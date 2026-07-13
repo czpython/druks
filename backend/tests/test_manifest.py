@@ -7,7 +7,7 @@ from druks.harnesses.artifacts import persist_manifest
 from druks.harnesses.base import Harness
 from druks.harnesses.claude import ClaudeHarness
 from druks.mcp import models
-from druks.mcp.constants import get_bearer_token_env_var
+from druks.mcp.helpers import get_bearer_token_env_var
 from druks.sandbox.datastructures import McpServer
 from druks.skills.datastructures import InstalledSkill
 from druks.skills.models import Skill, SkillCollection
@@ -186,6 +186,38 @@ def test_manifest_records_token_presence_never_the_value(db_session):
     serialized = json.dumps(manifest)
     assert _TOKEN not in serialized
     assert _LINEAR_ENV in serialized  # the var name is safe to record
+
+
+def test_manifest_stays_presence_only_for_a_declared_header_server(db_session):
+    """A server delivered with declared headers records the same presence-only
+    entry: no header value — plain or secret — lands in the manifest, and a
+    bearer-less server simply reads token_present False."""
+    models.McpServer.create(
+        name="grafana",
+        url="https://mcp.grafana.com/mcp",
+        token_source="",
+        headers={"X-Grafana-URL": "https://acme.grafana.net"},
+        secret_headers={"X-Api-Key": "grafana-api-secret"},
+    )
+    delivered = McpServer(
+        name="grafana",
+        url="https://mcp.grafana.com/mcp",
+        headers={"X-Grafana-URL": "https://acme.grafana.net"},
+        env_headers={"X-Api-Key": "MCP_GRAFANA_HEADER_X_API_KEY"},
+    )
+
+    manifest = _build(
+        mcp_servers=(delivered,),
+        extra_env={"MCP_GRAFANA_HEADER_X_API_KEY": "grafana-api-secret"},
+    )
+
+    serialized = json.dumps(manifest)
+    assert "grafana-api-secret" not in serialized
+    assert "acme.grafana.net" not in serialized
+    grafana_entry = next(s for s in manifest["mcp_servers"] if s["name"] == "grafana")
+    assert grafana_entry["declared"] is True
+    assert grafana_entry["delivered"] is True
+    assert grafana_entry["token_present"] is False
 
 
 # --- persistence + surfacing in transcript files -------------------------

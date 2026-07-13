@@ -9,12 +9,10 @@ from pydantic import BaseModel, Field
 from druks.database import db_session
 from druks.mcp import models as mcp_models
 from druks.mcp import oauth
-from druks.mcp.constants import (
-    TOKEN_SOURCE_STATIC,
-    TOKEN_SOURCE_STATIC_FROM_ENV,
-    get_bearer_token_env_var,
-)
+from druks.mcp.constants import TOKEN_ENV_PREFIX
+from druks.mcp.enums import TokenSource
 from druks.mcp.exceptions import MissingTokenError, SourceEnvVarUnsetError
+from druks.mcp.helpers import get_bearer_token_env_var
 
 if TYPE_CHECKING:
     from druks.durable.enums import AgentCallStatus
@@ -91,14 +89,21 @@ class AgentInvocation:
 
 @dataclass(frozen=True)
 class McpServer:
-    """A streamable-HTTP MCP server the agent talks to. The harness reads the
-    bearer token from ``bearer_token_env_var`` at runtime (the value rides in
-    via the run's env), so the token never lands in any emitted config — only
-    the var name does."""
+    """A streamable-HTTP MCP server the agent talks to. Config-safe by
+    construction: no secret value appears here — the bearer token and every
+    secret header value ride the run's env, and this shape names only their
+    env vars; the harness reads them at runtime. Only non-secret declared
+    header values are carried inline."""
 
     name: str
     url: str
-    bearer_token_env_var: str
+    # "" when the server carries no Authorization bearer — its auth, if any,
+    # rides the declared headers.
+    bearer_token_env_var: str = ""
+    # Non-secret declared headers, emitted inline: header name -> value.
+    headers: dict[str, str] = field(default_factory=dict)
+    # Secret declared headers: header name -> the env var carrying its value.
+    env_headers: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -173,27 +178,41 @@ class Workspace:
                 # A required server owns its name: the registry twin is neither
                 # resolved (no raise, no env clobber) nor delivered.
                 continue
-            # Per-strategy token resolution, loud when a server can't
+            # Per-strategy bearer resolution, loud when a server can't
             # authenticate — delivery never ships a header the harness
             # can't fill.
-            if server["token_source"] == TOKEN_SOURCE_STATIC:
-                # A stored token is ciphertext everywhere else; decrypted
-                # only here, entering the run env.
+            source = server["token_source"]
+            if not source:
+                # No bearer; auth, if any, rides the declared headers below.
+                token = ""
+            elif source == TokenSource.STATIC:
+                # A stored token is ciphertext everywhere else; decrypted only
+                # here, entering the run env.
                 if not server["token"]:
                     raise MissingTokenError(server["name"])
                 token = server["token"].decrypt()
-            elif server["token_source"] == TOKEN_SOURCE_STATIC_FROM_ENV:
+            elif source == TokenSource.STATIC_FROM_ENV:
                 token = os.environ.get(server["source_env_var"], "")
                 if not token:
                     raise SourceEnvVarUnsetError(server["name"], server["source_env_var"])
-            else:
+            else:  # oauth
                 token = await oauth.mint_access_token(server["name"])
-            env[get_bearer_token_env_var(server["name"])] = token
+            bearer_token_env_var = ""
+            if token:
+                bearer_token_env_var = get_bearer_token_env_var(server["name"])
+                env[bearer_token_env_var] = token
+            env_headers = {}
+            for index, (header, value) in enumerate(server["secret_headers"].items()):
+                env_var = f"{TOKEN_ENV_PREFIX}{server['name'].upper()}_HEADER_{index}"
+                env[env_var] = value
+                env_headers[header] = env_var
             wire.append(
                 McpServer(
                     name=server["name"],
                     url=server["url"],
-                    bearer_token_env_var=get_bearer_token_env_var(server["name"]),
+                    bearer_token_env_var=bearer_token_env_var,
+                    headers=dict(server["headers"]),
+                    env_headers=env_headers,
                 )
             )
         kwargs["mcp_servers"] = tuple(wire)

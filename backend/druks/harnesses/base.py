@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, ClassVar
 import httpx
 
 from druks.mcp import models as mcp_models
-from druks.mcp.constants import get_bearer_token_env_var
+from druks.mcp.helpers import get_bearer_token_env_var
 from druks.redis import get_client
 from druks.skills.models import Skill
 from druks.usage.models import UsageScrape

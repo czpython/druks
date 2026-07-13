@@ -8,13 +8,13 @@ from druks.harnesses.claude import ClaudeHarness
 from druks.harnesses.codex import CodexHarness
 from druks.harnesses.datastructures import SandboxSettings
 from druks.mcp.catalog import load_mcp_catalog
-from druks.mcp.constants import get_bearer_token_env_var
 from druks.mcp.exceptions import (
     InvalidCatalogError,
     InvalidServerNameError,
     MissingTokenError,
     SourceEnvVarUnsetError,
 )
+from druks.mcp.helpers import get_bearer_token_env_var
 from druks.mcp.models import McpServer
 from druks.sandbox.datastructures import RequiredMcpServer, Workspace
 from druks.settings import PACKAGED_MCP_CATALOG
@@ -97,7 +97,7 @@ def test_create_rejects_names_that_break_env_or_config(db_session):
 def test_valid_name_derives_shell_safe_env_var(db_session):
     server = McpServer.create(name="linear_app", url=_LINEAR_URL, token=_TOKEN)
     # Every char of the derived var is a valid shell identifier char.
-    var = server.bearer_token_env_var
+    var = get_bearer_token_env_var(server.name)
     assert var == "MCP_LINEAR_APP_TOKEN"
     assert all(ch.isalnum() or ch == "_" for ch in var)
     assert not var[0].isdigit()
@@ -238,6 +238,111 @@ async def test_delivery_tolerates_explicit_none_extra_env(db_session):
     kwargs = await _delivery(extra_env=None)
     assert "linear" in {s.name for s in kwargs["mcp_servers"]}
     assert kwargs["extra_env"][get_bearer_token_env_var("linear")] == _TOKEN
+
+
+# --- declared headers: N per server, secret values via env refs -----------
+
+
+def _grafana_shaped_server() -> None:
+    # A registry-installed shape: no bearer (empty token_source), one plain
+    # declared header and one secret one.
+    McpServer.create(
+        name="grafana",
+        url="https://mcp.grafana.com/mcp",
+        token_source="",
+        headers={"X-Grafana-URL": "https://acme.grafana.net"},
+        secret_headers={"X-Api-Key": "grafana-api-secret"},
+    )
+
+
+async def test_declared_headers_deliver_inline_and_secret_values_ride_env(db_session):
+    _grafana_shaped_server()
+
+    kwargs = await _delivery()
+
+    grafana = next(s for s in kwargs["mcp_servers"] if s.name == "grafana")
+    # The wire shape names the env var carrying each secret header; the value
+    # rides only in the run env under that name, never inline.
+    assert grafana.headers == {"X-Grafana-URL": "https://acme.grafana.net"}
+    assert set(grafana.env_headers) == {"X-Api-Key"}
+    header_env_var = grafana.env_headers["X-Api-Key"]
+    assert kwargs["extra_env"][header_env_var] == "grafana-api-secret"
+    assert "grafana-api-secret" not in repr(grafana)
+    # No bearer: neither the wire shape nor the env carries an Authorization var.
+    assert grafana.bearer_token_env_var == ""
+    assert get_bearer_token_env_var("grafana") not in kwargs["extra_env"]
+
+
+async def test_two_header_server_emits_both_headers_in_each_harness_config(db_session):
+    _grafana_shaped_server()
+    kwargs = await _delivery()
+    servers = kwargs["mcp_servers"]
+    header_env_var = servers[0].env_headers["X-Api-Key"]
+
+    claude_flags = ClaudeHarness(
+        model="claude-x", fast_mode=False, effort=None, sandbox=_sandbox_config()
+    )._mcp_flags(servers)
+    headers = json.loads(claude_flags[1])["mcpServers"]["grafana"]["headers"]
+    assert headers == {
+        "X-Grafana-URL": "https://acme.grafana.net",
+        "X-Api-Key": f"${{{header_env_var}}}",
+    }
+    assert "grafana-api-secret" not in " ".join(claude_flags)
+
+    codex_config = " ".join(
+        CodexHarness(
+            model=CodexHarness.models[0], fast_mode=False, effort=None, sandbox=_sandbox_config()
+        )._mcp_flags(servers)
+    )
+    assert 'http_headers."X-Grafana-URL"="https://acme.grafana.net"' in codex_config
+    assert f'env_http_headers."X-Api-Key"="{header_env_var}"' in codex_config
+    assert "bearer_token_env_var" not in codex_config
+    assert "grafana-api-secret" not in codex_config
+
+
+async def test_bearer_and_declared_headers_combine_on_one_server(db_session):
+    # A static-token server may also declare plain headers; the Authorization
+    # bearer keeps its env-ref form beside them.
+    McpServer.create(
+        name="acme", url="https://mcp.acme.com/mcp", token=_TOKEN, headers={"X-Region": "eu"}
+    )
+
+    kwargs = await _delivery()
+    servers = kwargs["mcp_servers"]
+
+    claude_flags = ClaudeHarness(
+        model="claude-x", fast_mode=False, effort=None, sandbox=_sandbox_config()
+    )._mcp_flags(servers)
+    headers = json.loads(claude_flags[1])["mcpServers"]["acme"]["headers"]
+    assert headers == {
+        "Authorization": f"Bearer ${{{get_bearer_token_env_var('acme')}}}",
+        "X-Region": "eu",
+    }
+    assert kwargs["extra_env"][get_bearer_token_env_var("acme")] == _TOKEN
+
+
+async def test_bearerless_server_delivers_without_a_bearer(db_session):
+    # The loud MissingTokenError is a static-source contract; a bearerless
+    # server (auth in its headers, or no auth) delivers without any bearer.
+    McpServer.create(name="public_docs", url="https://docs.example.com/mcp", token_source="")
+
+    kwargs = await _delivery()
+
+    docs = next(s for s in kwargs["mcp_servers"] if s.name == "public_docs")
+    assert docs.bearer_token_env_var == ""
+    assert "extra_env" not in kwargs
+
+
+def test_bearerless_server_resolves_ready_with_its_headers(db_session):
+    _grafana_shaped_server()
+
+    grafana = next(s for s in McpServer.list_resolved() if s["name"] == "grafana")
+    assert grafana["token_source"] == ""
+    assert grafana["headers"] == {"X-Grafana-URL": "https://acme.grafana.net"}
+    # Nothing blocks delivery auth — the secret header is stored — so the
+    # API reads it ready.
+    assert grafana["has_token"] is True
+    assert grafana["secret_headers"]["X-Api-Key"] == "grafana-api-secret"
 
 
 # --- API: CRUD + enable/disable + redaction ------------------------------

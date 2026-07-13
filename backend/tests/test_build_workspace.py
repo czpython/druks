@@ -8,7 +8,7 @@ from druks.build.workflows import (
     BuildWorkflow,
     BuildWorkspace,
 )
-from druks.mcp.constants import get_bearer_token_env_var
+from druks.mcp.helpers import get_bearer_token_env_var
 from druks.sandbox import host as host_mod
 from druks.sandbox.layout import get_related_root
 from druks.workflows import FatalError

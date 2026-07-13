@@ -156,23 +156,23 @@ class ClaudeHarness(Harness):
 
     def _mcp_flags(self, servers: tuple[McpServer, ...]) -> tuple[str, ...]:
         """``--mcp-config`` JSON registering each MCP server for this run.
-        Claude expands ``${VAR}`` in the auth header from the run env at
-        connect time, so the bearer token never lands in the emitted config."""
+        Claude expands ``${VAR}`` refs in header values from the run env at
+        connect time, so no secret — the bearer or a secret header — ever
+        lands in the emitted config; only non-secret values ride inline."""
         if not servers:
             return ()
-        config = {
-            "mcpServers": {
-                server.name: {
-                    "type": "http",
-                    "url": server.url,
-                    "headers": {
-                        "Authorization": f"Bearer ${{{server.bearer_token_env_var}}}",
-                    },
-                }
-                for server in servers
-            }
-        }
-        return ("--mcp-config", json.dumps(config))
+        entries = {}
+        for server in servers:
+            headers = dict(server.headers)
+            if server.bearer_token_env_var:
+                headers["Authorization"] = f"Bearer ${{{server.bearer_token_env_var}}}"
+            for header, env_var in server.env_headers.items():
+                headers[header] = f"${{{env_var}}}"
+            entry: dict[str, object] = {"type": "http", "url": server.url}
+            if headers:
+                entry["headers"] = headers
+            entries[server.name] = entry
+        return ("--mcp-config", json.dumps({"mcpServers": entries}))
 
     def _command_args(self) -> tuple[str, ...]:
         args = (self.command,)

@@ -3,7 +3,7 @@ from fastapi.responses import HTMLResponse
 
 from druks.extensions.registry import mcp_servers
 from druks.mcp import oauth
-from druks.mcp.constants import TOKEN_SOURCE_OAUTH
+from druks.mcp.enums import TokenSource
 from druks.mcp.exceptions import InvalidServerNameError, OauthConnectError
 from druks.mcp.models import McpOauthGrant, McpServer
 from druks.mcp.schemas import (
@@ -79,7 +79,7 @@ async def remove_mcp_server(name: str) -> None:
 @router.post("/{name}/connect", response_model=ConnectMcpServerResponse)
 async def connect_mcp_server(name: str, request: Request) -> ConnectMcpServerResponse:
     definition = mcp_servers.get(name)
-    if not definition or definition["token_source"] != TOKEN_SOURCE_OAUTH:
+    if not definition or definition["token_source"] != TokenSource.OAUTH:
         raise HTTPException(status_code=404, detail=f"MCP server {name!r} is not an OAuth server.")
     endpoint = request.app.state.settings.endpoint
     if not endpoint:

@@ -9,13 +9,10 @@ import pytest
 from conftest import configure_app_for_test, make_settings
 from druks.extensions.registry import mcp_servers
 from druks.mcp import oauth
-from druks.mcp.constants import (
-    OAUTH_ACCESS_TOKEN_PREFIX,
-    OAUTH_CONNECT_STATE_PREFIX,
-    TOKEN_SOURCE_OAUTH,
-    get_bearer_token_env_var,
-)
+from druks.mcp.constants import OAUTH_ACCESS_TOKEN_PREFIX, OAUTH_CONNECT_STATE_PREFIX
+from druks.mcp.enums import TokenSource
 from druks.mcp.exceptions import GrantRefreshError, MissingGrantError, OauthConnectError
+from druks.mcp.helpers import get_bearer_token_env_var
 from druks.mcp.models import McpOauthGrant, McpServer
 from druks.redis import get_client
 from druks.sandbox.datastructures import Workspace
@@ -108,7 +105,7 @@ def _register_oauth_server(name: str = _NAME, enabled: bool = True) -> None:
         {
             "name": name,
             "url": _SERVER_URL,
-            "token_source": TOKEN_SOURCE_OAUTH,
+            "token_source": TokenSource.OAUTH,
             "source_env_var": "",
             "enabled": enabled,
         }

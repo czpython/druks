@@ -1,22 +1,19 @@
 import os
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy import Boolean, String, select
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from druks.core.models import Uuid7Pk
 from druks.database import db_session
 from druks.extensions.registry import mcp_servers
-from druks.mcp.constants import (
-    NAME_PATTERN,
-    TOKEN_SOURCE_OAUTH,
-    TOKEN_SOURCE_STATIC,
-    TOKEN_SOURCE_STATIC_FROM_ENV,
-    get_bearer_token_env_var,
-)
+from druks.mcp.constants import NAME_PATTERN
+from druks.mcp.enums import TokenSource
 from druks.mcp.exceptions import InvalidServerNameError
 from druks.models import Base
-from druks.secrets.fields import EncryptedTextField, Secret
+from druks.secrets.fields import EncryptedJsonField, EncryptedTextField, Secret
 
 
 class McpServer(Base, Uuid7Pk):
@@ -28,6 +25,16 @@ class McpServer(Base, Uuid7Pk):
     name: Mapped[str] = mapped_column(String, unique=True)
     url: Mapped[str] = mapped_column(String)
     token = EncryptedTextField(default="")
+    # How delivery sources this row's Authorization bearer (a TokenSource), or
+    # "" for no bearer — the server authenticates through its declared headers,
+    # or takes none. A catalog-managed name reads its source from the registry
+    # definition instead; static_from_env exists only there.
+    token_source: Mapped[str] = mapped_column(String, default=TokenSource.STATIC)
+    # Declared header values from the server's spec, split by secrecy at
+    # install time — the split *is* the secrecy record delivery and the API
+    # read from: plain values inline, secret ones ciphertext at rest.
+    headers: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+    secret_headers = EncryptedJsonField()
     is_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
 
@@ -44,21 +51,11 @@ class McpServer(Base, Uuid7Pk):
     def list_resolved(cls) -> list[dict]:
         # The full view the API reads and delivery resolves from: each built-in
         # definition (url + auth from the registry) overlaid with its operator
-        # row's enable choice and secrets, then any fully custom rows. has_token
-        # means "can authenticate at delivery", wherever the secret lives — the
-        # source var set in druks' env for an env-sourced server, a stored
-        # grant for a connected one, the stored token otherwise.
+        # row's enable choice and secrets, then any fully custom rows.
         rows = {server.name: server for server in cls.list_all()}
         servers: list[dict] = []
         for definition in mcp_servers.all():
             row = rows.pop(definition["name"], None)
-            token = row.token if row else Secret(b"", "")
-            if definition["token_source"] == TOKEN_SOURCE_STATIC_FROM_ENV:
-                has_token = bool(os.environ.get(definition["source_env_var"]))
-            elif definition["token_source"] == TOKEN_SOURCE_OAUTH:
-                has_token = bool(McpOauthGrant.get_by_server(definition["name"]))
-            else:
-                has_token = bool(token)
             servers.append(
                 {
                     "name": definition["name"],
@@ -66,8 +63,9 @@ class McpServer(Base, Uuid7Pk):
                     "token_source": definition["token_source"],
                     "source_env_var": definition["source_env_var"],
                     "is_enabled": row.is_enabled if row else definition["enabled"],
-                    "token": token,
-                    "has_token": has_token,
+                    "token": row.token if row else Secret(b"", ""),
+                    "headers": row.headers if row else {},
+                    "secret_headers": row.secret_headers if row else {},
                     "builtin": True,
                 }
             )
@@ -76,14 +74,29 @@ class McpServer(Base, Uuid7Pk):
                 {
                     "name": row.name,
                     "url": row.url,
-                    "token_source": TOKEN_SOURCE_STATIC,
+                    "token_source": row.token_source,
                     "source_env_var": "",
                     "is_enabled": row.is_enabled,
                     "token": row.token,
-                    "has_token": bool(row.token),
+                    "headers": row.headers,
+                    "secret_headers": row.secret_headers,
                     "builtin": False,
                 }
             )
+        # has_token = nothing blocks this server's auth at delivery, read from
+        # wherever its source keeps the secret: druks' env for an env-sourced
+        # server, a stored grant for a connected one, the stored token for a
+        # static one; a bearerless server has none to miss.
+        for server in servers:
+            source = server["token_source"]
+            if not source:
+                server["has_token"] = True
+            elif source == TokenSource.STATIC_FROM_ENV:
+                server["has_token"] = bool(os.environ.get(server["source_env_var"]))
+            elif source == TokenSource.OAUTH:
+                server["has_token"] = bool(McpOauthGrant.get_by_server(server["name"]))
+            else:
+                server["has_token"] = bool(server["token"])
         return servers
 
     @classmethod
@@ -107,12 +120,28 @@ class McpServer(Base, Uuid7Pk):
 
     @classmethod
     def create(
-        cls, *, name: str, url: str, token: str = "", is_enabled: bool = True
+        cls,
+        *,
+        name: str,
+        url: str,
+        token: str = "",
+        token_source: str = TokenSource.STATIC,
+        headers: dict[str, str] | None = None,
+        secret_headers: dict[str, str] | None = None,
+        is_enabled: bool = True,
     ) -> "McpServer":
         if not NAME_PATTERN.match(name):
             raise InvalidServerNameError(name)
         session = db_session()
-        server = cls(name=name, url=url, token=token, is_enabled=is_enabled)
+        server = cls(
+            name=name,
+            url=url,
+            token=token,
+            token_source=token_source,
+            headers=headers or {},
+            secret_headers=secret_headers or {},
+            is_enabled=is_enabled,
+        )
         session.add(server)
         session.flush()
         return server
@@ -121,10 +150,6 @@ class McpServer(Base, Uuid7Pk):
         session = db_session()
         session.delete(self)
         session.flush()
-
-    @property
-    def bearer_token_env_var(self) -> str:
-        return get_bearer_token_env_var(self.name)
 
 
 class McpOauthGrant(Base, Uuid7Pk):

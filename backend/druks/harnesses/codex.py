@@ -550,17 +550,33 @@ class CodexHarness(Harness):
 
     def _mcp_flags(self, servers: tuple[McpServer, ...]) -> tuple[str, ...]:
         """Inline ``-c`` overrides registering each MCP server on this run —
-        no persisted config, so it survives the per-run config push. Codex
-        reads the bearer token from the named env var at runtime."""
+        no persisted config, so it survives the per-run config push. Secrets
+        stay out of argv: codex reads the bearer and every env_http_headers
+        value from the named env var at runtime; only non-secret header values
+        ride inline. A header name is a quoted TOML key segment — a valid HTTP
+        header name carries no quote, so plain quoting holds."""
         flags: tuple[str, ...] = ()
         for server in servers:
-            flags = (
-                *flags,
-                "-c",
-                f'mcp_servers.{server.name}.url="{server.url}"',
-                "-c",
-                f'mcp_servers.{server.name}.bearer_token_env_var="{server.bearer_token_env_var}"',
-            )
+            flags = (*flags, "-c", f'mcp_servers.{server.name}.url="{server.url}"')
+            if server.bearer_token_env_var:
+                flags = (
+                    *flags,
+                    "-c",
+                    f"mcp_servers.{server.name}.bearer_token_env_var="
+                    f'"{server.bearer_token_env_var}"',
+                )
+            for header, value in server.headers.items():
+                flags = (
+                    *flags,
+                    "-c",
+                    f'mcp_servers.{server.name}.http_headers."{header}"="{value}"',
+                )
+            for header, env_var in server.env_headers.items():
+                flags = (
+                    *flags,
+                    "-c",
+                    f'mcp_servers.{server.name}.env_http_headers."{header}"="{env_var}"',
+                )
         return flags
 
     def _prompt_flags(self) -> tuple[str, ...]:
