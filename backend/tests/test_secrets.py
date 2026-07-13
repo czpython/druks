@@ -49,7 +49,7 @@ def test_stored_secrets_are_ciphertext_and_reads_restore_them(db_engine, db_sess
     assert row.token.decrypt() == _TOKEN
     # The resolved view every consumer reads carries the Secret itself, so it
     # plaintext exists only where decrypt() is called.
-    resolved = next(s for s in McpServer.list_resolved() if s["name"] == "linear")
+    resolved = McpServer.get_resolved()["linear"]
     assert resolved["token"].decrypt() == _TOKEN
     assert resolved["has_token"] is True
 
