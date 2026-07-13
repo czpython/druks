@@ -1,6 +1,7 @@
 import importlib
 import pkgutil
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from types import ModuleType
 from typing import Any
 
@@ -95,6 +96,22 @@ def resolve_workflow_extension(module: str) -> str | None:
             return _workflow_packages[prefix]
         prefix = prefix.rpartition(".")[0]
     raise LookupError(module)
+
+
+@contextmanager
+def claimed_workflow_package(package: str, extension: str | None) -> Iterator[None]:
+    """Provisionally claim ``package`` for ``extension`` while its entry point
+    loads: a fresh claim is released if the load fails, and an existing claim —
+    whoever holds it — is left untouched for the post-load checks to judge."""
+    fresh = package not in _workflow_packages
+    if fresh:
+        register_workflow_package(package, extension)
+    try:
+        yield
+    except BaseException:
+        if fresh:
+            del _workflow_packages[package]
+        raise
 
 
 webhooks = Registry("webhooks", key=lambda cls: f"{cls.__module__}.{cls.__qualname__}")

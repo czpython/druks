@@ -49,10 +49,11 @@ def test_list_files_inventories_call_artifacts(
 
     assert response.status_code == 200
     files = response.json()
-    # The slot the file occupies is its role; each carries a name + download url.
+    # The slot the file occupies is its role; each carries the file name the
+    # client composes into the download URL.
     assert files["stdout"]["name"] == "stdout.jsonl"
     assert files["stderr"]["name"] == "stderr.log"
-    assert files["response"]["url"].endswith("/files/output.json")
+    assert files["response"]["name"] == "output.json"
     assert files["metadata"] is not None
 
 
@@ -148,9 +149,11 @@ def test_get_file_serves_inventory_paths(
     run_id = _seed_run(tmp_path=tmp_path)
 
     files = client.get(f"/api/build/transcripts/{run_id}/files").json()
-    response_url = files["response"]["url"]
+    # Compose the download URL the way the client does: the listing's own route
+    # plus the file's name — the wire carries names only.
+    name = files["response"]["name"]
 
-    response = client.get(response_url)
+    response = client.get(f"/api/build/transcripts/{run_id}/files/{name}")
     assert response.status_code == 200
     assert response.json() == {"ok": True}
 
