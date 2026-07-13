@@ -10,7 +10,6 @@ from druks.events.models import Event
 from druks.extensions import registry as extensions_registry
 from druks.extensions.exceptions import MalformedExtension
 from druks.extensions.registry import (
-    claimed_workflow_package,
     register_workflow_package,
     resolve_workflow_extension,
     workflows,
@@ -55,31 +54,6 @@ def test_resolution_matches_package_boundaries():
     assert resolve_workflow_extension("alpha_pkg.workflows") == "alpha"
     with pytest.raises(LookupError):
         resolve_workflow_extension("alpha_pkg_sibling.workflows")
-
-
-def test_failed_claim_releases_a_fresh_registration():
-    # A claim made for a load that then fails must not survive it — otherwise a
-    # malformed first attempt pins the package under the wrong name and a
-    # corrected retry can never register it.
-    with pytest.raises(RuntimeError), claimed_workflow_package("gamma_pkg", "gamma"):
-        raise RuntimeError("load failed")
-    with pytest.raises(LookupError):
-        resolve_workflow_extension("gamma_pkg.workflows")
-
-
-def test_failed_claim_leaves_an_existing_registration_untouched():
-    # An aliased entry claiming an already-owned package must not evict the real
-    # owner — the post-load name check judges the alias, the map stays truthful.
-    register_workflow_package("alpha_pkg", "alpha")
-    with pytest.raises(RuntimeError), claimed_workflow_package("alpha_pkg", "imposter"):
-        raise RuntimeError("load failed")
-    assert resolve_workflow_extension("alpha_pkg.workflows") == "alpha"
-
-
-def test_successful_claim_keeps_the_registration():
-    with claimed_workflow_package("delta_pkg", "delta"):
-        pass
-    assert resolve_workflow_extension("delta_pkg.workflows") == "delta"
 
 
 def test_unregistered_module_fails_at_class_definition():
