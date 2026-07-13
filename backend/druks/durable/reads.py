@@ -29,11 +29,11 @@ _TRANSCRIPT_KEEPALIVE_SECONDS = 15.0
 _TERMINAL_CALL_STATES = {"succeeded", "failed", "abandoned"}
 
 
-def get_agent_call_files(call_id: str, extension: str) -> AgentCallFiles | None:
+def get_agent_call_files(call_id: str) -> AgentCallFiles | None:
     call = AgentCall.get(call_id)
     if not call:
         return None
-    return AgentCallFiles.from_call(call, Artifact.get_for_call(call.id), extension)
+    return AgentCallFiles.from_call(call, Artifact.get_for_call(call.id))
 
 
 def list_subject_timeline(subject_type: str, subject_id: str) -> list[RunResponse]:

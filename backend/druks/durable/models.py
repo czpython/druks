@@ -11,7 +11,12 @@ from sqlalchemy.orm import Mapped, column_property, mapped_column, relationship
 
 from druks.core.models import Uuid7Pk
 from druks.database import db_session, get_session
-from druks.durable.dbos_state import state_expression, subject_filter, updated_at_expression
+from druks.durable.dbos_state import (
+    extension_expression,
+    state_expression,
+    subject_filter,
+    updated_at_expression,
+)
 from druks.durable.enums import ACTIVE_STATES
 from druks.harnesses.artifacts import normalize_token_usage
 from druks.models import Base
@@ -50,6 +55,9 @@ class Run(Base):
     # fresh; an already-loaded instance keeps what it read until expired.
     # Read-only; an operator ends a run through cancel().
     state: Mapped[str] = column_property(state_expression(id, input_gate, created_at))
+    # The extension that launched the run, read back from the attributes
+    # stamped at start(); None for a framework cron.
+    extension: Mapped[str | None] = column_property(extension_expression(id))
     # When the run last changed — the newest of creation, the parked ask, and
     # DBOS's status write.
     updated_at: Mapped[datetime] = column_property(

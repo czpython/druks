@@ -207,7 +207,7 @@ def test_manifest_surfaces_in_agent_call_files(tmp_path, db_session):
     manifest = _build()
     with mock.patch("druks.durable.models.load_settings", return_value=make_settings(tmp_path)):
         persist_manifest(call.call_dir.parent, call_id=call.call_dir.name, manifest=manifest)
-        files = AgentCallFiles.from_call(call, None, "build")
+        files = AgentCallFiles.from_call(call, None)
 
     assert files.manifest
     assert files.manifest.name == "manifest.json"

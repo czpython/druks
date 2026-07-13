@@ -25,10 +25,17 @@ workflow_status = sa.Table(
     sa.Column("workflow_uuid", sa.String, primary_key=True),
     sa.Column("status", sa.String),
     sa.Column("updated_at", sa.BigInteger),
-    # The custom workflow attributes start() stamps: subject_type, subject_id
-    # (always stored as a string), extension.
     sa.Column("attributes", JSONB),
 )
+
+
+def extension_expression(run_id: sa.ColumnElement) -> sa.ColumnElement:
+    return (
+        sa.select(workflow_status.c.attributes["extension"].as_string())
+        .where(workflow_status.c.workflow_uuid == run_id)
+        .correlate_except(workflow_status)
+        .scalar_subquery()
+    )
 
 
 def subject_filter(

@@ -317,7 +317,7 @@ class Extension:
 
         @router.get("/files", response_model=AgentCallFiles, response_model_by_alias=True)
         async def list_files(call_id: str) -> AgentCallFiles:
-            files = reads.get_agent_call_files(call_id, cls.name)
+            files = reads.get_agent_call_files(call_id)
             if not files:
                 raise HTTPException(status.HTTP_404_NOT_FOUND, "Agent call not found.")
             return files

@@ -106,13 +106,9 @@ class AgentCallFiles(BaseResponse):
     artifact: ArtifactDescriptor | None = None
 
     @classmethod
-    def from_call(
-        cls, call: AgentCall, artifact: Artifact | None, extension: str
-    ) -> "AgentCallFiles":
-        # ``extension`` is the transcript router serving these URLs — the caller
-        # is that router, so it names its own mount.
+    def from_call(cls, call: AgentCall, artifact: Artifact | None) -> "AgentCallFiles":
         layout = call.artifact_layout
-        base = f"/api/{extension}/transcripts/{call.id}/files/"
+        base = f"/api/{call.run.extension}/transcripts/{call.id}/files/"
 
         def named(path: Path) -> ArtifactFile | None:
             if not path.is_file():
