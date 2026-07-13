@@ -36,6 +36,7 @@ class ClaudeHarness(Harness):
     # (``--output-format stream-json``), so the transcript is the stdout.
     name = "claude"
     provider = "anthropic"
+    model_prefixes = ("claude-",)
     models = ("claude-opus-4-7", "claude-sonnet-4-6", "claude-haiku-4-5")
     default_model = "claude-opus-4-7"
     command = "claude"

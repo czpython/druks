@@ -140,7 +140,6 @@ class ExtensionSettingsResponse(BaseResponse):
 
 
 class ExtensionsSettingsResponse(BaseResponse):
-    allowed_models: list[str]
     allowed_efforts: list[str]
     extensions: list[ExtensionSettingsResponse]
 

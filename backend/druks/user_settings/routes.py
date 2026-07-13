@@ -7,7 +7,7 @@ from druks.extensions.loader import iter_extensions
 from druks.extensions.registry import workflows
 from druks.harnesses.exceptions import LoginError
 from druks.harnesses.models import HarnessLogin
-from druks.harnesses.registry import allowed_models, get_harnesses
+from druks.harnesses.registry import get_harnesses
 from druks.notifications.models import Destination
 
 from . import reads
@@ -58,10 +58,10 @@ async def list_harness_settings() -> list[HarnessResponse]:
 async def update_harness_settings(name: str, body: HarnessUpdate) -> HarnessResponse:
     harness, row = _resolve_harness(name)
     updates = body.model_dump(exclude_unset=True, by_alias=False)
-    if "model" in updates and updates["model"] not in harness.models:
+    if "model" in updates and not harness.has_model(updates["model"]):
         raise HTTPException(
             status_code=422,
-            detail=f"Unknown model {updates['model']!r}. Allowed: {list(harness.models)}",
+            detail=f"{updates['model']!r} is not a {harness.name} model.",
         )
     _validate_effort(updates.get("effort"))
     _validate_timeout(updates.get("timeout"))
@@ -130,19 +130,19 @@ async def update_user_settings(
 async def get_extension_settings() -> ExtensionsSettingsResponse:
     projected = (reads.get_extension_settings(m) for m in iter_extensions())
     return ExtensionsSettingsResponse(
-        allowed_models=list(allowed_models()),
         allowed_efforts=list(ALLOWED_EFFORTS),
         extensions=[out for out in projected if out.agents or out.workflows or out.settings],
     )
 
 
-# The agent knobs have no Settings model to round-trip through — their allowed
-# values come from the harness registry — so the boundary validates them here.
+# An agent's model override is client data — reject a model no installed harness
+# can run (nothing owns its namespace). A model new to a known namespace passes,
+# so new models need no release.
 def _validate_model(value: str | None) -> None:
-    if value is not None and value not in allowed_models():
+    if value is not None and not any(harness.has_model(value) for harness in get_harnesses()):
         raise HTTPException(
             status_code=422,
-            detail=f"Unknown model {value!r}. Allowed: {list(allowed_models())}",
+            detail=f"No installed harness runs model {value!r}.",
         )
 
 

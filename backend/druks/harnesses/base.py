@@ -59,8 +59,14 @@ class Harness(ABC):
     name: str
     # Harness identity + shipped config, the seed source for the per-harness
     # ``HarnessSettings`` row the operator then tunes. Subclasses set provider,
-    # models and default_model; effort/timeout default to the shipped values.
+    # model_prefixes, models and default_model; effort/timeout default to the
+    # shipped values.
     provider: ClassVar[str]
+    # The model-name namespaces this harness runs — a model routes to the harness
+    # that owns its namespace, so a new model in a known one runs with no release.
+    model_prefixes: ClassVar[tuple[str, ...]]
+    # Suggested models for the settings picker and the ``default_model`` seed —
+    # advisory: any string in a matching namespace runs.
     models: ClassVar[tuple[str, ...]]
     default_model: ClassVar[str]
     default_effort: ClassVar[str] = "high"
@@ -69,6 +75,12 @@ class Harness(ABC):
     REFRESH_MARGIN: timedelta
     _TOKEN_URL: str
     _CLIENT_ID: str
+
+    @classmethod
+    def has_model(cls, model: str) -> bool:
+        """Whether ``model`` runs on this harness — matched by name namespace, so
+        a new model in a known namespace routes with no release."""
+        return model == cls.name or model.startswith(cls.model_prefixes)
 
     def __init__(
         self,

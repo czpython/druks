@@ -178,7 +178,8 @@ export interface DashboardHealth {
 export type AgentEffort = 'low' | 'medium' | 'high'
 
 /** One coding-agent harness's operator config — a DB record seeded from the
- * registry. `allowedModels` are the models this harness can run. */
+ * registry. `allowedModels` are the harness's suggested models for the picker —
+ * advisory, not a gate; any model in the harness's namespace runs. */
 export interface Harness {
   name: string
   provider: string
@@ -271,7 +272,6 @@ export interface ExtensionSettings {
 }
 
 export interface ExtensionsSettingsResponse {
-  allowedModels: string[]
   allowedEfforts: string[]
   extensions: ExtensionSettings[]
 }
@@ -365,27 +365,7 @@ export interface UsageTodayResponse {
   harnesses: UsageHarnessToday[]
 }
 
-// Family membership lists — kept for typing + the rare callsite
-// that needs to know which family a model lives in (the backend's
-// harness factory does the actual dispatch). Stay in lockstep with
-// the backend's matching tuples.
-export const ALLOWED_CODEX_MODELS: readonly string[] = ['gpt-5.5']
-export const ALLOWED_CLAUDE_MODELS: readonly string[] = [
-  'claude-opus-4-7',
-  'claude-sonnet-4-6',
-  'claude-haiku-4-5',
-]
 export const ALLOWED_EFFORTS: readonly AgentEffort[] = ['low', 'medium', 'high']
-// Single allow-list for every per-slot / per-op model knob. Every
-// model selector in the Settings modal renders from this — operator
-// picks any Claude or Codex model for any role. The two
-// family-default knobs (``codex_model`` / ``claude_model``) still
-// constrain to their respective family because their names commit
-// to a family.
-export const ALLOWED_MODELS: readonly string[] = [
-  ...ALLOWED_CLAUDE_MODELS,
-  ...ALLOWED_CODEX_MODELS,
-]
 
 export interface Skill {
   name: string

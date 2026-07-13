@@ -364,12 +364,13 @@ def test_extensions_clearing_an_override_reverts_to_the_family_default(tmp_path:
 
 def test_extensions_reject_unknown_agent_model(tmp_path: Path):
     with _build_client(tmp_path) as client:
+        # No installed harness owns this namespace, so nothing could run it.
         response = client.patch(
             "/api/settings/extensions",
-            json={"agentModels": {"implement": "gpt-9-imaginary"}},
+            json={"agentModels": {"implement": "llama-3-70b"}},
         )
     assert response.status_code == 422
-    assert "gpt-9-imaginary" in response.json()["detail"]
+    assert "llama-3-70b" in response.json()["detail"]
 
 
 def test_extensions_override_workflow_setting_persists(tmp_path: Path):

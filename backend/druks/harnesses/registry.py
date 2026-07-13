@@ -1,4 +1,5 @@
 from .base import Harness
+from .exceptions import HarnessError
 
 
 def get_harnesses() -> tuple[type[Harness], ...]:
@@ -9,15 +10,10 @@ def get_harnesses() -> tuple[type[Harness], ...]:
 
 
 def get_harness_for_model(model: str) -> type[Harness]:
-    """The harness class that runs ``model``."""
+    """The harness that runs ``model``, matched by name namespace — a model in a
+    known namespace routes even if it postdates this release. A miss means no
+    installed harness owns its namespace."""
     for harness in get_harnesses():
-        if model in harness.models:
+        if harness.has_model(model):
             return harness
-    # Models are registry-validated on write (allowed_models is the union), so a
-    # miss is a real bug — a stale override or a model dropped from a harness —
-    # not something to paper over by silently running it on the wrong CLI.
-    raise ValueError(f"no registered harness handles model {model!r}")
-
-
-def allowed_models() -> tuple[str, ...]:
-    return tuple(model for harness in get_harnesses() for model in harness.models)
+    raise HarnessError(f"no harness runs model {model!r}")
