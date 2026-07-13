@@ -380,6 +380,30 @@ export interface SkillCollection {
   skills: Skill[]
 }
 
+export interface RegistryHeader {
+  // One declared input of a registry remote, verbatim from the registry —
+  // only the name is guaranteed, the rest is omitted freely.
+  name: string
+  description?: string
+  placeholder?: string
+  isRequired?: boolean
+  isSecret?: boolean
+  format?: string
+}
+
+export interface McpRegistryCandidate {
+  // The druks-side name an install will use (the row's config key); display
+  // identity is registryName.
+  name: string
+  registryName: string
+  description: string
+  url: string
+  // Trust badge: the publisher provably owns the endpoint's domain, or a
+  // druks pin vouches for it.
+  official: boolean
+  headers: RegistryHeader[]
+}
+
 export interface McpServer {
   name: string
   url: string

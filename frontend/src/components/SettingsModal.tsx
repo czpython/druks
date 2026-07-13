@@ -6,6 +6,7 @@ import { ExtensionGlyph } from './ExtensionGlyph'
 import {
   type Harness,
   type ExtensionSettings,
+  type McpRegistryCandidate,
   type McpServer,
   type SkillCollection,
   type UpdateHarnessRequest,
@@ -1018,6 +1019,11 @@ function McpServersPane() {
   const [token, setToken] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [registryQuery, setRegistryQuery] = useState('')
+  const [searching, setSearching] = useState(false)
+  const [candidates, setCandidates] = useState<McpRegistryCandidate[] | null>(null)
+  const [selected, setSelected] = useState<McpRegistryCandidate | null>(null)
+  const [headerValues, setHeaderValues] = useState<Record<string, string>>({})
   const servers = serversQuery.data ?? []
 
   const refresh = () => queryClient.invalidateQueries({ queryKey: ['mcpServers'] })
@@ -1029,6 +1035,47 @@ function McpServersPane() {
     channel.onmessage = () => void queryClient.invalidateQueries({ queryKey: ['mcpServers'] })
     return () => channel.close()
   }, [queryClient])
+
+  async function searchRegistry() {
+    if (!registryQuery.trim()) return
+    setSearching(true)
+    setError(null)
+    setSelected(null)
+    try {
+      setCandidates(await api.searchMcpRegistry(registryQuery.trim()))
+    } catch (e) {
+      setCandidates(null)
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setSearching(false)
+    }
+  }
+
+  function select(candidate: McpRegistryCandidate) {
+    setSelected(candidate)
+    setHeaderValues({})
+    setError(null)
+  }
+
+  async function install(candidate: McpRegistryCandidate) {
+    setBusy(true)
+    setError(null)
+    try {
+      await api.installMcpServer({
+        name: candidate.name,
+        registry: candidate.registryName,
+        headers: headerValues,
+      })
+      setSelected(null)
+      setCandidates(null)
+      setRegistryQuery('')
+      await refresh()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
 
   async function add() {
     // A custom server is static — the backend requires a bearer token, so gate
@@ -1108,16 +1155,120 @@ function McpServersPane() {
     }
   }
 
+  const missingRequired = (selected?.headers ?? []).some(
+    (header) => header.isRequired && !(headerValues[header.name] ?? '').trim(),
+  )
+
   return (
     <div className="set-pane">
       <div className="set-pane-head">
         <div className="set-pane-sub">
-          Add an <b>MCP server</b> your agents can call — url plus a bearer token. Enabled servers are
-          carried into every sandbox VM; the token rides the run env and never lands in emitted config.
+          Add an <b>MCP server</b> your agents can call. Enabled servers are carried into every
+          sandbox VM; secrets ride the run env and never land in emitted config.
         </div>
       </div>
       <div className="set-group">
-        <div className="set-group-label">add server</div>
+        <div className="set-group-label">add from registry</div>
+        <div className="mcp-reg-search">
+          <input
+            className="skill-add-input"
+            placeholder="search the official MCP registry — grafana, sentry, …"
+            value={registryQuery}
+            onChange={(e) => setRegistryQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') void searchRegistry()
+            }}
+            autoComplete="off"
+            data-1p-ignore=""
+            data-lpignore="true"
+            disabled={searching}
+          />
+          <button
+            className="set-btn ghost"
+            disabled={searching || !registryQuery.trim()}
+            onClick={() => void searchRegistry()}
+          >
+            {searching ? 'searching…' : 'search'}
+          </button>
+        </div>
+        {candidates && candidates.length === 0 && (
+          <div className="set-field-help">
+            No matching servers with a hosted (HTTP) endpoint in the registry.
+          </div>
+        )}
+        {candidates && candidates.length > 0 && (
+          <div className="mcp-reg-results">
+            {candidates.map((candidate) => (
+              <div key={candidate.registryName}>
+                <button
+                  className={
+                    'mcp-reg-row' +
+                    (selected?.registryName === candidate.registryName ? ' is-selected' : '')
+                  }
+                  onClick={() => select(candidate)}
+                  disabled={busy}
+                >
+                  <span className="mcp-name">{candidate.name}</span>
+                  <span className={'mcp-reg-badge' + (candidate.official ? ' official' : '')}>
+                    {candidate.official ? 'official' : 'community'}
+                  </span>
+                  <span className="mcp-reg-desc" title={candidate.registryName}>
+                    {candidate.description}
+                  </span>
+                  <span className="mcp-url">{candidate.url}</span>
+                </button>
+                {selected?.registryName === candidate.registryName && (
+                  <div className="mcp-reg-form">
+                    {selected.headers.map((header) => (
+                      <div className="set-field" key={header.name}>
+                        <span className="set-field-label">
+                          {header.name}
+                          {header.isRequired ? ' *' : ''}
+                        </span>
+                        <input
+                          className="skill-add-input"
+                          type={header.isSecret ? 'password' : 'text'}
+                          placeholder={header.placeholder}
+                          value={headerValues[header.name] ?? ''}
+                          onChange={(e) =>
+                            setHeaderValues((values) => ({
+                              ...values,
+                              [header.name]: e.target.value,
+                            }))
+                          }
+                          autoComplete={header.isSecret ? 'new-password' : 'off'}
+                          data-1p-ignore=""
+                          data-lpignore="true"
+                          disabled={busy}
+                        />
+                        {header.description && (
+                          <span className="set-field-help">{header.description}</span>
+                        )}
+                      </div>
+                    ))}
+                    {!selected.headers.some((header) => header.isSecret) && (
+                      <div className="set-field-help">
+                        Uses OAuth — click <b>connect</b> on the added server to authorize it.
+                      </div>
+                    )}
+                    <div>
+                      <button
+                        className="set-btn primary"
+                        disabled={busy || missingRequired}
+                        onClick={() => void install(selected)}
+                      >
+                        {busy ? 'installing…' : 'install'}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+      <div className="set-group">
+        <div className="set-group-label">add custom server</div>
         <div className="mcp-add">
           <div className="set-field">
             <span className="set-field-label">name</span>
@@ -1201,6 +1352,20 @@ function McpServersPane() {
   )
 }
 
+function tokenStatusLabel(server: McpServer): string {
+  if (server.tokenSource === 'static_from_env') {
+    return `${server.sourceEnvVar}${server.hasToken ? ' set' : ' unset'}`
+  }
+  if (server.tokenSource === 'oauth') {
+    return server.hasToken ? 'connected' : 'not connected'
+  }
+  if (!server.tokenSource) {
+    // No bearer — header-auth'd (or auth-free): nothing to connect or store.
+    return 'ready'
+  }
+  return server.hasToken ? 'token set' : 'no token'
+}
+
 function McpServerRow({
   server,
   busy,
@@ -1224,15 +1389,7 @@ function McpServerRow({
         <span className="mcp-url">{server.url}</span>
       </div>
       <span className={'mcp-tok' + (server.hasToken ? ' ok' : ' missing')}>
-        {server.tokenSource === 'static_from_env'
-          ? `${server.sourceEnvVar}${server.hasToken ? ' set' : ' unset'}`
-          : server.tokenSource === 'oauth'
-            ? server.hasToken
-              ? 'connected'
-              : 'not connected'
-            : server.hasToken
-              ? 'token set'
-              : 'no token'}
+        {tokenStatusLabel(server)}
       </span>
       {server.tokenSource === 'oauth' &&
         (server.hasToken ? (

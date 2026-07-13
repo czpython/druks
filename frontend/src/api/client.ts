@@ -14,6 +14,7 @@ import type {
   UsageHistoryResponse,
   UsageResponse,
   UsageTodayResponse,
+  McpRegistryCandidate,
   McpServer,
   Skill,
   SkillCollection,
@@ -173,6 +174,13 @@ export const api = {
   mcpServers: () => getJSON<McpServer[]>('/api/mcp-servers'),
   createMcpServer: (body: { name: string; url: string; token: string }) =>
     postJSON<McpServer>('/api/mcp-servers', body),
+  // The official-registry picker: resolved candidates (badge + declared
+  // inputs), then an install that sends only the druks name, the registry
+  // name, and the filled header values — the url never comes from the client.
+  searchMcpRegistry: (query: string) =>
+    getJSON<McpRegistryCandidate[]>(`/api/mcp-servers/registry?query=${encodeURIComponent(query)}`),
+  installMcpServer: (body: { name: string; registry: string; headers: Record<string, string> }) =>
+    postJSON<McpServer>('/api/mcp-servers/registry', body),
   setMcpServerEnabled: (name: string, isEnabled: boolean) =>
     patchJSON<McpServer>(`/api/mcp-servers/${encodeURIComponent(name)}`, { is_enabled: isEnabled }),
   removeMcpServer: (name: string) => deleteRequest(`/api/mcp-servers/${encodeURIComponent(name)}`),
