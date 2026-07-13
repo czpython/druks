@@ -13,9 +13,9 @@ DEFAULT_DATA_DIR = Path("/var/lib/druks")
 # ``mcp_catalog_path`` points a deployment at its own file instead.
 PACKAGED_MCP_CATALOG = Path(__file__).with_name("mcp") / "catalog.json"
 
-# The trust pins behind the registry picker's official badge — the exceptions
-# the domain-ownership rule can't derive (see druks/mcp/registry.py);
-# ``mcp_trusted_path`` points a deployment at its own file instead.
+# The trust pins for the MCP registry picker's official badge (see
+# druks/mcp/registry.py); ``mcp_trusted_path`` points a deployment at its
+# own file instead.
 PACKAGED_MCP_TRUSTED = Path(__file__).with_name("mcp") / "trusted.json"
 
 
@@ -189,8 +189,7 @@ class Settings(BaseSettings):
         alias="DRUKS_MCP_CATALOG",
     )
     # The trust-pins file the registry picker's official badge reads; a
-    # deployment can point this at its own curated file (or, later, a
-    # druks-hosted one fetched to disk — a config change, not code).
+    # deployment can point this at its own curated file.
     mcp_trusted_path: ExpandedPath = Field(
         default=PACKAGED_MCP_TRUSTED,
         alias="DRUKS_MCP_TRUSTED",

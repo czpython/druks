@@ -26,11 +26,10 @@ TOKEN_SOURCE_STATIC = "static"
 TOKEN_SOURCE_STATIC_FROM_ENV = "static_from_env"
 TOKEN_SOURCE_OAUTH = "oauth"
 
-# The official MCP registry the picker resolves against. druks resolves
-# servers by name, server-side, and maintains no url list of its own beyond
-# the trust pins (druks/mcp/trusted.json). One resolve is one GET; the short
-# cache absorbs the picker re-querying as the operator types.
+# The official MCP registry the picker resolves against; search results
+# cache briefly in Redis so typing in the picker doesn't hammer it.
 REGISTRY_SEARCH_URL = "https://registry.modelcontextprotocol.io/v0/servers"
+REGISTRY_SEARCH_CACHE_PREFIX = "mcp:registry:search:"
 REGISTRY_CACHE_TTL_SECONDS = 300
 
 # OAuth connect + mint plumbing. The callback path is public API surface — the

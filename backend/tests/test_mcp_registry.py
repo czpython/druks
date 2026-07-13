@@ -3,13 +3,10 @@ import json
 import httpx
 import pytest
 from druks.mcp import registry
-from druks.mcp.exceptions import InvalidTrustedPinsError, RegistryUnavailableError
-from druks.mcp.registry import (
-    derive_server_name,
-    load_trusted_pins,
-    resolve_candidates,
-    search_registry,
-)
+from druks.mcp.constants import REGISTRY_SEARCH_CACHE_PREFIX
+from druks.mcp.exceptions import RegistryUnavailableError
+from druks.mcp.registry import derive_server_name, resolve_candidates, search_registry
+from druks.redis import get_client
 from druks.settings import PACKAGED_MCP_TRUSTED
 
 # Canned latest-version entries, shaped like the live /v0/servers?search=…
@@ -17,6 +14,11 @@ from druks.settings import PACKAGED_MCP_TRUSTED
 # streamable-http remote with a declared header; sentry's official entry is
 # npm-only (its hosted url exists only as a druks pin); an aggregator
 # (mcparmory) republishes both as stdio-only packages.
+_GRAFANA_HEADER = {
+    "name": "X-Grafana-URL",
+    "description": "URL of your Grafana Cloud instance",
+    "placeholder": "https://<instance>.grafana.net",
+}
 _GRAFANA = {
     "server": {
         "name": "io.github.grafana/mcp-grafana",
@@ -27,13 +29,7 @@ _GRAFANA = {
             {
                 "type": "streamable-http",
                 "url": "https://mcp.grafana.com/mcp",
-                "headers": [
-                    {
-                        "name": "X-Grafana-URL",
-                        "description": "URL of your Grafana Cloud instance",
-                        "placeholder": "https://<instance>.grafana.net",
-                    }
-                ],
+                "headers": [_GRAFANA_HEADER],
             }
         ],
     },
@@ -155,47 +151,29 @@ def test_official_candidates_sort_first():
     assert [c["name"] for c in candidates] == ["grafana", "aardvark"]
 
 
+def test_packaged_pins_resolve_grafana_and_sentry():
+    # The shipped trusted.json, end to end: grafana by publisher pin (registry
+    # url kept), sentry by url pin (registry entry has no remote).
+    pins = json.loads(PACKAGED_MCP_TRUSTED.read_text())
+
+    candidates = resolve_candidates([_GRAFANA, _SENTRY], pins)
+
+    assert [(c["name"], c["official"]) for c in candidates] == [
+        ("grafana", True),
+        ("sentry", True),
+    ]
+    assert next(c for c in candidates if c["name"] == "sentry")["url"] == pins["sentry"]
+
+
 # --- declared inputs: the form spec ---------------------------------------
 
 
-def test_header_specs_carry_the_declared_input_fields():
+def test_declared_header_inputs_pass_through_verbatim():
+    # The remote's declared inputs reach the candidate untouched — the wire
+    # response model owns their optionality, not the resolver.
     candidates = resolve_candidates([_GRAFANA], _PINS)
 
-    header = candidates[0]["headers"][0]
-    assert header == {
-        "name": "X-Grafana-URL",
-        "description": "URL of your Grafana Cloud instance",
-        "placeholder": "https://<instance>.grafana.net",
-        "is_required": False,
-        "is_secret": False,
-        "format": "",
-    }
-
-
-def test_secret_and_required_header_flags_survive():
-    entries = [
-        _entry(
-            "com.acme/observer",
-            remotes=[
-                {
-                    "type": "streamable-http",
-                    "url": "https://mcp.acme.com/mcp",
-                    "headers": [
-                        {"name": "X-Api-Key", "isSecret": True, "isRequired": True},
-                        {"name": "X-Region", "format": "string"},
-                    ],
-                }
-            ],
-        )
-    ]
-
-    candidates = resolve_candidates(entries, {})
-
-    api_key, region = candidates[0]["headers"]
-    assert api_key["is_secret"] is True
-    assert api_key["is_required"] is True
-    assert region["is_secret"] is False
-    assert region["format"] == "string"
+    assert candidates[0]["headers"] == [_GRAFANA_HEADER]
 
 
 # --- the druks-side name ---------------------------------------------------
@@ -213,37 +191,19 @@ def test_derive_server_name_strips_noise_and_stays_identifier_safe():
     assert derive_server_name("com.acme/mcp") == "mcp"
 
 
-# --- pins file --------------------------------------------------------------
-
-
-def test_load_trusted_pins_reads_the_packaged_file():
-    pins = load_trusted_pins(PACKAGED_MCP_TRUSTED)
-
-    assert pins["grafana"] == "io.github.grafana"
-    assert pins["sentry"].startswith("https://")
-
-
-def test_load_trusted_pins_fails_loudly_on_bad_content(tmp_path):
-    for content, reason in (
-        ("{not json", "not valid JSON"),
-        ('["list"]', "JSON object"),
-        ('{"grafana": 7}', "JSON object"),
-    ):
-        path = tmp_path / "trusted.json"
-        path.write_text(content)
-        with pytest.raises(InvalidTrustedPinsError, match=reason):
-            load_trusted_pins(path)
-
-    with pytest.raises(InvalidTrustedPinsError, match="absent.json"):
-        load_trusted_pins(tmp_path / "absent.json")
-
-
-# --- the client: one GET, cached, loud on failure ---------------------------
+# --- the client: one GET, cached in Redis, loud on failure ------------------
 
 
 @pytest.fixture(autouse=True)
-def _fresh_search_cache(monkeypatch):
-    monkeypatch.setattr(registry, "_search_cache", {})
+def _fresh_search_cache():
+    # The suite's FakeRedis lives for the whole session; drop this module's
+    # keys so every test sees a cold cache.
+    redis = get_client()
+    redis._data = {
+        key: value
+        for key, value in redis._data.items()
+        if not key.startswith(REGISTRY_SEARCH_CACHE_PREFIX)
+    }
 
 
 def _client_returning(handler):
@@ -264,8 +224,9 @@ async def test_search_registry_fetches_latest_and_caches(monkeypatch):
 
     assert first == [_GRAFANA]
     assert second == [_GRAFANA]
-    # One GET total — the second resolve is the cache; and that one GET asked
-    # for latest versions only (the registry otherwise returns every version).
+    # One GET total — the second resolve reads the Redis cache; and that one
+    # GET asked for latest versions only (the registry otherwise returns
+    # every version of every server).
     assert len(requests) == 1
     assert requests[0].url.params["search"] == "grafana"
     assert requests[0].url.params["version"] == "latest"
