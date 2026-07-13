@@ -26,6 +26,13 @@ TOKEN_SOURCE_STATIC = "static"
 TOKEN_SOURCE_STATIC_FROM_ENV = "static_from_env"
 TOKEN_SOURCE_OAUTH = "oauth"
 
+# The official MCP registry the picker resolves against. druks resolves
+# servers by name, server-side, and maintains no url list of its own beyond
+# the trust pins (druks/mcp/trusted.json). One resolve is one GET; the short
+# cache absorbs the picker re-querying as the operator types.
+REGISTRY_SEARCH_URL = "https://registry.modelcontextprotocol.io/v0/servers"
+REGISTRY_CACHE_TTL_SECONDS = 300
+
 # OAuth connect + mint plumbing. The callback path is public API surface — the
 # authorization server redirects the operator's browser to
 # {DRUKS_ENDPOINT}{OAUTH_CALLBACK_PATH} after consent. Access tokens cache in

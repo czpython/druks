@@ -46,6 +46,27 @@ class InvalidCatalogError(McpServerError):
         self.reason = reason
 
 
+class RegistryUnavailableError(McpServerError):
+    # The official registry couldn't answer a resolve — network trouble, a
+    # non-2xx, or a payload that isn't the documented shape. Surfaced to the
+    # operator's search as a loud failure, never an empty result set that
+    # would read as "no such server".
+    def __init__(self, query: str, reason: str):
+        super().__init__(f"MCP registry search for {query!r} failed: {reason}")
+        self.query = query
+        self.reason = reason
+
+
+class InvalidTrustedPinsError(McpServerError):
+    # The trust-pins file backs the official badge; an unreadable or malformed
+    # file stops the resolve loudly — a quietly empty pin set would silently
+    # downgrade every pinned server to community.
+    def __init__(self, path, reason: str):
+        super().__init__(f"Invalid MCP trust pins {path}: {reason}")
+        self.path = path
+        self.reason = reason
+
+
 class OauthConnectError(McpServerError):
     # The connect flow (discovery, client registration, code exchange) failed —
     # surfaced to the operator who clicked Connect, with the step that broke.
