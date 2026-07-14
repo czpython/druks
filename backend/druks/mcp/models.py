@@ -40,7 +40,7 @@ class McpServer(Base, Uuid7Pk):
 
     @classmethod
     def list_all(cls) -> list["McpServer"]:
-        # The raw overlay rows — not the merged registry view (list_resolved).
+        # The raw overlay rows — not the merged registry view (get_resolved).
         return list(db_session().execute(select(cls).order_by(cls.name)).scalars())
 
     @classmethod
@@ -48,46 +48,43 @@ class McpServer(Base, Uuid7Pk):
         return db_session().execute(select(cls).where(cls.name == name)).scalar_one_or_none()
 
     @classmethod
-    def list_resolved(cls) -> list[dict]:
-        # The full view the API reads and delivery resolves from: each built-in
-        # definition (url + auth from the registry) overlaid with its operator
-        # row's enable choice and secrets, then any fully custom rows.
+    def get_resolved(cls) -> dict[str, dict]:
+        # The full view the API reads and delivery resolves from, keyed by
+        # name: each built-in definition (url + auth from the registry)
+        # overlaid with its operator row's enable choice and secrets, then any
+        # fully custom rows.
         rows = {server.name: server for server in cls.list_all()}
-        servers: list[dict] = []
+        servers: dict[str, dict] = {}
         for definition in mcp_servers.all():
             row = rows.pop(definition["name"], None)
-            servers.append(
-                {
-                    "name": definition["name"],
-                    "url": definition["url"],
-                    "token_source": definition["token_source"],
-                    "source_env_var": definition["source_env_var"],
-                    "is_enabled": row.is_enabled if row else definition["enabled"],
-                    "token": row.token if row else Secret(b"", ""),
-                    "headers": row.headers if row else {},
-                    "secret_headers": row.secret_headers if row else {},
-                    "builtin": True,
-                }
-            )
+            servers[definition["name"]] = {
+                "name": definition["name"],
+                "url": definition["url"],
+                "token_source": definition["token_source"],
+                "source_env_var": definition["source_env_var"],
+                "is_enabled": row.is_enabled if row else definition["enabled"],
+                "token": row.token if row else Secret(b"", ""),
+                "headers": row.headers if row else {},
+                "secret_headers": row.secret_headers if row else {},
+                "builtin": True,
+            }
         for row in rows.values():
-            servers.append(
-                {
-                    "name": row.name,
-                    "url": row.url,
-                    "token_source": row.token_source,
-                    "source_env_var": "",
-                    "is_enabled": row.is_enabled,
-                    "token": row.token,
-                    "headers": row.headers,
-                    "secret_headers": row.secret_headers,
-                    "builtin": False,
-                }
-            )
+            servers[row.name] = {
+                "name": row.name,
+                "url": row.url,
+                "token_source": row.token_source,
+                "source_env_var": "",
+                "is_enabled": row.is_enabled,
+                "token": row.token,
+                "headers": row.headers,
+                "secret_headers": row.secret_headers,
+                "builtin": False,
+            }
         # has_token = nothing blocks this server's auth at delivery, read from
         # wherever its source keeps the secret: druks' env for an env-sourced
         # server, a stored grant for a connected one, the stored token for a
         # static one; a bearerless server has none to miss.
-        for server in servers:
+        for server in servers.values():
             source = server["token_source"]
             if not source:
                 server["has_token"] = True
@@ -102,7 +99,7 @@ class McpServer(Base, Uuid7Pk):
     @classmethod
     def list_enabled(cls) -> list[dict]:
         # The enabled subset — what a run delivers and the settings UI shows active.
-        return [server for server in cls.list_resolved() if server["is_enabled"]]
+        return [server for server in cls.get_resolved().values() if server["is_enabled"]]
 
     @classmethod
     def set_enabled(cls, name: str, is_enabled: bool) -> bool:

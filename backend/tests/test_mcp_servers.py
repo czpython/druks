@@ -336,7 +336,7 @@ async def test_bearerless_server_delivers_without_a_bearer(db_session):
 def test_bearerless_server_resolves_ready_with_its_headers(db_session):
     _grafana_shaped_server()
 
-    grafana = next(s for s in McpServer.list_resolved() if s["name"] == "grafana")
+    grafana = McpServer.get_resolved()["grafana"]
     assert grafana["token_source"] == ""
     assert grafana["headers"] == {"X-Grafana-URL": "https://acme.grafana.net"}
     # Nothing blocks delivery auth — the secret header is stored — so the
@@ -483,7 +483,7 @@ def test_packaged_catalog_ships_linear_disabled(registry_state, db_session):
     load_mcp_catalog(PACKAGED_MCP_CATALOG)
 
     assert "github" not in mcp_servers
-    builtins = [s for s in McpServer.list_resolved() if s["builtin"]]
+    builtins = [s for s in McpServer.get_resolved().values() if s["builtin"]]
     assert [s["name"] for s in builtins] == ["linear"]
     linear = builtins[0]
     assert linear["url"] == "https://mcp.linear.app/mcp"
@@ -590,7 +590,7 @@ def test_db_overlay_still_disables_a_catalog_entry(tmp_path, registry_state, db_
 
     McpServer.create(name="figma_test", url="https://mcp.figma.test/", is_enabled=False)
 
-    resolved = next(s for s in McpServer.list_resolved() if s["name"] == "figma_test")
+    resolved = McpServer.get_resolved()["figma_test"]
     assert resolved["builtin"] is True
     assert "figma_test" not in {s["name"] for s in McpServer.list_enabled()}
 
@@ -609,7 +609,7 @@ def test_catalog_enabled_false_ships_the_entry_dark(tmp_path, registry_state, db
         )
     )
 
-    resolved = {s["name"]: s for s in McpServer.list_resolved()}
+    resolved = McpServer.get_resolved()
     assert resolved["dark_test"]["is_enabled"] is False
     assert resolved["lit_test"]["is_enabled"] is True
     enabled_names = {s["name"] for s in McpServer.list_enabled()}

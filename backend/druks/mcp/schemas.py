@@ -8,7 +8,7 @@ NonBlank = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)
 
 
 class McpServerResponse(BaseResponse):
-    # A pure projection of one ``McpServer.list_resolved()`` item — the dict's
+    # A pure projection of one ``McpServer.get_resolved()`` item — the dict's
     # ``token`` is not a field here, so the secret can't serialize (and it
     # arrives as a Secret, redacted even if it did).
     name: str
@@ -29,10 +29,26 @@ class ConnectMcpServerResponse(BaseResponse):
     authorization_url: str
 
 
+class McpRegistryCandidateResponse(BaseResponse):
+    name: str
+    registry_name: str
+    description: str
+    url: str
+    official: bool
+    # The remote's declared inputs, verbatim — the registry owns their shape.
+    headers: list[dict]
+
+
 class CreateMcpServerRequest(BaseModel):
     name: str
     url: str
     token: str = ""
+
+
+class InstallMcpServerRequest(BaseModel):
+    name: str
+    registry: str
+    headers: dict[str, str] = {}
 
 
 # The catalog file is operator input, so its entries parse through a

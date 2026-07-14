@@ -62,11 +62,12 @@ async def search_registry(query: str) -> list[dict]:
     return entries
 
 
-def resolve_candidates(entries: list[dict], pins: dict[str, str]) -> list[dict]:
+def resolve_candidates(entries: list[dict], pins: dict[str, str]) -> dict[str, dict]:
     """One installable candidate per entry reachable over streamable HTTP —
     from its own declared remote, or from a pinned official url the registry
-    omits; stdio/oci-only entries drop out. ``official`` is the trust badge:
-    the publisher provably owns the remote's domain, or a pin vouches."""
+    omits; stdio/oci-only entries drop out. Keyed by registry name, official
+    candidates first. ``official`` is the trust badge: the publisher provably
+    owns the remote's domain, or a pin vouches."""
     # A url pin lifts exactly one entry among those deriving its name. The pin
     # itself supplies the url, so this choice only picks display text; the
     # tiebreak just needs determinism: prefer the publisher whose own name
@@ -128,4 +129,4 @@ def resolve_candidates(entries: list[dict], pins: dict[str, str]) -> list[dict]:
             }
         )
     candidates.sort(key=lambda candidate: (not candidate["official"], candidate["name"]))
-    return candidates
+    return {candidate["registry_name"]: candidate for candidate in candidates}
