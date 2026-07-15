@@ -295,16 +295,19 @@ async def test_invalid_grant_drops_only_the_addressed_row(monkeypatch, db_sessio
 
 async def test_concurrent_rotations_produce_one_grant(monkeypatch, db_session):
     login = _seed_claude(access="old", refresh="R0", expires_at=_NOW + timedelta(minutes=30))
+    login_id = login.id
     calls = _mock_post(
         monkeypatch, _resp(200, {"access_token": "new", "refresh_token": "R1", "expires_in": 100})
     )
     first, second = await asyncio.gather(
-        ClaudeHarness.rotate_token(login.id, now=_NOW),
-        ClaudeHarness.rotate_token(login.id, now=_NOW),
+        ClaudeHarness.rotate_token(login_id, now=_NOW),
+        ClaudeHarness.rotate_token(login_id, now=_NOW),
     )
     assert len(calls) == 1  # one provider grant, one persisted lineage
     assert {first.action, second.action} == {"refreshed", "locked"}
-    assert dict(HarnessLogin.get(login.id).payload)["claudeAiOauth"]["refreshToken"] == "R1"
+    # Sessions are task-scoped: the winner ran (and committed) inside its own
+    # gather task, so read past this task's identity map for what persisted.
+    assert dict(HarnessLogin.reload(login_id).payload)["claudeAiOauth"]["refreshToken"] == "R1"
 
 
 async def test_rotation_lock_is_released_after_refresh(monkeypatch, db_session):
