@@ -353,6 +353,21 @@ def bind_ambient_session(session) -> None:
     db_session.registry.set(session)
 
 
+def connect_harness(harness_cls, payload: dict, *, provider_email: str = "op@example.com"):
+    """Seed a connected seat the way a finished connect flow would: an account
+    keyed by the provider email plus the harness's login row, expiry mirrored
+    out of the payload. Returns the HarnessLogin row."""
+    from druks.harnesses.models import HarnessLogin
+
+    _, expires_at = harness_cls._refresh_state(payload)
+    return HarnessLogin.connect(
+        harness=harness_cls.name,
+        payload=payload,
+        expires_at=expires_at,
+        provider_email=provider_email,
+    )
+
+
 def seed_dbos_status(session, workflow_id: str, state: str, *, subject=None) -> None:
     """Write the ``dbos.workflow_status`` row a Run's derived ``state`` reads,
     carrying the subject attributes ``start()`` stamps — the paired half of

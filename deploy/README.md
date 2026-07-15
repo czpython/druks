@@ -148,6 +148,27 @@ code until they finish. Recovery does not preserve a live agent process inside
 a sandbox; it follows the operation boundary described in
 [Concepts](../docs/concepts.md#durability-and-recovery).
 
+### One-time: upgrading across the accounts migration
+
+The accounts release re-keys `harness_logins` per account and encrypts the
+stored credentials in place — a destructive schema change. Upgrade it as a
+maintenance cutover: stop the stack (`docker compose down`), wait for active
+calls to end, **back up Postgres**, run the migration with the new image
+(`docker compose run --rm web druks init-db`), then `docker compose up -d`.
+Never run old and new processes across this migration; parked workflows may
+stay parked. Rolling back afterwards means restoring the pre-migration
+database backup and the old image — there is no Alembic downgrade.
+
+With existing harness connections, the migration requires
+`DRUKS_DASHBOARD_EMAIL` in the migration run's environment and attaches every
+existing seat to one account with that email. A remote install needs no extra
+step — `.env` already holds the value the Caddy gate matches. **Warning:** the
+one-run value must match the provider email you will actually sign in with
+once account login lands; a mismatch strands the migrated seats on an account
+you cannot enter (automation keeps working, and reconnecting after an eventual
+`invalid_grant` re-creates the seat under your real account). Fresh installs
+and installs with no connected harness skip all of this.
+
 ### One-time: upgrading a box that ran the backend as root
 
 The backend containers now run as the deploy user (`DRUKS_UID`/`DRUKS_GID`),

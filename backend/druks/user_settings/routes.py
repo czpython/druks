@@ -48,7 +48,7 @@ def _resolve_harness(name: str) -> tuple[type, HarnessSettings]:
 async def list_harness_settings() -> list[HarnessResponse]:
     registered = {harness.name for harness in get_harnesses()}
     return [
-        HarnessResponse.from_row(row, HarnessLogin.get(row.name))
+        HarnessResponse.from_row(row, HarnessLogin.get_default(row.name))
         for row in HarnessSettings.all()
         if row.name in registered
     ]
@@ -67,13 +67,14 @@ async def update_harness_settings(name: str, body: HarnessUpdate) -> HarnessResp
     _validate_timeout(updates.get("timeout"))
     if updates:
         row.update(**updates)
-    return HarnessResponse.from_row(row, HarnessLogin.get(row.name))
+    return HarnessResponse.from_row(row, HarnessLogin.get_default(row.name))
 
 
 @router.post("/harnesses/{name}/login/start")
 async def start_harness_login(name: str) -> dict[str, str]:
     harness, _ = _resolve_harness(name)
-    return {"authorizeUrl": await harness.login_start()}
+    url, flow_id = await harness.login_start()
+    return {"authorizeUrl": url, "flowId": flow_id}
 
 
 @router.post(
@@ -81,15 +82,19 @@ async def start_harness_login(name: str) -> dict[str, str]:
     response_model=HarnessResponse,
     response_model_by_alias=True,
 )
-async def complete_harness_login(name: str, code: str = Body(..., embed=True)) -> HarnessResponse:
+async def complete_harness_login(
+    name: str,
+    code: str = Body(..., embed=True),
+    flow_id: str = Body(..., embed=True, alias="flowId"),
+) -> HarnessResponse:
     # code = a bare code, a code#state pair, or the full redirect URL — the
     # harness parses whichever it is.
     harness, row = _resolve_harness(name)
     try:
-        await harness.login_complete(code)
+        await harness.login_complete(flow_id=flow_id, pasted=code)
     except LoginError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    return HarnessResponse.from_row(row, HarnessLogin.get(row.name))
+    return HarnessResponse.from_row(row, HarnessLogin.get_default(row.name))
 
 
 @router.delete(
@@ -98,7 +103,7 @@ async def complete_harness_login(name: str, code: str = Body(..., embed=True)) -
 async def disconnect_harness(name: str) -> HarnessResponse:
     harness, row = _resolve_harness(name)
     harness.disconnect()
-    return HarnessResponse.from_row(row, HarnessLogin.get(row.name))
+    return HarnessResponse.from_row(row, HarnessLogin.get_default(row.name))
 
 
 @router.get("", response_model=UserSettingsResponse, response_model_by_alias=True)

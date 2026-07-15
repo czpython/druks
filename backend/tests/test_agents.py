@@ -54,9 +54,10 @@ def _seed_run_for_record(db_session):
 def _connected_claude(db_session):
     # A run refuses to dispatch on an unconnected harness; the runtime tests
     # here resolve to claude models, so connect it once.
+    from conftest import connect_harness
     from druks.harnesses.claude import ClaudeHarness
 
-    ClaudeHarness.store_credentials({"claudeAiOauth": {"accessToken": "test-token"}})
+    connect_harness(ClaudeHarness, {"claudeAiOauth": {"accessToken": "test-token"}})
 
 
 def _patch_runtime(monkeypatch, tmp_path, payload):

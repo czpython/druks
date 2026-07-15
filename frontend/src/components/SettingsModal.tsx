@@ -6,6 +6,7 @@ import { ExtensionGlyph } from './ExtensionGlyph'
 import {
   type Harness,
   type ExtensionSettings,
+  type LoginChallenge,
   type McpRegistryCandidate,
   type McpServer,
   type SkillCollection,
@@ -755,7 +756,7 @@ function HarnessesPane({
 // its own busy/error and refetches the harnesses query on change.
 function HarnessConnect({ harness }: { harness: Harness }) {
   const queryClient = useQueryClient()
-  const [authorizeUrl, setAuthorizeUrl] = useState<string | null>(null)
+  const [challenge, setChallenge] = useState<LoginChallenge | null>(null)
   const [code, setCode] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -775,12 +776,13 @@ function HarnessConnect({ harness }: { harness: Harness }) {
   }
 
   const start = () =>
-    run(async () => setAuthorizeUrl((await api.startHarnessLogin(harness.name)).authorizeUrl))
+    run(async () => setChallenge(await api.startHarnessLogin(harness.name)))
 
   const finish = () =>
     run(async () => {
-      await api.completeHarnessLogin(harness.name, code.trim())
-      setAuthorizeUrl(null)
+      if (!challenge) return
+      await api.completeHarnessLogin(harness.name, code.trim(), challenge.flowId)
+      setChallenge(null)
       setCode('')
       await refresh()
     })
@@ -812,18 +814,18 @@ function HarnessConnect({ harness }: { harness: Harness }) {
               Disconnect
             </button>
           )}
-          {!authorizeUrl && (
+          {!challenge && (
             <button className="hr-conn-btn" onClick={() => void start()} disabled={busy}>
               {harness.connected ? 'Reconnect' : 'Connect'}
             </button>
           )}
         </span>
       </div>
-      {authorizeUrl && (
+      {challenge && (
         <div className="hr-conn-flow">
           <div className="hr-conn-step">
             <span className="hr-conn-num">1</span>
-            <a href={authorizeUrl} target="_blank" rel="noreferrer">
+            <a href={challenge.authorizeUrl} target="_blank" rel="noreferrer">
               Open the sign-in page
             </a>
             , approve, then copy the code it shows (or the redirect URL).

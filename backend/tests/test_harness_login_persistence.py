@@ -5,9 +5,9 @@ import pytest
 from druks.database import configure_session, db_session, get_session
 from druks.harnesses.claude import ClaudeHarness
 from druks.harnesses.models import HarnessLogin
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 
-# The credential store's whole job is to persist a mutated credential-file dict
+# The credential store's whole job is to persist a rotated credential dict
 # through a real commit. The rollback-based suite can't verify that — its identity
 # map hands back the mutated in-memory object no matter what reached the DB — so
 # this module runs against its own database with real commits and fresh sessions,
@@ -59,23 +59,49 @@ def _committed(engine, work):
         session.close()
 
 
-def test_store_persists_mutated_payload_across_sessions(engine):
-    # Load the row, edit the payload in place, store it, then read it back from a
-    # fresh session — the round-trip refresh actually makes. Commit + new session
-    # proves the edit reached the DB, not just the in-memory object.
-    _committed(
-        engine,
-        lambda: ClaudeHarness.store_credentials(
-            {"claudeAiOauth": {"accessToken": "old", "refreshToken": "R0"}}
-        ),
+def _connect(payload: dict) -> str:
+    row = HarnessLogin.connect(
+        harness="claude",
+        payload=payload,
+        expires_at=None,
+        provider_email="op@example.com",
+    )
+    return row.id
+
+
+def test_rotation_persists_new_payload_across_sessions(engine):
+    # Connect the seat, rotate its payload the way rotate_token does (plain-dict
+    # copy, edit, whole-value update), then read it back from a fresh session —
+    # commit + new session proves the edit reached the DB, not just the
+    # in-memory object.
+    login_id = _committed(
+        engine, lambda: _connect({"claudeAiOauth": {"accessToken": "old", "refreshToken": "R0"}})
     )
 
-    def mutate_in_place():
-        data = ClaudeHarness.get_credentials()
+    def rotate_in_place():
+        row = HarnessLogin.get(login_id)
+        data = dict(row.payload)
         data["claudeAiOauth"]["accessToken"] = "new"
-        ClaudeHarness.store_credentials(data)
+        row.update_payload(data, expires_at=None)
 
-    _committed(engine, mutate_in_place)
+    _committed(engine, rotate_in_place)
 
-    block = _committed(engine, lambda: HarnessLogin.get("claude").payload["claudeAiOauth"])
+    block = _committed(
+        engine, lambda: dict(HarnessLogin.get(login_id).payload)["claudeAiOauth"]
+    )
     assert block["accessToken"] == "new"
+
+
+def test_payload_is_ciphertext_at_rest(engine):
+    _committed(
+        engine, lambda: _connect({"claudeAiOauth": {"accessToken": "supersecret"}})
+    )
+
+    with engine.connect() as connection:
+        stored = connection.execute(text("SELECT payload FROM harness_logins")).scalar_one()
+    raw = bytes(stored)
+    assert b"supersecret" not in raw
+    assert b"claudeAiOauth" not in raw
+
+    block = _committed(engine, lambda: ClaudeHarness.get_credentials()["claudeAiOauth"])
+    assert block["accessToken"] == "supersecret"

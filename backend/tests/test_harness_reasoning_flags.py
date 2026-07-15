@@ -1,4 +1,5 @@
 import pytest
+from conftest import connect_harness
 from druks.harnesses.claude import ClaudeHarness
 from druks.harnesses.codex import CodexHarness
 
@@ -9,8 +10,8 @@ _CODEX_MODEL = CodexHarness.models[0]
 def _connected_harnesses(db_session):
     # build_invocation renders each credential bundle from the DB row and
     # raises when that harness isn't connected.
-    ClaudeHarness.store_credentials({"claudeAiOauth": {"accessToken": "t"}})
-    CodexHarness.store_credentials({"tokens": {"access_token": "t"}})
+    connect_harness(ClaudeHarness, {"claudeAiOauth": {"accessToken": "t"}})
+    connect_harness(CodexHarness, {"tokens": {"access_token": "t"}})
 
 
 def _sandbox_config():

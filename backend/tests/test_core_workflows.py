@@ -15,3 +15,10 @@ def test_invalid_grant_warns(caplog):
     with caplog.at_level(logging.WARNING):
         _log_result(RotationResult("claude", "failed", error="invalid_grant"))
     assert "token refresh failed for claude" in caplog.text
+
+
+def test_locked_stays_quiet(caplog):
+    # Another worker owns that row's refresh — losing the election is routine.
+    with caplog.at_level(logging.WARNING):
+        _log_result(RotationResult("claude", "locked", login_id="L1"))
+    assert caplog.records == []

@@ -20,8 +20,8 @@ class HarnessResponse(BaseResponse):
     timeout: int
     fast_mode: bool
     allowed_models: list[str]
-    # Connection state, joined in from the HarnessLogin row — connected=False
-    # until the operator connects the harness from the dashboard.
+    # Connection state, joined in from the harness's default HarnessLogin row —
+    # connected=False until someone connects a seat from the dashboard.
     connected: bool
     kind: str | None
     account: str | None
@@ -41,7 +41,7 @@ class HarnessResponse(BaseResponse):
             allowed_models=settings.allowed_models,
             connected=bool(login),
             kind=login.kind if login else None,
-            account=login.account if login else None,
+            account=login.provider_email if login else None,
             expires_at=login.expires_at if login else None,
         )
 

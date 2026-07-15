@@ -142,9 +142,10 @@ export const api = {
     patchJSON<Harness>(`/api/settings/harnesses/${encodeURIComponent(name)}`, body),
   startHarnessLogin: (name: string) =>
     postJSON<LoginChallenge>(`/api/settings/harnesses/${encodeURIComponent(name)}/login/start`, {}),
-  completeHarnessLogin: (name: string, code: string) =>
+  completeHarnessLogin: (name: string, code: string, flowId: string) =>
     postJSON<Harness>(`/api/settings/harnesses/${encodeURIComponent(name)}/login/complete`, {
       code,
+      flowId,
     }),
   disconnectHarness: (name: string) =>
     deleteJSON<Harness>(`/api/settings/harnesses/${encodeURIComponent(name)}/login`),
