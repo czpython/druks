@@ -12,6 +12,8 @@ from alembic import context
 from druks.alembic_support import run_alembic_env
 
 if context.config.config_file_name is not None:
-    fileConfig(context.config.config_file_name)
+    # In-process upgrades (init-db, the migration tests) must not mute the
+    # app's already-created loggers.
+    fileConfig(context.config.config_file_name, disable_existing_loggers=False)
 
 run_alembic_env()

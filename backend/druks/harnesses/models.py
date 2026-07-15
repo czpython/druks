@@ -2,6 +2,7 @@ from datetime import datetime
 
 from sqlalchemy import ForeignKey, Index, String, UniqueConstraint, select, text
 from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm.attributes import flag_modified
 
 from druks.accounts.models import Account
 from druks.core.models import Uuid7Pk
@@ -108,9 +109,13 @@ class HarnessLogin(Base, Uuid7Pk):
 
     def update_payload(self, payload: dict, *, expires_at: datetime | None) -> None:
         # Whole-value reassignment is the write path: the encrypted column
-        # re-encrypts what it's handed, and an in-place edit of a nested block
-        # would not mark the column dirty.
+        # re-encrypts what it's handed. The caller's dict may alias the live
+        # mapping's nested blocks (a dict() copy is shallow), making old and
+        # new compare content-equal at flush and the UPDATE get skipped —
+        # force the write; this is a secrets store, not somewhere to lose a
+        # token.
         self.payload = payload
+        flag_modified(self, "payload")
         self.expires_at = expires_at
         db_session().flush()
 
