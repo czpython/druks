@@ -12,8 +12,10 @@ class Account(Base, Uuid7Pk):
     __tablename__ = "accounts"
 
     email: Mapped[str] = mapped_column(String, unique=True)
+    # No updated_at: an account is insert-once — email never changes and there
+    # is no other field to mutate — so the column would only ever equal
+    # created_at, and nothing reads it.
     created_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
-    updated_at: Mapped[datetime] = mapped_column(default=Base.utc_now, onupdate=Base.utc_now)
 
     @validates("email")
     def _canonical_email(self, _key: str, value: str) -> str:

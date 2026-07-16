@@ -54,7 +54,6 @@ def upgrade() -> None:
         sa.Column("id", sa.String(), nullable=False),
         sa.Column("email", sa.String(), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
-        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("email"),
     )
@@ -72,8 +71,7 @@ def upgrade() -> None:
         account_id = str(uuid7())
         bind.execute(
             sa.text(
-                "INSERT INTO accounts (id, email, created_at, updated_at) "
-                "VALUES (:id, :email, :now, :now)"
+                "INSERT INTO accounts (id, email, created_at) VALUES (:id, :email, :now)"
             ),
             {"id": account_id, "email": email, "now": now},
         )
