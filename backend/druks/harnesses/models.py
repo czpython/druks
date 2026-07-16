@@ -1,10 +1,11 @@
 from datetime import datetime
 
 from sqlalchemy import ForeignKey, Index, String, UniqueConstraint, select, text
-from sqlalchemy.orm import Mapped, mapped_column, validates
+from sqlalchemy.dialects.postgresql import CITEXT
+from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.orm.attributes import flag_modified
 
-from druks.accounts.models import Account, canonical_email
+from druks.accounts.models import Account
 from druks.core.models import Uuid7Pk
 from druks.database import db_session
 from druks.models import Base
@@ -27,22 +28,18 @@ class HarnessConnection(Base, Uuid7Pk):
 
     harness: Mapped[str]
     account_id: Mapped[str] = mapped_column(ForeignKey("accounts.id", ondelete="RESTRICT"))
-    # The email the provider reported at the token exchange. Cached because
-    # Claude states it once and its stored payload carries no identity at all —
-    # without this the connection is anonymous forever. A connect-time
-    # snapshot, not an identifier: it goes stale if the account is renamed
-    # upstream, and refreshes on the next connect. Null on a row migrated
-    # without one.
-    provider_email: Mapped[str | None]
+    # The email the provider reported at the token exchange (citext — matched
+    # case-insensitively). Cached because Claude states it once and its stored
+    # payload carries no identity at all — without this the connection is
+    # anonymous forever. A connect-time snapshot, not an identifier: it goes
+    # stale if the account is renamed upstream, and refreshes on the next
+    # connect. Null on a row migrated without one.
+    provider_email: Mapped[str | None] = mapped_column(CITEXT)
     kind: Mapped[str] = mapped_column(String, default="subscription")
     payload = EncryptedJsonField()
     expires_at: Mapped[datetime | None]
     is_default: Mapped[bool] = mapped_column(default=False)
     updated_at: Mapped[datetime] = mapped_column(default=Base.utc_now, onupdate=Base.utc_now)
-
-    @validates("provider_email")
-    def _canonical_provider_email(self, _key: str, value: str | None) -> str | None:
-        return canonical_email(value) if value else None
 
     @classmethod
     def get(cls, login_id: str) -> "HarnessConnection | None":

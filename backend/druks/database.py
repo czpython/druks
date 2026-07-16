@@ -3,7 +3,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session, scoped_session, sessionmaker
 
 _ALEMBIC_INI = Path(__file__).resolve().parent.parent / "alembic.ini"
@@ -104,6 +104,10 @@ def init_db(engine) -> None:
     from druks.user_settings.models import seed_harnesses
 
     import_extension_models()
+    # citext backs the case-insensitive email columns; create_all needs the
+    # type to exist first (production gets it from the accounts migration).
+    with engine.begin() as connection:
+        connection.execute(text("CREATE EXTENSION IF NOT EXISTS citext"))
     Base.metadata.create_all(engine)
     seed_harnesses(engine)
 

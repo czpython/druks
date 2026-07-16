@@ -121,14 +121,16 @@ async def test_login_complete_without_provider_email_raises(monkeypatch, db_sess
     assert HarnessConnection.list_all() == []
 
 
-async def test_login_complete_normalizes_provider_email(monkeypatch, db_session):
+async def test_login_complete_matches_provider_email_case_insensitively(monkeypatch, db_session):
+    # The provider's email is stored as given; the citext columns match it
+    # regardless of case, so no account or connection duplicates on casing.
     _, flow_id = await ClaudeHarness.login_start()
-    grant = dict(_CLAUDE_GRANT, account={"email_address": " Me@Example.COM "})
+    grant = dict(_CLAUDE_GRANT, account={"email_address": "Me@Example.COM"})
     _mock_post(monkeypatch, _resp(200, grant))
     await ClaudeHarness.login_complete(flow_id=flow_id, pasted="thecode")
     login = HarnessConnection.get_default("claude")
-    assert login.provider_email == "me@example.com"
-    assert Account.get_for_email("me@example.com") is not None
+    assert login.provider_email == "Me@Example.COM"
+    assert Account.get_for_email("me@example.com") is not None  # citext: case-insensitive
 
 
 async def test_codex_login_complete_is_form_encoded_and_reads_jwt(monkeypatch, db_session):

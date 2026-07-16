@@ -13,6 +13,7 @@ from datetime import UTC, datetime
 
 import sqlalchemy as sa
 from alembic import op
+from sqlalchemy.dialects import postgresql
 from uuid_utils import uuid7
 
 from druks.secrets import utils as secrets
@@ -30,6 +31,8 @@ _PAYLOAD_AAD = "harness_logins.payload"
 
 def upgrade() -> None:
     bind = op.get_bind()
+    # citext backs the case-insensitive email columns below.
+    bind.execute(sa.text("CREATE EXTENSION IF NOT EXISTS citext"))
     legacy = (
         bind.execute(sa.text("SELECT harness, payload, account FROM harness_logins"))
         .mappings()
@@ -40,7 +43,8 @@ def upgrade() -> None:
     if legacy:
         # Fail before any mutation: existing logins are re-keyed under one
         # account, and only the operator knows which identity that is.
-        email = os.environ.get("DRUKS_DASHBOARD_EMAIL", "").strip().lower()
+        # Strip whitespace (hand-edited .env); case is citext's job, not ours.
+        email = os.environ.get("DRUKS_DASHBOARD_EMAIL", "").strip()
         if not email:
             raise RuntimeError(
                 "DRUKS_DASHBOARD_EMAIL must be set (non-blank) for this migration: "
@@ -52,7 +56,7 @@ def upgrade() -> None:
     op.create_table(
         "accounts",
         sa.Column("id", sa.String(), nullable=False),
-        sa.Column("email", sa.String(), nullable=False),
+        sa.Column("email", postgresql.CITEXT(), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("email"),
@@ -60,7 +64,7 @@ def upgrade() -> None:
 
     op.add_column("harness_logins", sa.Column("id", sa.String(), nullable=True))
     op.add_column("harness_logins", sa.Column("account_id", sa.String(), nullable=True))
-    op.add_column("harness_logins", sa.Column("provider_email", sa.String(), nullable=True))
+    op.add_column("harness_logins", sa.Column("provider_email", postgresql.CITEXT(), nullable=True))
     op.add_column("harness_logins", sa.Column("is_default", sa.Boolean(), nullable=True))
     op.add_column(
         "harness_logins", sa.Column("payload_ciphertext", sa.LargeBinary(), nullable=True)
@@ -79,7 +83,7 @@ def upgrade() -> None:
             # Canonical serialization matches EncryptedJson's bind exactly, so
             # the decrypt-verify below compares like for like.
             canonical = json.dumps(row["payload"], separators=(",", ":"), sort_keys=True)
-            provider_email = (row["account"] or "").strip().lower()
+            provider_email = (row["account"] or "").strip()
             bind.execute(
                 sa.text(
                     "UPDATE harness_logins SET id = :id, account_id = :account_id, "

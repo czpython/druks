@@ -72,7 +72,7 @@ def _seed_legacy(engine) -> None:
                 {
                     "harness": "claude",
                     "payload": json.dumps(CLAUDE_PAYLOAD),
-                    # Mixed case + padding: the migration must normalize it.
+                    # Padding the migration strips; case is citext's to handle.
                     "account": " Legacy@Example.COM ",
                 },
                 {
@@ -124,7 +124,9 @@ def test_legacy_rows_are_rekeyed_under_one_account(engine, monkeypatch):
 
     accounts = _rows(engine, "SELECT id, email FROM accounts")
     assert len(accounts) == 1
-    assert accounts[0]["email"] == "op@example.com"
+    # Stored stripped, original case; citext matches it regardless of case.
+    assert accounts[0]["email"] == "Op@Example.COM"
+    assert _rows(engine, "SELECT id FROM accounts WHERE email = 'op@example.com'")
 
     logins = _rows(
         engine,
@@ -138,7 +140,7 @@ def test_legacy_rows_are_rekeyed_under_one_account(engine, monkeypatch):
         # harness's default, whatever its provider email was.
         assert row["account_id"] == accounts[0]["id"]
         assert row["is_default"] is True
-    assert logins[0]["provider_email"] == "legacy@example.com"
+    assert logins[0]["provider_email"] == "Legacy@Example.COM"  # stripped, original case
     assert logins[1]["provider_email"] is None
 
     # Payloads decrypt under the final AAD only — an envelope minted against
