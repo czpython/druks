@@ -35,9 +35,10 @@ class AgentCallResponse(BaseResponse):
     # Which agent made this call ("scope", "implement") — the timeline's row label.
     agent: str | None = None
     label: str = ""
-    # The account whose connection was charged; None renders legacy/unknown,
-    # never the viewer. fallback_reason present = not the run's own account.
-    account: str | None = None
+    # The account charged for this call, and why it wasn't the run's own when
+    # it fell back. Both None on legacy calls recorded before attribution
+    # existed — the client renders those as legacy/unknown, never the viewer.
+    account_email: str | None = None
     fallback_reason: str | None = None
     status: Literal["running", "succeeded", "failed", "abandoned"]
     # started_at + finished_at are the facts; the client derives elapsed (a live
@@ -49,9 +50,7 @@ class AgentCallResponse(BaseResponse):
     tokens: TokenUsage | None = None
 
     @classmethod
-    def from_call(
-        cls, call: AgentCall, account_emails: dict[str, str] | None = None
-    ) -> "AgentCallResponse":
+    def from_call(cls, call: AgentCall) -> "AgentCallResponse":
         # Liveness is derived, not stored: an unfinished call reads "running" while its
         # run is active and "abandoned" once the run is terminal (the run ended without
         # the call closing). A finished call keeps its recorded outcome.
@@ -65,7 +64,7 @@ class AgentCallResponse(BaseResponse):
             id=call.id,
             agent=call.agent,
             label=get_display_label(call.agent) if call.agent else "Agent",
-            account=(account_emails or {}).get(call.account_id),
+            account_email=call.account.email if call.account else None,
             fallback_reason=call.fallback_reason,
             status=status,  # type: ignore[arg-type]
             started_at=call.started_at,
@@ -148,15 +147,13 @@ class RunResponse(BaseResponse):
     input_request: dict[str, Any] | None = None
     created_at: datetime
     updated_at: datetime
-    # The account the run was started for (its owner); None renders
-    # legacy/unknown, never the viewer.
-    account: str | None = None
+    # The attributed account (who requested/triggered the run) — None on runs
+    # from before attribution existed: legacy, never the current viewer.
+    account_email: str | None = None
     agent_calls: list[AgentCallResponse] = Field(default_factory=list)
 
     @classmethod
-    def from_run(
-        cls, run: Run, calls: list[AgentCall], account_emails: dict[str, str] | None = None
-    ) -> "RunResponse":
+    def from_run(cls, run: Run, calls: list[AgentCall]) -> "RunResponse":
         return cls(
             id=run.id,
             kind=run.kind,
@@ -166,8 +163,8 @@ class RunResponse(BaseResponse):
             input_request=run.get_ask() if run.input_request else None,
             created_at=run.created_at,
             updated_at=run.updated_at,
-            account=(account_emails or {}).get(run.account_id),
-            agent_calls=[AgentCallResponse.from_call(c, account_emails) for c in calls],
+            account_email=run.account_email,
+            agent_calls=[AgentCallResponse.from_call(c) for c in calls],
         )
 
 

@@ -1,6 +1,5 @@
-from druks.accounts.dependencies import current_account
-from druks.accounts.models import Account
-from fastapi import APIRouter, Depends, status
+from druks.accounts.dependencies import CurrentAccountDep
+from fastapi import APIRouter, status
 from pydantic import BaseModel
 
 from druks_field_notes.models import Note
@@ -21,9 +20,7 @@ async def list_notes() -> list[NoteView]:
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
-async def write_note(
-    request: WriteNote, account: Account = Depends(current_account)
-) -> dict[str, int]:
+async def write_note(request: WriteNote, account: CurrentAccountDep) -> dict[str, int]:
     note = Note.create(body=request.body)
     # The signed-in account attributes the run it triggers.
     await Summarize.dispatch(note_id=note.id, account_id=account.id)

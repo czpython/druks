@@ -30,11 +30,17 @@ class Account(Base, Uuid7Pk):
         return db_session().scalar(select(cls).where(cls.email == email))
 
     @classmethod
-    def emails_by_id(cls, ids: set[str]) -> dict[str, str]:
-        if not ids:
-            return {}
-        rows = db_session().execute(select(cls.id, cls.email).where(cls.id.in_(ids)))
-        return dict(rows.tuples())
+    def resolve_assignee(cls, email: str | None) -> tuple[str | None, str | None]:
+        """(account id, stripped email) for a ticket assignee — the id is None
+        when no account carries that identity (citext matches the case), both
+        None when the ticket has no assignee at all."""
+        if not email:
+            return None, None
+        stripped = email.strip()
+        account = cls.get_for_email(stripped)
+        if account:
+            return account.id, stripped
+        return None, stripped
 
     @classmethod
     def get_or_create(cls, email: str) -> "Account":

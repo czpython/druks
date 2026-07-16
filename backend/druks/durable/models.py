@@ -9,6 +9,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Mapped, column_property, mapped_column, relationship
 
+from druks.accounts.models import Account
 from druks.core.models import Uuid7Pk
 from druks.database import db_session, get_session
 from druks.durable.dbos_state import (
@@ -55,9 +56,13 @@ class Run(Base):
     # fresh; an already-loaded instance keeps what it read until expired.
     # Read-only; an operator ends a run through cancel().
     state: Mapped[str] = column_property(state_expression(id, input_gate, created_at))
-    # The account the run was started for (session, ticket assignee) — derived
-    # from the attribute stamped at start(); NULL reads legacy/unattributed.
+    # The attributed account (who requested/triggered the run), read off the
+    # DBOS attributes stamped at start(); its email joined in for display.
+    # NULL reads legacy/unattributed.
     account_id: Mapped[str | None] = column_property(account_id_expression(id))
+    account_email: Mapped[str | None] = column_property(
+        select(Account.email).where(Account.id == account_id_expression(id)).scalar_subquery()
+    )
     # When the run last changed — the newest of creation, the parked ask, and
     # DBOS's status write.
     updated_at: Mapped[datetime] = column_property(
@@ -229,10 +234,13 @@ class AgentCall(Base, Uuid7Pk):
     # timeline's grouping label. Nullable — not every call is agent-attributed.
     agent: Mapped[str | None] = mapped_column(String, default=None)
     # The account whose connection executed this call — the subscription
-    # actually charged. NULL on legacy calls; never guess historical attribution.
+    # actually charged, distinct from the run's attributed account when the
+    # call fell back. NULL on legacy calls; never guess historical attribution.
+    # Eager-joined so projections read the email without I/O.
     account_id: Mapped[str | None] = mapped_column(
         ForeignKey("accounts.id", ondelete="RESTRICT"), default=None
     )
+    account: Mapped[Account | None] = relationship(lazy="joined")
     # Why the fallback account was charged instead of the run's own:
     # missing_assignee / unmatched_assignee / account_not_connected /
     # unattributed. NULL when the run's own account executed.
@@ -295,8 +303,8 @@ class AgentCall(Base, Uuid7Pk):
         model: str | None,
         agent: str | None,
         host_id: str,
-        account_id: str | None,
-        fallback_reason: str | None,
+        account_id: str | None = None,
+        fallback_reason: str | None = None,
     ) -> None:
         # Recorded RUNNING once the agent starts on its host (id = its on-disk
         # transcript dir) in its own committed transaction, so the live step

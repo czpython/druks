@@ -1,4 +1,6 @@
-from fastapi import HTTPException, Request
+from typing import Annotated
+
+from fastapi import Depends, HTTPException, Request
 
 from druks.accounts import sessions
 from druks.accounts.models import Account
@@ -26,3 +28,8 @@ async def current_account(request: Request) -> Account:
     if not account:
         raise HTTPException(status_code=401, detail="Sign in to use this API.")
     return account
+
+
+# Handler-parameter form of the gate, for routes that also read the account
+# (e.g. to attribute a workflow start).
+CurrentAccountDep = Annotated[Account, Depends(current_account)]

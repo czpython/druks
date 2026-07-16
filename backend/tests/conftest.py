@@ -72,19 +72,28 @@ class FakeRedis:
         self._ttls.pop(key, None)
         return self._data.pop(key, None)
 
-    async def zadd(self, key: str, mapping: dict[str, float]) -> None:
-        self._zsets.setdefault(key, {}).update(mapping)
+    # Sorted sets — the per-login gate's active-user registry. Stored apart
+    # from the string keys; scores kept for the range prune.
+    async def zadd(self, key: str, mapping: dict[str, float]) -> int:
+        zset = self._zsets.setdefault(key, {})
+        added = sum(1 for member in mapping if member not in zset)
+        zset.update(mapping)
+        return added
 
-    async def zrem(self, key: str, member: str) -> None:
-        self._zsets.get(key, {}).pop(member, None)
+    async def zrem(self, key: str, *members: str) -> int:
+        zset = self._zsets.get(key, {})
+        return sum(1 for member in members if zset.pop(member, None) is not None)
 
     async def zcard(self, key: str) -> int:
         return len(self._zsets.get(key, {}))
 
-    async def zremrangebyscore(self, key: str, low: str, high: float) -> None:
-        scores = self._zsets.get(key, {})
-        for member in [m for m, score in scores.items() if score <= float(high)]:
-            scores.pop(member)
+    async def zremrangebyscore(self, key: str, low: object, high: float) -> int:
+        zset = self._zsets.get(key, {})
+        floor = float("-inf") if low in ("-inf", None) else float(low)  # type: ignore[arg-type]
+        doomed = [member for member, score in zset.items() if floor <= score <= float(high)]
+        for member in doomed:
+            del zset[member]
+        return len(doomed)
 
     async def delete(self, key: str) -> None:
         self._data.pop(key, None)

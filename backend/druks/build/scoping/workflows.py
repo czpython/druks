@@ -1,9 +1,9 @@
 import logging
 
+from druks.accounts.models import Account
 from druks.build.extension import Build
 from druks.build.models import Project, ProjectRepo, WorkItem
 from druks.build.scoping.contracts import ScopeBriefOutput
-from druks.build.workflows import assignee_attribution
 from druks.ticketing.datastructures import Ticket
 from druks.workflows import Gate, Run, RunState, Workflow
 
@@ -45,11 +45,13 @@ class Scope(Workflow):
                 remote_url=ticket.url,
                 repo=target.full_name,
             )
+        account_id, stripped_assignee = Account.resolve_assignee(ticket.assignee_email)
         return await cls.start(
             subject=WorkItem.subject_for(item.id),
+            account_id=account_id,
+            assignee_email=stripped_assignee,
             remote_key=ticket.key,
             source=ticket.provider,
-            **assignee_attribution(ticket.assignee_email),
         )
 
     @classmethod

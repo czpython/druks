@@ -62,9 +62,9 @@ export interface AgentCallSummary {
   // Which agent made this call ("scope", "implement"); label is its display name.
   agent?: string | null
   label: string
-  // The account charged for the call; null is legacy/unknown, never the viewer.
-  account?: string | null
-  // Present when the fallback account was charged instead of the run's own.
+  /** The account charged for this call; null = legacy/unattributed, never the viewer. */
+  accountEmail?: string | null
+  /** Set when the call fell back to the fallback account's connection, and why. */
   fallbackReason?: string | null
   status: 'running' | 'succeeded' | 'failed' | 'abandoned'
   startedAt: string
@@ -113,8 +113,8 @@ export interface RunSummary {
   inputRequest?: InputRequest | null
   createdAt: string
   updatedAt: string
-  // The account the run was started for; null is legacy/unknown, never the viewer.
-  account?: string | null
+  /** Who requested/triggered the run; null = legacy/unattributed, never the viewer. */
+  accountEmail?: string | null
   agentCalls: AgentCallSummary[]
 }
 

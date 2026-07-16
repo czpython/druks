@@ -1,8 +1,10 @@
 from datetime import timedelta
+from typing import Any
 
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import JSONB
 
+from druks.database import db_session
 from druks.durable.enums import RunState
 
 # DBOS keeps its bookkeeping in this schema of the app database (init_dbos
@@ -86,6 +88,19 @@ def state_expression(
         else_=RunState.SCHEDULED.value,
     )
     return sa.func.coalesce(mapped, missing)
+
+
+def get_run_attributes(run_id: str) -> dict[str, Any]:
+    """The attributes stamped at start() for one run — subject keys,
+    attribution, the requested assignee. Empty for a run with none."""
+    value = (
+        db_session()
+        .execute(
+            sa.select(workflow_status.c.attributes).where(workflow_status.c.workflow_uuid == run_id)
+        )
+        .scalar()
+    )
+    return value or {}
 
 
 def account_id_expression(run_id: sa.ColumnElement) -> sa.ColumnElement:

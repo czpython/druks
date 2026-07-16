@@ -126,22 +126,26 @@ Start a workflow with an explicit subject:
 ```python
 run_id = await Sweep.start(
     subject={"type": "repository", "id": repo_id},
+    account_id=account.id,
     repo=full_name,
 )
 ```
 
 Pass `subject=None` deliberately for background work. A subject has at most one
 active run of a workflow kind; a duplicate start returns the active run id —
-deduplication never considers the account. Wrap `start()` in a domain
-`dispatch()` method when the extension needs lookup, snapshot, or routing
-policy before launch.
+attribution never changes that (two accounts starting the same subject share
+the one run). Wrap `start()` in a domain `dispatch()` method when the extension
+needs lookup, snapshot, or routing policy before launch.
 
-`start()` also attributes the run: pass `account_id` when a signed-in session
-or a resolved ticket assignee triggered it, or `unattributed_reason`
-(`missing_assignee` / `unmatched_assignee`) when no account resolved — agent
-calls then execute with the run's own account's connection, falling back to
-the install's fallback account with the reason recorded on the call. Resuming
-a parked run never re-attributes it.
+`account_id` attributes the run to the requesting account: a browser route
+passes the session account (`CurrentAccountDep`), a webhook dispatch resolves
+the ticket assignee (`Account.resolve_assignee`, whose email also rides
+`assignee_email=` for the fallback trail). Each of the run's agent calls then
+executes with that account's own connection, falling back to the install's
+fallback account with the reason recorded on the call. Omitting it (crons,
+background work) is fine — calls run on the fallback account's connection and
+read as unattributed. Resuming a parked run keeps its original attribution;
+the person clicking Resume never becomes the payer.
 
 ### Schedules and settings
 

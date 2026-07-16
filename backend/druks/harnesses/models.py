@@ -38,24 +38,29 @@ class HarnessConnection(Base, Uuid7Pk):
 
     @classmethod
     def select_for_run(
-        cls, harness: str, *, account_id: str | None, unattributed_reason: str | None
+        cls, harness: str, account_id: str | None, *, assignee_email: str | None
     ) -> tuple["HarnessConnection", str | None]:
-        """The connection an agent call executes with: the run's own account
-        when connected, else the fallback account — with the reason recorded
-        on the call. Raises when the fallback account has no login either."""
+        """The connection an agent call executes with, and why it fell back
+        (or None): the attributed account's own connection wins; otherwise the
+        fallback account's carries the call — fallback-with-visible-exception
+        keeps automation moving instead of wedging every unmatched webhook.
+        Raises :class:`HarnessNotConnectedError` when no connection can serve
+        at all."""
         if account_id:
-            row = cls.get_for_account(harness, account_id)
-            if row:
-                return row, None
-            reason = "account_not_connected"
-        else:
-            reason = unattributed_reason or "unattributed"
-        row = cls.get_for_account(harness, fallback=True)
-        if not row:
+            own = cls.get_for_account(harness, account_id)
+            if own:
+                return own, None
+        fallback = cls.get_for_account(harness, fallback=True)
+        if not fallback:
             raise HarnessNotConnectedError(
-                f"{harness} is not connected — connect it in Settings → Harnesses."
+                f"{harness} is not connected for the fallback account — connect it in "
+                "Settings → Harnesses."
             )
-        return row, reason
+        if account_id:
+            return fallback, "account_not_connected"
+        if assignee_email:
+            return fallback, "unmatched_assignee"
+        return fallback, "missing_assignee"
 
     @classmethod
     def get_for_account(

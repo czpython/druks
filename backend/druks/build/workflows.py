@@ -42,17 +42,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def assignee_attribution(assignee_email: str | None) -> dict[str, str]:
-    # start() kwargs attributing a ticket-origin run to its assignee; the
-    # reason records why no account resolved (citext matches the email's case).
-    if not assignee_email:
-        return {"unattributed_reason": "missing_assignee"}
-    account = Account.get_for_email(assignee_email.strip())
-    if account:
-        return {"account_id": account.id}
-    return {"unattributed_reason": "unmatched_assignee"}
-
-
 # The github MCP server build ships into its own runs — build's requirement
 # (there is no build without github), not an operator-facing catalog entry.
 # Its token is per-repo, minted from the reviewer app at workspace setup.
@@ -157,8 +146,13 @@ class BuildWorkflow(Workflow):
         item = WorkItem.get(work_item_id)
         if not item:
             raise ValueError(f"dispatching a build for unknown work item {work_item_id}")
+        # The run is attributed to the ticket assignee's account (their
+        # connection runs the calls); the owner fields stay workflow input.
+        account_id, stripped_assignee = Account.resolve_assignee(assignee_email)
         run_id = await cls.start(
             subject=WorkItem.subject_for(item.id),
+            account_id=account_id,
+            assignee_email=stripped_assignee,
             repo=item.repo,
             source=item.source,
             ticket_ref=item.remote_key,
@@ -166,7 +160,6 @@ class BuildWorkflow(Workflow):
             remote_url=item.remote_url,
             task_owner_email=assignee_email,
             task_owner_name=assignee_name,
-            **assignee_attribution(assignee_email),
         )
         item.update(build_run_id=run_id)
         # Back onto the active board: a scoped item re-enters flight when its

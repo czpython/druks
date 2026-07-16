@@ -231,7 +231,6 @@ class Sandbox:
             fast_mode=harness_settings.fast_mode,
             effort=effort,
             sandbox=SandboxSettings.maybe_from_settings(settings),
-            login_id=login_id,
         )
 
         # Names the artifact subdir and is the AgentCall.id — supplied by the
@@ -255,6 +254,7 @@ class Sandbox:
                 extra_env=extra_env,
                 mcp_servers=mcp_servers,
                 call_id=run_id,
+                login_id=login_id,
             )
         except Exception as exc:  # noqa: BLE001 — captured on the result, not raised
             status = AgentCallStatus.FAILED
@@ -287,6 +287,7 @@ class Sandbox:
         extra_env: dict[str, str] | None = None,
         mcp_servers: tuple[McpServer, ...] = (),
         call_id: str | None = None,
+        login_id: str | None = None,
     ) -> Any:
         """Drive one prompt through ``harness`` on this VM: the harness
         builds the invocation and parses the result; this sandbox executes it.
@@ -311,6 +312,7 @@ class Sandbox:
             add_dirs=add_dirs,
             extra_env=extra_env,
             mcp_servers=mcp_servers,
+            login_id=login_id,
         )
         result = await self._exec(
             invocation,

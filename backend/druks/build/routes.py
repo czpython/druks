@@ -1,10 +1,9 @@
 import logging
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query, Response, status
+from fastapi import APIRouter, Body, HTTPException, Query, Response, status
 from sqlalchemy import func, select, update
 
-from druks.accounts.dependencies import current_account
-from druks.accounts.models import Account
+from druks.accounts.dependencies import CurrentAccountDep
 from druks.build.models import Project, ProjectRepo, WorkItem, slugify
 from druks.build.schemas import (
     AddProjectRepoRequest,
@@ -156,7 +155,7 @@ async def delete_project(project_id: int) -> None:
 async def add_project_repo(
     project_id: int,
     body: AddProjectRepoRequest,
-    account: Account = Depends(current_account),
+    account: CurrentAccountDep,
 ) -> ProjectRepoSummary:
     project = Project.get(project_id)
     if not project:
@@ -214,7 +213,7 @@ async def update_project_repo(
     response_model_by_alias=True,
 )
 async def profile_project_repo(
-    project_id: int, repo_id: int, account: Account = Depends(current_account)
+    project_id: int, repo_id: int, account: CurrentAccountDep
 ) -> ProjectRepoSummary:
     row = ProjectRepo.get(repo_id)
     if not row:

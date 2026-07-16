@@ -82,11 +82,10 @@ current_workflow: ContextVar["Workflow"] = ContextVar("current_workflow")
 # step, so it skips wrapping itself; outside, it wraps itself in its own step.
 _in_step: ContextVar[bool] = ContextVar("_in_step", default=False)
 
-# Attribution rides the durable input dict beside the body's own kwargs under
-# reserved keys (a body param can't start with an underscore), stripped before
-# body-model validation — old checkpointed inputs without them replay as-is.
-_ACCOUNT_KEY = "_account_id"
-_UNATTRIBUTED_KEY = "_unattributed_reason"
+# Attribution rides the wire input under this key — reserved so _entry's
+# (subject, input) arity never changes and an old checkpoint without the key
+# replays untouched. A body parameter may not claim it.
+_ACCOUNT_INPUT_KEY = "__account_id__"
 
 
 class _Subject(BaseModel):
@@ -455,6 +454,14 @@ class Workflow:
         cls._body_method = _resolve_body_method(cls)
         # Before _wrap_steps: run()'s wrapper signature is (*args, **kwargs).
         cls._run_input_model = _input_model_from_signature(cls)
+        if cls._run_input_model:
+            claimed = {"account_id", "assignee_email"} & set(cls._run_input_model.model_fields)
+            if claimed:
+                raise WorkflowError(
+                    f"{cls.__name__}.{cls._body_method}() declares reserved start() "
+                    f"parameter(s) {sorted(claimed)} — attribution is platform "
+                    "routing, not workflow input; name the parameter differently"
+                )
         _wrap_steps(cls)
         _register_entry(cls)
         workflows.register(cls)
@@ -468,12 +475,10 @@ class Workflow:
         # run()'s validated input bundle (the model synthesized from its signature),
         # set before run() — for templates and derived properties. None = no input.
         self.input: BaseModel | None = None
-        # The account the run was started for (session, ticket assignee) — set
-        # from the reserved input key before run(); None with the dispatcher's
-        # reason when no account resolved. Resume never rewrites these: they
-        # ride the start-time input, so the resumer is never charged.
+        # The attributed account (who requested/triggered the run), replayed off
+        # the reserved input key — credential selection reads it per agent call.
+        # None on a run started without attribution (crons, old checkpoints).
         self.account_id: str | None = None
-        self.unattributed_reason: str | None = None
         # Facts published with set_state, kept warm for sync reads (templates,
         # workspace kwargs); the durable copy is the run's DBOS events.
         self._state_facts: dict[str, Any] = {}
@@ -620,7 +625,7 @@ class Workflow:
         *,
         subject: dict[str, Any] | None,
         account_id: str | None = None,
-        unattributed_reason: str | None = None,
+        assignee_email: str | None = None,
         **input: Any,
     ) -> str:
         # Mint the id, write the projection row, enqueue the body. Returns the
@@ -633,22 +638,20 @@ class Workflow:
         # shape fails at start, not inside the run.
         # subject is required (no default) so a run can't silently lose its
         # timeline by omission — pass subject=None explicitly for a background run.
+        # account_id attributes the run to the requesting/triggering account and
+        # picks its connection for the run's agent calls; assignee_email is the
+        # requested ticket assignee, kept for the fallback trail when it
+        # resolved to no account.
         if subject is not None:
             _Subject.model_validate(subject)  # raises on a bad shape (wrong/extra keys, types)
-        if account_id and unattributed_reason:
-            raise WorkflowError("unattributed_reason describes a run WITHOUT an account_id")
         if cls._run_input_model is None:
             if input:
                 raise WorkflowError(f"{cls.__name__}.{cls._body_method}() takes no input")
             wire: dict[str, Any] = {}
         else:
             wire = cls._run_input_model.model_validate(input).model_dump(mode="json")
-        # Attribution rides reserved keys beside the body's kwargs — stripped
-        # again before body validation, so old checkpointed inputs replay as-is.
         if account_id:
-            wire[_ACCOUNT_KEY] = account_id
-        if unattributed_reason:
-            wire[_UNATTRIBUTED_KEY] = unattributed_reason
+            wire[_ACCOUNT_INPUT_KEY] = account_id
         workflow_id = str(uuid7())
         # A subject has at most one active run per workflow kind, enforced by
         # DBOS queue deduplication: the slot is claimed atomically at enqueue,
@@ -664,11 +667,15 @@ class Workflow:
         # The workflow's routing metadata, stamped as DBOS custom attributes so
         # "runs for this subject" is answered by workflow_status itself. The
         # subject id is stamped as a string — the one shape every reader compares.
+        # Attribution rides here too (never the dedup id: different accounts
+        # starting the same subject must share the one active run).
         attributes = {}
         if subject:
             attributes = {"subject_type": subject["type"], "subject_id": str(subject["id"])}
         if account_id:
             attributes["account_id"] = account_id
+        if assignee_email:
+            attributes["assignee_email"] = assignee_email
         try:
             with (
                 SetWorkflowID(workflow_id),
@@ -685,10 +692,7 @@ class Workflow:
             # The holder reached terminal between the rejection and the lookup —
             # the slot is free now, so this start goes through.
             return await cls.start(
-                subject=subject,
-                account_id=account_id,
-                unattributed_reason=unattributed_reason,
-                **input,
+                subject=subject, account_id=account_id, assignee_email=assignee_email, **input
             )
         # The body also creates its row (idempotently) — this one just makes it
         # visible before an executor picks the workflow up.
@@ -730,9 +734,10 @@ async def _run_instance(
     instance = cls()
     instance._workflow_id = DBOS.workflow_id  # type: ignore[assignment]
     instance.subject = subject
+    # The reserved attribution key comes off first — it is platform routing,
+    # not body input, and an old checkpoint without it replays as account-less.
     input = dict(input or {})
-    instance.account_id = input.pop(_ACCOUNT_KEY, None)
-    instance.unattributed_reason = input.pop(_UNATTRIBUTED_KEY, None)
+    instance.account_id = input.pop(_ACCOUNT_INPUT_KEY, None)
     # The body's input re-validates from its wire dict; a cron fires with no
     # input, so a scheduled workflow must default every parameter. The validated
     # bundle also lands on the instance for templates / derived properties.

@@ -9,10 +9,12 @@ from pydantic import BaseModel, ConfigDict
 
 from druks.database import db_session
 from druks.durable.activity import set_run_phase
+from druks.durable.dbos_state import get_run_attributes
 from druks.durable.engine import _step_engine, step_session
 from druks.durable.enums import AgentCallStatus
 from druks.durable.exceptions import WorkflowError
 from druks.durable.models import AgentCall, Artifact
+from druks.events.models import Event
 from druks.extensions.registry import agents
 from druks.harnesses.models import HarnessConnection
 from druks.harnesses.registry import get_harness_for_model
@@ -21,7 +23,6 @@ from druks.sandbox import gate as sandbox_gate
 from druks.sandbox.client import sandbox_client
 from druks.sandbox.constants import MAX_AGENT_TIMEOUT_SECONDS
 from druks.settings import load_settings
-from druks.signals import publish
 from druks.user_settings.models import SettingsOverride
 from druks.workflows import _in_step, current_workflow
 
@@ -161,24 +162,31 @@ class Agent:
         model = self.get_model_name()
         harness = get_harness_for_model(model)
         workflow = current_workflow.get()
-        # Select the login before any VM work — the run's own account when
-        # connected, else the fallback account with the reason recorded on the
-        # call. Refusing here beats provisioning a VM and 401ing mid-run.
+        # Selection is the connected-harness preflight: the attributed
+        # account's own connection, else the fallback account's with the
+        # reason recorded. Refusing here, with the fix in the message, beats
+        # provisioning a VM and 401ing mid-run.
+        attributes = get_run_attributes(workflow_id)
         login, fallback_reason = HarnessConnection.select_for_run(
             harness.name,
-            account_id=workflow.account_id,
-            unattributed_reason=workflow.unattributed_reason,
+            workflow.account_id,
+            assignee_email=attributes.get("assignee_email"),
         )
         # Plain snapshots: the commits below expire the ORM row mid-flight.
         login_id, charged_account_id = login.id, login.account_id
         if fallback_reason:
-            await publish(
-                "credential.fallback",
-                run_id=workflow_id,
+            # The visible exception beside the moving automation — the nudge
+            # that a call charged the fallback account, and why.
+            Event.emit(
+                type="credential.fallback",
                 subject=workflow.subject,
-                harness=harness.name,
-                account_id=workflow.account_id,
-                reason=fallback_reason,
+                payload={
+                    "run_id": workflow_id,
+                    "harness": harness.name,
+                    "reason": fallback_reason,
+                    "assignee_email": attributes.get("assignee_email"),
+                },
+                extension=type(workflow).extension,
             )
         # An agent call is a durability boundary — its effects don't roll back —
         # so commit here rather than hold the step's connection idle through the
