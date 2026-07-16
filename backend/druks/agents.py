@@ -14,11 +14,14 @@ from druks.durable.enums import AgentCallStatus
 from druks.durable.exceptions import WorkflowError
 from druks.durable.models import AgentCall, Artifact
 from druks.extensions.registry import agents
+from druks.harnesses.models import HarnessConnection
 from druks.harnesses.registry import get_harness_for_model
 from druks.prompts import render_prompt
+from druks.sandbox import gate as sandbox_gate
 from druks.sandbox.client import sandbox_client
 from druks.sandbox.constants import MAX_AGENT_TIMEOUT_SECONDS
 from druks.settings import load_settings
+from druks.signals import publish
 from druks.user_settings.models import SettingsOverride
 from druks.workflows import _in_step, current_workflow
 
@@ -157,48 +160,73 @@ class Agent:
             raise WorkflowError(f"agent {self.id!r} has no prompt template to render")
         model = self.get_model_name()
         harness = get_harness_for_model(model)
-        # A run needs a connected harness — refusing here, with the fix in the
-        # message, beats provisioning a VM and 401ing mid-run.
-        harness.get_credentials()
         workflow = current_workflow.get()
+        # Select the login before any VM work — the run's own account when
+        # connected, else the fallback account with the reason recorded on the
+        # call. Refusing here beats provisioning a VM and 401ing mid-run.
+        login, fallback_reason = HarnessConnection.select_for_run(
+            harness.name,
+            account_id=workflow.account_id,
+            unattributed_reason=workflow.unattributed_reason,
+        )
+        # Plain snapshots: the commits below expire the ORM row mid-flight.
+        login_id, charged_account_id = login.id, login.account_id
+        if fallback_reason:
+            await publish(
+                "credential.fallback",
+                run_id=workflow_id,
+                subject=workflow.subject,
+                harness=harness.name,
+                account_id=workflow.account_id,
+                reason=fallback_reason,
+            )
         # An agent call is a durability boundary — its effects don't roll back —
         # so commit here rather than hold the step's connection idle through the
         # minutes of provisioning and the run.
         db_session().commit()
-        host_id = await workflow._ensure_host()
         settings = load_settings()
         artifact_dir = settings.artifacts_dir / f"run-{workflow_id}"
 
         engine = _step_engine()
         call_id = harness.mint_run_id(None)
-        await set_run_phase("provisioning_vm")
 
-        # Record the call RUNNING once it has a host to run on (its id names the
-        # on-disk transcript dir) so the live step shows while the agent works,
-        # then finish it — or fail it if the run raised after starting. A
-        # provisioning failure happens before this and records no call.
-        async with _runner(workflow, host_id, workflow_id, self.id) as runner:
-            # Templates read the live workflow + the workspace the agent runs in, alongside
-            # whatever the workflow's get_prompt_context composes.
-            prompt_context = await workflow.get_prompt_context(**context)
-            prompt_context.setdefault("workflow", workflow)
-            prompt_context.setdefault("workspace", runner)
-            prompt = await render_prompt(self.prompt, **prompt_context)
-            await set_run_phase("agent_running")
-            AgentCall.start(
-                engine,
-                call_id=call_id,
-                run_id=workflow_id,
-                model=model,
-                agent=self.id,
-                host_id=runner.host_id,
-            )
-            try:
-                result = await self._execute(runner, model, prompt, artifact_dir, call_id)
-            except BaseException as error:
-                AgentCall.fail(engine, call_id=call_id, error=str(error))
-                raise
-            AgentCall.finish(engine, call_id=call_id, result=result)
+        # The call is an active user of its login from provisioning through
+        # execution: that login's rotation waits for it; other logins' don't.
+        async with sandbox_gate.use(login_id, call_id):
+            host_id = await workflow._ensure_host()
+            await set_run_phase("provisioning_vm")
+
+            # Record the call RUNNING once it has a host to run on (its id names
+            # the on-disk transcript dir) so the live step shows while the agent
+            # works, then finish it — or fail it if the run raised after
+            # starting. A provisioning failure happens before this and records
+            # no call.
+            async with _runner(workflow, host_id, workflow_id, self.id) as runner:
+                # Templates read the live workflow + the workspace the agent runs in,
+                # alongside whatever the workflow's get_prompt_context composes.
+                prompt_context = await workflow.get_prompt_context(**context)
+                prompt_context.setdefault("workflow", workflow)
+                prompt_context.setdefault("workspace", runner)
+                prompt = await render_prompt(self.prompt, **prompt_context)
+                await set_run_phase("agent_running")
+                AgentCall.start(
+                    engine,
+                    call_id=call_id,
+                    run_id=workflow_id,
+                    model=model,
+                    agent=self.id,
+                    host_id=runner.host_id,
+                    account_id=charged_account_id,
+                    fallback_reason=fallback_reason,
+                )
+                try:
+                    result = await self._execute(
+                        runner, model, prompt, artifact_dir, call_id, login_id
+                    )
+                except BaseException as error:
+                    AgentCall.fail(engine, call_id=call_id, error=str(error))
+                    raise
+                AgentCall.finish(engine, call_id=call_id, result=result)
 
         if result.status is AgentCallStatus.FAILED:
             raise WorkflowError(result.last_error or f"agent {self.id!r} failed")
@@ -215,6 +243,7 @@ class Agent:
         prompt: str,
         artifact_dir: Path,
         call_id: str,
+        login_id: str,
     ) -> "AgentResult":
         schema = self.contract.model_json_schema()
         return await runner.run_agent(
@@ -227,4 +256,5 @@ class Agent:
             artifact_dir=artifact_dir,
             call_id=call_id,
             include_plugins=self.include_plugins,
+            login_id=login_id,
         )

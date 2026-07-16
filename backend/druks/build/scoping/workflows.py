@@ -3,6 +3,7 @@ import logging
 from druks.build.extension import Build
 from druks.build.models import Project, ProjectRepo, WorkItem
 from druks.build.scoping.contracts import ScopeBriefOutput
+from druks.build.workflows import assignee_attribution
 from druks.ticketing.datastructures import Ticket
 from druks.workflows import Gate, Run, RunState, Workflow
 
@@ -48,6 +49,7 @@ class Scope(Workflow):
             subject=WorkItem.subject_for(item.id),
             remote_key=ticket.key,
             source=ticket.provider,
+            **assignee_attribution(ticket.assignee_email),
         )
 
     @classmethod

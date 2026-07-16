@@ -1911,6 +1911,8 @@ input.set-select { background-image: none; padding-right: 12px; }
 .wic-op-main { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .wic-op-row1 { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .wic-op-kind { font-size: 13px; color: var(--text); white-space: nowrap; }
+.wic-op-owner { font-family: var(--font-mono); font-size: 11px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wic-call-fallback { font-family: var(--font-mono); font-size: 10px; color: var(--decision-request-revision); border: 1px solid var(--decision-request-revision); border-radius: 3px; padding: 0 4px; white-space: nowrap; }
 .wic-op-sub { font-family: var(--font-mono); font-size: 11px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .wic-sub-running, .wic-sub-cancelling { color: var(--wic-running); }
 .wic-sub-pending_input { color: var(--wic-human); }

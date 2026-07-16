@@ -88,6 +88,17 @@ def state_expression(
     return sa.func.coalesce(mapped, missing)
 
 
+def account_id_expression(run_id: sa.ColumnElement) -> sa.ColumnElement:
+    # The account the run was started for — a DBOS attribute like the subject
+    # keys, never a durable_runs column. NULL for legacy and actor-less runs.
+    return (
+        sa.select(workflow_status.c.attributes["account_id"].as_string())
+        .where(workflow_status.c.workflow_uuid == run_id)
+        .correlate_except(workflow_status)
+        .scalar_subquery()
+    )
+
+
 def updated_at_expression(run_id: sa.ColumnElement) -> sa.ColumnElement:
     # DBOS stamps updated_at in epoch milliseconds; convert so it compares
     # against our timestamptz columns.

@@ -30,6 +30,13 @@ class Account(Base, Uuid7Pk):
         return db_session().scalar(select(cls).where(cls.email == email))
 
     @classmethod
+    def emails_by_id(cls, ids: set[str]) -> dict[str, str]:
+        if not ids:
+            return {}
+        rows = db_session().execute(select(cls.id, cls.email).where(cls.id.in_(ids)))
+        return dict(rows.tuples())
+
+    @classmethod
     def get_or_create(cls, email: str) -> "Account":
         account = cls.get_for_email(email)
         if account:

@@ -309,16 +309,17 @@ async def test_dispatch_starts_a_run_keyed_to_the_note(installed, monkeypatch):
 
     started: dict[str, object] = {}
 
-    async def _capture(*, subject, **input):
-        started.update(subject=subject, input=input)
+    async def _capture(*, subject, account_id=None, **input):
+        started.update(subject=subject, account_id=account_id, input=input)
         return "run-1"
 
     monkeypatch.setattr(Summarize, "start", _capture)
 
-    run_id = await Summarize.dispatch(note_id=42)
+    run_id = await Summarize.dispatch(note_id=42, account_id="acct-1")
 
     assert run_id == "run-1"
     assert started["subject"] == {"type": "note", "id": 42}
+    assert started["account_id"] == "acct-1"
     assert started["input"] == {"note_id": 42}
 
 

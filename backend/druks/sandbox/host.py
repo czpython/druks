@@ -201,6 +201,7 @@ class Sandbox:
         add_dirs: tuple[str, ...] = (),
         extra_env: dict[str, Any] | None = None,
         mcp_servers: tuple[McpServer, ...] = (),
+        login_id: str | None = None,
     ) -> AgentResult:
         """Run the harness and return a pure ``AgentResult`` — no database write.
         A failure is captured on the result (``status=FAILED``), not raised.
@@ -230,6 +231,7 @@ class Sandbox:
             fast_mode=harness_settings.fast_mode,
             effort=effort,
             sandbox=SandboxSettings.maybe_from_settings(settings),
+            login_id=login_id,
         )
 
         # Names the artifact subdir and is the AgentCall.id — supplied by the

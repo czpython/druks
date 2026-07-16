@@ -420,14 +420,15 @@ async def test_codex_fetch_usage_success(monkeypatch, db_session):
 
 
 def test_render_credentials_file_serializes_stored_payload(db_session):
-    _seed_claude(access="tok", refresh="R0")
-    rendered = ClaudeHarness.render_credentials_file()
-    assert json.loads(rendered)["claudeAiOauth"]["accessToken"] == "tok"
+    login = _seed_claude(access="tok", refresh="R0")
+    harness = ClaudeHarness(model=None, fast_mode=False, effort=None, login_id=login.id)
+    assert json.loads(harness.render_credentials_file())["claudeAiOauth"]["accessToken"] == "tok"
 
 
 def test_render_credentials_file_raises_when_not_connected(db_session):
+    harness = ClaudeHarness(model=None, fast_mode=False, effort=None)
     with pytest.raises(HarnessNotConnectedError, match="connect it in Settings"):
-        ClaudeHarness.render_credentials_file()
+        harness.render_credentials_file()
 
 
 def test_claude_builder_puts_db_credentials_on_the_bundle(db_session):
@@ -490,3 +491,40 @@ def test_claude_builder_raises_when_not_connected(db_session):
     )
     with pytest.raises(HarnessNotConnectedError, match="claude is not connected"):
         _claude_credentials(sandbox, github_token=None)
+
+
+def test_select_for_run_uses_the_runs_own_connection(db_session):
+    _seed_claude(provider_email="a@example.com")  # a@ adopts the fallback
+    other = _seed_claude(provider_email="b@example.com")
+    row, reason = HarnessConnection.select_for_run(
+        "claude", account_id=other.account_id, unattributed_reason=None
+    )
+    # The run's own connection — never the fallback account's — and no reason.
+    assert (row.id, reason) == (other.id, None)
+
+
+def test_select_for_run_falls_back_when_the_account_has_no_connection(db_session):
+    fallback = _seed_claude(provider_email="a@example.com")
+    codex_only = _seed_codex(provider_email="b@example.com")
+    row, reason = HarnessConnection.select_for_run(
+        "claude", account_id=codex_only.account_id, unattributed_reason=None
+    )
+    assert (row.id, reason) == (fallback.id, "account_not_connected")
+
+
+def test_select_for_run_records_the_dispatch_reason(db_session):
+    fallback = _seed_claude(provider_email="a@example.com")
+    row, reason = HarnessConnection.select_for_run(
+        "claude", account_id=None, unattributed_reason="missing_assignee"
+    )
+    assert (row.id, reason) == (fallback.id, "missing_assignee")
+    _, reason = HarnessConnection.select_for_run(
+        "claude", account_id=None, unattributed_reason=None
+    )
+    assert reason == "unattributed"
+
+
+def test_select_for_run_raises_when_the_fallback_has_no_connection(db_session):
+    _seed_codex(provider_email="a@example.com")  # fallback account has codex only
+    with pytest.raises(HarnessNotConnectedError, match="connect it in Settings"):
+        HarnessConnection.select_for_run("claude", account_id=None, unattributed_reason=None)

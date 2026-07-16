@@ -17,9 +17,11 @@ class Summarize(Workflow):
         note.save_summary(result.summary)
 
     @classmethod
-    async def dispatch(cls, *, note_id: int) -> str:
-        # Launch policy for a note: one run per note, keyed by its subject.
+    async def dispatch(cls, *, note_id: int, account_id: str | None = None) -> str:
+        # Launch policy for a note: one run per note, keyed by its subject,
+        # attributed to the account that asked for it.
         return await cls.start(
             subject={"type": FieldNotes.subject_type, "id": note_id},
+            account_id=account_id,
             note_id=note_id,
         )

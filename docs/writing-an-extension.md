@@ -131,9 +131,17 @@ run_id = await Sweep.start(
 ```
 
 Pass `subject=None` deliberately for background work. A subject has at most one
-active run of a workflow kind; a duplicate start returns the active run id.
-Wrap `start()` in a domain `dispatch()` method when the extension needs lookup,
-snapshot, or routing policy before launch.
+active run of a workflow kind; a duplicate start returns the active run id —
+deduplication never considers the account. Wrap `start()` in a domain
+`dispatch()` method when the extension needs lookup, snapshot, or routing
+policy before launch.
+
+`start()` also attributes the run: pass `account_id` when a signed-in session
+or a resolved ticket assignee triggered it, or `unattributed_reason`
+(`missing_assignee` / `unmatched_assignee`) when no account resolved — agent
+calls then execute with the run's own account's connection, falling back to
+the install's fallback account with the reason recorded on the call. Resuming
+a parked run never re-attributes it.
 
 ### Schedules and settings
 

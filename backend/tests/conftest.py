@@ -5,7 +5,6 @@ from pathlib import Path
 from unittest import mock
 
 import druks.redis
-import druks.sandbox.gate as _gate
 import pytest
 from druks.database import (
     _session_factory,
@@ -30,10 +29,6 @@ _session_factory.configure(join_transaction_mode="create_savepoint")
 # rotation test's monkeypatch) still wins.
 os.environ.setdefault("DRUKS_SECRETS_KEY", base64.b64encode(secrets.token_bytes(32)).decode())
 
-# No Redis in the suite — the sandbox gate no-ops (real VMs/rotation are
-# integration concerns), so its waits don't reach for a client that isn't there.
-_gate._redis = lambda: None
-
 # A Workflow class resolves its declaring extension at definition time, from
 # packages the loader registers before importing. Tests import workflow modules
 # directly and some declare their own workflows, so both register here — before
@@ -51,6 +46,7 @@ class FakeRedis:
         self._data: dict[str, bytes] = {}
         # TTLs are recorded, never enforced — enough to observe a refresh.
         self._ttls: dict[str, int] = {}
+        self._zsets: dict[str, dict[str, float]] = {}
 
     async def set(self, key: str, value: str, *, nx: bool = False, ex: int | None = None):
         if nx and key in self._data:
@@ -75,6 +71,20 @@ class FakeRedis:
     async def getdel(self, key: str) -> bytes | None:
         self._ttls.pop(key, None)
         return self._data.pop(key, None)
+
+    async def zadd(self, key: str, mapping: dict[str, float]) -> None:
+        self._zsets.setdefault(key, {}).update(mapping)
+
+    async def zrem(self, key: str, member: str) -> None:
+        self._zsets.get(key, {}).pop(member, None)
+
+    async def zcard(self, key: str) -> int:
+        return len(self._zsets.get(key, {}))
+
+    async def zremrangebyscore(self, key: str, low: str, high: float) -> None:
+        scores = self._zsets.get(key, {})
+        for member in [m for m, score in scores.items() if score <= float(high)]:
+            scores.pop(member)
 
     async def delete(self, key: str) -> None:
         self._data.pop(key, None)
@@ -389,7 +399,9 @@ def connect_harness(harness_cls, payload: dict, *, provider_email: str = "op@exa
     )
 
 
-def seed_dbos_status(session, workflow_id: str, state: str, *, subject=None) -> None:
+def seed_dbos_status(
+    session, workflow_id: str, state: str, *, subject=None, account_id=None
+) -> None:
     """Write the ``dbos.workflow_status`` row a Run's derived ``state`` reads,
     carrying the subject attributes ``start()`` stamps — the paired half of
     every persisted run seed (there is no state column)."""
@@ -405,9 +417,12 @@ def seed_dbos_status(session, workflow_id: str, state: str, *, subject=None) -> 
         "cancelled": "CANCELLED",
     }[state]
     now_ms = int(Base.utc_now().timestamp() * 1000)
-    attributes = None
+    attributes = {}
     if subject:
         attributes = {"subject_type": subject["type"], "subject_id": str(subject["id"])}
+    if account_id:
+        attributes["account_id"] = account_id
+    attributes = attributes or None
     # created_at / priority carry server defaults in the dbos schema; the
     # derivation and subject keying read only these.
     session.execute(

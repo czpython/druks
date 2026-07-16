@@ -237,6 +237,48 @@ async def _wait_for(engine, workflow_id, predicate, timeout=15.0):
     raise AssertionError(f"timed out; last={_state(engine, workflow_id)}")
 
 
+def _account_id(engine, email: str) -> str:
+    from druks.accounts.models import Account
+
+    session = get_session(engine)
+    try:
+        row = session.execute(select(Account).where(Account.email == email)).scalar_one_or_none()
+        if not row:
+            row = Account(email=email)
+            session.add(row)
+            session.commit()
+        return row.id
+    finally:
+        session.close()
+
+
+async def test_attribution_rides_start(rt):
+    # The reserved keys are stripped before body validation (the body sees only
+    # its own kwargs) and stamped as DBOS attributes the Run projects.
+    SINK.clear()
+    account_id = _account_id(rt.engine, "op@example.com")
+    wfid = await rt.RecordFeedback.start(subject=None, account_id=account_id, repo="owner/attr")
+    await _wait_for(rt.engine, wfid, lambda r: r.state == RunState.FINISHED)
+    assert "owner/attr" in SINK
+    assert _state(rt.engine, wfid).account_id == account_id
+
+
+async def test_dedup_ignores_the_account_and_resume_keeps_the_owner(rt):
+    owner = _account_id(rt.engine, "op@example.com")
+    peer = _account_id(rt.engine, "peer@example.com")
+    subject = {"type": "attr_subject", "id": "dedup-1"}
+    first = await rt.SampleFlow.start(subject=subject, account_id=owner, repo="owner/app")
+    # A different account starting the same subject receives the same run.
+    second = await rt.SampleFlow.start(subject=subject, account_id=peer, repo="owner/app")
+    assert second == first
+
+    parked = await _wait_for(rt.engine, first, lambda r: r.state == RunState.PENDING_INPUT)
+    await parked.resume(action="merge")
+    done = await _wait_for(rt.engine, first, lambda r: r.state == RunState.FINISHED)
+    # The resumer never replaces the owner the run was started for.
+    assert done.account_id == owner
+
+
 async def test_step_gate_resume_finish(rt):
     wfid = await rt.SampleFlow.start(subject=None, repo="owner/app")
 
@@ -408,6 +450,10 @@ async def test_run_agent_step(rt, monkeypatch):
         session.close()
     # The call is recorded under the orchestrator-minted id threaded to run_agent.
     assert recorded[0].id == seen[0]["call_id"]
+    # No account on the start: the fallback account (the module's op@ seed) is
+    # charged and the reason recorded.
+    assert recorded[0].account_id == _account_id(rt.engine, "op@example.com")
+    assert recorded[0].fallback_reason == "unattributed"
     assert pinned == [0]  # connection released while the agent runs
 
 

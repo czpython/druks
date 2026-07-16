@@ -389,6 +389,7 @@ function RunRow({
         <div className="wic-op-main">
           <div className="wic-op-row1">
             <span className="wic-op-kind">{run.label}</span>
+            {run.account && <span className="wic-op-owner">{run.account}</span>}
           </div>
           <span className={`wic-op-sub wic-sub-${run.state}`}>
             <span className="wic-op-sub-dot" />
@@ -430,6 +431,14 @@ function CallRow({
         {CALL_GLYPH[call.status] ?? '·'}
       </span>
       <span className="wic-call-label">{call.label}</span>
+      {call.fallbackReason && (
+        <span
+          className="wic-call-fallback"
+          title={`Charged to the fallback account${call.account ? ` (${call.account})` : ''}: ${call.fallbackReason.replaceAll('_', ' ')}.`}
+        >
+          fallback
+        </span>
+      )}
       <span className="wic-call-ledger">
         <span className="wic-op-dur">{elapsed > 0 ? dur(elapsed) : '–'}</span>
         <span className="wic-op-cost">

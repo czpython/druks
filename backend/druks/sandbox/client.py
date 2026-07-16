@@ -15,7 +15,6 @@ from uuid_utils import uuid7
 
 from druks.settings import load_settings
 
-from . import gate
 from .constants import SANDBOX_HOST_LEASE_SECONDS
 from .exceptions import HostGone, SandboxUnreachable
 from .host import Sandbox
@@ -75,9 +74,6 @@ class Client:
         try:
             settings = load_settings()
             image = image_override or settings.sandbox_image
-            # Wait out any in-progress rotation so this VM is born with the
-            # fresh credential, never a copy about to be invalidated.
-            await gate.wait_until_open()
             # Fixed lease: drukbox reaps the host when this lapses, so a run whose
             # worker dies frees its VM without a druks-side reconciler.
             expires_at = datetime.now(UTC) + timedelta(seconds=SANDBOX_HOST_LEASE_SECONDS)

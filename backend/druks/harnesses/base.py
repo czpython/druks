@@ -16,6 +16,7 @@ from druks.database import db_session
 from druks.mcp import models as mcp_models
 from druks.mcp.helpers import get_bearer_token_env_var
 from druks.redis import get_client
+from druks.sandbox import gate as sandbox_gate
 from druks.skills.models import Skill
 from druks.usage.models import UsageScrape
 
@@ -94,6 +95,7 @@ class Harness(ABC):
         fast_mode: bool,
         effort: str | None,
         sandbox: SandboxSettings | None = None,
+        login_id: str | None = None,
     ) -> None:
         self.model = model
         self.fast_mode = fast_mode
@@ -101,6 +103,9 @@ class Harness(ABC):
         # Optional only so argv-shape unit tests can build the harness without a
         # sandbox-configured Settings; every real run needs it and raises when None.
         self.sandbox = sandbox
+        # The selected connection this invocation runs with — immutable id;
+        # the payload is read fresh at push time.
+        self.login_id = login_id
 
     @abstractmethod
     def build_invocation(self, **kwargs: object) -> AgentInvocation:
@@ -199,13 +204,17 @@ class Harness(ABC):
             )
         return data
 
-    @classmethod
-    def render_credentials_file(cls) -> str:
-        """The credential-file JSON the sandbox writes for this CLI — the stored
-        payload serialized. The push writes it as a secret; no host credential
-        file is read. Raises :class:`HarnessNotConnectedError` when the harness
-        isn't connected."""
-        return json.dumps(cls.get_credentials())
+    def render_credentials_file(self) -> str:
+        """The credential-file JSON the sandbox writes for this CLI — the
+        selected login's payload, read fresh at push time (rotation may have
+        advanced it since selection). The push writes it as a secret; no host
+        credential file is read."""
+        row = HarnessConnection.get(self.login_id) if self.login_id else None
+        if not row:
+            raise HarnessNotConnectedError(
+                f"{self.name} is not connected — connect it in Settings → Harnesses."
+            )
+        return json.dumps(dict(row.payload))
 
     @classmethod
     async def login_start(cls, *, account_id: str | None = None) -> tuple[str, str]:
@@ -335,8 +344,12 @@ class Harness(ABC):
                 return RotationResult(cls.name, "fresh", expires_at=expires_at, login_id=row.id)
 
             try:
-                grant = await _post_grant(cls._TOKEN_URL, cls._grant_body(refresh_token))
-                new_expiry = cls._apply_refresh(data, grant, moment)
+                # A refresh invalidates the old token server-side and would 401
+                # a VM mid-call holding a pushed copy — shut this login's gate,
+                # wait out its active calls, then rotate.
+                async with sandbox_gate.hold(row.id):
+                    grant = await _post_grant(cls._TOKEN_URL, cls._grant_body(refresh_token))
+                    new_expiry = cls._apply_refresh(data, grant, moment)
             except GrantError as exc:
                 if exc.tag == "invalid_grant":
                     # The provider revoked this row's refresh lineage;

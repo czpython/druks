@@ -6,6 +6,7 @@ from typing import Literal
 
 from sqlalchemy import Engine
 
+from druks.accounts.models import Account
 from druks.database import session_scope
 from druks.durable.live import keepalive_comment, serialize_model_event
 
@@ -72,9 +73,15 @@ def get_subject_response(
 
 
 def _timeline(runs: list[Run], calls_by_run: dict[str, list[AgentCall]]) -> list[RunResponse]:
-    # by_run keys every run id, so the lookup is total.
+    # by_run keys every run id, so the lookup is total. The responses display
+    # account emails; the rows store ids — one lookup covers the timeline.
     ordered = sorted(runs, key=lambda run: (run.created_at, run.id))
-    return [RunResponse.from_run(run, calls_by_run[run.id]) for run in ordered]
+    attributed = {run.account_id for run in runs if run.account_id}
+    attributed |= {
+        call.account_id for calls in calls_by_run.values() for call in calls if call.account_id
+    }
+    emails = Account.emails_by_id(attributed)
+    return [RunResponse.from_run(run, calls_by_run[run.id], emails) for run in ordered]
 
 
 def _running_calls(active_run: Run | None) -> list[AgentCall]:

@@ -117,6 +117,7 @@ class ClaudeHarness(Harness):
             stdin=prompt.encode("utf-8"),
             credentials=_claude_credentials(
                 self.sandbox,
+                credentials_file=self.render_credentials_file(),
                 github_token=github_token,
                 include_plugins=include_plugins,
             ),
@@ -330,6 +331,7 @@ def _parse_iso(value: object) -> datetime | None:
 def _claude_credentials(
     sandbox: SandboxSettings,
     *,
+    credentials_file: str,
     github_token: str | None,
     include_plugins: bool = True,
 ) -> Credentials:
@@ -375,7 +377,7 @@ def _claude_credentials(
     if skills_src:
         dirs += ((skills_src, ".claude/skills"),)
     return Credentials(
-        claude_credentials=ClaudeHarness.render_credentials_file(),
+        claude_credentials=credentials_file,
         github_token=github_token,
         extra_config_files=files,
         extra_config_dirs=dirs,

@@ -1,10 +1,8 @@
-import contextlib
 import logging
 
 from druks.harnesses.datastructures import RotationResult
 from druks.harnesses.models import HarnessConnection
 from druks.harnesses.registry import get_harnesses
-from druks.sandbox import gate
 from druks.workflows import Workflow
 
 logger = logging.getLogger(__name__)
@@ -26,22 +24,17 @@ async def _refresh() -> dict[str, object]:
 
     # rotate_token is the source of truth for what's due: it no-ops ("fresh", no
     # server call, no invalidation) any row outside its margin, so rotating all
-    # only refreshes the one(s) actually expiring. A refresh invalidates the
-    # old token server-side and would 401 a VM mid-run holding a pushed copy,
-    # so close the gate around it — but only when a rotation is
-    # coming, since the common no-op tick shouldn't stall provisioning.
-    coming = any(by_name[login.harness].needs_refresh(login) for login in logins)
+    # only refreshes the one(s) actually expiring — and each real refresh holds
+    # its own login's gate, so other logins keep provisioning throughout.
     # Snapshot plain values before rotating: each refreshed row commits as it
     # lands, which expires every ORM object in the session mid-loop.
     rows = [(login.harness, login.id) for login in logins]
-    gate_ctx = gate.hold() if coming else contextlib.nullcontext()
 
     results: list[RotationResult] = []
-    async with gate_ctx:
-        for harness_name, login_id in rows:
-            result = await by_name[harness_name].rotate_token(login_id)
-            _log_result(result)
-            results.append(result)
+    for harness_name, login_id in rows:
+        result = await by_name[harness_name].rotate_token(login_id)
+        _log_result(result)
+        results.append(result)
 
     return {
         "results": [

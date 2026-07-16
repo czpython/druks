@@ -11,7 +11,12 @@ from sqlalchemy.orm import Mapped, column_property, mapped_column, relationship
 
 from druks.core.models import Uuid7Pk
 from druks.database import db_session, get_session
-from druks.durable.dbos_state import state_expression, subject_filter, updated_at_expression
+from druks.durable.dbos_state import (
+    account_id_expression,
+    state_expression,
+    subject_filter,
+    updated_at_expression,
+)
 from druks.durable.enums import ACTIVE_STATES
 from druks.harnesses.artifacts import normalize_token_usage
 from druks.models import Base
@@ -50,6 +55,9 @@ class Run(Base):
     # fresh; an already-loaded instance keeps what it read until expired.
     # Read-only; an operator ends a run through cancel().
     state: Mapped[str] = column_property(state_expression(id, input_gate, created_at))
+    # The account the run was started for (session, ticket assignee) — derived
+    # from the attribute stamped at start(); NULL reads legacy/unattributed.
+    account_id: Mapped[str | None] = column_property(account_id_expression(id))
     # When the run last changed — the newest of creation, the parked ask, and
     # DBOS's status write.
     updated_at: Mapped[datetime] = column_property(
@@ -205,7 +213,10 @@ class RunArtifactLayout:
 
 class AgentCall(Base, Uuid7Pk):
     __tablename__ = "agent_calls"
-    __table_args__ = (Index("agent_calls_run_idx", "run_id"),)
+    __table_args__ = (
+        Index("agent_calls_run_idx", "run_id"),
+        Index("agent_calls_account_finished_idx", "account_id", "finished_at"),
+    )
 
     # Which model ran this row, snapshotted at dispatch; cost analysis and the
     # transcript layout both read it. Nullable — a call may be recorded before
@@ -217,6 +228,15 @@ class AgentCall(Base, Uuid7Pk):
     # Which agent (registry id: "scope", "implement", …) made this call — the
     # timeline's grouping label. Nullable — not every call is agent-attributed.
     agent: Mapped[str | None] = mapped_column(String, default=None)
+    # The account whose connection executed this call — the subscription
+    # actually charged. NULL on legacy calls; never guess historical attribution.
+    account_id: Mapped[str | None] = mapped_column(
+        ForeignKey("accounts.id", ondelete="RESTRICT"), default=None
+    )
+    # Why the fallback account was charged instead of the run's own:
+    # missing_assignee / unmatched_assignee / account_not_connected /
+    # unattributed. NULL when the run's own account executed.
+    fallback_reason: Mapped[str | None] = mapped_column(String, default=None)
     created_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
     started_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
     status: Mapped[str] = mapped_column(default=AgentCallStatus.RUNNING.value)
@@ -275,6 +295,8 @@ class AgentCall(Base, Uuid7Pk):
         model: str | None,
         agent: str | None,
         host_id: str,
+        account_id: str | None,
+        fallback_reason: str | None,
     ) -> None:
         # Recorded RUNNING once the agent starts on its host (id = its on-disk
         # transcript dir) in its own committed transaction, so the live step
@@ -297,6 +319,8 @@ class AgentCall(Base, Uuid7Pk):
                     agent=agent,
                     model=model,
                     sandbox_host_id=host_id,
+                    account_id=account_id,
+                    fallback_reason=fallback_reason,
                 )
             )
             session.commit()

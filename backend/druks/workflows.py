@@ -82,6 +82,12 @@ current_workflow: ContextVar["Workflow"] = ContextVar("current_workflow")
 # step, so it skips wrapping itself; outside, it wraps itself in its own step.
 _in_step: ContextVar[bool] = ContextVar("_in_step", default=False)
 
+# Attribution rides the durable input dict beside the body's own kwargs under
+# reserved keys (a body param can't start with an underscore), stripped before
+# body-model validation — old checkpointed inputs without them replay as-is.
+_ACCOUNT_KEY = "_account_id"
+_UNATTRIBUTED_KEY = "_unattributed_reason"
+
 
 class _Subject(BaseModel):
     # What a run is about — the opaque {type, id} the platform keys events to.
@@ -462,6 +468,12 @@ class Workflow:
         # run()'s validated input bundle (the model synthesized from its signature),
         # set before run() — for templates and derived properties. None = no input.
         self.input: BaseModel | None = None
+        # The account the run was started for (session, ticket assignee) — set
+        # from the reserved input key before run(); None with the dispatcher's
+        # reason when no account resolved. Resume never rewrites these: they
+        # ride the start-time input, so the resumer is never charged.
+        self.account_id: str | None = None
+        self.unattributed_reason: str | None = None
         # Facts published with set_state, kept warm for sync reads (templates,
         # workspace kwargs); the durable copy is the run's DBOS events.
         self._state_facts: dict[str, Any] = {}
@@ -603,7 +615,14 @@ class Workflow:
         SettingsOverride.set_workflow_setting(cls.kind, field, value)
 
     @classmethod
-    async def start(cls, *, subject: dict[str, Any] | None, **input: Any) -> str:
+    async def start(
+        cls,
+        *,
+        subject: dict[str, Any] | None,
+        account_id: str | None = None,
+        unattributed_reason: str | None = None,
+        **input: Any,
+    ) -> str:
         # Mint the id, write the projection row, enqueue the body. Returns the
         # workflow id; an extension that wants one-active-run-per-subject enforces
         # that on its own side before calling this. Enqueuing (not start_workflow)
@@ -616,12 +635,20 @@ class Workflow:
         # timeline by omission — pass subject=None explicitly for a background run.
         if subject is not None:
             _Subject.model_validate(subject)  # raises on a bad shape (wrong/extra keys, types)
+        if account_id and unattributed_reason:
+            raise WorkflowError("unattributed_reason describes a run WITHOUT an account_id")
         if cls._run_input_model is None:
             if input:
                 raise WorkflowError(f"{cls.__name__}.{cls._body_method}() takes no input")
             wire: dict[str, Any] = {}
         else:
             wire = cls._run_input_model.model_validate(input).model_dump(mode="json")
+        # Attribution rides reserved keys beside the body's kwargs — stripped
+        # again before body validation, so old checkpointed inputs replay as-is.
+        if account_id:
+            wire[_ACCOUNT_KEY] = account_id
+        if unattributed_reason:
+            wire[_UNATTRIBUTED_KEY] = unattributed_reason
         workflow_id = str(uuid7())
         # A subject has at most one active run per workflow kind, enforced by
         # DBOS queue deduplication: the slot is claimed atomically at enqueue,
@@ -637,13 +664,15 @@ class Workflow:
         # The workflow's routing metadata, stamped as DBOS custom attributes so
         # "runs for this subject" is answered by workflow_status itself. The
         # subject id is stamped as a string — the one shape every reader compares.
-        attributes = None
+        attributes = {}
         if subject:
             attributes = {"subject_type": subject["type"], "subject_id": str(subject["id"])}
+        if account_id:
+            attributes["account_id"] = account_id
         try:
             with (
                 SetWorkflowID(workflow_id),
-                SetWorkflowAttributes(attributes),
+                SetWorkflowAttributes(attributes or None),
                 enqueue_options,
             ):
                 await run_queue.enqueue_async(cls._entry, subject, wire)
@@ -655,7 +684,12 @@ class Workflow:
                 return holder
             # The holder reached terminal between the rejection and the lookup —
             # the slot is free now, so this start goes through.
-            return await cls.start(subject=subject, **input)
+            return await cls.start(
+                subject=subject,
+                account_id=account_id,
+                unattributed_reason=unattributed_reason,
+                **input,
+            )
         # The body also creates its row (idempotently) — this one just makes it
         # visible before an executor picks the workflow up.
         Run.create_row(_step_engine(), workflow_id=workflow_id, kind=cls.kind)
@@ -696,12 +730,15 @@ async def _run_instance(
     instance = cls()
     instance._workflow_id = DBOS.workflow_id  # type: ignore[assignment]
     instance.subject = subject
+    input = dict(input or {})
+    instance.account_id = input.pop(_ACCOUNT_KEY, None)
+    instance.unattributed_reason = input.pop(_UNATTRIBUTED_KEY, None)
     # The body's input re-validates from its wire dict; a cron fires with no
     # input, so a scheduled workflow must default every parameter. The validated
     # bundle also lands on the instance for templates / derived properties.
     run_kwargs: dict[str, Any] = {}
     if cls._run_input_model:
-        validated = cls._run_input_model.model_validate(input or {})
+        validated = cls._run_input_model.model_validate(input)
         instance.input = validated
         run_kwargs = {name: getattr(validated, name) for name in type(validated).model_fields}
     token = current_workflow.set(instance)

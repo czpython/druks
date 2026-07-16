@@ -8,6 +8,7 @@ from sqlalchemy.orm.attributes import flag_modified
 from druks.accounts.models import Account
 from druks.core.models import Uuid7Pk
 from druks.database import db_session
+from druks.harnesses.exceptions import HarnessNotConnectedError
 from druks.models import Base
 from druks.secrets.fields import EncryptedJsonField
 from druks.user_settings.models import UserSettings
@@ -34,6 +35,27 @@ class HarnessConnection(Base, Uuid7Pk):
     @classmethod
     def get(cls, login_id: str) -> "HarnessConnection | None":
         return db_session().get(cls, login_id)
+
+    @classmethod
+    def select_for_run(
+        cls, harness: str, *, account_id: str | None, unattributed_reason: str | None
+    ) -> tuple["HarnessConnection", str | None]:
+        """The connection an agent call executes with: the run's own account
+        when connected, else the fallback account — with the reason recorded
+        on the call. Raises when the fallback account has no login either."""
+        if account_id:
+            row = cls.get_for_account(harness, account_id)
+            if row:
+                return row, None
+            reason = "account_not_connected"
+        else:
+            reason = unattributed_reason or "unattributed"
+        row = cls.get_for_account(harness, fallback=True)
+        if not row:
+            raise HarnessNotConnectedError(
+                f"{harness} is not connected — connect it in Settings → Harnesses."
+            )
+        return row, reason
 
     @classmethod
     def get_for_account(
