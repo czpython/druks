@@ -15,6 +15,11 @@ python3 -c 'import base64, os; print("DRUKS_SECRETS_KEY=" + base64.b64encode(os.
 uv run druks init-db
 ```
 
+Upgrading a dev database that already holds connected harnesses across the
+accounts migration needs `DRUKS_DASHBOARD_EMAIL` exported for that one
+`druks init-db` run — set it to the provider email you will sign in with once
+account login lands. Fresh databases don't need it.
+
 The dev Compose project creates two databases:
 
 - `druks_dev` for the host-run application

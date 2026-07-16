@@ -12,7 +12,7 @@ from urllib.parse import urlparse
 import httpx
 from drukbox_sdk import SandboxAPI
 from githubkit import AppAuthStrategy, GitHub
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from .agents import Agent
@@ -20,7 +20,7 @@ from .core.apis.github import get_github_client
 from .database import create_engine_from_url
 from .extensions.loader import iter_extensions
 from .extensions.registry import _ROLES, agents, autodiscover, webhooks, workflows
-from .harnesses.models import HarnessLogin
+from .harnesses.models import HarnessConnection
 from .harnesses.registry import get_harnesses
 from .sandbox.client import sandbox_client
 from .settings import Settings, load_settings
@@ -176,7 +176,11 @@ def check_harness_credentials(settings: Settings) -> list[CheckResult]:
         with Session(engine) as session:
             results: list[CheckResult] = []
             for harness in get_harnesses():
-                row = session.get(HarnessLogin, harness.name)
+                row = session.scalar(
+                    select(HarnessConnection).where(
+                        HarnessConnection.harness == harness.name, HarnessConnection.is_default
+                    )
+                )
                 results.append(
                     _harness_credential_check(
                         harness.name,

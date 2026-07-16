@@ -152,11 +152,23 @@ def rt():
 
     # An agent run checks the resolved harness is connected before any VM work;
     # AgentFlow's decider resolves to claude, so connect it for the module.
-    from druks.harnesses.models import HarnessLogin
+    from druks.accounts.models import Account
+    from druks.harnesses.models import HarnessConnection
 
     session = get_session(engine)
     try:
-        session.add(HarnessLogin(harness="claude", payload={"claudeAiOauth": {"accessToken": "t"}}))
+        account = Account(email="op@example.com")
+        session.add(account)
+        session.flush()
+        session.add(
+            HarnessConnection(
+                harness="claude",
+                account_id=account.id,
+                provider_email=account.email,
+                payload={"claudeAiOauth": {"accessToken": "t"}},
+                is_default=True,
+            )
+        )
         session.commit()
     finally:
         session.close()

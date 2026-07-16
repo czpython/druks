@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, ClassVar
 
 import httpx
 
+from druks.database import db_session
 from druks.mcp import models as mcp_models
 from druks.mcp.helpers import get_bearer_token_env_var
 from druks.redis import get_client
@@ -34,7 +35,7 @@ from .exceptions import (
     LoginError,
     OAuthTokenError,
 )
-from .models import HarnessLogin
+from .models import HarnessConnection
 
 if TYPE_CHECKING:
     from druks.sandbox.datastructures import McpServer
@@ -46,6 +47,9 @@ _USAGE_TIMEOUT_SECONDS = 20.0
 # The connect-flow pending state (PKCE verifier + state) lives in Redis this long
 # — enough to sign in and paste, short enough that an abandoned attempt clears.
 _LOGIN_PENDING_TTL_SECONDS = 600
+# Per-row refresh lock: five minutes outlives the provider grant timeout and
+# expires before the next 15-minute cron tick if the holder dies mid-refresh.
+_REFRESH_LOCK_TTL_SECONDS = 300
 
 # The capability manifest is a plain JSON dict written per AgentCall. Bump when
 # the recorded shape changes so a reader can tell manifests apart across
@@ -182,23 +186,17 @@ class Harness(ABC):
 
     @classmethod
     def get_credentials(cls) -> dict:
-        """The stored credential-file dict. Raises
+        """The default login's credential-file dict — the row execution
+        resolves while runs aren't account-aware. Raises
         :class:`HarnessNotConnectedError`, with the connect-in-Settings fix,
-        when the harness was never connected."""
-        row = HarnessLogin.get(cls.name)
-        data = row.payload if row else None
+        when no login is designated."""
+        row = HarnessConnection.get_default(cls.name)
+        data = dict(row.payload) if row else None
         if not data:
             raise HarnessNotConnectedError(
                 f"{cls.name} is not connected — connect it in Settings → Harnesses."
             )
         return data
-
-    @classmethod
-    def store_credentials(cls, data: dict) -> None:
-        """Persist the credential-file dict as this harness's row, mirroring the
-        access-token expiry out of it for the refresh cron and doctor to read."""
-        _, expires_at = cls._refresh_state(data)
-        HarnessLogin.store(harness=cls.name, payload=data, expires_at=expires_at)
 
     @classmethod
     def render_credentials_file(cls) -> str:
@@ -209,25 +207,27 @@ class Harness(ABC):
         return json.dumps(cls.get_credentials())
 
     @classmethod
-    async def login_start(cls) -> str:
+    async def login_start(cls) -> tuple[str, str]:
         """Begin a connect flow: mint a PKCE verifier + challenge, build the
-        provider's authorize URL, stash the pending state in Redis (single-use,
-        short TTL), and return the URL for the operator to open in a browser."""
+        provider's authorize URL, and stash the pending state in Redis under an
+        opaque flow id (single-use, short TTL) so concurrent connects never
+        overwrite each other. Returns (authorize URL, flow id)."""
         verifier = _b64url(secrets.token_bytes(64))
         challenge = _b64url(hashlib.sha256(verifier.encode()).digest())
         url, state = cls.authorize_url(verifier=verifier, challenge=challenge)
+        flow_id = secrets.token_urlsafe(24)
         pending = json.dumps({"verifier": verifier, "state": state})
-        await get_client().set(_login_pending_key(cls.name), pending, ex=_LOGIN_PENDING_TTL_SECONDS)
-        return url
+        await get_client().set(_login_pending_key(flow_id), pending, ex=_LOGIN_PENDING_TTL_SECONDS)
+        return url, flow_id
 
     @classmethod
-    async def login_complete(cls, pasted: str) -> None:
-        """Finish a connect flow: pop the single-use pending state, parse the
-        paste (bare code or full redirect URL), exchange it, and persist the
-        credential + account. Raises :class:`LoginError` with a user-facing
-        message on any failure — the pending state is gone either way, so a
-        retry re-starts cleanly."""
-        pending = await get_client().getdel(_login_pending_key(cls.name))  # single-use
+    async def login_complete(cls, *, flow_id: str, pasted: str) -> None:
+        """Finish a connect flow: pop the flow's single-use pending state,
+        parse the paste (bare code or full redirect URL), exchange it, and
+        upsert the login under the provider-reported account. Raises
+        :class:`LoginError` with a user-facing message on any failure — the
+        pending state is gone either way, so a retry re-starts cleanly."""
+        pending = await get_client().getdel(_login_pending_key(flow_id))  # single-use
         if not pending:
             raise LoginError("This sign-in expired — start it again.")
         expected = json.loads(pending)
@@ -238,15 +238,27 @@ class Harness(ABC):
         if pasted_state and pasted_state != expected["state"]:
             raise LoginError("That code is from a different sign-in — start it again.")
 
-        payload, account = await cls.exchange(code=code, verifier=expected["verifier"])
+        payload, provider_email = await cls.exchange(code=code, verifier=expected["verifier"])
+        if not provider_email:
+            raise LoginError(
+                "The provider returned no account email — sign in with an account "
+                "that has one and try again."
+            )
         _, expires_at = cls._refresh_state(payload)
-        HarnessLogin.store(
-            harness=cls.name, payload=payload, expires_at=expires_at, account=account
+        HarnessConnection.connect(
+            harness=cls.name,
+            payload=payload,
+            expires_at=expires_at,
+            provider_email=provider_email,
         )
 
     @classmethod
     def disconnect(cls) -> None:
-        HarnessLogin.delete(cls.name)
+        """Disconnect the default login — the single connection card's target.
+        Never promotes another one."""
+        row = HarnessConnection.get_default(cls.name)
+        if row:
+            row.delete()
 
     @classmethod
     @abstractmethod
@@ -259,7 +271,7 @@ class Harness(ABC):
     @abstractmethod
     async def exchange(cls, *, code: str, verifier: str) -> tuple[dict, str | None]:
         """Exchange the authorization code for tokens; return (credential-file
-        payload, account label)."""
+        payload, provider-reported account email)."""
 
     @classmethod
     def load_token(cls, *, now: datetime | None = None) -> Token:
@@ -286,60 +298,98 @@ class Harness(ABC):
     @classmethod
     async def rotate_token(
         cls,
+        login_id: str,
         *,
         now: datetime | None = None,
         margin: timedelta | None = None,
     ) -> RotationResult:
-        """Refresh the stored token in place if it's within the expiry margin,
-        persisting the new token back to the row."""
+        """Refresh one login row's token if it's within the expiry margin,
+        persisting the new token back to that row. Addressed by row id and
+        read fresh — the caller's tick may span other rows' commits. One
+        refresher per row: a Redis lock elects the winner, and the loser
+        reports ``locked`` without touching the provider — two concurrent
+        grants on one refresh lineage trip the provider's reuse detection."""
         moment = now or _utc_now()
-        try:
-            data = cls.get_credentials()
-        except HarnessNotConnectedError:
-            return RotationResult(cls.name, "failed", error="no_credentials")
-
+        row = HarnessConnection.reload(login_id)
+        if not row:
+            return RotationResult(cls.name, "failed", error="no_credentials", login_id=login_id)
+        data = dict(row.payload)
         refresh_token, expires_at = cls._refresh_state(data)
         if not refresh_token:
-            return RotationResult(cls.name, "no_refresh_token")
+            return RotationResult(cls.name, "no_refresh_token", login_id=login_id)
 
         limit = margin if margin is not None else cls.REFRESH_MARGIN
         if expires_at and expires_at - moment > limit:
-            return RotationResult(cls.name, "fresh", expires_at=expires_at)
+            return RotationResult(cls.name, "fresh", expires_at=expires_at, login_id=login_id)
 
+        redis = get_client()
+        lock_key = _refresh_lock_key(login_id)
+        if not await redis.set(lock_key, "1", nx=True, ex=_REFRESH_LOCK_TTL_SECONDS):
+            return RotationResult(cls.name, "locked", login_id=login_id)
         try:
-            grant = await _post_grant(cls._TOKEN_URL, cls._grant_body(refresh_token))
-            new_expiry = cls._apply_refresh(data, grant, moment)
-        except GrantError as exc:
-            if exc.tag == "invalid_grant":
-                # The provider revoked the refresh lineage; presenting it again
-                # can never succeed. Drop the credential so the harness reads as
-                # disconnected — the UI shows Reconnect and the next tick
-                # short-circuits to no_credentials instead of hammering forever.
-                cls.disconnect()
-                logger.warning(
-                    "%s auto-disconnected after invalid_grant; reconnect to restore", cls.name
+            # Re-read after winning the lock: the previous holder may have
+            # advanced this lineage (or deleted the row) after our first read.
+            row = HarnessConnection.reload(login_id)
+            if not row:
+                return RotationResult(
+                    cls.name, "failed", error="no_credentials", login_id=login_id
                 )
-            return RotationResult(cls.name, "failed", error=exc.tag)
-        except ValueError:
-            return RotationResult(cls.name, "failed", error="bad_response")
+            data = dict(row.payload)
+            refresh_token, expires_at = cls._refresh_state(data)
+            if not refresh_token:
+                return RotationResult(cls.name, "no_refresh_token", login_id=row.id)
+            if expires_at and expires_at - moment > limit:
+                return RotationResult(cls.name, "fresh", expires_at=expires_at, login_id=row.id)
 
-        cls.store_credentials(data)
-        return RotationResult(cls.name, "refreshed", expires_at=new_expiry)
+            try:
+                grant = await _post_grant(cls._TOKEN_URL, cls._grant_body(refresh_token))
+                new_expiry = cls._apply_refresh(data, grant, moment)
+            except GrantError as exc:
+                if exc.tag == "invalid_grant":
+                    # The provider revoked this row's refresh lineage;
+                    # presenting it again can never succeed. Drop only this
+                    # credential so the login reads as disconnected — the UI
+                    # shows Reconnect and the next tick has no row to hammer.
+                    row.delete()
+                    db_session().commit()
+                    logger.warning(
+                        "%s login %s auto-disconnected after invalid_grant; "
+                        "reconnect to restore",
+                        cls.name,
+                        row.id,
+                    )
+                return RotationResult(cls.name, "failed", error=exc.tag, login_id=row.id)
+            except ValueError:
+                return RotationResult(cls.name, "failed", error="bad_response", login_id=row.id)
+
+            row.update_payload(data, expires_at=new_expiry)
+            # The grant is externally anchored — the provider may have killed
+            # the old refresh token the moment it issued this one — so the new
+            # lineage must be committed before the lock releases; deferring to
+            # the step's own commit would let a concurrent refresher take the
+            # freed lock and re-present the superseded token.
+            db_session().commit()
+            return RotationResult(cls.name, "refreshed", expires_at=new_expiry, login_id=row.id)
+        finally:
+            await redis.delete(lock_key)
 
     @classmethod
-    def needs_refresh(cls) -> bool:
-        """Whether the access token is within its refresh margin — the cheap
-        read the refresh workflow uses to decide whether to gate provisioning
-        before rotating. An unreadable/expired credential reads as False:
-        there's nothing live to protect, so let the rotation sort it out
-        ungated."""
+    def needs_refresh(cls, login: HarnessConnection) -> bool:
+        """Whether the row's access token is within its refresh margin — the
+        cheap read the refresh workflow uses to decide whether to gate
+        provisioning before rotating. An unreadable/expired credential reads
+        as False: there's nothing live to protect, so let the rotation sort it
+        out ungated."""
         try:
-            token = cls.load_token()
+            token = cls._token_from_credentials(dict(login.payload))
         except OAuthTokenError:
             return False
         if not token.expires_at:
             return False
-        return token.expires_at - _utc_now() <= cls.REFRESH_MARGIN
+        now = _utc_now()
+        if token.expires_at <= now:
+            return False
+        return token.expires_at - now <= cls.REFRESH_MARGIN
 
     @classmethod
     @abstractmethod
@@ -502,8 +552,12 @@ async def _post_grant(url: str, body: dict) -> dict:
         raise GrantError("bad_response") from exc
 
 
-def _login_pending_key(harness: str) -> str:
-    return f"druks:login:pending:{harness}"
+def _login_pending_key(flow_id: str) -> str:
+    return f"druks:login:pending:{flow_id}"
+
+
+def _refresh_lock_key(login_id: str) -> str:
+    return f"druks:harness:refresh:{login_id}"
 
 
 def _b64url(raw: bytes) -> str:

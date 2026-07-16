@@ -38,11 +38,12 @@ def test_harness_response_carries_connection_state(tmp_path: Path):
     assert "expiresAt" in claude
 
 
-def test_login_start_returns_authorize_url(tmp_path: Path):
+def test_login_start_returns_authorize_url_and_flow_id(tmp_path: Path):
     with _build_client(tmp_path) as client:
         response = client.post("/api/settings/harnesses/claude/login/start")
     assert response.status_code == 200
     assert response.json()["authorizeUrl"].startswith("https://claude.ai/oauth/authorize?")
+    assert response.json()["flowId"]
 
 
 def test_login_start_unknown_harness_is_404(tmp_path: Path):
@@ -53,10 +54,22 @@ def test_login_start_unknown_harness_is_404(tmp_path: Path):
 
 def test_login_complete_with_no_code_is_422(tmp_path: Path):
     with _build_client(tmp_path) as client:
-        client.post("/api/settings/harnesses/claude/login/start")
+        flow_id = client.post("/api/settings/harnesses/claude/login/start").json()["flowId"]
         # Empty paste fails before any provider call — clean check of the
         # LoginError -> 422 wiring without mocking the exchange.
-        response = client.post("/api/settings/harnesses/claude/login/complete", json={"code": ""})
+        response = client.post(
+            "/api/settings/harnesses/claude/login/complete",
+            json={"code": "", "flowId": flow_id},
+        )
+    assert response.status_code == 422
+
+
+def test_login_complete_without_flow_id_is_422(tmp_path: Path):
+    with _build_client(tmp_path) as client:
+        client.post("/api/settings/harnesses/claude/login/start")
+        response = client.post(
+            "/api/settings/harnesses/claude/login/complete", json={"code": "x"}
+        )
     assert response.status_code == 422
 
 
@@ -70,9 +83,10 @@ def test_login_complete_provider_rejection_is_422(tmp_path: Path, monkeypatch):
 
     monkeypatch.setattr(hbase.httpx.AsyncClient, "post", fake_post)
     with _build_client(tmp_path) as client:
-        client.post("/api/settings/harnesses/claude/login/start")
+        flow_id = client.post("/api/settings/harnesses/claude/login/start").json()["flowId"]
         response = client.post(
-            "/api/settings/harnesses/claude/login/complete", json={"code": "code"}
+            "/api/settings/harnesses/claude/login/complete",
+            json={"code": "code", "flowId": flow_id},
         )
 
     assert response.status_code == 422

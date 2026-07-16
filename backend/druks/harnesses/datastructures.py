@@ -34,10 +34,11 @@ class CodexToken:
 @dataclass(frozen=True)
 class RotationResult:
     harness: str
-    # "refreshed" | "fresh" | "no_refresh_token" | "failed"
+    # "refreshed" | "fresh" | "locked" | "no_refresh_token" | "failed"
     action: str
     error: str | None = None
     expires_at: datetime | None = None
+    login_id: str | None = None
 
 
 @dataclass(frozen=True)

@@ -197,6 +197,9 @@ export interface Harness {
 
 export interface LoginChallenge {
   authorizeUrl: string
+  /** Opaque id of this connect attempt; passed back on complete so
+   * concurrent sign-ins never clobber each other's pending state. */
+  flowId: string
 }
 
 export interface UpdateHarnessRequest {

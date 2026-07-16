@@ -36,12 +36,23 @@ class _FakeHarness:
     refresh_due = True
 
     @classmethod
-    def needs_refresh(cls, **kwargs):
+    def needs_refresh(cls, login):
         return cls.refresh_due
 
     @classmethod
-    async def rotate_token(cls, **kwargs):
-        return RotationResult(cls.name, "refreshed")
+    async def rotate_token(cls, login_id):
+        return RotationResult(cls.name, "refreshed", login_id=login_id)
+
+
+class _FakeLogin:
+    harness = "fake"
+    id = "login-1"
+
+
+class _FakeLogins:
+    @staticmethod
+    def list_all():
+        return [_FakeLogin()]
 
 
 class _TrackingGate:
@@ -64,6 +75,7 @@ class _TrackingGate:
 async def test_refresh_closes_gate_when_a_rotation_is_due(monkeypatch):
     hold = _TrackingGate()
     monkeypatch.setattr(harness_workflows, "get_harnesses", lambda: (_FakeHarness,))
+    monkeypatch.setattr(harness_workflows, "HarnessConnection", _FakeLogins)
     monkeypatch.setattr(harness_workflows.gate, "hold", hold)
     _FakeHarness.refresh_due = True
 
@@ -75,6 +87,7 @@ async def test_refresh_closes_gate_when_a_rotation_is_due(monkeypatch):
 async def test_refresh_leaves_gate_open_on_a_no_op_tick(monkeypatch):
     hold = _TrackingGate()
     monkeypatch.setattr(harness_workflows, "get_harnesses", lambda: (_FakeHarness,))
+    monkeypatch.setattr(harness_workflows, "HarnessConnection", _FakeLogins)
     monkeypatch.setattr(harness_workflows.gate, "hold", hold)
     _FakeHarness.refresh_due = False
 
