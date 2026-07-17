@@ -163,7 +163,7 @@ class Agent:
         workflow = current_workflow.get()
         # Refusing an unservable call here beats provisioning a VM and
         # 401ing mid-run.
-        connection = HarnessConnection.select_for_run(harness.name, workflow.account_id)
+        connection = HarnessConnection.lookup(harness.name, workflow.account_id)
         # Plain snapshots: the commits below expire the ORM row mid-flight.
         connection_id, charged_account_id = connection.id, connection.account_id
         if charged_account_id != workflow.account_id:

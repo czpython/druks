@@ -37,7 +37,7 @@ class HarnessConnection(Base, Uuid7Pk):
         return db_session().get(cls, login_id)
 
     @classmethod
-    def select_for_run(cls, harness: str, account_id: str | None) -> "HarnessConnection":
+    def lookup(cls, harness: str, account_id: str | None) -> "HarnessConnection":
         """The connection a call runs with: the account's own, else the
         fallback account's — which carries unmatched work so automation keeps
         moving."""

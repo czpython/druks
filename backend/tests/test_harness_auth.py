@@ -494,27 +494,27 @@ def test_claude_builder_raises_when_not_connected(db_session):
         _claude_credentials(sandbox, github_token=None)
 
 
-def test_select_for_run_prefers_the_accounts_own_connection(db_session):
+def test_lookup_prefers_the_accounts_own_connection(db_session):
     fallback = _seed_claude(provider_email="a@example.com")  # a@ adopts the fallback
     own = _seed_claude(provider_email="b@example.com")
 
-    assert HarnessConnection.select_for_run("claude", own.account_id).id == own.id
-    assert HarnessConnection.select_for_run("claude", fallback.account_id).id == fallback.id
+    assert HarnessConnection.lookup("claude", own.account_id).id == own.id
+    assert HarnessConnection.lookup("claude", fallback.account_id).id == fallback.id
 
 
-def test_select_for_run_falls_back(db_session):
+def test_lookup_falls_back(db_session):
     fallback = _seed_claude(provider_email="a@example.com")
     codex_only = _seed_codex(provider_email="b@example.com")
 
     # An account with no claude connection, and no account at all.
-    assert HarnessConnection.select_for_run("claude", codex_only.account_id).id == fallback.id
-    assert HarnessConnection.select_for_run("claude", None).id == fallback.id
+    assert HarnessConnection.lookup("claude", codex_only.account_id).id == fallback.id
+    assert HarnessConnection.lookup("claude", None).id == fallback.id
 
 
-def test_select_for_run_without_any_connection_raises(db_session):
+def test_lookup_without_any_connection_raises(db_session):
     _seed_codex(provider_email="a@example.com")  # the fallback account has codex only
     with pytest.raises(HarnessNotConnectedError, match="connect it in Settings"):
-        HarnessConnection.select_for_run("claude", None)
+        HarnessConnection.lookup("claude", None)
 
 
 def test_render_credentials_file_renders_only_the_selected_login(db_session):
