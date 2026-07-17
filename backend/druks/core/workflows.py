@@ -1,4 +1,3 @@
-import contextlib
 import logging
 
 from druks.harnesses.datastructures import RotationResult
@@ -27,20 +26,33 @@ async def _refresh() -> dict[str, object]:
     # rotate_token is the source of truth for what's due: it no-ops ("fresh", no
     # server call, no invalidation) any row outside its margin. A refresh
     # invalidates the old token server-side and would 401 a VM mid-run holding
-    # a pushed copy, so a due row's rotation shuts that login's gate — its new
-    # calls wait, its active ones drain, and every other login keeps
-    # provisioning and running throughout. The common no-op tick touches no
-    # gate at all. Snapshot plain values before rotating: each refreshed row
-    # commits as it lands, which expires every ORM object in the session
+    # a pushed copy, so a due rotation runs only while its login is idle —
+    # shut the gate, rotate if no calls are active, else defer to the next
+    # tick (the refresh margin dwarfs the call horizon). Once expiry is closer
+    # than the horizon a mid-run 401 is unavoidable either way, so rotate
+    # regardless. Other logins provision and run throughout; a no-op tick
+    # touches no gate. Snapshot plain values before rotating: each refreshed
+    # row commits as it lands, which expires every ORM object in the session
     # mid-loop.
     rows = [
-        (login.harness, login.id, by_name[login.harness].needs_refresh(login)) for login in logins
+        (
+            login.harness,
+            login.id,
+            by_name[login.harness].needs_refresh(login),
+            by_name[login.harness].refresh_is_urgent(login),
+        )
+        for login in logins
     ]
 
     results: list[RotationResult] = []
-    for harness_name, login_id, due in rows:
-        gate_ctx = gate.hold(login_id) if due else contextlib.nullcontext()
-        async with gate_ctx:
+    for harness_name, login_id, due, urgent in rows:
+        if due:
+            async with gate.shut(login_id) as idle:
+                if idle or urgent:
+                    result = await by_name[harness_name].rotate_token(login_id)
+                else:
+                    result = RotationResult(harness_name, "busy", login_id=login_id)
+        else:
             result = await by_name[harness_name].rotate_token(login_id)
         _log_result(result)
         results.append(result)
@@ -54,7 +66,11 @@ async def _refresh() -> dict[str, object]:
 
 
 def _log_result(result: RotationResult) -> None:
-    if result.action == "refreshed":
+    if result.action == "busy":
+        logger.info(
+            "deferring %s rotation for login %s; calls active", result.harness, result.login_id
+        )
+    elif result.action == "refreshed":
         logger.info(
             "refreshed %s token for login %s; expires_at=%s",
             result.harness,

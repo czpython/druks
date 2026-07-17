@@ -16,6 +16,7 @@ from druks.database import db_session
 from druks.mcp import models as mcp_models
 from druks.mcp.helpers import get_bearer_token_env_var
 from druks.redis import get_client
+from druks.sandbox.constants import MAX_AGENT_TIMEOUT_SECONDS
 from druks.skills.models import Skill
 from druks.usage.models import UsageScrape
 
@@ -375,6 +376,15 @@ class Harness(ABC):
             return RotationResult(cls.name, "refreshed", expires_at=new_expiry, login_id=row.id)
         finally:
             await redis.delete(lock_key)
+
+    @classmethod
+    def refresh_is_urgent(cls, login: HarnessConnection) -> bool:
+        """Expiry is closer than the call horizon — rotate even while busy,
+        since a mid-run 401 is unavoidable either way."""
+        _, expires_at = cls._refresh_state(dict(login.payload))
+        if not expires_at:
+            return False
+        return expires_at - _utc_now() < timedelta(seconds=MAX_AGENT_TIMEOUT_SECONDS)
 
     @classmethod
     def needs_refresh(cls, login: HarnessConnection) -> bool:

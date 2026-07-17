@@ -1,5 +1,4 @@
 import asyncio
-import logging
 import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -8,16 +7,18 @@ from druks.redis import get_client
 
 from .constants import MAX_AGENT_TIMEOUT_SECONDS
 
-logger = logging.getLogger(__name__)
-
-# One gate per credential: a login's token rotation waits only for that
-# login's active agent calls, and every other login keeps provisioning and
-# running throughout. Active users live in a sorted set scored by their expiry
-# (capped at the agent horizon), so a crashed caller ages out instead of
-# holding the gate forever. Idle warm VMs never block a rotation — every
+# One gate per credential: a rotation runs only while its login has no
+# active agent calls — a busy login defers to the next tick (the refresh
+# margin dwarfs the call horizon) — and every other login keeps provisioning
+# and running throughout. Active users live in a sorted set scored by their
+# expiry (capped at the agent horizon), so a crashed caller ages out instead
+# of deferring rotation forever. Idle warm VMs never block a rotation — every
 # invocation rewrites credentials fresh.
 _RUN_HORIZON = MAX_AGENT_TIMEOUT_SECONDS  # a sandbox run never outlives this; caps every wait
 _POLL = 2.0
+# The gate is only shut for the seconds a refresh takes; a short TTL means a
+# crashed holder frees the login fast instead of blocking it for the horizon.
+_SHUT_TTL_SECONDS = 60
 
 
 def _rotating_key(login_id: str) -> str:
@@ -51,27 +52,16 @@ async def use(login_id: str, call_id: str) -> AsyncIterator[None]:
 
 
 @asynccontextmanager
-async def hold(login_id: str) -> AsyncIterator[None]:
-    """Shut one login's gate for its token rotation: block that login's new
-    calls, wait out its active ones (expired registrations pruned first),
-    rotate, release."""
+async def shut(login_id: str) -> AsyncIterator[bool]:
+    """Shut one login's gate and say whether it is idle: True means no active
+    calls — rotate now; False means calls are running — defer, the next tick
+    retries well inside the refresh margin. Expired registrations are pruned
+    first so a crashed caller never defers rotation forever. The gate reopens
+    on exit either way."""
     client = get_client()
-    await client.set(_rotating_key(login_id), "1", ex=int(_RUN_HORIZON))
+    await client.set(_rotating_key(login_id), "1", ex=_SHUT_TTL_SECONDS)
     try:
-        waited = 0.0
-        while True:
-            await client.zremrangebyscore(_users_key(login_id), "-inf", time.time())
-            if not await client.zcard(_users_key(login_id)):
-                break
-            if waited >= _RUN_HORIZON:
-                logger.warning(
-                    "gate for login %s hit the horizon with calls still registered; "
-                    "rotating anyway",
-                    login_id,
-                )
-                break
-            await asyncio.sleep(_POLL)
-            waited += _POLL
-        yield
+        await client.zremrangebyscore(_users_key(login_id), "-inf", time.time())
+        yield not await client.zcard(_users_key(login_id))
     finally:
         await client.delete(_rotating_key(login_id))

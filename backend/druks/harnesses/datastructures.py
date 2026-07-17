@@ -44,7 +44,7 @@ class CompletedLogin:
 @dataclass(frozen=True)
 class RotationResult:
     harness: str
-    # "refreshed" | "fresh" | "locked" | "no_refresh_token" | "failed"
+    # "refreshed" | "fresh" | "busy" | "locked" | "no_refresh_token" | "failed"
     action: str
     error: str | None = None
     expires_at: datetime | None = None
