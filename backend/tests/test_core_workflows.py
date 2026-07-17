@@ -20,5 +20,5 @@ def test_invalid_grant_warns(caplog):
 def test_locked_stays_quiet(caplog):
     # Another worker owns that row's refresh — losing the election is routine.
     with caplog.at_level(logging.WARNING):
-        _log_result(RotationResult("claude", "locked", login_id="L1"))
+        _log_result(RotationResult("claude", "locked", connection_id="L1"))
     assert caplog.records == []

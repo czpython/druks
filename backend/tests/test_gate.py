@@ -62,27 +62,27 @@ async def test_expired_registrations_never_defer_a_rotation():
 
 class _FakeHarness:
     name = "fake"
-    due_login_ids: set[str] = set()
-    urgent_login_ids: set[str] = set()
+    due_connection_ids: set[str] = set()
+    urgent_connection_ids: set[str] = set()
 
     @classmethod
     def needs_refresh(cls, login):
-        return login.id in cls.due_login_ids
+        return login.id in cls.due_connection_ids
 
     @classmethod
     def refresh_is_urgent(cls, login):
-        return login.id in cls.urgent_login_ids
+        return login.id in cls.urgent_connection_ids
 
     @classmethod
-    async def rotate_token(cls, login_id):
-        return RotationResult(cls.name, "refreshed", login_id=login_id)
+    async def rotate_token(cls, connection_id):
+        return RotationResult(cls.name, "refreshed", connection_id=connection_id)
 
 
 class _FakeLogin:
     harness = "fake"
 
-    def __init__(self, login_id: str) -> None:
-        self.id = login_id
+    def __init__(self, connection_id: str) -> None:
+        self.id = connection_id
 
 
 class _FakeLogins:
@@ -105,8 +105,8 @@ async def test_refresh_shuts_only_the_due_logins(monkeypatch):
     monkeypatch.setattr(harness_workflows, "get_harnesses", lambda: (_FakeHarness,))
     monkeypatch.setattr(harness_workflows, "HarnessConnection", _FakeLogins)
     monkeypatch.setattr(harness_workflows.gate, "shut", _fake_shut(shut, idle=True))
-    _FakeHarness.due_login_ids = {"login-2"}
-    _FakeHarness.urgent_login_ids = set()
+    _FakeHarness.due_connection_ids = {"login-2"}
+    _FakeHarness.urgent_connection_ids = set()
 
     result = await harness_workflows._refresh()
 
@@ -121,8 +121,8 @@ async def test_refresh_defers_a_busy_login(monkeypatch):
     monkeypatch.setattr(harness_workflows, "get_harnesses", lambda: (_FakeHarness,))
     monkeypatch.setattr(harness_workflows, "HarnessConnection", _FakeLogins)
     monkeypatch.setattr(harness_workflows.gate, "shut", _fake_shut(shut, idle=False))
-    _FakeHarness.due_login_ids = {"login-2"}
-    _FakeHarness.urgent_login_ids = set()
+    _FakeHarness.due_connection_ids = {"login-2"}
+    _FakeHarness.urgent_connection_ids = set()
 
     result = await harness_workflows._refresh()
 
@@ -136,8 +136,8 @@ async def test_refresh_rotates_a_busy_login_once_urgent(monkeypatch):
     monkeypatch.setattr(harness_workflows, "get_harnesses", lambda: (_FakeHarness,))
     monkeypatch.setattr(harness_workflows, "HarnessConnection", _FakeLogins)
     monkeypatch.setattr(harness_workflows.gate, "shut", _fake_shut(shut, idle=False))
-    _FakeHarness.due_login_ids = {"login-2"}
-    _FakeHarness.urgent_login_ids = {"login-2"}
+    _FakeHarness.due_connection_ids = {"login-2"}
+    _FakeHarness.urgent_connection_ids = {"login-2"}
 
     result = await harness_workflows._refresh()
 
@@ -149,8 +149,8 @@ async def test_refresh_touches_no_gate_on_a_no_op_tick(monkeypatch):
     monkeypatch.setattr(harness_workflows, "get_harnesses", lambda: (_FakeHarness,))
     monkeypatch.setattr(harness_workflows, "HarnessConnection", _FakeLogins)
     monkeypatch.setattr(harness_workflows.gate, "shut", _fake_shut(shut, idle=True))
-    _FakeHarness.due_login_ids = set()
-    _FakeHarness.urgent_login_ids = set()
+    _FakeHarness.due_connection_ids = set()
+    _FakeHarness.urgent_connection_ids = set()
 
     await harness_workflows._refresh()
 

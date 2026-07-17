@@ -188,10 +188,8 @@ class Harness(ABC):
 
     @classmethod
     def get_credentials(cls) -> dict:
-        """The fallback account's credential-file dict for this harness — the
-        account actor-less runs run as while runs aren't account-attributed.
-        Raises :class:`HarnessNotConnectedError` when that account has no
-        login here."""
+        """The fallback account's credential dict — for callers with no
+        selection (usage polling, doctor)."""
         row = HarnessConnection.get_for_account(cls.name, fallback=True)
         data = dict(row.payload) if row else None
         if data:
@@ -202,14 +200,8 @@ class Harness(ABC):
 
     @classmethod
     def render_credentials_file(cls, connection_id: str | None = None) -> str:
-        """The credential-file JSON the sandbox writes for this CLI — the
-        selected connection's payload, read fresh at push time (rotation may
-        have advanced it since selection); the fallback account's for a
-        one-shot caller with no selection. The push writes it as a secret; no
-        host credential file is read. Raises
-        :class:`HarnessNotConnectedError` when the connection is gone — a
-        disconnect between selection and render must fail the call, never
-        render another account's payload."""
+        """The selected connection's payload, read fresh at push time; a
+        vanished row fails the call rather than render another account's."""
         if not connection_id:
             return json.dumps(cls.get_credentials())
         row = HarnessConnection.get(connection_id)
@@ -306,7 +298,7 @@ class Harness(ABC):
     @classmethod
     async def rotate_token(
         cls,
-        login_id: str,
+        connection_id: str,
         *,
         now: datetime | None = None,
         margin: timedelta | None = None,
@@ -318,34 +310,42 @@ class Harness(ABC):
         reports ``locked`` without touching the provider — two concurrent
         grants on one refresh lineage trip the provider's reuse detection."""
         moment = now or _utc_now()
-        row = HarnessConnection.reload(login_id)
+        row = HarnessConnection.reload(connection_id)
         if not row:
-            return RotationResult(cls.name, "failed", error="no_credentials", login_id=login_id)
+            return RotationResult(
+                cls.name, "failed", error="no_credentials", connection_id=connection_id
+            )
         data = dict(row.payload)
         refresh_token, expires_at = cls._refresh_state(data)
         if not refresh_token:
-            return RotationResult(cls.name, "no_refresh_token", login_id=login_id)
+            return RotationResult(cls.name, "no_refresh_token", connection_id=connection_id)
 
         limit = margin if margin is not None else cls.REFRESH_MARGIN
         if expires_at and expires_at - moment > limit:
-            return RotationResult(cls.name, "fresh", expires_at=expires_at, login_id=login_id)
+            return RotationResult(
+                cls.name, "fresh", expires_at=expires_at, connection_id=connection_id
+            )
 
         redis = get_client()
-        lock_key = _refresh_lock_key(login_id)
+        lock_key = _refresh_lock_key(connection_id)
         if not await redis.set(lock_key, "1", nx=True, ex=_REFRESH_LOCK_TTL_SECONDS):
-            return RotationResult(cls.name, "locked", login_id=login_id)
+            return RotationResult(cls.name, "locked", connection_id=connection_id)
         try:
             # Re-read after winning the lock: the previous holder may have
             # advanced this lineage (or deleted the row) after our first read.
-            row = HarnessConnection.reload(login_id)
+            row = HarnessConnection.reload(connection_id)
             if not row:
-                return RotationResult(cls.name, "failed", error="no_credentials", login_id=login_id)
+                return RotationResult(
+                    cls.name, "failed", error="no_credentials", connection_id=connection_id
+                )
             data = dict(row.payload)
             refresh_token, expires_at = cls._refresh_state(data)
             if not refresh_token:
-                return RotationResult(cls.name, "no_refresh_token", login_id=row.id)
+                return RotationResult(cls.name, "no_refresh_token", connection_id=row.id)
             if expires_at and expires_at - moment > limit:
-                return RotationResult(cls.name, "fresh", expires_at=expires_at, login_id=row.id)
+                return RotationResult(
+                    cls.name, "fresh", expires_at=expires_at, connection_id=row.id
+                )
 
             try:
                 grant = await _post_grant(cls._TOKEN_URL, cls._grant_body(refresh_token))
@@ -363,9 +363,11 @@ class Harness(ABC):
                         cls.name,
                         row.id,
                     )
-                return RotationResult(cls.name, "failed", error=exc.tag, login_id=row.id)
+                return RotationResult(cls.name, "failed", error=exc.tag, connection_id=row.id)
             except ValueError:
-                return RotationResult(cls.name, "failed", error="bad_response", login_id=row.id)
+                return RotationResult(
+                    cls.name, "failed", error="bad_response", connection_id=row.id
+                )
 
             row.update_payload(data, expires_at=new_expiry)
             # The grant is externally anchored — the provider may have killed
@@ -374,14 +376,15 @@ class Harness(ABC):
             # the step's own commit would let a concurrent refresher take the
             # freed lock and re-present the superseded token.
             db_session().commit()
-            return RotationResult(cls.name, "refreshed", expires_at=new_expiry, login_id=row.id)
+            return RotationResult(
+                cls.name, "refreshed", expires_at=new_expiry, connection_id=row.id
+            )
         finally:
             await redis.delete(lock_key)
 
     @classmethod
     def refresh_is_urgent(cls, login: HarnessConnection) -> bool:
-        """Expiry is closer than the call horizon — rotate even while busy,
-        since a mid-run 401 is unavoidable either way."""
+        """Expiry inside the call horizon: a mid-run 401 is unavoidable."""
         _, expires_at = cls._refresh_state(dict(login.payload))
         if not expires_at:
             return False
@@ -570,8 +573,8 @@ def _login_pending_key(flow_id: str) -> str:
     return f"druks:login:pending:{flow_id}"
 
 
-def _refresh_lock_key(login_id: str) -> str:
-    return f"druks:harness:refresh:{login_id}"
+def _refresh_lock_key(connection_id: str) -> str:
+    return f"druks:harness:refresh:{connection_id}"
 
 
 def _b64url(raw: bytes) -> str:

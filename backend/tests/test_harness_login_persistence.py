@@ -80,12 +80,12 @@ def test_rotation_persists_new_payload_across_sessions(engine):
     # copy, edit, whole-value update), then read it back from a fresh session —
     # commit + new session proves the edit reached the DB, not just the
     # in-memory object.
-    login_id = _committed(
+    connection_id = _committed(
         engine, lambda: _connect({"claudeAiOauth": {"accessToken": "old", "refreshToken": "R0"}})
     )
 
     def rotate_in_place():
-        row = HarnessConnection.get(login_id)
+        row = HarnessConnection.get(connection_id)
         data = dict(row.payload)
         data["claudeAiOauth"]["accessToken"] = "new"
         row.update_payload(data, expires_at=None)
@@ -93,7 +93,7 @@ def test_rotation_persists_new_payload_across_sessions(engine):
     _committed(engine, rotate_in_place)
 
     block = _committed(
-        engine, lambda: dict(HarnessConnection.get(login_id).payload)["claudeAiOauth"]
+        engine, lambda: dict(HarnessConnection.get(connection_id).payload)["claudeAiOauth"]
     )
     assert block["accessToken"] == "new"
 

@@ -132,7 +132,7 @@ async def test_claude_fresh_not_refreshed(monkeypatch, db_session):
     calls = _mock_post(monkeypatch, _resp(200, {}))
     result = await ClaudeHarness.rotate_token(login.id, now=_NOW)
     assert result.action == "fresh"
-    assert result.login_id == login.id
+    assert result.connection_id == login.id
     assert calls == []
 
 
@@ -203,13 +203,13 @@ async def test_codex_invalid_grant_drops_row(monkeypatch, db_session):
 
 async def test_rotation_of_a_deleted_row_is_a_no_op(monkeypatch, db_session):
     login = _seed_claude(access="old", expires_at=_NOW - timedelta(minutes=1))
-    login_id = login.id
+    connection_id = login.id
     _mock_post(monkeypatch, _resp(400, {"error": "invalid_grant"}))
-    await ClaudeHarness.rotate_token(login_id, now=_NOW)
+    await ClaudeHarness.rotate_token(connection_id, now=_NOW)
     # Row is gone; rotating the stale id must short-circuit before any
     # grant POST.
     calls = _mock_post(monkeypatch, _resp(200, {"access_token": "x"}))
-    result = await ClaudeHarness.rotate_token(login_id, now=_NOW)
+    result = await ClaudeHarness.rotate_token(connection_id, now=_NOW)
     assert result.action == "failed"
     assert result.error == "no_credentials"
     assert calls == []
@@ -298,19 +298,20 @@ async def test_invalid_grant_drops_only_the_addressed_row(monkeypatch, db_sessio
 
 async def test_concurrent_rotations_produce_one_grant(monkeypatch, db_session):
     login = _seed_claude(access="old", refresh="R0", expires_at=_NOW + timedelta(minutes=30))
-    login_id = login.id
+    connection_id = login.id
     calls = _mock_post(
         monkeypatch, _resp(200, {"access_token": "new", "refresh_token": "R1", "expires_in": 100})
     )
     first, second = await asyncio.gather(
-        ClaudeHarness.rotate_token(login_id, now=_NOW),
-        ClaudeHarness.rotate_token(login_id, now=_NOW),
+        ClaudeHarness.rotate_token(connection_id, now=_NOW),
+        ClaudeHarness.rotate_token(connection_id, now=_NOW),
     )
     assert len(calls) == 1  # one provider grant, one persisted lineage
     assert {first.action, second.action} == {"refreshed", "locked"}
     # Sessions are task-scoped: the winner ran (and committed) inside its own
     # gather task, so read past this task's identity map for what persisted.
-    assert dict(HarnessConnection.reload(login_id).payload)["claudeAiOauth"]["refreshToken"] == "R1"
+    payload = dict(HarnessConnection.reload(connection_id).payload)
+    assert payload["claudeAiOauth"]["refreshToken"] == "R1"
 
 
 async def test_rotation_lock_is_released_after_refresh(monkeypatch, db_session):
