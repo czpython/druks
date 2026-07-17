@@ -389,9 +389,11 @@ function RunRow({
         <div className="wic-op-main">
           <div className="wic-op-row1">
             <span className="wic-op-kind">{run.label}</span>
-            <span className="wic-op-owner" title="Who requested this run.">
-              {run.accountEmail ?? 'legacy / unknown'}
-            </span>
+            {run.accountEmail && (
+              <span className="wic-op-owner" title="Who requested this run.">
+                {run.accountEmail}
+              </span>
+            )}
           </div>
           <span className={`wic-op-sub wic-sub-${run.state}`}>
             <span className="wic-op-sub-dot" />
@@ -433,13 +435,10 @@ function CallRow({
         {CALL_GLYPH[call.status] ?? '·'}
       </span>
       <span className="wic-call-label">{call.label}</span>
-      <span className="wic-call-account" title="The account this call charged.">
-        {call.accountEmail ?? 'legacy / unknown'}
-      </span>
       {call.fallbackReason && (
         <span
           className="wic-call-fallback"
-          title={`Ran on the fallback account's connection (${call.fallbackReason.replaceAll('_', ' ')}).`}
+          title={`Charged to the fallback account${call.accountEmail ? ` (${call.accountEmail})` : ''}: ${call.fallbackReason.replaceAll('_', ' ')}.`}
         >
           fallback
         </span>
