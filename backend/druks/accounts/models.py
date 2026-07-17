@@ -8,8 +8,6 @@ from druks.core.models import Uuid7Pk
 from druks.database import db_session
 from druks.models import Base
 
-SYSTEM_ACCOUNT_ID = "system"
-
 
 class Account(Base, Uuid7Pk):
     __tablename__ = "accounts"

@@ -9,7 +9,8 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Mapped, column_property, mapped_column, relationship
 
-from druks.accounts.models import SYSTEM_ACCOUNT_ID, Account
+from druks.accounts.constants import SYSTEM_ACCOUNT_ID
+from druks.accounts.models import Account
 from druks.core.models import Uuid7Pk
 from druks.database import db_session, get_session
 from druks.durable.dbos_state import state_expression, subject_filter, updated_at_expression

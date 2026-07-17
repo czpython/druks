@@ -1,6 +1,7 @@
 from sqlalchemy import select
 
-from druks.accounts.models import SYSTEM_ACCOUNT_ID, Account
+from druks.accounts.constants import SYSTEM_ACCOUNT_ID
+from druks.accounts.models import Account
 from druks.database import get_session
 from druks.harnesses.registry import get_harnesses
 from druks.user_settings.models import HarnessSettings
