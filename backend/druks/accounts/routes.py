@@ -15,9 +15,9 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 def _resolve_harness(name: str) -> type[Harness]:
     harness = get_harness(name)
-    if not harness:
-        raise HTTPException(status_code=404, detail=f"Unknown harness: {name!r}")
-    return harness
+    if harness:
+        return harness
+    raise HTTPException(status_code=404, detail=f"Unknown harness: {name!r}")
 
 
 def _set_session_cookie(request: Request, response: Response, token: str) -> None:

@@ -23,7 +23,7 @@ async def resolve_session_account(request: Request) -> Account | None:
 async def current_account(request: Request) -> Account:
     """The signed-in account, else 401."""
     account = await resolve_session_account(request)
-    if not account:
-        raise HTTPException(status_code=401, detail="Sign in to use this API.")
-    sessions.current_account_id.set(account.id)
-    return account
+    if account:
+        sessions.current_account_id.set(account.id)
+        return account
+    raise HTTPException(status_code=401, detail="Sign in to use this API.")

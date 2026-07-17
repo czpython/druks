@@ -194,11 +194,11 @@ class Harness(ABC):
         login here."""
         row = HarnessConnection.get_for_account(cls.name, fallback=True)
         data = dict(row.payload) if row else None
-        if not data:
-            raise HarnessNotConnectedError(
-                f"{cls.name} is not connected — connect it in Settings → Harnesses."
-            )
-        return data
+        if data:
+            return data
+        raise HarnessNotConnectedError(
+            f"{cls.name} is not connected — connect it in Settings → Harnesses."
+        )
 
     @classmethod
     def render_credentials_file(cls, login_id: str | None = None) -> str:
@@ -212,12 +212,12 @@ class Harness(ABC):
         if not login_id:
             return json.dumps(cls.get_credentials())
         row = HarnessConnection.get(login_id)
-        if not row:
-            raise HarnessNotConnectedError(
-                f"the selected {cls.name} login was disconnected — reconnect it in "
-                "Settings → Harnesses."
-            )
-        return json.dumps(dict(row.payload))
+        if row:
+            return json.dumps(dict(row.payload))
+        raise HarnessNotConnectedError(
+            f"the selected {cls.name} login was disconnected — reconnect it in "
+            "Settings → Harnesses."
+        )
 
     @classmethod
     async def login_start(cls, *, account_id: str | None = None) -> tuple[str, str]:

@@ -39,9 +39,9 @@ def _validate_timezone(value: str) -> str:
 
 def _resolve_harness(name: str) -> tuple[type, HarnessSettings]:
     row = HarnessSettings.get(name)
-    if not row:
-        raise HTTPException(status_code=404, detail=f"Unknown harness: {name!r}")
-    return row.harness, row
+    if row:
+        return row.harness, row
+    raise HTTPException(status_code=404, detail=f"Unknown harness: {name!r}")
 
 
 def _harness_response(settings: HarnessSettings, account: Account) -> HarnessResponse:
