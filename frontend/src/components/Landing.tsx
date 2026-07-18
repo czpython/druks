@@ -30,7 +30,7 @@ export function Landing({ onSignedIn }: { onSignedIn: (account: Account) => void
         <div className="landing-word">
           druks<span>.</span>
         </div>
-        <div className="landing-tag">durable agent orchestration</div>
+        <div className="landing-tag">home for durable agent apps</div>
         <div className="landing-head">
           <h1>Connect a harness to sign in</h1>
           <p>

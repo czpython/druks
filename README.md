@@ -11,11 +11,9 @@
 > Druks is under active development. Expect breaking changes and rough edges
 > before 1.0; `main` and `latest` are edge builds, not stable releases.
 
-Druks is a platform for **durable agent orchestration**. It gives
-long-running agent applications a durable workflow engine, human gates,
-sandboxed execution, events, webhooks, settings, and an operator dashboard.
-The application supplies the domain logic as an independently packaged
-extension.
+Druks is the self-hosted **home for durable agent apps**, running on the
+Claude and Codex subscriptions you already pay for. Build ships out of the
+box: autonomous software delivery from ticket to reviewed pull request.
 
 An ordinary agent script loses its place when the process dies. A Druks
 workflow records the result of each completed durable operation in Postgres.
