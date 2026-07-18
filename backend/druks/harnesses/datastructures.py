@@ -75,9 +75,9 @@ class ParsedUsage:
 class ParsedModels:
     ok: bool
     error: str | None = None
-    # Picker entries: ``{"id", "label"}`` always; codex adds ``"efforts"``
-    # and ``"minimal_client_version"``.
-    entries: tuple[dict, ...] = ()
+    # ``{"id", "label"}`` each; codex adds ``"efforts"`` and
+    # ``"minimal_client_version"``.
+    models: tuple[dict, ...] = ()
     raw: str = field(default="", repr=False)
 
 

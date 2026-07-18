@@ -43,11 +43,6 @@ _TOKEN_COUNT_MARKERS = ('"type":"token_count"', '"type": "token_count"')
 # extension. Returns the same numbers /status shows without a completion.
 _CODEX_USAGE_URL = "https://chatgpt.com/backend-api/wham/usage"
 _CODEX_USER_AGENT = "codex-cli"
-# Codex model-list endpoint. ``client_version`` is required and the server
-# returns only models with ``minimal_client_version <= client_version``, so
-# the value is resolved live from the same npm discovery the CLI's own update
-# checker uses — a pinned constant would silently shrink the list as it aged.
-_CODEX_MODELS_URL = "https://chatgpt.com/backend-api/codex/models"
 _NPM_LATEST_URL = "https://registry.npmjs.org/@openai%2fcodex/latest"
 _NPM_TIMEOUT_SECONDS = 10.0
 
@@ -283,6 +278,7 @@ class CodexHarness(Harness):
     model_prefixes = ("gpt-", "o1", "o3", "o4")
     models = ("gpt-5.5",)
     default_model = "gpt-5.5"
+    model_discovery_url = "https://chatgpt.com/backend-api/codex/models"
     command = "codex"
 
     # OAuth refresh config (consumed by the Harness templates).
@@ -391,15 +387,23 @@ class CodexHarness(Harness):
         return _CODEX_USAGE_URL, headers
 
     @classmethod
-    async def _models_request(cls, token: CodexToken) -> tuple[str, dict]:
+    async def get_model_discovery_url(cls) -> str:
+        # ``client_version`` is required and the server returns only models
+        # with ``minimal_client_version <= client_version``, so the value is
+        # resolved live from the same npm discovery the CLI's own update
+        # checker uses — a pinned constant would silently shrink the list.
         version = await _latest_cli_version()
+        return f"{cls.model_discovery_url}?client_version={version}"
+
+    @classmethod
+    def get_model_discovery_headers(cls, token: CodexToken) -> dict:
         headers = {
             "Authorization": f"Bearer {token.access_token}",
             "User-Agent": _CODEX_USER_AGENT,
         }
         if token.account_id:
             headers["ChatGPT-Account-Id"] = token.account_id
-        return f"{_CODEX_MODELS_URL}?client_version={version}", headers
+        return headers
 
     @classmethod
     def _parse_usage(cls, raw: str) -> ParsedUsage:
@@ -443,10 +447,10 @@ class CodexHarness(Harness):
             data = json.loads(raw)
         except (json.JSONDecodeError, TypeError):
             return ParsedModels(ok=False, error="unparseable", raw=raw)
-        models = data.get("models") if isinstance(data, dict) else None
-        if not isinstance(models, list):
+        listed = data.get("models") if isinstance(data, dict) else None
+        if not isinstance(listed, list):
             return ParsedModels(ok=False, error="unexpected_payload", raw=raw)
-        entries = tuple(
+        models = tuple(
             {
                 "id": model["slug"],
                 "label": model.get("display_name") or model["slug"],
@@ -457,14 +461,14 @@ class CodexHarness(Harness):
                 ],
                 "minimal_client_version": model.get("minimal_client_version"),
             }
-            for model in models
+            for model in listed
             if isinstance(model, dict) and model.get("slug") and model.get("visibility") == "list"
         )
-        if not entries:
+        if not models:
             # A 200 with nothing selectable is what a stale-low client_version
             # produces — never let it read as "no models".
             return ParsedModels(ok=False, error="empty_list", raw=raw)
-        return ParsedModels(ok=True, entries=entries, raw=raw)
+        return ParsedModels(ok=True, models=models, raw=raw)
 
     def _build_codex_wrapper(
         self,

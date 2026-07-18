@@ -19,7 +19,7 @@ def test_claude_parse_maps_ids_and_labels() -> None:
     parsed = ClaudeHarness._parse_models(payload)
 
     assert parsed.ok
-    assert parsed.entries == (
+    assert parsed.models == (
         {"id": "claude-fable-5", "label": "Claude Fable 5"},
         {"id": "claude-opus-4-8", "label": "claude-opus-4-8"},
     )
@@ -73,7 +73,7 @@ def test_codex_parse_keeps_only_listed_models() -> None:
     parsed = CodexHarness._parse_models(payload)
 
     assert parsed.ok
-    assert parsed.entries == (
+    assert parsed.models == (
         {
             "id": "gpt-5.6-sol",
             "label": "GPT-5.6-Sol",
@@ -101,6 +101,6 @@ def test_allowed_models_falls_back_to_the_shipped_tuple() -> None:
 
 def test_allowed_models_prefers_the_fetched_list() -> None:
     settings = HarnessSettings(name="claude")
-    settings.fetched_models = [{"id": "claude-fable-5", "label": "Claude Fable 5", "extra": 1}]
+    settings.models_fetched = [{"id": "claude-fable-5", "label": "Claude Fable 5", "extra": 1}]
 
     assert settings.allowed_models == [{"id": "claude-fable-5", "label": "Claude Fable 5"}]

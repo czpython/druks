@@ -83,9 +83,9 @@ class HarnessSettings(Base):
     effort: Mapped[str] = mapped_column(String, default="high")
     timeout: Mapped[int] = mapped_column(default=1800)
     updated_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
-    # Provider-fetched picker entries (``{"id", "label", …}`` dicts); falsy ⇒
+    # Provider-fetched picker models (``{"id", "label", …}`` dicts); falsy ⇒
     # never fetched, the harness's shipped tuple serves.
-    fetched_models: Mapped[Any] = mapped_column(JSONB, default=None, nullable=True)
+    models_fetched: Mapped[Any] = mapped_column(JSONB, default=None, nullable=True)
     models_fetched_at: Mapped[datetime | None] = mapped_column(default=None)
 
     @classmethod
@@ -117,10 +117,10 @@ class HarnessSettings(Base):
 
     @property
     def allowed_models(self) -> list[dict]:
-        """Picker entries, ``{"id", "label"}`` each — the provider-fetched
+        """Picker models, ``{"id", "label"}`` each — the provider-fetched
         list when one has landed, else the harness's shipped tuple."""
-        if self.fetched_models:
-            return [{"id": m["id"], "label": m["label"]} for m in self.fetched_models]
+        if self.models_fetched:
+            return [{"id": m["id"], "label": m["label"]} for m in self.models_fetched]
         return [{"id": name, "label": name} for name in self.harness.models]
 
     async def refresh_models(self, connection: "HarnessConnection") -> dict[str, object]:
@@ -133,7 +133,7 @@ class HarnessSettings(Base):
             logger.warning("models fetch crashed for %s", self.name, exc_info=True)
             return {"harness": self.name, "ok": False, "error": "crashed"}
         if parsed.ok:
-            self.fetched_models = list(parsed.entries)
+            self.models_fetched = list(parsed.models)
             self.models_fetched_at = Base.utc_now()
             db_session().flush()
         return {"harness": self.name, "ok": parsed.ok, "error": parsed.error}

@@ -78,6 +78,8 @@ class Harness(ABC):
     # advisory: any string in a matching namespace runs.
     models: ClassVar[tuple[str, ...]]
     default_model: ClassVar[str]
+    # The provider's model-list endpoint the picker refresh fetches.
+    model_discovery_url: ClassVar[str]
     default_effort: ClassVar[str] = "high"
     default_timeout: ClassVar[int] = 1800
     # Per-CLI OAuth refresh config (set by subclasses).
@@ -526,9 +528,10 @@ class Harness(ABC):
             return ParsedModels(ok=False, error=exc.tag)
 
         try:
-            url, headers = await cls._models_request(token)
+            url = await cls.get_model_discovery_url()
         except ModelsRequestError as exc:
             return ParsedModels(ok=False, error=exc.tag)
+        headers = cls.get_model_discovery_headers(token)
         try:
             async with httpx.AsyncClient(timeout=_USAGE_TIMEOUT_SECONDS) as client:
                 response = await client.get(url, headers=headers)
@@ -550,10 +553,16 @@ class Harness(ABC):
         return ParsedModels(ok=False, error=tag)
 
     @classmethod
+    async def get_model_discovery_url(cls) -> str:
+        """The URL fetch_models GETs — ``model_discovery_url``, unless part of
+        it must be resolved at fetch time (override; raise
+        :class:`ModelsRequestError` when it can't be)."""
+        return cls.model_discovery_url
+
+    @classmethod
     @abstractmethod
-    async def _models_request(cls, token: Token) -> tuple[str, dict]:
-        """Return (url, headers) for the model-list endpoint; raise
-        :class:`ModelsRequestError` when the request can't be built."""
+    def get_model_discovery_headers(cls, token: Token) -> dict:
+        """Auth headers for the model-discovery endpoint."""
 
     @classmethod
     @abstractmethod
