@@ -2254,8 +2254,47 @@ input.set-select { background-image: none; padding-right: 12px; }
 .ins .wic-op-sub-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--text-faint); box-shadow: none; flex-shrink: 0; }
 
 /* Landing — the unauthenticated door: connect a harness, get a session. */
-.landing { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px; }
-.landing-card { width: min(440px, 100%); display: flex; flex-direction: column; gap: 14px; padding: 28px; border-radius: 8px; background: var(--surface); border: 1px solid var(--border); }
-.landing-card h1 { font-family: var(--font-mono); font-size: 18px; letter-spacing: 0.08em; }
-.landing-hint { font-size: 12.5px; color: var(--text-dim); line-height: 1.5; }
-.landing-connect { display: flex; flex-direction: column; gap: 9px; }
+.landing { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 40px 20px; position: relative; overflow: hidden; }
+.landing::before { content: ""; position: absolute; inset: 0; background-image: linear-gradient(var(--border) 1px, transparent 1px), linear-gradient(90deg, var(--border) 1px, transparent 1px); background-size: 56px 56px; opacity: 0.28; mask-image: radial-gradient(120% 100% at 50% 42%, #000 0%, transparent 70%); }
+.landing::after { content: ""; position: absolute; top: -20%; left: 50%; width: 70%; height: 70%; background: radial-gradient(circle, color-mix(in oklch, var(--accent-violet) 12%, transparent), transparent 66%); filter: blur(24px); animation: landing-drift 16s ease-in-out infinite alternate; }
+@keyframes landing-drift { from { transform: translate(-52%, 0) scale(1); } to { transform: translate(-48%, 10%) scale(1.12); } }
+.landing-col { position: relative; z-index: 1; width: min(452px, 100%); }
+.landing-word { font-family: var(--font-mono); font-size: 19px; font-weight: 600; letter-spacing: 0.42em; padding-left: 0.2em; }
+.landing-word span { color: var(--text-faint); }
+.landing-tag { margin-top: 9px; font-family: var(--font-mono); font-size: 12px; letter-spacing: 0.06em; color: var(--text-faint); }
+.landing-head { margin: 38px 0 30px; }
+.landing-head h1 { font-size: 26px; letter-spacing: -0.02em; font-weight: 600; }
+.landing-head p { margin-top: 12px; font-size: 15px; line-height: 1.6; color: var(--text-mid); }
+.landing-head b { color: var(--text); font-weight: 600; }
+.landing-stage { min-height: 284px; display: flex; flex-direction: column; gap: 14px; }
+.landing-choice { display: flex; flex-direction: column; gap: 10px; }
+.landing-card { display: flex; align-items: center; gap: 16px; width: 100%; text-align: left; padding: 18px 20px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; font-size: 15px; position: relative; overflow: hidden; transition: all 180ms ease; }
+.landing-card::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--fam); opacity: 0.55; transition: all 180ms ease; }
+.landing-card:hover { background: var(--surface-2); border-color: var(--border-loud); transform: translateY(-1px); }
+.landing-card:hover::before { opacity: 1; width: 4px; }
+.landing-card:focus-visible { outline: 2px solid var(--fam); outline-offset: 2px; }
+.landing-chip { flex: none; width: 38px; height: 38px; border-radius: 9px; background: var(--surface-2); border: 1px solid var(--border-loud); display: grid; place-items: center; font-family: var(--font-mono); font-size: 15px; font-weight: 600; color: var(--fam); }
+.landing-lbl { flex: 1; display: flex; flex-direction: column; gap: 3px; }
+.landing-lbl-t { font-weight: 600; letter-spacing: -0.01em; }
+.landing-lbl-d { font-size: 12.5px; color: var(--text-faint); }
+.landing-arrow { flex: none; color: var(--text-faint); transition: all 180ms ease; }
+.landing-card:hover .landing-arrow { color: var(--fam); transform: translateX(3px); }
+.landing-panel { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 26px; }
+.landing-panel-top { display: flex; align-items: center; gap: 13px; padding-bottom: 22px; margin-bottom: 22px; border-bottom: 1px solid var(--border); }
+.landing-panel-top .landing-chip { width: 40px; height: 40px; }
+.landing-who { display: flex; flex-direction: column; gap: 2px; }
+.landing-who-t { font-weight: 600; font-size: 15px; }
+.landing-who-s { font-size: 12.5px; color: var(--text-faint); font-family: var(--font-mono); }
+.landing-badge { margin-left: auto; font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; padding: 5px 10px; border-radius: 999px; border: 1px solid var(--border-loud); color: var(--text-dim); }
+.landing-busy { display: flex; align-items: center; gap: 11px; font-size: 14px; color: var(--text-mid); }
+.landing-spin { flex: none; width: 16px; height: 16px; border-radius: 50%; border: 2px solid var(--border-loud); border-top-color: var(--fam); animation: landing-spin 800ms linear infinite; }
+@keyframes landing-spin { to { transform: rotate(360deg); } }
+.landing-panel .hr-conn-flow { background: none; border: none; padding: 0; gap: 14px; }
+.landing-panel .hr-conn-step { font-size: 13.5px; }
+.landing-cancel { margin-top: 22px; width: 100%; padding: 11px 18px; border-radius: 10px; font-size: 13.5px; font-weight: 600; color: var(--text-mid); border: 1px solid var(--border-loud); transition: all 160ms ease; }
+.landing-cancel:hover:not(:disabled) { background: var(--surface-2); color: var(--text); }
+.landing-cancel:disabled { opacity: 0.45; cursor: default; }
+.landing-err { display: flex; gap: 10px; align-items: flex-start; font-size: 13px; line-height: 1.55; color: var(--text-mid); background: color-mix(in oklch, var(--outcome-failed) 7%, transparent); border: 1px solid color-mix(in oklch, var(--outcome-failed) 28%, transparent); border-radius: 10px; padding: 12px 14px; animation: landing-shake 400ms ease; }
+.landing-err-x { flex: none; font-family: var(--font-mono); font-weight: 700; color: var(--outcome-failed); }
+.landing-panel .landing-err { margin-top: 14px; }
+@keyframes landing-shake { 0%, 100% { transform: translateX(0); } 20% { transform: translateX(-4px); } 40% { transform: translateX(4px); } 60% { transform: translateX(-2px); } 80% { transform: translateX(2px); } }

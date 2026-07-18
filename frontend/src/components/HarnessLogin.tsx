@@ -34,7 +34,13 @@ export function useHarnessLogin(name: string, onDone: (account: Account) => void
       await onDone(account)
     })
 
-  return { challenge, code, setCode, busy, error, start, finish }
+  const cancel = () => {
+    setChallenge(null)
+    setCode('')
+    setError(null)
+  }
+
+  return { challenge, code, setCode, busy, error, start, finish, cancel }
 }
 
 export function LoginSteps({
