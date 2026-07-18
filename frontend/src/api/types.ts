@@ -37,8 +37,16 @@ export interface SubjectSummary {
 
 export interface SubjectStatus {
   state: RunState
-  // The one-line "what now": the parked gate's ask, or the running step.
-  label: string
+  // Facts the extension renders its lane copy from; the backend ships no prose.
+  // The driving run's kind and, while running, its latest agent call's agent.
+  kind: string | null
+  agent: string | null
+  // A parked run's gate identity; the extension maps it to its own words.
+  gate: string | null
+  // The failed driving run's stop reason, and its machine classification
+  // ("gate_timeout" = unanswered gate, not a crash).
+  failure: string | null
+  reason: string | null
 }
 
 // The live sub-phase a running run pushes ("Building sandbox VM…", "Working…") —

@@ -117,7 +117,7 @@ def test_parked_run_surfaces_needs_you(client: TestClient, db_session):
 
     detail = client.get("/api/faketest/thing/1").json()
     assert detail["status"]["state"] == "pending_input"
-    assert detail["status"]["label"] == "Approve the plan"
+    assert detail["status"]["gate"] == "approve_plan"
     parked = detail["timeline"][-1]
     assert parked["inputRequest"] == {"label": "Approve the plan"}
 
@@ -137,7 +137,7 @@ def test_status_carries_the_latest_run_failure(client: TestClient, db_session):
 
 
 def test_parked_board_row_skips_the_agent_call_query(client: TestClient, db_session, monkeypatch):
-    # A parked row's board label is its gate ask, never its latest agent call, so
+    # A parked row's status carries its gate ask, never its latest agent call, so
     # the per-subject status read must not query agent_calls — the board runs it
     # for every subject.
     run = _seed_run(
@@ -157,7 +157,7 @@ def test_parked_board_row_skips_the_agent_call_query(client: TestClient, db_sess
     )
 
     rows = {row["summary"]["id"]: row for row in client.get("/api/faketest/thing").json()["rows"]}
-    assert rows["1"]["status"]["label"] == "Approve the plan"
+    assert rows["1"]["status"]["gate"] == "approve_plan"
     assert queried == []
 
 

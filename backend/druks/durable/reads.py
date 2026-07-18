@@ -10,7 +10,6 @@ from druks.database import session_scope
 from druks.durable.live import keepalive_comment, serialize_model_event
 
 from .enums import RunState
-from .exceptions import GateTimeout
 from .models import AgentCall, Artifact, Run
 from .schemas import (
     AgentCallFiles,
@@ -21,7 +20,6 @@ from .schemas import (
     SubjectStatus,
     SubjectSummary,
     TranscriptChunk,
-    get_display_label,
 )
 
 _TRANSCRIPT_POLL_SECONDS = 0.5
@@ -78,9 +76,9 @@ def _timeline(runs: list[Run], calls_by_run: dict[str, list[AgentCall]]) -> list
 
 
 def _running_calls(active_run: Run | None) -> list[AgentCall]:
-    # A parked run's label is its gate ask; only a running run's reads its latest
-    # agent call. So a parked board row never queries agent_calls — the board runs
-    # this per subject.
+    # A parked run's status carries its gate ask; only a running run surfaces its
+    # latest agent call. So a parked board row never queries agent_calls — the
+    # board runs this per subject.
     if active_run and active_run.state != RunState.PENDING_INPUT.value:
         return AgentCall.list_for_run(active_run.id)
     return []
@@ -91,32 +89,28 @@ def _status(
 ) -> SubjectStatus:
     # The newest active run drives the subject — a stale parked run a fresh dispatch
     # superseded must not outrank it; once all are terminal, the latest one's outcome
-    # stands. State and its failure ride that run; the label is its own derivation.
+    # stands. Facts only: the extension's UI renders its copy from them.
     driving_run = active_run or (runs[0] if runs else None)
+    if not driving_run:
+        return SubjectStatus(state=RunState.SCHEDULED)
+    # A pending_input run is always the active one (ACTIVE_STATES), so the
+    # driving run alone decides parked-ness.
+    parked = driving_run.state == RunState.PENDING_INPUT.value
+    # ``agent`` is the *running* run's latest agent — a parked run's calls are
+    # history, not the current step, whichever caller handed them in. ``gate``
+    # is the inverse: only a parked run's input_gate is a live ask (a timed-out
+    # run keeps the stale column).
+    agent = None
+    if active_calls and not parked:
+        agent = active_calls[-1].agent
     return SubjectStatus(
-        state=RunState(driving_run.state) if driving_run else RunState.SCHEDULED,
-        label=_subject_label(active_run, runs, active_calls),
-        failure=driving_run.failure if driving_run else None,
+        state=RunState(driving_run.state),
+        kind=driving_run.kind,
+        agent=agent,
+        gate=driving_run.input_gate if parked else None,
+        failure=driving_run.failure,
+        reason=driving_run.failure_code,
     )
-
-
-def _subject_label(active_run: Run | None, runs: list[Run], active_calls: list[AgentCall]) -> str:
-    # The one-line "what now": a parked run's ask label, a timed-out gate's retry
-    # hint, else the active run's latest agent call (or its kind before any call).
-    if not active_run:
-        newest_run = runs[0] if runs else None
-        if newest_run and newest_run.failure_code == GateTimeout.code:
-            # An unanswered gate, not a crash — and the run is terminal, so a
-            # fresh trigger goes straight through; say so instead of a bare
-            # "failed" the operator would read as broken.
-            return f"{get_display_label(newest_run.kind)} timed out — re-trigger to retry"
-        return ""
-    if active_run.state == RunState.PENDING_INPUT.value:
-        ask = active_run.get_ask() if active_run.input_request else {}
-        return ask.get("label") or "Waiting on you"
-    if active_calls and active_calls[-1].agent:
-        return get_display_label(active_calls[-1].agent)
-    return get_display_label(active_run.kind)
 
 
 def read_transcript_chunk(

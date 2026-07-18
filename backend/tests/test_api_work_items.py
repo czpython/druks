@@ -138,7 +138,7 @@ def test_subject_detail_composes_summary_status_and_timeline(client: TestClient,
     assert detail["summary"]["links"]["pr"] == "https://github.com/ClawHaven/acme-app/pull/8"
     # Status is the platform's, aggregated from the item's runs — parked on a gate.
     assert detail["status"]["state"] == "pending_input"
-    assert detail["status"]["label"] == "Approve plan"
+    assert detail["status"]["gate"] == "review_plan"
     # The timeline is the platform's: the run itself, carrying its gate ask and
     # its agent calls.
     (entry,) = detail["timeline"]
