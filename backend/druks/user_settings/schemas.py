@@ -43,7 +43,7 @@ class HarnessResponse(BaseResponse):
             allowed_models=settings.allowed_models,
             connected=bool(login),
             kind=login.kind if login else None,
-            account=account.email if login else None,
+            account=account.username if login else None,
             provider_email=login.provider_email if login else None,
             expires_at=login.expires_at if login else None,
         )

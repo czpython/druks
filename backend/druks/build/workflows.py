@@ -147,7 +147,7 @@ class BuildWorkflow(Workflow):
         if not item:
             raise ValueError(f"dispatching a build for unknown work item {work_item_id}")
         # The assignee's account runs the calls; the owner fields stay input.
-        assignee = Account.get_for_email(assignee_email.strip()) if assignee_email else None
+        assignee = Account.get_for_username(assignee_email.strip()) if assignee_email else None
         run_id = await cls.start(
             subject=WorkItem.subject_for(item.id),
             account_id=assignee.id if assignee else None,

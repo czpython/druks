@@ -168,14 +168,14 @@ def rt():
 
     session = get_session(engine)
     try:
-        account = Account(email="op@example.com")
+        account = Account(username="op@example.com")
         session.add(account)
         session.flush()
         session.add(
             HarnessConnection(
                 harness="claude",
                 account_id=account.id,
-                provider_email=account.email,
+                provider_email=account.username,
                 payload={"claudeAiOauth": {"accessToken": "t"}},
             )
         )
@@ -253,9 +253,9 @@ def _account_id(engine, email: str) -> str:
 
     session = get_session(engine)
     try:
-        row = session.execute(select(Account).where(Account.email == email)).scalar_one_or_none()
+        row = session.execute(select(Account).where(Account.username == email)).scalar_one_or_none()
         if not row:
-            row = Account(email=email)
+            row = Account(username=email)
             session.add(row)
             session.commit()
         return row.id

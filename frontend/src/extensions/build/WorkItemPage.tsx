@@ -390,7 +390,7 @@ function RunRow({
           <div className="wic-op-row1">
             <span className="wic-op-kind">{run.label}</span>
             <span className="wic-op-owner" title="Who requested this run.">
-              {run.accountEmail}
+              {run.accountUsername}
             </span>
           </div>
           <span className={`wic-op-sub wic-sub-${run.state}`}>
@@ -409,7 +409,7 @@ function RunRow({
           <CallRow
             key={call.id}
             call={call}
-            runAccountEmail={run.accountEmail}
+            runAccountUsername={run.accountUsername}
             selected={selectedHere && selection?.call?.id === call.id}
             onSelect={() => onSelect(call.id)}
           />
@@ -420,12 +420,12 @@ function RunRow({
 
 function CallRow({
   call,
-  runAccountEmail,
+  runAccountUsername,
   selected,
   onSelect,
 }: {
   call: AgentCallSummary
-  runAccountEmail: string
+  runAccountUsername: string
   selected: boolean
   onSelect: () => void
 }) {
@@ -436,8 +436,8 @@ function CallRow({
         {CALL_GLYPH[call.status] ?? '·'}
       </span>
       <span className="wic-call-label">{call.label}</span>
-      {call.accountEmail !== runAccountEmail && (
-        <span className="wic-call-fallback" title={`Charged to ${call.accountEmail}.`}>
+      {call.accountUsername !== runAccountUsername && (
+        <span className="wic-call-fallback" title={`Charged to ${call.accountUsername}.`}>
           fallback
         </span>
       )}

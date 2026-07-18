@@ -63,7 +63,7 @@ export interface AgentCallSummary {
   agent?: string | null
   label: string
   /** The account charged for this call — differs from the run's on fallback. */
-  accountEmail: string
+  accountUsername: string
   status: 'running' | 'succeeded' | 'failed' | 'abandoned'
   startedAt: string
   finishedAt?: string | null
@@ -112,7 +112,7 @@ export interface RunSummary {
   createdAt: string
   updatedAt: string
   /** Who asked; "system" when nobody did. */
-  accountEmail: string
+  accountUsername: string
   agentCalls: AgentCallSummary[]
 }
 
@@ -203,7 +203,7 @@ export interface Harness {
 
 export interface Account {
   id: string
-  email: string
+  username: string
 }
 
 export interface LoginChallenge {

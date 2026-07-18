@@ -349,7 +349,7 @@ def test_connect_scopes_rows_by_harness_and_account(db_session):
     assert len({claude_row.id, codex_row.id, other.id}) == 3
     assert claude_row.account_id == codex_row.account_id  # same person, one account
     assert other.account_id != claude_row.account_id
-    assert Account.get_for_email("a@example.com").id == claude_row.account_id
+    assert Account.get_for_username("a@example.com").id == claude_row.account_id
     # The first account adopted the execution fallback.
     assert UserSettings.get().fallback_account_id == claude_row.account_id
 

@@ -53,7 +53,7 @@ describe('HarnessConnect', () => {
   it('drives the /api/auth connect flow end to end', async () => {
     const responses: Record<string, unknown> = {
       '/api/auth/harnesses/claude/login/start': { authorizeUrl: 'https://x/auth', loginId: 'L1' },
-      '/api/auth/harnesses/claude/login/complete': { id: 'a1', email: 'me@example.com' },
+      '/api/auth/harnesses/claude/login/complete': { id: 'a1', username: 'me@example.com' },
     }
     const fetchMock = vi.fn<(url: string, init?: RequestInit) => Promise<Response>>(
       async (url) => {

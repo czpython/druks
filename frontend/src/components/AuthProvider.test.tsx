@@ -23,7 +23,7 @@ async function flush() {
 
 describe('AuthProvider', () => {
   it('mounts the app only once the session resolves', async () => {
-    stubFetch(200, { id: 'a1', email: 'me@example.com' })
+    stubFetch(200, { id: 'a1', username: 'me@example.com' })
     render(
       <AuthProvider>
         <div data-testid="app" />
@@ -49,7 +49,7 @@ describe('AuthProvider', () => {
   })
 
   it('a broadcast 401 unmounts the app back to the landing', async () => {
-    stubFetch(200, { id: 'a1', email: 'me@example.com' })
+    stubFetch(200, { id: 'a1', username: 'me@example.com' })
     render(
       <AuthProvider>
         <div data-testid="app" />

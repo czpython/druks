@@ -47,7 +47,7 @@ class Scope(Workflow):
             )
         assignee = None
         if ticket.assignee_email:
-            assignee = Account.get_for_email(ticket.assignee_email.strip())
+            assignee = Account.get_for_username(ticket.assignee_email.strip())
         return await cls.start(
             subject=WorkItem.subject_for(item.id),
             account_id=assignee.id if assignee else None,

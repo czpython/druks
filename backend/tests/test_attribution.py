@@ -11,7 +11,7 @@ def test_run_projects_its_account(db_session):
 
     run = db_session.get(Run, "run-attr-1")
     assert run.account_id == account.id
-    assert RunResponse.from_run(run, []).account_email == "dev@example.com"
+    assert RunResponse.from_run(run, []).account_username == "dev@example.com"
 
 
 def test_an_unowned_run_belongs_to_system(db_session):
@@ -20,4 +20,4 @@ def test_an_unowned_run_belongs_to_system(db_session):
 
     run = db_session.get(Run, "run-attr-2")
     assert run.account_id == "system"
-    assert RunResponse.from_run(run, []).account_email == "system"
+    assert RunResponse.from_run(run, []).account_username == "system"

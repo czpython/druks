@@ -122,11 +122,11 @@ def test_legacy_rows_are_rekeyed_under_one_account(engine, monkeypatch):
 
     _upgrade("head")
 
-    accounts = _rows(engine, "SELECT id, email FROM accounts WHERE id != 'system'")
+    accounts = _rows(engine, "SELECT id, username FROM accounts WHERE id != 'system'")
     assert len(accounts) == 1
     # Stored stripped, original case; citext matches it regardless of case.
-    assert accounts[0]["email"] == "Op@Example.COM"
-    assert _rows(engine, "SELECT id FROM accounts WHERE email = 'op@example.com'")
+    assert accounts[0]["username"] == "Op@Example.COM"
+    assert _rows(engine, "SELECT id FROM accounts WHERE username = 'op@example.com'")
 
     logins = _rows(
         engine,
@@ -171,7 +171,7 @@ def test_orm_reads_migrated_rows_under_the_model_aad(engine, monkeypatch):
     try:
         assert ClaudeHarness.get_credentials() == CLAUDE_PAYLOAD
         codex_row = HarnessConnection.get_for_account(
-            "codex", Account.get_for_email("op@example.com").id
+            "codex", Account.get_for_username("op@example.com").id
         )
         assert dict(codex_row.payload) == CODEX_PAYLOAD
         assert codex_row.provider_email is None

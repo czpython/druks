@@ -74,7 +74,7 @@ def test_login_flow_mints_session_and_account(tmp_path, monkeypatch, db_session)
 
         response = _login(client, monkeypatch)
         assert response.status_code == 200
-        assert response.json()["email"] == "me@example.com"
+        assert response.json()["username"] == "me@example.com"
         cookie = response.headers["set-cookie"]
         assert SESSION_COOKIE in cookie
         assert "HttpOnly" in cookie
@@ -83,7 +83,7 @@ def test_login_flow_mints_session_and_account(tmp_path, monkeypatch, db_session)
 
         session = client.get("/api/auth/session")
         assert session.status_code == 200
-        assert session.json()["email"] == "me@example.com"
+        assert session.json()["username"] == "me@example.com"
 
 
 def test_the_session_read_slides_the_cookie(tmp_path, monkeypatch, db_session):
@@ -123,7 +123,9 @@ def test_redis_eviction_signs_out_but_keeps_credentials(tmp_path, monkeypatch, d
         druks.redis.get_client()._data.clear()  # Redis loss
         assert client.get("/api/auth/session").status_code == 401
     # The durable credential is untouched — only the session died.
-    assert HarnessConnection.get_for_account("claude", Account.get_for_email("me@example.com").id)
+    assert HarnessConnection.get_for_account(
+        "claude", Account.get_for_username("me@example.com").id
+    )
 
 
 def test_session_keeps_its_account_across_reconnects(tmp_path, monkeypatch, db_session):
@@ -137,8 +139,8 @@ def test_session_keeps_its_account_across_reconnects(tmp_path, monkeypatch, db_s
             json={"code": "thecode", "loginId": start.json()["loginId"]},
         )
         assert complete.status_code == 200
-        assert complete.json()["email"] == "me@example.com"
-    account = Account.get_for_email("me@example.com")
+        assert complete.json()["username"] == "me@example.com"
+    account = Account.get_for_username("me@example.com")
     codex = HarnessConnection.get_for_account("codex", account.id)
     assert codex.provider_email == "corp-seat@corp.com"
 
@@ -162,7 +164,7 @@ def test_bound_reconnect_requires_its_session_at_complete(tmp_path, monkeypatch,
         # The flow must never rebind the login by email fallback.
         assert response.status_code == 422
         assert "different session" in response.json()["detail"]
-    assert not Account.get_for_email("corp-seat@corp.com")
+    assert not Account.get_for_username("corp-seat@corp.com")
     assert not any(row.harness == "codex" for row in HarnessConnection.list_all())
 
 
@@ -196,7 +198,7 @@ def test_new_identity_cannot_acquire_legacy_logins(tmp_path, monkeypatch, db_ses
     with _client(tmp_path) as client:
         response = _login(client, monkeypatch, email="newcomer@example.com")
         assert response.status_code == 200
-    accounts = {account.email: account for account in _all_accounts()}
+    accounts = {account.username: account for account in _all_accounts()}
     assert set(accounts) == {"op@example.com", "newcomer@example.com", "system"}
     # The legacy login stays put; the fallback account stays the operator's.
     assert HarnessConnection.reload(legacy.id).account_id == accounts["op@example.com"].id
@@ -213,7 +215,7 @@ def test_dashboard_identity_resolves_the_migrated_account(tmp_path, monkeypatch,
         assert response.status_code == 200
     # No second account minted, the legacy login updated in place; reload()
     # reads past this task's identity map.
-    assert {account.email for account in _all_accounts()} == {"op@example.com", "system"}
+    assert {account.username for account in _all_accounts()} == {"op@example.com", "system"}
     updated = HarnessConnection.reload(legacy_id)
     assert dict(updated.payload)["claudeAiOauth"]["accessToken"] == "AT"
 

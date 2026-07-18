@@ -38,5 +38,5 @@ def seed_system_account(engine) -> None:
     # Owns every run nobody asked for: crons, background work.
     with get_session(engine) as session:
         if not session.get(Account, SYSTEM_ACCOUNT_ID):
-            session.add(Account(id=SYSTEM_ACCOUNT_ID, email="system"))
+            session.add(Account(id=SYSTEM_ACCOUNT_ID, username="system"))
             session.commit()

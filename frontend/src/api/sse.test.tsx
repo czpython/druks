@@ -56,7 +56,7 @@ beforeEach(() => {
   FakeEventSource.instances = []
   vi.stubGlobal('EventSource', FakeEventSource)
   // Every SSE error rechecks the session; default to a live one.
-  stubSession(JSON.stringify({ id: 'a1', email: 'me@example.com' }), 200)
+  stubSession(JSON.stringify({ id: 'a1', username: 'me@example.com' }), 200)
 })
 
 afterEach(() => {
@@ -218,7 +218,7 @@ describe('useSSE', () => {
   })
 
   it('rechecks the session on error and stays open while it is live', async () => {
-    const fetchMock = stubSession(JSON.stringify({ id: 'a1', email: 'me@example.com' }), 200)
+    const fetchMock = stubSession(JSON.stringify({ id: 'a1', username: 'me@example.com' }), 200)
     render(<Harness url="/api/x" handlers={{ 'foo.updated': vi.fn() }} />)
 
     act(() => {
