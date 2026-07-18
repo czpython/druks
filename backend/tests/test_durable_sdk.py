@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 import psycopg
 import pytest
+from conftest import init_db
 from druks.agents import Agent, AgentOutput
 from druks.database import configure_session, get_session
 from druks.durable import FatalError, Run, RunState
@@ -153,8 +154,6 @@ def rt():
     admin.close()
 
     engine = create_engine(URL)
-    from druks.database import init_db
-
     init_db(engine)  # full schema incl. durable_runs + the work_items chain
     configure_engine(engine)
     configure_session(engine)

@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 import psycopg
 import pytest
+from conftest import init_db
 from druks.database import configure_session, get_session
 from druks.durable import Run, RunState
 from druks.durable.engine import configure_engine, init_dbos, launch, shutdown
@@ -48,8 +49,6 @@ def rt():
     admin.close()
 
     engine = create_engine(URL)
-    from druks.database import init_db
-
     init_db(engine)
     configure_engine(engine)
     configure_session(engine)

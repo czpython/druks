@@ -4,16 +4,29 @@ import secrets
 from pathlib import Path
 from unittest import mock
 
+# The models modules register their tables on Base for init_db's create_all.
+import druks.durable.models  # noqa: F401
+import druks.harnesses.models  # noqa: F401
+import druks.mcp.models  # noqa: F401
+import druks.notifications.models  # noqa: F401
 import druks.redis
+import druks.skills.models  # noqa: F401
+import druks.user_settings.models  # noqa: F401
 import pytest
+from druks.bootstrap import seed
 from druks.database import (
     _session_factory,
     configure_session,
     create_engine_from_url,
-    init_db,
 )
-from druks.extensions.loader import iter_extensions, register_workflow_package
+from druks.extensions.loader import (
+    import_extension_models,
+    iter_extensions,
+    register_workflow_package,
+)
+from druks.models import Base
 from druks.settings import Settings
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 # Every Session the suite opens binds to the per-test connection (the _txn
@@ -196,6 +209,19 @@ class FakeLinear:
 
     async def get_issue(self, issue_id: str) -> dict[str, object]:
         return {"description": self._description}
+
+
+def init_db(engine) -> None:
+    """Create any missing tables and run the first-start seeds — the suite's
+    schema path. Production schema is owned by Alembic (``druks init-db`` runs
+    ``alembic upgrade head``). Idempotent."""
+    import_extension_models()
+    # citext backs the case-insensitive email columns; create_all needs the
+    # type to exist first (production gets it from the accounts migration).
+    with engine.begin() as connection:
+        connection.execute(text("CREATE EXTENSION IF NOT EXISTS citext"))
+    Base.metadata.create_all(engine)
+    seed(engine)
 
 
 @pytest.fixture(scope="session")

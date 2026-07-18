@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 import psycopg
 import pytest
+from conftest import init_db
 from druks.database import configure_session, db_session, get_session
 from druks.durable import Run, RunState
 from druks.durable.engine import configure_engine, init_dbos, launch, shutdown
@@ -30,7 +31,6 @@ pytestmark = [
 
 @pytest.fixture(scope="module", autouse=True)
 def rt():
-    from druks.database import init_db
     from druks.extensions.loader import load
     from druks.extensions.registry import agents, workflows
     from fastapi import FastAPI

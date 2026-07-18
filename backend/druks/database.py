@@ -3,7 +3,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, scoped_session, sessionmaker
 
 _ALEMBIC_INI = Path(__file__).resolve().parent.parent / "alembic.ini"
@@ -13,8 +13,7 @@ def run_migrations(database_url: str) -> None:
     """Bring the schema to head — the migrate container's job (``druks
     init-db``). Core first, then each installed extension's own migrations: an
     external extension owns an independent history, so this order is the contract,
-    not a cross-repo revision link. Production schema is owned by Alembic;
-    ``init_db`` (create_all) is only for the pytest fixture."""
+    not a cross-repo revision link. Production schema is owned by Alembic."""
     from alembic import command
     from alembic.config import Config
 
@@ -84,32 +83,6 @@ def create_engine_from_url(database_url: str):
     # writes. Model methods ``flush()``; the boundary commits. Low pool_timeout
     # because a checkout wait blocks the event loop.
     return create_engine(database_url, pool_pre_ping=True, pool_timeout=5)
-
-
-def init_db(engine) -> None:
-    """Create any missing tables and run the first-start seeds. Used by the
-    pytest fixture; production schema is owned by Alembic (``druks init-db``
-    runs ``alembic upgrade head``). Idempotent."""
-    # cycle: every models module imports db_session from here at module
-    # top, so we can't pull them in at file scope. Extension tables (build,
-    # usage) register through import_extension_models().
-    import druks.durable.models  # noqa: F401
-    import druks.harnesses.models  # noqa: F401
-    import druks.mcp.models  # noqa: F401
-    import druks.notifications.models  # noqa: F401
-    import druks.skills.models  # noqa: F401
-    import druks.user_settings.models  # noqa: F401
-    from druks.bootstrap import seed
-    from druks.extensions.loader import import_extension_models
-    from druks.models import Base
-
-    import_extension_models()
-    # citext backs the case-insensitive email columns; create_all needs the
-    # type to exist first (production gets it from the accounts migration).
-    with engine.begin() as connection:
-        connection.execute(text("CREATE EXTENSION IF NOT EXISTS citext"))
-    Base.metadata.create_all(engine)
-    seed(engine)
 
 
 def get_session(engine) -> Session:

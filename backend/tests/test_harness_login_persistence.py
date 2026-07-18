@@ -2,6 +2,7 @@ import os
 
 import psycopg
 import pytest
+from conftest import init_db
 from druks.database import configure_session, db_session, get_session
 from druks.harnesses.claude import ClaudeHarness
 from druks.harnesses.models import HarnessConnection
@@ -31,8 +32,6 @@ pytestmark = pytest.mark.skipif(not _pg_up(), reason="test Postgres not reachabl
 
 @pytest.fixture
 def engine():
-    from druks.database import init_db
-
     admin = psycopg.connect(f"{PG_BASE}/postgres", autocommit=True)
     admin.execute(f"DROP DATABASE IF EXISTS {DB}")
     admin.execute(f"CREATE DATABASE {DB}")

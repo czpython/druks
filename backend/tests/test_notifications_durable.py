@@ -4,9 +4,9 @@ from types import SimpleNamespace
 
 import psycopg
 import pytest
-from conftest import configure_app_for_test, make_settings
+from conftest import configure_app_for_test, init_db, make_settings
 from dbos import DBOS
-from druks.database import configure_session, db_session, get_session, init_db
+from druks.database import configure_session, db_session, get_session
 from druks.durable.engine import configure_engine, init_dbos, launch, shutdown
 from druks.durable.enums import RunState
 from druks.extensions.registry import workflows
