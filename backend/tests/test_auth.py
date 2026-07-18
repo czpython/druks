@@ -197,7 +197,7 @@ def test_new_identity_cannot_acquire_legacy_logins(tmp_path, monkeypatch, db_ses
         response = _login(client, monkeypatch, email="newcomer@example.com")
         assert response.status_code == 200
     accounts = {account.email: account for account in _all_accounts()}
-    assert set(accounts) == {"op@example.com", "newcomer@example.com"}
+    assert set(accounts) == {"op@example.com", "newcomer@example.com", "system"}
     # The legacy login stays put; the fallback account stays the operator's.
     assert HarnessConnection.reload(legacy.id).account_id == accounts["op@example.com"].id
     assert UserSettings.get().fallback_account_id == accounts["op@example.com"].id
@@ -211,9 +211,9 @@ def test_dashboard_identity_resolves_the_migrated_account(tmp_path, monkeypatch,
     with _client(tmp_path) as client:
         response = _login(client, monkeypatch, email="op@example.com")
         assert response.status_code == 200
-    # One account, the legacy login updated in place; reload() reads past
-    # this task's identity map.
-    assert len(_all_accounts()) == 1
+    # No second account minted, the legacy login updated in place; reload()
+    # reads past this task's identity map.
+    assert {account.email for account in _all_accounts()} == {"op@example.com", "system"}
     updated = HarnessConnection.reload(legacy_id)
     assert dict(updated.payload)["claudeAiOauth"]["accessToken"] == "AT"
 

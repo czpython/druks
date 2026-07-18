@@ -122,7 +122,7 @@ def test_legacy_rows_are_rekeyed_under_one_account(engine, monkeypatch):
 
     _upgrade("head")
 
-    accounts = _rows(engine, "SELECT id, email FROM accounts")
+    accounts = _rows(engine, "SELECT id, email FROM accounts WHERE id != 'system'")
     assert len(accounts) == 1
     # Stored stripped, original case; citext matches it regardless of case.
     assert accounts[0]["email"] == "Op@Example.COM"
@@ -185,5 +185,5 @@ def test_fresh_install_migrates_without_the_variable(engine, monkeypatch):
 
     _upgrade("head")
 
-    assert _rows(engine, "SELECT id FROM accounts") == []
+    assert _rows(engine, "SELECT id FROM accounts") == [{"id": "system"}]
     assert _rows(engine, "SELECT id FROM harness_logins") == []
