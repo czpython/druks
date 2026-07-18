@@ -54,13 +54,10 @@ class UserSettings(Base):
         self.updated_at = Base.utc_now()
         db_session().flush()
 
-    @classmethod
-    def ensure_fallback_account(cls, account_id: str) -> None:
-        settings = cls.get()
-        if not settings.fallback_account_id:
-            settings.fallback_account_id = account_id
-            settings.updated_at = Base.utc_now()
-            db_session().flush()
+    def set_fallback_account(self, account_id: str) -> None:
+        self.fallback_account_id = account_id
+        self.updated_at = Base.utc_now()
+        db_session().flush()
 
     def set_gate_park_destination(self, destination_id: str | None) -> None:
         # None is the off-switch, so this is a set-or-clear, not a skip-on-None.

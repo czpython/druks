@@ -75,8 +75,11 @@ async def complete_login(
             detail="This sign-in was started under a different session — start it again.",
         )
     account = session_account or Account.get_or_create(completed.provider_email)
-    # The very first login is the execution fallback until reassigned.
-    UserSettings.ensure_fallback_account(account.id)
+    # Runs with no actor execute as the fallback account; claim the slot when
+    # none is set yet.
+    settings = UserSettings.get()
+    if not settings.fallback_account_id:
+        settings.set_fallback_account(account.id)
     HarnessConnection.connect(
         harness=harness.name,
         account=account,

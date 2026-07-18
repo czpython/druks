@@ -400,7 +400,9 @@ def connect_harness(harness_cls, payload: dict, *, provider_email: str = "op@exa
     from druks.user_settings.models import UserSettings
 
     account = Account.get_or_create(provider_email)
-    UserSettings.ensure_fallback_account(account.id)
+    settings = UserSettings.get()
+    if not settings.fallback_account_id:
+        settings.set_fallback_account(account.id)
     _, expires_at = harness_cls._refresh_state(payload)
     return HarnessConnection.connect(
         harness=harness_cls.name,

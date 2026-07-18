@@ -64,7 +64,9 @@ def _connect(payload: dict) -> str:
     from druks.user_settings.models import UserSettings
 
     account = Account.get_or_create("op@example.com")
-    UserSettings.ensure_fallback_account(account.id)
+    settings = UserSettings.get()
+    if not settings.fallback_account_id:
+        settings.set_fallback_account(account.id)
     row = HarnessConnection.connect(
         harness="claude",
         account=account,
