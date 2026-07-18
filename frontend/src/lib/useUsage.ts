@@ -9,15 +9,12 @@ import type {
   UsageTodayResponse,
 } from '../api/types'
 
-// Nothing scrapes server-side on its own — an open app is the driver.
 const REFRESH_TICK_MS = 5 * 60_000
 
 /**
- * The viewer's usage snapshot, plus the scrape driver: while mounted,
- * nudge a scrape of the viewer's own connections every tick (the server
- * floors repeats) and re-read at a 60s cadence. ``refresh()`` is the
- * same nudge for the manual button — the endpoint is synchronous, so
- * one invalidate shows the fresh row.
+ * The viewer's usage snapshot. While mounted, nudges a scrape of the
+ * viewer's connections every tick (the server floors repeats) and
+ * re-reads at a 60s cadence; ``refresh()`` is the manual nudge.
  */
 export function useUsage() {
   const queryClient = useQueryClient()

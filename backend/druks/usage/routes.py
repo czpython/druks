@@ -29,9 +29,7 @@ router = APIRouter(tags=["usage"])
 # The /today bucket for calls whose model no current harness claims.
 UNATTRIBUTED = "unattributed"
 
-# The refresh endpoint scrapes at most this often per connection — the
-# frontend tick drives it, this floor keeps an open tab from hammering
-# the providers.
+# An open tab must not hammer the providers.
 _REFRESH_FLOOR_SECONDS = 60
 
 # When a snapshot crosses this age, the pill flips to a warning glyph
@@ -71,8 +69,6 @@ async def get_usage(account: Account = Depends(current_account)) -> UsageRespons
 
 @router.post("/refresh")
 async def refresh_usage(account: Account = Depends(current_account)) -> None:
-    # The frontend tick is the only scrape driver: the viewer's own
-    # connections, floored so an open tab cannot hammer the providers.
     now = datetime.now(UTC)
     for harness in get_harnesses():
         connection = HarnessConnection.get_for_account(harness.name, account.id)

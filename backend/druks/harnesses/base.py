@@ -458,7 +458,7 @@ class Harness(ABC):
         account_id = connection.account_id
         try:
             parsed = await cls.fetch_usage(connection)
-        except Exception:  # noqa: BLE001 — one broken connection must not lose the others' snapshots
+        except Exception:  # noqa: BLE001 — a crashed scrape records an error row, not a failed refresh
             logger.warning("usage fetch crashed for %s", cls.name, exc_info=True)
             UsageScrape(
                 harness=cls.name,
