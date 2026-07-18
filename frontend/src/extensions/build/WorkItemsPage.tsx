@@ -12,7 +12,7 @@ import { RepoCell } from '../../components/RepoCell'
 import { StatusGlyph } from '../../components/StatusGlyph'
 import { TicketCell } from '../../components/TicketCell'
 import { relTime, secondsSince, updatedAtSortKey } from '../../lib/format'
-import { laneLabel } from './lane'
+import { statusLine } from './statusLine'
 import { workItemPathFromSummary } from './slug'
 
 /** ``owner/name`` -> ``name`` for the repo column. */
@@ -26,7 +26,7 @@ function matchesQuery(row: WorkItemRow, q: string): boolean {
   if (!q.trim()) return true
   const needle = q.toLowerCase()
   const { summary, status } = row
-  return `${summary.title} ${summary.remoteKey ?? ''} ${summary.repo} ${laneLabel(status)}`
+  return `${summary.title} ${summary.remoteKey ?? ''} ${summary.repo} ${statusLine(status)}`
     .toLowerCase()
     .includes(needle)
 }
@@ -58,7 +58,7 @@ function WorkItemRowView({
       {/* The line is the ask ("Review plan"), the live step ("Implementing…"),
           or the timeout hint — build's copy over the platform's status facts. */}
       <span className="wi-next mono dim">
-        {live ? `${laneLabel(status)}…` : laneLabel(status)}
+        {live ? `${statusLine(status)}…` : statusLine(status)}
       </span>
       <span className="wi-updated mono dim">
         {failed ? `failed ${when}` : parked ? `parked ${when}` : when}

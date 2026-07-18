@@ -20,7 +20,7 @@ import { Page } from '../../components/Page'
 import { queryGate } from '../../components/QueryGate'
 import { RunTranscript } from '../../components/RunTranscript'
 import { computeElapsed, dur, formatTokenCount, relTime, secondsSince } from '../../lib/format'
-import { laneLabel } from './lane'
+import { statusLine } from './statusLine'
 import { agentCallPath, workItemPath } from './slug'
 import { useCanonicalPath } from '../../lib/useCanonicalPath'
 import { useTicker } from '../../lib/useTicker'
@@ -139,11 +139,11 @@ const STATE_CLS: Record<RunState, string> = {
   orphaned: 'failed',
 }
 
-// The pill renders build's lane copy over the platform's status facts; the
+// The pill renders build's status line over the platform's facts; the
 // tone comes from the lifecycle state. Live (a dot animates) while a run is active.
 function statusView(status: SubjectStatus): Status {
   const live = status.state === 'running' || status.state === 'pending_input'
-  return { cls: STATE_CLS[status.state], label: laneLabel(status), live }
+  return { cls: STATE_CLS[status.state], label: statusLine(status), live }
 }
 
 const fmtTok = (n: number) => (n > 0 ? formatTokenCount(n) : '0')

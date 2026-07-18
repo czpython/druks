@@ -1,6 +1,6 @@
 import type { SubjectStatus } from '../../api/types'
 
-// Build's lane copy, composed from the platform's status facts — the backend
+// Build's status-line copy, composed from the platform's status facts — the backend
 // ships data; the extension owns its own vocabulary.
 
 // The parked line per gate identity. Scope's gate parks for the operator's
@@ -16,7 +16,7 @@ function kindLabel(kind: string): string {
   return spaced.charAt(0).toUpperCase() + spaced.slice(1)
 }
 
-export function laneLabel(status: SubjectStatus): string {
+export function statusLine(status: SubjectStatus): string {
   if (status.state === 'pending_input') {
     return (status.gate && PARKED_LINES[status.gate]) || 'Waiting on you'
   }

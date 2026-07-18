@@ -91,19 +91,25 @@ def _status(
     # superseded must not outrank it; once all are terminal, the latest one's outcome
     # stands. Facts only: the extension's UI renders its copy from them.
     driving_run = active_run or (runs[0] if runs else None)
-    parked = bool(active_run) and active_run.state == RunState.PENDING_INPUT.value
+    if not driving_run:
+        return SubjectStatus(state=RunState.SCHEDULED)
+    # A pending_input run is always the active one (ACTIVE_STATES), so the
+    # driving run alone decides parked-ness.
+    parked = driving_run.state == RunState.PENDING_INPUT.value
     # ``agent`` is the *running* run's latest agent — a parked run's calls are
-    # history, not the current step, whichever caller handed them in.
+    # history, not the current step, whichever caller handed them in. ``gate``
+    # is the inverse: only a parked run's input_gate is a live ask (a timed-out
+    # run keeps the stale column).
     agent = None
     if active_calls and not parked:
         agent = active_calls[-1].agent
     return SubjectStatus(
-        state=RunState(driving_run.state) if driving_run else RunState.SCHEDULED,
-        kind=driving_run.kind if driving_run else None,
+        state=RunState(driving_run.state),
+        kind=driving_run.kind,
         agent=agent,
-        gate=active_run.input_gate if parked else None,
-        failure=driving_run.failure if driving_run else None,
-        reason=driving_run.failure_code if driving_run else None,
+        gate=driving_run.input_gate if parked else None,
+        failure=driving_run.failure,
+        reason=driving_run.failure_code,
     )
 
 

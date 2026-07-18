@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { SubjectStatus } from '../../api/types'
-import { laneLabel } from './lane'
+import { statusLine } from './statusLine'
 
 function status(overrides: Partial<SubjectStatus>): SubjectStatus {
   return {
@@ -15,43 +15,43 @@ function status(overrides: Partial<SubjectStatus>): SubjectStatus {
   }
 }
 
-describe('laneLabel', () => {
+describe('statusLine', () => {
   it('parked renders build’s line for the gate identity', () => {
-    expect(laneLabel(status({ state: 'pending_input', gate: 'scope_reply' }))).toBe(
+    expect(statusLine(status({ state: 'pending_input', gate: 'scope_reply' }))).toBe(
       'Reply on the ticket',
     )
-    expect(laneLabel(status({ state: 'pending_input', gate: 'review_work' }))).toBe(
+    expect(statusLine(status({ state: 'pending_input', gate: 'review_work' }))).toBe(
       'Review implementation',
     )
   })
 
   it('an unmapped gate reads as a generic park', () => {
-    expect(laneLabel(status({ state: 'pending_input', gate: 'review' }))).toBe('Waiting on you')
+    expect(statusLine(status({ state: 'pending_input', gate: 'review' }))).toBe('Waiting on you')
   })
 
   it('parked without a gate falls back', () => {
-    expect(laneLabel(status({ state: 'pending_input' }))).toBe('Waiting on you')
+    expect(statusLine(status({ state: 'pending_input' }))).toBe('Waiting on you')
   })
 
   it('running shows the live agent over the kind', () => {
-    expect(laneLabel(status({ agent: 'implement' }))).toBe('Implement')
+    expect(statusLine(status({ agent: 'implement' }))).toBe('Implement')
   })
 
   it('running before any call shows the kind', () => {
-    expect(laneLabel(status({}))).toBe('Scope')
+    expect(statusLine(status({}))).toBe('Scope')
   })
 
   it('a timed-out gate renders the re-trigger hint', () => {
-    expect(laneLabel(status({ state: 'failed', reason: 'gate_timeout' }))).toBe(
+    expect(statusLine(status({ state: 'failed', reason: 'gate_timeout' }))).toBe(
       'Scope timed out — re-trigger to retry',
     )
   })
 
   it('a crash renders no line', () => {
-    expect(laneLabel(status({ state: 'failed', failure: 'boom' }))).toBe('')
+    expect(statusLine(status({ state: 'failed', failure: 'boom' }))).toBe('')
   })
 
   it('the hint is failed-only — an orphaned run with the code renders nothing', () => {
-    expect(laneLabel(status({ state: 'orphaned', reason: 'gate_timeout' }))).toBe('')
+    expect(statusLine(status({ state: 'orphaned', reason: 'gate_timeout' }))).toBe('')
   })
 })
