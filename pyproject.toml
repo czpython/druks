@@ -1,7 +1,7 @@
 [project]
 name = "druks"
 version = "0.0.1"
-description = "Platform for durable agent orchestration."
+description = "Autonomous software delivery; the self-hosted home for durable agent apps."
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]

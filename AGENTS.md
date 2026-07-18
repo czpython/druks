@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Druks is a platform for durable agent orchestration on DBOS and Postgres. It owns
+Druks runs durable agent applications on DBOS and Postgres. It owns
 workflow execution, persisted state and events, gates, webhooks, sandbox access,
 and the shared dashboard. Apps are **extensions**: standalone Python packages
 that self-register through the `druks.extensions` entry point. `build` is the
