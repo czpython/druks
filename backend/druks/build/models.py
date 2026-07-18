@@ -141,13 +141,13 @@ class ProjectRepo(Base):
         return db_session().scalars(stmt).first()
 
     @classmethod
-    def get_for_signals(
+    def lookup(
         cls,
         *,
         project_name: str | None,
         labels: list[str],
     ) -> "ProjectRepo | None":
-        """Resolve a ticket's PR-target repo from its routing signals.
+        """Look up the PR-target repo from a ticket's routing signals.
 
         Precedence: tracker project name (the original Linear convention),
         then labels — first bare-name match wins. One Jira project can span

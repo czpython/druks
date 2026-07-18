@@ -8,14 +8,14 @@ def _register(db_session, *full_names):
     db_session.flush()
 
 
-def _resolve(**signals):
+def _lookup(**signals):
     defaults = {"project_name": None, "labels": []}
-    return ProjectRepo.get_for_signals(**{**defaults, **signals})
+    return ProjectRepo.lookup(**{**defaults, **signals})
 
 
 def test_project_name_wins_over_labels(db_session):
     _register(db_session, "acme/widget", "octo/alfred")
-    row = _resolve(project_name="widget", labels=["alfred"])
+    row = _lookup(project_name="widget", labels=["alfred"])
     assert row.full_name == "acme/widget"
 
 
@@ -23,16 +23,16 @@ def test_label_routes_when_project_name_is_not_a_repo(db_session):
     """The org-project shape: the Jira project names the org, not a repo, and
     SHRP tickets carry a free-form 'Alfred' label — matched case-insensitively."""
     _register(db_session, "octo/alfred")
-    row = _resolve(project_name="Octo", labels=["customer-request", "Alfred"])
+    row = _lookup(project_name="Octo", labels=["customer-request", "Alfred"])
     assert row.full_name == "octo/alfred"
 
 
 def test_first_matching_label_wins(db_session):
     _register(db_session, "octo/alfred", "octo/obrv2")
-    row = _resolve(labels=["obrv2", "Alfred"])
+    row = _lookup(labels=["obrv2", "Alfred"])
     assert row.full_name == "octo/obrv2"
 
 
 def test_no_signal_matches_any_repo(db_session):
     _register(db_session, "octo/alfred")
-    assert _resolve(project_name="Octo", labels=["bug"]) is None
+    assert _lookup(project_name="Octo", labels=["bug"]) is None

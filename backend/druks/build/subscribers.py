@@ -236,9 +236,7 @@ async def _dispatch_intake(source: str, payload: dict) -> None:
 
 async def _resolve_repo(source: str, payload: dict) -> tuple[str | None, int | None]:
     if source == "jira":
-        target = ProjectRepo.get_for_signals(
-            project_name=payload["project_name"], labels=payload["labels"]
-        )
+        target = ProjectRepo.lookup(project_name=payload["project_name"], labels=payload["labels"])
         return (target.full_name, target.project_id) if target else (None, None)
     # Linear: the project name is the bare repo name; resolve the owner by
     # probing the operator Extension's installations.

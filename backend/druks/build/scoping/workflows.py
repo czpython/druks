@@ -30,9 +30,7 @@ class Scope(Workflow):
             return None
         item = WorkItem.get_for_remote_key(source=ticket.provider, remote_key=ticket.key)
         if not item:
-            target = ProjectRepo.get_for_signals(
-                project_name=ticket.project_name, labels=ticket.labels
-            )
+            target = ProjectRepo.lookup(project_name=ticket.project_name, labels=ticket.labels)
             project = Project.get_for_repo(target.full_name) if target else None
             if not project:
                 logger.info("No project routes %s; not scoping.", ticket.key)
