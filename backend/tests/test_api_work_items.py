@@ -39,17 +39,14 @@ def _seed_scope_run(db_session, item, *, state="finished", status=None):
         subject={"type": "work_item", "id": item.id},
     )
     seed_call(db_session, run, "scope", status="failed" if state == "failed" else "succeeded")
-    if status is not None:
-        from druks.events.models import Event
-
-        Event.emit(
-            type="scoped" if status == "ready" else status,
-            subject=WorkItem.subject_for(item.id),
-        )
-        db_session.flush()
     handoff = {"ready": "scoped", "skipped": "skipped"}.get(status)
     if handoff is not None:
         item.set_status(handoff)
+    elif status is not None:
+        from druks.events.models import Event
+
+        Event.emit(type=status, subject=WorkItem.subject_for(item.id))
+        db_session.flush()
     return run
 
 
@@ -94,11 +91,8 @@ def _seed_op(db_session, work_item_id, *, kind="implement", state, input_gate=No
 def _ship(repo, pr_number):
     """Merge a work item's PR — the 'shipped' log event that lands it in
     History, mirroring the merge handler."""
-    from druks.events.models import Event
-
     item = WorkItem.get_for_pr(repo=repo, pr_number=pr_number)
     if item:
-        Event.emit(type="shipped", subject=WorkItem.subject_for(item.id))
         item.set_status("shipped")
 
 

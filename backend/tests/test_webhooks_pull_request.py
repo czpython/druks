@@ -160,7 +160,6 @@ async def test_remerge_after_retrigger_records_a_fresh_shipped(db_session, tmp_p
     repo, pr_number, branch = "ClawHaven/acme-app", 77, "agent/eng-9"
     work_item_id, _ = _park_work_item(repo=repo, pr_number=pr_number, branch=branch)
     # Round 1: shipped.
-    Event.emit(type="shipped", subject=WorkItem.subject_for(work_item_id))
     WorkItem.get(work_item_id).set_status("shipped")
     # Re-trigger: a newer RUNNING build run; dispatch cleared the handoff status.
     new_run = seed_build_run(ds(), work_item_id=work_item_id, state="running")
@@ -179,7 +178,6 @@ async def test_merge_echo_with_no_newer_activity_still_dedups(db_session, tmp_pa
     webhook arrives with nothing newer — still dropped."""
     repo, pr_number, branch = "ClawHaven/acme-app", 78, "agent/eng-10"
     work_item_id, _ = _park_work_item(repo=repo, pr_number=pr_number, branch=branch)
-    Event.emit(type="shipped", subject=WorkItem.subject_for(work_item_id))
     WorkItem.get(work_item_id).set_status("shipped")
 
     await _fire_closed(repo=repo, pr_number=pr_number, branch=branch, tmp_path=tmp_path)

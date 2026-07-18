@@ -32,8 +32,7 @@ async def work_item_back_on_board(*, subject: dict, **_: object) -> None:
 
 @subscribe("run.finished", kind=Scope.kind, subject__type="work_item", result__status="ready")
 async def scope_outcome_settles_lane(*, subject: dict, **_: object) -> None:
-    Build.record_event(type="scoped", subject=subject, payload={})
-    WorkItem.get(subject["id"]).set_status(HandoffStatus.SCOPED)
+    WorkItem.get(subject["id"]).set_status(HandoffStatus.SCOPED, event_payload={})
 
 
 @subscribe("repo.pushed", to_default_branch=True)
@@ -118,7 +117,6 @@ async def observe_pr_closed(*, repo: str, pr_number: int, payload: dict) -> None
 async def _ship(*, repo: str, pr_number: int, work_item: WorkItem | None) -> None:
     if not work_item:
         return
-    Build.record_event(type="shipped", subject=WorkItem.subject_for(work_item.id))
     work_item.set_status(HandoffStatus.SHIPPED)
     # An operator merge over a waiting gate strands the parked run — cancel it.
     # A RUNNING run converges on its own (its merge step sees the closed PR), so
@@ -133,12 +131,7 @@ async def _ship(*, repo: str, pr_number: int, work_item: WorkItem | None) -> Non
 async def _observe_external_close(*, repo: str, pr_number: int, work_item: WorkItem | None) -> None:
     if not work_item:
         return
-    Build.record_event(
-        type="cancelled",
-        subject=WorkItem.subject_for(work_item.id),
-        payload={"external": True},
-    )
-    work_item.set_status(HandoffStatus.CANCELLED)
+    work_item.set_status(HandoffStatus.CANCELLED, event_payload={"external": True})
     await work_item.cancel_active_build(failure="pr closed without merge")
     snapshot_policy = work_item.extension_config_snapshot.get("policy") or {}
     if RepoPolicy.model_validate(snapshot_policy).delete_branch:
@@ -190,10 +183,7 @@ async def ticket_close_cancels_parked_scope(*, payload: dict) -> None:
     parked = Scope.parked_for(item.id)
     if not parked:
         return
-    Build.record_event(
-        type="cancelled", subject=WorkItem.subject_for(item.id), payload={"external": True}
-    )
-    item.set_status(HandoffStatus.CANCELLED)
+    item.set_status(HandoffStatus.CANCELLED, event_payload={"external": True})
     await parked.cancel(failure="ticket closed while scope parked")
 
 

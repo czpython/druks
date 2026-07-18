@@ -7,6 +7,7 @@ from sqlalchemy import ForeignKey, Index, func, select, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from druks.build.enums import HandoffStatus
 from druks.db import Base, db_session
 from druks.durable.reads import get_subject_status
 from druks.durable.schemas import SubjectStatus
@@ -379,7 +380,19 @@ class WorkItem(Base):
         calls = AgentCall.list_for_subject("work_item", str(item.id))
         return calls[-1].sandbox_host_id if calls else None
 
-    def set_status(self, status: str | None) -> None:
+    def set_status(
+        self, status: HandoffStatus | None, *, event_payload: dict[str, Any] | None = None
+    ) -> None:
+        """The handoff-lane write. A non-None status is a milestone, so the
+        matching build event records first — the pairing is structural, not a
+        call-site convention. None clears the lane on (re)dispatch: no event."""
+        if status:
+            # cycle: the extension imports this module at file scope.
+            from druks.build.extension import Build
+
+            Build.record_event(
+                type=status, subject=self.subject_for(self.id), payload=event_payload
+            )
         self.status = status
         self.updated_at = Base.utc_now()
         db_session().flush()
