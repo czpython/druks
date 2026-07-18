@@ -228,7 +228,9 @@ class Harness(ABC):
                 "account_id": account_id,
             }
         )
-        await get_client().set(_login_pending_key(flow_id), pending, ex=_LOGIN_PENDING_TTL_SECONDS)
+        await get_client().set(
+            f"{LOGIN_PENDING_PREFIX}{flow_id}", pending, ex=_LOGIN_PENDING_TTL_SECONDS
+        )
         return url, flow_id
 
     @classmethod
@@ -236,7 +238,7 @@ class Harness(ABC):
         """Pop the flow's single-use state, parse the paste, exchange the code.
         Raises :class:`LoginError` on failure; the state is gone either way,
         so a retry re-starts cleanly."""
-        pending = await get_client().getdel(_login_pending_key(flow_id))  # single-use
+        pending = await get_client().getdel(f"{LOGIN_PENDING_PREFIX}{flow_id}")  # single-use
         if not pending:
             raise LoginError("This sign-in expired — start it again.")
         expected = json.loads(pending)
@@ -579,10 +581,6 @@ async def _post_grant(url: str, body: dict) -> dict:
         return response.json()
     except ValueError as exc:
         raise GrantError("bad_response") from exc
-
-
-def _login_pending_key(flow_id: str) -> str:
-    return f"{LOGIN_PENDING_PREFIX}{flow_id}"
 
 
 def _b64url(raw: bytes) -> str:

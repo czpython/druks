@@ -17,33 +17,27 @@ _POLL = 2.0
 _SHUT_TTL_SECONDS = 60
 
 
-def _rotating_key(connection_id: str) -> str:
-    return f"{ROTATING_PREFIX}{connection_id}"
-
-
-def _users_key(connection_id: str) -> str:
-    return f"{GATE_USERS_PREFIX}{connection_id}"
-
-
 @asynccontextmanager
 async def use(connection_id: str, call_id: str) -> AsyncIterator[None]:
     """Register the call as an active user of its connection for its span."""
     client = get_client()
+    rotating = f"{ROTATING_PREFIX}{connection_id}"
+    users = f"{GATE_USERS_PREFIX}{connection_id}"
     while True:
         waited = 0.0
-        while waited < _RUN_HORIZON and await client.exists(_rotating_key(connection_id)):
+        while waited < _RUN_HORIZON and await client.exists(rotating):
             await asyncio.sleep(_POLL)
             waited += _POLL
-        await client.zadd(_users_key(connection_id), {call_id: time.time() + _RUN_HORIZON})
+        await client.zadd(users, {call_id: time.time() + _RUN_HORIZON})
         # A flag landing between the wait and the add must not race the
         # rotation: back out and re-wait.
-        if not await client.exists(_rotating_key(connection_id)):
+        if not await client.exists(rotating):
             break
-        await client.zrem(_users_key(connection_id), call_id)
+        await client.zrem(users, call_id)
     try:
         yield
     finally:
-        await client.zrem(_users_key(connection_id), call_id)
+        await client.zrem(users, call_id)
 
 
 @asynccontextmanager
@@ -51,9 +45,11 @@ async def shut(connection_id: str) -> AsyncIterator[bool]:
     """Shut the connection's gate; yield True when idle — rotate now — else
     defer to the next tick. Reopens on exit either way."""
     client = get_client()
-    await client.set(_rotating_key(connection_id), "1", ex=_SHUT_TTL_SECONDS)
+    rotating = f"{ROTATING_PREFIX}{connection_id}"
+    users = f"{GATE_USERS_PREFIX}{connection_id}"
+    await client.set(rotating, "1", ex=_SHUT_TTL_SECONDS)
     try:
-        await client.zremrangebyscore(_users_key(connection_id), "-inf", time.time())
-        yield not await client.zcard(_users_key(connection_id))
+        await client.zremrangebyscore(users, "-inf", time.time())
+        yield not await client.zcard(users)
     finally:
-        await client.delete(_rotating_key(connection_id))
+        await client.delete(rotating)

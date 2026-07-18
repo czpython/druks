@@ -139,18 +139,6 @@ async def _register_client(
     return registration
 
 
-def _connect_state_key(state: str) -> str:
-    return f"{OAUTH_CONNECT_STATE_PREFIX}{state}"
-
-
-def _access_token_key(name: str) -> str:
-    return f"{OAUTH_ACCESS_TOKEN_PREFIX}{name}"
-
-
-def _refresh_lock_key(name: str) -> str:
-    return f"{OAUTH_REFRESH_LOCK_PREFIX}{name}"
-
-
 async def begin_connect(name: str, server_url: str, endpoint: str) -> str:
     """Start the operator's authorization-code + PKCE flow for one server:
     discover the authorization server, register druks as a public client, stash
@@ -183,7 +171,9 @@ async def begin_connect(name: str, server_url: str, endpoint: str) -> str:
         "redirect_uri": redirect_uri,
     }
     await get_client().set(
-        _connect_state_key(state), json.dumps(pending), ex=OAUTH_CONNECT_STATE_TTL_SECONDS
+        f"{OAUTH_CONNECT_STATE_PREFIX}{state}",
+        json.dumps(pending),
+        ex=OAUTH_CONNECT_STATE_TTL_SECONDS,
     )
     query = urlencode(
         {
@@ -207,7 +197,7 @@ async def complete_connect(*, state: str, code: str) -> str:
     real only when this request's transaction commits, and a cache filled
     ahead of that would outlive its failure. The first delivery mints from the
     committed grant."""
-    raw = await get_client().getdel(_connect_state_key(state))
+    raw = await get_client().getdel(f"{OAUTH_CONNECT_STATE_PREFIX}{state}")
     if not raw:
         raise OauthConnectError("unknown", "unknown or expired state; start the connect flow again")
     pending = json.loads(raw)
@@ -249,7 +239,7 @@ async def complete_connect(*, state: str, code: str) -> str:
 
 
 async def evict_access_token(name: str) -> None:
-    await get_client().delete(_access_token_key(name))
+    await get_client().delete(f"{OAUTH_ACCESS_TOKEN_PREFIX}{name}")
 
 
 async def mint_access_token(name: str) -> str:
@@ -263,13 +253,13 @@ async def mint_access_token(name: str) -> str:
     fail loudly — delivery never ships a server the agent can't authenticate
     to."""
     redis = get_client()
+    token_key = f"{OAUTH_ACCESS_TOKEN_PREFIX}{name}"
+    lock_key = f"{OAUTH_REFRESH_LOCK_PREFIX}{name}"
     for _ in range(OAUTH_MINT_WAIT_ATTEMPTS):
-        cached = await redis.get(_access_token_key(name))
+        cached = await redis.get(token_key)
         if cached:
             return cached.decode()
-        if await redis.set(
-            _refresh_lock_key(name), "1", nx=True, ex=OAUTH_REFRESH_LOCK_TTL_SECONDS
-        ):
+        if await redis.set(lock_key, "1", nx=True, ex=OAUTH_REFRESH_LOCK_TTL_SECONDS):
             break
         await asyncio.sleep(OAUTH_MINT_WAIT_INTERVAL_SECONDS)
     else:
@@ -322,7 +312,7 @@ async def mint_access_token(name: str) -> str:
                 name, "the token endpoint returned a malformed expires_in"
             ) from error
         if ttl > 0:
-            await redis.set(_access_token_key(name), tokens["access_token"], ex=ttl)
+            await redis.set(token_key, tokens["access_token"], ex=ttl)
         return tokens["access_token"]
     finally:
-        await redis.delete(_refresh_lock_key(name))
+        await redis.delete(lock_key)

@@ -9,7 +9,11 @@ import pytest
 from conftest import configure_app_for_test, make_settings
 from druks.extensions.registry import mcp_servers
 from druks.mcp import oauth
-from druks.mcp.constants import OAUTH_ACCESS_TOKEN_PREFIX, OAUTH_CONNECT_STATE_PREFIX
+from druks.mcp.constants import (
+    OAUTH_ACCESS_TOKEN_PREFIX,
+    OAUTH_CONNECT_STATE_PREFIX,
+    OAUTH_REFRESH_LOCK_PREFIX,
+)
 from druks.mcp.enums import TokenSource
 from druks.mcp.exceptions import GrantRefreshError, MissingGrantError, OauthConnectError
 from druks.mcp.helpers import get_bearer_token_env_var
@@ -294,11 +298,11 @@ async def test_mint_losing_the_refresh_lock_polls_for_the_winners_token(
     _store_grant()
     redis = get_client()
     monkeypatch.setattr(oauth, "OAUTH_MINT_WAIT_INTERVAL_SECONDS", 0)
-    await redis.set(oauth._refresh_lock_key(_NAME), "1")
+    await redis.set(f"{OAUTH_REFRESH_LOCK_PREFIX}{_NAME}", "1")
 
     async def _winner_finishes():
         await redis.set(f"{OAUTH_ACCESS_TOKEN_PREFIX}{_NAME}", "at-winner")
-        await redis.delete(oauth._refresh_lock_key(_NAME))
+        await redis.delete(f"{OAUTH_REFRESH_LOCK_PREFIX}{_NAME}")
 
     winner = asyncio.create_task(_winner_finishes())
     assert await oauth.mint_access_token(_NAME) == "at-winner"
@@ -310,7 +314,7 @@ async def test_mint_times_out_loudly_when_the_refresh_lock_never_frees(db_sessio
     _store_grant()
     monkeypatch.setattr(oauth, "OAUTH_MINT_WAIT_INTERVAL_SECONDS", 0)
     monkeypatch.setattr(oauth, "OAUTH_MINT_WAIT_ATTEMPTS", 3)
-    await get_client().set(oauth._refresh_lock_key(_NAME), "1")
+    await get_client().set(f"{OAUTH_REFRESH_LOCK_PREFIX}{_NAME}", "1")
 
     with pytest.raises(GrantRefreshError, match="concurrent refresh"):
         await oauth.mint_access_token(_NAME)
