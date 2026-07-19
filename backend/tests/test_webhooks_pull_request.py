@@ -329,3 +329,23 @@ async def test_external_close_survives_policy_resolution_failure(db_session, tmp
     assert deleted == []  # cleanup skipped when policy can't be resolved
     assert pushed == [SemanticStatus.READY_FOR_AGENT]  # ticket still reset
     assert _milestone_count(work_item_id, "cancelled") == 1
+
+
+@pytest.mark.asyncio
+async def test_stale_close_after_redispatch_spares_the_new_run(db_session, tmp_path):
+    """A delayed pr.closed for a superseded attempt's PR must not touch the new
+    run: re-dispatch cleared the item's branch/PR, so the stale close no longer
+    resolves the item."""
+    from druks.database import db_session as ds
+
+    repo, pr_a, branch_a = "ClawHaven/acme-app", 61, "agent/eng-old"
+    item = make_test_work_item(repo=repo, title="Re-dispatched")
+    item.update(pr_number=pr_a, branch=branch_a)
+    # Re-dispatch: a new run takes over and the prior attempt's branch/PR clear.
+    new_run = seed_build_run(ds(), work_item_id=item.id, state="running")
+    item.update(branch=None, pr_number=None)
+
+    await _fire_closed(repo=repo, pr_number=pr_a, branch=branch_a, tmp_path=tmp_path, merged=False)
+
+    assert _fresh_run(new_run.id).state == "running"  # the live attempt is untouched
+    assert _milestone_count(item.id, "cancelled") == 0

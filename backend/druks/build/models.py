@@ -18,6 +18,10 @@ from druks.workflows import Run
 
 logger = logging.getLogger(__name__)
 
+# WorkItem.update() sentinel: a field left at _KEEP is untouched, while passing
+# None clears the (nullable) column — the two an intent flag has to tell apart.
+_KEEP: Any = object()
+
 
 class Project(Base):
     __tablename__ = "projects"
@@ -365,24 +369,24 @@ class WorkItem(Base):
     def update(
         self,
         *,
-        title: str | None = None,
-        remote_url: str | None = None,
-        pr_number: int | None = None,
-        branch: str | None = None,
-        build_run_id: str | None = None,
-        project_id: int | None = None,
+        title: str = _KEEP,
+        remote_url: str | None = _KEEP,
+        pr_number: int | None = _KEEP,
+        branch: str | None = _KEEP,
+        build_run_id: str | None = _KEEP,
+        project_id: int = _KEEP,
     ) -> None:
-        if title is not None:
+        if title is not _KEEP:
             self.title = title
-        if remote_url is not None:
+        if remote_url is not _KEEP:
             self.remote_url = remote_url
-        if pr_number is not None:
+        if pr_number is not _KEEP:
             self.pr_number = pr_number
-        if branch is not None:
+        if branch is not _KEEP:
             self.branch = branch
-        if build_run_id is not None:
+        if build_run_id is not _KEEP:
             self.build_run_id = build_run_id
-        if project_id is not None:
+        if project_id is not _KEEP:
             self.project_id = project_id
         self.updated_at = Base.utc_now()
         db_session().flush()

@@ -160,7 +160,13 @@ class BuildWorkflow(Workflow):
             task_owner_email=assignee_email,
             task_owner_name=assignee_name,
         )
-        item.update(build_run_id=run_id)
+        # start() hands back the live run's id on a duplicate dispatch; only a
+        # genuinely new run is a fresh attempt. Point the item at it and drop the
+        # prior attempt's branch/PR so a late close for the old PR can't resolve
+        # this item onto the new run and cancel it — a duplicate keeps the live
+        # run's routing untouched.
+        if item.build_run_id != run_id:
+            item.update(build_run_id=run_id, branch=None, pr_number=None)
         # Back onto the active board: a scoped item re-enters flight when its
         # build starts. History is for items at rest in a handoff lane.
         item.set_status(None)
