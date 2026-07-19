@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 from druks.build import workflows as build_workflows
-from druks.build.prompt_view import BuildPromptView
+from druks.build.prompt_context import BuildPromptContext
 from druks.prompts import render_prompt
 
 _OP_TEMPLATES = [
@@ -18,8 +18,8 @@ _OP_TEMPLATES = [
 ]
 
 
-def _view() -> SimpleNamespace:
-    """A stand-in BuildPromptView exposing the fields the templates read."""
+def _build() -> SimpleNamespace:
+    """A stand-in BuildPromptContext exposing the fields the templates read."""
     return SimpleNamespace(
         repo="acme/widget",
         branch="agent/eng-1",
@@ -55,12 +55,12 @@ def _workspace() -> SimpleNamespace:
 async def test_build_operation_prompt_renders(template):
     output = await render_prompt(
         f"build/build_workflow/{template}",
-        view=_view(),
+        build=_build(),
         verification="VERIFICATION-BLOCK",
         workspace=_workspace(),
     )
 
-    # The view-derived bits resolved — a leftover ``workflow`` ref would have
+    # The build-derived bits resolved — a leftover ``workflow`` ref would have
     # raised on StrictUndefined.
     assert "acme/widget" in output
 
@@ -68,12 +68,12 @@ async def test_build_operation_prompt_renders(template):
 async def test_implement_prompt_provisions_when_no_pr_exists():
     # The first delivery has no PR: the implementer is told to create the branch and
     # open the draft PR; the revision path (dismiss stale reviews) must not render.
-    view = _view()
-    view.branch = None
-    view.pr_number = None
+    build = _build()
+    build.branch = None
+    build.pr_number = None
     output = await render_prompt(
         "build/build_workflow/implement.md",
-        view=view,
+        build=build,
         verification="VERIFICATION-BLOCK",
         workspace=_workspace(),
     )
@@ -86,12 +86,12 @@ async def test_implement_prompt_provisions_when_no_pr_exists():
 async def test_generate_plan_prompt_quotes_operator_content():
     """Free-text answers and the operator's note render block-quoted line by line —
     operator words stay answer content in the prompt, never instruction text."""
-    view = _view()
-    view.answered_questions = [{"question": "Which cache?", "answer": "redis\nwith a 5m TTL"}]
-    view.operator_note = "Tighten the rollout.\nSplit phase 2."
+    build = _build()
+    build.answered_questions = [{"question": "Which cache?", "answer": "redis\nwith a 5m TTL"}]
+    build.operator_note = "Tighten the rollout.\nSplit phase 2."
     output = await render_prompt(
         "build/build_workflow/generate_plan.md",
-        view=view,
+        build=build,
         verification="VERIFICATION-BLOCK",
         workspace=_workspace(),
     )
@@ -104,11 +104,11 @@ async def test_build_prompt_orders_the_ticket_fetch(template):
     """Every build agent is ordered to fetch the ticket from its source before
     acting — a mandatory first step, not a suggestion. Regression guard for the
     silently-skipped-fetch bug (agents working off the ticket ref alone)."""
-    view = _view()
-    view.source = "linear"
+    build = _build()
+    build.source = "linear"
     output = await render_prompt(
         f"build/build_workflow/{template}",
-        view=view,
+        build=build,
         verification="VERIFICATION-BLOCK",
         workspace=_workspace(),
     )
@@ -122,11 +122,11 @@ async def test_review_code_prompt_owns_its_followup_subissue():
     regression guard for the dangling promise left when druks-side sub-issue
     creation was removed and nothing filed it. LLM-first: the agent does the
     tracker write, druks acts on nothing it returns."""
-    view = _view()
-    view.source = "linear"
+    build = _build()
+    build.source = "linear"
     output = await render_prompt(
         "build/build_workflow/review_code.md",
-        view=view,
+        build=build,
         verification="VERIFICATION-BLOCK",
         workspace=_workspace(),
     )
@@ -135,15 +135,14 @@ async def test_review_code_prompt_owns_its_followup_subissue():
     assert '"summary"' in output  # the only thing it returns
 
 
-def test_build_prompt_view_covers_template_attrs():
-    # Every build prompt reads view.<attr>; assert BuildPromptView carries them all,
-    # so a template ref can never outrun the view contract. ``\bview`` skips the
-    # ``review.`` loop-var substring.
+def test_build_prompt_context_covers_template_attrs():
+    # Every build prompt reads build.<attr>; assert BuildPromptContext carries them
+    # all, so a template ref can never outrun the context contract.
     prompts_root = Path(build_workflows.__file__).resolve().parents[2]
     prompts_dir = prompts_root / "templates/prompts/build/build_workflow"
     attrs: set[str] = set()
     for template in prompts_dir.glob("*.md"):
-        attrs |= set(re.findall(r"\bview\.([a-z_]+)", template.read_text()))
-    fields = set(BuildPromptView.__dataclass_fields__)
+        attrs |= set(re.findall(r"\bbuild\.([a-z_]+)", template.read_text()))
+    fields = set(BuildPromptContext.__dataclass_fields__)
     missing = sorted(a for a in attrs if a not in fields)
-    assert not missing, f"BuildPromptView missing template attrs: {missing}"
+    assert not missing, f"BuildPromptContext missing template attrs: {missing}"

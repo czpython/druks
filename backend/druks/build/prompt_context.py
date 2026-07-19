@@ -10,10 +10,10 @@ from druks.build.models import ProjectRepo
 
 
 @dataclass(frozen=True)
-class BuildPromptView:
+class BuildPromptContext:
     """What build's prompt templates render against — a flat snapshot of the run's
     state, assembled once per agent call by ``BuildWorkflow.get_prompt_context``.
-    The templates read ``view.<field>`` and nothing else off the run, so this is
+    The templates read ``build.<field>`` and nothing else off the run, so this is
     the whole contract between the workflow and its prompts; the workflow itself
     stays free of template accessors.
     """

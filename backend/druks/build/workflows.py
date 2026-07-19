@@ -34,7 +34,7 @@ from druks.workflows import FatalError, Gate, Workflow, step
 
 from .extension import Build
 from .policy import RepoPolicy
-from .prompt_view import BuildPromptView
+from .prompt_context import BuildPromptContext
 from .workspace import RepoWorkspace
 
 if TYPE_CHECKING:
@@ -243,7 +243,7 @@ class BuildWorkflow(Workflow):
     async def get_prompt_context(self, **context: Any) -> dict[str, Any]:
         last = self._last_implement
         plan = self.plan
-        view = BuildPromptView(
+        prompt_context = BuildPromptContext(
             repo=self.input.repo,
             branch=self.branch,
             pr_number=self.pr_number,
@@ -269,7 +269,7 @@ class BuildWorkflow(Workflow):
             "verification": await self._policy.verification_block(
                 profile=self._profile, repo=self.input.repo
             ),
-            "view": view,
+            "build": prompt_context,
             **await super().get_prompt_context(**context),
         }
 
@@ -472,7 +472,7 @@ class BuildWorkflow(Workflow):
     def _last_implement(self) -> ImplementationOutput | None:
         return self._implementation_results[-1] if self._implementation_results else None
 
-    # Prompt-context projections — computed for BuildPromptView, not workflow API.
+    # Prompt-context projections — computed for BuildPromptContext, not workflow API.
     def _reviewer_requirements(self) -> list[ReviewOutput]:
         # Approve-with-required-changes verdicts on the current plan draft only —
         # reviews of superseded drafts don't bind the implementer.

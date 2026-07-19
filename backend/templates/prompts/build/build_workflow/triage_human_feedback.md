@@ -25,7 +25,7 @@ Triage the latest pending entry in the **Human feedback** section above. Decide 
 ## Post your triage outcome on the PR — REQUIRED (GitHub MCP)
 
 A `github` MCP server is connected. After you decide, you **must** post a comment
-on this PR ({{ view.repo }} #{{ view.pr_number }}) through
+on this PR ({{ build.repo }} #{{ build.pr_number }}) through
 it explaining what was decided and why — addressed to the reviewer, in reply to
 their feedback. This is in addition to the JSON you return: the JSON drives the
 build; the comment is what the reviewer sees.

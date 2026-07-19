@@ -1,7 +1,7 @@
-{% if view.related_repos %}
+{% if build.related_repos %}
 ## Reference repositories
 
-These related repos may hold useful context. They are NOT pre-cloned — if one is relevant to your task, clone it yourself:
+These related repos may hold useful build. They are NOT pre-cloned — if one is relevant to your task, clone it yourself:
 
 ```
 git clone https://github.com/<full_name> {{ workspace.workspace_root }}/related/<name>
@@ -14,7 +14,7 @@ git clone https://github.com/<full_name> {{ workspace.workspace_root }}/related/
 
 Repos:
 
-{% for ref in view.related_repos %}
+{% for ref in build.related_repos %}
 - `{{ ref.full_name }}`{% if ref.purpose %} — {{ ref.purpose }}{% endif %}
 {% endfor %}
 
