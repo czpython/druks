@@ -8,27 +8,6 @@ from druks.build.enums import (
     HumanFeedbackAction,
     ReviewDecision,
 )
-from druks.workflows import FatalError
-
-
-class QuestionOption(BaseModel):
-    id: str
-    label: str
-
-
-class Question(BaseModel):
-    id: str
-    status: Literal["open", "answered"] = "open"
-    prompt: str
-    options: list[QuestionOption] = Field(default_factory=list)
-    answer: str | None = None
-    comment_id: int | None = None
-
-
-class AcceptanceCriterion(BaseModel):
-    id: str
-    description: str
-    verification: str = ""
 
 
 class HumanFeedback(BaseModel):
@@ -39,28 +18,6 @@ class HumanFeedback(BaseModel):
     triage_body: str = ""
     question: str = ""
     implementation_instructions: str = ""
-
-
-class PlanData(BaseModel):
-    plan_markdown: str = ""
-    questions: list[Question] = Field(default_factory=list)
-    acceptance_criteria: list[AcceptanceCriterion] = Field(default_factory=list)
-
-    def get_answered(self, picks: dict[str, str]) -> list[dict[str, str]]:
-        # Each question the operator answered, paired with its answer — what the
-        # re-plan agent reads to resolve it. A pick matching an offered option maps
-        # to that option's label; anything else is the operator's own words, kept
-        # verbatim.
-        pairs = []
-        for question in self.questions:
-            chosen = picks.get(question.id)
-            if not chosen:
-                continue
-            label = next(
-                (option.label for option in question.options if option.id == chosen), chosen
-            )
-            pairs.append({"question": question.prompt, "answer": label})
-        return pairs
 
 
 class RepoProfilerOutput(AgentOutput):
@@ -109,11 +66,30 @@ class AcceptanceCriterionOutput(AgentOutput):
     verification: str
 
 
-def _criteria(items: list[AcceptanceCriterionOutput]) -> list[AcceptanceCriterion]:
-    return [
-        AcceptanceCriterion(id=c.id, description=c.description, verification=c.verification)
-        for c in items
-    ]
+class PlanData(BaseModel):
+    # The workflow's current plan, normalized from either producer — the
+    # generate_plan agent (questions and all) or a contract revision (questions
+    # resolved). It carries the agents' own output shapes; a re-plan reads the
+    # questions and acceptance criteria straight off them.
+    plan_markdown: str = ""
+    questions: list[QuestionOutput] = Field(default_factory=list)
+    acceptance_criteria: list[AcceptanceCriterionOutput] = Field(default_factory=list)
+
+    def get_answered(self, picks: dict[str, str]) -> list[dict[str, str]]:
+        # Each question the operator answered, paired with its answer — what the
+        # re-plan agent reads to resolve it. A pick matching an offered option maps
+        # to that option's label; anything else is the operator's own words, kept
+        # verbatim.
+        pairs = []
+        for question in self.questions:
+            chosen = picks.get(question.id)
+            if not chosen:
+                continue
+            label = next(
+                (option.label for option in question.options if option.id == chosen), chosen
+            )
+            pairs.append({"question": question.prompt, "answer": label})
+        return pairs
 
 
 class PlanOutput(AgentOutput):
@@ -127,15 +103,8 @@ class PlanOutput(AgentOutput):
     def to_result(self) -> PlanData:
         return PlanData(
             plan_markdown=self.plan_markdown,
-            acceptance_criteria=_criteria(self.acceptance_criteria),
-            questions=[
-                Question(
-                    id=q.id,
-                    prompt=q.prompt,
-                    options=[QuestionOption(id=o.id, label=o.label) for o in q.options],
-                )
-                for q in self.questions
-            ],
+            acceptance_criteria=self.acceptance_criteria,
+            questions=self.questions,
         )
 
 
@@ -152,15 +121,9 @@ class ContractRevisionOutput(AgentOutput):
         # implementation_instructions ride the prompt, not the plan artifact.
         return PlanData(
             plan_markdown=self.plan_markdown,
-            acceptance_criteria=_criteria(self.acceptance_criteria),
+            acceptance_criteria=self.acceptance_criteria,
             questions=[],
         )
-
-
-class PlanReview(BaseModel):
-    decision: ReviewDecision
-    body: str = ""
-    assignee_github_login: str | None = None
 
 
 class ReviewOutput(AgentOutput):
@@ -175,13 +138,6 @@ class ReviewOutput(AgentOutput):
     # Required but nullable: the agent always reports the field, null when it
     # resolved no assignee login convincingly.
     assignee_github_login: str | None
-
-    def to_result(self) -> PlanReview:
-        return PlanReview(
-            decision=self.decision,
-            body=self.body,
-            assignee_github_login=self.assignee_github_login,
-        )
 
 
 class TriageOutput(AgentOutput):
@@ -204,19 +160,11 @@ class CommandCheckOutput(AgentOutput):
     reason: str
 
 
-class Implementation(BaseModel):
-    # A delivery: a pushed commit on a branch with a PR. Every field required — an
-    # implementer that could not deliver raises out of to_result instead.
-    base_sha: str
-    head_sha: str
-    branch: str
-    pr_number: int
-
-
 class ImplementationOutput(AgentOutput):
     type: Literal["result"]
-    # ``needs_clarification`` = the implementer found a contradiction in the
-    # binding requirements and bailed; ``summary`` carries the reason.
+    # ``needs_clarification`` = the implementer found a contradiction in the binding
+    # requirements and bailed; ``summary`` carries the reason. The workflow turns
+    # that into a run-stopping failure.
     status: Literal["success", "needs_clarification"]
     # Nullable only for needs_clarification (bailed before delivering) — the strict
     # schema bans defaults, so optional is spelled required-but-nullable. On success
@@ -253,18 +201,6 @@ class ImplementationOutput(AgentOutput):
             )
         return self
 
-    def to_result(self) -> Implementation:
-        # A bail is a stop, not a result: the run fails with the implementer's own
-        # reason, read off the dashboard instead of dug out of the transcript.
-        if self.status == "needs_clarification":
-            raise FatalError(f"implementation needs clarification: {self.summary}")
-        return Implementation(
-            base_sha=self.base_sha,
-            head_sha=self.head_sha,
-            branch=self.branch,
-            pr_number=self.pr_number,
-        )
-
 
 class FindingOutput(AgentOutput):
     severity: Literal["high", "medium", "low"]
@@ -287,20 +223,12 @@ class AcceptanceResultOutput(AgentOutput):
     evidence: str
 
 
-class ImplementationReview(BaseModel):
-    verdict: EvaluationVerdict
-    body: str = ""
-
-
 class EvaluationOutput(AgentOutput):
     verdict: EvaluationVerdict
     body: str
     findings: list[FindingOutput]
     checks: list[EvalCheckOutput]
     acceptance_results: list[AcceptanceResultOutput]
-
-    def to_result(self) -> ImplementationReview:
-        return ImplementationReview(verdict=self.verdict, body=self.body)
 
 
 class CodeReviewOutput(AgentOutput):

@@ -1,7 +1,11 @@
-from druks.build.contracts import PlanData, PlanReview, Question, QuestionOption
+from types import SimpleNamespace
+
+import pytest
+from druks.build.contracts import PlanData, QuestionOptionOutput, QuestionOutput, ReviewOutput
 from druks.build.enums import ReviewDecision
 from druks.build.policy import RepoPolicy
 from druks.build.workflows import Build, BuildWorkflow
+from druks.workflows import FatalError
 
 
 async def test_plan_phase_threads_free_text_into_the_next_pass(monkeypatch):
@@ -16,10 +20,10 @@ async def test_plan_phase_threads_free_text_into_the_next_pass(monkeypatch):
             PlanData(
                 plan_markdown="v1",
                 questions=[
-                    Question(
+                    QuestionOutput(
                         id="q1",
                         prompt="Which cache?",
-                        options=[QuestionOption(id="a", label="Redis")],
+                        options=[QuestionOptionOutput(id="a", label="Redis")],
                     )
                 ],
             ),
@@ -35,7 +39,9 @@ async def test_plan_phase_threads_free_text_into_the_next_pass(monkeypatch):
         return next(plans)
 
     async def fake_review_agent():
-        return PlanReview(decision=ReviewDecision.REQUEST_CHANGES)
+        return ReviewOutput(
+            decision=ReviewDecision.REQUEST_CHANGES, body="", assignee_github_login=None
+        )
 
     monkeypatch.setattr(Build, "generate_plan", fake_plan_agent)
     monkeypatch.setattr(Build, "review_plan", fake_review_agent)
@@ -66,3 +72,19 @@ async def test_plan_phase_threads_free_text_into_the_next_pass(monkeypatch):
         },
         {"answered": [], "note": "add a rollback section"},
     ]
+
+
+async def test_needs_clarification_delivery_stops_the_run(monkeypatch):
+    """The implementer bailing (needs_clarification) fails the run with its own
+    reason — the stop is a workflow decision now, not a contract side effect."""
+    flow = BuildWorkflow()
+
+    async def bailed():
+        return SimpleNamespace(
+            status="needs_clarification",
+            summary="AC-3 requires a pure function that performs I/O",
+        )
+
+    monkeypatch.setattr(Build, "implement", bailed)
+    with pytest.raises(FatalError, match="pure function"):
+        await flow.implement()

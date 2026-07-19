@@ -72,11 +72,10 @@ def test_implementation_success_requires_a_delivery():
         _implementation(branch=None, pr_number=None)
 
 
-def test_implementation_needs_clarification_fails_the_run_with_its_reason():
-    # A bail is a stop, not a result: to_result raises with the agent's why, which
-    # becomes the run's failure — read off the dashboard, not dug out of the transcript.
-    from druks.workflows import FatalError
-
+def test_needs_clarification_may_omit_the_delivery_fields():
+    # The bail path carries no commit — the validator binds a delivery only on
+    # success, so a needs_clarification output validates with the shas left null.
+    # The workflow turns that bail into a run-stopping failure (see the plan-phase tests).
     bailed = _implementation(
         status="needs_clarification",
         summary="AC-3 requires a pure function that performs I/O",
@@ -86,8 +85,8 @@ def test_implementation_needs_clarification_fails_the_run_with_its_reason():
         branch=None,
         pr_number=None,
     )
-    with pytest.raises(FatalError, match="pure function"):
-        bailed.to_result()
+    assert bailed.status == "needs_clarification"
+    assert "pure function" in bailed.summary
 
 
 def test_get_answered_maps_picks_to_labels_and_keeps_free_text_verbatim():
@@ -95,13 +94,17 @@ def test_get_answered_maps_picks_to_labels_and_keeps_free_text_verbatim():
     # words (kept verbatim); unanswered questions don't reach the re-plan agent.
     plan = O.PlanData(
         questions=[
-            O.Question(
-                id="q1", prompt="Which cache?", options=[O.QuestionOption(id="a", label="Redis")]
+            O.QuestionOutput(
+                id="q1",
+                prompt="Which cache?",
+                options=[O.QuestionOptionOutput(id="a", label="Redis")],
             ),
-            O.Question(
-                id="q2", prompt="Which queue?", options=[O.QuestionOption(id="a", label="SQS")]
+            O.QuestionOutput(
+                id="q2",
+                prompt="Which queue?",
+                options=[O.QuestionOptionOutput(id="a", label="SQS")],
             ),
-            O.Question(id="q3", prompt="Feature flag?", options=[]),
+            O.QuestionOutput(id="q3", prompt="Feature flag?", options=[]),
         ]
     )
     assert plan.get_answered({"q1": "a", "q2": "kafka — we already run it"}) == [

@@ -143,15 +143,13 @@ def _stub(monkeypatch, rt):
     # stages (generate_plan, review_code) return their stub as the step result,
     # so those stubs are the real domain models; contract-consuming stages take
     # attribute lookalikes. Returns the invocation log (agent ids, in order).
-    from druks.build.contracts import Implementation
-
     results = {
         "generate_plan": PlanData(plan_markdown="p"),
         "review_plan": SimpleNamespace(
             decision=ReviewDecision.APPROVE, body="", assignee_github_login=None
         ),
-        "implement": Implementation(
-            base_sha="a", head_sha="b", branch="agent/acme-1", pr_number=42
+        "implement": SimpleNamespace(
+            status="success", base_sha="a", head_sha="b", branch="agent/acme-1", pr_number=42
         ),
         "evaluate_implementation": EvaluationOutput(
             verdict=EvaluationVerdict.PASS, body="", findings=[], checks=[], acceptance_results=[]

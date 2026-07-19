@@ -6,11 +6,11 @@ from pydantic import BaseModel, Field
 
 from druks.accounts.models import Account
 from druks.build.contracts import (
+    EvaluationOutput,
     HumanFeedback,
-    Implementation,
-    ImplementationReview,
+    ImplementationOutput,
     PlanData,
-    PlanReview,
+    ReviewOutput,
 )
 from druks.build.enums import (
     EvaluationVerdict,
@@ -121,12 +121,12 @@ class BuildWorkflow(Workflow):
         # run() from the top with every agent call and gate reply memoized, so
         # these rebuild to exactly what the live pass held.
         self._plans: list[PlanData] = []
-        self._plan_reviews: list[PlanReview] = []
+        self._plan_reviews: list[ReviewOutput] = []
         # Where _plan_reviews stood at the latest plan draft, so
         # reviewer_requirements only spans reviews of the current plan.
         self._reviews_at_plan = 0
-        self._implementation_reviews: list[ImplementationReview] = []
-        self._implementation_results: list[Implementation] = []
+        self._implementation_reviews: list[EvaluationOutput] = []
+        self._implementation_results: list[ImplementationOutput] = []
         self._human_feedback: list[HumanFeedback] = []
         # The questions the operator answered ({question, answer}), fed to the next plan
         # pass; empty on the first pass and after a plain re-plan.
@@ -364,7 +364,7 @@ class BuildWorkflow(Workflow):
         self._note = note
         return self._add_plan(await Build.generate_plan())
 
-    async def review_plan(self) -> PlanReview:
+    async def review_plan(self) -> ReviewOutput:
         grade = await Build.review_plan()
         self._plan_reviews.append(grade)
         return grade
@@ -372,8 +372,13 @@ class BuildWorkflow(Workflow):
     async def revise_contract(self) -> PlanData:
         return self._add_plan(await Build.revise_contract())
 
-    async def implement(self) -> Implementation:
+    async def implement(self) -> ImplementationOutput:
         delivery = await Build.implement()
+        # A bail is a stop, not a result: the implementer hit a contradiction in the
+        # binding requirements and couldn't deliver. Fail the run with its own reason,
+        # read off the dashboard instead of dug out of the transcript.
+        if delivery.status == "needs_clarification":
+            raise FatalError(f"implementation needs clarification: {delivery.summary}")
         if not self.pr_number:
             # First delivery: the implementer provisioned the branch + draft PR alongside
             # its commits; publish the pair (the run.state signal mirrors it onto the item).
@@ -381,7 +386,7 @@ class BuildWorkflow(Workflow):
         self._implementation_results.append(delivery)
         return delivery
 
-    async def evaluate(self) -> ImplementationReview:
+    async def evaluate(self) -> EvaluationOutput:
         review = await Build.evaluate_implementation()
         self._implementation_reviews.append(review)
         return review
@@ -443,11 +448,11 @@ class BuildWorkflow(Workflow):
         return self.plan.questions
 
     @property
-    def plan_reviews(self) -> list[PlanReview]:
+    def plan_reviews(self) -> list[ReviewOutput]:
         return list(self._plan_reviews)
 
     @property
-    def implementation_reviews(self) -> list[ImplementationReview]:
+    def implementation_reviews(self) -> list[EvaluationOutput]:
         return list(self._implementation_reviews)
 
     @property
@@ -462,7 +467,7 @@ class BuildWorkflow(Workflow):
         return len(self._plans)
 
     @property
-    def reviewer_requirements(self) -> list[PlanReview]:
+    def reviewer_requirements(self) -> list[ReviewOutput]:
         # Approve-with-required-changes verdicts on the current plan draft
         # only — reviews of superseded drafts don't bind the implementer.
         return [
@@ -482,7 +487,7 @@ class BuildWorkflow(Workflow):
         return list(self._human_feedback)
 
     @property
-    def _last_implement(self) -> Implementation | None:
+    def _last_implement(self) -> ImplementationOutput | None:
         return self._implementation_results[-1] if self._implementation_results else None
 
     @property
