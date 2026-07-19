@@ -1,5 +1,4 @@
 import logging
-import re
 from datetime import datetime
 from typing import Any
 
@@ -28,7 +27,6 @@ class Project(Base):
     # the natural display key — duplicate names would make the project
     # column ambiguous.
     name: Mapped[str] = mapped_column(unique=True)
-    slug: Mapped[str] = mapped_column(unique=True)
     created_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
     updated_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
 
@@ -39,9 +37,9 @@ class Project(Base):
     )
 
     @classmethod
-    def create(cls, *, name: str, slug: str | None = None) -> "Project":
+    def create(cls, *, name: str) -> "Project":
         session = db_session()
-        project = cls(name=name, slug=slug or slugify(name))
+        project = cls(name=name)
         session.add(project)
         session.flush()
         return project
@@ -161,11 +159,6 @@ class ProjectRepo(Base):
                 if row:
                     return row
         return None
-
-
-def slugify(name: str) -> str:
-    """Lowercase, replace non-alnum runs with single hyphens, trim ends."""
-    return re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
 
 
 class WorkItem(Base):

@@ -3,7 +3,7 @@ import logging
 from fastapi import APIRouter, Body, HTTPException, Query, Response, status
 from sqlalchemy import func, select, update
 
-from druks.build.models import Project, ProjectRepo, WorkItem, slugify
+from druks.build.models import Project, ProjectRepo, WorkItem
 from druks.build.schemas import (
     AddProjectRepoRequest,
     CreateProjectRequest,
@@ -44,7 +44,7 @@ async def create_project(body: CreateProjectRequest) -> ProjectSummary:
     name = body.name.strip()
     if not name:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "name is required")
-    project = Project.create(name=name, slug=body.slug)
+    project = Project.create(name=name)
     return ProjectSummary.from_project(project)
 
 
@@ -119,7 +119,6 @@ async def update_project(
         if not name:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "name cannot be empty")
         project.name = name
-        project.slug = slugify(name)
         db_session().flush()
     return ProjectSummary.from_project(project)
 

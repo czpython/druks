@@ -79,8 +79,8 @@ def _seed_work_item(engine, *, repo: str) -> int:
     from sqlalchemy.orm import Session
 
     with Session(engine) as session:
-        slug = f"rt-{uuid4().hex[:8]}"
-        project = Project(name=slug, slug=slug)
+        name = f"rt-{uuid4().hex[:8]}"
+        project = Project(name=name)
         session.add(project)
         session.flush()
         item = WorkItem(project_id=project.id, repo=repo, title="rt")

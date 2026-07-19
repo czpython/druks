@@ -28,7 +28,6 @@ export interface ProjectRepo {
 export interface Project {
   id: number
   name: string
-  slug: string
   createdAt: string
   updatedAt: string
   repos: ProjectRepo[]
@@ -40,7 +39,6 @@ export interface ProjectsResponse {
 
 export interface CreateProjectRequest {
   name: string
-  slug?: string | null
 }
 
 export interface UpdateProjectRequest {

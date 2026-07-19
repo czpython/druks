@@ -60,7 +60,6 @@ class ProjectRepoSummary(BaseResponse):
 class ProjectSummary(BaseResponse):
     id: int
     name: str
-    slug: str
     created_at: datetime
     updated_at: datetime
     repos: list[ProjectRepoSummary] = Field(default_factory=list)
@@ -70,7 +69,6 @@ class ProjectSummary(BaseResponse):
         return cls(
             id=project.id,
             name=project.name,
-            slug=project.slug,
             created_at=project.created_at,
             updated_at=project.updated_at,
             repos=[ProjectRepoSummary.from_repo(repo) for repo in project.repos],
@@ -83,7 +81,6 @@ class ProjectsResponse(BaseResponse):
 
 class CreateProjectRequest(BaseModel):
     name: str
-    slug: str | None = None
 
 
 class AddProjectRepoRequest(BaseModel):
