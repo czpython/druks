@@ -1,3 +1,4 @@
+import json
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
@@ -30,6 +31,40 @@ def get_display_label(kind: str) -> str:
     return kind.rsplit(".", 1)[-1].replace("_", " ").capitalize()
 
 
+def _wire_cost(char: str) -> int:
+    # What one character spends of a wire budget: its JSON-escaped UTF-8 bytes
+    # (a control byte like ESC serializes as  — six bytes, not one).
+    return len(json.dumps(char, ensure_ascii=False).encode()) - 2
+
+
+def clip(text: str | None, limit: int) -> str | None:
+    # Budgeted read-sides bound their free-text fields by what the field will
+    # occupy in the serialized response, so the budgets hold for multibyte and
+    # escape-heavy text alike. The ellipsis (3 bytes) marks the cut.
+    if not text:
+        return text
+    total = 0
+    cut = None
+    for index, char in enumerate(text):
+        total += _wire_cost(char)
+        if cut is None and total > limit - 3:
+            cut = index
+        if total > limit:
+            return text[:cut] + "…"
+    return text
+
+
+def _derived_status(call: AgentCall) -> str:
+    # Liveness is derived, not stored: an unfinished call reads "running" while its
+    # run is active and "abandoned" once the run is terminal (the run ended without
+    # the call closing). A finished call keeps its recorded outcome.
+    if call.finished_at:
+        return AgentCallStatus(call.status).value
+    if call.run.is_active:
+        return "running"
+    return "abandoned"
+
+
 class AgentCallResponse(BaseResponse):
     id: str
     # Which agent made this call ("scope", "implement") — the timeline's row label.
@@ -48,21 +83,12 @@ class AgentCallResponse(BaseResponse):
 
     @classmethod
     def from_call(cls, call: AgentCall) -> "AgentCallResponse":
-        # Liveness is derived, not stored: an unfinished call reads "running" while its
-        # run is active and "abandoned" once the run is terminal (the run ended without
-        # the call closing). A finished call keeps its recorded outcome.
-        if call.finished_at:
-            status = AgentCallStatus(call.status).value
-        elif call.run.is_active:
-            status = "running"
-        else:
-            status = "abandoned"
         return cls(
             id=call.id,
             agent=call.agent,
             label=get_display_label(call.agent) if call.agent else "Agent",
             account_username=call.account.username,
-            status=status,  # type: ignore[arg-type]
+            status=_derived_status(call),  # type: ignore[arg-type]
             started_at=call.started_at,
             finished_at=call.finished_at,
             last_error=call.last_error,
@@ -107,7 +133,7 @@ class AgentCallFiles(BaseResponse):
 
         def named(path: Path) -> ArtifactFile | None:
             if not path.is_file():
-                return None
+                return
             stat = path.stat()
             return ArtifactFile(
                 name=path.name,
@@ -221,3 +247,110 @@ class TranscriptChunk(BaseResponse):
     next_offset: int
     eof: bool
     text: str
+
+
+# Free-text fields on the agent-surface summaries are clipped to this, so a
+# stack trace can't blow a response budget.
+_TEXT_CLIP = 160
+
+
+class TextSlice(BaseResponse):
+    # One bounded UTF-8-safe cut of an on-disk text file; offsets are byte
+    # positions, has_earlier marks content before this slice.
+    offset: int
+    next_offset: int
+    eof: bool
+    has_earlier: bool
+    text: str
+
+
+class AgentCallSummary(BaseResponse):
+    # The bounded agent-surface cut of AgentCallResponse: the same facts with
+    # clipped free text and no token breakdown.
+    id: str
+    agent: str | None = None
+    account_username: str
+    status: Literal["running", "succeeded", "failed", "abandoned"]
+    started_at: datetime
+    finished_at: datetime | None = None
+    last_error: str | None = None
+    cost_usd: float | None = None
+
+    @classmethod
+    def from_call(cls, call: AgentCall) -> "AgentCallSummary":
+        return cls(
+            id=call.id,
+            agent=call.agent,
+            account_username=call.account.username,
+            status=_derived_status(call),  # type: ignore[arg-type]
+            started_at=call.started_at,
+            finished_at=call.finished_at,
+            last_error=clip(call.last_error, _TEXT_CLIP),
+            cost_usd=call.cost_usd,
+        )
+
+
+class RunSummary(BaseResponse):
+    # One run for the agent surface, with its latest agent calls — the bounded
+    # cut of RunResponse (no ask payload; get_gate serves the live one).
+    id: str
+    kind: str
+    state: Literal["scheduled", "running", "pending_input", "finished", "failed", "cancelled"]
+    failure: str | None = None
+    created_at: datetime
+    updated_at: datetime
+    account_username: str
+    agent_calls: list[AgentCallSummary] = Field(default_factory=list)
+
+    @classmethod
+    def from_run(cls, run: Run, calls: list[AgentCall]) -> "RunSummary":
+        return cls(
+            id=run.id,
+            kind=run.kind,
+            state=run.state,  # type: ignore[arg-type]
+            failure=clip(run.failure, _TEXT_CLIP),
+            created_at=run.created_at,
+            updated_at=run.updated_at,
+            account_username=run.account.username,
+            agent_calls=[AgentCallSummary.from_call(call) for call in calls],
+        )
+
+
+class ArtifactChunk(BaseResponse):
+    # A call's renderable output, head-bounded; page the rest through the
+    # call's transcript files route.
+    call_id: str
+    kind: str
+    title: str
+    chunk: TextSlice
+
+
+class GateView(BaseResponse):
+    # Everything needed to answer a parked run in one read: the ask, the
+    # artifact under review, the reply's JSON Schema, and parked_at — the park
+    # identity answer_gate must echo back.
+    run_id: str
+    gate: str
+    parked_at: datetime
+    ask: dict[str, Any]
+    artifact: ArtifactChunk | None = None
+    reply_schema: dict[str, Any]
+
+
+class GateAnswerResult(BaseResponse):
+    run_id: str
+    parked_at: datetime
+    result: Literal["answered", "already_answered"]
+
+
+class AgentCallDetail(BaseResponse):
+    run_id: str
+    call: AgentCallSummary
+    transcript: TextSlice
+    stderr: TextSlice
+    artifact: ArtifactChunk | None = None
+
+
+class CancelRunResult(BaseResponse):
+    run_id: str
+    result: Literal["cancelled", "already_cancelled"]

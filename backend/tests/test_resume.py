@@ -5,14 +5,25 @@ from druks.api.schemas import ResumeRequest
 from druks.durable import Run
 from fastapi import HTTPException
 
+# The shape review() parks with: an in-app ask plus the parked_at stamp the
+# answer service echoes.
 _ASK = {
+    "presentation": "in_app",
     "controls": ["approve", "request_changes", "cancel"],
     "questions": [{"id": "q1", "prompt": "which?", "options": [{"id": "a", "label": "A"}]}],
 }
 
 
 def _park(db_session) -> None:
-    db_session.add(Run(id="r1", kind="build", input_gate="review_plan", input_request=_ASK))
+    db_session.add(
+        Run(
+            id="r1",
+            kind="build",
+            input_gate="review_plan",
+            input_request=_ASK,
+            input_requested_at=Run.utc_now(),
+        )
+    )
     db_session.flush()
     seed_dbos_status(db_session, "r1", "pending_input")
 

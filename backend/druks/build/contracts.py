@@ -50,14 +50,17 @@ class RepoProfilerOutput(AgentOutput):
 
 
 class QuestionOptionOutput(AgentOutput):
-    id: str
-    label: str
+    # Identity and cardinality are contract-capped at the agent boundary so a
+    # parked ask (and the gate view built from it) is bounded by construction —
+    # an oversized answer fails parse loudly instead of being clipped later.
+    id: str = Field(max_length=64)
+    label: str = Field(max_length=256)
 
 
 class QuestionOutput(AgentOutput):
-    id: str
-    prompt: str
-    options: list[QuestionOptionOutput]
+    id: str = Field(max_length=64)
+    prompt: str = Field(max_length=2048)
+    options: list[QuestionOptionOutput] = Field(max_length=16)
 
 
 class AcceptanceCriterionOutput(AgentOutput):
@@ -95,7 +98,7 @@ class PlanData(BaseModel):
 class PlanOutput(AgentOutput):
     plan_markdown: str
     acceptance_criteria: list[AcceptanceCriterionOutput]
-    questions: list[QuestionOutput]
+    questions: list[QuestionOutput] = Field(max_length=8)
 
     def get_artifact(self) -> dict[str, str]:
         return {"kind": "markdown", "title": "Implementation plan", "content": self.plan_markdown}

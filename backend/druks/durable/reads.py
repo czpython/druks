@@ -2,6 +2,7 @@
 # Schemas stay pure projections; routes call in here.
 import asyncio
 from collections.abc import AsyncIterator
+from pathlib import Path
 from typing import Literal
 
 from sqlalchemy import Engine
@@ -15,10 +16,12 @@ from .schemas import (
     AgentCallFiles,
     AgentCallResponse,
     RunResponse,
+    RunSummary,
     SubjectActivity,
     SubjectResponse,
     SubjectStatus,
     SubjectSummary,
+    TextSlice,
     TranscriptChunk,
 )
 
@@ -30,7 +33,7 @@ _TERMINAL_CALL_STATES = {"succeeded", "failed", "abandoned"}
 def get_agent_call_files(call_id: str) -> AgentCallFiles | None:
     call = AgentCall.get(call_id)
     if not call:
-        return None
+        return
     return AgentCallFiles.from_call(call, Artifact.get_for_call(call.id))
 
 
@@ -45,6 +48,16 @@ def get_subject_status(subject_type: str, subject_id: str) -> SubjectStatus:
     runs = Run.list_for_subject(subject_type, subject_id)
     active_run = next((run for run in runs if run.is_active), None)
     return _status(runs, active_run, _running_calls(active_run))
+
+
+def list_recent_runs(
+    subject_type: str, subject_id: str, *, limit: int, calls_limit: int
+) -> list[RunSummary]:
+    # The subject's newest runs, each with its latest agent calls — the bounded
+    # agent-surface cut of list_subject_timeline.
+    runs = Run.list_for_subject(subject_type, subject_id)[:limit]
+    calls_by_run = AgentCall.by_run([run.id for run in runs])
+    return [RunSummary.from_run(run, calls_by_run[run.id][-calls_limit:]) for run in runs]
 
 
 def get_subject_response(
@@ -113,6 +126,81 @@ def _status(
     )
 
 
+def _continuation_prefix(payload: bytes) -> int:
+    # Bytes of a split character's tail at the head of a mid-file slice.
+    length = 0
+    while length < min(3, len(payload)) and payload[length] & 0xC0 == 0x80:
+        length += 1
+    return length
+
+
+# Leads whose first continuation is narrower than 80–BF (RFC 3629): E0/F0
+# exclude overlongs, ED excludes surrogates, F4 caps at U+10FFFF.
+_FIRST_CONTINUATION = {
+    0xE0: (0xA0, 0xBF),
+    0xED: (0x80, 0x9F),
+    0xF0: (0x90, 0xBF),
+    0xF4: (0x80, 0x8F),
+}
+
+
+def _partial_suffix(payload: bytes) -> int:
+    # Bytes of an incomplete trailing multi-byte character; 0 when the slice
+    # ends on a character boundary.
+    for back in range(1, min(4, len(payload)) + 1):
+        byte = payload[-back]
+        if byte & 0xC0 == 0x80:
+            continue
+        # Only a sequence that can still complete is worth trimming; anything
+        # that never will (C0/C1 or F5+ leads, raw terminal noise, a first
+        # continuation outside the lead's constrained range — overlongs,
+        # surrogates, beyond U+10FFFF) is kept, replaced by decode(), and
+        # advanced past.
+        if 0xC2 <= byte <= 0xF4:
+            needed = 2 if byte < 0xE0 else 3 if byte < 0xF0 else 4
+            if back < needed:
+                low, high = _FIRST_CONTINUATION.get(byte, (0x80, 0xBF))
+                if back == 1 or low <= payload[-back + 1] <= high:
+                    return back
+        return 0
+    return 0
+
+
+def read_slice(path: Path, *, offset: int, limit: int) -> TextSlice:
+    # One bounded slice of a text file, snapped to UTF-8 character boundaries
+    # on both cut edges (the next read re-covers trimmed bytes). A negative
+    # offset addresses from the end — the tail |offset| bytes. Missing file:
+    # an empty eof slice.
+    if not path.exists():
+        return TextSlice(offset=0, next_offset=0, eof=True, has_earlier=False, text="")
+    # Any single character fits, so boundary trims always leave progress — a
+    # smaller limit could sit on a four-byte character forever.
+    limit = max(limit, 4)
+    size = path.stat().st_size
+    if offset < 0:
+        offset = max(size + offset, 0)
+    with path.open("rb") as handle:
+        handle.seek(offset)
+        payload = handle.read(limit)
+    if offset:
+        lead = _continuation_prefix(payload)
+        offset += lead
+        payload = payload[lead:]
+    # Trim a partial trailing sequence unconditionally: at EOF it means the
+    # writer is mid-character, and emitting � would advance past bytes whose
+    # completion the next read must re-cover. next_offset stays behind the
+    # trim, so eof reads false until the character lands whole.
+    payload = payload[: len(payload) - _partial_suffix(payload)]
+    next_offset = offset + len(payload)
+    return TextSlice(
+        offset=offset,
+        next_offset=next_offset,
+        eof=next_offset >= size,
+        has_earlier=offset > 0,
+        text=payload.decode("utf-8", errors="replace"),
+    )
+
+
 def read_transcript_chunk(
     engine: Engine,
     call_id: str,
@@ -127,23 +215,20 @@ def read_transcript_chunk(
     with session_scope(engine):
         call = AgentCall.get(call_id)
         if not call:
-            return None
+            return
         path = call.get_stream_path(stream)
-    if not path or not path.exists():
+    if not path:
         return TranscriptChunk(
             call_id=call_id, stream=stream, offset=offset, next_offset=offset, eof=True, text=""
         )
-    with path.open("rb") as handle:
-        handle.seek(offset)
-        payload = handle.read(limit)
-    next_offset = offset + len(payload)
+    piece = read_slice(path, offset=offset, limit=limit)
     return TranscriptChunk(
         call_id=call_id,
         stream=stream,
-        offset=offset,
-        next_offset=next_offset,
-        eof=next_offset >= path.stat().st_size,
-        text=payload.decode("utf-8", errors="replace"),
+        offset=piece.offset,
+        next_offset=piece.next_offset,
+        eof=piece.eof,
+        text=piece.text,
     )
 
 

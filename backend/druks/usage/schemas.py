@@ -85,3 +85,29 @@ class UsageTodayResponse(BaseResponse):
     day: str
     timezone: str
     harnesses: list[UsageHarnessToday]
+
+
+class AgentHarnessUsage(BaseResponse):
+    # One harness's quota for the agent surface: the latest snapshot's facts
+    # plus a short percent-left trend per window, oldest first.
+    name: str
+    is_connected: bool = False
+    plan_tier: str | None = None
+    five_hour_percent_left: int | None = None
+    five_hour_resets_at: datetime | None = None
+    week_percent_left: int | None = None
+    week_resets_at: datetime | None = None
+    is_unlimited: bool = False
+    scraped_at: datetime | None = None
+    five_hour_history: list[UsageHistoryPoint] = Field(default_factory=list)
+    week_history: list[UsageHistoryPoint] = Field(default_factory=list)
+
+
+class AgentUsage(BaseResponse):
+    # The caller's spend for the operator-local day plus per-harness quota.
+    day: str
+    timezone: str
+    spend_today_usd: float
+    tokens_today: int
+    runs_today: int
+    harnesses: list[AgentHarnessUsage] = Field(default_factory=list)
