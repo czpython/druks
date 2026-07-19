@@ -7,12 +7,9 @@ from conftest import (
     make_settings,
     make_test_work_item,
     seed_build_run,
-    seed_call,
     seed_run,
 )
 from druks.accounts.models import Account
-from druks.build import agent as build_agent
-from druks.build.workflows import BuildWorkflow
 from druks.durable.models import Run
 from druks.durable.reads import read_transcript_chunk
 from druks.mcp.gateway import services
@@ -25,9 +22,6 @@ _IN_APP_ASK = {
 }
 
 _AGENT_ROUTES = {
-    ("get", "/api/build/agent/work"): "list_work",
-    ("get", "/api/build/agent/work-items/{work_item_id}"): "get_work_item",
-    ("post", "/api/build/agent/dispatch"): "dispatch",
     ("get", "/api/agent/gates/{run_id}"): "get_gate",
     ("post", "/api/agent/gates/{run_id}/answer"): "answer_gate",
     ("get", "/api/agent/agent-calls/{call_id}"): "get_agent_call",
@@ -74,7 +68,7 @@ def _park(db_session, item_id):
     return run
 
 
-def test_openapi_pins_the_eight_agent_routes(client: TestClient):
+def test_openapi_pins_the_five_agent_routes(client: TestClient):
     from druks.api.app import app
 
     schema = app.openapi()
@@ -90,7 +84,6 @@ def test_openapi_pins_the_eight_agent_routes(client: TestClient):
 def test_agent_routes_sit_behind_the_gate(tmp_path, db_session):
     app = configure_app_for_test(settings=make_settings(tmp_path), authenticated=False)
     with TestClient(app) as anonymous:
-        assert anonymous.get("/api/build/agent/work").status_code == 401
         assert anonymous.get("/api/agent/gates/x").status_code == 401
         assert anonymous.get("/api/usage/agent").status_code == 401
 
@@ -104,10 +97,6 @@ def test_agent_errors_share_one_shape(client: TestClient, db_session):
         "retryable": False,
     }
 
-    bad_cursor = client.get("/api/build/agent/work", params={"cursor": "!!junk!!"})
-    assert bad_cursor.status_code == 400
-    assert bad_cursor.json()["code"] == "INVALID_CURSOR"
-
     item = make_test_work_item(repo="o/r", title="t")
     run = _park(db_session, item.id)
     stale = client.post(
@@ -118,10 +107,6 @@ def test_agent_errors_share_one_shape(client: TestClient, db_session):
     body = stale.json()
     assert body["code"] == "GATE_ROUND_STALE"
     assert body["retryable"] is True
-
-    missing_item = client.get("/api/build/agent/work-items/999999")
-    assert missing_item.status_code == 404
-    assert missing_item.json()["code"] == "WORK_ITEM_NOT_FOUND"
 
 
 def test_get_gate_then_answer_roundtrip(client: TestClient, db_session, resume_spy):
@@ -201,69 +186,6 @@ def test_cancel_run_route(client: TestClient, db_session):
     again = client.post(f"/api/agent/runs/{run.id}/cancel", json={"reason": "wrong branch"})
     assert again.status_code == 200
     assert again.json()["result"] == "already_cancelled"
-
-
-def test_dispatch_route(client: TestClient, db_session, account, monkeypatch):
-    item = make_test_work_item(repo="o/r", title="t")
-    seed_run(db_session, "run-dispatch", account_id=account.id)
-
-    async def _start(cls, **kwargs):
-        return "run-dispatch"
-
-    monkeypatch.setattr(BuildWorkflow, "start", classmethod(_start))
-
-    both = client.post(
-        "/api/build/agent/dispatch",
-        json={"work_item_id": item.id, "source": "linear", "ticket_ref": "ACME-1"},
-    )
-    assert both.status_code == 422
-    neither = client.post("/api/build/agent/dispatch", json={})
-    assert neither.status_code == 422
-    half = client.post("/api/build/agent/dispatch", json={"source": "linear"})
-    assert half.status_code == 422
-
-    ok = client.post("/api/build/agent/dispatch", json={"work_item_id": item.id})
-    assert ok.status_code == 200
-    body = ok.json()
-    assert body["workItemId"] == item.id
-    assert body["runId"] == "run-dispatch"
-    assert body["isOwnedByCaller"] is True
-
-
-def test_work_routes_match_the_services(client: TestClient, db_session, account):
-    item = make_test_work_item(repo="o/r", title="parity", remote_key="ACME-9")
-    run = seed_build_run(db_session, work_item_id=item.id, state="running")
-    seed_call(db_session, run, "implement")
-
-    page = client.get("/api/build/agent/work")
-    assert page.status_code == 200
-    assert page.json() == build_agent.list_work(account).model_dump(mode="json", by_alias=True)
-
-    detail = client.get(f"/api/build/agent/work-items/{item.id}")
-    assert detail.status_code == 200
-    assert detail.json() == build_agent.get_work_item(item.id).model_dump(
-        mode="json", by_alias=True
-    )
-
-    call_id = detail.json()["runs"][0]["agentCalls"][0]["id"]
-    call = client.get(f"/api/agent/agent-calls/{call_id}")
-    assert call.status_code == 200
-    assert call.json() == services.get_agent_call(call_id).model_dump(mode="json", by_alias=True)
-
-
-def test_board_status_matches_list_work(client: TestClient, db_session, account):
-    item = make_test_work_item(repo="o/r", title="board parity")
-    _park(db_session, item.id)
-
-    board = client.get("/api/build/work_item")
-    assert board.status_code == 200
-    row = next(r for r in board.json()["rows"] if r["summary"]["id"] == str(item.id))
-    listed = next(
-        i
-        for i in build_agent.list_work(account).model_dump(mode="json", by_alias=True)["items"]
-        if i["workItemId"] == item.id
-    )
-    assert listed["status"] == row["status"]
 
 
 def test_transcript_route_matches_the_read_machinery(client: TestClient, db_session, db_engine):

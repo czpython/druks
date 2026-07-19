@@ -1,20 +1,11 @@
 import logging
-from typing import Literal
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query, Response, status
-from fastapi.exceptions import RequestValidationError
-from pydantic import BaseModel
+from fastapi import APIRouter, Body, HTTPException, Query, Response, status
 from sqlalchemy import func, select, update
 
-from druks.accounts.dependencies import current_account
-from druks.accounts.models import Account
-from druks.build import agent
 from druks.build.models import Project, ProjectRepo, WorkItem
 from druks.build.schemas import (
     AddProjectRepoRequest,
-    AgentDispatchResult,
-    AgentWorkItemDetail,
-    AgentWorkPage,
     CreateProjectRequest,
     DashboardItem,
     GitHubReposResponse,
@@ -264,67 +255,3 @@ async def list_work_items_history(
     # reads the event log directly, already ordered newest-handoff-first and bounded.
     items = [DashboardItem.from_work_item(wi) for wi in WorkItem.list_handoff(limit=clamped)]
     return WorkItemsHistoryResponse(items=items)
-
-
-# /api/build/agent                                            the agent surface
-
-agent_router = APIRouter(prefix="/agent", tags=["agent"])
-
-
-class DispatchRequest(BaseModel):
-    # Address the item one way: its druks id, or its ticket in the tracker.
-    work_item_id: int | None = None
-    source: Literal["linear", "jira"] | None = None
-    ticket_ref: str | None = None
-
-
-@agent_router.get(
-    "/work",
-    operation_id="list_work",
-    response_model=AgentWorkPage,
-    response_model_by_alias=True,
-)
-async def list_work(
-    filter: Literal["mine", "parked", "active", "failed"] | None = None,
-    cursor: str | None = None,
-    account: Account = Depends(current_account),
-) -> AgentWorkPage:
-    return agent.list_work(account, filter=filter, cursor=cursor)
-
-
-@agent_router.get(
-    "/work-items/{work_item_id}",
-    operation_id="get_work_item",
-    response_model=AgentWorkItemDetail,
-    response_model_by_alias=True,
-)
-async def get_work_item(work_item_id: int) -> AgentWorkItemDetail:
-    return agent.get_work_item(work_item_id)
-
-
-@agent_router.post(
-    "/dispatch",
-    operation_id="dispatch",
-    response_model=AgentDispatchResult,
-    response_model_by_alias=True,
-)
-async def dispatch(
-    body: DispatchRequest, account: Account = Depends(current_account)
-) -> AgentDispatchResult:
-    if bool(body.work_item_id) == bool(body.source and body.ticket_ref):
-        # The addressing XOR is request shape, so it wears Pydantic's envelope.
-        raise RequestValidationError(
-            [
-                {
-                    "loc": ("body",),
-                    "msg": "Address exactly one of work_item_id, or source + ticket_ref.",
-                    "type": "value_error",
-                }
-            ]
-        )
-    return await agent.dispatch(
-        account,
-        work_item_id=body.work_item_id,
-        source=body.source,
-        ticket_ref=body.ticket_ref,
-    )
