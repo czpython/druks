@@ -10,7 +10,7 @@ class Summarize(Workflow):
 
     async def run(self, note_id: int) -> None:
         note = Note.get(note_id)
-        assert note is not None  # dispatched against a note the route just created
+        assert note  # dispatched against a note the route just created
         # The note body is the agent's prompt context; the summary it returns is the
         # extension's own domain result, saved onto the note.
         result = await FieldNotes.summarize(note_body=note.body)
@@ -20,7 +20,8 @@ class Summarize(Workflow):
     async def dispatch(cls, *, note_id: int) -> str:
         # Launch policy for a note: one run per note, keyed by its subject; the
         # signed-in requester attributes it ambiently.
-        return await cls.start(
+        start_result = await cls.start(
             subject={"type": FieldNotes.subject_type, "id": note_id},
             note_id=note_id,
         )
+        return start_result.run_id

@@ -148,7 +148,7 @@ class BuildWorkflow(Workflow):
             raise ValueError(f"dispatching a build for unknown work item {work_item_id}")
         # The assignee's account runs the calls; the owner fields stay input.
         assignee = Account.get_for_username(assignee_email.strip()) if assignee_email else None
-        run_id = await cls.start(
+        start_result = await cls.start(
             subject=WorkItem.subject_for(item.id),
             account_id=assignee.id if assignee else None,
             repo=item.repo,
@@ -159,11 +159,11 @@ class BuildWorkflow(Workflow):
             task_owner_email=assignee_email,
             task_owner_name=assignee_name,
         )
-        item.update(build_run_id=run_id)
+        item.update(build_run_id=start_result.run_id)
         # Back onto the active board: a scoped item re-enters flight when its
         # build starts. History is for items at rest in a handoff lane.
         item.set_status(None)
-        return run_id
+        return start_result.run_id
 
     async def run_multistep(
         self,

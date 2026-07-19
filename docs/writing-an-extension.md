@@ -124,17 +124,20 @@ control flow and I/O inside steps. See
 Start a workflow with an explicit subject:
 
 ```python
-run_id = await Sweep.start(
+start_result = await Sweep.start(
     subject={"type": "repository", "id": repo_id},
     repo=full_name,
 )
 ```
 
-Pass `subject=None` deliberately for background work. A subject has at most one
-active run of a workflow kind; a duplicate start returns the active run id —
-attribution never changes that (two accounts starting the same subject share
-the one run). Wrap `start()` in a domain `dispatch()` method when the extension
-needs lookup, snapshot, or routing policy before launch.
+Pass `subject=None` deliberately for background work. `start()` returns a
+`WorkflowStartResult`: a subject has at most one active run of a workflow kind,
+and a duplicate start hands back the active run's `run_id` with `is_duplicate`
+set — attribution never changes that (two accounts starting the same subject
+share the one run). Code that consumed the old string return migrates with
+`run_id = (await Workflow.start(...)).run_id`. Wrap `start()` in a domain
+`dispatch()` method when the extension needs lookup, snapshot, or routing
+policy before launch.
 
 A browser-origin start attributes itself: the session gate stamps the
 request's signed-in account, and `start()` inherits it — a route that starts a

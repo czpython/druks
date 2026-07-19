@@ -27,14 +27,14 @@ class Scope(Workflow):
     async def dispatch(cls, *, ticket: Ticket) -> str | None:
         # The scoped label is the done marker — remove it to force a re-scope.
         if ticket.has_label(Build.settings().scoper_scoped_label):
-            return None
+            return
         item = WorkItem.get_for_remote_key(source=ticket.provider, remote_key=ticket.key)
         if not item:
             target = ProjectRepo.lookup(project_name=ticket.project_name, labels=ticket.labels)
             project = Project.get_for_repo(target.full_name) if target else None
             if not project:
                 logger.info("No project routes %s; not scoping.", ticket.key)
-                return None
+                return
             item = WorkItem.create(
                 project_id=project.id,
                 source=ticket.provider,
@@ -46,12 +46,13 @@ class Scope(Workflow):
         assignee = None
         if ticket.assignee_email:
             assignee = Account.get_for_username(ticket.assignee_email.strip())
-        return await cls.start(
+        start_result = await cls.start(
             subject=WorkItem.subject_for(item.id),
             account_id=assignee.id if assignee else None,
             remote_key=ticket.key,
             source=ticket.provider,
         )
+        return start_result.run_id
 
     @classmethod
     def parked_for(cls, work_item_id: int) -> Run | None:

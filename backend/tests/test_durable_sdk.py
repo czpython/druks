@@ -270,9 +270,11 @@ async def test_attribution_rides_the_run_and_survives_resume(rt):
 
     SINK.clear()
     account_id = _account_id(rt.engine, "op@example.com")
-    wfid = await rt.AttributedFlow.start(
-        subject={"type": "widget", "id": 878787}, account_id=account_id
-    )
+    wfid = (
+        await rt.AttributedFlow.start(
+            subject={"type": "widget", "id": 878787}, account_id=account_id
+        )
+    ).run_id
     parked = await _wait_for(rt.engine, wfid, lambda r: r.state == RunState.PENDING_INPUT)
     with rt.engine.connect() as conn:
         attributes = conn.execute(
@@ -295,7 +297,7 @@ async def test_browser_origin_start_inherits_the_ambient_account(rt):
     account_id = _account_id(rt.engine, "ambient@example.com")
     token = current_account_id.set(account_id)
     try:
-        wfid = await rt.RecordFeedback.start(subject=None, repo="owner/ambient")
+        wfid = (await rt.RecordFeedback.start(subject=None, repo="owner/ambient")).run_id
     finally:
         current_account_id.reset(token)
     await _wait_for(rt.engine, wfid, lambda r: r.state == RunState.FINISHED)
@@ -308,18 +310,19 @@ async def test_duplicate_start_shares_the_run_across_accounts(rt):
     first = _account_id(rt.engine, "op@example.com")
     second = _account_id(rt.engine, "peer@example.com")
     subject = {"type": "widget", "id": 909090}
-    wfid = await rt.SampleFlow.start(subject=subject, account_id=first, repo="owner/app")
+    wfid = (await rt.SampleFlow.start(subject=subject, account_id=first, repo="owner/app")).run_id
     parked = await _wait_for(rt.engine, wfid, lambda r: r.state == RunState.PENDING_INPUT)
 
-    dup = await rt.SampleFlow.start(subject=subject, account_id=second, repo="owner/app")
-    assert dup == wfid
+    duplicate = await rt.SampleFlow.start(subject=subject, account_id=second, repo="owner/app")
+    assert duplicate.run_id == wfid
+    assert duplicate.is_duplicate
 
     await parked.resume(action="merge")
     await _wait_for(rt.engine, wfid, lambda r: r.state == RunState.FINISHED)
 
 
 async def test_step_gate_resume_finish(rt):
-    wfid = await rt.SampleFlow.start(subject=None, repo="owner/app")
+    wfid = (await rt.SampleFlow.start(subject=None, repo="owner/app")).run_id
 
     parked = await _wait_for(rt.engine, wfid, lambda r: r.state == RunState.PENDING_INPUT)
     assert parked.input_gate == "approve"
@@ -336,7 +339,7 @@ async def test_duplicate_replies_to_one_round_collapse(rt):
     not buffer on the topic and ghost-resume the gate's next round unprompted."""
     from sqlalchemy import text
 
-    wfid = await rt.DoubleGateFlow.start(subject=None)
+    wfid = (await rt.DoubleGateFlow.start(subject=None)).run_id
     parked = await _wait_for(rt.engine, wfid, lambda r: r.state == RunState.PENDING_INPUT)
     first_asked_at = parked.input_requested_at
 
@@ -378,7 +381,7 @@ async def test_duplicate_replies_to_one_round_collapse(rt):
 async def test_fail_branch(rt):
     from sqlalchemy import text
 
-    wfid = await rt.SampleFlow.start(subject=None, repo="owner/app")
+    wfid = (await rt.SampleFlow.start(subject=None, repo="owner/app")).run_id
     parked = await _wait_for(rt.engine, wfid, lambda r: r.input_gate == "approve")
 
     await parked.resume(action="close")
@@ -397,7 +400,7 @@ async def test_fail_branch(rt):
 async def test_subjectless_gate_fails_loudly(rt):
     """A gate with no on_wait override fails a subjectless run now, instead of
     parking it unseen for the whole gate TTL."""
-    wfid = await rt.ConfirmFlow.start(subject=None)
+    wfid = (await rt.ConfirmFlow.start(subject=None)).run_id
     failed = await _wait_for(rt.engine, wfid, lambda r: r.state == RunState.FAILED)
     assert failed.failure
     assert "'confirm'" in failed.failure
@@ -408,7 +411,7 @@ async def test_subjectless_gate_fails_loudly(rt):
 async def test_subject_gate_parks_unchanged(rt):
     """The same no-on_wait gate still parks and resumes for a subject run — the
     subject's watchers are the ones who'd see it, feed-side."""
-    wfid = await rt.ConfirmFlow.start(subject={"type": "widget", "id": 636363})
+    wfid = (await rt.ConfirmFlow.start(subject={"type": "widget", "id": 636363})).run_id
     parked = await _wait_for(rt.engine, wfid, lambda r: r.state == RunState.PENDING_INPUT)
     assert parked.input_gate == "confirm"
     # start() stamped the subject as workflow attributes — the keying every
@@ -427,7 +430,7 @@ async def test_subject_gate_parks_unchanged(rt):
 async def test_subjectless_review_fails_loudly(rt):
     """review() is a human gate too: a subjectless run fails instead of parking
     an in-app ask nobody would ever see."""
-    wfid = await rt.ReviewFlow.start(subject=None)
+    wfid = (await rt.ReviewFlow.start(subject=None)).run_id
     failed = await _wait_for(rt.engine, wfid, lambda r: r.state == RunState.FAILED)
     assert failed.failure
     assert "'review'" in failed.failure
@@ -477,7 +480,7 @@ async def test_run_agent_step(rt, monkeypatch):
     monkeypatch.setattr("druks.sandbox.client.Client.ephemeral", _fake_ephemeral)
     monkeypatch.setattr("druks.agents.render_prompt", _fake_render)
 
-    wfid = await rt.AgentFlow.start(subject=None, repo="owner/app")
+    wfid = (await rt.AgentFlow.start(subject=None, repo="owner/app")).run_id
     failed = await _wait_for(rt.engine, wfid, lambda r: r.state == RunState.FAILED)
     assert failed.failure == "stopped by agent"
     assert seen and seen[0]["artifact_dir"].name == f"run-{wfid}"
@@ -673,7 +676,7 @@ async def test_input_is_validated_at_start(rt):
     with pytest.raises(WorkflowError):
         await rt.SubjectFlow.start(subject=None, repo="x")  # takes no input
 
-    wfid = await rt.RecordFeedback.start(subject=None, repo="owner/flat")
+    wfid = (await rt.RecordFeedback.start(subject=None, repo="owner/flat")).run_id
     await _wait_for(rt.engine, wfid, lambda r: r.state == RunState.FINISHED)
     assert "owner/flat" in SINK
 
@@ -735,7 +738,7 @@ async def test_step_on_run_or_run_multistep_is_rejected(rt):
 async def test_subject_reaches_body_and_result_rides_finished_event(rt):
     from druks.events.models import Event
 
-    wfid = await rt.SubjectFlow.start(subject={"type": "widget", "id": 7})
+    wfid = (await rt.SubjectFlow.start(subject={"type": "widget", "id": 7})).run_id
     await _wait_for(rt.engine, wfid, lambda r: r.state == RunState.FINISHED)
 
     assert "subj-id:7" in SINK  # the platform threaded subject into self.subject
@@ -769,9 +772,9 @@ async def test_run_events_carry_subject(rt):
     # run-state transition emits a run-level event keyed to it.
     from druks.events.models import Event
 
-    wfid = await rt.RecordFeedback.start(
-        subject={"type": "widget", "id": 4242}, repo="owner/evented"
-    )
+    wfid = (
+        await rt.RecordFeedback.start(subject={"type": "widget", "id": 4242}, repo="owner/evented")
+    ).run_id
     await _wait_for(rt.engine, wfid, lambda r: r.state == RunState.FINISHED)
 
     session = get_session(rt.engine)
@@ -791,10 +794,14 @@ async def test_duplicate_start_returns_the_live_run(rt):
     # hands back the live run's id. The slot frees at the terminal outcome, so
     # the subject can run again.
     subject = {"type": "widget", "id": 515151}
-    wfid = await rt.SampleFlow.start(subject=subject, repo="owner/app")
+    start_result = await rt.SampleFlow.start(subject=subject, repo="owner/app")
+    assert not start_result.is_duplicate
+    wfid = start_result.run_id
     parked = await _wait_for(rt.engine, wfid, lambda r: r.state == RunState.PENDING_INPUT)
 
-    assert await rt.SampleFlow.start(subject=subject, repo="owner/app") == wfid
+    duplicate = await rt.SampleFlow.start(subject=subject, repo="owner/app")
+    assert duplicate.run_id == wfid
+    assert duplicate.is_duplicate
 
     await parked.resume(action="merge")
     await _wait_for(rt.engine, wfid, lambda r: r.state == RunState.FINISHED)
@@ -803,7 +810,7 @@ async def test_duplicate_start_returns_the_live_run(rt):
     deadline = asyncio.get_event_loop().time() + 10.0
     fresh = wfid
     while fresh == wfid and asyncio.get_event_loop().time() < deadline:
-        fresh = await rt.SampleFlow.start(subject=subject, repo="owner/app")
+        fresh = (await rt.SampleFlow.start(subject=subject, repo="owner/app")).run_id
         if fresh == wfid:
             await asyncio.sleep(0.1)
     assert fresh != wfid
@@ -822,7 +829,7 @@ async def test_failed_enqueue_claims_no_slot(rt, monkeypatch):
         with pytest.raises(RuntimeError, match="queue down"):
             await rt.SubjectFlow.start(subject=subject)
 
-    wfid = await rt.SubjectFlow.start(subject=subject)
+    wfid = (await rt.SubjectFlow.start(subject=subject)).run_id
     await _wait_for(rt.engine, wfid, lambda r: r.state == RunState.FINISHED)
 
 
@@ -831,7 +838,7 @@ async def test_subjectless_run_emits_no_events(rt):
     # must not write run-level events into the feed.
     from druks.events.models import Event
 
-    wfid = await rt.RecordFeedback.start(subject=None, repo="owner/quiet")
+    wfid = (await rt.RecordFeedback.start(subject=None, repo="owner/quiet")).run_id
     await _wait_for(rt.engine, wfid, lambda r: r.state == RunState.FINISHED)
 
     session = get_session(rt.engine)

@@ -185,10 +185,12 @@ async def test_happy_path_to_merge(rt, monkeypatch):
     _stub(monkeypatch, rt)
 
     item_id = _seed_work_item(rt.engine, repo="acme/widget")
-    wfid = await rt.flow.start(
-        repo="acme/widget",
-        subject={"type": "work_item", "id": item_id},
-    )
+    wfid = (
+        await rt.flow.start(
+            repo="acme/widget",
+            subject={"type": "work_item", "id": item_id},
+        )
+    ).run_id
 
     parked = await _wait(
         rt.engine,
@@ -233,10 +235,12 @@ async def test_recovery_rebuilds_the_diary_without_rerunning_agents(rt, monkeypa
     invoked = _stub(monkeypatch, rt)
 
     item_id = _seed_work_item(rt.engine, repo="acme/widget")
-    wfid = await rt.flow.start(
-        repo="acme/widget",
-        subject={"type": "work_item", "id": item_id},
-    )
+    wfid = (
+        await rt.flow.start(
+            repo="acme/widget",
+            subject={"type": "work_item", "id": item_id},
+        )
+    ).run_id
     await _wait(
         rt.engine,
         wfid,
