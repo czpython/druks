@@ -5,10 +5,12 @@ import { api } from '../api/client'
 import { ExtensionGlyph } from './ExtensionGlyph'
 import { LoginSteps, useHarnessLogin } from './HarnessLogin'
 import {
+  type CreatedPat,
   type Harness,
   type ExtensionSettings,
   type McpRegistryCandidate,
   type McpServer,
+  type Pat,
   type SkillCollection,
   type UpdateHarnessRequest,
   type UpdateExtensionsSettingsRequest,
@@ -110,7 +112,7 @@ export function SettingsModal({ open, onClose }: Props) {
   // Pending per-harness edits (name -> sparse UpdateHarnessRequest), flushed by
   // submit() — same dirty/save flow as the extension and general settings.
   const [harnessEdits, setHarnessEdits] = useState<Record<string, UpdateHarnessRequest>>({})
-  // 'general' | 'harnesses' | 'skills' | 'mcp' | <extension name>
+  // 'general' | 'harnesses' | 'skills' | 'mcp' | 'agent-access' | <extension name>
   const [section, setSection] = useState<string>('general')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -285,6 +287,7 @@ export function SettingsModal({ open, onClose }: Props) {
             <RailItem icon="harnesses" label="Harnesses" active={section === 'harnesses'} onClick={() => setSection('harnesses')} />
             <RailItem icon="skills" label="Skills" active={section === 'skills'} onClick={() => setSection('skills')} />
             <RailItem icon="mcp" label="MCP" active={section === 'mcp'} onClick={() => setSection('mcp')} />
+            <RailItem icon="agent-access" label="Agent access" active={section === 'agent-access'} onClick={() => setSection('agent-access')} />
             <div className="set-rail-label">apps</div>
             {allExtensions.map((extension) => (
               <button
@@ -328,6 +331,7 @@ export function SettingsModal({ open, onClose }: Props) {
               ))}
             {section === 'skills' && <SkillsPane />}
             {section === 'mcp' && <McpServersPane />}
+            {section === 'agent-access' && <AgentAccessPane />}
             {extensionSection && (
               <ExtensionPane
                 extension={extensionSection}
@@ -415,6 +419,12 @@ function RailGlyph({ name }: { name: string }) {
         <rect x="2.5" y="2.5" width="4" height="4" rx="1" />
         <rect x="9.5" y="9.5" width="4" height="4" rx="1" />
         <path d="M6.5 4.5H10a1.5 1.5 0 0 1 1.5 1.5v3.5" />
+      </>
+    ),
+    'agent-access': (
+      <>
+        <circle cx="5.2" cy="5.2" r="2.7" />
+        <path d="M7.1 7.1 13.5 13.5M10.7 10.7l2-2" />
       </>
     ),
     extension: (
@@ -1378,6 +1388,182 @@ function McpServerRow({
           title="remove server"
         >
           ✕ remove
+        </button>
+      )}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Agent access — personal access tokens agents present to call this same API.
+// The minted secret lives only in component state between mint and dismiss:
+// never in the query cache, storage, or a URL — and a list refetch can't
+// clear it, only the operator can.
+// ---------------------------------------------------------------------------
+
+export function AgentAccessPane() {
+  const queryClient = useQueryClient()
+  const patsQuery = useQuery({ queryKey: ['pats'], queryFn: () => api.pats() })
+  const [name, setName] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [minted, setMinted] = useState<CreatedPat | null>(null)
+  const [copied, setCopied] = useState(false)
+  const pats = patsQuery.data ?? []
+
+  const refresh = () => queryClient.invalidateQueries({ queryKey: ['pats'] })
+
+  async function mint() {
+    const value = name.trim()
+    if (!value) return
+    setBusy(true)
+    setError(null)
+    try {
+      const created = await api.createPat(value)
+      setMinted(created)
+      setCopied(false)
+      setName('')
+      await refresh()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function revoke(pat: Pat) {
+    if (!window.confirm(`Revoke ${pat.name}? Agents using it lose access immediately.`)) return
+    setBusy(true)
+    setError(null)
+    try {
+      await api.revokePat(pat.id)
+      await refresh()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function copy() {
+    if (!minted) return
+    try {
+      await navigator.clipboard.writeText(minted.token)
+      setCopied(true)
+    } catch {
+      // Clipboard denied — the token stays on screen to copy by hand.
+    }
+  }
+
+  return (
+    <div className="set-pane">
+      <div className="set-pane-head">
+        <div className="set-pane-sub">
+          Mint a <b>personal access token</b> for an agent to call this druks — sent as{' '}
+          <b>Authorization: Bearer …</b>, same account and authority as your session. Revoking a
+          token cuts its access immediately.
+        </div>
+      </div>
+      <div className="set-group">
+        <div className="set-group-label">mint token</div>
+        <div className="skill-add">
+          <input
+            className="skill-add-input"
+            placeholder="What will hold it?  e.g. claude on my laptop"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') void mint()
+            }}
+            autoComplete="off"
+            data-1p-ignore=""
+            data-lpignore="true"
+            disabled={busy}
+          />
+          <button className="set-btn primary" disabled={busy || !name.trim()} onClick={() => void mint()}>
+            {busy ? 'minting…' : 'mint'}
+          </button>
+        </div>
+        {error && <div className="set-skill-error">{error}</div>}
+      </div>
+      {minted && (
+        <div className="set-group">
+          <div className="set-group-label">{minted.name} — copy it now</div>
+          <div className="skill-add">
+            <input
+              className="skill-add-input"
+              readOnly
+              value={minted.token}
+              onFocus={(e) => e.currentTarget.select()}
+              aria-label="personal access token"
+              data-1p-ignore=""
+              data-lpignore="true"
+            />
+            <button className="set-btn primary" onClick={() => void copy()}>
+              {copied ? 'copied' : 'copy'}
+            </button>
+            <button className="set-btn ghost" onClick={() => setMinted(null)}>
+              done
+            </button>
+          </div>
+          <div className="set-field-help">
+            The only time druks shows it — a hash is stored, not the token.
+          </div>
+        </div>
+      )}
+      {pats.length > 0 && (
+        <div className="set-group">
+          <div className="set-group-label">
+            tokens<span className="gl-count">{pats.length}</span>
+          </div>
+          <div className="mcp-servers">
+            {pats.map((pat) => (
+              <PatRow key={pat.id} pat={pat} busy={busy} onRevoke={revoke} />
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function patStatusLabel(pat: Pat): string {
+  if (pat.isRevoked) return 'revoked'
+  if (pat.isExpired) return 'expired'
+  return 'active'
+}
+
+function PatRow({
+  pat,
+  busy,
+  onRevoke,
+}: {
+  pat: Pat
+  busy: boolean
+  onRevoke: (pat: Pat) => Promise<void>
+}) {
+  return (
+    <div className={'mcp-row' + (pat.isActive ? '' : ' is-off')}>
+      <div className="mcp-id">
+        <span className="mcp-name">{pat.name}</span>
+        <span className="mcp-url">
+          {pat.tokenPrefix}… · expires {new Date(pat.expiresAt).toLocaleDateString()}
+        </span>
+      </div>
+      <span className="mcp-tok">
+        last used {pat.lastUsedAt ? new Date(pat.lastUsedAt).toLocaleString() : 'never'}
+      </span>
+      <span className={'hr-chip ' + (pat.isActive ? 'hr-chip-on' : 'hr-chip-off')}>
+        {patStatusLabel(pat)}
+      </span>
+      {!pat.isRevoked && (
+        <button
+          className="sc-remove"
+          onClick={() => void onRevoke(pat)}
+          disabled={busy}
+          title="revoke token"
+        >
+          ✕ revoke
         </button>
       )}
     </div>
