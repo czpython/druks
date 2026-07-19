@@ -150,7 +150,6 @@ class Build(Extension):
         "run.cancelled": "cancelled",
         "run.pending_input": "waiting on you",
         "needs_answers": "needs answers",
-        "split_recommended": "split recommended",
     }
 
     @classmethod

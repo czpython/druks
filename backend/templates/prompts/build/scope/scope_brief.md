@@ -31,8 +31,9 @@ loops that could have been avoided here for the cost of one careful read.
   version?", "Which component file?" are questions for the planner — they read the code.
 - Do not invent requirements beyond what the ticket and comments imply.
 - Do not split a coherent vertical slice (one endpoint + its UI consumer making the smallest
-  useful feature chunk) — that is the right PR size, not a split candidate. Split only when
-  independent surfaces could each ship and deliver value without the other.
+  useful feature chunk) — that is the right PR size, not a split candidate. When work genuinely
+  bundles independent surfaces that could each ship on their own, don't scope it silently as one:
+  raise the split as an open question (instruction 5) and let the operator decide.
 
 Produce a structured scope brief for the ticket below so the implementation agent
 (and humans) know exactly what to do — and leave the brief on the ticket yourself.
@@ -69,26 +70,19 @@ The Linear project this issue lives in maps to the following repositories in you
 
 4. If the issue is genuinely ambiguous about scope, set `status` to `"needs_answers"` and put precise questions in `open_questions`. Each question should be answerable in one or two short comments. Leave the other brief fields as best-effort placeholders (empty arrays / empty strings are fine).
 
-5. **Before settling on `"ready"`, check whether the work should be split into multiple sub-tickets.** A too-large ticket is the most common cause of wasted review loops and oversized PRs — catching it here, before any planning happens, is cheap. Split when *any* of these are true:
+5. **Before settling on `"ready"`, check whether the work is too large to ship as one reviewable PR.** A too-large ticket is the most common cause of wasted review loops and oversized PRs — catching it here, before any planning happens, is cheap. Treat it as a scope ambiguity: if the work genuinely bundles independent surfaces that could each ship on their own, set `status` to `"needs_answers"` and ask the operator — as an entry in `open_questions` — whether to split it, naming the seam you would carve along ("This bundles a new `/api/x` endpoint and its dashboard consumer, which could ship separately — split into two tickets, or scope as one?"). You name the seam in one line; the operator decides. Do not model the sub-tickets yourself.
+
+   Raise the split question when *any* of these are true:
    - The work crosses independent surfaces that each have their own value and could ship separately with mocks for the other (e.g. new backend endpoint + new UI consumer; data model + admin tool that uses it; migration + the feature that depends on it).
    - It bundles a refactor or migration with a feature — the refactor should land first on its own so the feature PR is a small, reviewable diff on top.
    - The acceptance criteria fall into two or more independent groups where one group could ship and be useful without the other.
-   - The work has a clear A → B → C ordering where each step is itself a meaningful PR-sized chunk (not just "implement, then write tests" — those are one PR).
 
-   **Do NOT split** when the ticket is:
+   **Do NOT** raise it when the ticket is:
    - A single feature that touches many files inside one module or one boundary (frontend-only, backend-only).
    - A pure refactor, pure bugfix, or pure docs change.
    - Vertically thin: one endpoint + one UI consumer that together make the smallest useful slice of a new feature. Vertical slices are the *right* size, even when they cross layers.
 
-   When in doubt, prefer `"ready"`. False splits are expensive — they fragment a coherent change into a chain of tiny PRs the operator has to babysit. Splits should be the exception, reserved for tickets that would clearly produce a sprawling PR otherwise.
-
-   When you decide to split, set `status` to `"split_recommended"` and populate `split_recommendation`:
-   - `rationale`: one paragraph — name the seams you're carving along and why each child can stand on its own. The operator reads this first to decide whether to accept the split.
-   - `tickets`: ordered list. Earliest-shippable first. For each entry:
-     - `title`: concise, Linear-style ("Add user model" not "Implementing the user model class").
-     - `problem`, `scope`, `acceptance_criteria`: same shape as the parent brief but scoped to this child only.
-     - `blocked_by`: list of integer indices into this `tickets` array — which other proposed sub-tickets must ship before this one. Use `[]` for independent children. The first proposed ticket always has `blocked_by: []`.
-   Leave the parent brief fields (`problem`, `scope`, `acceptance_criteria`, `stack_hints`, `related_repos`, `out_of_scope`, `open_questions`) as empty arrays / empty strings — the parent will be re-scoped (or closed as an epic) once the operator accepts the split.
+   When in doubt, prefer a single `"ready"` brief. False splits are expensive — they fragment a coherent change into a chain of tiny PRs the operator has to babysit. A split question should be the exception, reserved for tickets that would clearly produce a sprawling PR otherwise.
 
 6. Otherwise set `status` to `"ready"` and fill in every brief field. The brief is a fast-scan summary — the original Linear source stays available below it for detail. **Aim for ≤ 600 tokens across the *summary* fields** (`problem`, `scope`, `acceptance_criteria`). The cap does **not** apply to `decisions` (see below) — that section preserves operator-stated contracts uncompressed.
    - `problem`: at most three sentences stating the user-facing problem. Use the source's own framing where it provides one. You may add a single clause of inferred motivation when it helps an implementer understand "why now", but do not invent requirements that aren't implied by the source.
@@ -107,11 +101,10 @@ The Linear project this issue lives in maps to the following repositories in you
      Empty list is fine when the operator only restated the original description without adding refinement detail. But if the operator's comments contain any of the shapes above, the corresponding text MUST appear in `decisions` near-verbatim — paraphrasing loses the precision that made the operator write it down in the first place. **When in doubt, copy more.** The brief gets longer; the implementer gets the contract right; nobody loses.
    - `stack_hints`: lowercase ecosystem-level labels — frameworks, libraries, languages, datastores, runtimes (e.g. `frontend`, `nextjs`, `django`, `postgres`, `pytest`). **Never file paths, module names, app directories, project locations, or feature names.** A label that contains a slash, points to a directory, or names a specific module is wrong — use the framework or technology behind it instead. Do not include backend/database/server labels just because the selected app repo contains them when the issue is clearly frontend-only, design-only, or documentation-only.
 
-     **stack_hints MUST be non-empty when status is `ready`.** An empty array is never correct for a finalised brief — every implementation ticket touches at least one language/framework/runtime, and this is the fast-scan context the implementer reads before touching the code. If the technologies are obvious from the source ticket or the `related_repos` descriptions above, write them down — being explicit is cheap, omission costs revision rounds. The empty-array path is only legal when `status` is `"needs_answers"` or `"split_recommended"`.
+     **stack_hints MUST be non-empty when status is `ready`.** An empty array is never correct for a finalised brief — every implementation ticket touches at least one language/framework/runtime, and this is the fast-scan context the implementer reads before touching the code. If the technologies are obvious from the source ticket or the `related_repos` descriptions above, write them down — being explicit is cheap, omission costs revision rounds. The empty-array path is only legal when `status` is `"needs_answers"`.
    - `related_repos`: each entry is `{ "full_name": "org/repo", "purpose": "design reference" }`. Use only repos from the directory above. **The implementation target itself MUST NOT appear here.** `related_repos` is a list of *additional* read-only references the implementer should consult (design refs, sibling services, shared schemas) — it must not echo the primary repo the ticket is assigned to. Including the target repo causes the implementer harness to grant itself a redundant read permission against its own working directory, which has triggered concrete tool-routing failures downstream.
    - `out_of_scope`: explicit non-goals so the agent doesn't drift. **Preserve the source's out-of-scope items verbatim or near-verbatim when present.** These are firewall statements; paraphrasing loses precision.
    - `open_questions`: empty list when status is `"ready"`.
-   - `split_recommendation`: empty proposal (`{"rationale": "", "tickets": []}`) when status is `"ready"`.
 
 # Leave your outcome on the ticket
 
@@ -147,22 +140,7 @@ emitting the JSON, matching your `status`:
 >
 > - <each open question as a bullet>
 
-**`split_recommended`** — post ONE comment on the ticket:
-
-> **Druks scoping — split recommended for {{ remote_key }}**
->
-> <rationale paragraph>
->
-> Proposed sub-tickets:
->
-> ### 1. <title>
-> <problem>
-> **Scope.** <scope>
-> **Acceptance:** <bullets>
-> _Blocked by: <1-indexed ticket numbers, when any>_
-> (…one section per proposed ticket)
-
-Post the comment for a parked status even if a near-identical comment from a previous
+Post the comment for a needs_answers park even if a near-identical comment from a previous
 round exists — each round's questions supersede the last.
 
 7. Return ONLY the JSON object matching the schema. No prose, no preamble.

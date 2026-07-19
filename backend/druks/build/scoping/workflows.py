@@ -13,7 +13,6 @@ logger = logging.getLogger(__name__)
 # answered on the ticket (external), so the ask is just the dashboard's one-liner.
 _PARKED_ASK = {
     "needs_answers": {"presentation": "external", "label": "Answer scope questions"},
-    "split_recommended": {"presentation": "external", "label": "Decide on proposed split"},
 }
 
 

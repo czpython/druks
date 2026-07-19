@@ -81,7 +81,7 @@ async def _wait(engine, wfid, predicate, timeout=20.0):
 
 
 def _brief(status, *, questions=()):
-    from druks.build.scoping.contracts import ScopeBriefOutput, SplitProposalOutput
+    from druks.build.scoping.contracts import ScopeBriefOutput
 
     return ScopeBriefOutput(
         status=status,
@@ -93,7 +93,6 @@ def _brief(status, *, questions=()):
         out_of_scope=[],
         decisions=[],
         open_questions=list(questions),
-        split_recommendation=SplitProposalOutput(rationale="", tickets=[]),
     )
 
 

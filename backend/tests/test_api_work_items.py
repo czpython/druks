@@ -17,7 +17,7 @@ _RUN_STATE = {
 
 def _seed_scope_run(db_session, item, *, state="finished", status=None):
     """A scope run for ``item`` (keyed by its remote_key) with its ``scope``
-    agent call. A needs_answers / split_recommended status parks the run on the
+    agent call. A needs_answers status parks the run on the
     ScopeReply gate (PENDING_INPUT + input_request) — seeded from the workflow's
     own gate ask so the board reads exactly what the workflow stores at the park
     point."""
