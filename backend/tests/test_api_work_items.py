@@ -39,7 +39,7 @@ def _seed_scope_run(db_session, item, *, state="finished", status=None):
         subject={"type": "work_item", "id": item.id},
     )
     seed_call(db_session, run, "scope", status="failed" if state == "failed" else "succeeded")
-    handoff = {"ready": "scoped", "skipped": "skipped"}.get(status)
+    handoff = {"ready": "scoped"}.get(status)
     if handoff is not None:
         item.set_status(handoff)
     elif status is not None:

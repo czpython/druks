@@ -20,8 +20,6 @@ def _outcome_from_status(status: str) -> tuple[str, Outcome]:
         return "Complete", Outcome.FINISHED
     if status == HandoffStatus.CANCELLED:
         return "Cancelled", Outcome.CANCELLED
-    if status == HandoffStatus.SKIPPED:
-        return "Skipped", Outcome.CANCELLED
     return "Scoped", Outcome.SCOPED
 
 

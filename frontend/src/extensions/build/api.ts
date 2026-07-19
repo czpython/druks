@@ -28,19 +28,7 @@ export const buildApi = {
   },
 }
 
-export type PendingReason =
-  | 'plan_questions_open'
-  | 'plan_waiting_review'
-  | 'impl_waiting_review'
-  | 'eval_blocked'
-  | 'stuck_past_threshold'
-  | 'dead_letter'
-  | 'scope_questions_open'
-  | 'scope_dead'
-  | 'research_needs_approval'
-  | 'research_needs_clarification'
-
-export type Outcome = 'finished' | 'failed' | 'cancelled' | 'scoped'
+export type Outcome = 'finished' | 'cancelled' | 'scoped'
 
 export interface Links {
   repo: string
@@ -61,55 +49,6 @@ export interface WorkItemSummary extends SubjectSummary {
   updatedAt: string
   links: Links
 }
-
-export interface JobSummary {
-  id: number
-  kind: string
-  status: 'queued' | 'running' | 'succeeded' | 'failed' | 'dead'
-  repo?: string | null
-  prNumber?: number | null
-  branch?: string | null
-  attempts: number
-  maxAttempts: number
-  runAfter: string
-  lastError?: string | null
-  createdAt: string
-  updatedAt: string
-}
-
-export type PendingItem =
-  | {
-      type: 'human_review'
-      workItem: WorkItemSummary
-      reason: PendingReason
-      reasonLabel: string
-    }
-  | {
-      type: 'dead_job'
-      workItem?: WorkItemSummary | null
-      job: JobSummary
-      lastError: string
-      reason: 'dead_letter'
-    }
-  | {
-      type: 'stuck_effort'
-      workItem: WorkItemSummary
-      thresholdSeconds: number
-      reason: 'stuck_past_threshold'
-    }
-  | {
-      type: 'scope_questions'
-      item: DashboardItem
-      reason: 'scope_questions_open'
-      reasonLabel: string
-    }
-  | {
-      type: 'scope_dead'
-      item: DashboardItem
-      reason: 'scope_dead'
-      reasonLabel: string
-      lastError?: string | null
-    }
 
 export interface DashboardItem {
   /** Stable id like "code:37" — used for React keys and SSE diffs. */

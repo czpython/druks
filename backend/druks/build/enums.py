@@ -24,7 +24,6 @@ class HumanFeedbackAction(StrEnum):
 
 class Outcome(StrEnum):
     FINISHED = "finished"
-    FAILED = "failed"
     CANCELLED = "cancelled"
     SCOPED = "scoped"
 
@@ -32,5 +31,4 @@ class Outcome(StrEnum):
 class HandoffStatus(StrEnum):
     SCOPED = "scoped"
     SHIPPED = "shipped"
-    SKIPPED = "skipped"
     CANCELLED = "cancelled"

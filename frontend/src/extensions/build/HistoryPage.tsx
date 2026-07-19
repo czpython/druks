@@ -19,7 +19,6 @@ type OutcomeFilter = 'all' | Outcome
 
 const LANDING_VERB: Record<Outcome, string> = {
   finished: 'shipped',
-  failed: 'stopped',
   cancelled: 'cancelled',
   scoped: 'scoped',
 }
@@ -44,7 +43,6 @@ export function HistoryPage() {
   const items = historyQuery.data!.items
   const counts: Record<Outcome, number> = {
     finished: items.filter((i) => i.outcome === 'finished').length,
-    failed: items.filter((i) => i.outcome === 'failed').length,
     cancelled: items.filter((i) => i.outcome === 'cancelled').length,
     scoped: items.filter((i) => i.outcome === 'scoped').length,
   }
@@ -72,10 +70,6 @@ export function HistoryPage() {
           <span>·</span>
           <span>
             <span className="outcome-tag outcome-scoped">◇</span> {counts.scoped} scoped
-          </span>
-          <span>·</span>
-          <span>
-            <span className="outcome-tag outcome-failed">✕</span> {counts.failed} stopped
           </span>
           <span>·</span>
           <span>
@@ -110,12 +104,6 @@ export function HistoryPage() {
             current={outcomeFilter}
             onSelect={setOutcomeFilter}
             label={`scoped (${counts.scoped})`}
-          />
-          <FilterChip<OutcomeFilter>
-            value="failed"
-            current={outcomeFilter}
-            onSelect={setOutcomeFilter}
-            label={`stopped (${counts.failed})`}
           />
           <FilterChip<OutcomeFilter>
             value="cancelled"
