@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 from druks.extensions import loader
 from druks.extensions.loader import load_extension
+from druks.workflows import WorkflowStartResult
 
 # druks-field_notes is a real, standalone extension package that lives outside the
 # druks tree (``backend/tests/druks-field_notes``) — a model, a migration, a route, a
@@ -311,7 +312,7 @@ async def test_dispatch_starts_a_run_keyed_to_the_note(installed, monkeypatch):
 
     async def _capture(*, subject, **input):
         started.update(subject=subject, input=input)
-        return "run-1"
+        return WorkflowStartResult(run_id="run-1", is_duplicate=False)
 
     monkeypatch.setattr(Summarize, "start", _capture)
 

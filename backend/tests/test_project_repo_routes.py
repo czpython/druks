@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import pytest
+from druks.workflows import WorkflowStartResult
 from fastapi.testclient import TestClient
 
 
@@ -23,7 +24,7 @@ def _stub_profile_start(monkeypatch):
 
     async def _start(cls, *, subject, **input):
         calls.append({"subject": subject, **input})
-        return "fake-run-id"
+        return WorkflowStartResult(run_id="fake-run-id", is_duplicate=False)
 
     monkeypatch.setattr(Profile, "start", classmethod(_start))
     return calls

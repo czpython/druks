@@ -3,6 +3,7 @@ from types import SimpleNamespace
 import druks.build.subscribers  # noqa: F401 — registers the repo.pushed subscriber
 from conftest import make_settings
 from druks.core.webhooks.github import GitHubEvents
+from druks.workflows import WorkflowStartResult
 
 
 def _push_payload(*, full_name, default_branch, ref, changed_paths=()):
@@ -28,7 +29,7 @@ def _stub_profile_start(monkeypatch):
 
     async def _start(cls, *, subject, **input):
         calls.append({"subject": subject, **input})
-        return "fake-run-id"
+        return WorkflowStartResult(run_id="fake-run-id", is_duplicate=False)
 
     monkeypatch.setattr(Profile, "start", classmethod(_start))
     return calls

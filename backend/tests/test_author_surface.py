@@ -19,6 +19,7 @@ AUTHOR_SURFACE = {
         "SubjectSummary",
         "Workflow",
         "WorkflowError",
+        "WorkflowStartResult",
         "get_run_phase",
         "set_run_phase",
         "step",

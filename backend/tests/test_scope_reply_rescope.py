@@ -3,6 +3,7 @@ from conftest import make_test_work_item, seed_dbos_status
 from druks.build.scoping.workflows import Scope, ScopeReply
 from druks.durable import Run
 from druks.ticketing.datastructures import Ticket
+from druks.workflows import WorkflowStartResult
 from uuid_utils import uuid7
 
 
@@ -14,7 +15,7 @@ def _stub_enqueue(monkeypatch):
 
     async def _fake_start(**kwargs):
         calls.append(kwargs)
-        return str(uuid7())
+        return WorkflowStartResult(run_id=str(uuid7()), is_duplicate=False)
 
     monkeypatch.setattr("druks.build.scoping.workflows.Scope.start", _fake_start)
     return calls
