@@ -15,7 +15,7 @@ from druks.ticketing.datastructures import Ticket
 from druks.ticketing.enums import SemanticStatus
 from druks.ticketing.exceptions import TrackerNotConfigured
 from druks.ticketing.helpers import get_tracker, is_tracker_source
-from druks.workflows import AgentCall, Run
+from druks.workflows import Run
 
 logger = logging.getLogger(__name__)
 
@@ -333,25 +333,6 @@ class WorkItem(Base):
         return db_session().scalars(stmt).first()
 
     @classmethod
-    def by_remote_key(
-        cls,
-        *,
-        source: str,
-        remote_keys: set[str],
-    ) -> dict[str, "WorkItem"]:
-        """Bulk variant of ``get_for_remote_key`` keyed by remote_key.
-
-        Returns a dict mapping each found key to its WorkItem; missing
-        keys are simply absent from the returned dict."""
-        if not remote_keys:
-            return {}
-        stmt = select(cls).where(
-            cls.source == source,
-            cls.remote_key.in_(remote_keys),
-        )
-        return {wi.remote_key: wi for wi in db_session().scalars(stmt) if wi.remote_key}
-
-    @classmethod
     def list_recent(cls, *, limit: int = 50, offset: int = 0) -> list["WorkItem"]:
         stmt = select(cls).order_by(cls.updated_at.desc()).limit(limit).offset(offset)
         return list(db_session().scalars(stmt))
@@ -363,22 +344,6 @@ class WorkItem(Base):
             select(cls).where(cls.status.is_not(None)).order_by(cls.updated_at.desc()).limit(limit)
         )
         return list(db_session().scalars(stmt))
-
-    @classmethod
-    def sandbox_host_id_for(cls, repo: str, pr_number: int) -> str | None:
-        """The host_id of the most recent agent run for this work item. None
-        when nothing has run for this PR yet.
-
-        Callers MUST tolerate stale ids — the host may already be gone on the
-        provider side. ``sandbox_client.attach`` translates a 404 into
-        :class:`HostGone`, and the for_pr / token-rotation paths catch that and
-        re-acquire or skip.
-        """
-        item = cls.get_for_pr(repo=repo, pr_number=pr_number)
-        if not item:
-            return None
-        calls = AgentCall.list_for_subject("work_item", str(item.id))
-        return calls[-1].sandbox_host_id if calls else None
 
     def set_status(
         self, status: HandoffStatus | None, *, event_payload: dict[str, Any] | None = None

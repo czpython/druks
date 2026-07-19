@@ -2,7 +2,6 @@ import type { Outcome } from './api'
 
 const GLYPH: Record<Outcome, string> = {
   finished: '✓',
-  failed: '✕',
   cancelled: '◯',
   scoped: '◇',
 }
