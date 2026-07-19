@@ -37,7 +37,7 @@ Implement the approved plan (rendered above as **Current plan**) on the work bra
 
 ## Delivering your work
 
-{% if workflow.pr_number %}
+{% if build.pr_number %}
 When the implementation is complete you MUST commit and push it to the PR branch — the pushed commit is the deliverable. The repo is checked out on the PR branch already. Run, from the repo root:
 {% else %}
 No PR exists yet — your delivery provisions it. The repo is checked out on the default branch, so create the work branch first and implement on it (`git checkout -b <branch>`), named:
@@ -57,7 +57,7 @@ git push
 
 Stage only the paths your implementation changed; explicit staging is what keeps stray artifacts (caches, downloaded toolchains, editor files) out of the PR. The commit subject must describe what THIS commit's diff actually contains — not work that landed in earlier commits — and must not include the ticket or issue prefix.
 
-{% if workflow.pr_number %}
+{% if build.pr_number %}
 After a successful push, dismiss the PR's existing reviews (`gh` is authenticated) — every approval or change request on the PR is a verdict on a diff that no longer exists. A dismissal failure must never block your delivery — note it in known_risks and move on.
 {% else %}
 After a successful push, open the draft PR against the default branch (`gh pr create --draft`; `gh` is authenticated):

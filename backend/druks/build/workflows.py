@@ -34,6 +34,7 @@ from druks.workflows import FatalError, Gate, Workflow, step
 
 from .extension import Build
 from .policy import RepoPolicy
+from .prompt_context import BuildPromptContext
 from .workspace import RepoWorkspace
 
 if TYPE_CHECKING:
@@ -240,10 +241,35 @@ class BuildWorkflow(Workflow):
         }
 
     async def get_prompt_context(self, **context: Any) -> dict[str, Any]:
+        last = self._last_implement
+        plan = self.plan
+        prompt_context = BuildPromptContext(
+            repo=self.input.repo,
+            branch=self.branch,
+            pr_number=self.pr_number,
+            ticket_ref=self.input.ticket_ref,
+            source=self.input.source,
+            issue_number=self.input.issue_number,
+            task_owner_name=self.input.task_owner_name,
+            task_owner_email=self.input.task_owner_email,
+            plan_revision=len(self._plans),
+            implementation_revision=len(self._implementation_results),
+            finalized_base_sha=last.base_sha if last else None,
+            finalized_pr_sha=last.head_sha if last else None,
+            current_plan=plan.plan_markdown,
+            acceptance_criteria=plan.acceptance_criteria,
+            reviewer_requirements=self._reviewer_requirements(),
+            implementation_reviews=list(self._implementation_reviews),
+            human_feedback=list(self._human_feedback),
+            related_repos=self._related_repos(),
+            answered_questions=self._answered,
+            operator_note=self._note,
+        )
         return {
             "verification": await self._policy.verification_block(
                 profile=self._profile, repo=self.input.repo
             ),
+            "build": prompt_context,
             **await super().get_prompt_context(**context),
         }
 
@@ -428,32 +454,12 @@ class BuildWorkflow(Workflow):
         return getattr(self.state, "pr_number", None)
 
     @property
-    def plan_drafts(self) -> list[PlanData]:
-        return list(self._plans)
-
-    @property
     def plan(self) -> PlanData:
         return self._plans[-1] if self._plans else PlanData()
 
     @property
-    def current_plan(self) -> str:
-        return self.plan.plan_markdown
-
-    @property
-    def acceptance_criteria(self):
-        return self.plan.acceptance_criteria
-
-    @property
-    def questions(self):
-        return self.plan.questions
-
-    @property
     def plan_reviews(self) -> list[ReviewOutput]:
         return list(self._plan_reviews)
-
-    @property
-    def implementation_reviews(self) -> list[EvaluationOutput]:
-        return list(self._implementation_reviews)
 
     @property
     def assignee_github_login(self) -> str | None:
@@ -463,13 +469,13 @@ class BuildWorkflow(Workflow):
         return None
 
     @property
-    def plan_revision(self) -> int:
-        return len(self._plans)
+    def _last_implement(self) -> ImplementationOutput | None:
+        return self._implementation_results[-1] if self._implementation_results else None
 
-    @property
-    def reviewer_requirements(self) -> list[ReviewOutput]:
-        # Approve-with-required-changes verdicts on the current plan draft
-        # only — reviews of superseded drafts don't bind the implementer.
+    # Prompt-context projections — computed for BuildPromptContext, not workflow API.
+    def _reviewer_requirements(self) -> list[ReviewOutput]:
+        # Approve-with-required-changes verdicts on the current plan draft only —
+        # reviews of superseded drafts don't bind the implementer.
         return [
             review
             for review in self._plan_reviews[self._reviews_at_plan :]
@@ -477,31 +483,7 @@ class BuildWorkflow(Workflow):
             and review.body.strip()
         ]
 
-    @property
-    def implementation_revision(self) -> int:
-        # Prior finalized implement attempts — 0 on the first. Read by the prompt header.
-        return len(self._implementation_results)
-
-    @property
-    def human_feedback(self) -> list[HumanFeedback]:
-        return list(self._human_feedback)
-
-    @property
-    def _last_implement(self) -> ImplementationOutput | None:
-        return self._implementation_results[-1] if self._implementation_results else None
-
-    @property
-    def finalized_base_sha(self) -> str | None:
-        return self._last_implement.base_sha if self._last_implement else None
-
-    @property
-    def finalized_pr_sha(self) -> str | None:
-        # What the harness pushed to origin/<pr> — the finalize lease check, so a
-        # concurrent write to the PR branch is rejected, not overwritten.
-        return self._last_implement.head_sha if self._last_implement else None
-
-    @property
-    def related_repos(self) -> list[ProjectRepo]:
+    def _related_repos(self) -> list[ProjectRepo]:
         # The project's sibling repos (the prompt reads full_name + purpose).
         target = (self.input.repo or "").strip().lower()
         project = Project.get_for_repo(self.input.repo) if self.input.repo else None
@@ -512,14 +494,6 @@ class BuildWorkflow(Workflow):
             for repo in project.repos
             if (repo.full_name or "").strip() and repo.full_name.lower() != target
         ]
-
-    @property
-    def answered_questions(self) -> list[dict[str, str]]:
-        return self._answered
-
-    @property
-    def operator_note(self) -> str:
-        return self._note
 
     @step
     async def _clear_draft(self) -> None:
