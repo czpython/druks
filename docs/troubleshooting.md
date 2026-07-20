@@ -102,6 +102,18 @@ Webhook delivery is deduplicated in Redis. A handler failure releases the claim
 and returns an error so the provider can redeliver. Extension subscribers must
 be idempotent.
 
+## An agent cannot reach `/mcp`
+
+1. A 401 means the personal access token is missing, malformed, expired, or
+   revoked — mint a fresh one in **Settings → Agent access** and resend it as
+   `Authorization: Bearer <token>` ([Connect your agent](connect-your-agent.md)).
+2. A redirect or 404 at the edge means the host's Caddyfile predates the
+   `/mcp` handlers: deploys never refresh the host copy, so re-run the
+   installer (or copy `deploy/caddy/Caddyfile`) and `docker compose up -d
+   caddy`.
+3. Confirm the backend answers directly:
+   `curl -X POST http://127.0.0.1:8001/mcp` returns 401, never 404.
+
 ## An agent run will not start
 
 ### Harness not connected or expired

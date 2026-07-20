@@ -106,8 +106,9 @@ ssh exe.dev share set-public druks
 ```
 
 Public URLs: `https://<host>/_external/{github,linear,jira}/events/`
-(HMAC-gated webhooks) and `https://<host>/` (exe.dev login at the edge;
-harness login in the app mints the session).
+(HMAC-gated webhooks), `https://<host>/mcp` (PAT-authenticated MCP endpoint —
+[Connect your agent](../docs/connect-your-agent.md)), and `https://<host>/`
+(exe.dev login at the edge; harness login in the app mints the session).
 
 **Elsewhere (e.g. AWS + Teleport)**, the dashboard goes through your
 identity proxy (set `DRUKS_AUTH_HEADER` to the header it injects), but
@@ -123,11 +124,14 @@ Druks' shipped Caddy dashboard listener is loopback HTTP behind that edge.
 2. Set `DRUKS_WEBHOOK_HOST=druks.example.com` in `.env` and
    `docker compose up -d caddy`.
 
-Caddy auto-provisions Let's Encrypt for that hostname and serves
-**only** `POST /_external/*` on it — no dashboard routes, no identity
-header, so the SSO gate can't be forged from the public side. Webhook
-URLs become `https://druks.example.com/_external/<provider>/events/`.
-Leave `DRUKS_WEBHOOK_HOST` unset to bring your own ingress instead.
+Caddy auto-provisions Let's Encrypt for that hostname and serves **only**
+`POST /_external/*` and the PAT-authenticated `/mcp` endpoint on it — no
+dashboard routes, no identity header, so the SSO gate can't be forged from
+the public side. Webhook URLs become
+`https://druks.example.com/_external/<provider>/events/`; agents connect at
+`https://druks.example.com/mcp`
+([Connect your agent](../docs/connect-your-agent.md)). Leave
+`DRUKS_WEBHOOK_HOST` unset to bring your own ingress instead.
 
 ## Update / redeploy
 
@@ -239,6 +243,8 @@ Caddyfile fetched by the installer) enforces path-level access:
   Druks. Per-provider paths land under
   `/_external/<provider>/<category>/`; extension role-module discovery
   registers them at import time.
+- `/mcp` — public, authenticated per request by personal access token inside
+  the app; proxied unbuffered so its SSE frames stream.
 - Everything else — a nonempty trusted identity header (exe.dev login
   provides one) required, then proxied to `web` (`127.0.0.1:8001`), which
   serves the API, the SPA, and extension frontends alike; the app itself

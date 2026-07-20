@@ -37,6 +37,7 @@ dependencies = [
     "blinker>=1.9",
     "apprise>=1.9",
     "cryptography>=48.0.1",
+    "fastmcp>=3.4.4,<4",
 ]
 
 [project.urls]
