@@ -68,7 +68,8 @@ management itself accepts the dashboard session only, so a leaked token
 cannot mint or revoke tokens. On compromise, revoke the token in Settings →
 Agent access (immediate; the list shows each token's prefix and last use,
 tracked hourly, to identify it) and mint a replacement — rotation is mint
-first, revoke second.
+first, revoke second. Agents consume the API through the MCP endpoint; see
+[Connect your agent](connect-your-agent.md).
 
 ## GitHub Apps
 

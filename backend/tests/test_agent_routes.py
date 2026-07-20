@@ -6,10 +6,12 @@ from conftest import (
     configure_app_for_test,
     make_settings,
     make_test_work_item,
+    seed_agent_run,
     seed_build_run,
     seed_run,
 )
 from druks.accounts.models import Account
+from druks.api.app import app
 from druks.durable.models import Run
 from druks.durable.reads import read_transcript_chunk
 from druks.mcp.gateway import services
@@ -22,11 +24,11 @@ _IN_APP_ASK = {
 }
 
 _MCP_ROUTES = {
-    ("get", "/mcp/gates/{run_id}"): "get_gate",
-    ("post", "/mcp/gates/{run_id}/answer"): "answer_gate",
-    ("get", "/mcp/agent-calls/{call_id}"): "get_agent_call",
-    ("post", "/mcp/runs/{run_id}/cancel"): "cancel_run",
-    ("get", "/mcp/usage"): "get_usage",
+    ("get", "/api/gates/{run_id}"): "get_gate",
+    ("post", "/api/gates/{run_id}/answer"): "answer_gate",
+    ("get", "/api/agent-calls/{call_id}"): "get_agent_call",
+    ("post", "/api/runs/{run_id}/cancel"): "cancel_run",
+    ("get", "/api/usage/summary"): "get_usage",
 }
 
 
@@ -69,14 +71,12 @@ def _park(db_session, item_id):
 
 
 def test_openapi_pins_the_five_agent_routes(client: TestClient):
-    from druks.api.app import app
-
     schema = app.openapi()
     found = {
         (method, path): operation
         for path, operations in schema["paths"].items()
         for method, operation in operations.items()
-        if operation.get("tags") == ["mcp"]
+        if operation.get("tags") == ["agent"]
     }
     assert {key: op["operationId"] for key, op in found.items()} == _MCP_ROUTES
 
@@ -84,12 +84,12 @@ def test_openapi_pins_the_five_agent_routes(client: TestClient):
 def test_agent_routes_sit_behind_the_gate(tmp_path, db_session):
     app = configure_app_for_test(settings=make_settings(tmp_path), authenticated=False)
     with TestClient(app) as anonymous:
-        assert anonymous.get("/mcp/gates/x").status_code == 401
-        assert anonymous.get("/mcp/usage").status_code == 401
+        assert anonymous.get("/api/gates/x").status_code == 401
+        assert anonymous.get("/api/usage/summary").status_code == 401
 
 
 def test_agent_errors_share_one_shape(client: TestClient, db_session):
-    missing = client.get("/mcp/gates/no-such-run")
+    missing = client.get("/api/gates/no-such-run")
     assert missing.status_code == 404
     assert missing.json() == {
         "code": "RUN_NOT_FOUND",
@@ -100,7 +100,7 @@ def test_agent_errors_share_one_shape(client: TestClient, db_session):
     item = make_test_work_item(repo="o/r", title="t")
     run = _park(db_session, item.id)
     stale = client.post(
-        f"/mcp/gates/{run.id}/answer",
+        f"/api/gates/{run.id}/answer",
         json={"parkedAt": "2020-01-01T00:00:00+00:00", "control": "approve"},
     )
     assert stale.status_code == 409
@@ -113,13 +113,13 @@ def test_get_gate_then_answer_roundtrip(client: TestClient, db_session, resume_s
     item = make_test_work_item(repo="o/r", title="t")
     run = _park(db_session, item.id)
 
-    view = client.get(f"/mcp/gates/{run.id}")
+    view = client.get(f"/api/gates/{run.id}")
     assert view.status_code == 200
     data = view.json()
     assert data == services.get_gate(run.id).model_dump(mode="json", by_alias=True)
 
     answered = client.post(
-        f"/mcp/gates/{run.id}/answer",
+        f"/api/gates/{run.id}/answer",
         json={"parkedAt": data["parkedAt"], "control": "approve", "note": "ship it"},
     )
     assert answered.status_code == 200
@@ -138,7 +138,7 @@ def test_answer_gate_reads_already_answered_off_the_receipt(
     db_session.flush()
 
     response = client.post(
-        f"/mcp/gates/{run.id}/answer",
+        f"/api/gates/{run.id}/answer",
         json={"parkedAt": parked_at.isoformat(), "control": "approve"},
     )
 
@@ -152,7 +152,7 @@ def test_answer_gate_requires_an_aware_parked_at(client: TestClient, db_session)
     run = _park(db_session, item.id)
 
     naive = client.post(
-        f"/mcp/gates/{run.id}/answer",
+        f"/api/gates/{run.id}/answer",
         json={"parkedAt": "2026-07-19T10:00:00", "control": "approve"},
     )
 
@@ -168,12 +168,12 @@ def test_cancel_run_route(client: TestClient, db_session):
     run.input_requested_at = run.utc_now()
     db_session.flush()
 
-    unbounded = client.post(f"/mcp/runs/{run.id}/cancel", json={"reason": "r" * 501})
+    unbounded = client.post(f"/api/runs/{run.id}/cancel", json={"reason": "r" * 501})
     assert unbounded.status_code == 422
-    blank = client.post(f"/mcp/runs/{run.id}/cancel", json={"reason": ""})
+    blank = client.post(f"/api/runs/{run.id}/cancel", json={"reason": ""})
     assert blank.status_code == 422
 
-    cancelled = client.post(f"/mcp/runs/{run.id}/cancel", json={"reason": "wrong branch"})
+    cancelled = client.post(f"/api/runs/{run.id}/cancel", json={"reason": "wrong branch"})
     assert cancelled.status_code == 200
     assert cancelled.json() == {"runId": run.id, "result": "cancelled"}
 
@@ -183,14 +183,12 @@ def test_cancel_run_route(client: TestClient, db_session):
     assert not run.input_gate
     assert run.failure == "wrong branch"
 
-    again = client.post(f"/mcp/runs/{run.id}/cancel", json={"reason": "wrong branch"})
+    again = client.post(f"/api/runs/{run.id}/cancel", json={"reason": "wrong branch"})
     assert again.status_code == 200
     assert again.json()["result"] == "already_cancelled"
 
 
 def test_transcript_route_matches_the_read_machinery(client: TestClient, db_session, db_engine):
-    from conftest import seed_agent_run
-
     call = seed_agent_run()
     call_dir = call.call_dir
     call_dir.mkdir(parents=True, exist_ok=True)
@@ -202,8 +200,8 @@ def test_transcript_route_matches_the_read_machinery(client: TestClient, db_sess
     assert response.status_code == 200
     chunk = read_transcript_chunk(db_engine, call.id, "stdout", offset=0, limit=7)
     assert response.json() == chunk.model_dump(mode="json", by_alias=True)
-    # The 7-byte cut lands mid-é; the served chunk ends on a character boundary.
-    assert response.json()["text"] == "hello "
+    # The 7-byte cut lands mid-é; the window serves the seam's one �.
+    assert response.json()["text"] == "hello �"
 
 
 def test_resume_route_contract_is_preserved(client: TestClient, db_session, resume_spy):
@@ -257,7 +255,7 @@ def test_usage_agent_route_matches_the_service(client: TestClient, db_session, a
     )
     db_session.flush()
 
-    response = client.get("/mcp/usage")
+    response = client.get("/api/usage/summary")
     assert response.status_code == 200
     body = response.json()
     assert body == services.get_usage(account).model_dump(mode="json", by_alias=True)

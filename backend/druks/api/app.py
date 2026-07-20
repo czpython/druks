@@ -1,13 +1,15 @@
 import logging
-from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from collections.abc import AsyncIterator, Mapping
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from pathlib import Path
 from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from fastmcp.utilities.lifespan import combine_lifespans
 from starlette.datastructures import MutableHeaders
+from starlette.routing import Route
 
 from druks.accounts.dependencies import current_account
 from druks.accounts.routes import router as auth_router
@@ -112,7 +114,18 @@ async def _release_db_session() -> AsyncIterator[None]:
         db_session.remove()
 
 
-app = FastAPI(title="Druks", lifespan=lifespan, dependencies=[Depends(_release_db_session)])
+def _mcp_lifespan(app: FastAPI) -> AbstractAsyncContextManager[Mapping[str, Any] | None]:
+    # FastAPI never runs a plain route's lifespan; the endpoint's builds its
+    # session manager. Late-bound: the endpoint derives from the assembled
+    # app further down.
+    return mcp_app.lifespan(app)
+
+
+app = FastAPI(
+    title="Druks",
+    lifespan=combine_lifespans(lifespan, _mcp_lifespan),
+    dependencies=[Depends(_release_db_session)],
+)
 
 
 # Exception handlers — uniform JSON envelope.
@@ -201,6 +214,17 @@ app.include_router(gateway_router, dependencies=_session_gate)
 app.include_router(artifacts_router, dependencies=_session_gate)
 load(app)
 
+# Tools derive from every route tagged "agent", so the endpoint composes
+# after load() — an extension's tagged routes join tools/list too.
+from druks.mcp.app import create_mcp_app  # noqa: E402
+
+# A bare Route at exactly /mcp (a Mount would 307 the no-slash path); PATs
+# authenticate it, so it sits outside the session gate.
+mcp_app = create_mcp_app(app)
+app.router.routes.append(
+    Route("/mcp", mcp_app, methods=["POST", "DELETE"], include_in_schema=False)
+)
+
 
 # Unknown /api/* paths return a JSON 404 across every method instead of
 # falling through to the SPA index.html, which would mislead API consumers
@@ -213,6 +237,17 @@ load(app)
 )
 async def api_not_found(path: str) -> None:
     raise HTTPException(status_code=404, detail=f"Unknown API path: /api/{path}")
+
+
+# The edge forwards /mcp/* but the endpoint owns only the exact path; an
+# unowned subpath must not fall through to the SPA's index.html.
+@app.api_route(
+    "/mcp/{path:path}",
+    methods=["GET", "POST", "PATCH", "PUT", "DELETE"],
+    include_in_schema=False,
+)
+async def mcp_not_found(path: str) -> None:
+    raise HTTPException(status_code=404, detail=f"Unknown MCP path: /mcp/{path}")
 
 
 # Repo root in a checkout, /app in the backend image — both put the built SPA
