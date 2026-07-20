@@ -6,8 +6,7 @@ from conftest import make_test_work_item, seed_build_run, seed_call
 from druks.accounts.models import Account
 from druks.durable.models import Artifact, Run
 from druks.durable.reads import read_slice
-from druks.mcp.gateway import services
-from druks.mcp.gateway import exceptions
+from druks.mcp.gateway import exceptions, services
 from druks.usage.models import UsageScrape
 
 pytestmark = pytest.mark.usefixtures("_data_dir")
