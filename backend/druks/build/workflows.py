@@ -113,9 +113,6 @@ class BuildWorkflow(Workflow):
 
     def __init__(self) -> None:
         super().__init__()
-        # Durable by determinism: a recovery re-runs the body from the top with
-        # every agent call and gate reply memoized, so the journal rebuilds to
-        # exactly what the live pass held.
         self._journal = BuildJournal()
 
     @classmethod
@@ -347,11 +344,8 @@ class BuildWorkflow(Workflow):
         # NO_CHANGE / QUESTION → re-park
         return await self._work_gate()
 
-    # These wrappers are plain workflow-body code: the agent calls inside them
-    # memoize themselves, so on a recovery the pure parts re-run deterministically
-    # and rebuild the journal (set_state included — it is body-only). Only
-    # side-effecting IO beyond an agent call (GitHub writes, child starts, event
-    # records) keeps its own @step.
+    # Body code, never @step: the agent calls inside memoize themselves, and the
+    # journal writes + set_state must re-run on replay — a @step would skip them.
     async def implement(self) -> ImplementationOutput:
         delivery = await Build.implement()
         # A bail is a stop, not a result: the implementer hit a contradiction in the
@@ -423,31 +417,29 @@ class BuildWorkflow(Workflow):
 
     async def _request_assignee_review(self) -> None:
         login = self._journal.assignee_github_login
-        if not login or not self.input.repo or not self.pr_number:
-            return
-        try:
-            await get_github_client(load_settings()).request_pull_request_reviewers(
-                self.input.repo, self.pr_number, [login]
-            )
-        except Exception:  # noqa: BLE001 — a missed ping must not fail the park
-            logger.warning(
-                "could not request review from %s on %s#%s",
-                login,
-                self.input.repo,
-                self.pr_number,
-            )
+        if login and self.input.repo and self.pr_number:
+            try:
+                await get_github_client(load_settings()).request_pull_request_reviewers(
+                    self.input.repo, self.pr_number, [login]
+                )
+            except Exception:  # noqa: BLE001 — a missed ping must not fail the park
+                logger.warning(
+                    "could not request review from %s on %s#%s",
+                    login,
+                    self.input.repo,
+                    self.pr_number,
+                )
 
     async def _set_pr_draft(self, *, draft: bool) -> None:
-        if not self.input.repo or not self.pr_number:
-            return
-        try:
-            await get_github_client(load_settings()).set_pull_request_draft_state(
-                self.input.repo, self.pr_number, draft=draft
-            )
-        except Exception:  # noqa: BLE001 — a draft merge fails loudly anyway
-            logger.warning(
-                "Could not set draft=%s on %s#%s.", draft, self.input.repo, self.pr_number
-            )
+        if self.input.repo and self.pr_number:
+            try:
+                await get_github_client(load_settings()).set_pull_request_draft_state(
+                    self.input.repo, self.pr_number, draft=draft
+                )
+            except Exception:  # noqa: BLE001 — a draft merge fails loudly anyway
+                logger.warning(
+                    "Could not set draft=%s on %s#%s.", draft, self.input.repo, self.pr_number
+                )
 
 
 class Profile(Workflow):
@@ -511,9 +503,8 @@ class Profile(Workflow):
 
 
 async def _delete_branch(repo: str, branch: str | None) -> None:
-    if not branch:
-        return
-    try:
-        await get_github_client(load_settings()).delete_branch(repo, branch)
-    except Exception:  # noqa: BLE001 — cleanup only
-        logger.warning("Could not delete branch %s on %s.", branch, repo, exc_info=True)
+    if branch:
+        try:
+            await get_github_client(load_settings()).delete_branch(repo, branch)
+        except Exception:  # noqa: BLE001 — cleanup only
+            logger.warning("Could not delete branch %s on %s.", branch, repo, exc_info=True)

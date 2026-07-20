@@ -19,7 +19,7 @@ class PlanRecord:
 class BuildJournal:
     """The run's working memory, rebuilt on replay. Mutate only from workflow-body
     code after a memoized call — never inside a @step, where replay skips the
-    write. Templates read the projections as ``build.journal.<name>``."""
+    write."""
 
     def __init__(self) -> None:
         self.plans: list[PlanRecord] = []
@@ -27,7 +27,6 @@ class BuildJournal:
         self.evaluations: list[EvaluationOutput] = []
         self.human_feedback: list[HumanFeedback] = []
 
-    # Each add returns its argument so call sites chain around the agent call.
     def add_plan(self, plan: PlanData) -> PlanData:
         self.plans.append(PlanRecord(plan=plan))
         return plan

@@ -18,8 +18,7 @@ _OP_TEMPLATES = [
     "triage_human_feedback.md",
 ]
 
-# The kwargs the workflow passes at each agent's call site — top-level template
-# names, beside the standing ``build`` context.
+# The kwargs the workflow passes at each template's agent call site.
 _CALL_KWARGS = {
     "generate_plan.md": {"answered_questions": [], "operator_note": ""},
 }
@@ -27,7 +26,7 @@ _CALL_KWARGS = {
 
 def _build() -> SimpleNamespace:
     """A stand-in BuildPromptContext exposing the fields the templates read —
-    identity facts faked, the journal real (its projections are the contract)."""
+    identity facts faked, the journal real."""
     return SimpleNamespace(
         repo="acme/widget",
         branch="agent/eng-1",

@@ -8,10 +8,9 @@ from druks.build.models import ProjectRepo
 class BuildPromptContext:
     """What build's prompt templates render against — the run's identity facts
     plus its journal, assembled per agent call by ``BuildWorkflow.get_prompt_context``.
-    The templates read ``build.<field>`` (and the journal's projections as
-    ``build.journal.<name>``) and nothing else off the run, so this is the whole
-    contract between the workflow and its prompts; the workflow itself stays
-    free of template accessors.
+    The templates read ``build.<field>`` and nothing else off the run, so this is
+    the whole contract between the workflow and its prompts; the workflow itself
+    stays free of template accessors.
     """
 
     # Target repo + ticket identity, flattened from the run input.
@@ -24,6 +23,4 @@ class BuildPromptContext:
     task_owner_name: str | None
     task_owner_email: str | None
     related_repos: list[ProjectRepo]
-    # The run's working memory, read live — StrictUndefined fails loudly on a
-    # renamed projection, and the sandboxed environment keeps templates read-only.
     journal: BuildJournal
