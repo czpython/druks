@@ -7,6 +7,7 @@ import httpx
 import pytest
 from conftest import configure_app_for_test, connect_harness, make_settings
 from druks import database
+from druks.accounts.constants import SESSION_PREFIX
 from druks.accounts.models import Account
 from druks.accounts.sessions import SESSION_COOKIE
 from druks.harnesses import base as hbase
@@ -126,6 +127,18 @@ def test_redis_eviction_signs_out_but_keeps_credentials(tmp_path, monkeypatch, d
     assert HarnessConnection.get_for_account(
         "claude", Account.get_for_username("me@example.com").id
     )
+
+
+def test_missing_account_does_not_drop_the_session(tmp_path, monkeypatch, db_session):
+    # A None from Account.get is a transient/anomalous read (nothing deletes
+    # accounts), so it 401s the request but must never destroy the session —
+    # else a blip becomes a forced re-login.
+    with _client(tmp_path) as client:
+        _login(client, monkeypatch)
+        key = f"{SESSION_PREFIX}{client.cookies[SESSION_COOKIE]}"
+        druks.redis.get_client()._data[key] = b"no-such-account"
+        assert client.get("/api/auth/session").status_code == 401
+        assert key in druks.redis.get_client()._data
 
 
 def test_session_keeps_its_account_across_reconnects(tmp_path, monkeypatch, db_session):

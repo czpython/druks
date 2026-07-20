@@ -8,19 +8,17 @@ _BEARER_CHALLENGE = 'Bearer realm="druks"'
 
 
 async def resolve_session_account(request: Request) -> Account | None:
-    """The session cookie's account, or None; drops a session whose account
-    is gone."""
+    """The account behind the session cookie, or None."""
     token = request.cookies.get(sessions.SESSION_COOKIE)
     if not token:
         return
     account_id = await sessions.resolve_session(token)
     if not account_id:
         return
-    account = Account.get(account_id)
-    if not account:
-        await sessions.drop_session(token)
-        return
-    return account
+    # Never drop the session on a missing account: nothing deletes accounts
+    # (the FKs forbid it), so a None here is a transient read, not a real
+    # deletion — dropping would turn a blip into a forced re-login.
+    return Account.get(account_id)
 
 
 async def current_session_account(request: Request) -> Account:
