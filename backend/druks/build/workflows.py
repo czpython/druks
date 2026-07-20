@@ -378,7 +378,15 @@ class BuildWorkflow(Workflow):
             return
         await github.squash_merge_pull_request(self.input.repo, self.pr_number)
         if self._policy.delete_branch:
-            await _delete_branch(self.input.repo, self.branch)
+            try:
+                await github.delete_branch(self.input.repo, self.branch)
+            except Exception:  # noqa: BLE001 — cleanup only
+                logger.warning(
+                    "Could not delete branch %s on %s.",
+                    self.branch,
+                    self.input.repo,
+                    exc_info=True,
+                )
 
     # The provisioned branch + PR, published by the first implement — None until then
     # (planning runs against the default branch, and there is no PR to point at).
@@ -500,11 +508,3 @@ class Profile(Workflow):
             ],
             **await super().get_prompt_context(**context),
         }
-
-
-async def _delete_branch(repo: str, branch: str | None) -> None:
-    if branch:
-        try:
-            await get_github_client(load_settings()).delete_branch(repo, branch)
-        except Exception:  # noqa: BLE001 — cleanup only
-            logger.warning("Could not delete branch %s on %s.", branch, repo, exc_info=True)

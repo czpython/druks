@@ -8,7 +8,7 @@ from druks.build.extension import Build
 from druks.build.models import Project, ProjectRepo, WorkItem
 from druks.build.policy import RepoPolicy
 from druks.build.scoping.workflows import Scope
-from druks.build.workflows import BuildWorkflow, Profile, _delete_branch
+from druks.build.workflows import BuildWorkflow, Profile
 from druks.core.apis.exceptions import GitHubAppNotConfiguredError, GitHubAppNotInstalledError
 from druks.core.apis.github import get_github_client
 from druks.settings import load_settings
@@ -137,8 +137,8 @@ async def _observe_external_close(*, repo: str, pr_number: int, work_item: WorkI
     # failure must not strand the ticket — its reset below still runs.
     try:
         if (await RepoPolicy.resolve(repo)).delete_branch:
-            await _delete_branch(repo, work_item.branch)
-    except Exception:  # noqa: BLE001 — cleanup only, like _delete_branch itself
+            await get_github_client(load_settings()).delete_branch(repo, work_item.branch)
+    except Exception:  # noqa: BLE001 — cleanup only
         logger.warning("Skipped branch cleanup for %s#%s.", repo, pr_number, exc_info=True)
     # The attempt was abandoned, not the ticket: send it back to the
     # provider's resting pool rather than stranding it in In Progress.
