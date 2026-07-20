@@ -2,6 +2,7 @@
 # Schemas stay pure projections; routes call in here.
 import asyncio
 from collections.abc import AsyncIterator
+from pathlib import Path
 from typing import Literal
 
 from sqlalchemy import Engine
@@ -19,6 +20,7 @@ from .schemas import (
     SubjectResponse,
     SubjectStatus,
     SubjectSummary,
+    TextSlice,
     TranscriptChunk,
 )
 
@@ -30,7 +32,7 @@ _TERMINAL_CALL_STATES = {"succeeded", "failed", "abandoned"}
 def get_agent_call_files(call_id: str) -> AgentCallFiles | None:
     call = AgentCall.get(call_id)
     if not call:
-        return None
+        return
     return AgentCallFiles.from_call(call, Artifact.get_for_call(call.id))
 
 
@@ -113,6 +115,28 @@ def _status(
     )
 
 
+def read_slice(path: Path, *, offset: int, limit: int) -> TextSlice:
+    # A bounded byte window of a text file. A multibyte character split at a
+    # window seam shows one � — the live tail below does the same. Negative
+    # offset reads the tail; missing file is an empty eof slice.
+    if not path.exists():
+        return TextSlice(offset=0, next_offset=0, eof=True, has_earlier=False, text="")
+    size = path.stat().st_size
+    if offset < 0:
+        offset = max(size + offset, 0)
+    with path.open("rb") as handle:
+        handle.seek(offset)
+        payload = handle.read(limit)
+    next_offset = offset + len(payload)
+    return TextSlice(
+        offset=offset,
+        next_offset=next_offset,
+        eof=next_offset >= size,
+        has_earlier=offset > 0,
+        text=payload.decode("utf-8", errors="replace"),
+    )
+
+
 def read_transcript_chunk(
     engine: Engine,
     call_id: str,
@@ -127,23 +151,20 @@ def read_transcript_chunk(
     with session_scope(engine):
         call = AgentCall.get(call_id)
         if not call:
-            return None
+            return
         path = call.get_stream_path(stream)
-    if not path or not path.exists():
+    if not path:
         return TranscriptChunk(
             call_id=call_id, stream=stream, offset=offset, next_offset=offset, eof=True, text=""
         )
-    with path.open("rb") as handle:
-        handle.seek(offset)
-        payload = handle.read(limit)
-    next_offset = offset + len(payload)
+    piece = read_slice(path, offset=offset, limit=limit)
     return TranscriptChunk(
         call_id=call_id,
         stream=stream,
-        offset=offset,
-        next_offset=next_offset,
-        eof=next_offset >= path.stat().st_size,
-        text=payload.decode("utf-8", errors="replace"),
+        offset=piece.offset,
+        next_offset=piece.next_offset,
+        eof=piece.eof,
+        text=piece.text,
     )
 
 

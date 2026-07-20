@@ -4,6 +4,7 @@
 # real schema, so this guards it directly.
 import pytest
 from druks.build import contracts as O
+from pydantic import ValidationError
 
 MODELS = [
     O.PlanOutput,
@@ -111,3 +112,21 @@ def test_get_answered_maps_picks_to_labels_and_keeps_free_text_verbatim():
         {"question": "Which cache?", "answer": "Redis"},
         {"question": "Which queue?", "answer": "kafka — we already run it"},
     ]
+
+
+def test_ask_contracts_cap_identity_and_cardinality():
+    # The gate view is bounded by construction: identity and list sizes are
+    # hard caps at the agent boundary, never clipped downstream.
+    option = O.QuestionOptionOutput(id="a", label="Redis")
+    with pytest.raises(ValidationError):
+        O.QuestionOptionOutput(id="a" * 65, label="Redis")
+    with pytest.raises(ValidationError):
+        O.QuestionOutput(id="q", prompt="p" * 2049, options=[])
+    with pytest.raises(ValidationError):
+        O.QuestionOutput(id="q", prompt="p", options=[option] * 17)
+    with pytest.raises(ValidationError):
+        O.PlanOutput(
+            plan_markdown="m",
+            acceptance_criteria=[],
+            questions=[O.QuestionOutput(id=f"q{i}", prompt="p", options=[]) for i in range(9)],
+        )

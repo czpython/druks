@@ -143,7 +143,7 @@ def _input_model_from_signature(cls: type["Workflow"]) -> type[BaseModel] | None
     method = getattr(cls, method_name)
     parameters = [p for name, p in inspect.signature(method).parameters.items() if name != "self"]
     if not parameters:
-        return None
+        return
     hints = get_type_hints(method)
     fields: dict[str, Any] = {}
     for p in parameters:
@@ -239,7 +239,7 @@ async def _park(
         workflow.workflow_id,
         RunState.RUNNING,
         subject=workflow.subject,
-        facts=_GATE_CLEARED,
+        facts={**_GATE_CLEARED, "answer_parked_at": Run.input_requested_at},
     )
     return payload
 
@@ -251,9 +251,8 @@ async def _notify_designated_destination(workflow_id: str, subject: dict[str, An
     async def _create() -> str | None:
         async with step_session():
             destination_id = UserSettings.get().gate_park_destination_id
-            if not destination_id:
-                return None
-            return Run.get(workflow_id).create_park_notification(destination_id, subject)
+            if destination_id:
+                return Run.get(workflow_id).create_park_notification(destination_id, subject)
 
     notification_id = await DBOS.run_step_async(
         StepOptions(name="notifications.gate_park", **_IO_RETRIES), _create
@@ -306,14 +305,13 @@ async def _emit_run_event(
                 for field, value in facts.items():
                     setattr(run, field, value)
                 session.flush()
-            if not subject:
-                # Subjectless framework crons are plumbing: no feed entry.
-                return None
-            return {
-                "kind": run.kind,
-                "subject": subject,
-                "payload": _log_run_event(run, event, subject, result),
-            }
+            # Subjectless framework crons are plumbing: no feed entry.
+            if subject:
+                return {
+                    "kind": run.kind,
+                    "subject": subject,
+                    "payload": _log_run_event(run, event, subject, result),
+                }
 
     transition = await DBOS.run_step_async(
         StepOptions(name=f"run.{event.value}", **_IO_RETRIES), _transition
@@ -554,7 +552,7 @@ class Workflow:
         # The warm VM, provisioned once per segment; state is carried in git, so
         # only the host-id matters across steps — held-across-steps never fights replay.
         if not self.steps_reuse_sandbox:
-            return None
+            return
         if self._host and self._host.expires_at:
             remaining = (self._host.expires_at - datetime.now(UTC)).total_seconds()
             if remaining < SANDBOX_HOST_ROTATE_BEFORE_SECONDS:
@@ -628,13 +626,13 @@ class Workflow:
         **input: Any,
     ) -> str:
         # Mint the id, write the projection row, enqueue the body. Returns the
-        # workflow id; an extension that wants one-active-run-per-subject enforces
-        # that on its own side before calling this. Enqueuing (not start_workflow)
-        # routes execution onto the shared queue, so the process that kicks a run
-        # off — often the web process — doesn't have to be the one that runs it;
-        # any launched executor picks it up. The input kwargs mirror the body's own
-        # signature and validate against the model synthesized from it, so a bad
-        # shape fails at start, not inside the run.
+        # run to follow — a freshly enqueued run, or the subject's already-live
+        # one handed back. Enqueuing (not start_workflow) routes execution
+        # onto the shared queue, so the process that kicks a run off — often the
+        # web process — doesn't have to be the one that runs it; any launched
+        # executor picks it up. The input kwargs mirror the body's own signature
+        # and validate against the model synthesized from it, so a bad shape
+        # fails at start, not inside the run.
         # subject is required (no default) so a run can't silently lose its
         # timeline by omission — pass subject=None explicitly for a background run.
         if account_id is None:
@@ -643,12 +641,11 @@ class Workflow:
             account_id = current_account_id.get()
         if subject is not None:
             _Subject.model_validate(subject)  # raises on a bad shape (wrong/extra keys, types)
-        if cls._run_input_model is None:
-            if input:
-                raise WorkflowError(f"{cls.__name__}.{cls._body_method}() takes no input")
-            wire: dict[str, Any] = {}
-        else:
+        wire: dict[str, Any] = {}
+        if cls._run_input_model:
             wire = cls._run_input_model.model_validate(input).model_dump(mode="json")
+        elif input:
+            raise WorkflowError(f"{cls.__name__}.{cls._body_method}() takes no input")
         if account_id:
             wire[_ACCOUNT_INPUT_KEY] = account_id
         workflow_id = str(uuid7())

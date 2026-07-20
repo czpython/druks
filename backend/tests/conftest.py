@@ -479,6 +479,7 @@ def seed_build_run(
     input_gate: str | None = None,
     input_request: dict | None = None,
     failure: str | None = None,
+    account_id: str | None = None,
 ):
     """Seed a build Run row for a work item and bind it via
     ``item.build_run_id``. Returns the Run. Attach agent calls with
@@ -496,6 +497,7 @@ def seed_build_run(
         input_gate=input_gate,
         input_request=input_request,
         failure=failure,
+        account_id=account_id,
     )
     session.add(run)
     session.flush()

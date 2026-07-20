@@ -18,6 +18,8 @@ from druks.durable.engine import init_dbos, launch, shutdown
 from druks.events.routes import router as events_router
 from druks.extensions.loader import iter_extensions, load
 from druks.mcp.catalog import load_mcp_catalog
+from druks.mcp.gateway.exceptions import AgentApiError
+from druks.mcp.gateway.routes import router as gateway_router
 from druks.mcp.routes import router as mcp_router
 from druks.notifications.routes import external_router as notifications_external_router
 from druks.notifications.routes import router as notifications_router
@@ -128,6 +130,16 @@ async def _http_exception_handler(request: Request, exc: HTTPException) -> JSONR
     )
 
 
+# The agent surface's one error shape. Messages are authored for the caller —
+# the handler never serializes tracebacks or internals.
+@app.exception_handler(AgentApiError)
+async def _agent_api_error_handler(request: Request, exc: AgentApiError) -> JSONResponse:
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"code": exc.code, "message": str(exc), "retryable": exc.retryable},
+    )
+
+
 @app.exception_handler(RequestValidationError)
 async def _validation_exception_handler(
     request: Request,
@@ -185,6 +197,7 @@ app.include_router(mcp_router, dependencies=_session_gate)
 app.include_router(notifications_router, dependencies=_session_gate)
 app.include_router(events_router, dependencies=_session_gate)
 app.include_router(runs_router, dependencies=_session_gate)
+app.include_router(gateway_router, dependencies=_session_gate)
 app.include_router(artifacts_router, dependencies=_session_gate)
 load(app)
 

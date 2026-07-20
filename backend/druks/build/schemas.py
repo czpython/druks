@@ -102,6 +102,11 @@ class Links(BaseResponse):
     pr: str | None = None
     ticket: str | None = None
 
+    @classmethod
+    def from_work_item(cls, item: WorkItem) -> "Links":
+        pr = f"https://github.com/{item.repo}/pull/{item.pr_number}" if item.pr_number else None
+        return cls(repo=f"https://github.com/{item.repo}", pr=pr, ticket=item.remote_url)
+
 
 class WorkItemSummary(SubjectSummary):
     # The work item's domain header — what only build knows. Status (where it is
@@ -124,8 +129,6 @@ class WorkItemSummary(SubjectSummary):
 
     @classmethod
     def from_work_item(cls, item: WorkItem) -> "WorkItemSummary":
-        repo_url = f"https://github.com/{item.repo}"
-        pr_url = f"https://github.com/{item.repo}/pull/{item.pr_number}" if item.pr_number else None
         return cls(
             id=str(item.id),
             source=item.source,  # type: ignore[arg-type]
@@ -138,7 +141,7 @@ class WorkItemSummary(SubjectSummary):
             branch=item.branch,
             created_at=item.created_at,
             updated_at=item.updated_at,
-            links=Links(repo=repo_url, pr=pr_url, ticket=item.remote_url),
+            links=Links.from_work_item(item),
         )
 
 
@@ -161,8 +164,6 @@ class DashboardItem(BaseResponse):
     @classmethod
     def from_work_item(cls, item: WorkItem) -> "DashboardItem":
         assert item.status is not None  # History is terminal-only: status is always set.
-        repo_url = f"https://github.com/{item.repo}"
-        pr_url = f"https://github.com/{item.repo}/pull/{item.pr_number}" if item.pr_number else None
         label, outcome = _outcome_from_status(item.status)
         return cls(
             key=f"code:{item.id}",
@@ -178,7 +179,7 @@ class DashboardItem(BaseResponse):
             outcome=outcome,
             created_at=item.created_at,
             updated_at=item.updated_at,
-            links=Links(repo=repo_url, pr=pr_url, ticket=item.remote_url),
+            links=Links.from_work_item(item),
         )
 
 
