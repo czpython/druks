@@ -5,7 +5,7 @@ from typing import Any, Literal
 from pydantic import Field, SerializeAsAny
 
 from druks.harnesses.artifacts import normalize_token_usage
-from druks.schemas import BaseResponse, clip
+from druks.schemas import BaseResponse
 
 from .enums import AgentCallStatus, RunState
 from .models import AgentCall, Artifact, Run
@@ -225,11 +225,6 @@ class TranscriptChunk(BaseResponse):
     text: str
 
 
-# Free-text fields on the agent-surface summaries are clipped to this, so a
-# stack trace can't blow a response budget.
-_TEXT_CLIP = 160
-
-
 class TextSlice(BaseResponse):
     # One bounded UTF-8-safe cut of an on-disk text file; offsets are byte
     # positions, has_earlier marks content before this slice.
@@ -261,7 +256,7 @@ class AgentCallSummary(BaseResponse):
             status=_derived_status(call),  # type: ignore[arg-type]
             started_at=call.started_at,
             finished_at=call.finished_at,
-            last_error=clip(call.last_error, _TEXT_CLIP),
+            last_error=call.last_error,
             cost_usd=call.cost_usd,
         )
 
@@ -284,7 +279,7 @@ class RunSummary(BaseResponse):
             id=run.id,
             kind=run.kind,
             state=run.state,  # type: ignore[arg-type]
-            failure=clip(run.failure, _TEXT_CLIP),
+            failure=run.failure,
             created_at=run.created_at,
             updated_at=run.updated_at,
             account_username=run.account.username,

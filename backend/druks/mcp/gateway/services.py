@@ -31,7 +31,6 @@ from druks.mcp.gateway.schemas import (
 )
 from druks.notifications.exceptions import InvalidChoiceError
 from druks.notifications.services import validate_in_app_answer
-from druks.schemas import clip
 from druks.usage.models import UsageScrape
 from druks.usage.reads import list_finished_calls
 from druks.usage.schemas import UsageHistoryPoint
@@ -42,28 +41,7 @@ _TRANSCRIPT_TAIL_BYTES = 8 * 1024
 _STDERR_TAIL_BYTES = 4 * 1024
 _ARTIFACT_CHUNK_BYTES = 4 * 1024
 _NOTE_BYTES = 2 * 1024
-_PROMPT_CLIP = 2 * 1024
-_OPTION_LABEL_CLIP = 256
-# Each usage trend stays this short so the whole response holds its byte budget.
-_HISTORY_POINTS = 8
-
-
-def _bounded_ask(ask: dict[str, Any]) -> dict[str, Any]:
-    # The ask is agent-authored free text, so the view bounds each field like
-    # every other budgeted response. Question COUNT stays whole — dropping a
-    # question would make the gate unanswerable; real asks hold a handful.
-    questions = [
-        {
-            **question,
-            "prompt": clip(question.get("prompt"), _PROMPT_CLIP),
-            "options": [
-                {**option, "label": clip(option.get("label"), _OPTION_LABEL_CLIP)}
-                for option in question.get("options", [])
-            ],
-        }
-        for question in ask.get("questions", [])
-    ]
-    return {**ask, "questions": questions}
+_HISTORY_POINTS = 8  # trend points per harness on the usage response
 
 
 def get_gate(run_id: str) -> GateDetail:
@@ -77,7 +55,7 @@ def get_gate(run_id: str) -> GateDetail:
         # External gates are answered on their source (PR review, ticket
         # comment); an ask-less park offers no reply contract either.
         raise GateNotAnswerable(run_id)
-    ask = _bounded_ask(run.get_ask())
+    ask = run.get_ask()
     return GateDetail(
         run_id=run.id,
         gate=run.input_gate,  # type: ignore[arg-type]
@@ -237,7 +215,7 @@ def _harness_usage(name: str, account_id: str, *, now: datetime) -> AgentHarness
     return AgentHarnessUsage(
         name=name,
         is_connected=is_connected,
-        plan_tier=clip(row.plan_tier, 64),
+        plan_tier=row.plan_tier,
         five_hour_percent_left=row.five_hour_percent_left,
         five_hour_resets_at=row.five_hour_resets_at,
         week_percent_left=row.week_percent_left,

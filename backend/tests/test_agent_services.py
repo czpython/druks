@@ -1,4 +1,3 @@
-import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -119,26 +118,6 @@ def test_get_gate_returns_ask_schema_and_parked_at(db_session):
     assert schema["properties"]["control"]["enum"] == ["approve", "request_changes", "cancel"]
     assert schema["properties"]["answers"]["properties"]["q1"]["description"] == "Which db?"
     assert schema["required"] == ["control"]
-
-
-def test_get_gate_bounds_an_agent_authored_ask(db_session):
-    item = make_test_work_item(repo="o/r", title="t")
-    question = {
-        "id": "q1",
-        "prompt": "🦖" * 5000,
-        "options": [{"id": "a", "label": "💥" * 500}],
-    }
-    run = _park(db_session, item.id, ask=_in_app_ask([question]))
-
-    view = services.get_gate(run.id)
-
-    prompt = view.ask["questions"][0]["prompt"]
-    label = view.ask["questions"][0]["options"][0]["label"]
-    assert len(json.dumps(prompt, ensure_ascii=False).encode()) - 2 <= 2048
-    assert len(json.dumps(label, ensure_ascii=False).encode()) - 2 <= 256
-    # The reply schema derives from the bounded ask, so its description is the
-    # clipped prompt — one bounded view, both structures.
-    assert view.reply_schema["properties"]["answers"]["properties"]["q1"]["description"] == prompt
 
 
 def test_get_gate_serves_a_bounded_artifact_chunk(db_session):
