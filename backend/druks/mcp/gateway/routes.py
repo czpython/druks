@@ -14,11 +14,11 @@ from druks.mcp.gateway.schemas import (
     GateDetail,
 )
 
-router = APIRouter(tags=["agent"])
+router = APIRouter(prefix="/mcp", tags=["mcp"])
 
 
 @router.get(
-    "/api/agent/gates/{run_id}",
+    "/gates/{run_id}",
     operation_id="get_gate",
     response_model=GateDetail,
     response_model_by_alias=True,
@@ -28,7 +28,7 @@ async def get_gate(run_id: str) -> GateDetail:
 
 
 @router.post(
-    "/api/agent/gates/{run_id}/answer",
+    "/gates/{run_id}/answer",
     operation_id="answer_gate",
     response_model=GateAnswerResult,
     response_model_by_alias=True,
@@ -44,7 +44,7 @@ async def answer_gate(run_id: str, body: AnswerGateRequest) -> GateAnswerResult:
 
 
 @router.get(
-    "/api/agent/agent-calls/{call_id}",
+    "/agent-calls/{call_id}",
     operation_id="get_agent_call",
     response_model=AgentCallDetail,
     response_model_by_alias=True,
@@ -54,7 +54,7 @@ async def get_agent_call(call_id: str) -> AgentCallDetail:
 
 
 @router.post(
-    "/api/agent/runs/{run_id}/cancel",
+    "/runs/{run_id}/cancel",
     operation_id="cancel_run",
     response_model=CancelRunResult,
     response_model_by_alias=True,
@@ -66,7 +66,7 @@ async def cancel_run(
 
 
 @router.get(
-    "/api/usage/agent",
+    "/usage",
     operation_id="get_usage",
     response_model=AgentUsage,
     response_model_by_alias=True,

@@ -19,7 +19,7 @@ from druks.events.routes import router as events_router
 from druks.extensions.loader import iter_extensions, load
 from druks.mcp.catalog import load_mcp_catalog
 from druks.mcp.gateway.exceptions import AgentApiError
-from druks.mcp.gateway.routes import router as agent_router
+from druks.mcp.gateway.routes import router as gateway_router
 from druks.mcp.routes import router as mcp_router
 from druks.notifications.routes import external_router as notifications_external_router
 from druks.notifications.routes import router as notifications_router
@@ -197,7 +197,7 @@ app.include_router(mcp_router, dependencies=_session_gate)
 app.include_router(notifications_router, dependencies=_session_gate)
 app.include_router(events_router, dependencies=_session_gate)
 app.include_router(runs_router, dependencies=_session_gate)
-app.include_router(agent_router, dependencies=_session_gate)
+app.include_router(gateway_router, dependencies=_session_gate)
 app.include_router(artifacts_router, dependencies=_session_gate)
 load(app)
 
