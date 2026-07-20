@@ -134,48 +134,25 @@ def _continuation_prefix(payload: bytes) -> int:
     return length
 
 
-# Leads whose first continuation is narrower than 80–BF (RFC 3629): E0/F0
-# exclude overlongs, ED excludes surrogates, F4 caps at U+10FFFF.
-_FIRST_CONTINUATION = {
-    0xE0: (0xA0, 0xBF),
-    0xED: (0x80, 0x9F),
-    0xF0: (0x90, 0xBF),
-    0xF4: (0x80, 0x8F),
-}
-
-
-def _partial_suffix(payload: bytes) -> int:
-    # Bytes of an incomplete trailing multi-byte character; 0 when the slice
-    # ends on a character boundary.
-    for back in range(1, min(4, len(payload)) + 1):
-        byte = payload[-back]
-        if byte & 0xC0 == 0x80:
-            continue
-        # Only a sequence that can still complete is worth trimming; anything
-        # that never will (C0/C1 or F5+ leads, raw terminal noise, a first
-        # continuation outside the lead's constrained range — overlongs,
-        # surrogates, beyond U+10FFFF) is kept, replaced by decode(), and
-        # advanced past.
-        if 0xC2 <= byte <= 0xF4:
-            needed = 2 if byte < 0xE0 else 3 if byte < 0xF0 else 4
-            if back < needed:
-                low, high = _FIRST_CONTINUATION.get(byte, (0x80, 0xBF))
-                if back == 1 or low <= payload[-back + 1] <= high:
-                    return back
-        return 0
-    return 0
+def _complete_prefix(payload: bytes) -> bytes:
+    # Drop a trailing sequence the window truncated mid-character so the next
+    # read re-covers it; a genuinely invalid byte is kept (decode replaces it)
+    # so pagination never stalls. The decoder tells the two apart.
+    try:
+        payload.decode("utf-8")
+    except UnicodeDecodeError as error:
+        if error.reason == "unexpected end of data":
+            return payload[: error.start]
+    return payload
 
 
 def read_slice(path: Path, *, offset: int, limit: int) -> TextSlice:
-    # One bounded slice of a text file, snapped to UTF-8 character boundaries
-    # on both cut edges (the next read re-covers trimmed bytes). A negative
-    # offset addresses from the end — the tail |offset| bytes. Missing file:
+    # A bounded slice of a text file snapped to UTF-8 boundaries; the next read
+    # re-covers trimmed bytes. Negative offset reads the tail; missing file is
     # an empty eof slice.
     if not path.exists():
         return TextSlice(offset=0, next_offset=0, eof=True, has_earlier=False, text="")
-    # Any single character fits, so boundary trims always leave progress — a
-    # smaller limit could sit on a four-byte character forever.
-    limit = max(limit, 4)
+    limit = max(limit, 4)  # any character fits, so a trim always leaves progress
     size = path.stat().st_size
     if offset < 0:
         offset = max(size + offset, 0)
@@ -186,11 +163,7 @@ def read_slice(path: Path, *, offset: int, limit: int) -> TextSlice:
         lead = _continuation_prefix(payload)
         offset += lead
         payload = payload[lead:]
-    # Trim a partial trailing sequence unconditionally: at EOF it means the
-    # writer is mid-character, and emitting � would advance past bytes whose
-    # completion the next read must re-cover. next_offset stays behind the
-    # trim, so eof reads false until the character lands whole.
-    payload = payload[: len(payload) - _partial_suffix(payload)]
+    payload = _complete_prefix(payload)
     next_offset = offset + len(payload)
     return TextSlice(
         offset=offset,
