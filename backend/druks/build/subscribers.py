@@ -16,7 +16,7 @@ from druks.signals import subscribe
 from druks.ticketing.enums import SemanticStatus
 from druks.ticketing.exceptions import TrackerNotConfigured
 from druks.ticketing.helpers import get_tracker
-from druks.workflows import Run, RunState
+from druks.workflows import Run
 
 logger = logging.getLogger(__name__)
 
@@ -122,7 +122,7 @@ async def _ship(*, repo: str, pr_number: int, work_item: WorkItem | None) -> Non
     # A RUNNING run converges on its own (its merge step sees the closed PR), so
     # it is left to finish; that includes druks's own merge wrapping up.
     run = work_item.get_build_run()
-    if run and run.state == RunState.PENDING_INPUT.value:
+    if run and run.is_parked:
         await run.cancel(failure="pr merged while parked")
     await work_item.set_remote_status(SemanticStatus.DONE)
     logger.info("Merge observed for %s#%s.", repo, pr_number)

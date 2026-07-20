@@ -5,7 +5,7 @@ from druks.build.extension import Build
 from druks.build.models import Project, ProjectRepo, WorkItem
 from druks.build.scoping.contracts import ScopeBriefOutput
 from druks.ticketing.datastructures import Ticket
-from druks.workflows import Gate, Run, RunState, Workflow
+from druks.workflows import Gate, Run, Workflow
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +55,7 @@ class Scope(Workflow):
     @classmethod
     def parked_for(cls, work_item_id: int) -> Run | None:
         runs = Run.list_for_subject("work_item", str(work_item_id), kind=cls.kind)
-        return next((run for run in runs if run.state == RunState.PENDING_INPUT.value), None)
+        return next((run for run in runs if run.is_parked), None)
 
     async def get_prompt_context(self, **context: object) -> dict[str, object]:
         # Everything the agent needs beyond the ticket it fetches itself: where

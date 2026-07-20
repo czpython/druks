@@ -14,13 +14,11 @@ from druks.accounts.models import Account
 from druks.core.models import Uuid7Pk
 from druks.database import db_session, get_session
 from druks.durable.dbos_state import state_expression, subject_filter, updated_at_expression
-from druks.durable.enums import ACTIVE_STATES
+from druks.durable.enums import ACTIVE_STATES, AgentCallStatus, RunState
 from druks.harnesses.artifacts import normalize_token_usage
 from druks.models import Base
 from druks.notifications.models import Notification
 from druks.settings import load_settings
-
-from .enums import AgentCallStatus
 
 if TYPE_CHECKING:
     from druks.sandbox.datastructures import AgentResult
@@ -71,6 +69,10 @@ class Run(Base):
     @property
     def is_active(self) -> bool:
         return self.state in {s.value for s in ACTIVE_STATES}
+
+    @property
+    def is_parked(self) -> bool:
+        return self.state == RunState.PENDING_INPUT.value
 
     @classmethod
     def create_row(cls, engine, *, workflow_id: str, kind: str, account_id: str | None) -> None:

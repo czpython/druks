@@ -146,6 +146,37 @@ visible by comparison. Runs with no account anywhere (crons, background work)
 run as the system account. Resuming a parked run keeps its original attribution;
 the person clicking Resume never becomes the payer.
 
+### Replay-rebuilt workflow state
+
+A `run_multistep()` body often accumulates working state across its calls — the
+drafts produced so far, the reviews of the current draft, the last delivery.
+Hold that state in plain instance attributes and mutate them only from
+orchestration-body code, right after the memoized call that produced the value:
+
+```python
+class Sweep(Workflow):
+    def __init__(self) -> None:
+        super().__init__()
+        self._findings: list[str] = []
+
+    async def run_multistep(self, repo: str) -> None:
+        self._findings.extend(await self.scan(repo))
+```
+
+This is durable by determinism: recovery re-runs the body from the top with
+every `@step`, agent call, and gate reply memoized, so the attributes rebuild
+to exactly what the live pass held. It is the standard durable-execution idiom —
+Temporal workflows hold state the same way.
+
+The one trap: never mutate these attributes inside a `@step` or `run()`. A
+completed step is skipped on replay — its body never runs again — so a write
+made there silently vanishes from the rebuilt state. A step returns values;
+the replayed body records them.
+
+`BuildJournal` (`backend/druks/build/journal.py`) is the reference shape: one
+typed object owning the run's working memory, with this contract stated on the
+class.
+
 ### Schedules and settings
 
 Set `every` to declare a cron:
