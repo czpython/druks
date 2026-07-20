@@ -120,7 +120,7 @@ def test_get_gate_returns_ask_schema_and_parked_at(db_session):
     assert schema["required"] == ["control"]
 
 
-def test_get_gate_serves_a_bounded_artifact_chunk(db_session):
+def test_get_gate_serves_the_artifact(db_session):
     item = make_test_work_item(repo="o/r", title="t")
     run = _park(db_session, item.id)
     call = seed_call(db_session, run, "generate_plan")
@@ -133,8 +133,7 @@ def test_get_gate_serves_a_bounded_artifact_chunk(db_session):
     assert view.artifact is not None
     assert view.artifact.call_id == call.id
     assert view.artifact.title == "Plan"
-    assert len(view.artifact.chunk.text.encode()) <= 4096
-    assert view.artifact.chunk.eof is False
+    assert len(view.artifact.content.encode()) <= 4096
 
 
 def test_get_gate_refuses_when_not_parked_or_external(db_session):
@@ -262,15 +261,11 @@ def test_get_agent_call_serves_bounded_tails(db_session):
 
     assert detail.run_id == call.run_id
     assert detail.call.id == call.id
-    assert len(detail.call.last_error or "") <= 160
-    assert len(detail.transcript.text.encode()) <= 8192
-    assert detail.transcript.offset == 20480 - 8192
-    assert detail.transcript.eof is True
-    assert detail.transcript.has_earlier is True
-    assert len(detail.stderr.text.encode()) <= 4096
-    assert detail.stderr.has_earlier is True
+    assert detail.call.last_error == "boom " * 100
+    assert detail.transcript == "s" * 8192
+    assert detail.stderr == "e" * 4096
     assert detail.artifact is not None
-    assert len(detail.artifact.chunk.text.encode()) <= 4096
+    assert detail.artifact.content == "a" * 4096
 
     with pytest.raises(AgentCallNotFound):
         services.get_agent_call("no-such-call")
@@ -283,9 +278,8 @@ def test_get_agent_call_without_files_reads_empty(db_session):
 
     detail = services.get_agent_call(call.id)
 
-    assert detail.transcript.text == ""
-    assert detail.transcript.eof is True
-    assert detail.stderr.has_earlier is False
+    assert detail.transcript == ""
+    assert detail.stderr == ""
     assert detail.artifact is None
 
 

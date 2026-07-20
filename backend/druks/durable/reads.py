@@ -16,7 +16,6 @@ from .schemas import (
     AgentCallFiles,
     AgentCallResponse,
     RunResponse,
-    RunSummary,
     SubjectActivity,
     SubjectResponse,
     SubjectStatus,
@@ -48,16 +47,6 @@ def get_subject_status(subject_type: str, subject_id: str) -> SubjectStatus:
     runs = Run.list_for_subject(subject_type, subject_id)
     active_run = next((run for run in runs if run.is_active), None)
     return _status(runs, active_run, _running_calls(active_run))
-
-
-def list_recent_runs(
-    subject_type: str, subject_id: str, *, limit: int, calls_limit: int
-) -> list[RunSummary]:
-    # The subject's newest runs, each with its latest agent calls — the bounded
-    # agent-surface cut of list_subject_timeline.
-    runs = Run.list_for_subject(subject_type, subject_id)[:limit]
-    calls_by_run = AgentCall.by_run([run.id for run in runs])
-    return [RunSummary.from_run(run, calls_by_run[run.id][-calls_limit:]) for run in runs]
 
 
 def get_subject_response(

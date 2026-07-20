@@ -24,7 +24,7 @@ from druks.mcp.gateway.schemas import (
     AgentCallDetail,
     AgentHarnessUsage,
     AgentUsage,
-    ArtifactChunk,
+    ArtifactContent,
     CancelRunResult,
     GateAnswerResult,
     GateDetail,
@@ -61,7 +61,7 @@ def get_gate(run_id: str) -> GateDetail:
         gate=run.input_gate,  # type: ignore[arg-type]
         parked_at=run.input_requested_at,  # type: ignore[arg-type]
         ask=ask,
-        artifact=_artifact_chunk(Artifact.get_latest_for_run(run.id)),
+        artifact=_artifact_content(Artifact.get_latest_for_run(run.id)),
         reply_schema=_reply_schema(ask),
     )
 
@@ -110,9 +110,9 @@ def get_agent_call(call_id: str) -> AgentCallDetail:
         call=AgentCallSummary.from_call(call),
         transcript=read_slice(
             layout.transcript, offset=-_TRANSCRIPT_TAIL_BYTES, limit=_TRANSCRIPT_TAIL_BYTES
-        ),
-        stderr=read_slice(layout.stderr, offset=-_STDERR_TAIL_BYTES, limit=_STDERR_TAIL_BYTES),
-        artifact=_artifact_chunk(Artifact.get_for_call(call.id)),
+        ).text,
+        stderr=read_slice(layout.stderr, offset=-_STDERR_TAIL_BYTES, limit=_STDERR_TAIL_BYTES).text,
+        artifact=_artifact_content(Artifact.get_for_call(call.id)),
     )
 
 
@@ -128,18 +128,18 @@ async def cancel_run(run_id: str, *, reason: str) -> CancelRunResult:
     return CancelRunResult(run_id=run.id, result="cancelled")
 
 
-def _artifact_chunk(artifact: Artifact | None) -> ArtifactChunk | None:
+def _artifact_content(artifact: Artifact | None) -> ArtifactContent | None:
     if not artifact:
         return
     call = AgentCall.get(artifact.agent_call_id)
     path = call.get_file_path(artifact.path) if call else None
     if not path:
         return
-    return ArtifactChunk(
+    return ArtifactContent(
         call_id=artifact.agent_call_id,
         kind=artifact.kind,
         title=artifact.title,
-        chunk=read_slice(path, offset=0, limit=_ARTIFACT_CHUNK_BYTES),
+        content=read_slice(path, offset=0, limit=_ARTIFACT_CHUNK_BYTES).text,
     )
 
 

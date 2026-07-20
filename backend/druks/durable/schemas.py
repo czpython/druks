@@ -259,29 +259,3 @@ class AgentCallSummary(BaseResponse):
             last_error=call.last_error,
             cost_usd=call.cost_usd,
         )
-
-
-class RunSummary(BaseResponse):
-    # One run for the agent surface, with its latest agent calls — the bounded
-    # cut of RunResponse (no ask payload; get_gate serves the live one).
-    id: str
-    kind: str
-    state: Literal["scheduled", "running", "pending_input", "finished", "failed", "cancelled"]
-    failure: str | None = None
-    created_at: datetime
-    updated_at: datetime
-    account_username: str
-    agent_calls: list[AgentCallSummary] = Field(default_factory=list)
-
-    @classmethod
-    def from_run(cls, run: Run, calls: list[AgentCall]) -> "RunSummary":
-        return cls(
-            id=run.id,
-            kind=run.kind,
-            state=run.state,  # type: ignore[arg-type]
-            failure=run.failure,
-            created_at=run.created_at,
-            updated_at=run.updated_at,
-            account_username=run.account.username,
-            agent_calls=[AgentCallSummary.from_call(call) for call in calls],
-        )

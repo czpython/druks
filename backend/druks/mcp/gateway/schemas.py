@@ -4,18 +4,16 @@ from typing import Any, Literal
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 
-from druks.durable.schemas import AgentCallSummary, TextSlice
+from druks.durable.schemas import AgentCallSummary
 from druks.schemas import BaseResponse
 from druks.usage.schemas import UsageHistoryPoint
 
 
-class ArtifactChunk(BaseResponse):
-    # A call's renderable output, head-bounded; page the rest through the
-    # call's transcript files route.
+class ArtifactContent(BaseResponse):
     call_id: str
     kind: str
     title: str
-    chunk: TextSlice
+    content: str
 
 
 class GateDetail(BaseResponse):
@@ -26,7 +24,7 @@ class GateDetail(BaseResponse):
     gate: str
     parked_at: datetime
     ask: dict[str, Any]
-    artifact: ArtifactChunk | None = None
+    artifact: ArtifactContent | None = None
     reply_schema: dict[str, Any]
 
 
@@ -51,9 +49,9 @@ class AnswerGateRequest(BaseModel):
 class AgentCallDetail(BaseResponse):
     run_id: str
     call: AgentCallSummary
-    transcript: TextSlice
-    stderr: TextSlice
-    artifact: ArtifactChunk | None = None
+    transcript: str
+    stderr: str
+    artifact: ArtifactContent | None = None
 
 
 class CancelRunResult(BaseResponse):
