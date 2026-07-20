@@ -33,9 +33,9 @@ async def test_plan_phase_threads_free_text_into_the_next_pass(monkeypatch):
     )
     passes: list[dict] = []
 
-    async def fake_plan_agent():
-        # The state the planner's view is built from on each pass.
-        passes.append({"answered": flow._answered, "note": flow._note})
+    async def fake_plan_agent(**kwargs):
+        # The call kwargs the planner's view is built from on each pass.
+        passes.append(kwargs)
         return next(plans)
 
     async def fake_review_agent():
@@ -65,12 +65,14 @@ async def test_plan_phase_threads_free_text_into_the_next_pass(monkeypatch):
 
     assert await flow._plan_phase() is True
     assert passes == [
-        {"answered": [], "note": ""},
+        {"answered_questions": [], "operator_note": ""},
         {
-            "answered": [{"question": "Which cache?", "answer": "memcache — redis is banned here"}],
-            "note": "",
+            "answered_questions": [
+                {"question": "Which cache?", "answer": "memcache — redis is banned here"}
+            ],
+            "operator_note": "",
         },
-        {"answered": [], "note": "add a rollback section"},
+        {"answered_questions": [], "operator_note": "add a rollback section"},
     ]
 
 

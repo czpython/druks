@@ -39,6 +39,3 @@ class BuildPromptContext:
     implementation_reviews: list[EvaluationOutput]
     human_feedback: list[HumanFeedback]
     related_repos: list[ProjectRepo]
-    # The operator's guidance carried into the next plan pass.
-    answered_questions: list[dict[str, str]]
-    operator_note: str

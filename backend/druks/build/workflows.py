@@ -129,12 +129,6 @@ class BuildWorkflow(Workflow):
         self._implementation_reviews: list[EvaluationOutput] = []
         self._implementation_results: list[ImplementationOutput] = []
         self._human_feedback: list[HumanFeedback] = []
-        # The questions the operator answered ({question, answer}), fed to the next plan
-        # pass; empty on the first pass and after a plain re-plan.
-        self._answered: list[dict[str, str]] = []
-        # The operator's free-text note from the latest review reply, quoted to the
-        # next plan pass; empty when they left none.
-        self._note = ""
 
     @classmethod
     async def dispatch(
@@ -266,8 +260,6 @@ class BuildWorkflow(Workflow):
             implementation_reviews=list(self._implementation_reviews),
             human_feedback=list(self._human_feedback),
             related_repos=self._related_repos(),
-            answered_questions=self._answered,
-            operator_note=self._note,
         )
         return {
             "verification": await self._policy.verification_block(
@@ -381,14 +373,10 @@ class BuildWorkflow(Workflow):
     # and rebuild the in-memory diary (set_state included — it is body-only). Only
     # side-effecting IO beyond an agent call (GitHub writes, child starts, event
     # records) keeps its own @step.
-    async def generate_plan(
-        self, answered: list[dict[str, str]] | None = None, note: str = ""
-    ) -> PlanData:
-        # The operator's guidance reaches the agent via answered_questions and
-        # operator_note — not on the plan.
-        self._answered = answered or []
-        self._note = note
-        return self._add_plan(await Build.generate_plan())
+    async def generate_plan(self, answered: list[dict[str, str]], note: str) -> PlanData:
+        return self._add_plan(
+            await Build.generate_plan(answered_questions=answered, operator_note=note)
+        )
 
     async def review_plan(self) -> ReviewOutput:
         grade = await Build.review_plan()
@@ -550,7 +538,6 @@ class Profile(Workflow):
         # Every dispatch site verifies the repo exists first; a build never
         # profiles a repo that isn't there.
         project_repo = ProjectRepo.get(repo_id)
-        self._repo = project_repo.full_name
 
         if refresh_only:
             baseline = project_repo.profile.get("baseline") or {}
@@ -570,7 +557,7 @@ class Profile(Workflow):
         project_repo.set_profile(baseline=baseline, effective=effective)
 
     async def get_workspace_kwargs(self, sandbox: "Sandbox") -> dict[str, Any]:
-        repo = self._repo
+        repo = ProjectRepo.get(self.input.repo_id).full_name
         github_token = await get_github_client(load_settings()).token_for_repo(repo)
         await sandbox.write_secret(
             secret=github_token, remote=get_github_token_remote_path(sandbox.ssh_username)
@@ -589,7 +576,7 @@ class Profile(Workflow):
 
     async def get_prompt_context(self, **context: Any) -> dict[str, Any]:
         return {
-            "repo": self._repo,
+            "repo": ProjectRepo.get(self.input.repo_id).full_name,
             "skills_catalog": [
                 {"name": skill.name, "description": skill.description}
                 for skill in Skill.list_enabled()

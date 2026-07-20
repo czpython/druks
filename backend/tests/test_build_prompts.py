@@ -17,6 +17,12 @@ _OP_TEMPLATES = [
     "triage_human_feedback.md",
 ]
 
+# The kwargs the workflow passes at each agent's call site — top-level template
+# names, beside the standing ``build`` context.
+_CALL_KWARGS = {
+    "generate_plan.md": {"answered_questions": [], "operator_note": ""},
+}
+
 
 def _build() -> SimpleNamespace:
     """A stand-in BuildPromptContext exposing the fields the templates read."""
@@ -39,8 +45,6 @@ def _build() -> SimpleNamespace:
         implementation_reviews=[],
         human_feedback=[],
         related_repos=[],
-        answered_questions=[],
-        operator_note="",
     )
 
 
@@ -58,6 +62,7 @@ async def test_build_operation_prompt_renders(template):
         build=_build(),
         verification="VERIFICATION-BLOCK",
         workspace=_workspace(),
+        **_CALL_KWARGS.get(template, {}),
     )
 
     # The build-derived bits resolved — a leftover ``workflow`` ref would have
@@ -86,14 +91,13 @@ async def test_implement_prompt_provisions_when_no_pr_exists():
 async def test_generate_plan_prompt_quotes_operator_content():
     """Free-text answers and the operator's note render block-quoted line by line —
     operator words stay answer content in the prompt, never instruction text."""
-    build = _build()
-    build.answered_questions = [{"question": "Which cache?", "answer": "redis\nwith a 5m TTL"}]
-    build.operator_note = "Tighten the rollout.\nSplit phase 2."
     output = await render_prompt(
         "build/build_workflow/generate_plan.md",
-        build=build,
+        build=_build(),
         verification="VERIFICATION-BLOCK",
         workspace=_workspace(),
+        answered_questions=[{"question": "Which cache?", "answer": "redis\nwith a 5m TTL"}],
+        operator_note="Tighten the rollout.\nSplit phase 2.",
     )
     assert "> redis\n  > with a 5m TTL" in output
     assert "> Tighten the rollout.\n> Split phase 2." in output
@@ -111,6 +115,7 @@ async def test_build_prompt_orders_the_ticket_fetch(template):
         build=build,
         verification="VERIFICATION-BLOCK",
         workspace=_workspace(),
+        **_CALL_KWARGS.get(template, {}),
     )
     assert "MANDATORY FIRST ACTION" in output
     assert "fetch `ACME-1`" in output
