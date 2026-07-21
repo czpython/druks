@@ -363,8 +363,8 @@ def configure_app_for_test(
 
 
 async def _test_account():
+    from druks.accounts.context import current_account_id
     from druks.accounts.models import Account
-    from druks.accounts.sessions import current_account_id
 
     account = Account.get_or_create("op@example.com")
     current_account_id.set(account.id)

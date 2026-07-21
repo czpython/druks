@@ -288,9 +288,9 @@ async def test_attribution_rides_the_run_and_survives_resume(rt):
 
 
 async def test_browser_origin_start_inherits_the_ambient_account(rt):
-    # The session gate stamps the request's account into a contextvar;
+    # The auth gate stamps the request's account into a contextvar;
     # start() reads it when no explicit account_id is passed.
-    from druks.accounts.sessions import current_account_id
+    from druks.accounts.context import current_account_id
 
     account_id = _account_id(rt.engine, "ambient@example.com")
     token = current_account_id.set(account_id)

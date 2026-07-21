@@ -19,7 +19,7 @@ from dbos._error import (
 from pydantic import BaseModel, ConfigDict, Field, create_model
 from uuid_utils import uuid7
 
-from druks.accounts.sessions import current_account_id
+from druks.accounts.context import current_account_id
 from druks.durable.activity import get_run_phase, set_run_phase
 from druks.durable.engine import _step_engine, register_schedule, run_queue, step_session
 from druks.durable.enums import AgentCallStatus, RunState
@@ -636,7 +636,7 @@ class Workflow:
         # subject is required (no default) so a run can't silently lose its
         # timeline by omission — pass subject=None explicitly for a background run.
         if account_id is None:
-            # Browser-origin starts inherit the session gate's account;
+            # Browser-origin starts inherit the request's authenticated account;
             # dispatchers that know better pass account_id explicitly.
             account_id = current_account_id.get()
         if subject is not None:
