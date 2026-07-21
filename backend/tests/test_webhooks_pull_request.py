@@ -259,7 +259,9 @@ async def test_external_close_honors_delete_branch_policy(db_session, tmp_path, 
     async def _record(repo, branch):
         deleted.append((repo, branch))
 
-    monkeypatch.setattr(webhooks_mod, "_delete_branch", _record)
+    monkeypatch.setattr(
+        webhooks_mod, "get_github_client", lambda settings: SimpleNamespace(delete_branch=_record)
+    )
 
     repo, pr_number, branch = "ClawHaven/acme-app", 93, "agent/eng-22"
     _park_work_item(repo=repo, pr_number=pr_number, branch=branch)
@@ -280,7 +282,9 @@ async def test_external_close_deletes_branch_by_default(db_session, tmp_path, mo
     async def _record(repo, branch):
         deleted.append((repo, branch))
 
-    monkeypatch.setattr(webhooks_mod, "_delete_branch", _record)
+    monkeypatch.setattr(
+        webhooks_mod, "get_github_client", lambda settings: SimpleNamespace(delete_branch=_record)
+    )
 
     repo, pr_number, branch = "ClawHaven/acme-app", 94, "agent/eng-23"
     _park_work_item(repo=repo, pr_number=pr_number, branch=branch)
@@ -310,7 +314,9 @@ async def test_external_close_survives_policy_resolution_failure(db_session, tmp
     async def _delete(repo, branch):
         deleted.append((repo, branch))
 
-    monkeypatch.setattr(webhooks_mod, "_delete_branch", _delete)
+    monkeypatch.setattr(
+        webhooks_mod, "get_github_client", lambda settings: SimpleNamespace(delete_branch=_delete)
+    )
 
     pushed = []
 

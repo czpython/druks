@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 from druks.build import workflows as build_workflows
+from druks.build.journal import BuildJournal
 from druks.build.prompt_context import BuildPromptContext
 from druks.prompts import render_prompt
 
@@ -17,15 +18,15 @@ _OP_TEMPLATES = [
     "triage_human_feedback.md",
 ]
 
-# The kwargs the workflow passes at each agent's call site — top-level template
-# names, beside the standing ``build`` context.
+# The kwargs the workflow passes at each template's agent call site.
 _CALL_KWARGS = {
     "generate_plan.md": {"answered_questions": [], "operator_note": ""},
 }
 
 
 def _build() -> SimpleNamespace:
-    """A stand-in BuildPromptContext exposing the fields the templates read."""
+    """A stand-in BuildPromptContext exposing the fields the templates read —
+    identity facts faked, the journal real."""
     return SimpleNamespace(
         repo="acme/widget",
         branch="agent/eng-1",
@@ -35,16 +36,8 @@ def _build() -> SimpleNamespace:
         issue_number=None,
         task_owner_name=None,
         task_owner_email=None,
-        plan_revision=1,
-        implementation_revision=0,
-        finalized_base_sha=None,
-        finalized_pr_sha=None,
-        current_plan=None,
-        acceptance_criteria=[],
-        reviewer_requirements=[],
-        implementation_reviews=[],
-        human_feedback=[],
         related_repos=[],
+        journal=BuildJournal(),
     )
 
 

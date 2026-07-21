@@ -5,13 +5,7 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 from pydantic import BaseModel, Field
 
 from druks.accounts.models import Account
-from druks.build.contracts import (
-    EvaluationOutput,
-    HumanFeedback,
-    ImplementationOutput,
-    PlanData,
-    ReviewOutput,
-)
+from druks.build.contracts import HumanFeedback, ImplementationOutput
 from druks.build.enums import (
     EvaluationVerdict,
     HumanFeedbackAction,
@@ -33,6 +27,7 @@ from druks.ticketing.enums import SemanticStatus
 from druks.workflows import FatalError, Gate, Workflow, step
 
 from .extension import Build
+from .journal import BuildJournal
 from .policy import RepoPolicy
 from .prompt_context import BuildPromptContext
 from .workspace import RepoWorkspace
@@ -118,17 +113,7 @@ class BuildWorkflow(Workflow):
 
     def __init__(self) -> None:
         super().__init__()
-        # The run's working memory. Durable by determinism: a recovery re-runs
-        # run() from the top with every agent call and gate reply memoized, so
-        # these rebuild to exactly what the live pass held.
-        self._plans: list[PlanData] = []
-        self._plan_reviews: list[ReviewOutput] = []
-        # Where _plan_reviews stood at the latest plan draft, so
-        # reviewer_requirements only spans reviews of the current plan.
-        self._reviews_at_plan = 0
-        self._implementation_reviews: list[EvaluationOutput] = []
-        self._implementation_results: list[ImplementationOutput] = []
-        self._human_feedback: list[HumanFeedback] = []
+        self._journal = BuildJournal()
 
     @classmethod
     async def dispatch(
@@ -239,8 +224,6 @@ class BuildWorkflow(Workflow):
         }
 
     async def get_prompt_context(self, **context: Any) -> dict[str, Any]:
-        last = self._last_implement
-        plan = self.plan
         prompt_context = BuildPromptContext(
             repo=self.input.repo,
             branch=self.branch,
@@ -250,16 +233,8 @@ class BuildWorkflow(Workflow):
             issue_number=self.input.issue_number,
             task_owner_name=self.input.task_owner_name,
             task_owner_email=self.input.task_owner_email,
-            plan_revision=len(self._plans),
-            implementation_revision=len(self._implementation_results),
-            finalized_base_sha=last.base_sha if last else None,
-            finalized_pr_sha=last.head_sha if last else None,
-            current_plan=plan.plan_markdown,
-            acceptance_criteria=plan.acceptance_criteria,
-            reviewer_requirements=self._reviewer_requirements(),
-            implementation_reviews=list(self._implementation_reviews),
-            human_feedback=list(self._human_feedback),
             related_repos=self._related_repos(),
+            journal=self._journal,
         )
         return {
             "verification": await self._policy.verification_block(
@@ -291,11 +266,13 @@ class BuildWorkflow(Workflow):
         answered: list[dict[str, str]] = []
         note = ""
         while True:
-            plan = await self.generate_plan(answered, note)
+            plan = self._journal.add_plan(
+                await Build.generate_plan(answered_questions=answered, operator_note=note)
+            )
             # No open questions and a clean grade under an auto-approve policy ships
             # the plan without asking the operator.
             if not plan.questions:
-                grade = await self.review_plan()
+                grade = self._journal.add_plan_review(await Build.review_plan())
                 if grade.decision == ReviewDecision.APPROVE and (
                     self._policy.plan_approval_gate(self._settings.auto_dispatch_on_plan_approval)
                     == "none"
@@ -312,7 +289,7 @@ class BuildWorkflow(Workflow):
     async def _implement_phase(self) -> None:
         while True:
             await self.implement()
-            evaluation = await self.evaluate()
+            evaluation = self._journal.add_evaluation(await Build.evaluate_implementation())
             if evaluation.verdict == EvaluationVerdict.PASS:
                 if self._settings.review_code:
                     await Build.review_code()
@@ -320,7 +297,7 @@ class BuildWorkflow(Workflow):
                     return
                 continue
             if evaluation.verdict == EvaluationVerdict.FAIL and (
-                len(self._implementation_results) < self._settings.max_implementation_revisions
+                self._journal.implementation_revision < self._settings.max_implementation_revisions
             ):
                 continue
             if await self._work_gate():
@@ -340,7 +317,7 @@ class BuildWorkflow(Workflow):
         if decision.action == "request_changes":
             return await self._triage(decision)
         if decision.action == "revise_contract":
-            await self.revise_contract()
+            self._journal.add_plan(await Build.revise_contract())
             return False
         if decision.action == "cancel":
             await self._push_ticket_status(SemanticStatus.CANCELED)
@@ -356,36 +333,19 @@ class BuildWorkflow(Workflow):
         return True
 
     async def _triage(self, decision: ReviewWork) -> bool:
-        feedback = await self.triage_feedback(decision)
-        self._human_feedback.append(feedback)
+        feedback = self._journal.add_feedback(await self.triage_feedback(decision))
         if feedback.triage_action == HumanFeedbackAction.CHANGE_REQUIRED:
             return False  # loop → implement
         if feedback.triage_action == HumanFeedbackAction.CONTRACT_CHANGE_REQUIRED:
-            await self.revise_contract()
+            self._journal.add_plan(await Build.revise_contract())
             return False
         if feedback.triage_action == HumanFeedbackAction.CLOSE:
             raise FatalError("closed at human triage")
         # NO_CHANGE / QUESTION → re-park
         return await self._work_gate()
 
-    # The phase methods are plain workflow-body code: the agent calls inside them
-    # memoize themselves, so on a recovery the pure parts re-run deterministically
-    # and rebuild the in-memory diary (set_state included — it is body-only). Only
-    # side-effecting IO beyond an agent call (GitHub writes, child starts, event
-    # records) keeps its own @step.
-    async def generate_plan(self, answered: list[dict[str, str]], note: str) -> PlanData:
-        return self._add_plan(
-            await Build.generate_plan(answered_questions=answered, operator_note=note)
-        )
-
-    async def review_plan(self) -> ReviewOutput:
-        grade = await Build.review_plan()
-        self._plan_reviews.append(grade)
-        return grade
-
-    async def revise_contract(self) -> PlanData:
-        return self._add_plan(await Build.revise_contract())
-
+    # Body code, never @step: the agent calls inside memoize themselves, and the
+    # journal writes + set_state must re-run on replay — a @step would skip them.
     async def implement(self) -> ImplementationOutput:
         delivery = await Build.implement()
         # A bail is a stop, not a result: the implementer hit a contradiction in the
@@ -397,13 +357,7 @@ class BuildWorkflow(Workflow):
             # First delivery: the implementer provisioned the branch + draft PR alongside
             # its commits; publish the pair (the run.state signal mirrors it onto the item).
             await self.set_state(branch=delivery.branch, pr_number=delivery.pr_number)
-        self._implementation_results.append(delivery)
-        return delivery
-
-    async def evaluate(self) -> EvaluationOutput:
-        review = await Build.evaluate_implementation()
-        self._implementation_reviews.append(review)
-        return review
+        return self._journal.add_implementation(delivery)
 
     async def triage_feedback(self, decision: ReviewWork) -> HumanFeedback:
         parsed = await Build.triage_human_feedback()
@@ -424,12 +378,15 @@ class BuildWorkflow(Workflow):
             return
         await github.squash_merge_pull_request(self.input.repo, self.pr_number)
         if self._policy.delete_branch:
-            await _delete_branch(self.input.repo, self.branch)
-
-    def _add_plan(self, plan: PlanData) -> PlanData:
-        self._plans.append(plan)
-        self._reviews_at_plan = len(self._plan_reviews)
-        return plan
+            try:
+                await github.delete_branch(self.input.repo, self.branch)
+            except Exception:  # noqa: BLE001 — cleanup only
+                logger.warning(
+                    "Could not delete branch %s on %s.",
+                    self.branch,
+                    self.input.repo,
+                    exc_info=True,
+                )
 
     # The provisioned branch + PR, published by the first implement — None until then
     # (planning runs against the default branch, and there is no PR to point at).
@@ -440,36 +397,6 @@ class BuildWorkflow(Workflow):
     @property
     def pr_number(self) -> int | None:
         return getattr(self.state, "pr_number", None)
-
-    @property
-    def plan(self) -> PlanData:
-        return self._plans[-1] if self._plans else PlanData()
-
-    @property
-    def plan_reviews(self) -> list[ReviewOutput]:
-        return list(self._plan_reviews)
-
-    @property
-    def assignee_github_login(self) -> str | None:
-        for review in reversed(self.plan_reviews):
-            if review.assignee_github_login:
-                return review.assignee_github_login
-        return None
-
-    @property
-    def _last_implement(self) -> ImplementationOutput | None:
-        return self._implementation_results[-1] if self._implementation_results else None
-
-    # Prompt-context projections — computed for BuildPromptContext, not workflow API.
-    def _reviewer_requirements(self) -> list[ReviewOutput]:
-        # Approve-with-required-changes verdicts on the current plan draft only —
-        # reviews of superseded drafts don't bind the implementer.
-        return [
-            review
-            for review in self._plan_reviews[self._reviews_at_plan :]
-            if review.decision == ReviewDecision.APPROVE_WITH_REQUIRED_CHANGES
-            and review.body.strip()
-        ]
 
     def _related_repos(self) -> list[ProjectRepo]:
         # The project's sibling repos (the prompt reads full_name + purpose).
@@ -497,32 +424,30 @@ class BuildWorkflow(Workflow):
             await work_item.set_remote_status(status)
 
     async def _request_assignee_review(self) -> None:
-        login = self.assignee_github_login
-        if not login or not self.input.repo or not self.pr_number:
-            return
-        try:
-            await get_github_client(load_settings()).request_pull_request_reviewers(
-                self.input.repo, self.pr_number, [login]
-            )
-        except Exception:  # noqa: BLE001 — a missed ping must not fail the park
-            logger.warning(
-                "could not request review from %s on %s#%s",
-                login,
-                self.input.repo,
-                self.pr_number,
-            )
+        login = self._journal.assignee_github_login
+        if login and self.input.repo and self.pr_number:
+            try:
+                await get_github_client(load_settings()).request_pull_request_reviewers(
+                    self.input.repo, self.pr_number, [login]
+                )
+            except Exception:  # noqa: BLE001 — a missed ping must not fail the park
+                logger.warning(
+                    "could not request review from %s on %s#%s",
+                    login,
+                    self.input.repo,
+                    self.pr_number,
+                )
 
     async def _set_pr_draft(self, *, draft: bool) -> None:
-        if not self.input.repo or not self.pr_number:
-            return
-        try:
-            await get_github_client(load_settings()).set_pull_request_draft_state(
-                self.input.repo, self.pr_number, draft=draft
-            )
-        except Exception:  # noqa: BLE001 — a draft merge fails loudly anyway
-            logger.warning(
-                "Could not set draft=%s on %s#%s.", draft, self.input.repo, self.pr_number
-            )
+        if self.input.repo and self.pr_number:
+            try:
+                await get_github_client(load_settings()).set_pull_request_draft_state(
+                    self.input.repo, self.pr_number, draft=draft
+                )
+            except Exception:  # noqa: BLE001 — a draft merge fails loudly anyway
+                logger.warning(
+                    "Could not set draft=%s on %s#%s.", draft, self.input.repo, self.pr_number
+                )
 
 
 class Profile(Workflow):
@@ -583,12 +508,3 @@ class Profile(Workflow):
             ],
             **await super().get_prompt_context(**context),
         }
-
-
-async def _delete_branch(repo: str, branch: str | None) -> None:
-    if not branch:
-        return
-    try:
-        await get_github_client(load_settings()).delete_branch(repo, branch)
-    except Exception:  # noqa: BLE001 — cleanup only
-        logger.warning("Could not delete branch %s on %s.", branch, repo, exc_info=True)

@@ -14,13 +14,11 @@
 
   **MANDATORY FIRST ACTION — fetch the ticket. This is not a suggestion.** Your very first tool call MUST be to fetch `{{ build.ticket_ref }}` from {{ build.source | default('the tracker', true) | capitalize }} using your available tools, then read its full description and **every** comment before you read the codebase, write a plan, edit a file, or emit any output. Do not begin from the ticket reference, title, or the rendered plan alone — those are derived; the ticket and its operator comments are the binding source of truth, and frequently carry exact decisions you must honor verbatim (its description may also end with a `# Druks scope brief` section summarizing problem, scope, and acceptance criteria). The ONLY acceptable reason to proceed without the ticket's full text is a genuine tool failure, which you must report as a blocker — never guess or fabricate the requirements. If the source materially contradicts a plan or acceptance criteria rendered below, surface the conflict rather than silently proceeding.
 {% endif %}
-- **Plan revision:** {{ build.plan_revision }}
-- **Implementation revision:** {{ build.implementation_revision }}{% if build.implementation_revision == 0 %} (first attempt){% endif %}
-{% if build.finalized_base_sha %}
-- **base_sha:** `{{ build.finalized_base_sha }}`
-{% endif %}
-{% if build.finalized_pr_sha %}
-- **head_sha:** `{{ build.finalized_pr_sha }}`
+- **Plan revision:** {{ build.journal.plan_revision }}
+- **Implementation revision:** {{ build.journal.implementation_revision }}{% if build.journal.implementation_revision == 0 %} (first attempt){% endif %}
+{% if build.journal.last_implementation %}
+- **base_sha:** `{{ build.journal.last_implementation.base_sha }}`
+- **head_sha:** `{{ build.journal.last_implementation.head_sha }}`
 {% endif %}
 
 ### Workspace paths (inside this sandbox VM)
@@ -28,16 +26,16 @@
 - ``workspace_root``: `{{ workspace.workspace_root }}` — clone related repos you need as ``workspace_root/related/<name>``
 
 {{ verification }}
-{% if build.current_plan %}
+{% if build.journal.plan.plan_markdown %}
 ## Current plan
 
-{{ build.current_plan }}
+{{ build.journal.plan.plan_markdown }}
 
 {% endif %}
-{% if build.acceptance_criteria %}
+{% if build.journal.plan.acceptance_criteria %}
 ## Acceptance criteria
 
-{% for ac in build.acceptance_criteria %}
+{% for ac in build.journal.plan.acceptance_criteria %}
 ### {{ ac.id }}
 
 **Description:** {{ ac.description.strip() }}
@@ -48,22 +46,22 @@
 {% endif %}
 {% endfor %}
 {% endif %}
-{% if build.reviewer_requirements %}
+{% if build.journal.reviewer_requirements() %}
 ## Reviewer requirements (active)
 
 These are binding plan clarifications from the plan reviewer. Treat them as part of the plan and apply them.
 
-{% for req in build.reviewer_requirements %}
+{% for req in build.journal.reviewer_requirements() %}
 ### Requirement {{ loop.index }}
 
 {{ req.body.strip() }}
 
 {% endfor %}
 {% endif %}
-{% if build.implementation_reviews %}
+{% if build.journal.evaluations %}
 ## Prior implementation review
 
-{% for review in build.implementation_reviews %}
+{% for review in build.journal.evaluations %}
 ### Round {{ loop.index }} — verdict: {{ review.verdict.value if review.verdict.value is defined else review.verdict }}
 
 {% if review.body %}
@@ -72,10 +70,10 @@ These are binding plan clarifications from the plan reviewer. Treat them as part
 {% endif %}
 {% endfor %}
 {% endif %}
-{% if build.human_feedback %}
+{% if build.journal.human_feedback %}
 ## Human feedback
 
-{% for fb in build.human_feedback %}
+{% for fb in build.journal.human_feedback %}
 ### {{ fb.reviewer }} — status: {{ fb.status }}
 
 {% if fb.body %}
