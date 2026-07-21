@@ -1,6 +1,7 @@
 from fastapi import HTTPException, Request
 
 from druks.accounts import sessions
+from druks.accounts.context import current_account_id
 from druks.accounts.exceptions import InvalidPatError
 from druks.accounts.models import Account, PersonalAccessToken
 
@@ -22,7 +23,7 @@ async def current_session_account(request: Request) -> Account:
     management, so a token can never manage tokens."""
     account = await resolve_session_account(request)
     if account:
-        sessions.current_account_id.set(account.id)
+        current_account_id.set(account.id)
         return account
     raise HTTPException(status_code=401, detail="Sign in to use this API.")
 
@@ -45,7 +46,7 @@ async def current_account(request: Request) -> Account:
                     detail=str(error),
                     headers={"WWW-Authenticate": f'{_BEARER_CHALLENGE}, error="invalid_token"'},
                 ) from error
-            sessions.current_account_id.set(pat.account_id)
+            current_account_id.set(pat.account_id)
             return pat.account
         raise HTTPException(
             status_code=401,
