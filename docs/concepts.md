@@ -203,14 +203,18 @@ coordination such as webhook deduplication, OAuth state/token caches, and the
 sandbox provisioning gate. Drukbox provisions sandbox hosts; Druks then reaches
 them over SSH.
 
-Harness login is the application's login: connecting Codex or Claude resolves
-an account and mints the `druks_session` cookie (30-day sliding TTL in Redis)
-that every internal API and SSE stream requires. In the shipped remote stack,
-Caddy additionally requires an identity header inserted by exe.dev or another
-upstream proxy — a pure admission check; the app never reads it. Public `/_external`
-routes — webhooks and the token-authenticated notification respond — bypass
-the session gate but keep their own authentication. A local dashboard bound directly to
-`127.0.0.1:8001` still requires the session but has no edge in front and must
-not be published as-is. The upstream proxy must remove any client-supplied
-copy of the trusted identity header before inserting its authenticated value;
-merely forwarding that header makes identity resolution forgeable.
+Druks does not authenticate browsers; identity resolves per request. A
+`Authorization: Bearer` personal access token always resolves first — present
+means it must authenticate. Otherwise the configured `DRUKS_AUTH_MODE`
+decides: in `header` mode the edge (exe.dev, Teleport, Cloudflare Access, …)
+authenticates and asserts the operator's email in the trusted identity
+header, and Druks maps it to an account — open enrollment, since the edge
+gates who reaches Druks at all; in `none` mode there is no authentication and
+exactly one operator account, created by the first completed harness
+connection. Public `/_external` routes — webhooks and the token-authenticated
+notification respond — and the PAT-authenticated `/mcp` endpoint sit outside
+that identity gate but keep their own authentication. Connecting Codex or
+Claude is a capability connect for the current account, not a login. See
+[configuration](configuration.md#public-urls-and-access-control) for the
+trust requirements, including why the edge must strip client-supplied copies
+of the identity header.

@@ -6,7 +6,7 @@
 # One image is published from CI (.github/workflows/build-release-images.yml)
 # and pinned in compose.yaml via ${DRUKS_TAG:-latest}:
 #
-#   ghcr.io/clawhaven/druks:<tag> — Python backend + baked-in SPA build
+#   ghcr.io/czpython/druks:<tag> — Python backend + baked-in SPA build
 #
 # This path is pull-then-restart. The backend image carries the SPA; Compose
 # bind-mounts the repository Caddyfile.

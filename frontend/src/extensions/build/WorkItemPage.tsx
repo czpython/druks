@@ -653,6 +653,12 @@ function InAppReview({ runId, ask }: { runId: string; ask: InputRequest }) {
 
   return (
     <div className="ins-needs">
+      {ask.context && (
+        <div className="review-artifact">
+          <div className="review-artifact-title">Plan reviewer critique</div>
+          <Markdown source={ask.context} />
+        </div>
+      )}
       {artifact.data && (
         <div className="review-artifact">
           <div className="review-artifact-title">{artifact.data.title}</div>

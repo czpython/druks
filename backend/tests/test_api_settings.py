@@ -38,11 +38,11 @@ def test_harness_response_carries_connection_state(tmp_path: Path):
     assert "expiresAt" in claude
 
 
-def test_harnesses_show_only_the_signed_in_accounts_connection(tmp_path: Path, db_session):
+def test_harnesses_show_only_the_requesting_accounts_connection(tmp_path: Path, db_session):
     from conftest import connect_harness
     from druks.harnesses.claude import ClaudeHarness
 
-    # The suite's gate stands in op@example.com; another account's
+    # The suite's identity gate stands in op@example.com; another account's
     # connection never shows on this card.
     connect_harness(
         ClaudeHarness,
@@ -73,7 +73,7 @@ def test_harness_card_reports_identity(tmp_path: Path, db_session):
     assert claude["providerEmail"] == "seat@corp.com"
 
 
-def test_disconnect_removes_only_the_signed_in_accounts_connection(tmp_path: Path, db_session):
+def test_disconnect_removes_only_the_requesting_accounts_connection(tmp_path: Path, db_session):
     from conftest import connect_harness
     from druks.harnesses.claude import ClaudeHarness
     from druks.harnesses.models import HarnessConnection
@@ -86,7 +86,7 @@ def test_disconnect_removes_only_the_signed_in_accounts_connection(tmp_path: Pat
     )
     mine_id, other_id = mine.id, other.id
     with _build_client(tmp_path) as client:
-        response = client.delete("/api/settings/harnesses/claude/login")
+        response = client.delete("/api/harnesses/claude/connection")
     assert response.status_code == 200
     assert response.json()["connected"] is False
     # The request deleted in its own task-scoped session; read past this
@@ -97,7 +97,7 @@ def test_disconnect_removes_only_the_signed_in_accounts_connection(tmp_path: Pat
 
 def test_disconnect_without_a_connection_is_a_no_op(tmp_path: Path):
     with _build_client(tmp_path) as client:
-        response = client.delete("/api/settings/harnesses/claude/login")
+        response = client.delete("/api/harnesses/claude/connection")
     assert response.status_code == 200
     assert response.json()["connected"] is False
 

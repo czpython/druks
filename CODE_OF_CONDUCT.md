@@ -9,7 +9,7 @@ project spaces or when representing the project.
 
 Maintainers may edit or remove contributions and restrict participation when
 needed to protect the community. Report sensitive conduct privately through
-the repository's [security advisory form](https://github.com/clawhaven/druks/security/advisories/new)
+the repository's [security advisory form](https://github.com/czpython/druks/security/advisories/new)
 and label it as a code-of-conduct report. Reports will be handled confidentially
 and without retaliation.
 

@@ -20,11 +20,11 @@ from druks.sandbox.constants import MAX_AGENT_TIMEOUT_SECONDS
 from druks.skills.models import Skill
 from druks.usage.models import UsageScrape
 
-from .constants import LOGIN_PENDING_PREFIX, REFRESH_LOCK_PREFIX
+from .constants import CONNECT_PENDING_PREFIX, REFRESH_LOCK_PREFIX
 from .datastructures import (
     AgentInvocation,
     CodexToken,
-    CompletedLogin,
+    CompletedConnect,
     HarnessRunResult,
     OAuthToken,
     ParsedModels,
@@ -33,10 +33,10 @@ from .datastructures import (
     SandboxSettings,
 )
 from .exceptions import (
+    ConnectError,
     GrantError,
     HarnessError,
     HarnessNotConnectedError,
-    LoginError,
     OAuthTokenError,
 )
 from .models import HarnessConnection
@@ -48,9 +48,10 @@ logger = logging.getLogger(__name__)
 
 _GRANT_TIMEOUT_SECONDS = 30.0
 _USAGE_TIMEOUT_SECONDS = 20.0
-# The connect-flow pending state (PKCE verifier + state) lives in Redis this long
-# — enough to sign in and paste, short enough that an abandoned attempt clears.
-_LOGIN_PENDING_TTL_SECONDS = 600
+# The connect-flow pending state (PKCE verifier + state) lives in Redis this
+# long — enough to authorize and paste, short enough that an abandoned attempt
+# clears.
+_CONNECT_PENDING_TTL_SECONDS = 600
 # Per-row refresh lock: five minutes outlives the provider grant timeout and
 # expires before the next 15-minute cron tick if the holder dies mid-refresh.
 _REFRESH_LOCK_TTL_SECONDS = 300
@@ -212,14 +213,14 @@ class Harness(ABC):
         if row:
             return json.dumps(dict(row.payload))
         raise HarnessNotConnectedError(
-            f"the selected {cls.name} login was disconnected — reconnect it in "
+            f"the selected {cls.name} connection was removed — reconnect it in "
             "Settings → Harnesses."
         )
 
     @classmethod
-    async def login_start(cls, *, account_id: str | None = None) -> tuple[str, str]:
+    async def connect_start(cls, *, account_id: str | None = None) -> tuple[str, str]:
         """Mint PKCE state under a single-use flow id; return (authorize URL,
-        flow id). A reconnect under a live session binds ``account_id``."""
+        flow id). A flow started by a resolved operator binds ``account_id``."""
         verifier = _b64url(secrets.token_bytes(64))
         challenge = _b64url(hashlib.sha256(verifier.encode()).digest())
         url, state = cls.authorize_url(verifier=verifier, challenge=challenge)
@@ -232,34 +233,34 @@ class Harness(ABC):
             }
         )
         await get_client().set(
-            f"{LOGIN_PENDING_PREFIX}{flow_id}", pending, ex=_LOGIN_PENDING_TTL_SECONDS
+            f"{CONNECT_PENDING_PREFIX}{flow_id}", pending, ex=_CONNECT_PENDING_TTL_SECONDS
         )
         return url, flow_id
 
     @classmethod
-    async def login_complete(cls, *, flow_id: str, pasted: str) -> CompletedLogin:
+    async def connect_complete(cls, *, flow_id: str, pasted: str) -> CompletedConnect:
         """Pop the flow's single-use state, parse the paste, exchange the code.
-        Raises :class:`LoginError` on failure; the state is gone either way,
+        Raises :class:`ConnectError` on failure; the state is gone either way,
         so a retry re-starts cleanly."""
-        pending = await get_client().getdel(f"{LOGIN_PENDING_PREFIX}{flow_id}")  # single-use
+        pending = await get_client().getdel(f"{CONNECT_PENDING_PREFIX}{flow_id}")  # single-use
         if not pending:
-            raise LoginError("This sign-in expired — start it again.")
+            raise ConnectError("This connect attempt expired — start it again.")
         expected = json.loads(pending)
 
         code, pasted_state = _parse_pasted(pasted)
         if not code:
-            raise LoginError("Couldn't find an authorization code in what you pasted.")
+            raise ConnectError("Couldn't find an authorization code in what you pasted.")
         if pasted_state and pasted_state != expected["state"]:
-            raise LoginError("That code is from a different sign-in — start it again.")
+            raise ConnectError("That code is from a different connect attempt — start it again.")
 
         payload, provider_email = await cls.exchange(code=code, verifier=expected["verifier"])
         if not provider_email:
-            raise LoginError(
-                "The provider returned no account email — sign in with an account "
+            raise ConnectError(
+                "The provider returned no account email — authorize with an account "
                 "that has one and try again."
             )
         _, expires_at = cls._refresh_state(payload)
-        return CompletedLogin(
+        return CompletedConnect(
             payload=payload,
             provider_email=provider_email,
             expires_at=expires_at,
@@ -270,8 +271,8 @@ class Harness(ABC):
     @abstractmethod
     def authorize_url(cls, *, verifier: str, challenge: str) -> tuple[str, str]:
         """Build this provider's PKCE authorize URL; return (url, state), where
-        ``state`` is what the provider echoes back so login_complete can verify
-        the round-trip."""
+        ``state`` is what the provider echoes back so connect_complete can
+        verify the round-trip."""
 
     @classmethod
     @abstractmethod
@@ -305,7 +306,7 @@ class Harness(ABC):
         now: datetime | None = None,
         margin: timedelta | None = None,
     ) -> RotationResult:
-        """Refresh one login row's token if it's within the expiry margin,
+        """Refresh one connection row's token if it's within the expiry margin,
         persisting the new token back to that row. Addressed by row id and
         read fresh — the caller's tick may span other rows' commits. One
         refresher per row: a Redis lock elects the winner, and the loser
@@ -356,12 +357,13 @@ class Harness(ABC):
                 if exc.tag == "invalid_grant":
                     # The provider revoked this row's refresh lineage;
                     # presenting it again can never succeed. Drop only this
-                    # credential so the login reads as disconnected — the UI
-                    # shows Reconnect and the next tick has no row to hammer.
+                    # credential so the connection reads as disconnected — the
+                    # UI shows Reconnect and the next tick has no row to hammer.
                     row.delete()
                     db_session().commit()
                     logger.warning(
-                        "%s login %s auto-disconnected after invalid_grant; reconnect to restore",
+                        "%s connection %s auto-disconnected after invalid_grant; "
+                        "reconnect to restore",
                         cls.name,
                         row.id,
                     )
@@ -653,8 +655,8 @@ def _parse_pasted(raw: str) -> tuple[str | None, str | None]:
 
 async def post_token(url: str, body: dict, *, form: bool) -> dict:
     """POST an authorization-code exchange (form- or JSON-encoded) and return the
-    parsed grant. Raises :class:`LoginError` with the provider's error text on any
-    failure, so the operator sees why the sign-in didn't take."""
+    parsed grant. Raises :class:`ConnectError` with the provider's error text on
+    any failure, so the operator sees why the connect didn't take."""
     try:
         async with httpx.AsyncClient(timeout=_GRANT_TIMEOUT_SECONDS) as client:
             if form:
@@ -663,7 +665,7 @@ async def post_token(url: str, body: dict, *, form: bool) -> dict:
                 response = await client.post(url, json=body)
     except httpx.HTTPError as exc:
         logger.warning("token exchange request failed (%s): %s", url, exc, exc_info=True)
-        raise LoginError("The request to the provider failed — try again.") from exc
+        raise ConnectError("The request to the provider failed — try again.") from exc
     if response.status_code != 200:
         logger.warning(
             "token exchange returned %s (%s): %s",
@@ -672,11 +674,11 @@ async def post_token(url: str, body: dict, *, form: bool) -> dict:
             response.text[:300],
         )
         detail = response.text.strip()[:300] or f"HTTP {response.status_code}"
-        raise LoginError(f"The provider rejected the sign-in: {detail}")
+        raise ConnectError(f"The provider rejected the connect: {detail}")
     try:
         return response.json()
     except ValueError as exc:
-        raise LoginError("The provider returned an unreadable response.") from exc
+        raise ConnectError("The provider returned an unreadable response.") from exc
 
 
 def check_returncode(result: HarnessRunResult, *, name: str) -> None:

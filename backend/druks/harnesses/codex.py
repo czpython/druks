@@ -287,7 +287,7 @@ class CodexHarness(Harness):
     _CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
 
     # Connect-flow (PKCE): authorize on auth.openai.com; the operator pastes the
-    # failed localhost redirect URL back. Verified in ENG-687.
+    # failed localhost redirect URL back.
     redirect_uri = "http://localhost:1455/auth/callback"
 
     @classmethod
@@ -321,7 +321,7 @@ class CodexHarness(Harness):
         params = {
             "id_token_add_organizations": "true",
             "codex_cli_simplified_flow": "true",
-            "originator": "pi",  # the value verified in ENG-687; others untested
+            "originator": "pi",  # the only value verified against the live exchange
             "client_id": cls._CLIENT_ID,
             "response_type": "code",
             "redirect_uri": cls.redirect_uri,

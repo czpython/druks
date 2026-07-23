@@ -26,7 +26,7 @@ class HarnessResponse(BaseResponse):
     timeout: int
     fast_mode: bool
     allowed_models: list[AllowedModel]
-    # The signed-in account's own connection; false until this account connects.
+    # The requesting account's own connection; false until this account connects.
     connected: bool
     kind: str | None
     account: str | None
@@ -36,7 +36,10 @@ class HarnessResponse(BaseResponse):
 
     @classmethod
     def from_row(
-        cls, settings: "HarnessSettings", login: "HarnessConnection | None", account: "Account"
+        cls,
+        settings: "HarnessSettings",
+        connection: "HarnessConnection | None",
+        account: "Account",
     ) -> "HarnessResponse":
         return cls(
             name=settings.name,
@@ -46,11 +49,11 @@ class HarnessResponse(BaseResponse):
             timeout=settings.timeout,
             fast_mode=settings.fast_mode,
             allowed_models=settings.allowed_models,
-            connected=bool(login),
-            kind=login.kind if login else None,
-            account=account.username if login else None,
-            provider_email=login.provider_email if login else None,
-            expires_at=login.expires_at if login else None,
+            connected=bool(connection),
+            kind=connection.kind if connection else None,
+            account=account.username if connection else None,
+            provider_email=connection.provider_email if connection else None,
+            expires_at=connection.expires_at if connection else None,
         )
 
 

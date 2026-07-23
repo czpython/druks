@@ -19,6 +19,8 @@ with the route that matches what you are doing.
   upgrades, rollback, logs, and public ingress.
 - [Configuration](configuration.md) — environment settings, dashboard settings,
   integrations, MCP, skills, and stored-secret handling.
+- [Connect your agent](connect-your-agent.md) — the `/mcp` endpoint, personal
+  access tokens, and client configuration.
 - [Troubleshooting](troubleshooting.md) — symptom-driven diagnosis for boot,
   webhooks, harnesses, sandboxes, gates, and recovery.
 

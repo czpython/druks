@@ -65,3 +65,30 @@ def test_profile_endpoint_dispatches(client: TestClient, monkeypatch):
             "repo_id": repo.id,
         }
     ]
+
+
+def test_nested_repo_routes_are_scoped_to_their_project(client: TestClient, monkeypatch):
+    """PATCH / profile / DELETE reached through the wrong project's URL are 404 and
+    side-effect-free — the routes scope by (project_id, repo_id), not repo_id alone."""
+    from druks.build.models import Project, ProjectRepo
+
+    profile_calls = _stub_profile_start(monkeypatch)
+    owner = Project.create(name="Owner")
+    other = Project.create(name="Other")
+    repo_id = ProjectRepo.create(project_id=owner.id, full_name="acme/widget").id
+
+    wrong = f"/api/build/projects/{other.id}/repos/{repo_id}"
+    assert client.patch(wrong, json={"purpose": "infra"}).status_code == 404
+    assert client.post(f"{wrong}/profile").status_code == 404
+    assert client.delete(wrong).status_code == 404
+    # None of the wrong-parent calls mutated the repo or dispatched a profile run.
+    assert ProjectRepo.get(repo_id).purpose is None
+    assert profile_calls == []
+
+    # Through its own project the repo mutates and deletes as normal.
+    right = f"/api/build/projects/{owner.id}/repos/{repo_id}"
+    patched = client.patch(right, json={"purpose": "infra"})
+    assert patched.status_code == 200
+    assert patched.json()["purpose"] == "infra"
+    assert client.delete(right).status_code == 204
+    assert ProjectRepo.get(repo_id) is None

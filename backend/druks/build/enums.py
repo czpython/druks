@@ -3,7 +3,6 @@ from enum import StrEnum
 
 class ReviewDecision(StrEnum):
     APPROVE = "APPROVE"
-    APPROVE_WITH_REQUIRED_CHANGES = "APPROVE_WITH_REQUIRED_CHANGES"
     REQUEST_CHANGES = "REQUEST_CHANGES"
     COMMENT = "COMMENT"
 
@@ -22,15 +21,7 @@ class HumanFeedbackAction(StrEnum):
     CLOSE = "close"
 
 
-class Outcome(StrEnum):
-    FINISHED = "finished"
-    FAILED = "failed"
-    CANCELLED = "cancelled"
-    SCOPED = "scoped"
-
-
 class HandoffStatus(StrEnum):
     SCOPED = "scoped"
     SHIPPED = "shipped"
-    SKIPPED = "skipped"
     CANCELLED = "cancelled"

@@ -9,9 +9,9 @@
 # Claude Code refuses ``--permission-mode bypassPermissions`` as root.
 #
 # Published by .github/workflows/publish-sandbox-image.yml as
-# ghcr.io/clawhaven/druks-sandbox; point DRUKS_SANDBOX_IMAGE at it and
+# ghcr.io/czpython/druks-sandbox; point DRUKS_SANDBOX_IMAGE at it and
 # run drukbox with DOCKER_SSH_USERNAME=druks.
-FROM ghcr.io/clawhaven/drukbox/sandbox:latest@sha256:b3785d1701efa394df5773b3c57c21da9152258911fbd70f63054bc6846735f2
+FROM ghcr.io/czpython/drukbox/sandbox:latest@sha256:a5312ab8289cab543f30ec7ba1f1ada8e027c78c9fe06ed5d52c0459e5a2ffef
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 

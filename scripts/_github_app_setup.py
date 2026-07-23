@@ -7,7 +7,7 @@ from pathlib import Path
 
 ENV_PATH = Path(".env")
 MANIFEST_DIR = Path(__file__).parent / "manifests"
-SETUP_PAGE = "https://clawhaven.github.io/druks-app-setup/"
+SETUP_PAGE = "https://druks.ai/app-setup/"
 
 # (role, env key, pem path, default app name)
 ROLES = (

@@ -3,7 +3,7 @@
 The whole stack runs in Docker Compose: Druks (`web`, which embeds the DBOS
 durable engine and serves the dashboard SPA), Postgres, and Redis. A
 **remote** install (`DRUKS_PROVIDER=exe`/`aws`) also brings up stock Caddy
-(auth gate + proxy, Caddyfile bind-mounted) and the Drukbox sandbox control
+(identity edge + proxy, Caddyfile bind-mounted) and the Drukbox sandbox control
 plane (`sandbox-service`, `sandbox-janitor`). Those three live in the compose
 `remote` profile, which `install.sh` selects by writing `COMPOSE_PROFILES` to
 `.env`, so plain `docker compose` commands in the install dir pick it up.
@@ -36,7 +36,7 @@ the installer logs in with it.)
 ### 1. Run the installer
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/clawhaven/druks/main/scripts/install.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/czpython/druks/main/scripts/install.sh)
 ```
 
 First pass writes `~/druks/.env` with random secrets pre-filled,
@@ -64,7 +64,7 @@ want it elsewhere.
 ### 2. Re-run the installer
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/clawhaven/druks/main/scripts/install.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/czpython/druks/main/scripts/install.sh)
 ```
 
 Second pass validates that the required `.env` keys and PEMs are present,
@@ -106,8 +106,10 @@ ssh exe.dev share set-public druks
 ```
 
 Public URLs: `https://<host>/_external/{github,linear,jira}/events/`
-(HMAC-gated webhooks) and `https://<host>/` (exe.dev login at the edge;
-harness login in the app mints the session).
+(HMAC-gated webhooks), `https://<host>/mcp` (PAT-authenticated MCP endpoint —
+[Connect your agent](../docs/connect-your-agent.md)), and `https://<host>/`
+(exe.dev authenticates at the edge; druks maps its asserted email to your
+account).
 
 **Elsewhere (e.g. AWS + Teleport)**, the dashboard goes through your
 identity proxy (set `DRUKS_AUTH_HEADER` to the header it injects), but
@@ -123,11 +125,14 @@ Druks' shipped Caddy dashboard listener is loopback HTTP behind that edge.
 2. Set `DRUKS_WEBHOOK_HOST=druks.example.com` in `.env` and
    `docker compose up -d caddy`.
 
-Caddy auto-provisions Let's Encrypt for that hostname and serves
-**only** `POST /_external/*` on it — no dashboard routes, no identity
-header, so the SSO gate can't be forged from the public side. Webhook
-URLs become `https://druks.example.com/_external/<provider>/events/`.
-Leave `DRUKS_WEBHOOK_HOST` unset to bring your own ingress instead.
+Caddy auto-provisions Let's Encrypt for that hostname and serves **only**
+`POST /_external/*` and the PAT-authenticated `/mcp` endpoint on it — no
+dashboard routes, no identity header, so the SSO gate can't be forged from
+the public side. Webhook URLs become
+`https://druks.example.com/_external/<provider>/events/`; agents connect at
+`https://druks.example.com/mcp`
+([Connect your agent](../docs/connect-your-agent.md)). Leave
+`DRUKS_WEBHOOK_HOST` unset to bring your own ingress instead.
 
 ## Update / redeploy
 
@@ -146,42 +151,6 @@ compatibility changes: drain affected runs or keep an executor with compatible
 code until they finish. Recovery does not preserve a live agent process inside
 a sandbox; it follows the operation boundary described in
 [Concepts](../docs/concepts.md#durability-and-recovery).
-
-### One-time: upgrading across the accounts migration
-
-The accounts release re-keys `harness_logins` per account and encrypts the
-stored credentials in place — a destructive schema change. Upgrade it as a
-maintenance cutover: stop the stack (`docker compose down`), wait for active
-calls to end, **back up Postgres**, run the migration with the new image
-(`docker compose run --rm web druks init-db`), then `docker compose up -d`.
-Never run old and new processes across this migration; parked workflows may
-stay parked. Rolling back afterwards means restoring the pre-migration
-database backup and the old image — there is no Alembic downgrade.
-
-With existing harness connections, the migration requires
-`DRUKS_DASHBOARD_EMAIL` in the migration run's environment and attaches every
-existing seat to one account with that email. A remote install needs no extra
-step — `.env` already holds the value the old Caddy gate matched. **Warning:**
-the one-run value must match the provider email you will actually sign in with
-once account login lands; a mismatch strands the migrated seats on an account
-you cannot enter (automation keeps working, and reconnecting after an eventual
-`invalid_grant` re-creates the seat under your real account). Fresh installs
-and installs with no connected harness skip all of this.
-
-Once the account-login release is deployed, finish the cutover — deploys never
-refresh the host-copied `compose.yaml`/`Caddyfile`, so this is an explicit
-step (re-running `install.sh` performs the copy for you):
-
-1. Replace the host copies of `deploy/compose.yaml` and
-   `deploy/caddy/Caddyfile` with this release's versions (the Caddy gate now
-   admits any nonempty trusted identity; the app enforces its own session).
-2. Delete the now-unused `DRUKS_DASHBOARD_EMAIL` line from `~/druks/.env`.
-3. Recreate the affected services: `docker compose up -d --force-recreate web
-   caddy`.
-
-Until those land, the new release still runs behind the old single-email gate
-— that transition window is supported. Afterwards, each browser performs one
-harness login to mint its session cookie.
 
 ### One-time: upgrading a box that ran the backend as root
 
@@ -239,7 +208,10 @@ Caddyfile fetched by the installer) enforces path-level access:
   Druks. Per-provider paths land under
   `/_external/<provider>/<category>/`; extension role-module discovery
   registers them at import time.
+- `/mcp` — public, authenticated per request by personal access token inside
+  the app; proxied unbuffered so its SSE frames stream.
 - Everything else — a nonempty trusted identity header (exe.dev login
   provides one) required, then proxied to `web` (`127.0.0.1:8001`), which
-  serves the API, the SPA, and extension frontends alike; the app itself
-  requires its session cookie, minted by harness login.
+  serves the API, the SPA, and extension frontends alike; the app maps that
+  asserted email to your account per request
+  ([access control](../docs/configuration.md#public-urls-and-access-control)).

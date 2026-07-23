@@ -33,8 +33,8 @@ class HarnessConnection(Base, Uuid7Pk):
     updated_at: Mapped[datetime] = mapped_column(default=Base.utc_now, onupdate=Base.utc_now)
 
     @classmethod
-    def get(cls, login_id: str) -> "HarnessConnection | None":
-        return db_session().get(cls, login_id)
+    def get(cls, connection_id: str) -> "HarnessConnection | None":
+        return db_session().get(cls, connection_id)
 
     @classmethod
     def lookup(cls, harness: str, account_id: str | None) -> "HarnessConnection":
@@ -70,17 +70,22 @@ class HarnessConnection(Base, Uuid7Pk):
         return list(db_session().scalars(select(cls).order_by(cls.harness, cls.id)))
 
     @classmethod
+    def list_for_account(cls, account_id: str) -> list["HarnessConnection"]:
+        stmt = select(cls).where(cls.account_id == account_id).order_by(cls.harness)
+        return list(db_session().scalars(stmt))
+
+    @classmethod
     def list_for_harness(cls, harness: str) -> list["HarnessConnection"]:
         stmt = select(cls).where(cls.harness == harness).order_by(cls.id)
         return list(db_session().scalars(stmt))
 
     @classmethod
-    def reload(cls, login_id: str) -> "HarnessConnection | None":
+    def reload(cls, connection_id: str) -> "HarnessConnection | None":
         """Fresh-from-DB read of one row, past the identity map's cached state
         — the post-lock re-read that keeps a refresher from re-presenting a
         refresh token a concurrent winner already advanced."""
         return db_session().scalar(
-            select(cls).where(cls.id == login_id).execution_options(populate_existing=True)
+            select(cls).where(cls.id == connection_id).execution_options(populate_existing=True)
         )
 
     @classmethod

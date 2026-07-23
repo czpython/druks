@@ -215,7 +215,7 @@ function ProjectCard({ project }: { project: Project }) {
           onClick={() => {
             if (
               confirm(
-                `Delete project "${project.name}"? Repos in this project become unbound; work items keep their history.`,
+                `Delete project "${project.name}"? Move or delete its work items first — a project still referenced by work items can't be deleted.`,
               )
             ) {
               remove.mutate()

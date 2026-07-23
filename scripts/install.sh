@@ -17,7 +17,7 @@
 #
 # Usage:
 #
-#   bash <(curl -fsSL https://raw.githubusercontent.com/clawhaven/druks/main/scripts/install.sh)
+#   bash <(curl -fsSL https://raw.githubusercontent.com/czpython/druks/main/scripts/install.sh)
 #
 # Env knobs:
 #   GHCR_TOKEN            optional — GitHub PAT with `read:packages` scope,
@@ -40,7 +40,7 @@
 set -euo pipefail
 
 INSTALL_DIR="${DRUKS_INSTALL_DIR:-$HOME/druks}"
-REPO="clawhaven/druks"
+REPO="czpython/druks"
 REF="${DRUKS_REF:-main}"
 # Validated by ``druks setup`` (the single authority on provider names).
 PROVIDER="${DRUKS_PROVIDER:-exe}"
@@ -106,7 +106,7 @@ if [ -n "${GHCR_TOKEN:-}" ]; then
   echo "$GHCR_TOKEN" | docker login ghcr.io -u token --password-stdin >/dev/null
 fi
 
-BACKEND_IMAGE="ghcr.io/clawhaven/druks:$IMAGE_TAG"
+BACKEND_IMAGE="ghcr.io/czpython/druks:$IMAGE_TAG"
 echo "→ pulling $BACKEND_IMAGE"
 docker pull -q "$BACKEND_IMAGE" >/dev/null
 
@@ -238,7 +238,7 @@ if [ "$PROVIDER" = "docker" ]; then
 Dashboard: http://127.0.0.1:8001
 
 Sandboxes run as local Docker containers — start drukbox on the host:
-  git clone https://github.com/clawhaven/drukbox
+  git clone https://github.com/czpython/drukbox
   cd drukbox && DOCKER_SSH_USERNAME=druks make dev
 ------------------------------------------------------------
 MSG

@@ -45,7 +45,7 @@ WHAT TO LOOK FOR — beyond AC correctness, which is the evaluator's job, not yo
 - Comments and naming that lie or mislead — drift between what the comment claims and what the code does.
 
 WHAT NOT TO FLAG:
-- Anything the evaluator already covered (AC correctness, reviewer requirements). Don't relitigate.
+- Anything the evaluator already covered (AC correctness). Don't relitigate.
 - Style nits that don't change behavior or maintainability (whitespace, alphabetical import order, single vs double quote unless the repo enforces one).
 - "I would have done this differently" without a concrete reason tied to maintainability, performance, or correctness.
 - Pre-existing issues in unchanged code. You're reviewing the diff, not the codebase.
@@ -61,7 +61,7 @@ You do the writing yourself — druks records only your one-line `summary`.
 
 1. **Decide.** If the diff is clean — no medium- or high-severity finding — you file no sub-issue. Low-severity findings alone never justify one. Otherwise you have real follow-up work.
 
-2. **Post one PR comment** on PR #{{ workflow.pr_number }} (`gh pr comment {{ workflow.pr_number }} --body ...`; the checkout is authenticated): `Code review: <your one-sentence summary, verbatim>`.
+2. **Post one PR comment** on PR #{{ build.pr_number }} (`gh pr comment {{ build.pr_number }} --body ...`; the checkout is authenticated): `Code review: <your one-sentence summary, verbatim>`.
 
 3. **File a follow-up sub-issue — only when step 1 found real work.** Open it on the same tracker as the parent ticket (the one you fetched at the start), as a child of that ticket, using the same tracker tools. Give it a concise verb-first title (e.g. "Extract duplicate validation helper", "Add integration test for refund path"). In the body write one section per finding — the follow-up implementer reads it as spec — each covering:
    - severity: high / medium / low

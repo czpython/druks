@@ -45,12 +45,12 @@ def _resolve_harness(name: str) -> tuple[type, HarnessSettings]:
 
 
 def _harness_response(settings: HarnessSettings, account: Account) -> HarnessResponse:
-    login = HarnessConnection.get_for_account(settings.name, account.id)
-    return HarnessResponse.from_row(settings, login, account)
+    connection = HarnessConnection.get_for_account(settings.name, account.id)
+    return HarnessResponse.from_row(settings, connection, account)
 
 
-# Connection state is the signed-in account's own login — connect/reconnect
-# live on the /api/auth login surface, not here.
+# Connection state is the requesting operator's own connection —
+# connect/disconnect live on the /api/harnesses connection surface, not here.
 @router.get("/harnesses", response_model=list[HarnessResponse], response_model_by_alias=True)
 async def list_harness_settings(
     account: Account = Depends(current_account),
@@ -76,20 +76,6 @@ async def update_harness_settings(
     _validate_timeout(updates.get("timeout"))
     if updates:
         row.update(**updates)
-    return _harness_response(row, account)
-
-
-@router.delete(
-    "/harnesses/{name}/login", response_model=HarnessResponse, response_model_by_alias=True
-)
-async def disconnect_harness(
-    name: str, account: Account = Depends(current_account)
-) -> HarnessResponse:
-    _, row = _resolve_harness(name)
-    login = HarnessConnection.get_for_account(name, account.id)
-    if login:
-        # Only the signed-in account's own login — never another account's.
-        login.delete()
     return _harness_response(row, account)
 
 

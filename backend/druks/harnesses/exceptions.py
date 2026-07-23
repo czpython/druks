@@ -36,7 +36,7 @@ class GrantError(Exception):
         self.tag = tag
 
 
-class LoginError(Exception):
+class ConnectError(Exception):
     """A connect flow could not complete — expired/single-use pending state, a
     paste with no code, a state mismatch, or a provider-rejected exchange. The
     message is user-facing (surfaced inline in the Settings card)."""
