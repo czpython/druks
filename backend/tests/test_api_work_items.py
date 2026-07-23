@@ -17,17 +17,18 @@ _RUN_STATE = {
 
 def _seed_scope_run(db_session, item, *, state="finished", status=None):
     """A scope run for ``item`` (keyed by its remote_key) with its ``scope``
-    agent call. A needs_answers status parks the run on the
-    ScopeReply gate (PENDING_INPUT + input_request) — seeded from the workflow's
-    own gate ask so the board reads exactly what the workflow stores at the park
-    point."""
-    from druks.build.workflows import _PARKED_ASK, ScopeReply
+    agent call. A needs_answers status parks the run on the ScopeReply gate
+    (PENDING_INPUT + input_request) with the same ask the workflow stores at
+    the park point."""
+    from druks.build.workflows import ScopeReply
 
-    parked = _PARKED_ASK.get(status) if status else None
+    parked = None
+    if status == "needs_answers":
+        parked = {"presentation": "external", "label": "Answer scope questions"}
     run = Run(
         id=str(uuid7()),
         kind="build.scope",
-        input_gate=ScopeReply.topic if parked else None,
+        input_gate=ScopeReply.name if parked else None,
         input_request=parked,
     )
     db_session.add(run)

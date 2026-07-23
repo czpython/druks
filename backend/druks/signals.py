@@ -12,12 +12,22 @@ def subscribe(name: str, **filters: Any) -> Callable[[Subscriber], Subscriber]:
     """Register an async subscriber for the named signal.
 
     ``filters`` are equality matches against the published kwargs; ``__``
-    descends into dicts (``subject__type="work_item"``). A non-matching
-    publication skips the subscriber, so the body starts at the real work."""
+    descends into dicts (``subject__type="work_item"``); a ``Gate`` class
+    stands for its ``name``. A non-matching publication skips the
+    subscriber, so the body starts at the real work."""
 
     def register(fn: Subscriber) -> Subscriber:
+        # Lazy import: druks.workflows imports this module.
+        from druks.workflows import Gate
+
+        matches = {}
+        for lookup, expected in filters.items():
+            if isinstance(expected, type) and issubclass(expected, Gate):
+                expected = expected.name
+            matches[lookup] = expected
+
         async def receiver(_sender: Any, **kwargs: Any) -> None:
-            for lookup, expected in filters.items():
+            for lookup, expected in matches.items():
                 value: Any = kwargs
                 for part in lookup.split("__"):
                     value = value.get(part) if isinstance(value, dict) else None

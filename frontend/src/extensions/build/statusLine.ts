@@ -6,7 +6,7 @@ import type { SubjectStatus } from '../../api/types'
 // The parked line per gate identity. Scope's gate parks for the operator's
 // ticket reply, whatever the ask; unmapped gates read as a generic park.
 const PARKED_LINES: Record<string, string> = {
-  scope_reply: 'Reply on the ticket',
+  scope: 'Reply on the ticket',
   review_work: 'Review implementation',
 }
 

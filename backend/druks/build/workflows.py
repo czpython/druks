@@ -489,16 +489,8 @@ class Profile(Workflow):
         }
 
 
-# What the gate asks the operator while the run is parked, by brief status. Scope is
-# answered on the ticket (external), so the ask is just the dashboard's one-liner.
-_PARKED_ASK = {
-    "needs_answers": {"presentation": "external", "label": "Answer scope questions"},
-}
-
-
 class ScopeReply(Gate):
-    """No fields: the operator answers by commenting on the ticket — the agent
-    re-reads the thread on resume — so the reply only needs to wake the run."""
+    name = "scope"
 
 
 class Scope(Workflow):
@@ -566,4 +558,6 @@ class Scope(Workflow):
             brief = await Build.scope(remote_key=remote_key, source=source)
             if brief.status == "ready":
                 return brief
-            await ScopeReply.wait(input_request=_PARKED_ASK[brief.status])
+            await ScopeReply.wait(
+                input_request={"presentation": "external", "label": "Answer scope questions"}
+            )

@@ -269,8 +269,9 @@ Druks sandbox contract, not `exe`, AWS, or Docker directly.
 
 ## Wait for input
 
-A gate's fields are the reply schema and its class name becomes the default
-topic:
+A gate's fields are the reply schema; `name` pins the gate's durable identity —
+the recv channel and the parked run's `gate` on the read side (declaring it is
+required — the identity must survive a class rename):
 
 ```python
 from typing import Literal
@@ -279,6 +280,7 @@ from druks.workflows import Gate, Workflow
 
 
 class ApproveReport(Gate):
+    name = "approve_report"
     action: Literal["approve", "revise", "cancel"]
     note: str | None = None
 

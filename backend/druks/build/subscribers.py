@@ -3,6 +3,7 @@ import re
 
 from githubkit.exception import RequestFailed, RequestTimeout
 
+from druks.build.contracts import ReviewWork
 from druks.build.enums import HandoffStatus
 from druks.build.extension import Build
 from druks.build.models import Project, ProjectRepo, WorkItem
@@ -67,9 +68,7 @@ async def build_running_reaches_the_tracker(*, subject: dict, **_: object) -> No
     await item.set_remote_status(SemanticStatus.IN_PROGRESS)
 
 
-@subscribe(
-    "run.pending_input", kind=BuildWorkflow.kind, subject__type="work_item", gate="review_work"
-)
+@subscribe("run.pending_input", kind=BuildWorkflow.kind, subject__type="work_item", gate=ReviewWork)
 async def work_review_park_reaches_the_tracker(*, subject: dict, **_: object) -> None:
     item = WorkItem.get(subject["id"])
     await item.set_remote_status(SemanticStatus.IN_REVIEW)

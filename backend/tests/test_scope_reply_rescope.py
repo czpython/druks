@@ -24,7 +24,7 @@ def _scope_run(db_session, *, work_item_id, parked=True):
     run = Run(
         id=str(uuid7()),
         kind="build.scope",
-        input_gate=ScopeReply.topic if parked else None,
+        input_gate=ScopeReply.name if parked else None,
     )
     db_session.add(run)
     db_session.flush()

@@ -130,7 +130,7 @@ async def test_scope_parks_then_resumes_to_ready(rt, monkeypatch):
     parked = await _wait(
         rt.engine,
         wfid,
-        lambda r: r.state == RunState.PENDING_INPUT and r.input_gate == "scope_reply",
+        lambda r: r.state == RunState.PENDING_INPUT and r.input_gate == "scope",
     )
     # The ask is declared at the gate, stored on the run — the read side renders it.
     assert parked.input_request == {

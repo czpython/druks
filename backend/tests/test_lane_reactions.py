@@ -91,7 +91,7 @@ def _parked_scope_run(session, *, work_item_id):
     run = Run(
         id=str(uuid7()),
         kind=Scope.kind,
-        input_gate=ScopeReply.topic,
+        input_gate=ScopeReply.name,
         input_request={"presentation": "external", "label": "Answer scope questions"},
     )
     session.add(run)

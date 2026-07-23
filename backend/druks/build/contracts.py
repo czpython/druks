@@ -17,6 +17,7 @@ if TYPE_CHECKING:
 # The PR webhook resumes approve/request_changes; revise_contract and cancel
 # come from the operator's UI.
 class ReviewWork(Gate):
+    name = "review_work"
     action: Literal["approve", "request_changes", "revise_contract", "cancel"]
     reviewer: str | None = None
     body: str | None = None

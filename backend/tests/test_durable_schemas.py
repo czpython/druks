@@ -56,7 +56,7 @@ def test_subject_state_uses_the_latest_outcome_once_every_run_is_terminal():
 def test_status_surfaces_the_newest_active_runs_gate():
     runs = [
         _run("new", "build.build_workflow", RunState.PENDING_INPUT, "review"),
-        _run("old", "build.build_workflow", RunState.PENDING_INPUT, "scope_reply"),
+        _run("old", "build.build_workflow", RunState.PENDING_INPUT, "scope"),
     ]
     assert _status_of(runs).gate == "review"
 

@@ -17,7 +17,7 @@ function status(overrides: Partial<SubjectStatus>): SubjectStatus {
 
 describe('statusLine', () => {
   it('parked renders build’s line for the gate identity', () => {
-    expect(statusLine(status({ state: 'pending_input', gate: 'scope_reply' }))).toBe(
+    expect(statusLine(status({ state: 'pending_input', gate: 'scope' }))).toBe(
       'Reply on the ticket',
     )
     expect(statusLine(status({ state: 'pending_input', gate: 'review_work' }))).toBe(

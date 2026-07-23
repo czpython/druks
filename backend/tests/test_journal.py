@@ -71,5 +71,5 @@ def test_review_reply_validates_the_resume_wire_shape():
     assert reply.action == "request_changes"
     assert (reply.answers, reply.note) == ({"q1": "redis"}, "why q1")
     assert OperatorReply.model_validate({"action": "approve"}).answers == {}
-    # The recv topic stays the wire's "review", not the class-name derivation.
-    assert OperatorReply.topic == "review"
+    # The gate's pinned name is the wire's "review", untouched by the class name.
+    assert OperatorReply.name == "review"

@@ -54,6 +54,7 @@ _REVIEW_REPLIES: list[OperatorReply] = []
 
 def _build_park_flows():
     class ParkNote(Gate):
+        name = "park_note"
         action: str = ""
 
         @classmethod

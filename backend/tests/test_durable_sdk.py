@@ -55,6 +55,7 @@ def _build_units():
     class Approve(Gate):
         # The on_wait override is what lets the subjectless flows below park
         # here at all — without it every wait() would fail as SubjectlessGate.
+        name = "approve"
         action: str = ""
 
         @classmethod
@@ -63,6 +64,7 @@ def _build_units():
 
     class Confirm(Gate):
         # No on_wait override: only a subject run may park here.
+        name = "confirm"
         action: str = ""
 
     class SampleFlow(Workflow):

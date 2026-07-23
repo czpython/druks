@@ -198,17 +198,22 @@ class Journal:
 
 
 class Gate(BaseModel):
-    """A typed human-in-the-loop gate. Subclass per park point; the class name is
-    the durable recv topic, the fields are the reply's schema. `wait()` parks the
+    """A typed human-in-the-loop gate. Subclass per park point; ``name`` pins the
+    gate's durable identity — the recv channel and the parked run's ``gate`` on
+    the read side — and the fields are the reply's schema. `wait()` parks the
     running workflow until `Run.resume()` answers it (or the TTL lapses) and
     returns the validated reply — both ends of the channel hang off the class."""
 
-    topic: ClassVar[str] = ""
+    name: ClassVar[str] = ""
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
-        if not cls.__dict__.get("topic"):
-            cls.topic = _kind_from_class_name(cls.__name__)
+        if not cls.__dict__.get("name"):
+            raise WorkflowError(
+                f"{cls.__name__} must pin ``name`` — it is the gate's durable identity "
+                "(the recv channel and the parked run's gate), so it never rides the "
+                "class name."
+            )
 
     @classmethod
     async def on_wait(cls, workflow: "Workflow") -> None:
@@ -224,14 +229,14 @@ class Gate(BaseModel):
         # Suspend the running workflow until its gate is answered. A gate is a
         # run-level state — the read surfaces "needs you" straight off the parked run.
         # ``input_request`` is the plain-dict ask (at least a ``label`` and
-        # ``presentation``), stored on the run beside the gate topic and cleared on
+        # ``presentation``), stored on the run beside ``input_gate`` and cleared on
         # resume — so an extension declares the ask here, beside on_wait, not at read time.
         workflow = current_workflow.get()
         if not workflow.subject and cls.on_wait.__func__ is Gate.on_wait.__func__:
             # No subject means no feed surface; if on_wait wasn't overridden
             # either, nobody would ever see this park — fail loudly instead
             # of parking invisibly for the whole TTL.
-            raise SubjectlessGate(cls.topic)
+            raise SubjectlessGate(cls.name)
 
         async def _on_wait() -> None:
             # on_wait is real IO (it tells a human), so it gets its own checkpointed
@@ -239,8 +244,8 @@ class Gate(BaseModel):
             async with step_session():
                 await cls.on_wait(workflow)
 
-        await DBOS.run_step_async(StepOptions(name=f"{cls.topic}._on_wait"), _on_wait)
-        payload = await _park(workflow, cls.topic, input_request, ttl_seconds)
+        await DBOS.run_step_async(StepOptions(name=f"{cls.name}._on_wait"), _on_wait)
+        payload = await _park(workflow, cls.name, input_request, ttl_seconds)
         reply = cls.model_validate(payload)
         workflow.journal.add(reply)
         return reply
@@ -250,8 +255,8 @@ class OperatorReply(Gate):
     """The operator's in-app review decision. Answers and note are content for
     the next agent prompt, never control flow."""
 
-    # One topic serves every in-app review — a run parks on one gate at a time.
-    topic = "review"
+    # One gate serves every in-app review — a run parks on one at a time.
+    name = "review"
     action: _ReviewAction
     answers: dict[str, str] = Field(default_factory=dict)
     note: str = ""
@@ -259,19 +264,19 @@ class OperatorReply(Gate):
 
 async def _park(
     workflow: "Workflow",
-    topic: str,
+    gate: str,
     input_request: dict[str, Any] | None,
     ttl_seconds: float,
 ) -> dict[str, Any]:
-    # Shared park core: a park lasts days, so reap the warm VM, then suspend on the topic
-    # until Run.resume answers it.
+    # Shared park core: a park lasts days, so reap the warm VM, then suspend on the
+    # gate's channel until Run.resume answers it.
     await workflow._reap_run()
     await _emit_run_event(
         workflow.workflow_id,
         RunState.PENDING_INPUT,
         subject=workflow.subject,
         facts={
-            "input_gate": topic,
+            "input_gate": gate,
             "input_request": input_request,
             "input_requested_at": datetime.now(UTC),
         },
@@ -279,9 +284,9 @@ async def _park(
     if workflow.subject:
         # Every subjected park notifies the designated destination — no author opt-in.
         await _notify_designated_destination(workflow.workflow_id, workflow.subject)
-    payload = await DBOS.recv_async(topic, timeout_seconds=ttl_seconds)
+    payload = await DBOS.recv_async(gate, timeout_seconds=ttl_seconds)
     if payload is None:
-        raise GateTimeout(topic)
+        raise GateTimeout(gate)
     await _emit_run_event(
         workflow.workflow_id,
         RunState.RUNNING,
@@ -576,7 +581,7 @@ class Workflow:
         if not self.subject:
             # An in-app review is answered from the subject's surfaces; a
             # subjectless run has none, so nobody would ever see the ask.
-            raise SubjectlessGate(OperatorReply.topic)
+            raise SubjectlessGate(OperatorReply.name)
         request = {
             "presentation": "in_app",
             "controls": list(_REVIEW_CONTROLS),
@@ -584,7 +589,7 @@ class Workflow:
         }
         if context:
             request["context"] = context
-        payload = await _park(self, OperatorReply.topic, request, GATE_TTL_SECONDS)
+        payload = await _park(self, OperatorReply.name, request, GATE_TTL_SECONDS)
         reply = OperatorReply.model_validate(payload)
         self.journal.add(reply)
         return reply

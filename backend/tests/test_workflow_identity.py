@@ -10,7 +10,7 @@ from druks.extensions import loader as extensions_loader
 from druks.extensions.exceptions import MalformedExtension
 from druks.extensions.loader import register_workflow_package, resolve_workflow_extension
 from druks.extensions.registry import workflows
-from druks.workflows import Workflow, _log_run_event, step
+from druks.workflows import Gate, Workflow, _log_run_event, step
 
 
 @pytest.fixture(autouse=True)
@@ -29,6 +29,15 @@ def _workflow(name: str, module: str, **attrs):
     async def run(self) -> None: ...
 
     return type(name, (Workflow,), {"__module__": module, "run": run, **attrs})
+
+
+def test_a_gate_without_a_pinned_name_raises():
+    # The name is the gate's durable identity (recv channel, the parked run's
+    # gate) — it must survive a class rename, so deriving it is refused.
+    with pytest.raises(WorkflowError, match="must pin"):
+
+        class Anonymous(Gate):
+            action: str = ""
 
 
 def test_registration_is_idempotent_and_conflicts_loudly():

@@ -38,9 +38,9 @@ export interface Links {
 }
 
 export interface WorkItemSummary extends SubjectSummary {
-  source: 'linear' | 'github'
+  source: 'linear' | 'github' | 'jira'
   repo: string
-  projectName?: string | null
+  projectName: string
   title: string
   remoteKey?: string | null
   remoteUrl?: string | null
