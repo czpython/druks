@@ -49,7 +49,7 @@ def rt():
     configure_engine(engine)
     configure_session(engine)
 
-    from druks.build.scoping.workflows import Scope  # registers on import
+    from druks.build.workflows import Scope  # registers on import
 
     os.environ["DRUKS_DATABASE_URL"] = URL
     init_dbos()
@@ -81,7 +81,7 @@ async def _wait(engine, wfid, predicate, timeout=20.0):
 
 
 def _brief(status, *, questions=()):
-    from druks.build.scoping.contracts import ScopeBriefOutput, SplitProposalOutput
+    from druks.build.contracts import ScopeBriefOutput
 
     return ScopeBriefOutput(
         status=status,
@@ -93,7 +93,6 @@ def _brief(status, *, questions=()):
         out_of_scope=[],
         decisions=[],
         open_questions=list(questions),
-        split_recommendation=SplitProposalOutput(rationale="", tickets=[]),
     )
 
 

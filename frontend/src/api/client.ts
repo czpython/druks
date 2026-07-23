@@ -2,11 +2,13 @@ import type {
   Account,
   AgentCallFiles,
   ArtifactContent,
+  ConnectChallenge,
   DashboardHealth,
   FeedResponse,
   ExtensionsSettingsResponse,
   Harness,
-  LoginChallenge,
+  Identity,
+  Pat,
   SubjectResponse,
   SubjectSummary,
   UpdateHarnessRequest,
@@ -22,11 +24,12 @@ import type {
   UserSettings,
 } from './types'
 
-// A 401 means the session is gone: typed to branch on, broadcast so the
-// AuthProvider unmounts the app.
+// A 401 means the request's identity did not resolve: typed to branch on,
+// broadcast so the IdentityBootstrap rechecks /api/auth/me — never converted
+// into onboarding.
 export class UnauthorizedError extends Error {}
 
-export const AUTH_EXPIRED_EVENT = 'druks:auth-expired'
+export const IDENTITY_INVALIDATED_EVENT = 'druks:identity-invalidated'
 
 // FastAPI puts the human-readable message in ``detail``; throw that as the
 // Error message so consumers display it as-is. Non-JSON bodies (proxy pages,
@@ -44,7 +47,7 @@ async function throwApiError(response: Response, path: string): Promise<never> {
       ? detail
       : `${response.status} ${response.statusText}: ${body || path}`
   if (response.status === 401) {
-    window.dispatchEvent(new Event(AUTH_EXPIRED_EVENT))
+    window.dispatchEvent(new Event(IDENTITY_INVALIDATED_EVENT))
     throw new UnauthorizedError(message)
   }
   throw new Error(message)
@@ -121,21 +124,25 @@ export async function postNoContent(path: string, body: unknown): Promise<void> 
   }
 }
 
-// Harness login mints the session; landing and Settings reconnect share it.
-export const authApi = {
-  session: (): Promise<Account | null> =>
-    getJSON<Account>('/api/auth/session').catch((error) => {
-      if (error instanceof UnauthorizedError) return null
-      throw error
-    }),
-  startLogin: (name: string) =>
-    postJSON<LoginChallenge>(`/api/auth/harnesses/${encodeURIComponent(name)}/login/start`, {}),
-  completeLogin: (name: string, code: string, loginId: string) =>
-    postJSON<Account>(`/api/auth/harnesses/${encodeURIComponent(name)}/login/complete`, {
-      code,
-      loginId,
-    }),
-  logout: () => postNoContent('/api/auth/logout', {}),
+// The edge (or none-mode locality) asserts identity; /api/auth/me is the one
+// bootstrap read. A 401 here rejects — the bootstrap shows an identity error,
+// never onboarding.
+let lastAccountId: string | null = null
+
+export const identityApi = {
+  me: async (): Promise<Identity> => {
+    const identity = await getJSON<Identity>('/api/auth/me')
+    const accountId = identity.account?.id ?? null
+    // The edge can switch who it asserts without any 401 — a recheck that
+    // resolves a different account broadcasts so the bootstrap remounts every
+    // account-scoped surface instead of streaming as one identity while
+    // rendering another.
+    if (lastAccountId && accountId && accountId !== lastAccountId) {
+      window.dispatchEvent(new Event(IDENTITY_INVALIDATED_EVENT))
+    }
+    lastAccountId = accountId
+    return identity
+  },
 }
 
 // The generic subject read-side every extension gets for free at
@@ -180,8 +187,17 @@ export const api = {
   harnesses: () => getJSON<Harness[]>('/api/settings/harnesses'),
   updateHarness: (name: string, body: UpdateHarnessRequest) =>
     patchJSON<Harness>(`/api/settings/harnesses/${encodeURIComponent(name)}`, body),
+  // The harness connection flow — the capability connect (and, during setup,
+  // what creates the operator account).
+  startHarnessConnect: (name: string) =>
+    postJSON<ConnectChallenge>(`/api/harnesses/${encodeURIComponent(name)}/connection/start`, {}),
+  completeHarnessConnect: (name: string, code: string, connectionId: string) =>
+    postJSON<Account>(`/api/harnesses/${encodeURIComponent(name)}/connection/complete`, {
+      code,
+      connectionId,
+    }),
   disconnectHarness: (name: string) =>
-    deleteJSON<Harness>(`/api/settings/harnesses/${encodeURIComponent(name)}/login`),
+    deleteJSON<Harness>(`/api/harnesses/${encodeURIComponent(name)}/connection`),
   getExtensionSettings: () => getJSON<ExtensionsSettingsResponse>('/api/settings/extensions'),
   updateExtensionSettings: (body: UpdateExtensionsSettingsRequest) =>
     patchJSON<ExtensionsSettingsResponse>('/api/settings/extensions', body),
@@ -201,6 +217,14 @@ export const api = {
       `/api/skills/${encodeURIComponent(collectionId)}/skills/${encodeURIComponent(name)}`,
       { enabled },
     ),
+
+  // Personal access tokens — the agent door to this same API. The plaintext
+  // comes back once, on mint; list rows carry the prefix only. Management
+  // admits the edge/none operator identity alone — never a bearer token.
+  pats: () => getJSON<Pat[]>('/api/auth/personal-tokens'),
+  createPat: (name: string) => postJSON<{ token: string }>('/api/auth/personal-tokens', { name }),
+  revokePat: (id: string) =>
+    deleteJSON<Pat>(`/api/auth/personal-tokens/${encodeURIComponent(id)}`),
 
   // MCP servers — a backend-owned registry, delivered into every agent VM. The
   // token is write-only: sent on create, redacted in every response. Keyed by

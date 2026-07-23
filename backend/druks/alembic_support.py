@@ -2,14 +2,18 @@ from alembic import context
 from sqlalchemy import engine_from_config, pool
 
 from druks.models import Base
+from druks.secrets.fields import _EncryptedColumn
 from druks.settings import load_settings
 
 
 def _render_item(type_, obj, autogen_context):
-    # The _UtcDateTime decorator only changes read-side tz coercion; its DDL is
-    # plain TIMESTAMPTZ. Render it as such so migrations never import extension code.
+    # Render app TypeDecorators as their plain DDL type so migrations never
+    # import extension code. _UtcDateTime only changes read-side tz coercion
+    # (DDL is TIMESTAMPTZ); the encrypted columns store as LargeBinary (bytea).
     if type_ == "type" and obj.__class__.__name__ == "_UtcDateTime":
         return "sa.DateTime(timezone=True)"
+    if type_ == "type" and isinstance(obj, _EncryptedColumn):
+        return "sa.LargeBinary()"
     return False
 
 

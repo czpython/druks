@@ -79,8 +79,8 @@ def _seed_work_item(engine, *, repo: str) -> int:
     from sqlalchemy.orm import Session
 
     with Session(engine) as session:
-        slug = f"rt-{uuid4().hex[:8]}"
-        project = Project(name=slug, slug=slug)
+        name = f"rt-{uuid4().hex[:8]}"
+        project = Project(name=name)
         session.add(project)
         session.flush()
         item = WorkItem(project_id=project.id, repo=repo, title="rt")
@@ -103,9 +103,15 @@ async def _wait(engine, wfid, predicate, timeout=20.0):
     raise AssertionError("timed out")
 
 
-def _stub(monkeypatch, rt):
+def _stub(monkeypatch, rt, *, plan_approval="human", auto_dispatch=False):
     import druks.build.workflows as m
-    from druks.build.contracts import CodeReviewOutput, EvaluationOutput, PlanData
+    from druks.build.contracts import (
+        CodeReviewOutput,
+        EvaluationOutput,
+        ImplementationOutput,
+        PlanData,
+        ReviewOutput,
+    )
     from druks.build.enums import EvaluationVerdict, ReviewDecision
     from druks.build.policy import Gates, RepoPolicy
 
@@ -116,22 +122,24 @@ def _stub(monkeypatch, rt):
 
     for name in (
         "_push_ticket_status",
-        "_set_pr_draft",
-        "_request_assignee_review",
+        "set_pr_draft",
+        "request_assignee_review",
         "_clear_draft",
     ):
         monkeypatch.setattr(flow, name, _noop)
 
     async def _policy_and_profile(self):
         policy = RepoPolicy(
-            gates=Gates(plan_approval="human", implementation_approval="human"),
+            gates=Gates(plan_approval=plan_approval, implementation_approval="human"),
             on_approval="merge",
         )
         return {"policy": policy.model_dump(mode="json"), "profile": {}}
 
     async def _settings(self):
         return flow.Settings(
-            auto_dispatch_on_plan_approval=False, max_implementation_revisions=5, review_code=True
+            auto_dispatch_on_plan_approval=auto_dispatch,
+            max_implementation_revisions=5,
+            review_code=True,
         )
 
     monkeypatch.setattr(flow, "_load_policy_and_profile", _policy_and_profile)
@@ -139,19 +147,30 @@ def _stub(monkeypatch, rt):
 
     # The agent execution is faked per agent BELOW the step wrapper (_run, not
     # __call__), so every call still memoizes through DBOS exactly like prod —
-    # the recovery test's call counts prove replay skips them. Pass-through
-    # stages (generate_plan, review_code) return their stub as the step result,
-    # so those stubs are the real domain models; contract-consuming stages take
-    # attribute lookalikes. Returns the invocation log (agent ids, in order).
-    from druks.build.contracts import Implementation
-
+    # the recovery test's call counts prove replay skips them. The stubs are
+    # real domain models: they land on the journal, so its typed projections
+    # read them exactly as in prod. Returns the invocation log
+    # (agent ids, in order).
     results = {
         "generate_plan": PlanData(plan_markdown="p"),
-        "review_plan": SimpleNamespace(
-            decision=ReviewDecision.APPROVE, body="", assignee_github_login=None
-        ),
-        "implement": Implementation(
-            base_sha="a", head_sha="b", branch="agent/acme-1", pr_number=42
+        "review_plan": ReviewOutput(decision=ReviewDecision.APPROVE, body=""),
+        "implement": ImplementationOutput.model_validate(
+            {
+                "type": "result",
+                "status": "success",
+                "base_sha": "a",
+                "head_sha": "b",
+                "commit_sha": "b",
+                "branch": "agent/acme-1",
+                "pr_number": 42,
+                "files_changed": [],
+                "acceptance_results": [],
+                "checks": [],
+                "known_risks": [],
+                "summary": "",
+                "workspace_path": "/repo",
+                "workspace_retention": None,
+            }
         ),
         "evaluate_implementation": EvaluationOutput(
             verdict=EvaluationVerdict.PASS, body="", findings=[], checks=[], acceptance_results=[]
@@ -222,12 +241,36 @@ async def test_happy_path_to_merge(rt, monkeypatch):
     assert [e.type for e in events if e.type.startswith("run.")][-1] == "run.finished"
 
 
-async def test_recovery_rebuilds_the_diary_without_rerunning_agents(rt, monkeypatch):
-    """The diary (plans, reviews, revision counts) is durable by determinism: a
-    crash mid-run means DBOS re-executes run() from the top on a fresh instance,
-    with every agent call and gate reply memoized. Kill the runtime while the run
-    is parked mid-_plan_phase, bring it back up, and the run must finish — with
-    the pre-crash agents replayed from checkpoints, never re-invoked."""
+async def test_auto_mode_machine_review_replaces_the_plan_gate(rt, monkeypatch):
+    """plan_approval resolves to none: the machine reviewer approves the plan and
+    the run reaches the work gate with no plan park — review_plan runs exactly
+    once, where it substitutes for the operator."""
+    invoked = _stub(monkeypatch, rt, plan_approval=None, auto_dispatch=True)
+
+    item_id = _seed_work_item(rt.engine, repo="acme/gizmo")
+    wfid = await rt.flow.start(
+        repo="acme/gizmo",
+        subject={"type": "work_item", "id": item_id},
+    )
+
+    parked = await _wait(
+        rt.engine,
+        wfid,
+        lambda r: r.state == RunState.PENDING_INPUT and r.input_gate == "review_work",
+    )
+    assert invoked[:2] == ["generate_plan", "review_plan"]
+    await parked.resume(action="approve")
+    done = await _wait(rt.engine, wfid, lambda r: r.state == RunState.FINISHED)
+    assert done.failure is None
+
+
+async def test_recovery_rebuilds_the_journal_without_rerunning_agents(rt, monkeypatch):
+    """The journal is durable by determinism: a crash mid-run means DBOS
+    re-executes the body from the top on a fresh instance, with every agent
+    call and gate reply memoized through the same chokepoints. Kill the
+    runtime while the run is parked mid-_plan_phase, bring it back up, and the
+    run must finish — with the pre-crash agents replayed from checkpoints,
+    never re-invoked."""
     from druks.durable.engine import init_dbos, launch, shutdown
 
     invoked = _stub(monkeypatch, rt)
@@ -242,7 +285,8 @@ async def test_recovery_rebuilds_the_diary_without_rerunning_agents(rt, monkeypa
         wfid,
         lambda r: r.state == RunState.PENDING_INPUT and r.input_gate == "review",
     )
-    assert invoked == ["generate_plan", "review_plan"]
+    # Gate mode: the operator is the reviewer — review_plan never ran.
+    assert invoked == ["generate_plan"]
 
     # The crash: tear the runtime down while the workflow is parked on the gate
     # and bring it back up. launch() recovers the pending workflow, which
@@ -269,17 +313,29 @@ async def test_recovery_rebuilds_the_diary_without_rerunning_agents(rt, monkeypa
         wfid,
         lambda r: r.state == RunState.PENDING_INPUT and r.input_gate == "review_work",
     )
+
+    # Second crash with an implementation on the journal: the replay back to
+    # this park rebuilds the typed projections, with zero agent re-invocations.
+    shutdown()
+    init_dbos()
+    launch()
+    await DBOS._configure_asyncio_thread_pool()
+
+    parked = await _wait(
+        rt.engine,
+        wfid,
+        lambda r: r.state == RunState.PENDING_INPUT and r.input_gate == "review_work",
+    )
     await parked.resume(action="approve")
     done = await _wait(rt.engine, wfid, lambda r: r.state == RunState.FINISHED)
     assert done.failure is None
 
     # Replay recomposition, proven by invocation counts: the pre-crash agents
     # came back from checkpoints (no re-invocation), and the post-crash phase ran
-    # once each on the rebuilt diary — implement's revision guard, evaluate's
+    # once each on the rebuilt journal — implement's revision guard, evaluate's
     # grade, and the review_code toggle all read recomposed state.
     assert invoked == [
         "generate_plan",
-        "review_plan",
         "implement",
         "evaluate_implementation",
         "review_code",

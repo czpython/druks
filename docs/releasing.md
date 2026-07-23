@@ -33,7 +33,7 @@ image tag and a full commit SHA selects `sha-<full-git-sha>`.
 
 ```bash
 DRUKS_REF=v0.1.0 \
-  bash <(curl -fsSL https://raw.githubusercontent.com/clawhaven/druks/v0.1.0/scripts/install.sh)
+  bash <(curl -fsSL https://raw.githubusercontent.com/czpython/druks/v0.1.0/scripts/install.sh)
 ```
 
 For rollback, prefer the immutable full-SHA tag recorded during release. Check

@@ -26,7 +26,7 @@ explains the exact boundary.
 ## Install
 
 The installer supports three sandbox profiles backed by
-[Drukbox](https://github.com/clawhaven/drukbox):
+[Drukbox](https://github.com/czpython/drukbox):
 
 - `exe` (default) and `aws`: remote sandbox VMs, with Druks and Drukbox in Compose
 - `docker`: local sandbox containers, with Drukbox running on the host
@@ -34,7 +34,7 @@ The installer supports three sandbox profiles backed by
 For a remote install:
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/clawhaven/druks/main/scripts/install.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/czpython/druks/main/scripts/install.sh)
 ```
 
 That command follows the edge channel while Druks has no stable release. Once
@@ -50,7 +50,7 @@ control, verification, and rollback.
 For a laptop-only stack:
 
 ```bash
-DRUKS_PROVIDER=docker bash <(curl -fsSL https://raw.githubusercontent.com/clawhaven/druks/main/scripts/install.sh)
+DRUKS_PROVIDER=docker bash <(curl -fsSL https://raw.githubusercontent.com/czpython/druks/main/scripts/install.sh)
 ```
 
 Then follow [full local setup](docs/full-local.md) to start Drukbox and connect

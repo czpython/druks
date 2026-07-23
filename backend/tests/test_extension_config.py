@@ -1,5 +1,5 @@
 import pytest
-from conftest import make_settings, make_test_work_item
+from conftest import make_settings
 from druks.build.policy import RepoPolicy
 from druks.extensions.config import resolve_extension_config
 from druks.extensions.exceptions import ExtensionConfigError
@@ -124,11 +124,11 @@ class TestExtensionPromptOverridePaths:
         assert await _resolve_override("build/build_workflow/implement.md", repo=REPO) == "tuned"
 
 
-class TestWorkItemSnapshot:
-    """The build run resolves its policy + profile once: a snapshotted work item
-    holds for the item's lifespan; without a snapshot it resolves live. Pins
-    the ``_load_policy_and_profile`` decision in isolation — the @step runs
-    through a pass-through so no DBOS runtime is needed."""
+class TestLoadPolicyAndProfile:
+    """The build run resolves its policy + profile once, live — the repo's
+    config plus its profiled facts. Pins ``_load_policy_and_profile`` in
+    isolation; the @step runs through a pass-through so no DBOS runtime is
+    needed."""
 
     @pytest.fixture(autouse=True)
     def _passthrough_step(self, monkeypatch, db_engine):
@@ -143,32 +143,14 @@ class TestWorkItemSnapshot:
         yield
         configure_engine(None)
 
-    def _flow(self, *, repo, work_item_id):
+    def _flow(self, *, repo):
         from druks.build.workflows import BuildWorkflow
 
         flow = BuildWorkflow()
         flow.input = BuildWorkflow._run_input_model(repo=repo, pr_number=1, branch="agent/x")
-        flow._work_item_id = work_item_id
         return flow
 
-    async def test_run_reads_snapshot_from_work_item(self, db_session, monkeypatch):
-        async def _boom(cls, repo):
-            raise AssertionError("snapshot present — live resolution is a bug")
-
-        monkeypatch.setattr(RepoPolicy, "resolve", classmethod(_boom))
-
-        item = make_test_work_item(repo=REPO, title="t")
-        item.update(
-            extension_config_snapshot={
-                "policy": {"sandbox": {"image": "snapped"}},
-                "profile": {},
-            }
-        )
-
-        snapshot = await self._flow(repo=REPO, work_item_id=item.id)._load_policy_and_profile()
-        assert RepoPolicy.model_validate(snapshot["policy"]).sandbox.image == "snapped"
-
-    async def test_run_resolves_live_without_snapshot(self, db_session, monkeypatch):
+    async def test_resolves_live(self, db_session, monkeypatch):
         from druks.build.models import Project, ProjectRepo
 
         async def _live(cls, repo):
@@ -181,9 +163,9 @@ class TestWorkItemSnapshot:
         project = Project.create(name="Acme")
         ProjectRepo.create(project_id=project.id, full_name=REPO)
 
-        snapshot = await self._flow(repo=REPO, work_item_id=None)._load_policy_and_profile()
-        assert RepoPolicy.model_validate(snapshot["policy"]).sandbox.image == "live"
-        assert snapshot["profile"] == {}  # registered but not yet profiled
+        resolved = await self._flow(repo=REPO)._load_policy_and_profile()
+        assert RepoPolicy.model_validate(resolved["policy"]).sandbox.image == "live"
+        assert resolved["profile"] == {}  # registered but not yet profiled
 
 
 class TestPolicyKeysParsing:

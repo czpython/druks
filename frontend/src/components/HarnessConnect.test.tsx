@@ -25,11 +25,13 @@ function harness(overrides: Partial<Harness> = {}): Harness {
 
 function renderCard(value: Harness) {
   const queryClient = new QueryClient()
-  return render(
+  const invalidate = vi.spyOn(queryClient, 'invalidateQueries')
+  const view = render(
     <QueryClientProvider client={queryClient}>
       <HarnessConnect harness={value} />
     </QueryClientProvider>,
   )
+  return { view, invalidate }
 }
 
 afterEach(() => {
@@ -44,16 +46,19 @@ async function flush() {
 }
 
 describe('HarnessConnect', () => {
-  it('shows the signed-in identity', () => {
+  it('shows the connected account identity', () => {
     renderCard(harness({ connected: true, account: 'ops@corp.com' }))
     expect(screen.getByText('connected · ops@corp.com')).toBeTruthy()
     expect(screen.getByText('Reconnect')).toBeTruthy()
   })
 
-  it('drives the /api/auth connect flow end to end', async () => {
+  it('drives the connection flow end to end and refreshes only the harness query', async () => {
     const responses: Record<string, unknown> = {
-      '/api/auth/harnesses/claude/login/start': { authorizeUrl: 'https://x/auth', loginId: 'L1' },
-      '/api/auth/harnesses/claude/login/complete': { id: 'a1', username: 'me@example.com' },
+      '/api/harnesses/claude/connection/start': {
+        authorizeUrl: 'https://x/auth',
+        connectionId: 'C1',
+      },
+      '/api/harnesses/claude/connection/complete': { id: 'a1', username: 'me@example.com' },
     }
     const fetchMock = vi.fn<(url: string, init?: RequestInit) => Promise<Response>>(
       async (url) => {
@@ -63,11 +68,11 @@ describe('HarnessConnect', () => {
     )
     vi.stubGlobal('fetch', fetchMock)
 
-    renderCard(harness())
+    const { invalidate } = renderCard(harness())
     fireEvent.click(screen.getByText('Connect'))
     await flush()
 
-    expect(screen.getByText('Open the sign-in page')).toBeTruthy()
+    expect(screen.getByText('Open the authorization page')).toBeTruthy()
     fireEvent.change(screen.getByPlaceholderText('Paste the code or redirect URL'), {
       target: { value: 'the-code' },
     })
@@ -75,12 +80,15 @@ describe('HarnessConnect', () => {
     await flush()
 
     const completeCall = fetchMock.mock.calls.find(
-      ([url]) => url === '/api/auth/harnesses/claude/login/complete',
+      ([url]) => url === '/api/harnesses/claude/connection/complete',
     )
     expect(JSON.parse(String(completeCall?.[1]?.body))).toEqual({
       code: 'the-code',
-      loginId: 'L1',
+      connectionId: 'C1',
     })
+    // Completion refreshes the harness card — and only that: the browser's
+    // own identity is untouched, so /api/auth/me is never rechecked.
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['harnesses'] })
+    expect(fetchMock.mock.calls.some(([url]) => String(url) === '/api/auth/me')).toBe(false)
   })
-
 })

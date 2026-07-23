@@ -1,16 +1,15 @@
 from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends
-from sqlalchemy import select
 
 from druks.accounts.dependencies import current_account
 from druks.accounts.models import Account
 from druks.core.utils.time import operator_local_day
-from druks.db import db_session
 from druks.harnesses.artifacts import normalize_token_usage
 from druks.harnesses.models import HarnessConnection
 from druks.harnesses.registry import get_harnesses
 from druks.usage.models import UsageScrape
+from druks.usage.reads import list_finished_calls
 from druks.usage.schemas import (
     UsageHarnessHistory,
     UsageHarnessSummary,
@@ -21,8 +20,8 @@ from druks.usage.schemas import (
     UsageResponse,
     UsageTodayResponse,
 )
+from druks.usage.trends import FIVE_HOUR_RANGE, WEEK_RANGE, downsample
 from druks.user_settings.models import HarnessSettings, UserSettings
-from druks.workflows import AgentCall
 
 router = APIRouter(tags=["usage"])
 
@@ -38,12 +37,7 @@ _REFRESH_FLOOR_SECONDS = 60
 # default 5-min poll cadence.
 _STALE_AFTER_SECONDS = 24 * 60 * 60
 
-# Trend ranges for the usage page sparklines. The 5h window gets one
-# full window plus headroom so an exhaustion arc is visible end to end;
-# weekly gets the whole week. Both are downsampled to keep the payload
-# flat regardless of poll cadence.
-_FIVE_HOUR_RANGE = timedelta(hours=6)
-_WEEK_RANGE = timedelta(days=7)
+# The dashboard sparklines keep this many points regardless of poll cadence.
 _MAX_SPARK_POINTS = 72
 
 
@@ -96,28 +90,11 @@ async def get_usage_history(account: Account = Depends(current_account)) -> Usag
     response_model_by_alias=True,
 )
 async def get_usage_today(account: Account = Depends(current_account)) -> UsageTodayResponse:
-    # The shared operator-local-day boundary keeps this total identical to
-    # the sys-strip's spend-today figure.
-    timezone_name = UserSettings.get().timezone
-    now = datetime.now(UTC)
-    timezone, local_start = operator_local_day(timezone_name, now)
+    # Deriving the operator-local-day window here (the query just takes it) keeps
+    # this total identical to the sys-strip's and the agent surface's figures.
+    timezone, local_start = operator_local_day(UserSettings.get().timezone, datetime.now(UTC))
+    rows = list_finished_calls(account.id, since=local_start, until=local_start + timedelta(days=1))
     timezone_name = str(timezone)
-    rows = (
-        db_session()
-        .execute(
-            select(
-                AgentCall.model,
-                AgentCall.cost_usd,
-                AgentCall.cost_metadata,
-                AgentCall.finished_at,
-            )
-            .where(AgentCall.account_id == account.id)
-            .where(AgentCall.finished_at.is_not(None))
-            .where(AgentCall.finished_at >= local_start.astimezone(UTC))
-            .where(AgentCall.finished_at < (local_start + timedelta(days=1)).astimezone(UTC)),
-        )
-        .all()
-    )
 
     # Every call counts, even one whose model no picker list claims (pinned
     # outside the list, or never resolved): money spent must not vanish from
@@ -162,8 +139,8 @@ async def get_usage_today(account: Account = Depends(current_account)) -> UsageT
 
 
 def _harness_history(name: str, account_id: str, *, now: datetime) -> UsageHarnessHistory:
-    rows = UsageScrape.history_for(name, account_id, since=now - _WEEK_RANGE)
-    five_hour_cutoff = now - _FIVE_HOUR_RANGE
+    rows = UsageScrape.history_for(name, account_id, since=now - WEEK_RANGE)
+    five_hour_cutoff = now - FIVE_HOUR_RANGE
     five_hour = [
         UsageHistoryPoint(t=row.scraped_at, pct=row.five_hour_percent_left)
         for row in rows
@@ -176,21 +153,9 @@ def _harness_history(name: str, account_id: str, *, now: datetime) -> UsageHarne
     ]
     return UsageHarnessHistory(
         name=name,
-        five_hour=_downsample(five_hour),
-        week=_downsample(week),
+        five_hour=downsample(five_hour, cap=_MAX_SPARK_POINTS),
+        week=downsample(week, cap=_MAX_SPARK_POINTS),
     )
-
-
-def _downsample(points: list[UsageHistoryPoint]) -> list[UsageHistoryPoint]:
-    """Thin a series to ≤ _MAX_SPARK_POINTS, always keeping the newest
-    sample (the page's "now" anchor)."""
-    if len(points) <= _MAX_SPARK_POINTS:
-        return points
-    stride = -(-len(points) // _MAX_SPARK_POINTS)  # ceil division
-    thinned = points[::stride]
-    if thinned[-1] is not points[-1]:
-        thinned.append(points[-1])
-    return thinned
 
 
 def _summarize(
@@ -221,11 +186,11 @@ def _summarize(
 
 def _metric(percent_left: int | None, resets_at: datetime | None) -> UsageMetricSummary | None:
     if percent_left is None and resets_at is None:
-        return None
+        return
     return UsageMetricSummary(percent_left=percent_left, resets_at=resets_at)
 
 
 def _age_seconds(scraped_at: datetime | None, *, now: datetime) -> int | None:
     if not scraped_at:
-        return None
+        return
     return max(0, int((now - scraped_at).total_seconds()))

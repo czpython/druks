@@ -22,11 +22,11 @@ exports, and credential captures cannot reappear through Git history.
 
 ## Publish the tree
 
-1. Rename this private repository so `clawhaven/druks` is available, then archive
+1. Rename this private repository so `czpython/druks` is available, then archive
    the renamed repository when it no longer needs writes.
 2. Export the reviewed commit without its `.git` directory.
 3. Initialize a new repository, make one signed initial commit, and push it to a
-   new public `clawhaven/druks` repository.
+   new public `czpython/druks` repository.
 4. Verify the public tree and source archive against the recorded private commit
    before accepting contributions.
 

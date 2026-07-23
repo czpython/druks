@@ -173,7 +173,7 @@ export function WorkItemsPage() {
         <EmptyState
           glyph="∅"
           msg={active.length === 0 ? 'nothing active' : 'no matches'}
-          sub={query ? `for "${query}"` : 'all clear — check History for finished work'}
+          sub={query ? `for "${query}"` : 'all clear — check History for handed-off work'}
         />
       ) : (
         <div className="work-items-list">

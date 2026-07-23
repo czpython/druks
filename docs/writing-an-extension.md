@@ -136,8 +136,8 @@ attribution never changes that (two accounts starting the same subject share
 the one run). Wrap `start()` in a domain `dispatch()` method when the extension
 needs lookup, snapshot, or routing policy before launch.
 
-A browser-origin start attributes itself: the session gate stamps the
-request's signed-in account, and `start()` inherits it — a route that starts a
+A browser-origin start attributes itself: the request identity gate stamps
+the resolved account, and `start()` inherits it — a route that starts a
 workflow needs no ceremony. Pass `account_id` only when the dispatcher knows
 better (a webhook dispatch resolving the ticket assignee). Each agent call
 executes with the run's account's own connection, else the install's fallback
@@ -145,6 +145,43 @@ account — the charged account is recorded on the call, so a fallback is
 visible by comparison. Runs with no account anywhere (crons, background work)
 run as the system account. Resuming a parked run keeps its original attribution;
 the person clicking Resume never becomes the payer.
+
+### The journal
+
+Druks keeps a journal of each run's typed values: every body-level agent call
+and every gate reply lands in it automatically, in call order. Add your own
+values with `self.journal.add()`; read them back by contract type:
+
+```python
+self.journal.filter(PlanData)                                # all entries, oldest first
+self.journal.latest(PlanData)                                # newest, or None
+self.journal.filter(ImplementationOutput, status="success")  # keyword filters: ANDed equality
+self.journal.filter(ReviewWork)                              # gate replies, by their Gate class
+```
+
+Subclass `Journal` to name your projections, and declare it on the workflow:
+
+```python
+class SweepJournal(Journal):
+    @property
+    def findings(self) -> list[FindingData]:
+        return self.filter(FindingData)
+
+
+class Sweep(Workflow):
+    journal_class = SweepJournal
+```
+
+The journal survives crashes without being stored: recovery re-runs the body
+with every durable call memoized, so the same entries land in the same order.
+
+Two rules:
+
+- Only body-level calls are journaled. An agent call inside a `@step` — or in
+  a `run()` body, which is one big step — never lands there; keep that state
+  in local variables.
+- Never mutate body-held state inside a `@step`: a completed step is skipped
+  on replay, so the write disappears.
 
 ### Schedules and settings
 

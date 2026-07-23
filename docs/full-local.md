@@ -27,7 +27,7 @@ and `linux/arm64`.
 ## 1. Install the local Druks profile
 
 ```bash
-DRUKS_PROVIDER=docker bash <(curl -fsSL https://raw.githubusercontent.com/clawhaven/druks/main/scripts/install.sh)
+DRUKS_PROVIDER=docker bash <(curl -fsSL https://raw.githubusercontent.com/czpython/druks/main/scripts/install.sh)
 ```
 
 The first run:
@@ -40,7 +40,7 @@ The first run:
 For the bundled `build` extension, provision its GitHub Apps:
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/clawhaven/druks/main/scripts/install.sh) --apps
+bash <(curl -fsSL https://raw.githubusercontent.com/czpython/druks/main/scripts/install.sh) --apps
 ```
 
 Then re-run the installer. A boot-ready run pulls images, applies Druks
@@ -52,7 +52,7 @@ the local profile.
 In a separate checkout:
 
 ```bash
-git clone https://github.com/clawhaven/drukbox
+git clone https://github.com/czpython/drukbox
 cd drukbox
 DOCKER_SSH_USERNAME=druks make dev
 ```
@@ -86,12 +86,12 @@ Success means the Compose services are up and the health endpoint returns
 Open **Settings → Harnesses** in the dashboard and connect Claude and Codex.
 Druks stores those subscription credentials in Postgres and writes a fresh
 credential file into each sandbox. It does not use host CLI login files.
-That first connect is also the dashboard sign-in: harness login mints the
-`druks_session` cookie every internal API requires — a local install has no
-identity proxy in front, so the provider email is the account identity.
-Protect database access and backups as credential-bearing data; unlike MCP
-tokens and OAuth grants, harness payloads do not use the
-`DRUKS_SECRETS_KEY` envelope.
+The local profile runs `DRUKS_AUTH_MODE=none` — no browser authentication and
+exactly one operator account. A fresh install shows onboarding until the
+first harness connection completes; that connection creates the sole operator
+account from the provider-verified email. Protect database access and backups
+as credential-bearing data; unlike MCP tokens and OAuth grants, harness
+payloads do not use the `DRUKS_SECRETS_KEY` envelope.
 
 Agent calls refuse before provisioning if their selected harness is not
 connected. `druks doctor` reports the connection and token expiry for every
@@ -131,7 +131,7 @@ development Druks environment and invoke its documented trigger or
 ## Sandbox image
 
 `DRUKS_SANDBOX_IMAGE` selects the image Drukbox starts. The shipped
-`ghcr.io/clawhaven/druks-sandbox:latest` image contains the non-root `druks`
+`ghcr.io/czpython/druks-sandbox:latest` image contains the non-root `druks`
 user plus Git, GitHub CLI, Node, Claude, and Codex.
 
 Build it from the repository when changing the sandbox:

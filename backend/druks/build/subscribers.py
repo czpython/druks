@@ -7,8 +7,7 @@ from druks.build.enums import HandoffStatus
 from druks.build.extension import Build
 from druks.build.models import Project, ProjectRepo, WorkItem
 from druks.build.policy import RepoPolicy
-from druks.build.scoping.workflows import Scope
-from druks.build.workflows import BuildWorkflow, Profile, _delete_branch
+from druks.build.workflows import BuildWorkflow, Profile, Scope
 from druks.core.apis.exceptions import GitHubAppNotConfiguredError, GitHubAppNotInstalledError
 from druks.core.apis.github import get_github_client
 from druks.settings import load_settings
@@ -16,7 +15,7 @@ from druks.signals import subscribe
 from druks.ticketing.enums import SemanticStatus
 from druks.ticketing.exceptions import TrackerNotConfigured
 from druks.ticketing.helpers import get_tracker
-from druks.workflows import Run, RunState
+from druks.workflows import Run
 
 logger = logging.getLogger(__name__)
 
@@ -122,7 +121,7 @@ async def _ship(*, repo: str, pr_number: int, work_item: WorkItem | None) -> Non
     # A RUNNING run converges on its own (its merge step sees the closed PR), so
     # it is left to finish; that includes druks's own merge wrapping up.
     run = work_item.get_build_run()
-    if run and run.state == RunState.PENDING_INPUT.value:
+    if run and run.is_parked:
         await run.cancel(failure="pr merged while parked")
     await work_item.set_remote_status(SemanticStatus.DONE)
     logger.info("Merge observed for %s#%s.", repo, pr_number)
@@ -133,9 +132,13 @@ async def _observe_external_close(*, repo: str, pr_number: int, work_item: WorkI
         return
     work_item.set_status(HandoffStatus.CANCELLED, event_payload={"external": True})
     await work_item.cancel_active_build(failure="pr closed without merge")
-    snapshot_policy = work_item.extension_config_snapshot.get("policy") or {}
-    if RepoPolicy.model_validate(snapshot_policy).delete_branch:
-        await _delete_branch(repo, work_item.branch)
+    # Branch cleanup is best-effort: resolving policy is live IO now, and a fetch
+    # failure must not strand the ticket — its reset below still runs.
+    try:
+        if (await RepoPolicy.resolve(repo)).delete_branch:
+            await get_github_client(load_settings()).delete_branch(repo, work_item.branch)
+    except Exception:  # noqa: BLE001 — cleanup only
+        logger.warning("Skipped branch cleanup for %s#%s.", repo, pr_number, exc_info=True)
     # The attempt was abandoned, not the ticket: send it back to the
     # provider's resting pool rather than stranding it in In Progress.
     await work_item.set_remote_status(SemanticStatus.READY_FOR_AGENT)

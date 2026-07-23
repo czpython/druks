@@ -1,4 +1,4 @@
-from druks.build.scoping.workflows import Scope
+from druks.build.workflows import Scope
 from druks.extensions.registry import workflows
 
 

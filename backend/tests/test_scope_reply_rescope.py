@@ -1,6 +1,6 @@
 import pytest
 from conftest import make_test_work_item, seed_dbos_status
-from druks.build.scoping.workflows import Scope, ScopeReply
+from druks.build.workflows import Scope, ScopeReply
 from druks.durable import Run
 from druks.ticketing.datastructures import Ticket
 from uuid_utils import uuid7
@@ -16,7 +16,7 @@ def _stub_enqueue(monkeypatch):
         calls.append(kwargs)
         return str(uuid7())
 
-    monkeypatch.setattr("druks.build.scoping.workflows.Scope.start", _fake_start)
+    monkeypatch.setattr("druks.build.workflows.Scope.start", _fake_start)
     return calls
 
 

@@ -1,12 +1,12 @@
 import inspect
 import re
 from collections.abc import Callable
-from contextlib import nullcontext
+from contextlib import nullcontext, suppress
 from contextvars import ContextVar
 from datetime import UTC, datetime
 from functools import partial
 from types import SimpleNamespace
-from typing import TYPE_CHECKING, Any, ClassVar, Self, get_type_hints
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, Self, TypeVar, get_args, get_type_hints
 
 from croniter import croniter
 from dbos import DBOS, SetEnqueueOptions, SetWorkflowAttributes, SetWorkflowID, StepOptions
@@ -19,7 +19,7 @@ from dbos._error import (
 from pydantic import BaseModel, ConfigDict, Field, create_model
 from uuid_utils import uuid7
 
-from druks.accounts.sessions import current_account_id
+from druks.accounts.context import current_account_id
 from druks.durable.activity import get_run_phase, set_run_phase
 from druks.durable.engine import _step_engine, register_schedule, run_queue, step_session
 from druks.durable.enums import AgentCallStatus, RunState
@@ -50,6 +50,8 @@ __all__ = [
     "AgentCallStatus",
     "FatalError",
     "Gate",
+    "Journal",
+    "OperatorReply",
     "Run",
     "RunState",
     "SubjectActivity",
@@ -67,13 +69,13 @@ if TYPE_CHECKING:
 # A human gate can park for days; a long recv TTL still caps zombie parks.
 GATE_TTL_SECONDS = 14 * 24 * 60 * 60
 
-# The controls an in-app review always offers. Framework-owned: an extension's agent
-# supplies the plan and questions (content), but the decision verbs are ours — so a
+# The decision verbs an in-app review offers. Framework-owned: an extension's
+# agent supplies the plan and questions (content), but the verbs are ours — so a
 # resume can only carry an action we defined, the line the resume endpoint checks.
-_REVIEW_CONTROLS = ("approve", "request_changes", "cancel")
-# The recv topic every in-app review parks on. A run parks on one gate at a time, so
-# one topic serves them all; Run.resume routes the reply back through it.
-_REVIEW_TOPIC = "review"
+_ReviewAction = Literal["approve", "request_changes", "cancel"]
+_REVIEW_CONTROLS = get_args(_ReviewAction)
+
+T = TypeVar("T")
 
 # The running workflow instance, so a Gate's on_wait() can reach its extension's
 # side-effects (set draft, request review, …) when the gate parks. No default:
@@ -143,7 +145,7 @@ def _input_model_from_signature(cls: type["Workflow"]) -> type[BaseModel] | None
     method = getattr(cls, method_name)
     parameters = [p for name, p in inspect.signature(method).parameters.items() if name != "self"]
     if not parameters:
-        return None
+        return
     hints = get_type_hints(method)
     fields: dict[str, Any] = {}
     for p in parameters:
@@ -161,6 +163,38 @@ _CAMEL_BOUNDARY = re.compile(r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])")
 
 def _kind_from_class_name(name: str) -> str:
     return _CAMEL_BOUNDARY.sub("_", name).lower()
+
+
+class Journal:
+    """The run's working memory. Druks adds each body-level agent output and
+    gate reply; a body adds its own derived values; subclass it for named
+    projections and declare yours via ``journal_class``."""
+
+    def __init__(self) -> None:
+        self._entries: list[Any] = []
+
+    def add(self, entry: Any) -> None:
+        self._entries.append(entry)
+
+    def filter(self, contract: type[T], *, after: Any = None, **filters: Any) -> list[T]:
+        # ``after`` anchors by identity: only entries recorded after that exact entry.
+        entries = self._entries
+        if after:
+            if positions := [i for i, entry in enumerate(entries) if entry is after]:
+                entries = entries[positions[0] + 1 :]
+            else:
+                raise WorkflowError("after= must be an entry of this journal")
+        return [
+            entry
+            for entry in entries
+            if isinstance(entry, contract)
+            and all(getattr(entry, name) == expected for name, expected in filters.items())
+        ]
+
+    def latest(self, contract: type[T], **filters: Any) -> T | None:
+        with suppress(IndexError):
+            return self.filter(contract, **filters)[-1]
+        return
 
 
 class Gate(BaseModel):
@@ -207,7 +241,20 @@ class Gate(BaseModel):
 
         await DBOS.run_step_async(StepOptions(name=f"{cls.topic}._on_wait"), _on_wait)
         payload = await _park(workflow, cls.topic, input_request, ttl_seconds)
-        return cls.model_validate(payload)
+        reply = cls.model_validate(payload)
+        workflow.journal.add(reply)
+        return reply
+
+
+class OperatorReply(Gate):
+    """The operator's in-app review decision. Answers and note are content for
+    the next agent prompt, never control flow."""
+
+    # One topic serves every in-app review — a run parks on one gate at a time.
+    topic = "review"
+    action: _ReviewAction
+    answers: dict[str, str] = Field(default_factory=dict)
+    note: str = ""
 
 
 async def _park(
@@ -239,7 +286,7 @@ async def _park(
         workflow.workflow_id,
         RunState.RUNNING,
         subject=workflow.subject,
-        facts=_GATE_CLEARED,
+        facts={**_GATE_CLEARED, "answer_parked_at": Run.input_requested_at},
     )
     return payload
 
@@ -251,9 +298,8 @@ async def _notify_designated_destination(workflow_id: str, subject: dict[str, An
     async def _create() -> str | None:
         async with step_session():
             destination_id = UserSettings.get().gate_park_destination_id
-            if not destination_id:
-                return None
-            return Run.get(workflow_id).create_park_notification(destination_id, subject)
+            if destination_id:
+                return Run.get(workflow_id).create_park_notification(destination_id, subject)
 
     notification_id = await DBOS.run_step_async(
         StepOptions(name="notifications.gate_park", **_IO_RETRIES), _create
@@ -306,14 +352,13 @@ async def _emit_run_event(
                 for field, value in facts.items():
                     setattr(run, field, value)
                 session.flush()
-            if not subject:
-                # Subjectless framework crons are plumbing: no feed entry.
-                return None
-            return {
-                "kind": run.kind,
-                "subject": subject,
-                "payload": _log_run_event(run, event, subject, result),
-            }
+            # Subjectless framework crons are plumbing: no feed entry.
+            if subject:
+                return {
+                    "kind": run.kind,
+                    "subject": subject,
+                    "payload": _log_run_event(run, event, subject, result),
+                }
 
     transition = await DBOS.run_step_async(
         StepOptions(name=f"run.{event.value}", **_IO_RETRIES), _transition
@@ -416,6 +461,8 @@ class Workflow:
     steps_reuse_sandbox: ClassVar[bool] = False
     # The Workspace subclass agents run in; an extension sets it (default: the bare VM).
     workspace_class: ClassVar[type[Workspace]] = Workspace
+    # The Journal subclass the run keeps; an extension sets it for named projections.
+    journal_class: ClassVar[type[Journal]] = Journal
     # Exactly one: run() is a single operation, auto-stepped, no ceremony.
     # run_multistep() orchestrates explicit @step calls and/or gates.
     run: ClassVar[Callable]
@@ -479,6 +526,7 @@ class Workflow:
         # Who requested/triggered the run, replayed off the reserved input
         # key; None on system-owned runs (crons, old checkpoints).
         self.account_id: str | None = None
+        self.journal = self.journal_class()
         # Facts published with set_state, kept warm for sync reads (templates,
         # workspace kwargs); the durable copy is the run's DBOS events.
         self._state_facts: dict[str, Any] = {}
@@ -515,24 +563,31 @@ class Workflow:
 
         await DBOS.run_step_async(StepOptions(name="run.state", **_IO_RETRIES), _fan_out)
 
-    async def review(self, *, questions: list[BaseModel] | None = None) -> dict[str, Any]:
-        # Park for an in-app decision: the ask carries the controls and any questions;
-        # the reply is {action, answers, note} — an answer is an offered option id or
-        # the operator's own words, note their free-text remark. Both are content for
-        # the next agent prompt, never control flow (the resume endpoint holds the
-        # action to the offered controls). External gates use a Gate. The artifact the
-        # reviewer judges isn't named here — a parked run can't produce new ones, so
-        # the read side resolves the latest on demand.
+    async def review(
+        self, *, questions: list[BaseModel] | None = None, context: str = ""
+    ) -> OperatorReply:
+        # Park for an in-app decision: the ask carries the controls, any
+        # questions, and optional context (rendered beside the reviewed
+        # document); the OperatorReply carries the operator's answer (the resume
+        # endpoint holds the action to the offered controls). External gates use
+        # a Gate. The artifact the reviewer judges isn't named here — a parked
+        # run can't produce new ones, so the read side resolves the latest on
+        # demand.
         if not self.subject:
             # An in-app review is answered from the subject's surfaces; a
             # subjectless run has none, so nobody would ever see the ask.
-            raise SubjectlessGate(_REVIEW_TOPIC)
+            raise SubjectlessGate(OperatorReply.topic)
         request = {
             "presentation": "in_app",
             "controls": list(_REVIEW_CONTROLS),
             "questions": [q.model_dump(mode="json") for q in questions or ()],
         }
-        return await _park(self, _REVIEW_TOPIC, request, GATE_TTL_SECONDS)
+        if context:
+            request["context"] = context
+        payload = await _park(self, OperatorReply.topic, request, GATE_TTL_SECONDS)
+        reply = OperatorReply.model_validate(payload)
+        self.journal.add(reply)
+        return reply
 
     async def get_prompt_context(self, **context: Any) -> dict[str, Any]:
         # Everything an agent's template renders with, beyond the workflow and
@@ -554,7 +609,7 @@ class Workflow:
         # The warm VM, provisioned once per segment; state is carried in git, so
         # only the host-id matters across steps — held-across-steps never fights replay.
         if not self.steps_reuse_sandbox:
-            return None
+            return
         if self._host and self._host.expires_at:
             remaining = (self._host.expires_at - datetime.now(UTC)).total_seconds()
             if remaining < SANDBOX_HOST_ROTATE_BEFORE_SECONDS:
@@ -628,27 +683,26 @@ class Workflow:
         **input: Any,
     ) -> str:
         # Mint the id, write the projection row, enqueue the body. Returns the
-        # workflow id; an extension that wants one-active-run-per-subject enforces
-        # that on its own side before calling this. Enqueuing (not start_workflow)
-        # routes execution onto the shared queue, so the process that kicks a run
-        # off — often the web process — doesn't have to be the one that runs it;
-        # any launched executor picks it up. The input kwargs mirror the body's own
-        # signature and validate against the model synthesized from it, so a bad
-        # shape fails at start, not inside the run.
+        # run to follow — a freshly enqueued run, or the subject's already-live
+        # one handed back. Enqueuing (not start_workflow) routes execution
+        # onto the shared queue, so the process that kicks a run off — often the
+        # web process — doesn't have to be the one that runs it; any launched
+        # executor picks it up. The input kwargs mirror the body's own signature
+        # and validate against the model synthesized from it, so a bad shape
+        # fails at start, not inside the run.
         # subject is required (no default) so a run can't silently lose its
         # timeline by omission — pass subject=None explicitly for a background run.
-        if account_id is None:
-            # Browser-origin starts inherit the session gate's account;
+        if not account_id:
+            # Browser-origin starts inherit the request's authenticated account;
             # dispatchers that know better pass account_id explicitly.
             account_id = current_account_id.get()
         if subject is not None:
             _Subject.model_validate(subject)  # raises on a bad shape (wrong/extra keys, types)
-        if cls._run_input_model is None:
-            if input:
-                raise WorkflowError(f"{cls.__name__}.{cls._body_method}() takes no input")
-            wire: dict[str, Any] = {}
-        else:
+        wire: dict[str, Any] = {}
+        if cls._run_input_model:
             wire = cls._run_input_model.model_validate(input).model_dump(mode="json")
+        elif input:
+            raise WorkflowError(f"{cls.__name__}.{cls._body_method}() takes no input")
         if account_id:
             wire[_ACCOUNT_INPUT_KEY] = account_id
         workflow_id = str(uuid7())
