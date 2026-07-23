@@ -117,17 +117,20 @@ services:
       disable: true
 
   caddy:
-    # Stock Caddy — the external auth gate + webhook TLS. A local install
-    # skips it (dashboard reached directly on 127.0.0.1:8001), so it lives
-    # in the ``remote`` profile. Caddyfile is fetched next to this compose
-    # file by install.sh.
+    # Stock Caddy — the identity edge + webhook TLS. A local install skips it
+    # (dashboard reached directly on 127.0.0.1:8001, DRUKS_AUTH_MODE=none), so
+    # it lives in the ``remote`` profile. Caddyfile is fetched next to this
+    # compose file by install.sh.
     image: caddy:2.10-alpine
     profiles: ["remote"]
     network_mode: host
     restart: unless-stopped
     environment:
       DRUKS_UPSTREAM: ${DRUKS_UPSTREAM:-127.0.0.1:8001}
-      DRUKS_AUTH_HEADER: ${DRUKS_AUTH_HEADER:-X-ExeDev-Email}
+      # Both Caddy and druks read DRUKS_AUTH_HEADER (web gets it from env_file):
+      # Caddy requires the edge's assertion, druks maps it to an account. No
+      # default anywhere — the backend refuses header mode without it.
+      DRUKS_AUTH_HEADER: ${DRUKS_AUTH_HEADER:-}
       # ``:-`` so an empty .env value still collapses to the inert loopback
       # default — Caddy treats set-but-empty as a real (broken) site address.
       DRUKS_WEBHOOK_HOST: ${DRUKS_WEBHOOK_HOST:-http://127.0.0.1:8081}

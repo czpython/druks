@@ -7,7 +7,7 @@ from pydantic import Field, SerializeAsAny
 from druks.harnesses.artifacts import normalize_token_usage
 from druks.schemas import BaseResponse
 
-from .enums import AgentCallStatus, RunState
+from .enums import RunState
 from .models import AgentCall, Artifact, Run
 
 
@@ -48,21 +48,12 @@ class AgentCallResponse(BaseResponse):
 
     @classmethod
     def from_call(cls, call: AgentCall) -> "AgentCallResponse":
-        # Liveness is derived, not stored: an unfinished call reads "running" while its
-        # run is active and "abandoned" once the run is terminal (the run ended without
-        # the call closing). A finished call keeps its recorded outcome.
-        if call.finished_at:
-            status = AgentCallStatus(call.status).value
-        elif call.run.is_active:
-            status = "running"
-        else:
-            status = "abandoned"
         return cls(
             id=call.id,
             agent=call.agent,
             label=get_display_label(call.agent) if call.agent else "Agent",
             account_username=call.account.username,
-            status=status,  # type: ignore[arg-type]
+            status=call.get_live_status(),  # type: ignore[arg-type]
             started_at=call.started_at,
             finished_at=call.finished_at,
             last_error=call.last_error,
@@ -107,7 +98,7 @@ class AgentCallFiles(BaseResponse):
 
         def named(path: Path) -> ArtifactFile | None:
             if not path.is_file():
-                return None
+                return
             stat = path.stat()
             return ArtifactFile(
                 name=path.name,
@@ -220,4 +211,14 @@ class TranscriptChunk(BaseResponse):
     offset: int
     next_offset: int
     eof: bool
+    text: str
+
+
+class TextSlice(BaseResponse):
+    # One bounded UTF-8-safe cut of an on-disk text file; offsets are byte
+    # positions, has_earlier marks content before this slice.
+    offset: int
+    next_offset: int
+    eof: bool
+    has_earlier: bool
     text: str

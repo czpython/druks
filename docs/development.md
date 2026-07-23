@@ -15,10 +15,12 @@ python3 -c 'import base64, os; print("DRUKS_SECRETS_KEY=" + base64.b64encode(os.
 uv run druks init-db
 ```
 
-Upgrading a dev database that already holds connected harnesses across the
-accounts migration needs `DRUKS_DASHBOARD_EMAIL` exported for that one
-`druks init-db` run — set it to the provider email you will sign in with once
-account login lands. Fresh databases don't need it.
+Local development runs `DRUKS_AUTH_MODE=none` (the `.env.example` default):
+the loopback dashboard has no authentication and exactly one operator
+account, created by your first harness connection. To exercise `header` mode
+against the dev server, set `DRUKS_AUTH_MODE=header`, name a header in
+`DRUKS_AUTH_HEADER` (no default), and send it yourself (for example with a
+browser header extension or `curl -H 'X-Edge-Email: you@example.com'`).
 
 The dev Compose project creates two databases:
 

@@ -44,7 +44,13 @@ class FakeEventSource implements EventTarget {
   }
 }
 
-function stubSession(body: string, status: number) {
+const LIVE_IDENTITY = {
+  authMode: 'none',
+  account: { id: 'a1', username: 'me@example.com' },
+  onboardingRequired: false,
+}
+
+function stubIdentity(body: string, status: number) {
   const fetchMock = vi.fn<(url: string, init?: RequestInit) => Promise<Response>>(
     async () => new Response(body, { status }),
   )
@@ -55,8 +61,8 @@ function stubSession(body: string, status: number) {
 beforeEach(() => {
   FakeEventSource.instances = []
   vi.stubGlobal('EventSource', FakeEventSource)
-  // Every SSE error rechecks the session; default to a live one.
-  stubSession(JSON.stringify({ id: 'a1', username: 'me@example.com' }), 200)
+  // Every SSE error rechecks identity; default to a live one.
+  stubIdentity(JSON.stringify(LIVE_IDENTITY), 200)
 })
 
 afterEach(() => {
@@ -217,8 +223,8 @@ describe('useSSE', () => {
     expect(onError).toHaveBeenCalledTimes(1)
   })
 
-  it('rechecks the session on error and stays open while it is live', async () => {
-    const fetchMock = stubSession(JSON.stringify({ id: 'a1', username: 'me@example.com' }), 200)
+  it('rechecks identity on error and stays open while the account remains valid', async () => {
+    const fetchMock = stubIdentity(JSON.stringify(LIVE_IDENTITY), 200)
     render(<Harness url="/api/x" handlers={{ 'foo.updated': vi.fn() }} />)
 
     act(() => {
@@ -227,14 +233,30 @@ describe('useSSE', () => {
     await flushMicrotasks()
 
     expect(fetchMock).toHaveBeenCalledWith(
-      '/api/auth/session',
+      '/api/auth/me',
       expect.objectContaining({ credentials: 'same-origin' }),
     )
+    // The EventSource keeps its automatic reconnect.
     expect(FakeEventSource.instances[0]?.closed).toBe(false)
   })
 
-  it('closes the source when the session died — no blind reconnects', async () => {
-    stubSession(JSON.stringify({ error: 'HTTP_401', detail: 'Sign in.' }), 401)
+  it('closes the source when identity cannot be resolved — no blind reconnects', async () => {
+    stubIdentity(JSON.stringify({ error: 'HTTP_401', detail: 'No identity.' }), 401)
+    render(<Harness url="/api/x" handlers={{ 'foo.updated': vi.fn() }} />)
+
+    act(() => {
+      FakeEventSource.instances[0]?.emitError()
+    })
+    await flushMicrotasks()
+
+    expect(FakeEventSource.instances[0]?.closed).toBe(true)
+  })
+
+  it('closes the source when identity resolves to the setup state', async () => {
+    stubIdentity(
+      JSON.stringify({ authMode: 'none', account: null, onboardingRequired: true }),
+      200,
+    )
     render(<Harness url="/api/x" handlers={{ 'foo.updated': vi.fn() }} />)
 
     act(() => {

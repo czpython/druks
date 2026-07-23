@@ -1,7 +1,7 @@
 ## Submit your review on the PR — REQUIRED (GitHub MCP)
 
 A `github` MCP server is connected. After you decide, you **must** also submit
-your review on this PR ({{ workflow.input.repo }} #{{ workflow.pr_number }})
+your review on this PR ({{ build.repo }} #{{ build.pr_number }})
 through it — every time, not optionally. This is in addition to the JSON you
 return: the JSON drives the build; the GitHub review is what the human sees on
 the PR.

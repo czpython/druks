@@ -66,24 +66,44 @@ The installer performs these steps in this order.
 
 ## The dashboard is inaccessible
 
-The shipped remote edge admits any request whose configured
-`DRUKS_AUTH_HEADER` carries a nonempty trusted identity; from there the app
-itself asks you to connect a harness, which mints the session cookie. A
-redirect to `__exe.dev/login` means no trusted identity header reached Caddy.
-A dashboard that loads but immediately shows the connect screen means the
-session cookie is missing or expired — sign in with Codex or Claude again
-(Redis loss signs everyone out but never touches stored credentials).
+The edge authenticates; Druks maps its asserted identity to an account.
+Distinguish the failure by what you see:
+
+- **A redirect to `__exe.dev/login`** — no trusted identity header reached
+  Caddy; sign in at the edge.
+- **A "couldn't resolve your identity" page (`header` mode 401)** — the
+  request reached Druks without exactly one nonblank `DRUKS_AUTH_HEADER`
+  value. Confirm the proxy injects the header Druks expects, and that
+  nothing between them drops or duplicates it.
+- **An "Assertion rejected: …" 401 (`jwt` mode)** — the edge asserted a token
+  Druks could not verify. The named failure class says which check failed:
+  signature or key problems point at `DRUKS_AUTH_JWKS_URL` (is it reachable
+  from the container? did the edge rotate keys?), issuer/audience mismatches
+  at the `DRUKS_AUTH_JWT_*` values, and expiry classes at clock skew between
+  edge and host.
+- **Onboarding ("connect a harness to finish setup")** — identity resolved
+  but that account has no harness connection yet; in a fresh `none`-mode
+  install the first completed connection creates the operator account.
+  Ordinary API calls answer 409 until then.
+- **A 503 (or refused startup) in `none` mode** — more than one non-system
+  account exists. Druks refuses to guess which is the operator; remove the
+  extras or switch to `header` mode.
+- **Runs refusing to start** — identity is fine; the selected harness is not
+  connected (see below).
+
+Redis loss does not sign browsers out — there are no sessions. It only drops
+in-flight connect attempts and other transient coordination.
 
 Check:
 
 ```bash
-grep -E '^(DRUKS_AUTH_HEADER|DRUKS_UPSTREAM)=' ~/druks/.env
+grep -E '^(DRUKS_AUTH_MODE|DRUKS_AUTH_HEADER|DRUKS_UPSTREAM)=' ~/druks/.env
 docker compose logs --tail=200 caddy web
 ```
 
 The local `docker` profile intentionally skips Caddy; use
-<http://127.0.0.1:8001>. It has no application login and should remain
-loopback-only.
+<http://127.0.0.1:8001>. It runs `DRUKS_AUTH_MODE=none` — no authentication —
+and must remain loopback-only.
 
 ## Webhooks are not arriving
 
@@ -101,6 +121,18 @@ reach the webhook verifier.
 Webhook delivery is deduplicated in Redis. A handler failure releases the claim
 and returns an error so the provider can redeliver. Extension subscribers must
 be idempotent.
+
+## An agent cannot reach `/mcp`
+
+1. A 401 means the personal access token is missing, malformed, expired, or
+   revoked — mint a fresh one in **Settings → Agent access** and resend it as
+   `Authorization: Bearer <token>` ([Connect your agent](connect-your-agent.md)).
+2. A redirect or 404 at the edge means the host's Caddyfile predates the
+   `/mcp` handlers: deploys never refresh the host copy, so re-run the
+   installer (or copy `deploy/caddy/Caddyfile`) and `docker compose up -d
+   caddy`.
+3. Confirm the backend answers directly:
+   `curl -X POST http://127.0.0.1:8001/mcp` returns 401, never 404.
 
 ## An agent run will not start
 

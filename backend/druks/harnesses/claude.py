@@ -50,7 +50,7 @@ class ClaudeHarness(Harness):
 
     # Connect-flow (PKCE code-paste): authorize on claude.ai, land on the
     # console.anthropic.com code page, exchange JSON with the state echoed in the
-    # body. Verified in ENG-687.
+    # body.
     redirect_uri = "https://console.anthropic.com/oauth/code/callback"
 
     def build_invocation(
@@ -217,7 +217,7 @@ class ClaudeHarness(Harness):
     @classmethod
     def authorize_url(cls, *, verifier: str, challenge: str) -> tuple[str, str]:
         # Anthropic's console flow echoes the PKCE verifier back as the OAuth
-        # state (verified in ENG-687), so that's what login_complete checks.
+        # state, so that's what connect_complete checks.
         params = {
             "code": "true",
             "client_id": cls._CLIENT_ID,

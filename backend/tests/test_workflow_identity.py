@@ -1,6 +1,5 @@
 import pytest
-from druks.build.scoping.workflows import Scope
-from druks.build.workflows import BuildWorkflow, Profile
+from druks.build.workflows import BuildWorkflow, Profile, Scope
 from druks.core.workflows import RefreshTokens
 from druks.durable.enums import RunState
 from druks.durable.exceptions import WorkflowError

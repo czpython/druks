@@ -13,6 +13,8 @@ AUTHOR_SURFACE = {
         "AgentCallStatus",
         "FatalError",
         "Gate",
+        "Journal",
+        "OperatorReply",
         "Run",
         "RunState",
         "SubjectActivity",

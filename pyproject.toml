@@ -37,6 +37,7 @@ dependencies = [
     "blinker>=1.9",
     "apprise>=1.9",
     "cryptography>=48.0.1",
+    "fastmcp>=3.4.4,<4",
 ]
 
 [project.urls]
@@ -46,6 +47,7 @@ Repository = "https://github.com/czpython/druks"
 
 [dependency-groups]
 dev = [
+    "pyjwt[crypto]>=2.10",
     "pyright>=1.1.408",
     "pytest>=8.4.0",
     "pytest-asyncio>=1.3.0",

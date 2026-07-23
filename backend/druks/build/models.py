@@ -1,5 +1,4 @@
 import logging
-import re
 from datetime import datetime
 from typing import Any
 
@@ -15,20 +14,20 @@ from druks.ticketing.datastructures import Ticket
 from druks.ticketing.enums import SemanticStatus
 from druks.ticketing.exceptions import TrackerNotConfigured
 from druks.ticketing.helpers import get_tracker, is_tracker_source
-from druks.workflows import AgentCall, Run
+from druks.workflows import Run
 
 logger = logging.getLogger(__name__)
+
+# WorkItem.update() sentinel: a field left at _KEEP is untouched, while passing
+# None clears the (nullable) column — the two an intent flag has to tell apart.
+_KEEP: Any = object()
 
 
 class Project(Base):
     __tablename__ = "projects"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    # Human label shown in the dashboard. Unique because we use it as
-    # the natural display key — duplicate names would make the project
-    # column ambiguous.
     name: Mapped[str] = mapped_column(unique=True)
-    slug: Mapped[str] = mapped_column(unique=True)
     created_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
     updated_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
 
@@ -39,9 +38,9 @@ class Project(Base):
     )
 
     @classmethod
-    def create(cls, *, name: str, slug: str | None = None) -> "Project":
+    def create(cls, *, name: str) -> "Project":
         session = db_session()
-        project = cls(name=name, slug=slug or slugify(name))
+        project = cls(name=name)
         session.add(project)
         session.flush()
         return project
@@ -74,18 +73,10 @@ class ProjectRepo(Base):
     project_id: Mapped[int] = mapped_column(
         ForeignKey("projects.id", ondelete="CASCADE"),
     )
-    # ``owner/name``. UNIQUE because a repo lives in exactly one project
-    # If multi-project sharing ever becomes a
-    # real requirement, drop the UNIQUE and route the lookup through a
-    # primary-binding column instead.
     full_name: Mapped[str] = mapped_column(unique=True)
     # Optional free-form role for the dashboard: "design", "infra",
     # "extension". None when the operator hasn't labelled it.
     purpose: Mapped[str | None]
-    # {"baseline": ..., "effective": ...} — baseline is what the repo profiler
-    # detected; effective is baseline with the operator's pinned verification
-    # (RepoPolicy.verification) applied. Kept separate so removing the pin
-    # restores the detected baseline instead of losing it.
     profile: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
     created_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
 
@@ -108,6 +99,13 @@ class ProjectRepo(Base):
     @classmethod
     def get(cls, repo_id: int) -> "ProjectRepo | None":
         return db_session().get(cls, repo_id)
+
+    @classmethod
+    def get_in_project(cls, *, project_id: int, repo_id: int) -> "ProjectRepo | None":
+        # Scoped lookup for the nested /projects/{project_id}/repos/{repo_id} routes:
+        # a repo reached through the wrong project's URL is a miss, not a hit to reject.
+        stmt = select(cls).where(cls.id == repo_id, cls.project_id == project_id).limit(1)
+        return db_session().scalars(stmt).first()
 
     def effective_profile(self) -> dict[str, Any]:
         # {} until the repo profiler has run — an unprofiled repo is a normal state.
@@ -163,11 +161,6 @@ class ProjectRepo(Base):
         return None
 
 
-def slugify(name: str) -> str:
-    """Lowercase, replace non-alnum runs with single hyphens, trim ends."""
-    return re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
-
-
 class WorkItem(Base):
     __tablename__ = "work_items"
     __table_args__ = (
@@ -190,8 +183,6 @@ class WorkItem(Base):
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    # The Druks Project this WorkItem belongs to. Required - intake
-    # refuses tickets whose Linear project doesn't map to a ProjectRepo.
     project_id: Mapped[int] = mapped_column(
         ForeignKey("projects.id"),
     )
@@ -218,14 +209,7 @@ class WorkItem(Base):
     build_run_id: Mapped[str | None] = mapped_column(
         ForeignKey("durable_runs.id", ondelete="SET NULL"), default=None
     )
-    # The handoff lane: null while in flight, a HandoffStatus at rest. active =
-    # null, history = set; stamped at handoff, cleared on (re)dispatch.
     status: Mapped[str | None] = mapped_column(default=None)
-    # Intake-time snapshot of the resolved ``.druks/build`` config; the
-    # workflow reads it for the item's lifespan so a mid-flight config
-    # push can't flip policy under a running build. Empty only until
-    # intake fills it in (the workflow then resolves live).
-    extension_config_snapshot: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
     created_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
     updated_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
 
@@ -333,25 +317,6 @@ class WorkItem(Base):
         return db_session().scalars(stmt).first()
 
     @classmethod
-    def by_remote_key(
-        cls,
-        *,
-        source: str,
-        remote_keys: set[str],
-    ) -> dict[str, "WorkItem"]:
-        """Bulk variant of ``get_for_remote_key`` keyed by remote_key.
-
-        Returns a dict mapping each found key to its WorkItem; missing
-        keys are simply absent from the returned dict."""
-        if not remote_keys:
-            return {}
-        stmt = select(cls).where(
-            cls.source == source,
-            cls.remote_key.in_(remote_keys),
-        )
-        return {wi.remote_key: wi for wi in db_session().scalars(stmt) if wi.remote_key}
-
-    @classmethod
     def list_recent(cls, *, limit: int = 50, offset: int = 0) -> list["WorkItem"]:
         stmt = select(cls).order_by(cls.updated_at.desc()).limit(limit).offset(offset)
         return list(db_session().scalars(stmt))
@@ -363,22 +328,6 @@ class WorkItem(Base):
             select(cls).where(cls.status.is_not(None)).order_by(cls.updated_at.desc()).limit(limit)
         )
         return list(db_session().scalars(stmt))
-
-    @classmethod
-    def sandbox_host_id_for(cls, repo: str, pr_number: int) -> str | None:
-        """The host_id of the most recent agent run for this work item. None
-        when nothing has run for this PR yet.
-
-        Callers MUST tolerate stale ids — the host may already be gone on the
-        provider side. ``sandbox_client.attach`` translates a 404 into
-        :class:`HostGone`, and the for_pr / token-rotation paths catch that and
-        re-acquire or skip.
-        """
-        item = cls.get_for_pr(repo=repo, pr_number=pr_number)
-        if not item:
-            return None
-        calls = AgentCall.list_for_subject("work_item", str(item.id))
-        return calls[-1].sandbox_host_id if calls else None
 
     def set_status(
         self, status: HandoffStatus | None, *, event_payload: dict[str, Any] | None = None
@@ -427,27 +376,24 @@ class WorkItem(Base):
     def update(
         self,
         *,
-        title: str | None = None,
-        remote_url: str | None = None,
-        pr_number: int | None = None,
-        branch: str | None = None,
-        build_run_id: str | None = None,
-        project_id: int | None = None,
-        extension_config_snapshot: dict[str, Any] | None = None,
+        title: str = _KEEP,
+        remote_url: str | None = _KEEP,
+        pr_number: int | None = _KEEP,
+        branch: str | None = _KEEP,
+        build_run_id: str | None = _KEEP,
+        project_id: int = _KEEP,
     ) -> None:
-        if title is not None:
+        if title is not _KEEP:
             self.title = title
-        if extension_config_snapshot is not None:
-            self.extension_config_snapshot = extension_config_snapshot
-        if remote_url is not None:
+        if remote_url is not _KEEP:
             self.remote_url = remote_url
-        if pr_number is not None:
+        if pr_number is not _KEEP:
             self.pr_number = pr_number
-        if branch is not None:
+        if branch is not _KEEP:
             self.branch = branch
-        if build_run_id is not None:
+        if build_run_id is not _KEEP:
             self.build_run_id = build_run_id
-        if project_id is not None:
+        if project_id is not _KEEP:
             self.project_id = project_id
         self.updated_at = Base.utc_now()
         db_session().flush()

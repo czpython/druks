@@ -1,17 +1,11 @@
 import logging
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Literal, cast
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field
 
 from druks.accounts.models import Account
-from druks.build.contracts import (
-    HumanFeedback,
-    Implementation,
-    ImplementationReview,
-    PlanData,
-    PlanReview,
-)
+from druks.build.contracts import ImplementationOutput, ReviewWork, ScopeBriefOutput
 from druks.build.enums import (
     EvaluationVerdict,
     HumanFeedbackAction,
@@ -29,11 +23,14 @@ from druks.sandbox.layout import (
 )
 from druks.settings import load_settings
 from druks.skills.models import Skill
+from druks.ticketing.datastructures import Ticket
 from druks.ticketing.enums import SemanticStatus
-from druks.workflows import FatalError, Gate, Workflow, step
+from druks.workflows import FatalError, Gate, Run, Workflow, step
 
 from .extension import Build
+from .journal import BuildJournal
 from .policy import RepoPolicy
+from .prompt_context import BuildPromptContext
 from .workspace import RepoWorkspace
 
 if TYPE_CHECKING:
@@ -47,22 +44,6 @@ logger = logging.getLogger(__name__)
 # Its token is per-repo, minted from the reviewer app at workspace setup.
 GITHUB_MCP_NAME = "github"
 GITHUB_MCP_URL = "https://api.githubcopilot.com/mcp/"
-
-
-# Build's one external gate: code review happens on the PR. `action` spans the webhook's
-# review vocab (approve, request_changes — the only actions a resumer can send) plus the
-# operator's UI decisions (revise_contract, cancel). on_wait un-drafts the PR and pings
-# the assignee.
-class ReviewWork(Gate):
-    action: Literal["approve", "request_changes", "revise_contract", "cancel"]
-    reviewer: str | None = None
-    body: str | None = None
-
-    @classmethod
-    async def on_wait(cls, workflow: Workflow) -> None:
-        build = cast("BuildWorkflow", workflow)
-        await build._set_pr_draft(draft=False)
-        await build._request_assignee_review()
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -95,6 +76,8 @@ class BuildWorkspace(RepoWorkspace):
 class BuildWorkflow(Workflow):
     steps_reuse_sandbox = True
     workspace_class = BuildWorkspace
+    journal_class = BuildJournal
+    journal: BuildJournal
 
     class Settings(BaseModel):
         auto_dispatch_on_plan_approval: bool = Field(
@@ -114,26 +97,6 @@ class BuildWorkflow(Workflow):
             title="Review code",
             description="Run the line-level reviewer after a passing evaluation.",
         )
-
-    def __init__(self) -> None:
-        super().__init__()
-        # The run's working memory. Durable by determinism: a recovery re-runs
-        # run() from the top with every agent call and gate reply memoized, so
-        # these rebuild to exactly what the live pass held.
-        self._plans: list[PlanData] = []
-        self._plan_reviews: list[PlanReview] = []
-        # Where _plan_reviews stood at the latest plan draft, so
-        # reviewer_requirements only spans reviews of the current plan.
-        self._reviews_at_plan = 0
-        self._implementation_reviews: list[ImplementationReview] = []
-        self._implementation_results: list[Implementation] = []
-        self._human_feedback: list[HumanFeedback] = []
-        # The questions the operator answered ({question, answer}), fed to the next plan
-        # pass; empty on the first pass and after a plain re-plan.
-        self._answered: list[dict[str, str]] = []
-        # The operator's free-text note from the latest review reply, quoted to the
-        # next plan pass; empty when they left none.
-        self._note = ""
 
     @classmethod
     async def dispatch(
@@ -159,7 +122,13 @@ class BuildWorkflow(Workflow):
             task_owner_email=assignee_email,
             task_owner_name=assignee_name,
         )
-        item.update(build_run_id=run_id)
+        # start() hands back the live run's id on a duplicate dispatch; only a
+        # genuinely new run is a fresh attempt. Point the item at it and drop the
+        # prior attempt's branch/PR so a late close for the old PR can't resolve
+        # this item onto the new run and cancel it — a duplicate keeps the live
+        # run's routing untouched.
+        if item.build_run_id != run_id:
+            item.update(build_run_id=run_id, branch=None, pr_number=None)
         # Back onto the active board: a scoped item re-enters flight when its
         # build starts. History is for items at rest in a handoff lane.
         item.set_status(None)
@@ -181,14 +150,12 @@ class BuildWorkflow(Workflow):
         task_owner_email: str | None = None,
         task_owner_name: str | None = None,
     ) -> None:
-        work_item_id = self.subject["id"] if self.subject else None
-        self._work_item_id = work_item_id
         # Resolve the repo's policy + profile and the operator settings inside
         # steps so their reads are memoized — the body itself does no IO, and
         # replay reuses the values.
-        snapshot = await self._load_policy_and_profile()
-        self._policy = RepoPolicy.model_validate(snapshot["policy"])
-        self._profile = snapshot["profile"]
+        resolved = await self._load_policy_and_profile()
+        self._policy = RepoPolicy.model_validate(resolved["policy"])
+        self._profile = resolved["profile"]
         self._settings = await self._load_settings()
 
         if not await self._plan_phase():
@@ -240,20 +207,29 @@ class BuildWorkflow(Workflow):
         }
 
     async def get_prompt_context(self, **context: Any) -> dict[str, Any]:
+        prompt_context = BuildPromptContext(
+            repo=self.input.repo,
+            branch=self.branch,
+            pr_number=self.pr_number,
+            ticket_ref=self.input.ticket_ref,
+            source=self.input.source,
+            issue_number=self.input.issue_number,
+            task_owner_name=self.input.task_owner_name,
+            task_owner_email=self.input.task_owner_email,
+            related_repos=self._related_repos(),
+            journal=self.journal,
+        )
         return {
             "verification": await self._policy.verification_block(
                 profile=self._profile, repo=self.input.repo
             ),
+            "build": prompt_context,
             **await super().get_prompt_context(**context),
         }
 
     @step
     async def _load_policy_and_profile(self) -> dict[str, Any]:
-        # One memoized read: the work item's dispatch-time snapshot when present,
-        # else the live policy + the repo's profiled facts.
-        item = WorkItem.get(self._work_item_id) if self._work_item_id else None
-        if item and item.extension_config_snapshot:
-            return item.extension_config_snapshot
+        # One memoized read: the live policy + the repo's profiled facts.
         policy = await RepoPolicy.resolve(self.input.repo)
         # A build dispatches against a work item whose repo is registered.
         target = ProjectRepo.get_for_repo(self.input.repo)
@@ -268,33 +244,42 @@ class BuildWorkflow(Workflow):
         return self.settings()
 
     async def _plan_phase(self) -> bool:
-        """Plan → questions? park for the operator's answers and re-plan : approve.
-        True → implement; cancel raises."""
+        """Gate mode: plan → park. Auto mode: machine review with one bounded
+        redraft. True → implement; cancel raises."""
+        gate = self._policy.plan_approval_gate(self._settings.auto_dispatch_on_plan_approval)
         answered: list[dict[str, str]] = []
         note = ""
         while True:
-            plan = await self.generate_plan(answered, note)
-            # No open questions and a clean grade under an auto-approve policy ships
-            # the plan without asking the operator.
-            if not plan.questions:
-                grade = await self.review_plan()
-                if grade.decision == ReviewDecision.APPROVE and (
-                    self._policy.plan_approval_gate(self._settings.auto_dispatch_on_plan_approval)
-                    == "none"
-                ):
+            reviewer_notes = ""
+            redrafted = False
+            critique = ""
+            while True:
+                plan = await Build.generate_plan(
+                    answered_questions=answered, operator_note=note, reviewer_notes=reviewer_notes
+                )
+                if gate != "none" or plan.questions:
+                    break
+                grade = await Build.review_plan()
+                if grade.decision == ReviewDecision.APPROVE:
                     return True
-            reply = await self.review(questions=plan.questions)
-            if reply["action"] == "cancel":
+                if redrafted:
+                    # Exhausted — park below, critique on the ask.
+                    critique = grade.body
+                    break
+                redrafted = True
+                reviewer_notes = grade.body
+            reply = await self.review(questions=plan.questions, context=critique)
+            if reply.action == "cancel":
                 raise FatalError("cancelled at plan review")
-            if reply["action"] == "approve" and not plan.questions:
+            if reply.action == "approve" and not plan.questions:
                 return True
-            answered = plan.get_answered(reply["answers"])
-            note = reply["note"]
+            answered = plan.get_answered(reply.answers)
+            note = reply.note
 
     async def _implement_phase(self) -> None:
         while True:
             await self.implement()
-            evaluation = await self.evaluate()
+            evaluation = await Build.evaluate_implementation()
             if evaluation.verdict == EvaluationVerdict.PASS:
                 if self._settings.review_code:
                     await Build.review_code()
@@ -302,7 +287,7 @@ class BuildWorkflow(Workflow):
                     return
                 continue
             if evaluation.verdict == EvaluationVerdict.FAIL and (
-                len(self._implementation_results) < self._settings.max_implementation_revisions
+                self.journal.implementation_revision < self._settings.max_implementation_revisions
             ):
                 continue
             if await self._work_gate():
@@ -320,9 +305,9 @@ class BuildWorkflow(Workflow):
         if decision.action == "approve":
             return await self._approved_work()
         if decision.action == "request_changes":
-            return await self._triage(decision)
+            return await self._triage()
         if decision.action == "revise_contract":
-            await self.revise_contract()
+            await Build.revise_contract()
             return False
         if decision.action == "cancel":
             await self._push_ticket_status(SemanticStatus.CANCELED)
@@ -337,65 +322,32 @@ class BuildWorkflow(Workflow):
             await self._clear_draft()
         return True
 
-    async def _triage(self, decision: ReviewWork) -> bool:
-        feedback = await self.triage_feedback(decision)
-        self._human_feedback.append(feedback)
-        if feedback.triage_action == HumanFeedbackAction.CHANGE_REQUIRED:
+    async def _triage(self) -> bool:
+        feedback = await Build.triage_human_feedback()
+        if feedback.action == HumanFeedbackAction.CHANGE_REQUIRED:
             return False  # loop → implement
-        if feedback.triage_action == HumanFeedbackAction.CONTRACT_CHANGE_REQUIRED:
-            await self.revise_contract()
+        if feedback.action == HumanFeedbackAction.CONTRACT_CHANGE_REQUIRED:
+            await Build.revise_contract()
             return False
-        if feedback.triage_action == HumanFeedbackAction.CLOSE:
+        if feedback.action == HumanFeedbackAction.CLOSE:
             raise FatalError("closed at human triage")
         # NO_CHANGE / QUESTION → re-park
         return await self._work_gate()
 
-    # The phase methods are plain workflow-body code: the agent calls inside them
-    # memoize themselves, so on a recovery the pure parts re-run deterministically
-    # and rebuild the in-memory diary (set_state included — it is body-only). Only
-    # side-effecting IO beyond an agent call (GitHub writes, child starts, event
-    # records) keeps its own @step.
-    async def generate_plan(
-        self, answered: list[dict[str, str]] | None = None, note: str = ""
-    ) -> PlanData:
-        # The operator's guidance reaches the agent via answered_questions and
-        # operator_note — not on the plan.
-        self._answered = answered or []
-        self._note = note
-        return self._add_plan(await Build.generate_plan())
-
-    async def review_plan(self) -> PlanReview:
-        grade = await Build.review_plan()
-        self._plan_reviews.append(grade)
-        return grade
-
-    async def revise_contract(self) -> PlanData:
-        return self._add_plan(await Build.revise_contract())
-
-    async def implement(self) -> Implementation:
+    # Body code, never @step: the agent calls inside memoize themselves and land
+    # on the record, and set_state must re-run on replay — a @step would skip them.
+    async def implement(self) -> ImplementationOutput:
         delivery = await Build.implement()
+        # A bail is a stop, not a result: the implementer hit a contradiction in the
+        # binding requirements and couldn't deliver. Fail the run with its own reason,
+        # read off the dashboard instead of dug out of the transcript.
+        if delivery.status == "needs_clarification":
+            raise FatalError(f"implementation needs clarification: {delivery.summary}")
         if not self.pr_number:
             # First delivery: the implementer provisioned the branch + draft PR alongside
             # its commits; publish the pair (the run.state signal mirrors it onto the item).
             await self.set_state(branch=delivery.branch, pr_number=delivery.pr_number)
-        self._implementation_results.append(delivery)
         return delivery
-
-    async def evaluate(self) -> ImplementationReview:
-        review = await Build.evaluate_implementation()
-        self._implementation_reviews.append(review)
-        return review
-
-    async def triage_feedback(self, decision: ReviewWork) -> HumanFeedback:
-        parsed = await Build.triage_human_feedback()
-        return HumanFeedback(
-            reviewer=decision.reviewer or "(triage)",
-            body=parsed.body,
-            triage_action=parsed.action,
-            triage_body=parsed.body,
-            question=parsed.question,
-            implementation_instructions=parsed.implementation_instructions,
-        )
 
     @step
     async def merge(self) -> None:
@@ -405,12 +357,15 @@ class BuildWorkflow(Workflow):
             return
         await github.squash_merge_pull_request(self.input.repo, self.pr_number)
         if self._policy.delete_branch:
-            await _delete_branch(self.input.repo, self.branch)
-
-    def _add_plan(self, plan: PlanData) -> PlanData:
-        self._plans.append(plan)
-        self._reviews_at_plan = len(self._plan_reviews)
-        return plan
+            try:
+                await github.delete_branch(self.input.repo, self.branch)
+            except Exception:  # noqa: BLE001 — cleanup only
+                logger.warning(
+                    "Could not delete branch %s on %s.",
+                    self.branch,
+                    self.input.repo,
+                    exc_info=True,
+                )
 
     # The provisioned branch + PR, published by the first implement — None until then
     # (planning runs against the default branch, and there is no PR to point at).
@@ -422,81 +377,7 @@ class BuildWorkflow(Workflow):
     def pr_number(self) -> int | None:
         return getattr(self.state, "pr_number", None)
 
-    @property
-    def plan_drafts(self) -> list[PlanData]:
-        return list(self._plans)
-
-    @property
-    def plan(self) -> PlanData:
-        return self._plans[-1] if self._plans else PlanData()
-
-    @property
-    def current_plan(self) -> str:
-        return self.plan.plan_markdown
-
-    @property
-    def acceptance_criteria(self):
-        return self.plan.acceptance_criteria
-
-    @property
-    def questions(self):
-        return self.plan.questions
-
-    @property
-    def plan_reviews(self) -> list[PlanReview]:
-        return list(self._plan_reviews)
-
-    @property
-    def implementation_reviews(self) -> list[ImplementationReview]:
-        return list(self._implementation_reviews)
-
-    @property
-    def assignee_github_login(self) -> str | None:
-        for review in reversed(self.plan_reviews):
-            if review.assignee_github_login:
-                return review.assignee_github_login
-        return None
-
-    @property
-    def plan_revision(self) -> int:
-        return len(self._plans)
-
-    @property
-    def reviewer_requirements(self) -> list[PlanReview]:
-        # Approve-with-required-changes verdicts on the current plan draft
-        # only — reviews of superseded drafts don't bind the implementer.
-        return [
-            review
-            for review in self._plan_reviews[self._reviews_at_plan :]
-            if review.decision == ReviewDecision.APPROVE_WITH_REQUIRED_CHANGES
-            and review.body.strip()
-        ]
-
-    @property
-    def implementation_revision(self) -> int:
-        # Prior finalized implement attempts — 0 on the first. Read by the prompt header.
-        return len(self._implementation_results)
-
-    @property
-    def human_feedback(self) -> list[HumanFeedback]:
-        return list(self._human_feedback)
-
-    @property
-    def _last_implement(self) -> Implementation | None:
-        return self._implementation_results[-1] if self._implementation_results else None
-
-    @property
-    def finalized_base_sha(self) -> str | None:
-        return self._last_implement.base_sha if self._last_implement else None
-
-    @property
-    def finalized_pr_sha(self) -> str | None:
-        # What the harness pushed to origin/<pr> — the finalize lease check, so a
-        # concurrent write to the PR branch is rejected, not overwritten.
-        return self._last_implement.head_sha if self._last_implement else None
-
-    @property
-    def related_repos(self) -> list[ProjectRepo]:
+    def _related_repos(self) -> list[ProjectRepo]:
         # The project's sibling repos (the prompt reads full_name + purpose).
         target = (self.input.repo or "").strip().lower()
         project = Project.get_for_repo(self.input.repo) if self.input.repo else None
@@ -508,17 +389,9 @@ class BuildWorkflow(Workflow):
             if (repo.full_name or "").strip() and repo.full_name.lower() != target
         ]
 
-    @property
-    def answered_questions(self) -> list[dict[str, str]]:
-        return self._answered
-
-    @property
-    def operator_note(self) -> str:
-        return self._note
-
     @step
     async def _clear_draft(self) -> None:
-        await self._set_pr_draft(draft=False)
+        await self.set_pr_draft(draft=False)
 
     @step
     async def _push_ticket_status(self, status: SemanticStatus) -> None:
@@ -529,33 +402,31 @@ class BuildWorkflow(Workflow):
         if work_item:
             await work_item.set_remote_status(status)
 
-    async def _request_assignee_review(self) -> None:
-        login = self.assignee_github_login
-        if not login or not self.input.repo or not self.pr_number:
-            return
-        try:
-            await get_github_client(load_settings()).request_pull_request_reviewers(
-                self.input.repo, self.pr_number, [login]
-            )
-        except Exception:  # noqa: BLE001 — a missed ping must not fail the park
-            logger.warning(
-                "could not request review from %s on %s#%s",
-                login,
-                self.input.repo,
-                self.pr_number,
-            )
+    async def request_assignee_review(self) -> None:
+        login = self.journal.assignee_github_login
+        if login and self.input.repo and self.pr_number:
+            try:
+                await get_github_client(load_settings()).request_pull_request_reviewers(
+                    self.input.repo, self.pr_number, [login]
+                )
+            except Exception:  # noqa: BLE001 — a missed ping must not fail the park
+                logger.warning(
+                    "could not request review from %s on %s#%s",
+                    login,
+                    self.input.repo,
+                    self.pr_number,
+                )
 
-    async def _set_pr_draft(self, *, draft: bool) -> None:
-        if not self.input.repo or not self.pr_number:
-            return
-        try:
-            await get_github_client(load_settings()).set_pull_request_draft_state(
-                self.input.repo, self.pr_number, draft=draft
-            )
-        except Exception:  # noqa: BLE001 — a draft merge fails loudly anyway
-            logger.warning(
-                "Could not set draft=%s on %s#%s.", draft, self.input.repo, self.pr_number
-            )
+    async def set_pr_draft(self, *, draft: bool) -> None:
+        if self.input.repo and self.pr_number:
+            try:
+                await get_github_client(load_settings()).set_pull_request_draft_state(
+                    self.input.repo, self.pr_number, draft=draft
+                )
+            except Exception:  # noqa: BLE001 — a draft merge fails loudly anyway
+                logger.warning(
+                    "Could not set draft=%s on %s#%s.", draft, self.input.repo, self.pr_number
+                )
 
 
 class Profile(Workflow):
@@ -571,7 +442,6 @@ class Profile(Workflow):
         # Every dispatch site verifies the repo exists first; a build never
         # profiles a repo that isn't there.
         project_repo = ProjectRepo.get(repo_id)
-        self._repo = project_repo.full_name
 
         if refresh_only:
             baseline = project_repo.profile.get("baseline") or {}
@@ -591,7 +461,7 @@ class Profile(Workflow):
         project_repo.set_profile(baseline=baseline, effective=effective)
 
     async def get_workspace_kwargs(self, sandbox: "Sandbox") -> dict[str, Any]:
-        repo = self._repo
+        repo = ProjectRepo.get(self.input.repo_id).full_name
         github_token = await get_github_client(load_settings()).token_for_repo(repo)
         await sandbox.write_secret(
             secret=github_token, remote=get_github_token_remote_path(sandbox.ssh_username)
@@ -610,7 +480,7 @@ class Profile(Workflow):
 
     async def get_prompt_context(self, **context: Any) -> dict[str, Any]:
         return {
-            "repo": self._repo,
+            "repo": ProjectRepo.get(self.input.repo_id).full_name,
             "skills_catalog": [
                 {"name": skill.name, "description": skill.description}
                 for skill in Skill.list_enabled()
@@ -619,10 +489,81 @@ class Profile(Workflow):
         }
 
 
-async def _delete_branch(repo: str, branch: str | None) -> None:
-    if not branch:
-        return
-    try:
-        await get_github_client(load_settings()).delete_branch(repo, branch)
-    except Exception:  # noqa: BLE001 — cleanup only
-        logger.warning("Could not delete branch %s on %s.", branch, repo, exc_info=True)
+# What the gate asks the operator while the run is parked, by brief status. Scope is
+# answered on the ticket (external), so the ask is just the dashboard's one-liner.
+_PARKED_ASK = {
+    "needs_answers": {"presentation": "external", "label": "Answer scope questions"},
+}
+
+
+class ScopeReply(Gate):
+    """No fields: the operator answers by commenting on the ticket — the agent
+    re-reads the thread on resume — so the reply only needs to wake the run."""
+
+
+class Scope(Workflow):
+    @classmethod
+    async def dispatch(cls, *, ticket: Ticket) -> str | None:
+        # The scoped label is the done marker — remove it to force a re-scope.
+        if ticket.has_label(Build.settings().scoper_scoped_label):
+            return None
+        item = WorkItem.get_for_remote_key(source=ticket.provider, remote_key=ticket.key)
+        if not item:
+            target = ProjectRepo.lookup(project_name=ticket.project_name, labels=ticket.labels)
+            project = Project.get_for_repo(target.full_name) if target else None
+            if not project:
+                logger.info("No project routes %s; not scoping.", ticket.key)
+                return None
+            item = WorkItem.create(
+                project_id=project.id,
+                source=ticket.provider,
+                title=ticket.title or ticket.key,
+                remote_key=ticket.key,
+                remote_url=ticket.url,
+                repo=target.full_name,
+            )
+        assignee = None
+        if ticket.assignee_email:
+            assignee = Account.get_for_username(ticket.assignee_email.strip())
+        return await cls.start(
+            subject=WorkItem.subject_for(item.id),
+            account_id=assignee.id if assignee else None,
+            remote_key=ticket.key,
+            source=ticket.provider,
+        )
+
+    @classmethod
+    def parked_for(cls, work_item_id: int) -> Run | None:
+        runs = Run.list_for_subject("work_item", str(work_item_id), kind=cls.kind)
+        return next((run for run in runs if run.is_parked), None)
+
+    async def get_prompt_context(self, **context: object) -> dict[str, object]:
+        # Everything the agent needs beyond the ticket it fetches itself: where
+        # the work lands (the subject's repo + siblings), the marks it must leave
+        # on the tracker, and the target repo's recommended skills for the brief's
+        # Skills section.
+        item = WorkItem.get(self.subject["id"])
+        siblings = [
+            {"full_name": r.full_name, "purpose": r.purpose or ""}
+            for r in item.project.repos
+            if r.full_name != item.repo
+        ]
+        # The ticket routed through this repo to exist, so it's registered.
+        target = ProjectRepo.get_for_repo(item.repo)
+        settings = Build.settings()
+        return {
+            "target_repo": item.repo,
+            "target_purpose": target.purpose or "",
+            "repos": siblings,
+            "scoped_label": settings.scoper_scoped_label,
+            "post_refinement_status": Build.post_refinement_status(item.source),
+            "recommended_skills": target.effective_profile().get("recommended_skills", []),
+            **await super().get_prompt_context(**context),
+        }
+
+    async def run_multistep(self, remote_key: str, source: str = "linear") -> ScopeBriefOutput:
+        while True:
+            brief = await Build.scope(remote_key=remote_key, source=source)
+            if brief.status == "ready":
+                return brief
+            await ScopeReply.wait(input_request=_PARKED_ASK[brief.status])

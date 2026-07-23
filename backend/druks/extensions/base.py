@@ -227,7 +227,7 @@ class Extension:
 
         modules = cls.discover()
         # /api/<name> wraps the author's own prefix so extensions can't shadow
-        # the platform or each other; every route sits behind the session gate.
+        # the platform or each other; every route sits behind the identity gate.
         prefix = f"/api/{cls.name}"
         for router in cls.get_routers(modules):
             app.include_router(router, prefix=prefix, dependencies=[Depends(current_account)])

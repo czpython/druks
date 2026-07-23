@@ -1,23 +1,29 @@
 import logging
-from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from collections.abc import AsyncIterator, Mapping
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from pathlib import Path
 from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from fastmcp.utilities.lifespan import combine_lifespans
 from starlette.datastructures import MutableHeaders
+from starlette.routing import Route
 
-from druks.accounts.dependencies import current_account
+from druks.accounts.dependencies import current_account, resolve_single_operator
+from druks.accounts.exceptions import AuthConfigurationError
 from druks.accounts.routes import router as auth_router
 from druks.api.artifacts import router as artifacts_router
 from druks.api.runs import router as runs_router
-from druks.database import configure_session, create_engine_from_url, db_session
+from druks.database import configure_session, create_engine_from_url, db_session, session_scope
 from druks.durable.engine import init_dbos, launch, shutdown
 from druks.events.routes import router as events_router
 from druks.extensions.loader import iter_extensions, load
+from druks.harnesses.routes import router as harness_connection_router
 from druks.mcp.catalog import load_mcp_catalog
+from druks.mcp.gateway.exceptions import AgentApiError
+from druks.mcp.gateway.routes import router as gateway_router
 from druks.mcp.routes import router as mcp_router
 from druks.notifications.routes import external_router as notifications_external_router
 from druks.notifications.routes import router as notifications_router
@@ -55,6 +61,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         # workflows may deliver MCP servers immediately. A bad catalog stops
         # boot here, loudly. (The suite loads it from a conftest fixture.)
         load_mcp_catalog(settings.mcp_catalog_path)
+        if settings.auth_mode == "none":
+            # A drifted none-mode install (more than one operator account) must
+            # refuse at boot, not per request; the per-request resolver repeats
+            # the check for drift that happens while running.
+            with session_scope(app.state.engine):
+                resolve_single_operator()
         # DBOS runs embedded here: this process both serves HTTP and executes
         # durable workflows. Tests pre-populate app.state.settings and never
         # reach here — they drive DBOS through their own fixtures.
@@ -110,7 +122,18 @@ async def _release_db_session() -> AsyncIterator[None]:
         db_session.remove()
 
 
-app = FastAPI(title="Druks", lifespan=lifespan, dependencies=[Depends(_release_db_session)])
+def _mcp_lifespan(app: FastAPI) -> AbstractAsyncContextManager[Mapping[str, Any] | None]:
+    # FastAPI never runs a plain route's lifespan; the endpoint's builds its
+    # session manager. Late-bound: the endpoint derives from the assembled
+    # app further down.
+    return mcp_app.lifespan(app)
+
+
+app = FastAPI(
+    title="Druks",
+    lifespan=combine_lifespans(lifespan, _mcp_lifespan),
+    dependencies=[Depends(_release_db_session)],
+)
 
 
 # Exception handlers — uniform JSON envelope.
@@ -126,6 +149,26 @@ async def _http_exception_handler(request: Request, exc: HTTPException) -> JSONR
         content={"error": f"HTTP_{exc.status_code}", "detail": exc.detail},
         headers=getattr(exc, "headers", None),
     )
+
+
+# The agent surface's one error shape. Messages are authored for the caller —
+# the handler never serializes tracebacks or internals.
+@app.exception_handler(AgentApiError)
+async def _agent_api_error_handler(request: Request, exc: AgentApiError) -> JSONResponse:
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"code": exc.code, "message": str(exc), "retryable": exc.retryable},
+    )
+
+
+# Auth-mode drift (e.g. none mode grew a second operator account) is an
+# operator problem, not a caller problem: log it loudly, answer 503.
+@app.exception_handler(AuthConfigurationError)
+async def _auth_configuration_handler(
+    request: Request, exc: AuthConfigurationError
+) -> JSONResponse:
+    logging.getLogger(__name__).error("auth configuration failure: %s", exc)
+    return JSONResponse(status_code=503, content={"error": "HTTP_503", "detail": str(exc)})
 
 
 @app.exception_handler(RequestValidationError)
@@ -170,23 +213,39 @@ async def _unhandled_exception_handler(
 
 # Platform-core routers, mounted by hand at their own prefixes. Extension routers
 # (core, build, usage, …) are discovered and mounted under /api/<extension> by load().
-# /api sits behind the session gate except the login surface and the health
-# probe; /_external routes carry their own authentication. The boundary test
-# pins the split.
-_session_gate = [Depends(current_account)]
+# /api sits behind the identity gate except the identity/connection surface and
+# the health probe; /_external routes carry their own authentication. The
+# boundary test pins the split. The auth and harness-connection routers mount
+# ungated because each of their routes carries its own resolver (/me and the
+# connection flow must answer during none/zero setup; capability management
+# admits only the session identity).
+_identity_gate = [Depends(current_account)]
 app.include_router(health_router)
 # Before the webhook catch-all ({hook_path:path}): declaration order is match order.
 app.include_router(notifications_external_router)
 app.include_router(webhooks_router)
 app.include_router(auth_router)
-app.include_router(settings_router, dependencies=_session_gate)
-app.include_router(skills_router, dependencies=_session_gate)
-app.include_router(mcp_router, dependencies=_session_gate)
-app.include_router(notifications_router, dependencies=_session_gate)
-app.include_router(events_router, dependencies=_session_gate)
-app.include_router(runs_router, dependencies=_session_gate)
-app.include_router(artifacts_router, dependencies=_session_gate)
+app.include_router(harness_connection_router)
+app.include_router(settings_router, dependencies=_identity_gate)
+app.include_router(skills_router, dependencies=_identity_gate)
+app.include_router(mcp_router, dependencies=_identity_gate)
+app.include_router(notifications_router, dependencies=_identity_gate)
+app.include_router(events_router, dependencies=_identity_gate)
+app.include_router(runs_router, dependencies=_identity_gate)
+app.include_router(gateway_router, dependencies=_identity_gate)
+app.include_router(artifacts_router, dependencies=_identity_gate)
 load(app)
+
+# Tools derive from every route tagged "agent", so the endpoint composes
+# after load() — an extension's tagged routes join tools/list too.
+from druks.mcp.app import create_mcp_app  # noqa: E402
+
+# A bare Route at exactly /mcp (a Mount would 307 the no-slash path); PATs
+# authenticate it, so it sits outside the identity gate.
+mcp_app = create_mcp_app(app)
+app.router.routes.append(
+    Route("/mcp", mcp_app, methods=["POST", "DELETE"], include_in_schema=False)
+)
 
 
 # Unknown /api/* paths return a JSON 404 across every method instead of
@@ -200,6 +259,17 @@ load(app)
 )
 async def api_not_found(path: str) -> None:
     raise HTTPException(status_code=404, detail=f"Unknown API path: /api/{path}")
+
+
+# The edge forwards /mcp/* but the endpoint owns only the exact path; an
+# unowned subpath must not fall through to the SPA's index.html.
+@app.api_route(
+    "/mcp/{path:path}",
+    methods=["GET", "POST", "PATCH", "PUT", "DELETE"],
+    include_in_schema=False,
+)
+async def mcp_not_found(path: str) -> None:
+    raise HTTPException(status_code=404, detail=f"Unknown MCP path: /mcp/{path}")
 
 
 # Repo root in a checkout, /app in the backend image — both put the built SPA

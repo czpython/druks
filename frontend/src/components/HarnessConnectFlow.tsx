@@ -1,12 +1,15 @@
 import { useState } from 'react'
 
-import { authApi } from '../api/client'
-import type { Account, LoginChallenge } from '../api/types'
+import { api } from '../api/client'
+import type { Account, ConnectChallenge } from '../api/types'
 
-// The one PKCE paste-back flow, shared by the landing screen and Settings.
+// The one PKCE paste-back connect flow, shared by onboarding and Settings.
 // eslint-disable-next-line react-refresh/only-export-components -- hook co-located with its steps UI
-export function useHarnessLogin(name: string, onDone: (account: Account) => void | Promise<void>) {
-  const [challenge, setChallenge] = useState<LoginChallenge | null>(null)
+export function useHarnessConnect(
+  name: string,
+  onDone: (account: Account) => void | Promise<void>,
+) {
+  const [challenge, setChallenge] = useState<ConnectChallenge | null>(null)
   const [code, setCode] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -23,12 +26,12 @@ export function useHarnessLogin(name: string, onDone: (account: Account) => void
     }
   }
 
-  const start = () => run(async () => setChallenge(await authApi.startLogin(name)))
+  const start = () => run(async () => setChallenge(await api.startHarnessConnect(name)))
 
   const finish = () =>
     run(async () => {
       if (!challenge) return
-      const account = await authApi.completeLogin(name, code.trim(), challenge.loginId)
+      const account = await api.completeHarnessConnect(name, code.trim(), challenge.connectionId)
       setChallenge(null)
       setCode('')
       await onDone(account)
@@ -43,10 +46,10 @@ export function useHarnessLogin(name: string, onDone: (account: Account) => void
   return { challenge, code, setCode, busy, error, start, finish, cancel }
 }
 
-export function LoginSteps({
+export function ConnectSteps({
   flow,
 }: {
-  flow: ReturnType<typeof useHarnessLogin>
+  flow: ReturnType<typeof useHarnessConnect>
 }) {
   if (!flow.challenge) return null
   return (
@@ -54,7 +57,7 @@ export function LoginSteps({
       <div className="hr-conn-step">
         <span className="hr-conn-num">1</span>
         <a href={flow.challenge.authorizeUrl} target="_blank" rel="noreferrer">
-          Open the sign-in page
+          Open the authorization page
         </a>
         , approve, then copy the code it shows (or the redirect URL).
       </div>

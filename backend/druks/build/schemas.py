@@ -8,21 +8,9 @@ from druks.durable.enums import RunState
 from druks.schemas import BaseResponse
 from druks.workflows import SubjectSummary
 
-from .enums import HandoffStatus, Outcome
+from .enums import HandoffStatus
 
 ProfileState = Literal["unprofiled", "running", "ready", "failed"]
-
-
-def _outcome_from_status(status: str) -> tuple[str, Outcome]:
-    # The stored handoff lane → (label, outcome). History is terminal-only, so this
-    # is the whole derivation: a handed-off item's outcome is just its status.
-    if status == HandoffStatus.SHIPPED:
-        return "Complete", Outcome.FINISHED
-    if status == HandoffStatus.CANCELLED:
-        return "Cancelled", Outcome.CANCELLED
-    if status == HandoffStatus.SKIPPED:
-        return "Skipped", Outcome.CANCELLED
-    return "Scoped", Outcome.SCOPED
 
 
 class ProjectRepoSummary(BaseResponse):
@@ -62,7 +50,6 @@ class ProjectRepoSummary(BaseResponse):
 class ProjectSummary(BaseResponse):
     id: int
     name: str
-    slug: str
     created_at: datetime
     updated_at: datetime
     repos: list[ProjectRepoSummary] = Field(default_factory=list)
@@ -72,7 +59,6 @@ class ProjectSummary(BaseResponse):
         return cls(
             id=project.id,
             name=project.name,
-            slug=project.slug,
             created_at=project.created_at,
             updated_at=project.updated_at,
             repos=[ProjectRepoSummary.from_repo(repo) for repo in project.repos],
@@ -85,7 +71,6 @@ class ProjectsResponse(BaseResponse):
 
 class CreateProjectRequest(BaseModel):
     name: str
-    slug: str | None = None
 
 
 class AddProjectRepoRequest(BaseModel):
@@ -106,6 +91,11 @@ class Links(BaseResponse):
     repo: str
     pr: str | None = None
     ticket: str | None = None
+
+    @classmethod
+    def from_work_item(cls, item: WorkItem) -> "Links":
+        pr = f"https://github.com/{item.repo}/pull/{item.pr_number}" if item.pr_number else None
+        return cls(repo=f"https://github.com/{item.repo}", pr=pr, ticket=item.remote_url)
 
 
 class WorkItemSummary(SubjectSummary):
@@ -129,8 +119,6 @@ class WorkItemSummary(SubjectSummary):
 
     @classmethod
     def from_work_item(cls, item: WorkItem) -> "WorkItemSummary":
-        repo_url = f"https://github.com/{item.repo}"
-        pr_url = f"https://github.com/{item.repo}/pull/{item.pr_number}" if item.pr_number else None
         return cls(
             id=str(item.id),
             source=item.source,  # type: ignore[arg-type]
@@ -143,7 +131,7 @@ class WorkItemSummary(SubjectSummary):
             branch=item.branch,
             created_at=item.created_at,
             updated_at=item.updated_at,
-            links=Links(repo=repo_url, pr=pr_url, ticket=item.remote_url),
+            links=Links.from_work_item(item),
         )
 
 
@@ -155,20 +143,15 @@ class DashboardItem(BaseResponse):
     repo: str | None = None
     pr_number: int | None = None
     project_name: str | None = None
-    # The terminal human label ("Complete", "Cancelled", "Scoped") — History rows
-    # show this alongside the ``outcome`` glyph.
-    status: str
-    outcome: Outcome | None = None
+    # The stored handoff lane, verbatim — the FE words and colors it.
+    status: HandoffStatus
     created_at: datetime
     updated_at: datetime
     links: Links
 
     @classmethod
     def from_work_item(cls, item: WorkItem) -> "DashboardItem":
-        assert item.status is not None  # History is terminal-only: status is always set.
-        repo_url = f"https://github.com/{item.repo}"
-        pr_url = f"https://github.com/{item.repo}/pull/{item.pr_number}" if item.pr_number else None
-        label, outcome = _outcome_from_status(item.status)
+        # History is terminal-only, so the stored lane is always set.
         return cls(
             key=f"code:{item.id}",
             source_id=item.id,
@@ -176,14 +159,13 @@ class DashboardItem(BaseResponse):
             title=item.title,
             repo=item.repo,
             pr_number=item.pr_number,
-            # Druks Project is now required on WorkItem, so the dashboard
+            # Druks Project is required on WorkItem, so the dashboard
             # always has a curated project name to render.
             project_name=item.project.name,
-            status=label,
-            outcome=outcome,
+            status=HandoffStatus(item.status),
             created_at=item.created_at,
             updated_at=item.updated_at,
-            links=Links(repo=repo_url, pr=pr_url, ticket=item.remote_url),
+            links=Links.from_work_item(item),
         )
 
 

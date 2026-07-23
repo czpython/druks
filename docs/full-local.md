@@ -86,12 +86,12 @@ Success means the Compose services are up and the health endpoint returns
 Open **Settings → Harnesses** in the dashboard and connect Claude and Codex.
 Druks stores those subscription credentials in Postgres and writes a fresh
 credential file into each sandbox. It does not use host CLI login files.
-That first connect is also the dashboard sign-in: harness login mints the
-`druks_session` cookie every internal API requires — a local install has no
-identity proxy in front, so the provider email is the account identity.
-Protect database access and backups as credential-bearing data; unlike MCP
-tokens and OAuth grants, harness payloads do not use the
-`DRUKS_SECRETS_KEY` envelope.
+The local profile runs `DRUKS_AUTH_MODE=none` — no browser authentication and
+exactly one operator account. A fresh install shows onboarding until the
+first harness connection completes; that connection creates the sole operator
+account from the provider-verified email. Protect database access and backups
+as credential-bearing data; unlike MCP tokens and OAuth grants, harness
+payloads do not use the `DRUKS_SECRETS_KEY` envelope.
 
 Agent calls refuse before provisioning if their selected harness is not
 connected. `druks doctor` reports the connection and token expiry for every

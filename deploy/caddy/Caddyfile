@@ -27,17 +27,33 @@ http://:8000 {
 		reverse_proxy {$DRUKS_UPSTREAM}
 	}
 
-	# Admission is an upstream-injected trusted header: any nonempty value
-	# passes the edge. Identity inside the app is its own (harness login
-	# mints the session cookie); the header is never read by the backend.
-	# DRUKS_AUTH_HEADER defaults to exe.dev's; point it at another
-	# proxy's header (Teleport: X-Forwarded-Email, Cloudflare Access:
-	# Cf-Access-Authenticated-User-Email, …) to swap the auth edge with no
-	# code change.
+	# Agents reach /mcp with personal access tokens checked by the app, so it
+	# rides in front of the identity gate like webhooks do. flush_interval -1
+	# streams the endpoint's SSE frames unbuffered.
+	@mcp {
+		path /mcp /mcp/*
+	}
+	handle @mcp {
+		request_body {
+			max_size 1MB
+		}
+		reverse_proxy {$DRUKS_UPSTREAM} {
+			flush_interval -1
+		}
+	}
+
+	# The edge authenticates; this proxy forwards its identity assertion and
+	# the backend maps the asserted email to an account (DRUKS_AUTH_MODE=header
+	# reads the same DRUKS_AUTH_HEADER). The upstream proxy must strip any
+	# client-supplied copy of the header before inserting its authenticated
+	# value. DRUKS_AUTH_HEADER has no default — name your edge's header in the
+	# .env (exe.dev: X-ExeDev-Email, Teleport: X-Forwarded-Email, Cloudflare
+	# Access: Cf-Access-Authenticated-User-Email, …); swapping the identity
+	# edge is a config change, never a code change.
 	# The backend serves everything behind the gate — the API, the SPA at /,
 	# extension frontends at /app/<name>. Cache policy for the served
 	# frontends lives with their server (api/app.py), not at the edge.
-	@dashboard_user header {$DRUKS_AUTH_HEADER:X-ExeDev-Email} *
+	@dashboard_user header {$DRUKS_AUTH_HEADER} *
 	handle @dashboard_user {
 		reverse_proxy {$DRUKS_UPSTREAM}
 	}
@@ -50,12 +66,14 @@ http://:8000 {
 	}
 }
 
-# Public webhook ingress — set DRUKS_WEBHOOK_HOST to a hostname with an
+# Public integrations ingress — set DRUKS_WEBHOOK_HOST to a hostname with an
 # A-record at this box and Caddy auto-provisions TLS for it. Serves the
-# HMAC-verified /_external/* paths and nothing else: no dashboard routes,
-# no identity header, so the trusted-header gate above stays unforgeable.
-# Unset → an inert loopback listener; deployments whose edge already
-# carries webhooks (exe.dev port-share) need nothing here.
+# HMAC-verified /_external/* paths and the PAT-authenticated /mcp endpoint
+# (this host is the canonical MCP address) and nothing else: no dashboard
+# routes, and nothing served here resolves the DRUKS_AUTH_HEADER assertion,
+# so edge identity stays unforgeable from the public side. Unset → an inert
+# loopback listener; deployments whose edge already carries webhooks (exe.dev
+# port-share) need nothing here.
 {$DRUKS_WEBHOOK_HOST:http://127.0.0.1:8081} {
 	header {
 		X-Content-Type-Options "nosniff"
@@ -71,6 +89,17 @@ http://:8000 {
 			max_size 1MB
 		}
 		reverse_proxy {$DRUKS_UPSTREAM}
+	}
+	@mcp {
+		path /mcp /mcp/*
+	}
+	handle @mcp {
+		request_body {
+			max_size 1MB
+		}
+		reverse_proxy {$DRUKS_UPSTREAM} {
+			flush_interval -1
+		}
 	}
 	handle {
 		respond 404

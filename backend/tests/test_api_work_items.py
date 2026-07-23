@@ -17,18 +17,18 @@ _RUN_STATE = {
 
 def _seed_scope_run(db_session, item, *, state="finished", status=None):
     """A scope run for ``item`` (keyed by its remote_key) with its ``scope``
-    agent call. A needs_answers / split_recommended status parks the run on the
+    agent call. A needs_answers status parks the run on the
     ScopeReply gate (PENDING_INPUT + input_request) — seeded from the workflow's
     own gate ask so the board reads exactly what the workflow stores at the park
     point."""
-    from druks.build.scoping.workflows import _PARKED_ASK, ScopeReply
+    from druks.build.workflows import _PARKED_ASK, ScopeReply
 
     parked = _PARKED_ASK.get(status) if status else None
     run = Run(
         id=str(uuid7()),
         kind="build.scope",
         input_gate=ScopeReply.topic if parked else None,
-        input_request=parked.model_dump(mode="json") if parked else None,
+        input_request=parked,
     )
     db_session.add(run)
     db_session.flush()
@@ -39,7 +39,7 @@ def _seed_scope_run(db_session, item, *, state="finished", status=None):
         subject={"type": "work_item", "id": item.id},
     )
     seed_call(db_session, run, "scope", status="failed" if state == "failed" else "succeeded")
-    handoff = {"ready": "scoped", "skipped": "skipped"}.get(status)
+    handoff = {"ready": "scoped"}.get(status)
     if handoff is not None:
         item.set_status(handoff)
     elif status is not None:
@@ -217,7 +217,7 @@ def test_scoped_item_lands_in_history(client: TestClient, db_session):
 
     items = client.get("/api/build/work-items/history").json()["items"]
     row = next(it for it in items if it["title"] == "scoped at rest")
-    assert row["outcome"] == "scoped"
+    assert row["status"] == "scoped"
 
 
 def test_pr_closed_without_merge_is_cancelled_in_history(client: TestClient, db_session):
@@ -230,7 +230,7 @@ def test_pr_closed_without_merge_is_cancelled_in_history(client: TestClient, db_
 
     items = client.get("/api/build/work-items/history").json()["items"]
     row = next(it for it in items if it["title"] == "abandoned")
-    assert row["outcome"] == "cancelled"
+    assert row["status"] == "cancelled"
 
 
 def test_history_clamps_limit(client: TestClient, db_session):
