@@ -21,12 +21,6 @@ class HumanFeedbackAction(StrEnum):
     CLOSE = "close"
 
 
-class Outcome(StrEnum):
-    FINISHED = "finished"
-    CANCELLED = "cancelled"
-    SCOPED = "scoped"
-
-
 class HandoffStatus(StrEnum):
     SCOPED = "scoped"
     SHIPPED = "shipped"

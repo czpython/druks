@@ -3,10 +3,10 @@ import { useState } from 'react'
 import { useLocation } from 'wouter'
 
 import { buildApi } from './api'
-import type { Outcome } from './api'
+import type { HandoffStatus } from './api'
 import { EmptyState } from '../../components/EmptyState'
 import { FilterChip } from '../../components/FilterChip'
-import { OutcomeTag } from './OutcomeTag'
+import { StatusTag } from './StatusTag'
 import { Page } from '../../components/Page'
 import { PageHeader } from '../../components/PageHeader'
 import { PRCell } from '../../components/PRCell'
@@ -15,13 +15,7 @@ import { RepoCell } from '../../components/RepoCell'
 import { relTime, secondsSince, updatedAtSortKey } from '../../lib/format'
 import { dashboardItemPath } from './slug'
 
-type OutcomeFilter = 'all' | Outcome
-
-const LANDING_VERB: Record<Outcome, string> = {
-  finished: 'shipped',
-  cancelled: 'cancelled',
-  scoped: 'scoped',
-}
+type StatusFilter = 'all' | HandoffStatus
 
 function repoBareName(repo: string | null | undefined): string | null {
   if (!repo) return null
@@ -33,7 +27,7 @@ export function HistoryPage() {
     queryKey: ['work-items-history'],
     queryFn: () => buildApi.history(),
   })
-  const [outcomeFilter, setOutcomeFilter] = useState<OutcomeFilter>('all')
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
   const [query, setQuery] = useState('')
   const [, navigate] = useLocation()
 
@@ -41,15 +35,15 @@ export function HistoryPage() {
   if (gate) return <Page scroll="internal" className="page-history">{gate}</Page>
 
   const items = historyQuery.data!.items
-  const counts: Record<Outcome, number> = {
-    finished: items.filter((i) => i.outcome === 'finished').length,
-    cancelled: items.filter((i) => i.outcome === 'cancelled').length,
-    scoped: items.filter((i) => i.outcome === 'scoped').length,
+  const counts: Record<HandoffStatus, number> = {
+    shipped: items.filter((i) => i.status === 'shipped').length,
+    cancelled: items.filter((i) => i.status === 'cancelled').length,
+    scoped: items.filter((i) => i.status === 'scoped').length,
   }
 
   const filtered = items
     .filter((item) => {
-      if (outcomeFilter !== 'all' && item.outcome !== outcomeFilter) return false
+      if (statusFilter !== 'all' && item.status !== statusFilter) return false
       if (query.trim()) {
         const q = query.toLowerCase()
         if (!`${item.title} ${item.ticketRef ?? ''}`.toLowerCase().includes(q)) return false
@@ -65,7 +59,7 @@ export function HistoryPage() {
       meta={
         <>
           <span>
-            <span className="outcome-tag outcome-finished">✓</span> {counts.finished} shipped
+            <span className="outcome-tag outcome-shipped">✓</span> {counts.shipped} shipped
           </span>
           <span>·</span>
           <span>
@@ -87,28 +81,28 @@ export function HistoryPage() {
             onChange={(e) => setQuery(e.target.value)}
           />
           <span className="filter-sep mono dim">·</span>
-          <FilterChip<OutcomeFilter>
+          <FilterChip<StatusFilter>
             value="all"
-            current={outcomeFilter}
-            onSelect={setOutcomeFilter}
+            current={statusFilter}
+            onSelect={setStatusFilter}
             label="all"
           />
-          <FilterChip<OutcomeFilter>
-            value="finished"
-            current={outcomeFilter}
-            onSelect={setOutcomeFilter}
-            label={`shipped (${counts.finished})`}
+          <FilterChip<StatusFilter>
+            value="shipped"
+            current={statusFilter}
+            onSelect={setStatusFilter}
+            label={`shipped (${counts.shipped})`}
           />
-          <FilterChip<OutcomeFilter>
+          <FilterChip<StatusFilter>
             value="scoped"
-            current={outcomeFilter}
-            onSelect={setOutcomeFilter}
+            current={statusFilter}
+            onSelect={setStatusFilter}
             label={`scoped (${counts.scoped})`}
           />
-          <FilterChip<OutcomeFilter>
+          <FilterChip<StatusFilter>
             value="cancelled"
-            current={outcomeFilter}
-            onSelect={setOutcomeFilter}
+            current={statusFilter}
+            onSelect={setStatusFilter}
             label={`cancelled (${counts.cancelled})`}
           />
         </div>
@@ -135,28 +129,25 @@ export function HistoryPage() {
             <span>what</span>
             <span className="th-right">when</span>
           </div>
-          {filtered.map((item) => {
-            const outcome: Outcome = item.outcome ?? 'finished'
-            return (
-              <div
-                key={item.key}
-                className="row row-history"
-                onClick={() => navigate(dashboardItemPath(item))}
-              >
-                <OutcomeTag outcome={outcome} />
-                <span className="row-id mono">{item.ticketRef ?? `#${item.sourceId}`}</span>
-                <span className="row-title" title={item.title}>
-                  {item.title}
-                </span>
-                <RepoCell repoBare={repoBareName(item.repo)} project={item.projectName} />
-                <PRCell prNumber={item.prNumber} prUrl={null} />
-                <span className="row-fin-what mono">{LANDING_VERB[outcome]}</span>
-                <span className="row-fin-dur mono dim">
-                  {relTime(secondsSince(item.updatedAt))}
-                </span>
-              </div>
-            )
-          })}
+          {filtered.map((item) => (
+            <div
+              key={item.key}
+              className="row row-history"
+              onClick={() => navigate(dashboardItemPath(item))}
+            >
+              <StatusTag status={item.status} />
+              <span className="row-id mono">{item.ticketRef ?? `#${item.sourceId}`}</span>
+              <span className="row-title" title={item.title}>
+                {item.title}
+              </span>
+              <RepoCell repoBare={repoBareName(item.repo)} project={item.projectName} />
+              <PRCell prNumber={item.prNumber} prUrl={null} />
+              <span className="row-fin-what mono">{item.status}</span>
+              <span className="row-fin-dur mono dim">
+                {relTime(secondsSince(item.updatedAt))}
+              </span>
+            </div>
+          ))}
         </div>
       )}
     </Page>

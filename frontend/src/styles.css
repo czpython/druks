@@ -36,7 +36,7 @@
   --accent-amber:  #f5a85c;
   --accent-violet: #a78bfa;
 
-  /* Outcome colors (finished panel). Abandoned is deliberately the most
+  /* Outcome colors (history). Abandoned is deliberately the most
      muted outcome, but blue-gray vanished among the equally blue-gray
      labels around it — a warm stone separates it by hue, not just
      luminance, so "Cancelled" reads as a state rather than ambient dim
@@ -396,7 +396,7 @@ button { background: none; border: none; color: inherit; cursor: pointer; font: 
   font-size: 11px;
 }
 .outcome-merged    { color: var(--outcome-merged); }
-.outcome-finished  { color: var(--outcome-merged); }
+.outcome-shipped   { color: var(--outcome-merged); }
 .outcome-failed    { color: var(--outcome-failed); }
 .outcome-abandoned { color: var(--outcome-abandoned); }
 .outcome-cancelled { color: var(--outcome-abandoned); }

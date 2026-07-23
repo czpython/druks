@@ -28,7 +28,8 @@ export const buildApi = {
   },
 }
 
-export type Outcome = 'finished' | 'cancelled' | 'scoped'
+// The stored handoff lane, verbatim from the backend's HandoffStatus.
+export type HandoffStatus = 'shipped' | 'cancelled' | 'scoped'
 
 export interface Links {
   repo: string
@@ -59,8 +60,7 @@ export interface DashboardItem {
   repo?: string | null
   prNumber?: number | null
   projectName?: string | null
-  status: string
-  outcome?: Outcome | null
+  status: HandoffStatus
   createdAt: string
   updatedAt: string
   links: Links

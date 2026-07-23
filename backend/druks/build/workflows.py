@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, Any
 from pydantic import BaseModel, Field
 
 from druks.accounts.models import Account
-from druks.build.contracts import ImplementationOutput, ReviewWork
+from druks.build.contracts import ImplementationOutput, ReviewWork, ScopeBriefOutput
 from druks.build.enums import (
     EvaluationVerdict,
     HumanFeedbackAction,
@@ -23,8 +23,9 @@ from druks.sandbox.layout import (
 )
 from druks.settings import load_settings
 from druks.skills.models import Skill
+from druks.ticketing.datastructures import Ticket
 from druks.ticketing.enums import SemanticStatus
-from druks.workflows import FatalError, Workflow, step
+from druks.workflows import FatalError, Gate, Run, Workflow, step
 
 from .extension import Build
 from .journal import BuildJournal
@@ -486,3 +487,83 @@ class Profile(Workflow):
             ],
             **await super().get_prompt_context(**context),
         }
+
+
+# What the gate asks the operator while the run is parked, by brief status. Scope is
+# answered on the ticket (external), so the ask is just the dashboard's one-liner.
+_PARKED_ASK = {
+    "needs_answers": {"presentation": "external", "label": "Answer scope questions"},
+}
+
+
+class ScopeReply(Gate):
+    """No fields: the operator answers by commenting on the ticket — the agent
+    re-reads the thread on resume — so the reply only needs to wake the run."""
+
+
+class Scope(Workflow):
+    @classmethod
+    async def dispatch(cls, *, ticket: Ticket) -> str | None:
+        # The scoped label is the done marker — remove it to force a re-scope.
+        if ticket.has_label(Build.settings().scoper_scoped_label):
+            return None
+        item = WorkItem.get_for_remote_key(source=ticket.provider, remote_key=ticket.key)
+        if not item:
+            target = ProjectRepo.lookup(project_name=ticket.project_name, labels=ticket.labels)
+            project = Project.get_for_repo(target.full_name) if target else None
+            if not project:
+                logger.info("No project routes %s; not scoping.", ticket.key)
+                return None
+            item = WorkItem.create(
+                project_id=project.id,
+                source=ticket.provider,
+                title=ticket.title or ticket.key,
+                remote_key=ticket.key,
+                remote_url=ticket.url,
+                repo=target.full_name,
+            )
+        assignee = None
+        if ticket.assignee_email:
+            assignee = Account.get_for_username(ticket.assignee_email.strip())
+        return await cls.start(
+            subject=WorkItem.subject_for(item.id),
+            account_id=assignee.id if assignee else None,
+            remote_key=ticket.key,
+            source=ticket.provider,
+        )
+
+    @classmethod
+    def parked_for(cls, work_item_id: int) -> Run | None:
+        runs = Run.list_for_subject("work_item", str(work_item_id), kind=cls.kind)
+        return next((run for run in runs if run.is_parked), None)
+
+    async def get_prompt_context(self, **context: object) -> dict[str, object]:
+        # Everything the agent needs beyond the ticket it fetches itself: where
+        # the work lands (the subject's repo + siblings), the marks it must leave
+        # on the tracker, and the target repo's recommended skills for the brief's
+        # Skills section.
+        item = WorkItem.get(self.subject["id"])
+        siblings = [
+            {"full_name": r.full_name, "purpose": r.purpose or ""}
+            for r in item.project.repos
+            if r.full_name != item.repo
+        ]
+        # The ticket routed through this repo to exist, so it's registered.
+        target = ProjectRepo.get_for_repo(item.repo)
+        settings = Build.settings()
+        return {
+            "target_repo": item.repo,
+            "target_purpose": target.purpose or "",
+            "repos": siblings,
+            "scoped_label": settings.scoper_scoped_label,
+            "post_refinement_status": Build.post_refinement_status(item.source),
+            "recommended_skills": target.effective_profile().get("recommended_skills", []),
+            **await super().get_prompt_context(**context),
+        }
+
+    async def run_multistep(self, remote_key: str, source: str = "linear") -> ScopeBriefOutput:
+        while True:
+            brief = await Build.scope(remote_key=remote_key, source=source)
+            if brief.status == "ready":
+                return brief
+            await ScopeReply.wait(input_request=_PARKED_ASK[brief.status])

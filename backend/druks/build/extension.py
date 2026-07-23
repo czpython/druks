@@ -1,5 +1,3 @@
-from typing import TYPE_CHECKING
-
 from pydantic import BaseModel, Field
 
 from druks.agents import Agent
@@ -11,17 +9,15 @@ from druks.build.contracts import (
     PlanOutput,
     RepoProfilerOutput,
     ReviewOutput,
+    ScopeBriefOutput,
     TriageOutput,
 )
 from druks.build.models import WorkItem
-from druks.build.scoping.contracts import ScopeBriefOutput
+from druks.build.schemas import WorkItemSummary
 from druks.db import db_session
 from druks.events import Event, FeedItem
 from druks.extensions import Extension
 from druks.workflows import Run, SubjectActivity, get_run_phase
-
-if TYPE_CHECKING:
-    from druks.build.schemas import WorkItemSummary
 
 _PHASE_META: dict[str, SubjectActivity] = {
     "provisioning_vm": SubjectActivity(label="Building sandbox VM…", kind="infra"),
@@ -188,17 +184,12 @@ class Build(Extension):
         return
 
     @classmethod
-    def subject_summary(cls, subject_id: str) -> "WorkItemSummary | None":
-        # Lazy import: schemas reaches back here through the scoping workflow.
-        from druks.build.schemas import WorkItemSummary
-
+    def subject_summary(cls, subject_id: str) -> WorkItemSummary | None:
         item = WorkItem.get(int(subject_id))
         return WorkItemSummary.from_work_item(item) if item else None
 
     @classmethod
-    def list_subjects(cls) -> "list[WorkItemSummary]":
-        from druks.build.schemas import WorkItemSummary
-
+    def list_subjects(cls) -> list[WorkItemSummary]:
         # The active board: in-flight items only — handed-off ones live in History.
         # The 500 most-recent cover it; paginate if a board outgrows it.
         return [
@@ -209,8 +200,8 @@ class Build(Extension):
 
     @classmethod
     async def subject_activity(cls, subject_id: str) -> SubjectActivity | None:
-        # Lazy import: the scoping workflow imports this extension at module top.
-        from druks.build.scoping.workflows import Scope
+        # Lazy import: the workflow module imports this extension at module top.
+        from druks.build.workflows import Scope
 
         item = WorkItem.get(int(subject_id))
         if item:

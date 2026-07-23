@@ -5,7 +5,7 @@ import pytest
 from conftest import make_test_work_item, seed_dbos_status
 from druks.build.enums import HandoffStatus
 from druks.build.models import WorkItem
-from druks.build.scoping.workflows import Scope, ScopeReply
+from druks.build.workflows import Scope, ScopeReply
 from druks.durable import Run
 from druks.durable.dbos_state import workflow_status
 from druks.events.models import Event

@@ -7,8 +7,7 @@ from druks.build.enums import HandoffStatus
 from druks.build.extension import Build
 from druks.build.models import Project, ProjectRepo, WorkItem
 from druks.build.policy import RepoPolicy
-from druks.build.scoping.workflows import Scope
-from druks.build.workflows import BuildWorkflow, Profile
+from druks.build.workflows import BuildWorkflow, Profile, Scope
 from druks.core.apis.exceptions import GitHubAppNotConfiguredError, GitHubAppNotInstalledError
 from druks.core.apis.github import get_github_client
 from druks.settings import load_settings
