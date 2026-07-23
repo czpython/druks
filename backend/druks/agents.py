@@ -151,11 +151,17 @@ class Agent:
             async with step_session():
                 return await _invoke()
 
-        return await DBOS.run_step_async(StepOptions(name=f"{workflow.kind}.agent.{self.id}"), _do)
+        result = await DBOS.run_step_async(
+            StepOptions(name=f"{workflow.kind}.agent.{self.id}"), _do
+        )
+        # Body-level only, on both passes: in-step calls hit the early return
+        # live and are skipped with their step on replay.
+        workflow.journal.add(result)
+        return result
 
     async def _run(self, *, workflow_id: str, **context: Any) -> Any:
         """The raw execution: provision or attach a host, record the AgentCall, run
-        the harness. ``run_agent`` handles the durable wrapping + nesting."""
+        the harness. ``__call__`` handles the durable wrapping + nesting."""
         if not self.prompt:
             raise WorkflowError(f"agent {self.id!r} has no prompt template to render")
         model = self.get_model_name()

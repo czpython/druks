@@ -4,6 +4,8 @@ from types import SimpleNamespace
 
 import pytest
 from druks.build import workflows as build_workflows
+from druks.build.journal import BuildJournal
+from druks.build.prompt_context import BuildPromptContext
 from druks.prompts import render_prompt
 
 _OP_TEMPLATES = [
@@ -16,32 +18,33 @@ _OP_TEMPLATES = [
     "triage_human_feedback.md",
 ]
 
+# The kwargs the workflow passes at each template's agent call site.
+_CALL_KWARGS = {
+    "generate_plan.md": {"answered_questions": [], "operator_note": "", "reviewer_notes": ""},
+}
 
-def _workflow() -> SimpleNamespace:
-    """A stand-in BuildWorkflow exposing the attributes the templates read."""
-    input = SimpleNamespace(
-        repo="acme/widget",
-        issue_number=None,
-        ticket_ref="ACME-1",
-        task_owner_name=None,
-        task_owner_email=None,
-    )
+
+def _build() -> SimpleNamespace:
+    """A stand-in BuildPromptContext exposing the fields the templates read —
+    identity facts faked, the journal real and empty."""
     return SimpleNamespace(
-        input=input,
+        repo="acme/widget",
         branch="agent/eng-1",
         pr_number=7,
-        plan_revision=1,
-        implementation_revision=0,
-        finalized_base_sha=None,
-        finalized_pr_sha=None,
-        current_plan=None,
-        acceptance_criteria=[],
-        reviewer_requirements=[],
-        implementation_reviews=[],
-        human_feedback=[],
+        ticket_ref="ACME-1",
+        source="github",
+        issue_number=None,
+        task_owner_name=None,
+        task_owner_email=None,
         related_repos=[],
-        answered_questions=[],
-        operator_note="",
+        journal=BuildJournal(),
+    )
+
+
+def _workspace() -> SimpleNamespace:
+    return SimpleNamespace(
+        repo_path="/home/agent/work/repo",
+        workspace_root="/home/agent/work",
     )
 
 
@@ -49,35 +52,28 @@ def _workflow() -> SimpleNamespace:
 async def test_build_operation_prompt_renders(template):
     output = await render_prompt(
         f"build/build_workflow/{template}",
-        repo="acme/widget",
-        workflow=_workflow(),
+        build=_build(),
         verification="VERIFICATION-BLOCK",
-        workspace=SimpleNamespace(
-            repo_path="/home/agent/work/repo",
-            workspace_root="/home/agent/work",
-        ),
+        workspace=_workspace(),
+        **_CALL_KWARGS.get(template, {}),
     )
 
-    # The workflow-derived bits resolved — a leftover ``operation`` ref would
-    # have raised on StrictUndefined.
+    # The build-derived bits resolved — a leftover ``workflow`` ref would have
+    # raised on StrictUndefined.
     assert "acme/widget" in output
 
 
 async def test_implement_prompt_provisions_when_no_pr_exists():
     # The first delivery has no PR: the implementer is told to create the branch and
     # open the draft PR; the revision path (dismiss stale reviews) must not render.
-    workflow = _workflow()
-    workflow.branch = None
-    workflow.pr_number = None
+    build = _build()
+    build.branch = None
+    build.pr_number = None
     output = await render_prompt(
         "build/build_workflow/implement.md",
-        repo="acme/widget",
-        workflow=workflow,
+        build=build,
         verification="VERIFICATION-BLOCK",
-        workspace=SimpleNamespace(
-            repo_path="/home/agent/work/repo",
-            workspace_root="/home/agent/work",
-        ),
+        workspace=_workspace(),
     )
     assert "gh pr create --draft" in output
     # The PR body carries the plan — what reviewers review the diff against.
@@ -88,21 +84,50 @@ async def test_implement_prompt_provisions_when_no_pr_exists():
 async def test_generate_plan_prompt_quotes_operator_content():
     """Free-text answers and the operator's note render block-quoted line by line —
     operator words stay answer content in the prompt, never instruction text."""
-    workflow = _workflow()
-    workflow.answered_questions = [{"question": "Which cache?", "answer": "redis\nwith a 5m TTL"}]
-    workflow.operator_note = "Tighten the rollout.\nSplit phase 2."
     output = await render_prompt(
         "build/build_workflow/generate_plan.md",
-        repo="acme/widget",
-        workflow=workflow,
+        build=_build(),
         verification="VERIFICATION-BLOCK",
-        workspace=SimpleNamespace(
-            repo_path="/home/agent/work/repo",
-            workspace_root="/home/agent/work",
-        ),
+        workspace=_workspace(),
+        answered_questions=[{"question": "Which cache?", "answer": "redis\nwith a 5m TTL"}],
+        operator_note="Tighten the rollout.\nSplit phase 2.",
+        reviewer_notes="",
     )
     assert "> redis\n  > with a 5m TTL" in output
     assert "> Tighten the rollout.\n> Split phase 2." in output
+
+
+async def test_generate_plan_prompt_quotes_the_reviewer_critique():
+    output = await render_prompt(
+        "build/build_workflow/generate_plan.md",
+        build=_build(),
+        verification="VERIFICATION-BLOCK",
+        workspace=_workspace(),
+        answered_questions=[],
+        operator_note="",
+        reviewer_notes="Name the wire schema.\nSplit the migration.",
+    )
+    assert "## Plan reviewer critique" in output
+    assert "> Name the wire schema.\n> Split the migration." in output
+
+
+async def test_the_planner_resolves_the_assignee_not_the_reviewer():
+    # Only the planner always runs, so only its prompt owns the resolution.
+    planner = await render_prompt(
+        "build/build_workflow/generate_plan.md",
+        build=_build(),
+        verification="VERIFICATION-BLOCK",
+        workspace=_workspace(),
+        **_CALL_KWARGS["generate_plan.md"],
+    )
+    reviewer = await render_prompt(
+        "build/build_workflow/review_plan.md",
+        build=_build(),
+        verification="VERIFICATION-BLOCK",
+        workspace=_workspace(),
+    )
+    assert "ASSIGNEE RESOLUTION" in planner
+    assert "assignee_github_login" not in reviewer
 
 
 @pytest.mark.parametrize("template", _OP_TEMPLATES)
@@ -110,17 +135,14 @@ async def test_build_prompt_orders_the_ticket_fetch(template):
     """Every build agent is ordered to fetch the ticket from its source before
     acting — a mandatory first step, not a suggestion. Regression guard for the
     silently-skipped-fetch bug (agents working off the ticket ref alone)."""
-    workflow = _workflow()
-    workflow.input.source = "linear"
+    build = _build()
+    build.source = "linear"
     output = await render_prompt(
         f"build/build_workflow/{template}",
-        repo="acme/widget",
-        workflow=workflow,
+        build=build,
         verification="VERIFICATION-BLOCK",
-        workspace=SimpleNamespace(
-            repo_path="/home/agent/work/repo",
-            workspace_root="/home/agent/work",
-        ),
+        workspace=_workspace(),
+        **_CALL_KWARGS.get(template, {}),
     )
     assert "MANDATORY FIRST ACTION" in output
     assert "fetch `ACME-1`" in output
@@ -132,34 +154,27 @@ async def test_review_code_prompt_owns_its_followup_subissue():
     regression guard for the dangling promise left when druks-side sub-issue
     creation was removed and nothing filed it. LLM-first: the agent does the
     tracker write, druks acts on nothing it returns."""
-    workflow = _workflow()
-    workflow.input.source = "linear"
+    build = _build()
+    build.source = "linear"
     output = await render_prompt(
         "build/build_workflow/review_code.md",
-        repo="acme/widget",
-        workflow=workflow,
+        build=build,
         verification="VERIFICATION-BLOCK",
-        workspace=SimpleNamespace(
-            repo_path="/home/agent/work/repo",
-            workspace_root="/home/agent/work",
-        ),
+        workspace=_workspace(),
     )
     assert "File a follow-up sub-issue" in output
     assert "same tracker tools" in output  # the agent writes it, not druks
     assert '"summary"' in output  # the only thing it returns
 
 
-def test_build_workflow_exposes_template_attrs(db_session):
-    # Every build prompt reads workflow.<attr> off the real BuildWorkflow; the
-    # _workflow() stand-in above can't catch an attr the real class dropped, so
-    # assert the class satisfies the contract across *all* of its templates.
-
+def test_build_prompt_context_covers_template_attrs():
+    # Every build prompt reads build.<attr>; assert BuildPromptContext carries them
+    # all, so a template ref can never outrun the context contract.
     prompts_root = Path(build_workflows.__file__).resolve().parents[2]
     prompts_dir = prompts_root / "templates/prompts/build/build_workflow"
     attrs: set[str] = set()
     for template in prompts_dir.glob("*.md"):
-        attrs |= set(re.findall(r"workflow\.([a-z_]+)", template.read_text()))
-    workflow = build_workflows.BuildWorkflow()  # input/state are instance attrs
-    workflow.input = build_workflows.BuildWorkflow._run_input_model(repo="acme/widget")
-    missing = sorted(a for a in attrs if not hasattr(workflow, a))
-    assert not missing, f"BuildWorkflow missing template attrs: {missing}"
+        attrs |= set(re.findall(r"\bbuild\.([a-z_]+)", template.read_text()))
+    fields = set(BuildPromptContext.__dataclass_fields__)
+    missing = sorted(a for a in attrs if a not in fields)
+    assert not missing, f"BuildPromptContext missing template attrs: {missing}"

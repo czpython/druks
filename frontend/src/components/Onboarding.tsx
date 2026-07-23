@@ -1,24 +1,26 @@
 import type { CSSProperties } from 'react'
 
-import { LoginSteps, useHarnessLogin } from './HarnessLogin'
+import { ConnectSteps, useHarnessConnect } from './HarnessConnectFlow'
 import { harnessColors } from '../lib/harnessColors'
 import type { Account } from '../api/types'
 
-type LandingEntry = {
+type OnboardingEntry = {
   title: string
   mark: string
   fam: string
-  flow: ReturnType<typeof useHarnessLogin>
+  flow: ReturnType<typeof useHarnessConnect>
 }
 
-// The unauthenticated door: connect a harness, get a session.
-export function Landing({ onSignedIn }: { onSignedIn: (account: Account) => void }) {
-  const codex = useHarnessLogin('codex', onSignedIn)
-  const claude = useHarnessLogin('claude', onSignedIn)
+// The setup door: the edge (or none-mode locality) already decided who you
+// are — druks just needs its first harness connection. Works before any
+// account exists (fresh none mode) and for a newly enrolled header identity.
+export function Onboarding({ onConnected }: { onConnected: (account: Account) => void }) {
+  const codex = useHarnessConnect('codex', onConnected)
+  const claude = useHarnessConnect('claude', onConnected)
   // Accent slots follow registry enrolment order (claude, codex) so each
-  // harness keeps the colour it has everywhere in the signed-in app.
+  // harness keeps the colour it has everywhere in the app.
   const color = harnessColors(['claude', 'codex'])
-  const entries: LandingEntry[] = [
+  const entries: OnboardingEntry[] = [
     { title: 'Codex', mark: 'Cx', fam: color.codex!, flow: codex },
     { title: 'Claude', mark: 'Cl', fam: color.claude!, flow: claude },
   ]
@@ -32,9 +34,9 @@ export function Landing({ onSignedIn }: { onSignedIn: (account: Account) => void
         </div>
         <div className="landing-tag">home for durable agent apps</div>
         <div className="landing-head">
-          <h1>Connect a harness to sign in</h1>
+          <h1>Connect a harness to finish setup</h1>
           <p>
-            druks runs agents on your own coding subscription. <b>Connecting one signs you in</b>.
+            druks runs agents on your own coding subscription. <b>Connecting one finishes setup</b>.
           </p>
         </div>
         <div className="landing-stage">
@@ -49,23 +51,23 @@ export function Landing({ onSignedIn }: { onSignedIn: (account: Account) => void
   )
 }
 
-function HarnessCard({ entry }: { entry: LandingEntry }) {
+function HarnessCard({ entry }: { entry: OnboardingEntry }) {
   return (
     <div className="landing-choice" style={{ '--fam': entry.fam } as CSSProperties}>
       <button className="landing-card" onClick={() => void entry.flow.start()}>
         <span className="landing-chip">{entry.mark}</span>
         <span className="landing-lbl">
           <span className="landing-lbl-t">Connect {entry.title}</span>
-          <span className="landing-lbl-d">Sign in with your {entry.title} subscription</span>
+          <span className="landing-lbl-d">Use your {entry.title} subscription</span>
         </span>
         <span className="landing-arrow">→</span>
       </button>
-      {entry.flow.error && <LandingError message={entry.flow.error} />}
+      {entry.flow.error && <OnboardingError message={entry.flow.error} />}
     </div>
   )
 }
 
-function ConnectPanel({ entry }: { entry: LandingEntry }) {
+function ConnectPanel({ entry }: { entry: OnboardingEntry }) {
   const { flow } = entry
   return (
     <div className="landing-panel" style={{ '--fam': entry.fam } as CSSProperties}>
@@ -79,8 +81,8 @@ function ConnectPanel({ entry }: { entry: LandingEntry }) {
       </div>
       {flow.challenge ? (
         <>
-          <LoginSteps flow={flow} />
-          {flow.error && <LandingError message={flow.error} />}
+          <ConnectSteps flow={flow} />
+          {flow.error && <OnboardingError message={flow.error} />}
           <button className="landing-cancel" onClick={flow.cancel} disabled={flow.busy}>
             Cancel
           </button>
@@ -95,7 +97,7 @@ function ConnectPanel({ entry }: { entry: LandingEntry }) {
   )
 }
 
-function LandingError({ message }: { message: string }) {
+function OnboardingError({ message }: { message: string }) {
   return (
     <div className="landing-err">
       <span className="landing-err-x">!</span>

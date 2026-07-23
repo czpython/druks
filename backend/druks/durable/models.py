@@ -14,13 +14,11 @@ from druks.accounts.models import Account
 from druks.core.models import Uuid7Pk
 from druks.database import db_session, get_session
 from druks.durable.dbos_state import state_expression, subject_filter, updated_at_expression
-from druks.durable.enums import ACTIVE_STATES
+from druks.durable.enums import ACTIVE_STATES, AgentCallStatus, RunState
 from druks.harnesses.artifacts import normalize_token_usage
 from druks.models import Base
 from druks.notifications.models import Notification
 from druks.settings import load_settings
-
-from .enums import AgentCallStatus
 
 if TYPE_CHECKING:
     from druks.sandbox.datastructures import AgentResult
@@ -41,6 +39,8 @@ class Run(Base):
     # When the run last asked for input — a historical fact (input_gate says
     # whether it's still waiting), and the one transition DBOS doesn't stamp.
     input_requested_at: Mapped[datetime | None] = mapped_column(default=None)
+    # The receipt: the input_requested_at stamp an answer last resumed.
+    answer_parked_at: Mapped[datetime | None] = mapped_column(default=None)
     failure: Mapped[str | None] = mapped_column(default=None)
     # The FatalError subtype's code when the run stopped on a deliberate domain
     # error, so read-sides tell e.g. a gate timeout from a crash without parsing
@@ -69,6 +69,14 @@ class Run(Base):
     @property
     def is_active(self) -> bool:
         return self.state in {s.value for s in ACTIVE_STATES}
+
+    @property
+    def is_parked(self) -> bool:
+        return self.state == RunState.PENDING_INPUT.value
+
+    @property
+    def is_running(self) -> bool:
+        return self.state == RunState.RUNNING.value
 
     @classmethod
     def create_row(cls, engine, *, workflow_id: str, kind: str, account_id: str | None) -> None:
@@ -250,6 +258,14 @@ class AgentCall(Base, Uuid7Pk):
     # and treat 404 as the host being gone.
     sandbox_host_id: Mapped[str]
 
+    def get_live_status(self) -> str:
+        # Unfinished: "running" while the run is live, "abandoned" once it's terminal.
+        if self.finished_at:
+            return AgentCallStatus(self.status).value
+        if self.run.is_active:
+            return "running"
+        return "abandoned"
+
     @property
     def artifact_dir(self) -> str:
         return str(load_settings().artifacts_dir / f"run-{self.run_id}")
@@ -279,7 +295,7 @@ class AgentCall(Base, Uuid7Pk):
         try:
             candidate.relative_to(self.call_dir.resolve())
         except ValueError:
-            return None
+            return
         return candidate if candidate.is_file() else None
 
     def get_stream_path(self, stream: Literal["stdout", "stderr"]) -> Path | None:

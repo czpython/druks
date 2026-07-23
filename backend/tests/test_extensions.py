@@ -81,7 +81,7 @@ def test_load_confines_extension_routers_to_the_extension_namespace(monkeypatch)
     monkeypatch.setattr(loader, "import_extension_models", lambda: None)
     app = FastAPI()
     load(app)
-    # Mounting is under test, not the session gate.
+    # Mounting is under test, not the identity gate.
     from druks.accounts.dependencies import current_account
 
     app.dependency_overrides[current_account] = lambda: None

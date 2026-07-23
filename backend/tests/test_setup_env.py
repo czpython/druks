@@ -31,6 +31,9 @@ def test_fresh_run_writes_template_with_secrets_and_reports_gaps(tmp_path):
     # Provider block present.
     assert values["DEFAULT_HOST_PROVIDER"] == "exe"
     assert values["TAILSCALE_ENABLED"] == "true"
+    # exe.dev is the identity edge; druks maps its asserted email header.
+    assert values["DRUKS_AUTH_MODE"] == "header"
+    assert values["DRUKS_AUTH_HEADER"] == "X-ExeDev-Email"
     # The secrets dir is created alongside.
     assert (tmp_path / "secrets").is_dir()
 
@@ -47,6 +50,10 @@ def test_aws_provider_block(tmp_path):
     assert values["DRUKS_ENDPOINT"] == ""
     assert values["TAILSCALE_ENABLED"] == "false"
     assert "AWS_REGION" in values
+    # Bring-your-own-edge: header mode, and the operator must name the header
+    # their proxy injects — a required gap, never a guessed default.
+    assert values["DRUKS_AUTH_MODE"] == "header"
+    assert values["DRUKS_AUTH_HEADER"] == ""
     # The sandbox-VM instance profile stays a documented, commented knob.
     assert "# AWS_INSTANCE_PROFILE=" in env_path.read_text()
 
@@ -69,6 +76,9 @@ def test_docker_provider_wires_drukbox_on_host(tmp_path):
     # The local dashboard's URL is fixed, so the OAuth-MCP callback base is
     # defaulted — connecting an OAuth MCP server works without a manual edit.
     assert values["DRUKS_ENDPOINT"] == "http://localhost:8001"
+    # Loopback dashboard, no edge: identity mode none.
+    assert values["DRUKS_AUTH_MODE"] == "none"
+    assert "DRUKS_AUTH_HEADER" not in values
 
 
 def test_rerun_preserves_values_secrets_and_operator_additions(tmp_path):
@@ -87,6 +97,20 @@ def test_rerun_preserves_values_secrets_and_operator_additions(tmp_path):
     assert values["GITHUB_OPERATOR_APP_ID"] == "111"
     assert values["DRUKS_WEBHOOK_SECRET"] == first["DRUKS_WEBHOOK_SECRET"]  # not regenerated
     assert values["MY_CUSTOM_FLAG"] == "on"  # hand edits survive
+
+
+def test_rerun_preserves_the_identity_header_choice(tmp_path):
+    env_path = tmp_path / ".env"
+    _run(env_path)
+    env_path.write_text(
+        env_path.read_text().replace(
+            "DRUKS_AUTH_HEADER=X-ExeDev-Email", "DRUKS_AUTH_HEADER=X-Custom-Email"
+        )
+    )
+
+    _run(env_path)
+
+    assert read_env(env_path)["DRUKS_AUTH_HEADER"] == "X-Custom-Email"
 
 
 def test_rerun_keeps_the_provider_the_env_was_written_with(tmp_path):

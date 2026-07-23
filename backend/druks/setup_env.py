@@ -126,6 +126,45 @@ _COMMON_SECTIONS: tuple[Section, ...] = (
     ),
 )
 
+# How each install shape resolves browser identity. Both Caddy and druks read
+# DRUKS_AUTH_HEADER: Caddy requires the edge's assertion, druks maps it to an
+# account.
+_EXE_IDENTITY_SECTION = Section(
+    "IDENTITY — exe.dev authenticates at the edge; druks maps the asserted email",
+    (
+        Entry("DRUKS_AUTH_MODE", "header"),
+        Entry("DRUKS_AUTH_HEADER", "X-ExeDev-Email"),
+    ),
+)
+
+_AWS_IDENTITY_SECTION = Section(
+    "IDENTITY — your edge proxy authenticates; druks maps the asserted email",
+    (
+        Entry("DRUKS_AUTH_MODE", "header"),
+        Entry(
+            "DRUKS_AUTH_HEADER",
+            prompt="Identity header your edge proxy injects (e.g. X-Forwarded-Email)",
+            required=True,
+            comment=(
+                "The header your identity proxy (Teleport, Cloudflare Access, …)\n"
+                "injects after authenticating. The proxy must strip any\n"
+                "client-supplied copy before inserting its own."
+            ),
+        ),
+    ),
+)
+
+_LOCAL_IDENTITY_SECTION = Section(
+    "IDENTITY — loopback dashboard, no authentication; one operator account",
+    (Entry("DRUKS_AUTH_MODE", "none"),),
+)
+
+_IDENTITY_SECTIONS = {
+    "exe": _EXE_IDENTITY_SECTION,
+    "aws": _AWS_IDENTITY_SECTION,
+    "docker": _LOCAL_IDENTITY_SECTION,
+}
+
 # How druks reaches drukbox. The remote shapes run drukbox itself from this
 # same .env (compose `remote` profile): container on :8780, generated token;
 # SERVICE_TOKENS is drukbox's accepted-token list, mirrored from the sandbox
@@ -213,7 +252,7 @@ _PROVIDER_SECTIONS = {"exe": _EXE_SECTION, "aws": _AWS_SECTION, "docker": _LOCAL
 
 
 def sections_for(provider: str) -> tuple[Section, ...]:
-    return (*_COMMON_SECTIONS, _PROVIDER_SECTIONS[provider])
+    return (*_COMMON_SECTIONS, _IDENTITY_SECTIONS[provider], _PROVIDER_SECTIONS[provider])
 
 
 def read_env(path: Path) -> dict[str, str]:

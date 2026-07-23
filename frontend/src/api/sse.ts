@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react'
 
-import { authApi } from './client'
+import { UnauthorizedError, identityApi } from './client'
 
 type Handler = (data: unknown) => void
 
@@ -64,15 +64,20 @@ export function useSSE(url: string, { handlers, onError, enabled = true }: UseSS
 
     const errorListener: EventListener = (event) => {
       onErrorRef.current?.(event)
-      // An SSE error may be an expired session: recheck instead of letting
-      // EventSource reconnect forever; the recheck's 401 signals the
-      // AuthProvider.
-      void authApi
-        .session()
-        .then((account) => {
-          if (!account) source.close()
+      // An SSE error may be a dead identity: recheck /api/auth/me and close
+      // only when identity cannot be resolved (the recheck's 401 broadcasts
+      // to the IdentityBootstrap). While the same account remains valid the
+      // EventSource keeps its automatic reconnect.
+      void identityApi
+        .me()
+        .then((identity) => {
+          if (!identity.account) source.close()
         })
-        .catch(() => undefined)
+        .catch((error: unknown) => {
+          // Only a dead identity ends the stream; a transient recheck failure
+          // leaves EventSource's automatic reconnect running.
+          if (error instanceof UnauthorizedError) source.close()
+        })
     }
     source.addEventListener('error', errorListener)
 

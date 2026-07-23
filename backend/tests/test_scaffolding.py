@@ -51,7 +51,7 @@ def test_create_extension_scaffolds_a_loadable_package(tmp_path):
 
         app = FastAPI()
         extension.load(app)
-        # Scaffolding is under test, not the session gate.
+        # Scaffolding is under test, not the identity gate.
         from druks.accounts.dependencies import current_account
 
         app.dependency_overrides[current_account] = lambda: None

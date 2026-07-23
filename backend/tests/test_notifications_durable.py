@@ -16,7 +16,7 @@ from druks.notifications.models import Destination, Notification
 from druks.notifications.outbox import notifications_queue, send_notification
 from druks.notifications.services import respond_to_notification
 from druks.user_settings.models import UserSettings
-from druks.workflows import Gate, Run, Workflow
+from druks.workflows import Gate, OperatorReply, Run, Workflow
 from fastapi.testclient import TestClient
 from pydantic import BaseModel, Field
 from sqlalchemy import create_engine, select, text
@@ -49,7 +49,7 @@ class _Question(BaseModel):
 
 # What the in-app reviews resumed with — the respond round-trip asserts the
 # payload arrived in the workflow verbatim.
-_REVIEW_REPLIES: list[dict] = []
+_REVIEW_REPLIES: list[OperatorReply] = []
 
 
 def _build_park_flows():
@@ -662,7 +662,7 @@ async def test_respond_round_trip_finishes_the_run(rt, deliver_spy):
     assert first == "ok"
 
     await _wait_run(rt, workflow_id, lambda run: run.state == RunState.FINISHED)
-    assert {"action": "approve", "answers": {"q1": "postgres"}, "note": ""} in _REVIEW_REPLIES
+    assert OperatorReply(action="approve", answers={"q1": "postgres"}) in _REVIEW_REPLIES
     assert _notifications_for_run(rt, workflow_id)[0].state == "acknowledged"
 
     # Sequential second answer: the acknowledged fast-path rejects it, and the

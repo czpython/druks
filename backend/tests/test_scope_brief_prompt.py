@@ -43,7 +43,6 @@ async def test_prompt_owns_the_tracker_writes():
     assert "Write the brief into the ticket description" in output
     assert "druks-scoped" in output
     assert "open questions for ACME-1" in output
-    assert "split recommended for ACME-1" in output
 
 
 async def test_prompt_carries_the_recommended_skills():
@@ -67,15 +66,16 @@ async def test_prompt_tells_scoper_to_focus_stack_hints_on_task_surface():
     assert "Do not include backend/database/server labels" in output
 
 
-async def test_prompt_teaches_scoper_when_to_recommend_a_split():
-    # The split branch is the operator's main upstream defence against
-    # oversized PRs and wasted review loops. If this guidance ever drops
-    # out of the prompt, scoping silently regresses to always-ready and
-    # we won't notice until tickets get too big again.
+async def test_prompt_teaches_scoper_to_raise_oversized_work_as_a_question():
+    # Oversized-ticket detection is the scoper's main upstream defence against
+    # wasted review loops. It routes through needs_answers now (ask the operator
+    # whether to split) rather than a structured proposal — if this guidance ever
+    # drops out, scoping silently regresses to always-ready and we won't notice
+    # until tickets get too big again.
     output = await _render()
-    assert "split_recommended" in output
-    assert "Do NOT split" in output
-    assert "Vertical slices" in output
+    assert "too large to ship as one reviewable PR" in output
+    assert "whether to split" in output
+    assert "Vertical slices are the" in output
 
 
 async def test_jira_prompt_carries_connector_routing_hint():

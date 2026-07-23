@@ -1,10 +1,10 @@
 import base64
 import logging
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 import asyncssh
-from pydantic import BeforeValidator, Field
+from pydantic import BeforeValidator, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 DEFAULT_DATA_DIR = Path("/var/lib/druks")
@@ -88,6 +88,22 @@ class Settings(BaseSettings):
         default="postgresql+psycopg://druks:druks@localhost:5432/druks",
         alias="DRUKS_DATABASE_URL",
     )
+
+    # How a browser request resolves an account. ``none``: no authentication —
+    # loopback-only deployments with a single operator account. ``header``: the
+    # edge (exe.dev, Teleport, Cloudflare Access, …) authenticates and asserts
+    # the operator's email in ``auth_header``; druks maps it to an account.
+    # ``jwt``: the edge asserts a signed JWT in ``auth_header`` instead; druks
+    # verifies it against the JWKS below and maps its identity claim. Bearer
+    # personal access tokens resolve first in every mode.
+    auth_mode: Literal["none", "header", "jwt"] = Field(default="none", alias="DRUKS_AUTH_MODE")
+    # No default: the operator names their edge's header explicitly — druks
+    # blesses no provider.
+    auth_header: str = Field(default="", alias="DRUKS_AUTH_HEADER")
+    auth_jwks_url: str = Field(default="", alias="DRUKS_AUTH_JWKS_URL")
+    auth_jwt_issuer: str = Field(default="", alias="DRUKS_AUTH_JWT_ISSUER")
+    auth_jwt_audience: str = Field(default="", alias="DRUKS_AUTH_JWT_AUDIENCE")
+    auth_jwt_identity_claim: str = Field(default="email", alias="DRUKS_AUTH_JWT_IDENTITY_CLAIM")
 
     webhook_secret: str = Field(default="", alias="DRUKS_WEBHOOK_SECRET")
     # Public hostname webhook senders POST to (Caddy serves it; see
@@ -196,6 +212,29 @@ class Settings(BaseSettings):
     )
 
     log_level: str = Field(default="INFO", alias="DRUKS_LOG_LEVEL")
+
+    @model_validator(mode="after")
+    def _auth_mode_is_fully_configured(self) -> "Settings":
+        if self.auth_mode != "none" and not self.auth_header.strip():
+            raise ValueError(
+                "DRUKS_AUTH_HEADER must name the edge's identity header "
+                f"when DRUKS_AUTH_MODE={self.auth_mode}"
+            )
+        if self.auth_mode != "none" and self.auth_header.strip().lower() == "authorization":
+            # Authorization is the PAT slot and always parses bearer-first — an
+            # assertion configured there could never be read, locking everyone out.
+            raise ValueError("DRUKS_AUTH_HEADER cannot be Authorization — that slot is PAT-only")
+        if self.auth_mode == "jwt":
+            required = {
+                "DRUKS_AUTH_JWKS_URL": self.auth_jwks_url,
+                "DRUKS_AUTH_JWT_ISSUER": self.auth_jwt_issuer,
+                "DRUKS_AUTH_JWT_AUDIENCE": self.auth_jwt_audience,
+                "DRUKS_AUTH_JWT_IDENTITY_CLAIM": self.auth_jwt_identity_claim,
+            }
+            missing = [name for name, value in required.items() if not value.strip()]
+            if missing:
+                raise ValueError(f"DRUKS_AUTH_MODE=jwt requires {', '.join(missing)}")
+        return self
 
     @property
     def logs_dir(self) -> Path:

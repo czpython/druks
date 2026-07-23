@@ -121,21 +121,21 @@ def test_codex_load_token_expired(db_session):
 
 
 async def test_claude_fresh_not_refreshed(monkeypatch, db_session):
-    login = _seed_claude(expires_at=_NOW + timedelta(hours=6))
+    connection = _seed_claude(expires_at=_NOW + timedelta(hours=6))
     calls = _mock_post(monkeypatch, _resp(200, {}))
-    result = await ClaudeHarness.rotate_token(login.id, now=_NOW)
+    result = await ClaudeHarness.rotate_token(connection.id, now=_NOW)
     assert result.action == "fresh"
-    assert result.connection_id == login.id
+    assert result.connection_id == connection.id
     assert calls == []
 
 
 async def test_claude_stale_refreshes_and_persists(monkeypatch, db_session):
     soon = _NOW + timedelta(minutes=30)
-    login = _seed_claude(access="old", refresh="R0", expires_at=soon)
+    connection = _seed_claude(access="old", refresh="R0", expires_at=soon)
     calls = _mock_post(
         monkeypatch, _resp(200, {"access_token": "new", "refresh_token": "R1", "expires_in": 28800})
     )
-    result = await ClaudeHarness.rotate_token(login.id, now=_NOW)
+    result = await ClaudeHarness.rotate_token(connection.id, now=_NOW)
     assert result.action == "refreshed"
     assert calls[0]["json"]["refresh_token"] == "R0"
     block = ClaudeHarness.get_credentials()["claudeAiOauth"]
@@ -147,9 +147,9 @@ async def test_claude_stale_refreshes_and_persists(monkeypatch, db_session):
 
 
 async def test_claude_invalid_grant_drops_row(monkeypatch, db_session):
-    login = _seed_claude(access="old", expires_at=_NOW - timedelta(minutes=1))
+    connection = _seed_claude(access="old", expires_at=_NOW - timedelta(minutes=1))
     _mock_post(monkeypatch, _resp(400, {"error": "invalid_grant"}))
-    result = await ClaudeHarness.rotate_token(login.id, now=_NOW)
+    result = await ClaudeHarness.rotate_token(connection.id, now=_NOW)
     assert result.action == "failed"
     assert result.error == "invalid_grant"
     # A revoked lineage self-disconnects and commits inside the rotation — the
@@ -160,34 +160,34 @@ async def test_claude_invalid_grant_drops_row(monkeypatch, db_session):
 
 
 async def test_claude_network_error_keeps_row(monkeypatch, db_session):
-    login = _seed_claude(access="old", expires_at=_NOW - timedelta(minutes=1))
+    connection = _seed_claude(access="old", expires_at=_NOW - timedelta(minutes=1))
     _mock_post(monkeypatch, httpx.ConnectError("boom"))
-    result = await ClaudeHarness.rotate_token(login.id, now=_NOW)
+    result = await ClaudeHarness.rotate_token(connection.id, now=_NOW)
     assert result.error == "network"
     assert ClaudeHarness.get_credentials()["claudeAiOauth"]["accessToken"] == "old"
 
 
 async def test_claude_http_500_keeps_row(monkeypatch, db_session):
-    login = _seed_claude(access="old", expires_at=_NOW - timedelta(minutes=1))
+    connection = _seed_claude(access="old", expires_at=_NOW - timedelta(minutes=1))
     _mock_post(monkeypatch, _resp(500, ""))
-    result = await ClaudeHarness.rotate_token(login.id, now=_NOW)
+    result = await ClaudeHarness.rotate_token(connection.id, now=_NOW)
     assert result.error == "http_500"
     assert ClaudeHarness.get_credentials()["claudeAiOauth"]["accessToken"] == "old"
 
 
 async def test_claude_bad_response_keeps_row(monkeypatch, db_session):
-    login = _seed_claude(access="old", expires_at=_NOW - timedelta(minutes=1))
+    connection = _seed_claude(access="old", expires_at=_NOW - timedelta(minutes=1))
     _mock_post(monkeypatch, _resp(200, "not json"))
-    result = await ClaudeHarness.rotate_token(login.id, now=_NOW)
+    result = await ClaudeHarness.rotate_token(connection.id, now=_NOW)
     assert result.error == "bad_response"
     assert ClaudeHarness.get_credentials()["claudeAiOauth"]["accessToken"] == "old"
 
 
 async def test_codex_invalid_grant_drops_row(monkeypatch, db_session):
     stale = _jwt(int((_NOW + timedelta(hours=1)).timestamp()))
-    login = _seed_codex(access=stale, refresh="R0")
+    connection = _seed_codex(access=stale, refresh="R0")
     _mock_post(monkeypatch, _resp(400, {"error": "invalid_grant"}))
-    result = await CodexHarness.rotate_token(login.id, now=_NOW)
+    result = await CodexHarness.rotate_token(connection.id, now=_NOW)
     assert result.error == "invalid_grant"
     assert not HarnessConnection.list_all()
     with pytest.raises(HarnessNotConnectedError):
@@ -195,8 +195,8 @@ async def test_codex_invalid_grant_drops_row(monkeypatch, db_session):
 
 
 async def test_rotation_of_a_deleted_row_is_a_no_op(monkeypatch, db_session):
-    login = _seed_claude(access="old", expires_at=_NOW - timedelta(minutes=1))
-    connection_id = login.id
+    connection = _seed_claude(access="old", expires_at=_NOW - timedelta(minutes=1))
+    connection_id = connection.id
     _mock_post(monkeypatch, _resp(400, {"error": "invalid_grant"}))
     await ClaudeHarness.rotate_token(connection_id, now=_NOW)
     # Row is gone; rotating the stale id must short-circuit before any
@@ -209,22 +209,22 @@ async def test_rotation_of_a_deleted_row_is_a_no_op(monkeypatch, db_session):
 
 
 async def test_claude_relogin_overwrite_picked_up(monkeypatch, db_session):
-    login = _seed_claude(refresh="R_NEW", expires_at=_NOW - timedelta(minutes=1))
+    connection = _seed_claude(refresh="R_NEW", expires_at=_NOW - timedelta(minutes=1))
     calls = _mock_post(
         monkeypatch, _resp(200, {"access_token": "a", "refresh_token": "b", "expires_in": 100})
     )
-    await ClaudeHarness.rotate_token(login.id, now=_NOW)
+    await ClaudeHarness.rotate_token(connection.id, now=_NOW)
     assert calls[0]["json"]["refresh_token"] == "R_NEW"
 
 
 async def test_codex_stale_refreshes_and_preserves(monkeypatch, db_session):
     stale = _jwt(int((_NOW + timedelta(hours=1)).timestamp()))
     fresh = _jwt(int((_NOW + timedelta(days=10)).timestamp()))
-    login = _seed_codex(access=stale, refresh="R0", account_id="acc-9")
+    connection = _seed_codex(access=stale, refresh="R0", account_id="acc-9")
     calls = _mock_post(
         monkeypatch, _resp(200, {"access_token": fresh, "refresh_token": "R1", "id_token": "id-1"})
     )
-    result = await CodexHarness.rotate_token(login.id, now=_NOW)
+    result = await CodexHarness.rotate_token(connection.id, now=_NOW)
     assert result.action == "refreshed"
     assert calls[0]["json"]["client_id"] == "app_EMoamEEZ73f0CkXaXp7hrann"
     data = CodexHarness.get_credentials()
@@ -239,17 +239,17 @@ async def test_codex_stale_refreshes_and_preserves(monkeypatch, db_session):
 async def test_codex_keeps_refresh_when_omitted(monkeypatch, db_session):
     stale = _jwt(int((_NOW + timedelta(hours=1)).timestamp()))
     fresh = _jwt(int((_NOW + timedelta(days=10)).timestamp()))
-    login = _seed_codex(access=stale, refresh="KEEP")
+    connection = _seed_codex(access=stale, refresh="KEEP")
     _mock_post(monkeypatch, _resp(200, {"access_token": fresh}))
-    await CodexHarness.rotate_token(login.id, now=_NOW)
+    await CodexHarness.rotate_token(connection.id, now=_NOW)
     assert CodexHarness.get_credentials()["tokens"]["refresh_token"] == "KEEP"
 
 
 async def test_codex_no_refresh_token(monkeypatch, db_session):
     stale = _jwt(int((_NOW + timedelta(hours=1)).timestamp()))
-    login = _seed_codex(refresh=None, access=stale)
+    connection = _seed_codex(refresh=None, access=stale)
     calls = _mock_post(monkeypatch, _resp(200, {}))
-    result = await CodexHarness.rotate_token(login.id, now=_NOW)
+    result = await CodexHarness.rotate_token(connection.id, now=_NOW)
     assert result.action == "no_refresh_token"
     assert calls == []
 
@@ -290,8 +290,8 @@ async def test_invalid_grant_drops_only_the_addressed_row(monkeypatch, db_sessio
 
 
 async def test_concurrent_rotations_produce_one_grant(monkeypatch, db_session):
-    login = _seed_claude(access="old", refresh="R0", expires_at=_NOW + timedelta(minutes=30))
-    connection_id = login.id
+    connection = _seed_claude(access="old", refresh="R0", expires_at=_NOW + timedelta(minutes=30))
+    connection_id = connection.id
     calls = _mock_post(
         monkeypatch, _resp(200, {"access_token": "new", "refresh_token": "R1", "expires_in": 100})
     )
@@ -308,14 +308,14 @@ async def test_concurrent_rotations_produce_one_grant(monkeypatch, db_session):
 
 
 async def test_rotation_lock_is_released_after_refresh(monkeypatch, db_session):
-    login = _seed_claude(access="old", refresh="R0", expires_at=_NOW + timedelta(minutes=30))
+    connection = _seed_claude(access="old", refresh="R0", expires_at=_NOW + timedelta(minutes=30))
     _mock_post(
         monkeypatch, _resp(200, {"access_token": "new", "refresh_token": "R1", "expires_in": 100})
     )
-    await ClaudeHarness.rotate_token(login.id, now=_NOW)
+    await ClaudeHarness.rotate_token(connection.id, now=_NOW)
     import druks.redis
 
-    assert await druks.redis.get_client().get(f"druks:harness:refresh:{login.id}") is None
+    assert await druks.redis.get_client().get(f"druks:harness:refresh:{connection.id}") is None
 
 
 def test_disconnect_removes_only_the_addressed_login(db_session):
@@ -325,7 +325,7 @@ def test_disconnect_removes_only_the_addressed_login(db_session):
     mine.delete()
 
     assert HarnessConnection.get(other.id)
-    # The fallback account (the first) has no claude login left; another
+    # The fallback account (the first) has no claude connection left; another
     # account's credential never leaks into execution.
     with pytest.raises(HarnessNotConnectedError):
         ClaudeHarness.get_credentials()
@@ -416,8 +416,8 @@ async def test_codex_fetch_usage_success(monkeypatch, db_session):
 
 
 def test_render_credentials_file_serializes_stored_payload(db_session):
-    login = _seed_claude(access="tok", refresh="R0")
-    rendered = ClaudeHarness.render_credentials_file(login.id)
+    connection = _seed_claude(access="tok", refresh="R0")
+    rendered = ClaudeHarness.render_credentials_file(connection.id)
     assert json.loads(rendered)["claudeAiOauth"]["accessToken"] == "tok"
 
 
@@ -523,12 +523,12 @@ def test_render_credentials_file_renders_only_the_selected_login(db_session):
     assert rendered["claudeAiOauth"]["accessToken"] == "mine-token"
 
 
-def test_render_credentials_file_for_a_deleted_login_raises(db_session):
+def test_render_credentials_file_for_a_deleted_connection_raises(db_session):
     _seed_claude(provider_email="a@example.com")  # the surviving fallback
     gone = _seed_claude(provider_email="b@example.com")
     gone_id = gone.id
     gone.delete()
     # A disconnect between selection and render fails the call — it must never
     # fall through to another account's payload.
-    with pytest.raises(HarnessNotConnectedError, match="disconnected"):
+    with pytest.raises(HarnessNotConnectedError, match="removed"):
         ClaudeHarness.render_credentials_file(gone_id)

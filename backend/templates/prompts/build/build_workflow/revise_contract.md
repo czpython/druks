@@ -28,7 +28,7 @@ The human reviewer's feedback contradicts the current acceptance criteria. Revis
 
 # Update the PR description
 
-The PR description is the plan document reviewers review the diff against — your revision made it stale. Before emitting your final JSON, write the revised plan to PR #{{ workflow.pr_number }}'s description (`gh pr edit {{ workflow.pr_number }} --body-file <file>`; the checkout is authenticated):
+The PR description is the plan document reviewers review the diff against — your revision made it stale. Before emitting your final JSON, write the revised plan to PR #{{ build.pr_number }}'s description (`gh pr edit {{ build.pr_number }} --body-file <file>`; the checkout is authenticated):
 
 - `**Linear ticket:** [<ticket ref>](<url>)` when the ticket has a URL.
 - `## Plan` — your revised plan markdown.

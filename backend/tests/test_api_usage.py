@@ -21,7 +21,7 @@ def client(extension_settings: Settings):
 
 
 def _account_id() -> str:
-    # The suite's session gate stands in op@example.com (conftest override).
+    # The suite's auth gate stands in op@example.com (conftest override).
     from druks.accounts.models import Account
 
     return Account.get_or_create("op@example.com").id

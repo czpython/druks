@@ -72,12 +72,6 @@ class FakeRedis:
     async def get(self, key: str) -> bytes | None:
         return self._data.get(key)
 
-    async def getex(self, key: str, *, ex: int | None = None) -> bytes | None:
-        value = self._data.get(key)
-        if value is not None and ex is not None:
-            self._ttls[key] = ex
-        return value
-
     async def exists(self, key: str) -> int:
         return int(key in self._data)
 
@@ -346,7 +340,7 @@ def configure_app_for_test(
     authenticated: bool = True,
 ):
 
-    from druks.accounts.dependencies import current_account
+    from druks.accounts.dependencies import current_account, current_session_account
     from druks.api.app import app
 
     if engine is None:
@@ -356,15 +350,16 @@ def configure_app_for_test(
     app.state.settings = settings
     app.state.engine = engine
     if authenticated:
-        # Stand a signed-in account in for the gate; auth tests pass
-        # authenticated=False and walk the real cookie flow.
+        # Stand a resolved operator in for both identity gates; identity tests
+        # pass authenticated=False and walk the real per-request resolvers.
         app.dependency_overrides[current_account] = _test_account
+        app.dependency_overrides[current_session_account] = _test_account
     return app
 
 
 async def _test_account():
+    from druks.accounts.context import current_account_id
     from druks.accounts.models import Account
-    from druks.accounts.sessions import current_account_id
 
     account = Account.get_or_create("op@example.com")
     current_account_id.set(account.id)
@@ -479,6 +474,7 @@ def seed_build_run(
     input_gate: str | None = None,
     input_request: dict | None = None,
     failure: str | None = None,
+    account_id: str | None = None,
 ):
     """Seed a build Run row for a work item and bind it via
     ``item.build_run_id``. Returns the Run. Attach agent calls with
@@ -496,6 +492,7 @@ def seed_build_run(
         input_gate=input_gate,
         input_request=input_request,
         failure=failure,
+        account_id=account_id,
     )
     session.add(run)
     session.flush()

@@ -32,12 +32,12 @@ class CodexToken:
 
 
 @dataclass(frozen=True)
-class CompletedLogin:
+class CompletedConnect:
     payload: dict
     provider_email: str
     expires_at: datetime | None
-    # The session account a reconnect was bound to at start; None on an
-    # initial login.
+    # The operator account the flow was bound to at start; None on an unbound
+    # none/zero setup flow.
     account_id: str | None
 
 

@@ -67,11 +67,11 @@ def _build_units():
 
     class SampleFlow(Workflow):
         @step
-        async def record(self, repo: str) -> str:
+        async def note_repo(self, repo: str) -> str:
             return f"recorded:{repo}"
 
         async def run_multistep(self, repo: str) -> None:
-            await self.record(repo)
+            await self.note_repo(repo)
             decision = await Approve.wait()
             if decision.action == "close":
                 raise FatalError("closed at review")
@@ -81,16 +81,27 @@ def _build_units():
 
         async def run(self, repo: str) -> None:
             decision = await self.DECIDER(body="x")
+            # run()'s whole body is one step, so this agent call is in-step and
+            # must never land on the journal — on the live or the replay pass.
+            SINK.append(f"instep-journal:{len(self.journal.filter(Decision))}")
             if decision.action == "stop":
                 raise FatalError("stopped by agent")
 
+    class AgentBodyFlow(Workflow):
+        # In run_multistep the agent call is body-level — its own step — so
+        # the platform journals the domain value it returns.
+        async def run_multistep(self, repo: str) -> None:
+            decision = await AgentFlow.DECIDER(body="x")
+            assert self.journal.latest(Decision) is decision
+            SINK.append(f"body-journal:{len(self.journal.filter(Decision))}:{decision.action}")
+
     class RecordFeedback(Workflow):
         @step
-        async def record(self, repo: str) -> None:
+        async def note_repo(self, repo: str) -> None:
             SINK.append(repo)
 
         async def run_multistep(self, repo: str) -> None:
-            await self.record(repo)
+            await self.note_repo(repo)
 
     # every= so launch()'s apply_schedules has a schedule to create (smoke).
     class DailySweep(Workflow):
@@ -114,6 +125,8 @@ def _build_units():
             SINK.append(f"round1:{first.action}")
             second = await Approve.wait()
             SINK.append(f"round2:{second.action}")
+            replies = [reply.action for reply in self.journal.filter(Approve)]
+            SINK.append(f"gate-journal:{replies}")
 
     class ConfirmFlow(Workflow):
         async def run_multistep(self) -> None:
@@ -135,6 +148,7 @@ def _build_units():
     return (
         SampleFlow,
         AgentFlow,
+        AgentBodyFlow,
         RecordFeedback,
         SubjectFlow,
         DoubleGateFlow,
@@ -161,7 +175,7 @@ def rt():
     # An agent run checks the resolved harness is connected before any VM work;
     # AgentFlow's decider resolves to claude, so connect it for the module —
     # and mark the account as the execution fallback, the way the first
-    # login would.
+    # harness connection would.
     from druks.accounts.models import Account
     from druks.harnesses.models import HarnessConnection
     from druks.user_settings.models import UserSettings
@@ -187,6 +201,7 @@ def rt():
     (
         sample_flow,
         agent_flow,
+        agent_body_flow,
         feedback_flow,
         subject_flow,
         double_gate_flow,
@@ -202,6 +217,7 @@ def rt():
             engine=engine,
             SampleFlow=sample_flow,
             AgentFlow=agent_flow,
+            AgentBodyFlow=agent_body_flow,
             RecordFeedback=feedback_flow,
             SubjectFlow=subject_flow,
             DoubleGateFlow=double_gate_flow,
@@ -217,6 +233,7 @@ def rt():
         agents._items.pop("decider", None)
         workflows._items.pop("sample_flow", None)
         workflows._items.pop("agent_flow", None)
+        workflows._items.pop("agent_body_flow", None)
         workflows._items.pop("record_feedback", None)
         workflows._items.pop("daily_sweep", None)
         workflows._items.pop("subject_flow", None)
@@ -288,9 +305,9 @@ async def test_attribution_rides_the_run_and_survives_resume(rt):
 
 
 async def test_browser_origin_start_inherits_the_ambient_account(rt):
-    # The session gate stamps the request's account into a contextvar;
+    # The auth gate stamps the request's account into a contextvar;
     # start() reads it when no explicit account_id is passed.
-    from druks.accounts.sessions import current_account_id
+    from druks.accounts.context import current_account_id
 
     account_id = _account_id(rt.engine, "ambient@example.com")
     token = current_account_id.set(account_id)
@@ -373,6 +390,8 @@ async def test_duplicate_replies_to_one_round_collapse(rt):
     await _wait_for(rt.engine, wfid, lambda r: r.state == RunState.FINISHED)
     assert "round2:second" in SINK
     assert "round2:duplicate" not in SINK
+    # Both replies landed on the journal, in reply order.
+    assert "gate-journal:['first', 'second']" in SINK
 
 
 async def test_fail_branch(rt):
@@ -433,16 +452,13 @@ async def test_subjectless_review_fails_loudly(rt):
     assert "'review'" in failed.failure
 
 
-async def test_run_agent_step(rt, monkeypatch):
-    # Stub the VM; assert the step records an AgentCall and the result round-trips.
+def _fake_ephemeral_returning(action: str, seen: list[dict], pinned: list[int]):
+    # Class-method stand-in for Client.ephemeral: a VM whose agent returns
+    # ``action``.
     from datetime import UTC, datetime
 
     from druks.durable.enums import AgentCallStatus
-    from druks.durable.models import AgentCall
     from druks.sandbox.datastructures import AgentResult
-
-    seen: list[dict] = []
-    pinned: list[int] = []
 
     @contextlib.asynccontextmanager
     async def _fake_ephemeral(self, **_kw):
@@ -457,7 +473,7 @@ async def test_run_agent_step(rt, monkeypatch):
             # The harness names the on-disk dir (and the row) from the supplied
             # call_id, so the result echoes it back as run_id.
             return AgentResult(
-                output={"action": "stop"},
+                output={"action": action},
                 run_id=kwargs["call_id"],
                 sandbox_host_id="host-test",
                 model="claude",
@@ -469,17 +485,30 @@ async def test_run_agent_step(rt, monkeypatch):
         # The base Workspace wrapping this box reads host_id off ``id``.
         yield SimpleNamespace(run_agent=_run_agent, id="host-test")
 
-    async def _fake_render(*_a, **_k):
-        return "PROMPT"
+    return _fake_ephemeral
 
+
+async def _fake_render(*_a, **_k):
+    return "PROMPT"
+
+
+async def test_run_agent_step(rt, monkeypatch):
+    # Stub the VM; assert the step records an AgentCall and the result round-trips.
+    from druks.durable.models import AgentCall
+
+    seen: list[dict] = []
+    pinned: list[int] = []
     # Patch the class method (not the singleton instance): an instance-attr
     # patch leaves a shadowing leftover that breaks later sandbox tests.
-    monkeypatch.setattr("druks.sandbox.client.Client.ephemeral", _fake_ephemeral)
+    monkeypatch.setattr(
+        "druks.sandbox.client.Client.ephemeral", _fake_ephemeral_returning("stop", seen, pinned)
+    )
     monkeypatch.setattr("druks.agents.render_prompt", _fake_render)
 
     wfid = await rt.AgentFlow.start(subject=None, repo="owner/app")
     failed = await _wait_for(rt.engine, wfid, lambda r: r.state == RunState.FAILED)
     assert failed.failure == "stopped by agent"
+    assert "instep-journal:0" in SINK  # an agent call inside run()'s step: never recorded
     assert seen and seen[0]["artifact_dir"].name == f"run-{wfid}"
     assert seen[0]["agent"] == "decider"
     session = get_session(rt.engine)
@@ -493,6 +522,22 @@ async def test_run_agent_step(rt, monkeypatch):
     # is charged.
     assert recorded[0].account_id == _account_id(rt.engine, "op@example.com")
     assert pinned == [0]  # connection released while the agent runs
+
+
+async def test_body_level_agent_output_lands_on_the_journal(rt, monkeypatch):
+    """A run_multistep body-level agent call lands the domain value the body
+    receives on the journal — AgentBodyFlow asserts identity in-body and sinks
+    the projection."""
+    seen: list[dict] = []
+    pinned: list[int] = []
+    monkeypatch.setattr(
+        "druks.sandbox.client.Client.ephemeral", _fake_ephemeral_returning("ship", seen, pinned)
+    )
+    monkeypatch.setattr("druks.agents.render_prompt", _fake_render)
+
+    wfid = await rt.AgentBodyFlow.start(subject=None, repo="owner/app")
+    await _wait_for(rt.engine, wfid, lambda r: r.state == RunState.FINISHED)
+    assert "body-journal:1:ship" in SINK
 
 
 async def test_task_enqueue(rt):

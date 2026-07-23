@@ -35,25 +35,85 @@ caches, and the sandbox provisioning gate.
 | `DRUKS_ENDPOINT` | Browser-visible dashboard base URL used to build MCP OAuth callbacks |
 | `DRUKS_WEBHOOK_HOST` | Public webhook hostname used by `druks doctor` for its ingress probe |
 | `DRUKS_WEBHOOK_SECRET` | Shared HMAC secret used by bundled webhook integrations |
-| `DRUKS_AUTH_HEADER` | Identity header the edge (Caddy) requires; the app never reads it |
+| `DRUKS_AUTH_MODE` | `none` (default; no authentication, single operator), `header` (edge-asserted identity), or `jwt` (edge-signed assertion, verified) |
+| `DRUKS_AUTH_HEADER` | The trusted identity header; read by both the shipped Caddy edge and Druks. No default — header and jwt modes refuse to start without it |
+| `DRUKS_AUTH_JWKS_URL` | `jwt` mode: where the edge publishes its signing keys |
+| `DRUKS_AUTH_JWT_ISSUER` | `jwt` mode: required `iss` claim value |
+| `DRUKS_AUTH_JWT_AUDIENCE` | `jwt` mode: required `aud` claim value |
+| `DRUKS_AUTH_JWT_IDENTITY_CLAIM` | `jwt` mode: the claim mapped to the account (default `email`) |
 
 `DRUKS_ENDPOINT` and `DRUKS_WEBHOOK_HOST` are different. The first is where an
 operator's browser reaches Druks; the second is the public ingress webhook
 senders reach. They may share a hostname on exe.dev.
 
-Harness login is the account door: signing in to Codex or Claude from the
-dashboard resolves your account and mints the `druks_session` cookie
-(HttpOnly, 30-day sliding TTL in Redis) that every internal API and SSE
-stream requires. The shipped remote Caddy admits only requests carrying a
-nonempty `DRUKS_AUTH_HEADER` identity — pure admission; the app never reads
-the header. Public `POST /_external/*` routes bypass the
-edge identity check and carry their own authentication — webhook signature
-verification, and the notification respond route's correlation token. Do not
-publish the local `127.0.0.1:8001` listener directly. Configure
-the identity proxy to strip every client-supplied copy of
-`DRUKS_AUTH_HEADER` — a client that can inject it walks past the edge. Terminate
-TLS and set HSTS at that public proxy; the shipped Caddy listener is loopback
-HTTP behind the TLS edge.
+Druks does not authenticate browsers. Identity resolves per request, in this
+order:
+
+1. **Personal access token.** When an `Authorization` header is present it
+   must authenticate — a malformed or dead bearer is a 401, never a fall
+   through to the modes below.
+2. **`header` mode.** The edge (exe.dev, Teleport, Cloudflare Access, …)
+   authenticates and asserts the operator's email as exactly one nonblank
+   `DRUKS_AUTH_HEADER` value; Druks trims outer whitespace and maps it to an
+   account, creating one on first sight (open enrollment — the edge decides
+   who reaches Druks at all; the account column is case-insensitive).
+3. **`jwt` mode.** The same assertion channel as `header` mode, but the value
+   is a signed JWT: Druks verifies the RS256 signature against
+   `DRUKS_AUTH_JWKS_URL` (keys cached for five minutes and refetched on
+   rotation), requires `exp`, `iss`, and `aud` to match the configured
+   issuer and audience, and maps the verified
+   `DRUKS_AUTH_JWT_IDENTITY_CLAIM` through the same open enrollment. A
+   failed verification is a 401 naming only the failure class — never the
+   token. Confirm the real edge's header name, claims, and rotation story
+   before enabling the mode; the RS256 profile is pinned, not negotiated.
+4. **`none` mode.** No authentication and no identity edge: Druks resolves
+   the only non-system account. Zero accounts is the setup state — the
+   dashboard onboards by connecting a harness, and the first completed
+   connection creates the operator account from the provider-verified email.
+   More than one non-system account is configuration drift: Druks refuses
+   requests (and startup) loudly rather than guess.
+
+Trust requirements for `header` mode: the edge must authenticate every
+dashboard request, must strip any client-supplied copy of
+`DRUKS_AUTH_HEADER` before inserting its authenticated value — a client that
+can inject the header can be anyone — and must terminate TLS and set HSTS.
+`jwt` mode keeps the same strip requirement but adds cryptographic
+provenance: a forged header value fails signature verification instead of
+becoming an identity, so a misconfigured proxy degrades to a 401 rather
+than an impersonation.
+The shipped Caddy listener is loopback HTTP behind that edge, and the Druks
+web listener itself binds loopback by default. In `none` mode there is no
+authentication at all, so the listener must stay loopback-only — never
+publish it.
+
+Any public listener that bypasses the identity edge must never forward
+`DRUKS_AUTH_HEADER` upstream. The shipped webhook listener already serves
+only HMAC-verified `/_external/*` and the PAT-authenticated `/mcp` — nothing
+that resolves the header — and any future public listener (for example the
+planned MCP integrations listener) must keep that same isolation.
+
+Public `POST /_external/*` routes bypass the identity gate and carry their
+own authentication — webhook signature verification, and the notification
+respond route's correlation token. `GET /api/auth/me` answers without a
+resolved account so the dashboard can render onboarding in the `none`-mode
+setup state.
+
+## Personal access tokens
+
+Agents and other non-browser clients authenticate the same internal API with
+personal access tokens minted in Settings → Agent access, sent as
+`Authorization: Bearer <token>`. A token serializes as
+`druks_pat_<prefix>_<secret>`; Druks stores only the SHA-256 of the full
+token, shows the plaintext exactly once at mint, and expires it 365 days
+after creation. When the header is present it must authenticate — a bad
+token is a 401, never a fall back to edge identity — and token management
+itself accepts the signed-in identity only (edge-asserted, or the none-mode
+operator) and refuses any `Authorization` header, so a leaked token cannot
+mint or revoke tokens. On compromise, revoke the token in Settings → Agent access
+(immediate; the list shows each token's prefix and last use, tracked hourly,
+to identify it) and mint a replacement — rotation is mint first, revoke
+second. Agents consume the API through the MCP endpoint; see
+[Connect your agent](connect-your-agent.md).
 
 ## GitHub Apps
 
@@ -144,9 +204,12 @@ extension and edited in the dashboard, not environment variables.
 ## Harnesses
 
 Claude and Codex subscription credentials are connected from **Settings →
-Harnesses**. The login flow stores each credential in Postgres; Druks refreshes
-it on a schedule and synthesizes the CLI credential file inside each sandbox.
-It does not copy a host login.
+Harnesses**. The connect flow stores each credential in Postgres; Druks
+refreshes it on a schedule and synthesizes the CLI credential file inside each
+sandbox. It does not copy a host login. Connecting is a capability connect for
+the requesting account — in a fresh `none`-mode install the first completed
+connection also creates the operator account (see
+[access control](#public-urls-and-access-control)).
 
 Process settings such as `DRUKS_CLAUDE_CONFIG_DIR` and
 `DRUKS_CODEX_CONFIG_DIR` point at optional non-auth CLI configuration to carry
