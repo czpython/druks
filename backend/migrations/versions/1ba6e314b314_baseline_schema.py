@@ -1,11 +1,12 @@
 """baseline schema
 
-Collapsed the pre-1.0 migration chain into one create-all baseline
-(schema proven identical to the prior head f0a1b2c3d4e5).
+Collapsed the migration chain (40cfd4c2aeee + the two-headed
+0ec9db44973e/b3f1a9c47d20/ff43df27a2e0 branches) into one create-all
+baseline; schema proven identical to both heads applied.
 
-Revision ID: 40cfd4c2aeee
+Revision ID: 1ba6e314b314
 Revises:
-Create Date: 2026-07-19 01:12:59.769302
+Create Date: 2026-07-24 00:08:01.159354
 
 """
 
@@ -16,14 +17,13 @@ from alembic import op
 from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
-revision: str = "40cfd4c2aeee"
+revision: str = "1ba6e314b314"
 down_revision: str | Sequence[str] | None = None
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    # citext backs the case-insensitive account/provider email columns below.
     op.execute("CREATE EXTENSION IF NOT EXISTS citext")
     op.create_table(
         "accounts",
@@ -137,6 +137,7 @@ def upgrade() -> None:
         sa.Column("input_gate", sa.String(), nullable=True),
         sa.Column("input_request", postgresql.JSONB(astext_type=sa.Text()), nullable=True),
         sa.Column("input_requested_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("answer_parked_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("failure", sa.String(), nullable=True),
         sa.Column("failure_code", sa.String(), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
@@ -157,6 +158,33 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(["account_id"], ["accounts.id"], ondelete="RESTRICT"),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("harness", "account_id"),
+    )
+    op.create_table(
+        "personal_access_tokens",
+        sa.Column("account_id", sa.String(), nullable=False),
+        sa.Column("name", sa.String(length=80), nullable=False),
+        sa.Column("token_prefix", sa.String(length=12), nullable=False),
+        sa.Column("token_hash", sa.LargeBinary(), nullable=False),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("expires_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("last_used_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("revoked_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("id", sa.String(), nullable=False),
+        sa.ForeignKeyConstraint(["account_id"], ["accounts.id"], ondelete="RESTRICT"),
+        sa.PrimaryKeyConstraint("id"),
+        sa.UniqueConstraint("token_hash"),
+    )
+    op.create_index(
+        op.f("ix_personal_access_tokens_token_prefix"),
+        "personal_access_tokens",
+        ["token_prefix"],
+        unique=True,
+    )
+    op.create_index(
+        "personal_access_tokens_account_idx",
+        "personal_access_tokens",
+        ["account_id", "revoked_at", "created_at"],
+        unique=False,
     )
     op.create_table(
         "project_repos",
@@ -291,9 +319,6 @@ def upgrade() -> None:
         sa.Column("branch", sa.String(), nullable=True),
         sa.Column("build_run_id", sa.String(), nullable=True),
         sa.Column("status", sa.String(), nullable=True),
-        sa.Column(
-            "extension_config_snapshot", postgresql.JSONB(astext_type=sa.Text()), nullable=False
-        ),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
         sa.ForeignKeyConstraint(["build_run_id"], ["durable_runs.id"], ondelete="SET NULL"),
@@ -347,6 +372,11 @@ def downgrade() -> None:
     op.drop_table("skills")
     op.drop_index("project_repos_project_idx", table_name="project_repos")
     op.drop_table("project_repos")
+    op.drop_index("personal_access_tokens_account_idx", table_name="personal_access_tokens")
+    op.drop_index(
+        op.f("ix_personal_access_tokens_token_prefix"), table_name="personal_access_tokens"
+    )
+    op.drop_table("personal_access_tokens")
     op.drop_table("harness_logins")
     op.drop_table("durable_runs")
     op.drop_table("skill_collections")
