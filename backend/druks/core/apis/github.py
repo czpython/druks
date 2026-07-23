@@ -87,15 +87,20 @@ class GitHubClient:
         "add repo" affordance.
         """
         try:
-            inst_resp = await self._app.rest.apps.async_get_org_installation(owner)
+            installation_response = await self._app.rest.apps.async_get_org_installation(owner)
         except RequestFailed as error:
-            if error.response.status_code == 404:
-                return []
-            raise
-        inst_id = inst_resp.parsed_data.id
+            if error.response.status_code != 404:
+                raise
+            try:
+                installation_response = await self._app.rest.apps.async_get_user_installation(owner)
+            except RequestFailed as error:
+                if error.response.status_code == 404:
+                    return []
+                raise
+        installation_id = installation_response.parsed_data.id
 
         async with GitHub(
-            AppInstallationAuthStrategy(self._app_id, self._private_key, inst_id),
+            AppInstallationAuthStrategy(self._app_id, self._private_key, installation_id),
             base_url=self._base_url,
         ) as gh:
             repos: list[dict[str, Any]] = []

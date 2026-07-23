@@ -1,7 +1,13 @@
+from types import SimpleNamespace
 from typing import Any
+from unittest.mock import AsyncMock, call
 
+import druks.core.apis.github as github_api
+import pytest
 from druks.core.apis.exceptions import GitHubAppNotInstalledError
 from druks.core.apis.github import GitHubClient
+from githubkit import GitHub
+from githubkit.exception import RequestFailed
 
 
 class _Parsed:
@@ -76,12 +82,129 @@ class _FakeResponse:
         self.status_code = status_code
 
 
-def _make_request_failed(status_code: int):
-    from githubkit.exception import RequestFailed
-
+def _make_request_failed(status_code: int) -> RequestFailed:
     exc = RequestFailed.__new__(RequestFailed)
     exc.response = _FakeResponse(status_code)  # type: ignore[assignment]
     return exc
+
+
+class _OwnerReposClient(GitHubClient):
+    def __init__(self, apps: Any) -> None:
+        self._app_id = "123"
+        self._private_key = "private-key"
+        self._base_url = "https://api.github.test"
+        self._app = SimpleNamespace(rest=SimpleNamespace(apps=apps))
+
+
+class _InstallationGitHub:
+    def __init__(self, apps: Any) -> None:
+        self.rest = SimpleNamespace(apps=apps)
+
+    async def __aenter__(self) -> "_InstallationGitHub":
+        return self
+
+    async def __aexit__(self, *args: Any) -> None:
+        pass
+
+
+async def test_list_repos_for_user_installation_falls_back_and_paginates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app_apis = SimpleNamespace(
+        async_get_org_installation=AsyncMock(side_effect=_make_request_failed(404)),
+        async_get_user_installation=AsyncMock(
+            return_value=SimpleNamespace(parsed_data=SimpleNamespace(id=42))
+        ),
+    )
+    first_page = [
+        SimpleNamespace(full_name=f"czpython/repo-{number}", description=None)
+        for number in range(100)
+    ]
+    second_page = [
+        SimpleNamespace(full_name="czpython/repo-100", description="first"),
+        SimpleNamespace(full_name="czpython/repo-101", description="second"),
+    ]
+    repo_apis = SimpleNamespace(
+        async_list_repos_accessible_to_installation=AsyncMock(
+            side_effect=[
+                SimpleNamespace(parsed_data=SimpleNamespace(repositories=first_page)),
+                SimpleNamespace(parsed_data=SimpleNamespace(repositories=second_page)),
+            ]
+        )
+    )
+    installation_github = _InstallationGitHub(repo_apis)
+    monkeypatch.setattr(github_api, "GitHub", lambda *_args, **_kwargs: installation_github)
+    client = _OwnerReposClient(app_apis)
+
+    repos = await client.list_repos_for_owner("czpython")
+
+    assert len(repos) == 102
+    assert repos[0] == {"full_name": "czpython/repo-0", "description": None}
+    assert repos[-1] == {"full_name": "czpython/repo-101", "description": "second"}
+    app_apis.async_get_org_installation.assert_awaited_once_with("czpython")
+    app_apis.async_get_user_installation.assert_awaited_once_with("czpython")
+    repo_apis.async_list_repos_accessible_to_installation.assert_has_awaits(
+        [
+            call(per_page=100, page=1),
+            call(per_page=100, page=2),
+        ]
+    )
+
+
+async def test_list_repos_for_org_installation_does_not_consult_user_endpoint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app_apis = SimpleNamespace(
+        async_get_org_installation=AsyncMock(
+            return_value=SimpleNamespace(parsed_data=SimpleNamespace(id=41))
+        ),
+        async_get_user_installation=AsyncMock(),
+    )
+    repo_apis = SimpleNamespace(
+        async_list_repos_accessible_to_installation=AsyncMock(
+            return_value=SimpleNamespace(
+                parsed_data=SimpleNamespace(
+                    repositories=[
+                        SimpleNamespace(
+                            full_name="clawhaven/druks",
+                            description="Durable agent applications",
+                        )
+                    ]
+                )
+            )
+        )
+    )
+    installation_github = _InstallationGitHub(repo_apis)
+    monkeypatch.setattr(github_api, "GitHub", lambda *_args, **_kwargs: installation_github)
+    client = _OwnerReposClient(app_apis)
+
+    repos = await client.list_repos_for_owner("clawhaven")
+
+    assert repos == [
+        {
+            "full_name": "clawhaven/druks",
+            "description": "Durable agent applications",
+        }
+    ]
+    app_apis.async_get_org_installation.assert_awaited_once_with("clawhaven")
+    app_apis.async_get_user_installation.assert_not_awaited()
+
+
+async def test_list_repos_for_owner_returns_empty_when_app_is_not_installed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app_apis = SimpleNamespace(
+        async_get_org_installation=AsyncMock(side_effect=_make_request_failed(404)),
+        async_get_user_installation=AsyncMock(side_effect=_make_request_failed(404)),
+    )
+    github_constructor = AsyncMock()
+    monkeypatch.setattr(github_api, "GitHub", github_constructor)
+    client = _OwnerReposClient(app_apis)
+
+    assert await client.list_repos_for_owner("uninstalled") == []
+    app_apis.async_get_org_installation.assert_awaited_once_with("uninstalled")
+    app_apis.async_get_user_installation.assert_awaited_once_with("uninstalled")
+    github_constructor.assert_not_called()
 
 
 class _Flaky401Pulls:
@@ -146,8 +269,6 @@ async def test_401_invalidates_cache_and_retries_once_then_succeeds() -> None:
 
 
 async def test_403_does_not_retry() -> None:
-    from githubkit.exception import RequestFailed
-
     pulls = _ForbiddenPulls()
 
     class _Gh:
@@ -168,8 +289,6 @@ async def test_403_does_not_retry() -> None:
 
 
 async def test_401_on_retry_surfaces_to_caller() -> None:
-    from githubkit.exception import RequestFailed
-
     pulls = _StuckOn401Pulls()
 
     class _Gh:
@@ -236,8 +355,6 @@ async def test_github_client_aclose_drops_cache_without_raising() -> None:
     would raise ``'NoneType' object has no attribute 'aclose'`` (the prod
     "Application shutdown failed" on every restart). aclose just drops the
     per-installation cache."""
-    from githubkit import GitHub
-
     client = GitHubClient.__new__(GitHubClient)
     client._app = GitHub("fake-token")
     client._repo_gh_cache = {1: GitHub("fake-token")}
