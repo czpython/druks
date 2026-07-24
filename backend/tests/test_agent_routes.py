@@ -19,7 +19,7 @@ from fastapi.testclient import TestClient
 
 _IN_APP_ASK = {
     "presentation": "in_app",
-    "controls": ["approve", "request_changes", "cancel"],
+    "controls": ["approve", "request_changes"],
     "questions": [],
 }
 

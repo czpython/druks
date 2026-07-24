@@ -22,7 +22,7 @@ _WEBHOOK_URL = "https://hooks.slack.com/services/T000/B000/slackrail"
 
 _IN_APP_ASK = {
     "presentation": "in_app",
-    "controls": ["approve", "request_changes", "cancel"],
+    "controls": ["approve", "request_changes"],
     "questions": [],
 }
 

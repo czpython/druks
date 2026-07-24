@@ -172,20 +172,6 @@ async def test_questions_park_in_auto_mode_too(monkeypatch):
     assert await flow._plan_phase() is True
 
 
-async def test_cancel_at_the_plan_park_stops_the_run(monkeypatch):
-    flow = _flow()
-    _fake_plans(monkeypatch, PlanData(plan_markdown="v1"))
-    _no_review_agent(monkeypatch)
-
-    async def fake_review(*, questions=None, context=""):
-        return OperatorReply(action="cancel")
-
-    flow.review = fake_review
-
-    with pytest.raises(FatalError, match="cancelled at plan review"):
-        await flow._plan_phase()
-
-
 async def test_needs_clarification_delivery_stops_the_run(monkeypatch):
     """The implementer bailing (needs_clarification) fails the run with its own
     reason — the stop is a workflow decision now, not a contract side effect."""

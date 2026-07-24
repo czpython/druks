@@ -2203,8 +2203,11 @@ input.set-select { background-image: none; padding-right: 12px; }
 .ins-xscript-bar .ins-stream-meta { margin-bottom: 0; }
 .ins-run-link { display: inline-flex; align-items: center; gap: 6px; font-family: var(--font-mono); font-size: 11px; color: var(--text-dim); white-space: nowrap; cursor: pointer; }
 .ins-run-link:hover { color: var(--text); }
-/* In the sticky step header the run link sits flush right of the metrics. */
-.ins-step-head .ins-run-link { margin-left: auto; }
+/* In the sticky step header the run actions sit flush right of the metrics. */
+.ins-step-head .ins-sh-actions { margin-left: auto; display: inline-flex; align-items: center; gap: 16px; }
+.ins-run-link.ins-cancel { color: var(--outcome-abandoned); }
+.ins-cancel-confirm { display: inline-flex; align-items: center; gap: 10px; }
+.ins-cancel-reason { font-family: var(--font-mono); font-size: 11px; padding: 3px 8px; width: 190px; border: 1px solid var(--border); border-radius: 4px; background: var(--bg); color: var(--text); }
 .ins-live-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--bucket-run); box-shadow: 0 0 6px var(--bucket-run); animation: pulse 1.4s ease-in-out infinite; }
 
 /* provisioning notice */

@@ -104,6 +104,8 @@ const CALL_GLYPH: Record<string, string> = {
   abandoned: '⊘',
 }
 const isRunning = (run: RunSummary) => run.state === 'running'
+const isActiveRun = (run: RunSummary) =>
+  run.state === 'running' || run.state === 'pending_input' || run.state === 'scheduled'
 
 interface Metrics {
   elapsed: number
@@ -549,16 +551,73 @@ function RunHeader({
           <span className="ins-sh-k">tokens</span> {fmtTok(m.tokens)}
         </span>
       </span>
-      {call && (
-        <button
-          type="button"
-          className="ins-run-link"
-          onClick={() => navigate(agentCallPath(wi.id, wi.remoteKey, wi.title, call.id))}
-        >
-          open full run ↗
-        </button>
-      )}
+      <span className="ins-sh-actions">
+        {isActiveRun(run) && <CancelRun runId={run.id} />}
+        {call && (
+          <button
+            type="button"
+            className="ins-run-link"
+            onClick={() => navigate(agentCallPath(wi.id, wi.remoteKey, wi.title, call.id))}
+          >
+            open full run ↗
+          </button>
+        )}
+      </span>
     </div>
+  )
+}
+
+// Cancel is a run-level action: end any active run, parked or running. A destructive
+// stop, so it confirms first and takes an optional reason (the recorded cancel note).
+// The detail stream re-emits the snapshot on the state flip, so this control unmounts
+// itself — no local success handling.
+function CancelRun({ runId }: { runId: string }) {
+  const [confirming, setConfirming] = useState(false)
+  const [reason, setReason] = useState('')
+  const [pending, setPending] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  async function cancel() {
+    setPending(true)
+    setError(null)
+    try {
+      await api.cancelRun(runId, reason.trim() || 'cancelled by operator')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'could not cancel')
+      setPending(false)
+    }
+  }
+
+  if (!confirming) {
+    return (
+      <button type="button" className="ins-run-link ins-cancel" onClick={() => setConfirming(true)}>
+        cancel run
+      </button>
+    )
+  }
+  return (
+    <span className="ins-cancel-confirm">
+      <input
+        type="text"
+        className="ins-cancel-reason mono"
+        placeholder="reason (optional)"
+        maxLength={500}
+        value={reason}
+        onChange={(e) => setReason(e.target.value)}
+      />
+      <button type="button" className="ins-run-link ins-cancel" disabled={pending} onClick={cancel}>
+        confirm cancel
+      </button>
+      <button
+        type="button"
+        className="ins-run-link"
+        disabled={pending}
+        onClick={() => setConfirming(false)}
+      >
+        back
+      </button>
+      {error && <span className="review-error">{error}</span>}
+    </span>
   )
 }
 
@@ -580,7 +639,6 @@ const CONTROL_LABEL: Record<string, string> = {
   approve: 'Approve',
   request_changes: 'Request changes',
   revise_contract: 'Revise contract',
-  cancel: 'Cancel',
 }
 
 // A run parked on an external ask (PR review, ticket comment): a one-line

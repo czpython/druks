@@ -150,7 +150,7 @@ def test_deleting_designated_destination_unsets_the_pointer(tmp_path, db_session
 
 _IN_APP_ASK = {
     "presentation": "in_app",
-    "controls": ["approve", "request_changes", "cancel"],
+    "controls": ["approve", "request_changes"],
     "questions": [{"id": "q1", "prompt": "which?", "options": [{"id": "a", "label": "A"}]}],
 }
 
