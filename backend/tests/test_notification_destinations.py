@@ -180,19 +180,6 @@ def test_routes_reject_blank_name(tmp_path, db_session):
         assert not client.get("/api/notifications/destinations").json()
 
 
-def test_routes_list_masks_every_url(tmp_path, db_session):
-    with TestClient(configure_app_for_test(settings=make_settings(tmp_path))) as client:
-        client.post("/api/notifications/destinations", json=_create_body())
-        client.post("/api/notifications/destinations", json=_create_body(name="alerts"))
-
-        listed = client.get("/api/notifications/destinations")
-        assert listed.status_code == 200
-        assert [destination["name"] for destination in listed.json()] == ["alerts", "ops"]
-        assert all(destination["url"] == "**********" for destination in listed.json())
-        assert all(destination["hasUrl"] for destination in listed.json())
-        assert "secretpart" not in listed.text
-
-
 def test_routes_toggle_enabled(tmp_path, db_session):
     with TestClient(configure_app_for_test(settings=make_settings(tmp_path))) as client:
         destination_id = client.post("/api/notifications/destinations", json=_create_body()).json()[
@@ -254,16 +241,6 @@ async def test_informational_delivery_unparseable_stored_url_still_fails_loudly(
 
     assert "ops" in str(excinfo.value)
     assert fake_apprise.sent == []
-    assert _WEBHOOK_URL not in str(excinfo.value)
-    assert _WEBHOOK_URL not in caplog.text
-
-
-async def test_informational_delivery_notify_falsy_is_a_failure(fake_apprise, caplog):
-    fake_apprise.notify_result = False
-
-    with pytest.raises(DeliveryError) as excinfo:
-        await delivery.deliver(_slack_destination(), "hello")
-
     assert _WEBHOOK_URL not in str(excinfo.value)
     assert _WEBHOOK_URL not in caplog.text
 

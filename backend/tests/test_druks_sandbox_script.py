@@ -71,3 +71,41 @@ def test_exec_start_token_change_picked_up_on_next_spawn(tmp_path: Path):
         )
         stdout = (get_runs_root / run_id / "stdout.jsonl").read_text()
         assert f"GH_TOKEN={token}" in stdout
+
+
+def _git_credential(op: str, *, token_file: Path) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        ["sh", str(SCRIPT), "git-credential", op],
+        input="protocol=https\nhost=github.com\n",
+        capture_output=True,
+        text=True,
+        env={"DRUKS_GITHUB_TOKEN_FILE": str(token_file), "PATH": "/usr/bin:/bin"},
+    )
+
+
+def test_git_credential_get_emits_token_from_file(tmp_path: Path):
+    token_file = tmp_path / "github-token"
+    token_file.write_text("gho_rotatable_secret")
+
+    proc = _git_credential("get", token_file=token_file)
+
+    assert proc.returncode == 0
+    assert "username=x-access-token" in proc.stdout
+    assert "password=gho_rotatable_secret" in proc.stdout
+
+
+def test_git_credential_store_and_erase_are_noops(tmp_path: Path):
+    token_file = tmp_path / "github-token"
+    token_file.write_text("gho_x")
+
+    for op in ("store", "erase"):
+        proc = _git_credential(op, token_file=token_file)
+        assert proc.returncode == 0, op
+        assert proc.stdout == "", op
+
+
+def test_git_credential_get_silent_when_token_file_missing(tmp_path: Path):
+    proc = _git_credential("get", token_file=tmp_path / "does-not-exist")
+
+    assert proc.returncode == 0
+    assert proc.stdout == ""

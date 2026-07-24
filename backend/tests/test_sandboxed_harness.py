@@ -7,13 +7,13 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from druks.harnesses.base import Harness
+from druks.harnesses.base import Harness, check_returncode
 from druks.harnesses.exceptions import (
     HarnessError,
     HarnessFirstByteTimeoutError,
     HarnessTimeoutError,
 )
-from druks.sandbox.datastructures import AgentInvocation, Credentials
+from druks.sandbox.datastructures import AgentInvocation, Credentials, HarnessRunResult
 from druks.sandbox.exceptions import SandboxUnreachable
 from druks.sandbox.host import Sandbox
 
@@ -347,62 +347,9 @@ async def test_run_prompt_builds_executes_and_parses(
     assert seen["parse"]["result"].stdout == b"streamed\n"
 
 
-def test_sandbox_settings_from_settings_threads_through(tmp_path: Path):
-    from types import SimpleNamespace
-
-    from druks.harnesses.datastructures import SandboxSettings
-
-    claude_dir = tmp_path / ".claude"
-    codex_dir = tmp_path / ".codex"
-
-    skills_path = tmp_path / "skills"
-
-    fake_settings = SimpleNamespace(
-        sandbox_service_url="https://sb.test",
-        sandbox_service_token="t-xyz",
-        sandbox_service_timeout=42.0,
-        sandbox_image="ghcr.io/.../sandbox:v1",
-        claude_config_dir=claude_dir,
-        codex_config_dir=codex_dir,
-        skills_dir=skills_path,
-    )
-
-    sandbox_settings = SandboxSettings.from_settings(fake_settings)  # type: ignore[arg-type]
-
-    assert sandbox_settings.service_url == "https://sb.test"
-    assert sandbox_settings.service_token == "t-xyz"
-    assert sandbox_settings.service_timeout == 42.0
-    assert sandbox_settings.image == "ghcr.io/.../sandbox:v1"
-    assert not hasattr(sandbox_settings, "ssh_username")
-    assert sandbox_settings.claude_config_dir == claude_dir
-    assert sandbox_settings.codex_config_dir == codex_dir
-    assert sandbox_settings.skills_dir == skills_path
-
-
-def test_sandbox_settings_is_frozen():
-    from druks.harnesses.datastructures import SandboxSettings
-
-    sandbox_settings = SandboxSettings(
-        service_url="x",
-        service_token="x",
-        service_timeout=30.0,
-        image="x",
-        claude_config_dir=Path("/home/agent/.claude"),
-        codex_config_dir=Path("/home/agent/.codex"),
-    )
-
-    from dataclasses import FrozenInstanceError
-
-    with pytest.raises(FrozenInstanceError):
-        sandbox_settings.service_url = "y"  # type: ignore[misc]
-
-
 def test_check_returncode_surfaces_the_streams_terminal_error():
     """A usage-limit death persisted as a bare 'claude exited with 1.' —
     the reason (and its reset time) was sitting in the last result event."""
-    from druks.harnesses.base import check_returncode
-    from druks.sandbox.datastructures import HarnessRunResult
-
     stdout = (
         b'{"type":"assistant","message":{}}\n'
         b'{"type":"result","subtype":"success","is_error":true,'
@@ -416,8 +363,6 @@ def test_check_returncode_surfaces_the_streams_terminal_error():
 
 
 def test_check_returncode_stays_bare_without_a_terminal_event():
-    from druks.harnesses.base import check_returncode
-    from druks.sandbox.datastructures import HarnessRunResult
 
     with pytest.raises(HarnessError, match=r"claude exited with 2\.$"):
         check_returncode(

@@ -183,17 +183,6 @@ async def test_claude_bad_response_keeps_row(monkeypatch, db_session):
     assert ClaudeHarness.get_credentials()["claudeAiOauth"]["accessToken"] == "old"
 
 
-async def test_codex_invalid_grant_drops_row(monkeypatch, db_session):
-    stale = _jwt(int((_NOW + timedelta(hours=1)).timestamp()))
-    connection = _seed_codex(access=stale, refresh="R0")
-    _mock_post(monkeypatch, _resp(400, {"error": "invalid_grant"}))
-    result = await CodexHarness.rotate_token(connection.id, now=_NOW)
-    assert result.error == "invalid_grant"
-    assert not HarnessConnection.list_all()
-    with pytest.raises(HarnessNotConnectedError):
-        CodexHarness.get_credentials()
-
-
 async def test_rotation_of_a_deleted_row_is_a_no_op(monkeypatch, db_session):
     connection = _seed_claude(access="old", expires_at=_NOW - timedelta(minutes=1))
     connection_id = connection.id

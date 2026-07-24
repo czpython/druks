@@ -4,6 +4,7 @@ import hashlib
 import json
 from urllib.parse import parse_qsl, urlparse
 
+import druks.redis
 import httpx
 import pytest
 from conftest import configure_app_for_test, make_settings
@@ -406,11 +407,17 @@ async def test_disconnect_route_drops_grant_and_cache(
     with TestClient(configure_app_for_test(settings=make_settings(tmp_path))) as client:
         assert client.delete(f"/api/mcp-servers/{_NAME}/grant").status_code == 204
         assert not McpOauthGrant.get_for_server(_NAME)
-        assert not await get_client().get(f"{OAUTH_ACCESS_TOKEN_PREFIX}{_NAME}")
         # The mirror of connect-enables: no grant, no calls, so no dead entry
         # riding into VMs.
         assert McpServer.get_for_name(_NAME).is_enabled is False
         assert client.delete(f"/api/mcp-servers/{_NAME}/grant").status_code == 404
+
+    # Read the eviction on this test's own loop. Abandon whatever client the
+    # portal left (the conftest fixture's move) rather than trusting lifespan
+    # shutdown to have nulled it — a portal-bound client awaited from here
+    # parks forever, it doesn't raise.
+    druks.redis._client = None
+    assert not await get_client().get(f"{OAUTH_ACCESS_TOKEN_PREFIX}{_NAME}")
 
 
 def test_api_has_token_reflects_the_grant_and_leaks_no_secret(tmp_path, registry_state, db_session):

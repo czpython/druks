@@ -1,4 +1,5 @@
 import base64
+import faulthandler
 import os
 import secrets
 from pathlib import Path
@@ -49,6 +50,11 @@ os.environ.setdefault("DRUKS_SECRETS_KEY", base64.b64encode(secrets.token_bytes(
 iter_extensions()
 for test_module in ("test_durable_sdk", "test_notifications_durable"):
     register_workflow_package(test_module, None)
+
+# A parked await hangs the suite silently — the whole run normally finishes in
+# ~90s. Dump every thread's stack and die from inside the process, so CI keeps
+# the dump (a cancelled job loses its step's unflushed tail).
+faulthandler.dump_traceback_later(timeout=540, exit=True)
 
 
 @pytest.fixture(autouse=True)

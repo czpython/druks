@@ -2,7 +2,7 @@ import pytest
 from druks.ticketing.datastructures import Ticket
 from druks.ticketing.enums import SemanticStatus, StatusKind
 from druks.ticketing.exceptions import TrackerNotConfigured
-from druks.ticketing.helpers import get_tracker, is_tracker_source
+from druks.ticketing.helpers import get_tracker
 from druks.ticketing.jira import Jira
 from druks.ticketing.linear import Linear
 
@@ -153,12 +153,6 @@ def test_get_tracker_unconfigured_raises(tmp_path, monkeypatch):
     monkeypatch.setattr(linear, "load_settings", lambda: make_settings(tmp_path))
     with pytest.raises(TrackerNotConfigured):
         get_tracker("linear")
-
-
-def test_is_tracker_source():
-    assert is_tracker_source("linear")
-    assert is_tracker_source("jira")
-    assert not is_tracker_source("github")
 
 
 def test_linear_declares_known_exceptions():

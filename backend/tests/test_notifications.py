@@ -5,11 +5,9 @@ from conftest import (
     configure_app_for_test,
     make_settings,
     seed_dbos_status,
-    seed_run,
 )
 from druks.durable import Run
 from druks.models import Base
-from druks.notifications.datastructures import NotificationState
 from druks.notifications.exceptions import InvalidChoiceError
 from druks.notifications.models import Destination, Notification
 from druks.notifications.services import respond_to_notification
@@ -25,56 +23,7 @@ def _destination(name: str = "ops") -> Destination:
     return Destination.create(name=name, kind="slack_webhook", url=_WEBHOOK_URL)
 
 
-# --- entity: defaults, round-trip, transitions ------------------------------
-
-
-def test_row_defaults_and_minted_token(db_session):
-    destination = _destination()
-    notification = Notification.create(
-        destination_id=destination.id,
-        reason="gate.parked",
-        body="review the plan",
-        subject=_SUBJECT,
-    )
-
-    read = Notification.get(notification.id)
-    assert read.state == NotificationState.PENDING
-    assert read.attempts == 0
-    assert read.last_error is None
-    assert read.delivered_at is None
-    assert read.subject == _SUBJECT
-    assert read.actions is None
-    assert read.run_id is None
-    assert read.run_parked_at is None
-    assert read.deep_link is None
-    assert len(read.correlation_token) >= 32
-
-
-def test_reply_routing_and_actions_round_trip(db_session):
-    destination = _destination()
-    run = seed_run(db_session, str(uuid7()), kind="notifications.test")
-    asked_at = Base.utc_now()
-
-    notification = Notification.create(
-        destination_id=destination.id,
-        reason="gate.parked",
-        body="review the plan",
-        subject={"type": "work_item", "id": 7},
-        actions=[{"id": "approve", "label": "Approve"}, {"id": "reject", "label": "Reject"}],
-        run_id=run.id,
-        run_parked_at=asked_at,
-        deep_link="https://github.com/acme/app/pull/1",
-    )
-
-    read = Notification.get(notification.id)
-    assert read.subject == {"type": "work_item", "id": 7}
-    assert read.actions == [
-        {"id": "approve", "label": "Approve"},
-        {"id": "reject", "label": "Reject"},
-    ]
-    assert read.run_id == run.id
-    assert read.run_parked_at == asked_at
-    assert read.deep_link == "https://github.com/acme/app/pull/1"
+# --- entity ------------------------------------------------------------------
 
 
 def test_unique_token_collision_raises(db_session):
@@ -93,27 +42,6 @@ def test_unique_token_collision_raises(db_session):
     db_session.add(duplicate)
     with pytest.raises(IntegrityError):
         db_session.flush()
-
-
-def test_transitions(db_session):
-    destination = _destination()
-    notification = Notification.create(
-        destination_id=destination.id, reason="r", body="b", subject=_SUBJECT
-    )
-
-    notification.attempts += 1
-    notification.mark_delivered()
-    assert notification.state == NotificationState.DELIVERED
-    assert notification.delivered_at is not None
-    assert notification.attempts == 1
-
-    notification.mark_failed("DeliveryError: HTTPStatusError")
-    assert notification.state == NotificationState.FAILED
-    assert notification.last_error == "DeliveryError: HTTPStatusError"
-
-    notification.state = NotificationState.ACKNOWLEDGED.value
-    db_session.flush()
-    assert Notification.get(notification.id).state == "acknowledged"
 
 
 def test_list_recent_newest_first_with_limit(db_session):

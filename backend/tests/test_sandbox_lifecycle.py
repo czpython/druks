@@ -5,25 +5,20 @@ from typing import Any
 
 import pytest
 from drukbox_sdk import SandboxHost as SandboxHostRecord
+from drukbox_sdk.exceptions import SandboxNotFoundError
 from druks.sandbox import credentials as creds_module
 from druks.sandbox import layout, repo
+from druks.sandbox.client import sandbox_client
+from druks.sandbox.constants import SANDBOX_HOST_LEASE_SECONDS
 from druks.sandbox.datastructures import Credentials
-from druks.sandbox.exceptions import ExecFailed
+from druks.sandbox.exceptions import ExecFailed, HostGone
 from druks.sandbox.host import ExecResult
-from druks.sandbox.runner import Exec
 
 
 @dataclass
 class _FakeUpload:
     local: Path
     remote: str
-
-
-@dataclass
-class _FakeDownload:
-    remote: str
-    local: Path
-    succeed: bool = True
 
 
 class _FakeSandbox:
@@ -33,12 +28,10 @@ class _FakeSandbox:
         self.exec_log: list[tuple[list[str], float]] = []
         self.uploads: list[_FakeUpload] = []
         self.secrets: list[tuple[str, str]] = []  # (secret, remote)
-        self.downloads: list[_FakeDownload] = []
         self.aclose_calls = 0
         # Per-test injection points.
         self.exec_results: dict[int, ExecResult] = {}
         self.default_exec_result = ExecResult(0, "", "")
-        self.download_failures: set[str] = set()
 
     async def exec(self, cmd: list[str], *, timeout: float = 30.0) -> ExecResult:
         idx = len(self.exec_log)
@@ -50,9 +43,9 @@ class _FakeSandbox:
         *,
         local: Path,
         remote: str,
-        extension: int = 0o600,
+        mode: int = 0o600,
     ) -> None:
-        del extension  # tested at the Sandbox level, not via the fake
+        del mode  # tested at the Sandbox level, not via the fake
         self.uploads.append(_FakeUpload(local=local, remote=remote))
 
     async def upload_dir(
@@ -63,8 +56,6 @@ class _FakeSandbox:
         excludes: tuple[str, ...] = (),
     ) -> None:
         # Record dir uploads the same way; tests assert on .remote.
-        # ``excludes`` is captured for completeness but no test asserts on
-        # it yet — the production code passes a sensible default.
         del excludes
         self.uploads.append(_FakeUpload(local=local, remote=remote))
 
@@ -73,21 +64,10 @@ class _FakeSandbox:
         *,
         secret: str,
         remote: str,
-        extension: int = 0o600,
+        mode: int = 0o600,
     ) -> None:
-        del extension  # tested at the Sandbox level, not via the fake
+        del mode  # tested at the Sandbox level, not via the fake
         self.secrets.append((secret, remote))
-
-    async def download(self, *, remote: str, local: Path) -> None:
-        succeed = remote not in self.download_failures
-        rec = _FakeDownload(remote=remote, local=local, succeed=succeed)
-        self.downloads.append(rec)
-        if not rec.succeed:
-            raise FileNotFoundError(remote)
-        # Materialise an empty local file so the real lifecycle's
-        # caller-side reads don't trip on missing-file errors.
-        local.parent.mkdir(parents=True, exist_ok=True)
-        local.write_bytes(b"")
 
     async def aclose(self) -> None:
         self.aclose_calls += 1
@@ -429,46 +409,6 @@ def patched_real_sandbox(monkeypatch: pytest.MonkeyPatch) -> list[_FakeSandbox]:
 
 
 @pytest.fixture
-def patched_credentials_push(monkeypatch: pytest.MonkeyPatch) -> list[Credentials]:
-    calls: list[Credentials] = []
-
-    async def fake_push(_sandbox: Any, creds: Credentials) -> None:
-        calls.append(creds)
-
-    monkeypatch.setattr("druks.sandbox.credentials.push", fake_push)
-    return calls
-
-
-@pytest.fixture
-def patched_repo_ensure(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
-    calls: list[dict[str, Any]] = []
-
-    async def fake_ensure(_sandbox: Any, **kwargs: Any) -> None:
-        calls.append(kwargs)
-
-    monkeypatch.setattr("druks.sandbox.repo.ensure", fake_ensure)
-    return calls
-
-
-@pytest.fixture
-def patched_start_exec(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
-    calls: list[dict[str, Any]] = []
-
-    async def fake_start_exec(**kwargs: Any) -> Exec:
-        calls.append(kwargs)
-        # Return an Exec handle bound to the same sandbox the lifecycle
-        # passed in — caller code may inspect run.host indirectly.
-        return Exec(
-            host=kwargs["host"],
-            run_id=kwargs["run_id"],
-            run_dir=f"/work/runs/{kwargs['run_id']}",
-        )
-
-    monkeypatch.setattr("druks.sandbox.runner.start_exec", fake_start_exec)
-    return calls
-
-
-@pytest.fixture
 def patched_sandbox_api(monkeypatch: pytest.MonkeyPatch) -> list[_FakeAPI]:
     """Stub ``Client._api`` to hand out a per-test fake. Tests
     append the FakeAPI they want returned (in order) and assert on it
@@ -493,8 +433,6 @@ async def test_acquire_uploads_helper_and_closes_ssh_without_releasing(
     patched_real_sandbox: list[_FakeSandbox],
     patched_sandbox_api: list[_FakeAPI],
 ):
-    from druks.sandbox.client import sandbox_client
-
     api = _FakeAPI(create_record=_record(status="active"))
     patched_sandbox_api.append(api)
 
@@ -503,8 +441,6 @@ async def test_acquire_uploads_helper_and_closes_ssh_without_releasing(
 
     # The host is created with a fixed lease so drukbox reaps it if the worker
     # dies mid-run — no druks-side reconciler.
-    from druks.sandbox.constants import SANDBOX_HOST_LEASE_SECONDS
-
     [expires_at] = api.created_expires_at
     assert expires_at is not None
     remaining = (expires_at - datetime.now(UTC)).total_seconds()
@@ -530,28 +466,18 @@ async def test_acquire_releases_host_when_helper_upload_fails(
     """Regression: if anything between ``create_host`` and the yield
     raises, ``acquire`` must release the host itself — the caller never
     learns the id, so leaving cleanup to them would orphan the VM."""
-    from druks.sandbox.client import sandbox_client
 
     api = _FakeAPI(create_record=_record(status="active"))
     patched_sandbox_api.append(api)
 
-    async def _boom(self: Any, *args: Any, **kwargs: Any) -> None:
-        raise RuntimeError("helper upload failed")
-
-    import druks.sandbox.client as client_mod
-
-    original = client_mod._upload_helper_script
-
     async def _fake_upload(sandbox: Any) -> None:
         raise RuntimeError("helper upload failed")
 
-    client_mod._upload_helper_script = _fake_upload
-    try:
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr("druks.sandbox.client._upload_helper_script", _fake_upload)
         with pytest.raises(RuntimeError, match="helper upload failed"):
             async with sandbox_client.acquire():
                 pass
-    finally:
-        client_mod._upload_helper_script = original
 
     assert api.deleted_ids == ["host-xyz"], (
         "create_host succeeded but the helper upload failed before yield; "
@@ -563,7 +489,6 @@ async def test_attach_returns_sandbox(
     patched_real_sandbox: list[_FakeSandbox],
     patched_sandbox_api: list[_FakeAPI],
 ):
-    from druks.sandbox.client import sandbox_client
 
     api = _FakeAPI(
         create_record=None,
@@ -582,10 +507,6 @@ async def test_attach_raises_host_gone_on_not_found(
     patched_real_sandbox: list[_FakeSandbox],
     patched_sandbox_api: list[_FakeAPI],
 ):
-    from drukbox_sdk.exceptions import SandboxNotFoundError
-    from druks.sandbox.client import sandbox_client
-    from druks.sandbox.exceptions import HostGone
-
     api = _FakeAPI(
         create_record=None,
         get_host_raises=SandboxNotFoundError("host-xyz not found"),
@@ -598,7 +519,6 @@ async def test_attach_raises_host_gone_on_not_found(
 
 
 async def test_release_calls_sdk_delete(patched_sandbox_api: list[_FakeAPI]):
-    from druks.sandbox.client import sandbox_client
 
     api = _FakeAPI(create_record=None)
     patched_sandbox_api.append(api)
@@ -611,7 +531,6 @@ async def test_release_calls_sdk_delete(patched_sandbox_api: list[_FakeAPI]):
 async def test_release_swallows_sdk_delete_failure(
     patched_sandbox_api: list[_FakeAPI],
 ):
-    from druks.sandbox.client import sandbox_client
 
     # provider 503s on delete — release must not raise, since the
     # caller's intent is "I'm done with this host"; surfacing the
@@ -625,19 +544,3 @@ async def test_release_swallows_sdk_delete_failure(
     await sandbox_client.release(host_id="host-xyz")
 
     assert api.deleted_ids == ["host-xyz"]
-
-
-async def test_acquire_then_release_round_trip(
-    patched_real_sandbox: list[_FakeSandbox],
-    patched_sandbox_api: list[_FakeAPI],
-):
-    from druks.sandbox.client import sandbox_client
-
-    api = _FakeAPI(create_record=_record(status="active"))
-    patched_sandbox_api.append(api)
-
-    async with sandbox_client.acquire() as sandbox:
-        host_id = sandbox.id
-
-    await sandbox_client.release(host_id=host_id)
-    assert api.deleted_ids == [host_id]

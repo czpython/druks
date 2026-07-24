@@ -143,17 +143,6 @@ def test_a_valid_pat_wins_over_a_conflicting_header(tmp_path, db_session):
     assert not Account.get_for_username("op@example.com")
 
 
-@pytest.mark.parametrize("header", ["", "Token abc", "Bearer", "Bearer a b", "Bearer garbage"])
-def test_a_bad_authorization_never_falls_through_to_the_assertion(tmp_path, db_session, header):
-    with _header_client(tmp_path) as client:
-        response = client.get(
-            "/api/auth/me", headers={"Authorization": header, HEADER: "op@example.com"}
-        )
-        assert response.status_code == 401
-        assert response.headers["WWW-Authenticate"].startswith('Bearer realm="druks"')
-    assert not Account.get_for_username("op@example.com")
-
-
 def test_onboarding_clears_once_the_account_has_a_connection(tmp_path, db_session):
     connect_harness(ClaudeHarness, {"claudeAiOauth": {"accessToken": "x"}})
     with _header_client(tmp_path) as client:

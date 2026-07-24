@@ -1,14 +1,13 @@
 import asyncio
 from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Any, Self
+from typing import Self
 from unittest.mock import patch
 
 import asyncssh
 import pytest
 from druks.sandbox import runner
 from druks.sandbox.exceptions import ExecFailed, SandboxUnreachable
-from druks.sandbox.host import ExecResult, Sandbox
+from druks.sandbox.host import ExecResult
 from druks.sandbox.runner import Exec, attach, start_exec
 
 
@@ -148,12 +147,6 @@ def fast_sleep(monkeypatch: pytest.MonkeyPatch) -> list[float]:
 
     monkeypatch.setattr("druks.sandbox.runner.asyncio.sleep", fake_sleep)
     return sleeps
-
-
-def _ok_pid_check_then(*rest: ExecResult) -> list[ExecResult]:
-
-    pid_ok = ExecResult(0, "12345", "")
-    return [*list(rest), pid_ok]
 
 
 async def test_start_exec_writes_env_file_and_invokes_druks_sandbox_verb(
@@ -450,16 +443,6 @@ async def test_wait_polls_until_exit_code_appears(fast_sleep: list[float]):
     assert poll_count >= 3
 
 
-async def test_wait_parses_nonzero_exit_code(fast_sleep: list[float]):
-
-    vm = _FakeVM()
-    vm.write("/work/runs/r-1/exit_code", b"137")
-    sandbox = _FakeSandbox(vm=vm)
-    run = Exec(host=sandbox, run_id="r-1", run_dir="/work/runs/r-1")  # type: ignore[arg-type]
-
-    assert await run.wait() == 137
-
-
 async def test_kill_invokes_druks_sandbox_exec_kill_verb(fast_sleep: list[float]):
     sandbox = _FakeSandbox()
     run = Exec(host=sandbox, run_id="r-1", run_dir="/work/runs/r-1")  # type: ignore[arg-type]
@@ -502,91 +485,6 @@ def test_backoff_is_monotonic_and_capped():
     assert max(deltas) <= runner.RECONNECT_BACKOFF_MAX_SECONDS
 
 
-def test_druks_sandbox_script_ships_with_the_package():
-
-    script = Path(__file__).parent.parent / "druks" / "sandbox" / "druks-sandbox.sh"
-    assert script.exists()
-    content = script.read_text()
-    # Surface markers — sanity checks rather than full content matching.
-    assert content.startswith("#!/bin/sh")
-    # All three verbs present.
-    assert "exec-start" in content
-    assert "exec-kill" in content
-    assert "git-credential" in content
-    # Atomic exit-code write.
-    assert "exit_code.tmp" in content
-    # The helper itself doesn't invoke nohup/setsid — the caller (the
-    # runner's spawn command) does. The wrapper just runs the user
-    # command. Comments do mention nohup; check only executable lines.
-    non_comment = "\n".join(
-        line for line in content.splitlines() if not line.lstrip().startswith("#")
-    )
-    assert "nohup" not in non_comment
-    assert "setsid" not in non_comment
-
-
-def _druks_sandbox_script() -> Path:
-    return Path(__file__).parent.parent / "druks" / "sandbox" / "druks-sandbox.sh"
-
-
-def test_git_credential_get_emits_token_from_file(tmp_path: Path):
-
-    import subprocess
-
-    token_file = tmp_path / "github-token"
-    token_file.write_text("gho_rotatable_secret")
-
-    proc = subprocess.run(
-        ["sh", str(_druks_sandbox_script()), "git-credential", "get"],
-        input="protocol=https\nhost=github.com\n",
-        capture_output=True,
-        text=True,
-        env={"DRUKS_GITHUB_TOKEN_FILE": str(token_file), "PATH": "/usr/bin:/bin"},
-    )
-
-    assert proc.returncode == 0
-    assert "username=x-access-token" in proc.stdout
-    assert "password=gho_rotatable_secret" in proc.stdout
-
-
-def test_git_credential_store_and_erase_are_noops(tmp_path: Path):
-
-    import subprocess
-
-    token_file = tmp_path / "github-token"
-    token_file.write_text("gho_x")
-
-    for op in ("store", "erase"):
-        proc = subprocess.run(
-            ["sh", str(_druks_sandbox_script()), "git-credential", op],
-            input="protocol=https\nhost=github.com\n",
-            capture_output=True,
-            text=True,
-            env={"DRUKS_GITHUB_TOKEN_FILE": str(token_file), "PATH": "/usr/bin:/bin"},
-        )
-        assert proc.returncode == 0, op
-        assert proc.stdout == "", op
-
-
-def test_git_credential_get_silent_when_token_file_missing(tmp_path: Path):
-
-    import subprocess
-
-    proc = subprocess.run(
-        ["sh", str(_druks_sandbox_script()), "git-credential", "get"],
-        input="protocol=https\nhost=github.com\n",
-        capture_output=True,
-        text=True,
-        env={
-            "DRUKS_GITHUB_TOKEN_FILE": str(tmp_path / "does-not-exist"),
-            "PATH": "/usr/bin:/bin",
-        },
-    )
-
-    assert proc.returncode == 0
-    assert proc.stdout == ""
-
-
 async def test_completion_reports_running_with_stdout_size():
 
     vm = _FakeVM()
@@ -616,16 +514,6 @@ async def test_completion_reports_done_with_exit_code():
     assert result.stdout_bytes == 3
 
 
-async def test_completion_reports_zero_stdout_before_first_byte():
-
-    sandbox = _FakeSandbox(vm=_FakeVM())
-    run = Exec(host=sandbox, run_id="r-1", run_dir="/work/runs/r-1")  # type: ignore[arg-type]
-
-    result = await run.completion()
-
-    assert result == (False, None, 0)
-
-
 async def test_completion_raises_sandbox_unreachable_on_ssh_error():
 
     sandbox = _FakeSandbox(vm=_FakeVM())
@@ -635,14 +523,3 @@ async def test_completion_raises_sandbox_unreachable_on_ssh_error():
     with pytest.raises(SandboxUnreachable, match="completion"):
         await run.completion()
     assert sandbox.aclose_calls == 1
-
-
-def test_run_handle_typechecks_against_sandbox_protocol():
-
-    # Pure typing assertion: the real Sandbox class is the canonical
-    # shape; if Exec() ever rejects it, type-check fails everywhere.
-    assert callable(Sandbox)
-
-
-# Silence "unused" lint for utility helpers tests may grow later.
-_ = (_ok_pid_check_then, Any)

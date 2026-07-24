@@ -20,6 +20,10 @@ permissions:
 jobs:
   checks:
     runs-on: ubuntu-latest
+    # A hung await stalls forever, not loudly; the whole job normally takes
+    # ~3 minutes. Pairs with pytest's faulthandler below: the dump names the
+    # frame, this timeout does the killing.
+    timeout-minutes: 15
     # The suite talks to a real Postgres (the harness runs each test in a rolled-back
     # transaction; the durable tests create their own databases) and a real Redis
     # (flushed between tests). Defaults in backend/tests match localhost:5432 with
@@ -57,6 +61,9 @@ jobs:
           python-version: "3.11"
       - run: uv sync --locked --dev
       - run: uv run ruff check backend
+      # The suite watchdog lives in conftest (faulthandler, 9 minutes): a hang
+      # dumps every thread's stack and exits from inside the process, so the
+      # step ends normally and the log keeps the dump.
       - run: uv run pytest backend/
       # The out-of-tree proof extension, installed editable exactly as an author's
       # ``pip install -e`` would — its real entry point registers here, so the loader
