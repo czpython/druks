@@ -127,12 +127,6 @@ services:
     restart: unless-stopped
     environment:
       DRUKS_UPSTREAM: ${DRUKS_UPSTREAM:-127.0.0.1:8001}
-      # Both Caddy and druks read DRUKS_AUTH_HEADER (web gets it from env_file):
-      # Caddy requires the edge's assertion, druks maps it to an account. No
-      # default anywhere — the backend refuses header mode without it.
-      DRUKS_AUTH_HEADER: ${DRUKS_AUTH_HEADER:-}
-      # ``:-`` so an empty .env value still collapses to the inert loopback
-      # default — Caddy treats set-but-empty as a real (broken) site address.
       DRUKS_WEBHOOK_HOST: ${DRUKS_WEBHOOK_HOST:-http://127.0.0.1:8081}
     volumes:
       - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
