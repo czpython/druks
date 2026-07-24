@@ -286,7 +286,7 @@ export function SettingsModal({ open, onClose }: Props) {
             <RailItem icon="harnesses" label="Harnesses" active={section === 'harnesses'} onClick={() => setSection('harnesses')} />
             <RailItem icon="skills" label="Skills" active={section === 'skills'} onClick={() => setSection('skills')} />
             <RailItem icon="mcp" label="MCP" active={section === 'mcp'} onClick={() => setSection('mcp')} />
-            <RailItem icon="agent-access" label="Agent access" active={section === 'agent-access'} onClick={() => setSection('agent-access')} />
+            <RailItem icon="agent-access" label="Tokens" active={section === 'agent-access'} onClick={() => setSection('agent-access')} />
             <div className="set-rail-label">apps</div>
             {allExtensions.map((extension) => (
               <button
@@ -1462,9 +1462,8 @@ export function AgentAccessPane() {
     <div className="set-pane">
       <div className="set-pane-head">
         <div className="set-pane-sub">
-          Mint a <b>personal access token</b> for an agent to call this druks — sent as{' '}
-          <b>Authorization: Bearer …</b>, same account and authority as your browser identity.
-          Revoking a token cuts its access immediately.
+          Give an agent, script, or CLI a token to call druks as you — same account and
+          permissions, no browser needed. Revoke it any time to cut access instantly.
         </div>
       </div>
       <div className="set-group">
@@ -1514,7 +1513,8 @@ export function AgentAccessPane() {
             </button>
           </div>
           <div className="set-field-help">
-            The only time druks shows it — a hash is stored, not the token.
+            Send it as <b>Authorization: Bearer &lt;token&gt;</b>. This is the only time druks
+            shows it — a hash is stored, not the token.
           </div>
         </div>
       )}
