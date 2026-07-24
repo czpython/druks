@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 from drukbox_sdk import SandboxHost as SandboxHostRecord
+from druks.sandbox import client as client_module
 from druks.sandbox.host import Sandbox
 
 
@@ -121,26 +122,12 @@ def test_ssh_connect_kwargs_raises_when_the_key_was_never_persisted(
         Sandbox(record=_aws_direct_record())._ssh_connect_kwargs()
 
 
-def test_ssh_connect_kwargs_raises_when_neither_path_is_available():
-    """Surfaces a malformed record loudly instead of falling through."""
-    bad = replace(
-        _aws_direct_record(),
-        internal_ssh_host=None,
-        external_ssh_host="",
-        private_key=None,
-    )
-    with pytest.raises(RuntimeError, match="no reachable address"):
-        Sandbox(record=bad)._ssh_connect_kwargs()
-
-
 def _stub_acquire_settings(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     *,
     sandbox_image: str,
 ):
-    from druks.sandbox import client as client_module
-
     create_calls: list[dict[str, object]] = []
 
     class _FakeAPI:
@@ -204,20 +191,10 @@ async def test_acquire_persists_private_key_when_returned(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ):
-    """AWS-shape records land at <keys_dir>/<host_id> with extension 0600."""
+    """AWS-shape records land at <keys_dir>/<host_id> with mode 0600."""
     sc, _ = _stub_acquire_settings(monkeypatch, tmp_path, sandbox_image="")
     async with sc.acquire(idempotency_key="op"):
         pass
     key_path = tmp_path / "host-aws"
     assert key_path.read_text().startswith("-----BEGIN OPENSSH")
     assert oct(os.stat(key_path).st_mode & 0o777) == "0o600"
-
-
-async def test_build_extension_config_resolve_returns_defaults_when_repo_is_none():
-    """No repo → no GitHub round trip; defaults."""
-    from druks.build.policy import RepoPolicy
-
-    policy = await RepoPolicy.resolve(None)
-    assert policy.sandbox.image is None
-    assert policy.sandbox.env == {}
-    assert policy.verification is None

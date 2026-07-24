@@ -42,9 +42,28 @@ http://:8000 {
 		}
 	}
 
-	# Identity is the edge's job (auth_mode header/jwt) or moot (mode=none serves
-	# the single operator); the app re-asserts it per request, so Caddy forwards.
-	reverse_proxy {$DRUKS_UPSTREAM}
+	# The edge authenticates; this proxy forwards its identity assertion and
+	# the backend maps the asserted email to an account (DRUKS_AUTH_MODE=header
+	# reads the same DRUKS_AUTH_HEADER). The upstream proxy must strip any
+	# client-supplied copy of the header before inserting its authenticated
+	# value. DRUKS_AUTH_HEADER has no default — name your edge's header in the
+	# .env (exe.dev: X-ExeDev-Email, Teleport: X-Forwarded-Email, Cloudflare
+	# Access: Cf-Access-Authenticated-User-Email, …); swapping the identity
+	# edge is a config change, never a code change.
+	# The backend serves everything behind the gate — the API, the SPA at /,
+	# extension frontends at /app/<name>. Cache policy for the served
+	# frontends lives with their server (api/app.py), not at the edge.
+	@dashboard_user header {$DRUKS_AUTH_HEADER} *
+	handle @dashboard_user {
+		reverse_proxy {$DRUKS_UPSTREAM}
+	}
+
+	# No identity header at all. exe.dev passes unauthenticated traffic
+	# through and relies on this redirect to its SSO; proxies like Teleport
+	# intercept upstream and never reach here, so this stays exe-shaped.
+	handle {
+		redir https://{host}/__exe.dev/login?redirect={uri} 302
+	}
 }
 
 # Public integrations ingress — set DRUKS_WEBHOOK_HOST to a hostname with an

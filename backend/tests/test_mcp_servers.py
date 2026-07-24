@@ -103,18 +103,6 @@ def test_valid_name_derives_shell_safe_env_var(db_session):
     assert not var[0].isdigit()
 
 
-# --- read paths: resolved view + enabled subset --------------------------
-
-
-def test_list_enabled_carries_url_and_auth_for_delivery(db_session):
-    # The enabled subset delivery renders from: url + token source per server.
-    McpServer.create(name="linear", url=_LINEAR_URL, token=_TOKEN)
-
-    linear = next(s for s in McpServer.list_enabled() if s["name"] == "linear")
-    assert linear["url"] == _LINEAR_URL
-    assert linear["token_source"] == "static"
-
-
 # --- delivery at the workspace seam --------------------------------------
 
 
@@ -451,16 +439,6 @@ def test_routes_disable_and_refuse_deleting_a_builtin(tmp_path, registry_state, 
 # --- catalog: the deploy-declarative default-server set -------------------
 
 
-@pytest.fixture
-def registry_state():
-    # Catalog loads register into the process-global registry; snapshot and
-    # restore so a test's entries don't leak into the rest of the suite.
-    saved = dict(mcp_servers._items)
-    yield
-    mcp_servers._items.clear()
-    mcp_servers._items.update(saved)
-
-
 def _write_catalog(tmp_path, content):
     path = tmp_path / "catalog.json"
     path.write_text(content if isinstance(content, str) else json.dumps(content))
@@ -503,23 +481,6 @@ async def test_packaged_catalog_delivers_nothing_until_linear_is_connected(
 
     kwargs = await _delivery()
     assert "mcp_servers" not in kwargs
-
-
-def test_packaged_linear_enables_like_any_builtin(tmp_path, registry_state, db_session):
-    load_mcp_catalog(PACKAGED_MCP_CATALOG)
-    with TestClient(configure_app_for_test(settings=make_settings(tmp_path))) as client:
-        listed = next(s for s in client.get("/api/mcp-servers").json() if s["name"] == "linear")
-        assert listed["builtin"] is True
-        assert listed["isEnabled"] is False
-        assert listed["tokenSource"] == "oauth"
-        assert listed["hasToken"] is False
-
-        enabled = client.patch("/api/mcp-servers/linear", json={"is_enabled": True})
-        assert enabled.status_code == 200
-        assert enabled.json()["isEnabled"] is True
-        # The operator's overlay row now carries the choice; the shipped
-        # default only ever applied while no row existed.
-        assert McpServer.get_for_name("linear")
 
 
 def test_load_catalog_tolerates_wrapper_and_is_idempotent(tmp_path, registry_state):

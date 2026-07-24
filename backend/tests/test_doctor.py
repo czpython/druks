@@ -270,12 +270,6 @@ def test_harness_credentials_fail_when_not_connected(tmp_path: Path) -> None:
     assert "not connected" in result.detail
 
 
-def test_harness_credential_check_not_connected() -> None:
-    result = doctor._harness_credential_check("codex", connected=False, expires_at=None)
-    assert not result.ok
-    assert "not connected" in result.detail
-
-
 def test_harness_credential_check_expired() -> None:
     past = datetime.now(UTC) - timedelta(hours=1)
     result = doctor._harness_credential_check("claude", connected=True, expires_at=past)

@@ -143,37 +143,9 @@ def test_get_gate_refuses_when_not_parked_or_external(db_session):
         services.get_gate(external.id)
 
 
-async def test_answer_gate_resumes_through_run_resume(db_session, resume_spy):
-    item = make_test_work_item(repo="o/r", title="t")
-    run = _park(db_session, item.id)
-
-    result = await services.answer_gate(
-        run.id,
-        parked_at=run.input_requested_at,
-        control="approve",
-        answers={},
-        note="ship it",
-    )
-
-    assert result.result == "answered"
-    assert result.parked_at == run.input_requested_at
-    assert resume_spy == [{"id": run.id, "action": "approve", "answers": {}, "note": "ship it"}]
-
-
-async def test_answer_gate_uses_the_receipt_for_already_answered(db_session, resume_spy):
-    item = make_test_work_item(repo="o/r", title="t")
-    parked_at = datetime.now(UTC)
-    run = seed_build_run(db_session, work_item_id=item.id, state="running")
-    run.input_requested_at = parked_at
-    run.answer_parked_at = parked_at
-    db_session.flush()
-
-    result = await services.answer_gate(
-        run.id, parked_at=parked_at, control="approve", answers={}, note=""
-    )
-
-    assert result.result == "already_answered"
-    assert resume_spy == []
+# The answered and already-answered happy paths are pinned at both doors —
+# test_agent_routes (REST) and test_mcp_endpoint (MCP); this file keeps the
+# taxonomy arms those tests don't reach.
 
 
 async def test_answer_gate_error_taxonomy(db_session, resume_spy):

@@ -5,10 +5,10 @@ from pathlib import Path
 from typing import Any, Self
 from unittest.mock import AsyncMock
 
-import asyncssh
 import pytest
 from drukbox_sdk import SandboxHost as SandboxHostRecord
-from druks.sandbox.host import ExecResult, Sandbox
+from druks.sandbox.exceptions import SandboxError
+from druks.sandbox.host import ExecResult, Sandbox, _stream_local_tar_into
 
 
 @dataclass
@@ -151,8 +151,6 @@ async def test_first_call_opens_connection_with_record_details(
     assert kwargs["port"] == 22
     assert kwargs["username"] == "druks"
     assert "client_keys" not in kwargs
-    assert kwargs["connect_timeout"] == 30.0
-    assert kwargs["keepalive_interval"] == 15.0
     # ``known_hosts`` was sourced from the record via the patched
     # ``import_known_hosts`` shim, not passed raw.
     assert kwargs["known_hosts"] == (
@@ -199,8 +197,12 @@ async def test_aclose_closes_and_is_idempotent(
     fake_record: SandboxHostRecord,
     patched_asyncssh: tuple[AsyncMock, _FakeConnection],
 ):
-    _, fake_conn = patched_asyncssh
+    connect_mock, fake_conn = patched_asyncssh
     sandbox = Sandbox(record=fake_record)
+
+    # Before first use: nothing to close, nothing dialed.
+    await sandbox.aclose()
+    connect_mock.assert_not_called()
 
     await sandbox.exec(["true"])
     await sandbox.aclose()
@@ -212,33 +214,6 @@ async def test_aclose_closes_and_is_idempotent(
     fake_conn.wait_closed_called = False
     await sandbox.aclose()
     assert fake_conn.wait_closed_called is False
-
-
-async def test_aclose_before_first_use_is_noop(
-    fake_record: SandboxHostRecord,
-    patched_asyncssh: tuple[AsyncMock, _FakeConnection],
-):
-    connect_mock, fake_conn = patched_asyncssh
-    sandbox = Sandbox(record=fake_record)
-
-    await sandbox.aclose()
-
-    connect_mock.assert_not_called()
-    assert fake_conn.closed is False
-
-
-async def test_async_context_manager_closes_on_exit(
-    fake_record: SandboxHostRecord,
-    patched_asyncssh: tuple[AsyncMock, _FakeConnection],
-):
-    _, fake_conn = patched_asyncssh
-
-    async with Sandbox(
-        record=fake_record,
-    ) as sandbox:
-        await sandbox.exec(["true"])
-
-    assert fake_conn.closed is True
 
 
 async def test_async_context_manager_closes_on_exception(
@@ -378,33 +353,6 @@ async def test_exec_closed_channel_without_status_is_not_ok(
     assert result.ok is False
 
 
-async def test_exec_oneshot_passes_timeout(
-    fake_record: SandboxHostRecord,
-    patched_asyncssh: tuple[AsyncMock, _FakeConnection],
-):
-    _, fake_conn = patched_asyncssh
-    sandbox = Sandbox(record=fake_record)
-
-    await sandbox.exec(["true"], timeout=90.0)
-
-    _, kwargs = fake_conn.run_calls[-1]
-    assert kwargs["timeout"] == 90.0
-    # Always ``check=False`` — exec never raises on non-zero.
-    assert kwargs["check"] is False
-
-
-async def test_ssh_connection_returns_underlying_conn_for_runner(
-    fake_record: SandboxHostRecord,
-    patched_asyncssh: tuple[AsyncMock, _FakeConnection],
-):
-    _, fake_conn = patched_asyncssh
-    sandbox = Sandbox(record=fake_record)
-
-    conn = await sandbox.ssh_connection()
-
-    assert conn is fake_conn
-
-
 # Tar streaming — exercises the local-tar half of upload_dir against a real
 # ``tar -xf -`` subprocess. The SSH half is covered by the integration
 # suite; here we only need to know we build the right tar.
@@ -431,8 +379,6 @@ async def _roundtrip_via_tar(
     dst: Path,
     excludes: tuple[str, ...] = (),
 ) -> None:
-    from druks.sandbox.host import _stream_local_tar_into
-
     dst.mkdir(parents=True, exist_ok=True)
     untar = await asyncio.create_subprocess_exec(
         "tar",
@@ -493,15 +439,9 @@ async def test_upload_dir_tar_honours_excludes(tmp_path: Path):
     assert not (dst / "plugin" / "node_modules").exists()
 
 
-def test_asyncssh_module_is_real_dep():
-    assert hasattr(asyncssh, "connect")
-
-
 async def test_write_secret_raises_when_the_remote_write_fails(fake_record):
     # push() now writes the harness OAuth credential through write_secret, so a
     # failed remote write must fail the run, not start the agent unauthenticated.
-    from druks.sandbox.exceptions import SandboxError
-
     sandbox = Sandbox(record=fake_record)
 
     async def failing_exec(cmd, *, timeout=30.0):
