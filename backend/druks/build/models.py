@@ -7,9 +7,12 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from druks.build.enums import HandoffStatus
+from druks.build.policy import RepoPolicy
+from druks.core.apis.github import get_github_client
 from druks.db import Base, db_session
 from druks.durable.reads import get_subject_status
 from druks.durable.schemas import SubjectStatus
+from druks.settings import load_settings
 from druks.ticketing.datastructures import Ticket
 from druks.ticketing.enums import SemanticStatus
 from druks.ticketing.exceptions import TrackerNotConfigured
@@ -129,7 +132,7 @@ class ProjectRepo(Base):
         """
         target = (name or "").strip().lower()
         if not target:
-            return None
+            return
         # SQLite-friendly bare-name suffix match.
         stmt = select(cls).where(func.lower(cls.full_name).like(f"%/{target}")).limit(1)
         return db_session().scalars(stmt).first()
@@ -169,7 +172,7 @@ class ProjectRepo(Base):
                 row = cls.get_for_name(name)
                 if row:
                     return row
-        return None
+        return
 
 
 class WorkItem(Base):
@@ -312,6 +315,27 @@ class WorkItem(Base):
         if run and run.is_active:
             await run.cancel(failure=failure)
         db_session().flush()
+
+    async def ship(self) -> None:
+        # PR merged → settle shipped. A run still parked under an operator merge is
+        # stranded; cancel it (a RUNNING run converges on its own closed-PR merge step).
+        self.set_status(HandoffStatus.SHIPPED)
+        run = self.get_build_run()
+        if run and run.is_parked:
+            await run.cancel(failure="pr merged while parked")
+        await self.set_remote_status(SemanticStatus.DONE)
+
+    async def close_external(self) -> None:
+        # PR closed without a merge → abandon the attempt, not the ticket. Best-effort
+        # branch cleanup, then back to the provider's resting pool.
+        self.set_status(HandoffStatus.CANCELLED, event_payload={"external": True})
+        await self.cancel_active_build(failure="pr closed without merge")
+        try:
+            if (await RepoPolicy.resolve(self.repo)).delete_branch:
+                await get_github_client(load_settings()).delete_branch(self.repo, self.branch)
+        except Exception:  # noqa: BLE001 — cleanup only
+            logger.warning("Skipped branch cleanup for %s.", self.repo, exc_info=True)
+        await self.set_remote_status(SemanticStatus.READY_FOR_AGENT)
 
     @classmethod
     def get_for_remote_key(
