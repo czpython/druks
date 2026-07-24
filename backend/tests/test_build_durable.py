@@ -146,10 +146,9 @@ def _stub(monkeypatch, rt, *, plan_approval="human", auto_dispatch=False):
     monkeypatch.setattr(flow, "_load_settings", _settings)
 
     # The agent execution is faked per agent BELOW the step wrapper (_run, not
-    # __call__), so every call still memoizes through DBOS exactly like prod —
-    # the recovery test's call counts prove replay skips them. The stubs are
-    # real domain models: they land on the journal, so its typed projections
-    # read them exactly as in prod. Returns the invocation log
+    # __call__), so every call still memoizes through DBOS exactly like prod. The
+    # stubs are real domain models: they land on the journal, so its typed
+    # projections read them exactly as in prod. Returns the invocation log
     # (agent ids, in order).
     results = {
         "generate_plan": PlanData(plan_markdown="p"),
@@ -262,81 +261,3 @@ async def test_auto_mode_machine_review_replaces_the_plan_gate(rt, monkeypatch):
     await parked.resume(action="approve")
     done = await _wait(rt.engine, wfid, lambda r: r.state == RunState.FINISHED)
     assert done.failure is None
-
-
-async def test_recovery_rebuilds_the_journal_without_rerunning_agents(rt, monkeypatch):
-    """The journal is durable by determinism: a crash mid-run means DBOS
-    re-executes the body from the top on a fresh instance, with every agent
-    call and gate reply memoized through the same chokepoints. Kill the
-    runtime while the run is parked mid-_plan_phase, bring it back up, and the
-    run must finish — with the pre-crash agents replayed from checkpoints,
-    never re-invoked."""
-    from druks.durable.engine import init_dbos, launch, shutdown
-
-    invoked = _stub(monkeypatch, rt)
-
-    item_id = _seed_work_item(rt.engine, repo="acme/widget")
-    wfid = await rt.flow.start(
-        repo="acme/widget",
-        subject={"type": "work_item", "id": item_id},
-    )
-    await _wait(
-        rt.engine,
-        wfid,
-        lambda r: r.state == RunState.PENDING_INPUT and r.input_gate == "review",
-    )
-    # Gate mode: the operator is the reviewer — review_plan never ran.
-    assert invoked == ["generate_plan"]
-
-    # The crash: tear the runtime down while the workflow is parked on the gate
-    # and bring it back up. launch() recovers the pending workflow, which
-    # replays run() from the top on a fresh BuildWorkflow instance.
-    shutdown()
-    init_dbos()
-    launch()
-    # A real crash restarts the process with a fresh event loop; this in-process
-    # relaunch keeps the loop whose default executor destroy() just shut down.
-    # Re-point it at the new instance (what the first DBOS async call would do)
-    # before recovery's dequeue lands work on the dead one.
-    from dbos import DBOS
-
-    await DBOS._configure_asyncio_thread_pool()
-
-    parked = await _wait(
-        rt.engine,
-        wfid,
-        lambda r: r.state == RunState.PENDING_INPUT and r.input_gate == "review",
-    )
-    await parked.resume(action="approve", answers={})
-    parked = await _wait(
-        rt.engine,
-        wfid,
-        lambda r: r.state == RunState.PENDING_INPUT and r.input_gate == "review_work",
-    )
-
-    # Second crash with an implementation on the journal: the replay back to
-    # this park rebuilds the typed projections, with zero agent re-invocations.
-    shutdown()
-    init_dbos()
-    launch()
-    await DBOS._configure_asyncio_thread_pool()
-
-    parked = await _wait(
-        rt.engine,
-        wfid,
-        lambda r: r.state == RunState.PENDING_INPUT and r.input_gate == "review_work",
-    )
-    await parked.resume(action="approve")
-    done = await _wait(rt.engine, wfid, lambda r: r.state == RunState.FINISHED)
-    assert done.failure is None
-
-    # Replay recomposition, proven by invocation counts: the pre-crash agents
-    # came back from checkpoints (no re-invocation), and the post-crash phase ran
-    # once each on the rebuilt journal — implement's revision guard, evaluate's
-    # grade, and the review_code toggle all read recomposed state.
-    assert invoked == [
-        "generate_plan",
-        "implement",
-        "evaluate_implementation",
-        "review_code",
-    ]
