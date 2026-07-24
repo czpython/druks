@@ -4,11 +4,9 @@ import httpx
 import pytest
 from conftest import configure_app_for_test, make_settings
 from druks.mcp import registry
-from druks.mcp.constants import REGISTRY_SEARCH_CACHE_PREFIX
 from druks.mcp.exceptions import RegistryUnavailableError
 from druks.mcp.models import McpOauthGrant, McpServer
 from druks.mcp.registry import derive_server_name, resolve_candidates, search_registry
-from druks.redis import get_client
 from druks.settings import PACKAGED_MCP_TRUSTED
 from fastapi.testclient import TestClient
 
@@ -192,18 +190,6 @@ def test_derive_server_name_strips_noise_and_stays_identifier_safe():
 
 
 # --- the client: one GET, cached in Redis, loud on failure ------------------
-
-
-@pytest.fixture(autouse=True)
-def _fresh_search_cache():
-    # The suite's FakeRedis lives for the whole session; drop this module's
-    # keys so every test sees a cold cache.
-    redis = get_client()
-    redis._data = {
-        key: value
-        for key, value in redis._data.items()
-        if not key.startswith(REGISTRY_SEARCH_CACHE_PREFIX)
-    }
 
 
 def _client_returning(handler):

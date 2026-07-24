@@ -3,7 +3,6 @@ import secrets
 from datetime import timedelta
 from pathlib import Path
 
-import druks.redis
 import pytest
 from conftest import configure_app_for_test, make_settings
 from druks.accounts.constants import PAT_TOKEN_TAG
@@ -15,12 +14,6 @@ from fastapi.testclient import TestClient
 
 HEADER = "X-ExeDev-Email"
 OPERATOR = {HEADER: "op@example.com"}
-
-
-@pytest.fixture(autouse=True)
-def _clear_redis():
-    druks.redis.get_client()._data.clear()
-    yield
 
 
 def _client(tmp_path: Path, **settings_overrides) -> TestClient:

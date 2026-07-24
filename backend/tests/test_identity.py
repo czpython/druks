@@ -2,7 +2,6 @@ import base64
 import json
 from pathlib import Path
 
-import druks.redis
 import httpx
 import pytest
 from conftest import configure_app_for_test, connect_harness, make_settings
@@ -18,12 +17,6 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 
 HEADER = "X-ExeDev-Email"
-
-
-@pytest.fixture(autouse=True)
-def _clear_redis():
-    druks.redis.get_client()._data.clear()
-    yield
 
 
 def _client(tmp_path: Path, **settings_overrides) -> TestClient:

@@ -1,3 +1,6 @@
+import hashlib
+import hmac
+
 import pytest
 from druks.extensions.registry import webhooks
 from druks.settings import Settings
@@ -7,30 +10,6 @@ from druks.webhooks.router import router as webhooks_router
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse, Response
 from fastapi.testclient import TestClient
-
-MODULE = "druks.webhooks.base"
-
-
-@pytest.fixture(autouse=True)
-def _fake_deliveries(monkeypatch):
-    """Delivery dedup lives in Redis; substitute a per-test set."""
-    seen: set[str] = set()
-
-    async def mark(provider, key):
-        if key is None:
-            return True
-        dedup = f"{provider}:{key}"
-        if dedup in seen:
-            return False
-        seen.add(dedup)
-        return True
-
-    async def release(provider, key):
-        if key is not None:
-            seen.discard(f"{provider}:{key}")
-
-    monkeypatch.setattr(f"{MODULE}.mark_delivery", mark)
-    monkeypatch.setattr(f"{MODULE}.release_delivery", release)
 
 
 @pytest.fixture(autouse=True)
@@ -193,6 +172,8 @@ def _client_for(*hook_classes: type[Webhook], settings: Settings) -> TestClient:
 
     The hook classes are passed in for clarity (they self-register on
     definition; this just documents which hooks the test exercises).
+    Use as a context manager: delivery marking talks to Redis, and only the
+    ``with`` form gives every request one shared event loop for that client.
     """
     app = FastAPI()
     app.state.settings = settings
@@ -214,8 +195,8 @@ def test_dispatch_calls_matching_on_action_method(settings):
         async def on_ping(self):
             return JSONResponse({"pong": self.data.get("seq")})
 
-    client = _client_for(Hook, settings=settings)
-    response = client.post("/_external/dispatch/events/", json={"seq": 7})
+    with _client_for(Hook, settings=settings) as client:
+        response = client.post("/_external/dispatch/events/", json={"seq": 7})
     assert response.status_code == 200
     assert response.json() == {"pong": 7}
 
@@ -237,8 +218,8 @@ def test_dispatch_unhandled_action_falls_through_to_on_unhandled(settings):
             seen.append(action)
             return JSONResponse({"unhandled": action}, status_code=202)
 
-    client = _client_for(Hook, settings=settings)
-    response = client.post("/_external/fallback/events/", json={})
+    with _client_for(Hook, settings=settings) as client:
+        response = client.post("/_external/fallback/events/", json={})
     assert response.status_code == 202
     assert response.json() == {"unhandled": "no_method_for_this"}
     assert seen == ["no_method_for_this"]
@@ -255,8 +236,8 @@ def test_dispatch_request_is_authentic_false_raises_401(settings):
         def get_action(self):
             return "ping"
 
-    client = _client_for(Hook, settings=settings)
-    response = client.post("/_external/auth/events/", json={})
+    with _client_for(Hook, settings=settings) as client:
+        response = client.post("/_external/auth/events/", json={})
     assert response.status_code == 401
 
 
@@ -271,14 +252,14 @@ def test_dispatch_request_is_authentic_may_raise_http_exception(settings):
         def get_action(self):
             return "ping"
 
-    client = _client_for(Hook, settings=settings)
-    response = client.post("/_external/rich/events/", json={})
+    with _client_for(Hook, settings=settings) as client:
+        response = client.post("/_external/rich/events/", json={})
     assert response.status_code == 403
 
 
 def test_unknown_path_returns_404(settings):
-    client = _client_for(settings=settings)
-    response = client.post("/_external/nothing/here/", json={})
+    with _client_for(settings=settings) as client:
+        response = client.post("/_external/nothing/here/", json={})
     assert response.status_code == 404
 
 
@@ -296,8 +277,8 @@ def test_trailing_slash_is_optional_on_request_url(settings):
         async def on_ping(self):
             return JSONResponse({"ok": True})
 
-    client = _client_for(Hook, settings=settings)
-    response = client.post("/_external/loose/events", json={})
+    with _client_for(Hook, settings=settings) as client:
+        response = client.post("/_external/loose/events", json={})
     assert response.status_code == 200
 
 
@@ -324,14 +305,14 @@ def test_dedup_first_call_dispatches_second_call_short_circuits(settings):
             seen_pings.append(self.data["seq"])
             return JSONResponse({"ok": True})
 
-    client = _client_for(Hook, settings=settings)
-    r1 = client.post("/_external/dedup/events/", json={"key": "K", "seq": 1})
-    assert r1.status_code == 200
-    assert r1.json() == {"ok": True}
+    with _client_for(Hook, settings=settings) as client:
+        r1 = client.post("/_external/dedup/events/", json={"key": "K", "seq": 1})
+        assert r1.status_code == 200
+        assert r1.json() == {"ok": True}
 
-    r2 = client.post("/_external/dedup/events/", json={"key": "K", "seq": 2})
-    assert r2.status_code == 200
-    assert r2.json() == {"accepted": False, "duplicate": True}
+        r2 = client.post("/_external/dedup/events/", json={"key": "K", "seq": 2})
+        assert r2.status_code == 200
+        assert r2.json() == {"accepted": False, "duplicate": True}
 
     assert seen_pings == [1]
 
@@ -360,13 +341,13 @@ def test_failed_handler_releases_claim_so_retry_reprocesses(settings):
                 raise RuntimeError("transient handler failure")
             return JSONResponse({"ok": True})
 
-    client = _client_for(Hook, settings=settings)
-    r1 = client.post("/_external/flaky/events/", json={"key": "K", "seq": 1})
-    assert r1.status_code == 500  # handler raised; claim released
+    with _client_for(Hook, settings=settings) as client:
+        r1 = client.post("/_external/flaky/events/", json={"key": "K", "seq": 1})
+        assert r1.status_code == 500  # handler raised; claim released
 
-    r2 = client.post("/_external/flaky/events/", json={"key": "K", "seq": 2})
-    assert r2.status_code == 200
-    assert r2.json() == {"ok": True}
+        r2 = client.post("/_external/flaky/events/", json={"key": "K", "seq": 2})
+        assert r2.status_code == 200
+        assert r2.json() == {"ok": True}
     assert attempts == [1, 2]  # reprocessed, not swallowed as a duplicate
 
 
@@ -374,12 +355,9 @@ def test_failed_handler_releases_claim_so_retry_reprocesses(settings):
 
 
 def test_verify_hmac_sha256_accepts_correct_signature():
-    import hashlib
-    import hmac as _hmac
-
     body = b'{"hello":"world"}'
     secret = "supersecret"
-    sig = "sha256=" + _hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
+    sig = "sha256=" + hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
 
     # Should not raise.
     verify_hmac_sha256(body, sig, secret)

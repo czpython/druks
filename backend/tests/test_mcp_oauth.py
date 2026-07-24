@@ -18,7 +18,7 @@ from druks.mcp.enums import TokenSource
 from druks.mcp.exceptions import GrantRefreshError, MissingGrantError, OauthConnectError
 from druks.mcp.helpers import get_bearer_token_env_var
 from druks.mcp.models import McpOauthGrant, McpServer
-from druks.redis import get_client
+from druks.redis import close_client, get_client
 from druks.sandbox.datastructures import Workspace
 from fastapi.testclient import TestClient
 
@@ -91,17 +91,6 @@ def auth_server(monkeypatch):
         oauth, "_http", lambda: httpx.AsyncClient(transport=httpx.MockTransport(fake.handler))
     )
     return fake
-
-
-@pytest.fixture(autouse=True)
-async def _clean_oauth_redis():
-    # The suite shares one FakeRedis; OAuth keys are server-name-keyed, so a
-    # cached token from one test would satisfy the next test's mint.
-    redis = get_client()
-    for key in list(redis._data):
-        if key.startswith("mcp:oauth:"):
-            await redis.delete(key)
-    yield
 
 
 def _register_oauth_server(name: str = _NAME, enabled: bool = True) -> None:
@@ -371,14 +360,13 @@ def test_connect_route_returns_the_consent_url(tmp_path, registry_state, auth_se
         assert response.json()["authorizationUrl"].startswith(f"{_AUTH_BASE}/authorize?")
 
 
-async def test_callback_route_completes_the_connect(
-    tmp_path, registry_state, auth_server, db_session
-):
+def test_callback_route_completes_the_connect(tmp_path, registry_state, auth_server, db_session):
     _register_oauth_server(enabled=False)
-    url = await oauth.begin_connect(_NAME, _SERVER_URL, _ENDPOINT)
-    state = dict(parse_qsl(urlparse(url).query))["state"]
+    settings = make_settings(tmp_path, endpoint=_ENDPOINT)
 
-    with TestClient(configure_app_for_test(settings=make_settings(tmp_path))) as client:
+    with TestClient(configure_app_for_test(settings=settings)) as client:
+        url = client.post(f"/api/mcp-servers/{_NAME}/connect").json()["authorizationUrl"]
+        state = dict(parse_qsl(urlparse(url).query))["state"]
         page = client.get("/api/mcp-servers/oauth/callback", params={"state": state, "code": "c"})
         assert page.status_code == 200
         assert "Connected" in page.text
@@ -411,6 +399,9 @@ async def test_disconnect_route_drops_grant_and_cache(
     _register_oauth_server()
     _store_grant()
     await oauth.mint_access_token(_NAME)
+    # The mint's Redis client is bound to this test's loop; close it so the
+    # route dials its own — the cached token lives in Redis either way.
+    await close_client()
 
     with TestClient(configure_app_for_test(settings=make_settings(tmp_path))) as client:
         assert client.delete(f"/api/mcp-servers/{_NAME}/grant").status_code == 204

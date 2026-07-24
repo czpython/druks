@@ -51,82 +51,15 @@ for test_module in ("test_durable_sdk", "test_notifications_durable"):
     register_workflow_package(test_module, None)
 
 
-class FakeRedis:
-    # The subset the run lock and the MCP OAuth cache use; one instance per
-    # suite, keys per test are distinct enough (run ids, server names) that
-    # cross-test bleed can't collide.
-    def __init__(self) -> None:
-        self._data: dict[str, bytes] = {}
-        # TTLs are recorded, never enforced — enough to observe a refresh.
-        self._ttls: dict[str, int] = {}
-        self._zsets: dict[str, dict[str, float]] = {}
-
-    async def set(self, key: str, value: str, *, nx: bool = False, ex: int | None = None):
-        if nx and key in self._data:
-            return None
-        self._data[key] = value.encode()
-        if ex is not None:
-            self._ttls[key] = ex
-        return True
-
-    async def get(self, key: str) -> bytes | None:
-        return self._data.get(key)
-
-    async def exists(self, key: str) -> int:
-        return int(key in self._data)
-
-    async def getdel(self, key: str) -> bytes | None:
-        self._ttls.pop(key, None)
-        return self._data.pop(key, None)
-
-    # Sorted sets — the per-login gate's active-user registry. Stored apart
-    # from the string keys; scores kept for the range prune.
-    async def zadd(self, key: str, mapping: dict[str, float]) -> int:
-        zset = self._zsets.setdefault(key, {})
-        added = sum(1 for member in mapping if member not in zset)
-        zset.update(mapping)
-        return added
-
-    async def zrem(self, key: str, *members: str) -> int:
-        zset = self._zsets.get(key, {})
-        return sum(1 for member in members if zset.pop(member, None) is not None)
-
-    async def zcard(self, key: str) -> int:
-        return len(self._zsets.get(key, {}))
-
-    async def zremrangebyscore(self, key: str, low: object, high: float) -> int:
-        zset = self._zsets.get(key, {})
-        floor = float("-inf") if low in ("-inf", None) else float(low)  # type: ignore[arg-type]
-        doomed = [member for member, score in zset.items() if floor <= score <= float(high)]
-        for member in doomed:
-            del zset[member]
-        return len(doomed)
-
-    async def delete(self, key: str) -> None:
-        self._data.pop(key, None)
-        self._ttls.pop(key, None)
-
-    async def expire(self, key: str, seconds: int) -> bool:
-        if key not in self._data:
-            return False
-        self._ttls[key] = seconds
-        return True
-
-    async def aclose(self) -> None:
-        return
-
-
-_fake_redis = FakeRedis()
-druks.redis._client = _fake_redis  # get_client() returns it instead of connecting
-
-
-async def _keep_fake_client() -> None:
-    # The app lifespan's shutdown would null _client, and the next get_client()
-    # would dial a real Redis; the suite keeps the fake for its whole life.
-    return
-
-
-druks.redis.close_client = _keep_fake_client
+@pytest.fixture(autouse=True)
+async def _redis():
+    # Real Redis (CI runs one beside Postgres; settings default to it). Drop
+    # whatever client the previous test left — its event loop is gone, GC
+    # closes the sockets — then flush on a fresh client and close it, so every
+    # consumer dials on its own live loop (a TestClient portal, or this test's).
+    druks.redis._client = None
+    await druks.redis.get_client().flushdb()
+    await druks.redis.close_client()
 
 
 @pytest.fixture(autouse=True)
