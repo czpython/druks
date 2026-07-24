@@ -17,10 +17,9 @@ def get_harness(name: str) -> type[Harness] | None:
 
 
 def get_harness_for_model(model: str) -> type[Harness]:
-    """The harness that runs ``model``, matched by name namespace — a model in a
-    known namespace routes even if it postdates this release. A miss means no
-    installed harness owns its namespace."""
-    for harness in get_harnesses():
-        if harness.has_model(model):
-            return harness
+    from druks.user_settings.models import HarnessSettings
+
+    for row in HarnessSettings.all():
+        if model == row.name or any(m["id"] == model for m in row.allowed_models):
+            return row.harness
     raise HarnessError(f"no harness runs model {model!r}")

@@ -271,7 +271,6 @@ class CodexHarness(Harness):
     # symmetric with claude. session.jsonl is still snapshotted for cost.
     name = "codex"
     provider = "openai"
-    model_prefixes = ("gpt-", "o1", "o3", "o4")
     models = ("gpt-5.5",)
     default_model = "gpt-5.5"
     # ``client_version`` is required and lower-bounds the list (the server
