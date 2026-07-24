@@ -411,7 +411,6 @@ async def test_in_app_park_notifies_with_actions(rt, deliver_spy):
     assert notification.actions == [
         {"id": "approve", "label": "Approve"},
         {"id": "request_changes", "label": "Request changes"},
-        {"id": "cancel", "label": "Cancel"},
         {"id": "postgres", "label": "Postgres"},
     ]
     assert notification.deep_link is None
