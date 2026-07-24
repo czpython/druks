@@ -10,10 +10,7 @@ from druks.sandbox import gate
 
 @pytest.fixture(autouse=True)
 def _fast_poll(monkeypatch):
-    druks.redis.get_client()._data.clear()
-    druks.redis.get_client()._zsets.clear()
     monkeypatch.setattr(gate, "_POLL", 0.01)
-    yield
 
 
 async def test_use_registers_for_the_span_and_unregisters():

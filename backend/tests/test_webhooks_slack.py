@@ -119,24 +119,23 @@ def test_signature_verifier_against_a_known_answer(monkeypatch):
 async def test_unsigned_or_stale_requests_401_and_never_resume(tmp_path, db_session, resume_spy):
     run, notification = _parked_notification(db_session)
     body = _interactivity_body(encode_button(notification.correlation_token, "approve"))
-    client = _client(tmp_path)
+    with _client(tmp_path) as client:
+        no_headers = client.post("/_external/slack/interactivity/", content=body)
+        assert no_headers.status_code == 401
 
-    no_headers = client.post("/_external/slack/interactivity/", content=body)
-    assert no_headers.status_code == 401
+        wrong_secret = client.post(
+            "/_external/slack/interactivity/",
+            content=body,
+            headers=_signed_headers(body, secret="wrong-secret"),
+        )
+        assert wrong_secret.status_code == 401
 
-    wrong_secret = client.post(
-        "/_external/slack/interactivity/",
-        content=body,
-        headers=_signed_headers(body, secret="wrong-secret"),
-    )
-    assert wrong_secret.status_code == 401
-
-    replayed = client.post(
-        "/_external/slack/interactivity/",
-        content=body,
-        headers=_signed_headers(body, timestamp=str(int(time.time()) - 3600)),
-    )
-    assert replayed.status_code == 401
+        replayed = client.post(
+            "/_external/slack/interactivity/",
+            content=body,
+            headers=_signed_headers(body, timestamp=str(int(time.time()) - 3600)),
+        )
+        assert replayed.status_code == 401
 
     assert resume_spy == []
     assert Notification.get(notification.id).state == "pending"
@@ -148,11 +147,10 @@ async def test_unsigned_or_stale_requests_401_and_never_resume(tmp_path, db_sess
 async def test_signed_click_routes_through_respond(tmp_path, db_session, resume_spy):
     run, notification = _parked_notification(db_session)
     body = _interactivity_body(encode_button(notification.correlation_token, "approve"))
-    client = _client(tmp_path)
-
-    response = client.post(
-        "/_external/slack/interactivity/", content=body, headers=_signed_headers(body)
-    )
+    with _client(tmp_path) as client:
+        response = client.post(
+            "/_external/slack/interactivity/", content=body, headers=_signed_headers(body)
+        )
 
     assert response.status_code == 200
     assert response.json() == {"accepted": True}
@@ -168,20 +166,19 @@ async def test_signed_click_routes_through_respond(tmp_path, db_session, resume_
 async def test_dead_round_click_is_acknowledged_without_resume(tmp_path, db_session, resume_spy):
     run, notification = _parked_notification(db_session)
     notification.mark_acknowledged()
-    client = _client(tmp_path)
+    with _client(tmp_path) as client:
+        body = _interactivity_body(encode_button(notification.correlation_token, "approve"))
+        acknowledged = client.post(
+            "/_external/slack/interactivity/", content=body, headers=_signed_headers(body)
+        )
+        assert acknowledged.status_code == 200
+        assert acknowledged.json() == {"accepted": False}
 
-    body = _interactivity_body(encode_button(notification.correlation_token, "approve"))
-    acknowledged = client.post(
-        "/_external/slack/interactivity/", content=body, headers=_signed_headers(body)
-    )
-    assert acknowledged.status_code == 200
-    assert acknowledged.json() == {"accepted": False}
-
-    ghost = _interactivity_body(encode_button("ghost-token", "approve"))
-    unknown = client.post(
-        "/_external/slack/interactivity/", content=ghost, headers=_signed_headers(ghost)
-    )
-    assert unknown.status_code == 200
+        ghost = _interactivity_body(encode_button("ghost-token", "approve"))
+        unknown = client.post(
+            "/_external/slack/interactivity/", content=ghost, headers=_signed_headers(ghost)
+        )
+        assert unknown.status_code == 200
     assert unknown.json() == {"accepted": False}
     assert "ghost-token" not in unknown.text
 
@@ -190,7 +187,6 @@ async def test_dead_round_click_is_acknowledged_without_resume(tmp_path, db_sess
 
 async def test_malformed_payloads_400_never_500_never_resume(tmp_path, db_session, resume_spy):
     run, notification = _parked_notification(db_session)
-    client = _client(tmp_path)
     malformed = [
         b"not-a-form",
         urlencode({"payload": "not json"}).encode(),
@@ -200,11 +196,12 @@ async def test_malformed_payloads_400_never_500_never_resume(tmp_path, db_sessio
         _interactivity_body("not-an-encoded-button!!"),
     ]
 
-    for body in malformed:
-        response = client.post(
-            "/_external/slack/interactivity/", content=body, headers=_signed_headers(body)
-        )
-        assert response.status_code == 400
+    with _client(tmp_path) as client:
+        for body in malformed:
+            response = client.post(
+                "/_external/slack/interactivity/", content=body, headers=_signed_headers(body)
+            )
+            assert response.status_code == 400
 
     assert resume_spy == []
     assert Notification.get(notification.id).state == "pending"
@@ -214,12 +211,12 @@ async def test_unknown_interactivity_type_is_acknowledged_unhandled(
     tmp_path, db_session, resume_spy
 ):
     _parked_notification(db_session)
-    client = _client(tmp_path)
     body = urlencode({"payload": json.dumps({"type": "view_submission"})}).encode()
 
-    response = client.post(
-        "/_external/slack/interactivity/", content=body, headers=_signed_headers(body)
-    )
+    with _client(tmp_path) as client:
+        response = client.post(
+            "/_external/slack/interactivity/", content=body, headers=_signed_headers(body)
+        )
 
     assert response.status_code == 200
     assert response.json() == {"accepted": True, "handled": False}

@@ -11,14 +11,6 @@ from druks.harnesses.codex import CodexHarness
 from druks.harnesses.exceptions import ConnectError
 
 
-@pytest.fixture(autouse=True)
-def _clear_pending():
-    # The suite shares one in-memory fake Redis; clear the connect pending keys
-    # so one test's stash never leaks into another.
-    druks.redis.get_client()._data.clear()
-    yield
-
-
 def _jwt(claims: dict) -> str:
     header = base64.urlsafe_b64encode(b'{"alg":"none"}').rstrip(b"=").decode()
     payload = base64.urlsafe_b64encode(json.dumps(claims).encode()).rstrip(b"=").decode()

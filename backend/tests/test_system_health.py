@@ -1,20 +1,7 @@
 from pathlib import Path
 
-import pytest
 from conftest import configure_app_for_test, make_settings
 from fastapi.testclient import TestClient
-
-MODULE = "druks.api.health_status"
-
-
-@pytest.fixture(autouse=True)
-def _no_redis_freshness(monkeypatch):
-    """Webhook freshness lives in Redis; tests have none running."""
-
-    async def none(provider):
-        return None
-
-    monkeypatch.setattr(f"{MODULE}.last_delivery_at", none)
 
 
 def _client(tmp_path: Path) -> TestClient:

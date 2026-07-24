@@ -21,9 +21,10 @@ jobs:
   checks:
     runs-on: ubuntu-latest
     # The suite talks to a real Postgres (the harness runs each test in a rolled-back
-    # transaction; the durable tests create their own databases). Defaults in
-    # backend/tests match localhost:5432 with druks/druks/druks, so this mirrors local
-    # dev (deploy/compose.dev.yaml) and needs no env wiring. Image tracks deploy/compose.yaml.
+    # transaction; the durable tests create their own databases) and a real Redis
+    # (flushed between tests). Defaults in backend/tests match localhost:5432 with
+    # druks/druks/druks and localhost:6379, so this mirrors local dev
+    # (deploy/compose.dev.yaml) and needs no env wiring. Images track deploy/compose.yaml.
     services:
       postgres:
         image: postgres:16-alpine@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777
@@ -35,6 +36,15 @@ jobs:
           - 5432:5432
         options: >-
           --health-cmd "pg_isready -U druks"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:8.2-alpine@sha256:223b183cbc49f5ff48728e1fc52ccf101f05072decad2bd9867281a3c9bf75fd
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5

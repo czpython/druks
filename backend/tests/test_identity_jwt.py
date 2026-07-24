@@ -1,7 +1,6 @@
 import time
 from pathlib import Path
 
-import druks.redis
 import jwt as pyjwt
 import pytest
 from conftest import configure_app_for_test, make_settings
@@ -24,7 +23,6 @@ _JWKS = {"keys": [{**_JWK, "kid": KID}]}
 
 @pytest.fixture(autouse=True)
 def _serve_jwks(monkeypatch):
-    druks.redis.get_client()._data.clear()
     assertion._verifier.cache_clear()
 
     async def fetch_jwks(self):
