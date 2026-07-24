@@ -61,9 +61,9 @@ jobs:
           python-version: "3.11"
       - run: uv sync --locked --dev
       - run: uv run ruff check backend
-      # The suite watchdog lives in conftest (faulthandler, 9 minutes): a hang
-      # dumps every thread's stack and exits from inside the process, so the
-      # step ends normally and the log keeps the dump.
+      # Hang defense is pytest-timeout (pyproject): 180s per test, thread
+      # method — dump every thread's stack and exit from inside the process,
+      # so the step ends normally and the log keeps the dump.
       - run: uv run pytest backend/
       # The out-of-tree proof extension, installed editable exactly as an author's
       # ``pip install -e`` would — its real entry point registers here, so the loader

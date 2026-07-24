@@ -51,6 +51,7 @@ dev = [
     "pyright>=1.1.408",
     "pytest>=8.4.0",
     "pytest-asyncio>=1.3.0",
+    "pytest-timeout>=2.4.0",
     "ruff>=0.14.0",
 ]
 
@@ -107,6 +108,13 @@ extend-immutable-calls = ["fastapi.Depends", "fastapi.Query"]
 testpaths = ["backend/tests"]
 asyncio_mode = "auto"
 pythonpath = ["backend", "backend/tests"]
+# A parked await hangs a run silently (the suite normally finishes in ~90s).
+# thread method: dump EVERY thread's stack — DBOS workers included — then
+# exit from inside the process, so CI ends the step normally and keeps the
+# dump. Covers fixture setup, re-arms per test, survives pytest's own
+# faulthandler cancellations.
+timeout = 180
+timeout_method = "thread"
 
 [tool.pyright]
 pythonVersion = "3.11"
