@@ -25,7 +25,7 @@ from druks.settings import load_settings
 from druks.skills.models import Skill
 from druks.ticketing.datastructures import Ticket
 from druks.ticketing.enums import SemanticStatus
-from druks.workflows import FatalError, Gate, Run, Workflow, step
+from druks.workflows import FatalError, Gate, OperatorCancelled, Run, Workflow, step
 
 from .extension import Build
 from .journal import BuildJournal
@@ -269,7 +269,7 @@ class BuildWorkflow(Workflow):
                 reviewer_notes = grade.body
             reply = await self.review(questions=plan.questions, context=critique)
             if reply.action == "cancel":
-                raise FatalError("cancelled at plan review")
+                raise OperatorCancelled("cancelled at plan review")
             if reply.action == "approve" and not plan.questions:
                 return True
             answered = plan.get_answered(reply.answers)
@@ -310,7 +310,7 @@ class BuildWorkflow(Workflow):
             return False
         if decision.action == "cancel":
             await self._push_ticket_status(SemanticStatus.CANCELED)
-            raise FatalError("cancelled at work review")
+            raise OperatorCancelled("cancelled at work review")
         return False
 
     async def _approved_work(self) -> bool:

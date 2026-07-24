@@ -11,6 +11,12 @@ class FatalError(Exception):
     code: ClassVar[str] = ""
 
 
+class OperatorCancelled(Exception):
+    """End the run as cancelled on the operator's say-so: the message becomes the
+    run's recorded reason and the run finalizes as CANCELLED, not FAILED — a
+    deliberate stop the board reads as done, not as still needing you."""
+
+
 class WorkflowError(Exception):
     pass
 

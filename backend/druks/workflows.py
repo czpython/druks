@@ -23,7 +23,13 @@ from druks.accounts.context import current_account_id
 from druks.durable.activity import get_run_phase, set_run_phase
 from druks.durable.engine import _step_engine, register_schedule, run_queue, step_session
 from druks.durable.enums import AgentCallStatus, RunState
-from druks.durable.exceptions import FatalError, GateTimeout, SubjectlessGate, WorkflowError
+from druks.durable.exceptions import (
+    FatalError,
+    GateTimeout,
+    OperatorCancelled,
+    SubjectlessGate,
+    WorkflowError,
+)
 from druks.durable.models import AgentCall, Run
 from druks.durable.schemas import AgentCallResponse, SubjectActivity, SubjectSummary
 from druks.events.models import Event
@@ -51,6 +57,7 @@ __all__ = [
     "FatalError",
     "Gate",
     "Journal",
+    "OperatorCancelled",
     "OperatorReply",
     "Run",
     "RunState",
@@ -426,15 +433,29 @@ async def _execute_run(
     body: Callable,
 ) -> Any:
     # Ensure the row (idempotent, so a scheduled run with no start() makes it
-    # here), then run the body between its running and finished/failed events.
-    # Every failure re-raises so DBOS records the terminal ERROR derived state
-    # reads; an operator cancel already carries its own reason and terminal
-    # status, so it passes through untouched.
+    # here), then run the body between its running event and a terminal one. A
+    # crash or FatalError re-raises so DBOS records the terminal ERROR that
+    # derived state reads as failed.
     Run.create_row(_step_engine(), workflow_id=workflow_id, kind=kind, account_id=account_id)
     await _emit_run_event(workflow_id, RunState.RUNNING, subject=subject)
     try:
         result = await body()
     except (DBOSAwaitedWorkflowCancelledError, DBOSWorkflowCancelledError):
+        # An external cancel (Run.cancel) already wrote the reason and the
+        # CANCELLED status, so let it pass through untouched.
+        raise
+    except OperatorCancelled as cancelled:
+        # The operator ended the run at a review gate. Derived state reads the DBOS
+        # status, so end it CANCELLED, not the ERROR a raise records: emit the
+        # terminal event while the run is still live, then set the status. The
+        # re-raise can't overwrite a terminal CANCELLED, so the run stands cancelled.
+        await _emit_run_event(
+            workflow_id,
+            RunState.CANCELLED,
+            subject=subject,
+            facts={**_GATE_CLEARED, "failure": str(cancelled)},
+        )
+        await DBOS.cancel_workflow_async(workflow_id)
         raise
     except Exception as exc:
         await _emit_run_event(

@@ -12,7 +12,7 @@ from druks.durable import FatalError, Run, RunState
 from druks.durable.dbos_state import workflow_status
 from druks.durable.engine import configure_engine, init_dbos, launch, shutdown
 from druks.extensions.registry import agents, workflows
-from druks.workflows import Gate, Workflow, step
+from druks.workflows import Gate, OperatorCancelled, Workflow, step
 from pydantic import BaseModel
 from sqlalchemy import create_engine, select
 
@@ -77,6 +77,8 @@ def _build_units():
             decision = await Approve.wait()
             if decision.action == "close":
                 raise FatalError("closed at review")
+            if decision.action == "cancel":
+                raise OperatorCancelled("cancelled at review")
 
     class AgentFlow(Workflow):
         DECIDER = Agent(id="decider", contract=Decision, model="claude", prompt="t")
@@ -413,6 +415,26 @@ async def test_fail_branch(rt):
             {"id": wfid},
         ).scalar_one()
     assert status == "ERROR"
+
+
+async def test_cancel_branch(rt):
+    from sqlalchemy import text
+
+    wfid = await rt.SampleFlow.start(subject=None, repo="owner/app")
+    parked = await _wait_for(rt.engine, wfid, lambda r: r.input_gate == "approve")
+
+    await parked.resume(action="cancel")
+    cancelled = await _wait_for(rt.engine, wfid, lambda r: r.state == RunState.CANCELLED)
+    assert cancelled.failure == "cancelled at review"
+    assert cancelled.input_gate is None
+    # CANCELLED derives from DBOS's own record: the body self-cancelled, so DBOS
+    # holds terminal CANCELLED — a deliberate stop, not the ERROR a raise leaves.
+    with rt.engine.connect() as conn:
+        status = conn.execute(
+            text("SELECT status FROM dbos.workflow_status WHERE workflow_uuid = :id"),
+            {"id": wfid},
+        ).scalar_one()
+    assert status == "CANCELLED"
 
 
 async def test_subjectless_gate_fails_loudly(rt):

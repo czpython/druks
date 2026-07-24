@@ -5,7 +5,7 @@ from druks.build.contracts import PlanData, QuestionOptionOutput, QuestionOutput
 from druks.build.enums import ReviewDecision
 from druks.build.policy import RepoPolicy
 from druks.build.workflows import Build, BuildWorkflow
-from druks.workflows import FatalError, OperatorReply
+from druks.workflows import FatalError, OperatorCancelled, OperatorReply
 
 
 def _flow(*, auto_dispatch: bool = False) -> BuildWorkflow:
@@ -182,7 +182,7 @@ async def test_cancel_at_the_plan_park_stops_the_run(monkeypatch):
 
     flow.review = fake_review
 
-    with pytest.raises(FatalError, match="cancelled at plan review"):
+    with pytest.raises(OperatorCancelled, match="cancelled at plan review"):
         await flow._plan_phase()
 
 
