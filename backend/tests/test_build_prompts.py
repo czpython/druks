@@ -182,16 +182,16 @@ def test_build_prompt_context_covers_template_attrs():
     assert not missing, f"BuildPromptContext missing template attrs: {missing}"
 
 
-def test_require_for_repo_returns_the_repo(db_session):
+def test_get_for_repo_returns_the_repo(db_session):
     project = Project.create(name="acme/widget")
     ProjectRepo.create(project_id=project.id, full_name="acme/widget")
-    assert ProjectRepo.require_for_repo("acme/widget").full_name == "acme/widget"
+    assert ProjectRepo.get_for_repo("acme/widget").full_name == "acme/widget"
 
 
-def test_require_for_repo_fails_clearly_when_the_repo_was_transferred(db_session):
+def test_get_for_repo_raises_when_the_repo_was_transferred(db_session):
     # Registered under the new name; a run still holding the old name must fail
     # with the reason, not an opaque NoneType crash.
     project = Project.create(name="czpython/druks")
     ProjectRepo.create(project_id=project.id, full_name="czpython/druks")
     with pytest.raises(FatalError, match="renamed or transferred"):
-        ProjectRepo.require_for_repo("clawhaven/druks")
+        ProjectRepo.get_for_repo("clawhaven/druks", raise_on_missing=True)

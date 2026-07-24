@@ -231,7 +231,7 @@ class BuildWorkflow(Workflow):
     async def _load_policy_and_profile(self) -> dict[str, Any]:
         # One memoized read: the live policy + the repo's profiled facts.
         policy = await RepoPolicy.resolve(self.input.repo)
-        target = ProjectRepo.require_for_repo(self.input.repo)
+        target = ProjectRepo.get_for_repo(self.input.repo, raise_on_missing=True)
         return {
             "policy": policy.model_dump(mode="json"),
             "profile": target.effective_profile(),
@@ -539,7 +539,7 @@ class Scope(Workflow):
             for r in item.project.repos
             if r.full_name != item.repo
         ]
-        target = ProjectRepo.require_for_repo(item.repo)
+        target = ProjectRepo.get_for_repo(item.repo, raise_on_missing=True)
         settings = Build.settings()
         return {
             "target_repo": item.repo,
