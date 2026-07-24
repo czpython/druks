@@ -9,7 +9,7 @@ from fastapi import HTTPException
 # answer service echoes.
 _ASK = {
     "presentation": "in_app",
-    "controls": ["approve", "request_changes", "cancel"],
+    "controls": ["approve", "request_changes"],
     "questions": [{"id": "q1", "prompt": "which?", "options": [{"id": "a", "label": "A"}]}],
 }
 

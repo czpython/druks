@@ -23,7 +23,7 @@ from fastmcp.client.transports import StreamableHttpTransport
 
 _IN_APP_ASK = {
     "presentation": "in_app",
-    "controls": ["approve", "request_changes", "cancel"],
+    "controls": ["approve", "request_changes"],
     "questions": [],
 }
 
@@ -219,7 +219,7 @@ async def test_gate_cycle_reads_answers_and_reports_stale_rounds(
     async with live(app), _client(app, pat_token) as client:
         gate = (await client.call_tool("get_gate", {"run_id": run.id})).structured_content
         assert gate["runId"] == run.id
-        assert gate["ask"]["controls"] == ["approve", "request_changes", "cancel"]
+        assert gate["ask"]["controls"] == ["approve", "request_changes"]
 
         stale = await _call_error(
             client,

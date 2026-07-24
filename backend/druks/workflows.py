@@ -72,7 +72,7 @@ GATE_TTL_SECONDS = 14 * 24 * 60 * 60
 # The decision verbs an in-app review offers. Framework-owned: an extension's
 # agent supplies the plan and questions (content), but the verbs are ours — so a
 # resume can only carry an action we defined, the line the resume endpoint checks.
-_ReviewAction = Literal["approve", "request_changes", "cancel"]
+_ReviewAction = Literal["approve", "request_changes"]
 _REVIEW_CONTROLS = get_args(_ReviewAction)
 
 T = TypeVar("T")

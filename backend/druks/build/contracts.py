@@ -14,11 +14,12 @@ if TYPE_CHECKING:
     from druks.build.workflows import BuildWorkflow
 
 
-# The PR webhook resumes approve/request_changes; revise_contract and cancel
-# come from the operator's UI.
 class ReviewWork(Gate):
+    """The verdict on the built work: approve/request_changes (PR webhook) or
+    revise_contract (UI)."""
+
     name = "review_work"
-    action: Literal["approve", "request_changes", "revise_contract", "cancel"]
+    action: Literal["approve", "request_changes", "revise_contract"]
     reviewer: str | None = None
     body: str | None = None
 

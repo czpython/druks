@@ -121,7 +121,6 @@ def _stub(monkeypatch, rt, *, plan_approval="human", auto_dispatch=False):
         return None
 
     for name in (
-        "_push_ticket_status",
         "set_pr_draft",
         "request_assignee_review",
         "_clear_draft",

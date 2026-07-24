@@ -24,7 +24,6 @@ from druks.sandbox.layout import (
 from druks.settings import load_settings
 from druks.skills.models import Skill
 from druks.ticketing.datastructures import Ticket
-from druks.ticketing.enums import SemanticStatus
 from druks.workflows import FatalError, Gate, Run, Workflow, step
 
 from .extension import Build
@@ -244,7 +243,7 @@ class BuildWorkflow(Workflow):
 
     async def _plan_phase(self) -> bool:
         """Gate mode: plan → park. Auto mode: machine review with one bounded
-        redraft. True → implement; cancel raises."""
+        redraft. True → implement."""
         gate = self._policy.plan_approval_gate(self._settings.auto_dispatch_on_plan_approval)
         answered: list[dict[str, str]] = []
         note = ""
@@ -268,8 +267,6 @@ class BuildWorkflow(Workflow):
                 redrafted = True
                 reviewer_notes = grade.body
             reply = await self.review(questions=plan.questions, context=critique)
-            if reply.action == "cancel":
-                raise FatalError("cancelled at plan review")
             if reply.action == "approve" and not plan.questions:
                 return True
             answered = plan.get_answered(reply.answers)
@@ -307,10 +304,6 @@ class BuildWorkflow(Workflow):
             return await self._triage()
         if decision.action == "revise_contract":
             await Build.revise_contract()
-            return False
-        if decision.action == "cancel":
-            await self._push_ticket_status(SemanticStatus.CANCELED)
-            raise FatalError("cancelled at work review")
         return False
 
     async def _approved_work(self) -> bool:
@@ -391,15 +384,6 @@ class BuildWorkflow(Workflow):
     @step
     async def _clear_draft(self) -> None:
         await self.set_pr_draft(draft=False)
-
-    @step
-    async def _push_ticket_status(self, status: SemanticStatus) -> None:
-        work_item = WorkItem.get_for_pr(
-            repo=self.input.repo,
-            pr_number=self.pr_number,
-        )
-        if work_item:
-            await work_item.set_remote_status(status)
 
     async def request_assignee_review(self) -> None:
         login = self.journal.assignee_github_login
