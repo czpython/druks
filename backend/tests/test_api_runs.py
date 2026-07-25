@@ -116,26 +116,29 @@ def test_transcript_range_fetch_derived_abandoned_call_uses_immutable_cache(
     tmp_path: Path,
     db_session,
 ):
+    from druks.durable import AgentCall
     from druks.durable.dbos_state import workflow_status
     from sqlalchemy import update
 
-    run_id = _seed_run(tmp_path=tmp_path, finished=False)
+    call_id = _seed_run(tmp_path=tmp_path, finished=False)
+    call = AgentCall.get(call_id)
+    assert call is not None
     db_session.execute(
         update(workflow_status)
-        .where(workflow_status.c.workflow_uuid == run_id)
+        .where(workflow_status.c.workflow_uuid == call.run_id)
         .values(status="ERROR")
     )
     db_session.expire_all()
 
     response = client.get(
-        f"/api/build/transcripts/{run_id}",
+        f"/api/build/transcripts/{call_id}",
         params={"stream": "stdout", "limit": 5},
     )
 
     assert response.status_code == 200
     assert response.headers["cache-control"] == "public, max-age=31536000, immutable"
     assert response.json() == {
-        "callId": run_id,
+        "callId": call_id,
         "stream": "stdout",
         "offset": 0,
         "nextOffset": 5,
