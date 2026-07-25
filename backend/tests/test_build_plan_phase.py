@@ -62,7 +62,7 @@ async def test_gate_mode_parks_every_plan_and_never_calls_the_reviewer(monkeypat
                 QuestionOutput(
                     id="q1",
                     prompt="Which cache?",
-                    options=[QuestionOptionOutput(id="a", label="Redis")],
+                    options=[QuestionOptionOutput(id="a", label="Redis", recommended=False)],
                 )
             ],
         ),
@@ -98,6 +98,113 @@ async def test_gate_mode_parks_every_plan_and_never_calls_the_reviewer(monkeypat
         },
         {"answered_questions": [], "operator_note": "add a rollback section", "reviewer_notes": ""},
     ]
+
+
+async def test_approve_confirming_recommendations_proceeds_without_redraft(monkeypatch):
+    """Approving every recommended option proceeds after one plan."""
+    flow = _flow()
+    passes = _fake_plans(
+        monkeypatch,
+        PlanData(
+            plan_markdown="v1",
+            questions=[
+                QuestionOutput(
+                    id="q1",
+                    prompt="Which cache?",
+                    options=[
+                        QuestionOptionOutput(id="a", label="Redis", recommended=True),
+                        QuestionOptionOutput(id="b", label="Memcache", recommended=False),
+                    ],
+                )
+            ],
+        ),
+    )
+    _no_review_agent(monkeypatch)
+
+    async def fake_review(*, questions=None, context=""):
+        return OperatorReply(action="approve", answers={"q1": "a"})
+
+    flow.review = fake_review
+
+    assert await flow._plan_phase() is True
+    assert len(passes) == 1
+
+
+async def test_approve_diverging_from_recommendation_redrafts(monkeypatch):
+    """Approving a different option folds that answer into a second plan."""
+    flow = _flow()
+    passes = _fake_plans(
+        monkeypatch,
+        PlanData(
+            plan_markdown="v1",
+            questions=[
+                QuestionOutput(
+                    id="q1",
+                    prompt="Which cache?",
+                    options=[
+                        QuestionOptionOutput(id="a", label="Redis", recommended=True),
+                        QuestionOptionOutput(id="b", label="Memcache", recommended=False),
+                    ],
+                )
+            ],
+        ),
+        PlanData(plan_markdown="v2"),
+    )
+    _no_review_agent(monkeypatch)
+    replies = iter(
+        [
+            OperatorReply(action="approve", answers={"q1": "b"}),
+            OperatorReply(action="approve"),
+        ]
+    )
+
+    async def fake_review(*, questions=None, context=""):
+        return next(replies)
+
+    flow.review = fake_review
+
+    assert await flow._plan_phase() is True
+    assert len(passes) == 2
+    assert passes[1]["answered_questions"] == [{"question": "Which cache?", "answer": "Memcache"}]
+
+
+async def test_approve_with_note_redrafts(monkeypatch):
+    """An approve note is change guidance and triggers a second plan."""
+    flow = _flow()
+    passes = _fake_plans(
+        monkeypatch,
+        PlanData(
+            plan_markdown="v1",
+            questions=[
+                QuestionOutput(
+                    id="q1",
+                    prompt="Which cache?",
+                    options=[QuestionOptionOutput(id="a", label="Redis", recommended=True)],
+                )
+            ],
+        ),
+        PlanData(plan_markdown="v2"),
+    )
+    _no_review_agent(monkeypatch)
+    replies = iter(
+        [
+            OperatorReply(
+                action="approve",
+                answers={"q1": "a"},
+                note="include the rollback command",
+            ),
+            OperatorReply(action="approve"),
+        ]
+    )
+
+    async def fake_review(*, questions=None, context=""):
+        return next(replies)
+
+    flow.review = fake_review
+
+    assert await flow._plan_phase() is True
+    assert len(passes) == 2
+    assert passes[1]["operator_note"] == "include the rollback command"
 
 
 async def test_auto_mode_folds_the_critique_into_one_redraft(monkeypatch):

@@ -65,6 +65,7 @@ class QuestionOptionOutput(AgentOutput):
     # an oversized answer fails parse loudly instead of being clipped later.
     id: str = Field(max_length=64)
     label: str = Field(max_length=256)
+    recommended: bool
 
 
 class QuestionOutput(AgentOutput):
@@ -89,6 +90,16 @@ class PlanData(BaseModel):
     acceptance_criteria: list[AcceptanceCriterionOutput] = Field(default_factory=list)
     # Resolved by the planner; a revision carries None.
     assignee_github_login: str | None = None
+
+    def confirms_recommendations(self, picks: dict[str, str]) -> bool:
+        # Unanswered questions and questions without a recommendation cannot confirm intent.
+        return all(
+            any(
+                option.recommended and picks.get(question.id) == option.id
+                for option in question.options
+            )
+            for question in self.questions
+        )
 
     def get_answered(self, picks: dict[str, str]) -> list[dict[str, str]]:
         # Each question the operator answered, paired with its answer — what the

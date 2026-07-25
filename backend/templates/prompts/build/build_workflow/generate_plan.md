@@ -15,8 +15,8 @@ your acceptance criteria. Wrong shape here compounds into every step that follow
   external services. If you cannot express it as a machine-checkable assertion — diff exists,
   test passes, column present in migration, function has this signature — it is not an AC yet.
 - **Open questions are cheap now, expensive later.** A question surfaced in the plan costs a
-  paragraph. The same question surfaced during implementation costs three revision rounds and
-  forces either a bad guess or a full loop.
+  paragraph. A confident answer is a decision, not a question: make it, plan with it, and note
+  it in the plan. Ask only when no confident decision can make the plan complete.
 - **One PR, one coherent change.** If you would want to merge half of this and revisit the
   rest, the scope should be split into two plans.
 
@@ -61,7 +61,7 @@ The plan reviewer rejected your previous draft with the critique below. Fold eve
 > {{ reviewer_notes | replace("\n", "\n> ") }}
 
 {% endif %}
-Generate the initial implementation plan. Include open questions only when the plan cannot be made decision-complete from the issue and repository build. Return specific acceptance criteria describing what must be true for this PR to pass. When the work changes a protocol or wire contract, include exact request/response examples in the plan or acceptance criteria. Do not add standalone lint, test, or type-check acceptance criteria from the verification profile. A test explicitly requested by the issue remains a valid AC. A behavioral AC may include a `Verification:` note describing how the evaluator confirms that specific criterion.
+Generate the initial implementation plan. If the issue and repository support a confident answer, make that decision, plan with it, and note it instead of asking. Include open questions only when the plan cannot be made decision-complete from the issue and repository build. For each unavoidable question, set `recommended: true` on exactly one option. Return specific acceptance criteria describing what must be true for this PR to pass. When the work changes a protocol or wire contract, include exact request/response examples in the plan or acceptance criteria. Do not add standalone lint, test, or type-check acceptance criteria from the verification profile. A test explicitly requested by the issue remains a valid AC. A behavioral AC may include a `Verification:` note describing how the evaluator confirms that specific criterion.
 
 ACCEPTANCE CRITERIA MUST BE CODE-VERIFIABLE. Druks's evaluator inspects the diff and reads tests. It runs the configured verification profile as its own check set, separate from the binding acceptance criteria the implementer must satisfy. It cannot drive a browser, click through a UI, eyeball rendered output, exercise a real third-party API, or otherwise perform a runtime/visual smoke. Any criterion phrased as "manually smoke X", "load the app locally", "verify visually", "click through Y", "confirm in production", or "exercise the live N integration" is unfulfillable in this pipeline and will lock the PR in revision loops forever.
 
