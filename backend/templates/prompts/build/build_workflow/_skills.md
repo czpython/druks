@@ -1,7 +1,7 @@
 {% if build.skills %}
 ## Skills
 
-Load each skill below before starting work and apply its expertise. If a skill is unavailable, continue without it.
+These are installed in this VM under your agent home. Open one when its subject matter comes up in the work — not up front, and not the whole set. If a skill is unavailable, carry on without it.
 
 {% for skill in build.skills %}
 - `/{{ skill }}`
