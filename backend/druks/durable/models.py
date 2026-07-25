@@ -338,6 +338,14 @@ class AgentCall(Base, Uuid7Pk):
         return "abandoned"
 
     @property
+    def transcript_cache_control(self) -> str:
+        # Only a running call still appends to its log. Every other state has
+        # written its last byte, so that byte range never changes again.
+        if self.get_live_status() == AgentCallStatus.RUNNING:
+            return "no-store"
+        return "public, max-age=31536000, immutable"
+
+    @property
     def artifact_dir(self) -> str:
         return str(load_settings().artifacts_dir / f"run-{self.run_id}")
 

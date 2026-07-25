@@ -21,10 +21,10 @@ def client(tmp_path: Path, db_session, monkeypatch):
         yield client
 
 
-def _seed_run(*, tmp_path: Path, finished: bool = True) -> str:
+def _seed_run(*, tmp_path: Path, finished: bool = True, run_state: str = "running") -> str:
     from conftest import finish_agent_run, seed_agent_run
 
-    run = seed_agent_run()
+    run = seed_agent_run(run_state=run_state)
 
     # The harness writes every file for a call into run-<run_id>/<call_id>/.
     call_dir = run.call_dir
@@ -87,48 +87,30 @@ def test_transcript_range_fetch_paginates(
     assert data["eof"] is True
 
 
-def test_transcript_range_fetch_running_call_disables_cache(
+def test_transcript_of_a_running_call_is_never_cached(
     client: TestClient,
     tmp_path: Path,
     db_session,
 ):
-    run_id = _seed_run(tmp_path=tmp_path, finished=False)
+    call_id = _seed_run(tmp_path=tmp_path, finished=False)
 
     response = client.get(
-        f"/api/build/transcripts/{run_id}",
+        f"/api/build/transcripts/{call_id}",
         params={"stream": "stdout", "limit": 5},
     )
 
     assert response.status_code == 200
     assert response.headers["cache-control"] == "no-store"
-    assert response.json() == {
-        "callId": run_id,
-        "stream": "stdout",
-        "offset": 0,
-        "nextOffset": 5,
-        "eof": False,
-        "text": "hello",
-    }
 
 
-def test_transcript_range_fetch_derived_abandoned_call_uses_immutable_cache(
+def test_transcript_of_an_abandoned_call_is_cached_immutably(
     client: TestClient,
     tmp_path: Path,
     db_session,
 ):
-    from druks.durable import AgentCall
-    from druks.durable.dbos_state import workflow_status
-    from sqlalchemy import update
-
-    call_id = _seed_run(tmp_path=tmp_path, finished=False)
-    call = AgentCall.get(call_id)
-    assert call is not None
-    db_session.execute(
-        update(workflow_status)
-        .where(workflow_status.c.workflow_uuid == call.run_id)
-        .values(status="ERROR")
-    )
-    db_session.expire_all()
+    # The call never wrote finished_at, but its run died — nothing will append
+    # to that log again, so the chunk is as permanent as a finished call's.
+    call_id = _seed_run(tmp_path=tmp_path, finished=False, run_state="failed")
 
     response = client.get(
         f"/api/build/transcripts/{call_id}",
@@ -137,14 +119,6 @@ def test_transcript_range_fetch_derived_abandoned_call_uses_immutable_cache(
 
     assert response.status_code == 200
     assert response.headers["cache-control"] == "public, max-age=31536000, immutable"
-    assert response.json() == {
-        "callId": call_id,
-        "stream": "stdout",
-        "offset": 0,
-        "nextOffset": 5,
-        "eof": False,
-        "text": "hello",
-    }
 
 
 def test_transcript_missing_file_returns_eof(

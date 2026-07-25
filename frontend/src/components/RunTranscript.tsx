@@ -36,25 +36,24 @@ export function RunTranscript({ basePath, stream = 'stdout', isLive }: RunTransc
       let offset = 0
       let text = ''
       let eof = false
-      let receivedChunk = false
+      let ok: boolean
       do {
         const res = await fetch(
           `${basePath}?stream=${stream}&offset=${offset}&limit=${TRANSCRIPT_CHUNK_LIMIT}`,
           { headers: { Accept: 'application/json' } },
         )
-        if (!res.ok) break
-        const chunk = (await res.json()) as { text: string; nextOffset: number; eof: boolean }
-        text += chunk.text
-        offset = chunk.nextOffset
-        eof = chunk.eof
-        receivedChunk = true
-        if (!cancelled) {
-          setInitial({ key: transcriptKey, text, nextOffset: offset, eof })
+        ok = res.ok
+        if (ok) {
+          const chunk = (await res.json()) as { text: string; nextOffset: number; eof: boolean }
+          text += chunk.text
+          offset = chunk.nextOffset
+          eof = chunk.eof
         }
-      } while (!cancelled && !isLive && !eof)
-      if (!cancelled && !receivedChunk) {
+        if (cancelled) return
+        // Publish after every chunk so a long backfill renders as it arrives,
+        // and once more on a failed fetch so the view stops saying "loading".
         setInitial({ key: transcriptKey, text, nextOffset: offset, eof })
-      }
+      } while (ok && !isLive && !eof)
     })()
     return () => {
       cancelled = true
@@ -65,40 +64,34 @@ export function RunTranscript({ basePath, stream = 'stdout', isLive }: RunTransc
     return <pre className="run-pre mono dim">loading transcript…</pre>
   }
 
-  if (!isLive) {
-    return <StreamTranscript text={initial.text} complete={initial.eof} />
+  if (isLive) {
+    return (
+      <RunTranscriptLive
+        key={transcriptKey}
+        eventsUrl={`${basePath}/stream?stream=${stream}&offset=${initial.nextOffset}`}
+        initialText={initial.text}
+      />
+    )
   }
 
-  return (
-    <RunTranscriptLive
-      key={transcriptKey}
-      eventsUrl={`${basePath}/stream?stream=${stream}&offset=${initial.nextOffset}`}
-      initialText={initial.text}
-      initialEof={initial.eof}
-      isLive={isLive}
-    />
-  )
+  return <StreamTranscript text={initial.text} complete={initial.eof} />
 }
 
 function RunTranscriptLive({
   eventsUrl,
   initialText,
-  initialEof,
-  isLive,
 }: {
   eventsUrl: string
   initialText: string
-  initialEof: boolean
-  isLive: boolean
 }) {
   const [text, setText] = useState(initialText)
-  const [complete, setComplete] = useState(!isLive && initialEof)
+  const [complete, setComplete] = useState(false)
 
   // Gate ``enabled`` on ``!complete`` so useSSE closes the EventSource on
   // ``agent_call.finished`` — otherwise a native EventSource auto-reconnects to the
   // offset-pinned URL and replays the whole file, duplicating the transcript.
   useSSE(eventsUrl, {
-    enabled: isLive && !complete,
+    enabled: !complete,
     handlers: useMemo(
       () => ({
         'transcript.chunk': (payload) => {

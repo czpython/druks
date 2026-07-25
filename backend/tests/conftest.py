@@ -464,6 +464,7 @@ def seed_agent_run(
     host_id: str | None = None,
     model: str | None = "gpt-5.5",
     workflow_id: str | None = None,
+    run_state: str = "running",
 ):
     """Create a build Run and an AgentCall on it, returning the AgentCall.
 
@@ -482,7 +483,7 @@ def seed_agent_run(
                 project = Project.create(name=repo)
                 ProjectRepo.create(project_id=project.id, full_name=repo)
             work_item_id = WorkItem.create(project_id=project.id, title="x", repo=repo).id
-        run = seed_build_run(session, work_item_id=work_item_id)
+        run = seed_build_run(session, work_item_id=work_item_id, state=run_state)
         workflow_id = run.id
     else:
         run = Run.get(workflow_id)

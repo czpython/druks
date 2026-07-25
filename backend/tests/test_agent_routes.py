@@ -192,7 +192,7 @@ def test_cancel_run_route(client: TestClient, db_session):
     assert again.json()["result"] == "already_cancelled"
 
 
-def test_transcript_route_matches_the_read_machinery(client: TestClient, db_session, db_engine):
+def test_transcript_route_matches_the_read_machinery(client: TestClient, db_session):
     call = seed_agent_run()
     call_dir = call.call_dir
     call_dir.mkdir(parents=True, exist_ok=True)
@@ -202,7 +202,7 @@ def test_transcript_route_matches_the_read_machinery(client: TestClient, db_sess
         f"/api/build/transcripts/{call.id}", params={"stream": "stdout", "limit": 7}
     )
     assert response.status_code == 200
-    chunk = read_transcript_chunk(db_engine, call.id, "stdout", offset=0, limit=7)
+    chunk = read_transcript_chunk(call, "stdout", offset=0, limit=7)
     assert response.json() == chunk.model_dump(mode="json", by_alias=True)
     # The 7-byte cut lands mid-é; the window serves the seam's one �.
     assert response.json()["text"] == "hello �"

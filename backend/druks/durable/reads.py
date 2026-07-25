@@ -146,28 +146,23 @@ def read_slice(path: Path, *, offset: int, limit: int) -> TextSlice:
 
 
 def read_transcript_chunk(
-    engine: Engine,
-    call_id: str,
+    call: AgentCall,
     stream: Literal["stdout", "stderr"],
     *,
     offset: int,
     limit: int,
-) -> TranscriptChunk | None:
+) -> TranscriptChunk:
     # One paginated slice of an agent call's stdout/stderr log — the initial
-    # backfill before the live tail takes over. None if the call is gone; an empty
-    # eof chunk if it has produced no log yet. The platform owns the log path.
-    with session_scope(engine):
-        call = AgentCall.get(call_id)
-        if not call:
-            return
-        path = call.get_stream_path(stream)
+    # backfill before the live tail takes over. An empty eof chunk while the call
+    # has produced no log yet. The platform owns the log path.
+    path = call.get_stream_path(stream)
     if not path:
         return TranscriptChunk(
-            call_id=call_id, stream=stream, offset=offset, next_offset=offset, eof=True, text=""
+            call_id=call.id, stream=stream, offset=offset, next_offset=offset, eof=True, text=""
         )
     piece = read_slice(path, offset=offset, limit=limit)
     return TranscriptChunk(
-        call_id=call_id,
+        call_id=call.id,
         stream=stream,
         offset=piece.offset,
         next_offset=piece.next_offset,

@@ -278,7 +278,6 @@ class Extension:
 
         from druks.api.dependencies import EngineDep
         from druks.durable import reads
-        from druks.durable.enums import AgentCallStatus
         from druks.durable.live import SSE_HEADERS
         from druks.durable.models import AgentCall
         from druks.durable.schemas import AgentCallFiles, TranscriptChunk
@@ -292,7 +291,6 @@ class Extension:
         async def get_transcript(
             call_id: str,
             stream: Literal["stdout", "stderr"],
-            engine: EngineDep,
             response: Response,
             offset: int = 0,
             limit: int = default_limit,
@@ -303,17 +301,11 @@ class Extension:
                 raise HTTPException(
                     status.HTTP_400_BAD_REQUEST, f"limit must be in 1..{max_limit}."
                 )
-            chunk = reads.read_transcript_chunk(engine, call_id, stream, offset=offset, limit=limit)
-            if not chunk:
-                raise HTTPException(status.HTTP_404_NOT_FOUND, "Run not found.")
             call = AgentCall.get(call_id)
             if not call:
                 raise HTTPException(status.HTTP_404_NOT_FOUND, "Run not found.")
-            if call.get_live_status() == AgentCallStatus.RUNNING:
-                response.headers["Cache-Control"] = "no-store"
-            else:
-                response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
-            return chunk
+            response.headers["Cache-Control"] = call.transcript_cache_control
+            return reads.read_transcript_chunk(call, stream, offset=offset, limit=limit)
 
         @router.get("/stream", response_class=StreamingResponse)
         async def stream_transcript(
