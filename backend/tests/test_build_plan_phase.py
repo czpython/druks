@@ -1,11 +1,17 @@
 from types import SimpleNamespace
 
 import pytest
-from druks.build.contracts import PlanData, QuestionOptionOutput, QuestionOutput, ReviewOutput
+from druks.build.contracts import (
+    PlanData,
+    QuestionOptionOutput,
+    QuestionOutput,
+    ReviewOutput,
+    ReviewWork,
+)
 from druks.build.enums import ReviewDecision
 from druks.build.policy import RepoPolicy
 from druks.build.workflows import Build, BuildWorkflow
-from druks.workflows import FatalError, OperatorReply
+from druks.workflows import FatalError, OperatorReply, Run
 
 
 def _flow(*, auto_dispatch: bool = False) -> BuildWorkflow:
@@ -170,6 +176,26 @@ async def test_questions_park_in_auto_mode_too(monkeypatch):
     flow.review = fake_review
 
     assert await flow._plan_phase() is True
+
+
+async def test_review_work_ask_renders_a_notification_body(monkeypatch):
+    workflow = _flow()
+    input_requests: list[dict] = []
+
+    async def fake_wait(*, input_request):
+        input_requests.append(input_request)
+        return ReviewWork(action="approve")
+
+    async def fake_approved_work():
+        return True
+
+    monkeypatch.setattr(ReviewWork, "wait", fake_wait)
+    monkeypatch.setattr(workflow, "_approved_work", fake_approved_work)
+
+    await workflow._work_gate()
+
+    run = Run(input_request=input_requests[0])
+    assert run.get_rendered_ask()["body"]
 
 
 async def test_needs_clarification_delivery_stops_the_run(monkeypatch):

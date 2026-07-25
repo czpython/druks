@@ -193,8 +193,8 @@ class Agent:
         # Registered for provisioning through execution — this connection's
         # rotation defers around it.
         async with sandbox_gate.use(connection_id, call_id):
-            host_id = await workflow._ensure_host()
             await set_run_phase("provisioning_vm")
+            host_id = await workflow._ensure_host()
 
             # Record the call RUNNING once it has a host to run on (its id names
             # the on-disk transcript dir) so the live step shows while the agent

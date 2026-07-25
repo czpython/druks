@@ -93,7 +93,6 @@ export interface AskQuestion {
 // artifact right here; "external" points at the PR/ticket.
 export interface InputRequest {
   presentation: 'in_app' | 'external'
-  label?: string
   controls?: string[]
   questions?: AskQuestion[]
   artifact_id?: string | null
@@ -116,6 +115,7 @@ export interface RunSummary {
   label: string
   state: RunState
   failure?: string | null
+  gate: string | null
   // The structured ask while this run is parked on the operator. Presence means
   // "needs you".
   inputRequest?: InputRequest | null

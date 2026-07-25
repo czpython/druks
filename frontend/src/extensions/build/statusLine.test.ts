@@ -23,10 +23,13 @@ describe('statusLine', () => {
     expect(statusLine(status({ state: 'pending_input', gate: 'review_work' }))).toBe(
       'Review implementation',
     )
+    expect(statusLine(status({ state: 'pending_input', gate: 'review' }))).toBe(
+      'Review the plan',
+    )
   })
 
   it('an unmapped gate reads as a generic park', () => {
-    expect(statusLine(status({ state: 'pending_input', gate: 'review' }))).toBe('Waiting on you')
+    expect(statusLine(status({ state: 'pending_input', gate: 'unknown' }))).toBe('Waiting on you')
   })
 
   it('parked without a gate falls back', () => {

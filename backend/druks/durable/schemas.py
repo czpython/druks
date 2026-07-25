@@ -129,6 +129,7 @@ class RunResponse(BaseResponse):
     label: str
     state: Literal["scheduled", "running", "pending_input", "finished", "failed", "cancelled"]
     failure: str | None = None
+    gate: str | None = None
     # The structured ask the parked run declared at ``Gate.wait(input_request=…)`` —
     # set while the run is PENDING_INPUT, cleared on resume. Presence = "needs you".
     input_request: dict[str, Any] | None = None
@@ -139,14 +140,21 @@ class RunResponse(BaseResponse):
     agent_calls: list[AgentCallResponse] = Field(default_factory=list)
 
     @classmethod
-    def from_run(cls, run: Run, calls: list[AgentCall]) -> "RunResponse":
+    def from_run(
+        cls,
+        run: Run,
+        calls: list[AgentCall],
+        *,
+        input_request: dict[str, Any] | None,
+    ) -> "RunResponse":
         return cls(
             id=run.id,
             kind=run.kind,
             label=get_display_label(run.kind),
             state=run.state,  # type: ignore[arg-type]
             failure=run.failure,
-            input_request=run.get_ask() if run.input_request else None,
+            gate=run.input_gate,
+            input_request=input_request,
             created_at=run.created_at,
             updated_at=run.updated_at,
             account_username=run.account.username,
