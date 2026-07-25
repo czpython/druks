@@ -38,6 +38,15 @@ async def review_park_marks_ticket_in_review(*, subject: WorkItem, **_: object) 
     await subject.set_remote_status(TicketStatus.IN_REVIEW)
 
 
+@subscribe("run.failed", kind=BuildWorkflow.kind, subject=WorkItem)
+@subscribe("run.cancelled", kind=BuildWorkflow.kind, subject=WorkItem)
+async def build_end_settles_the_item(*, subject: WorkItem, **_: object) -> None:
+    # Nothing merged, so the attempt was abandoned — unless the PR already spoke:
+    # ship() cancels the run it just shipped, and that cancel arrives here.
+    if not subject.status:
+        subject.set_status(HandoffStatus.CANCELLED)
+
+
 @subscribe("repo.pushed", to_default_branch=True)
 async def policy_push_reprofiles_the_repo(*, repo: str, paths: list, **_: object) -> None:
     # The operator edited the repo's build policy — re-apply it over the

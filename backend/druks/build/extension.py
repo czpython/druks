@@ -175,13 +175,9 @@ class Build(Extension):
 
     @classmethod
     def list_subjects(cls) -> list[WorkItemSummary]:
-        # The active board: in-flight items only — handed-off ones live in History.
-        # The 500 most-recent cover it; paginate if a board outgrows it.
-        return [
-            WorkItemSummary.from_work_item(item)
-            for item in WorkItem.list_recent(limit=500)
-            if not item.status
-        ]
+        # The active board: whatever hasn't handed off yet. The 500 most-recent
+        # cover it; paginate if a board outgrows it.
+        return [WorkItemSummary.from_work_item(item) for item in WorkItem.list_open(limit=500)]
 
     @classmethod
     async def subject_activity(cls, subject: WorkItem) -> SubjectActivity | None:

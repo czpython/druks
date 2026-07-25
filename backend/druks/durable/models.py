@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
 from dbos import DBOS
-from sqlalchemy import ForeignKey, Index, String, func, select, update
+from sqlalchemy import ForeignKey, Index, Integer, Select, String, cast, func, select, update
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Mapped, column_property, mapped_column, relationship
@@ -13,12 +13,18 @@ from druks.accounts.constants import SYSTEM_ACCOUNT_ID
 from druks.accounts.models import Account
 from druks.core.models import Uuid7Pk
 from druks.database import db_session, get_session
-from druks.durable.dbos_state import state_expression, subject_filter, updated_at_expression
-from druks.durable.enums import ACTIVE_STATES, AgentCallStatus, RunState
+from druks.durable.dbos_state import (
+    state_expression,
+    subject_filter,
+    updated_at_expression,
+    workflow_status,
+)
+from druks.durable.enums import ACTIVE_STATES, OPEN_STATES, AgentCallStatus, RunState
 from druks.harnesses.artifacts import normalize_token_usage
 from druks.models import Base
 from druks.notifications.models import Notification
 from druks.settings import load_settings
+from druks.signals import publish
 
 if TYPE_CHECKING:
     from druks.sandbox.datastructures import AgentResult
@@ -102,17 +108,62 @@ class Run(Base):
     ) -> list["Run"]:
         # Every run about this subject (stamped at start), newest first — a
         # subject's lifecycle spans many runs, so its status is theirs
-        # aggregated. ``kind`` narrows to one workflow's runs; per (kind,
-        # subject) the queue dedup makes runs strictly sequential, so newest
-        # first holds within a kind too.
+        # aggregated. Ordered by start, not last touch: which run began most
+        # recently is fixed, where updated_at moves and could lift an older run
+        # over a newer one. created_at holds whole seconds, so the uuid7 id
+        # settles runs that started within the same one. ``kind`` narrows to one
+        # workflow's runs.
         stmt = (
             select(cls)
             .where(subject_filter(cls.id, subject_type, subject_id))
-            .order_by(cls.updated_at.desc())
+            .order_by(cls.created_at.desc(), cls.id.desc())
         )
         if kind:
             stmt = stmt.where(cls.kind == kind)
         return list(db_session().scalars(stmt))
+
+    @classmethod
+    def get_latest_for_subject(
+        cls, subject_type: str, subject_id: str, kind: str | None = None
+    ) -> "Run | None":
+        """The run that speaks for the subject: a subject holds at most one active
+        run per kind (queue dedup) and the next starts only once the last is
+        terminal, so the newest is the live one whenever anything is live."""
+        stmt = (
+            select(cls)
+            .where(subject_filter(cls.id, subject_type, subject_id))
+            .order_by(cls.created_at.desc(), cls.id.desc())
+            .limit(1)
+        )
+        if kind:
+            stmt = stmt.where(cls.kind == kind)
+        return db_session().scalars(stmt).first()
+
+    @classmethod
+    def open_subject_ids(cls, subject_type: str) -> Select:
+        """The subjects of ``subject_type`` whose newest run hasn't handed off —
+        a subquery their own read composes."""
+        state = state_expression(cls.id, cls.input_gate, cls.created_at).label("state")
+        subject_id = workflow_status.c.attributes["subject_id"].as_string().label("subject_id")
+        driving = (
+            select(
+                subject_id,
+                state,
+                func.row_number()
+                .over(
+                    partition_by=subject_id,
+                    order_by=(cls.created_at.desc(), cls.id.desc()),
+                )
+                .label("rank"),
+            )
+            .join_from(cls, workflow_status, workflow_status.c.workflow_uuid == cls.id)
+            .where(workflow_status.c.attributes["subject_type"].as_string() == subject_type)
+            .subquery()
+        )
+        return select(cast(driving.c.subject_id, Integer)).where(
+            driving.c.rank == 1,
+            driving.c.state.in_([run_state.value for run_state in OPEN_STATES]),
+        )
 
     def get_ask(self) -> dict[str, Any]:
         # The parked ask, ready to serve. An in-app review's ask names neither
@@ -191,6 +242,16 @@ class Run(Base):
             idempotency_key=f"{self.input_gate}:{self.input_requested_at}",
         )
 
+    @property
+    def subject(self) -> dict[str, str] | None:
+        # Stamped at start; a subjectless cron has none.
+        attributes = db_session().scalar(
+            select(workflow_status.c.attributes).where(workflow_status.c.workflow_uuid == self.id)
+        )
+        if attributes:
+            return {"type": attributes["subject_type"], "id": attributes["subject_id"]}
+        return
+
     async def cancel(self, *, failure: str | None = None) -> None:
         # Clear the ask (so nothing tries to answer it) and keep the operator's
         # reason, then cancel the DBOS workflow — that writes the CANCELLED
@@ -203,6 +264,16 @@ class Run(Base):
         self.failure = failure
         db_session().flush()
         await DBOS.cancel_workflow_async(self.id)
+        # The body raises DBOSWorkflowCancelledError and re-raises without
+        # emitting, so the canceller announces the terminal state itself.
+        subject = self.subject
+        if subject:
+            await publish(
+                "run.cancelled",
+                subject=subject,
+                kind=self.kind,
+                failure=failure,
+            )
 
 
 @dataclass(frozen=True)

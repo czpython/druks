@@ -15,6 +15,9 @@ class RunState(StrEnum):
 
 ACTIVE_STATES = (RunState.SCHEDULED, RunState.RUNNING, RunState.PENDING_INPUT)
 TERMINAL_STATES = (RunState.FINISHED, RunState.FAILED, RunState.CANCELLED, RunState.ORPHANED)
+# A subject whose newest run is in one of these is still open: going, or
+# failed and wanting the operator.
+OPEN_STATES = (*ACTIVE_STATES, RunState.FAILED)
 
 
 class AgentCallStatus(StrEnum):
