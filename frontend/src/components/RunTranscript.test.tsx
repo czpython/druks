@@ -72,13 +72,13 @@ describe('RunTranscript', () => {
 
     act(() => {
       const handlers = useSSEMock.mock.calls.at(-1)?.[1].handlers
-      handlers?.['transcript.chunk']({ text: 'streamed row\n' })
+      handlers?.['transcript.chunk']?.({ text: 'streamed row\n' })
     })
     expect(await screen.findByText('streamed row')).toBeTruthy()
 
     act(() => {
       const handlers = useSSEMock.mock.calls.at(-1)?.[1].handlers
-      handlers?.['agent_call.finished']({})
+      handlers?.['agent_call.finished']?.({})
     })
     expect(useSSEMock).toHaveBeenLastCalledWith(
       '/api/build/transcripts/call-2/stream?stream=stdout&offset=12',

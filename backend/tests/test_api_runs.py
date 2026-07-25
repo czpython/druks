@@ -111,6 +111,39 @@ def test_transcript_range_fetch_running_call_disables_cache(
     }
 
 
+def test_transcript_range_fetch_derived_abandoned_call_uses_immutable_cache(
+    client: TestClient,
+    tmp_path: Path,
+    db_session,
+):
+    from druks.durable.dbos_state import workflow_status
+    from sqlalchemy import update
+
+    run_id = _seed_run(tmp_path=tmp_path, finished=False)
+    db_session.execute(
+        update(workflow_status)
+        .where(workflow_status.c.workflow_uuid == run_id)
+        .values(status="ERROR")
+    )
+    db_session.expire_all()
+
+    response = client.get(
+        f"/api/build/transcripts/{run_id}",
+        params={"stream": "stdout", "limit": 5},
+    )
+
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "public, max-age=31536000, immutable"
+    assert response.json() == {
+        "callId": run_id,
+        "stream": "stdout",
+        "offset": 0,
+        "nextOffset": 5,
+        "eof": False,
+        "text": "hello",
+    }
+
+
 def test_transcript_missing_file_returns_eof(
     client: TestClient,
     tmp_path: Path,
