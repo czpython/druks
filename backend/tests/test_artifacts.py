@@ -1,8 +1,12 @@
 import pytest
+from conftest import seed_run
 from druks.api.artifacts import get_artifact
+from druks.durable.enums import RunState
 from druks.durable.models import AgentCall, Artifact, Run
+from druks.durable.schemas import RunResponse
 from fastapi import HTTPException
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 
 def _seed_call(db_session) -> AgentCall:
@@ -74,9 +78,6 @@ def test_get_latest_for_run_returns_the_newest_calls_artifact(db_session, tmp_pa
 def test_get_ask_resolves_the_review_artifact(db_session, tmp_path):
     # An in-app ask stores no label/artifact — the read side derives both from
     # the run's latest artifact. A declared ask passes through untouched.
-    from druks.durable.enums import RunState
-    from druks.durable.schemas import RunResponse
-
     run = Run(
         id="run-1",
         kind="build",
@@ -88,7 +89,7 @@ def test_get_ask_resolves_the_review_artifact(db_session, tmp_path):
     db_session.flush()
     Artifact.record(call_dir=tmp_path, call_id="call-1", kind="markdown", title="Plan", content="x")
 
-    ask = RunResponse.from_run(run, []).input_request
+    ask = RunResponse.from_run(run, [], input_request=run.get_ask()).input_request
     assert ask == {
         "presentation": "in_app",
         "controls": ["approve"],
@@ -104,10 +105,18 @@ def test_get_ask_resolves_the_review_artifact(db_session, tmp_path):
     )
     db_session.add(external)
     db_session.flush()
-    assert RunResponse.from_run(external, []).input_request == {
+    response = RunResponse.from_run(external, [], input_request=external.get_ask())
+    assert response.input_request == {
         "presentation": "external",
         "label": "Review implementation",
     }
+
+
+def test_run_response_projects_the_parked_gate(db_session):
+    run = seed_run(db_session, "run-gate", input_gate="review")
+
+    response = RunResponse.from_run(run, [], input_request=None)
+    assert response.gate == "review"
 
 
 async def test_get_artifact_returns_recorded_content(db_session, tmp_path, monkeypatch):
@@ -145,8 +154,6 @@ async def test_get_artifact_404_when_content_gone(db_session, tmp_path, monkeypa
     db_session.add(Run(id="run-1", kind="build"))
     db_session.add(AgentCall(id="call-1", run_id="run-1", sandbox_host_id="host-1"))
     db_session.flush()
-    from sqlalchemy.dialects.postgresql import insert as pg_insert
-
     db_session.execute(
         pg_insert(Artifact).values(
             id="art-1", agent_call_id="call-1", kind="markdown", title="P", path="artifact.md"

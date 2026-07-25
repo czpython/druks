@@ -74,7 +74,14 @@ def get_subject_response(
 def _timeline(runs: list[Run], calls_by_run: dict[str, list[AgentCall]]) -> list[RunResponse]:
     # by_run keys every run id, so the lookup is total.
     ordered = sorted(runs, key=lambda run: (run.created_at, run.id))
-    return [RunResponse.from_run(run, calls_by_run[run.id]) for run in ordered]
+    return [
+        RunResponse.from_run(
+            run,
+            calls_by_run[run.id],
+            input_request=run.get_ask() if run.input_request else None,
+        )
+        for run in ordered
+    ]
 
 
 def _running_calls(active_run: Run | None) -> list[AgentCall]:

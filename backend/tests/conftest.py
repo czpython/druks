@@ -498,11 +498,11 @@ def seed_agent_run(
     return call
 
 
-def seed_run(session, run_id, *, kind="build.build_workflow", account_id="system"):
+def seed_run(session, run_id, *, kind="build.build_workflow", account_id="system", input_gate=None):
     # A bare durable_runs row so an AgentCall / Artifact FK to it resolves.
     from druks.durable import Run
 
-    run = Run(id=run_id, kind=kind, account_id=account_id)
+    run = Run(id=run_id, kind=kind, account_id=account_id, input_gate=input_gate)
     session.add(run)
     session.flush()
     return run

@@ -20,7 +20,7 @@ import { Page } from '../../components/Page'
 import { queryGate } from '../../components/QueryGate'
 import { RunTranscript } from '../../components/RunTranscript'
 import { computeElapsed, dur, formatTokenCount, relTime, secondsSince } from '../../lib/format'
-import { statusLine } from './statusLine'
+import { parkedLine, statusLine } from './statusLine'
 import { agentCallPath, workItemPath } from './slug'
 import { useCanonicalPath } from '../../lib/useCanonicalPath'
 import { useTicker } from '../../lib/useTicker'
@@ -369,12 +369,12 @@ function RunRow({
   // fold it into the parent instead of showing both.
   const collapseCalls = run.agentCalls.length <= 1
   // A running run shows the live phase ("Building sandbox VM…", "Working…") as
-  // its sub-line; a parked one shows its ask; a failed one its reason.
+  // its sub-line; a parked one shows its gate; a failed one its reason.
   const sub =
     run.state === 'failed' && run.failure
       ? (run.failure.split('—')[0] ?? run.failure).trim()
       : run.state === 'pending_input'
-        ? (run.inputRequest?.label ?? STATE_LABEL.pending_input)
+        ? (parkedLine(run.gate) ?? STATE_LABEL.pending_input)
         : isRunning(run) && activity
           ? activity.label
           : (STATE_LABEL[run.state] ?? run.state)
@@ -653,7 +653,7 @@ function RunNeedsInput({ run, prUrl }: { run: RunSummary; prUrl?: string | null 
         <span>◆</span> needs you
       </div>
       <div className="ins-needs-body">
-        {ask.label ?? 'This run is waiting on you.'}
+        {parkedLine(run.gate) ?? 'This run is waiting on you.'}
         {prUrl && (
           <>
             {' '}

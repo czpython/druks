@@ -7,7 +7,12 @@ import type { SubjectStatus } from '../../api/types'
 // ticket reply, whatever the ask; unmapped gates read as a generic park.
 const PARKED_LINES: Record<string, string> = {
   scope: 'Reply on the ticket',
+  review: 'Review the plan',
   review_work: 'Review implementation',
+}
+
+export function parkedLine(gate: string | null): string | null {
+  return gate ? (PARKED_LINES[gate] ?? null) : null
 }
 
 function kindLabel(kind: string): string {
@@ -18,7 +23,7 @@ function kindLabel(kind: string): string {
 
 export function statusLine(status: SubjectStatus): string {
   if (status.state === 'pending_input') {
-    return (status.gate && PARKED_LINES[status.gate]) || 'Waiting on you'
+    return parkedLine(status.gate) ?? 'Waiting on you'
   }
   if (status.state === 'running' || status.state === 'scheduled') {
     return kindLabel(status.agent ?? status.kind ?? '')
