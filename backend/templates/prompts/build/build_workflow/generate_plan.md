@@ -26,8 +26,10 @@ your acceptance criteria. Wrong shape here compounds into every step that follow
   the implementer can execute without you in the room.
 - Do not write ACs that require a browser, live API call, visual check, or operator action
   post-merge. If it cannot be code-verified, move it to out-of-scope as a post-merge note.
-- Do not add verification criteria (lint, tests, type checks) for commands that are not in the
-  verification profile or explicitly requested by the issue.
+- **Keep verification profile checks out of ACs.** The profile is the evaluator's check set.
+  Do not require the implementer to run or pass its lint, test, or type-check commands. Write
+  ACs for the change's behavior and code shape: a diff exists, a function has a signature, a
+  migration has a column, or a test covers a new branch.
 
 {% include "build/build_workflow/_header.md" %}
 {% include "build/build_workflow/_related_repos.md" %}
@@ -59,9 +61,9 @@ The plan reviewer rejected your previous draft with the critique below. Fold eve
 > {{ reviewer_notes | replace("\n", "\n> ") }}
 
 {% endif %}
-Generate the initial implementation plan. Include open questions only when the plan cannot be made decision-complete from the issue and repository build. Return specific acceptance criteria describing what must be true for this PR to pass. When the work changes a protocol or wire contract, include exact request/response examples in the plan or acceptance criteria. If the verification profile is empty, do not add standalone test/lint/typecheck criteria; keep verification criteria tied to commands that are actually configured or explicitly requested by the issue.
+Generate the initial implementation plan. Include open questions only when the plan cannot be made decision-complete from the issue and repository build. Return specific acceptance criteria describing what must be true for this PR to pass. When the work changes a protocol or wire contract, include exact request/response examples in the plan or acceptance criteria. Do not add standalone lint, test, or type-check acceptance criteria from the verification profile. A test explicitly requested by the issue remains a valid AC. A behavioral AC may include a `Verification:` note describing how the evaluator confirms that specific criterion.
 
-ACCEPTANCE CRITERIA MUST BE CODE-VERIFIABLE. Druks's evaluator inspects the diff, reads tests, and runs the configured verification profile — it cannot drive a browser, click through a UI, eyeball rendered output, exercise a real third-party API, or otherwise perform a runtime/visual smoke. Any criterion phrased as "manually smoke X", "load the app locally", "verify visually", "click through Y", "confirm in production", or "exercise the live N integration" is unfulfillable in this pipeline and will lock the PR in revision loops forever.
+ACCEPTANCE CRITERIA MUST BE CODE-VERIFIABLE. Druks's evaluator inspects the diff and reads tests. It runs the configured verification profile as its own check set, separate from the binding acceptance criteria the implementer must satisfy. It cannot drive a browser, click through a UI, eyeball rendered output, exercise a real third-party API, or otherwise perform a runtime/visual smoke. Any criterion phrased as "manually smoke X", "load the app locally", "verify visually", "click through Y", "confirm in production", or "exercise the live N integration" is unfulfillable in this pipeline and will lock the PR in revision loops forever.
 
 When the source ticket asks for a manual smoke or visual check, do ONE of these instead — never both — when writing acceptance criteria:
 
