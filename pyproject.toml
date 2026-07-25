@@ -97,6 +97,8 @@ extend-exclude = ["backend/migrations/versions"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]
+# SIM108 rewrites if/else into a ternary; formatter-wrapped ternaries are banned here, and plain if/else is the house form.
+ignore = ["SIM108"]
 
 [tool.ruff.lint.flake8-bugbear]
 # FastAPI dependency markers are the documented way to declare injected

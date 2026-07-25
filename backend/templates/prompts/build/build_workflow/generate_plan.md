@@ -48,6 +48,7 @@ your acceptance criteria. Wrong shape here compounds into every step that follow
 - Preserve the source's explicit out-of-scope statements near-verbatim.
 
 {% include "build/build_workflow/_header.md" %}
+{% include "build/build_workflow/_contract.md" %}
 {% include "build/build_workflow/_related_repos.md" %}
 {% include "build/build_workflow/_skills.md" %}
 {% if answered_questions %}

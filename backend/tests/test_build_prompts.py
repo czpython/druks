@@ -21,6 +21,10 @@ _OP_TEMPLATES = [
     "triage_human_feedback.md",
 ]
 
+# The roles that carry the plan, the acceptance criteria, and the ticket behind
+# them. The code reviewer is deliberately outside this set: it grades the diff.
+_CONTRACT_TEMPLATES = [name for name in _OP_TEMPLATES if name != "review_code.md"]
+
 # The kwargs the workflow passes at each template's agent call site.
 _CALL_KWARGS = {
     "generate_plan.md": {"answered_questions": [], "operator_note": "", "reviewer_notes": ""},
@@ -156,11 +160,12 @@ async def test_the_planner_resolves_the_assignee_not_the_reviewer():
     assert "assignee_github_login" not in reviewer
 
 
-@pytest.mark.parametrize("template", _OP_TEMPLATES)
+@pytest.mark.parametrize("template", _CONTRACT_TEMPLATES)
 async def test_build_prompt_orders_the_ticket_fetch(template):
-    """Every build agent is ordered to fetch the ticket from its source before
-    acting — a mandatory first step, not a suggestion. Regression guard for the
-    silently-skipped-fetch bug (agents working off the ticket ref alone)."""
+    """Every agent that works the contract is ordered to fetch the ticket from its
+    source before acting — a mandatory first step, not a suggestion. Regression
+    guard for the silently-skipped-fetch bug (agents working off the ticket ref
+    alone). The code reviewer is ordered to read the diff instead."""
     build = _build()
     build.source = "linear"
     output = await render_prompt(
@@ -191,6 +196,66 @@ async def test_review_code_prompt_owns_its_followup_subissue():
     assert "File a follow-up sub-issue" in output
     assert "same tracker tools" in output  # the agent writes it, not druks
     assert '"summary"' in output  # the only thing it returns
+
+
+async def test_contract_context_is_omitted_only_from_code_review():
+    build = _build()
+    build.journal = SimpleNamespace(
+        plan_revision=1,
+        implementation_revision=1,
+        last_implementation=SimpleNamespace(base_sha="base123", head_sha="head456"),
+        plan=SimpleNamespace(
+            plan_markdown="PLAN-MARKER",
+            acceptance_criteria=[
+                SimpleNamespace(
+                    id="AC-1",
+                    description="AC-MARKER",
+                    verification="VERIFY-MARKER",
+                )
+            ],
+            rejected_approaches=["RULED-OUT-MARKER"],
+        ),
+        evaluations=[SimpleNamespace(verdict="pass", body="EVALUATION-MARKER")],
+        human_feedback=[
+            SimpleNamespace(
+                reviewer="REVIEWER-MARKER",
+                body="FEEDBACK-MARKER",
+                question="QUESTION-MARKER",
+                implementation_instructions="INSTRUCTIONS-MARKER",
+            )
+        ],
+    )
+    headings = (
+        "## Current plan",
+        "## Acceptance criteria",
+        "## Prior implementation review",
+        "## Human feedback",
+    )
+    markers = headings + (
+        "MANDATORY FIRST ACTION — fetch the ticket",
+        "PLAN-MARKER",
+        "AC-MARKER",
+        "RULED-OUT-MARKER",
+        "EVALUATION-MARKER",
+        "FEEDBACK-MARKER",
+        "QUESTION-MARKER",
+        "INSTRUCTIONS-MARKER",
+    )
+    for template in _OP_TEMPLATES:
+        output = await render_prompt(
+            f"build/build_workflow/{template}",
+            build=build,
+            verification="VERIFICATION-BLOCK",
+            workspace=_workspace(),
+            **_CALL_KWARGS.get(template, {}),
+        )
+        if template == "review_code.md":
+            assert all(marker not in output for marker in markers)
+            assert "`git diff <base_sha>..<head_sha>`" in output
+        else:
+            positions = [output.index(heading) for heading in headings]
+            assert positions == sorted(positions)
+            assert all(marker in output for marker in markers)
 
 
 def test_build_prompt_context_covers_template_attrs():

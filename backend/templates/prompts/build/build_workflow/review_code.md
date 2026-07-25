@@ -27,6 +27,9 @@ write it?
   there is at least one medium or high finding.
 
 {% include "build/build_workflow/_header.md" %}
+
+**MANDATORY FIRST ACTION — read the diff. This is not a suggestion.** Your very first tool call MUST be `git diff <base_sha>..<head_sha>` using the SHAs rendered above. Then read every changed file END TO END — the whole file, not the changed hunks — before writing any finding. You are reviewing code, not a plan: you have no plan and no acceptance criteria here by design, because correctness against the contract was already adjudicated by the evaluator. Fetch the ticket when you need its scope to judge a finding, and to file the follow-up sub-issue below.
+
 {% include "build/build_workflow/_related_repos.md" %}
 {% include "build/build_workflow/_skills.md" %}
 Review the implementation as a code reviewer, AFTER the evaluator has already passed on correctness against the acceptance criteria. Your job is the holistic quality pass: would you be happy maintaining this code in 6 months?
@@ -43,15 +46,15 @@ WHAT TO LOOK FOR — beyond AC correctness, which is the evaluator's job, not yo
 - Foot-guns: surprising default values, unsafe casts, swallowed exceptions, missing input validation on a public boundary, log-then-continue patterns where the caller can't tell something failed.
 - Secret leaks, obvious injection paths, log lines that include sensitive data.
 - Comments and naming that lie or mislead — drift between what the comment claims and what the code does.
+- Edits outside the ticket scope: a file the change touches that the ticket never asked for is a finding; name it by file path.
 
 WHAT NOT TO FLAG:
 - Anything the evaluator already covered (AC correctness). Don't relitigate.
-- Style nits that don't change behavior or maintainability (whitespace, alphabetical import order, single vs double quote unless the repo enforces one).
 - "I would have done this differently" without a concrete reason tied to maintainability, performance, or correctness.
 - Pre-existing issues in unchanged code. You're reviewing the diff, not the codebase.
 
 SEVERITY CALIBRATION:
-- high: correctness bug, security flaw, data loss path, or a duplicate of an existing helper that's already used elsewhere in the repo (someone will fix the other usages later and miss this one).
+- high: correctness bug, security flaw, data loss path, an out-of-scope edit, or a duplicate of an existing helper that's already used elsewhere in the repo (someone will fix the other usages later and miss this one).
 - medium: test shape problem (asserting against implementation details), missing test for a non-trivial new behavior, idiomatic mismatch that will confuse future readers, log-then-continue pattern, unsafe default.
 - low: naming clarity, comment drift, a small refactor that would simplify the next change but isn't required now.
 
@@ -63,7 +66,7 @@ You do the writing yourself — druks records only your one-line `summary`.
 
 2. **Post one PR comment** on PR #{{ build.pr_number }} (`gh pr comment {{ build.pr_number }} --body ...`; the checkout is authenticated): `Code review: <your one-sentence summary, verbatim>`.
 
-3. **File a follow-up sub-issue — only when step 1 found real work.** Open it on the same tracker as the parent ticket (the one you fetched at the start), as a child of that ticket, using the same tracker tools. Give it a concise verb-first title (e.g. "Extract duplicate validation helper", "Add integration test for refund path"). In the body write one section per finding — the follow-up implementer reads it as spec — each covering:
+3. **File a follow-up sub-issue — only when step 1 found real work.** Open it on the same tracker as the parent ticket named in **Workflow context**, as a child of that ticket, using the same tracker tools. Give it a concise verb-first title (e.g. "Extract duplicate validation helper", "Add integration test for refund path"). In the body write one section per finding — the follow-up implementer reads it as spec — each covering:
    - severity: high / medium / low
    - what's wrong, why it matters, and what good would look like
    - the file path and anchor line it applies to, when it has one
