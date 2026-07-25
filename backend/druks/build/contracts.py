@@ -73,6 +73,9 @@ class QuestionOutput(AgentOutput):
     prompt: str = Field(max_length=2048)
     options: list[QuestionOptionOutput] = Field(max_length=16)
 
+    def recommends(self, pick: str | None) -> bool:
+        return any(option.recommended and option.id == pick for option in self.options)
+
 
 class AcceptanceCriterionOutput(AgentOutput):
     id: str
@@ -92,14 +95,7 @@ class PlanData(BaseModel):
     assignee_github_login: str | None = None
 
     def uses_recommended_answers(self, picks: dict[str, str]) -> bool:
-        # Unanswered questions and questions without a recommendation cannot confirm intent.
-        return all(
-            any(
-                option.recommended and picks.get(question.id) == option.id
-                for option in question.options
-            )
-            for question in self.questions
-        )
+        return all(question.recommends(picks.get(question.id)) for question in self.questions)
 
     def get_answered(self, picks: dict[str, str]) -> list[dict[str, str]]:
         # Each question the operator answered, paired with its answer — what the
