@@ -97,7 +97,7 @@ class PlanData(BaseModel):
     def uses_recommended_answers(self, picks: dict[str, str]) -> bool:
         return all(question.is_recommended(picks.get(question.id)) for question in self.questions)
 
-    def get_answered(self, picks: dict[str, str]) -> list[dict[str, str]]:
+    def get_answered_questions(self, picks: dict[str, str]) -> list[dict[str, str]]:
         # Each question the operator answered, paired with its answer — what the
         # re-plan agent reads to resolve it.
         pairs = []

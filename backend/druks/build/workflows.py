@@ -26,6 +26,7 @@ from druks.skills.models import Skill
 from druks.ticketing.datastructures import Ticket
 from druks.workflows import FatalError, Gate, Workflow, step
 
+from .constants import GITHUB_MCP_NAME, GITHUB_MCP_URL, PLAN_DRAFTS_PER_ROUND
 from .extension import Build
 from .journal import BuildJournal
 from .policy import RepoPolicy
@@ -36,14 +37,6 @@ if TYPE_CHECKING:
     from druks.sandbox.host import Sandbox
 
 logger = logging.getLogger(__name__)
-
-
-# The github MCP server build ships into its own runs — build's requirement
-# (there is no build without github), not an operator-facing catalog entry.
-# Its token is per-repo, minted from the reviewer app at workspace setup.
-GITHUB_MCP_NAME = "github"
-GITHUB_MCP_URL = "https://api.githubcopilot.com/mcp/"
-_PLAN_DRAFTS_PER_ROUND = 2
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -259,7 +252,7 @@ class BuildWorkflow(Workflow):
         operator_note = ""
         while True:
             unresolved_critique = ""
-            for _ in range(_PLAN_DRAFTS_PER_ROUND):
+            for _ in range(PLAN_DRAFTS_PER_ROUND):
                 draft_guidance = unresolved_critique
                 unresolved_critique = ""
                 plan = await Build.generate_plan(
@@ -283,7 +276,7 @@ class BuildWorkflow(Workflow):
                 and plan.uses_recommended_answers(operator_reply.answers)
             ):
                 return True
-            answered_questions = plan.get_answered(operator_reply.answers)
+            answered_questions = plan.get_answered_questions(operator_reply.answers)
             operator_note = operator_reply.note
 
     async def _implement_phase(self) -> None:
