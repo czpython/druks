@@ -7,8 +7,9 @@ from druks.accounts.models import Account
 from druks.durable.engine import apply_schedules
 from druks.extensions.loader import get_extension, iter_extensions
 from druks.extensions.registry import workflows
+from druks.harnesses.exceptions import HarnessError
 from druks.harnesses.models import HarnessConnection
-from druks.harnesses.registry import get_harnesses
+from druks.harnesses.registry import get_harness_for_model, get_harnesses
 from druks.notifications.models import Destination
 
 from . import reads
@@ -67,11 +68,19 @@ async def update_harness_settings(
 ) -> HarnessResponse:
     harness, row = _resolve_harness(name)
     updates = body.model_dump(exclude_unset=True, by_alias=False)
-    if "model" in updates and not harness.has_model(updates["model"]):
-        raise HTTPException(
-            status_code=422,
-            detail=f"{updates['model']!r} is not a {harness.name} model.",
-        )
+    if "model" in updates:
+        try:
+            resolved = get_harness_for_model(updates["model"])
+        except HarnessError as exc:
+            raise HTTPException(
+                status_code=422,
+                detail=f"{updates['model']!r} is not a {harness.name} model.",
+            ) from exc
+        if resolved.name != harness.name:
+            raise HTTPException(
+                status_code=422,
+                detail=f"{updates['model']!r} is not a {harness.name} model.",
+            )
     _validate_effort(updates.get("effort"))
     _validate_timeout(updates.get("timeout"))
     if updates:
@@ -114,14 +123,17 @@ async def get_extension_settings() -> ExtensionsSettingsResponse:
 
 
 # An agent's model override is client data — reject a model no installed harness
-# can run (nothing owns its namespace). A model new to a known namespace passes,
-# so new models need no release.
+# lists.
 def _validate_model(value: str | None) -> None:
-    if value is not None and not any(harness.has_model(value) for harness in get_harnesses()):
+    if value is None:
+        return
+    try:
+        get_harness_for_model(value)
+    except HarnessError as exc:
         raise HTTPException(
             status_code=422,
             detail=f"No installed harness runs model {value!r}.",
-        )
+        ) from exc
 
 
 def _validate_effort(value: str | None) -> None:
