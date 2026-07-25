@@ -21,7 +21,7 @@ def client(tmp_path: Path, db_session, monkeypatch):
         yield client
 
 
-def _seed_run(*, tmp_path: Path) -> str:
+def _seed_run(*, tmp_path: Path, finished: bool = True) -> str:
     from conftest import finish_agent_run, seed_agent_run
 
     run = seed_agent_run()
@@ -34,7 +34,8 @@ def _seed_run(*, tmp_path: Path) -> str:
     (call_dir / "stdout.jsonl").write_bytes(b"hello stdout output")
     (call_dir / "stderr.log").write_bytes(b"warning text")
 
-    finish_agent_run(run)
+    if finished:
+        finish_agent_run(run)
     return run.id
 
 
@@ -69,6 +70,7 @@ def test_transcript_range_fetch_paginates(
         params={"stream": "stdout", "limit": 5},
     )
     assert first.status_code == 200
+    assert first.headers["cache-control"] == "public, max-age=31536000, immutable"
     data = first.json()
     assert data["offset"] == 0
     assert data["nextOffset"] == 5
@@ -83,6 +85,30 @@ def test_transcript_range_fetch_paginates(
     data = second.json()
     assert data["text"] == " stdout output"
     assert data["eof"] is True
+
+
+def test_transcript_range_fetch_running_call_disables_cache(
+    client: TestClient,
+    tmp_path: Path,
+    db_session,
+):
+    run_id = _seed_run(tmp_path=tmp_path, finished=False)
+
+    response = client.get(
+        f"/api/build/transcripts/{run_id}",
+        params={"stream": "stdout", "limit": 5},
+    )
+
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-store"
+    assert response.json() == {
+        "callId": run_id,
+        "stream": "stdout",
+        "offset": 0,
+        "nextOffset": 5,
+        "eof": False,
+        "text": "hello",
+    }
 
 
 def test_transcript_missing_file_returns_eof(

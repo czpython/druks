@@ -16,10 +16,10 @@ interface RunTranscriptProps {
 }
 
 /**
- * Shared live transcript: fetches the full log up-front (paginated), then —
- * when ``isLive`` — opens an SSE stream pinned at the trailing offset and
- * appends chunks until ``agent_call.finished``. Used by the agent-call and
- * work-item pages; the only difference is ``basePath``.
+ * Shared transcript: progressively renders the paginated backfill, then — when
+ * ``isLive`` — opens an SSE stream pinned at the trailing offset and appends
+ * chunks until ``agent_call.finished``. Used by the agent-call and work-item
+ * pages; the only difference is ``basePath``.
  */
 export function RunTranscript({ basePath, stream = 'stdout', isLive }: RunTranscriptProps) {
   const transcriptKey = `${basePath}:${stream}`
@@ -36,6 +36,7 @@ export function RunTranscript({ basePath, stream = 'stdout', isLive }: RunTransc
       let offset = 0
       let text = ''
       let eof = false
+      let receivedChunk = false
       do {
         const res = await fetch(
           `${basePath}?stream=${stream}&offset=${offset}&limit=${TRANSCRIPT_CHUNK_LIMIT}`,
@@ -46,8 +47,12 @@ export function RunTranscript({ basePath, stream = 'stdout', isLive }: RunTransc
         text += chunk.text
         offset = chunk.nextOffset
         eof = chunk.eof
+        receivedChunk = true
+        if (!cancelled) {
+          setInitial({ key: transcriptKey, text, nextOffset: offset, eof })
+        }
       } while (!cancelled && !isLive && !eof)
-      if (!cancelled) {
+      if (!cancelled && !receivedChunk) {
         setInitial({ key: transcriptKey, text, nextOffset: offset, eof })
       }
     })()
@@ -58,6 +63,10 @@ export function RunTranscript({ basePath, stream = 'stdout', isLive }: RunTransc
 
   if (!initial || initial.key !== transcriptKey) {
     return <pre className="run-pre mono dim">loading transcript…</pre>
+  }
+
+  if (!isLive) {
+    return <StreamTranscript text={initial.text} complete={initial.eof} />
   }
 
   return (

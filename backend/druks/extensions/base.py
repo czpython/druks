@@ -273,11 +273,12 @@ class Extension:
         import mimetypes
         from typing import Literal
 
-        from fastapi import APIRouter, HTTPException, status
+        from fastapi import APIRouter, HTTPException, Response, status
         from fastapi.responses import FileResponse, StreamingResponse
 
         from druks.api.dependencies import EngineDep
         from druks.durable import reads
+        from druks.durable.enums import AgentCallStatus
         from druks.durable.live import SSE_HEADERS
         from druks.durable.models import AgentCall
         from druks.durable.schemas import AgentCallFiles, TranscriptChunk
@@ -292,6 +293,7 @@ class Extension:
             call_id: str,
             stream: Literal["stdout", "stderr"],
             engine: EngineDep,
+            response: Response,
             offset: int = 0,
             limit: int = default_limit,
         ) -> TranscriptChunk:
@@ -304,6 +306,13 @@ class Extension:
             chunk = reads.read_transcript_chunk(engine, call_id, stream, offset=offset, limit=limit)
             if not chunk:
                 raise HTTPException(status.HTTP_404_NOT_FOUND, "Run not found.")
+            call = AgentCall.get(call_id)
+            if not call:
+                raise HTTPException(status.HTTP_404_NOT_FOUND, "Run not found.")
+            if call.get_live_status() == AgentCallStatus.RUNNING:
+                response.headers["Cache-Control"] = "no-store"
+            else:
+                response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
             return chunk
 
         @router.get("/stream", response_class=StreamingResponse)
