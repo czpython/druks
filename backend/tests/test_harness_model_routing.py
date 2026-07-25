@@ -1,12 +1,11 @@
 import pytest
-from fastapi import HTTPException
-
 from druks.harnesses.claude import ClaudeHarness
 from druks.harnesses.codex import CodexHarness
 from druks.harnesses.exceptions import HarnessError
 from druks.harnesses.registry import get_harness_for_model
 from druks.user_settings.models import HarnessSettings
 from druks.user_settings.routes import _validate_model
+from fastapi import HTTPException
 
 
 def test_shipped_tuple_fallback_routes_shipped_models(db_session):
