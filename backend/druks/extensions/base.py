@@ -278,12 +278,16 @@ class Extension:
 
         from druks.api.dependencies import EngineDep
         from druks.durable import reads
+        from druks.durable.enums import AgentCallStatus
         from druks.durable.live import SSE_HEADERS
         from druks.durable.models import AgentCall
         from druks.durable.schemas import AgentCallFiles, TranscriptChunk
 
         default_limit = 64 * 1024
         max_limit = 256 * 1024
+        # A call that has stopped writing never appends to its log again, so the
+        # byte range this serves is permanent.
+        settled_cache = "public, max-age=31536000, immutable"
 
         router = APIRouter(prefix="/transcripts/{call_id}", tags=[f"{cls.name}:transcripts"])
 
@@ -304,7 +308,10 @@ class Extension:
             call = AgentCall.get(call_id)
             if not call:
                 raise HTTPException(status.HTTP_404_NOT_FOUND, "Run not found.")
-            response.headers["Cache-Control"] = call.transcript_cache_control
+            if call.get_live_status() == AgentCallStatus.RUNNING:
+                response.headers["Cache-Control"] = "no-store"
+            else:
+                response.headers["Cache-Control"] = settled_cache
             return reads.read_transcript_chunk(call, stream, offset=offset, limit=limit)
 
         @router.get("/stream", response_class=StreamingResponse)
