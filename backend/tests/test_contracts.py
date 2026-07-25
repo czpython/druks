@@ -140,10 +140,10 @@ def test_agreement_needs_every_question_picked_as_recommended():
         ]
     )
 
-    assert confirmed.is_answered_as_recommended({"q1": "a", "q2": "b"})
-    assert not confirmed.is_answered_as_recommended({"q1": "a"})
-    assert not without_recommendation.is_answered_as_recommended({"q1": "a"})
-    assert O.PlanData().is_answered_as_recommended({})
+    assert confirmed.uses_recommended_answers({"q1": "a", "q2": "b"})
+    assert not confirmed.uses_recommended_answers({"q1": "a"})
+    assert not without_recommendation.uses_recommended_answers({"q1": "a"})
+    assert O.PlanData().uses_recommended_answers({})
 
 
 def test_ask_contracts_cap_identity_and_cardinality():

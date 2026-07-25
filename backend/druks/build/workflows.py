@@ -278,7 +278,7 @@ class BuildWorkflow(Workflow):
             if (
                 reply.action == "approve"
                 and not reply.note
-                and plan.is_answered_as_recommended(reply.answers)
+                and plan.uses_recommended_answers(reply.answers)
             ):
                 return True
             answered = plan.get_answered(reply.answers)
