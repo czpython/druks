@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 from druks.build import workflows as build_workflows
+from druks.build.contracts import PlanData
 from druks.build.journal import BuildJournal
 from druks.build.models import Project, ProjectRepo
 from druks.build.prompt_context import BuildPromptContext
@@ -114,6 +115,26 @@ async def test_generate_plan_prompt_quotes_the_reviewer_critique():
     )
     assert "## Plan reviewer critique" in output
     assert "> Name the wire schema.\n> Split the migration." in output
+
+
+async def test_ruled_out_approaches_cross_the_plan_review_park():
+    """The planner's rejected approaches ride the journal into implement — the park
+    reaps the warm VM, so the journal is the only thing that carries."""
+    build = _build()
+    build.journal.add(
+        PlanData(
+            plan_markdown="p",
+            rejected_approaches=["a status column on Run — derives from DBOS already"],
+        )
+    )
+    output = await render_prompt(
+        "build/build_workflow/implement.md",
+        build=build,
+        verification="VERIFICATION-BLOCK",
+        workspace=_workspace(),
+    )
+    assert "## Ruled out" in output
+    assert "a status column on Run — derives from DBOS already" in output
 
 
 async def test_the_planner_resolves_the_assignee_not_the_reviewer():
