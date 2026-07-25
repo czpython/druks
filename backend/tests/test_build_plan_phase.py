@@ -227,6 +227,42 @@ async def test_auto_mode_folds_the_critique_into_one_redraft(monkeypatch):
     assert [p["reviewer_notes"] for p in passes] == ["", "name the wire schema"]
 
 
+async def test_auto_mode_redraft_questions_park_without_the_folded_critique(monkeypatch):
+    """A redraft's questions park without repeating the critique already folded into it."""
+    flow = _flow(auto_dispatch=True)
+    passes = _fake_plans(
+        monkeypatch,
+        PlanData(plan_markdown="v1"),
+        PlanData(
+            plan_markdown="v2",
+            questions=[QuestionOutput(id="q1", prompt="Feature flag?", options=[])],
+        ),
+        PlanData(plan_markdown="v3"),
+    )
+    _fake_grades(
+        monkeypatch,
+        ReviewOutput(decision=ReviewDecision.REQUEST_CHANGES, body="name the rollout boundary"),
+        ReviewOutput(decision=ReviewDecision.APPROVE, body=""),
+    )
+    parks: list[tuple[list, str]] = []
+
+    async def fake_review(*, questions=None, context=""):
+        parks.append((list(questions or []), context))
+        return OperatorReply(action="request_changes", answers={"q1": "behind a flag"})
+
+    flow.review = fake_review
+
+    assert await flow._plan_phase() is True
+    assert len(parks) == 1
+    assert [question.id for question in parks[0][0]] == ["q1"]
+    assert parks[0][1] == ""
+    assert [p["reviewer_notes"] for p in passes] == [
+        "",
+        "name the rollout boundary",
+        "",
+    ]
+
+
 async def test_auto_mode_parks_after_the_bounded_redraft(monkeypatch):
     """Two straight rejections exhaust the machine loop — the run parks with the
     critique standing. The operator's request_changes re-arms one fresh redraft."""
