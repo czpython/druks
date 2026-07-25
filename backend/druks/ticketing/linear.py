@@ -8,7 +8,7 @@ from druks.settings import load_settings
 
 from .base import Tracker
 from .datastructures import Ticket
-from .enums import SemanticStatus, StatusKind
+from .enums import StatusKind, TicketStatus
 from .exceptions import TrackerNotConfigured
 
 _STATE_KIND: dict[str, StatusKind] = {
@@ -22,11 +22,11 @@ _STATE_KIND: dict[str, StatusKind] = {
 
 # READY_FOR_AGENT is operator-set, so the caller supplies its name to
 # from_settings(); the rest are fixed.
-_STATIC_STATUS_NAMES: dict[SemanticStatus, str] = {
-    SemanticStatus.IN_PROGRESS: "In Progress",
-    SemanticStatus.IN_REVIEW: "In Review",
-    SemanticStatus.DONE: "Done",
-    SemanticStatus.CANCELED: "Canceled",
+_STATIC_STATUS_NAMES: dict[TicketStatus, str] = {
+    TicketStatus.IN_PROGRESS: "In Progress",
+    TicketStatus.IN_REVIEW: "In Review",
+    TicketStatus.DONE: "Done",
+    TicketStatus.CANCELED: "Canceled",
 }
 
 
@@ -38,7 +38,7 @@ class Linear(Tracker):
         self,
         *,
         api_key: str,
-        status_names: dict[SemanticStatus, str],
+        status_names: dict[TicketStatus, str],
         client: Any | None = None,
     ) -> None:
         self._client = LinearClient(api_key=api_key, client=client)
@@ -52,7 +52,7 @@ class Linear(Tracker):
         names = dict(_STATIC_STATUS_NAMES)
         # Empty leaves READY_FOR_AGENT unmapped.
         if ready_for_agent_status:
-            names[SemanticStatus.READY_FOR_AGENT] = ready_for_agent_status
+            names[TicketStatus.READY_FOR_AGENT] = ready_for_agent_status
         return cls(api_key=settings.linear_api_key, status_names=names)
 
     def _normalize(self, raw: dict[str, Any]) -> Ticket:
@@ -87,7 +87,7 @@ class Linear(Tracker):
     async def fetch_ticket(self, key: str) -> Ticket:
         return self._normalize(await self._client.get_issue(key))
 
-    async def set_status(self, ticket: Ticket, status: SemanticStatus) -> None:
+    async def set_status(self, ticket: Ticket, status: TicketStatus) -> None:
         name = self._status_names.get(status)
         if not name:
             raise ValueError(f"Linear has no configured status name for {status}")

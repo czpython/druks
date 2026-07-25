@@ -201,7 +201,7 @@ async def test_external_close_returns_ticket_to_resting_pool(db_session, tmp_pat
     provider's resting status (Linear → Backlog, Jira → Open) so the
     ticket doesn't strand in In Progress/Review."""
     from druks.build.models import WorkItem
-    from druks.ticketing.enums import SemanticStatus
+    from druks.ticketing.enums import TicketStatus
 
     pushed = []
 
@@ -217,14 +217,14 @@ async def test_external_close_returns_ticket_to_resting_pool(db_session, tmp_pat
         repo=repo, pr_number=pr_number, branch=branch, tmp_path=tmp_path, merged=False
     )
 
-    assert pushed == [(work_item_id, SemanticStatus.READY_FOR_AGENT)]
+    assert pushed == [(work_item_id, TicketStatus.READY_FOR_AGENT)]
 
 
 @pytest.mark.asyncio
 async def test_external_merge_pushes_done(db_session, tmp_path, monkeypatch):
     """An externally-merged PR mirrors druks's own merge op: ticket → Done."""
     from druks.build.models import WorkItem
-    from druks.ticketing.enums import SemanticStatus
+    from druks.ticketing.enums import TicketStatus
 
     pushed = []
 
@@ -240,7 +240,7 @@ async def test_external_merge_pushes_done(db_session, tmp_path, monkeypatch):
         repo=repo, pr_number=pr_number, branch=branch, tmp_path=tmp_path, merged=True
     )
 
-    assert pushed == [(work_item_id, SemanticStatus.DONE)]
+    assert pushed == [(work_item_id, TicketStatus.DONE)]
 
 
 @pytest.mark.asyncio
@@ -302,7 +302,7 @@ async def test_external_close_survives_policy_resolution_failure(db_session, tmp
     the ticket — the cancel and resting-pool reset still happen."""
     from druks.build import models as build_models
     from druks.build.policy import RepoPolicy
-    from druks.ticketing.enums import SemanticStatus
+    from druks.ticketing.enums import TicketStatus
 
     async def _boom(cls, repo):
         raise RuntimeError("github down")
@@ -333,7 +333,7 @@ async def test_external_close_survives_policy_resolution_failure(db_session, tmp
     )
 
     assert deleted == []  # cleanup skipped when policy can't be resolved
-    assert pushed == [SemanticStatus.READY_FOR_AGENT]  # ticket still reset
+    assert pushed == [TicketStatus.READY_FOR_AGENT]  # ticket still reset
     assert _milestone_count(work_item_id, "cancelled") == 1
 
 

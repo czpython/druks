@@ -7,7 +7,7 @@ from druks.build.models import WorkItem
 from druks.build.workflows import BuildWorkflow
 from druks.durable import Run
 from druks.signals import publish
-from druks.ticketing.enums import SemanticStatus
+from druks.ticketing.enums import TicketStatus
 from uuid_utils import uuid7
 
 pytestmark = pytest.mark.asyncio
@@ -38,7 +38,7 @@ async def test_build_lifecycle_reaches_the_tracker(db_session, monkeypatch):
     await publish("run.pending_input", subject=subject, kind=BuildWorkflow.kind, gate="review_plan")
     await publish("run.running", subject=subject, kind="build.profile")
 
-    assert pushed == [SemanticStatus.IN_PROGRESS, SemanticStatus.IN_REVIEW]
+    assert pushed == [TicketStatus.IN_PROGRESS, TicketStatus.IN_REVIEW]
 
 
 async def test_pr_review_answers_through_the_review_gate(db_session, monkeypatch):
