@@ -70,7 +70,7 @@ def rt():
             os.environ["DRUKS_DATABASE_URL"] = db_url_snap
 
 
-def _seed_work_item(engine, *, repo: str) -> int:
+def _seed_work_item(engine, *, repo: str):
     # The run.* subscribers dereference the subject row (a subscriber failure
     # now fails the lifecycle step), so the item must exist, not just its id.
     from uuid import uuid4
@@ -86,7 +86,9 @@ def _seed_work_item(engine, *, repo: str) -> int:
         item = WorkItem(project_id=project.id, repo=repo, title="rt")
         session.add(item)
         session.commit()
-        return item.id
+        session.refresh(item)
+        session.expunge(item)
+        return item
 
 
 async def _wait(engine, wfid, predicate, timeout=20.0):
@@ -201,10 +203,10 @@ async def _dict(d):
 async def test_happy_path_to_merge(rt, monkeypatch):
     _stub(monkeypatch, rt)
 
-    item_id = _seed_work_item(rt.engine, repo="acme/widget")
+    item = _seed_work_item(rt.engine, repo="acme/widget")
     wfid = await rt.flow.start(
         repo="acme/widget",
-        subject={"type": "work_item", "id": item_id},
+        subject=item,
     )
 
     parked = await _wait(
@@ -232,7 +234,7 @@ async def test_happy_path_to_merge(rt, monkeypatch):
     session = get_session(rt.engine)
     try:
         events = (
-            session.query(Event).filter(Event.subject_id == str(item_id)).order_by(Event.id).all()
+            session.query(Event).filter(Event.subject_id == str(item.id)).order_by(Event.id).all()
         )
     finally:
         session.close()
@@ -245,10 +247,10 @@ async def test_auto_mode_machine_review_replaces_the_plan_gate(rt, monkeypatch):
     once, where it substitutes for the operator."""
     invoked = _stub(monkeypatch, rt, plan_approval=None, auto_dispatch=True)
 
-    item_id = _seed_work_item(rt.engine, repo="acme/gizmo")
+    item = _seed_work_item(rt.engine, repo="acme/gizmo")
     wfid = await rt.flow.start(
         repo="acme/gizmo",
-        subject={"type": "work_item", "id": item_id},
+        subject=item,
     )
 
     parked = await _wait(

@@ -7,6 +7,6 @@ from druks.workflows import FatalError, Gate, Workflow, step  # noqa: F401
 # Set ``every = "<cron>"`` to schedule one; raise ``FatalError`` for a clean domain
 # stop; a ``Gate`` subclass parks the run for human input.
 #
-# Callers launch with ``cls.start(subject=<{"type", "id"} dict or None>, **input)``.
+# Callers launch with ``cls.start(subject=<Subject row or None>, **input)``.
 # Only if a workflow grows launch policy (dedupe, routing, subject lookup) wrap
 # start() in a ``dispatch()`` classmethod and point callers there instead.

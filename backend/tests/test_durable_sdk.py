@@ -12,6 +12,7 @@ from druks.durable import FatalError, Run, RunState
 from druks.durable.dbos_state import workflow_status
 from druks.durable.engine import configure_engine, init_dbos, launch, shutdown
 from druks.extensions.registry import agents, workflows
+from druks.models import Subject
 from druks.workflows import Gate, Workflow, step
 from pydantic import BaseModel
 from sqlalchemy import create_engine, select
@@ -48,6 +49,10 @@ class RepoCfg(BaseModel):
 
 
 SINK: list[str] = []
+
+
+class Widget(Subject):
+    __tablename__ = "test_widgets"
 
 
 # run_multistep() below for fixtures using @step/a gate; run() for the rest.
@@ -116,7 +121,7 @@ def _build_units():
         # Records the subject the platform threaded in, and returns a BaseModel
         # so the result rides its run.finished event.
         async def run(self) -> Decision:
-            SINK.append(f"subj-id:{self.subject['id']}")  # type: ignore[index]
+            SINK.append(f"subj-id:{self.subject.id}")
             return Decision(action="ok")
 
     class DoubleGateFlow(Workflow):
@@ -187,6 +192,10 @@ def rt():
         account = Account(username="op@example.com")
         session.add(account)
         session.flush()
+        session.add_all(
+            Widget(id=subject_id)
+            for subject_id in (7, 4242, 636363, 424242, 515151, 878787, 909090)
+        )
         session.add(
             HarnessConnection(
                 harness="claude",
@@ -289,9 +298,7 @@ async def test_attribution_rides_the_run_and_survives_resume(rt):
 
     SINK.clear()
     account_id = _account_id(rt.engine, "op@example.com")
-    wfid = await rt.AttributedFlow.start(
-        subject={"type": "widget", "id": 878787}, account_id=account_id
-    )
+    wfid = await rt.AttributedFlow.start(subject=Widget(id=878787), account_id=account_id)
     parked = await _wait_for(rt.engine, wfid, lambda r: r.state == RunState.PENDING_INPUT)
     with rt.engine.connect() as conn:
         attributes = conn.execute(
@@ -326,7 +333,7 @@ async def test_duplicate_start_shares_the_run_across_accounts(rt):
     # subject share the one active run.
     first = _account_id(rt.engine, "op@example.com")
     second = _account_id(rt.engine, "peer@example.com")
-    subject = {"type": "widget", "id": 909090}
+    subject = Widget(id=909090)
     wfid = await rt.SampleFlow.start(subject=subject, account_id=first, repo="owner/app")
     parked = await _wait_for(rt.engine, wfid, lambda r: r.state == RunState.PENDING_INPUT)
 
@@ -429,7 +436,7 @@ async def test_subjectless_gate_fails_loudly(rt):
 async def test_subject_gate_parks_unchanged(rt):
     """The same no-on_wait gate still parks and resumes for a subject run — the
     subject's watchers are the ones who'd see it, feed-side."""
-    wfid = await rt.ConfirmFlow.start(subject={"type": "widget", "id": 636363})
+    wfid = await rt.ConfirmFlow.start(subject=Widget(id=636363))
     parked = await _wait_for(rt.engine, wfid, lambda r: r.state == RunState.PENDING_INPUT)
     assert parked.input_gate == "confirm"
     # start() stamped the subject as workflow attributes — the keying every
@@ -691,22 +698,19 @@ async def test_user_settings_get_recreates_the_singleton(rt):
         assert UserSettings.get().id == UserSettings.SINGLETON_ID
 
 
-async def test_subject_shape_validation(rt):
-    # start() validates the {type, id} subject shape before enqueuing, so a
-    # malformed subject is rejected up front rather than inside the run.
-    from pydantic import ValidationError
+async def test_a_run_hydrates_the_subject_row_it_was_started_for(rt):
+    from druks.database import db_session, session_scope
 
-    for bad in (
-        {"type": "x"},  # missing id
-        {"id": 1},  # missing type
-        {},
-        {"type": "x", "id": 1, "extra": 1},  # extra key
-        {"type": "", "id": 1},  # empty type
-        {"type": "x", "id": None},  # id wrong type
-        ["type", "id"],  # not a dict
-    ):
-        with pytest.raises(ValidationError):
-            await rt.SubjectFlow.start(subject=bad)
+    with session_scope(rt.engine):
+        widget = Widget()
+        db_session().add(widget)
+        db_session().flush()
+        assert widget.identity == {"type": "widget", "id": widget.id}
+
+        run = Workflow()
+        run._subject = widget.identity
+
+        assert run.subject is widget
 
 
 async def test_input_is_validated_at_start(rt):
@@ -782,7 +786,7 @@ async def test_step_on_run_or_run_multistep_is_rejected(rt):
 async def test_subject_reaches_body_and_result_rides_finished_event(rt):
     from druks.events.models import Event
 
-    wfid = await rt.SubjectFlow.start(subject={"type": "widget", "id": 7})
+    wfid = await rt.SubjectFlow.start(subject=Widget(id=7))
     await _wait_for(rt.engine, wfid, lambda r: r.state == RunState.FINISHED)
 
     assert "subj-id:7" in SINK  # the platform threaded subject into self.subject
@@ -816,9 +820,7 @@ async def test_run_events_carry_subject(rt):
     # run-state transition emits a run-level event keyed to it.
     from druks.events.models import Event
 
-    wfid = await rt.RecordFeedback.start(
-        subject={"type": "widget", "id": 4242}, repo="owner/evented"
-    )
+    wfid = await rt.RecordFeedback.start(subject=Widget(id=4242), repo="owner/evented")
     await _wait_for(rt.engine, wfid, lambda r: r.state == RunState.FINISHED)
 
     session = get_session(rt.engine)
@@ -837,7 +839,7 @@ async def test_duplicate_start_returns_the_live_run(rt):
     # held while the run is enqueued, running, or parked — a duplicate start()
     # hands back the live run's id. The slot frees at the terminal outcome, so
     # the subject can run again.
-    subject = {"type": "widget", "id": 515151}
+    subject = Widget(id=515151)
     wfid = await rt.SampleFlow.start(subject=subject, repo="owner/app")
     parked = await _wait_for(rt.engine, wfid, lambda r: r.state == RunState.PENDING_INPUT)
 
@@ -859,7 +861,7 @@ async def test_duplicate_start_returns_the_live_run(rt):
 async def test_failed_enqueue_claims_no_slot(rt, monkeypatch):
     # A failure at enqueue claims nothing — the next start() proceeds instead of
     # being handed a phantom "live" run DBOS never received.
-    subject = {"type": "widget", "id": 424242}
+    subject = Widget(id=424242)
 
     async def _boom(*args, **kwargs):
         raise RuntimeError("queue down")

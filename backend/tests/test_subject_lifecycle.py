@@ -1,8 +1,9 @@
 from datetime import timedelta
 
 import pytest
-from conftest import seed_dbos_status
+from conftest import make_test_work_item, seed_dbos_status
 from druks.build.contracts import ReviewWork
+from druks.build.models import WorkItem
 from druks.build.workflows import BuildWorkflow, Scope, ScopeReply
 from druks.durable.models import Run
 from druks.durable.reads import get_subject_phase
@@ -13,10 +14,14 @@ from uuid_utils import uuid7
 pytestmark = pytest.mark.asyncio
 
 
+def _work_item(**fields):
+    return make_test_work_item(repo="ClawHaven/acme-app", title="probe", **fields)
+
+
 def _subject_run(
     db_session,
     *,
-    subject: dict,
+    subject: WorkItem,
     kind: str,
     state: str,
     order: int = 0,
@@ -30,7 +35,7 @@ def _subject_run(
     )
     db_session.add(run)
     db_session.flush()
-    seed_dbos_status(db_session, run.id, state, subject=subject)
+    seed_dbos_status(db_session, run.id, state, subject=subject.identity)
     return run
 
 
@@ -38,7 +43,7 @@ async def test_gate_answer_resumes_only_a_run_parked_on_its_gate(db_session, mon
     # A subject can carry runs of several workflows at once; the gate names which one
     # answers, so a newer run of another kind never hides the parked one. A timed-out
     # run keeps its stale ``input_gate``, so parked-ness decides, not that column.
-    subject = {"type": "work_item", "id": 1}
+    subject = _work_item(remote_key="ENG-748-A")
     parked = _subject_run(
         db_session, subject=subject, kind=Scope.kind, state="pending_input", gate=ScopeReply.name
     )
@@ -53,7 +58,7 @@ async def test_gate_answer_resumes_only_a_run_parked_on_its_gate(db_session, mon
     await ScopeReply.answer(subject)
     assert resumed == [parked.id]
 
-    timed_out = {"type": "work_item", "id": 2}
+    timed_out = _work_item(remote_key="ENG-748-B")
     _subject_run(
         db_session,
         subject=timed_out,
@@ -71,7 +76,7 @@ async def test_workflow_cancel_takes_its_own_kind_and_passes_over_idle_subjects(
 ):
     # Webhooks redeliver, and a PR can close long after its build ended: cancelling what
     # is already gone is the no-op the caller expects, not an error.
-    subject = {"type": "work_item", "id": 3}
+    subject = _work_item(remote_key="ENG-748-C")
     build = _subject_run(db_session, subject=subject, kind=BuildWorkflow.kind, state="running")
     _subject_run(db_session, subject=subject, kind=Scope.kind, state="running", order=1)
     cancelled = []
@@ -84,14 +89,14 @@ async def test_workflow_cancel_takes_its_own_kind_and_passes_over_idle_subjects(
     await BuildWorkflow.cancel(subject)
     assert cancelled == [build.id]
 
-    idle = {"type": "work_item", "id": 4}
+    idle = _work_item(remote_key="ENG-748-D")
     _subject_run(db_session, subject=idle, kind=BuildWorkflow.kind, state="finished")
     await BuildWorkflow.cancel(idle)
     assert cancelled == [build.id]
 
 
 async def test_subject_phase_reads_the_driving_running_workflow(db_session, monkeypatch):
-    subject = {"type": "work_item", "id": 5}
+    subject = _work_item(remote_key="ENG-748-E")
     _subject_run(
         db_session, subject=subject, kind=Scope.kind, state="pending_input", gate=ScopeReply.name
     )
@@ -106,5 +111,5 @@ async def test_subject_phase_reads_the_driving_running_workflow(db_session, monk
 
     monkeypatch.setattr("druks.durable.reads.get_run_phase", phase)
 
-    assert await get_subject_phase(subject["type"], str(subject["id"])) == "agent_running"
+    assert await get_subject_phase(subject.subject_type, str(subject.id)) == "agent_running"
     assert seen == [driving.id]

@@ -4,5 +4,5 @@ from druks.signals import subscribe  # noqa: F401
 # kwargs; ``__`` descends into dicts). Defining a handler registers it — no body guards.
 #
 # @subscribe("run.finished", subject__type="{{ name }}")
-# async def on_finished(*, subject: dict, **_: object) -> None:
+# async def on_finished(*, subject: YourSubject, **_: object) -> None:
 #     ...

@@ -92,13 +92,7 @@ async def test_dispatch_shapes_the_profile_start(db_session, monkeypatch, refres
     run_id = await Profile.dispatch(repo, refresh_only=refresh_only)
 
     assert run_id == "profile-run"
-    assert calls == [
-        {
-            "subject": {"type": "project_repo", "id": repo.id},
-            "repo_id": repo.id,
-            "refresh_only": refresh_only,
-        }
-    ]
+    assert calls == [{"subject": repo, "repo_id": repo.id, "refresh_only": refresh_only}]
 
 
 class TestProfileRun:

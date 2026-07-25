@@ -8,11 +8,11 @@ def test_feed_reads_run_and_milestone_events(db_session):
     item = make_test_work_item(repo="acme/extension", remote_key="ACME-9", title="t")
     Event.emit(
         type="run.running",
-        subject=item.subject,
+        subject=item.identity,
         extension="build",
         payload={"kind": "build.build_workflow", "run": "wf1"},
     )
-    Event.emit(type="shipped", subject=item.subject, extension="build")
+    Event.emit(type="shipped", subject=item.identity, extension="build")
     db_session.flush()
 
     page, _ = build_feed()

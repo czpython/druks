@@ -15,10 +15,11 @@ from dbos._error import (
     DBOSQueueDeduplicatedError,
     DBOSWorkflowCancelledError,
 )
-from pydantic import BaseModel, ConfigDict, Field, create_model
+from pydantic import BaseModel, Field, create_model
 from uuid_utils import uuid7
 
 from druks.accounts.context import current_account_id
+from druks.database import db_session
 from druks.durable.activity import set_run_phase
 from druks.durable.engine import _step_engine, register_schedule, run_queue, step_session
 from druks.durable.enums import AgentCallStatus, RunState
@@ -34,7 +35,7 @@ from druks.extensions.settings import (
     validate_setting_override,
     validate_settings_declaration,
 )
-from druks.models import snake_name
+from druks.models import Base, Subject, snake_name
 from druks.notifications.outbox import notifications_queue, send_notification
 from druks.sandbox.client import sandbox_client
 from druks.sandbox.constants import SANDBOX_HOST_ROTATE_BEFORE_SECONDS
@@ -90,14 +91,6 @@ _in_step: ContextVar[bool] = ContextVar("_in_step", default=False)
 # Reserved so _entry's arity and old checkpoints stay untouched; a body
 # parameter may not claim it.
 _ACCOUNT_INPUT_KEY = "__account_id__"
-
-
-class _Subject(BaseModel):
-    # What a run is about — the opaque {type, id} the platform keys events to.
-    # Modelled so start() validates the shape declaratively instead of by hand.
-    model_config = ConfigDict(extra="forbid")
-    type: str = Field(min_length=1)
-    id: int | str
 
 
 def _resolve_body_method(cls: type["Workflow"]) -> str:
@@ -218,15 +211,14 @@ class Gate(BaseModel):
         return
 
     @classmethod
-    async def answer(cls, subject: dict[str, Any], **reply: Any) -> None:
-        subject_key = _Subject.model_validate(subject)
-        runs = Run.list_for_subject(subject_key.type, str(subject_key.id))
+    async def answer(cls, subject: Subject, **reply: Any) -> None:
+        runs = Run.list_for_subject(subject.subject_type, str(subject.id))
         parked = next((run for run in runs if run.is_parked and run.input_gate == cls.name), None)
         if parked:
             await parked.resume(**reply)
             return
         raise WorkflowError(
-            f"subject {subject_key.type}:{subject_key.id} is not parked on gate {cls.name!r}"
+            f"subject {subject.subject_type}:{subject.id} is not parked on gate {cls.name!r}"
         )
 
     @classmethod
@@ -239,7 +231,7 @@ class Gate(BaseModel):
         # ``presentation``), stored on the run beside ``input_gate`` and cleared on
         # resume — so an extension declares the ask here, beside on_wait, not at read time.
         workflow = current_workflow.get()
-        if not workflow.subject and cls.on_wait.__func__ is Gate.on_wait.__func__:
+        if not workflow._subject and cls.on_wait.__func__ is Gate.on_wait.__func__:
             # No subject means no feed surface; if on_wait wasn't overridden
             # either, nobody would ever see this park — fail loudly instead
             # of parking invisibly for the whole TTL.
@@ -281,23 +273,23 @@ async def _park(
     await _emit_run_event(
         workflow.workflow_id,
         RunState.PENDING_INPUT,
-        subject=workflow.subject,
+        subject=workflow._subject,
         facts={
             "input_gate": gate,
             "input_request": input_request,
             "input_requested_at": datetime.now(UTC),
         },
     )
-    if workflow.subject:
+    if workflow._subject:
         # Every subjected park notifies the designated destination — no author opt-in.
-        await _notify_designated_destination(workflow.workflow_id, workflow.subject)
+        await _notify_designated_destination(workflow.workflow_id, workflow._subject)
     payload = await DBOS.recv_async(gate, timeout_seconds=ttl_seconds)
     if payload is None:
         raise GateTimeout(gate)
     await _emit_run_event(
         workflow.workflow_id,
         RunState.RUNNING,
-        subject=workflow.subject,
+        subject=workflow._subject,
         facts={**_GATE_CLEARED, "answer_parked_at": Run.input_requested_at},
     )
     return payload
@@ -529,9 +521,8 @@ class Workflow:
     def __init__(self) -> None:
         self._workflow_id: str = ""
         # What the run is about ({"type", "id"}), set from the dispatch arguments
-        # before run(); None for a subjectless framework run. Dispatch-only —
-        # read, don't write.
-        self.subject: dict[str, Any] | None = None
+        # before run(); None for a subjectless framework run.
+        self._subject: dict[str, Any] | None = None
         # run()'s validated input bundle (the model synthesized from its signature),
         # set before run() — for templates and derived properties. None = no input.
         self.input: BaseModel | None = None
@@ -545,6 +536,17 @@ class Workflow:
         # The run's warm VM, provisioned lazily and reaped at segment boundaries;
         # its lease expiry decides when it must rotate.
         self._host: Sandbox | None = None
+
+    @property
+    def subject(self) -> Any:
+        if not self._subject:
+            return
+        subject_type, subject_id = self._subject["type"], self._subject["id"]
+        for mapper in Base.registry.mappers:
+            model = mapper.class_
+            if issubclass(model, Subject) and model.subject_type == subject_type:
+                return db_session().get(model, int(subject_id))
+        raise LookupError(f"no subject class is named {subject_type!r}")
 
     @property
     def state(self) -> Any:
@@ -571,7 +573,12 @@ class Workflow:
 
         async def _fan_out() -> None:
             async with step_session():
-                await publish("run.state", subject=self.subject, kind=self.kind, **facts)
+                await publish(
+                    "run.state",
+                    subject=self._subject,
+                    kind=self.kind,
+                    **facts,
+                )
 
         await DBOS.run_step_async(StepOptions(name="run.state", **_IO_RETRIES), _fan_out)
 
@@ -585,7 +592,7 @@ class Workflow:
         # a Gate. The artifact the reviewer judges isn't named here — a parked
         # run can't produce new ones, so the read side resolves the latest on
         # demand.
-        if not self.subject:
+        if not self._subject:
             # An in-app review is answered from the subject's surfaces; a
             # subjectless run has none, so nobody would ever see the ask.
             raise SubjectlessGate(OperatorReply.name)
@@ -687,9 +694,8 @@ class Workflow:
         SettingsOverride.set_workflow_setting(cls.kind, field, value)
 
     @classmethod
-    async def cancel(cls, subject: dict[str, Any], *, failure: str | None = None) -> None:
-        subject_key = _Subject.model_validate(subject)
-        runs = Run.list_for_subject(subject_key.type, str(subject_key.id), kind=cls.kind)
+    async def cancel(cls, subject: Subject, *, failure: str | None = None) -> None:
+        runs = Run.list_for_subject(subject.subject_type, str(subject.id), kind=cls.kind)
         run = next((run for run in runs if run.is_active), None)
         if run:
             await run.cancel(failure=failure)
@@ -698,7 +704,7 @@ class Workflow:
     async def start(
         cls,
         *,
-        subject: dict[str, Any] | None,
+        subject: Subject | None,
         account_id: str | None = None,
         **input: Any,
     ) -> str:
@@ -716,8 +722,6 @@ class Workflow:
             # Browser-origin starts inherit the request's authenticated account;
             # dispatchers that know better pass account_id explicitly.
             account_id = current_account_id.get()
-        if subject is not None:
-            _Subject.model_validate(subject)  # raises on a bad shape (wrong/extra keys, types)
         wire: dict[str, Any] = {}
         if cls._run_input_model:
             wire = cls._run_input_model.model_validate(input).model_dump(mode="json")
@@ -733,7 +737,7 @@ class Workflow:
         # when DBOS gives up on a dead workflow. A duplicate start() hands back
         # the live run's id. Subjectless runs are unbounded.
         enqueue_options = (
-            SetEnqueueOptions(deduplication_id=f"{cls.kind}:{subject['type']}:{subject['id']}")
+            SetEnqueueOptions(deduplication_id=f"{cls.kind}:{subject.subject_type}:{subject.id}")
             if subject
             else nullcontext()
         )
@@ -742,14 +746,18 @@ class Workflow:
         # subject id is stamped as a string — the one shape every reader compares.
         attributes = None
         if subject:
-            attributes = {"subject_type": subject["type"], "subject_id": str(subject["id"])}
+            attributes = {
+                "subject_type": subject.subject_type,
+                "subject_id": str(subject.id),
+            }
+        subject_record = subject.identity if subject else None
         try:
             with (
                 SetWorkflowID(workflow_id),
                 SetWorkflowAttributes(attributes),
                 enqueue_options,
             ):
-                await run_queue.enqueue_async(cls._entry, subject, wire)
+                await run_queue.enqueue_async(cls._entry, subject_record, wire)
         except DBOSQueueDeduplicatedError as duplicate:
             holder = _get_dbos_instance()._sys_db.get_deduplicated_workflow(
                 run_queue.name, duplicate.deduplication_id
@@ -800,7 +808,7 @@ async def _run_instance(
 ) -> Any:
     instance = cls()
     instance._workflow_id = DBOS.workflow_id  # type: ignore[assignment]
-    instance.subject = subject
+    instance._subject = subject
     # Platform routing comes off before body validation; an old checkpoint
     # without the key replays account-less.
     input = dict(input or {})

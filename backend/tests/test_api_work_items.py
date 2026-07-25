@@ -46,7 +46,7 @@ def _seed_scope_run(db_session, item, *, state="finished", status=None):
     elif status is not None:
         from druks.events.models import Event
 
-        Event.emit(type=status, subject=item.subject)
+        Event.emit(type=status, subject=item.identity)
         db_session.flush()
     return run
 
@@ -97,7 +97,7 @@ def _ship(repo, pr_number):
         item.set_status("shipped")
 
 
-# The generic subject read-side — Build declares subject_type="work_item", so the
+# The generic subject read-side — Build declares subject=WorkItem, so the
 # platform mounts /api/build/work_item (list) and /{id} (detail). Build supplies
 # only the domain summary; status (RunState-aggregated) and the timeline are the
 # platform's. See test_generic_subjects.py for the platform-side contract.
@@ -311,7 +311,7 @@ async def test_subject_activity_surfaces_running_phase(db_session, monkeypatch):
         return "provisioning_vm"
 
     monkeypatch.setattr(build_extension, "get_subject_phase", phase)
-    activity = await build_extension.Build.subject_activity(str(item.id))
+    activity = await build_extension.Build.subject_activity(item)
     assert activity is not None
     assert activity.label == "Building sandbox VM…"
     assert activity.kind == "infra"
@@ -326,4 +326,4 @@ async def test_subject_activity_none_when_not_running(db_session):
         db_session, work_item_id=item.id, state="pending_input", input_gate="review_plan"
     )
 
-    assert await build_extension.Build.subject_activity(str(item.id)) is None
+    assert await build_extension.Build.subject_activity(item) is None

@@ -8,11 +8,11 @@ from druks.extensions import Extension
 from pydantic import BaseModel, Field, SecretStr, field_validator
 
 from druks_field_notes.contracts import NoteSummary
+from druks_field_notes.models import Note
+from druks_field_notes.schemas import NoteView
 
 if TYPE_CHECKING:
     from druks.settings import Settings
-
-    from druks_field_notes.schemas import NoteView
 
 # The env var field_notes would read its summarizer credential from. Unset in a
 # bare install, so the check below reports it missing — the "extension owns a check
@@ -35,7 +35,7 @@ def check_summary_api_key(settings: "Settings") -> CheckResult:
 
 class FieldNotes(Extension):
     name = "field_notes"
-    subject_type = "note"
+    subject = Note
     icon = "notebook"
     description = "Turns a jotted observation into a one-line summary with an agent."
 
@@ -97,21 +97,11 @@ class FieldNotes(Extension):
         )
 
     @classmethod
-    def subject_summary(cls, subject_id: str) -> "NoteView | None":
-        # models imported lazily: the entry point loads this module before the loader
-        # snapshots the table metadata, so a module-top model import would register
-        # field_notes_notes early and slip past the prefix check.
-        from druks_field_notes.models import Note
-        from druks_field_notes.schemas import NoteView
-
-        note = Note.get(int(subject_id))
-        return NoteView.from_note(note) if note is not None else None
+    def subject_summary(cls, subject: Note) -> NoteView:
+        return NoteView.from_note(subject)
 
     @classmethod
-    def list_subjects(cls) -> "list[NoteView]":
-        from druks_field_notes.models import Note
-        from druks_field_notes.schemas import NoteView
-
+    def list_subjects(cls) -> list[NoteView]:
         notes = Note.list_recent(limit=cls.settings().board_size)
         return [NoteView.from_note(note) for note in notes]
 
