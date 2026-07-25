@@ -390,9 +390,8 @@ Inside the workflow, `self.subject` is that row — live, not a snapshot taken a
 dispatch. A run that parks on a gate for three days resumes against whatever the
 row says then, and finds nothing if it was deleted meanwhile.
 
-You name what happened to the row: a work item ships, gets scoped, gets
-cancelled. Whether a run is working on it is druks's to say, and you read that
-off the status:
+You name what happened to the row: a work item ships, gets cancelled. Whether a
+run is working on it is druks's to say, and you read that off the status:
 
 ```python
 from druks.workflows import get_subject_phase, get_subject_status

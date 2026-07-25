@@ -251,7 +251,6 @@ async def list_work_items_history(
     response.headers["Cache-Control"] = "no-store"
     clamped = max(1, min(limit, _HISTORY_MAX_LIMIT))
     # Recent-history aggregation. History is "handoff" — druks finished a
-    # unit and handed off (shipped / cancelled / skipped / scoped). list_handoff
-    # reads the event log directly, already ordered newest-handoff-first and bounded.
+    # unit and handed it off as shipped or cancelled.
     items = [DashboardItem.from_work_item(wi) for wi in WorkItem.list_handoff(limit=clamped)]
     return WorkItemsHistoryResponse(items=items)

@@ -18,7 +18,7 @@ class FeedItem(BaseResponse):
     # color off the prefix, so a new type lands in the right bucket for free.
     kind: str
     # Coarse source label for the feed's source column (linear / github / codex
-    # / claude / scoper / worker / cron / watch).
+    # / claude / worker / cron / watch).
     source: str
     summary: str
     # Internal route the row deep-links to; None when it has no detail page.

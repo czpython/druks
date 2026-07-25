@@ -9,7 +9,6 @@ from druks.build.contracts import (
     PlanOutput,
     RepoProfilerOutput,
     ReviewOutput,
-    ScopeBriefOutput,
     TriageOutput,
 )
 from druks.build.models import WorkItem
@@ -52,46 +51,33 @@ class Build(Extension):
             title="Jira trigger status",
             description="A Jira ticket entering this status opens a build; empty disables Jira.",
         )
-        scoper_candidate_statuses: tuple[str, ...] = Field(
-            default=("Needs Refinement",),
-            title="Scoper candidate statuses",
-            description="Ticket statuses that trigger the scoper to write a brief.",
-        )
-        scoper_scoped_label: str = Field(
-            default="druks-scoped",
-            title="Scoped label",
-            description="Label the scoper sets once briefed; remove it to force a re-scope.",
-        )
-        scoper_post_refinement_status: str = Field(
+        linear_resting_status: str = Field(
             default="Backlog",
-            title="Linear post-refinement status",
-            description="Status the scoper moves a briefed Linear ticket to; empty leaves it put.",
+            title="Linear resting status",
+            description=(
+                "Status druks returns a ticket to when it stops working on it; empty leaves it put."
+            ),
         )
-        jira_scoper_post_refinement_status: str = Field(
+        jira_resting_status: str = Field(
             default="Open",
-            title="Jira post-refinement status",
-            description="Status the scoper moves a briefed Jira ticket to; empty leaves it put.",
+            title="Jira resting status",
+            description=(
+                "Status druks returns a ticket to when it stops working on it; empty leaves it put."
+            ),
         )
 
     @classmethod
-    def post_refinement_status(cls, source: str) -> str:
-        # The provider status name the scoper moves a briefed ticket to. Core
-        # ticketing can't import this extension, so it takes the name as an argument.
+    def resting_status(cls, source: str) -> str:
+        # Core ticketing can't import this extension, so it takes the name as an argument.
         settings = cls.settings()
         if source == "jira":
-            return settings.jira_scoper_post_refinement_status
-        return settings.scoper_post_refinement_status
+            return settings.jira_resting_status
+        return settings.linear_resting_status
 
     # The build pipeline's agents — the extension owns them; any of its workflows run
     # them. The attribute name is each agent's id (its durable settings/timeline key).
-    scope = Agent(
-        description="ticket → brief",
-        prompt="build/scope/scope_brief.md",
-        contract=ScopeBriefOutput,
-        model="codex",
-    )
     generate_plan = Agent(
-        description="brief → implementation plan",
+        description="ticket → implementation plan",
         prompt="build/build_workflow/generate_plan.md",
         contract=PlanOutput,
         model="codex",

@@ -31,6 +31,7 @@ def _build() -> SimpleNamespace:
     identity facts faked, the journal real and empty."""
     return SimpleNamespace(
         repo="acme/widget",
+        work_item_url="https://druks.test/work-items/1",
         branch="agent/eng-1",
         pr_number=7,
         ticket_ref="ACME-1",
@@ -39,6 +40,7 @@ def _build() -> SimpleNamespace:
         task_owner_name=None,
         task_owner_email=None,
         related_repos=[],
+        skills=["python-house-rules"],
         journal=BuildJournal(),
     )
 
@@ -63,6 +65,7 @@ async def test_build_operation_prompt_renders(template):
     # The build-derived bits resolved — a leftover ``workflow`` ref would have
     # raised on StrictUndefined.
     assert "acme/widget" in output
+    assert "- `/python-house-rules`" in output
 
 
 async def test_implement_prompt_provisions_when_no_pr_exists():

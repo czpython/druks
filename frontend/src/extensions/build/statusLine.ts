@@ -3,10 +3,8 @@ import type { SubjectStatus } from '../../api/types'
 // Build's status-line copy, composed from the platform's status facts — the backend
 // ships data; the extension owns its own vocabulary.
 
-// The parked line per gate identity. Scope's gate parks for the operator's
-// ticket reply, whatever the ask; unmapped gates read as a generic park.
+// Build's copy for mapped parked gates.
 const PARKED_LINES: Record<string, string> = {
-  scope: 'Reply on the ticket',
   review: 'Review the plan',
   review_work: 'Review implementation',
 }

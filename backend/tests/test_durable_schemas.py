@@ -1,3 +1,4 @@
+from druks.build.workflows import BuildWorkflow
 from druks.durable.enums import RunState
 from druks.durable.exceptions import GateTimeout
 from druks.durable.models import AgentCall, Run
@@ -56,7 +57,7 @@ def test_subject_state_uses_the_latest_outcome_once_every_run_is_terminal():
 def test_status_surfaces_the_newest_active_runs_gate():
     runs = [
         _run("new", "build.build_workflow", RunState.PENDING_INPUT, "review"),
-        _run("old", "build.build_workflow", RunState.PENDING_INPUT, "scope"),
+        _run("old", "build.build_workflow", RunState.PENDING_INPUT, "review_work"),
     ]
     assert _status_of(runs).gate == "review"
 
@@ -93,16 +94,16 @@ def test_status_carries_the_gate_timeout_reason():
     # The gate timeout's stamped failure_code rides the status as ``reason`` —
     # the board renders the re-trigger hint from it instead of a bare "failed".
     runs = [
-        _run("new", "build.scope", RunState.FAILED, failure_code=GateTimeout.code),
+        _run("new", BuildWorkflow.kind, RunState.FAILED, failure_code=GateTimeout.code),
     ]
     status = _status_of(runs)
     assert status.reason == GateTimeout.code
-    assert status.kind == "build.scope"
+    assert status.kind == BuildWorkflow.kind
 
 
 def test_status_carries_failure_but_no_reason_when_the_run_crashed():
     runs = [
-        _run("new", "build.scope", RunState.FAILED, failure="boom"),
+        _run("new", BuildWorkflow.kind, RunState.FAILED, failure="boom"),
     ]
     status = _status_of(runs)
     assert not status.reason

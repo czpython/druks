@@ -10,6 +10,9 @@ your acceptance criteria. Wrong shape here compounds into every step that follow
 - **Read the codebase first.** The right approach is almost always the one the repo already
   uses for similar work. Name the files, layers, and data shapes that change. Inventing new
   abstractions where existing ones fit is a defect in the plan, not cleverness.
+- **Preserve operator contracts verbatim.** Copy exact field shapes, JSON and endpoint
+  contracts, template strings, do/don't decisions, and dependency nuance from the description
+  and especially operator refinement comments into the plan. When in doubt, copy more.
 - **ACs are written for a machine, not a human.** Every acceptance criterion will be verified
   by a code-reading evaluator who cannot run a browser, eyeball rendered output, or call
   external services. If you cannot express it as a machine-checkable assertion — diff exists,
@@ -17,8 +20,11 @@ your acceptance criteria. Wrong shape here compounds into every step that follow
 - **Open questions are cheap now, expensive later.** A question surfaced in the plan costs a
   paragraph. A confident answer is a decision, not a question: make it, plan with it, and note
   it in the plan. Ask only when no confident decision can make the plan complete.
-- **One PR, one coherent change.** If you would want to merge half of this and revisit the
-  rest, the scope should be split into two plans.
+- **One PR, one coherent change.** If the work bundles independent surfaces that could ship
+  separately, a refactor with a feature, or independently shippable AC groups, ask one question
+  naming the split seam and let the operator decide. Do not ask for a single feature spanning
+  many files, a pure refactor/bugfix/docs change, or the smallest useful endpoint-and-UI vertical
+  slice. When in doubt, plan it as one.
 
 ## Boundaries
 
@@ -30,6 +36,7 @@ your acceptance criteria. Wrong shape here compounds into every step that follow
   Do not require the implementer to run or pass its lint, test, or type-check commands. Write
   ACs for the change's behavior and code shape: a diff exists, a function has a signature, a
   migration has a column, or a test covers a new branch.
+- Preserve the source's explicit out-of-scope statements near-verbatim.
 
 {% include "build/build_workflow/_header.md" %}
 {% include "build/build_workflow/_related_repos.md" %}
@@ -61,6 +68,22 @@ The plan reviewer rejected your previous draft with the critique below. Fold eve
 > {{ reviewer_notes | replace("\n", "\n> ") }}
 
 {% endif %}
+{% if not answered_questions and not operator_note %}
+Before deep code reading, judge whether the ticket is ambiguous about intent: which reading of
+the request is meant, what feature surface is in play, or whether adjacent sub-features are
+included. If it is, stop there: return at most two `questions`, mark exactly one option per
+question `recommended: true`, give a short `plan_markdown` stating what you understood and what
+is blocked, and leave `acceptance_criteria` empty. Never early-exit for anything the repo can
+answer — read the code and decide.
+
+{% endif %}
+{% if build.journal.plan_revision == 0 %}
+On this ticket's first plan only, post ONE comment on the source ticket with your tracker tools:
+two or three sentences stating what druks understood the work to be.
+{% if build.work_item_url %}Add this link on its own line: {{ build.work_item_url }}
+{% endif %}Never edit the ticket description and never post the plan itself.
+
+{% endif %}
 Generate the initial implementation plan. If the issue and repository support a confident answer, make that decision, plan with it, and note it instead of asking. Include open questions only when the plan cannot be made decision-complete from the issue and repository build. For each unavoidable question, set `recommended: true` on exactly one option. Return specific acceptance criteria describing what must be true for this PR to pass. When the work changes a protocol or wire contract, include exact request/response examples in the plan or acceptance criteria. Do not add standalone lint, test, or type-check acceptance criteria from the verification profile. A test explicitly requested by the issue remains a valid AC. A behavioral AC may include a `Verification:` note describing how the evaluator confirms that specific criterion.
 
 ACCEPTANCE CRITERIA MUST BE CODE-VERIFIABLE. Druks's evaluator inspects the diff and reads tests. It runs the configured verification profile as its own check set, separate from the binding acceptance criteria the implementer must satisfy. It cannot drive a browser, click through a UI, eyeball rendered output, exercise a real third-party API, or otherwise perform a runtime/visual smoke. Any criterion phrased as "manually smoke X", "load the app locally", "verify visually", "click through Y", "confirm in production", or "exercise the live N integration" is unfulfillable in this pipeline and will lock the PR in revision loops forever.
@@ -71,8 +94,6 @@ When the source ticket asks for a manual smoke or visual check, do ONE of these 
 - **Move the request to ``out_of_scope`` as a post-merge note**: the operator does the smoke after merge with their own eyes, not as a precondition to merge. Phrase it explicitly: "Out of scope: post-merge smoke of X (operator-driven; not gated by this PR)".
 
 Smoke / manual-verify requests in the source are operator concerns, not implementer concerns. Honor the intent (the operator wants to test the UX) without making the agent loop block on something it can't satisfy.
-
-When you fetch the ticket, its description ends with a `# Druks scope brief` heading — that section is the authoritative scope summary (problem, scope, acceptance criteria, out of scope). Everything above that heading is the human-authored source material; use it as detail and context, but the brief section wins on intent and shape. If the source lists per-test acceptance criteria that the brief summarises into prose, the source is canonical for those tests — do not drop them.
 
 ASSIGNEE RESOLUTION — the `assignee_github_login` schema field. Resolve the ticket
 assignee's GitHub login via the github MCP from their name

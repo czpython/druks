@@ -3,12 +3,12 @@ from druks.build.enums import HandoffStatus
 from druks.build.workflows import BuildWorkflow
 
 
-async def test_dispatch_pulls_scoped_item_back_onto_the_board(db_session, monkeypatch) -> None:
-    """A scoped item rests in History; dispatching its build must clear the
+async def test_dispatch_pulls_cancelled_item_back_onto_the_board(db_session, monkeypatch) -> None:
+    """A cancelled item rests in History; dispatching its build must clear the
     handoff status so the active board shows the run (and its gates) instead
-    of a stale "Scoped" row."""
+    of a stale "Cancelled" row."""
     item = make_test_work_item(repo="o/r", title="t", remote_key="ACME-1")
-    item.set_status(HandoffStatus.SCOPED)
+    item.set_status(HandoffStatus.CANCELLED)
     seed_run(db_session, "run-1")
 
     async def fake_start(cls, **kwargs):

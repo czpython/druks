@@ -111,8 +111,7 @@ async def test_missing_key_does_not_emit(tmp_path, monkeypatch):
 
 
 async def test_done_category_marks_the_transition_terminal(tmp_path, monkeypatch):
-    """The "done" statusCategory is Jira's terminal marker — the transition
-    carries terminal=True so the scope-cancel subscriber can filter on it."""
+    """The "done" statusCategory is Jira's terminal marker."""
     events = []
 
     async def _emit(event_type, **kwargs):
@@ -143,30 +142,12 @@ async def test_open_category_is_not_terminal(tmp_path, monkeypatch):
     assert events[0][1]["terminal"] is False
 
 
-# --- subscriber: scope + build routing -------------------------------------
+# --- subscriber: build routing ---------------------------------------------
 
 
 def _pin_settings(monkeypatch, **over):
-    settings = subs.Build.Settings(scoper_candidate_statuses=("Backlog", "Todo"), **over)
+    settings = subs.Build.Settings(**over)
     monkeypatch.setattr(subs.Build, "settings", classmethod(lambda cls: settings))
-
-
-async def test_candidate_status_dispatches_scope(tmp_path, monkeypatch):
-    """A status in ``scoper_candidate_statuses`` fetches the ticket and scopes."""
-    _pin_settings(monkeypatch)
-    ticket = object()
-    tracker = AsyncMock()
-    tracker.fetch_ticket = AsyncMock(return_value=ticket)
-    tracker.__aenter__ = AsyncMock(return_value=tracker)
-    tracker.__aexit__ = AsyncMock(return_value=False)
-    monkeypatch.setattr(subs, "get_tracker", lambda _s: tracker)
-    scope = AsyncMock()
-    monkeypatch.setattr(subs.Scope, "dispatch", scope)
-
-    await subs.ticket_transition_drives_the_funnel(payload=_jira_payload(status="Backlog"))
-
-    tracker.fetch_ticket.assert_awaited_once_with("IT-12")
-    scope.assert_awaited_once_with(ticket=ticket)
 
 
 async def test_trigger_status_dispatches_build_with_the_webhook_payload(tmp_path, monkeypatch):
@@ -181,7 +162,7 @@ async def test_trigger_status_dispatches_build_with_the_webhook_payload(tmp_path
     build.assert_awaited_once_with(ticket=payload)
 
 
-async def test_trigger_status_routes_an_unscoped_ticket_by_label(tmp_path, db_session, monkeypatch):
+async def test_trigger_status_routes_a_new_ticket_by_label(tmp_path, db_session, monkeypatch):
     """No work item yet: the label names the repo, the registry routes it."""
     from druks.build.models import Project, ProjectRepo, WorkItem
 
@@ -219,15 +200,11 @@ async def test_trigger_status_ignores_an_unroutable_ticket(tmp_path, db_session,
     start.assert_not_called()
 
 
-async def test_irrelevant_status_does_nothing(tmp_path, monkeypatch):
-    """A status that's neither candidate nor trigger dispatches neither path."""
+async def test_refinement_candidate_status_no_longer_dispatches(tmp_path, monkeypatch):
     _pin_settings(monkeypatch, jira_trigger_status="Ready")
-    scope = AsyncMock()
     build = AsyncMock()
-    monkeypatch.setattr(subs.Scope, "dispatch", scope)
     monkeypatch.setattr(subs.BuildWorkflow, "dispatch", build)
 
-    await subs.ticket_transition_drives_the_funnel(payload=_jira_payload(status="In Progress"))
+    await subs.ticket_transition_drives_the_funnel(payload=_jira_payload(status="Backlog"))
 
-    scope.assert_not_called()
     build.assert_not_called()

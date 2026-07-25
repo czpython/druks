@@ -44,7 +44,7 @@ class LinearClient:
         self.api_key = api_key
         self.api_url = api_url
         # One long-lived AsyncClient per LinearClient instance — pools
-        # connections across the many GraphQL calls a single scope run
+        # connections across the many GraphQL calls a single build run
         # makes. Tests inject a stub client; production builds the default.
         self._client = client or httpx.AsyncClient(
             timeout=_DEFAULT_TIMEOUT,

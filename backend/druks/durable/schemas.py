@@ -124,7 +124,7 @@ class AgentCallFiles(BaseResponse):
 
 class RunResponse(BaseResponse):
     id: str
-    # The durable kind ("build.scope"); ``label`` is its display name ("Scope").
+    # The durable kind ("build.build_workflow"); ``label`` is its display name ("Build workflow").
     kind: str
     label: str
     state: Literal["scheduled", "running", "pending_input", "finished", "failed", "cancelled"]

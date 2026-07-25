@@ -1,1 +1,9 @@
-The scope brief on the ticket may include a `## Skills` section listing skills to load (e.g. `/python-house-rules`). Load each one before starting work and apply its expertise. If a skill is unavailable, continue without it.
+{% if build.skills %}
+## Skills
+
+Load each skill below before starting work and apply its expertise. If a skill is unavailable, continue without it.
+
+{% for skill in build.skills %}
+- `/{{ skill }}`
+{% endfor %}
+{% endif %}

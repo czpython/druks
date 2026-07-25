@@ -197,7 +197,7 @@ def test_extensions_surface_build_agents_and_workflow_defaults(tmp_path: Path):
     # declares neither and the operator set no override.
     assert agents["generate_plan"] == {
         "name": "generate_plan",
-        "description": "brief → implementation plan",
+        "description": "ticket → implementation plan",
         "model": "gpt-5.5",
         "source": "default",
         "default": "codex",

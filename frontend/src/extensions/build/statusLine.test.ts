@@ -6,7 +6,7 @@ import { statusLine } from './statusLine'
 function status(overrides: Partial<SubjectStatus>): SubjectStatus {
   return {
     state: 'running',
-    kind: 'build.scope',
+    kind: 'build.build_workflow',
     agent: null,
     gate: null,
     failure: null,
@@ -17,9 +17,6 @@ function status(overrides: Partial<SubjectStatus>): SubjectStatus {
 
 describe('statusLine', () => {
   it('parked renders build’s line for the gate identity', () => {
-    expect(statusLine(status({ state: 'pending_input', gate: 'scope' }))).toBe(
-      'Reply on the ticket',
-    )
     expect(statusLine(status({ state: 'pending_input', gate: 'review_work' }))).toBe(
       'Review implementation',
     )
@@ -41,12 +38,12 @@ describe('statusLine', () => {
   })
 
   it('running before any call shows the kind', () => {
-    expect(statusLine(status({}))).toBe('Scope')
+    expect(statusLine(status({}))).toBe('Build workflow')
   })
 
   it('a timed-out gate renders the re-trigger hint', () => {
     expect(statusLine(status({ state: 'failed', reason: 'gate_timeout' }))).toBe(
-      'Scope timed out — re-trigger to retry',
+      'Build workflow timed out — re-trigger to retry',
     )
   })
 

@@ -3,7 +3,6 @@ import type { HandoffStatus } from './api'
 const GLYPH: Record<HandoffStatus, string> = {
   shipped: '✓',
   cancelled: '◯',
-  scoped: '◇',
 }
 
 interface Props {
