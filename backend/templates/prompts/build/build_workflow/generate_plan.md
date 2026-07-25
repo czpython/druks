@@ -10,6 +10,15 @@ your acceptance criteria. Wrong shape here compounds into every step that follow
 - **Read the codebase first.** The right approach is almost always the one the repo already
   uses for similar work. Name the files, layers, and data shapes that change. Inventing new
   abstractions where existing ones fit is a defect in the plan, not cleverness.
+- **Scale the read to the ticket.** A ticket that names the change, its call sites, and the
+  approach is decision-complete: verify the surface it names and plan from there. Do not
+  re-survey the subsystem to rediscover what the ticket already told you. A ticket that states
+  a problem and leaves the shape open gets the full exploration. Judge on substance — does it
+  name the surface and the approach? — never on length or author, and when the call is close,
+  explore: over-reading costs money, under-reading costs a bad plan.
+- **Verify what the ticket claims.** A named call site may have moved or gone since it was
+  written, so confirm each one at HEAD before you plan on it. Read the cited regions rather
+  than whole files — a whole file is re-processed on every turn.
 - **Preserve operator contracts verbatim.** Copy exact field shapes, JSON and endpoint
   contracts, template strings, do/don't decisions, and dependency nuance from the description
   and especially operator refinement comments into the plan. When in doubt, copy more.
