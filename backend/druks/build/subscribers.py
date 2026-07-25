@@ -51,16 +51,11 @@ async def scope_ready_settles_the_lane(*, subject: dict, **_: object) -> None:
 async def policy_push_reprofiles_the_repo(*, repo: str, paths: list, **_: object) -> None:
     # The operator edited the repo's build policy — re-apply it over the
     # profiled baseline.
-    if ".druks/build/config.yml" not in paths:
-        return
-    project_repo = ProjectRepo.get_for_repo(repo)
-    if not project_repo:
-        return
-    await Profile.start(
-        subject={"type": "project_repo", "id": project_repo.id},
-        repo_id=project_repo.id,
-        refresh_only=True,
-    )
+    if ".druks/build/config.yml" in paths:
+        project_repo = ProjectRepo.get_for_repo(repo)
+
+        if project_repo:
+            await Profile.dispatch(project_repo, refresh_only=True)
 
 
 # Routers

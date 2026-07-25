@@ -213,6 +213,7 @@ class BuildWorkflow(Workflow):
         }
 
     async def get_prompt_context(self, **context: Any) -> dict[str, Any]:
+        target_repo = ProjectRepo.get_for_repo(self.input.repo, raise_on_missing=True)
         prompt_context = BuildPromptContext(
             repo=self.input.repo,
             branch=self.branch,
@@ -222,7 +223,7 @@ class BuildWorkflow(Workflow):
             issue_number=self.input.issue_number,
             task_owner_name=self.input.task_owner_name,
             task_owner_email=self.input.task_owner_email,
-            related_repos=self._related_repos(),
+            related_repos=target_repo.siblings(),
             journal=self.journal,
         )
         return {
@@ -376,18 +377,6 @@ class BuildWorkflow(Workflow):
     def pr_number(self) -> int | None:
         return getattr(self.state, "pr_number", None)
 
-    def _related_repos(self) -> list[ProjectRepo]:
-        # The project's sibling repos (the prompt reads full_name + purpose).
-        target = (self.input.repo or "").strip().lower()
-        project = Project.get_for_repo(self.input.repo) if self.input.repo else None
-        if not project:
-            return []
-        return [
-            repo
-            for repo in project.repos
-            if (repo.full_name or "").strip() and repo.full_name.lower() != target
-        ]
-
     @step
     async def _clear_draft(self) -> None:
         await self.set_pr_draft(draft=False)
@@ -427,6 +416,14 @@ class Profile(Workflow):
     the reaction to a .druks/build/config.yml push."""
 
     workspace_class = RepoWorkspace
+
+    @classmethod
+    async def dispatch(cls, repo: ProjectRepo, *, refresh_only: bool = False) -> str:
+        return await cls.start(
+            subject={"type": "project_repo", "id": repo.id},
+            repo_id=repo.id,
+            refresh_only=refresh_only,
+        )
 
     async def run(self, repo_id: int, refresh_only: bool = False) -> None:
         # Every dispatch site verifies the repo exists first; a build never
@@ -525,12 +522,11 @@ class Scope(Workflow):
         # on the tracker, and the target repo's recommended skills for the brief's
         # Skills section.
         item = WorkItem.get(self.subject["id"])
-        siblings = [
-            {"full_name": r.full_name, "purpose": r.purpose or ""}
-            for r in item.project.repos
-            if r.full_name != item.repo
-        ]
         target = ProjectRepo.get_for_repo(item.repo, raise_on_missing=True)
+        siblings = [
+            {"full_name": repo.full_name, "purpose": repo.purpose or ""}
+            for repo in target.siblings()
+        ]
         settings = Build.settings()
         return {
             "target_repo": item.repo,

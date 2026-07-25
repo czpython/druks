@@ -36,3 +36,17 @@ def test_first_matching_label_wins(db_session):
 def test_no_signal_matches_any_repo(db_session):
     _register(db_session, "octo/alfred")
     assert _lookup(project_name="Octo", labels=["bug"]) is None
+
+
+def test_siblings_returns_only_other_repos_in_the_project(db_session):
+    project = Project.create(name="Acme")
+    target = ProjectRepo.create(project_id=project.id, full_name="acme/api")
+    sibling = ProjectRepo.create(
+        project_id=project.id,
+        full_name="acme/web",
+        purpose="frontend",
+    )
+    other_project = Project.create(name="Other")
+    ProjectRepo.create(project_id=other_project.id, full_name="other/worker")
+
+    assert target.siblings() == [sibling]
