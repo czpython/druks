@@ -1,5 +1,4 @@
 import inspect
-import re
 from collections.abc import Callable
 from contextlib import nullcontext, suppress
 from contextvars import ContextVar
@@ -20,12 +19,13 @@ from pydantic import BaseModel, ConfigDict, Field, create_model
 from uuid_utils import uuid7
 
 from druks.accounts.context import current_account_id
-from druks.durable.activity import get_run_phase, set_run_phase
+from druks.durable.activity import set_run_phase
 from druks.durable.engine import _step_engine, register_schedule, run_queue, step_session
 from druks.durable.enums import AgentCallStatus, RunState
 from druks.durable.exceptions import FatalError, GateTimeout, SubjectlessGate, WorkflowError
 from druks.durable.models import AgentCall, Run
-from druks.durable.schemas import AgentCallResponse, SubjectActivity, SubjectSummary
+from druks.durable.reads import get_subject_phase, get_subject_status
+from druks.durable.schemas import AgentCallResponse, SubjectActivity, SubjectStatus, SubjectSummary
 from druks.events.models import Event
 from druks.extensions.loader import resolve_workflow_extension
 from druks.extensions.registry import workflows
@@ -34,6 +34,7 @@ from druks.extensions.settings import (
     validate_setting_override,
     validate_settings_declaration,
 )
+from druks.models import snake_name
 from druks.notifications.outbox import notifications_queue, send_notification
 from druks.sandbox.client import sandbox_client
 from druks.sandbox.constants import SANDBOX_HOST_ROTATE_BEFORE_SECONDS
@@ -42,8 +43,8 @@ from druks.signals import publish
 from druks.user_settings.models import SettingsOverride, UserSettings
 
 # druks.workflows is the author door for workflow authoring: the bases (Workflow,
-# Gate, step) defined below plus the run/timeline records re-exported from the
-# engine. The engine itself (druks.durable) stays internal.
+# Gate, step) defined below plus the author-facing read contracts. The engine
+# itself (druks.durable) stays internal.
 __all__ = [
     "AgentCall",
     "AgentCallResponse",
@@ -52,13 +53,14 @@ __all__ = [
     "Gate",
     "Journal",
     "OperatorReply",
-    "Run",
     "RunState",
     "SubjectActivity",
+    "SubjectStatus",
     "SubjectSummary",
     "Workflow",
     "WorkflowError",
-    "get_run_phase",
+    "get_subject_phase",
+    "get_subject_status",
     "set_run_phase",
     "step",
 ]
@@ -158,13 +160,6 @@ def _input_model_from_signature(cls: type["Workflow"]) -> type[BaseModel] | None
     return create_model(f"{cls.__name__}Input", **fields)
 
 
-_CAMEL_BOUNDARY = re.compile(r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])")
-
-
-def _kind_from_class_name(name: str) -> str:
-    return _CAMEL_BOUNDARY.sub("_", name).lower()
-
-
 class Journal:
     """The run's working memory. Druks adds each body-level agent output and
     gate reply; a body adds its own derived values; subclass it for named
@@ -201,7 +196,7 @@ class Gate(BaseModel):
     """A typed human-in-the-loop gate. Subclass per park point; ``name`` pins the
     gate's durable identity — the recv channel and the parked run's ``gate`` on
     the read side — and the fields are the reply's schema. `wait()` parks the
-    running workflow until `Run.resume()` answers it (or the TTL lapses) and
+    running workflow until `answer()` resolves it (or the TTL lapses) and
     returns the validated reply — both ends of the channel hang off the class."""
 
     name: ClassVar[str] = ""
@@ -221,6 +216,18 @@ class Gate(BaseModel):
         # human aware there's something to answer (set PR draft, request review,
         # notify Slack, …). Default: nothing.
         return
+
+    @classmethod
+    async def answer(cls, subject: dict[str, Any], **reply: Any) -> None:
+        subject_key = _Subject.model_validate(subject)
+        runs = Run.list_for_subject(subject_key.type, str(subject_key.id))
+        parked = next((run for run in runs if run.is_parked and run.input_gate == cls.name), None)
+        if parked:
+            await parked.resume(**reply)
+            return
+        raise WorkflowError(
+            f"subject {subject_key.type}:{subject_key.id} is not parked on gate {cls.name!r}"
+        )
 
     @classmethod
     async def wait(
@@ -496,7 +503,7 @@ class Workflow:
                 "druks.extensions.loader; a module the loader doesn't own must "
                 "register_workflow_package() before importing"
             ) from None
-        local_kind = cls.__dict__.get("kind") or _kind_from_class_name(cls.__name__)
+        local_kind = cls.__dict__.get("kind") or snake_name(cls.__name__)
         if "." in local_kind:
             raise WorkflowError(
                 f"{cls.__name__}.kind {local_kind!r} must be a local name — "
@@ -678,6 +685,14 @@ class Workflow:
             value = coerce_setting_value(cls.Settings, field, value)
             validate_setting_override(cls.Settings, cls.settings().model_dump(), field, value)
         SettingsOverride.set_workflow_setting(cls.kind, field, value)
+
+    @classmethod
+    async def cancel(cls, subject: dict[str, Any], *, failure: str | None = None) -> None:
+        subject_key = _Subject.model_validate(subject)
+        runs = Run.list_for_subject(subject_key.type, str(subject_key.id), kind=cls.kind)
+        run = next((run for run in runs if run.is_active), None)
+        if run:
+            await run.cancel(failure=failure)
 
     @classmethod
     async def start(

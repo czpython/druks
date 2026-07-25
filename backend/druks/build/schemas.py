@@ -4,9 +4,8 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 from druks.build.models import Project, ProjectRepo, WorkItem
-from druks.durable.enums import RunState
 from druks.schemas import BaseResponse
-from druks.workflows import SubjectSummary
+from druks.workflows import RunState, SubjectSummary
 
 from .enums import HandoffStatus
 

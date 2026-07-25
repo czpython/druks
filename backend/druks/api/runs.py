@@ -1,9 +1,10 @@
 from fastapi import APIRouter, HTTPException, status
 
 from druks.api.schemas import ResumeRequest
+from druks.durable.enums import RunState
+from druks.durable.models import Run
 from druks.notifications.exceptions import InvalidChoiceError
 from druks.notifications.services import validate_in_app_answer
-from druks.workflows import Run, RunState
 
 router = APIRouter(prefix="/api/runs", tags=["runs"])
 

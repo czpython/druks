@@ -9,15 +9,13 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from druks.build.enums import HandoffStatus
 from druks.build.policy import RepoPolicy
 from druks.core.apis.github import get_github_client
-from druks.db import Base, db_session
-from druks.durable.reads import get_subject_status
-from druks.durable.schemas import SubjectStatus
+from druks.db import Base, Subject, db_session
 from druks.settings import load_settings
 from druks.ticketing.datastructures import Ticket
 from druks.ticketing.enums import SemanticStatus
 from druks.ticketing.exceptions import TrackerNotConfigured
 from druks.ticketing.helpers import get_tracker, is_tracker_source
-from druks.workflows import FatalError, Run
+from druks.workflows import FatalError, SubjectStatus, get_subject_status
 
 logger = logging.getLogger(__name__)
 
@@ -68,11 +66,10 @@ class Project(Base):
         return db_session().scalars(stmt).first()
 
 
-class ProjectRepo(Base):
+class ProjectRepo(Subject):
     __tablename__ = "project_repos"
     __table_args__ = (Index("project_repos_project_idx", "project_id"),)
 
-    id: Mapped[int] = mapped_column(primary_key=True)
     project_id: Mapped[int] = mapped_column(
         ForeignKey("projects.id", ondelete="CASCADE"),
     )
@@ -118,7 +115,7 @@ class ProjectRepo(Base):
         return self.profile.get("effective") or {}
 
     def profiler_status(self) -> SubjectStatus:
-        return get_subject_status("project_repo", str(self.id))
+        return get_subject_status(self.subject_type, str(self.id))
 
     def set_profile(self, *, baseline: dict[str, Any], effective: dict[str, Any]) -> None:
         self.profile = {"baseline": baseline, "effective": effective}
@@ -178,7 +175,7 @@ class ProjectRepo(Base):
         return
 
 
-class WorkItem(Base):
+class WorkItem(Subject):
     __tablename__ = "work_items"
     __table_args__ = (
         Index("work_items_repo_idx", "repo", "pr_number"),
@@ -199,7 +196,6 @@ class WorkItem(Base):
         Index("work_items_status_idx", "status"),
     )
 
-    id: Mapped[int] = mapped_column(primary_key=True)
     project_id: Mapped[int] = mapped_column(
         ForeignKey("projects.id"),
     )
@@ -219,23 +215,15 @@ class WorkItem(Base):
     repo: Mapped[str]
     pr_number: Mapped[int | None]
     branch: Mapped[str | None]
-    # The item's durable build run. Build owns the work-item ↔ run link here, so
-    # the platform run table stays oblivious to extensions; it's the dedup anchor (one
-    # active build per item) and the resume handle. SET NULL: a pruned run leaves
-    # the item with no active build, which is what the dedup check already reads.
+    # The item's latest durable build id. Build owns this historical link, so the
+    # platform timeline stays oblivious to extensions. SET NULL lets pruning leave
+    # the item without a stale attempt id.
     build_run_id: Mapped[str | None] = mapped_column(
         ForeignKey("durable_runs.id", ondelete="SET NULL"), default=None
     )
     status: Mapped[str | None] = mapped_column(default=None)
     created_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
     updated_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
-
-    @classmethod
-    def subject_for(cls, work_item_id: int) -> dict[str, Any]:
-        """The event-log subject for a work item — what build stamps on a run at
-        dispatch and on the milestones it emits, so both key to the same item.
-        Takes the id (not an instance): the merge step and dispatch only hold it."""
-        return {"type": "work_item", "id": work_item_id}
 
     @classmethod
     def create(
@@ -266,14 +254,22 @@ class WorkItem(Base):
         return db_session().get(cls, work_item_id)
 
     @classmethod
-    def get_for_pr(cls, *, repo: str, pr_number: int) -> "WorkItem | None":
-        stmt = (
-            select(cls)
-            .where(func.lower(cls.repo) == repo.lower(), cls.pr_number == pr_number)
-            .order_by(cls.updated_at.desc())
-            .limit(1)
-        )
-        return db_session().scalars(stmt).first()
+    def get_for_pr(
+        cls, *, repo: str, pr_number: int | None, branch: str | None = None
+    ) -> "WorkItem | None":
+        """The item a pull request belongs to. Its number identifies it; the head
+        branch is the fallback for an event that lands before druks mirrored one."""
+        if pr_number:
+            stmt = (
+                select(cls)
+                .where(func.lower(cls.repo) == repo.lower(), cls.pr_number == pr_number)
+                .order_by(cls.updated_at.desc())
+                .limit(1)
+            )
+            found = db_session().scalars(stmt).first()
+            if found:
+                return found
+        return cls.get_for_branch(repo=repo, branch=branch) if branch else None
 
     @classmethod
     def get_for_branch(cls, *, repo: str, branch: str) -> "WorkItem | None":
@@ -285,54 +281,26 @@ class WorkItem(Base):
         )
         return db_session().scalars(stmt).first()
 
-    @classmethod
-    def is_known_druks_pr(
-        cls,
-        *,
-        repo: str,
-        pr_number: int | None,
-        branch: str | None,
-        include_terminal: bool = False,
-    ) -> bool:
-        """Does an item druks owns match this PR/branch? ``include_terminal``
-        also accepts items whose build run has finished — the close echo still
-        needs to find a merged item that no longer has a live run."""
-        by_pr = cls.get_for_pr(repo=repo, pr_number=pr_number) if pr_number else None
-        by_branch = cls.get_for_branch(repo=repo, branch=branch) if branch else None
-        for item in (by_pr, by_branch):
-            if item and (include_terminal or item.has_live_build()):
-                return True
-        return False
-
-    def get_build_run(self) -> "Run | None":
-        return Run.get(self.build_run_id) if self.build_run_id else None
-
-    def has_live_build(self) -> bool:
-        run = self.get_build_run()
-        return bool(run and run.is_active)
-
-    async def cancel_active_build(self, *, failure: str) -> None:
-        """Cancel the item's active build run. Called when the PR left druks's
-        hands (merged or closed externally)."""
-        run = self.get_build_run()
-        if run and run.is_active:
-            await run.cancel(failure=failure)
-        db_session().flush()
-
     async def ship(self) -> None:
-        # PR merged → settle shipped. A run still parked under an operator merge is
-        # stranded; cancel it (a RUNNING run converges on its own closed-PR merge step).
+        # A build parked on the operator's review is stranded by their merge; a running
+        # one converges on its own, its merge step finding the PR already closed.
+        from druks.build.workflows import BuildWorkflow
+
         self.set_status(HandoffStatus.SHIPPED)
-        run = self.get_build_run()
-        if run and run.is_parked:
-            await run.cancel(failure="pr merged while parked")
+        build = get_subject_status(self.subject_type, str(self.id), kind=BuildWorkflow.kind)
+        if build.is_parked:
+            await BuildWorkflow.cancel(self.subject, failure="pr merged while parked")
         await self.set_remote_status(SemanticStatus.DONE)
 
     async def close_external(self) -> None:
-        # PR closed without a merge → abandon the attempt, not the ticket. Best-effort
-        # branch cleanup, then back to the provider's resting pool.
+        # The attempt was abandoned, not the ticket, so the ticket returns to the
+        # provider's resting pool. Branch cleanup is best-effort: a fetch failure
+        # must not strand it there.
+        from druks.build.workflows import BuildWorkflow
+
         self.set_status(HandoffStatus.CANCELLED, event_payload={"external": True})
-        await self.cancel_active_build(failure="pr closed without merge")
+        await BuildWorkflow.cancel(self.subject, failure="pr closed without merge")
+        db_session().flush()
         try:
             if (await RepoPolicy.resolve(self.repo)).delete_branch:
                 await get_github_client(load_settings()).delete_branch(self.repo, self.branch)
@@ -375,10 +343,10 @@ class WorkItem(Base):
         call-site convention. None clears the lane on (re)dispatch: no event."""
         if status:
             # cycle: the extension imports this module at file scope.
-            from druks.build.extension import Build
+            import druks.build.extension as build_extension
 
-            Build.record_event(
-                type=status, subject=self.subject_for(self.id), payload=event_payload
+            build_extension.Build.record_event(
+                type=status, subject=self.subject, payload=event_payload
             )
         self.status = status
         self.updated_at = Base.utc_now()
@@ -389,11 +357,12 @@ class WorkItem(Base):
         if not is_tracker_source(self.source):
             return
         # Lazy: the Build extension imports this module, so it can't be imported at top.
-        from druks.build.extension import Build
+        import druks.build.extension as build_extension
 
         try:
             tracker = get_tracker(
-                self.source, ready_for_agent_status=Build.post_refinement_status(self.source)
+                self.source,
+                ready_for_agent_status=build_extension.Build.post_refinement_status(self.source),
             )
         except TrackerNotConfigured:
             return

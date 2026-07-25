@@ -46,7 +46,7 @@ def _seed_scope_run(db_session, item, *, state="finished", status=None):
     elif status is not None:
         from druks.events.models import Event
 
-        Event.emit(type=status, subject=WorkItem.subject_for(item.id))
+        Event.emit(type=status, subject=item.subject)
         db_session.flush()
     return run
 
@@ -307,17 +307,17 @@ async def test_subject_activity_surfaces_running_phase(db_session, monkeypatch):
     item = make_test_work_item(repo="ClawHaven/acme-app", title="x")
     seed_build_run(db_session, work_item_id=item.id, state="running")
 
-    async def phase(_run_id):
+    async def phase(_subject_type, _subject_id):
         return "provisioning_vm"
 
-    monkeypatch.setattr(build_extension, "get_run_phase", phase)
+    monkeypatch.setattr(build_extension, "get_subject_phase", phase)
     activity = await build_extension.Build.subject_activity(str(item.id))
     assert activity is not None
     assert activity.label == "Building sandbox VM…"
     assert activity.kind == "infra"
 
 
-async def test_subject_activity_none_when_not_running(db_session, monkeypatch):
+async def test_subject_activity_none_when_not_running(db_session):
     # A run parked on a gate isn't working — no live sub-phase.
     from druks.build import extension as build_extension
 
@@ -326,8 +326,4 @@ async def test_subject_activity_none_when_not_running(db_session, monkeypatch):
         db_session, work_item_id=item.id, state="pending_input", input_gate="review_plan"
     )
 
-    async def phase(_run_id):
-        return "agent_running"
-
-    monkeypatch.setattr(build_extension, "get_run_phase", phase)
     assert await build_extension.Build.subject_activity(str(item.id)) is None

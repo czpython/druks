@@ -8,6 +8,7 @@ from typing import Literal
 from sqlalchemy import Engine
 
 from druks.database import session_scope
+from druks.durable.activity import get_run_phase
 from druks.durable.live import keepalive_comment, serialize_model_event
 
 from .enums import RunState
@@ -43,10 +44,20 @@ def list_subject_timeline(subject_type: str, subject_id: str) -> list[RunRespons
     return _timeline(runs, AgentCall.by_run([run.id for run in runs]))
 
 
-def get_subject_status(subject_type: str, subject_id: str) -> SubjectStatus:
-    runs = Run.list_for_subject(subject_type, subject_id)
+def get_subject_status(
+    subject_type: str, subject_id: str, *, kind: str | None = None
+) -> SubjectStatus:
+    runs = Run.list_for_subject(subject_type, subject_id, kind=kind)
     active_run = next((run for run in runs if run.is_active), None)
     return _status(runs, active_run, _running_calls(active_run))
+
+
+async def get_subject_phase(subject_type: str, subject_id: str) -> str | None:
+    runs = Run.list_for_subject(subject_type, subject_id)
+    active_run = next((run for run in runs if run.is_active), None)
+    if active_run and active_run.is_running:
+        return await get_run_phase(active_run.id)
+    return
 
 
 def get_subject_response(

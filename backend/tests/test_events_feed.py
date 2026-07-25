@@ -2,18 +2,17 @@ from conftest import make_test_work_item
 
 
 def test_feed_reads_run_and_milestone_events(db_session):
-    from druks.build.models import WorkItem
     from druks.events.builder import build_feed
     from druks.events.models import Event
 
     item = make_test_work_item(repo="acme/extension", remote_key="ACME-9", title="t")
     Event.emit(
         type="run.running",
-        subject=WorkItem.subject_for(item.id),
+        subject=item.subject,
         extension="build",
         payload={"kind": "build.build_workflow", "run": "wf1"},
     )
-    Event.emit(type="shipped", subject=WorkItem.subject_for(item.id), extension="build")
+    Event.emit(type="shipped", subject=item.subject, extension="build")
     db_session.flush()
 
     page, _ = build_feed()

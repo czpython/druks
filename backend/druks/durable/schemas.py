@@ -188,6 +188,10 @@ class SubjectStatus(BaseResponse):
     failure: str | None = None
     reason: str | None = None
 
+    @property
+    def is_parked(self) -> bool:
+        return self.state == RunState.PENDING_INPUT
+
 
 class SubjectRow(BaseResponse):
     summary: SerializeAsAny[SubjectSummary]

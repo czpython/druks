@@ -69,7 +69,7 @@ def _park_work_item(*, repo, pr_number, branch, state="pending_input", input_gat
 
 
 def _fresh_run(run_id):
-    # Run.cancel() never writes state — re-select before reading the derived one.
+    # Workflow.cancel() never writes state — re-select before reading the derived one.
     from druks.database import db_session
 
     db_session().expire_all()

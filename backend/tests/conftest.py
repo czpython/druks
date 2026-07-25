@@ -95,7 +95,7 @@ def _no_durable_dispatch(request):
     with (
         mock.patch.object(Workflow, "start", classmethod(_noop)),
         mock.patch("druks.agents.set_run_phase", _phase_noop),
-        mock.patch("druks.build.extension.get_run_phase", _phase_noop),
+        mock.patch("druks.build.extension.get_subject_phase", _phase_noop),
         mock.patch("dbos.DBOS.cancel_workflow_async", _dbos_cancel),
     ):
         yield

@@ -303,7 +303,19 @@ reply = await ApproveReport.wait(
 
 `on_wait()` is a checkpointed notification step. The workflow then parks
 durably and releases its warm sandbox. The owning external system resumes the
-run with `Run.resume()` or a webhook reaction.
+workflow through the gate and its subject:
+
+```python
+await ApproveReport.answer(
+    {"type": "repository", "id": repo_id},
+    action="approve",
+    note="Ship it.",
+)
+```
+
+`answer()` resolves the subject's run parked on that gate, and raises when none
+is — an already-answered or timed-out gate included. A subject may have runs of
+several workflows at once; the gate identifies which one answers.
 
 For a subject-backed decision inside the Druks dashboard, use:
 
@@ -318,6 +330,16 @@ the wait is visible; otherwise Druks raises instead of parking silently.
 Raise `FatalError` for a deliberate domain stop. Subclass it and set `code`
 when readers need a stable machine failure code. Unexpected exceptions fail
 the run and are re-raised to DBOS.
+
+Stop this workflow's active execution for a subject through the workflow class:
+
+```python
+await Sweep.cancel({"type": "repository", "id": repo_id})
+```
+
+The workflow class supplies its kind; the caller never locates or handles the
+platform's internal timeline row. Cancelling a subject with nothing of that kind
+running is a no-op, so a redelivered webhook stays idempotent.
 
 ## Give runs a subject read-side
 
@@ -348,6 +370,42 @@ Druks mounts a board and per-subject point-in-time and SSE routes under
 `/api/night_watch/repository`. It composes each summary with generic run status,
 timeline, agent calls, artifacts, and the current gate. Override
 `subject_activity()` only for a transient application-specific phase.
+
+The row those runs are about subclasses `Subject` instead of `Base`. Its class
+name is the subject type, so the row spells its identity once and hands
+`subject` to any workflow or gate:
+
+```python
+from druks.db import Subject
+
+
+class Repository(Subject):
+    __tablename__ = "repositories"
+
+
+await NightWatch.dispatch(subject=repository.subject)
+```
+
+Two lifecycles meet on that row, and they keep separate words. The subject's own
+landing is the extension's — a work item ships, is scoped, is cancelled. Whether
+work is happening is the platform's, read off `get_subject_status(...)`:
+`status.is_parked` while a run waits on a human. Neither borrows the other's
+vocabulary.
+
+Use subject-keyed reads when extension policy reacts to lifecycle state or
+exposes a transient activity:
+
+```python
+from druks.workflows import RunState, get_subject_phase, get_subject_status
+
+subject = {"type": "repository", "id": repo_id}
+status = get_subject_status(subject["type"], str(subject["id"]))
+if status.state == RunState.RUNNING:
+    phase = await get_subject_phase(subject["type"], str(subject["id"]))
+```
+
+`status.kind` identifies the workflow currently driving the subject and
+`status.gate` identifies its parked ask.
 
 ## Record events and react to signals
 
