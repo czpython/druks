@@ -10,12 +10,12 @@ _ASK = {"presentation": "in_app", "controls": ["approve"], "questions": []}
 
 
 class _ParkedWorkflow:
-    # The slice of Workflow that _park touches. subject=None keeps the emit to
+    # The slice of Workflow that _park touches. A subjectless run keeps the emit to
     # its facts write (no feed event, no notification) — the receipt path under
     # test is exactly that write.
     def __init__(self, workflow_id: str) -> None:
         self.workflow_id = workflow_id
-        self.subject = None
+        self._subject = None
 
     async def _reap_run(self) -> None:
         return

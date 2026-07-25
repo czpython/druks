@@ -37,8 +37,8 @@ class Base(DeclarativeBase):
 
 class Subject(Base):
     """A row an extension's runs are about — a work item, a repo, a document.
-    Subclass it instead of ``Base``: the class name is the subject type, so a
-    subject never spells its identity twice."""
+    Subclass it instead of ``Base``: the class name is the subject type, so
+    ``WorkItem`` is ``work_item``."""
 
     __abstract__ = True
 
@@ -51,5 +51,9 @@ class Subject(Base):
         super().__init_subclass__(**kwargs)
 
     @property
-    def subject(self) -> dict[str, Any]:
-        return {"type": self.subject_type, "id": self.id}
+    def identity(self) -> dict[str, Any]:
+        """What a run or an event records in place of the row, which can be gone by
+        the time either is read."""
+        if self.id:
+            return {"type": self.subject_type, "id": self.id}
+        raise ValueError(f"unsaved {type(self).__name__} has no identity — flush it first")

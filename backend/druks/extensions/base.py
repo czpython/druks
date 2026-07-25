@@ -9,6 +9,7 @@ from pydantic import BaseModel
 
 from druks.events.feed import generic_entry
 from druks.events.models import Event
+from druks.models import Subject
 from druks.user_settings.models import SettingsOverride
 
 from .registry import agents as agent_registry
@@ -85,11 +86,9 @@ class Extension:
     # belong to the extension itself rather than one of its workflows. Mirrors a
     # workflow's ``Settings``.
     settings_model: ClassVar[type[BaseModel] | None] = None
-    # The kind of subject this extension's runs are about (e.g. "work_item"). Set it to
-    # get the generic subject read-side mounted at ``/api/<name>/<subject_type>`` — the
-    # platform serves status + timeline + live stream, and the extension supplies only
-    # the domain summary. None = the extension has no subject read-side.
-    subject_type: ClassVar[str | None] = None
+    # The row this extension's runs are about. Declaring it mounts the generic
+    # subject read-side; None means the extension has no subject read-side.
+    subject: ClassVar[type[Subject] | None] = None
     # The checks this extension contributes to ``druks doctor`` — one per precondition
     # it owns (its API key set, its webhook secret present, its provider reachable).
     # ``druks doctor`` runs each through the same ``CheckResult`` report as its core
@@ -243,7 +242,7 @@ class Extension:
         its ``routes`` modules, plus the generic read-side it gets for free —
         ``/transcripts`` always, and the subject read-side
         (``/<subject_type>`` → status + timeline + live stream) when it declares a
-        ``subject_type``. Override to add a router built outside a ``routes`` module."""
+        ``subject``. Override to add a router built outside a ``routes`` module."""
         # Local, not module-top: keeps FastAPI off the import graph so the loader
         # stays importable app-lessly; enumerating routers is where it's really needed.
         from fastapi import APIRouter
@@ -258,7 +257,7 @@ class Extension:
                     seen.add(id(value))
                     declared.append(value)
         routers = [*declared, cls._get_transcript_routes()]
-        if cls.subject_type:
+        if cls.subject:
             routers.append(cls._get_subject_routes())
         return routers
 
@@ -352,18 +351,19 @@ class Extension:
     def _get_subject_routes(cls) -> "APIRouter":
         """The board and one subject (header + status + timeline + activity), each with a
         point-in-time read and a ``/stream`` that pushes the whole snapshot on change.
-        Mounted at ``/api/<name>/<subject_type>`` once the extension sets ``subject_type``."""
+        Mounted at ``/api/<name>/<subject_type>`` once the extension declares ``subject``."""
         from fastapi import APIRouter, HTTPException, status
         from fastapi.responses import StreamingResponse
 
         from druks.api.dependencies import EngineDep
-        from druks.database import session_scope
+        from druks.database import db_session, session_scope
         from druks.durable import reads
         from druks.durable.live import SSE_HEADERS, stream
         from druks.durable.schemas import SubjectList, SubjectResponse, SubjectRow
 
-        kind = cls.subject_type
-        assert kind is not None
+        subject_model = cls.subject
+        assert subject_model
+        kind = subject_model.subject_type
 
         router = APIRouter(prefix=f"/{kind}", tags=[f"{cls.name}:{kind}"])
 
@@ -375,11 +375,16 @@ class Extension:
                 ]
             )
 
-        async def subject(subject_id: str) -> SubjectResponse | None:
-            summary = cls.subject_summary(subject_id)
+        async def subject_response(subject_id: str) -> SubjectResponse | None:
+            if not subject_id.isdigit():
+                return
+            subject = db_session().get(subject_model, int(subject_id))
+            if not subject:
+                return
+            summary = cls.subject_summary(subject)
             if not summary:
-                return None
-            activity = await cls.subject_activity(subject_id)
+                return
+            activity = await cls.subject_activity(subject)
             return reads.get_subject_response(kind, subject_id, summary=summary, activity=activity)
 
         @router.get("", response_model=SubjectList, response_model_by_alias=True)
@@ -398,8 +403,8 @@ class Extension:
             )
 
         @router.get("/{subject_id}", response_model=SubjectResponse, response_model_by_alias=True)
-        async def get_subject(subject_id: str) -> SubjectResponse:
-            response = await subject(subject_id)
+        async def read_subject(subject_id: str) -> SubjectResponse:
+            response = await subject_response(subject_id)
             if not response:
                 raise HTTPException(status.HTTP_404_NOT_FOUND, f"No {kind} {subject_id!r}.")
             return response
@@ -408,7 +413,7 @@ class Extension:
         async def stream_subject(subject_id: str, engine: EngineDep) -> StreamingResponse:
             async def snapshot() -> SubjectResponse | None:
                 with session_scope(engine):
-                    return await subject(subject_id)
+                    return await subject_response(subject_id)
 
             return StreamingResponse(
                 stream(snapshot), media_type="text/event-stream", headers=SSE_HEADERS
@@ -428,13 +433,18 @@ class Extension:
         cls,
         *,
         type: str,
-        subject: dict[str, Any] | None = None,
+        subject: Subject | None = None,
         payload: dict[str, Any] | None = None,
     ) -> None:
         """Record one of this extension's domain events to the log, stamped with the
         extension automatically. Apps record through here so the ``Event`` model
         stays a platform internal — the write-side twin of ``format_event``."""
-        Event.emit(type=type, subject=subject, payload=payload, extension=cls.name)
+        Event.emit(
+            type=type,
+            subject=subject.identity if subject else None,
+            payload=payload,
+            extension=cls.name,
+        )
 
     @classmethod
     def format_event(cls, event: Event) -> "FeedItem":
@@ -445,23 +455,21 @@ class Extension:
         return generic_entry(event)
 
     @classmethod
-    def subject_summary(cls, subject_id: str) -> "SubjectSummary | None":
+    def subject_summary(cls, subject: Any) -> "SubjectSummary | None":
         """This extension's domain header for one subject — its own fields only; the
-        read-side composes it with the platform's generic status + timeline. None when
-        the id isn't one of its subjects. Required once ``subject_type`` is set."""
-        raise NotImplementedError(
-            f"extension {cls.name!r} sets subject_type but no subject_summary"
-        )
+        read-side composes it with the platform's generic status + timeline. Required
+        once ``subject`` is set."""
+        raise NotImplementedError(f"extension {cls.name!r} sets subject but no subject_summary")
 
     @classmethod
     def list_subjects(cls) -> "Sequence[SubjectSummary]":
         """This extension's subjects, newest-movement first, each as its domain summary.
         Returns a covariant ``Sequence`` so an extension can return ``list`` of its own
-        ``SubjectSummary`` subclass. Required once ``subject_type`` is set."""
-        raise NotImplementedError(f"extension {cls.name!r} sets subject_type but no list_subjects")
+        ``SubjectSummary`` subclass. Required once ``subject`` is set."""
+        raise NotImplementedError(f"extension {cls.name!r} sets subject but no list_subjects")
 
     @classmethod
-    async def subject_activity(cls, subject_id: str) -> "SubjectActivity | None":
+    async def subject_activity(cls, subject: Any) -> "SubjectActivity | None":
         """The subject's live sub-phase, if any (e.g. "Building sandbox VM…"). Optional —
         override to surface a transient signal the running run pushes."""
-        return None
+        return

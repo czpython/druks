@@ -125,7 +125,7 @@ Start a workflow with an explicit subject:
 
 ```python
 run_id = await Sweep.start(
-    subject={"type": "repository", "id": repo_id},
+    subject=repository,
     repo=full_name,
 )
 ```
@@ -307,7 +307,7 @@ workflow through the gate and its subject:
 
 ```python
 await ApproveReport.answer(
-    {"type": "repository", "id": repo_id},
+    repository,
     action="approve",
     note="Ship it.",
 )
@@ -334,7 +334,7 @@ the run and are re-raised to DBOS.
 Stop this workflow's active execution for a subject through the workflow class:
 
 ```python
-await Sweep.cancel({"type": "repository", "id": repo_id})
+await Sweep.cancel(repository)
 ```
 
 The workflow class supplies its kind; the caller never locates or handles the
@@ -343,10 +343,17 @@ running is a no-op, so a redelivered webhook stays idempotent.
 
 ## Give runs a subject read-side
 
-Set one subject type and return extension-owned summaries:
+A subject is the row your runs are about — a repository, a work item, a
+document. Subclass `Subject` instead of `Base`, and the class name is the
+subject type: `Repository` becomes `repository`.
 
 ```python
+from druks.db import Subject
 from druks.workflows import SubjectSummary
+
+
+class Repository(Subject):
+    __tablename__ = "repositories"
 
 
 class RepositorySummary(SubjectSummary):
@@ -355,10 +362,10 @@ class RepositorySummary(SubjectSummary):
 
 
 class NightWatch(Extension):
-    subject_type = "repository"
+    subject = Repository
 
     @classmethod
-    def subject_summary(cls, subject_id: str) -> RepositorySummary | None:
+    def subject_summary(cls, subject: Repository) -> RepositorySummary:
         ...
 
     @classmethod
@@ -366,46 +373,38 @@ class NightWatch(Extension):
         ...
 ```
 
-Druks mounts a board and per-subject point-in-time and SSE routes under
-`/api/night_watch/repository`. It composes each summary with generic run status,
-timeline, agent calls, artifacts, and the current gate. Override
-`subject_activity()` only for a transient application-specific phase.
+Druks then serves that subject under `/api/night_watch/repository`: a board of
+every row, a page for one row, and a live stream of either. Each response pairs
+your summary with the run's status, timeline, agent calls, artifacts, and the
+question it is waiting on. Override `subject_activity()` only to add a passing
+detail of your own, like "Building sandbox VM…".
 
-The row those runs are about subclasses `Subject` instead of `Base`. Its class
-name is the subject type, so the row spells its identity once and hands
-`subject` to any workflow or gate:
-
-```python
-from druks.db import Subject
-
-
-class Repository(Subject):
-    __tablename__ = "repositories"
-
-
-await NightWatch.dispatch(subject=repository.subject)
-```
-
-Two lifecycles meet on that row, and they keep separate words. The subject's own
-landing is the extension's — a work item ships, is scoped, is cancelled. Whether
-work is happening is the platform's, read off `get_subject_status(...)`:
-`status.is_parked` while a run waits on a human. Neither borrows the other's
-vocabulary.
-
-Use subject-keyed reads when extension policy reacts to lifecycle state or
-exposes a transient activity:
+Hand the row itself to anything that asks for a subject — starting a run,
+answering a gate, recording an event:
 
 ```python
-from druks.workflows import RunState, get_subject_phase, get_subject_status
-
-subject = {"type": "repository", "id": repo_id}
-status = get_subject_status(subject["type"], str(subject["id"]))
-if status.state == RunState.RUNNING:
-    phase = await get_subject_phase(subject["type"], str(subject["id"]))
+await NightWatch.dispatch(subject=repository)
 ```
 
-`status.kind` identifies the workflow currently driving the subject and
-`status.gate` identifies its parked ask.
+Inside the workflow, `self.subject` is that row — live, not a snapshot taken at
+dispatch. A run that parks on a gate for three days resumes against whatever the
+row says then, and finds nothing if it was deleted meanwhile.
+
+You name what happened to the row: a work item ships, gets scoped, gets
+cancelled. Whether a run is working on it is druks's to say, and you read that
+off the status:
+
+```python
+from druks.workflows import get_subject_phase, get_subject_status
+
+status = get_subject_status(repository.subject_type, str(repository.id))
+if status.is_parked:
+    ...  # a run stopped to ask a human something
+```
+
+`status.kind` names the workflow currently driving the row and `status.gate` the
+question it stopped on. While a run is working, `get_subject_phase(...)` returns
+the step it is on.
 
 ## Record events and react to signals
 
@@ -414,7 +413,7 @@ Record an extension event through the extension so ownership is stamped:
 ```python
 NightWatch.record_event(
     type="report.published",
-    subject={"type": "repository", "id": repo_id},
+    subject=repository,
     payload={"url": report_url},
 )
 ```
@@ -431,8 +430,8 @@ from druks.signals import subscribe
 
 
 @subscribe("run.finished", subject__type="repository")
-async def on_sweep_finished(*, subject: dict, **_: object) -> None:
-    ...
+async def on_sweep_finished(*, subject: Repository, **_: object) -> None:
+    await notify(subject.full_name)
 ```
 
 Signals are at-least-once. A subscriber exception propagates so webhook

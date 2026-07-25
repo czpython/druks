@@ -5,9 +5,14 @@ from conftest import seed_dbos_status
 from druks.durable import AgentCall, Run
 from druks.durable.schemas import SubjectSummary
 from druks.extensions.base import Extension
+from druks.models import Subject
 from fastapi import APIRouter
 from fastapi.testclient import TestClient
 from uuid_utils import uuid7
+
+
+class Thing(Subject):
+    __tablename__ = "faketest_things"
 
 
 class _ThingSummary(SubjectSummary):
@@ -16,18 +21,20 @@ class _ThingSummary(SubjectSummary):
 
 class _ThingExtension(Extension):
     name = "faketest"
-    subject_type = "thing"
+    subject = Thing
 
-    _THINGS = {"1": "First", "2": "Second"}
+    _THINGS = {1: "First", 2: "Second"}
 
     @classmethod
-    def subject_summary(cls, subject_id: str) -> _ThingSummary | None:
-        title = cls._THINGS.get(subject_id)
-        return _ThingSummary(id=subject_id, title=title) if title is not None else None
+    def subject_summary(cls, subject: Thing) -> _ThingSummary:
+        return _ThingSummary(id=str(subject.id), title=cls._THINGS[subject.id])
 
     @classmethod
     def list_subjects(cls) -> list[_ThingSummary]:
-        return [_ThingSummary(id=sid, title=title) for sid, title in cls._THINGS.items()]
+        return [
+            _ThingSummary(id=str(subject_id), title=title)
+            for subject_id, title in cls._THINGS.items()
+        ]
 
 
 def _seed_run(
@@ -70,6 +77,9 @@ def client(tmp_path: Path, db_session, monkeypatch):
     from conftest import configure_app_for_test, make_settings
 
     monkeypatch.setenv("DRUKS_DATA_DIR", str(tmp_path))
+    for subject_id in _ThingExtension._THINGS:
+        db_session.merge(Thing(id=subject_id))
+    db_session.flush()
     app = configure_app_for_test(settings=make_settings(tmp_path))
 
     holder = APIRouter()

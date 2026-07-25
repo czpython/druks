@@ -289,7 +289,7 @@ class WorkItem(Subject):
         self.set_status(HandoffStatus.SHIPPED)
         build = get_subject_status(self.subject_type, str(self.id), kind=BuildWorkflow.kind)
         if build.is_parked:
-            await BuildWorkflow.cancel(self.subject, failure="pr merged while parked")
+            await BuildWorkflow.cancel(self, failure="pr merged while parked")
         await self.set_remote_status(SemanticStatus.DONE)
 
     async def close_external(self) -> None:
@@ -299,7 +299,7 @@ class WorkItem(Subject):
         from druks.build.workflows import BuildWorkflow
 
         self.set_status(HandoffStatus.CANCELLED, event_payload={"external": True})
-        await BuildWorkflow.cancel(self.subject, failure="pr closed without merge")
+        await BuildWorkflow.cancel(self, failure="pr closed without merge")
         db_session().flush()
         try:
             if (await RepoPolicy.resolve(self.repo)).delete_branch:
@@ -345,9 +345,7 @@ class WorkItem(Subject):
             # cycle: the extension imports this module at file scope.
             import druks.build.extension as build_extension
 
-            build_extension.Build.record_event(
-                type=status, subject=self.subject, payload=event_payload
-            )
+            build_extension.Build.record_event(type=status, subject=self, payload=event_payload)
         self.status = status
         self.updated_at = Base.utc_now()
         db_session().flush()

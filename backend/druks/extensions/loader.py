@@ -174,6 +174,18 @@ def _load_entry(entry: "EntryPoint") -> type[Extension]:
     return extension
 
 
+def _tables_declared_in(package: str) -> set[str]:
+    # A table belongs to whoever declared its model, not to whoever happened to import
+    # it first: an extension entry module pulls its own models in, and a sibling's.
+    from druks.models import Base
+
+    return {
+        mapper.local_table.name
+        for mapper in Base.registry.mappers
+        if mapper.class_.__module__.startswith(f"{package}.") and mapper.local_table is not None
+    }
+
+
 def import_extension_models(only: type[Extension] | None = None) -> None:
     """Import extensions' ``<package>.models`` so their tables register on the shared
     metadata before ``create_all`` or autogenerate. Defaults to every installed
@@ -185,23 +197,17 @@ def import_extension_models(only: type[Extension] | None = None) -> None:
     import importlib
     import importlib.util
 
-    # Core/framework tables must be registered first, so an extension's transitive pull
-    # of them isn't read as the extension's own (and flagged for missing the prefix).
-    import druks.durable.models  # noqa: F401
-    import druks.skills.models  # noqa: F401
-    import druks.user_settings.models  # noqa: F401
-    from druks.models import Base
-
     extensions = [only] if only else iter_extensions()
-    seen = set(Base.metadata.tables)
     for extension in extensions:
         name = f"{extension.package}.models"
         if not importlib.util.find_spec(name):
             continue
         importlib.import_module(name)
-        owned = set(Base.metadata.tables) - seen
-        seen |= owned
-        misnamed = sorted(t for t in owned if not t.startswith(extension.table_prefix))
+        misnamed = sorted(
+            table
+            for table in _tables_declared_in(extension.package)
+            if not table.startswith(extension.table_prefix)
+        )
         if misnamed and extension.prefix_tables and not extension.builtin:
             raise ValueError(
                 f"extension {extension.name!r} tables must start with "

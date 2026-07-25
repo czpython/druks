@@ -50,7 +50,7 @@ async def test_answers_parked_scope_by_subject(db_session, monkeypatch):
 
     monkeypatch.setattr(Run, "resume", answer)
 
-    await ScopeReply.answer(item.subject)
+    await ScopeReply.answer(item)
 
     assert answered == [(run.id, {})]
 
@@ -60,7 +60,7 @@ async def test_rejects_other_work_items(db_session):
     item = make_test_work_item(repo="acme/widget", title="t", source="linear", remote_key="ACME-1")
     _scope_run(db_session, work_item_id=item.id)
     with pytest.raises(WorkflowError, match="is not parked"):
-        await ScopeReply.answer({"type": "work_item", "id": item.id + 1})
+        await ScopeReply.answer(WorkItem(id=item.id + 1))
 
 
 @pytest.mark.asyncio
@@ -68,7 +68,7 @@ async def test_rejects_a_resolved_scope(db_session):
     item = make_test_work_item(repo="acme/widget", title="t", source="linear", remote_key="ACME-1")
     _scope_run(db_session, work_item_id=item.id, parked=False)
     with pytest.raises(WorkflowError, match="is not parked"):
-        await ScopeReply.answer(item.subject)
+        await ScopeReply.answer(item)
 
 
 @pytest.mark.asyncio

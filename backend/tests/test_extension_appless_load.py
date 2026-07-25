@@ -26,16 +26,18 @@ _FILES = {
         from druks.extensions import Extension
         from pydantic import BaseModel, Field
 
+        from .models import ProbeItem
+
 
         class Probe(Extension):
             name = "probe"
-            subject_type = "widget"
+            subject = ProbeItem
 
             class Settings(BaseModel):
                 budget: int = Field(default=3, ge=1)
 
             @classmethod
-            def subject_summary(cls, subject_id):
+            def subject_summary(cls, subject):
                 return None
 
             @classmethod
@@ -43,14 +45,11 @@ _FILES = {
                 return []
     """,
     "models.py": """
-        from druks.db import Base
-        from sqlalchemy.orm import Mapped, mapped_column
+        from druks.db import Subject
 
 
-        class ProbeItem(Base):
+        class ProbeItem(Subject):
             __tablename__ = "probe_items"
-
-            id: Mapped[str] = mapped_column(primary_key=True)
     """,
     "routes.py": """
         from fastapi import APIRouter
@@ -65,9 +64,11 @@ _FILES = {
     "subscribers.py": """
         from druks.signals import subscribe
 
+        from .models import ProbeItem
 
-        @subscribe("run.finished", subject__type="widget")
-        async def on_widget_done(**_: object) -> None:
+
+        @subscribe("run.finished", subject__type="probe_item")
+        async def on_probe_item_done(*, subject: ProbeItem, **_: object) -> None:
             ...
     """,
     "workflows.py": """

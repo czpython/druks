@@ -103,13 +103,13 @@ async def test_scope_parks_then_resumes_to_ready(rt, monkeypatch):
 
     project = Project.create(name="acme/widget")
     ProjectRepo.create(project_id=project.id, full_name="acme/widget")
-    item_id = WorkItem.create(
+    item = WorkItem.create(
         project_id=project.id,
         source="linear",
         title="Add SSE",
         remote_key="ACME-1",
         repo="acme/widget",
-    ).id
+    )
     db_session().commit()
 
     # Round 1 asks a question (parks); round 2 is ready (finishes). The agent
@@ -122,7 +122,7 @@ async def test_scope_parks_then_resumes_to_ready(rt, monkeypatch):
     monkeypatch.setattr("druks.agents.Agent._run", _run_agent)
 
     wfid = await rt.flow.start(
-        subject={"type": "work_item", "id": item_id},
+        subject=item,
         source="linear",
         remote_key="ACME-1",
     )
@@ -147,10 +147,10 @@ async def test_scope_parks_then_resumes_to_ready(rt, monkeypatch):
     try:
         finished = (
             session.query(Event)
-            .filter(Event.type == "run.finished", Event.subject_id == str(item_id))
+            .filter(Event.type == "run.finished", Event.subject_id == str(item.id))
             .one()
         )
-        item_status = session.get(WorkItem, item_id).status
+        item_status = session.get(WorkItem, item.id).status
     finally:
         session.close()
     # The finished event carries the result; the lane subscriber reacted to it.

@@ -158,10 +158,12 @@ than only on the VM.
 
 ## Events, signals, webhooks, and subjects
 
-A subject is the opaque `{"type": ..., "id": ...}` identity a run is about.
-Subjected lifecycle events enter an append-only event log. Extensions can add
-domain events, format feed rows, and provide subject summaries; Druks supplies
-pagination, activity composition, and a live SSE feed.
+A subject is the row a run is about. The extension owns it and hands it to druks
+whenever it starts a run or answers a gate; only the row's type and id travel
+further, because a run outlives the row it points at. Everything that happens to
+a run lands in an append-only event log. Extensions add their own events, format
+feed rows, and supply subject summaries; druks supplies pagination, activity
+composition, and a live feed.
 
 Signals connect producers to extension reactions. They are awaited and
 delivered at least once: webhook failures return an error so the provider can

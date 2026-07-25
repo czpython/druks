@@ -1,5 +1,13 @@
 import pytest
+from conftest import make_test_work_item
+from druks.build.models import ProjectRepo, WorkItem
 from druks.signals import publish, subscribe
+from druks.workflows import Workflow
+from sqlalchemy.orm import object_session
+
+
+def _work_item(**fields):
+    return make_test_work_item(repo="ClawHaven/acme-app", title="probe", **fields)
 
 
 @pytest.mark.asyncio
@@ -13,3 +21,58 @@ async def test_subscriber_failure_propagates_to_the_publisher():
 
     with pytest.raises(RuntimeError, match="boom"):
         await publish("test.subscriber_failure")
+
+
+@pytest.mark.asyncio
+async def test_subject_subscriber_receives_the_row(db_session):
+    item = _work_item(remote_key="ENG-748-SIGNAL")
+    received = []
+
+    @subscribe("test.subject_row", subject=WorkItem)
+    async def receive(*, subject: WorkItem) -> None:
+        received.append(subject)
+
+    await publish("test.subject_row", subject=item.identity)
+
+    assert received == [item]
+
+
+@pytest.mark.asyncio
+async def test_deleted_subject_skips_the_subscriber(db_session):
+    item = _work_item(remote_key="ENG-748-DELETED")
+    identity = item.identity
+    received = []
+
+    @subscribe("test.deleted_subject", subject=WorkItem)
+    async def receive(*, subject: WorkItem) -> None:
+        received.append(subject)
+
+    object_session(item).delete(item)
+    object_session(item).flush()
+    await publish("test.deleted_subject", subject=identity)
+
+    assert received == []
+
+
+@pytest.mark.asyncio
+async def test_another_subjects_event_skips_the_subscriber(db_session):
+    item = _work_item()
+    repo = ProjectRepo.create(project_id=item.project_id, full_name="acme/other")
+    received = []
+
+    @subscribe("test.other_subject", subject=WorkItem)
+    async def receive(*, subject: WorkItem) -> None:
+        received.append(subject)
+
+    await publish("test.other_subject", subject=repo.identity)
+    await publish("test.other_subject", subject=None)
+
+    assert received == []
+
+
+def test_workflow_subject_requires_a_registered_class():
+    workflow = Workflow()
+    workflow._subject = {"type": "missing", "id": 1}
+
+    with pytest.raises(LookupError, match="no subject class is named"):
+        _ = workflow.subject

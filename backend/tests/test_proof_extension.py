@@ -89,7 +89,7 @@ def test_boot_loads_the_external_extension(installed):
 
     assert extension.name == "field_notes"
     assert extension.package == _PACKAGE
-    assert extension.subject_type == "note"
+    assert extension.subject.subject_type == "note"
 
 
 def test_discovery_registers_the_tables_and_capabilities(installed):
@@ -114,7 +114,7 @@ def test_routes_read_off_the_loaded_extension(installed):
     prefixes = {router.prefix for router in extension.routers()}
     assert "/notes" in prefixes  # the extension's declared router
     assert "/transcripts/{call_id}" in prefixes  # the free agent-call read-side
-    assert "/note" in prefixes  # the subject read-side it gets for declaring subject_type
+    assert "/note" in prefixes  # the subject read-side it gets for declaring subject=Note
 
 
 def test_settings_resolve_off_the_loaded_extension(installed):
@@ -302,6 +302,7 @@ async def test_dispatch_starts_a_run_keyed_to_the_note(installed, monkeypatch):
     the note id, and the note id also rides the run as its typed input. The
     workflow's identity comes from its declaring extension, never the caller."""
     load_extension("field_notes")
+    from druks_field_notes.models import Note
     from druks_field_notes.workflows import Summarize
 
     assert Summarize.extension == "field_notes"
@@ -315,11 +316,12 @@ async def test_dispatch_starts_a_run_keyed_to_the_note(installed, monkeypatch):
 
     monkeypatch.setattr(Summarize, "start", _capture)
 
-    run_id = await Summarize.dispatch(note_id=42)
+    note = Note(id=42)
+    run_id = await Summarize.dispatch(note=note)
 
     assert run_id == "run-1"
-    assert started["subject"] == {"type": "note", "id": 42}
-    assert started["input"] == {"note_id": 42}
+    assert started["subject"] is note
+    assert started["input"] == {}
 
 
 async def test_run_summarizes_the_note_and_saves_it(installed, db_session, monkeypatch):
@@ -342,7 +344,9 @@ async def test_run_summarizes_the_note_and_saves_it(installed, db_session, monke
 
     monkeypatch.setattr(FieldNotes, "summarize", staticmethod(_summarize))
 
-    await Summarize.run.__wrapped__(Summarize(), note_id=note.id)
+    workflow = Summarize()
+    workflow._subject = note.identity
+    await Summarize.run.__wrapped__(workflow)
 
     saved = Note.get(note.id)
     assert saved is not None

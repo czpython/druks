@@ -12,39 +12,37 @@ from druks.workflows import get_subject_status
 # Projections
 
 
-@subscribe("run.running", subject__type="work_item")
-async def run_start_returns_item_to_board(*, subject: dict, **_: object) -> None:
+@subscribe("run.running", subject=WorkItem)
+async def run_start_returns_item_to_board(*, subject: WorkItem, **_: object) -> None:
     # Any run starting for a work item puts it back on the active board —
     # re-scoping, a new build, a resume all mean druks has it in court again.
-    WorkItem.get(subject["id"]).set_status(None)
+    subject.set_status(None)
 
 
-@subscribe("run.state", kind=BuildWorkflow.kind, subject__type="work_item")
+@subscribe("run.state", kind=BuildWorkflow.kind, subject=WorkItem)
 async def provision_mirrors_onto_item(
-    *, subject: dict, pr_number: int, branch: str, **_: object
+    *, subject: WorkItem, pr_number: int, branch: str, **_: object
 ) -> None:
     # The implementer's provisioned PR + branch, mirrored onto the work item —
     # the read side (board links, webhook routing by repo+PR) keys off them.
-    WorkItem.get(subject["id"]).update(pr_number=pr_number, branch=branch)
+    subject.update(pr_number=pr_number, branch=branch)
 
 
-@subscribe("run.running", kind=BuildWorkflow.kind, subject__type="work_item")
-async def build_start_marks_ticket_in_progress(*, subject: dict, **_: object) -> None:
+@subscribe("run.running", kind=BuildWorkflow.kind, subject=WorkItem)
+async def build_start_marks_ticket_in_progress(*, subject: WorkItem, **_: object) -> None:
     # Every (re)start and gate-resume of a build means the ticket is in progress —
     # including the return from a rework loop that had parked it In Review.
-    item = WorkItem.get(subject["id"])
-    await item.set_remote_status(SemanticStatus.IN_PROGRESS)
+    await subject.set_remote_status(SemanticStatus.IN_PROGRESS)
 
 
-@subscribe("run.pending_input", kind=BuildWorkflow.kind, subject__type="work_item", gate=ReviewWork)
-async def review_park_marks_ticket_in_review(*, subject: dict, **_: object) -> None:
-    item = WorkItem.get(subject["id"])
-    await item.set_remote_status(SemanticStatus.IN_REVIEW)
+@subscribe("run.pending_input", kind=BuildWorkflow.kind, gate=ReviewWork, subject=WorkItem)
+async def review_park_marks_ticket_in_review(*, subject: WorkItem, **_: object) -> None:
+    await subject.set_remote_status(SemanticStatus.IN_REVIEW)
 
 
-@subscribe("run.finished", kind=Scope.kind, subject__type="work_item", result__status="ready")
-async def scope_ready_settles_the_lane(*, subject: dict, **_: object) -> None:
-    WorkItem.get(subject["id"]).set_status(HandoffStatus.SCOPED, event_payload={})
+@subscribe("run.finished", kind=Scope.kind, result__status="ready", subject=WorkItem)
+async def scope_ready_settles_the_lane(*, subject: WorkItem, **_: object) -> None:
+    subject.set_status(HandoffStatus.SCOPED, event_payload={})
 
 
 @subscribe("repo.pushed", to_default_branch=True)
@@ -69,7 +67,7 @@ async def pr_review_answers_the_gate(*, repo: str, pr_number: int, payload: dict
     status = get_subject_status(item.subject_type, str(item.id), kind=BuildWorkflow.kind)
     if status.is_parked and status.gate == ReviewWork.name:
         await ReviewWork.answer(
-            item.subject,
+            item,
             action=payload["action"],
             reviewer=payload["reviewer"],
             body=payload["body"],
@@ -116,7 +114,7 @@ async def ticket_reply_resumes_parked_scope(*, payload: dict) -> None:
         if item:
             status = get_subject_status(item.subject_type, str(item.id), kind=Scope.kind)
             if status.is_parked and status.gate == ScopeReply.name:
-                await ScopeReply.answer(item.subject)
+                await ScopeReply.answer(item)
 
 
 @subscribe("ticket.transitioned", payload__terminal=True)
@@ -129,7 +127,7 @@ async def ticket_close_cancels_parked_scope(*, payload: dict) -> None:
         status = get_subject_status(item.subject_type, str(item.id), kind=Scope.kind)
         if status.is_parked and status.gate == ScopeReply.name:
             item.set_status(HandoffStatus.CANCELLED, event_payload={"external": True})
-            await Scope.cancel(item.subject, failure="ticket closed while scope parked")
+            await Scope.cancel(item, failure="ticket closed while scope parked")
 
 
 async def _dispatch_scope(source: str, key: str) -> None:

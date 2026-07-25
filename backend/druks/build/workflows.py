@@ -115,7 +115,7 @@ class BuildWorkflow(Workflow):
         email = ticket["assignee_email"]
         assignee = Account.get_for_username(email.strip()) if email else None
         run_id = await cls.start(
-            subject=item.subject,
+            subject=item,
             account_id=assignee.id if assignee else None,
             repo=item.repo,
             source=item.source,
@@ -419,7 +419,7 @@ class Profile(Workflow):
     @classmethod
     async def dispatch(cls, repo: ProjectRepo, *, refresh_only: bool = False) -> str:
         return await cls.start(
-            subject=repo.subject,
+            subject=repo,
             repo_id=repo.id,
             refresh_only=refresh_only,
         )
@@ -504,7 +504,7 @@ class Scope(Workflow):
         if ticket.assignee_email:
             assignee = Account.get_for_username(ticket.assignee_email.strip())
         return await cls.start(
-            subject=item.subject,
+            subject=item,
             account_id=assignee.id if assignee else None,
             remote_key=ticket.key,
             source=ticket.provider,
@@ -515,7 +515,7 @@ class Scope(Workflow):
         # the work lands (the subject's repo + siblings), the marks it must leave
         # on the tracker, and the target repo's recommended skills for the brief's
         # Skills section.
-        item = WorkItem.get(self.subject["id"])
+        item = self.subject
         target = ProjectRepo.get_for_repo(item.repo, raise_on_missing=True)
         siblings = [
             {"full_name": repo.full_name, "purpose": repo.purpose or ""}

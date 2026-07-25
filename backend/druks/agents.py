@@ -176,7 +176,7 @@ class Agent:
             # The visible nudge: this call charged the fallback account.
             Event.emit(
                 type="credential.fallback",
-                subject=workflow.subject,
+                subject=workflow._subject,
                 payload={"run_id": workflow_id, "harness": harness.name},
                 extension=type(workflow).extension,
             )

@@ -22,7 +22,7 @@ async def test_run_running_puts_item_back_on_board(db_session):
     item = make_test_work_item(repo="acme/widget", title="t", source="linear", remote_key="ACME-1")
     item.set_status(HandoffStatus.SCOPED)
 
-    await publish("run.running", subject=item.subject, kind="build.scope")
+    await publish("run.running", subject=item.identity, kind="build.scope")
 
     assert WorkItem.get(item.id).status is None
 
@@ -32,7 +32,7 @@ async def test_scope_finish_settles_the_lane(db_session):
 
     await publish(
         "run.finished",
-        subject=item.subject,
+        subject=item.identity,
         kind=Scope.kind,
         result={"status": "ready"},
     )
@@ -45,7 +45,7 @@ async def test_parked_statuses_leave_the_item_active(db_session):
 
     await publish(
         "run.finished",
-        subject=item.subject,
+        subject=item.identity,
         kind=Scope.kind,
         result={"status": "needs_answers"},
     )
@@ -59,7 +59,7 @@ async def test_other_kinds_are_ignored(db_session):
 
     await publish(
         "run.finished",
-        subject=item.subject,
+        subject=item.identity,
         kind="build.build_workflow",
         result={"status": "ready"},
     )
@@ -75,7 +75,7 @@ async def test_build_lifecycle_reaches_the_tracker(db_session, monkeypatch):
 
     monkeypatch.setattr(WorkItem, "set_remote_status", _push)
     item = make_test_work_item(repo="acme/widget", title="t", source="linear", remote_key="ACME-7")
-    subject = item.subject
+    subject = item.identity
 
     await publish("run.running", subject=subject, kind=BuildWorkflow.kind)
     await publish("run.pending_input", subject=subject, kind=BuildWorkflow.kind, gate="review_work")
@@ -101,7 +101,7 @@ async def test_pr_review_answers_through_the_review_gate(db_session, monkeypatch
         db_session,
         run.id,
         "pending_input",
-        subject=item.subject,
+        subject=item.identity,
     )
     item.update(build_run_id=run.id)
     answers = []
@@ -125,7 +125,7 @@ async def test_pr_review_answers_through_the_review_gate(db_session, monkeypatch
 
     assert answers == [
         (
-            item.subject,
+            item,
             {
                 "action": "request_changes",
                 "reviewer": "alice",
@@ -227,7 +227,7 @@ async def test_provision_state_reaches_the_work_item(db_session):
 
     await publish(
         "run.state",
-        subject=item.subject,
+        subject=item.identity,
         kind=BuildWorkflow.kind,
         pr_number=12,
         branch="agent/eng-8",

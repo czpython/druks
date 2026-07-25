@@ -27,7 +27,7 @@ _PHASE_META: dict[str, SubjectActivity] = {
 
 class Build(Extension):
     name = "build"
-    subject_type = "work_item"
+    subject = WorkItem
     # build's tables (projects, work_items, ...) are already unprefixed in core's
     # migration history, so they must stay that way.
     prefix_tables = False
@@ -184,9 +184,8 @@ class Build(Extension):
         return
 
     @classmethod
-    def subject_summary(cls, subject_id: str) -> WorkItemSummary | None:
-        item = WorkItem.get(int(subject_id))
-        return WorkItemSummary.from_work_item(item) if item else None
+    def subject_summary(cls, subject: WorkItem) -> WorkItemSummary:
+        return WorkItemSummary.from_work_item(subject)
 
     @classmethod
     def list_subjects(cls) -> list[WorkItemSummary]:
@@ -199,9 +198,6 @@ class Build(Extension):
         ]
 
     @classmethod
-    async def subject_activity(cls, subject_id: str) -> SubjectActivity | None:
-        item = WorkItem.get(int(subject_id))
-        if item:
-            phase = await get_subject_phase("work_item", str(item.id))
-            return _PHASE_META.get(phase or "")
-        return
+    async def subject_activity(cls, subject: WorkItem) -> SubjectActivity | None:
+        phase = await get_subject_phase(subject.subject_type, str(subject.id))
+        return _PHASE_META.get(phase or "")
