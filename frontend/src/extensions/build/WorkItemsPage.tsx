@@ -140,12 +140,12 @@ export function WorkItemsPage() {
       (row.status.state === 'running' || row.status.state === 'scheduled') &&
       matchesQuery(row, query),
   )
-  const shown = needsYou.length + inFlight.length
+  const total = needsYou.length + inFlight.length
 
   const head = (
     <PageHeader
       eyebrow="active"
-      count={active.length}
+      count={total}
       meta={
         <>
           <span>{needsYou.length} needs you</span>
@@ -169,10 +169,10 @@ export function WorkItemsPage() {
 
   return (
     <Page scroll="internal" className="page-work-items" header={head}>
-      {shown === 0 ? (
+      {total === 0 ? (
         <EmptyState
           glyph="∅"
-          msg={active.length === 0 ? 'nothing active' : 'no matches'}
+          msg={rows.length === 0 ? 'nothing active' : 'no matches'}
           sub={query ? `for "${query}"` : 'all clear — check History for handed-off work'}
         />
       ) : (

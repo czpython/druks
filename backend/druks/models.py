@@ -1,8 +1,8 @@
 import re
 from datetime import UTC, datetime
-from typing import Any, ClassVar
+from typing import Any, ClassVar, Self
 
-from sqlalchemy import DateTime
+from sqlalchemy import DateTime, select
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.types import TypeDecorator
 
@@ -57,3 +57,19 @@ class Subject(Base):
         if self.id:
             return {"type": self.subject_type, "id": self.id}
         raise ValueError(f"unsaved {type(self).__name__} has no identity — flush it first")
+
+    @classmethod
+    def list_open(cls, *, limit: int = 50) -> list[Self]:
+        """The rows whose newest run hasn't handed off — still going, or failed
+        and wanting the operator. What an extension's active view lists."""
+        # Cycle: the durable read side is built on this module's Base.
+        from druks.database import db_session
+        from druks.durable.models import Run
+
+        stmt = (
+            select(cls)
+            .where(cls.id.in_(Run.open_subject_ids(cls.subject_type)))
+            .order_by(cls.id.desc())
+            .limit(limit)
+        )
+        return list(db_session().scalars(stmt))

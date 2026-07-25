@@ -47,9 +47,8 @@ def list_subject_timeline(subject_type: str, subject_id: str) -> list[RunRespons
 def get_subject_status(
     subject_type: str, subject_id: str, *, kind: str | None = None
 ) -> SubjectStatus:
-    runs = Run.list_for_subject(subject_type, subject_id, kind=kind)
-    active_run = next((run for run in runs if run.is_active), None)
-    return _status(runs, active_run, _running_calls(active_run))
+    latest = Run.get_latest_for_subject(subject_type, subject_id, kind=kind)
+    return _status(latest, _running_calls(latest))
 
 
 async def get_subject_phase(subject_type: str, subject_id: str) -> str | None:
@@ -67,16 +66,12 @@ def get_subject_response(
     summary: SubjectSummary,
     activity: SubjectActivity | None = None,
 ) -> SubjectResponse:
-    # One fetch feeds both the status derivation and the timeline.
     runs = Run.list_for_subject(subject_type, subject_id)
     calls_by_run = AgentCall.by_run([run.id for run in runs])
-    active_run = next((run for run in runs if run.is_active), None)
-    active_calls: list[AgentCall] = []
-    if active_run:
-        active_calls = calls_by_run[active_run.id]
+    latest = Run.get_latest_for_subject(subject_type, subject_id)
     return SubjectResponse(
         summary=summary,
-        status=_status(runs, active_run, active_calls),
+        status=_status(latest, calls_by_run.get(latest.id, []) if latest else []),
         timeline=_timeline(runs, calls_by_run),
         activity=activity,
     )
@@ -95,22 +90,17 @@ def _timeline(runs: list[Run], calls_by_run: dict[str, list[AgentCall]]) -> list
     ]
 
 
-def _running_calls(active_run: Run | None) -> list[AgentCall]:
+def _running_calls(run: Run | None) -> list[AgentCall]:
     # A parked run's status carries its gate ask; only a running run surfaces its
     # latest agent call. So a parked board row never queries agent_calls — the
     # board runs this per subject.
-    if active_run and active_run.state != RunState.PENDING_INPUT.value:
-        return AgentCall.list_for_run(active_run.id)
+    if run and not run.is_parked:
+        return AgentCall.list_for_run(run.id)
     return []
 
 
-def _status(
-    runs: list[Run], active_run: Run | None, active_calls: list[AgentCall]
-) -> SubjectStatus:
-    # The newest active run drives the subject — a stale parked run a fresh dispatch
-    # superseded must not outrank it; once all are terminal, the latest one's outcome
-    # stands. Facts only: the extension's UI renders its copy from them.
-    driving_run = active_run or (runs[0] if runs else None)
+def _status(driving_run: Run | None, calls: list[AgentCall]) -> SubjectStatus:
+    # Facts only: the extension's UI renders its copy from them.
     if not driving_run:
         return SubjectStatus(state=RunState.SCHEDULED)
     # A pending_input run is always the active one (ACTIVE_STATES), so the
@@ -121,8 +111,8 @@ def _status(
     # is the inverse: only a parked run's input_gate is a live ask (a timed-out
     # run keeps the stale column).
     agent = None
-    if active_calls and not parked:
-        agent = active_calls[-1].agent
+    if calls and not parked:
+        agent = calls[-1].agent
     return SubjectStatus(
         state=RunState(driving_run.state),
         kind=driving_run.kind,

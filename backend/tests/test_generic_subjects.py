@@ -99,8 +99,8 @@ def client(tmp_path: Path, db_session, monkeypatch):
 
 def test_status_aggregates_across_runs_and_timeline_spans_them(client: TestClient, db_session):
     # Subject "1" lived across two runs: an earlier finished one and a current
-    # running one. Status is the active run's (running wins), and the timeline is
-    # every run, oldest first, each carrying its own agent calls.
+    # running one. Status is the newest run's, and the timeline is every run,
+    # oldest first, each carrying its own agent calls.
     done = _seed_run(db_session, subject_id="1", kind="faketest.prepare", state="finished")
     _seed_call(db_session, done, agent="prepare")
     live = _seed_run(db_session, subject_id="1", state="running")

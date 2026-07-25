@@ -23,13 +23,12 @@ def _run(
     )
 
 
-def _status_of(runs, active_calls=None):
-    active_run = next((run for run in runs if run.is_active), None)
-    return _status(runs, active_run, active_calls or [])
-
-
-def test_subject_state_prefers_the_newer_active_run_over_a_stale_parked_one():
+def _status_of(runs, calls=None):
     # runs arrives newest-first, mirroring Run.list_for_subject.
+    return _status(runs[0], calls or [])
+
+
+def test_subject_state_takes_the_newest_run():
     runs = [
         _run("new", "build.build_workflow", RunState.RUNNING),
         _run("old", "build.build_workflow", RunState.PENDING_INPUT),
@@ -37,7 +36,7 @@ def test_subject_state_prefers_the_newer_active_run_over_a_stale_parked_one():
     assert _status_of(runs).state == RunState.RUNNING
 
 
-def test_subject_state_prefers_a_newer_parked_run_over_an_older_running_one():
+def test_subject_state_takes_a_newer_parked_run_over_an_older_running_one():
     # Recency decides, not a hardcoded state preference.
     runs = [
         _run("new", "build.build_workflow", RunState.PENDING_INPUT),
