@@ -2,12 +2,12 @@ from druks.build.contracts import ReviewWork
 from druks.build.enums import HandoffStatus
 from druks.build.extension import Build
 from druks.build.models import ProjectRepo, WorkItem
-from druks.build.workflows import BuildWorkflow, Profile, Scope
+from druks.build.workflows import BuildWorkflow, Profile, Scope, ScopeReply
 from druks.signals import subscribe
 from druks.ticketing.enums import SemanticStatus
 from druks.ticketing.exceptions import TrackerNotConfigured
 from druks.ticketing.helpers import get_tracker
-from druks.workflows import Run
+from druks.workflows import get_subject_status
 
 # Projections
 
@@ -63,21 +63,17 @@ async def policy_push_reprofiles_the_repo(*, repo: str, paths: list, **_: object
 
 @subscribe("pr.review_submitted")
 async def pr_review_answers_the_gate(*, repo: str, pr_number: int, payload: dict) -> None:
-    if not WorkItem.is_known_druks_pr(repo=repo, pr_number=pr_number, branch=payload["branch"]):
-        return
-
-    run = _active_build_run_for_pr(repo, pr_number)
-    if not run or not run.input_gate:
-        return
-    await run.resume(action=payload["action"], reviewer=payload["reviewer"], body=payload["body"])
-
-
-def _active_build_run_for_pr(repo: str, pr_number: int) -> "Run | None":
-    item = WorkItem.get_for_pr(repo=repo, pr_number=pr_number)
+    item = WorkItem.get_for_pr(repo=repo, pr_number=pr_number, branch=payload["branch"])
     if not item:
         return
-    run = item.get_build_run()
-    return run if run and run.is_active else None
+    status = get_subject_status(item.subject_type, str(item.id), kind=BuildWorkflow.kind)
+    if status.is_parked and status.gate == ReviewWork.name:
+        await ReviewWork.answer(
+            item.subject,
+            action=payload["action"],
+            reviewer=payload["reviewer"],
+            body=payload["body"],
+        )
 
 
 @subscribe("pr.closed")
@@ -85,18 +81,13 @@ async def pr_close_settles_the_item(*, repo: str, pr_number: int, payload: dict)
     """A PR druks owns closed on GitHub — the owner announcing the outcome.
     One path for every merge, druks's own included: GitHub says merged, druks
     ships the item. The status guards are redelivery idempotency."""
-    if not WorkItem.is_known_druks_pr(
-        repo=repo, pr_number=pr_number, branch=payload["branch"], include_terminal=True
-    ):
+    item = WorkItem.get_for_pr(repo=repo, pr_number=pr_number, branch=payload["branch"])
+    if not item or item.status == HandoffStatus.SHIPPED:
         return
-    item = WorkItem.get_for_pr(repo=repo, pr_number=pr_number)
-    if item:
-        if item.status == HandoffStatus.SHIPPED:
-            return
-        if payload["merged"]:
-            await item.ship()
-        elif item.status != HandoffStatus.CANCELLED:
-            await item.close_external()
+    if payload["merged"]:
+        await item.ship()
+    elif item.status != HandoffStatus.CANCELLED:
+        await item.close_external()
 
 
 @subscribe("ticket.transitioned")
@@ -117,16 +108,15 @@ async def ticket_transition_drives_the_funnel(*, payload: dict) -> None:
 async def ticket_reply_resumes_parked_scope(*, payload: dict) -> None:
     """An operator's reply on a ticket with a parked scope run — resume it; the
     agent re-reads the whole thread, so which comment was answered is irrelevant."""
-    if not payload["parent_id"]:
-        return  # top-level comment, not a reply
-    async with get_tracker(payload["source"]) as tracker:
-        # Linear's GraphQL takes the issue UUID wherever it takes the key.
-        ticket = await tracker.fetch_ticket(payload["issue_id"])
-    item = WorkItem.get_for_remote_key(source=payload["source"], remote_key=ticket.key)
-    if not item:
-        return
-    if parked := Scope.parked_for(item.id):
-        await parked.resume()
+    if payload["parent_id"]:
+        async with get_tracker(payload["source"]) as tracker:
+            # Linear's GraphQL takes the issue UUID wherever it takes the key.
+            ticket = await tracker.fetch_ticket(payload["issue_id"])
+        item = WorkItem.get_for_remote_key(source=payload["source"], remote_key=ticket.key)
+        if item:
+            status = get_subject_status(item.subject_type, str(item.id), kind=Scope.kind)
+            if status.is_parked and status.gate == ScopeReply.name:
+                await ScopeReply.answer(item.subject)
 
 
 @subscribe("ticket.transitioned", payload__terminal=True)
@@ -135,13 +125,11 @@ async def ticket_close_cancels_parked_scope(*, payload: dict) -> None:
     parked on it — nobody is left to answer the gate, so end the run now instead
     of at the gate TTL."""
     item = WorkItem.get_for_remote_key(source=payload["source"], remote_key=payload["identifier"])
-    if not item:
-        return
-    parked = Scope.parked_for(item.id)
-    if not parked:
-        return
-    item.set_status(HandoffStatus.CANCELLED, event_payload={"external": True})
-    await parked.cancel(failure="ticket closed while scope parked")
+    if item:
+        status = get_subject_status(item.subject_type, str(item.id), kind=Scope.kind)
+        if status.is_parked and status.gate == ScopeReply.name:
+            item.set_status(HandoffStatus.CANCELLED, event_payload={"external": True})
+            await Scope.cancel(item.subject, failure="ticket closed while scope parked")
 
 
 async def _dispatch_scope(source: str, key: str) -> None:

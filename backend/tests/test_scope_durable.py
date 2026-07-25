@@ -122,7 +122,7 @@ async def test_scope_parks_then_resumes_to_ready(rt, monkeypatch):
     monkeypatch.setattr("druks.agents.Agent._run", _run_agent)
 
     wfid = await rt.flow.start(
-        subject=WorkItem.subject_for(item_id),
+        subject={"type": "work_item", "id": item_id},
         source="linear",
         remote_key="ACME-1",
     )

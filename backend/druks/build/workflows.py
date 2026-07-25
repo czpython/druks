@@ -24,7 +24,7 @@ from druks.sandbox.layout import (
 from druks.settings import load_settings
 from druks.skills.models import Skill
 from druks.ticketing.datastructures import Ticket
-from druks.workflows import FatalError, Gate, Run, Workflow, step
+from druks.workflows import FatalError, Gate, Workflow, step
 
 from .extension import Build
 from .journal import BuildJournal
@@ -121,7 +121,7 @@ class BuildWorkflow(Workflow):
         email = ticket["assignee_email"]
         assignee = Account.get_for_username(email.strip()) if email else None
         run_id = await cls.start(
-            subject=WorkItem.subject_for(item.id),
+            subject=item.subject,
             account_id=assignee.id if assignee else None,
             repo=item.repo,
             source=item.source,
@@ -420,7 +420,7 @@ class Profile(Workflow):
     @classmethod
     async def dispatch(cls, repo: ProjectRepo, *, refresh_only: bool = False) -> str:
         return await cls.start(
-            subject={"type": "project_repo", "id": repo.id},
+            subject=repo.subject,
             repo_id=repo.id,
             refresh_only=refresh_only,
         )
@@ -505,16 +505,11 @@ class Scope(Workflow):
         if ticket.assignee_email:
             assignee = Account.get_for_username(ticket.assignee_email.strip())
         return await cls.start(
-            subject=WorkItem.subject_for(item.id),
+            subject=item.subject,
             account_id=assignee.id if assignee else None,
             remote_key=ticket.key,
             source=ticket.provider,
         )
-
-    @classmethod
-    def parked_for(cls, work_item_id: int) -> Run | None:
-        runs = Run.list_for_subject("work_item", str(work_item_id), kind=cls.kind)
-        return next((run for run in runs if run.is_parked), None)
 
     async def get_prompt_context(self, **context: object) -> dict[str, object]:
         # Everything the agent needs beyond the ticket it fetches itself: where

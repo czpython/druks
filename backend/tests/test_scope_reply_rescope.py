@@ -1,8 +1,10 @@
 import pytest
 from conftest import make_test_work_item, seed_dbos_status
+from druks.build.models import Project, ProjectRepo, WorkItem
 from druks.build.workflows import Scope, ScopeReply
 from druks.durable import Run
 from druks.ticketing.datastructures import Ticket
+from druks.workflows import WorkflowError
 from uuid_utils import uuid7
 
 
@@ -37,31 +39,42 @@ def _scope_run(db_session, *, work_item_id, parked=True):
     return run
 
 
-def test_finds_parked_scope_by_subject(db_session):
+@pytest.mark.asyncio
+async def test_answers_parked_scope_by_subject(db_session, monkeypatch):
     item = make_test_work_item(repo="acme/widget", title="t", source="linear", remote_key="ACME-1")
     run = _scope_run(db_session, work_item_id=item.id)
-    found = Scope.parked_for(item.id)
-    assert found is not None and found.id == run.id
+    answered = []
+
+    async def answer(self, **reply):
+        answered.append((self.id, reply))
+
+    monkeypatch.setattr(Run, "resume", answer)
+
+    await ScopeReply.answer(item.subject)
+
+    assert answered == [(run.id, {})]
 
 
-def test_ignores_other_work_items(db_session):
+@pytest.mark.asyncio
+async def test_rejects_other_work_items(db_session):
     item = make_test_work_item(repo="acme/widget", title="t", source="linear", remote_key="ACME-1")
     _scope_run(db_session, work_item_id=item.id)
-    assert Scope.parked_for(item.id + 1) is None
+    with pytest.raises(WorkflowError, match="is not parked"):
+        await ScopeReply.answer({"type": "work_item", "id": item.id + 1})
 
 
-def test_ignores_a_resolved_scope(db_session):
+@pytest.mark.asyncio
+async def test_rejects_a_resolved_scope(db_session):
     item = make_test_work_item(repo="acme/widget", title="t", source="linear", remote_key="ACME-1")
     _scope_run(db_session, work_item_id=item.id, parked=False)
-    assert Scope.parked_for(item.id) is None
+    with pytest.raises(WorkflowError, match="is not parked"):
+        await ScopeReply.answer(item.subject)
 
 
 @pytest.mark.asyncio
 async def test_transition_skips_an_already_labeled_ticket_without_a_run(db_session, _stub_enqueue):
     """The scoped label is the done-marker: dispatching anyway would enqueue a
     run for a ticket that's already scoped — noise."""
-    from druks.build.models import Project, ProjectRepo
-
     project = Project.create(name="acme/widget")
     ProjectRepo.create(project_id=project.id, full_name="acme/widget")
     db_session.flush()
@@ -80,8 +93,6 @@ async def test_transition_skips_an_already_labeled_ticket_without_a_run(db_sessi
 
 @pytest.mark.asyncio
 async def test_transition_scopes_an_unlabeled_ticket(db_session, _stub_enqueue):
-    from druks.build.models import Project, ProjectRepo
-
     project = Project.create(name="acme/widget")
     ProjectRepo.create(project_id=project.id, full_name="acme/widget")
     db_session.flush()
@@ -112,8 +123,6 @@ async def test_label_routed_ticket_lands_on_the_work_item(db_session, _stub_enqu
     """The org-project shape: the Jira project names the org, a label names the
     repo. Routing resolves at dispatch and lands on the work item — the run's
     prompt context reads it from there."""
-    from druks.build.models import Project, ProjectRepo, WorkItem
-
     project = Project.create(name="octo/alfred")
     ProjectRepo.create(project_id=project.id, full_name="octo/alfred")
     db_session.flush()
@@ -133,8 +142,6 @@ async def test_label_routed_ticket_lands_on_the_work_item(db_session, _stub_enqu
 
 @pytest.mark.asyncio
 async def test_unroutable_ticket_creates_nothing(db_session, _stub_enqueue):
-    from druks.build.models import WorkItem
-
     ticket = Ticket(
         provider="jira",
         id="10002",

@@ -17,7 +17,7 @@ from druks.build.schemas import WorkItemSummary
 from druks.db import db_session
 from druks.events import Event, FeedItem
 from druks.extensions import Extension
-from druks.workflows import Run, SubjectActivity, get_run_phase
+from druks.workflows import SubjectActivity, get_subject_phase
 
 _PHASE_META: dict[str, SubjectActivity] = {
     "provisioning_vm": SubjectActivity(label="Building sandbox VM…", kind="infra"),
@@ -200,17 +200,8 @@ class Build(Extension):
 
     @classmethod
     async def subject_activity(cls, subject_id: str) -> SubjectActivity | None:
-        # Lazy import: the workflow module imports this extension at module top.
-        from druks.build.workflows import Scope
-
         item = WorkItem.get(int(subject_id))
         if item:
-            run = item.get_build_run()
-            if not run:
-                scope_runs = Run.list_for_subject("work_item", str(item.id), kind=Scope.kind)
-                run = scope_runs[0] if scope_runs else None
-            # Only while a run is actually RUNNING — a run parked on a gate isn't working.
-            if run and run.is_running:
-                phase = await get_run_phase(run.id)
-                return _PHASE_META.get(phase or "")
+            phase = await get_subject_phase("work_item", str(item.id))
+            return _PHASE_META.get(phase or "")
         return

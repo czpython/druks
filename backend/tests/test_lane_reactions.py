@@ -3,9 +3,10 @@ from unittest.mock import AsyncMock
 import druks.build.subscribers  # noqa: F401 — registers the lane reactions
 import pytest
 from conftest import make_test_work_item, seed_dbos_status
+from druks.build.contracts import ReviewWork
 from druks.build.enums import HandoffStatus
 from druks.build.models import WorkItem
-from druks.build.workflows import Scope, ScopeReply
+from druks.build.workflows import BuildWorkflow, Scope, ScopeReply
 from druks.durable import Run
 from druks.durable.dbos_state import workflow_status
 from druks.events.models import Event
@@ -21,7 +22,7 @@ async def test_run_running_puts_item_back_on_board(db_session):
     item = make_test_work_item(repo="acme/widget", title="t", source="linear", remote_key="ACME-1")
     item.set_status(HandoffStatus.SCOPED)
 
-    await publish("run.running", subject=WorkItem.subject_for(item.id), kind="build.scope")
+    await publish("run.running", subject=item.subject, kind="build.scope")
 
     assert WorkItem.get(item.id).status is None
 
@@ -31,7 +32,7 @@ async def test_scope_finish_settles_the_lane(db_session):
 
     await publish(
         "run.finished",
-        subject=WorkItem.subject_for(item.id),
+        subject=item.subject,
         kind=Scope.kind,
         result={"status": "ready"},
     )
@@ -44,7 +45,7 @@ async def test_parked_statuses_leave_the_item_active(db_session):
 
     await publish(
         "run.finished",
-        subject=WorkItem.subject_for(item.id),
+        subject=item.subject,
         kind=Scope.kind,
         result={"status": "needs_answers"},
     )
@@ -58,7 +59,7 @@ async def test_other_kinds_are_ignored(db_session):
 
     await publish(
         "run.finished",
-        subject=WorkItem.subject_for(item.id),
+        subject=item.subject,
         kind="build.build_workflow",
         result={"status": "ready"},
     )
@@ -67,8 +68,6 @@ async def test_other_kinds_are_ignored(db_session):
 
 
 async def test_build_lifecycle_reaches_the_tracker(db_session, monkeypatch):
-    from druks.build.workflows import BuildWorkflow
-
     pushed = []
 
     async def _push(self, status):
@@ -76,7 +75,7 @@ async def test_build_lifecycle_reaches_the_tracker(db_session, monkeypatch):
 
     monkeypatch.setattr(WorkItem, "set_remote_status", _push)
     item = make_test_work_item(repo="acme/widget", title="t", source="linear", remote_key="ACME-7")
-    subject = WorkItem.subject_for(item.id)
+    subject = item.subject
 
     await publish("run.running", subject=subject, kind=BuildWorkflow.kind)
     await publish("run.pending_input", subject=subject, kind=BuildWorkflow.kind, gate="review_work")
@@ -85,6 +84,55 @@ async def test_build_lifecycle_reaches_the_tracker(db_session, monkeypatch):
     await publish("run.running", subject=subject, kind="build.scope")
 
     assert pushed == [SemanticStatus.IN_PROGRESS, SemanticStatus.IN_REVIEW]
+
+
+async def test_pr_review_answers_through_the_review_gate(db_session, monkeypatch):
+    item = make_test_work_item(repo="acme/widget", title="t", source="linear", remote_key="ACME-9")
+    item.update(pr_number=12, branch="agent/acme-9")
+    run = Run(
+        id=str(uuid7()),
+        kind=BuildWorkflow.kind,
+        input_gate=ReviewWork.name,
+        input_request={"presentation": "external", "label": "Review implementation"},
+    )
+    db_session.add(run)
+    db_session.flush()
+    seed_dbos_status(
+        db_session,
+        run.id,
+        "pending_input",
+        subject=item.subject,
+    )
+    item.update(build_run_id=run.id)
+    answers = []
+
+    async def answer(subject, **reply):
+        answers.append((subject, reply))
+
+    monkeypatch.setattr(ReviewWork, "answer", answer)
+
+    await publish(
+        "pr.review_submitted",
+        repo=item.repo,
+        pr_number=item.pr_number,
+        payload={
+            "branch": item.branch,
+            "action": "request_changes",
+            "reviewer": "alice",
+            "body": "Please split the migration.",
+        },
+    )
+
+    assert answers == [
+        (
+            item.subject,
+            {
+                "action": "request_changes",
+                "reviewer": "alice",
+                "body": "Please split the migration.",
+            },
+        )
+    ]
 
 
 def _parked_scope_run(session, *, work_item_id):
@@ -136,13 +184,12 @@ async def test_ticket_close_cancels_the_parked_scope(db_session, monkeypatch):
         payload={"source": "linear", "identifier": "ACME-5", "status": "Done", "terminal": True},
     )
 
-    # Run.cancel() never writes state — re-select before reading the derived one.
+    # Workflow.cancel() never writes state — re-select before reading the derived one.
     db_session.expire_all()
     refreshed = Run.get(run.id)
     assert refreshed
     assert refreshed.state == "cancelled"
     assert refreshed.input_gate is None
-    assert refreshed.failure == "ticket closed while scope parked"
     assert item.status == HandoffStatus.CANCELLED
     assert _cancelled_milestones(db_session, item.id) == 1
     assert cancelled == [run.id]
@@ -176,13 +223,11 @@ async def test_ticket_close_for_an_unknown_ticket_is_ignored(db_session):
 
 
 async def test_provision_state_reaches_the_work_item(db_session):
-    from druks.build.workflows import BuildWorkflow
-
     item = make_test_work_item(repo="acme/widget", title="t", source="linear", remote_key="ACME-8")
 
     await publish(
         "run.state",
-        subject=WorkItem.subject_for(item.id),
+        subject=item.subject,
         kind=BuildWorkflow.kind,
         pr_number=12,
         branch="agent/eng-8",
