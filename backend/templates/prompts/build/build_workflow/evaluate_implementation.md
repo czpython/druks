@@ -31,6 +31,7 @@ plan should have asked for. You verify what it did ask for, exhaustively, in a s
   AWARENESS rule below.
 
 {% include "build/build_workflow/_header.md" %}
+{% include "build/build_workflow/_contract.md" %}
 {% include "build/build_workflow/_related_repos.md" %}
 {% include "build/build_workflow/_skills.md" %}
 Evaluate the implementation against the **Current plan** above, the issue, and the current PR diff. When `base_sha` and `head_sha` are listed in the **Workflow context** section above, use them as the authoritative diff range and evaluate `head_sha` against `base_sha`. If branch names disagree with those SHAs, trust the SHAs and mention metadata drift only when it affects the PR. Return blocked if an authoritative SHA is unavailable locally after fetching. Evaluate every acceptance criterion from the PR state and report one result per criterion. Inspection commands such as git diff/show, rg, and sed are allowed for review. Verification commands are different: run only the configured verification profile commands when feasible and report their results in checks. Do not invent repo-specific smoke tests or package install commands. Return exactly one final result object. Return pass only when the work is ready for a human final PR review. Return fail for actionable implementation changes.

@@ -22,6 +22,7 @@ everything the original plan got right.
 - Do not add scope beyond what the human feedback introduced.
 
 {% include "build/build_workflow/_header.md" %}
+{% include "build/build_workflow/_contract.md" %}
 {% include "build/build_workflow/_related_repos.md" %}
 {% include "build/build_workflow/_skills.md" %}
 The human reviewer's feedback contradicts the current acceptance criteria. Revise the plan and acceptance criteria to incorporate the feedback while preserving the original issue intent. The latest triaged human feedback is in the **Human feedback** section above; the current acceptance criteria are in the **Acceptance criteria** section above. Return the full revised plan markdown, the complete updated acceptance criteria list, and concise implementation instructions describing what changed so the implementer knows what to redo.

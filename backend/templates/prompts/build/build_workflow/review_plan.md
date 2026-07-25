@@ -31,6 +31,7 @@ implementation — your verdict is the gate.
 - Do not require changes beyond what the issue and the existing codebase support.
 
 {% include "build/build_workflow/_header.md" %}
+{% include "build/build_workflow/_contract.md" %}
 {% include "build/build_workflow/_related_repos.md" %}
 {% include "build/build_workflow/_skills.md" %}
 Review the current plan in one complete pass. Batch every blocking issue and every required clarification into a single response — there is no second automatic round.
