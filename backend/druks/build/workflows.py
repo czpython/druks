@@ -98,18 +98,28 @@ class BuildWorkflow(Workflow):
         )
 
     @classmethod
-    async def dispatch(
-        cls,
-        *,
-        work_item_id: int,
-        assignee_email: str | None = None,
-        assignee_name: str | None = None,
-    ) -> str:
-        item = WorkItem.get(work_item_id)
-        if not item:
-            raise ValueError(f"dispatching a build for unknown work item {work_item_id}")
-        # The assignee's account runs the calls; the owner fields stay input.
-        assignee = Account.get_for_username(assignee_email.strip()) if assignee_email else None
+    async def dispatch(cls, *, ticket: dict) -> str | None:
+        # The tracker funnel's entry: a ticket at the trigger status opens a build.
+        # Resolve-or-refresh the item, then start (start() dedups a live run).
+        item = WorkItem.get_for_remote_key(source=ticket["source"], remote_key=ticket["identifier"])
+        if item:
+            item.update(title=ticket["title"], remote_url=ticket["url"])
+        else:
+            repo = ProjectRepo.lookup(project_name=ticket["project_name"], labels=ticket["labels"])
+            if repo:
+                item = WorkItem.create(
+                    project_id=repo.project_id,
+                    source=ticket["source"],
+                    title=ticket["title"] or ticket["identifier"],
+                    remote_key=ticket["identifier"],
+                    remote_url=ticket["url"],
+                    repo=repo.full_name,
+                )
+            else:
+                logger.info("Ticket %s has no routable repo; skipping.", ticket["identifier"])
+                return
+        email = ticket["assignee_email"]
+        assignee = Account.get_for_username(email.strip()) if email else None
         run_id = await cls.start(
             subject=WorkItem.subject_for(item.id),
             account_id=assignee.id if assignee else None,
@@ -118,18 +128,15 @@ class BuildWorkflow(Workflow):
             ticket_ref=item.remote_key,
             remote_title=item.title,
             remote_url=item.remote_url,
-            task_owner_email=assignee_email,
-            task_owner_name=assignee_name,
+            task_owner_email=email,
+            task_owner_name=ticket["assignee_name"],
         )
-        # start() hands back the live run's id on a duplicate dispatch; only a
-        # genuinely new run is a fresh attempt. Point the item at it and drop the
-        # prior attempt's branch/PR so a late close for the old PR can't resolve
-        # this item onto the new run and cancel it — a duplicate keeps the live
-        # run's routing untouched.
+        # A duplicate dispatch gets the live run back; only a genuinely new run
+        # resets routing — drop the old branch/PR so a late close for the prior PR
+        # can't resolve this item onto the new run and cancel it.
         if item.build_run_id != run_id:
             item.update(build_run_id=run_id, branch=None, pr_number=None)
-        # Back onto the active board: a scoped item re-enters flight when its
-        # build starts. History is for items at rest in a handoff lane.
+        # (Re)dispatched → back in flight; clear the handoff lane.
         item.set_status(None)
         return run_id
 
@@ -481,14 +488,14 @@ class Scope(Workflow):
     async def dispatch(cls, *, ticket: Ticket) -> str | None:
         # The scoped label is the done marker — remove it to force a re-scope.
         if ticket.has_label(Build.settings().scoper_scoped_label):
-            return None
+            return
         item = WorkItem.get_for_remote_key(source=ticket.provider, remote_key=ticket.key)
         if not item:
             target = ProjectRepo.lookup(project_name=ticket.project_name, labels=ticket.labels)
             project = Project.get_for_repo(target.full_name) if target else None
             if not project:
                 logger.info("No project routes %s; not scoping.", ticket.key)
-                return None
+                return
             item = WorkItem.create(
                 project_id=project.id,
                 source=ticket.provider,

@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock
 import druks.build.subscribers as subs
 import druks.core.webhooks.jira as jira_mod
 import pytest
-from conftest import make_settings
+from conftest import make_settings, seed_run
 from druks.core.webhooks.jira import JiraEvents
 from fastapi import HTTPException
 
@@ -143,7 +143,7 @@ async def test_open_category_is_not_terminal(tmp_path, monkeypatch):
     assert events[0][1]["terminal"] is False
 
 
-# --- subscriber: scope + intake routing ------------------------------------
+# --- subscriber: scope + build routing -------------------------------------
 
 
 def _pin_settings(monkeypatch, **over):
@@ -163,33 +163,22 @@ async def test_candidate_status_dispatches_scope(tmp_path, monkeypatch):
     scope = AsyncMock()
     monkeypatch.setattr(subs.Scope, "dispatch", scope)
 
-    await subs.route_ticket_transition(payload=_jira_payload(status="Backlog"))
+    await subs.ticket_transition_drives_the_funnel(payload=_jira_payload(status="Backlog"))
 
     tracker.fetch_ticket.assert_awaited_once_with("IT-12")
     scope.assert_awaited_once_with(ticket=ticket)
 
 
-async def test_trigger_status_opens_build_on_the_scoped_work_item(tmp_path, monkeypatch):
-    """A scoped ticket already has its work item — intake refreshes it from the
-    webhook and dispatches by id."""
+async def test_trigger_status_dispatches_build_with_the_webhook_payload(tmp_path, monkeypatch):
+    """The build funnel receives the normalized ticket payload without a refetch."""
     _pin_settings(monkeypatch, jira_trigger_status="Ready")
-    refreshed = {}
-    monkeypatch.setattr(
-        subs.WorkItem,
-        "get_for_remote_key",
-        lambda *, source, remote_key: SimpleNamespace(
-            id=7, repo="acme/acme-app", update=lambda **kw: refreshed.update(kw)
-        ),
-    )
     build = AsyncMock()
     monkeypatch.setattr(subs.BuildWorkflow, "dispatch", build)
+    payload = _jira_payload(status="Ready")
 
-    await subs.route_ticket_transition(payload=_jira_payload(status="Ready"))
+    await subs.ticket_transition_drives_the_funnel(payload=payload)
 
-    build.assert_awaited_once()
-    assert build.await_args.kwargs["work_item_id"] == 7
-    assert build.await_args.kwargs["assignee_email"] == "dev@acme.co"
-    assert refreshed["title"] == "Add an endpoint"
+    build.assert_awaited_once_with(ticket=payload)
 
 
 async def test_trigger_status_routes_an_unscoped_ticket_by_label(tmp_path, db_session, monkeypatch):
@@ -200,16 +189,19 @@ async def test_trigger_status_routes_an_unscoped_ticket_by_label(tmp_path, db_se
     ProjectRepo.create(project_id=project.id, full_name="octo/alfred")
     db_session.flush()
     _pin_settings(monkeypatch, jira_trigger_status="Ready")
-    build = AsyncMock()
-    monkeypatch.setattr(subs.BuildWorkflow, "dispatch", build)
+    seed_run(db_session, "run-new")
 
-    await subs.route_ticket_transition(
+    async def fake_start(cls, **kwargs):
+        return "run-new"
+
+    monkeypatch.setattr(subs.BuildWorkflow, "start", classmethod(fake_start))
+
+    await subs.ticket_transition_drives_the_funnel(
         payload=_jira_payload(key="SHRP-1", status="Ready", project="Octo", labels=["Alfred"]),
     )
 
-    build.assert_awaited_once()
     item = WorkItem.get_for_remote_key(source="jira", remote_key="SHRP-1")
-    assert build.await_args.kwargs["work_item_id"] == item.id
+    assert item.build_run_id == "run-new"
     assert item.repo == "octo/alfred"
     assert item.project_id == project.id
 
@@ -217,14 +209,14 @@ async def test_trigger_status_routes_an_unscoped_ticket_by_label(tmp_path, db_se
 async def test_trigger_status_ignores_an_unroutable_ticket(tmp_path, db_session, monkeypatch):
     """No signal matches a registered repo → no build."""
     _pin_settings(monkeypatch, jira_trigger_status="Ready")
-    build = AsyncMock()
-    monkeypatch.setattr(subs.BuildWorkflow, "dispatch", build)
+    start = AsyncMock()
+    monkeypatch.setattr(subs.BuildWorkflow, "start", start)
 
-    await subs.route_ticket_transition(
+    await subs.ticket_transition_drives_the_funnel(
         payload=_jira_payload(key="SHRP-2", status="Ready", project="Octo"),
     )
 
-    build.assert_not_called()
+    start.assert_not_called()
 
 
 async def test_irrelevant_status_does_nothing(tmp_path, monkeypatch):
@@ -235,7 +227,7 @@ async def test_irrelevant_status_does_nothing(tmp_path, monkeypatch):
     monkeypatch.setattr(subs.Scope, "dispatch", scope)
     monkeypatch.setattr(subs.BuildWorkflow, "dispatch", build)
 
-    await subs.route_ticket_transition(payload=_jira_payload(status="In Progress"))
+    await subs.ticket_transition_drives_the_funnel(payload=_jira_payload(status="In Progress"))
 
     scope.assert_not_called()
     build.assert_not_called()

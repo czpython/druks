@@ -247,7 +247,7 @@ async def test_external_merge_pushes_done(db_session, tmp_path, monkeypatch):
 async def test_external_close_honors_delete_branch_policy(db_session, tmp_path, monkeypatch):
     """delete_branch: false in the repo's live .druks/build/config.yml keeps the
     head branch on an external close."""
-    from druks.build import subscribers as webhooks_mod
+    from druks.build import models as build_models
 
     async def _fetch(*, repo, path):
         return "delete_branch: false\n"
@@ -260,7 +260,7 @@ async def test_external_close_honors_delete_branch_policy(db_session, tmp_path, 
         deleted.append((repo, branch))
 
     monkeypatch.setattr(
-        webhooks_mod, "get_github_client", lambda settings: SimpleNamespace(delete_branch=_record)
+        build_models, "get_github_client", lambda settings: SimpleNamespace(delete_branch=_record)
     )
 
     repo, pr_number, branch = "ClawHaven/acme-app", 93, "agent/eng-22"
@@ -275,7 +275,7 @@ async def test_external_close_honors_delete_branch_policy(db_session, tmp_path, 
 
 @pytest.mark.asyncio
 async def test_external_close_deletes_branch_by_default(db_session, tmp_path, monkeypatch):
-    from druks.build import subscribers as webhooks_mod
+    from druks.build import models as build_models
 
     deleted = []
 
@@ -283,7 +283,7 @@ async def test_external_close_deletes_branch_by_default(db_session, tmp_path, mo
         deleted.append((repo, branch))
 
     monkeypatch.setattr(
-        webhooks_mod, "get_github_client", lambda settings: SimpleNamespace(delete_branch=_record)
+        build_models, "get_github_client", lambda settings: SimpleNamespace(delete_branch=_record)
     )
 
     repo, pr_number, branch = "ClawHaven/acme-app", 94, "agent/eng-23"
@@ -300,7 +300,7 @@ async def test_external_close_deletes_branch_by_default(db_session, tmp_path, mo
 async def test_external_close_survives_policy_resolution_failure(db_session, tmp_path, monkeypatch):
     """Branch cleanup is best-effort: a policy-resolution failure must not strand
     the ticket — the cancel and resting-pool reset still happen."""
-    from druks.build import subscribers as webhooks_mod
+    from druks.build import models as build_models
     from druks.build.policy import RepoPolicy
     from druks.ticketing.enums import SemanticStatus
 
@@ -315,7 +315,7 @@ async def test_external_close_survives_policy_resolution_failure(db_session, tmp
         deleted.append((repo, branch))
 
     monkeypatch.setattr(
-        webhooks_mod, "get_github_client", lambda settings: SimpleNamespace(delete_branch=_delete)
+        build_models, "get_github_client", lambda settings: SimpleNamespace(delete_branch=_delete)
     )
 
     pushed = []

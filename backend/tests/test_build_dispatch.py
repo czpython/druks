@@ -15,7 +15,19 @@ async def test_dispatch_pulls_scoped_item_back_onto_the_board(db_session, monkey
         return "run-1"
 
     monkeypatch.setattr(BuildWorkflow, "start", classmethod(fake_start))
-    run_id = await BuildWorkflow.dispatch(work_item_id=item.id)
+    run_id = await BuildWorkflow.dispatch(
+        ticket={
+            "source": item.source,
+            "identifier": item.remote_key,
+            "status": "Ready",
+            "title": item.title,
+            "url": "https://tracker.test/ACME-1",
+            "project_name": "r",
+            "labels": [],
+            "assignee_email": None,
+            "assignee_name": None,
+        }
+    )
 
     assert run_id == "run-1"
     assert item.build_run_id == "run-1"
@@ -37,7 +49,19 @@ async def test_redispatch_to_a_new_run_clears_prior_attempt_branch_and_pr(
         return "run-new"
 
     monkeypatch.setattr(BuildWorkflow, "start", classmethod(fake_start))
-    await BuildWorkflow.dispatch(work_item_id=item.id)
+    await BuildWorkflow.dispatch(
+        ticket={
+            "source": item.source,
+            "identifier": item.remote_key,
+            "status": "Ready",
+            "title": item.title,
+            "url": "https://tracker.test/ACME-2",
+            "project_name": "r",
+            "labels": [],
+            "assignee_email": None,
+            "assignee_name": None,
+        }
+    )
 
     assert item.build_run_id == "run-new"
     assert item.pr_number is None
@@ -55,7 +79,19 @@ async def test_duplicate_dispatch_keeps_the_live_attempt_routing(db_session, mon
         return "run-live"
 
     monkeypatch.setattr(BuildWorkflow, "start", classmethod(dedup_start))
-    await BuildWorkflow.dispatch(work_item_id=item.id)
+    await BuildWorkflow.dispatch(
+        ticket={
+            "source": item.source,
+            "identifier": item.remote_key,
+            "status": "Ready",
+            "title": item.title,
+            "url": "https://tracker.test/ACME-3",
+            "project_name": "r",
+            "labels": [],
+            "assignee_email": None,
+            "assignee_name": None,
+        }
+    )
 
     assert item.build_run_id == "run-live"
     assert item.pr_number == 7
