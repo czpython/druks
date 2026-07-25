@@ -667,11 +667,10 @@ function RunNeedsInput({ run, prUrl }: { run: RunSummary; prUrl?: string | null 
   )
 }
 
-// The in-app review: the artifact (the plan) rendered, the LLM's questions as
-// options (plus an "other…" box for the operator's own words), and the workflow's
-// controls as buttons. A click resumes the run with {control, answers, note};
-// the operator's choice maps to a stored action server-side — free text is content
-// for the next plan pass, never a control.
+// The in-app review: the artifact (the plan), structured question options, one
+// note, and the workflow's controls. A click resumes the run with
+// {control, answers, note}; free text is content for the next plan pass, never a
+// control.
 function InAppReview({ runId, ask }: { runId: string; ask: InputRequest }) {
   const [answers, setAnswers] = useState<Record<string, string>>({})
   const [note, setNote] = useState('')
@@ -688,13 +687,9 @@ function InAppReview({ runId, ask }: { runId: string; ask: InputRequest }) {
     setPending(control)
     setError(null)
     try {
-      // Only answers with content travel — a cleared "other…" box means unanswered.
-      const given = Object.fromEntries(
-        Object.entries(answers).filter(([, answer]) => answer.trim() !== ''),
-      )
       // The run un-parks; the subject's SSE stream re-emits the snapshot and this
       // banner clears itself.
-      await api.resumeRun(runId, { control, answers: given, note: note.trim() })
+      await api.resumeRun(runId, { control, answers, note: note.trim() })
     } catch (err) {
       setError(err instanceof Error ? err.message : 'could not submit')
       setPending(null)
@@ -716,10 +711,7 @@ function InAppReview({ runId, ask }: { runId: string; ask: InputRequest }) {
         </div>
       )}
       {ask.questions?.map((question) => {
-        // One answer per question — an offered option or the operator's own words;
-        // picking clears the typed text, typing clears the pick.
         const picked = answers[question.id] ?? ''
-        const isOption = question.options.some((option) => option.id === picked)
         return (
           <fieldset key={question.id} className="review-question">
             <legend>{question.prompt}</legend>
@@ -734,16 +726,11 @@ function InAppReview({ runId, ask }: { runId: string; ask: InputRequest }) {
                   }
                 />
                 {option.label}
+                {option.recommended && (
+                  <span className="review-recommended">recommended</span>
+                )}
               </label>
             ))}
-            <textarea
-              className="review-other"
-              placeholder="other — answer in your own words…"
-              value={isOption ? '' : picked}
-              onChange={(e) =>
-                setAnswers((prev) => ({ ...prev, [question.id]: e.target.value }))
-              }
-            />
           </fieldset>
         )
       })}
@@ -761,7 +748,7 @@ function InAppReview({ runId, ask }: { runId: string; ask: InputRequest }) {
           const needsGuidance =
             control === 'request_changes' &&
             note.trim() === '' &&
-            !Object.values(answers).some((answer) => answer.trim() !== '')
+            Object.keys(answers).length === 0
           return (
             <button
               key={control}

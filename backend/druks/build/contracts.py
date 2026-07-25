@@ -65,12 +65,16 @@ class QuestionOptionOutput(AgentOutput):
     # an oversized answer fails parse loudly instead of being clipped later.
     id: str = Field(max_length=64)
     label: str = Field(max_length=256)
+    recommended: bool
 
 
 class QuestionOutput(AgentOutput):
     id: str = Field(max_length=64)
     prompt: str = Field(max_length=2048)
     options: list[QuestionOptionOutput] = Field(max_length=16)
+
+    def recommends(self, pick: str | None) -> bool:
+        return any(option.recommended and option.id == pick for option in self.options)
 
 
 class AcceptanceCriterionOutput(AgentOutput):
@@ -89,6 +93,9 @@ class PlanData(BaseModel):
     acceptance_criteria: list[AcceptanceCriterionOutput] = Field(default_factory=list)
     # Resolved by the planner; a revision carries None.
     assignee_github_login: str | None = None
+
+    def uses_recommended_answers(self, picks: dict[str, str]) -> bool:
+        return all(question.recommends(picks.get(question.id)) for question in self.questions)
 
     def get_answered(self, picks: dict[str, str]) -> list[dict[str, str]]:
         # Each question the operator answered, paired with its answer — what the

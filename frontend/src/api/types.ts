@@ -80,12 +80,11 @@ export interface AgentCallSummary {
   tokens?: TokenUsage | null
 }
 
-// A question the ask surfaces for the operator to answer with one of its options
-// or in their own words.
+// A question the ask surfaces for the operator to answer with one offered option.
 export interface AskQuestion {
   id: string
   prompt: string
-  options: { id: string; label: string }[]
+  options: { id: string; label: string; recommended: boolean }[]
 }
 
 // The ask a parked run declares (input_request, snake_case keys). presentation

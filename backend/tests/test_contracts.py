@@ -4,6 +4,7 @@
 # real schema, so this guards it directly.
 import pytest
 from druks.build import contracts as O
+from druks.build.enums import ReviewDecision
 from pydantic import ValidationError
 
 MODELS = [
@@ -98,12 +99,12 @@ def test_get_answered_maps_picks_to_labels_and_keeps_free_text_verbatim():
             O.QuestionOutput(
                 id="q1",
                 prompt="Which cache?",
-                options=[O.QuestionOptionOutput(id="a", label="Redis")],
+                options=[O.QuestionOptionOutput(id="a", label="Redis", recommended=False)],
             ),
             O.QuestionOutput(
                 id="q2",
                 prompt="Which queue?",
-                options=[O.QuestionOptionOutput(id="a", label="SQS")],
+                options=[O.QuestionOptionOutput(id="a", label="SQS", recommended=False)],
             ),
             O.QuestionOutput(id="q3", prompt="Feature flag?", options=[]),
         ]
@@ -114,12 +115,43 @@ def test_get_answered_maps_picks_to_labels_and_keeps_free_text_verbatim():
     ]
 
 
+def test_agreement_needs_every_question_picked_as_recommended():
+    confirmed = O.PlanData(
+        questions=[
+            O.QuestionOutput(
+                id="q1",
+                prompt="Which cache?",
+                options=[O.QuestionOptionOutput(id="a", label="Redis", recommended=True)],
+            ),
+            O.QuestionOutput(
+                id="q2",
+                prompt="Which queue?",
+                options=[O.QuestionOptionOutput(id="b", label="SQS", recommended=True)],
+            ),
+        ]
+    )
+    without_recommendation = O.PlanData(
+        questions=[
+            O.QuestionOutput(
+                id="q1",
+                prompt="Which cache?",
+                options=[O.QuestionOptionOutput(id="a", label="Redis", recommended=False)],
+            )
+        ]
+    )
+
+    assert confirmed.uses_recommended_answers({"q1": "a", "q2": "b"})
+    assert not confirmed.uses_recommended_answers({"q1": "a"})
+    assert not without_recommendation.uses_recommended_answers({"q1": "a"})
+    assert O.PlanData().uses_recommended_answers({})
+
+
 def test_ask_contracts_cap_identity_and_cardinality():
     # The gate view is bounded by construction: identity and list sizes are
     # hard caps at the agent boundary, never clipped downstream.
-    option = O.QuestionOptionOutput(id="a", label="Redis")
+    option = O.QuestionOptionOutput(id="a", label="Redis", recommended=False)
     with pytest.raises(ValidationError):
-        O.QuestionOptionOutput(id="a" * 65, label="Redis")
+        O.QuestionOptionOutput(id="a" * 65, label="Redis", recommended=False)
     with pytest.raises(ValidationError):
         O.QuestionOutput(id="q", prompt="p" * 2049, options=[])
     with pytest.raises(ValidationError):
@@ -135,7 +167,5 @@ def test_ask_contracts_cap_identity_and_cardinality():
 
 def test_review_output_records_no_artifact():
     # An artifact would displace the plan as the parked ask's document.
-    from druks.build.enums import ReviewDecision
-
     grade = O.ReviewOutput(decision=ReviewDecision.REQUEST_CHANGES, body="name the wire schema")
     assert grade.get_artifact() == {}

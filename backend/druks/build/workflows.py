@@ -275,7 +275,11 @@ class BuildWorkflow(Workflow):
                 redrafted = True
                 reviewer_notes = grade.body
             reply = await self.review(questions=plan.questions, context=critique)
-            if reply.action == "approve" and not plan.questions:
+            if (
+                reply.action == "approve"
+                and not reply.note
+                and plan.uses_recommended_answers(reply.answers)
+            ):
                 return True
             answered = plan.get_answered(reply.answers)
             note = reply.note

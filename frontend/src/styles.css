@@ -2238,11 +2238,10 @@ input.set-select { background-image: none; padding-right: 12px; }
 .review-question legend { font-size: 13px; color: var(--text-mid); margin-bottom: 6px; padding: 0; }
 .review-option { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-mid); padding: 3px 0; cursor: pointer; }
 .review-option input { accent-color: var(--bucket-human); }
-.review-other, .review-note { display: block; width: 100%; border: 1px solid var(--border); border-radius: 5px; background: var(--surface-2); color: var(--text-mid); font-family: inherit; font-size: 13px; line-height: 1.45; padding: 6px 10px; resize: vertical; }
-.review-other:focus, .review-note:focus { outline: none; border-color: color-mix(in oklch, var(--bucket-human) 50%, transparent); }
-.review-other::placeholder, .review-note::placeholder { color: var(--text-faint); }
-.review-other { margin-top: 6px; min-height: 30px; }
-.review-note { margin-top: 12px; min-height: 44px; }
+.review-recommended { color: var(--bucket-human); font-size: 11px; font-weight: 600; }
+.review-note { display: block; width: 100%; min-height: 44px; margin-top: 12px; border: 1px solid var(--border); border-radius: 5px; background: var(--surface-2); color: var(--text-mid); font-family: inherit; font-size: 13px; line-height: 1.45; padding: 6px 10px; resize: vertical; }
+.review-note:focus { outline: none; border-color: color-mix(in oklch, var(--bucket-human) 50%, transparent); }
+.review-note::placeholder { color: var(--text-faint); }
 .review-controls { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
 .review-btn { border: 1px solid var(--border); border-radius: 5px; background: var(--surface-2); color: var(--text-mid); font-size: 12px; padding: 6px 14px; }
 .review-btn:hover:not(:disabled) { border-color: var(--text-dim); }
