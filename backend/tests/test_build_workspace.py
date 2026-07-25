@@ -2,12 +2,8 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from druks.build.workflows import (
-    GITHUB_MCP_NAME,
-    GITHUB_MCP_URL,
-    BuildWorkflow,
-    BuildWorkspace,
-)
+from druks.build.constants import GITHUB_MCP_NAME, GITHUB_MCP_URL
+from druks.build.workflows import BuildWorkflow, BuildWorkspace
 from druks.mcp.helpers import get_bearer_token_env_var
 from druks.sandbox import host as host_mod
 from druks.sandbox.layout import get_related_root

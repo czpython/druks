@@ -73,7 +73,7 @@ class QuestionOutput(AgentOutput):
     prompt: str = Field(max_length=2048)
     options: list[QuestionOptionOutput] = Field(max_length=16)
 
-    def recommends(self, pick: str | None) -> bool:
+    def is_recommended(self, pick: str | None) -> bool:
         return any(option.recommended and option.id == pick for option in self.options)
 
 
@@ -95,13 +95,11 @@ class PlanData(BaseModel):
     assignee_github_login: str | None = None
 
     def uses_recommended_answers(self, picks: dict[str, str]) -> bool:
-        return all(question.recommends(picks.get(question.id)) for question in self.questions)
+        return all(question.is_recommended(picks.get(question.id)) for question in self.questions)
 
-    def get_answered(self, picks: dict[str, str]) -> list[dict[str, str]]:
+    def get_answered_questions(self, picks: dict[str, str]) -> list[dict[str, str]]:
         # Each question the operator answered, paired with its answer — what the
-        # re-plan agent reads to resolve it. A pick matching an offered option maps
-        # to that option's label; anything else is the operator's own words, kept
-        # verbatim.
+        # re-plan agent reads to resolve it.
         pairs = []
         for question in self.questions:
             chosen = picks.get(question.id)

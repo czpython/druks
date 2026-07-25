@@ -91,7 +91,7 @@ def test_needs_clarification_may_omit_the_delivery_fields():
     assert "pure function" in bailed.summary
 
 
-def test_get_answered_maps_picks_to_labels_and_keeps_free_text_verbatim():
+def test_answered_questions_map_picks_to_labels_and_keep_free_text_verbatim():
     # An answer is an offered option id (paired as its label) or the operator's own
     # words (kept verbatim); unanswered questions don't reach the re-plan agent.
     plan = O.PlanData(
@@ -109,7 +109,7 @@ def test_get_answered_maps_picks_to_labels_and_keeps_free_text_verbatim():
             O.QuestionOutput(id="q3", prompt="Feature flag?", options=[]),
         ]
     )
-    assert plan.get_answered({"q1": "a", "q2": "kafka — we already run it"}) == [
+    assert plan.get_answered_questions({"q1": "a", "q2": "kafka — we already run it"}) == [
         {"question": "Which cache?", "answer": "Redis"},
         {"question": "Which queue?", "answer": "kafka — we already run it"},
     ]

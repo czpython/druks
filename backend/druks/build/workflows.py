@@ -26,6 +26,7 @@ from druks.skills.models import Skill
 from druks.ticketing.datastructures import Ticket
 from druks.workflows import FatalError, Gate, Workflow, step
 
+from .constants import GITHUB_MCP_NAME, GITHUB_MCP_URL, PLAN_DRAFTS_PER_ROUND
 from .extension import Build
 from .journal import BuildJournal
 from .policy import RepoPolicy
@@ -36,13 +37,6 @@ if TYPE_CHECKING:
     from druks.sandbox.host import Sandbox
 
 logger = logging.getLogger(__name__)
-
-
-# The github MCP server build ships into its own runs — build's requirement
-# (there is no build without github), not an operator-facing catalog entry.
-# Its token is per-repo, minted from the reviewer app at workspace setup.
-GITHUB_MCP_NAME = "github"
-GITHUB_MCP_URL = "https://api.githubcopilot.com/mcp/"
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -250,39 +244,40 @@ class BuildWorkflow(Workflow):
         return self.settings()
 
     async def _plan_phase(self) -> bool:
-        """Gate mode: plan → park. Auto mode: machine review with one bounded
-        redraft. True → implement."""
-        gate = self._policy.plan_approval_gate(self._settings.auto_dispatch_on_plan_approval)
-        answered: list[dict[str, str]] = []
-        note = ""
+        """True → implement."""
+        human_approval_required = (
+            self._policy.plan_approval_gate(self._settings.auto_dispatch_on_plan_approval) != "none"
+        )
+        answered_questions: list[dict[str, str]] = []
+        operator_note = ""
         while True:
-            reviewer_notes = ""
-            redrafted = False
-            critique = ""
-            while True:
+            unresolved_critique = ""
+            for _ in range(PLAN_DRAFTS_PER_ROUND):
+                draft_guidance = unresolved_critique
+                unresolved_critique = ""
                 plan = await Build.generate_plan(
-                    answered_questions=answered, operator_note=note, reviewer_notes=reviewer_notes
+                    answered_questions=answered_questions,
+                    operator_note=operator_note,
+                    reviewer_notes=draft_guidance,
                 )
-                if gate != "none" or plan.questions:
+                if human_approval_required or plan.questions:
                     break
-                grade = await Build.review_plan()
-                if grade.decision == ReviewDecision.APPROVE:
+                machine_review = await Build.review_plan()
+                if machine_review.decision == ReviewDecision.APPROVE:
                     return True
-                if redrafted:
-                    # Exhausted — park below, critique on the ask.
-                    critique = grade.body
-                    break
-                redrafted = True
-                reviewer_notes = grade.body
-            reply = await self.review(questions=plan.questions, context=critique)
+                unresolved_critique = machine_review.body
+            operator_reply = await self.review(
+                questions=plan.questions,
+                context=unresolved_critique,
+            )
             if (
-                reply.action == "approve"
-                and not reply.note
-                and plan.uses_recommended_answers(reply.answers)
+                operator_reply.action == "approve"
+                and not operator_reply.note
+                and plan.uses_recommended_answers(operator_reply.answers)
             ):
                 return True
-            answered = plan.get_answered(reply.answers)
-            note = reply.note
+            answered_questions = plan.get_answered_questions(operator_reply.answers)
+            operator_note = operator_reply.note
 
     async def _implement_phase(self) -> None:
         while True:
