@@ -104,6 +104,10 @@ When the source ticket asks for a manual smoke or visual check, do ONE of these 
 
 Smoke / manual-verify requests in the source are operator concerns, not implementer concerns. Honor the intent (the operator wants to test the UX) without making the agent loop block on something it can't satisfy.
 
+RULED OUT — the `rejected_approaches` schema field. Name each approach you considered and
+dropped, with the reason you dropped it. Every agent after you reads the list and takes it as
+settled, so an approach you rejected silently is one they will propose again.
+
 ASSIGNEE RESOLUTION — the `assignee_github_login` schema field. Resolve the ticket
 assignee's GitHub login via the github MCP from their name
 `{{ build.task_owner_name or "(unknown)" }}` or email

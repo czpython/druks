@@ -46,6 +46,14 @@
 {% endif %}
 {% endfor %}
 {% endif %}
+{% if build.journal.plan.rejected_approaches %}
+## Ruled out
+
+{% for approach in build.journal.plan.rejected_approaches %}
+- {{ approach.strip() }}
+{% endfor %}
+
+{% endif %}
 {% if build.journal.evaluations %}
 ## Prior implementation review
 

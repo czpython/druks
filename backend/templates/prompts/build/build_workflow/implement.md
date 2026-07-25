@@ -17,7 +17,8 @@ acceptance criterion — nothing more, nothing less.
   operator through the structured return value.
 - **Minimum scope.** You are not here to improve the codebase, refactor adjacent code, or
   apply opinions about better approaches. Scope creep in either direction — doing more than
-  asked or quietly doing less — costs a revision round.
+  asked or quietly doing less — costs a revision round.{% if build.journal.plan.rejected_approaches %} The approaches listed under
+  **Ruled out** are settled — do not revisit them.{% endif %}
 - **You deliver by pushing.** You are working in a clone with push access already configured.
   When the implementation is complete, commit every change and push it to the work branch
   (see "Delivering your work" below). The pushed commit IS the deliverable — the evaluator
