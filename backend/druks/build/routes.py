@@ -177,7 +177,7 @@ async def add_project_repo(
         )
         .values(project_id=project.id)
     )
-    await Profile.start(subject={"type": "project_repo", "id": repo.id}, repo_id=repo.id)
+    await Profile.dispatch(repo)
     return ProjectRepoSummary.from_repo(repo)
 
 
@@ -209,9 +209,9 @@ async def profile_project_repo(project_id: int, repo_id: int) -> ProjectRepoSumm
     row = ProjectRepo.get_in_project(project_id=project_id, repo_id=repo_id)
     if not row:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "repo not found")
-    # Profile is subject-unique: start() returns the live run when one is already
+    # Profile is subject-unique: dispatch() returns the live run when one is already
     # active for this repo, so the route just dispatches and lets the lock dedup.
-    await Profile.start(subject={"type": "project_repo", "id": repo_id}, repo_id=repo_id)
+    await Profile.dispatch(row)
     return ProjectRepoSummary.from_repo(row)
 
 

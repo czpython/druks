@@ -78,6 +78,29 @@ def test_profiler_output_maps_onto_the_stored_shape():
     assert output.to_result() == _profiled()
 
 
+@pytest.mark.parametrize("refresh_only", [False, True])
+async def test_dispatch_shapes_the_profile_start(db_session, monkeypatch, refresh_only):
+    repo = _seed_repo()
+    calls: list[dict] = []
+
+    async def _start(cls, **kwargs):
+        calls.append(kwargs)
+        return "profile-run"
+
+    monkeypatch.setattr(Profile, "start", classmethod(_start))
+
+    run_id = await Profile.dispatch(repo, refresh_only=refresh_only)
+
+    assert run_id == "profile-run"
+    assert calls == [
+        {
+            "subject": {"type": "project_repo", "id": repo.id},
+            "repo_id": repo.id,
+            "refresh_only": refresh_only,
+        }
+    ]
+
+
 class TestProfileRun:
     async def test_persists_baseline_and_effective(self, db_session, monkeypatch):
         _seed_skills("django-patterns")

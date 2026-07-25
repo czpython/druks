@@ -14,23 +14,23 @@ def client(tmp_path: Path, db_session, monkeypatch):
         yield client
 
 
-def _stub_profile_start(monkeypatch):
-    """Profile.start hits DBOS's queue — route tests only need to prove the
-    route calls it with the right subject/input, not run it."""
+def _stub_profile_dispatch(monkeypatch):
+    """Profile.dispatch hits DBOS's queue — route tests only prove they hand it
+    the registered repo."""
     from druks.build.workflows import Profile
 
     calls: list[dict] = []
 
-    async def _start(cls, *, subject, **input):
-        calls.append({"subject": subject, **input})
+    async def _dispatch(cls, repo, *, refresh_only=False):
+        calls.append({"repo_id": repo.id, "refresh_only": refresh_only})
         return "fake-run-id"
 
-    monkeypatch.setattr(Profile, "start", classmethod(_start))
+    monkeypatch.setattr(Profile, "dispatch", classmethod(_dispatch))
     return calls
 
 
 def test_adding_a_repo_dispatches_a_profile_run(client: TestClient, monkeypatch):
-    calls = _stub_profile_start(monkeypatch)
+    calls = _stub_profile_dispatch(monkeypatch)
 
     project = client.post("/api/build/projects", json={"name": "Acme"}).json()
     repo = client.post(
@@ -40,8 +40,8 @@ def test_adding_a_repo_dispatches_a_profile_run(client: TestClient, monkeypatch)
 
     assert calls == [
         {
-            "subject": {"type": "project_repo", "id": repo["id"]},
             "repo_id": repo["id"],
+            "refresh_only": False,
         }
     ]
     assert repo["profileStatus"] == "unprofiled"
@@ -52,7 +52,7 @@ def test_profile_endpoint_dispatches(client: TestClient, monkeypatch):
     # job — the route always dispatches and start() dedups against a live run.
     from druks.build.models import Project, ProjectRepo
 
-    calls = _stub_profile_start(monkeypatch)
+    calls = _stub_profile_dispatch(monkeypatch)
     project = Project.create(name="Acme")
     repo = ProjectRepo.create(project_id=project.id, full_name="acme/widget")
 
@@ -61,8 +61,8 @@ def test_profile_endpoint_dispatches(client: TestClient, monkeypatch):
     assert response.status_code == 200
     assert calls == [
         {
-            "subject": {"type": "project_repo", "id": repo.id},
             "repo_id": repo.id,
+            "refresh_only": False,
         }
     ]
 
@@ -72,7 +72,7 @@ def test_nested_repo_routes_are_scoped_to_their_project(client: TestClient, monk
     side-effect-free — the routes scope by (project_id, repo_id), not repo_id alone."""
     from druks.build.models import Project, ProjectRepo
 
-    profile_calls = _stub_profile_start(monkeypatch)
+    profile_calls = _stub_profile_dispatch(monkeypatch)
     owner = Project.create(name="Owner")
     other = Project.create(name="Other")
     repo_id = ProjectRepo.create(project_id=owner.id, full_name="acme/widget").id
