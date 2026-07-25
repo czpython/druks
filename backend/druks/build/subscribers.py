@@ -2,11 +2,9 @@ from druks.build.contracts import ReviewWork
 from druks.build.enums import HandoffStatus
 from druks.build.extension import Build
 from druks.build.models import ProjectRepo, WorkItem
-from druks.build.workflows import BuildWorkflow, Profile, Scope, ScopeReply
+from druks.build.workflows import BuildWorkflow, Profile
 from druks.signals import subscribe
 from druks.ticketing.enums import SemanticStatus
-from druks.ticketing.exceptions import TrackerNotConfigured
-from druks.ticketing.helpers import get_tracker
 from druks.workflows import get_subject_status
 
 # Projections
@@ -15,7 +13,7 @@ from druks.workflows import get_subject_status
 @subscribe("run.running", subject=WorkItem)
 async def run_start_returns_item_to_board(*, subject: WorkItem, **_: object) -> None:
     # Any run starting for a work item puts it back on the active board —
-    # re-scoping, a new build, a resume all mean druks has it in court again.
+    # a new build or resume means druks has it in court again.
     subject.set_status(None)
 
 
@@ -38,11 +36,6 @@ async def build_start_marks_ticket_in_progress(*, subject: WorkItem, **_: object
 @subscribe("run.pending_input", kind=BuildWorkflow.kind, gate=ReviewWork, subject=WorkItem)
 async def review_park_marks_ticket_in_review(*, subject: WorkItem, **_: object) -> None:
     await subject.set_remote_status(SemanticStatus.IN_REVIEW)
-
-
-@subscribe("run.finished", kind=Scope.kind, result__status="ready", subject=WorkItem)
-async def scope_ready_settles_the_lane(*, subject: WorkItem, **_: object) -> None:
-    subject.set_status(HandoffStatus.SCOPED, event_payload={})
 
 
 @subscribe("repo.pushed", to_default_branch=True)
@@ -90,51 +83,9 @@ async def pr_close_settles_the_item(*, repo: str, pr_number: int, payload: dict)
 
 @subscribe("ticket.transitioned")
 async def ticket_transition_drives_the_funnel(*, payload: dict) -> None:
-    """A tracker ticket changed state (Jira or Linear). Scope a refinement
-    candidate and open a build when it hits the trigger status — build's whole
-    tracker-driven funnel."""
-    source, status, key = payload["source"], payload["status"], payload["identifier"]
+    """Dispatch a build when a tracker ticket enters its provider's trigger status."""
+    source, status = payload["source"], payload["status"]
     settings = Build.settings()
-    if status in settings.scoper_candidate_statuses:
-        await _dispatch_scope(source, key)
     trigger = settings.linear_trigger_status if source == "linear" else settings.jira_trigger_status
     if trigger and status == trigger:
         await BuildWorkflow.dispatch(ticket=payload)
-
-
-@subscribe("ticket.commented")
-async def ticket_reply_resumes_parked_scope(*, payload: dict) -> None:
-    """An operator's reply on a ticket with a parked scope run — resume it; the
-    agent re-reads the whole thread, so which comment was answered is irrelevant."""
-    if payload["parent_id"]:
-        async with get_tracker(payload["source"]) as tracker:
-            # Linear's GraphQL takes the issue UUID wherever it takes the key.
-            ticket = await tracker.fetch_ticket(payload["issue_id"])
-        item = WorkItem.get_for_remote_key(source=payload["source"], remote_key=ticket.key)
-        if item:
-            status = get_subject_status(item.subject_type, str(item.id), kind=Scope.kind)
-            if status.is_parked and status.gate == ScopeReply.name:
-                await ScopeReply.answer(item)
-
-
-@subscribe("ticket.transitioned", payload__terminal=True)
-async def ticket_close_cancels_parked_scope(*, payload: dict) -> None:
-    """The operator moved the ticket to a terminal status while a scope run was
-    parked on it — nobody is left to answer the gate, so end the run now instead
-    of at the gate TTL."""
-    item = WorkItem.get_for_remote_key(source=payload["source"], remote_key=payload["identifier"])
-    if item:
-        status = get_subject_status(item.subject_type, str(item.id), kind=Scope.kind)
-        if status.is_parked and status.gate == ScopeReply.name:
-            item.set_status(HandoffStatus.CANCELLED, event_payload={"external": True})
-            await Scope.cancel(item, failure="ticket closed while scope parked")
-
-
-async def _dispatch_scope(source: str, key: str) -> None:
-    try:
-        tracker = get_tracker(source)
-    except TrackerNotConfigured:
-        return
-    async with tracker:
-        ticket = await tracker.fetch_ticket(key)
-        await Scope.dispatch(ticket=ticket)

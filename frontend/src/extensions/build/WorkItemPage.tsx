@@ -54,7 +54,7 @@ export function WorkItemPage({ workItemId }: Props) {
   )
 
   // Stream for as long as the page is open — even a terminal-looking item can
-  // be re-triggered (operators re-scope cancelled tickets), and gating on
+  // be re-triggered (operators restart cancelled tickets), and gating on
   // outcome left no stream for the next trigger to arrive on. The server
   // never hangs up (keepalives + polling until disconnect), so an always-on
   // EventSource can't reconnect-loop.

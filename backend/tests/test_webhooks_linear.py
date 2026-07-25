@@ -43,8 +43,7 @@ def _capture(monkeypatch):
 
 
 async def test_terminal_state_types_mark_the_transition_terminal(tmp_path, monkeypatch):
-    """completed and canceled are Linear's terminal state types — the transition
-    carries terminal=True so the scope-cancel subscriber can filter on it."""
+    """Completed and canceled states mark the normalized transition terminal."""
     for state_type, name in (("completed", "Done"), ("canceled", "Cancelled")):
         events = _capture(monkeypatch)
         provider = _provider(tmp_path, payload=_transition(state_name=name, state_type=state_type))

@@ -19,13 +19,11 @@ _CATEGORY_KIND: dict[str, StatusKind] = {
     "done": StatusKind.DONE,
 }
 
-# Status names from an "Internal tools"-style workflow — the issue type
-# druks-managed tickets use. Its transitions are validator- and required-field-
-# free (unlike the security issue types, whose Done gate demands a resolution +
-# Fix versions), so native status moves work like Linear's. READY_FOR_AGENT (the
-# scoper's post-refinement move, "Refinement" → "Open") is passed into from_settings
-# by the caller; "Backlog" is the operator's separate dispatch trigger, so the
-# scoper deliberately does not land there.
+# These status names belong to the "Internal tools" issue type used for druks-managed tickets;
+# its transitions have no validators or required fields, unlike security issues whose Done gate
+# requires a resolution and Fix versions, so native status moves work like Linear's.
+# READY_FOR_AGENT is supplied by the caller as the resting status; "Backlog" is the operator's
+# dispatch trigger, so druks deliberately does not land there.
 _STATIC_STATUS_NAMES: dict[SemanticStatus, str] = {
     SemanticStatus.IN_PROGRESS: "In Progress",
     SemanticStatus.IN_REVIEW: "Waiting CR",  # CR = code review; PR open, awaiting review

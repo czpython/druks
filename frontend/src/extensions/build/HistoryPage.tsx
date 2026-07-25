@@ -38,7 +38,6 @@ export function HistoryPage() {
   const counts: Record<HandoffStatus, number> = {
     shipped: items.filter((i) => i.status === 'shipped').length,
     cancelled: items.filter((i) => i.status === 'cancelled').length,
-    scoped: items.filter((i) => i.status === 'scoped').length,
   }
 
   const filtered = items
@@ -60,10 +59,6 @@ export function HistoryPage() {
         <>
           <span>
             <span className="outcome-tag outcome-shipped">✓</span> {counts.shipped} shipped
-          </span>
-          <span>·</span>
-          <span>
-            <span className="outcome-tag outcome-scoped">◇</span> {counts.scoped} scoped
           </span>
           <span>·</span>
           <span>
@@ -92,12 +87,6 @@ export function HistoryPage() {
             current={statusFilter}
             onSelect={setStatusFilter}
             label={`shipped (${counts.shipped})`}
-          />
-          <FilterChip<StatusFilter>
-            value="scoped"
-            current={statusFilter}
-            onSelect={setStatusFilter}
-            label={`scoped (${counts.scoped})`}
           />
           <FilterChip<StatusFilter>
             value="cancelled"

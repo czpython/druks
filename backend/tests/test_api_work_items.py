@@ -1,11 +1,9 @@
 from pathlib import Path
 
 import pytest
-from conftest import make_test_work_item, seed_build_run, seed_call, seed_dbos_status
+from conftest import make_test_work_item, seed_build_run, seed_call
 from druks.build.models import WorkItem
-from druks.durable import Run
 from fastapi.testclient import TestClient
-from uuid_utils import uuid7
 
 _RUN_STATE = {
     "running": "running",
@@ -13,42 +11,6 @@ _RUN_STATE = {
     "failed": "failed",
     "cancelled": "cancelled",
 }
-
-
-def _seed_scope_run(db_session, item, *, state="finished", status=None):
-    """A scope run for ``item`` (keyed by its remote_key) with its ``scope``
-    agent call. A needs_answers status parks the run on the ScopeReply gate
-    (PENDING_INPUT + input_request) with the same ask the workflow stores at
-    the park point."""
-    from druks.build.workflows import ScopeReply
-
-    parked = None
-    if status == "needs_answers":
-        parked = {"presentation": "external", "label": "Answer scope questions"}
-    run = Run(
-        id=str(uuid7()),
-        kind="build.scope",
-        input_gate=ScopeReply.name if parked else None,
-        input_request=parked,
-    )
-    db_session.add(run)
-    db_session.flush()
-    seed_dbos_status(
-        db_session,
-        run.id,
-        "pending_input" if parked else state,
-        subject={"type": "work_item", "id": item.id},
-    )
-    seed_call(db_session, run, "scope", status="failed" if state == "failed" else "succeeded")
-    handoff = {"ready": "scoped"}.get(status)
-    if handoff is not None:
-        item.set_status(handoff)
-    elif status is not None:
-        from druks.events.models import Event
-
-        Event.emit(type=status, subject=item.identity)
-        db_session.flush()
-    return run
 
 
 def _build_client(tmp_path):
@@ -210,17 +172,6 @@ def test_history_returns_only_done_work_items(client: TestClient, db_session):
     assert "broke" not in titles  # failed items stay active, not history
 
 
-def test_scoped_item_lands_in_history(client: TestClient, db_session):
-    item = make_test_work_item(
-        title="scoped at rest", repo="ClawHaven/acme-app", source="linear", remote_key="ACME-50"
-    )
-    _seed_scope_run(db_session, item, status="ready")
-
-    items = client.get("/api/build/work-items/history").json()["items"]
-    row = next(it for it in items if it["title"] == "scoped at rest")
-    assert row["status"] == "scoped"
-
-
 def test_pr_closed_without_merge_is_cancelled_in_history(client: TestClient, db_session):
     repo = "ClawHaven/acme-app"
     # A build parked on the operator, whose PR was then closed without merging.
@@ -254,21 +205,17 @@ def test_history_clamps_limit(client: TestClient, db_session):
     assert len(items) == 1
 
 
-def test_detail_timeline_shows_every_scope_run(db_session):
-    # A detail page is history: re-scoping must surface all scope passes, not
-    # just the latest (the bug — only _latest_scope_run was shown). Each pass is
-    # its own run, distinct, not collapsed.
+def test_repeated_runs_on_one_subject_each_surface_separately(db_session):
+    # The timeline must not collapse repeated runs to only the newest one.
     from druks.durable.reads import list_subject_timeline
 
-    item = make_test_work_item(
-        title="rescoped", repo="ClawHaven/acme-app", source="linear", remote_key="ACME-777"
-    )
+    item = make_test_work_item(repo="ClawHaven/acme-app", title="repeated")
     for _ in range(3):
-        _seed_scope_run(db_session, item)
+        seed_build_run(db_session, work_item_id=item.id, state="finished")
 
     entries = list_subject_timeline("work_item", str(item.id))
-    assert [e.kind for e in entries] == ["build.scope"] * 3
-    assert len({e.id for e in entries}) == 3  # distinct rows, not collapsed
+    assert [entry.kind for entry in entries] == ["build.build_workflow"] * 3
+    assert len({entry.id for entry in entries}) == 3
 
 
 def test_update_stamps_build_run_id(db_session):

@@ -5,13 +5,13 @@ from typing import TYPE_CHECKING, Any
 from pydantic import BaseModel, Field
 
 from druks.accounts.models import Account
-from druks.build.contracts import ImplementationOutput, ReviewWork, ScopeBriefOutput
+from druks.build.contracts import ImplementationOutput, ReviewWork
 from druks.build.enums import (
     EvaluationVerdict,
     HumanFeedbackAction,
     ReviewDecision,
 )
-from druks.build.models import Project, ProjectRepo, WorkItem
+from druks.build.models import ProjectRepo, WorkItem
 from druks.core.apis.github import get_github_client, get_reviewer_github_client
 from druks.sandbox import repo as _repo
 from druks.sandbox.datastructures import RequiredMcpServer
@@ -23,8 +23,7 @@ from druks.sandbox.layout import (
 )
 from druks.settings import load_settings
 from druks.skills.models import Skill
-from druks.ticketing.datastructures import Ticket
-from druks.workflows import FatalError, Gate, Workflow, step
+from druks.workflows import FatalError, Workflow, step
 
 from .constants import GITHUB_MCP_NAME, GITHUB_MCP_URL, PLAN_DRAFTS_PER_ROUND
 from .extension import Build
@@ -208,8 +207,11 @@ class BuildWorkflow(Workflow):
 
     async def get_prompt_context(self, **context: Any) -> dict[str, Any]:
         target_repo = ProjectRepo.get_for_repo(self.input.repo, raise_on_missing=True)
+        endpoint = load_settings().endpoint.rstrip("/")
+        work_item_url = f"{endpoint}/work-items/{self.subject.id}" if endpoint else ""
         prompt_context = BuildPromptContext(
             repo=self.input.repo,
+            work_item_url=work_item_url,
             branch=self.branch,
             pr_number=self.pr_number,
             ticket_ref=self.input.ticket_ref,
@@ -218,6 +220,7 @@ class BuildWorkflow(Workflow):
             task_owner_name=self.input.task_owner_name,
             task_owner_email=self.input.task_owner_email,
             related_repos=target_repo.siblings(),
+            skills=self._profile.get("recommended_skills", []),
             journal=self.journal,
         )
         return {
@@ -473,70 +476,3 @@ class Profile(Workflow):
             ],
             **await super().get_prompt_context(**context),
         }
-
-
-class ScopeReply(Gate):
-    name = "scope"
-
-
-class Scope(Workflow):
-    @classmethod
-    async def dispatch(cls, *, ticket: Ticket) -> str | None:
-        # The scoped label is the done marker — remove it to force a re-scope.
-        if ticket.has_label(Build.settings().scoper_scoped_label):
-            return
-        item = WorkItem.get_for_remote_key(source=ticket.provider, remote_key=ticket.key)
-        if not item:
-            target = ProjectRepo.lookup(project_name=ticket.project_name, labels=ticket.labels)
-            project = Project.get_for_repo(target.full_name) if target else None
-            if not project:
-                logger.info("No project routes %s; not scoping.", ticket.key)
-                return
-            item = WorkItem.create(
-                project_id=project.id,
-                source=ticket.provider,
-                title=ticket.title or ticket.key,
-                remote_key=ticket.key,
-                remote_url=ticket.url,
-                repo=target.full_name,
-            )
-        assignee = None
-        if ticket.assignee_email:
-            assignee = Account.get_for_username(ticket.assignee_email.strip())
-        return await cls.start(
-            subject=item,
-            account_id=assignee.id if assignee else None,
-            remote_key=ticket.key,
-            source=ticket.provider,
-        )
-
-    async def get_prompt_context(self, **context: object) -> dict[str, object]:
-        # Everything the agent needs beyond the ticket it fetches itself: where
-        # the work lands (the subject's repo + siblings), the marks it must leave
-        # on the tracker, and the target repo's recommended skills for the brief's
-        # Skills section.
-        item = self.subject
-        target = ProjectRepo.get_for_repo(item.repo, raise_on_missing=True)
-        siblings = [
-            {"full_name": repo.full_name, "purpose": repo.purpose or ""}
-            for repo in target.siblings()
-        ]
-        settings = Build.settings()
-        return {
-            "target_repo": item.repo,
-            "target_purpose": target.purpose or "",
-            "repos": siblings,
-            "scoped_label": settings.scoper_scoped_label,
-            "post_refinement_status": Build.post_refinement_status(item.source),
-            "recommended_skills": target.effective_profile().get("recommended_skills", []),
-            **await super().get_prompt_context(**context),
-        }
-
-    async def run_multistep(self, remote_key: str, source: str = "linear") -> ScopeBriefOutput:
-        while True:
-            brief = await Build.scope(remote_key=remote_key, source=source)
-            if brief.status == "ready":
-                return brief
-            await ScopeReply.wait(
-                input_request={"presentation": "external", "label": "Answer scope questions"}
-            )

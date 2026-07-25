@@ -209,8 +209,8 @@ function mergeEvents(prev: FeedItem[], next: FeedItem): FeedItem[] {
  * so the same colors mean the same things across views.
  */
 function eventKindClass(kind: string): string {
-  // Run lifecycle shares the agent bucket; milestones (shipped / scoped /
-  // cancelled) are the outcome facts that used to arrive as audit.pr_merged.
+  // Run lifecycle shares the agent bucket; milestones (shipped / cancelled)
+  // are the outcome facts that used to arrive as audit.pr_merged.
   if (kind.startsWith('run.')) return 'event-kind-agent'
   if (kind.startsWith('milestone.')) return 'event-kind-audit'
   if (kind.startsWith('agent_run.')) return 'event-kind-agent'

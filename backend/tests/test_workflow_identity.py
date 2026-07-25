@@ -1,5 +1,5 @@
 import pytest
-from druks.build.workflows import BuildWorkflow, Profile, Scope
+from druks.build.workflows import BuildWorkflow, Profile
 from druks.core.workflows import RefreshTokens
 from druks.durable.enums import RunState
 from druks.durable.exceptions import WorkflowError
@@ -101,7 +101,6 @@ def test_in_tree_identities_are_stable():
     # These kinds are durable identities (DBOS workflow names, settings keys,
     # dedup prefixes, step-name prefixes) — byte-for-byte pins.
     assert BuildWorkflow.kind == "build.build_workflow"
-    assert Scope.kind == "build.scope"
     assert Profile.kind == "build.profile"
     assert RefreshTokens.kind == "core.refresh_tokens"
     assert (BuildWorkflow.extension, RefreshTokens.extension) == ("build", "core")

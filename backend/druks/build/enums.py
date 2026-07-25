@@ -22,6 +22,5 @@ class HumanFeedbackAction(StrEnum):
 
 
 class HandoffStatus(StrEnum):
-    SCOPED = "scoped"
     SHIPPED = "shipped"
     CANCELLED = "cancelled"

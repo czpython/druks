@@ -400,7 +400,6 @@ button { background: none; border: none; color: inherit; cursor: pointer; font: 
 .outcome-failed    { color: var(--outcome-failed); }
 .outcome-abandoned { color: var(--outcome-abandoned); }
 .outcome-cancelled { color: var(--outcome-abandoned); }
-.outcome-scoped    { color: var(--bucket-human); }
 
 /* ============================================================
    Empty states
@@ -2152,7 +2151,6 @@ input.set-select { background-image: none; padding-right: 12px; }
 .ins-status-needsyou { color: var(--bucket-human); }
 .ins-status-failed   { color: var(--bucket-dead); }
 .ins-status-merged   { color: var(--outcome-merged); }
-.ins-status-scoped   { color: var(--bucket-human); }
 .ins-status-cancelled { color: var(--outcome-abandoned); }
 .ins-status-queued   { color: var(--text-dim); }
 .ins-status-running .ins-status-dot, .ins-status-needsyou .ins-status-dot { animation: pulse 1.4s ease-in-out infinite; }

@@ -15,6 +15,7 @@ class BuildPromptContext:
 
     # Target repo + ticket identity, flattened from the run input.
     repo: str | None
+    work_item_url: str
     branch: str | None
     pr_number: int | None
     ticket_ref: str | None
@@ -23,4 +24,5 @@ class BuildPromptContext:
     task_owner_name: str | None
     task_owner_email: str | None
     related_repos: list[ProjectRepo]
+    skills: list[str]
     journal: BuildJournal

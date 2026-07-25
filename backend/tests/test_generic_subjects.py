@@ -101,17 +101,17 @@ def test_status_aggregates_across_runs_and_timeline_spans_them(client: TestClien
     # Subject "1" lived across two runs: an earlier finished one and a current
     # running one. Status is the active run's (running wins), and the timeline is
     # every run, oldest first, each carrying its own agent calls.
-    done = _seed_run(db_session, subject_id="1", kind="faketest.scope", state="finished")
-    _seed_call(db_session, done, agent="scope")
+    done = _seed_run(db_session, subject_id="1", kind="faketest.prepare", state="finished")
+    _seed_call(db_session, done, agent="prepare")
     live = _seed_run(db_session, subject_id="1", state="running")
     _seed_call(db_session, live, agent="implement", status="running")
 
     detail = client.get("/api/faketest/thing/1").json()
     assert detail["summary"] == {"id": "1", "title": "First"}
     assert detail["status"]["state"] == "running"
-    assert [entry["kind"] for entry in detail["timeline"]] == ["faketest.scope", "faketest.flow"]
+    assert [entry["kind"] for entry in detail["timeline"]] == ["faketest.prepare", "faketest.flow"]
     # Calls group under their own run, not the subject at large.
-    assert [c["agent"] for c in detail["timeline"][0]["agentCalls"]] == ["scope"]
+    assert [c["agent"] for c in detail["timeline"][0]["agentCalls"]] == ["prepare"]
     assert [c["agent"] for c in detail["timeline"][1]["agentCalls"]] == ["implement"]
 
 

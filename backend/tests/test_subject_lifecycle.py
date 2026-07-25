@@ -4,11 +4,11 @@ import pytest
 from conftest import make_test_work_item, seed_dbos_status
 from druks.build.contracts import ReviewWork
 from druks.build.models import WorkItem
-from druks.build.workflows import BuildWorkflow, Scope, ScopeReply
+from druks.build.workflows import BuildWorkflow, Profile
 from druks.durable.models import Run
 from druks.durable.reads import get_subject_phase
 from druks.models import Base
-from druks.workflows import WorkflowError
+from druks.workflows import OperatorReply, WorkflowError
 from uuid_utils import uuid7
 
 pytestmark = pytest.mark.asyncio
@@ -45,9 +45,13 @@ async def test_gate_answer_resumes_only_a_run_parked_on_its_gate(db_session, mon
     # run keeps its stale ``input_gate``, so parked-ness decides, not that column.
     subject = _work_item(remote_key="ENG-748-A")
     parked = _subject_run(
-        db_session, subject=subject, kind=Scope.kind, state="pending_input", gate=ScopeReply.name
+        db_session,
+        subject=subject,
+        kind=BuildWorkflow.kind,
+        state="pending_input",
+        gate=OperatorReply.name,
     )
-    _subject_run(db_session, subject=subject, kind=BuildWorkflow.kind, state="running", order=1)
+    _subject_run(db_session, subject=subject, kind=Profile.kind, state="running", order=1)
     resumed = []
 
     async def resume(self, **reply):
@@ -55,7 +59,7 @@ async def test_gate_answer_resumes_only_a_run_parked_on_its_gate(db_session, mon
 
     monkeypatch.setattr(Run, "resume", resume)
 
-    await ScopeReply.answer(subject)
+    await OperatorReply.answer(subject, action="approve")
     assert resumed == [parked.id]
 
     timed_out = _work_item(remote_key="ENG-748-B")
@@ -78,7 +82,7 @@ async def test_workflow_cancel_takes_its_own_kind_and_passes_over_idle_subjects(
     # is already gone is the no-op the caller expects, not an error.
     subject = _work_item(remote_key="ENG-748-C")
     build = _subject_run(db_session, subject=subject, kind=BuildWorkflow.kind, state="running")
-    _subject_run(db_session, subject=subject, kind=Scope.kind, state="running", order=1)
+    _subject_run(db_session, subject=subject, kind=Profile.kind, state="running", order=1)
     cancelled = []
 
     async def cancel(self, *, failure=None):
@@ -98,11 +102,13 @@ async def test_workflow_cancel_takes_its_own_kind_and_passes_over_idle_subjects(
 async def test_subject_phase_reads_the_driving_running_workflow(db_session, monkeypatch):
     subject = _work_item(remote_key="ENG-748-E")
     _subject_run(
-        db_session, subject=subject, kind=Scope.kind, state="pending_input", gate=ScopeReply.name
+        db_session,
+        subject=subject,
+        kind=BuildWorkflow.kind,
+        state="pending_input",
+        gate=OperatorReply.name,
     )
-    driving = _subject_run(
-        db_session, subject=subject, kind=BuildWorkflow.kind, state="running", order=1
-    )
+    driving = _subject_run(db_session, subject=subject, kind=Profile.kind, state="running", order=1)
     seen = []
 
     async def phase(workflow_id):

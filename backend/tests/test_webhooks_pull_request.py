@@ -198,7 +198,7 @@ async def test_merge_echo_with_no_newer_activity_still_dedups(db_session, tmp_pa
 @pytest.mark.asyncio
 async def test_external_close_returns_ticket_to_resting_pool(db_session, tmp_path, monkeypatch):
     """Closing the PR abandons the attempt, not the ticket: druks pushes the
-    provider's resting status (Linear → post-refinement, Jira → Open) so the
+    provider's resting status (Linear → Backlog, Jira → Open) so the
     ticket doesn't strand in In Progress/Review."""
     from druks.build.models import WorkItem
     from druks.ticketing.enums import SemanticStatus

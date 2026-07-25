@@ -360,7 +360,7 @@ class WorkItem(Subject):
         try:
             tracker = get_tracker(
                 self.source,
-                ready_for_agent_status=build_extension.Build.post_refinement_status(self.source),
+                ready_for_agent_status=build_extension.Build.resting_status(self.source),
             )
         except TrackerNotConfigured:
             return
