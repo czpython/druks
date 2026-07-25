@@ -115,7 +115,7 @@ def test_get_answered_maps_picks_to_labels_and_keeps_free_text_verbatim():
     ]
 
 
-def test_confirming_recommendations_requires_an_answer_and_recommendation_per_question():
+def test_agreement_needs_every_question_picked_as_recommended():
     confirmed = O.PlanData(
         questions=[
             O.QuestionOutput(
@@ -140,10 +140,10 @@ def test_confirming_recommendations_requires_an_answer_and_recommendation_per_qu
         ]
     )
 
-    assert confirmed.confirms_recommendations({"q1": "a", "q2": "b"})
-    assert not confirmed.confirms_recommendations({"q1": "a"})
-    assert not without_recommendation.confirms_recommendations({"q1": "a"})
-    assert O.PlanData().confirms_recommendations({})
+    assert confirmed.is_answered_as_recommended({"q1": "a", "q2": "b"})
+    assert not confirmed.is_answered_as_recommended({"q1": "a"})
+    assert not without_recommendation.is_answered_as_recommended({"q1": "a"})
+    assert O.PlanData().is_answered_as_recommended({})
 
 
 def test_ask_contracts_cap_identity_and_cardinality():

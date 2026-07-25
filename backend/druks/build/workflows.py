@@ -277,8 +277,8 @@ class BuildWorkflow(Workflow):
             reply = await self.review(questions=plan.questions, context=critique)
             if (
                 reply.action == "approve"
-                and not reply.note.strip()
-                and plan.confirms_recommendations(reply.answers)
+                and not reply.note
+                and plan.is_answered_as_recommended(reply.answers)
             ):
                 return True
             answered = plan.get_answered(reply.answers)

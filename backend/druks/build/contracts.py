@@ -91,7 +91,7 @@ class PlanData(BaseModel):
     # Resolved by the planner; a revision carries None.
     assignee_github_login: str | None = None
 
-    def confirms_recommendations(self, picks: dict[str, str]) -> bool:
+    def is_answered_as_recommended(self, picks: dict[str, str]) -> bool:
         # Unanswered questions and questions without a recommendation cannot confirm intent.
         return all(
             any(
