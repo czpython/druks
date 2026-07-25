@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 from typing import ClassVar, Self
 
 from .datastructures import Ticket
-from .enums import SemanticStatus
+from .enums import TicketStatus
 
 
 class Tracker(ABC):
@@ -13,7 +13,7 @@ class Tracker(ABC):
     known_exceptions: ClassVar[tuple[type[BaseException], ...]] = ()
 
     # Set by each provider's __init__ from its (provider-specific) settings.
-    _status_names: dict[SemanticStatus, str]
+    _status_names: dict[TicketStatus, str]
 
     @classmethod
     @abstractmethod
@@ -34,7 +34,7 @@ class Tracker(ABC):
     async def fetch_ticket(self, key: str) -> Ticket: ...
 
     @abstractmethod
-    async def set_status(self, ticket: Ticket, status: SemanticStatus) -> None: ...
+    async def set_status(self, ticket: Ticket, status: TicketStatus) -> None: ...
 
     @abstractmethod
     async def aclose(self) -> None: ...

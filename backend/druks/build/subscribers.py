@@ -4,7 +4,7 @@ from druks.build.extension import Build
 from druks.build.models import ProjectRepo, WorkItem
 from druks.build.workflows import BuildWorkflow, Profile
 from druks.signals import subscribe
-from druks.ticketing.enums import SemanticStatus
+from druks.ticketing.enums import TicketStatus
 from druks.workflows import get_subject_status
 
 # Projections
@@ -30,12 +30,12 @@ async def provision_mirrors_onto_item(
 async def build_start_marks_ticket_in_progress(*, subject: WorkItem, **_: object) -> None:
     # Every (re)start and gate-resume of a build means the ticket is in progress —
     # including the return from a rework loop that had parked it In Review.
-    await subject.set_remote_status(SemanticStatus.IN_PROGRESS)
+    await subject.set_remote_status(TicketStatus.IN_PROGRESS)
 
 
 @subscribe("run.pending_input", kind=BuildWorkflow.kind, gate=ReviewWork, subject=WorkItem)
 async def review_park_marks_ticket_in_review(*, subject: WorkItem, **_: object) -> None:
-    await subject.set_remote_status(SemanticStatus.IN_REVIEW)
+    await subject.set_remote_status(TicketStatus.IN_REVIEW)
 
 
 @subscribe("repo.pushed", to_default_branch=True)

@@ -8,7 +8,7 @@ from druks.settings import load_settings
 
 from .base import Tracker
 from .datastructures import Ticket
-from .enums import SemanticStatus, StatusKind
+from .enums import StatusKind, TicketStatus
 from .exceptions import TrackerNotConfigured
 
 # Jira's statusCategory.key → druks's normalized kind. Jira folds done+canceled
@@ -24,13 +24,13 @@ _CATEGORY_KIND: dict[str, StatusKind] = {
 # requires a resolution and Fix versions, so native status moves work like Linear's.
 # READY_FOR_AGENT is supplied by the caller as the resting status; "Backlog" is the operator's
 # dispatch trigger, so druks deliberately does not land there.
-_STATIC_STATUS_NAMES: dict[SemanticStatus, str] = {
-    SemanticStatus.IN_PROGRESS: "In Progress",
-    SemanticStatus.IN_REVIEW: "Waiting CR",  # CR = code review; PR open, awaiting review
-    SemanticStatus.DONE: "Done",
+_STATIC_STATUS_NAMES: dict[TicketStatus, str] = {
+    TicketStatus.IN_PROGRESS: "In Progress",
+    TicketStatus.IN_REVIEW: "Waiting CR",  # CR = code review; PR open, awaiting review
+    TicketStatus.DONE: "Done",
     # This workflow has no cancel state; abandoned work closes as Done (its Done
     # transition takes no resolution/Fix-versions fields, so the move succeeds).
-    SemanticStatus.CANCELED: "Done",
+    TicketStatus.CANCELED: "Done",
 }
 
 
@@ -44,7 +44,7 @@ class Jira(Tracker):
         base_url: str,
         email: str,
         api_token: str,
-        status_names: dict[SemanticStatus, str],
+        status_names: dict[TicketStatus, str],
         client: Any | None = None,
     ) -> None:
         self._client = JiraClient(
@@ -60,7 +60,7 @@ class Jira(Tracker):
         names = dict(_STATIC_STATUS_NAMES)
         # Empty leaves READY_FOR_AGENT unmapped.
         if ready_for_agent_status:
-            names[SemanticStatus.READY_FOR_AGENT] = ready_for_agent_status
+            names[TicketStatus.READY_FOR_AGENT] = ready_for_agent_status
         return cls(
             base_url=settings.jira_base_url,
             email=settings.jira_email,
@@ -100,7 +100,7 @@ class Jira(Tracker):
     async def fetch_ticket(self, key: str) -> Ticket:
         return self._normalize(await self._client.get_issue(key))
 
-    async def set_status(self, ticket: Ticket, status: SemanticStatus) -> None:
+    async def set_status(self, ticket: Ticket, status: TicketStatus) -> None:
         name = self._status_names.get(status)
         if not name:
             raise ValueError(f"Jira has no configured status name for {status}")

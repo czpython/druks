@@ -1,6 +1,6 @@
 import pytest
 from druks.ticketing.datastructures import Ticket
-from druks.ticketing.enums import SemanticStatus, StatusKind
+from druks.ticketing.enums import StatusKind, TicketStatus
 from druks.ticketing.exceptions import TrackerNotConfigured
 from druks.ticketing.helpers import get_tracker
 from druks.ticketing.jira import Jira
@@ -61,10 +61,10 @@ def _linear_with(fake: _FakeLinearClient, *, status_names=None) -> Linear:
     provider = Linear.__new__(Linear)
     provider._client = fake  # type: ignore[attr-defined]
     provider._status_names = status_names or {  # type: ignore[attr-defined]
-        SemanticStatus.IN_PROGRESS: "In Progress",
-        SemanticStatus.DONE: "Done",
-        SemanticStatus.CANCELED: "Canceled",
-        SemanticStatus.READY_FOR_AGENT: "Ready for Agent",
+        TicketStatus.IN_PROGRESS: "In Progress",
+        TicketStatus.DONE: "Done",
+        TicketStatus.CANCELED: "Canceled",
+        TicketStatus.READY_FOR_AGENT: "Ready for Agent",
     }
     return provider
 
@@ -106,12 +106,12 @@ async def test_fetch_ticket_normalizes():
 
 
 @pytest.mark.asyncio
-async def test_set_status_maps_semantic_to_provider_name():
+async def test_set_status_maps_the_ticket_status_to_a_provider_name():
     fake = _FakeLinearClient()
     provider = _linear_with(fake)
     ticket = provider._normalize(SAMPLE_ISSUE)
-    await provider.set_status(ticket, SemanticStatus.DONE)
-    await provider.set_status(ticket, SemanticStatus.READY_FOR_AGENT)
+    await provider.set_status(ticket, TicketStatus.DONE)
+    await provider.set_status(ticket, TicketStatus.READY_FOR_AGENT)
     assert fake.calls == [
         ("update_issue_status", "uuid-issue-1", "Done"),
         ("update_issue_status", "uuid-issue-1", "Ready for Agent"),
@@ -120,10 +120,10 @@ async def test_set_status_maps_semantic_to_provider_name():
 
 @pytest.mark.asyncio
 async def test_set_status_unmapped_raises():
-    provider = _linear_with(_FakeLinearClient(), status_names={SemanticStatus.DONE: "Done"})
+    provider = _linear_with(_FakeLinearClient(), status_names={TicketStatus.DONE: "Done"})
     ticket = provider._normalize(SAMPLE_ISSUE)
     with pytest.raises(ValueError, match="no configured status"):
-        await provider.set_status(ticket, SemanticStatus.IN_REVIEW)
+        await provider.set_status(ticket, TicketStatus.IN_REVIEW)
 
 
 def test_get_tracker_resolves_configured_linear(tmp_path, monkeypatch):
@@ -194,9 +194,9 @@ async def test_remote_state_pushes_status(db_session, monkeypatch):
     fake = _FakeTracker()
     monkeypatch.setattr(models, "get_tracker", lambda source, **_: fake)
 
-    await item.set_remote_status(SemanticStatus.DONE)
+    await item.set_remote_status(TicketStatus.DONE)
 
-    assert fake.calls == [("linear", "ACME-1", SemanticStatus.DONE), "aclose"]
+    assert fake.calls == [("linear", "ACME-1", TicketStatus.DONE), "aclose"]
 
 
 @pytest.mark.asyncio
@@ -205,7 +205,7 @@ async def test_remote_state_skips_non_tracker_source(db_session):
 
     item = make_test_work_item(repo="acme/widget", source="github", remote_key="#5", title="t")
     # github has no tracker — a no-op that must not raise.
-    await item.set_remote_status(SemanticStatus.DONE)
+    await item.set_remote_status(TicketStatus.DONE)
 
 
 @pytest.mark.asyncio
@@ -225,7 +225,7 @@ async def test_remote_state_closes_on_failure(db_session, monkeypatch):
     boom = _Boom()
     monkeypatch.setattr(models, "get_tracker", lambda source, **_: boom)
 
-    await item.set_remote_status(SemanticStatus.DONE)
+    await item.set_remote_status(TicketStatus.DONE)
 
     assert "aclose" in boom.calls  # closed even on failure
 
@@ -300,9 +300,9 @@ def _jira_with(fake: _FakeJiraClient) -> Jira:
     provider = Jira.__new__(Jira)
     provider._client = fake  # type: ignore[attr-defined]
     provider._status_names = {  # type: ignore[attr-defined]
-        SemanticStatus.IN_PROGRESS: "In Progress",
-        SemanticStatus.DONE: "Done",
-        SemanticStatus.READY_FOR_AGENT: "Ready for Agent",
+        TicketStatus.IN_PROGRESS: "In Progress",
+        TicketStatus.DONE: "Done",
+        TicketStatus.READY_FOR_AGENT: "Ready for Agent",
     }
     return provider
 
@@ -340,7 +340,7 @@ async def test_jira_set_status_uses_transition():
     fake = _FakeJiraClient()
     provider = _jira_with(fake)
     ticket = provider._normalize(SAMPLE_JIRA_ISSUE)
-    await provider.set_status(ticket, SemanticStatus.DONE)
+    await provider.set_status(ticket, TicketStatus.DONE)
     assert ("transition_issue", "PROJ-7", "Done") in fake.calls
 
 
@@ -377,9 +377,8 @@ def test_get_tracker_resolves_configured_jira(tmp_path, monkeypatch):
     tracker = get_tracker("jira", ready_for_agent_status="Open")
     assert isinstance(tracker, Jira)
     assert tracker.source == "jira"
-    # The operator's READY_FOR_AGENT status name the caller supplies, mapped onto
-    # the semantic status for the actual move.
-    assert tracker._status_names[SemanticStatus.READY_FOR_AGENT] == "Open"
+    # The operator names their own READY_FOR_AGENT status; the move looks it up here.
+    assert tracker._status_names[TicketStatus.READY_FOR_AGENT] == "Open"
 
 
 def test_jira_status_names_match_internal_tools_workflow():
@@ -389,11 +388,11 @@ def test_jira_status_names_match_internal_tools_workflow():
     # so the ticket just never moves. Pin them.
     from druks.ticketing.jira import _STATIC_STATUS_NAMES
 
-    assert _STATIC_STATUS_NAMES[SemanticStatus.IN_PROGRESS] == "In Progress"
-    assert _STATIC_STATUS_NAMES[SemanticStatus.IN_REVIEW] == "Waiting CR"
-    assert _STATIC_STATUS_NAMES[SemanticStatus.DONE] == "Done"
+    assert _STATIC_STATUS_NAMES[TicketStatus.IN_PROGRESS] == "In Progress"
+    assert _STATIC_STATUS_NAMES[TicketStatus.IN_REVIEW] == "Waiting CR"
+    assert _STATIC_STATUS_NAMES[TicketStatus.DONE] == "Done"
     # No cancel state in this workflow — abandoned work closes as Done.
-    assert _STATIC_STATUS_NAMES[SemanticStatus.CANCELED] == "Done"
+    assert _STATIC_STATUS_NAMES[TicketStatus.CANCELED] == "Done"
 
 
 def test_get_tracker_unconfigured_jira_raises(tmp_path, monkeypatch):

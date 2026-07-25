@@ -12,7 +12,7 @@ from druks.core.apis.github import get_github_client
 from druks.db import Base, Subject, db_session
 from druks.settings import load_settings
 from druks.ticketing.datastructures import Ticket
-from druks.ticketing.enums import SemanticStatus
+from druks.ticketing.enums import TicketStatus
 from druks.ticketing.exceptions import TrackerNotConfigured
 from druks.ticketing.helpers import get_tracker, is_tracker_source
 from druks.workflows import FatalError, SubjectStatus, get_subject_status
@@ -290,7 +290,7 @@ class WorkItem(Subject):
         build = get_subject_status(self.subject_type, str(self.id), kind=BuildWorkflow.kind)
         if build.is_parked:
             await BuildWorkflow.cancel(self, failure="pr merged while parked")
-        await self.set_remote_status(SemanticStatus.DONE)
+        await self.set_remote_status(TicketStatus.DONE)
 
     async def close_external(self) -> None:
         # The attempt was abandoned, not the ticket, so the ticket returns to the
@@ -306,7 +306,7 @@ class WorkItem(Subject):
                 await get_github_client(load_settings()).delete_branch(self.repo, self.branch)
         except Exception:  # noqa: BLE001 — cleanup only
             logger.warning("Skipped branch cleanup for %s.", self.repo, exc_info=True)
-        await self.set_remote_status(SemanticStatus.READY_FOR_AGENT)
+        await self.set_remote_status(TicketStatus.READY_FOR_AGENT)
 
     @classmethod
     def get_for_remote_key(
@@ -350,7 +350,7 @@ class WorkItem(Subject):
         self.updated_at = Base.utc_now()
         db_session().flush()
 
-    async def set_remote_status(self, status: SemanticStatus) -> None:
+    async def set_remote_status(self, status: TicketStatus) -> None:
         # No-op for sources without a configured tracker (github, absent creds).
         if not is_tracker_source(self.source):
             return
