@@ -91,13 +91,13 @@ def _seed_work_item(engine, *, repo: str):
         return item
 
 
-async def _wait(engine, wfid, predicate, timeout=20.0):
+async def _wait(engine, workflow_id, predicate, timeout=20.0):
     deadline = asyncio.get_event_loop().time() + timeout
     while asyncio.get_event_loop().time() < deadline:
         session = get_session(engine)
         try:
-            row = session.get(Run, wfid)
-            if row is not None and predicate(row):
+            row = session.get(Run, workflow_id)
+            if row and predicate(row):
                 return row
         finally:
             session.close()
@@ -105,7 +105,14 @@ async def _wait(engine, wfid, predicate, timeout=20.0):
     raise AssertionError("timed out")
 
 
-def _stub(monkeypatch, rt, *, plan_approval="human", auto_dispatch=False):
+def _stub(
+    monkeypatch,
+    rt,
+    *,
+    plan_approval="human",
+    auto_dispatch=False,
+    merge_when_ready_accepted=True,
+):
     import druks.contrib.ship.workflows as m
     from druks.contrib.ship.contracts import (
         CodeReviewOutput,
@@ -119,8 +126,8 @@ def _stub(monkeypatch, rt, *, plan_approval="human", auto_dispatch=False):
 
     flow = rt.flow
 
-    async def _noop(*a, **k):
-        return None
+    async def _noop(*args, **kwargs):
+        return
 
     for name in (
         "set_pr_draft",
@@ -187,47 +194,49 @@ def _stub(monkeypatch, rt, *, plan_approval="human", auto_dispatch=False):
 
     monkeypatch.setattr(Agent, "_run", _run)
 
+    github_calls = []
+
+    async def _merge_when_ready(*args, **kwargs):
+        github_calls.append("merge_when_ready")
+        return merge_when_ready_accepted
+
     fake_github = SimpleNamespace(
-        get_pull_request=lambda *a, **k: _dict({"state": "open"}),
-        squash_merge_pull_request=lambda *a, **k: _dict({"merged": True}),
+        merge_when_ready=_merge_when_ready,
         create_issue_comment=_noop,
     )
-    monkeypatch.setattr(m, "get_github_client", lambda *a, **k: fake_github)
-    return invoked
+    monkeypatch.setattr(m, "get_github_client", lambda *args, **kwargs: fake_github)
+    return invoked, github_calls
 
 
-async def _dict(d):
-    return d
-
-
-async def test_happy_path_to_merge(rt, monkeypatch):
-    _stub(monkeypatch, rt)
-
-    item = _seed_work_item(rt.engine, repo="acme/widget")
-    wfid = await rt.flow.start(
-        repo="acme/widget",
-        subject=item,
-    )
-
+async def _start_to_work_gate(rt, item):
+    workflow_id = await rt.flow.start(repo=item.repo, subject=item)
     parked = await _wait(
         rt.engine,
-        wfid,
-        lambda r: r.state == RunState.PENDING_INPUT and r.input_gate == "review",
+        workflow_id,
+        lambda run: run.state == RunState.PENDING_INPUT and run.input_gate == "review",
     )
     await parked.resume(action="approve", answers={})
-
     parked = await _wait(
         rt.engine,
-        wfid,
-        lambda r: r.state == RunState.PENDING_INPUT and r.input_gate == "review_work",
+        workflow_id,
+        lambda run: run.state == RunState.PENDING_INPUT and run.input_gate == "review_work",
     )
+    return workflow_id, parked
+
+
+async def test_happy_path_declares_merge_intent(rt, monkeypatch):
+    _, github_calls = _stub(monkeypatch, rt)
+
+    item = _seed_work_item(rt.engine, repo="acme/widget")
+    workflow_id, parked = await _start_to_work_gate(rt, item)
     await parked.resume(action="approve")
 
-    done = await _wait(rt.engine, wfid, lambda r: r.state == RunState.FINISHED)
-    assert done.failure is None
+    done = await _wait(rt.engine, workflow_id, lambda run: run.state == RunState.FINISHED)
+    assert not done.failure
+    assert github_calls == ["merge_when_ready"]
 
     # Shipped settles via GitHub's pr.closed webhook (test_webhooks_pull_request),
-    # not the run — the run's job ends at the merge call. The run's durable
+    # not the run — the run's job ends when GitHub accepts the merge intent. The durable
     # residue is the event log of its state transitions.
     from druks.events.models import Event
 
@@ -241,24 +250,50 @@ async def test_happy_path_to_merge(rt, monkeypatch):
     assert [e.type for e in events if e.type.startswith("run.")][-1] == "run.finished"
 
 
+async def test_rejected_merge_intent_reparks_work_gate(rt, monkeypatch):
+    _, github_calls = _stub(
+        monkeypatch,
+        rt,
+        merge_when_ready_accepted=False,
+    )
+
+    item = _seed_work_item(rt.engine, repo="acme/repark")
+    workflow_id, parked = await _start_to_work_gate(rt, item)
+    first_parked_at = parked.input_requested_at
+    await parked.resume(action="approve")
+
+    reparked = await _wait(
+        rt.engine,
+        workflow_id,
+        lambda run: (
+            run.state == RunState.PENDING_INPUT
+            and run.input_gate == "review_work"
+            and run.input_requested_at != first_parked_at
+        ),
+    )
+    assert not reparked.failure
+    assert github_calls == ["merge_when_ready"]
+    await reparked.cancel()
+
+
 async def test_auto_mode_machine_review_replaces_the_plan_gate(rt, monkeypatch):
     """plan_approval resolves to none: the machine reviewer approves the plan and
     the run reaches the work gate with no plan park — review_plan runs exactly
     once, where it substitutes for the operator."""
-    invoked = _stub(monkeypatch, rt, plan_approval=None, auto_dispatch=True)
+    invoked, _ = _stub(monkeypatch, rt, plan_approval=None, auto_dispatch=True)
 
     item = _seed_work_item(rt.engine, repo="acme/gizmo")
-    wfid = await rt.flow.start(
+    workflow_id = await rt.flow.start(
         repo="acme/gizmo",
         subject=item,
     )
 
     parked = await _wait(
         rt.engine,
-        wfid,
-        lambda r: r.state == RunState.PENDING_INPUT and r.input_gate == "review_work",
+        workflow_id,
+        lambda run: run.state == RunState.PENDING_INPUT and run.input_gate == "review_work",
     )
     assert invoked[:2] == ["generate_plan", "review_plan"]
     await parked.resume(action="approve")
-    done = await _wait(rt.engine, wfid, lambda r: r.state == RunState.FINISHED)
-    assert done.failure is None
+    done = await _wait(rt.engine, workflow_id, lambda run: run.state == RunState.FINISHED)
+    assert not done.failure
