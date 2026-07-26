@@ -9,7 +9,7 @@ from pydantic import BaseModel
 
 from druks.events.feed import generic_entry
 from druks.events.models import Event
-from druks.models import Subject
+from druks.models import StoredSubject, Subject
 from druks.user_settings.models import SettingsOverride
 
 from .registry import agents as agent_registry
@@ -88,7 +88,7 @@ class Extension:
     settings_model: ClassVar[type[BaseModel] | None] = None
     # The row this extension's runs are about. Declaring it mounts the generic
     # subject read-side; None means the extension has no subject read-side.
-    subject: ClassVar[type[Subject] | None] = None
+    subject: ClassVar[type[StoredSubject] | None] = None
     # The checks this extension contributes to ``druks doctor`` — one per precondition
     # it owns (its API key set, its webhook secret present, its provider reachable).
     # ``druks doctor`` runs each through the same ``CheckResult`` report as its core
@@ -445,7 +445,7 @@ class Extension:
         cls,
         *,
         type: str,
-        subject: Subject | None = None,
+        subject: Subject | StoredSubject | None = None,
         payload: dict[str, Any] | None = None,
     ) -> None:
         """Record one of this extension's domain events to the log, stamped with the

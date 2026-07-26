@@ -1,11 +1,11 @@
 from datetime import datetime
 
-from druks.db import Subject, db_session
+from druks.db import StoredSubject, db_session
 from sqlalchemy import select
 from sqlalchemy.orm import Mapped, mapped_column
 
 
-class Note(Subject):
+class Note(StoredSubject):
     __tablename__ = "field_notes_notes"
 
     # What the note is about — the raw observation an operator jotted down. A run's
@@ -14,7 +14,7 @@ class Note(Subject):
     # The agent's summary of ``body``, written when a Summarize run finishes. None
     # until then.
     summary: Mapped[str | None]
-    created_at: Mapped[datetime] = mapped_column(default=Subject.utc_now)
+    created_at: Mapped[datetime] = mapped_column(default=StoredSubject.utc_now)
 
     @classmethod
     def create(cls, *, body: str) -> "Note":

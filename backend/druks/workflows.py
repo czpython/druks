@@ -25,7 +25,7 @@ from druks.durable.engine import _step_engine, register_schedule, run_queue, ste
 from druks.durable.enums import AgentCallStatus, RunState, WorkflowEvent
 from druks.durable.exceptions import FatalError, GateTimeout, SubjectlessGate, WorkflowError
 from druks.durable.models import AgentCall, Run
-from druks.durable.reads import get_subject_phase, get_subject_status
+from druks.durable.reads import get_subject_phase, get_subject_status, open_subjects
 from druks.durable.schemas import AgentCallResponse, SubjectActivity, SubjectStatus, SubjectSummary
 from druks.events.models import Event
 from druks.extensions.loader import resolve_workflow_extension
@@ -35,7 +35,7 @@ from druks.extensions.settings import (
     validate_setting_override,
     validate_settings_declaration,
 )
-from druks.models import Base, Subject, snake_name
+from druks.models import Base, StoredSubject, Subject, snake_name
 from druks.notifications.outbox import notifications_queue, send_notification
 from druks.sandbox.client import sandbox_client
 from druks.sandbox.constants import SANDBOX_HOST_ROTATE_BEFORE_SECONDS
@@ -54,6 +54,7 @@ __all__ = [
     "Gate",
     "Journal",
     "OperatorReply",
+    "Subject",
     "SubjectActivity",
     "SubjectStatus",
     "SubjectSummary",
@@ -62,6 +63,7 @@ __all__ = [
     "WorkflowEvent",
     "get_subject_phase",
     "get_subject_status",
+    "open_subjects",
     "set_run_phase",
     "step",
 ]
@@ -211,7 +213,7 @@ class Gate(BaseModel):
         return
 
     @classmethod
-    async def answer(cls, subject: Subject, **reply: Any) -> None:
+    async def answer(cls, subject: Subject | StoredSubject, **reply: Any) -> None:
         runs = Run.list_for_subject(subject.subject_type, str(subject.id))
         parked = next((run for run in runs if run.is_parked and run.input_gate == cls.name), None)
         if parked:
@@ -544,7 +546,7 @@ class Workflow:
         subject_type, subject_id = self._subject["type"], self._subject["id"]
         for mapper in Base.registry.mappers:
             model = mapper.class_
-            if issubclass(model, Subject) and model.subject_type == subject_type:
+            if issubclass(model, StoredSubject) and model.subject_type == subject_type:
                 return db_session().get(model, int(subject_id))
         raise LookupError(f"no subject class is named {subject_type!r}")
 
@@ -694,7 +696,7 @@ class Workflow:
         SettingsOverride.set_workflow_setting(cls.kind, field, value)
 
     @classmethod
-    async def cancel(cls, subject: Subject, *, failure: str | None = None) -> None:
+    async def cancel(cls, subject: Subject | StoredSubject, *, failure: str | None = None) -> None:
         runs = Run.list_for_subject(subject.subject_type, str(subject.id), kind=cls.kind)
         run = next((run for run in runs if run.is_active), None)
         if run:
@@ -704,7 +706,7 @@ class Workflow:
     async def start(
         cls,
         *,
-        subject: Subject | None,
+        subject: Subject | StoredSubject | None,
         account_id: str | None = None,
         **input: Any,
     ) -> str:

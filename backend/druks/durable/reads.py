@@ -7,9 +7,10 @@ from typing import TYPE_CHECKING, Literal
 
 from sqlalchemy import Engine
 
-from druks.database import session_scope
+from druks.database import db_session, session_scope
 from druks.durable.activity import get_run_phase
 from druks.durable.live import keepalive_comment, serialize_model_event
+from druks.models import Subject
 
 from .enums import RunState
 from .models import AgentCall, Artifact, Run
@@ -53,6 +54,17 @@ def get_subject_status(
     kind = workflow.kind if workflow else None
     latest = Run.get_latest_for_subject(subject_type, subject_id, kind=kind)
     return _status(latest, _running_calls(latest))
+
+
+def open_subjects(subject_type: str) -> list[tuple[Subject, SubjectStatus]]:
+    """Every subject of this type whose newest run hasn't handed off, newest first —
+    what a board lists when the subject is identity alone and has no table to select
+    from. A subject with rows of its own lists them with ``StoredSubject.list_open``."""
+    subject_ids = db_session().scalars(Run.open_subject_ids(subject_type))
+    return [
+        (Subject(subject_type, subject_id), get_subject_status(subject_type, subject_id))
+        for subject_id in subject_ids
+    ]
 
 
 async def get_subject_phase(subject_type: str, subject_id: str) -> str | None:
