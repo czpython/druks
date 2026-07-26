@@ -213,6 +213,8 @@ export const api = {
   // onto the sandbox VMs.
   skillCollections: () => getJSON<SkillCollection[]>('/api/skills'),
   installSkillCollection: (url: string) => postJSON<SkillCollection>('/api/skills', { url }),
+  syncSkillCollection: (id: string) =>
+    postJSON<SkillCollection>(`/api/skills/${encodeURIComponent(id)}/sync`, undefined),
   removeSkillCollection: (id: string) =>
     deleteRequest(`/api/skills/${encodeURIComponent(id)}`),
   setSkillEnabled: (collectionId: string, name: string, enabled: boolean) =>

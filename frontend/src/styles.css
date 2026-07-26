@@ -1081,7 +1081,8 @@ input.set-select { background-image: none; padding-right: 12px; }
 .sc-id { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
 .sc-repo { font-family: var(--font-mono); font-size: 13px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sc-meta { font-family: var(--font-mono); font-size: 10.5px; color: var(--text-dim); }
-.sc-remove { display: inline-flex; align-items: center; gap: 6px; font-family: var(--font-mono); font-size: 11px; color: var(--text-dim); border: 1px solid var(--border); border-radius: 4px; padding: 5px 10px; flex-shrink: 0; cursor: pointer; background: none; }
+.sc-sync, .sc-remove { display: inline-flex; align-items: center; gap: 6px; font-family: var(--font-mono); font-size: 11px; color: var(--text-dim); border: 1px solid var(--border); border-radius: 4px; padding: 5px 10px; flex-shrink: 0; cursor: pointer; background: none; }
+.sc-sync:hover { color: var(--text); background: var(--surface); border-color: var(--border-loud); }
 .sc-remove:hover { color: var(--bucket-dead); border-color: color-mix(in oklch, var(--bucket-dead) 45%, transparent); background: color-mix(in oklch, var(--bucket-dead) 10%, var(--surface)); }
 .sc-skills { display: flex; flex-direction: column; }
 .skill-row { display: grid; grid-template-columns: minmax(130px, 0.8fr) minmax(0, 1.5fr) auto; gap: 14px; align-items: center; padding: 10px 14px 10px 30px; border-bottom: 1px solid var(--border-soft); position: relative; }

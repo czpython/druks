@@ -36,6 +36,48 @@ async def install_collection(url: str = Body(..., embed=True)) -> SkillCollectio
     return SkillCollection.create(source=url, name=contents.name, skills=contents.skills)
 
 
+@router.post("/{collection_id}/sync", response_model=CollectionResponse)
+async def sync_collection(collection_id: str) -> SkillCollection:
+    collection = SkillCollection.get(collection_id)
+    if not collection:
+        raise HTTPException(status_code=404, detail=f"Collection {collection_id!r} not found")
+    settings = load_settings()
+    current_skills = {skill.name: skill for skill in collection.skills}
+    reserved_names = Skill.installed_names() - current_skills.keys()
+    try:
+        contents = await fetch_collection(collection.source, settings.skills_dir, reserved_names)
+    except (ValueError, RequestFailed, RequestTimeout) as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    except OSError as error:
+        raise HTTPException(
+            status_code=500, detail=f"Could not write skills under {settings.skills_dir}: {error}"
+        ) from error
+
+    installed_skills = {skill.name: skill for skill in contents.skills}
+    for name, skill in current_skills.items():
+        installed_skill = installed_skills.pop(name, None)
+        if installed_skill:
+            if skill.description != installed_skill.description:
+                skill.description = installed_skill.description
+            if skill.content_hash != installed_skill.content_hash:
+                skill.content_hash = installed_skill.content_hash
+        else:
+            remove_files(skill.path)
+            collection.skills.remove(skill)
+    for installed_skill in installed_skills.values():
+        collection.skills.append(
+            Skill(
+                name=installed_skill.name,
+                description=installed_skill.description,
+                path=installed_skill.path,
+                content_hash=installed_skill.content_hash,
+            )
+        )
+    collection.updated_at = SkillCollection.utc_now()
+    db_session().flush()
+    return collection
+
+
 @router.patch("/{collection_id}/skills/{name}", response_model=SkillResponse)
 async def set_skill_enabled(
     collection_id: str,
