@@ -2,6 +2,7 @@ from types import SimpleNamespace
 
 import pytest
 from druks.contrib.ship.contracts import (
+    AcceptanceCriterionOutput,
     PlanData,
     QuestionOptionOutput,
     QuestionOutput,
@@ -51,6 +52,16 @@ def _no_review_agent(monkeypatch) -> None:
     monkeypatch.setattr(Ship, "review_plan", fail_review_agent)
 
 
+def _acceptance_criteria() -> list[AcceptanceCriterionOutput]:
+    return [
+        AcceptanceCriterionOutput(
+            id="AC-1",
+            description="The planned change is implemented.",
+            verification="Read the changed code.",
+        )
+    ]
+
+
 async def test_gate_mode_parks_every_plan_and_never_calls_the_reviewer(monkeypatch):
     """Gate mode: generate → park, the reviewer never runs; operator answers
     and notes thread into the next pass."""
@@ -68,7 +79,7 @@ async def test_gate_mode_parks_every_plan_and_never_calls_the_reviewer(monkeypat
             ],
         ),
         PlanData(plan_markdown="v2"),
-        PlanData(plan_markdown="v3"),
+        PlanData(plan_markdown="v3", acceptance_criteria=_acceptance_criteria()),
     )
     _no_review_agent(monkeypatch)
 
@@ -108,6 +119,7 @@ async def test_approve_confirming_recommendations_proceeds_without_redraft(monke
         monkeypatch,
         PlanData(
             plan_markdown="v1",
+            acceptance_criteria=_acceptance_criteria(),
             questions=[
                 QuestionOutput(
                     id="q1",
@@ -131,6 +143,47 @@ async def test_approve_confirming_recommendations_proceeds_without_redraft(monke
     assert len(passes) == 1
 
 
+async def test_approve_confirming_recommendations_on_empty_plan_redrafts(monkeypatch):
+    """Approving recommended options on an empty-AC plan triggers a second plan."""
+    flow = _flow()
+    passes = _fake_plans(
+        monkeypatch,
+        PlanData(
+            plan_markdown="blocked",
+            questions=[
+                QuestionOutput(
+                    id="q1",
+                    prompt="Which cache?",
+                    options=[
+                        QuestionOptionOutput(id="a", label="Redis", recommended=True),
+                        QuestionOptionOutput(id="b", label="Memcache", recommended=False),
+                    ],
+                )
+            ],
+        ),
+        PlanData(
+            plan_markdown="v2",
+            acceptance_criteria=_acceptance_criteria(),
+        ),
+    )
+    _no_review_agent(monkeypatch)
+    replies = iter(
+        [
+            OperatorReply(action="approve", answers={"q1": "a"}),
+            OperatorReply(action="approve"),
+        ]
+    )
+
+    async def fake_review(*, questions=None, context=""):
+        return next(replies)
+
+    flow.review = fake_review
+
+    assert await flow._plan_phase() is True
+    assert len(passes) == 2
+    assert passes[1]["answered_questions"] == [{"question": "Which cache?", "answer": "Redis"}]
+
+
 async def test_approve_diverging_from_recommendation_redrafts(monkeypatch):
     """Approving a different option folds that answer into a second plan."""
     flow = _flow()
@@ -149,7 +202,7 @@ async def test_approve_diverging_from_recommendation_redrafts(monkeypatch):
                 )
             ],
         ),
-        PlanData(plan_markdown="v2"),
+        PlanData(plan_markdown="v2", acceptance_criteria=_acceptance_criteria()),
     )
     _no_review_agent(monkeypatch)
     replies = iter(
@@ -184,7 +237,7 @@ async def test_approve_with_note_redrafts(monkeypatch):
                 )
             ],
         ),
-        PlanData(plan_markdown="v2"),
+        PlanData(plan_markdown="v2", acceptance_criteria=_acceptance_criteria()),
     )
     _no_review_agent(monkeypatch)
     replies = iter(

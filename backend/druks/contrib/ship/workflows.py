@@ -274,7 +274,8 @@ class Build(Workflow):
                 context=unresolved_critique,
             )
             if (
-                operator_reply.action == "approve"
+                plan.acceptance_criteria
+                and operator_reply.action == "approve"
                 and not operator_reply.note
                 and plan.uses_recommended_answers(operator_reply.answers)
             ):
