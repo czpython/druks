@@ -67,6 +67,7 @@ druks = "druks.testing"
 # edits across the platform wiring.
 [project.entry-points."druks.extensions"]
 core = "druks.core.extension:Core"
+review = "druks.contrib.review.extension:Review"
 ship = "druks.contrib.ship.extension:Ship"
 usage = "druks.usage.extension:Usage"
 
