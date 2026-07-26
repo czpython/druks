@@ -9,7 +9,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from druks.contrib.ship.enums import HandoffStatus
 from druks.contrib.ship.policy import RepoPolicy
 from druks.core.apis.github import get_github_client
-from druks.db import Base, Subject, db_session
+from druks.db import Base, StoredSubject, db_session
 from druks.settings import load_settings
 from druks.ticketing.datastructures import Ticket
 from druks.ticketing.enums import TicketStatus
@@ -66,7 +66,7 @@ class Project(Base):
         return db_session().scalars(stmt).first()
 
 
-class ProjectRepo(Subject):
+class ProjectRepo(StoredSubject):
     __tablename__ = "project_repos"
     __table_args__ = (Index("project_repos_project_idx", "project_id"),)
 
@@ -175,7 +175,7 @@ class ProjectRepo(Subject):
         return
 
 
-class WorkItem(Subject):
+class WorkItem(StoredSubject):
     __tablename__ = "work_items"
     __table_args__ = (
         Index("work_items_repo_idx", "repo", "pr_number"),

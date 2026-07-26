@@ -354,16 +354,30 @@ running is a no-op, so a redelivered webhook stays idempotent.
 
 ## Give runs a subject read-side
 
-A subject is the row your runs are about — a repository, a work item, a
-document. Subclass `Subject` instead of `Base`, and the class name is the
+A subject is what your runs are about — a repository, a work item, a pull
+request. Identity is all the platform needs:
+
+```python
+from druks.workflows import Subject, get_subject_status
+
+await Review.start(subject=Subject(id=f"{repo}#{pr_number}", subject_type="pull_request"))
+
+status = get_subject_status("pull_request", f"{repo}#{pr_number}")
+```
+
+Status, timeline, and the run's own subject record answer for that identity
+alone — no table of yours involved.
+
+When the subject is also a row you keep — one you list, edit, and show fields
+from — subclass `StoredSubject` instead of `Base`, and the class name is the
 subject type: `Repository` becomes `repository`.
 
 ```python
-from druks.db import Subject
+from druks.db import StoredSubject
 from druks.workflows import SubjectSummary
 
 
-class Repository(Subject):
+class Repository(StoredSubject):
     __tablename__ = "repositories"
 
 

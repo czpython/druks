@@ -45,10 +45,10 @@ _FILES = {
                 return []
     """,
     "models.py": """
-        from druks.db import Subject
+        from druks.db import StoredSubject
 
 
-        class ProbeItem(Subject):
+        class ProbeItem(StoredSubject):
             __tablename__ = "probe_items"
     """,
     "routes.py": """

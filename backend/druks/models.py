@@ -2,7 +2,7 @@ import re
 from datetime import UTC, datetime
 from typing import Any, ClassVar, Self
 
-from sqlalchemy import DateTime, select
+from sqlalchemy import DateTime, Integer, cast, select
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.types import TypeDecorator
 
@@ -35,7 +35,7 @@ class Base(DeclarativeBase):
         return datetime.now(UTC).replace(microsecond=0)
 
 
-class Subject(Base):
+class StoredSubject(Base):
     """A row an extension's runs are about — a work item, a repo, a document.
     Subclass it instead of ``Base``: the class name is the subject type, so
     ``WorkItem`` is ``work_item``."""
@@ -66,9 +66,12 @@ class Subject(Base):
         from druks.database import db_session
         from druks.durable.models import Run
 
+        # The durable layer keys subjects by string, so the open ids come back as
+        # text and cast to this table's integer key.
+        open_ids = Run.open_subject_ids(cls.subject_type).subquery()
         stmt = (
             select(cls)
-            .where(cls.id.in_(Run.open_subject_ids(cls.subject_type)))
+            .where(cls.id.in_(select(cast(open_ids.c.subject_id, Integer))))
             .order_by(cls.id.desc())
             .limit(limit)
         )

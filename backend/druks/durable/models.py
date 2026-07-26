@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
 from dbos import DBOS
-from sqlalchemy import ForeignKey, Index, Integer, Select, String, cast, func, select, update
+from sqlalchemy import ForeignKey, Index, Select, String, func, select, update
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Mapped, column_property, mapped_column, relationship
@@ -147,14 +147,15 @@ class Run(Base):
 
     @classmethod
     def open_subject_ids(cls, subject_type: str) -> Select:
-        """The subjects of ``subject_type`` whose newest run hasn't handed off —
-        a subquery their own read composes."""
+        """The subjects of ``subject_type`` whose newest run hasn't handed off, that
+        run's most recent first — a subquery their own read composes."""
         state = state_expression(cls.id, cls.input_gate, cls.created_at).label("state")
         subject_id = workflow_status.c.attributes["subject_id"].as_string().label("subject_id")
         driving = (
             select(
                 subject_id,
                 state,
+                cls.created_at,
                 func.row_number()
                 .over(
                     partition_by=subject_id,
@@ -166,9 +167,13 @@ class Run(Base):
             .where(workflow_status.c.attributes["subject_type"].as_string() == subject_type)
             .subquery()
         )
-        return select(cast(driving.c.subject_id, Integer)).where(
-            driving.c.rank == 1,
-            driving.c.state.in_([run_state.value for run_state in OPEN_STATES]),
+        return (
+            select(driving.c.subject_id)
+            .where(
+                driving.c.rank == 1,
+                driving.c.state.in_([run_state.value for run_state in OPEN_STATES]),
+            )
+            .order_by(driving.c.created_at.desc())
         )
 
     def get_ask(self) -> dict[str, Any]:

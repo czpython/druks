@@ -10,7 +10,7 @@ from druks.database import configure_session, db_session, get_session
 from druks.durable.engine import configure_engine, init_dbos, launch, shutdown
 from druks.durable.enums import RunState
 from druks.extensions.registry import workflows
-from druks.models import Subject
+from druks.models import StoredSubject
 from druks.notifications import outbox
 from druks.notifications.exceptions import DeliveryError, NotificationError
 from druks.notifications.models import Destination, Notification
@@ -48,7 +48,7 @@ class _Question(BaseModel):
     options: list[dict] = Field(default_factory=list)
 
 
-class NotificationProbe(Subject):
+class NotificationProbe(StoredSubject):
     __tablename__ = "test_notification_probes"
 
 
