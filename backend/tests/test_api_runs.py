@@ -95,7 +95,7 @@ def test_transcript_of_a_running_call_is_never_cached(
     call_id = _seed_run(tmp_path=tmp_path, finished=False)
 
     response = client.get(
-        f"/api/build/transcripts/{call_id}",
+        f"/api/ship/transcripts/{call_id}",
         params={"stream": "stdout", "limit": 5},
     )
 
@@ -113,7 +113,7 @@ def test_transcript_of_an_abandoned_call_is_cached_immutably(
     call_id = _seed_run(tmp_path=tmp_path, finished=False, run_state="failed")
 
     response = client.get(
-        f"/api/build/transcripts/{call_id}",
+        f"/api/ship/transcripts/{call_id}",
         params={"stream": "stdout", "limit": 5},
     )
 
