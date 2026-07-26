@@ -117,7 +117,7 @@ second. Agents consume the API through the MCP endpoint; see
 
 ## GitHub Apps
 
-The bundled `build` extension requires two GitHub Apps. These are application
+The bundled `ship` extension requires two GitHub Apps. These are application
 requirements, not requirements of the Druks extension mechanism itself.
 
 - **Operator app:** receives webhooks and performs application-owned writes
@@ -125,7 +125,7 @@ requirements, not requirements of the Druks extension mechanism itself.
 - **Reviewer app:** submits reviews through a distinct GitHub identity.
 
 Personal access tokens are not a supported substitute. Install both Apps on
-the same repositories; that installation set is where `build` may act.
+the same repositories; that installation set is where `ship` may act.
 
 The fast path is:
 
@@ -176,7 +176,7 @@ at another compatible GitHub API endpoint.
 ## Ticketing integrations
 
 The bundled integrations support Linear and Jira. Configure only one ticketing
-source for `build` intake.
+source for `ship` intake.
 
 Linear:
 
@@ -198,7 +198,7 @@ JIRA_WEBHOOK_SECRET=
 credential fields are present, its webhook secret is required. Webhook URLs use
 `/_external/linear/events/` and `/_external/jira/events/`.
 
-The statuses that trigger or move `build` work are settings declared by the
+The statuses that trigger or move `ship` work are settings declared by the
 extension and edited in the dashboard, not environment variables.
 
 ## Harnesses

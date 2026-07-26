@@ -8,7 +8,7 @@ import type { ReactNode } from 'react'
 // contributions.
 
 // One route an extension mounts. ``path`` is a wouter pattern under the router base
-// (e.g. ``/build`` or ``/work-items/:slug``); ``render`` receives the matched params.
+// (e.g. ``/ship`` or ``/work-items/:slug``); ``render`` receives the matched params.
 export interface ExtensionRoute {
   path: string
   render: (params: Record<string, string>) => ReactNode

@@ -1,7 +1,7 @@
 from logging.config import fileConfig
 
 import druks.accounts.models  # noqa: F401
-import druks.build.models  # noqa: F401
+import druks.contrib.ship.models  # noqa: F401
 import druks.durable.models  # noqa: F401
 import druks.harnesses.models  # noqa: F401
 import druks.mcp.models  # noqa: F401

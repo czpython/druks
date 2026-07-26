@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 from conftest import make_test_work_item, seed_build_run, seed_call
-from druks.build.models import WorkItem
+from druks.contrib.ship.models import WorkItem
 from fastapi.testclient import TestClient
 
 _RUN_STATE = {
@@ -59,8 +59,8 @@ def _ship(repo, pr_number):
         item.set_status("shipped")
 
 
-# The generic subject read-side — Build declares subject=WorkItem, so the
-# platform mounts /api/build/work_item (list) and /{id} (detail). Build supplies
+# The generic subject read-side — Ship declares subject=WorkItem, so the
+# platform mounts /api/ship/work_item (list) and /{id} (detail). Ship supplies
 # only the domain summary; status (RunState-aggregated) and the timeline are the
 # platform's. See test_generic_subjects.py for the platform-side contract.
 
@@ -75,7 +75,7 @@ def test_subject_list_shows_active_and_excludes_handed_off(client: TestClient, d
     _seed_op(db_session, done, state="finished")
     _ship(repo, 1)
 
-    rows = {r["summary"]["title"]: r for r in client.get("/api/build/work_item").json()["rows"]}
+    rows = {r["summary"]["title"]: r for r in client.get("/api/ship/work_item").json()["rows"]}
     assert "building" in rows
     assert "shipped one" not in rows
     assert rows["building"]["status"]["state"] == "running"
@@ -95,7 +95,7 @@ def test_subject_detail_composes_summary_status_and_timeline(client: TestClient,
     )
     seed_call(db_session, run, "generate_plan")
 
-    detail = client.get(f"/api/build/work_item/{item.id}").json()
+    detail = client.get(f"/api/ship/work_item/{item.id}").json()
     assert detail["summary"]["id"] == str(item.id)
     assert detail["summary"]["remoteKey"] == "ACME-5"
     assert detail["summary"]["links"]["pr"] == "https://github.com/ClawHaven/acme-app/pull/8"
@@ -112,7 +112,7 @@ def test_subject_detail_composes_summary_status_and_timeline(client: TestClient,
 
 
 def test_subject_detail_unknown_is_404(client: TestClient):
-    assert client.get("/api/build/work_item/9999").status_code == 404
+    assert client.get("/api/ship/work_item/9999").status_code == 404
 
 
 def test_pending_gate_surfaces_input_request_on_the_run(db_session):
@@ -165,7 +165,7 @@ def test_history_returns_only_done_work_items(client: TestClient, db_session):
     WorkItem.get(failed_id).update(pr_number=2)
     _seed_op(db_session, failed_id, state="failed")
 
-    items = client.get("/api/build/work-items/history").json()["items"]
+    items = client.get("/api/ship/work-items/history").json()["items"]
     titles = [it["title"] for it in items]
     assert "shipped one" in titles
     assert "still running" not in titles
@@ -180,7 +180,7 @@ def test_pr_closed_without_merge_is_cancelled_in_history(client: TestClient, db_
     _seed_op(db_session, wid, state="finished")
     WorkItem.get(wid).set_status("cancelled")
 
-    items = client.get("/api/build/work-items/history").json()["items"]
+    items = client.get("/api/ship/work-items/history").json()["items"]
     row = next(it for it in items if it["title"] == "abandoned")
     assert row["status"] == "cancelled"
 
@@ -193,13 +193,13 @@ def test_history_clamps_limit(client: TestClient, db_session):
         _ship("ClawHaven/acme-app", i + 1)
 
     # limit > cap → clamps down, doesn't 400.
-    response = client.get("/api/build/work-items/history?limit=10000")
+    response = client.get("/api/ship/work-items/history?limit=10000")
     assert response.status_code == 200
     items = response.json()["items"]
     assert len(items) == 3  # all three shipped; cap doesn't truncate here
 
     # limit < 1 → clamps up to 1.
-    response = client.get("/api/build/work-items/history?limit=0")
+    response = client.get("/api/ship/work-items/history?limit=0")
     assert response.status_code == 200
     items = response.json()["items"]
     assert len(items) == 1
@@ -214,14 +214,14 @@ def test_repeated_runs_on_one_subject_each_surface_separately(db_session):
         seed_build_run(db_session, work_item_id=item.id, state="finished")
 
     entries = list_subject_timeline("work_item", str(item.id))
-    assert [entry.kind for entry in entries] == ["build.build_workflow"] * 3
+    assert [entry.kind for entry in entries] == ["ship.build"] * 3
     assert len({entry.id for entry in entries}) == 3
 
 
 def test_update_stamps_build_run_id(db_session):
     # build intake stamps the owning run via update(build_run_id=...); the kwarg
     # was missing, so every "Ready for Agent" transition threw a TypeError.
-    from druks.build.models import WorkItem
+    from druks.contrib.ship.models import WorkItem
 
     item = make_test_work_item(repo="ClawHaven/acme-app", title="x")
     run = seed_build_run(db_session, work_item_id=item.id, state="running")
@@ -249,7 +249,7 @@ def test_timeline_shows_every_build_attempt(db_session):
 async def test_subject_activity_surfaces_running_phase(db_session, monkeypatch):
     # A running build run pushes a transient phase; the detail view's live activity
     # surfaces it ("Building sandbox VM…") — finer than the lifecycle status.
-    from druks.build import extension as build_extension
+    from druks.contrib.ship import extension as ship_extension
 
     item = make_test_work_item(repo="ClawHaven/acme-app", title="x")
     seed_build_run(db_session, work_item_id=item.id, state="running")
@@ -257,8 +257,8 @@ async def test_subject_activity_surfaces_running_phase(db_session, monkeypatch):
     async def phase(_subject_type, _subject_id):
         return "provisioning_vm"
 
-    monkeypatch.setattr(build_extension, "get_subject_phase", phase)
-    activity = await build_extension.Build.subject_activity(item)
+    monkeypatch.setattr(ship_extension, "get_subject_phase", phase)
+    activity = await ship_extension.Ship.subject_activity(item)
     assert activity is not None
     assert activity.label == "Building sandbox VM…"
     assert activity.kind == "infra"
@@ -266,11 +266,11 @@ async def test_subject_activity_surfaces_running_phase(db_session, monkeypatch):
 
 async def test_subject_activity_none_when_not_running(db_session):
     # A run parked on a gate isn't working — no live sub-phase.
-    from druks.build import extension as build_extension
+    from druks.contrib.ship import extension as ship_extension
 
     item = make_test_work_item(repo="ClawHaven/acme-app", title="x")
     seed_build_run(
         db_session, work_item_id=item.id, state="pending_input", input_gate="review_plan"
     )
 
-    assert await build_extension.Build.subject_activity(item) is None
+    assert await ship_extension.Ship.subject_activity(item) is None

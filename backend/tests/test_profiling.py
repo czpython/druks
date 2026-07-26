@@ -1,9 +1,9 @@
 import pytest
-from druks.build.contracts import RepoProfilerOutput
-from druks.build.extension import Build
-from druks.build.models import Project, ProjectRepo
-from druks.build.policy import RepoPolicy, VerificationProfile
-from druks.build.workflows import Profile
+from druks.contrib.ship.contracts import RepoProfilerOutput
+from druks.contrib.ship.extension import Ship
+from druks.contrib.ship.models import Project, ProjectRepo
+from druks.contrib.ship.policy import RepoPolicy, VerificationProfile
+from druks.contrib.ship.workflows import Profile
 from druks.skills.datastructures import InstalledSkill
 from druks.skills.models import SkillCollection
 
@@ -103,7 +103,7 @@ class TestProfileRun:
         async def _profiler(*, repo: str):
             return _profiled()
 
-        monkeypatch.setattr(Build, "repo_profiler", _profiler)
+        monkeypatch.setattr(Ship, "repo_profiler", _profiler)
         monkeypatch.setattr(RepoPolicy, "resolve", staticmethod(_no_policy))
 
         await Profile().run(repo_id=repo.id)
@@ -124,7 +124,7 @@ class TestProfileRun:
                 recommended_skills=["django-patterns", "retired-skill", "made-up-skill"]
             )
 
-        monkeypatch.setattr(Build, "repo_profiler", _profiler)
+        monkeypatch.setattr(Ship, "repo_profiler", _profiler)
         monkeypatch.setattr(RepoPolicy, "resolve", staticmethod(_no_policy))
 
         await Profile().run(repo_id=repo.id)
@@ -141,7 +141,7 @@ class TestProfileRun:
         async def _pinning_policy(repo):
             return RepoPolicy(verification=VerificationProfile(test_commands=("make test",)))
 
-        monkeypatch.setattr(Build, "repo_profiler", _profiler)
+        monkeypatch.setattr(Ship, "repo_profiler", _profiler)
         monkeypatch.setattr(RepoPolicy, "resolve", staticmethod(_pinning_policy))
 
         await Profile().run(repo_id=repo.id)
@@ -166,7 +166,7 @@ class TestRefreshOnly:
         async def _pinning_policy(repo):
             return RepoPolicy(verification=VerificationProfile(test_commands=("make test",)))
 
-        monkeypatch.setattr(Build, "repo_profiler", _boom)
+        monkeypatch.setattr(Ship, "repo_profiler", _boom)
         monkeypatch.setattr(RepoPolicy, "resolve", staticmethod(_pinning_policy))
 
         await Profile().run(repo_id=repo.id, refresh_only=True)
@@ -183,7 +183,7 @@ class TestProfileStatus:
     failed, so there's no separate 'ready but stale' state."""
 
     def _summary(self, repo):
-        from druks.build.schemas import ProjectRepoSummary
+        from druks.contrib.ship.schemas import ProjectRepoSummary
 
         return ProjectRepoSummary.from_repo(repo)
 
@@ -192,7 +192,7 @@ class TestProfileStatus:
         from druks.durable import Run
         from uuid_utils import uuid7
 
-        run = Run(id=str(uuid7()), kind="build.profile", failure=failure)
+        run = Run(id=str(uuid7()), kind="ship.profile", failure=failure)
         db_session.add(run)
         db_session.flush()
         seed_dbos_status(db_session, run.id, state, subject={"type": "project_repo", "id": repo.id})

@@ -3,8 +3,8 @@
 # or the Codex harness 400s at runtime. The fake-harness tests never send the
 # real schema, so this guards it directly.
 import pytest
-from druks.build import contracts as O
-from druks.build.enums import ReviewDecision
+from druks.contrib.ship import contracts as O
+from druks.contrib.ship.enums import ReviewDecision
 from pydantic import ValidationError
 
 MODELS = [

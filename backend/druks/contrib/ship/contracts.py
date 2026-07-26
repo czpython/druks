@@ -3,7 +3,7 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 from pydantic import BaseModel, Field, model_validator
 
 from druks.agents import AgentOutput
-from druks.build.enums import (
+from druks.contrib.ship.enums import (
     EvaluationVerdict,
     HumanFeedbackAction,
     ReviewDecision,
@@ -11,7 +11,7 @@ from druks.build.enums import (
 from druks.workflows import Gate, Workflow
 
 if TYPE_CHECKING:
-    from druks.build.workflows import BuildWorkflow
+    from druks.contrib.ship.workflows import Build
 
 
 class ReviewWork(Gate):
@@ -25,7 +25,7 @@ class ReviewWork(Gate):
 
     @classmethod
     async def on_wait(cls, workflow: Workflow) -> None:
-        build = cast("BuildWorkflow", workflow)
+        build = cast("Build", workflow)
         await build.set_pr_draft(draft=False)
         await build.request_assignee_review()
 

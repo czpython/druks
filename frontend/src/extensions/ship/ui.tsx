@@ -1,5 +1,5 @@
 import { registerExtensionUI } from '../registry'
-import { BUILD } from './api'
+import { SHIP } from './api'
 import { parseLeadingId } from './slug'
 import { AgentCallPage } from './AgentCallPage'
 import { HistoryPage } from './HistoryPage'
@@ -8,22 +8,22 @@ import { ProjectsPage } from './projects/ProjectsPage'
 import { WorkItemPage } from './WorkItemPage'
 import { WorkItemsPage } from './WorkItemsPage'
 
-// build contributes its UI through the same registry any extension uses — its pages
+// Ship contributes its UI through the same registry any extension uses — its pages
 // are not the app's spine, they're one extension's routes. The shell mounts these and
-// derives build's subnav from ``nav``; feed, settings, and usage it gets for free.
+// derives Ship's subnav from ``nav``; feed, settings, and usage it gets for free.
 registerExtensionUI({
-  name: BUILD,
-  home: `/${BUILD}`,
+  name: SHIP,
+  home: `/${SHIP}`,
   systemStrip: true,
   nav: [
-    { href: `/${BUILD}`, label: 'active', match: (loc) => loc === `/${BUILD}` || isWorkItem(loc) },
-    { href: `/${BUILD}/history`, label: 'history' },
-    { href: `/${BUILD}/projects`, label: 'projects' },
+    { href: `/${SHIP}`, label: 'active', match: (loc) => loc === `/${SHIP}` || isWorkItem(loc) },
+    { href: `/${SHIP}/history`, label: 'history' },
+    { href: `/${SHIP}/projects`, label: 'projects' },
   ],
   routes: [
-    { path: `/${BUILD}`, render: () => <WorkItemsPage /> },
-    { path: `/${BUILD}/history`, render: () => <HistoryPage /> },
-    { path: `/${BUILD}/projects`, render: () => <ProjectsPage /> },
+    { path: `/${SHIP}`, render: () => <WorkItemsPage /> },
+    { path: `/${SHIP}/history`, render: () => <HistoryPage /> },
+    { path: `/${SHIP}/projects`, render: () => <ProjectsPage /> },
     {
       path: '/work-items/:slug/agent-calls/:callId',
       render: ({ slug, callId }) => {
@@ -43,7 +43,7 @@ registerExtensionUI({
   ],
 })
 
-// A work-item detail URL (item page or its agent-call child). build's detail pages
+// A work-item detail URL (item page or its agent-call child). Ship's detail pages
 // live off ``/work-items``, so its "active" tab lights on them too.
 function isWorkItem(location: string): boolean {
   return location.startsWith('/work-items/')

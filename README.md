@@ -12,8 +12,8 @@
 > before 1.0; `main` and `latest` are edge builds, not stable releases.
 
 Druks is the self-hosted **home for durable agent apps**, running on the
-Claude and Codex subscriptions you already pay for. Build ships out of the
-box: autonomous software delivery from ticket to reviewed pull request.
+Claude and Codex subscriptions you already pay for. Ship comes bundled:
+autonomous software delivery from ticket to reviewed pull request.
 
 An ordinary agent script loses its place when the process dies. A Druks
 workflow records the result of each completed durable operation in Postgres.
@@ -55,7 +55,7 @@ DRUKS_PROVIDER=docker bash <(curl -fsSL https://raw.githubusercontent.com/czpyth
 
 Then follow [full local setup](docs/full-local.md) to start Drukbox and connect
 the agent harnesses. A complete installation needs GitHub Apps because the
-bundled `build` extension is installed; a standalone extension may have
+bundled `ship` extension is installed; a standalone extension may have
 different integration requirements.
 
 ```text
@@ -84,9 +84,9 @@ Python distribution registered through the `druks.extensions` entry-point
 group. Installing the distribution registers it; Druks does not need an
 extension-specific plugin list.
 
-The bundled `build` extension is a concrete example. It coordinates coding
+The bundled `ship` extension is a concrete example. It coordinates coding
 agents through tickets and GitHub pull requests, but GitHub PR orchestration is
-`build` behavior—not the definition of Druks.
+`ship` behavior—not the definition of Druks.
 
 ## Documentation
 

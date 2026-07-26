@@ -207,7 +207,7 @@ class Sandbox:
         A failure is captured on the result (``status=FAILED``), not raised.
 
         The repo is a *precondition*, not an input: callers that need one clone
-        it into the VM first (see build's workspace). ``include_plugins=False`` (Claude only)
+        it into the VM first (see Ship's workspace). ``include_plugins=False`` (Claude only)
         skips uploading the operator's plugin state — for prompts that hit no MCP
         server; a no-op for codex.
         """

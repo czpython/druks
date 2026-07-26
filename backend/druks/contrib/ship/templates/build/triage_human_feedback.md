@@ -18,10 +18,10 @@ without ambiguity.
 
 - Do not edit files.
 
-{% include "build/build_workflow/_header.md" %}
-{% include "build/build_workflow/_contract.md" %}
-{% include "build/build_workflow/_related_repos.md" %}
-{% include "build/build_workflow/_skills.md" %}
+{% include "ship/build/_header.md" %}
+{% include "ship/build/_contract.md" %}
+{% include "ship/build/_related_repos.md" %}
+{% include "ship/build/_skills.md" %}
 Triage the latest pending entry in the **Human feedback** section above. Decide whether the feedback requires code changes, is incorrect or already addressed, needs a follow-up question, or means the PR should be closed/cancelled. Do not edit files. Use action `no_change` when no code change is needed and explain why in body. Use `change_required` only for actionable implementation work and put precise instructions for the implementer in implementation_instructions. Use `contract_change_required` when the feedback contradicts or invalidates one or more acceptance criteria — for example the human rejects a design choice that the criteria explicitly required. In that case put revised instructions in implementation_instructions explaining what changed. Use `question` when human input is needed before acting and put the exact question in question. Use `close` only when the correct action is to stop the PR.
 ## Post your triage outcome on the PR — REQUIRED (GitHub MCP)
 

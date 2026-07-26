@@ -63,8 +63,8 @@ druks = "druks.cli:main"
 # walks each one's package for capabilities. Adding an extension is one entry, not
 # edits across the platform wiring.
 [project.entry-points."druks.extensions"]
-build = "druks.build.extension:Build"
 core = "druks.core.extension:Core"
+ship = "druks.contrib.ship.extension:Ship"
 usage = "druks.usage.extension:Usage"
 
 [build-system]
@@ -77,17 +77,10 @@ packages = ["backend/druks"]
 [tool.hatch.build.targets.sdist]
 include = [
     "/backend/druks",
-    "/backend/templates",
     "/LICENSE",
     "/pyproject.toml",
     "/README.md",
 ]
-
-# Ship the prompt templates dir alongside the wheel. ``druks.core.prompts``
-# resolves the path relative to ``backend/`` so the directory has to land
-# at the same height as the ``druks`` package in the installed tree.
-[tool.hatch.build.targets.wheel.force-include]
-"backend/templates" = "templates"
 
 [tool.ruff]
 line-length = 100

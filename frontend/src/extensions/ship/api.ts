@@ -1,5 +1,5 @@
 /**
- * Build's frontend module: its API paths, response shapes, and vocabulary. The
+ * Ship's frontend module: its API paths, response shapes, and vocabulary. The
  * platform types it composes with (RunState, SubjectResponse, RunSummary,
  * AgentCallSummary, ArtifactFile, AgentCallFiles, TranscriptChunk) live in the
  * shared ``api/types``; this file holds only build's own vocabulary.
@@ -8,23 +8,23 @@
 import { getJSON, subjectApi } from '../../api/client'
 import type { SubjectResponse, SubjectRow, SubjectSummary } from '../../api/types'
 
-// build's identity on the platform: the name that keys its ``/api/build`` namespace
+// Ship's identity on the platform: the name that keys its ``/api/ship`` namespace
 // and the subject type its runs are about. The only place these literals live — the
 // generic shell reads the extension name off the registry, never hardcodes it.
-export const BUILD = 'build'
+export const SHIP = 'ship'
 export const WORK_ITEM = 'work_item'
 
 // build's read-side, specialised from the platform's generic subject endpoints.
 export const buildApi = {
-  workItem: (id: number) => subjectApi.read<WorkItemSummary>(BUILD, WORK_ITEM, id),
-  boardStreamUrl: () => subjectApi.boardStream(BUILD, WORK_ITEM),
-  subjectStreamUrl: (id: number) => subjectApi.stream(BUILD, WORK_ITEM, id),
-  transcriptBase: (callId: string) => subjectApi.transcriptBase(BUILD, callId),
-  transcriptFiles: (callId: string) => subjectApi.transcriptFiles(BUILD, callId),
-  transcriptFile: (callId: string, name: string) => subjectApi.transcriptFile(BUILD, callId, name),
+  workItem: (id: number) => subjectApi.read<WorkItemSummary>(SHIP, WORK_ITEM, id),
+  boardStreamUrl: () => subjectApi.boardStream(SHIP, WORK_ITEM),
+  subjectStreamUrl: (id: number) => subjectApi.stream(SHIP, WORK_ITEM, id),
+  transcriptBase: (callId: string) => subjectApi.transcriptBase(SHIP, callId),
+  transcriptFiles: (callId: string) => subjectApi.transcriptFiles(SHIP, callId),
+  transcriptFile: (callId: string, name: string) => subjectApi.transcriptFile(SHIP, callId, name),
   history: (limit?: number) => {
     const qs = limit !== undefined ? `?limit=${limit}` : ''
-    return getJSON<WorkItemsHistoryResponse>(`/api/${BUILD}/work-items/history${qs}`)
+    return getJSON<WorkItemsHistoryResponse>(`/api/${SHIP}/work-items/history${qs}`)
   },
 }
 

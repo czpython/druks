@@ -2,21 +2,20 @@ import functools
 import importlib.util
 from pathlib import Path
 
-from jinja2 import Environment, FileSystemLoader, StrictUndefined
+from jinja2 import Environment, FileSystemLoader, PrefixLoader, StrictUndefined
 from jinja2.sandbox import ImmutableSandboxedEnvironment
 
 from druks.extensions.fetcher import fetch_file
 from druks.extensions.loader import iter_extensions
 
-PROMPTS_DIR = Path(__file__).resolve().parents[2] / "templates" / "prompts"
-
 
 @functools.cache
 def _environment() -> Environment:
-    # One Jinja environment over the bundled core templates plus each installed
-    # extension's own ``templates/prompts`` root, so a separately-shipped extension carries
-    # its prompts in its package. Overrides resolved as strings via
-    # ``from_string`` still see the loader for ``{% include %}`` against partials.
+    # One Jinja environment over every installed extension's own ``templates`` root,
+    # each mounted under the extension's name: ``ship/build/implement.md`` is
+    # ``build/implement.md`` inside ship's package, so nothing repeats the extension in
+    # its own tree. Overrides resolved as strings via ``from_string`` still see the
+    # loader for ``{% include %}`` against partials.
     #
     # Sandboxed because a ``.druks/<ext>/prompts/*`` override is authored by anyone with
     # push access to a monitored repo: the sandbox blocks the ``__globals__`` walk to
@@ -24,7 +23,7 @@ def _environment() -> Environment:
     # ``workspace`` objects in context. Bundled templates only read public attributes,
     # so the sandbox is invisible to them.
     return ImmutableSandboxedEnvironment(
-        loader=FileSystemLoader([PROMPTS_DIR, *_extension_prompt_roots()]),
+        loader=PrefixLoader(_extension_template_roots()),
         autoescape=False,
         undefined=StrictUndefined,
         keep_trailing_newline=True,
@@ -33,15 +32,15 @@ def _environment() -> Environment:
     )
 
 
-def _extension_prompt_roots() -> list[Path]:
-    roots: list[Path] = []
+def _extension_template_roots() -> dict[str, FileSystemLoader]:
+    roots: dict[str, FileSystemLoader] = {}
     for extension in iter_extensions():
         spec = importlib.util.find_spec(extension.package)
         if not spec or not spec.submodule_search_locations:
             continue
-        root = Path(spec.submodule_search_locations[0]) / "templates" / "prompts"
+        root = Path(spec.submodule_search_locations[0]) / "templates"
         if root.is_dir():
-            roots.append(root)
+            roots[extension.name] = FileSystemLoader(root)
     return roots
 
 
@@ -58,8 +57,7 @@ async def render_prompt(
 
     1. ``<repo>/.druks/<extension>/prompts/<rest>``           — repo-specific tuning
     2. ``<owner>/.druks`` repo ``<extension>/prompts/<rest>`` — org-wide tuning
-    3. bundled ``backend/templates/prompts/<name>`` and each installed extension's
-        own ``<package>/templates/prompts`` root      — built-in baseline
+    3. ``<rest>`` under the extension's own ``<package>/templates`` root — built-in baseline
 
     A 404 at a tier silently falls through to the next. Auth or network
     failures propagate — those are real misconfigurations and the

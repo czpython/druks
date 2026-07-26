@@ -70,7 +70,7 @@ def test_create_extension_rejects_bad_and_taken_names(tmp_path):
     with pytest.raises(ValueError, match="must match"):
         create_extension("Night-Watch", tmp_path)
     with pytest.raises(ValueError, match="already installed"):
-        create_extension("build", tmp_path)
+        create_extension("ship", tmp_path)
     create_extension("night_watch", tmp_path)
     with pytest.raises(ValueError, match="already exists"):
         create_extension("night_watch", tmp_path)

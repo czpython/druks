@@ -212,7 +212,7 @@ async def _unhandled_exception_handler(
 
 
 # Platform-core routers, mounted by hand at their own prefixes. Extension routers
-# (core, build, usage, …) are discovered and mounted under /api/<extension> by load().
+# (core, ship, usage, …) are discovered and mounted under /api/<extension> by load().
 # /api sits behind the identity gate except the identity/connection surface and
 # the health probe; /_external routes carry their own authentication. The
 # boundary test pins the split. The auth and harness-connection routers mount

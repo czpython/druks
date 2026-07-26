@@ -188,7 +188,7 @@ class _FakeTracker:
 @pytest.mark.asyncio
 async def test_remote_state_pushes_status(db_session, monkeypatch):
     from conftest import make_test_work_item
-    from druks.build import models
+    from druks.contrib.ship import models
 
     item = make_test_work_item(repo="acme/widget", source="linear", remote_key="ACME-1", title="t")
     fake = _FakeTracker()
@@ -211,7 +211,7 @@ async def test_remote_state_skips_non_tracker_source(db_session):
 @pytest.mark.asyncio
 async def test_remote_state_closes_on_failure(db_session, monkeypatch):
     from conftest import make_test_work_item
-    from druks.build import models
+    from druks.contrib.ship import models
     from druks.core.apis.linear import LinearAPIError
 
     item = make_test_work_item(repo="acme/widget", source="linear", remote_key="ACME-2", title="t")

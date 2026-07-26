@@ -1,7 +1,7 @@
 from datetime import UTC, datetime, timedelta
 from unittest import mock
 
-import druks.build.workflows  # noqa: F401  # registers build.build_workflow, the seeded kind
+import druks.contrib.ship.workflows  # noqa: F401  # registers ship.build, the seeded kind
 import pytest
 from conftest import make_test_work_item, seed_build_run, seed_run
 from dbos._error import DBOSWorkflowCancelledError

@@ -30,10 +30,10 @@ implementation — your verdict is the gate.
   output, and the planner folds it.
 - Do not require changes beyond what the issue and the existing codebase support.
 
-{% include "build/build_workflow/_header.md" %}
-{% include "build/build_workflow/_contract.md" %}
-{% include "build/build_workflow/_related_repos.md" %}
-{% include "build/build_workflow/_skills.md" %}
+{% include "ship/build/_header.md" %}
+{% include "ship/build/_contract.md" %}
+{% include "ship/build/_related_repos.md" %}
+{% include "ship/build/_skills.md" %}
 Review the current plan in one complete pass. Batch every blocking issue and every required clarification into a single response — there is no second automatic round.
 
 SCOPE & APPROACH REVIEW — do this BEFORE evaluating contract details. These are the holistic checks that, if missed, cost the most downstream: a wrong shape at the plan stage burns implementation + evaluation rounds that no amount of polishing recovers.

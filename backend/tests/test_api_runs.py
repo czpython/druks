@@ -46,7 +46,7 @@ def test_list_files_inventories_call_artifacts(
 ):
     run_id = _seed_run(tmp_path=tmp_path)
 
-    response = client.get(f"/api/build/transcripts/{run_id}/files")
+    response = client.get(f"/api/ship/transcripts/{run_id}/files")
 
     assert response.status_code == 200
     files = response.json()
@@ -66,7 +66,7 @@ def test_transcript_range_fetch_paginates(
     run_id = _seed_run(tmp_path=tmp_path)
 
     first = client.get(
-        f"/api/build/transcripts/{run_id}",
+        f"/api/ship/transcripts/{run_id}",
         params={"stream": "stdout", "limit": 5},
     )
     assert first.status_code == 200
@@ -78,7 +78,7 @@ def test_transcript_range_fetch_paginates(
     assert data["text"] == "hello"
 
     second = client.get(
-        f"/api/build/transcripts/{run_id}",
+        f"/api/ship/transcripts/{run_id}",
         params={"stream": "stdout", "offset": 5, "limit": 1024},
     )
     assert second.status_code == 200
@@ -95,7 +95,7 @@ def test_transcript_of_a_running_call_is_never_cached(
     call_id = _seed_run(tmp_path=tmp_path, finished=False)
 
     response = client.get(
-        f"/api/build/transcripts/{call_id}",
+        f"/api/ship/transcripts/{call_id}",
         params={"stream": "stdout", "limit": 5},
     )
 
@@ -113,7 +113,7 @@ def test_transcript_of_an_abandoned_call_is_cached_immutably(
     call_id = _seed_run(tmp_path=tmp_path, finished=False, run_state="failed")
 
     response = client.get(
-        f"/api/build/transcripts/{call_id}",
+        f"/api/ship/transcripts/{call_id}",
         params={"stream": "stdout", "limit": 5},
     )
 
@@ -132,7 +132,7 @@ def test_transcript_missing_file_returns_eof(
     run_id = run.id
 
     response = client.get(
-        f"/api/build/transcripts/{run_id}",
+        f"/api/ship/transcripts/{run_id}",
         params={"stream": "stdout"},
     )
 
@@ -152,7 +152,7 @@ def test_transcript_stream_emits_chunk_then_finishes(
     run_id = _seed_run(tmp_path=tmp_path)
 
     response = client.get(
-        f"/api/build/transcripts/{run_id}/stream",
+        f"/api/ship/transcripts/{run_id}/stream",
         params={"stream": "stdout"},
     )
 
@@ -169,7 +169,7 @@ def test_transcript_stream_unknown_call_closes(
 ):
     # No such call: the stream ends instead of keepaliving forever.
     response = client.get(
-        "/api/build/transcripts/no-such-call/stream",
+        "/api/ship/transcripts/no-such-call/stream",
         params={"stream": "stdout"},
     )
 
@@ -184,12 +184,12 @@ def test_get_file_serves_inventory_paths(
 ):
     run_id = _seed_run(tmp_path=tmp_path)
 
-    files = client.get(f"/api/build/transcripts/{run_id}/files").json()
+    files = client.get(f"/api/ship/transcripts/{run_id}/files").json()
     # Compose the download URL the way the client does: the listing's own route
     # plus the file's name — the wire carries names only.
     name = files["response"]["name"]
 
-    response = client.get(f"/api/build/transcripts/{run_id}/files/{name}")
+    response = client.get(f"/api/ship/transcripts/{run_id}/files/{name}")
     assert response.status_code == 200
     assert response.json() == {"ok": True}
 
@@ -202,7 +202,7 @@ def test_get_file_rejects_path_traversal(
     run_id = _seed_run(tmp_path=tmp_path)
 
     response = client.get(
-        f"/api/build/transcripts/{run_id}/files/..%2F..%2Fetc%2Fpasswd",
+        f"/api/ship/transcripts/{run_id}/files/..%2F..%2Fetc%2Fpasswd",
     )
 
     assert response.status_code == 404
@@ -216,7 +216,7 @@ def test_get_file_missing_returns_404(
     run_id = _seed_run(tmp_path=tmp_path)
 
     response = client.get(
-        f"/api/build/transcripts/{run_id}/files/nope.json",
+        f"/api/ship/transcripts/{run_id}/files/nope.json",
     )
 
     assert response.status_code == 404

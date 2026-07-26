@@ -4,7 +4,7 @@ import { UsagePanel } from '../components/UsagePanel'
 
 /**
  * Dedicated route for the usage detail view (formerly a panel on
- * /build). The compact pill stays in the appbar; clicking it lands
+ * /ship). The compact pill stays in the appbar; clicking it lands
  * here.
  *
  * Thin shell — the actual layout, data fetching, refresh button,

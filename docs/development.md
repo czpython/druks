@@ -60,7 +60,7 @@ contains the built SPA and serves it from FastAPI.
 | `backend/druks/sandbox/` | Drukbox lifecycle, SSH execution, workspace delivery |
 | `backend/druks/api/` | FastAPI composition and platform routes |
 | `backend/druks/{mcp,skills,notifications,user_settings}/` | Shared operator services |
-| `backend/druks/build/` | Bundled reference extension, not framework core |
+| `backend/druks/contrib/ship/` | Bundled reference extension, not framework core |
 | `frontend/src/` | Shared dashboard shell and bundled extension UI |
 | `backend/migrations/` | Core/bundled schema history |
 | `deploy/`, `scripts/` | Images, Compose, Caddy, setup, and deployment |

@@ -170,18 +170,18 @@ def test_patch_unknown_harness_is_404(tmp_path: Path):
     assert response.status_code == 404
 
 
-def _build_extension(client: TestClient) -> dict:
+def _ship_extension(client: TestClient) -> dict:
     body = client.get("/api/settings/extensions").json()
-    return next(m for m in body["extensions"] if m["name"] == "build")
+    return next(m for m in body["extensions"] if m["name"] == "ship")
 
 
 def test_extensions_surface_build_agents(tmp_path: Path):
-    """The build pipeline's agents all tune under the build extension."""
+    """The build pipeline's agents all tune under the Ship extension."""
     with _build_client(tmp_path) as client:
         body = client.get("/api/settings/extensions").json()
     extensions = {m["name"]: m for m in body["extensions"]}
 
-    build_agents = {a["name"]: a for a in extensions["build"]["agents"]}
+    build_agents = {a["name"]: a for a in extensions["ship"]["agents"]}
     # The build pipeline's plan stage stays; the standalone Plan-tab agent is gone.
     assert "generate_plan" in build_agents
     assert "planning" not in build_agents
@@ -189,7 +189,7 @@ def test_extensions_surface_build_agents(tmp_path: Path):
 
 def test_extensions_surface_build_agents_and_workflow_defaults(tmp_path: Path):
     with _build_client(tmp_path) as client:
-        build = _build_extension(client)
+        build = _ship_extension(client)
 
     agents = {a["name"]: a for a in build["agents"]}
     # An agent's family-token default resolves to the family's model; effort
@@ -224,7 +224,7 @@ def test_extensions_override_agent_model_persists(tmp_path: Path):
             json={"agentModels": {"implement": "gpt-5.5"}},
         )
         assert patch.status_code == 200
-        agents = {a["name"]: a for a in _build_extension(client)["agents"]}
+        agents = {a["name"]: a for a in _ship_extension(client)["agents"]}
 
     assert agents["implement"]["model"] == "gpt-5.5"
     assert agents["implement"]["source"] == "agent"
@@ -232,7 +232,7 @@ def test_extensions_override_agent_model_persists(tmp_path: Path):
 
 def test_extensions_harness_effort_and_per_agent_effort_override(tmp_path: Path):
     with _build_client(tmp_path) as client:
-        agents = {a["name"]: a for a in _build_extension(client)["agents"]}
+        agents = {a["name"]: a for a in _ship_extension(client)["agents"]}
         # generate_plan runs on codex and inherits the codex harness effort.
         assert agents["generate_plan"]["effort"] == "high"
         assert agents["generate_plan"]["effortSource"] == "harness"
@@ -240,7 +240,7 @@ def test_extensions_harness_effort_and_per_agent_effort_override(tmp_path: Path)
         # Retune the codex harness effort + override one agent.
         client.patch("/api/settings/harnesses/codex", json={"effort": "low"})
         client.patch("/api/settings/extensions", json={"agentEfforts": {"generate_plan": "high"}})
-        agents = {a["name"]: a for a in _build_extension(client)["agents"]}
+        agents = {a["name"]: a for a in _ship_extension(client)["agents"]}
         # generate_plan overridden; revise_contract (also codex) inherits "low".
         assert agents["generate_plan"]["effort"] == "high"
         assert agents["generate_plan"]["effortSource"] == "agent"
@@ -260,7 +260,7 @@ def test_extensions_reject_unknown_effort(tmp_path: Path):
 
 def test_extensions_harness_timeout_and_per_agent_timeout_override(tmp_path: Path):
     with _build_client(tmp_path) as client:
-        agents = {a["name"]: a for a in _build_extension(client)["agents"]}
+        agents = {a["name"]: a for a in _ship_extension(client)["agents"]}
         # implement runs on claude and inherits the claude harness timeout.
         assert agents["implement"]["timeout"] == 1800
         assert agents["implement"]["timeoutSource"] == "harness"
@@ -268,7 +268,7 @@ def test_extensions_harness_timeout_and_per_agent_timeout_override(tmp_path: Pat
         # Retune the claude harness timeout + override one agent.
         client.patch("/api/settings/harnesses/claude", json={"timeout": 1200})
         client.patch("/api/settings/extensions", json={"agentTimeouts": {"implement": 3600}})
-        agents = {a["name"]: a for a in _build_extension(client)["agents"]}
+        agents = {a["name"]: a for a in _ship_extension(client)["agents"]}
         # implement overridden; review_plan (also claude) inherits 1200.
         assert agents["implement"]["timeout"] == 3600
         assert agents["implement"]["timeoutSource"] == "agent"
@@ -288,7 +288,7 @@ def test_extensions_reject_non_positive_timeout(tmp_path: Path):
 def test_build_review_code_is_a_workflow_setting(tmp_path: Path):
     """Gating the code reviewer is a build-workflow boolean, not an agent flag."""
     with _build_client(tmp_path) as client:
-        workflow = _build_extension(client)["workflows"][0]
+        workflow = _ship_extension(client)["workflows"][0]
         fields = {f["name"]: f for f in workflow["fields"]}
         assert fields["review_code"]["value"] is True
         assert fields["review_code"]["overridden"] is False
@@ -298,7 +298,7 @@ def test_build_review_code_is_a_workflow_setting(tmp_path: Path):
             json={"workflowSettings": {workflow["kind"]: {"review_code": False}}},
         )
         assert patch.status_code == 200
-        fields = {f["name"]: f for f in _build_extension(client)["workflows"][0]["fields"]}
+        fields = {f["name"]: f for f in _ship_extension(client)["workflows"][0]["fields"]}
         assert fields["review_code"]["value"] is False
         assert fields["review_code"]["overridden"] is True
 
@@ -367,13 +367,13 @@ def test_extensions_clearing_an_override_reverts_to_the_family_default(tmp_path:
         client.patch(
             "/api/settings/extensions", json={"agentModels": {"generate_plan": "claude-opus-4-7"}}
         )
-        agents = {a["name"]: a for a in _build_extension(client)["agents"]}
+        agents = {a["name"]: a for a in _ship_extension(client)["agents"]}
         assert agents["generate_plan"]["model"] == "claude-opus-4-7"
         assert agents["generate_plan"]["source"] == "agent"
 
         # Null clears the override; the agent falls back to its family default.
         client.patch("/api/settings/extensions", json={"agentModels": {"generate_plan": None}})
-        agents = {a["name"]: a for a in _build_extension(client)["agents"]}
+        agents = {a["name"]: a for a in _ship_extension(client)["agents"]}
         assert agents["generate_plan"]["model"] == "gpt-5.5"
         assert agents["generate_plan"]["source"] == "default"
 
@@ -393,12 +393,10 @@ def test_extensions_override_workflow_setting_persists(tmp_path: Path):
     with _build_client(tmp_path) as client:
         patch = client.patch(
             "/api/settings/extensions",
-            json={
-                "workflowSettings": {"build.build_workflow": {"max_implementation_revisions": 8}}
-            },
+            json={"workflowSettings": {"ship.build": {"max_implementation_revisions": 8}}},
         )
         assert patch.status_code == 200
-        fields = {f["name"]: f for f in _build_extension(client)["workflows"][0]["fields"]}
+        fields = {f["name"]: f for f in _ship_extension(client)["workflows"][0]["fields"]}
 
     assert fields["max_implementation_revisions"]["value"] == 8
     assert fields["max_implementation_revisions"]["overridden"] is True
@@ -408,6 +406,6 @@ def test_extensions_reject_out_of_range_workflow_setting(tmp_path: Path):
     with _build_client(tmp_path) as client:
         response = client.patch(
             "/api/settings/extensions",
-            json={"workflowSettings": {"build_workflow": {"max_implementation_revisions": 99}}},
+            json={"workflowSettings": {"ship.build": {"max_implementation_revisions": 99}}},
         )
     assert response.status_code == 422
