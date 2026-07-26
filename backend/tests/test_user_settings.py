@@ -13,10 +13,10 @@ from pydantic import BaseModel, Field, SecretStr, field_validator
 
 
 @pytest.fixture
-def session(db_session):
+def session(druks_db):
     # The per-test connection session (rolled back at teardown); reference rows
     # (the seeded harnesses) come from the session-scoped schema build.
-    return db_session
+    return druks_db
 
 
 def test_get_lazy_creates_row_with_default_timezone(session):

@@ -11,3 +11,8 @@ from druks.workflows import FatalError, Gate, Subject, Workflow, step  # noqa: F
 # ``StoredSubject`` row, or None for a background run.
 # Only if a workflow grows launch policy (dedupe, routing, subject lookup) wrap
 # start() in a ``dispatch()`` classmethod and point callers there instead.
+
+
+class Echo(Workflow):
+    async def run(self, message: str) -> str:
+        return message

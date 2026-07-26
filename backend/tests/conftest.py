@@ -1,46 +1,14 @@
-import base64
 import os
-import secrets
-from pathlib import Path
 from unittest import mock
 
-# The models modules register their tables on Base for init_db's create_all.
-import druks.durable.models  # noqa: F401
-import druks.harnesses.models  # noqa: F401
-import druks.mcp.models  # noqa: F401
-import druks.notifications.models  # noqa: F401
-import druks.redis
-import druks.skills.models  # noqa: F401
-import druks.user_settings.models  # noqa: F401
 import pytest
-from druks.bootstrap import seed
-from druks.database import (
-    _session_factory,
-    configure_session,
-    create_engine_from_url,
-)
+from druks.database import create_engine_from_url
+from druks.durable.dbos_state import DBOS_SYSTEM_SCHEMA
 from druks.extensions.loader import (
-    import_extension_models,
     iter_extensions,
     register_workflow_package,
 )
 from druks.models import Base
-from druks.settings import Settings
-from sqlalchemy import text
-from sqlalchemy.orm import Session
-
-# Every Session the suite opens binds to the per-test connection (the _txn
-# fixture), which already has a transaction open; create_savepoint turns the
-# app's own commits into savepoints so they don't end that transaction — the
-# whole test rolls back at teardown, on the SAME real-transaction engine
-# production uses (no AUTOCOMMIT pretence). On the durable tests, whose factory
-# binds to a plain engine with no open transaction, the mode is inert.
-_session_factory.configure(join_transaction_mode="create_savepoint")
-
-# Stored secrets encrypt at rest; the suite needs a key before any model write
-# or delivery read touches them. setdefault so an operator-exported key (or a
-# rotation test's monkeypatch) still wins.
-os.environ.setdefault("DRUKS_SECRETS_KEY", base64.b64encode(secrets.token_bytes(32)).decode())
 
 # A Workflow class resolves its declaring extension at definition time, from
 # packages the loader registers before importing. Tests import workflow modules
@@ -52,14 +20,8 @@ for test_module in ("test_durable_sdk", "test_notifications_durable"):
 
 
 @pytest.fixture(autouse=True)
-async def _redis():
-    # Real Redis (CI runs one beside Postgres; settings default to it). Drop
-    # whatever client the previous test left — its event loop is gone, GC
-    # closes the sockets — then flush on a fresh client and close it, so every
-    # consumer dials on its own live loop (a TestClient portal, or this test's).
-    druks.redis._client = None
-    await druks.redis.get_client().flushdb()
-    await druks.redis.close_client()
+async def _redis(druks_redis):
+    yield
 
 
 @pytest.fixture(autouse=True)
@@ -95,7 +57,6 @@ def _no_durable_dispatch(request):
     with (
         mock.patch.object(Workflow, "start", classmethod(_noop)),
         mock.patch("druks.agents.set_run_phase", _phase_noop),
-        mock.patch("druks.contrib.ship.extension.get_subject_phase", _phase_noop),
         mock.patch("dbos.DBOS.cancel_workflow_async", _dbos_cancel),
     ):
         yield
@@ -106,28 +67,20 @@ TEST_DATABASE_URL = os.environ.get(
 )
 
 
-def make_settings(tmp_path: Path, **overrides: object) -> Settings:
-    defaults = {
-        "data_dir": tmp_path,
-        "database_url": TEST_DATABASE_URL,
-        "webhook_secret": "test-secret",
-        "github_api_url": "https://api.github.com",
-        "github_operator_app_id": None,
-        "github_operator_private_key_path": None,
-        "github_reviewer_app_id": None,
-        "github_reviewer_private_key_path": None,
-        "linear_webhook_secret": "",
-        "linear_api_key": None,
-        # Null jira explicitly so a developer's real JIRA_* env vars don't leak
-        # in and make "unconfigured" tests see a configured tracker.
-        "jira_base_url": None,
-        "jira_email": None,
-        "jira_api_token": None,
-        "redis_url": "redis://127.0.0.1:6379/0",
-        "log_level": "WARNING",
-    }
-    defaults.update(overrides)
-    return Settings(**defaults)  # type: ignore[arg-type]
+
+@pytest.fixture(scope="session", autouse=True)
+def _reset_test_database():
+    # The repository suite owns its scratch database and starts from a clean
+    # application and DBOS schema; the shipped fixtures never destroy schemas. This
+    # runs before any test, so the shipped session fixture builds onto the fresh one.
+    engine = create_engine_from_url(TEST_DATABASE_URL)
+    with engine.connect() as connection:
+        connection.exec_driver_sql("DROP SCHEMA IF EXISTS public CASCADE")
+        connection.exec_driver_sql("CREATE SCHEMA public")
+        connection.exec_driver_sql(f"DROP SCHEMA IF EXISTS {DBOS_SYSTEM_SCHEMA} CASCADE")
+        connection.commit()
+    engine.dispose()
+    yield
 
 
 class FakeLinear:
@@ -136,54 +89,6 @@ class FakeLinear:
 
     async def get_issue(self, issue_id: str) -> dict[str, object]:
         return {"description": self._description}
-
-
-def init_db(engine) -> None:
-    """Create any missing tables and run the first-start seeds — the suite's
-    schema path. Production schema is owned by Alembic (``druks init-db`` runs
-    ``alembic upgrade head``). Idempotent."""
-    import_extension_models()
-    # citext backs the case-insensitive email columns; create_all needs the
-    # type to exist first (production gets it from the accounts migration).
-    with engine.begin() as connection:
-        connection.execute(text("CREATE EXTENSION IF NOT EXISTS citext"))
-    Base.metadata.create_all(engine)
-    seed(engine)
-
-
-@pytest.fixture(scope="session")
-def _test_engine():
-    # One real-transaction engine for the whole session; per-test isolation is
-    # the transaction rollback in _txn, not a per-test engine or schema rebuild.
-    engine = create_engine_from_url(TEST_DATABASE_URL)
-    yield engine
-    engine.dispose()
-
-
-@pytest.fixture(scope="session", autouse=True)
-def _test_schema(_test_engine):
-    # Build the schema + seed reference rows (harnesses) once for the session and
-    # commit them: they live outside every test's rolled-back transaction, so all
-    # tests see them and none can mutate them for another. Run.state derives off
-    # dbos.workflow_status, so the DBOS system tables must exist beside the app
-    # schema — built here the way production builds them (DBOS.launch runs the
-    # same migrations), not from DBOS's internal metadata (whose schema is an
-    # unsubstituted placeholder outside the migration path).
-    from dbos import run_dbos_database_migrations
-    from druks.durable.dbos_state import DBOS_SYSTEM_SCHEMA
-    from druks.durable.engine import _dbos_database_url
-
-    with _test_engine.connect() as conn:
-        conn.exec_driver_sql("DROP SCHEMA IF EXISTS public CASCADE")
-        conn.exec_driver_sql("CREATE SCHEMA public")
-        conn.exec_driver_sql(f"DROP SCHEMA IF EXISTS {DBOS_SYSTEM_SCHEMA} CASCADE")
-        conn.commit()
-    init_db(_test_engine)
-    run_dbos_database_migrations(
-        _dbos_database_url(_test_engine.url.render_as_string(hide_password=False)),
-        schema=DBOS_SYSTEM_SCHEMA,
-    )
-    yield
 
 
 @pytest.fixture
@@ -198,11 +103,6 @@ def registry_state():
     mcp_servers._items.clear()
     mcp_servers._items.update(saved)
 
-
-# The connection the current test's transaction is open on — what db_engine, the
-# db_session fixture, and configure_app_for_test all bind to, so a seed written
-# through one is visible in the others (one connection, one txn).
-_test_connection: object | None = None
 
 # These modules manage their own engine + database and commit for real — the DBOS
 # durable tests (their own per-test database + worker connections that read across
@@ -223,80 +123,13 @@ _OWN_DATABASE_MODULES = {
 
 
 @pytest.fixture(autouse=True)
-def _txn(request, _test_engine):
-    # Per-test isolation by transaction rollback: open one connection, begin a
-    # transaction, point the session registry and the durable step engine at it,
-    # roll back at the end. Seeds are visible everywhere without committing and
-    # nothing reaches the next test. (PG sequences are non-transactional, so unlike
-    # the old TRUNCATE RESTART IDENTITY this does NOT reset auto-increment ids —
-    # capture row.id, don't assert a literal.)
+def _platform_database(request):
     if request.module.__name__.rsplit(".", 1)[-1] in _OWN_DATABASE_MODULES:
         yield
         return
 
-    global _test_connection
-    from druks.database import db_session as registry
-    from druks.durable.engine import configure_engine
-
-    conn = _test_engine.connect()
-    txn = conn.begin()
-    # The connection is owned by this fixture, not the app: a test that enters
-    # the app lifespan (``with TestClient(app)``) would otherwise dispose() it on
-    # teardown, but a Connection has no dispose — and we must keep it open to roll
-    # back. Neutralise that one call.
-    conn.dispose = lambda: None
-    configure_session(conn)
-    configure_engine(conn)
-    _test_connection = conn
-    registry.remove()
-    try:
-        yield
-    finally:
-        registry.remove()
-        _test_connection = None
-        configure_engine(None)
-        txn.rollback()
-        conn.close()
-
-
-@pytest.fixture
-def db_engine():
-    # The per-test connection (its transaction already open); tests and the app
-    # process both bind to it, so writes are visible across them without a commit.
-    return _test_connection
-
-
-def configure_app_for_test(
-    *,
-    settings: Settings,
-    engine=None,
-    authenticated: bool = True,
-):
-
-    from druks.accounts.dependencies import current_account, current_session_account
-    from druks.api.app import app
-
-    if engine is None:
-        engine = _test_connection
-
-    configure_session(engine)
-    app.state.settings = settings
-    app.state.engine = engine
-    if authenticated:
-        # Stand a resolved operator in for both identity gates; identity tests
-        # pass authenticated=False and walk the real per-request resolvers.
-        app.dependency_overrides[current_account] = _test_account
-        app.dependency_overrides[current_session_account] = _test_account
-    return app
-
-
-async def _test_account():
-    from druks.accounts.context import current_account_id
-    from druks.accounts.models import Account
-
-    account = Account.get_or_create("op@example.com")
-    current_account_id.set(account.id)
-    return account
+    request.getfixturevalue("druks_db")
+    yield
 
 
 @pytest.fixture(autouse=True)
@@ -321,24 +154,6 @@ def _no_druks_namespace_fetches(monkeypatch):
 
     monkeypatch.setattr("druks.prompts.resolver.fetch_file", _none)
     monkeypatch.setattr("druks.extensions.config.fetch_file", _none)
-
-
-@pytest.fixture
-def db_session(db_engine):
-    # A session on the per-test connection, bound to the ambient registry so model
-    # classmethods that call ``db_session()`` see the same rows the test seeds
-    # directly. create_savepoint so a commit under test is a savepoint, not an end
-    # to the test's outer transaction. The registry bind and the durable step engine
-    # were already pointed at this connection by ``_txn``.
-    from druks.database import db_session as _db_session_registry
-
-    session = Session(db_engine, join_transaction_mode="create_savepoint", autoflush=True)
-    _db_session_registry.registry.set(session)
-    try:
-        yield session
-    finally:
-        _db_session_registry.remove()
-        session.close()
 
 
 def bind_ambient_session(session) -> None:
@@ -367,146 +182,7 @@ def connect_harness(harness_cls, payload: dict, *, provider_email: str = "op@exa
     )
 
 
-def seed_dbos_status(session, workflow_id: str, state: str, *, subject=None) -> None:
-    """Write the ``dbos.workflow_status`` row a Run's derived ``state`` reads,
-    carrying the subject attributes ``start()`` stamps — the paired half of
-    every persisted run seed (there is no state column)."""
-    from druks.durable.dbos_state import workflow_status
-    from druks.models import Base
 
-    status = {
-        "scheduled": "ENQUEUED",
-        "running": "PENDING",
-        "parked": "PENDING",
-        "finished": "SUCCESS",
-        "failed": "ERROR",
-        "cancelled": "CANCELLED",
-    }[state]
-    now_ms = int(Base.utc_now().timestamp() * 1000)
-    attributes = None
-    if subject:
-        attributes = {"subject_type": subject["type"], "subject_id": str(subject["id"])}
-    # created_at / priority carry server defaults in the dbos schema; the
-    # derivation and subject keying read only these.
-    session.execute(
-        workflow_status.insert().values(
-            workflow_uuid=workflow_id,
-            status=status,
-            updated_at=now_ms,
-            attributes=attributes,
-        )
-    )
-    session.flush()
-
-
-def seed_build_run(
-    session,
-    *,
-    work_item_id: int,
-    state: str = "running",
-    input_gate: str | None = None,
-    input_request: dict | None = None,
-    failure: str | None = None,
-    account_id: str | None = None,
-):
-    """Seed a build Run row for a work item and bind it via
-    ``item.build_run_id``. Returns the Run. Attach agent calls with
-    ``seed_call(session, run, agent)``; the run + its calls are the item's
-    timeline."""
-    from druks.contrib.ship.models import WorkItem
-    from druks.durable import Run
-    from uuid_utils import uuid7
-
-    if state == "parked" and input_gate is None:
-        input_gate = "review"  # a parked run always has a gate; derivation needs it
-    run = Run(
-        id=str(uuid7()),
-        kind="ship.build",
-        input_gate=input_gate,
-        input_request=input_request,
-        failure=failure,
-        account_id=account_id,
-    )
-    session.add(run)
-    session.flush()
-    seed_dbos_status(session, run.id, state, subject={"type": "work_item", "id": work_item_id})
-    item = WorkItem.get(work_item_id)
-    item.build_run_id = run.id
-    session.flush()
-    return run
-
-
-def seed_call(session, run, agent, *, status="succeeded", last_error=None, model="gpt-5.5"):
-    """Seed an AgentCall (the timeline's call row) on a run, stamped with the
-    agent that made it."""
-    from druks.durable import AgentCall
-    from druks.models import Base
-
-    call = AgentCall(
-        run_id=run.id,
-        agent=getattr(agent, "value", agent),
-        model=model,
-        status=status,
-        last_error=last_error,
-        finished_at=Base.utc_now() if status != "running" else None,
-        sandbox_host_id=f"test-host-{run.id}",
-    )
-    session.add(call)
-    session.flush()
-    return call
-
-
-def seed_agent_run(
-    *,
-    agent: str = "implement",
-    repo: str = "ClawHaven/acme-app",
-    work_item_id: int | None = None,
-    host_id: str | None = None,
-    model: str | None = "gpt-5.5",
-    workflow_id: str | None = None,
-    run_state: str = "running",
-):
-    """Create a build Run and an AgentCall on it, returning the AgentCall.
-
-    When ``work_item_id`` is given the run binds to it (so the call surfaces
-    on that item's detail timeline); otherwise a fresh work item is created.
-    Pass ``workflow_id`` to attach to an existing run instead."""
-    from druks.contrib.ship.models import Project, ProjectRepo, WorkItem
-    from druks.database import db_session
-    from druks.durable import AgentCall, Run
-
-    session = db_session()
-    if workflow_id is None:
-        if work_item_id is None:
-            project = Project.get_for_repo(repo)
-            if project is None:
-                project = Project.create(name=repo)
-                ProjectRepo.create(project_id=project.id, full_name=repo)
-            work_item_id = WorkItem.create(project_id=project.id, title="x", repo=repo).id
-        run = seed_build_run(session, work_item_id=work_item_id, state=run_state)
-        workflow_id = run.id
-    else:
-        run = Run.get(workflow_id)
-
-    call = AgentCall(
-        sandbox_host_id=host_id or f"test-host-{workflow_id}",
-        model=model,
-        run_id=workflow_id,
-        agent=agent,
-    )
-    session.add(call)
-    session.flush()
-    return call
-
-
-def seed_run(session, run_id, *, kind="ship.build", account_id="system", input_gate=None):
-    # A bare durable_runs row so an AgentCall / Artifact FK to it resolves.
-    from druks.durable import Run
-
-    run = Run(id=run_id, kind=kind, account_id=account_id, input_gate=input_gate)
-    session.add(run)
-    session.flush()
-    return run
 
 
 def make_agent_result(output, *, agent="agent", status=None, cost_usd=None, cost_metadata=None):
@@ -533,7 +209,6 @@ def finish_agent_run(call, *, status=None, last_error=None):
     # Mark a seeded AgentCall finished (prod builds finished rows via AgentCall.record).
     from druks.database import db_session
     from druks.durable.enums import AgentCallStatus
-    from druks.models import Base
 
     call.status = (status or AgentCallStatus.SUCCEEDED).value
     call.last_error = last_error
@@ -542,14 +217,30 @@ def finish_agent_run(call, *, status=None, last_error=None):
     return call
 
 
-def make_test_work_item(*, repo: str, **kwargs):
-    """Create a WorkItem with the required Project / ProjectRepo binding
-    for tests. Looks up an existing Project by repo name; otherwise
-    creates the chain. Extra kwargs flow into ``WorkItem.create``."""
-    from druks.contrib.ship.models import Project, ProjectRepo, WorkItem
 
-    project = Project.get_for_repo(repo)
-    if project is None:
-        project = Project.create(name=repo)
-        ProjectRepo.create(project_id=project.id, full_name=repo)
-    return WorkItem.create(project_id=project.id, repo=repo, **kwargs)
+
+def make_test_note(body: str = "a note"):
+    """The platform suite's subject. It belongs to the proof extension, not to ship —
+    platform behavior must hold for any extension's rows."""
+    from druks_field_notes.models import Note
+
+    return Note.create(body=body)
+
+
+def seed_note_run(session, *, note=None, state: str = "running", **kwargs):
+    """A run on a note, seeding one if the caller has none."""
+    from druks.testing import seed_run
+    from druks_field_notes.workflows import Summarize
+
+    subject = note or make_test_note()
+    return seed_run(session, kind=Summarize.kind, subject=subject, state=state, **kwargs)
+
+
+def seed_note_agent_run(*, agent: str = "implement", model: str | None = "gpt-5.5", **kwargs):
+    """A run on a fresh note with one agent call on it — the call is what the caller wants."""
+    from druks.database import db_session
+    from druks.testing import seed_call
+
+    session = db_session()
+    run = seed_note_run(session, **kwargs)
+    return seed_call(session, run, agent, status="running", model=model)

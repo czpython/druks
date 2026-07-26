@@ -2,8 +2,8 @@ from types import SimpleNamespace
 from typing import Any, cast
 
 import druks.core.webhooks.linear as linear_mod
-from conftest import make_settings
 from druks.core.webhooks.linear import LinearEvents
+from druks.testing import make_settings
 
 
 def _provider(tmp_path, *, payload):

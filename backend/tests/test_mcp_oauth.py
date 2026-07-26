@@ -7,7 +7,6 @@ from urllib.parse import parse_qsl, urlparse
 import druks.redis
 import httpx
 import pytest
-from conftest import configure_app_for_test, make_settings
 from druks.extensions.registry import mcp_servers
 from druks.mcp import oauth
 from druks.mcp.constants import (
@@ -21,6 +20,7 @@ from druks.mcp.helpers import get_bearer_token_env_var
 from druks.mcp.models import McpOauthGrant, McpServer
 from druks.redis import close_client, get_client
 from druks.sandbox.datastructures import Workspace
+from druks.testing import configure_app_for_test, make_settings
 from fastapi.testclient import TestClient
 
 _NAME = "linear_oauth"
@@ -182,7 +182,7 @@ async def test_begin_connect_requires_s256_when_methods_are_advertised(auth_serv
         await oauth.begin_connect(_NAME, _SERVER_URL, _ENDPOINT)
 
 
-async def test_complete_connect_exchanges_code_and_stores_the_grant(auth_server, db_session):
+async def test_complete_connect_exchanges_code_and_stores_the_grant(auth_server, druks_db):
     url = await oauth.begin_connect(_NAME, _SERVER_URL, _ENDPOINT)
     state = dict(parse_qsl(urlparse(url).query))["state"]
 
@@ -212,7 +212,7 @@ async def test_complete_connect_exchanges_code_and_stores_the_grant(auth_server,
         await oauth.complete_connect(state=state, code="code-1")
 
 
-async def test_complete_connect_without_refresh_token_stores_nothing(auth_server, db_session):
+async def test_complete_connect_without_refresh_token_stores_nothing(auth_server, druks_db):
     auth_server.token_response = {"access_token": "at-1", "expires_in": 3600}
     url = await oauth.begin_connect(_NAME, _SERVER_URL, _ENDPOINT)
     state = dict(parse_qsl(urlparse(url).query))["state"]
@@ -225,7 +225,7 @@ async def test_complete_connect_without_refresh_token_stores_nothing(auth_server
 # --- mint: cache, refresh, rotation, eviction -------------------------------
 
 
-async def test_mint_refreshes_on_cache_miss_and_persists_rotation(auth_server, db_session):
+async def test_mint_refreshes_on_cache_miss_and_persists_rotation(auth_server, druks_db):
     _store_grant(refresh_token="rt-old")
     auth_server.token_response = {
         "access_token": "at-2",
@@ -249,12 +249,12 @@ async def test_mint_refreshes_on_cache_miss_and_persists_rotation(auth_server, d
     assert len(auth_server.token_requests) == 1
 
 
-async def test_mint_without_grant_fails_loudly(db_session):
+async def test_mint_without_grant_fails_loudly(druks_db):
     with pytest.raises(MissingGrantError, match=_NAME):
         await oauth.mint_access_token(_NAME)
 
 
-async def test_mint_refresh_rejection_fails_loudly_and_evicts_the_cache(auth_server, db_session):
+async def test_mint_refresh_rejection_fails_loudly_and_evicts_the_cache(auth_server, druks_db):
     _store_grant()
     auth_server.token_status = 400
 
@@ -263,7 +263,7 @@ async def test_mint_refresh_rejection_fails_loudly_and_evicts_the_cache(auth_ser
     assert not await get_client().get(f"{OAUTH_ACCESS_TOKEN_PREFIX}{_NAME}")
 
 
-async def test_mint_rejects_a_malformed_token_response(auth_server, db_session):
+async def test_mint_rejects_a_malformed_token_response(auth_server, druks_db):
     _store_grant()
     auth_server.token_malformed = True
 
@@ -271,7 +271,7 @@ async def test_mint_rejects_a_malformed_token_response(auth_server, db_session):
         await oauth.mint_access_token(_NAME)
 
 
-async def test_mint_rejects_a_token_response_without_an_access_token(auth_server, db_session):
+async def test_mint_rejects_a_token_response_without_an_access_token(auth_server, druks_db):
     _store_grant()
     auth_server.token_response = {"refresh_token": "rt-2", "expires_in": 3600}
 
@@ -280,7 +280,7 @@ async def test_mint_rejects_a_token_response_without_an_access_token(auth_server
 
 
 async def test_mint_losing_the_refresh_lock_polls_for_the_winners_token(
-    auth_server, db_session, monkeypatch
+    auth_server, druks_db, monkeypatch
 ):
     # A second minter never refreshes (one rotation spender per server) and
     # never blocks the event loop: it polls until the winner's token appears
@@ -300,7 +300,7 @@ async def test_mint_losing_the_refresh_lock_polls_for_the_winners_token(
     assert not auth_server.token_requests
 
 
-async def test_mint_times_out_loudly_when_the_refresh_lock_never_frees(db_session, monkeypatch):
+async def test_mint_times_out_loudly_when_the_refresh_lock_never_frees(druks_db, monkeypatch):
     _store_grant()
     monkeypatch.setattr(oauth, "OAUTH_MINT_WAIT_INTERVAL_SECONDS", 0)
     monkeypatch.setattr(oauth, "OAUTH_MINT_WAIT_ATTEMPTS", 3)
@@ -313,7 +313,7 @@ async def test_mint_times_out_loudly_when_the_refresh_lock_never_frees(db_sessio
 # --- delivery: the oauth branch of the fold ---------------------------------
 
 
-async def test_delivery_mints_and_injects_the_oauth_token(registry_state, auth_server, db_session):
+async def test_delivery_mints_and_injects_the_oauth_token(registry_state, auth_server, druks_db):
     _register_oauth_server()
     _store_grant()
 
@@ -328,7 +328,7 @@ async def test_delivery_mints_and_injects_the_oauth_token(registry_state, auth_s
 
 
 async def test_delivery_fails_loudly_for_an_unconnected_enabled_oauth_server(
-    registry_state, db_session
+    registry_state, druks_db
 ):
     _register_oauth_server()
 
@@ -339,7 +339,7 @@ async def test_delivery_fails_loudly_for_an_unconnected_enabled_oauth_server(
 # --- API: connect / callback / disconnect / badge ---------------------------
 
 
-def test_connect_route_requires_druks_endpoint(tmp_path, registry_state, db_session):
+def test_connect_route_requires_druks_endpoint(tmp_path, registry_state, druks_db):
     _register_oauth_server()
     with TestClient(configure_app_for_test(settings=make_settings(tmp_path))) as client:
         response = client.post(f"/api/mcp-servers/{_NAME}/connect")
@@ -347,12 +347,12 @@ def test_connect_route_requires_druks_endpoint(tmp_path, registry_state, db_sess
         assert "DRUKS_ENDPOINT" in response.text
 
 
-def test_connect_route_rejects_a_non_oauth_server(tmp_path, db_session):
+def test_connect_route_rejects_a_non_oauth_server(tmp_path, druks_db):
     with TestClient(configure_app_for_test(settings=make_settings(tmp_path))) as client:
         assert client.post("/api/mcp-servers/github/connect").status_code == 404
 
 
-def test_connect_route_returns_the_consent_url(tmp_path, registry_state, auth_server, db_session):
+def test_connect_route_returns_the_consent_url(tmp_path, registry_state, auth_server, druks_db):
     _register_oauth_server()
     settings = make_settings(tmp_path, endpoint=_ENDPOINT)
     with TestClient(configure_app_for_test(settings=settings)) as client:
@@ -361,7 +361,7 @@ def test_connect_route_returns_the_consent_url(tmp_path, registry_state, auth_se
         assert response.json()["authorizationUrl"].startswith(f"{_AUTH_BASE}/authorize?")
 
 
-def test_callback_route_completes_the_connect(tmp_path, registry_state, auth_server, db_session):
+def test_callback_route_completes_the_connect(tmp_path, registry_state, auth_server, druks_db):
     _register_oauth_server(enabled=False)
     settings = make_settings(tmp_path, endpoint=_ENDPOINT)
 
@@ -395,7 +395,7 @@ def test_callback_route_completes_the_connect(tmp_path, registry_state, auth_ser
 
 
 async def test_disconnect_route_drops_grant_and_cache(
-    tmp_path, registry_state, auth_server, db_session
+    tmp_path, registry_state, auth_server, druks_db
 ):
     _register_oauth_server()
     _store_grant()
@@ -420,7 +420,7 @@ async def test_disconnect_route_drops_grant_and_cache(
     assert not await get_client().get(f"{OAUTH_ACCESS_TOKEN_PREFIX}{_NAME}")
 
 
-def test_api_has_token_reflects_the_grant_and_leaks_no_secret(tmp_path, registry_state, db_session):
+def test_api_has_token_reflects_the_grant_and_leaks_no_secret(tmp_path, registry_state, druks_db):
     _register_oauth_server()
     with TestClient(configure_app_for_test(settings=make_settings(tmp_path))) as client:
         server = next(s for s in client.get("/api/mcp-servers").json() if s["name"] == _NAME)

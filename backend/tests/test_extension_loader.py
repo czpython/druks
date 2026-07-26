@@ -7,11 +7,10 @@ def test_import_extension_models_registers_ship_via_generic_discovery():
     # Ship's tables are unprefixed (they live in core's schema), so it flows through the
     # same iter_extensions() path as any extension — exempt via prefix_tables=False, not a
     # hardcoded platform import.
-    from druks.contrib.ship.extension import Ship
-    from druks.extensions.loader import import_extension_models
+    from druks.extensions.loader import get_extension, import_extension_models
     from druks.models import Base
 
-    assert Ship.prefix_tables is False
+    assert get_extension("ship").prefix_tables is False
     import_extension_models()  # idempotent; raises if the unprefixed tables aren't exempt
     assert {"projects", "work_items", "project_repos"} <= set(Base.metadata.tables)
 

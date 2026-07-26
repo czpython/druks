@@ -2,10 +2,10 @@ import os
 
 import psycopg
 import pytest
-from conftest import init_db
 from druks.database import configure_session, db_session, get_session
 from druks.harnesses.claude import ClaudeHarness
 from druks.harnesses.models import HarnessConnection
+from druks.testing import init_db
 from sqlalchemy import create_engine, text
 
 # The credential store's whole job is to persist a rotated credential dict

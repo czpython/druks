@@ -69,6 +69,9 @@ def test_request_that_never_touches_the_db_opens_no_session(monkeypatch):
         return original()
 
     monkeypatch.setattr(db_session.registry, "createfunc", counting)
+    # The harness binds an ambient session; drop it so what the registry holds here
+    # is only what a request opened.
+    db_session.remove()
     app = FastAPI(dependencies=[Depends(_release_db_session)])
 
     @app.get("/plain")

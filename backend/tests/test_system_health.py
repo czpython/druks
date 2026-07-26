@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from conftest import configure_app_for_test, make_settings
+from druks.testing import configure_app_for_test, make_settings
 from fastapi.testclient import TestClient
 
 

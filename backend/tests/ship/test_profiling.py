@@ -9,12 +9,12 @@ from druks.skills.models import SkillCollection
 
 
 @pytest.fixture(autouse=True)
-def _passthrough_step(monkeypatch, db_engine):
+def _passthrough_step(monkeypatch, druks_db):
     # run() is itself a durable step (single-operation workflow) — route it
     # straight through so the test needs no live DBOS runtime.
     from druks.durable.engine import configure_engine
 
-    configure_engine(db_engine)
+    configure_engine(druks_db.connection())
 
     async def _run_step(_options, fn):
         return await fn()
@@ -79,7 +79,7 @@ def test_profiler_output_maps_onto_the_stored_shape():
 
 
 @pytest.mark.parametrize("refresh_only", [False, True])
-async def test_dispatch_shapes_the_profile_start(db_session, monkeypatch, refresh_only):
+async def test_dispatch_shapes_the_profile_start(druks_db, monkeypatch, refresh_only):
     repo = _seed_repo()
     calls: list[dict] = []
 
@@ -96,7 +96,7 @@ async def test_dispatch_shapes_the_profile_start(db_session, monkeypatch, refres
 
 
 class TestProfileRun:
-    async def test_persists_baseline_and_effective(self, db_session, monkeypatch):
+    async def test_persists_baseline_and_effective(self, druks_db, monkeypatch):
         _seed_skills("django-patterns")
         repo = _seed_repo()
 
@@ -114,7 +114,7 @@ class TestProfileRun:
         assert repo.profile["baseline"]["languages"] == ["python"]
         assert repo.effective_profile()["verification"]["lint_commands"] == ["ruff check ."]
 
-    async def test_drops_skills_that_are_not_enabled(self, db_session, monkeypatch):
+    async def test_drops_skills_that_are_not_enabled(self, druks_db, monkeypatch):
         _seed_skills("django-patterns", "retired-skill", disabled=("retired-skill",))
         repo = _seed_repo()
 
@@ -132,7 +132,7 @@ class TestProfileRun:
 
         assert repo.profile["baseline"]["recommended_skills"] == ["django-patterns"]
 
-    async def test_pinned_verification_replaces_the_detected_one(self, db_session, monkeypatch):
+    async def test_pinned_verification_replaces_the_detected_one(self, druks_db, monkeypatch):
         repo = _seed_repo()
 
         async def _profiler(*, repo: str):
@@ -155,7 +155,7 @@ class TestProfileRun:
 
 
 class TestRefreshOnly:
-    async def test_skips_the_agent_and_reapplies_the_pin(self, db_session, monkeypatch):
+    async def test_skips_the_agent_and_reapplies_the_pin(self, druks_db, monkeypatch):
         repo = _seed_repo()
         baseline = _profiled()
         repo.set_profile(baseline=baseline, effective=baseline)
@@ -187,41 +187,41 @@ class TestProfileStatus:
 
         return ProjectRepoSummary.from_repo(repo)
 
-    def _seed_run(self, db_session, repo, *, state, failure=None):
-        from conftest import seed_dbos_status
+    def _seed_run(self, druks_db, repo, *, state, failure=None):
         from druks.durable import Run
+        from druks.testing import seed_dbos_status
         from uuid_utils import uuid7
 
         run = Run(id=str(uuid7()), kind="ship.profile", failure=failure)
-        db_session.add(run)
-        db_session.flush()
-        seed_dbos_status(db_session, run.id, state, subject={"type": "project_repo", "id": repo.id})
+        druks_db.add(run)
+        druks_db.flush()
+        seed_dbos_status(druks_db, run.id, state, subject={"type": "project_repo", "id": repo.id})
         return run
 
-    def test_unprofiled_when_no_run_and_no_profile(self, db_session):
+    def test_unprofiled_when_no_run_and_no_profile(self, druks_db):
         assert self._summary(_seed_repo()).profile_status == "unprofiled"
 
-    def test_ready_when_profiled(self, db_session):
+    def test_ready_when_profiled(self, druks_db):
         repo = _seed_repo()
         repo.set_profile(baseline=_profiled(), effective=_profiled())
         assert self._summary(repo).profile_status == "ready"
 
-    def test_ready_even_when_a_later_run_failed(self, db_session):
+    def test_ready_even_when_a_later_run_failed(self, druks_db):
         repo = _seed_repo()
         repo.set_profile(baseline=_profiled(), effective=_profiled())
-        self._seed_run(db_session, repo, state="failed", failure="refresh boom")
+        self._seed_run(druks_db, repo, state="failed", failure="refresh boom")
         assert self._summary(repo).profile_status == "ready"
 
-    def test_failed_when_run_failed_and_no_profile(self, db_session):
+    def test_failed_when_run_failed_and_no_profile(self, druks_db):
         repo = _seed_repo()
-        self._seed_run(db_session, repo, state="failed", failure="boom")
+        self._seed_run(druks_db, repo, state="failed", failure="boom")
         summary = self._summary(repo)
         assert summary.profile_status == "failed"
         assert summary.profiler_run_failure == "boom"
 
-    def test_running_when_the_profiler_is_in_flight(self, db_session):
+    def test_running_when_the_profiler_is_in_flight(self, druks_db):
         repo = _seed_repo()
-        self._seed_run(db_session, repo, state="running")
+        self._seed_run(druks_db, repo, state="running")
         summary = self._summary(repo)
         assert summary.profile_status == "running"
         assert summary.profiler_run_failure is None

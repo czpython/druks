@@ -3,8 +3,8 @@ from pathlib import Path
 
 import httpx
 import pytest
-from conftest import make_settings
 from druks import doctor
+from druks.testing import make_settings
 
 
 def _named(results: list[doctor.CheckResult], name: str) -> doctor.CheckResult:
@@ -242,7 +242,8 @@ def test_run_checks_covers_all_check_names(tmp_path: Path) -> None:
 
     results = doctor.run_checks(settings)
 
-    assert {result.name for result in results} == {
+    # Installed extensions contribute their own checks alongside the platform's.
+    assert {result.name for result in results} >= {
         "webhook_secret",
         "webhook_ingress",
         "installations",

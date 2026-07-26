@@ -6,13 +6,13 @@ from types import SimpleNamespace
 from urllib.parse import urlencode
 
 import pytest
-from conftest import configure_app_for_test, make_settings, seed_dbos_status
 from druks.core.webhooks.slack import SlackInteractivity, verify_slack_signature
 from druks.database import db_session as ambient_db_session
 from druks.durable import Run
 from druks.models import Base
 from druks.notifications.buttons import encode_button
 from druks.notifications.models import Destination, Notification
+from druks.testing import configure_app_for_test, make_settings, seed_dbos_status
 from druks.webhooks.router import match_webhook
 from fastapi.testclient import TestClient
 from uuid_utils import uuid7
@@ -27,7 +27,7 @@ _IN_APP_ASK = {
 }
 
 
-def _parked_notification(db_session):
+def _parked_notification(druks_db):
     run = Run(
         id=str(uuid7()),
         kind="notifications.test",
@@ -35,9 +35,9 @@ def _parked_notification(db_session):
         input_request=_IN_APP_ASK,
         input_requested_at=Base.utc_now(),
     )
-    db_session.add(run)
-    db_session.flush()
-    seed_dbos_status(db_session, run.id, "parked")
+    druks_db.add(run)
+    druks_db.flush()
+    seed_dbos_status(druks_db, run.id, "parked")
     destination = Destination.create(
         name=f"slack-{run.id[-8:]}", kind="slack_webhook", url=_WEBHOOK_URL
     )
@@ -116,8 +116,8 @@ def test_signature_verifier_against_a_known_answer(monkeypatch):
     assert getattr(tampered_body.value, "status_code", None) == 401
 
 
-async def test_unsigned_or_stale_requests_401_and_never_resume(tmp_path, db_session, resume_spy):
-    run, notification = _parked_notification(db_session)
+async def test_unsigned_or_stale_requests_401_and_never_resume(tmp_path, druks_db, resume_spy):
+    run, notification = _parked_notification(druks_db)
     body = _interactivity_body(encode_button(notification.correlation_token, "approve"))
     with _client(tmp_path) as client:
         no_headers = client.post("/_external/slack/interactivity/", content=body)
@@ -144,8 +144,8 @@ async def test_unsigned_or_stale_requests_401_and_never_resume(tmp_path, db_sess
         assert notification.correlation_token not in response.text
 
 
-async def test_signed_click_routes_through_respond(tmp_path, db_session, resume_spy):
-    run, notification = _parked_notification(db_session)
+async def test_signed_click_routes_through_respond(tmp_path, druks_db, resume_spy):
+    run, notification = _parked_notification(druks_db)
     body = _interactivity_body(encode_button(notification.correlation_token, "approve"))
     with _client(tmp_path) as client:
         response = client.post(
@@ -163,8 +163,8 @@ async def test_signed_click_routes_through_respond(tmp_path, db_session, resume_
     assert _SIGNING_SECRET not in response.text
 
 
-async def test_dead_round_click_is_acknowledged_without_resume(tmp_path, db_session, resume_spy):
-    run, notification = _parked_notification(db_session)
+async def test_dead_round_click_is_acknowledged_without_resume(tmp_path, druks_db, resume_spy):
+    run, notification = _parked_notification(druks_db)
     notification.mark_acknowledged()
     with _client(tmp_path) as client:
         body = _interactivity_body(encode_button(notification.correlation_token, "approve"))
@@ -185,8 +185,8 @@ async def test_dead_round_click_is_acknowledged_without_resume(tmp_path, db_sess
     assert resume_spy == []
 
 
-async def test_malformed_payloads_400_never_500_never_resume(tmp_path, db_session, resume_spy):
-    run, notification = _parked_notification(db_session)
+async def test_malformed_payloads_400_never_500_never_resume(tmp_path, druks_db, resume_spy):
+    run, notification = _parked_notification(druks_db)
     malformed = [
         b"not-a-form",
         urlencode({"payload": "not json"}).encode(),
@@ -208,9 +208,9 @@ async def test_malformed_payloads_400_never_500_never_resume(tmp_path, db_sessio
 
 
 async def test_unknown_interactivity_type_is_acknowledged_unhandled(
-    tmp_path, db_session, resume_spy
+    tmp_path, druks_db, resume_spy
 ):
-    _parked_notification(db_session)
+    _parked_notification(druks_db)
     body = urlencode({"payload": json.dumps({"type": "view_submission"})}).encode()
 
     with _client(tmp_path) as client:

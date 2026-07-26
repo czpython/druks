@@ -39,12 +39,12 @@ def _store_grant(refresh_token: str = "rt-secret", client_secret: str = "") -> M
     )
 
 
-def test_stored_secrets_are_ciphertext_and_reads_restore_them(db_engine, db_session):
+def test_stored_secrets_are_ciphertext_and_reads_restore_them(druks_db):
     McpServer.create(name="linear", url="https://mcp.linear.app/sse", token=_TOKEN)
 
-    blob = bytes(db_engine.execute(text("SELECT token FROM mcp_servers")).scalar_one())
+    blob = bytes(druks_db.execute(text("SELECT token FROM mcp_servers")).scalar_one())
     assert _TOKEN.encode() not in blob
-    db_session.expire_all()
+    druks_db.expire_all()
     row = McpServer.get_for_name("linear")
     assert row.token.decrypt() == _TOKEN
     # The resolved view every consumer reads carries the Secret itself, so it
@@ -54,18 +54,18 @@ def test_stored_secrets_are_ciphertext_and_reads_restore_them(db_engine, db_sess
     assert resolved["has_token"] is True
 
 
-def test_grant_secret_halves_round_trip(db_session):
+def test_grant_secret_halves_round_trip(druks_db):
     _store_grant(refresh_token="rt-secret", client_secret="cs-secret")
 
-    db_session.expire_all()
+    druks_db.expire_all()
     grant = McpOauthGrant.get_for_server("notion")
     assert grant.refresh_token.decrypt() == "rt-secret"
     assert grant.client_secret.decrypt() == "cs-secret"
 
 
-def test_loaded_secrets_are_lazy_and_redacted(monkeypatch, db_session):
+def test_loaded_secrets_are_lazy_and_redacted(monkeypatch, druks_db):
     McpServer.create(name="linear", url="https://mcp.linear.app/sse", token=_TOKEN)
-    db_session.expire_all()
+    druks_db.expire_all()
 
     # Loading and logging a row never touches key material — decryption
     # happens only on decrypt(), and repr leaks nothing either way.
@@ -77,25 +77,25 @@ def test_loaded_secrets_are_lazy_and_redacted(monkeypatch, db_session):
         row.token.decrypt()
 
 
-def test_empty_value_needs_no_key(monkeypatch, db_engine, db_session):
+def test_empty_value_needs_no_key(monkeypatch, druks_db):
     # "" stores as empty bytes — presence checks and decrypt() of an absent
     # secret never touch key material (proven by breaking the key first).
     McpServer.create(name="linear", url="https://mcp.linear.app/sse", token="")
-    db_session.expire_all()
+    druks_db.expire_all()
 
-    assert bytes(db_engine.execute(text("SELECT token FROM mcp_servers")).scalar_one()) == b""
+    assert bytes(druks_db.execute(text("SELECT token FROM mcp_servers")).scalar_one()) == b""
     row = McpServer.get_for_name("linear")
     monkeypatch.setenv("DRUKS_SECRETS_KEY", "")
     assert not row.token
     assert row.token.decrypt() == ""
 
 
-def test_non_str_assignment_is_rejected(db_session):
+def test_non_str_assignment_is_rejected(druks_db):
     server = McpServer.create(name="linear", url="https://mcp.linear.app/sse", token=_TOKEN)
 
     server.token = 123
     with pytest.raises(StatementError, match="takes a str"):
-        db_session.flush()
+        druks_db.flush()
 
 
 def test_missing_key_refuses_boot(monkeypatch):
@@ -125,39 +125,39 @@ def test_malformed_key_refuses_boot(monkeypatch):
             load_settings()
 
 
-def test_undecryptable_secret_raises_the_named_error(monkeypatch, db_session):
+def test_undecryptable_secret_raises_the_named_error(monkeypatch, druks_db):
     # A key dropped from the list while rows written under it existed is the
     # usual cause — the error must say so, not surface a bare crypto traceback.
     McpServer.create(name="linear", url="https://mcp.linear.app/sse", token=_TOKEN)
-    db_session.expire_all()
+    druks_db.expire_all()
     monkeypatch.setenv("DRUKS_SECRETS_KEY", _key())
 
     with pytest.raises(SecretDecryptError, match="rotated out"):
         McpServer.get_for_name("linear").token.decrypt()
 
 
-def test_garbled_envelope_raises_the_named_error(db_engine, db_session):
+def test_garbled_envelope_raises_the_named_error(druks_db):
     # No structural pre-checks in decrypt: GCM authentication (and the
     # ValueError a mangled nonce raises) fold every unreadable shape into the
     # one named error.
     McpServer.create(name="linear", url="https://mcp.linear.app/sse", token=_TOKEN)
-    db_engine.execute(text(r"UPDATE mcp_servers SET token = '\x01ab'::bytea"))
-    db_session.expire_all()
+    druks_db.execute(text(r"UPDATE mcp_servers SET token = '\x01ab'::bytea"))
+    druks_db.expire_all()
 
     with pytest.raises(SecretDecryptError):
         McpServer.get_for_name("linear").token.decrypt()
 
 
-def test_ciphertext_is_bound_to_its_column(db_engine, db_session):
+def test_ciphertext_is_bound_to_its_column(druks_db):
     # An envelope can't be replayed into any other encrypted column — not
     # another table's, and not a sibling column on the same row.
     McpServer.create(name="linear", url="https://mcp.linear.app/sse", token=_TOKEN)
     _store_grant(refresh_token="rt-secret", client_secret="cs-secret")
-    db_engine.execute(
+    druks_db.execute(
         text("UPDATE mcp_oauth_grants SET refresh_token = (SELECT token FROM mcp_servers)")
     )
-    db_engine.execute(text("UPDATE mcp_oauth_grants SET client_secret = refresh_token"))
-    db_session.expire_all()
+    druks_db.execute(text("UPDATE mcp_oauth_grants SET client_secret = refresh_token"))
+    druks_db.expire_all()
 
     grant = McpOauthGrant.get_for_server("notion")
     with pytest.raises(SecretDecryptError):
@@ -166,7 +166,7 @@ def test_ciphertext_is_bound_to_its_column(db_engine, db_session):
         grant.client_secret.decrypt()
 
 
-def test_prepended_key_still_decrypts(monkeypatch, db_session):
+def test_prepended_key_still_decrypts(monkeypatch, druks_db):
     # Rotation is prepend-only: new writes use the first key; rows written
     # under an older key keep decrypting as long as it stays in the list.
     old_key = _key()
@@ -175,7 +175,7 @@ def test_prepended_key_still_decrypts(monkeypatch, db_session):
     _store_grant(refresh_token="rt-secret")
 
     monkeypatch.setenv("DRUKS_SECRETS_KEY", f"{_key()},{old_key}")
-    db_session.expire_all()
+    druks_db.expire_all()
     assert McpServer.get_for_name("linear").token.decrypt() == _TOKEN
     assert McpOauthGrant.get_for_server("notion").refresh_token.decrypt() == "rt-secret"
 
@@ -183,34 +183,34 @@ def test_prepended_key_still_decrypts(monkeypatch, db_session):
 # --- EncryptedJsonField (via the test-only model) ---------------------------
 
 
-def test_json_mapping_round_trips_as_ciphertext(db_engine, db_session):
-    db_session.add(EncryptedNote(data={"token": _TOKEN, "extra": "x"}))
-    db_session.flush()
+def test_json_mapping_round_trips_as_ciphertext(druks_db):
+    druks_db.add(EncryptedNote(data={"token": _TOKEN, "extra": "x"}))
+    druks_db.flush()
 
-    blob = bytes(db_engine.execute(text("SELECT data FROM test_encrypted_notes")).scalar_one())
+    blob = bytes(druks_db.execute(text("SELECT data FROM test_encrypted_notes")).scalar_one())
     assert _TOKEN.encode() not in blob
-    db_session.expire_all()
-    note = db_session.query(EncryptedNote).one()
+    druks_db.expire_all()
+    note = druks_db.query(EncryptedNote).one()
     assert note.data["token"] == _TOKEN
     assert repr(note.data) == "SecretsMapping(<redacted>)"
 
 
-def test_json_in_place_write_persists(db_session):
+def test_json_in_place_write_persists(druks_db):
     # Writing one key of the mapping must mark the column dirty on its own
     # (the Mutable wiring) and survive the flush.
-    db_session.add(EncryptedNote(data={"token": "old"}))
-    db_session.flush()
-    db_session.expire_all()
+    druks_db.add(EncryptedNote(data={"token": "old"}))
+    druks_db.flush()
+    druks_db.expire_all()
 
-    note = db_session.query(EncryptedNote).one()
+    note = druks_db.query(EncryptedNote).one()
     note.data["token"] = "new"
-    db_session.flush()
-    db_session.expire_all()
+    druks_db.flush()
+    druks_db.expire_all()
 
-    assert db_session.query(EncryptedNote).one().data["token"] == "new"
+    assert druks_db.query(EncryptedNote).one().data["token"] == "new"
 
 
-def test_json_non_dict_assignment_is_rejected(db_session):
+def test_json_non_dict_assignment_is_rejected(druks_db):
     note = EncryptedNote(data={"token": "t"})
 
     with pytest.raises(ValueError, match="dict"):

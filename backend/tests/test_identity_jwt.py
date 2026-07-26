@@ -3,10 +3,10 @@ from pathlib import Path
 
 import jwt as pyjwt
 import pytest
-from conftest import configure_app_for_test, make_settings
 from cryptography.hazmat.primitives.asymmetric import rsa
 from druks.accounts import jwt as assertion
 from druks.accounts.models import Account, PersonalAccessToken
+from druks.testing import configure_app_for_test, make_settings
 from fastapi.testclient import TestClient
 from fastmcp.server.auth.providers.jwt import JWTVerifier
 
@@ -60,7 +60,7 @@ def _jwt_client(tmp_path: Path) -> TestClient:
     return TestClient(app)
 
 
-def test_a_valid_assertion_open_enrolls_its_subject(tmp_path, db_session):
+def test_a_valid_assertion_open_enrolls_its_subject(tmp_path, druks_db):
     with _jwt_client(tmp_path) as client:
         response = client.get("/api/auth/me", headers={HEADER: _token()})
         assert response.status_code == 200
@@ -84,7 +84,7 @@ def test_a_valid_assertion_open_enrolls_its_subject(tmp_path, db_session):
         "not.a.jwt",
     ],
 )
-def test_a_bad_assertion_rejects_without_enrolling(tmp_path, db_session, token):
+def test_a_bad_assertion_rejects_without_enrolling(tmp_path, druks_db, token):
     with _jwt_client(tmp_path) as client:
         response = client.get("/api/auth/me", headers={HEADER: token})
         assert response.status_code == 401
@@ -93,12 +93,12 @@ def test_a_bad_assertion_rejects_without_enrolling(tmp_path, db_session, token):
     assert not Account.list_non_system()
 
 
-def test_none_mode_multi_kid_document_serves_the_matching_key(tmp_path, db_session):
+def test_none_mode_multi_kid_document_serves_the_matching_key(tmp_path, druks_db):
     with _jwt_client(tmp_path) as client:
         assert client.get("/api/auth/me", headers={HEADER: _token()}).status_code == 200
 
 
-def test_bearer_precedence_survives_jwt_mode(tmp_path, db_session):
+def test_bearer_precedence_survives_jwt_mode(tmp_path, druks_db):
     agent = Account.get_or_create("agent@example.com")
     _, token = PersonalAccessToken.create(account_id=agent.id, name="agent")
     with _jwt_client(tmp_path) as client:

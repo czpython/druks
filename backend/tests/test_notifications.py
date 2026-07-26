@@ -1,16 +1,12 @@
 from datetime import timedelta
 
 import pytest
-from conftest import (
-    configure_app_for_test,
-    make_settings,
-    seed_dbos_status,
-)
 from druks.durable import Run
 from druks.models import Base
 from druks.notifications.exceptions import InvalidChoiceError
 from druks.notifications.models import Destination, Notification
 from druks.notifications.services import respond_to_notification
+from druks.testing import configure_app_for_test, make_settings, seed_dbos_status
 from fastapi.testclient import TestClient
 from sqlalchemy.exc import IntegrityError
 from uuid_utils import uuid7
@@ -26,7 +22,7 @@ def _destination(name: str = "ops") -> Destination:
 # --- entity ------------------------------------------------------------------
 
 
-def test_unique_token_collision_raises(db_session):
+def test_unique_token_collision_raises(druks_db):
     destination = _destination()
     first = Notification.create(
         destination_id=destination.id, reason="r", body="b", subject=_SUBJECT
@@ -39,12 +35,12 @@ def test_unique_token_collision_raises(db_session):
         subject=_SUBJECT,
         correlation_token=first.correlation_token,
     )
-    db_session.add(duplicate)
+    druks_db.add(duplicate)
     with pytest.raises(IntegrityError):
-        db_session.flush()
+        druks_db.flush()
 
 
-def test_list_recent_newest_first_with_limit(db_session):
+def test_list_recent_newest_first_with_limit(druks_db):
     destination = _destination()
     ids = [
         Notification.create(
@@ -60,7 +56,7 @@ def test_list_recent_newest_first_with_limit(db_session):
 # --- read endpoints ---------------------------------------------------------
 
 
-def test_endpoints_list_and_get_omit_the_token(tmp_path, db_session):
+def test_endpoints_list_and_get_omit_the_token(tmp_path, druks_db):
     destination = _destination()
     tokens = []
     for index in range(3):
@@ -101,7 +97,7 @@ def test_endpoints_list_and_get_omit_the_token(tmp_path, db_session):
         assert client.get("/api/notifications/no-such-id").status_code == 404
 
 
-def test_destinations_route_still_resolves_after_notifications_mount(tmp_path, db_session):
+def test_destinations_route_still_resolves_after_notifications_mount(tmp_path, druks_db):
     # The route-order pin: the notifications /{notification_id} match must not
     # swallow /api/notifications/destinations.
     _destination(name="alpha")
@@ -116,7 +112,7 @@ def test_destinations_route_still_resolves_after_notifications_mount(tmp_path, d
 # --- the gate-park destination setting ---------------------------------------
 
 
-def test_settings_gate_park_destination_set_clear_and_reject(tmp_path, db_session):
+def test_settings_gate_park_destination_set_clear_and_reject(tmp_path, druks_db):
     destination = _destination()
 
     with TestClient(configure_app_for_test(settings=make_settings(tmp_path))) as client:
@@ -135,7 +131,7 @@ def test_settings_gate_park_destination_set_clear_and_reject(tmp_path, db_sessio
         assert cleared.json()["gateParkDestinationId"] is None
 
 
-def test_deleting_designated_destination_unsets_the_pointer(tmp_path, db_session):
+def test_deleting_designated_destination_unsets_the_pointer(tmp_path, druks_db):
     destination = _destination()
 
     with TestClient(configure_app_for_test(settings=make_settings(tmp_path))) as client:
@@ -155,7 +151,7 @@ _IN_APP_ASK = {
 }
 
 
-def _parked_notification(db_session, *, ask=None, run_state="parked"):
+def _parked_notification(druks_db, *, ask=None, run_state="parked"):
     ask = ask or _IN_APP_ASK
     run = Run(
         id=str(uuid7()),
@@ -164,9 +160,9 @@ def _parked_notification(db_session, *, ask=None, run_state="parked"):
         input_request=ask,
         input_requested_at=Base.utc_now(),
     )
-    db_session.add(run)
-    db_session.flush()
-    seed_dbos_status(db_session, run.id, run_state)
+    druks_db.add(run)
+    druks_db.flush()
+    seed_dbos_status(druks_db, run.id, run_state)
     destination = _destination(name=f"dest-{run.id[-8:]}")
     notification = Notification.create(
         destination_id=destination.id,
@@ -190,8 +186,8 @@ def resume_spy(monkeypatch):
     return calls
 
 
-async def test_respond_resumes_and_marks_acknowledged(db_session, resume_spy):
-    run, notification = _parked_notification(db_session)
+async def test_respond_resumes_and_marks_acknowledged(druks_db, resume_spy):
+    run, notification = _parked_notification(druks_db)
 
     await respond_to_notification(
         notification.correlation_token,
@@ -203,8 +199,8 @@ async def test_respond_resumes_and_marks_acknowledged(db_session, resume_spy):
     assert Notification.get(notification.id).is_acknowledged
 
 
-async def test_respond_route_codes_and_secret_hygiene(tmp_path, db_session, resume_spy):
-    run, notification = _parked_notification(db_session)
+async def test_respond_route_codes_and_secret_hygiene(tmp_path, druks_db, resume_spy):
+    run, notification = _parked_notification(druks_db)
     token = notification.correlation_token
     client = TestClient(configure_app_for_test(settings=make_settings(tmp_path)))
 
@@ -249,9 +245,9 @@ async def test_respond_route_codes_and_secret_hygiene(tmp_path, db_session, resu
         assert _WEBHOOK_URL not in response.text
 
 
-async def test_respond_external_notification_not_answerable(tmp_path, db_session, resume_spy):
+async def test_respond_external_notification_not_answerable(tmp_path, druks_db, resume_spy):
     run, notification = _parked_notification(
-        db_session, ask={"presentation": "external", "label": "Answer on the ticket"}
+        druks_db, ask={"presentation": "external", "label": "Answer on the ticket"}
     )
     client = TestClient(configure_app_for_test(settings=make_settings(tmp_path)))
 
@@ -265,7 +261,7 @@ async def test_respond_external_notification_not_answerable(tmp_path, db_session
     assert resume_spy == []
 
 
-async def test_respond_runless_notification_not_answerable(tmp_path, db_session, resume_spy):
+async def test_respond_runless_notification_not_answerable(tmp_path, druks_db, resume_spy):
     destination = _destination(name="runless-dest")
     notification = Notification.create(
         destination_id=destination.id, reason="r", body="b", subject=_SUBJECT
@@ -281,7 +277,7 @@ async def test_respond_runless_notification_not_answerable(tmp_path, db_session,
     assert resume_spy == []
 
 
-async def test_respond_stale_round_409(tmp_path, db_session, resume_spy):
+async def test_respond_stale_round_409(tmp_path, druks_db, resume_spy):
     run = Run(
         id=str(uuid7()),
         kind="notifications.test",
@@ -289,9 +285,9 @@ async def test_respond_stale_round_409(tmp_path, db_session, resume_spy):
         input_request=_IN_APP_ASK,
         input_requested_at=Base.utc_now(),
     )
-    db_session.add(run)
-    db_session.flush()
-    seed_dbos_status(db_session, run.id, "parked")
+    druks_db.add(run)
+    druks_db.flush()
+    seed_dbos_status(druks_db, run.id, "parked")
     destination = _destination(name="stale-dest")
     notification = Notification.create(
         destination_id=destination.id,
@@ -312,8 +308,8 @@ async def test_respond_stale_round_409(tmp_path, db_session, resume_spy):
     assert resume_spy == []
 
 
-async def test_respond_run_no_longer_parked_409(tmp_path, db_session, resume_spy):
-    run, notification = _parked_notification(db_session, run_state="finished")
+async def test_respond_run_no_longer_parked_409(tmp_path, druks_db, resume_spy):
+    run, notification = _parked_notification(druks_db, run_state="finished")
     client = TestClient(configure_app_for_test(settings=make_settings(tmp_path)))
 
     response = client.post(
@@ -326,9 +322,9 @@ async def test_respond_run_no_longer_parked_409(tmp_path, db_session, resume_spy
 
 
 async def test_respond_corrupt_correlation_500_and_logged(
-    tmp_path, db_session, resume_spy, monkeypatch, caplog
+    tmp_path, druks_db, resume_spy, monkeypatch, caplog
 ):
-    run, notification = _parked_notification(db_session)
+    run, notification = _parked_notification(druks_db)
     monkeypatch.setattr(Run, "get", classmethod(lambda cls, run_id: None))
     client = TestClient(
         configure_app_for_test(settings=make_settings(tmp_path)), raise_server_exceptions=False
@@ -346,10 +342,10 @@ async def test_respond_corrupt_correlation_500_and_logged(
     assert resume_spy == []
 
 
-async def test_respond_direct_call_rejects_whitespace_only_content(db_session, resume_spy):
+async def test_respond_direct_call_rejects_whitespace_only_content(druks_db, resume_spy):
     # The core is also the direct-call boundary (the Slack rail bypasses the
     # HTTP models' whitespace stripping) — blank means blank on every path.
-    run, notification = _parked_notification(db_session)
+    run, notification = _parked_notification(druks_db)
 
     with pytest.raises(InvalidChoiceError):
         await respond_to_notification(
@@ -365,11 +361,11 @@ async def test_respond_direct_call_rejects_whitespace_only_content(db_session, r
     assert Notification.get(notification.id).state == "pending"
 
 
-async def test_respond_ask_without_presentation_not_answerable(tmp_path, db_session, resume_spy):
+async def test_respond_ask_without_presentation_not_answerable(tmp_path, druks_db, resume_spy):
     # An ask that doesn't declare in_app isn't answerable via this rail — the
     # mapped 422, not a crash.
     run, notification = _parked_notification(
-        db_session, ask={"label": "legacy ask", "controls": ["approve"]}
+        druks_db, ask={"label": "legacy ask", "controls": ["approve"]}
     )
     client = TestClient(configure_app_for_test(settings=make_settings(tmp_path)))
 

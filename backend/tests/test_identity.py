@@ -4,7 +4,7 @@ from pathlib import Path
 
 import httpx
 import pytest
-from conftest import configure_app_for_test, connect_harness, make_settings
+from conftest import connect_harness
 from druks import database
 from druks.accounts.dependencies import resolve_single_operator
 from druks.accounts.exceptions import AuthConfigurationError
@@ -12,6 +12,7 @@ from druks.accounts.models import Account, PersonalAccessToken
 from druks.harnesses import base as hbase
 from druks.harnesses.claude import ClaudeHarness
 from druks.harnesses.models import HarnessConnection
+from druks.testing import configure_app_for_test, make_settings
 from druks.user_settings.models import HarnessSettings, UserSettings
 from fastapi.testclient import TestClient
 from sqlalchemy import select
@@ -95,7 +96,7 @@ def _mock_exchange_codex(monkeypatch, *, email: str):
 # --- header mode -----------------------------------------------------------
 
 
-def test_header_mode_requires_exactly_one_nonblank_assertion(tmp_path, db_session):
+def test_header_mode_requires_exactly_one_nonblank_assertion(tmp_path, druks_db):
     with _header_client(tmp_path) as client:
         assert client.get("/api/auth/me").status_code == 401
         assert client.get("/api/settings").status_code == 401
@@ -106,7 +107,7 @@ def test_header_mode_requires_exactly_one_nonblank_assertion(tmp_path, db_sessio
     assert {account.username for account in _all_accounts()} == {"system"}
 
 
-def test_an_asserted_email_open_enrolls_once_across_case_variants(tmp_path, db_session):
+def test_an_asserted_email_open_enrolls_once_across_case_variants(tmp_path, druks_db):
     with _header_client(tmp_path) as client:
         first = client.get("/api/auth/me", headers={HEADER: "  Op@Example.com "})
         assert first.status_code == 200
@@ -120,7 +121,7 @@ def test_an_asserted_email_open_enrolls_once_across_case_variants(tmp_path, db_s
     assert len(Account.list_non_system()) == 1
 
 
-def test_get_or_create_losing_the_insert_race_still_converges(db_session, monkeypatch):
+def test_get_or_create_losing_the_insert_race_still_converges(druks_db, monkeypatch):
     existing = Account.get_or_create("race@example.com")
     # Simulate losing the read-then-insert race: the pre-read misses, the
     # INSERT hits ON CONFLICT DO NOTHING, the canonical lookup converges.
@@ -129,7 +130,7 @@ def test_get_or_create_losing_the_insert_race_still_converges(db_session, monkey
     assert len(Account.list_non_system()) == 1
 
 
-def test_a_valid_pat_wins_over_a_conflicting_header(tmp_path, db_session):
+def test_a_valid_pat_wins_over_a_conflicting_header(tmp_path, druks_db):
     agent = Account.get_or_create("agent@example.com")
     _, token = PersonalAccessToken.create(account_id=agent.id, name="agent")
     with _header_client(tmp_path) as client:
@@ -143,7 +144,7 @@ def test_a_valid_pat_wins_over_a_conflicting_header(tmp_path, db_session):
     assert not Account.get_for_username("op@example.com")
 
 
-def test_onboarding_clears_once_the_account_has_a_connection(tmp_path, db_session):
+def test_onboarding_clears_once_the_account_has_a_connection(tmp_path, druks_db):
     connect_harness(ClaudeHarness, {"claudeAiOauth": {"accessToken": "x"}})
     with _header_client(tmp_path) as client:
         body = client.get("/api/auth/me", headers={HEADER: "op@example.com"}).json()
@@ -153,7 +154,7 @@ def test_onboarding_clears_once_the_account_has_a_connection(tmp_path, db_sessio
 # --- none mode -------------------------------------------------------------
 
 
-def test_none_mode_ignores_a_present_identity_header(tmp_path, db_session):
+def test_none_mode_ignores_a_present_identity_header(tmp_path, druks_db):
     connect_harness(ClaudeHarness, {"claudeAiOauth": {"accessToken": "x"}})
     with _client(tmp_path) as client:
         body = client.get("/api/auth/me", headers={HEADER: "intruder@example.com"}).json()
@@ -163,7 +164,7 @@ def test_none_mode_ignores_a_present_identity_header(tmp_path, db_session):
     assert not Account.get_for_username("intruder@example.com")
 
 
-def test_none_zero_reads_as_setup(tmp_path, db_session):
+def test_none_zero_reads_as_setup(tmp_path, druks_db):
     with _client(tmp_path) as client:
         me = client.get("/api/auth/me")
         assert me.status_code == 200
@@ -171,7 +172,7 @@ def test_none_zero_reads_as_setup(tmp_path, db_session):
         assert client.get("/api/settings").status_code == 409
 
 
-def test_none_one_resolves_the_operator(tmp_path, db_session):
+def test_none_one_resolves_the_operator(tmp_path, druks_db):
     connect_harness(ClaudeHarness, {"claudeAiOauth": {"accessToken": "x"}})
     with _client(tmp_path) as client:
         body = client.get("/api/auth/me").json()
@@ -180,7 +181,7 @@ def test_none_one_resolves_the_operator(tmp_path, db_session):
         assert client.get("/api/settings").status_code == 200
 
 
-def test_none_multi_refuses_requests_and_startup(tmp_path, db_session):
+def test_none_multi_refuses_requests_and_startup(tmp_path, druks_db):
     Account.get_or_create("one@example.com")
     Account.get_or_create("two@example.com")
     with _client(tmp_path) as client:
@@ -193,7 +194,7 @@ def test_none_multi_refuses_requests_and_startup(tmp_path, db_session):
 # --- connection flow -------------------------------------------------------
 
 
-def test_none_zero_setup_flow_creates_the_operator(tmp_path, monkeypatch, db_session):
+def test_none_zero_setup_flow_creates_the_operator(tmp_path, monkeypatch, druks_db):
     with _client(tmp_path) as client:
         response = _connect(client, monkeypatch, email="me@example.com")
         assert response.status_code == 200
@@ -208,7 +209,7 @@ def test_none_zero_setup_flow_creates_the_operator(tmp_path, monkeypatch, db_ses
     assert HarnessConnection.get_for_account("claude", account.id)
 
 
-def test_concurrent_setup_completions_with_one_email_converge(tmp_path, monkeypatch, db_session):
+def test_concurrent_setup_completions_with_one_email_converge(tmp_path, monkeypatch, druks_db):
     with _client(tmp_path) as client:
         # Both flows start while zero accounts exist — both unbound.
         first = client.post("/api/harnesses/claude/connection/start")
@@ -233,7 +234,7 @@ def test_concurrent_setup_completions_with_one_email_converge(tmp_path, monkeypa
     assert len(HarnessConnection.list_all()) == 2
 
 
-def test_a_stale_unbound_completion_attaches_to_the_operator(tmp_path, monkeypatch, db_session):
+def test_a_stale_unbound_completion_attaches_to_the_operator(tmp_path, monkeypatch, druks_db):
     with _client(tmp_path) as client:
         # Both flows start while zero accounts exist; the first completion
         # creates the operator, so the second — a different provider email —
@@ -261,7 +262,7 @@ def test_a_stale_unbound_completion_attaches_to_the_operator(tmp_path, monkeypat
     assert codex_connection.provider_email == "b@example.com"
 
 
-def test_a_connect_survives_a_failed_model_refresh(tmp_path, monkeypatch, db_session):
+def test_a_connect_survives_a_failed_model_refresh(tmp_path, monkeypatch, druks_db):
     async def _refresh_boom(self, connection):
         raise RuntimeError("picker flush failed")
 
@@ -275,7 +276,7 @@ def test_a_connect_survives_a_failed_model_refresh(tmp_path, monkeypatch, db_ses
     assert HarnessConnection.get_for_account("claude", account.id)
 
 
-def test_a_bound_connect_cannot_complete_under_another_operator(tmp_path, monkeypatch, db_session):
+def test_a_bound_connect_cannot_complete_under_another_operator(tmp_path, monkeypatch, druks_db):
     with _header_client(tmp_path) as client:
         start = client.post(
             "/api/harnesses/claude/connection/start", headers={HEADER: "alice@example.com"}
@@ -291,7 +292,7 @@ def test_a_bound_connect_cannot_complete_under_another_operator(tmp_path, monkey
     assert not any(row.harness == "claude" for row in HarnessConnection.list_all())
 
 
-def test_first_connection_claims_the_fallback_slot_once(tmp_path, monkeypatch, db_session):
+def test_first_connection_claims_the_fallback_slot_once(tmp_path, monkeypatch, druks_db):
     with _header_client(tmp_path) as client:
         _connect(client, monkeypatch, email="seat@corp.com", headers={HEADER: "first@example.com"})
         first = Account.get_for_username("first@example.com")
@@ -307,7 +308,7 @@ def test_first_connection_claims_the_fallback_slot_once(tmp_path, monkeypatch, d
     assert UserSettings.get().fallback_account_id == first.id
 
 
-def test_reconnect_records_provider_email_but_keeps_the_operator(tmp_path, monkeypatch, db_session):
+def test_reconnect_records_provider_email_but_keeps_the_operator(tmp_path, monkeypatch, druks_db):
     with _header_client(tmp_path) as client:
         response = _connect(
             client,
@@ -323,7 +324,7 @@ def test_reconnect_records_provider_email_but_keeps_the_operator(tmp_path, monke
     assert codex.provider_email == "corp-seat@corp.com"
 
 
-def test_connection_flow_rejects_a_bearer(tmp_path, db_session):
+def test_connection_flow_rejects_a_bearer(tmp_path, druks_db):
     agent = Account.get_or_create("agent@example.com")
     _, token = PersonalAccessToken.create(account_id=agent.id, name="agent")
     with _client(tmp_path) as client:
@@ -337,7 +338,7 @@ def test_connection_flow_rejects_a_bearer(tmp_path, db_session):
 # --- the old browser-session surface is gone -------------------------------
 
 
-def test_the_session_era_routes_are_gone(tmp_path, db_session):
+def test_the_session_era_routes_are_gone(tmp_path, druks_db):
     with _client(tmp_path) as client:
         gone = [
             client.get("/api/auth/session"),

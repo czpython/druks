@@ -19,7 +19,7 @@ DUMMY_AGENT = agents.Agent(
 )
 
 
-def test_get_timeout_caps_at_the_sandbox_lease_max(db_session):
+def test_get_timeout_caps_at_the_sandbox_lease_max(druks_db):
     """A resolved timeout over the sandbox-lease max is clamped; a shorter one passes through."""
     from druks.sandbox.constants import MAX_AGENT_TIMEOUT_SECONDS
 
@@ -43,15 +43,16 @@ def test_get_timeout_caps_at_the_sandbox_lease_max(db_session):
 
 
 @pytest.fixture(autouse=True)
-def _seed_run_for_record(db_session):
+def _seed_run_for_record(druks_db):
     # An agent call records an AgentCall, which FKs to its run.
-    from conftest import seed_run
+    from druks.testing import seed_run
+    from druks_field_notes.workflows import Summarize
 
-    seed_run(db_session, "wf-9")
+    seed_run(druks_db, kind=Summarize.kind, run_id="wf-9")
 
 
 @pytest.fixture(autouse=True)
-def _connected_claude(db_session):
+def _connected_claude(druks_db):
     # A run refuses to dispatch on an unconnected harness; the runtime tests
     # here resolve to claude models, so connect it once.
     from conftest import connect_harness
@@ -63,7 +64,7 @@ def _connected_claude(db_session):
 def _patch_runtime(monkeypatch, tmp_path, payload):
     """Pin settings/prompt; returns a fake sandbox capturing the run_agent
     call. The agent's model/effort/timeout resolve via the override store
-    against the test ``db_session``."""
+    against the test ``druks_db``."""
     settings = MagicMock()
     settings.artifacts_dir = tmp_path
     monkeypatch.setattr(agents, "load_settings", lambda: settings)
@@ -105,7 +106,7 @@ async def test_run_outside_workflow_raises():
         await DUMMY_AGENT(repo="acme/widget")
 
 
-async def test_run_refuses_unconnected_harness(db_session, tmp_path, monkeypatch, current_run):
+async def test_run_refuses_unconnected_harness(druks_db, tmp_path, monkeypatch, current_run):
     # The precondition fires where the harness is resolved — before any VM work.
     from druks.accounts.models import Account
     from druks.harnesses.exceptions import HarnessNotConnectedError
@@ -123,7 +124,7 @@ async def test_run_refuses_unconnected_harness(db_session, tmp_path, monkeypatch
     sandbox.run_agent.assert_not_awaited()
 
 
-async def test_declaration_drives_run_agent_call(db_session, tmp_path, monkeypatch, current_run):
+async def test_declaration_drives_run_agent_call(druks_db, tmp_path, monkeypatch, current_run):
     # The declaration drives what run_agent sees (model/operation/schema/artifact
     # dir/default timeout); run() returns the validated contract model.
     sandbox = _patch_runtime(monkeypatch, tmp_path, {"ok": True})
@@ -142,7 +143,7 @@ async def test_declaration_drives_run_agent_call(db_session, tmp_path, monkeypat
     assert kwargs["include_plugins"] is True
 
 
-async def test_declared_timeout_is_forwarded(db_session, tmp_path, monkeypatch, current_run):
+async def test_declared_timeout_is_forwarded(druks_db, tmp_path, monkeypatch, current_run):
     agent = agents.Agent(
         id="timeout_probe",
         prompt="dummy/agent.md",
@@ -162,7 +163,7 @@ async def test_declared_timeout_is_forwarded(db_session, tmp_path, monkeypatch, 
 
 
 async def test_runner_comes_from_workflow_workspace_factory(
-    db_session, tmp_path, monkeypatch, current_run
+    druks_db, tmp_path, monkeypatch, current_run
 ):
     """The runner is whatever ``workflow.get_workspace()`` returns — a mode overrides it to
     decide what the agent runs in (a cloned repo, tokens, MCP). The agent runs through it,
@@ -188,7 +189,7 @@ async def test_runner_comes_from_workflow_workspace_factory(
 
 
 async def test_ephemeral_acquisition_keys_idempotency_to_workflow_step(
-    db_session, tmp_path, monkeypatch, current_run
+    druks_db, tmp_path, monkeypatch, current_run
 ):
     """Without a warm context the runtime acquires a throwaway VM, keyed for
     idempotency to ``<workflow_id>:<step>``."""
@@ -208,7 +209,7 @@ async def test_ephemeral_acquisition_keys_idempotency_to_workflow_step(
     assert seen == ["wf-9:dummy"]
 
 
-async def test_running_call_visible_then_finished(db_session, tmp_path, monkeypatch, current_run):
+async def test_running_call_visible_then_finished(druks_db, tmp_path, monkeypatch, current_run):
     """The AgentCall exists RUNNING on its host while the agent runs, so the live
     transcript has a row to stream onto, and is finished once it returns."""
     sandbox = _patch_runtime(monkeypatch, tmp_path, {"ok": True})
@@ -232,7 +233,7 @@ async def test_running_call_visible_then_finished(db_session, tmp_path, monkeypa
     assert call.finished_at is not None
 
 
-async def test_provisioning_failure_records_no_call(db_session, tmp_path, monkeypatch, current_run):
+async def test_provisioning_failure_records_no_call(druks_db, tmp_path, monkeypatch, current_run):
     """A failure before the agent starts (e.g. no VM capacity) is not an agent
     call — the row only exists once there's a host to run on, so none is recorded."""
     _patch_runtime(monkeypatch, tmp_path, {"ok": True})
@@ -250,7 +251,7 @@ async def test_provisioning_failure_records_no_call(db_session, tmp_path, monkey
     assert AgentCall.list_for_run("wf-9") == []
 
 
-async def test_crash_after_start_fails_the_call(db_session, tmp_path, monkeypatch, current_run):
+async def test_crash_after_start_fails_the_call(druks_db, tmp_path, monkeypatch, current_run):
     """A raise after the call started (not a clean FAILED result) closes the
     row instead of leaving it dangling RUNNING."""
     sandbox = _patch_runtime(monkeypatch, tmp_path, {"ok": True})
@@ -269,7 +270,7 @@ async def test_crash_after_start_fails_the_call(db_session, tmp_path, monkeypatc
     assert "kaboom" in call.last_error
 
 
-async def test_recovery_supersedes_the_orphaned_running_call(db_session):
+async def test_recovery_supersedes_the_orphaned_running_call(druks_db):
     """A worker crash leaves a RUNNING row; the recovered step re-runs with a
     fresh id and abandons the orphan, so the timeline shows one live step."""
     from druks.durable.engine import _step_engine

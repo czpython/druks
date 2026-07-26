@@ -58,6 +58,9 @@ dev = [
 [project.scripts]
 druks = "druks.cli:main"
 
+[project.entry-points.pytest11]
+druks = "druks.testing"
+
 # Extensions are discovered here. An extension (in-tree today, a separate package
 # tomorrow) registers one Extension subclass; the platform loads them at startup and
 # walks each one's package for capabilities. Adding an extension is one entry, not

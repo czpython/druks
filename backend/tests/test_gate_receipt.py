@@ -1,10 +1,11 @@
 import pytest
-from conftest import seed_run
 from dbos import DBOS
 from dbos._error import DBOSWorkflowCancelledError
 from druks.durable.exceptions import GateTimeout
 from druks.durable.models import Run
+from druks.testing import seed_run
 from druks.workflows import _park
+from druks_field_notes.workflows import Summarize
 
 _ASK = {"presentation": "in_app", "controls": ["approve"], "questions": []}
 
@@ -31,15 +32,15 @@ def _direct_steps(monkeypatch):
     monkeypatch.setattr(DBOS, "run_step_async", _call_through)
 
 
-def _reload(db_session, run_id: str) -> Run:
-    db_session.expire_all()
-    return db_session.get(Run, run_id)
+def _reload(druks_db, run_id: str) -> Run:
+    druks_db.expire_all()
+    return druks_db.get(Run, run_id)
 
 
 async def test_answer_stamps_the_receipt_beside_the_gate_clear(
-    db_session, _direct_steps, monkeypatch
+    druks_db, _direct_steps, monkeypatch
 ):
-    run = seed_run(db_session, "run-receipt-answer")
+    run = seed_run(druks_db, kind=Summarize.kind, run_id="run-receipt-answer")
 
     async def _answer(topic, timeout_seconds):
         return {"action": "approve"}
@@ -48,7 +49,7 @@ async def test_answer_stamps_the_receipt_beside_the_gate_clear(
     payload = await _park(_ParkedWorkflow(run.id), "review", _ASK, ttl_seconds=1.0)
 
     assert payload == {"action": "approve"}
-    run = _reload(db_session, run.id)
+    run = _reload(druks_db, run.id)
     # The receipt is the round the answer cleared: the same stamp the park
     # wrote, which _GATE_CLEARED preserves on the row.
     assert run.input_requested_at
@@ -57,8 +58,8 @@ async def test_answer_stamps_the_receipt_beside_the_gate_clear(
     assert not run.input_request
 
 
-async def test_timeout_never_writes_the_receipt(db_session, _direct_steps, monkeypatch):
-    run = seed_run(db_session, "run-receipt-timeout")
+async def test_timeout_never_writes_the_receipt(druks_db, _direct_steps, monkeypatch):
+    run = seed_run(druks_db, kind=Summarize.kind, run_id="run-receipt-timeout")
 
     async def _lapse(topic, timeout_seconds):
         return None
@@ -67,13 +68,13 @@ async def test_timeout_never_writes_the_receipt(db_session, _direct_steps, monke
     with pytest.raises(GateTimeout):
         await _park(_ParkedWorkflow(run.id), "review", _ASK, ttl_seconds=1.0)
 
-    run = _reload(db_session, run.id)
+    run = _reload(druks_db, run.id)
     assert not run.answer_parked_at
     assert run.input_requested_at
 
 
-async def test_cancel_never_writes_the_receipt(db_session, _direct_steps, monkeypatch):
-    run = seed_run(db_session, "run-receipt-cancel")
+async def test_cancel_never_writes_the_receipt(druks_db, _direct_steps, monkeypatch):
+    run = seed_run(druks_db, kind=Summarize.kind, run_id="run-receipt-cancel")
 
     async def _cancelled(topic, timeout_seconds):
         raise DBOSWorkflowCancelledError(run.id)
@@ -82,5 +83,5 @@ async def test_cancel_never_writes_the_receipt(db_session, _direct_steps, monkey
     with pytest.raises(DBOSWorkflowCancelledError):
         await _park(_ParkedWorkflow(run.id), "review", _ASK, ttl_seconds=1.0)
 
-    run = _reload(db_session, run.id)
+    run = _reload(druks_db, run.id)
     assert not run.answer_parked_at

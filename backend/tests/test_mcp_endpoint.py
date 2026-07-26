@@ -5,17 +5,11 @@ from datetime import UTC, datetime, timedelta
 
 import httpx
 import pytest
-from conftest import (
-    configure_app_for_test,
-    finish_agent_run,
-    make_settings,
-    make_test_work_item,
-    seed_agent_run,
-    seed_build_run,
-)
+from conftest import finish_agent_run, make_test_note, seed_note_agent_run, seed_note_run
 from druks.accounts.models import Account, PersonalAccessToken
 from druks.api.app import mcp_app
 from druks.durable.models import Artifact, Run
+from druks.testing import configure_app_for_test, make_settings
 from druks.usage.models import UsageScrape
 from fastapi.testclient import TestClient
 from fastmcp.client import Client
@@ -47,7 +41,7 @@ _TOOL_NAMES = ["get_gate", "answer_gate", "get_agent_call", "cancel_run", "get_u
 
 
 @pytest.fixture
-def app(tmp_path, db_session, monkeypatch):
+def app(tmp_path, druks_db, monkeypatch):
     monkeypatch.setenv("DRUKS_DATA_DIR", str(tmp_path))
     return configure_app_for_test(settings=make_settings(tmp_path), authenticated=False)
 
@@ -61,7 +55,7 @@ async def live(app):
 
 
 @pytest.fixture
-def account(db_session):
+def account(druks_db):
     return Account.get_or_create("op@example.com")
 
 
@@ -109,20 +103,20 @@ def _wire_size(structured: dict) -> int:
     return len(json.dumps(structured, separators=(",", ":"), default=str).encode())
 
 
-def _park(db_session, item_id):
-    run = seed_build_run(
-        db_session,
-        work_item_id=item_id,
+def _park(druks_db, note):
+    run = seed_note_run(
+        druks_db,
+        note=note,
         state="parked",
         input_gate="review",
         input_request=dict(_IN_APP_ASK),
     )
     run.input_requested_at = datetime.now(UTC)
-    db_session.flush()
+    druks_db.flush()
     return run
 
 
-async def test_mcp_rejects_missing_and_dead_tokens(app, account, db_session):
+async def test_mcp_rejects_missing_and_dead_tokens(app, account, druks_db):
     row, token = PersonalAccessToken.create(account_id=account.id, name="agent")
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://druks.test"
@@ -141,7 +135,7 @@ async def test_mcp_rejects_missing_and_dead_tokens(app, account, db_session):
 
         bearer = {**_WIRE_HEADERS, "Authorization": f"Bearer {token}"}
         row.expires_at = datetime.now(UTC) - timedelta(days=1)
-        db_session.flush()
+        druks_db.flush()
         expired = await wire.post("/mcp", json=_INIT, headers=bearer)
         assert expired.status_code == 401
 
@@ -183,13 +177,13 @@ async def test_tools_list_pins_the_five_derived_from_agent_routes(app, pat_token
     assert not tools["get_usage"].inputSchema.get("required")
 
 
-async def test_claims_resolve_the_calling_account(app, db_session):
+async def test_claims_resolve_the_calling_account(app, druks_db):
     # get_usage must answer as the token's account — the forwarded bearer.
     mine = Account.get_or_create("op@example.com")
     theirs = Account.get_or_create("peer@example.com")
     _, my_token = PersonalAccessToken.create(account_id=mine.id, name="mine")
     _, their_token = PersonalAccessToken.create(account_id=theirs.id, name="theirs")
-    db_session.add(
+    druks_db.add(
         UsageScrape(
             harness="codex",
             account_id=mine.id,
@@ -197,7 +191,7 @@ async def test_claims_resolve_the_calling_account(app, db_session):
             five_hour_percent_left=42,
         )
     )
-    db_session.flush()
+    druks_db.flush()
 
     async with live(app), _client(app, my_token) as client:
         usage = (await client.call_tool("get_usage", {})).structured_content
@@ -211,10 +205,10 @@ async def test_claims_resolve_the_calling_account(app, db_session):
 
 
 async def test_gate_cycle_reads_answers_and_reports_stale_rounds(
-    app, pat_token, db_session, resume_spy
+    app, pat_token, druks_db, resume_spy
 ):
-    item = make_test_work_item(repo="o/r", title="t")
-    run = _park(db_session, item.id)
+    item = make_test_note()
+    run = _park(druks_db, item)
 
     async with live(app), _client(app, pat_token) as client:
         gate = (await client.call_tool("get_gate", {"run_id": run.id})).structured_content
@@ -239,7 +233,7 @@ async def test_gate_cycle_reads_answers_and_reports_stale_rounds(
         assert resume_spy == [{"id": run.id, "action": "approve", "answers": {}, "note": ""}]
 
         run.answer_parked_at = run.input_requested_at
-        db_session.flush()
+        druks_db.flush()
         repeat = (
             await client.call_tool(
                 "answer_gate",
@@ -255,22 +249,22 @@ async def test_gate_cycle_reads_answers_and_reports_stale_rounds(
         )
         assert missing["code"] == "RUN_NOT_FOUND"
 
-        external_item = make_test_work_item(repo="o/external", title="t")
-        external = seed_build_run(
-            db_session,
-            work_item_id=external_item.id,
+        external_item = make_test_note()
+        external = seed_note_run(
+            druks_db,
+            note=external_item,
             state="parked",
             input_gate="review",
             input_request={"presentation": "external"},
         )
         external.input_requested_at = datetime.now(UTC)
-        db_session.flush()
+        druks_db.flush()
         unanswerable = await _call_error(client, "get_gate", {"run_id": external.id})
     assert unanswerable["code"] == "GATE_NOT_ANSWERABLE"
 
 
-async def test_get_agent_call_serves_bounded_tails(app, pat_token, db_session):
-    call = seed_agent_run()
+async def test_get_agent_call_serves_bounded_tails(app, pat_token, druks_db):
+    call = seed_note_agent_run()
     call_dir = call.call_dir
     call_dir.mkdir(parents=True, exist_ok=True)
     (call_dir / "stdout.jsonl").write_bytes(b"s" * 20480)
@@ -292,19 +286,19 @@ async def test_get_agent_call_serves_bounded_tails(app, pat_token, db_session):
     assert error["code"] == "AGENT_CALL_NOT_FOUND"
 
 
-async def test_cancel_run_is_destructive_but_repeatable(app, pat_token, db_session, monkeypatch):
+async def test_cancel_run_is_destructive_but_repeatable(app, pat_token, druks_db, monkeypatch):
     cancels = []
 
     async def _spy(self, *, failure):
         cancels.append({"id": self.id, "failure": failure})
 
     monkeypatch.setattr(Run, "cancel", _spy)
-    item = make_test_work_item(repo="o/r", title="t")
-    active = seed_build_run(db_session, work_item_id=item.id, state="running")
-    done_item = make_test_work_item(repo="o/done", title="t")
-    done = seed_build_run(db_session, work_item_id=done_item.id, state="finished")
-    gone_item = make_test_work_item(repo="o/gone", title="t")
-    gone = seed_build_run(db_session, work_item_id=gone_item.id, state="cancelled")
+    item = make_test_note()
+    active = seed_note_run(druks_db, note=item, state="running")
+    done_item = make_test_note()
+    done = seed_note_run(druks_db, note=done_item, state="finished")
+    gone_item = make_test_note()
+    gone = seed_note_run(druks_db, note=gone_item, state="cancelled")
 
     async with live(app), _client(app, pat_token) as client:
         cancelled = (
@@ -355,7 +349,7 @@ def test_lifespan_composes_the_endpoint_once(app, monkeypatch):
     assert entered == [1]
 
 
-def test_mcp_server_registry_routes_stay_untouched(tmp_path, db_session, monkeypatch):
+def test_mcp_server_registry_routes_stay_untouched(tmp_path, druks_db, monkeypatch):
     monkeypatch.setenv("DRUKS_DATA_DIR", str(tmp_path))
     app = configure_app_for_test(settings=make_settings(tmp_path))
     with TestClient(app) as client:

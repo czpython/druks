@@ -1,11 +1,8 @@
-import sys
-from importlib.metadata import EntryPoint
 from pathlib import Path
 
 import pytest
-from conftest import make_settings
 from druks import doctor
-from druks.extensions import loader
+from druks.testing import make_settings
 
 # field_notes is the out-of-tree proof extension (``backend/tests/druks-field_notes``).
 # It declares one check on its class — its summarizer API key, which passes when the
@@ -13,56 +10,12 @@ from druks.extensions import loader
 # through the platform's own doctor, proving an extension contributes checks through the
 # loader without doctor importing the extension's private modules, and that a broken
 # extension check can't hide a core one.
-_PACKAGE = "druks_field_notes"
-_PACKAGE_ROOT = Path(__file__).resolve().parent / "druks-field_notes"
-
-
-def _entry() -> EntryPoint:
-    return EntryPoint(
-        name="field_notes",
-        value=f"{_PACKAGE}.extension:FieldNotes",
-        group="druks.extensions",
-    )
-
-
-@pytest.fixture(scope="module")
-def external_package():
-    """Put the on-disk proof package on ``sys.path`` and restore every global its
-    load mutates so the rest of the suite sees the in-tree extensions untouched.
-    Mirrors the proof-extension suite's fixture."""
-    from blinker import signal
-    from druks.extensions import loader as extensions_loader
-    from druks.extensions.registry import agents, webhooks, workflows
-    from druks.models import Base
-
-    sys.path.insert(0, str(_PACKAGE_ROOT))
-
-    tables = set(Base.metadata.tables)
-    registries = {registry: dict(registry._items) for registry in (agents, webhooks, workflows)}
-    packages = dict(extensions_loader._workflow_packages)
-    finished = signal("workflow.finished")
-    receivers = dict(finished.receivers)
-    try:
-        yield
-    finally:
-        sys.path.remove(str(_PACKAGE_ROOT))
-        for name in set(Base.metadata.tables) - tables:
-            Base.metadata.remove(Base.metadata.tables[name])
-        for registry, snapshot in registries.items():
-            registry._items = snapshot
-        extensions_loader._workflow_packages.clear()
-        extensions_loader._workflow_packages.update(packages)
-        finished.receivers = receivers
-        for name in [m for m in sys.modules if m == _PACKAGE or m.startswith(f"{_PACKAGE}.")]:
-            del sys.modules[name]
 
 
 @pytest.fixture
-def installed(external_package, monkeypatch):
-    """field_notes as the only extension the loader (and so doctor) sees."""
-    monkeypatch.setattr(loader, "entry_points", lambda *, group: [_entry()])
-    # The failing check reads a real env var; force it unset so the failure is
-    # deterministic regardless of the developer's environment.
+def installed(monkeypatch):
+    # The check reads a real env var; force it unset so the failure is deterministic
+    # regardless of the developer's environment.
     monkeypatch.delenv("FIELD_NOTES_API_KEY", raising=False)
 
 
@@ -98,13 +51,7 @@ def test_failing_extension_check_reports_under_the_extension(installed, tmp_path
 def test_extension_checks_are_wired_into_the_check_battery(installed, tmp_path: Path) -> None:
     """``run_checks`` runs the extension checks: ``check_extensions`` is one of the
     battery's entries and, like ``check_harness_credentials``, fans its several
-    results into the run — so the extension's checks reach the report beside core's.
-
-    (Asserted at the battery seam rather than by calling ``run_checks`` here: the
-    full battery's ``check_capability_modules`` walks and re-imports every extension
-    module, which would re-register this out-of-tree package's model mid-suite and
-    bleed into a later test. The passing/failing tests above already exercise the
-    extension checks end to end.)"""
+    results into the run — so the extension's checks reach the report beside core's."""
     settings = make_settings(tmp_path)
 
     assert doctor.check_extensions in doctor.CHECKS

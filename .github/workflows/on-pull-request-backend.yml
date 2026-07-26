@@ -61,15 +61,10 @@ jobs:
           python-version: "3.11"
       - run: uv sync --locked --dev
       - run: uv run ruff check backend
+      # The proof extension is a standalone distribution that depends on druks;
+      # it installs the way an author's would, so druks never depends on it.
+      - run: uv pip install -e backend/tests/druks-field_notes
       # Hang defense is pytest-timeout (pyproject): 180s per test, thread
       # method — dump every thread's stack and exit from inside the process,
       # so the step ends normally and the log keeps the dump.
       - run: uv run pytest backend/
-      # The out-of-tree proof extension, installed editable exactly as an author's
-      # ``pip install -e`` would — its real entry point registers here, so the loader
-      # discovers it with no test seam. Runs after the main suite (whose in-tree
-      # extension set the proof must not join) and re-verifies every author surface
-      # against the actual install: boot, discovery, migrations, routes, run start,
-      # feed formatting, settings.
-      - run: uv pip install -e backend/tests/druks-field_notes
-      - run: uv run pytest backend/tests/test_proof_extension.py backend/tests/test_proof_extension_install.py backend/tests/test_proof_extension_migration.py

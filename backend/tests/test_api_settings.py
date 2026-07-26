@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from conftest import configure_app_for_test, make_settings
+from druks.testing import configure_app_for_test, make_settings
 from fastapi.testclient import TestClient
 
 
@@ -38,7 +38,7 @@ def test_harness_response_carries_connection_state(tmp_path: Path):
     assert "expiresAt" in claude
 
 
-def test_harnesses_show_only_the_requesting_accounts_connection(tmp_path: Path, db_session):
+def test_harnesses_show_only_the_requesting_accounts_connection(tmp_path: Path, druks_db):
     from conftest import connect_harness
     from druks.harnesses.claude import ClaudeHarness
 
@@ -54,7 +54,7 @@ def test_harnesses_show_only_the_requesting_accounts_connection(tmp_path: Path, 
     assert claude["connected"] is False
 
 
-def test_harness_card_reports_identity(tmp_path: Path, db_session):
+def test_harness_card_reports_identity(tmp_path: Path, druks_db):
     from druks.accounts.models import Account
     from druks.harnesses.models import HarnessConnection
 
@@ -73,7 +73,7 @@ def test_harness_card_reports_identity(tmp_path: Path, db_session):
     assert claude["providerEmail"] == "seat@corp.com"
 
 
-def test_disconnect_removes_only_the_requesting_accounts_connection(tmp_path: Path, db_session):
+def test_disconnect_removes_only_the_requesting_accounts_connection(tmp_path: Path, druks_db):
     from conftest import connect_harness
     from druks.harnesses.claude import ClaudeHarness
     from druks.harnesses.models import HarnessConnection

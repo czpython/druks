@@ -4,7 +4,6 @@ from types import SimpleNamespace
 
 import psycopg
 import pytest
-from conftest import configure_app_for_test, init_db, make_settings
 from dbos import DBOS
 from druks.database import configure_session, db_session, get_session
 from druks.durable.engine import configure_engine, init_dbos, launch, shutdown
@@ -16,6 +15,7 @@ from druks.notifications.exceptions import DeliveryError, NotificationError
 from druks.notifications.models import Destination, Notification
 from druks.notifications.outbox import notifications_queue, send_notification
 from druks.notifications.services import respond_to_notification
+from druks.testing import configure_app_for_test, init_db, make_settings
 from druks.user_settings.models import UserSettings
 from druks.workflows import Gate, OperatorReply, Run, Workflow
 from fastapi.testclient import TestClient

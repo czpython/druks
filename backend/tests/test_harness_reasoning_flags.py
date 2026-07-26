@@ -7,7 +7,7 @@ _CODEX_MODEL = CodexHarness.models[0]
 
 
 @pytest.fixture(autouse=True)
-def _connected_harnesses(db_session):
+def _connected_harnesses(druks_db):
     # build_invocation renders each credential bundle from the DB row and
     # raises when that harness isn't connected.
     connect_harness(ClaudeHarness, {"claudeAiOauth": {"accessToken": "t"}})

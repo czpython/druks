@@ -1,15 +1,17 @@
 from datetime import timedelta
 
 import pytest
-from conftest import make_test_work_item, seed_dbos_status
 from druks.contrib.ship.contracts import ReviewWork
 from druks.contrib.ship.models import WorkItem
 from druks.contrib.ship.workflows import Build, Profile
 from druks.durable.models import Run
 from druks.durable.reads import get_subject_phase
 from druks.models import Base
+from druks.testing import seed_dbos_status
 from druks.workflows import OperatorReply, WorkflowError
 from uuid_utils import uuid7
+
+from ship.factories import make_test_work_item
 
 pytestmark = pytest.mark.asyncio
 
@@ -19,7 +21,7 @@ def _work_item(**fields):
 
 
 def _subject_run(
-    db_session,
+    druks_db,
     *,
     subject: WorkItem,
     kind: str,
@@ -33,25 +35,25 @@ def _subject_run(
         input_gate=gate,
         created_at=Base.utc_now() + timedelta(seconds=order),
     )
-    db_session.add(run)
-    db_session.flush()
-    seed_dbos_status(db_session, run.id, state, subject=subject.identity)
+    druks_db.add(run)
+    druks_db.flush()
+    seed_dbos_status(druks_db, run.id, state, subject=subject.identity)
     return run
 
 
-async def test_gate_answer_resumes_only_a_run_parked_on_its_gate(db_session, monkeypatch):
+async def test_gate_answer_resumes_only_a_run_parked_on_its_gate(druks_db, monkeypatch):
     # A subject can carry runs of several workflows at once; the gate names which one
     # answers, so a newer run of another kind never hides the parked one. A timed-out
     # run keeps its stale ``input_gate``, so parked-ness decides, not that column.
     subject = _work_item(remote_key="ENG-748-A")
     parked = _subject_run(
-        db_session,
+        druks_db,
         subject=subject,
         kind=Build.kind,
         state="parked",
         gate=OperatorReply.name,
     )
-    _subject_run(db_session, subject=subject, kind=Profile.kind, state="running", order=1)
+    _subject_run(druks_db, subject=subject, kind=Profile.kind, state="running", order=1)
     resumed = []
 
     async def resume(self, **reply):
@@ -64,7 +66,7 @@ async def test_gate_answer_resumes_only_a_run_parked_on_its_gate(db_session, mon
 
     timed_out = _work_item(remote_key="ENG-748-B")
     _subject_run(
-        db_session,
+        druks_db,
         subject=timed_out,
         kind=Build.kind,
         state="failed",
@@ -76,13 +78,13 @@ async def test_gate_answer_resumes_only_a_run_parked_on_its_gate(db_session, mon
 
 
 async def test_workflow_cancel_takes_its_own_kind_and_passes_over_idle_subjects(
-    db_session, monkeypatch
+    druks_db, monkeypatch
 ):
     # Webhooks redeliver, and a PR can close long after its build ended: cancelling what
     # is already gone is the no-op the caller expects, not an error.
     subject = _work_item(remote_key="ENG-748-C")
-    build = _subject_run(db_session, subject=subject, kind=Build.kind, state="running")
-    _subject_run(db_session, subject=subject, kind=Profile.kind, state="running", order=1)
+    build = _subject_run(druks_db, subject=subject, kind=Build.kind, state="running")
+    _subject_run(druks_db, subject=subject, kind=Profile.kind, state="running", order=1)
     cancelled = []
 
     async def cancel(self, *, failure=None):
@@ -94,21 +96,21 @@ async def test_workflow_cancel_takes_its_own_kind_and_passes_over_idle_subjects(
     assert cancelled == [build.id]
 
     idle = _work_item(remote_key="ENG-748-D")
-    _subject_run(db_session, subject=idle, kind=Build.kind, state="finished")
+    _subject_run(druks_db, subject=idle, kind=Build.kind, state="finished")
     await Build.cancel(idle)
     assert cancelled == [build.id]
 
 
-async def test_subject_phase_reads_the_driving_running_workflow(db_session, monkeypatch):
+async def test_subject_phase_reads_the_driving_running_workflow(druks_db, monkeypatch):
     subject = _work_item(remote_key="ENG-748-E")
     _subject_run(
-        db_session,
+        druks_db,
         subject=subject,
         kind=Build.kind,
         state="parked",
         gate=OperatorReply.name,
     )
-    driving = _subject_run(db_session, subject=subject, kind=Profile.kind, state="running", order=1)
+    driving = _subject_run(druks_db, subject=subject, kind=Profile.kind, state="running", order=1)
     seen = []
 
     async def phase(workflow_id):

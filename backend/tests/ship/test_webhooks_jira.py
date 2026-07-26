@@ -4,8 +4,9 @@ from unittest.mock import AsyncMock
 import druks.contrib.ship.subscribers as subs
 import druks.core.webhooks.jira as jira_mod
 import pytest
-from conftest import make_settings, seed_run
+from druks.contrib.ship.workflows import Build
 from druks.core.webhooks.jira import JiraEvents
+from druks.testing import make_settings, seed_run
 from fastapi import HTTPException
 
 
@@ -162,15 +163,15 @@ async def test_trigger_status_dispatches_build_with_the_webhook_payload(tmp_path
     build.assert_awaited_once_with(ticket=payload)
 
 
-async def test_trigger_status_routes_a_new_ticket_by_label(tmp_path, db_session, monkeypatch):
+async def test_trigger_status_routes_a_new_ticket_by_label(tmp_path, druks_db, monkeypatch):
     """No work item yet: the label names the repo, the registry routes it."""
     from druks.contrib.ship.models import Project, ProjectRepo, WorkItem
 
     project = Project.create(name="octo/alfred")
     ProjectRepo.create(project_id=project.id, full_name="octo/alfred")
-    db_session.flush()
+    druks_db.flush()
     _pin_settings(monkeypatch, jira_trigger_status="Ready")
-    seed_run(db_session, "run-new")
+    seed_run(druks_db, kind=Build.kind, run_id="run-new")
 
     async def fake_start(cls, **kwargs):
         return "run-new"
@@ -187,7 +188,7 @@ async def test_trigger_status_routes_a_new_ticket_by_label(tmp_path, db_session,
     assert item.project_id == project.id
 
 
-async def test_trigger_status_ignores_an_unroutable_ticket(tmp_path, db_session, monkeypatch):
+async def test_trigger_status_ignores_an_unroutable_ticket(tmp_path, druks_db, monkeypatch):
     """No signal matches a registered repo → no build."""
     _pin_settings(monkeypatch, jira_trigger_status="Ready")
     start = AsyncMock()

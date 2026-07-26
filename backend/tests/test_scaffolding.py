@@ -2,6 +2,7 @@ import importlib
 import sys
 
 import pytest
+from druks.extensions.loader import _workflow_packages, register_workflow_package
 from druks.scaffolding import create_extension
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -15,6 +16,8 @@ def test_create_extension_scaffolds_a_loadable_package(tmp_path):
     assert (package / "migrations" / "versions").is_dir()
     rendered = [path for path in target.rglob("*") if path.is_file()]
     assert rendered
+    # The generated suite is what an author runs first; the scaffold is useless without it.
+    assert (target / "tests" / "test_extension.py").is_file()
     for path in rendered:
         assert "-tpl" not in path.name
         assert "{{" not in path.read_text()
@@ -42,6 +45,10 @@ def test_create_extension_scaffolds_a_loadable_package(tmp_path):
         assert extension.table_prefix == "night_watch_"
         assert extension.package == "druks_night_watch"
 
+        # An installed extension has its package claimed by the loader before any
+        # module imports; the generated workflow resolves its identity from that.
+        register_workflow_package(extension.package, extension.name)
+
         for role in ("models", "schemas", "contracts", "workflows", "routes", "subscribers"):
             importlib.import_module(f"druks_night_watch.{role}")
 
@@ -62,6 +69,7 @@ def test_create_extension_scaffolds_a_loadable_package(tmp_path):
         assert "night_watch" in page.text
     finally:
         sys.path.remove(str(target))
+        _workflow_packages.pop("druks_night_watch", None)
         for name in [m for m in sys.modules if m.startswith("druks_night_watch")]:
             del sys.modules[name]
 

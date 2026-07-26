@@ -2,12 +2,12 @@ import json
 
 import httpx
 import pytest
-from conftest import configure_app_for_test, make_settings
 from druks.mcp import registry
 from druks.mcp.exceptions import RegistryUnavailableError
 from druks.mcp.models import McpOauthGrant, McpServer
 from druks.mcp.registry import derive_server_name, resolve_candidates, search_registry
 from druks.settings import PACKAGED_MCP_TRUSTED
+from druks.testing import configure_app_for_test, make_settings
 from fastapi.testclient import TestClient
 
 # Canned latest-version entries, shaped like the live /v0/servers?search=…
@@ -280,7 +280,7 @@ def _client_with_registry(tmp_path, monkeypatch, *entries):
     return TestClient(app)
 
 
-def test_registry_search_route_projects_resolved_candidates(tmp_path, monkeypatch, db_session):
+def test_registry_search_route_projects_resolved_candidates(tmp_path, monkeypatch, druks_db):
     with _client_with_registry(tmp_path, monkeypatch, _GRAFANA, _SENTRY) as client:
         response = client.get("/api/mcp-servers/registry", params={"query": "observability"})
 
@@ -295,7 +295,7 @@ def test_registry_search_route_projects_resolved_candidates(tmp_path, monkeypatc
         assert sentry["url"] == "https://mcp.sentry.dev/mcp"
 
 
-def test_registry_search_route_maps_unavailability_to_502(tmp_path, monkeypatch, db_session):
+def test_registry_search_route_maps_unavailability_to_502(tmp_path, monkeypatch, druks_db):
     monkeypatch.setattr(
         registry, "_http", _client_returning(lambda _r: httpx.Response(503, text="down"))
     )
@@ -307,7 +307,7 @@ def test_registry_search_route_maps_unavailability_to_502(tmp_path, monkeypatch,
         assert "registry search" in response.json()["detail"]
 
 
-def test_add_from_registry_writes_the_row_and_redacts_the_secret(tmp_path, monkeypatch, db_session):
+def test_add_from_registry_writes_the_row_and_redacts_the_secret(tmp_path, monkeypatch, druks_db):
     with _client_with_registry(tmp_path, monkeypatch, _ACME_ENTRY) as client:
         created = client.post(
             "/api/mcp-servers/registry",
@@ -340,7 +340,7 @@ def test_add_from_registry_writes_the_row_and_redacts_the_secret(tmp_path, monke
 
 
 def test_add_from_registry_oauth_candidate_ships_dark_and_connects(
-    tmp_path, monkeypatch, db_session
+    tmp_path, monkeypatch, druks_db
 ):
     with _client_with_registry(tmp_path, monkeypatch, _GRAFANA) as client:
         created = client.post(
@@ -380,7 +380,7 @@ def test_add_from_registry_oauth_candidate_ships_dark_and_connects(
 
 
 def test_add_from_registry_rejects_missing_required_and_unknown_headers(
-    tmp_path, monkeypatch, db_session
+    tmp_path, monkeypatch, druks_db
 ):
     with _client_with_registry(tmp_path, monkeypatch, _ACME_ENTRY) as client:
         # Required X-Api-Key blank → named 422; nothing persisted.
@@ -412,7 +412,7 @@ def test_add_from_registry_rejects_missing_required_and_unknown_headers(
 
 
 def test_add_from_registry_rejects_an_entry_without_an_http_remote(
-    tmp_path, monkeypatch, db_session
+    tmp_path, monkeypatch, druks_db
 ):
     # stdio/oci-only and unpinned: resolvable in search, not installable.
     with _client_with_registry(tmp_path, monkeypatch, _entry("com.mcparmory/grafana")) as client:
@@ -425,7 +425,7 @@ def test_add_from_registry_rejects_an_entry_without_an_http_remote(
         assert "not installable" in created.json()["detail"]
 
 
-def test_removing_a_connected_row_drops_its_grant(tmp_path, monkeypatch, db_session):
+def test_removing_a_connected_row_drops_its_grant(tmp_path, monkeypatch, druks_db):
     with _client_with_registry(tmp_path, monkeypatch, _GRAFANA) as client:
         client.post(
             "/api/mcp-servers/registry",

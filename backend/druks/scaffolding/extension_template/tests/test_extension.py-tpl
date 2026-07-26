@@ -1,6 +1,11 @@
-from druks_{{ name }}.extension import {{ Name }}
+from druks.testing import run_workflow
+from druks_{{ name }}.workflows import Echo
+
+# druks ships its fixtures as a pytest plugin, so installing it is the whole wiring:
+# ``druks_db`` for a rolled-back database session, ``druks_client`` for the API, and
+# ``run_workflow`` to run a workflow body without a durable engine. Nothing to import
+# into a conftest.
 
 
-def test_extension_declares_itself():
-    assert {{ Name }}.name == "{{ name }}"
-    assert {{ Name }}.table_prefix == "{{ name }}_"
+async def test_echo_returns_its_message():
+    assert await run_workflow(Echo, message="hello") == "hello"

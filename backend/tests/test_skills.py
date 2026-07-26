@@ -4,11 +4,11 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-from conftest import configure_app_for_test, make_settings
 from druks.skills import install as install_mod
 from druks.skills import routes as routes_mod
 from druks.skills.datastructures import CollectionContents, InstalledSkill
 from druks.skills.models import Skill, SkillCollection
+from druks.testing import configure_app_for_test, make_settings
 from fastapi.testclient import TestClient
 
 
@@ -104,7 +104,7 @@ def test_non_github_url_rejected():
         install_mod._parse_github_repo("https://gitlab.com/owner/repo")
 
 
-def test_collection_create_get_cascade_delete(db_session):
+def test_collection_create_get_cascade_delete(druks_db):
     collection = SkillCollection.create(
         source="https://github.com/o/r",
         name="o/r",
@@ -120,7 +120,7 @@ def test_collection_create_get_cascade_delete(db_session):
     # Skills land enabled; disabling drops them from the projection's tar.
     assert Skill.disabled_excludes() == ()
     Skill.get("alpha").enabled = False
-    db_session.flush()
+    druks_db.flush()
     assert Skill.disabled_excludes() == ("./alpha",)
 
     collection.delete()
@@ -171,7 +171,7 @@ def test_collection_routes_install_list_remove(tmp_path, monkeypatch):
         assert client.get("/api/skills").json() == []
 
 
-def test_sync_updates_changed_skill_and_timestamps(tmp_path, monkeypatch, db_session):
+def test_sync_updates_changed_skill_and_timestamps(tmp_path, monkeypatch, druks_db):
     settings = make_settings(tmp_path)
     original_skill = _skill_md("alpha")
     updated_skill = _skill_md("alpha", "updated description")
@@ -188,7 +188,7 @@ def test_sync_updates_changed_skill_and_timestamps(tmp_path, monkeypatch, db_ses
         original_hash = skill.content_hash
         collection.updated_at = old_timestamp
         skill.updated_at = old_timestamp
-        db_session.flush()
+        druks_db.flush()
 
         _patch_download(
             monkeypatch,
@@ -198,7 +198,7 @@ def test_sync_updates_changed_skill_and_timestamps(tmp_path, monkeypatch, db_ses
         assert response.status_code == 200
         assert response.json()["skills"][0]["description"] == "updated description"
 
-        db_session.expire_all()
+        druks_db.expire_all()
         assert skill.description == "updated description"
         assert skill.content_hash != original_hash
         assert skill.updated_at > old_timestamp
@@ -207,16 +207,16 @@ def test_sync_updates_changed_skill_and_timestamps(tmp_path, monkeypatch, db_ses
 
         skill_timestamp = skill.updated_at
         collection.updated_at = old_timestamp
-        db_session.flush()
+        druks_db.flush()
         response = client.post(f"/api/skills/{collection_id}/sync")
         assert response.status_code == 200
 
-        db_session.expire_all()
+        druks_db.expire_all()
         assert skill.updated_at == skill_timestamp
         assert collection.updated_at > old_timestamp
 
 
-def test_sync_adds_new_skill(tmp_path, monkeypatch, db_session):
+def test_sync_adds_new_skill(tmp_path, monkeypatch, druks_db):
     settings = make_settings(tmp_path)
     alpha_skill = _skill_md("alpha")
     beta_skill = _skill_md("beta")
@@ -242,12 +242,12 @@ def test_sync_adds_new_skill(tmp_path, monkeypatch, db_session):
         assert response.status_code == 200
         assert [skill["name"] for skill in response.json()["skills"]] == ["alpha", "beta"]
 
-        db_session.expire_all()
+        druks_db.expire_all()
         assert Skill.get("beta").collection_id == collection_id
         assert (settings.skills_dir / "beta" / "SKILL.md").read_bytes() == beta_skill
 
 
-def test_sync_removes_missing_skill_and_files(tmp_path, monkeypatch, db_session):
+def test_sync_removes_missing_skill_and_files(tmp_path, monkeypatch, druks_db):
     settings = make_settings(tmp_path)
     alpha_skill = _skill_md("alpha")
     beta_skill = _skill_md("beta")
@@ -272,12 +272,12 @@ def test_sync_removes_missing_skill_and_files(tmp_path, monkeypatch, db_session)
         assert response.status_code == 200
         assert [skill["name"] for skill in response.json()["skills"]] == ["alpha"]
 
-        db_session.expire_all()
+        druks_db.expire_all()
         assert not Skill.get("beta")
         assert not beta_path.exists()
 
 
-def test_sync_preserves_disabled_skill(tmp_path, monkeypatch, db_session):
+def test_sync_preserves_disabled_skill(tmp_path, monkeypatch, druks_db):
     alpha_skill = _skill_md("alpha")
 
     with TestClient(configure_app_for_test(settings=make_settings(tmp_path))) as client:
@@ -288,7 +288,7 @@ def test_sync_preserves_disabled_skill(tmp_path, monkeypatch, db_session):
         )
         skill = Skill.get("alpha")
         skill.enabled = False
-        db_session.flush()
+        druks_db.flush()
         _patch_download(
             monkeypatch,
             _tarball("owner-repo-abc", {"alpha/SKILL.md": alpha_skill}),
@@ -298,7 +298,7 @@ def test_sync_preserves_disabled_skill(tmp_path, monkeypatch, db_session):
         assert response.status_code == 200
         assert response.json()["skills"][0]["enabled"] is False
 
-        db_session.expire_all()
+        druks_db.expire_all()
         assert skill.enabled is False
 
 

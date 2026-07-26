@@ -1,11 +1,17 @@
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import pytest
-from conftest import configure_app_for_test, make_settings
-from druks.database import db_session
+from conftest import connect_harness
+from druks.accounts.models import Account
+from druks.harnesses.claude import ClaudeHarness
+from druks.harnesses.datastructures import ParsedMetric, ParsedUsage
 from druks.settings import Settings
+from druks.testing import configure_app_for_test, make_settings, seed_call, seed_run
 from druks.usage.models import UsageScrape
+from druks_field_notes.models import Note
+from druks_field_notes.workflows import Summarize
 from fastapi.testclient import TestClient
 
 
@@ -22,8 +28,6 @@ def client(extension_settings: Settings):
 
 def _account_id() -> str:
     # The suite's auth gate stands in op@example.com (conftest override).
-    from druks.accounts.models import Account
-
     return Account.get_or_create("op@example.com").id
 
 
@@ -43,20 +47,24 @@ def _harness(body: dict, name: str) -> dict:
     return next(entry for entry in body["harnesses"] if entry["name"] == name)
 
 
-def test_usage_today_counts_calls_whose_model_isnt_a_current_harness(client, db_session) -> None:
+def _seed_agent_call(druks_db, *, model: str | None = "gpt-5.5"):
+    note = Note.create(body="usage accounting")
+    run = seed_run(druks_db, kind=Summarize.kind, subject=note)
+    return seed_call(druks_db, run, "summarize", status="running", model=model)
+
+
+def test_usage_today_counts_calls_whose_model_isnt_a_current_harness(client, druks_db) -> None:
     # Model ids churn on deploys (opus-4-7 → 4-8), so a call finished earlier today
     # can carry an id no harness claims any more. Money spent must not vanish from
     # the display — the sys-strip's total_run_spend_between counts every call, and
     # the two surfaces must quote the same number. Unclaimed and unresolved models
     # land in the "unattributed" bucket the panel's grand total sums.
-    from conftest import seed_agent_run
-
     for model in ("claude-opus-4-5", None):
-        call = seed_agent_run(model=model)
+        call = _seed_agent_call(druks_db, model=model)
         call.account_id = _account_id()
         call.finished_at = datetime.now(UTC)
         call.cost_usd = 2.5
-    db_session.flush()
+    druks_db.flush()
 
     body = client.get("/api/usage/today").json()
     bucket = _harness(body, "unattributed")
@@ -181,12 +189,10 @@ def test_usage_history_serializes_series_oldest_first(client, extension_settings
     assert _harness(body, "codex")["week"] == []
 
 
-def test_usage_today_aggregates_spend_and_tokens_by_provider(client, extension_settings) -> None:
-    from zoneinfo import ZoneInfo
-
-    from conftest import seed_agent_run
-
-    codex_run = seed_agent_run(model="gpt-5.5")
+def test_usage_today_aggregates_spend_and_tokens_by_provider(
+    client, extension_settings, druks_db
+) -> None:
+    codex_run = _seed_agent_call(druks_db, model="gpt-5.5")
     codex_run.account_id = _account_id()
     codex_run.cost_usd = 1.25
     codex_run.cost_metadata = {
@@ -197,7 +203,7 @@ def test_usage_today_aggregates_spend_and_tokens_by_provider(client, extension_s
     }
     codex_run.finished_at = datetime.now(UTC)
 
-    claude_run = seed_agent_run(model="claude-opus-4-7")
+    claude_run = _seed_agent_call(druks_db, model="claude-opus-4-7")
     claude_run.account_id = _account_id()
     claude_run.cost_usd = 2.5
     claude_run.cost_metadata = {
@@ -210,13 +216,13 @@ def test_usage_today_aggregates_spend_and_tokens_by_provider(client, extension_s
     claude_run.finished_at = datetime.now(UTC)
 
     # Finished yesterday — outside today's boundary, must not count.
-    old_run = seed_agent_run(model="gpt-5.5")
+    old_run = _seed_agent_call(druks_db, model="gpt-5.5")
     old_run.cost_usd = 99.0
     old_run.finished_at = datetime.now(UTC) - timedelta(days=2)
 
     # Still running — no cost yet, counted nowhere.
-    seed_agent_run(model="gpt-5.5")
-    db_session().flush()
+    _seed_agent_call(druks_db, model="gpt-5.5")
+    druks_db.flush()
 
     body = client.get("/api/usage/today").json()
 
@@ -236,9 +242,7 @@ def test_usage_today_aggregates_spend_and_tokens_by_provider(client, extension_s
     assert sum(claude["hours"]) == 2.5
 
 
-def test_usage_excludes_another_accounts_scrape(client, db_session) -> None:
-    from druks.accounts.models import Account
-
+def test_usage_excludes_another_accounts_scrape(client, druks_db) -> None:
     snap = UsageScrape(harness="claude", parse_ok=True, five_hour_percent_left=54)
     snap.account_id = Account.get_or_create("other@example.com").id
     snap.save()
@@ -249,10 +253,7 @@ def test_usage_excludes_another_accounts_scrape(client, db_session) -> None:
     assert _harness(history, "claude")["fiveHour"] == []
 
 
-def test_usage_reports_connection_state(client, db_session) -> None:
-    from conftest import connect_harness
-    from druks.harnesses.claude import ClaudeHarness
-
+def test_usage_reports_connection_state(client, druks_db) -> None:
     body = client.get("/api/usage").json()
     assert _harness(body, "claude")["connected"] is False
 
@@ -261,24 +262,21 @@ def test_usage_reports_connection_state(client, db_session) -> None:
     assert _harness(body, "claude")["connected"] is True
 
 
-def test_usage_today_counts_only_the_viewers_calls(client, db_session) -> None:
-    from conftest import seed_agent_run
-    from druks.accounts.models import Account
-
-    mine = seed_agent_run(model="claude-opus-4-7")
+def test_usage_today_counts_only_the_viewers_calls(client, druks_db) -> None:
+    mine = _seed_agent_call(druks_db, model="claude-opus-4-7")
     mine.account_id = _account_id()
     mine.cost_usd = 2.0
     mine.finished_at = datetime.now(UTC)
 
-    other = seed_agent_run(model="claude-opus-4-7")
+    other = _seed_agent_call(druks_db, model="claude-opus-4-7")
     other.account_id = Account.get_or_create("other@example.com").id
     other.cost_usd = 5.0
     other.finished_at = datetime.now(UTC)
 
-    background = seed_agent_run(model="claude-opus-4-7")  # charged to system
+    background = _seed_agent_call(druks_db, model="claude-opus-4-7")
     background.cost_usd = 9.0
     background.finished_at = datetime.now(UTC)
-    db_session.flush()
+    druks_db.flush()
 
     body = client.get("/api/usage/today").json()
     assert _harness(body, "claude")["spendUsd"] == 2.0
@@ -286,8 +284,6 @@ def test_usage_today_counts_only_the_viewers_calls(client, db_session) -> None:
 
 
 def _fake_fetch(fetched: list):
-    from druks.harnesses.datastructures import ParsedMetric, ParsedUsage
-
     async def fake(connection, *, now=None):
         fetched.append(connection.account_id)
         return ParsedUsage(
@@ -303,10 +299,7 @@ def _fake_fetch(fetched: list):
     return fake
 
 
-def test_refresh_scrapes_only_the_viewers_connections(client, db_session, monkeypatch) -> None:
-    from conftest import connect_harness
-    from druks.harnesses.claude import ClaudeHarness
-
+def test_refresh_scrapes_only_the_viewers_connections(client, druks_db, monkeypatch) -> None:
     viewer = connect_harness(ClaudeHarness, {"claudeAiOauth": {"accessToken": "t"}})
     connect_harness(
         ClaudeHarness, {"claudeAiOauth": {"accessToken": "t2"}}, provider_email="other@example.com"
@@ -319,10 +312,7 @@ def test_refresh_scrapes_only_the_viewers_connections(client, db_session, monkey
     assert UsageScrape.latest_for("claude", viewer.account_id).five_hour_percent_left == 50
 
 
-def test_refresh_floors_repeat_scrapes(client, db_session, monkeypatch) -> None:
-    from conftest import connect_harness
-    from druks.harnesses.claude import ClaudeHarness
-
+def test_refresh_floors_repeat_scrapes(client, druks_db, monkeypatch) -> None:
     connect_harness(ClaudeHarness, {"claudeAiOauth": {"accessToken": "t"}})
     fetched: list[str] = []
     monkeypatch.setattr(ClaudeHarness, "fetch_usage", _fake_fetch(fetched))

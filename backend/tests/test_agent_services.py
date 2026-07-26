@@ -2,11 +2,12 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
-from conftest import make_test_work_item, seed_build_run, seed_call
+from conftest import make_test_note, seed_note_run
 from druks.accounts.models import Account
 from druks.durable.models import Artifact, Run
 from druks.durable.reads import read_slice
 from druks.mcp.gateway import exceptions, services
+from druks.testing import seed_call
 from druks.usage.models import UsageScrape
 
 pytestmark = pytest.mark.usefixtures("_data_dir")
@@ -19,7 +20,7 @@ def _data_dir(tmp_path, monkeypatch):
 
 
 @pytest.fixture
-def account(db_session):
+def account(druks_db):
     return Account.get_or_create("op@example.com")
 
 
@@ -42,16 +43,16 @@ def _in_app_ask(questions=()):
     }
 
 
-def _park(db_session, item_id, *, ask=None):
-    run = seed_build_run(
-        db_session,
-        work_item_id=item_id,
+def _park(druks_db, note, *, ask=None):
+    run = seed_note_run(
+        druks_db,
+        note=note,
         state="parked",
         input_gate="review",
         input_request=ask if ask is not None else _in_app_ask(),
     )
     run.input_requested_at = datetime.now(UTC)
-    db_session.flush()
+    druks_db.flush()
     return run
 
 
@@ -94,10 +95,10 @@ def test_read_slice_missing_file_is_an_empty_eof(tmp_path: Path):
 # ---- gates ----------------------------------------------------------------
 
 
-def test_get_gate_returns_the_ask_and_parked_at(db_session):
-    item = make_test_work_item(repo="o/r", title="t")
+def test_get_gate_returns_the_ask_and_parked_at(druks_db):
+    item = make_test_note()
     question = {"id": "q1", "prompt": "Which db?", "options": [{"id": "pg", "label": "Postgres"}]}
-    run = _park(db_session, item.id, ask=_in_app_ask([question]))
+    run = _park(druks_db, item, ask=_in_app_ask([question]))
 
     view = services.get_gate(run.id)
 
@@ -108,10 +109,10 @@ def test_get_gate_returns_the_ask_and_parked_at(db_session):
     assert view.ask["questions"][0]["prompt"] == "Which db?"
 
 
-def test_get_gate_serves_the_artifact(db_session):
-    item = make_test_work_item(repo="o/r", title="t")
-    run = _park(db_session, item.id)
-    call = seed_call(db_session, run, "generate_plan")
+def test_get_gate_serves_the_artifact(druks_db):
+    item = make_test_note()
+    run = _park(druks_db, item)
+    call = seed_call(druks_db, run, "generate_plan")
     Artifact.record(
         call_dir=call.call_dir, call_id=call.id, kind="markdown", title="Plan", content="x" * 10240
     )
@@ -124,19 +125,19 @@ def test_get_gate_serves_the_artifact(db_session):
     assert len(view.artifact.content.encode()) <= 4096
 
 
-def test_get_gate_refuses_when_not_parked_or_external(db_session):
+def test_get_gate_refuses_when_not_parked_or_external(druks_db):
     with pytest.raises(exceptions.RunNotFound):
         services.get_gate("no-such-run")
 
-    item = make_test_work_item(repo="o/r", title="t")
-    running = seed_build_run(db_session, work_item_id=item.id, state="running")
+    item = make_test_note()
+    running = seed_note_run(druks_db, note=item, state="running")
     with pytest.raises(exceptions.GateNotOpen):
         services.get_gate(running.id)
 
-    external_item = make_test_work_item(repo="o/r2", title="t")
+    external_item = make_test_note()
     external = _park(
-        db_session,
-        external_item.id,
+        druks_db,
+        external_item,
         ask={"presentation": "external", "label": "Answer on the ticket"},
     )
     with pytest.raises(exceptions.GateNotAnswerable):
@@ -148,21 +149,21 @@ def test_get_gate_refuses_when_not_parked_or_external(db_session):
 # taxonomy arms those tests don't reach.
 
 
-async def test_answer_gate_error_taxonomy(db_session, resume_spy):
+async def test_answer_gate_error_taxonomy(druks_db, resume_spy):
     with pytest.raises(exceptions.RunNotFound):
         await services.answer_gate(
             "no-such-run", parked_at=datetime.now(UTC), control="approve", answers={}, note=""
         )
 
-    item = make_test_work_item(repo="o/r", title="t")
-    finished = seed_build_run(db_session, work_item_id=item.id, state="finished")
+    item = make_test_note()
+    finished = seed_note_run(druks_db, note=item, state="finished")
     with pytest.raises(exceptions.GateNotOpen):
         await services.answer_gate(
             finished.id, parked_at=datetime.now(UTC), control="approve", answers={}, note=""
         )
 
-    parked_item = make_test_work_item(repo="o/r2", title="t")
-    run = _park(db_session, parked_item.id)
+    parked_item = make_test_note()
+    run = _park(druks_db, parked_item)
     with pytest.raises(exceptions.GateRoundStale):
         await services.answer_gate(
             run.id,
@@ -176,10 +177,10 @@ async def test_answer_gate_error_taxonomy(db_session, resume_spy):
             run.id, parked_at=run.input_requested_at, control="merge", answers={}, note=""
         )
 
-    external_item = make_test_work_item(repo="o/r3", title="t")
+    external_item = make_test_note()
     external = _park(
-        db_session,
-        external_item.id,
+        druks_db,
+        external_item,
         ask={"presentation": "external", "label": "Answer on the ticket"},
     )
     with pytest.raises(exceptions.GateNotAnswerable):
@@ -196,10 +197,10 @@ async def test_answer_gate_error_taxonomy(db_session, resume_spy):
 # ---- agent calls ----------------------------------------------------------
 
 
-def test_get_agent_call_serves_bounded_tails(db_session):
-    from conftest import finish_agent_run, seed_agent_run
+def test_get_agent_call_serves_bounded_tails(druks_db):
+    from conftest import finish_agent_run, seed_note_agent_run
 
-    call = seed_agent_run()
+    call = seed_note_agent_run()
     call_dir = call.call_dir
     call_dir.mkdir(parents=True, exist_ok=True)
     (call_dir / "stdout.jsonl").write_bytes(b"s" * 20480)
@@ -223,10 +224,10 @@ def test_get_agent_call_serves_bounded_tails(db_session):
         services.get_agent_call("no-such-call")
 
 
-def test_get_agent_call_without_files_reads_empty(db_session):
-    from conftest import seed_agent_run
+def test_get_agent_call_without_files_reads_empty(druks_db):
+    from conftest import seed_note_agent_run
 
-    call = seed_agent_run()
+    call = seed_note_agent_run()
 
     detail = services.get_agent_call(call.id)
 
@@ -238,21 +239,21 @@ def test_get_agent_call_without_files_reads_empty(db_session):
 # ---- cancel ---------------------------------------------------------------
 
 
-async def test_cancel_run_paths(db_session):
-    item = make_test_work_item(repo="o/r", title="t")
-    run = seed_build_run(db_session, work_item_id=item.id, state="running")
+async def test_cancel_run_paths(druks_db):
+    item = make_test_note()
+    run = seed_note_run(druks_db, note=item, state="running")
 
     result = await services.cancel_run(run.id, reason="stuck")
     assert result.result == "cancelled"
-    db_session.expire_all()
+    druks_db.expire_all()
     assert Run.get(run.id).state == "cancelled"
     assert Run.get(run.id).failure == "stuck"
 
     again = await services.cancel_run(run.id, reason="stuck")
     assert again.result == "already_cancelled"
 
-    finished_item = make_test_work_item(repo="o/r2", title="t")
-    finished = seed_build_run(db_session, work_item_id=finished_item.id, state="finished")
+    finished_item = make_test_note()
+    finished = seed_note_run(druks_db, note=finished_item, state="finished")
     with pytest.raises(exceptions.RunNotActive):
         await services.cancel_run(finished.id, reason="late")
 
@@ -263,14 +264,15 @@ async def test_cancel_run_paths(db_session):
 # ---- usage ----------------------------------------------------------------
 
 
-def test_get_usage_is_a_bounded_pure_read(db_session, account):
-    from conftest import seed_run
+def test_get_usage_is_a_bounded_pure_read(druks_db, account):
     from druks.durable.models import AgentCall
+    from druks.testing import seed_run
+    from druks_field_notes.workflows import Summarize
 
     now = datetime.now(UTC)
-    run = seed_run(db_session, "run-usage")
+    run = seed_run(druks_db, kind=Summarize.kind, run_id="run-usage")
     for index in range(30):
-        db_session.add(
+        druks_db.add(
             AgentCall(
                 run_id=run.id,
                 account_id=account.id,
@@ -309,13 +311,14 @@ def test_get_usage_is_a_bounded_pure_read(db_session, account):
     assert len(usage.model_dump_json(by_alias=True).encode()) <= 4 * 1024
 
 
-def test_get_usage_only_counts_the_callers_spend(db_session, account):
-    from conftest import seed_run
+def test_get_usage_only_counts_the_callers_spend(druks_db, account):
     from druks.durable.models import AgentCall
+    from druks.testing import seed_run
+    from druks_field_notes.workflows import Summarize
 
     other = Account.get_or_create("other@example.com")
-    run = seed_run(db_session, "run-usage-other")
-    db_session.add(
+    run = seed_run(druks_db, kind=Summarize.kind, run_id="run-usage-other")
+    druks_db.add(
         AgentCall(
             run_id=run.id,
             account_id=other.id,
@@ -326,7 +329,7 @@ def test_get_usage_only_counts_the_callers_spend(db_session, account):
             cost_usd=9.0,
         )
     )
-    db_session.flush()
+    druks_db.flush()
 
     usage = services.get_usage(account)
 
