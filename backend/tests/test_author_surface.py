@@ -30,7 +30,7 @@ AUTHOR_SURFACE = {
     "druks.db": {"Base", "StoredSubject", "db_session"},
     "druks.schemas": {"BaseResponse"},
     "druks.signals": {"subscribe"},
-    "druks.events": {"Event", "FeedItem"},
+    "druks.events": {"Event"},
     "druks.prompts": {"render_prompt"},
 }
 

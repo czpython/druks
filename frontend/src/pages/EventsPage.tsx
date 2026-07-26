@@ -8,6 +8,7 @@ import type { FeedItem } from '../api/types'
 import { BackToExtension } from '../components/BackToExtension'
 import { EmptyState } from '../components/EmptyState'
 import { Page } from '../components/Page'
+import { eventLine } from '../lib/feed'
 import { relTimeFromIso } from '../lib/format'
 import { useFormatters } from '../lib/preferences'
 
@@ -131,22 +132,23 @@ function EventRow({
   absTime: (iso: string) => string
   onNavigate: (path: string) => void
 }) {
-  const clickable = Boolean(event.linkPath)
+  const line = eventLine(event)
   const handleClick = () => {
-    if (event.linkPath) onNavigate(event.linkPath)
+    if (line.path) onNavigate(line.path)
   }
   return (
     <div
-      className={`event-row${clickable ? ' event-row-clickable' : ''}`}
-      onClick={clickable ? handleClick : undefined}
+      className={`event-row${line.path ? ' event-row-clickable' : ''}`}
+      onClick={line.path ? handleClick : undefined}
       title={absTime(event.at)}
     >
       <span className="event-time mono dim">{relTimeFromIso(event.at)}</span>
-      <span className={`event-kind-pill mono ${eventKindClass(event.kind)}`}>
-        {event.kind}
+      <span className={`event-kind-pill mono ${line.bucket}`}>{event.kind}</span>
+      <span className="event-source mono dim">{line.source}</span>
+      <span className="event-summary">
+        {line.label}
+        {line.subject && <span className="dim"> — {line.subject}</span>}
       </span>
-      <span className="event-source mono dim">{event.source}</span>
-      <span className="event-summary">{event.summary}</span>
     </div>
   )
 }
@@ -200,24 +202,4 @@ function mergeEvents(prev: FeedItem[], next: FeedItem): FeedItem[] {
     return a.id < b.id ? 1 : -1
   })
   return merged.length > FEED_CAP ? merged.slice(0, FEED_CAP) : merged
-}
-
-/**
- * Map an event kind ("agent_run.started", "webhook.github", …) to a CSS
- * class so the operator can scan by color. Buckets reuse the dashboard
- * status palette (cyan for in-progress, magenta for human-gated, etc.)
- * so the same colors mean the same things across views.
- */
-function eventKindClass(kind: string): string {
-  // Run lifecycle shares the agent bucket; milestones (shipped / cancelled)
-  // are the outcome facts that used to arrive as audit.pr_merged.
-  if (kind.startsWith('run.')) return 'event-kind-agent'
-  if (kind.startsWith('milestone.')) return 'event-kind-audit'
-  if (kind.startsWith('agent_run.')) return 'event-kind-agent'
-  if (kind.startsWith('scope_run.')) return 'event-kind-scope'
-  if (kind.startsWith('webhook.')) return 'event-kind-webhook'
-  if (kind.startsWith('signal.')) return 'event-kind-signal'
-  if (kind.startsWith('job.')) return 'event-kind-job'
-  if (kind.startsWith('audit.')) return 'event-kind-audit'
-  return 'event-kind-other'
 }

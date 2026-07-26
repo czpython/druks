@@ -13,10 +13,8 @@ from druks.contrib.ship.contracts import (
 )
 from druks.contrib.ship.models import WorkItem
 from druks.contrib.ship.schemas import WorkItemSummary
-from druks.db import db_session
-from druks.events import Event, FeedItem
 from druks.extensions import Extension
-from druks.workflows import SubjectActivity, WorkflowEvent, get_subject_phase
+from druks.workflows import SubjectActivity, get_subject_phase
 
 _PHASE_META: dict[str, SubjectActivity] = {
     "provisioning_vm": SubjectActivity(label="Building sandbox VM…", kind="infra"),
@@ -125,49 +123,6 @@ class Ship(Extension):
         contract=RepoProfilerOutput,
         model="codex",
     )
-    _LABEL = {
-        WorkflowEvent.RUNNING: "started",
-        WorkflowEvent.FINISHED: "finished",
-        WorkflowEvent.FAILED: "failed",
-        WorkflowEvent.CANCELLED: "cancelled",
-        WorkflowEvent.PARKED: "waiting on you",
-        "needs_answers": "needs answers",
-    }
-
-    @classmethod
-    def format_event(cls, event: Event) -> FeedItem:
-        wid = cls._work_item_id(event)
-        # ``session.get`` rides the identity map, so a feed with several events on
-        # the same work item costs one title lookup, not one per event.
-        item = db_session().get(WorkItem, wid) if wid else None
-        ticket_ref = (item.remote_key or "") if item else ""
-        workflow_name = event.payload.get("kind")
-        if workflow_name:
-            # The feed shows the workflow's local name, not its namespaced durable kind.
-            workflow_name = workflow_name.rsplit(".", 1)[-1]
-        label = cls._LABEL.get(event.type, event.type)
-        if event.type.startswith("workflow."):
-            kind, summary = event.type, (f"{workflow_name} {label}" if workflow_name else label)
-        else:
-            kind, summary = f"milestone.{event.type}", label
-        ref = ticket_ref or (f"work item {wid}" if wid else "")
-        if ref:
-            summary = f"{summary} — {ref}"
-        return FeedItem(
-            id=f"event:{event.id}",
-            at=event.created_at,
-            kind=kind,
-            source=workflow_name or "ship",
-            summary=summary,
-            link_path=f"/work-items/{wid}" if wid else None,
-            meta={"ticketRef": ticket_ref} if ticket_ref else {},
-        )
-
-    @staticmethod
-    def _work_item_id(event: Event) -> int | None:
-        if event.subject_type == "work_item" and event.subject_id:
-            return int(event.subject_id)
-        return
 
     @classmethod
     def subject_summary(cls, subject: WorkItem) -> WorkItemSummary:

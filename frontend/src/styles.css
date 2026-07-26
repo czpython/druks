@@ -1796,28 +1796,9 @@ input.set-select { background-image: none; padding-right: 12px; }
   color: var(--bucket-run);
   border-color: color-mix(in oklch, var(--bucket-run) 35%, transparent);
 }
-.event-kind-scope {
-  color: var(--bucket-plan);
-  border-color: color-mix(in oklch, var(--bucket-plan) 35%, transparent);
-}
-.event-kind-webhook {
-  color: var(--accent-amber);
-  border-color: color-mix(in oklch, var(--accent-amber) 30%, transparent);
-}
-.event-kind-signal {
-  color: var(--bucket-human);
-  border-color: color-mix(in oklch, var(--bucket-human) 35%, transparent);
-}
-.event-kind-job {
-  color: var(--accent-violet);
-  border-color: color-mix(in oklch, var(--accent-violet) 30%, transparent);
-}
 .event-kind-audit {
   color: var(--text-mid);
   border-color: var(--border);
-}
-.event-kind-other {
-  color: var(--text-dim);
 }
 
 /* ============================================================

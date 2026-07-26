@@ -3,9 +3,7 @@ from typing import TYPE_CHECKING, Literal
 
 from druks.agents import Agent
 from druks.doctor import CheckResult
-from druks.events import Event, FeedItem
 from druks.extensions import Extension
-from druks.workflows import WorkflowEvent
 from pydantic import BaseModel, Field, SecretStr, field_validator
 
 from druks_field_notes.contracts import NoteSummary
@@ -83,22 +81,6 @@ class FieldNotes(Extension):
         contract=NoteSummary,
         model="claude",
     )
-
-    @classmethod
-    def format_event(cls, event: Event) -> FeedItem:
-        note_id = event.subject_id
-        if event.type == WorkflowEvent.FINISHED:
-            verb = "summarized"
-        else:
-            verb = event.type.rsplit(".", 1)[-1]
-        return FeedItem(
-            id=f"event:{event.id}",
-            at=event.created_at,
-            kind=event.type,
-            source="field_notes",
-            summary=f"note {note_id} {verb}" if note_id else verb,
-            link_path=f"/app/field_notes/notes/{note_id}" if note_id else None,
-        )
 
     @classmethod
     def subject_summary(cls, subject: Note) -> NoteView:

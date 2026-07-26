@@ -30,6 +30,9 @@ export interface ExtensionUI {
   home?: string
   routes: ExtensionRoute[]
   nav?: ExtensionNavEntry[]
+  // Where a feed row about one of this extension's subjects navigates. The shell knows
+  // an extension has subjects, never where its pages put them.
+  subjectPath?: (subject: { type: string; id: string }) => string | undefined
   // Whether the persistent system-health strip (webhook + spend) rides above this
   // extension's list and detail surfaces. Opt-in — an extension that doesn't track
   // code hosts leaves it off and the band never renders.

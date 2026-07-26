@@ -4,7 +4,7 @@ from druks_field_notes.models import Note
 from druks_field_notes.workflows import Summarize
 
 
-def test_feed_reads_run_and_milestone_events(druks_db):
+def test_feed_carries_the_facts_a_row_is_worded_from(druks_db):
     note = Note.create(body="the pump ran hot")
     Event.emit(
         type="workflow.running",
@@ -12,16 +12,22 @@ def test_feed_reads_run_and_milestone_events(druks_db):
         extension="field_notes",
         payload={"kind": Summarize.kind, "run": "wf1"},
     )
-    Event.emit(type="summarized", subject=note.identity, extension="field_notes")
+    Event.emit(
+        type="summarized", subject=note.identity, extension="field_notes", payload={"words": 12}
+    )
     druks_db.flush()
 
-    page, _ = build_feed()
-    by_kind = {e.kind: e for e in page}
-    assert "workflow.running" in by_kind and "summarized" in by_kind
+    by_kind = {row.kind: row for row in build_feed()[0]}
+
+    started = by_kind["workflow.running"]
+    assert (started.extension, started.workflow) == ("field_notes", Summarize.kind)
+    assert (started.subject_type, started.subject_id) == ("note", str(note.id))
+    # Whatever is left of the payload once the workflow is promoted out of it.
+    assert started.facts == {"run": "wf1"}
+
+    # A milestone has no workflow behind it, and carries what its writer stated.
     summarized = by_kind["summarized"]
-    assert summarized.link_path == f"/app/field_notes/notes/{note.id}"
-    assert f"note {note.id}" in summarized.summary
-    assert f"note {note.id}" in by_kind["workflow.running"].summary
+    assert (summarized.workflow, summarized.facts) == (None, {"words": 12})
 
 
 def test_feed_paginates_same_second_events_without_loss_or_repeat(druks_db):
