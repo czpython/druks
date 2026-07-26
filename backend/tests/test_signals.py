@@ -1,6 +1,6 @@
 import pytest
 from conftest import make_test_work_item
-from druks.build.models import ProjectRepo, WorkItem
+from druks.contrib.ship.models import ProjectRepo, WorkItem
 from druks.signals import publish, subscribe
 from druks.workflows import Workflow
 from sqlalchemy.orm import object_session

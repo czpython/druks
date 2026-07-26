@@ -3,8 +3,8 @@ import logging
 from fastapi import APIRouter, Body, HTTPException, Query, Response, status
 from sqlalchemy import func, select, update
 
-from druks.build.models import Project, ProjectRepo, WorkItem
-from druks.build.schemas import (
+from druks.contrib.ship.models import Project, ProjectRepo, WorkItem
+from druks.contrib.ship.schemas import (
     AddProjectRepoRequest,
     CreateProjectRequest,
     DashboardItem,
@@ -15,7 +15,7 @@ from druks.build.schemas import (
     ProjectSummary,
     WorkItemsHistoryResponse,
 )
-from druks.build.workflows import Profile
+from druks.contrib.ship.workflows import Profile
 from druks.core.apis.github import get_github_client
 from druks.db import db_session
 from druks.settings import load_settings
@@ -23,7 +23,7 @@ from druks.settings import load_settings
 logger = logging.getLogger(__name__)
 
 
-# /api/build/projects                                          Project / ProjectRepo
+# /api/ship/projects                                          Project / ProjectRepo
 
 projects_router = APIRouter(prefix="/projects", tags=["projects"])
 
@@ -228,7 +228,7 @@ async def delete_project_repo(project_id: int, repo_id: int) -> None:
     session.flush()
 
 
-# /api/build/work-items                                                WorkItem CRUD
+# /api/ship/work-items                                                WorkItem CRUD
 
 work_items_router = APIRouter(prefix="/work-items", tags=["work-items"])
 

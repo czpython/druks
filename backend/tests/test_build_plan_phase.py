@@ -1,24 +1,25 @@
 from types import SimpleNamespace
 
 import pytest
-from druks.build.contracts import (
+from druks.contrib.ship.contracts import (
     PlanData,
     QuestionOptionOutput,
     QuestionOutput,
     ReviewOutput,
     ReviewWork,
 )
-from druks.build.enums import ReviewDecision
-from druks.build.policy import RepoPolicy
-from druks.build.workflows import Build, BuildWorkflow
+from druks.contrib.ship.enums import ReviewDecision
+from druks.contrib.ship.extension import Ship
+from druks.contrib.ship.policy import RepoPolicy
+from druks.contrib.ship.workflows import Build
 from druks.workflows import FatalError, OperatorReply, Run
 
 
-def _flow(*, auto_dispatch: bool = False) -> BuildWorkflow:
-    flow = BuildWorkflow()
+def _flow(*, auto_dispatch: bool = False) -> Build:
+    flow = Build()
     # plan_approval is undeclared: the gate resolves to "none" iff auto_dispatch.
     flow._policy = RepoPolicy()
-    flow._settings = BuildWorkflow.Settings(auto_dispatch_on_plan_approval=auto_dispatch)
+    flow._settings = Build.Settings(auto_dispatch_on_plan_approval=auto_dispatch)
     return flow
 
 
@@ -30,7 +31,7 @@ def _fake_plans(monkeypatch, *plans: PlanData) -> list[dict]:
         passes.append(kwargs)
         return next(supply)
 
-    monkeypatch.setattr(Build, "generate_plan", fake_plan_agent)
+    monkeypatch.setattr(Ship, "generate_plan", fake_plan_agent)
     return passes
 
 
@@ -40,14 +41,14 @@ def _fake_grades(monkeypatch, *grades: ReviewOutput) -> None:
     async def fake_review_agent():
         return next(supply)
 
-    monkeypatch.setattr(Build, "review_plan", fake_review_agent)
+    monkeypatch.setattr(Ship, "review_plan", fake_review_agent)
 
 
 def _no_review_agent(monkeypatch) -> None:
     async def fail_review_agent():
         raise AssertionError("review_plan must not run here")
 
-    monkeypatch.setattr(Build, "review_plan", fail_review_agent)
+    monkeypatch.setattr(Ship, "review_plan", fail_review_agent)
 
 
 async def test_gate_mode_parks_every_plan_and_never_calls_the_reviewer(monkeypatch):
@@ -344,7 +345,7 @@ async def test_review_work_ask_renders_a_notification_body(monkeypatch):
 async def test_needs_clarification_delivery_stops_the_run(monkeypatch):
     """The implementer bailing (needs_clarification) fails the run with its own
     reason — the stop is a workflow decision now, not a contract side effect."""
-    flow = BuildWorkflow()
+    flow = Build()
 
     async def bailed():
         return SimpleNamespace(
@@ -352,6 +353,6 @@ async def test_needs_clarification_delivery_stops_the_run(monkeypatch):
             summary="AC-3 requires a pure function that performs I/O",
         )
 
-    monkeypatch.setattr(Build, "implement", bailed)
+    monkeypatch.setattr(Ship, "implement", bailed)
     with pytest.raises(FatalError, match="pure function"):
         await flow.implement()

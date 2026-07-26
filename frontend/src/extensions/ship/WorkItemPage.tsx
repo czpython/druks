@@ -191,7 +191,7 @@ function WorkItemView({ data }: { data: WorkItemDetail }) {
 
   const crumb = (
     <div className="ins-crumb">
-      <Link href="/build" className="ins-crumb-back">
+      <Link href="/ship" className="ins-crumb-back">
         ← work items
       </Link>
     </div>

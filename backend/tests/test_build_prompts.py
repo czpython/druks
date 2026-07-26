@@ -1,14 +1,13 @@
 import re
-from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from druks.build import workflows as build_workflows
-from druks.build.contracts import PlanData
-from druks.build.journal import BuildJournal
-from druks.build.models import Project, ProjectRepo
-from druks.build.prompt_context import BuildPromptContext
+from druks.contrib.ship.contracts import PlanData
+from druks.contrib.ship.journal import BuildJournal
+from druks.contrib.ship.models import Project, ProjectRepo
+from druks.contrib.ship.prompt_context import BuildPromptContext
 from druks.prompts import render_prompt
+from druks.prompts.resolver import PROMPTS_DIR
 from druks.workflows import FatalError
 
 _OP_TEMPLATES = [
@@ -60,7 +59,7 @@ def _workspace() -> SimpleNamespace:
 @pytest.mark.parametrize("template", _OP_TEMPLATES)
 async def test_build_operation_prompt_renders(template):
     output = await render_prompt(
-        f"build/build_workflow/{template}",
+        f"ship/build/{template}",
         build=_build(),
         verification="VERIFICATION-BLOCK",
         workspace=_workspace(),
@@ -80,7 +79,7 @@ async def test_implement_prompt_provisions_when_no_pr_exists():
     build.branch = None
     build.pr_number = None
     output = await render_prompt(
-        "build/build_workflow/implement.md",
+        "ship/build/implement.md",
         build=build,
         verification="VERIFICATION-BLOCK",
         workspace=_workspace(),
@@ -95,7 +94,7 @@ async def test_generate_plan_prompt_quotes_operator_content():
     """Free-text answers and the operator's note render block-quoted line by line —
     operator words stay answer content in the prompt, never instruction text."""
     output = await render_prompt(
-        "build/build_workflow/generate_plan.md",
+        "ship/build/generate_plan.md",
         build=_build(),
         verification="VERIFICATION-BLOCK",
         workspace=_workspace(),
@@ -109,7 +108,7 @@ async def test_generate_plan_prompt_quotes_operator_content():
 
 async def test_generate_plan_prompt_quotes_the_reviewer_critique():
     output = await render_prompt(
-        "build/build_workflow/generate_plan.md",
+        "ship/build/generate_plan.md",
         build=_build(),
         verification="VERIFICATION-BLOCK",
         workspace=_workspace(),
@@ -132,7 +131,7 @@ async def test_ruled_out_approaches_cross_the_plan_review_park():
         )
     )
     output = await render_prompt(
-        "build/build_workflow/implement.md",
+        "ship/build/implement.md",
         build=build,
         verification="VERIFICATION-BLOCK",
         workspace=_workspace(),
@@ -144,14 +143,14 @@ async def test_ruled_out_approaches_cross_the_plan_review_park():
 async def test_the_planner_resolves_the_assignee_not_the_reviewer():
     # Only the planner always runs, so only its prompt owns the resolution.
     planner = await render_prompt(
-        "build/build_workflow/generate_plan.md",
+        "ship/build/generate_plan.md",
         build=_build(),
         verification="VERIFICATION-BLOCK",
         workspace=_workspace(),
         **_CALL_KWARGS["generate_plan.md"],
     )
     reviewer = await render_prompt(
-        "build/build_workflow/review_plan.md",
+        "ship/build/review_plan.md",
         build=_build(),
         verification="VERIFICATION-BLOCK",
         workspace=_workspace(),
@@ -169,7 +168,7 @@ async def test_build_prompt_orders_the_ticket_fetch(template):
     build = _build()
     build.source = "linear"
     output = await render_prompt(
-        f"build/build_workflow/{template}",
+        f"ship/build/{template}",
         build=build,
         verification="VERIFICATION-BLOCK",
         workspace=_workspace(),
@@ -188,7 +187,7 @@ async def test_review_code_prompt_owns_its_followup_subissue():
     build = _build()
     build.source = "linear"
     output = await render_prompt(
-        "build/build_workflow/review_code.md",
+        "ship/build/review_code.md",
         build=build,
         verification="VERIFICATION-BLOCK",
         workspace=_workspace(),
@@ -243,7 +242,7 @@ async def test_contract_context_is_omitted_only_from_code_review():
     )
     for template in _OP_TEMPLATES:
         output = await render_prompt(
-            f"build/build_workflow/{template}",
+            f"ship/build/{template}",
             build=build,
             verification="VERIFICATION-BLOCK",
             workspace=_workspace(),
@@ -261,10 +260,11 @@ async def test_contract_context_is_omitted_only_from_code_review():
 def test_build_prompt_context_covers_template_attrs():
     # Every build prompt reads build.<attr>; assert BuildPromptContext carries them
     # all, so a template ref can never outrun the context contract.
-    prompts_root = Path(build_workflows.__file__).resolve().parents[2]
-    prompts_dir = prompts_root / "templates/prompts/build/build_workflow"
+    prompts_dir = PROMPTS_DIR / "ship/build"
+    templates = sorted(prompts_dir.glob("*.md"))
+    assert templates, f"no build prompts under {prompts_dir}"
     attrs: set[str] = set()
-    for template in prompts_dir.glob("*.md"):
+    for template in templates:
         attrs |= set(re.findall(r"\bbuild\.([a-z_]+)", template.read_text()))
     fields = set(BuildPromptContext.__dataclass_fields__)
     missing = sorted(a for a in attrs if a not in fields)

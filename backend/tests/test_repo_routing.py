@@ -1,4 +1,4 @@
-from druks.build.models import Project, ProjectRepo
+from druks.contrib.ship.models import Project, ProjectRepo
 
 
 def _register(db_session, *full_names):

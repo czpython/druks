@@ -1,6 +1,6 @@
 from contextlib import suppress
 
-from druks.build.contracts import (
+from druks.contrib.ship.contracts import (
     EvaluationOutput,
     ImplementationOutput,
     PlanData,

@@ -3,7 +3,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-from druks.build.models import Project, ProjectRepo, WorkItem
+from druks.contrib.ship.models import Project, ProjectRepo, WorkItem
 from druks.schemas import BaseResponse
 from druks.workflows import RunState, SubjectSummary
 
@@ -98,7 +98,7 @@ class Links(BaseResponse):
 
 
 class WorkItemSummary(SubjectSummary):
-    # The work item's domain header — what only build knows. Status (where it is
+    # The work item's domain header — what only Ship knows. Status (where it is
     # in its lifecycle) and the timeline come from the platform's subject read-side,
     # which composes this with them; ``id`` is the platform subject key (str).
     source: Literal["linear", "github", "jira"]

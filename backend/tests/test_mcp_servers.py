@@ -47,7 +47,7 @@ async def _delivery(**kwargs) -> dict:
 
 def _requiring_workspace(*servers: RequiredMcpServer) -> Workspace:
     # A workspace declaring the servers it requires and credentials itself,
-    # as build does.
+    # as Ship does.
     class _Requiring(Workspace):
         def get_required_mcp_servers(self) -> tuple[RequiredMcpServer, ...]:
             return servers
@@ -120,7 +120,7 @@ async def test_delivery_carries_static_token_in_env(db_session):
 
 async def test_required_server_delivers_beside_the_registry(db_session):
     # A workspace declares a server with a run-scoped token it minted itself
-    # (build's per-repo reviewer token): wire shape + env var ride the same
+    # (Ship's per-repo reviewer token): wire shape + env var ride the same
     # seam as every registry server.
     McpServer.create(name="linear", url=_LINEAR_URL, token=_TOKEN)
     workspace = _requiring_workspace(
@@ -456,8 +456,8 @@ def _static_entry(url):
 def test_packaged_catalog_ships_linear_disabled(registry_state, db_session):
     # The one packaged default: Linear's hosted MCP, shipped dark — an oauth
     # entry has no grant until an operator connects it, and an enabled
-    # unconnected one would fail every run's delivery. build's github MCP is
-    # build's own requirement (get_required_mcp_servers), never a catalog entry.
+    # unconnected one would fail every run's delivery. Ship's github MCP is
+    # Ship's own requirement (get_required_mcp_servers), never a catalog entry.
     load_mcp_catalog(PACKAGED_MCP_CATALOG)
 
     assert "github" not in mcp_servers

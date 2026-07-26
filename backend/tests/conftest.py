@@ -95,7 +95,7 @@ def _no_durable_dispatch(request):
     with (
         mock.patch.object(Workflow, "start", classmethod(_noop)),
         mock.patch("druks.agents.set_run_phase", _phase_noop),
-        mock.patch("druks.build.extension.get_subject_phase", _phase_noop),
+        mock.patch("druks.contrib.ship.extension.get_subject_phase", _phase_noop),
         mock.patch("dbos.DBOS.cancel_workflow_async", _dbos_cancel),
     ):
         yield
@@ -413,7 +413,7 @@ def seed_build_run(
     ``item.build_run_id``. Returns the Run. Attach agent calls with
     ``seed_call(session, run, agent)``; the run + its calls are the item's
     timeline."""
-    from druks.build.models import WorkItem
+    from druks.contrib.ship.models import WorkItem
     from druks.durable import Run
     from uuid_utils import uuid7
 
@@ -421,7 +421,7 @@ def seed_build_run(
         input_gate = "review"  # a parked run always has a gate; derivation needs it
     run = Run(
         id=str(uuid7()),
-        kind="build.build_workflow",
+        kind="ship.build",
         input_gate=input_gate,
         input_request=input_request,
         failure=failure,
@@ -470,7 +470,7 @@ def seed_agent_run(
     When ``work_item_id`` is given the run binds to it (so the call surfaces
     on that item's detail timeline); otherwise a fresh work item is created.
     Pass ``workflow_id`` to attach to an existing run instead."""
-    from druks.build.models import Project, ProjectRepo, WorkItem
+    from druks.contrib.ship.models import Project, ProjectRepo, WorkItem
     from druks.database import db_session
     from druks.durable import AgentCall, Run
 
@@ -498,7 +498,7 @@ def seed_agent_run(
     return call
 
 
-def seed_run(session, run_id, *, kind="build.build_workflow", account_id="system", input_gate=None):
+def seed_run(session, run_id, *, kind="ship.build", account_id="system", input_gate=None):
     # A bare durable_runs row so an AgentCall / Artifact FK to it resolves.
     from druks.durable import Run
 
@@ -545,7 +545,7 @@ def make_test_work_item(*, repo: str, **kwargs):
     """Create a WorkItem with the required Project / ProjectRepo binding
     for tests. Looks up an existing Project by repo name; otherwise
     creates the chain. Extra kwargs flow into ``WorkItem.create``."""
-    from druks.build.models import Project, ProjectRepo, WorkItem
+    from druks.contrib.ship.models import Project, ProjectRepo, WorkItem
 
     project = Project.get_for_repo(repo)
     if project is None:

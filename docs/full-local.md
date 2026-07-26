@@ -18,7 +18,7 @@ in isolated containers rather than in the Druks process.
 - Git
 - enough local Docker capacity for Postgres, Redis, Druks, Drukbox, and
   short-lived sandbox containers
-- two GitHub Apps if you intend to use the bundled `build` extension
+- two GitHub Apps if you intend to use the bundled `ship` extension
 
 No Tailscale account or remote VM provider is needed.
 The Druks application and sandbox images are published for both `linux/amd64`
@@ -37,7 +37,7 @@ The first run:
 - points Druks at Drukbox on `127.0.0.1:8000`
 - prints blank required fields and exits without booting if setup is incomplete
 
-For the bundled `build` extension, provision its GitHub Apps:
+For the bundled `ship` extension, provision its GitHub Apps:
 
 ```bash
 bash <(curl -fsSL https://raw.githubusercontent.com/czpython/druks/main/scripts/install.sh) --apps
@@ -119,7 +119,7 @@ This creates and deletes a real sandbox container.
 ## 5. Exercise an application
 
 Druks does not invent a generic domain job: an installed extension supplies the
-workflow and its trigger. In the bundled distribution, `build` is the reference
+workflow and its trigger. In the bundled distribution, `ship` is the reference
 application. Register a project in its dashboard and use its configured ticket
 or GitHub trigger. Watch the run appear in the subject page and Events feed;
 agent-call pages stream transcript and artifact data.

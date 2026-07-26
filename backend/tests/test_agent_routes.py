@@ -199,7 +199,7 @@ def test_transcript_route_matches_the_read_machinery(client: TestClient, db_sess
     (call_dir / "stdout.jsonl").write_bytes(b"hello " + "é".encode() + b" transcript")
 
     response = client.get(
-        f"/api/build/transcripts/{call.id}", params={"stream": "stdout", "limit": 7}
+        f"/api/ship/transcripts/{call.id}", params={"stream": "stdout", "limit": 7}
     )
     assert response.status_code == 200
     chunk = read_transcript_chunk(db_engine, call.id, "stdout", offset=0, limit=7)

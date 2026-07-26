@@ -58,7 +58,7 @@ def test_manifest_records_the_delivered_capability_set(db_session):
         url="https://api.githubcopilot.com/mcp/",
         bearer_token_env_var=get_bearer_token_env_var("github"),
     )
-    # Both servers delivered with their token — github is build's own
+    # Both servers delivered with their token — github is Ship's own
     # requirement (get_required_mcp_servers), so it reads delivered but not declared.
     manifest = _build(
         mcp_servers=(linear, github),
