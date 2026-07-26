@@ -31,7 +31,7 @@ def _status_of(runs, calls=None):
 def test_subject_state_takes_the_newest_run():
     runs = [
         _run("new", "ship.build", RunState.RUNNING),
-        _run("old", "ship.build", RunState.PENDING_INPUT),
+        _run("old", "ship.build", RunState.PARKED),
     ]
     assert _status_of(runs).state == RunState.RUNNING
 
@@ -39,10 +39,10 @@ def test_subject_state_takes_the_newest_run():
 def test_subject_state_takes_a_newer_parked_run_over_an_older_running_one():
     # Recency decides, not a hardcoded state preference.
     runs = [
-        _run("new", "ship.build", RunState.PENDING_INPUT),
+        _run("new", "ship.build", RunState.PARKED),
         _run("old", "ship.build", RunState.RUNNING),
     ]
-    assert _status_of(runs).state == RunState.PENDING_INPUT
+    assert _status_of(runs).state == RunState.PARKED
 
 
 def test_subject_state_uses_the_latest_outcome_once_every_run_is_terminal():
@@ -55,8 +55,8 @@ def test_subject_state_uses_the_latest_outcome_once_every_run_is_terminal():
 
 def test_status_surfaces_the_newest_active_runs_gate():
     runs = [
-        _run("new", "ship.build", RunState.PENDING_INPUT, "review"),
-        _run("old", "ship.build", RunState.PENDING_INPUT, "review_work"),
+        _run("new", "ship.build", RunState.PARKED, "review"),
+        _run("old", "ship.build", RunState.PARKED, "review_work"),
     ]
     assert _status_of(runs).gate == "review"
 
@@ -64,7 +64,7 @@ def test_status_surfaces_the_newest_active_runs_gate():
 def test_status_carries_the_running_runs_kind_and_no_stale_gate():
     runs = [
         _run("new", "ship.build", RunState.RUNNING),
-        _run("old", "ship.build", RunState.PENDING_INPUT, "review"),
+        _run("old", "ship.build", RunState.PARKED, "review"),
     ]
     status = _status_of(runs)
     assert status.kind == "ship.build"
@@ -81,7 +81,7 @@ def test_parked_status_carries_no_agent_even_when_calls_are_handed_in():
     # The detail read passes the parked run's calls; the fact stays consistent
     # with the board, where a parked row never queries them.
     runs = [
-        _run("new", "ship.build", RunState.PENDING_INPUT, "review"),
+        _run("new", "ship.build", RunState.PARKED, "review"),
     ]
     calls = [AgentCall(agent="implement")]
     status = _status_of(runs, calls)

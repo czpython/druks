@@ -26,7 +26,7 @@ async def test_cancel_frees_subject_immediately(db_session, monkeypatch):
     run = seed_build_run(
         db_session,
         work_item_id=item.id,
-        state="pending_input",
+        state="parked",
         input_gate="review_work",
         input_request={"label": "Review", "presentation": "in_app"},
     )

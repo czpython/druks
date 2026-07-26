@@ -61,7 +61,7 @@ def _park(db_session, item_id):
     run = seed_build_run(
         db_session,
         work_item_id=item_id,
-        state="pending_input",
+        state="parked",
         input_gate="review",
         input_request=dict(_IN_APP_ASK),
     )

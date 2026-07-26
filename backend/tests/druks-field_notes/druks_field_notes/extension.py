@@ -5,6 +5,7 @@ from druks.agents import Agent
 from druks.doctor import CheckResult
 from druks.events import Event, FeedItem
 from druks.extensions import Extension
+from druks.workflows import WorkflowEvent
 from pydantic import BaseModel, Field, SecretStr, field_validator
 
 from druks_field_notes.contracts import NoteSummary
@@ -86,7 +87,10 @@ class FieldNotes(Extension):
     @classmethod
     def format_event(cls, event: Event) -> FeedItem:
         note_id = event.subject_id
-        verb = "summarized" if event.type == "run.finished" else event.type.rsplit(".", 1)[-1]
+        if event.type == WorkflowEvent.FINISHED:
+            verb = "summarized"
+        else:
+            verb = event.type.rsplit(".", 1)[-1]
         return FeedItem(
             id=f"event:{event.id}",
             at=event.created_at,

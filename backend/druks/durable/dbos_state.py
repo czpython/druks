@@ -63,7 +63,7 @@ def state_expression(
                     status.is_(None) | status.in_(("ENQUEUED", "DELAYED")),
                     RunState.SCHEDULED.value,
                 ),
-                ((status == "PENDING") & input_gate.is_not(None), RunState.PENDING_INPUT.value),
+                ((status == "PENDING") & input_gate.is_not(None), RunState.PARKED.value),
                 (status == "PENDING", RunState.RUNNING.value),
                 (status == "SUCCESS", RunState.FINISHED.value),
                 (

@@ -52,7 +52,7 @@ async def _fire_closed(*, repo, pr_number, branch, tmp_path, merged=True):
     await events.on_pull_request_closed()
 
 
-def _park_work_item(*, repo, pr_number, branch, state="pending_input", input_gate="review_work"):
+def _park_work_item(*, repo, pr_number, branch, state="parked", input_gate="review_work"):
     """A work item with a build run paused on the operator (review_work) — the
     haunting case. Returns (work_item_id, build_run_id)."""
     from druks.database import db_session
@@ -63,7 +63,7 @@ def _park_work_item(*, repo, pr_number, branch, state="pending_input", input_gat
         db_session(),
         work_item_id=item.id,
         state=state,
-        input_gate=input_gate if state == "pending_input" else None,
+        input_gate=input_gate if state == "parked" else None,
     )
     return item.id, run.id
 

@@ -81,7 +81,7 @@ def test_get_ask_resolves_the_review_artifact(db_session, tmp_path):
     run = Run(
         id="run-1",
         kind="build",
-        state=RunState.PENDING_INPUT.value,
+        state=RunState.PARKED.value,
         input_request={"presentation": "in_app", "controls": ["approve"]},
     )
     db_session.add(run)
@@ -100,7 +100,7 @@ def test_get_ask_resolves_the_review_artifact(db_session, tmp_path):
     external = Run(
         id="run-2",
         kind="build",
-        state=RunState.PENDING_INPUT.value,
+        state=RunState.PARKED.value,
         input_request={"presentation": "external", "label": "Review implementation"},
     )
     db_session.add(external)

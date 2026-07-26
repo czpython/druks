@@ -29,7 +29,7 @@ def get_gate(run_id: str) -> schemas.GateResponse:
     run = Run.get(run_id)
     if not run:
         raise exceptions.RunNotFound(run_id)
-    if run.state != RunState.PENDING_INPUT.value:
+    if run.state != RunState.PARKED.value:
         raise exceptions.GateNotOpen(run_id)
     ask = run.input_request
     if not ask or ask.get("presentation") != "in_app":
@@ -54,7 +54,7 @@ async def answer_gate(
         return schemas.GateAnswerResponse(
             run_id=run.id, parked_at=parked_at, result="already_answered"
         )
-    if run.state != RunState.PENDING_INPUT.value:
+    if run.state != RunState.PARKED.value:
         raise exceptions.GateNotOpen(run_id)
     if run.input_requested_at != parked_at:
         raise exceptions.GateRoundStale(run_id)

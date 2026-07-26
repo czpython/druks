@@ -12,6 +12,12 @@ class SettingsDeclarationError(Exception):
     operator PATCH."""
 
 
+class SubscriberDeclarationError(Exception):
+    """A subscriber's signature asks for a routing key — one a filter matches on but
+    no body is handed. Raised at declaration, so it fails on import instead of
+    inside the durable step that publishes the signal."""
+
+
 class ExtensionLoadError(Exception):
     """An extension could not be loaded app-lessly. The concrete subclass names
     which stage failed — nothing raises this base directly."""

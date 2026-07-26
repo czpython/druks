@@ -19,7 +19,13 @@ from druks.durable.dbos_state import (
     updated_at_expression,
     workflow_status,
 )
-from druks.durable.enums import ACTIVE_STATES, OPEN_STATES, AgentCallStatus, RunState
+from druks.durable.enums import (
+    ACTIVE_STATES,
+    OPEN_STATES,
+    AgentCallStatus,
+    RunState,
+    WorkflowEvent,
+)
 from druks.harnesses.artifacts import normalize_token_usage
 from druks.models import Base
 from druks.notifications.models import Notification
@@ -37,7 +43,7 @@ class Run(Base):
     id: Mapped[str] = mapped_column(String, primary_key=True)
     kind: Mapped[str]
     # The parked gate's recv topic — which gate, e.g. "review_plan"; presence ⇒
-    # PENDING_INPUT. The DBOS routing key, set automatically from the Gate class.
+    # PARKED. The DBOS routing key, set automatically from the Gate class.
     input_gate: Mapped[str | None] = mapped_column(default=None)
     # The structured ask the gate declared at Gate.wait(input_request=…) — the extension's
     # opaque payload, surfaced by the read-side and cleared on resume beside input_gate.
@@ -78,7 +84,7 @@ class Run(Base):
 
     @property
     def is_parked(self) -> bool:
-        return self.state == RunState.PENDING_INPUT.value
+        return self.state == RunState.PARKED.value
 
     @property
     def is_running(self) -> bool:
@@ -269,7 +275,7 @@ class Run(Base):
         subject = self.subject
         if subject:
             await publish(
-                "run.cancelled",
+                WorkflowEvent.CANCELLED,
                 subject=subject,
                 kind=self.kind,
                 failure=failure,

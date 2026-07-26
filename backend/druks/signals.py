@@ -1,13 +1,19 @@
+import inspect
 from collections.abc import Awaitable, Callable
 from typing import Any
 
 from blinker import signal
 
 from druks.database import db_session
+from druks.extensions.exceptions import SubscriberDeclarationError
 
 __all__ = ["subscribe"]
 
 Subscriber = Callable[..., Awaitable[None]]
+
+# Published so filters can match them, never handed to a body: the run row and its
+# durable kind are the substrate's, and a subscriber reacts to the subject.
+_ROUTING = frozenset({"run", "kind"})
 
 
 def subscribe(name: str, **filters: Any) -> Callable[[Subscriber], Subscriber]:
@@ -15,7 +21,7 @@ def subscribe(name: str, **filters: Any) -> Callable[[Subscriber], Subscriber]:
 
     ``filters`` are equality matches against the published kwargs; ``__``
     descends into dicts (``payload__terminal=True``); a ``Gate`` class stands for
-    its ``name``. ``workflow=Build`` narrows to that workflow's runs and
+    its ``name``. ``workflow=Build`` narrows to that workflow and
     ``subject=WorkItem`` to that subject, handing the body its row. A non-matching
     publication skips the subscriber, so the body starts at the real work."""
 
@@ -23,6 +29,12 @@ def subscribe(name: str, **filters: Any) -> Callable[[Subscriber], Subscriber]:
         # Lazy import: druks.workflows imports this module.
         from druks.workflows import Gate
 
+        if asked_for_routing := sorted(_ROUTING & set(inspect.signature(fn).parameters)):
+            raise SubscriberDeclarationError(
+                f"{fn.__name__}() asks for {asked_for_routing} — filters match on those, "
+                "bodies never receive them. Narrow with workflow=YourWorkflow and take "
+                "the facts you react to."
+            )
         workflow_class = filters.pop("workflow", None)
         if workflow_class:
             filters["kind"] = workflow_class.kind
@@ -35,19 +47,20 @@ def subscribe(name: str, **filters: Any) -> Callable[[Subscriber], Subscriber]:
                 expected = expected.name
             matches[lookup] = expected
 
-        async def receiver(_sender: Any, **kwargs: Any) -> None:
+        async def receiver(_sender: Any, **published: Any) -> None:
             for lookup, expected in matches.items():
-                value: Any = kwargs
+                value: Any = published
                 for part in lookup.split("__"):
                     value = value.get(part) if isinstance(value, dict) else None
                 if value != expected:
                     return
+            delivered = {key: value for key, value in published.items() if key not in _ROUTING}
             if subject_class:
-                row = db_session().get(subject_class, int(kwargs["subject"]["id"]))
+                row = db_session().get(subject_class, int(published["subject"]["id"]))
                 if not row:
                     return
-                kwargs["subject"] = row
-            await fn(**kwargs)
+                delivered["subject"] = row
+            await fn(**delivered)
 
         # weak=False: ``receiver`` is a local closure nothing else references, so a
         # weak ref would drop it the moment registration returns.

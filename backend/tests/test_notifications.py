@@ -155,7 +155,7 @@ _IN_APP_ASK = {
 }
 
 
-def _parked_notification(db_session, *, ask=None, run_state="pending_input"):
+def _parked_notification(db_session, *, ask=None, run_state="parked"):
     ask = ask or _IN_APP_ASK
     run = Run(
         id=str(uuid7()),
@@ -291,7 +291,7 @@ async def test_respond_stale_round_409(tmp_path, db_session, resume_spy):
     )
     db_session.add(run)
     db_session.flush()
-    seed_dbos_status(db_session, run.id, "pending_input")
+    seed_dbos_status(db_session, run.id, "parked")
     destination = _destination(name="stale-dest")
     notification = Notification.create(
         destination_id=destination.id,

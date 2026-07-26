@@ -1,8 +1,10 @@
 from druks.signals import subscribe  # noqa: F401
+from druks.workflows import WorkflowEvent  # noqa: F401
 
 # React to platform signals with declarative filters (equality against the published
 # kwargs; ``__`` descends into dicts). Defining a handler registers it — no body guards.
+# Filtering by ``subject=`` hands the body that row.
 #
-# @subscribe("run.finished", subject__type="{{ name }}")
+# @subscribe(WorkflowEvent.FINISHED, subject=YourSubject)
 # async def on_finished(*, subject: YourSubject, **_: object) -> None:
 #     ...

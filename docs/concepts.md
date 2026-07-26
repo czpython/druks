@@ -101,7 +101,7 @@ DBOS's workflow status:
 
 ```text
 scheduled -> running -> finished
-                    \-> pending_input -> running
+                    \-> parked -> running
                     \-> failed
                     \-> cancelled
 ```
@@ -119,7 +119,7 @@ that policy on subjectless background runs.
 A `Gate` is a typed reply model plus a durable receive topic. Waiting:
 
 1. releases any warm sandbox held by the workflow
-2. records `pending_input` and the request shown to the operator
+2. records `parked` and the request shown to the operator
 3. optionally sends a notification
 4. suspends on DBOS until a matching reply or the 14-day gate timeout
 5. clears the gate and returns the validated reply on resume

@@ -8,16 +8,17 @@ from druks.contrib.ship.workflows import Build
 from druks.durable import Run
 from druks.signals import publish
 from druks.ticketing.enums import TicketStatus
+from druks.workflows import WorkflowEvent
 from uuid_utils import uuid7
 
 pytestmark = pytest.mark.asyncio
 
 
-async def test_run_running_puts_item_back_on_board(db_session):
+async def test_workflow_running_puts_item_back_on_board(db_session):
     item = make_test_work_item(repo="acme/widget", title="t", source="linear", remote_key="ACME-1")
     item.set_status(HandoffStatus.CANCELLED)
 
-    await publish("run.running", subject=item.identity, kind=Build.kind)
+    await publish(WorkflowEvent.RUNNING, subject=item.identity, kind=Build.kind)
 
     assert WorkItem.get(item.id).status is None
 
@@ -32,11 +33,11 @@ async def test_build_lifecycle_reaches_the_tracker(db_session, monkeypatch):
     item = make_test_work_item(repo="acme/widget", title="t", source="linear", remote_key="ACME-7")
     subject = item.identity
 
-    await publish("run.running", subject=subject, kind=Build.kind)
-    await publish("run.pending_input", subject=subject, kind=Build.kind, gate="review_work")
+    await publish(WorkflowEvent.RUNNING, subject=subject, kind=Build.kind)
+    await publish(WorkflowEvent.PARKED, subject=subject, kind=Build.kind, gate="review_work")
     # Other gates and other kinds don't push.
-    await publish("run.pending_input", subject=subject, kind=Build.kind, gate="review_plan")
-    await publish("run.running", subject=subject, kind="ship.profile")
+    await publish(WorkflowEvent.PARKED, subject=subject, kind=Build.kind, gate="review_plan")
+    await publish(WorkflowEvent.RUNNING, subject=subject, kind="ship.profile")
 
     assert pushed == [TicketStatus.IN_PROGRESS, TicketStatus.IN_REVIEW]
 
@@ -55,7 +56,7 @@ async def test_pr_review_answers_through_the_review_gate(db_session, monkeypatch
     seed_dbos_status(
         db_session,
         run.id,
-        "pending_input",
+        "parked",
         subject=item.identity,
     )
     item.update(build_run_id=run.id)
@@ -94,7 +95,7 @@ async def test_provision_state_reaches_the_work_item(db_session):
     item = make_test_work_item(repo="acme/widget", title="t", source="linear", remote_key="ACME-8")
 
     await publish(
-        "run.state",
+        WorkflowEvent.STATE,
         subject=item.identity,
         kind=Build.kind,
         pr_number=12,

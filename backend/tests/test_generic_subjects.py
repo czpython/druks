@@ -47,7 +47,7 @@ def _seed_run(
     input_gate=None,
     failure=None,
 ):
-    if state == "pending_input" and input_gate is None:
+    if state == "parked" and input_gate is None:
         input_gate = "review"
     run = Run(
         id=str(uuid7()),
@@ -119,14 +119,14 @@ def test_parked_run_surfaces_needs_you(client: TestClient, db_session):
     run = _seed_run(
         db_session,
         subject_id="1",
-        state="pending_input",
+        state="parked",
         input_gate="approve_plan",
         input_request={"label": "Approve the plan"},
     )
     _seed_call(db_session, run, agent="generate_plan")
 
     detail = client.get("/api/faketest/thing/1").json()
-    assert detail["status"]["state"] == "pending_input"
+    assert detail["status"]["state"] == "parked"
     assert detail["status"]["gate"] == "approve_plan"
     parked = detail["timeline"][-1]
     assert parked["inputRequest"] == {"label": "Approve the plan"}
@@ -153,7 +153,7 @@ def test_parked_board_row_skips_the_agent_call_query(client: TestClient, db_sess
     run = _seed_run(
         db_session,
         subject_id="1",
-        state="pending_input",
+        state="parked",
         input_gate="approve_plan",
         input_request={"label": "Approve the plan"},
     )

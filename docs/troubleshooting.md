@@ -172,7 +172,7 @@ agent process; recovery follows the durable operation boundary.
 
 ## A run is waiting
 
-`pending_input` means the DBOS workflow is suspended on a gate, not stalled.
+`parked` means the DBOS workflow is suspended on a gate, not stalled.
 Open the subject detail page to see its current ask. In-app review offers
 approve, request changes, or cancel; an external gate is answered by its owning
 system.

@@ -107,9 +107,9 @@ def _status(driving_run: Run | None, calls: list[AgentCall]) -> SubjectStatus:
     # Facts only: the extension's UI renders its copy from them.
     if not driving_run:
         return SubjectStatus(state=RunState.SCHEDULED)
-    # A pending_input run is always the active one (ACTIVE_STATES), so the
+    # A parked run is always the active one (ACTIVE_STATES), so the
     # driving run alone decides parked-ness.
-    parked = driving_run.state == RunState.PENDING_INPUT.value
+    parked = driving_run.state == RunState.PARKED.value
     # ``agent`` is the *running* run's latest agent — a parked run's calls are
     # history, not the current step, whichever caller handed them in. ``gate``
     # is the inverse: only a parked run's input_gate is a live ask (a timed-out

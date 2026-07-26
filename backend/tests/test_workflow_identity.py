@@ -138,7 +138,7 @@ def test_lifecycle_event_stamps_the_declaring_extension(db_session):
 
     payload = _log_run_event(run, RunState.FINISHED, {"type": "note", "id": 1})
 
-    event = db_session.query(Event).filter_by(type="run.finished").one()
+    event = db_session.query(Event).filter_by(type="workflow.finished").one()
     assert payload["run"] == run.id
     assert event.extension == "alpha"
 

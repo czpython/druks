@@ -22,7 +22,7 @@ from druks.accounts.context import current_account_id
 from druks.database import db_session
 from druks.durable.activity import set_run_phase
 from druks.durable.engine import _step_engine, register_schedule, run_queue, step_session
-from druks.durable.enums import AgentCallStatus, RunState
+from druks.durable.enums import AgentCallStatus, RunState, WorkflowEvent
 from druks.durable.exceptions import FatalError, GateTimeout, SubjectlessGate, WorkflowError
 from druks.durable.models import AgentCall, Run
 from druks.durable.reads import get_subject_phase, get_subject_status
@@ -54,12 +54,12 @@ __all__ = [
     "Gate",
     "Journal",
     "OperatorReply",
-    "RunState",
     "SubjectActivity",
     "SubjectStatus",
     "SubjectSummary",
     "Workflow",
     "WorkflowError",
+    "WorkflowEvent",
     "get_subject_phase",
     "get_subject_status",
     "set_run_phase",
@@ -272,7 +272,7 @@ async def _park(
     await workflow._reap_run()
     await _emit_run_event(
         workflow.workflow_id,
-        RunState.PENDING_INPUT,
+        RunState.PARKED,
         subject=workflow._subject,
         facts={
             "input_gate": gate,
@@ -296,7 +296,7 @@ async def _park(
 
 
 async def _notify_designated_destination(workflow_id: str, subject: dict[str, Any]) -> None:
-    # Reads the ask off the run row the pending_input step just wrote (the
+    # Reads the ask off the run row the parked step just wrote (the
     # signal payload carries no ask — producer-side placement is the point);
     # the settings pointer is the operator's off-switch.
     async def _create() -> str | None:
@@ -337,7 +337,7 @@ _IO_RETRIES: StepOptions = {"retries_allowed": True, "max_attempts": 5}
 
 async def _emit_run_event(
     workflow_id: str,
-    event: RunState,
+    state: RunState,
     *,
     subject: dict[str, Any] | None,
     facts: dict[str, Any] | None = None,
@@ -361,11 +361,11 @@ async def _emit_run_event(
                 return {
                     "kind": run.kind,
                     "subject": subject,
-                    "payload": _log_run_event(run, event, subject, result),
+                    "payload": _log_run_event(run, state, subject, result),
                 }
 
     transition = await DBOS.run_step_async(
-        StepOptions(name=f"run.{event.value}", **_IO_RETRIES), _transition
+        StepOptions(name=f"run.{state.value}", **_IO_RETRIES), _transition
     )
     if not transition:
         return
@@ -373,20 +373,20 @@ async def _emit_run_event(
     async def _propagate() -> None:
         async with step_session():
             await publish(
-                f"run.{event.value}",
+                WorkflowEvent.for_state(state),
                 subject=transition["subject"],
                 kind=transition["kind"],
                 **{k: v for k, v in transition["payload"].items() if k != "kind"},
             )
 
     await DBOS.run_step_async(
-        StepOptions(name=f"run.{event.value}:propagate", **_IO_RETRIES), _propagate
+        StepOptions(name=f"run.{state.value}:propagate", **_IO_RETRIES), _propagate
     )
 
 
 def _log_run_event(
     run: Run,
-    event: RunState,
+    state: RunState,
     subject: dict[str, Any],
     result: Any = None,
 ) -> dict[str, Any]:
@@ -404,7 +404,7 @@ def _log_run_event(
     elif isinstance(result, dict):
         payload["result"] = result
     Event.emit(
-        type=f"run.{event.value}",
+        type=WorkflowEvent.for_state(state),
         subject=subject,
         payload=payload,
         extension=workflows.get(run.kind).extension,
@@ -562,7 +562,7 @@ class Workflow:
         # number, a resolved branch). Body-only, enforced: inside a @step the
         # in-memory update would vanish on replay (the step is skipped), which
         # is exactly the state loss this call exists to prevent. Each fact is a
-        # DBOS workflow event (memoized — written once); the ``run.state``
+        # DBOS workflow event (memoized — written once); the ``workflow.state``
         # signal fans out in its own checkpointed step so reactions fire once,
         # inside a session.
         if _in_step.get():
@@ -574,7 +574,7 @@ class Workflow:
         async def _fan_out() -> None:
             async with step_session():
                 await publish(
-                    "run.state",
+                    WorkflowEvent.STATE,
                     subject=self._subject,
                     kind=self.kind,
                     **facts,

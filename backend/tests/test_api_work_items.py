@@ -42,7 +42,7 @@ def _seed_op(db_session, work_item_id, *, kind="implement", state, input_gate=No
         run = seed_build_run(
             db_session,
             work_item_id=work_item_id,
-            state="pending_input",
+            state="parked",
             input_gate=input_gate,
             input_request=_GATE_REQUESTS.get(input_gate),
         )
@@ -89,7 +89,7 @@ def test_subject_detail_composes_summary_status_and_timeline(client: TestClient,
     run = seed_build_run(
         db_session,
         work_item_id=item.id,
-        state="pending_input",
+        state="parked",
         input_gate="review_plan",
         input_request={"next_action": "approve_plan", "label": "Approve plan"},
     )
@@ -100,13 +100,13 @@ def test_subject_detail_composes_summary_status_and_timeline(client: TestClient,
     assert detail["summary"]["remoteKey"] == "ACME-5"
     assert detail["summary"]["links"]["pr"] == "https://github.com/ClawHaven/acme-app/pull/8"
     # Status is the platform's, aggregated from the item's runs — parked on a gate.
-    assert detail["status"]["state"] == "pending_input"
+    assert detail["status"]["state"] == "parked"
     assert detail["status"]["gate"] == "review_plan"
     # The timeline is the platform's: the run itself, carrying its gate ask and
     # its agent calls.
     (entry,) = detail["timeline"]
     assert entry["id"] == run.id
-    assert entry["state"] == "pending_input"
+    assert entry["state"] == "parked"
     assert entry["inputRequest"] == {"next_action": "approve_plan", "label": "Approve plan"}
     assert [call["agent"] for call in entry["agentCalls"]] == ["generate_plan"]
 
@@ -124,7 +124,7 @@ def test_pending_gate_surfaces_input_request_on_the_run(db_session):
     run = seed_build_run(
         db_session,
         work_item_id=item.id,
-        state="pending_input",
+        state="parked",
         input_gate="review_plan",
         input_request={"next_action": "approve_plan", "label": "Approve plan"},
     )
@@ -133,7 +133,7 @@ def test_pending_gate_surfaces_input_request_on_the_run(db_session):
 
     (entry,) = list_subject_timeline("work_item", str(item.id))
     assert entry.input_request == {"next_action": "approve_plan", "label": "Approve plan"}
-    assert entry.state == "pending_input"
+    assert entry.state == "parked"
     assert [call.agent for call in entry.agent_calls] == ["generate_plan", "review_plan"]
 
 
@@ -269,8 +269,6 @@ async def test_subject_activity_none_when_not_running(db_session):
     from druks.contrib.ship import extension as ship_extension
 
     item = make_test_work_item(repo="ClawHaven/acme-app", title="x")
-    seed_build_run(
-        db_session, work_item_id=item.id, state="pending_input", input_gate="review_plan"
-    )
+    seed_build_run(db_session, work_item_id=item.id, state="parked", input_gate="review_plan")
 
     assert await ship_extension.Ship.subject_activity(item) is None

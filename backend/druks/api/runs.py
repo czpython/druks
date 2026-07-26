@@ -17,7 +17,7 @@ async def resume_run(run_id: str, body: ResumeRequest) -> None:
     if not run:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "run not found")
     ask = run.input_request
-    if run.state != RunState.PENDING_INPUT.value or not ask:
+    if run.state != RunState.PARKED.value or not ask:
         raise HTTPException(status.HTTP_409_CONFLICT, "run is not waiting on an in-app decision")
     try:
         resume_payload = validate_in_app_answer(ask, body.control, body.answers, body.note)
