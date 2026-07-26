@@ -11,10 +11,6 @@ dev = [
     "pytest-asyncio>=1.3.0",
 ]
 
-# Local checkout of druks core; point at the published package once one exists.
-[tool.uv.sources]
-druks = { path = "{{ druks_path }}", editable = true }
-
 # The platform discovers this extension here — installing the package is the
 # whole registration.
 [project.entry-points."druks.extensions"]

@@ -37,7 +37,15 @@ names, a mismatched entry-point key, malformed target, import failure, or
 unprefixed table.
 
 The project root also carries an `AGENTS.md` holding the contracts a coding agent
-cannot infer from the stubs, and a relative path back to this guide.
+cannot infer from the stubs, and a link back to this guide.
+
+The scaffold depends on the published `druks`. To develop an extension against a
+local checkout instead, pin it:
+
+```toml
+[tool.uv.sources]
+druks = { path = "../druks", editable = true }
+```
 
 ## Package layout
 

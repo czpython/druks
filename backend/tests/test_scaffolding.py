@@ -1,5 +1,4 @@
 import importlib
-import re
 import sys
 
 import pytest
@@ -23,11 +22,6 @@ def test_create_extension_scaffolds_a_loadable_package(tmp_path):
         'night_watch = "druks_night_watch.extension:NightWatch"'
         in (target / "pyproject.toml").read_text()
     )
-
-    # AGENTS.md exists to route an agent to the author guide from a directory that
-    # ships none of it, so the rendered pointer has to land on the real file.
-    guide = re.search(r"`(\S+writing-an-extension\.md)`", (target / "AGENTS.md").read_text())
-    assert (target / guide.group(1)).is_file()
 
     # No rendered file may reference retired surfaces: the old storage namespace, the
     # taskiq worker, or the one-arg ``config`` workflow wording.
