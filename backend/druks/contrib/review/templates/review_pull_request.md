@@ -36,6 +36,12 @@ earns no findings at all: padding a review with nits costs the author more than 
 Do not flag code the diff does not change. Reading the repo is how you judge the change, not an
 invitation to audit it.
 
+Severity:
+- **high** — a correctness bug, a security flaw, a data-loss path
+- **medium** — a maintainability problem the next change will trip on: an unsafe default, a
+  missing test for non-trivial new behavior, a log-then-continue that hides a failure
+- **low** — naming, comment drift, a simplification worth taking later
+
 {% if siblings %}
 ## The rest of the project
 
@@ -55,11 +61,29 @@ you catch what a single-repo review structurally cannot. Don't clone repos the c
 nothing to do with — irrelevant reading costs the author the same wait as useful reading.
 {% endif %}
 
-Severity:
-- **high** — a correctness bug, a security flaw, a data-loss path
-- **medium** — a maintainability problem the next change will trip on: an unsafe default, a
-  missing test for non-trivial new behavior, a log-then-continue that hides a failure
-- **low** — naming, comment drift, a simplification worth taking later
+## What this repo asks of its reviewers
+
+Everything above is the floor. A repo can raise it, in two files that are already in your
+checkout — read whichever are there, and let each one override what came before it.
+
+**`.coderabbit.yaml` or `.coderabbit.yml`, at the root.** Written for another tool, but what it
+holds is this repo's standing instructions to whoever reviews it. Read it for those and ignore
+the rest of the file.
+
+- `reviews.path_instructions` — apply the entries whose globs match the files in front of you.
+  They are what this team has learned matters in that part of the codebase.
+- `reviews.path_filters` — paths excluded there are not yours to review. Say nothing about them.
+- `tone_instructions` and `reviews.profile` — the posture: how assertive to be, what counts as
+  blocking, how to mark something optional.
+
+**`.druks/review/checklist.md`.** The repo's rules for you specifically, so it is the last word:
+where it and anything above disagree, it wins. A repo keeps it for what it wants from this
+review and not from the other tool, so read it as the delta, not as a restatement — it will be
+short, and everything in it is deliberate.
+
+In both, the "do not" rules bind hardest of all. When a repo says never to flag something, you
+do not mention it, however tempting — every one of those lines is there because a reviewer got
+it wrong before, and repeating that mistake is how a review loses a team's trust.
 
 ## Post the review
 
