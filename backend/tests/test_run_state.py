@@ -30,10 +30,10 @@ def test_session_get_derives_state(db_session):
 
 def test_pending_splits_on_the_gate(db_session):
     # DBOS says PENDING either way; the gate is the one fact it can't know.
-    _, parked = _item_and_run(db_session, "pending_input", input_gate="review_work")
+    _, parked = _item_and_run(db_session, "parked", input_gate="review_work")
     _, live = _item_and_run(db_session, "running")
     db_session.expire_all()
-    assert Run.get(parked.id).state == RunState.PENDING_INPUT.value
+    assert Run.get(parked.id).state == RunState.PARKED.value
     assert Run.get(live.id).state == RunState.RUNNING.value
 
 
@@ -88,13 +88,13 @@ def test_statuses_the_seed_map_never_writes(db_session, status, state):
 
 
 def test_queries_filter_on_derived_state(db_session):
-    _, parked = _item_and_run(db_session, "pending_input", input_gate="review_work")
+    _, parked = _item_and_run(db_session, "parked", input_gate="review_work")
     _, done = _item_and_run(db_session, "finished")
     ids = set(
         db_session.scalars(
             select(Run.id).where(
                 Run.id.in_([parked.id, done.id]),
-                Run.state.in_([RunState.PENDING_INPUT.value, RunState.RUNNING.value]),
+                Run.state.in_([RunState.PARKED.value, RunState.RUNNING.value]),
             )
         )
     )
@@ -142,7 +142,7 @@ async def test_facts_and_event_land_before_a_raising_subscriber(db_session, _inl
     with pytest.raises(RuntimeError, match="tracker down"):
         await _emit_run_event(
             run.id,
-            RunState.PENDING_INPUT,
+            RunState.PARKED,
             subject={"type": "work_item", "id": item.id},
             facts={"input_gate": "review_work", "input_request": {"label": "Review"}},
         )
@@ -218,7 +218,7 @@ async def test_failure_writes_the_reason_and_reraises(db_session, _inline_steps)
 
     item, run = _item_and_run(
         db_session,
-        "pending_input",
+        "parked",
         input_gate="review_work",
         input_request={"label": "Review"},
     )

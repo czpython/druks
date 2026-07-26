@@ -25,7 +25,7 @@ def _park(db_session) -> None:
         )
     )
     db_session.flush()
-    seed_dbos_status(db_session, "r1", "pending_input")
+    seed_dbos_status(db_session, "r1", "parked")
 
 
 async def test_resume_sends_the_offered_control_as_the_action(db_session, monkeypatch):

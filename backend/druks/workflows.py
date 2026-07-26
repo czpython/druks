@@ -272,7 +272,7 @@ async def _park(
     await workflow._reap_run()
     await _emit_run_event(
         workflow.workflow_id,
-        RunState.PENDING_INPUT,
+        RunState.PARKED,
         subject=workflow._subject,
         facts={
             "input_gate": gate,
@@ -296,7 +296,7 @@ async def _park(
 
 
 async def _notify_designated_destination(workflow_id: str, subject: dict[str, Any]) -> None:
-    # Reads the ask off the run row the pending_input step just wrote (the
+    # Reads the ask off the run row the parked step just wrote (the
     # signal payload carries no ask — producer-side placement is the point);
     # the settings pointer is the operator's off-switch.
     async def _create() -> str | None:
@@ -349,8 +349,6 @@ async def _emit_run_event(
     # DBOS commits the terminal status — subscribers stay idempotent and read
     # the payload, never derived Run.state. subject comes from the workflow's
     # own arguments, so a replay stamps the same routing every time.
-    # Step names keep the substrate's state word: a step name is a replay
-    # checkpoint identity, so renaming one re-runs that step for every live run.
     async def _transition() -> dict[str, Any] | None:
         async with step_session() as session:
             run = Run.get(workflow_id)

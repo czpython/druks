@@ -4,7 +4,7 @@ from enum import StrEnum
 class RunState(StrEnum):
     SCHEDULED = "scheduled"
     RUNNING = "running"
-    PENDING_INPUT = "pending_input"
+    PARKED = "parked"
     FINISHED = "finished"
     FAILED = "failed"
     CANCELLED = "cancelled"
@@ -13,7 +13,7 @@ class RunState(StrEnum):
     ORPHANED = "orphaned"
 
 
-ACTIVE_STATES = (RunState.SCHEDULED, RunState.RUNNING, RunState.PENDING_INPUT)
+ACTIVE_STATES = (RunState.SCHEDULED, RunState.RUNNING, RunState.PARKED)
 TERMINAL_STATES = (RunState.FINISHED, RunState.FAILED, RunState.CANCELLED, RunState.ORPHANED)
 # A subject whose newest run is in one of these is still open: going, or
 # failed and wanting the operator.
@@ -21,9 +21,10 @@ OPEN_STATES = (*ACTIVE_STATES, RunState.FAILED)
 
 
 class WorkflowEvent(StrEnum):
-    # What an extension subscribes to and what the feed stores. RunState above is
-    # the substrate's vocabulary — DBOS statuses, the Run row — and an author
-    # never types it: they know the workflow they wrote and what it did.
+    # Each state's signal topic, and what the feed stores. Naming them makes a
+    # subscriber's topic typo-proof — a bare string can silently subscribe to a
+    # topic nobody publishes. ``STATE`` is the odd one: facts a running workflow
+    # learned, no state behind it.
     RUNNING = "workflow.running"
     PARKED = "workflow.parked"
     FINISHED = "workflow.finished"
@@ -33,11 +34,7 @@ class WorkflowEvent(StrEnum):
 
     @classmethod
     def for_state(cls, state: RunState) -> "WorkflowEvent":
-        # A park is our word for the substrate's pending_input; every other state
-        # already names its own event. A derived state (scheduled, orphaned) never
-        # announces one, so asking raises.
-        if state is RunState.PENDING_INPUT:
-            return cls.PARKED
+        # A derived state (scheduled, orphaned) announces nothing, so asking raises.
         return cls(f"workflow.{state.value}")
 
 

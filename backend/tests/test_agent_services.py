@@ -46,7 +46,7 @@ def _park(db_session, item_id, *, ask=None):
     run = seed_build_run(
         db_session,
         work_item_id=item_id,
-        state="pending_input",
+        state="parked",
         input_gate="review",
         input_request=ask if ask is not None else _in_app_ask(),
     )

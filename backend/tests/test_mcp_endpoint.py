@@ -113,7 +113,7 @@ def _park(db_session, item_id):
     run = seed_build_run(
         db_session,
         work_item_id=item_id,
-        state="pending_input",
+        state="parked",
         input_gate="review",
         input_request=dict(_IN_APP_ASK),
     )
@@ -259,7 +259,7 @@ async def test_gate_cycle_reads_answers_and_reports_stale_rounds(
         external = seed_build_run(
             db_session,
             work_item_id=external_item.id,
-            state="pending_input",
+            state="parked",
             input_gate="review",
             input_request={"presentation": "external"},
         )

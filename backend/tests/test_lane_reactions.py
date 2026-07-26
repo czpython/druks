@@ -56,7 +56,7 @@ async def test_pr_review_answers_through_the_review_gate(db_session, monkeypatch
     seed_dbos_status(
         db_session,
         run.id,
-        "pending_input",
+        "parked",
         subject=item.identity,
     )
     item.update(build_run_id=run.id)

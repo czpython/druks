@@ -223,13 +223,13 @@ async def _start_to_work_gate(rt, item):
     parked = await _wait(
         rt.engine,
         workflow_id,
-        lambda run: run.state == RunState.PENDING_INPUT and run.input_gate == "review",
+        lambda run: run.state == RunState.PARKED and run.input_gate == "review",
     )
     await parked.resume(action="approve", answers={})
     parked = await _wait(
         rt.engine,
         workflow_id,
-        lambda run: run.state == RunState.PENDING_INPUT and run.input_gate == "review_work",
+        lambda run: run.state == RunState.PARKED and run.input_gate == "review_work",
     )
     return workflow_id, parked
 
@@ -276,7 +276,7 @@ async def test_rejected_merge_intent_reparks_work_gate(rt, monkeypatch):
         rt.engine,
         workflow_id,
         lambda run: (
-            run.state == RunState.PENDING_INPUT
+            run.state == RunState.PARKED
             and run.input_gate == "review_work"
             and run.input_requested_at != first_parked_at
         ),
@@ -301,7 +301,7 @@ async def test_auto_mode_machine_review_replaces_the_plan_gate(rt, monkeypatch):
     parked = await _wait(
         rt.engine,
         workflow_id,
-        lambda run: run.state == RunState.PENDING_INPUT and run.input_gate == "review_work",
+        lambda run: run.state == RunState.PARKED and run.input_gate == "review_work",
     )
     assert invoked[:2] == ["generate_plan", "review_plan"]
     await parked.resume(action="approve")

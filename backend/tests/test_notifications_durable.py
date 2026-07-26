@@ -415,7 +415,7 @@ async def test_in_app_park_notifies_with_actions(rt, deliver_spy):
     _set_gate_park_pointer(rt, destination.id)
 
     workflow_id = await rt.InAppFlow.start(subject=NotificationProbe(id=9001))
-    parked = await _wait_run(rt, workflow_id, lambda run: run.state == RunState.PENDING_INPUT)
+    parked = await _wait_run(rt, workflow_id, lambda run: run.state == RunState.PARKED)
 
     notification = await _wait_notification(rt, workflow_id, "delivered")
     assert len(_notifications_for_run(rt, workflow_id)) == 1
@@ -444,7 +444,7 @@ async def test_external_park_notifies_without_actions(rt, deliver_spy):
     _set_gate_park_pointer(rt, destination.id)
 
     workflow_id = await rt.ExternalFlow.start(subject=NotificationProbe(id=9002))
-    await _wait_run(rt, workflow_id, lambda run: run.state == RunState.PENDING_INPUT)
+    await _wait_run(rt, workflow_id, lambda run: run.state == RunState.PARKED)
 
     notification = await _wait_notification(rt, workflow_id, "delivered")
     assert notification.body == "Answer on the ticket"
@@ -461,7 +461,7 @@ async def test_external_park_with_declared_url_sets_deep_link(rt, deliver_spy):
     _set_gate_park_pointer(rt, destination.id)
 
     workflow_id = await rt.ExternalUrlFlow.start(subject=NotificationProbe(id=9003))
-    await _wait_run(rt, workflow_id, lambda run: run.state == RunState.PENDING_INPUT)
+    await _wait_run(rt, workflow_id, lambda run: run.state == RunState.PARKED)
 
     notification = await _wait_notification(rt, workflow_id, "delivered")
     assert notification.deep_link == "https://github.com/acme/app/pull/7"
@@ -473,8 +473,8 @@ async def test_no_designated_destination_notifies_nothing(rt, deliver_spy):
 
     in_app_id = await rt.InAppFlow.start(subject=NotificationProbe(id=9004))
     external_id = await rt.ExternalFlow.start(subject=NotificationProbe(id=9014))
-    await _wait_run(rt, in_app_id, lambda run: run.state == RunState.PENDING_INPUT)
-    await _wait_run(rt, external_id, lambda run: run.state == RunState.PENDING_INPUT)
+    await _wait_run(rt, in_app_id, lambda run: run.state == RunState.PARKED)
+    await _wait_run(rt, external_id, lambda run: run.state == RunState.PARKED)
 
     await asyncio.sleep(1.0)
     assert _notifications_for_run(rt, in_app_id) == []
@@ -491,7 +491,7 @@ async def test_deleted_designated_destination_notifies_nothing(rt, deliver_spy):
     _seed(rt, lambda: Destination.get(destination.id).delete())
 
     workflow_id = await rt.ExternalFlow.start(subject=NotificationProbe(id=9005))
-    await _wait_run(rt, workflow_id, lambda run: run.state == RunState.PENDING_INPUT)
+    await _wait_run(rt, workflow_id, lambda run: run.state == RunState.PARKED)
 
     await asyncio.sleep(1.0)
     assert _notifications_for_run(rt, workflow_id) == []
@@ -511,7 +511,7 @@ async def test_subjectless_park_notifies_nothing(rt, deliver_spy):
     _set_gate_park_pointer(rt, destination.id)
 
     workflow_id = await rt.ExternalFlow.start(subject=None)
-    await _wait_run(rt, workflow_id, lambda run: run.state == RunState.PENDING_INPUT)
+    await _wait_run(rt, workflow_id, lambda run: run.state == RunState.PARKED)
 
     await asyncio.sleep(1.0)
     assert _notifications_for_run(rt, workflow_id) == []
@@ -527,13 +527,13 @@ async def test_failed_delivery_leaves_run_parked_and_resumable(rt, deliver_spy, 
     _set_gate_park_pointer(rt, destination.id)
 
     workflow_id = await rt.InAppFlow.start(subject=NotificationProbe(id=9006))
-    await _wait_run(rt, workflow_id, lambda run: run.state == RunState.PENDING_INPUT)
+    await _wait_run(rt, workflow_id, lambda run: run.state == RunState.PARKED)
     notification = await _wait_notification(rt, workflow_id, "failed")
     assert _WEBHOOK_URL not in notification.last_error
 
     # The park never noticed the dead endpoint: still waiting, still resumable.
     parked = _run_snapshot(rt, workflow_id)
-    assert parked.state == RunState.PENDING_INPUT
+    assert parked.state == RunState.PARKED
     await parked.resume(action="approve")
     await _wait_run(rt, workflow_id, lambda run: run.state == RunState.FINISHED)
 
@@ -545,7 +545,7 @@ async def test_replayed_park_notifies_once(rt, deliver_spy):
     _set_gate_park_pointer(rt, destination.id)
 
     workflow_id = await rt.ExternalFlow.start(subject=NotificationProbe(id=9007))
-    await _wait_run(rt, workflow_id, lambda run: run.state == RunState.PENDING_INPUT)
+    await _wait_run(rt, workflow_id, lambda run: run.state == RunState.PARKED)
     await _wait_notification(rt, workflow_id, "delivered")
     assert len(deliver_spy.calls) == 1
 
@@ -572,7 +572,7 @@ async def test_replayed_park_notifies_once(rt, deliver_spy):
         await asyncio.sleep(0.1)
     else:
         raise AssertionError("workflow was never re-executed after resume")
-    await _wait_run(rt, workflow_id, lambda run: run.state == RunState.PENDING_INPUT)
+    await _wait_run(rt, workflow_id, lambda run: run.state == RunState.PARKED)
     await asyncio.sleep(1.0)  # room for a wrong duplicate enqueue to land
 
     assert len(_notifications_for_run(rt, workflow_id)) == 1
@@ -597,7 +597,7 @@ async def test_each_park_round_gets_its_own_notification(rt, deliver_spy):
     _set_gate_park_pointer(rt, destination.id)
 
     workflow_id = await rt.DoubleParkFlow.start(subject=NotificationProbe(id=9008))
-    first_round = await _wait_run(rt, workflow_id, lambda run: run.state == RunState.PENDING_INPUT)
+    first_round = await _wait_run(rt, workflow_id, lambda run: run.state == RunState.PARKED)
     await _wait_notification(rt, workflow_id, "delivered")
     assert len(deliver_spy.calls) == 1
 
@@ -608,7 +608,7 @@ async def test_each_park_round_gets_its_own_notification(rt, deliver_spy):
         rt,
         workflow_id,
         lambda run: (
-            run.state == RunState.PENDING_INPUT
+            run.state == RunState.PARKED
             and run.input_requested_at != first_round.input_requested_at
         ),
     )
@@ -666,7 +666,7 @@ async def test_respond_round_trip_finishes_the_run(rt, deliver_spy):
     )
     _set_gate_park_pointer(rt, destination.id)
     workflow_id = await rt.InAppFlow.start(subject=NotificationProbe(id=9009))
-    await _wait_run(rt, workflow_id, lambda run: run.state == RunState.PENDING_INPUT)
+    await _wait_run(rt, workflow_id, lambda run: run.state == RunState.PARKED)
     notification = await _wait_notification(rt, workflow_id, "delivered")
     token = notification.correlation_token
 
@@ -692,7 +692,7 @@ async def test_concurrent_responds_resolve_to_one_answer(rt, deliver_spy):
     )
     _set_gate_park_pointer(rt, destination.id)
     workflow_id = await rt.InAppFlow.start(subject=NotificationProbe(id=9010))
-    await _wait_run(rt, workflow_id, lambda run: run.state == RunState.PENDING_INPUT)
+    await _wait_run(rt, workflow_id, lambda run: run.state == RunState.PARKED)
     notification = await _wait_notification(rt, workflow_id, "delivered")
     token = notification.correlation_token
 

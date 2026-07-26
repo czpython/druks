@@ -11,7 +11,7 @@ def _board_ids(db_session):
     return {row.id for row in Ship.list_subjects()}
 
 
-@pytest.mark.parametrize("state", ["scheduled", "running", "pending_input", "failed"])
+@pytest.mark.parametrize("state", ["scheduled", "running", "parked", "failed"])
 def test_a_live_or_failed_build_holds_the_board(db_session, state):
     # A failed run still wants the operator, so it stays alongside the live ones.
     item = make_test_work_item(repo="ClawHaven/acme-app", title=f"build {state}")
@@ -77,7 +77,7 @@ def test_the_newest_run_speaks_for_the_item(db_session):
 
     item = make_test_work_item(repo="ClawHaven/acme-app", title="two runs")
     seed_build_run(db_session, work_item_id=item.id, state="cancelled")
-    seed_build_run(db_session, work_item_id=item.id, state="pending_input", input_gate="review")
+    seed_build_run(db_session, work_item_id=item.id, state="parked", input_gate="review")
     db_session.expire_all()
-    assert get_subject_status(item.subject_type, str(item.id)).state == "pending_input"
+    assert get_subject_status(item.subject_type, str(item.id)).state == "parked"
     assert str(item.id) in _board_ids(db_session)

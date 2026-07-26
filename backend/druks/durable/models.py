@@ -43,7 +43,7 @@ class Run(Base):
     id: Mapped[str] = mapped_column(String, primary_key=True)
     kind: Mapped[str]
     # The parked gate's recv topic — which gate, e.g. "review_plan"; presence ⇒
-    # PENDING_INPUT. The DBOS routing key, set automatically from the Gate class.
+    # PARKED. The DBOS routing key, set automatically from the Gate class.
     input_gate: Mapped[str | None] = mapped_column(default=None)
     # The structured ask the gate declared at Gate.wait(input_request=…) — the extension's
     # opaque payload, surfaced by the read-side and cleared on resume beside input_gate.
@@ -84,7 +84,7 @@ class Run(Base):
 
     @property
     def is_parked(self) -> bool:
-        return self.state == RunState.PENDING_INPUT.value
+        return self.state == RunState.PARKED.value
 
     @property
     def is_running(self) -> bool:

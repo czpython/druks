@@ -48,7 +48,7 @@ async def test_gate_answer_resumes_only_a_run_parked_on_its_gate(db_session, mon
         db_session,
         subject=subject,
         kind=Build.kind,
-        state="pending_input",
+        state="parked",
         gate=OperatorReply.name,
     )
     _subject_run(db_session, subject=subject, kind=Profile.kind, state="running", order=1)
@@ -105,7 +105,7 @@ async def test_subject_phase_reads_the_driving_running_workflow(db_session, monk
         db_session,
         subject=subject,
         kind=Build.kind,
-        state="pending_input",
+        state="parked",
         gate=OperatorReply.name,
     )
     driving = _subject_run(db_session, subject=subject, kind=Profile.kind, state="running", order=1)

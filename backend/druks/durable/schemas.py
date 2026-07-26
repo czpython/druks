@@ -127,11 +127,11 @@ class RunResponse(BaseResponse):
     # The durable kind ("ship.build"); ``label`` is its display name ("Build").
     kind: str
     label: str
-    state: Literal["scheduled", "running", "pending_input", "finished", "failed", "cancelled"]
+    state: Literal["scheduled", "running", "parked", "finished", "failed", "cancelled"]
     failure: str | None = None
     gate: str | None = None
     # The structured ask the parked run declared at ``Gate.wait(input_request=…)`` —
-    # set while the run is PENDING_INPUT, cleared on resume. Presence = "needs you".
+    # set while the run is PARKED, cleared on resume. Presence = "needs you".
     input_request: dict[str, Any] | None = None
     created_at: datetime
     updated_at: datetime
@@ -190,7 +190,7 @@ class SubjectStatus(BaseResponse):
 
     @property
     def is_parked(self) -> bool:
-        return self.state == RunState.PENDING_INPUT
+        return self.state == RunState.PARKED
 
     @property
     def is_running(self) -> bool:

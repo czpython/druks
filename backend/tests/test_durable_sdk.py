@@ -299,7 +299,7 @@ async def test_attribution_rides_the_run_and_survives_resume(rt):
     SINK.clear()
     account_id = _account_id(rt.engine, "op@example.com")
     wfid = await rt.AttributedFlow.start(subject=Widget(id=878787), account_id=account_id)
-    parked = await _wait_for(rt.engine, wfid, lambda r: r.state == RunState.PENDING_INPUT)
+    parked = await _wait_for(rt.engine, wfid, lambda r: r.state == RunState.PARKED)
     with rt.engine.connect() as conn:
         attributes = conn.execute(
             select(workflow_status.c.attributes).where(workflow_status.c.workflow_uuid == wfid)
@@ -335,7 +335,7 @@ async def test_duplicate_start_shares_the_run_across_accounts(rt):
     second = _account_id(rt.engine, "peer@example.com")
     subject = Widget(id=909090)
     wfid = await rt.SampleFlow.start(subject=subject, account_id=first, repo="owner/app")
-    parked = await _wait_for(rt.engine, wfid, lambda r: r.state == RunState.PENDING_INPUT)
+    parked = await _wait_for(rt.engine, wfid, lambda r: r.state == RunState.PARKED)
 
     dup = await rt.SampleFlow.start(subject=subject, account_id=second, repo="owner/app")
     assert dup == wfid
@@ -347,7 +347,7 @@ async def test_duplicate_start_shares_the_run_across_accounts(rt):
 async def test_step_gate_resume_finish(rt):
     wfid = await rt.SampleFlow.start(subject=None, repo="owner/app")
 
-    parked = await _wait_for(rt.engine, wfid, lambda r: r.state == RunState.PENDING_INPUT)
+    parked = await _wait_for(rt.engine, wfid, lambda r: r.state == RunState.PARKED)
     assert parked.input_gate == "approve"
     assert parked.input_requested_at is not None
 
@@ -363,7 +363,7 @@ async def test_duplicate_replies_to_one_round_collapse(rt):
     from sqlalchemy import text
 
     wfid = await rt.DoubleGateFlow.start(subject=None)
-    parked = await _wait_for(rt.engine, wfid, lambda r: r.state == RunState.PENDING_INPUT)
+    parked = await _wait_for(rt.engine, wfid, lambda r: r.state == RunState.PARKED)
     first_asked_at = parked.input_requested_at
 
     # The race: both resumers read the run while parked, then both send.
@@ -387,11 +387,11 @@ async def test_duplicate_replies_to_one_round_collapse(rt):
         rt.engine,
         wfid,
         lambda r: (
-            r.state in (RunState.PENDING_INPUT, RunState.FINISHED)
+            r.state in (RunState.PARKED, RunState.FINISHED)
             and r.input_requested_at != first_asked_at
         ),
     )
-    assert parked.state == RunState.PENDING_INPUT
+    assert parked.state == RunState.PARKED
     assert "round1:first" in SINK
 
     # A fresh reply to the new round is a new key, so it still gets through.
@@ -437,7 +437,7 @@ async def test_subject_gate_parks_unchanged(rt):
     """The same no-on_wait gate still parks and resumes for a subject run — the
     subject's watchers are the ones who'd see it, feed-side."""
     wfid = await rt.ConfirmFlow.start(subject=Widget(id=636363))
-    parked = await _wait_for(rt.engine, wfid, lambda r: r.state == RunState.PENDING_INPUT)
+    parked = await _wait_for(rt.engine, wfid, lambda r: r.state == RunState.PARKED)
     assert parked.input_gate == "confirm"
     # start() stamped the subject as workflow attributes — the keying every
     # runs-for-a-subject query reads; the id normalizes to a string.
@@ -843,7 +843,7 @@ async def test_duplicate_start_returns_the_live_run(rt):
     # the subject can run again.
     subject = Widget(id=515151)
     wfid = await rt.SampleFlow.start(subject=subject, repo="owner/app")
-    parked = await _wait_for(rt.engine, wfid, lambda r: r.state == RunState.PENDING_INPUT)
+    parked = await _wait_for(rt.engine, wfid, lambda r: r.state == RunState.PARKED)
 
     assert await rt.SampleFlow.start(subject=subject, repo="owner/app") == wfid
 

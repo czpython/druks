@@ -37,7 +37,7 @@ def _parked_notification(db_session):
     )
     db_session.add(run)
     db_session.flush()
-    seed_dbos_status(db_session, run.id, "pending_input")
+    seed_dbos_status(db_session, run.id, "parked")
     destination = Destination.create(
         name=f"slack-{run.id[-8:]}", kind="slack_webhook", url=_WEBHOOK_URL
     )

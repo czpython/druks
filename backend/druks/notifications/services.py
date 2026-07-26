@@ -55,10 +55,7 @@ async def respond_to_notification(token: str, choice: dict[str, Any]) -> None:
     # The notification snapshots the round it was sent for; the answer must
     # land on the run's live round — expire so the comparison reads fresh.
     db_session().expire(run)
-    if (
-        run.state != RunState.PENDING_INPUT.value
-        or run.input_requested_at != notification.run_parked_at
-    ):
+    if run.state != RunState.PARKED.value or run.input_requested_at != notification.run_parked_at:
         raise StaleRoundError()
     ask = run.get_ask()
     if ask.get("presentation") != "in_app":

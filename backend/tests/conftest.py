@@ -377,7 +377,7 @@ def seed_dbos_status(session, workflow_id: str, state: str, *, subject=None) -> 
     status = {
         "scheduled": "ENQUEUED",
         "running": "PENDING",
-        "pending_input": "PENDING",
+        "parked": "PENDING",
         "finished": "SUCCESS",
         "failed": "ERROR",
         "cancelled": "CANCELLED",
@@ -417,7 +417,7 @@ def seed_build_run(
     from druks.durable import Run
     from uuid_utils import uuid7
 
-    if state == "pending_input" and input_gate is None:
+    if state == "parked" and input_gate is None:
         input_gate = "review"  # a parked run always has a gate; derivation needs it
     run = Run(
         id=str(uuid7()),
