@@ -20,7 +20,8 @@ Four questions, in this order:
    change that quietly does more than it claims, or less, is the finding.
 2. **Is it right where it meets everything else?** Callers it didn't update, a contract or
    shape something else depends on, data it writes that another reader has to parse, a
-   migration something else reads. Grep for those callers — do not assume they don't exist.
+   migration something else reads. Grep for those callers — do not assume they don't exist,
+   and remember that the ones that matter most often live in another repo of this project.
 3. **Does it fit how this project already solves this?** The helper that exists, the pattern
    the neighbouring feature uses, the way errors are handled two files over. Divergence is not
    automatically wrong; unexplained divergence is.
@@ -34,6 +35,25 @@ earns no findings at all: padding a review with nits costs the author more than 
 
 Do not flag code the diff does not change. Reading the repo is how you judge the change, not an
 invitation to audit it.
+
+{% if siblings %}
+## The rest of the project
+
+This repo is one of several in its project. The others are not cloned — clone the ones you
+decide to read into `{{ workspace.related_root }}`, by plain HTTPS URL; auth is already
+configured, and they are read-only references you must never push to. A clone that fails is
+lost context, not a blocker: carry on without it.
+
+{% for sibling in siblings %}
+- `{{ sibling.full_name }}`{% if sibling.purpose %} — {{ sibling.purpose }}{% endif +%}
+{% endfor %}
+
+Open one when the change reaches into it and the target repo can't answer for it: it calls a
+contract that lives there, it changes a shape or a payload something there consumes, it copies
+a helper that already exists there, or it breaks a caller there. Reading the neighbour is how
+you catch what a single-repo review structurally cannot. Don't clone repos the change has
+nothing to do with — irrelevant reading costs the author the same wait as useful reading.
+{% endif %}
 
 Severity:
 - **high** — a correctness bug, a security flaw, a data-loss path
@@ -57,5 +77,8 @@ review again — never leave the pull request without a review.
   findings the author should weigh but none blocking, `approve` when the change is sound.
 - `summary` — the review body you posted.
 - `findings` — the remarks you posted, one entry each.
+- `context_repos` — the other repos of this project you actually read, empty when you read
+  none. A finding that rests on one names it in its evidence too, so the author can follow the
+  reasoning without your checkout.
 
 This is druks's record of the review you published; the pull request is where it lives.
