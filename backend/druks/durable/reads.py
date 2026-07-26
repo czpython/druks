@@ -62,7 +62,10 @@ def open_subjects(subject_type: str) -> list[tuple[Subject, SubjectStatus]]:
     from. A subject with rows of its own lists them with ``StoredSubject.list_open``."""
     subject_ids = db_session().scalars(Run.open_subject_ids(subject_type))
     return [
-        (Subject(subject_id, subject_type), get_subject_status(subject_type, subject_id))
+        (
+            Subject(id=subject_id, subject_type=subject_type),
+            get_subject_status(subject_type, subject_id),
+        )
         for subject_id in subject_ids
     ]
 

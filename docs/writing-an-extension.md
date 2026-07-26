@@ -360,7 +360,7 @@ request. Identity is all the platform needs:
 ```python
 from druks.workflows import Subject, get_subject_status
 
-await Review.start(subject=Subject(f"{repo}#{pr_number}", "pull_request"))
+await Review.start(subject=Subject(id=f"{repo}#{pr_number}", subject_type="pull_request"))
 
 status = get_subject_status("pull_request", f"{repo}#{pr_number}")
 ```
