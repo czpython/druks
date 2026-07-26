@@ -40,7 +40,7 @@ def external_package():
     tables = set(Base.metadata.tables)
     registries = {registry: dict(registry._items) for registry in (agents, webhooks, workflows)}
     packages = dict(extensions_loader._workflow_packages)
-    finished = signal("run.finished")
+    finished = signal("workflow.finished")
     receivers = dict(finished.receivers)
     try:
         yield

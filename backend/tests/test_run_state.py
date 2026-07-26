@@ -12,7 +12,7 @@ from druks.durable.models import Run
 from druks.events.models import Event
 from druks.models import Base
 from druks.signals import subscribe
-from druks.workflows import _emit_run_event, _execute_run
+from druks.workflows import WorkflowEvent, _emit_run_event, _execute_run
 from sqlalchemy import select, update
 from uuid_utils import uuid7
 
@@ -135,7 +135,7 @@ async def test_facts_and_event_land_before_a_raising_subscriber(db_session, _inl
     # delivery is at-least-once.
     item, run = _item_and_run(db_session, "running")
 
-    @subscribe("run.pending_input", run=run.id)
+    @subscribe(WorkflowEvent.PARKED, run=run.id)
     async def _raises(**_: object) -> None:
         raise RuntimeError("tracker down")
 
@@ -153,7 +153,7 @@ async def test_facts_and_event_land_before_a_raising_subscriber(db_session, _inl
     events = (
         ambient_session()
         .query(Event)
-        .filter_by(type="run.pending_input", subject_id=str(item.id))
+        .filter_by(type="workflow.parked", subject_id=str(item.id))
         .all()
     )
     assert len(events) == 1
@@ -162,15 +162,16 @@ async def test_facts_and_event_land_before_a_raising_subscriber(db_session, _inl
 
 @pytest.mark.asyncio
 async def test_lifecycle_subscribers_get_the_payload_before_dbos_commits(db_session, _inline_steps):
-    # The run.finished signal fires from inside the still-PENDING workflow —
+    # The workflow.finished signal fires from inside the still-PENDING workflow —
     # derived state hasn't turned yet, which is why subscribers read the
-    # payload, never Run.state.
+    # payload, never Run.state. The body gets the run's own facts, never the
+    # routing keys the filters match on.
     item, run = _item_and_run(db_session, "running")
     seen: list[tuple[str, dict]] = []
 
-    @subscribe("run.finished", run=run.id)
-    async def _reads_both(*, run: str, **kwargs: object) -> None:
-        seen.append((Run.get(run).state, kwargs))
+    @subscribe(WorkflowEvent.FINISHED, run=run.id)
+    async def _reads_both(**kwargs: object) -> None:
+        seen.append((Run.get(run.id).state, kwargs))
 
     await _emit_run_event(
         run.id,
@@ -183,12 +184,13 @@ async def test_lifecycle_subscribers_get_the_payload_before_dbos_commits(db_sess
     assert state_at_signal == RunState.RUNNING.value
     assert payload["subject"] == {"type": "work_item", "id": item.id}
     assert payload["result"] == {"status": "ok"}
+    assert "run" not in payload and "kind" not in payload
 
 
 @pytest.mark.asyncio
 async def test_cancellation_passes_through_untouched(db_session, _inline_steps):
     # Operator cancel already carries its own reason and terminal status; the
-    # body's cancellation exception must reach DBOS without a run.failed event
+    # body's cancellation exception must reach DBOS without a workflow.failed event
     # or a failure overwrite.
     item, run = _item_and_run(db_session, "running")
 
@@ -203,12 +205,12 @@ async def test_cancellation_passes_through_untouched(db_session, _inline_steps):
     types = [
         e.type for e in ambient_session().query(Event).filter_by(subject_id=str(item.id)).all()
     ]
-    assert "run.failed" not in types
+    assert "workflow.failed" not in types
 
 
 @pytest.mark.asyncio
 async def test_failure_writes_the_reason_and_reraises(db_session, _inline_steps):
-    # Both FatalError and a crash take this path: reason + run.failed land (the
+    # Both FatalError and a crash take this path: reason + workflow.failed land (the
     # gate pair cleared with them, so a failed run never keeps a stale ask),
     # then the exception reaches DBOS so it records the terminal ERROR that
     # derived state reads.
@@ -235,7 +237,10 @@ async def test_failure_writes_the_reason_and_reraises(db_session, _inline_steps)
     assert row.input_gate is None
     assert row.input_request is None
     failed = (
-        ambient_session().query(Event).filter_by(type="run.failed", subject_id=str(item.id)).one()
+        ambient_session()
+        .query(Event)
+        .filter_by(type="workflow.failed", subject_id=str(item.id))
+        .one()
     )
     assert failed.payload["failure"] == "closed at review"
 

@@ -5,19 +5,19 @@ from druks.contrib.ship.models import ProjectRepo, WorkItem
 from druks.contrib.ship.workflows import Build, Profile
 from druks.signals import subscribe
 from druks.ticketing.enums import TicketStatus
-from druks.workflows import get_subject_status
+from druks.workflows import WorkflowEvent, get_subject_status
 
 # Projections
 
 
-@subscribe("run.running", subject=WorkItem)
-async def run_start_returns_item_to_board(*, subject: WorkItem, **_: object) -> None:
-    # Any run starting for a work item puts it back on the active board —
+@subscribe(WorkflowEvent.RUNNING, subject=WorkItem)
+async def any_workflow_start_returns_item_to_board(*, subject: WorkItem, **_: object) -> None:
+    # Any workflow starting for a work item puts it back on the active board —
     # a new build or resume means druks has it in court again.
     subject.set_status(None)
 
 
-@subscribe("run.state", workflow=Build, subject=WorkItem)
+@subscribe(WorkflowEvent.STATE, workflow=Build, subject=WorkItem)
 async def provision_mirrors_onto_item(
     *, subject: WorkItem, pr_number: int, branch: str, **_: object
 ) -> None:
@@ -26,20 +26,20 @@ async def provision_mirrors_onto_item(
     subject.update(pr_number=pr_number, branch=branch)
 
 
-@subscribe("run.running", workflow=Build, subject=WorkItem)
+@subscribe(WorkflowEvent.RUNNING, workflow=Build, subject=WorkItem)
 async def build_start_marks_ticket_in_progress(*, subject: WorkItem, **_: object) -> None:
     # Every (re)start and gate-resume of a build means the ticket is in progress —
     # including the return from a rework loop that had parked it In Review.
     await subject.set_remote_status(TicketStatus.IN_PROGRESS)
 
 
-@subscribe("run.pending_input", workflow=Build, gate=ReviewWork, subject=WorkItem)
+@subscribe(WorkflowEvent.PARKED, workflow=Build, gate=ReviewWork, subject=WorkItem)
 async def review_park_marks_ticket_in_review(*, subject: WorkItem, **_: object) -> None:
     await subject.set_remote_status(TicketStatus.IN_REVIEW)
 
 
-@subscribe("run.failed", workflow=Build, subject=WorkItem)
-@subscribe("run.cancelled", workflow=Build, subject=WorkItem)
+@subscribe(WorkflowEvent.FAILED, workflow=Build, subject=WorkItem)
+@subscribe(WorkflowEvent.CANCELLED, workflow=Build, subject=WorkItem)
 async def build_end_settles_the_item(*, subject: WorkItem, **_: object) -> None:
     # Nothing merged, so the attempt was abandoned — unless the PR already spoke:
     # ship() cancels the run it just shipped, and that cancel arrives here.

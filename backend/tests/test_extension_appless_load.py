@@ -67,7 +67,7 @@ _FILES = {
         from .models import ProbeItem
 
 
-        @subscribe("run.finished", subject__type="probe_item")
+        @subscribe("workflow.finished", subject__type="probe_item")
         async def on_probe_item_done(*, subject: ProbeItem, **_: object) -> None:
             ...
     """,
@@ -111,7 +111,7 @@ def external_extension(tmp_path_factory):
     tables = set(Base.metadata.tables)
     registries = {r: dict(r._items) for r in (agents, webhooks, workflows)}
     packages = dict(extensions_loader._workflow_packages)
-    finished = signal("run.finished")
+    finished = signal("workflow.finished")
     receivers = dict(finished.receivers)
     try:
         yield _entry(_PACKAGE)

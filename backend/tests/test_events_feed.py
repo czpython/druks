@@ -7,7 +7,7 @@ def test_feed_reads_run_and_milestone_events(db_session):
 
     item = make_test_work_item(repo="acme/extension", remote_key="ACME-9", title="t")
     Event.emit(
-        type="run.running",
+        type="workflow.running",
         subject=item.identity,
         extension="ship",
         payload={"kind": "ship.build", "run": "wf1"},
@@ -17,11 +17,11 @@ def test_feed_reads_run_and_milestone_events(db_session):
 
     page, _ = build_feed()
     by_kind = {e.kind: e for e in page}
-    assert "run.running" in by_kind and "milestone.shipped" in by_kind
+    assert "workflow.running" in by_kind and "milestone.shipped" in by_kind
     shipped = by_kind["milestone.shipped"]
     assert shipped.link_path == f"/work-items/{item.id}"
     assert "ACME-9" in shipped.summary
-    assert "build started" in by_kind["run.running"].summary
+    assert "build started" in by_kind["workflow.running"].summary
 
 
 def test_feed_paginates_same_second_events_without_loss_or_repeat(db_session):

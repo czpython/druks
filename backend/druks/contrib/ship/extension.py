@@ -16,7 +16,7 @@ from druks.contrib.ship.schemas import WorkItemSummary
 from druks.db import db_session
 from druks.events import Event, FeedItem
 from druks.extensions import Extension
-from druks.workflows import SubjectActivity, get_subject_phase
+from druks.workflows import SubjectActivity, WorkflowEvent, get_subject_phase
 
 _PHASE_META: dict[str, SubjectActivity] = {
     "provisioning_vm": SubjectActivity(label="Building sandbox VM…", kind="infra"),
@@ -126,11 +126,11 @@ class Ship(Extension):
         model="codex",
     )
     _LABEL = {
-        "run.running": "started",
-        "run.finished": "finished",
-        "run.failed": "failed",
-        "run.cancelled": "cancelled",
-        "run.pending_input": "waiting on you",
+        WorkflowEvent.RUNNING: "started",
+        WorkflowEvent.FINISHED: "finished",
+        WorkflowEvent.FAILED: "failed",
+        WorkflowEvent.CANCELLED: "cancelled",
+        WorkflowEvent.PARKED: "waiting on you",
         "needs_answers": "needs answers",
     }
 
@@ -141,13 +141,13 @@ class Ship(Extension):
         # the same work item costs one title lookup, not one per event.
         item = db_session().get(WorkItem, wid) if wid else None
         ticket_ref = (item.remote_key or "") if item else ""
-        run_kind = event.payload.get("kind")
-        if run_kind:
+        workflow_name = event.payload.get("kind")
+        if workflow_name:
             # The feed shows the workflow's local name, not its namespaced durable kind.
-            run_kind = run_kind.rsplit(".", 1)[-1]
+            workflow_name = workflow_name.rsplit(".", 1)[-1]
         label = cls._LABEL.get(event.type, event.type)
-        if event.type.startswith("run."):
-            kind, summary = event.type, (f"{run_kind} {label}" if run_kind else label)
+        if event.type.startswith("workflow."):
+            kind, summary = event.type, (f"{workflow_name} {label}" if workflow_name else label)
         else:
             kind, summary = f"milestone.{event.type}", label
         ref = ticket_ref or (f"work item {wid}" if wid else "")
@@ -157,7 +157,7 @@ class Ship(Extension):
             id=f"event:{event.id}",
             at=event.created_at,
             kind=kind,
-            source=run_kind or "ship",
+            source=workflow_name or "ship",
             summary=summary,
             link_path=f"/work-items/{wid}" if wid else None,
             meta={"ticketRef": ticket_ref} if ticket_ref else {},

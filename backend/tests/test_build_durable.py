@@ -257,7 +257,7 @@ async def test_happy_path_declares_merge_intent(rt, monkeypatch):
         )
     finally:
         session.close()
-    assert [e.type for e in events if e.type.startswith("run.")][-1] == "run.finished"
+    assert [e.type for e in events if e.type.startswith("workflow.")][-1] == "workflow.finished"
 
 
 async def test_rejected_merge_intent_reparks_work_gate(rt, monkeypatch):

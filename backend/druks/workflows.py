@@ -22,7 +22,7 @@ from druks.accounts.context import current_account_id
 from druks.database import db_session
 from druks.durable.activity import set_run_phase
 from druks.durable.engine import _step_engine, register_schedule, run_queue, step_session
-from druks.durable.enums import AgentCallStatus, RunState
+from druks.durable.enums import AgentCallStatus, RunState, WorkflowEvent
 from druks.durable.exceptions import FatalError, GateTimeout, SubjectlessGate, WorkflowError
 from druks.durable.models import AgentCall, Run
 from druks.durable.reads import get_subject_phase, get_subject_status
@@ -60,6 +60,7 @@ __all__ = [
     "SubjectSummary",
     "Workflow",
     "WorkflowError",
+    "WorkflowEvent",
     "get_subject_phase",
     "get_subject_status",
     "set_run_phase",
@@ -349,6 +350,9 @@ async def _emit_run_event(
     # DBOS commits the terminal status — subscribers stay idempotent and read
     # the payload, never derived Run.state. subject comes from the workflow's
     # own arguments, so a replay stamps the same routing every time.
+    # The step names stay ``run.<state>`` while the signal says ``workflow.<verb>``:
+    # a step name is a replay checkpoint identity, so renaming one re-runs that step
+    # for every in-flight run. Vocabulary is the author's; checkpoints are DBOS's.
     async def _transition() -> dict[str, Any] | None:
         async with step_session() as session:
             run = Run.get(workflow_id)
@@ -373,7 +377,7 @@ async def _emit_run_event(
     async def _propagate() -> None:
         async with step_session():
             await publish(
-                f"run.{event.value}",
+                WorkflowEvent.for_state(event),
                 subject=transition["subject"],
                 kind=transition["kind"],
                 **{k: v for k, v in transition["payload"].items() if k != "kind"},
@@ -404,7 +408,7 @@ def _log_run_event(
     elif isinstance(result, dict):
         payload["result"] = result
     Event.emit(
-        type=f"run.{event.value}",
+        type=WorkflowEvent.for_state(event),
         subject=subject,
         payload=payload,
         extension=workflows.get(run.kind).extension,
@@ -562,7 +566,7 @@ class Workflow:
         # number, a resolved branch). Body-only, enforced: inside a @step the
         # in-memory update would vanish on replay (the step is skipped), which
         # is exactly the state loss this call exists to prevent. Each fact is a
-        # DBOS workflow event (memoized — written once); the ``run.state``
+        # DBOS workflow event (memoized — written once); the ``workflow.state``
         # signal fans out in its own checkpointed step so reactions fire once,
         # inside a session.
         if _in_step.get():
@@ -574,7 +578,7 @@ class Workflow:
         async def _fan_out() -> None:
             async with step_session():
                 await publish(
-                    "run.state",
+                    WorkflowEvent.STATE,
                     subject=self._subject,
                     kind=self.kind,
                     **facts,

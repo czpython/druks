@@ -9,13 +9,17 @@ __all__ = ["subscribe"]
 
 Subscriber = Callable[..., Awaitable[None]]
 
+# Published so filters can match them, never handed to a body: the run row and its
+# durable kind are the substrate's, and a subscriber reacts to the subject.
+_ROUTING = ("run", "kind")
+
 
 def subscribe(name: str, **filters: Any) -> Callable[[Subscriber], Subscriber]:
     """Register an async subscriber for the named signal.
 
     ``filters`` are equality matches against the published kwargs; ``__``
     descends into dicts (``payload__terminal=True``); a ``Gate`` class stands for
-    its ``name``. ``workflow=Build`` narrows to that workflow's runs and
+    its ``name``. ``workflow=Build`` narrows to that workflow and
     ``subject=WorkItem`` to that subject, handing the body its row. A non-matching
     publication skips the subscriber, so the body starts at the real work."""
 
@@ -47,7 +51,7 @@ def subscribe(name: str, **filters: Any) -> Callable[[Subscriber], Subscriber]:
                 if not row:
                     return
                 kwargs["subject"] = row
-            await fn(**kwargs)
+            await fn(**{key: value for key, value in kwargs.items() if key not in _ROUTING})
 
         # weak=False: ``receiver`` is a local closure nothing else references, so a
         # weak ref would drop it the moment registration returns.

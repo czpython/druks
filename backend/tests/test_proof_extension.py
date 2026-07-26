@@ -58,7 +58,7 @@ def external_package():
     tables = set(Base.metadata.tables)
     registries = {registry: dict(registry._items) for registry in (agents, webhooks, workflows)}
     packages = dict(extensions_loader._workflow_packages)
-    finished = signal("run.finished")
+    finished = signal("workflow.finished")
     receivers = dict(finished.receivers)
     try:
         yield
@@ -282,7 +282,7 @@ def test_feed_formats_the_extensions_event(installed):
     extension = load_extension("field_notes")
     event = Event(
         id=1,
-        type="run.finished",
+        type="workflow.finished",
         subject_type="note",
         subject_id="7",
         extension="field_notes",

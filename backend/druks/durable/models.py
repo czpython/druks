@@ -19,7 +19,13 @@ from druks.durable.dbos_state import (
     updated_at_expression,
     workflow_status,
 )
-from druks.durable.enums import ACTIVE_STATES, OPEN_STATES, AgentCallStatus, RunState
+from druks.durable.enums import (
+    ACTIVE_STATES,
+    OPEN_STATES,
+    AgentCallStatus,
+    RunState,
+    WorkflowEvent,
+)
 from druks.harnesses.artifacts import normalize_token_usage
 from druks.models import Base
 from druks.notifications.models import Notification
@@ -269,7 +275,7 @@ class Run(Base):
         subject = self.subject
         if subject:
             await publish(
-                "run.cancelled",
+                WorkflowEvent.CANCELLED,
                 subject=subject,
                 kind=self.kind,
                 failure=failure,

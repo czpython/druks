@@ -119,7 +119,7 @@ def _build_units():
 
     class SubjectFlow(Workflow):
         # Records the subject the platform threaded in, and returns a BaseModel
-        # so the result rides its run.finished event.
+        # so the result rides its workflow.finished event.
         async def run(self) -> Decision:
             SINK.append(f"subj-id:{self.subject.id}")
             return Decision(action="ok")
@@ -794,7 +794,9 @@ async def test_subject_reaches_body_and_result_rides_finished_event(rt):
     session = get_session(rt.engine)
     try:
         finished = (
-            session.query(Event).filter(Event.type == "run.finished", Event.subject_id == "7").one()
+            session.query(Event)
+            .filter(Event.type == "workflow.finished", Event.subject_id == "7")
+            .one()
         )
     finally:
         session.close()
@@ -829,7 +831,7 @@ async def test_run_events_carry_subject(rt):
     finally:
         session.close()
 
-    assert [e.type for e in events] == ["run.running", "run.finished"]
+    assert [e.type for e in events] == ["workflow.running", "workflow.finished"]
     assert {e.subject_type for e in events} == {"widget"}
     assert all(e.payload["run"] == wfid for e in events)
 
@@ -848,7 +850,7 @@ async def test_duplicate_start_returns_the_live_run(rt):
     await parked.resume(action="merge")
     await _wait_for(rt.engine, wfid, lambda r: r.state == RunState.FINISHED)
     # DBOS clears the slot when the workflow's outcome commits, a beat after the
-    # run.finished event — poll until the fresh start wins.
+    # workflow.finished event — poll until the fresh start wins.
     deadline = asyncio.get_event_loop().time() + 10.0
     fresh = wfid
     while fresh == wfid and asyncio.get_event_loop().time() < deadline:
