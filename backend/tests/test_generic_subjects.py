@@ -5,13 +5,13 @@ from conftest import seed_dbos_status
 from druks.durable import AgentCall, Run
 from druks.durable.schemas import SubjectSummary
 from druks.extensions.base import Extension
-from druks.models import Subject
+from druks.models import StoredSubject
 from fastapi import APIRouter
 from fastapi.testclient import TestClient
 from uuid_utils import uuid7
 
 
-class Thing(Subject):
+class Thing(StoredSubject):
     __tablename__ = "faketest_things"
 
 
