@@ -858,6 +858,19 @@ function SkillsPane() {
     }
   }
 
+  async function sync(id: string) {
+    setBusy(true)
+    setError(null)
+    try {
+      await api.syncSkillCollection(id)
+      await refresh()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   async function toggle(collectionId: string, name: string, enabled: boolean) {
     setBusy(true)
     setError(null)
@@ -904,7 +917,14 @@ function SkillsPane() {
           </div>
           <div className="skill-cols">
             {cols.map((c: SkillCollection) => (
-              <CollectionCard key={c.id} collection={c} busy={busy} onRemove={remove} onToggle={toggle} />
+              <CollectionCard
+                key={c.id}
+                collection={c}
+                busy={busy}
+                onSync={sync}
+                onRemove={remove}
+                onToggle={toggle}
+              />
             ))}
           </div>
         </div>
@@ -918,11 +938,13 @@ function SkillsPane() {
 function CollectionCard({
   collection,
   busy,
+  onSync,
   onRemove,
   onToggle,
 }: {
   collection: SkillCollection
   busy: boolean
+  onSync: (id: string) => Promise<void>
   onRemove: (id: string) => Promise<void>
   onToggle: (collectionId: string, name: string, enabled: boolean) => Promise<void>
 }) {
@@ -938,6 +960,17 @@ function CollectionCard({
             {collection.source}
           </span>
         </div>
+        <button
+          className="sc-sync"
+          onClick={(e) => {
+            e.stopPropagation()
+            void onSync(collection.id)
+          }}
+          disabled={busy}
+          title="sync collection from source"
+        >
+          sync
+        </button>
         <button
           className="sc-remove"
           onClick={(e) => {

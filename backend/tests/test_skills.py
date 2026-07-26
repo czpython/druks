@@ -1,5 +1,6 @@
 import io
 import tarfile
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -28,12 +29,24 @@ def _patch_download(monkeypatch, archive: bytes) -> None:
     monkeypatch.setattr(install_mod, "download_public_tarball", fake_download)
 
 
-def _skill_md(name: str) -> bytes:
-    return f"---\nname: {name}\ndescription: the {name} skill\n---\n# {name}\nbody\n".encode()
+def _skill_md(name: str, description: str = "") -> bytes:
+    description = description or f"the {name} skill"
+    return f"---\nname: {name}\ndescription: {description}\n---\n# {name}\nbody\n".encode()
 
 
 async def _fetch(url: str, skills_dir: Path, reserved: set[str] | None = None):
     return await install_mod.fetch_collection(url, skills_dir, reserved or set())
+
+
+def _install_collection(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    files: dict[str, bytes],
+) -> str:
+    _patch_download(monkeypatch, _tarball("owner-repo-abc", files))
+    response = client.post("/api/skills", json={"url": "https://github.com/owner/repo"})
+    assert response.status_code == 200
+    return response.json()["id"]
 
 
 async def test_fetch_collection_lands_every_skill(tmp_path, monkeypatch):
@@ -152,3 +165,162 @@ def test_collection_routes_install_list_remove(tmp_path, monkeypatch):
 
         assert client.delete(f"/api/skills/{collection_id}").status_code == 204
         assert client.get("/api/skills").json() == []
+
+
+def test_sync_updates_changed_skill_and_timestamps(tmp_path, monkeypatch, db_session):
+    settings = make_settings(tmp_path)
+    original_skill = _skill_md("alpha")
+    updated_skill = _skill_md("alpha", "updated description")
+    old_timestamp = datetime(2020, 1, 1, tzinfo=UTC)
+
+    with TestClient(configure_app_for_test(settings=settings)) as client:
+        collection_id = _install_collection(
+            client,
+            monkeypatch,
+            {"alpha/SKILL.md": original_skill},
+        )
+        collection = SkillCollection.get(collection_id)
+        skill = Skill.get("alpha")
+        original_hash = skill.content_hash
+        collection.updated_at = old_timestamp
+        skill.updated_at = old_timestamp
+        db_session.flush()
+
+        _patch_download(
+            monkeypatch,
+            _tarball("owner-repo-abc", {"alpha/SKILL.md": updated_skill}),
+        )
+        response = client.post(f"/api/skills/{collection_id}/sync")
+        assert response.status_code == 200
+        assert response.json()["skills"][0]["description"] == "updated description"
+
+        db_session.expire_all()
+        assert skill.description == "updated description"
+        assert skill.content_hash != original_hash
+        assert skill.updated_at > old_timestamp
+        assert collection.updated_at > old_timestamp
+        assert (settings.skills_dir / "alpha" / "SKILL.md").read_bytes() == updated_skill
+
+        skill_timestamp = skill.updated_at
+        collection.updated_at = old_timestamp
+        db_session.flush()
+        response = client.post(f"/api/skills/{collection_id}/sync")
+        assert response.status_code == 200
+
+        db_session.expire_all()
+        assert skill.updated_at == skill_timestamp
+        assert collection.updated_at > old_timestamp
+
+
+def test_sync_adds_new_skill(tmp_path, monkeypatch, db_session):
+    settings = make_settings(tmp_path)
+    alpha_skill = _skill_md("alpha")
+    beta_skill = _skill_md("beta")
+
+    with TestClient(configure_app_for_test(settings=settings)) as client:
+        collection_id = _install_collection(
+            client,
+            monkeypatch,
+            {"alpha/SKILL.md": alpha_skill},
+        )
+        _patch_download(
+            monkeypatch,
+            _tarball(
+                "owner-repo-abc",
+                {
+                    "alpha/SKILL.md": alpha_skill,
+                    "beta/SKILL.md": beta_skill,
+                },
+            ),
+        )
+
+        response = client.post(f"/api/skills/{collection_id}/sync")
+        assert response.status_code == 200
+        assert [skill["name"] for skill in response.json()["skills"]] == ["alpha", "beta"]
+
+        db_session.expire_all()
+        assert Skill.get("beta").collection_id == collection_id
+        assert (settings.skills_dir / "beta" / "SKILL.md").read_bytes() == beta_skill
+
+
+def test_sync_removes_missing_skill_and_files(tmp_path, monkeypatch, db_session):
+    settings = make_settings(tmp_path)
+    alpha_skill = _skill_md("alpha")
+    beta_skill = _skill_md("beta")
+
+    with TestClient(configure_app_for_test(settings=settings)) as client:
+        collection_id = _install_collection(
+            client,
+            monkeypatch,
+            {
+                "alpha/SKILL.md": alpha_skill,
+                "beta/SKILL.md": beta_skill,
+            },
+        )
+        beta_path = settings.skills_dir / "beta"
+        assert beta_path.is_dir()
+        _patch_download(
+            monkeypatch,
+            _tarball("owner-repo-abc", {"alpha/SKILL.md": alpha_skill}),
+        )
+
+        response = client.post(f"/api/skills/{collection_id}/sync")
+        assert response.status_code == 200
+        assert [skill["name"] for skill in response.json()["skills"]] == ["alpha"]
+
+        db_session.expire_all()
+        assert not Skill.get("beta")
+        assert not beta_path.exists()
+
+
+def test_sync_preserves_disabled_skill(tmp_path, monkeypatch, db_session):
+    alpha_skill = _skill_md("alpha")
+
+    with TestClient(configure_app_for_test(settings=make_settings(tmp_path))) as client:
+        collection_id = _install_collection(
+            client,
+            monkeypatch,
+            {"alpha/SKILL.md": alpha_skill},
+        )
+        skill = Skill.get("alpha")
+        skill.enabled = False
+        db_session.flush()
+        _patch_download(
+            monkeypatch,
+            _tarball("owner-repo-abc", {"alpha/SKILL.md": alpha_skill}),
+        )
+
+        response = client.post(f"/api/skills/{collection_id}/sync")
+        assert response.status_code == 200
+        assert response.json()["skills"][0]["enabled"] is False
+
+        db_session.expire_all()
+        assert skill.enabled is False
+
+
+def test_sync_nonexistent_collection_returns_404(tmp_path):
+    with TestClient(configure_app_for_test(settings=make_settings(tmp_path))) as client:
+        response = client.post("/api/skills/unknown/sync")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Collection 'unknown' not found"
+
+
+def test_sync_allows_collection_own_existing_skill_name(tmp_path, monkeypatch):
+    alpha_skill = _skill_md("alpha")
+
+    with TestClient(configure_app_for_test(settings=make_settings(tmp_path))) as client:
+        collection_id = _install_collection(
+            client,
+            monkeypatch,
+            {"alpha/SKILL.md": alpha_skill},
+        )
+        _patch_download(
+            monkeypatch,
+            _tarball("owner-repo-abc", {"alpha/SKILL.md": alpha_skill}),
+        )
+
+        response = client.post(f"/api/skills/{collection_id}/sync")
+
+    assert response.status_code == 200
+    assert [skill["name"] for skill in response.json()["skills"]] == ["alpha"]

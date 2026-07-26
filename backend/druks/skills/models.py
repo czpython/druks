@@ -15,7 +15,7 @@ class SkillCollection(Base, Uuid7Pk):
     name: Mapped[str] = mapped_column(String)
     source: Mapped[str] = mapped_column(String, unique=True)
     created_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
-    updated_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
+    updated_at: Mapped[datetime] = mapped_column(default=Base.utc_now, onupdate=Base.utc_now)
 
     skills: Mapped[list["Skill"]] = relationship(
         back_populates="collection",
@@ -71,7 +71,7 @@ class Skill(Base, Uuid7Pk):
     path: Mapped[str] = mapped_column(String)
     content_hash: Mapped[str] = mapped_column(String)
     created_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
-    updated_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
+    updated_at: Mapped[datetime] = mapped_column(default=Base.utc_now, onupdate=Base.utc_now)
 
     @classmethod
     def installed_names(cls) -> set[str]:
