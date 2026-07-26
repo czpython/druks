@@ -1,7 +1,7 @@
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/logo/web/DruksLogo_White.svg" />
-    <img src="docs/assets/logo/web/DruksLogo_Black.svg" alt="Druks" width="140" />
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/czpython/druks/main/docs/assets/logo/web/DruksLogo_White.svg" />
+    <img src="https://raw.githubusercontent.com/czpython/druks/main/docs/assets/logo/web/DruksLogo_Black.svg" alt="Druks" width="140" />
   </picture>
 </p>
 
@@ -20,7 +20,7 @@ workflow records the result of each completed durable operation in Postgres.
 After a restart or deploy, Druks replays the workflow and reuses those recorded
 results instead of repeating completed work. If the process was interrupted
 *inside* an operation, that operation may run again, so side effects still need
-idempotency. [Durability and recovery](docs/concepts.md#durability-and-recovery)
+idempotency. [Durability and recovery](https://github.com/czpython/druks/blob/main/docs/concepts.md#durability-and-recovery)
 explains the exact boundary.
 
 ## Install
@@ -39,12 +39,12 @@ bash <(curl -fsSL https://raw.githubusercontent.com/czpython/druks/main/scripts/
 
 That command follows the edge channel while Druks has no stable release. Once
 versioned releases exist, install the script and image from the same tag as
-described in [the release process](docs/releasing.md#install-an-immutable-version).
+described in [the release process](https://github.com/czpython/druks/blob/main/docs/releasing.md#install-an-immutable-version).
 
 The first run creates `~/druks/.env`, generates secrets, and prints any values
 still required. Re-run the same command after filling them; it pulls images,
 runs migrations, and starts the stack. Re-running is also the upgrade path.
-See the [deployment runbook](deploy/README.md) for prerequisites, access
+See the [deployment runbook](https://github.com/czpython/druks/blob/main/deploy/README.md) for prerequisites, access
 control, verification, and rollback.
 
 For a laptop-only stack:
@@ -53,7 +53,7 @@ For a laptop-only stack:
 DRUKS_PROVIDER=docker bash <(curl -fsSL https://raw.githubusercontent.com/czpython/druks/main/scripts/install.sh)
 ```
 
-Then follow [full local setup](docs/full-local.md) to start Drukbox and connect
+Then follow [full local setup](https://github.com/czpython/druks/blob/main/docs/full-local.md) to start Drukbox and connect
 the agent harnesses. A complete installation needs GitHub Apps because the
 bundled `ship` extension is installed; a standalone extension may have
 different integration requirements.
@@ -90,12 +90,12 @@ agents through tickets and GitHub pull requests, but GitHub PR orchestration is
 
 ## Documentation
 
-- **Evaluating Druks:** [Concepts and guarantees](docs/concepts.md)
-- **Installing locally:** [Full local setup](docs/full-local.md)
-- **Operating a remote stack:** [Deployment runbook](deploy/README.md)
-- **Configuring integrations and secrets:** [Configuration](docs/configuration.md)
-- **Building an application:** [Writing an extension](docs/writing-an-extension.md)
-- **Diagnosing a run or service:** [Troubleshooting](docs/troubleshooting.md)
-- **Contributing to Druks:** [Contribution guide](CONTRIBUTING.md)
-- **Reporting a vulnerability:** [Security policy](SECURITY.md)
-- **All documentation:** [Documentation index](docs/index.md)
+- **Evaluating Druks:** [Concepts and guarantees](https://github.com/czpython/druks/blob/main/docs/concepts.md)
+- **Installing locally:** [Full local setup](https://github.com/czpython/druks/blob/main/docs/full-local.md)
+- **Operating a remote stack:** [Deployment runbook](https://github.com/czpython/druks/blob/main/deploy/README.md)
+- **Configuring integrations and secrets:** [Configuration](https://github.com/czpython/druks/blob/main/docs/configuration.md)
+- **Building an application:** [Writing an extension](https://github.com/czpython/druks/blob/main/docs/writing-an-extension.md)
+- **Diagnosing a run or service:** [Troubleshooting](https://github.com/czpython/druks/blob/main/docs/troubleshooting.md)
+- **Contributing to Druks:** [Contribution guide](https://github.com/czpython/druks/blob/main/CONTRIBUTING.md)
+- **Reporting a vulnerability:** [Security policy](https://github.com/czpython/druks/blob/main/SECURITY.md)
+- **All documentation:** [Documentation index](https://github.com/czpython/druks/blob/main/docs/index.md)

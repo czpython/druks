@@ -1,9 +1,10 @@
 # Releasing Druks
 
-Druks publishes the backend and sandbox as container images. `main` is the edge
-channel: a successful main build updates `latest` and also publishes an immutable
-`sha-<full-git-sha>` tag. A `v*` Git tag publishes the matching version tag and
-the immutable SHA tag; it does not move `latest`.
+Druks publishes the backend and sandbox as container images, and the Python
+distribution to PyPI. `main` is the edge channel: a successful main build updates
+`latest` and also publishes an immutable `sha-<full-git-sha>` tag. A `v*` Git tag
+publishes the matching version tag and the immutable SHA tag; it does not move
+`latest`.
 
 ## Prepare a release
 
@@ -24,6 +25,23 @@ git push origin v0.1.0
 
 Wait for both image workflows, then verify the version and SHA tags in GHCR and
 create the GitHub release from the same tag.
+
+## Publish to PyPI
+
+Publishing the GitHub release runs `release.yml`, which builds the released tag
+and uploads it over a PyPI Trusted Publisher. No token is stored; the `pypi`
+environment on this repository and the publisher registered on PyPI are what
+authorize the upload.
+
+To publish a tag whose release already exists, run the workflow manually and give
+it that tag:
+
+```bash
+gh workflow run release.yml -f tag=v0.1.0
+```
+
+PyPI rejects a version it already holds, so a version is published once. A
+mistaken upload needs a new version, not a retry.
 
 ## Install an immutable version
 
