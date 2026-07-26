@@ -1,8 +1,8 @@
 from fastapi import APIRouter, Body, HTTPException
 from githubkit.exception import RequestFailed, RequestTimeout
 
+from druks.api.dependencies import SettingsDep
 from druks.database import db_session
-from druks.settings import load_settings
 
 from .install import fetch_collection, remove_files
 from .models import Skill, SkillCollection
@@ -17,12 +17,14 @@ async def list_collections() -> list[SkillCollection]:
 
 
 @router.post("", response_model=CollectionResponse)
-async def install_collection(url: str = Body(..., embed=True)) -> SkillCollection:
+async def install_collection(
+    settings: SettingsDep,
+    url: str = Body(..., embed=True),
+) -> SkillCollection:
     if SkillCollection.get_for_source(url):
         raise HTTPException(
             status_code=409, detail=f"Collection {url!r} already installed; remove it first."
         )
-    settings = load_settings()
     try:
         contents = await fetch_collection(url, settings.skills_dir, Skill.installed_names())
     except (ValueError, RequestFailed, RequestTimeout) as error:
@@ -37,11 +39,10 @@ async def install_collection(url: str = Body(..., embed=True)) -> SkillCollectio
 
 
 @router.post("/{collection_id}/sync", response_model=CollectionResponse)
-async def sync_collection(collection_id: str) -> SkillCollection:
+async def sync_collection(collection_id: str, settings: SettingsDep) -> SkillCollection:
     collection = SkillCollection.get(collection_id)
     if not collection:
         raise HTTPException(status_code=404, detail=f"Collection {collection_id!r} not found")
-    settings = load_settings()
     current_skills = {skill.name: skill for skill in collection.skills}
     reserved_names = Skill.installed_names() - current_skills.keys()
     try:
