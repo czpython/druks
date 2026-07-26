@@ -20,6 +20,9 @@ registerExtensionUI({
     { href: `/${SHIP}/history`, label: 'history' },
     { href: `/${SHIP}/projects`, label: 'projects' },
   ],
+  // Ship's other subject, a project repo, has no page of its own — a row about one
+  // stays unclickable rather than landing on the work item that shares its id.
+  subjectPath: ({ type, id }) => (type === 'work_item' ? `/work-items/${id}` : undefined),
   routes: [
     { path: `/${SHIP}`, render: () => <WorkItemsPage /> },
     { path: `/${SHIP}/history`, render: () => <HistoryPage /> },

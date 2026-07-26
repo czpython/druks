@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING, Any, ClassVar
 
 from pydantic import BaseModel
 
-from druks.events.feed import generic_entry
 from druks.events.models import Event
 from druks.models import StoredSubject
 from druks.user_settings.models import SettingsOverride
@@ -28,7 +27,6 @@ if TYPE_CHECKING:
     from druks.doctor import CheckResult
     from druks.durable.datastructures import Subject
     from druks.durable.schemas import SubjectActivity, SubjectSummary
-    from druks.events.feed import FeedItem
     from druks.settings import Settings
     from druks.workflows import Workflow
 
@@ -451,21 +449,14 @@ class Extension:
     ) -> None:
         """Record one of this extension's domain events to the log, stamped with the
         extension automatically. Apps record through here so the ``Event`` model
-        stays a platform internal — the write-side twin of ``format_event``."""
+        stays a platform internal. ``type`` is the milestone's own word ("shipped") —
+        the feed reads it as one, so an extension writes no rendering."""
         Event.emit(
             type=type,
             subject=subject.identity if subject else None,
             payload=payload,
             extension=cls.name,
         )
-
-    @classmethod
-    def format_event(cls, event: Event) -> "FeedItem":
-        """Render one of this extension's events into an activity-feed row. The core
-        feed dispatches each event to its extension by ``event.extension``, so the core
-        never learns an extension's event types — override to give them human
-        summaries."""
-        return generic_entry(event)
 
     @classmethod
     def subject_summary(cls, subject: Any) -> "SubjectSummary | None":

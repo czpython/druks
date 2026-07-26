@@ -329,12 +329,19 @@ export interface UpdateExtensionsSettingsRequest {
 
 export interface FeedItem {
   id: string
+  seq: number
   at: string
+  // A lifecycle topic ("workflow.finished") or the milestone an extension recorded
+  // ("shipped"). The words are this client's — see lib/feed.
   kind: string
-  source: string
-  summary: string
-  linkPath?: string | null
-  meta?: Record<string, unknown>
+  extension?: string | null
+  // The durable kind of the workflow a lifecycle row is about ("ship.build").
+  workflow?: string | null
+  subjectType?: string | null
+  subjectId?: string | null
+  // Whatever else the event recorded, stated by its writer — a gate, a failure,
+  // a ticket key.
+  facts: Record<string, unknown>
 }
 
 export interface FeedResponse {

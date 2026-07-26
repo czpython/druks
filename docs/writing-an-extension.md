@@ -443,18 +443,31 @@ NightWatch.record_event(
 )
 ```
 
-Override `format_event()` to turn extension events into `FeedItem` rows.
-Lifecycle events for subjected workflows are recorded automatically. Call
-`record_event()` inside a platform-bound transaction such as a request,
-durable step, or subscriber.
+`type` is the milestone's own word, which the feed reads as one — there is no
+rendering hook to implement. Lifecycle events for subjected workflows are
+recorded automatically. Call `record_event()` inside a platform-bound
+transaction such as a request, durable step, or subscriber.
+
+A feed row carries facts, never prose: its kind, the workflow it came from, the
+subject identity, and the event's payload — a client words them. Whatever a row
+should say beyond identity is stated by its writer, on the event:
+
+```python
+NightWatch.record_event(
+    type="report.published",
+    subject=repository,
+    payload={"repo": repository.full_name, "url": report_url},
+)
+```
 
 React with filters rather than body guards:
 
 ```python
 from druks.signals import subscribe
+from druks.workflows import WorkflowEvent
 
 
-@subscribe("run.finished", subject__type="repository")
+@subscribe(WorkflowEvent.FINISHED, subject=Repository)
 async def on_sweep_finished(*, subject: Repository, **_: object) -> None:
     await notify(subject.full_name)
 ```
@@ -644,10 +657,10 @@ Import from concern namespaces, not from `druks.durable` or internal modules:
 | `druks.extensions` | `Extension` |
 | `druks.agents` | `Agent`, `AgentOutput` |
 | `druks.workflows` | `Workflow`, `Gate`, `step`, run/agent response types, lifecycle enums and workflow errors |
-| `druks.db` | `Base`, `db_session` |
+| `druks.db` | `Base`, `StoredSubject`, `db_session` |
 | `druks.schemas` | `BaseResponse` |
 | `druks.signals` | `subscribe` |
-| `druks.events` | `Event`, `FeedItem` |
+| `druks.events` | `Event` |
 | `druks.prompts` | `render_prompt` |
 | `druks.webhooks` | `Webhook`, `verify_hmac_sha256` |
 | `druks.testing` | `run_workflow`, `seed_run`, `seed_call`, `init_db` — plus the fixtures the plugin registers |

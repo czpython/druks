@@ -345,7 +345,10 @@ class WorkItem(StoredSubject):
             # cycle: the extension imports this module at file scope.
             import druks.contrib.ship.extension as ship_extension
 
-            ship_extension.Ship.record_event(type=status, subject=self, payload=event_payload)
+            payload = dict(event_payload or {})
+            if self.remote_key:
+                payload["ticket"] = self.remote_key
+            ship_extension.Ship.record_event(type=status, subject=self, payload=payload)
         self.status = status
         self.updated_at = Base.utc_now()
         db_session().flush()
