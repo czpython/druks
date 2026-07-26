@@ -84,6 +84,15 @@ Python distribution registered through the `druks.extensions` entry-point
 group. Installing the distribution registers it; Druks does not need an
 extension-specific plugin list.
 
+Scaffold one with the published CLI, no checkout required:
+
+```bash
+uvx --from druks druks create extension night_watch
+```
+
+The generated project root carries an `AGENTS.md` with the contracts and a link
+to the authoring guide.
+
 The bundled `ship` extension is a concrete example. It coordinates coding
 agents through tickets and GitHub pull requests, but GitHub PR orchestration is
 `ship` behavior—not the definition of Druks.

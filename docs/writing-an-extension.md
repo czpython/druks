@@ -7,14 +7,15 @@ before choosing which side should own a capability.
 
 ## Scaffold and prove the package
 
-From a Druks checkout:
-
 ```bash
-uv run druks create extension night_watch
+uvx --from druks druks create extension night_watch
 cd druks-night_watch
 uv sync
 uv run pytest
 ```
+
+From a Druks checkout, `uv run druks create extension night_watch` scaffolds with
+that checkout's CLI instead.
 
 The command writes a standalone `druks-night_watch` project in the current
 directory. Its `pyproject.toml` contains:
