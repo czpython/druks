@@ -1,9 +1,11 @@
+import inspect
 from collections.abc import Awaitable, Callable
 from typing import Any
 
 from blinker import signal
 
 from druks.database import db_session
+from druks.extensions.exceptions import SubscriberDeclarationError
 
 __all__ = ["subscribe"]
 
@@ -11,7 +13,7 @@ Subscriber = Callable[..., Awaitable[None]]
 
 # Published so filters can match them, never handed to a body: the run row and its
 # durable kind are the substrate's, and a subscriber reacts to the subject.
-_ROUTING = ("run", "kind")
+_ROUTING = frozenset({"run", "kind"})
 
 
 def subscribe(name: str, **filters: Any) -> Callable[[Subscriber], Subscriber]:
@@ -27,6 +29,12 @@ def subscribe(name: str, **filters: Any) -> Callable[[Subscriber], Subscriber]:
         # Lazy import: druks.workflows imports this module.
         from druks.workflows import Gate
 
+        if asked_for_routing := sorted(_ROUTING & set(inspect.signature(fn).parameters)):
+            raise SubscriberDeclarationError(
+                f"{fn.__name__}() asks for {asked_for_routing} — filters match on those, "
+                "bodies never receive them. Narrow with workflow=YourWorkflow and take "
+                "the facts you react to."
+            )
         workflow_class = filters.pop("workflow", None)
         if workflow_class:
             filters["kind"] = workflow_class.kind
