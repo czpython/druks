@@ -1903,7 +1903,7 @@ input.set-select { background-image: none; padding-right: 12px; }
 }
 .wic-node-scheduled { color: var(--wic-scheduled); border-color: var(--border); }
 .wic-node-running, .wic-node-cancelling { color: var(--wic-running); border-color: var(--wic-running); animation: pulse 1.6s ease-in-out infinite; }
-.wic-node-pending_input { color: var(--wic-human); border-color: var(--wic-human); animation: pulse 1.6s ease-in-out infinite; }
+.wic-node-parked { color: var(--wic-human); border-color: var(--wic-human); animation: pulse 1.6s ease-in-out infinite; }
 .wic-node-finished  { color: var(--wic-finished);  border-color: var(--wic-finished); }
 .wic-node-failed    { color: var(--wic-failed);     border-color: var(--wic-failed); }
 .wic-node-cancelled { color: var(--wic-cancelled);  border-color: var(--wic-cancelled); }
@@ -1914,7 +1914,7 @@ input.set-select { background-image: none; padding-right: 12px; }
 .wic-op-owner { font-family: var(--font-mono); font-size: 10.5px; color: var(--text-faint); margin-left: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .wic-op-sub { font-family: var(--font-mono); font-size: 11px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .wic-sub-running, .wic-sub-cancelling { color: var(--wic-running); }
-.wic-sub-pending_input { color: var(--wic-human); }
+.wic-sub-parked { color: var(--wic-human); }
 .wic-sub-failed    { color: var(--wic-failed); }
 .wic-sub-scheduled { color: var(--text-faint); }
 

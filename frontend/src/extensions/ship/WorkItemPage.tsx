@@ -82,7 +82,7 @@ export function WorkItemPage({ workItemId }: Props) {
 const STATE_GLYPH: Record<string, string> = {
   scheduled: '·',
   running: '●',
-  pending_input: '◆',
+  parked: '◆',
   finished: '✓',
   failed: '✕',
   cancelled: '⊘',
@@ -91,7 +91,7 @@ const STATE_GLYPH: Record<string, string> = {
 const STATE_LABEL: Record<string, string> = {
   scheduled: 'scheduled',
   running: 'running',
-  pending_input: 'waiting on you',
+  parked: 'waiting on you',
   finished: 'finished',
   failed: 'failed',
   cancelled: 'cancelled',
@@ -105,7 +105,7 @@ const CALL_GLYPH: Record<string, string> = {
 }
 const isRunning = (run: RunSummary) => run.state === 'running'
 const isActiveRun = (run: RunSummary) =>
-  run.state === 'running' || run.state === 'pending_input' || run.state === 'scheduled'
+  run.state === 'running' || run.state === 'parked' || run.state === 'scheduled'
 
 interface Metrics {
   elapsed: number
@@ -133,7 +133,7 @@ interface Status {
 const STATE_CLS: Record<RunState, string> = {
   scheduled: 'queued',
   running: 'running',
-  pending_input: 'needsyou',
+  parked: 'needsyou',
   finished: 'merged',
   failed: 'failed',
   cancelled: 'cancelled',
@@ -144,7 +144,7 @@ const STATE_CLS: Record<RunState, string> = {
 // The pill renders build's status line over the platform's facts; the
 // tone comes from the lifecycle state. Live (a dot animates) while a run is active.
 function statusView(status: SubjectStatus): Status {
-  const live = status.state === 'running' || status.state === 'pending_input'
+  const live = status.state === 'running' || status.state === 'parked'
   return { cls: STATE_CLS[status.state], label: statusLine(status), live }
 }
 
@@ -373,8 +373,8 @@ function RunRow({
   const sub =
     run.state === 'failed' && run.failure
       ? (run.failure.split('—')[0] ?? run.failure).trim()
-      : run.state === 'pending_input'
-        ? (parkedLine(run.gate) ?? STATE_LABEL.pending_input)
+      : run.state === 'parked'
+        ? (parkedLine(run.gate) ?? STATE_LABEL.parked)
         : isRunning(run) && activity
           ? activity.label
           : (STATE_LABEL[run.state] ?? run.state)

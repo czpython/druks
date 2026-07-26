@@ -38,11 +38,11 @@ function WorkItemRowView({
   row: WorkItemRow
   onOpen: (row: WorkItemRow) => void
 }) {
-  // Active lanes: pending_input → parked on you, failed → needs you to retry or
+  // Active lanes: parked → parked on you, failed → needs you to retry or
   // cancel, running/scheduled → a step is live.
   const { summary: wi, status } = row
   const failed = status.state === 'failed'
-  const parked = status.state === 'pending_input'
+  const parked = status.state === 'parked'
   const live = status.state === 'running' || status.state === 'scheduled'
   const when = relTime(secondsSince(wi.updatedAt))
   return (
@@ -132,7 +132,7 @@ export function WorkItemsPage() {
   )
   const needsYou = active.filter(
     (row) =>
-      (row.status.state === 'pending_input' || row.status.state === 'failed') &&
+      (row.status.state === 'parked' || row.status.state === 'failed') &&
       matchesQuery(row, query),
   )
   const inFlight = active.filter(

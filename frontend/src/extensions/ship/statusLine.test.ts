@@ -17,20 +17,20 @@ function status(overrides: Partial<SubjectStatus>): SubjectStatus {
 
 describe('statusLine', () => {
   it('parked renders build’s line for the gate identity', () => {
-    expect(statusLine(status({ state: 'pending_input', gate: 'review_work' }))).toBe(
+    expect(statusLine(status({ state: 'parked', gate: 'review_work' }))).toBe(
       'Review implementation',
     )
-    expect(statusLine(status({ state: 'pending_input', gate: 'review' }))).toBe(
+    expect(statusLine(status({ state: 'parked', gate: 'review' }))).toBe(
       'Review the plan',
     )
   })
 
   it('an unmapped gate reads as a generic park', () => {
-    expect(statusLine(status({ state: 'pending_input', gate: 'unknown' }))).toBe('Waiting on you')
+    expect(statusLine(status({ state: 'parked', gate: 'unknown' }))).toBe('Waiting on you')
   })
 
   it('parked without a gate falls back', () => {
-    expect(statusLine(status({ state: 'pending_input' }))).toBe('Waiting on you')
+    expect(statusLine(status({ state: 'parked' }))).toBe('Waiting on you')
   })
 
   it('running shows the live agent over the kind', () => {
