@@ -1,10 +1,12 @@
 import pytest
+from druks.accounts.models import Account
 from druks.harnesses.claude import ClaudeHarness
 from druks.harnesses.codex import CodexHarness
 from druks.harnesses.exceptions import HarnessError
 from druks.harnesses.registry import get_harness_for_model
 from druks.user_settings.models import HarnessSettings
-from druks.user_settings.routes import _validate_model
+from druks.user_settings.routes import _validate_model, update_harness_settings
+from druks.user_settings.schemas import HarnessUpdate
 from fastapi import HTTPException
 
 
@@ -40,3 +42,17 @@ def test_settings_reject_model_missing_from_lists_returns_422(db_session):
 
     assert error.value.status_code == 422
     assert error.value.detail == "No installed harness runs model 'llama-3-70b'."
+
+
+async def test_settings_reject_model_from_another_harness_returns_422(db_session):
+    account = Account.get_or_create("op@example.com")
+
+    with pytest.raises(HTTPException) as error:
+        await update_harness_settings(
+            name="claude",
+            body=HarnessUpdate(model="gpt-5.5"),
+            account=account,
+        )
+
+    assert error.value.status_code == 422
+    assert "is not a claude model" in error.value.detail
