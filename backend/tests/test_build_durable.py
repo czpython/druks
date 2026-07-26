@@ -36,7 +36,7 @@ def rt():
     from fastapi import FastAPI
 
     # Load every extension first so the snapshot is the complete production registry;
-    # the durable workflow then overwrites build's same-named agents, and the
+    # the durable workflow then overwrites Ship's same-named agents, and the
     # wholesale restore puts the full set back. (Coexistence-only — the
     # collision is gone once the cutover deletes the old modules.)
     load(FastAPI())
@@ -53,13 +53,13 @@ def rt():
     configure_engine(engine)
     configure_session(engine)
 
-    from druks.build.workflows import BuildWorkflow  # registers on import
+    from druks.contrib.ship.workflows import Build  # registers on import
 
     os.environ["DRUKS_DATABASE_URL"] = URL
     init_dbos()
     launch()
     try:
-        yield SimpleNamespace(engine=engine, flow=BuildWorkflow)
+        yield SimpleNamespace(engine=engine, flow=Build)
     finally:
         shutdown()
         engine.dispose()
@@ -75,7 +75,7 @@ def _seed_work_item(engine, *, repo: str):
     # now fails the lifecycle step), so the item must exist, not just its id.
     from uuid import uuid4
 
-    from druks.build.models import Project, WorkItem
+    from druks.contrib.ship.models import Project, WorkItem
     from sqlalchemy.orm import Session
 
     with Session(engine) as session:
@@ -106,16 +106,16 @@ async def _wait(engine, wfid, predicate, timeout=20.0):
 
 
 def _stub(monkeypatch, rt, *, plan_approval="human", auto_dispatch=False):
-    import druks.build.workflows as m
-    from druks.build.contracts import (
+    import druks.contrib.ship.workflows as m
+    from druks.contrib.ship.contracts import (
         CodeReviewOutput,
         EvaluationOutput,
         ImplementationOutput,
         PlanData,
         ReviewOutput,
     )
-    from druks.build.enums import EvaluationVerdict, ReviewDecision
-    from druks.build.policy import Gates, RepoPolicy
+    from druks.contrib.ship.enums import EvaluationVerdict, ReviewDecision
+    from druks.contrib.ship.policy import Gates, RepoPolicy
 
     flow = rt.flow
 

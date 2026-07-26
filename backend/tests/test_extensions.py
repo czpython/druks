@@ -9,12 +9,12 @@ from fastapi.testclient import TestClient
 
 def test_iter_extensions_discovers_the_in_tree_extensions():
     """The in-tree extensions resolve from the ``druks.extensions`` entry points."""
-    assert {extension.name for extension in iter_extensions()} == {"build", "core", "usage"}
+    assert {extension.name for extension in iter_extensions()} == {"core", "ship", "usage"}
 
 
-def test_build_app_derives_its_package_from_the_defining_module():
-    build = next(extension for extension in iter_extensions() if extension.name == "build")
-    assert build.package == "druks.build"  # Build lives in druks.build.extension
+def test_ship_app_derives_its_package_from_the_defining_module():
+    ship = next(extension for extension in iter_extensions() if extension.name == "ship")
+    assert ship.package == "druks.contrib.ship"
 
 
 def test_extension_without_a_name_is_rejected():

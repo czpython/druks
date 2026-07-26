@@ -1,14 +1,14 @@
-import druks.build.workflows  # noqa: F401  # registers build.build_workflow, the seeded kind
+import druks.contrib.ship.workflows  # noqa: F401  # registers ship.build, the seeded kind
 import pytest
 from conftest import make_test_work_item, seed_build_run
-from druks.build.enums import HandoffStatus
-from druks.build.extension import Build
-from druks.build.models import WorkItem
+from druks.contrib.ship.enums import HandoffStatus
+from druks.contrib.ship.extension import Ship
+from druks.contrib.ship.models import WorkItem
 
 
 def _board_ids(db_session):
     db_session.expire_all()
-    return {row.id for row in Build.list_subjects()}
+    return {row.id for row in Ship.list_subjects()}
 
 
 @pytest.mark.parametrize("state", ["scheduled", "running", "pending_input", "failed"])
@@ -45,7 +45,7 @@ def test_an_item_without_runs_stays_off_the_board(db_session):
 
 async def test_a_cancelled_build_settles_as_cancelled(db_session):
     # Nothing merged, so History records the abandonment.
-    from druks.build.subscribers import build_end_settles_the_item
+    from druks.contrib.ship.subscribers import build_end_settles_the_item
 
     item = make_test_work_item(repo="ClawHaven/acme-app", title="cancelled build")
     await build_end_settles_the_item(subject=item)
@@ -55,7 +55,7 @@ async def test_a_cancelled_build_settles_as_cancelled(db_session):
 async def test_a_shipped_item_keeps_its_outcome(db_session):
     # ship() lands first and owns the verdict; the run's own cancel must not
     # overwrite it on the way out.
-    from druks.build.subscribers import build_end_settles_the_item
+    from druks.contrib.ship.subscribers import build_end_settles_the_item
 
     item = make_test_work_item(repo="ClawHaven/acme-app", title="merged build")
     item.set_status(HandoffStatus.SHIPPED)

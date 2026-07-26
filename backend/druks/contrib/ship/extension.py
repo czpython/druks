@@ -1,7 +1,7 @@
 from pydantic import BaseModel, Field
 
 from druks.agents import Agent
-from druks.build.contracts import (
+from druks.contrib.ship.contracts import (
     CodeReviewOutput,
     ContractRevisionOutput,
     EvaluationOutput,
@@ -11,8 +11,8 @@ from druks.build.contracts import (
     ReviewOutput,
     TriageOutput,
 )
-from druks.build.models import WorkItem
-from druks.build.schemas import WorkItemSummary
+from druks.contrib.ship.models import WorkItem
+from druks.contrib.ship.schemas import WorkItemSummary
 from druks.db import db_session
 from druks.events import Event, FeedItem
 from druks.extensions import Extension
@@ -24,10 +24,10 @@ _PHASE_META: dict[str, SubjectActivity] = {
 }
 
 
-class Build(Extension):
-    name = "build"
+class Ship(Extension):
+    name = "ship"
     subject = WorkItem
-    # build's tables (projects, work_items, ...) are already unprefixed in core's
+    # These tables (projects, work_items, ...) are already unprefixed in core's
     # migration history, so they must stay that way.
     prefix_tables = False
     icon = "hammer"
@@ -78,50 +78,50 @@ class Build(Extension):
     # them. The attribute name is each agent's id (its durable settings/timeline key).
     generate_plan = Agent(
         description="ticket → implementation plan",
-        prompt="build/build_workflow/generate_plan.md",
+        prompt="ship/build/generate_plan.md",
         contract=PlanOutput,
         model="codex",
     )
     review_plan = Agent(
         description="critiques the plan before any work starts",
-        prompt="build/build_workflow/review_plan.md",
+        prompt="ship/build/review_plan.md",
         contract=ReviewOutput,
         model="claude",
     )
     revise_contract = Agent(
         description="revises the plan contract on feedback",
-        prompt="build/build_workflow/revise_contract.md",
+        prompt="ship/build/revise_contract.md",
         contract=ContractRevisionOutput,
         model="codex",
     )
     implement = Agent(
         description="plan → diff, in a drukbox",
-        prompt="build/build_workflow/implement.md",
+        prompt="ship/build/implement.md",
         contract=ImplementationOutput,
         model="claude",
     )
     evaluate_implementation = Agent(
         description="adversarial review of the diff",
-        prompt="build/build_workflow/evaluate_implementation.md",
+        prompt="ship/build/evaluate_implementation.md",
         contract=EvaluationOutput,
         model="codex",
         effort="medium",
     )
     review_code = Agent(
         description="line-level code review on the PR",
-        prompt="build/build_workflow/review_code.md",
+        prompt="ship/build/review_code.md",
         contract=CodeReviewOutput,
         model="claude",
     )
     triage_human_feedback = Agent(
         description="routes a human's PR feedback back into the workflow",
-        prompt="build/build_workflow/triage_human_feedback.md",
+        prompt="ship/build/triage_human_feedback.md",
         contract=TriageOutput,
         model="codex",
     )
     repo_profiler = Agent(
         description="reads a repo once and reports its stack, verification commands, and skills",
-        prompt="build/profile/repo_profiler.md",
+        prompt="ship/profile/repo_profiler.md",
         contract=RepoProfilerOutput,
         model="codex",
     )
@@ -157,7 +157,7 @@ class Build(Extension):
             id=f"event:{event.id}",
             at=event.created_at,
             kind=kind,
-            source=run_kind or "build",
+            source=run_kind or "ship",
             summary=summary,
             link_path=f"/work-items/{wid}" if wid else None,
             meta={"ticketRef": ticket_ref} if ticket_ref else {},

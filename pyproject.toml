@@ -63,8 +63,8 @@ druks = "druks.cli:main"
 # walks each one's package for capabilities. Adding an extension is one entry, not
 # edits across the platform wiring.
 [project.entry-points."druks.extensions"]
-build = "druks.build.extension:Build"
 core = "druks.core.extension:Core"
+ship = "druks.contrib.ship.extension:Ship"
 usage = "druks.usage.extension:Usage"
 
 [build-system]

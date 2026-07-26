@@ -30,10 +30,10 @@ plan should have asked for. You verify what it did ask for, exhaustively, in a s
   the most recent revision and unaddressed prior blockers only. See the ROUND-COUNTER
   AWARENESS rule below.
 
-{% include "build/build_workflow/_header.md" %}
-{% include "build/build_workflow/_contract.md" %}
-{% include "build/build_workflow/_related_repos.md" %}
-{% include "build/build_workflow/_skills.md" %}
+{% include "ship/build/_header.md" %}
+{% include "ship/build/_contract.md" %}
+{% include "ship/build/_related_repos.md" %}
+{% include "ship/build/_skills.md" %}
 Evaluate the implementation against the **Current plan** above, the issue, and the current PR diff. When `base_sha` and `head_sha` are listed in the **Workflow context** section above, use them as the authoritative diff range and evaluate `head_sha` against `base_sha`. If branch names disagree with those SHAs, trust the SHAs and mention metadata drift only when it affects the PR. Return blocked if an authoritative SHA is unavailable locally after fetching. Evaluate every acceptance criterion from the PR state and report one result per criterion. Inspection commands such as git diff/show, rg, and sed are allowed for review. Verification commands are different: run only the configured verification profile commands when feasible and report their results in checks. Do not invent repo-specific smoke tests or package install commands. Return exactly one final result object. Return pass only when the work is ready for a human final PR review. Return fail for actionable implementation changes.
 
 EXHAUSTIVE ENUMERATION — this is the single most important rule. Subsequent rounds will not retry, and findings you omit now cost an entire extra implementation loop to surface next round. Walk through these sweeps and list every blocker you find in a single response:
@@ -80,4 +80,4 @@ GITHUB CHECKS — the PR's CI is part of your evidence; consult it yourself (`gh
 - Checks still running when you finish everything else: wait a few minutes for them; if they have not settled, report them as not_run and do not block on them.
 - If local verification cannot run because repo dependencies, private indexes, or credentials are unavailable, report those checks as not_run. Green GitHub checks covering the same ground make that gap non-blocking: return pass, not blocked, and name in `body` which GitHub checks stood in.
 
-{% include "build/build_workflow/_github_review.md" %}
+{% include "ship/build/_github_review.md" %}

@@ -28,7 +28,7 @@ class VerificationProfile(BaseModel):
 
 
 class RepoPolicy(BaseModel):
-    """The operator's ``.druks/build/config.yml``, validated whole so a typo'd
+    """The operator's ``.druks/ship/config.yml``, validated whole so a typo'd
     key fails loud at resolution."""
 
     model_config = {"frozen": True, "extra": "forbid"}
@@ -43,7 +43,7 @@ class RepoPolicy(BaseModel):
 
     @classmethod
     async def resolve(cls, repo: str | None) -> "RepoPolicy":
-        return await resolve_extension_config("build", repo=repo, model=cls)
+        return await resolve_extension_config("ship", repo=repo, model=cls)
 
     def plan_approval_gate(self, auto_dispatch: bool) -> GateValue:
         return self.gates.plan_approval or ("none" if auto_dispatch else "human")
@@ -63,7 +63,7 @@ class RepoPolicy(BaseModel):
             {"label": "Tests", "commands": verification.get("test_commands", [])},
         ]
         body = await render_prompt(
-            "build/verification_block.md",
+            "ship/verification_block.md",
             repo=repo,
             sections=sections,
             has_commands=any(section["commands"] for section in sections),

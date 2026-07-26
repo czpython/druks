@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-import druks.build.subscribers  # noqa: F401 — registers the repo.pushed subscriber
+import druks.contrib.ship.subscribers  # noqa: F401 — registers the repo.pushed subscriber
 from conftest import make_settings
 from druks.core.webhooks.github import GitHubEvents
 
@@ -22,7 +22,7 @@ async def _fire_push(*, payload, tmp_path):
 
 
 def _stub_profile_dispatch(monkeypatch):
-    from druks.build.workflows import Profile
+    from druks.contrib.ship.workflows import Profile
 
     calls: list[dict] = []
 
@@ -35,7 +35,7 @@ def _stub_profile_dispatch(monkeypatch):
 
 
 async def test_policy_push_on_default_branch_reprofiles(tmp_path, db_session, monkeypatch):
-    from druks.build.models import Project, ProjectRepo
+    from druks.contrib.ship.models import Project, ProjectRepo
 
     project = Project.create(name="Acme")
     repo = ProjectRepo.create(project_id=project.id, full_name="acme/widget")
@@ -46,7 +46,7 @@ async def test_policy_push_on_default_branch_reprofiles(tmp_path, db_session, mo
             full_name="acme/widget",
             default_branch="main",
             ref="refs/heads/main",
-            changed_paths=(".druks/build/config.yml",),
+            changed_paths=(".druks/ship/config.yml",),
         ),
         tmp_path=tmp_path,
     )
@@ -60,7 +60,7 @@ async def test_policy_push_on_default_branch_reprofiles(tmp_path, db_session, mo
 
 
 async def test_non_default_branch_push_is_ignored(tmp_path, db_session, monkeypatch):
-    from druks.build.models import Project, ProjectRepo
+    from druks.contrib.ship.models import Project, ProjectRepo
 
     project = Project.create(name="Acme")
     ProjectRepo.create(project_id=project.id, full_name="acme/widget")
@@ -71,7 +71,7 @@ async def test_non_default_branch_push_is_ignored(tmp_path, db_session, monkeypa
             full_name="acme/widget",
             default_branch="main",
             ref="refs/heads/feature-x",
-            changed_paths=(".druks/build/config.yml",),
+            changed_paths=(".druks/ship/config.yml",),
         ),
         tmp_path=tmp_path,
     )
@@ -80,7 +80,7 @@ async def test_non_default_branch_push_is_ignored(tmp_path, db_session, monkeypa
 
 
 async def test_unrelated_path_push_is_ignored(tmp_path, db_session, monkeypatch):
-    from druks.build.models import Project, ProjectRepo
+    from druks.contrib.ship.models import Project, ProjectRepo
 
     project = Project.create(name="Acme")
     ProjectRepo.create(project_id=project.id, full_name="acme/widget")
@@ -107,7 +107,7 @@ async def test_policy_push_for_an_unknown_repo_is_a_noop(tmp_path, db_session, m
             full_name="acme/not-registered",
             default_branch="main",
             ref="refs/heads/main",
-            changed_paths=(".druks/build/config.yml",),
+            changed_paths=(".druks/ship/config.yml",),
         ),
         tmp_path=tmp_path,
     )

@@ -1,6 +1,6 @@
 import pytest
 from conftest import make_settings
-from druks.build.policy import RepoPolicy
+from druks.contrib.ship.policy import RepoPolicy
 from druks.extensions.config import resolve_extension_config
 from druks.extensions.exceptions import ExtensionConfigError
 
@@ -26,16 +26,16 @@ class TestResolveExtensionConfig:
         """No org-wide .druks tier — one repo, one file, one fetch."""
         calls = _fake_fetch(
             monkeypatch,
-            {(REPO, ".druks/build/config.yml"): "sandbox:\n  image: repo-image\n"},
+            {(REPO, ".druks/ship/config.yml"): "sandbox:\n  image: repo-image\n"},
         )
         policy = await RepoPolicy.resolve(REPO)
         assert policy.sandbox.image == "repo-image"
-        assert calls == [(REPO, ".druks/build/config.yml")]
+        assert calls == [(REPO, ".druks/ship/config.yml")]
 
     async def test_unknown_key_fails_loudly(self, monkeypatch):
         """A typo'd key is a ExtensionConfigError at resolution, not a silent no-op."""
-        _fake_fetch(monkeypatch, {(REPO, ".druks/build/config.yml"): "verficiation: {}\n"})
-        with pytest.raises(ExtensionConfigError, match="invalid build config"):
+        _fake_fetch(monkeypatch, {(REPO, ".druks/ship/config.yml"): "verficiation: {}\n"})
+        with pytest.raises(ExtensionConfigError, match="invalid ship config"):
             await RepoPolicy.resolve(REPO)
 
     async def test_no_file_yields_defaults(self, monkeypatch):
@@ -45,7 +45,7 @@ class TestResolveExtensionConfig:
 
     async def test_repo_none_skips_fetching_entirely(self, monkeypatch):
         calls = _fake_fetch(monkeypatch, {})
-        await resolve_extension_config("build", repo=None, model=RepoPolicy)
+        await resolve_extension_config("ship", repo=None, model=RepoPolicy)
         assert calls == []
 
 
@@ -71,8 +71,8 @@ class TestFetchFile:
                 pass
 
         self._wire(monkeypatch, tmp_path, _GitHub())
-        assert await fetch_file(repo=REPO, path=".druks/build/config.yml") is None
-        assert await fetch_file(repo=REPO, path=".druks/build/config.yml") is None
+        assert await fetch_file(repo=REPO, path=".druks/ship/config.yml") is None
+        assert await fetch_file(repo=REPO, path=".druks/ship/config.yml") is None
         assert len(fetches) == 1
 
     async def test_fetch_error_propagates(self, monkeypatch, tmp_path):
@@ -87,15 +87,15 @@ class TestFetchFile:
 
         self._wire(monkeypatch, tmp_path, _GitHub())
         with pytest.raises(RuntimeError, match="github down"):
-            await fetch_file(repo=REPO, path=".druks/build/config.yml")
+            await fetch_file(repo=REPO, path=".druks/ship/config.yml")
 
 
 class TestExtensionPromptOverridePaths:
-    """Unlike build's config.yml, prompt overrides keep the org-then-repo tiering."""
+    """Unlike Ship's config.yml, prompt overrides keep the org-then-repo tiering."""
 
     async def test_repo_extension_dir_checked_before_org(self, monkeypatch):
-        """``build/build_workflow/*`` resolves via the repo's
-        ``.druks/build/prompts/...`` first, then the org's extension dir."""
+        """``ship/build/*`` resolves via the repo's
+        ``.druks/ship/prompts/...`` first, then the org's extension dir."""
         from druks.prompts.resolver import _resolve_override
 
         calls: list[tuple[str, str]] = []
@@ -105,23 +105,23 @@ class TestExtensionPromptOverridePaths:
             return None
 
         monkeypatch.setattr("druks.prompts.resolver.fetch_file", fetch)
-        body = await _resolve_override("build/build_workflow/implement.md", repo=REPO)
+        body = await _resolve_override("ship/build/implement.md", repo=REPO)
         assert body is None
         assert calls == [
-            (REPO, ".druks/build/prompts/build_workflow/implement.md"),
-            (ORG_DRUKS, "build/prompts/build_workflow/implement.md"),
+            (REPO, ".druks/ship/prompts/build/implement.md"),
+            (ORG_DRUKS, "ship/prompts/build/implement.md"),
         ]
 
     async def test_repo_extension_dir_wins(self, monkeypatch):
         from druks.prompts.resolver import _resolve_override
 
         async def fetch(*, repo: str, path: str) -> str | None:
-            if (repo, path) == (REPO, ".druks/build/prompts/build_workflow/implement.md"):
+            if (repo, path) == (REPO, ".druks/ship/prompts/build/implement.md"):
                 return "tuned"
             return None
 
         monkeypatch.setattr("druks.prompts.resolver.fetch_file", fetch)
-        assert await _resolve_override("build/build_workflow/implement.md", repo=REPO) == "tuned"
+        assert await _resolve_override("ship/build/implement.md", repo=REPO) == "tuned"
 
 
 class TestLoadPolicyAndProfile:
@@ -144,14 +144,14 @@ class TestLoadPolicyAndProfile:
         configure_engine(None)
 
     def _flow(self, *, repo):
-        from druks.build.workflows import BuildWorkflow
+        from druks.contrib.ship.workflows import Build
 
-        flow = BuildWorkflow()
-        flow.input = BuildWorkflow._run_input_model(repo=repo, pr_number=1, branch="agent/x")
+        flow = Build()
+        flow.input = Build._run_input_model(repo=repo, pr_number=1, branch="agent/x")
         return flow
 
     async def test_resolves_live(self, db_session, monkeypatch):
-        from druks.build.models import Project, ProjectRepo
+        from druks.contrib.ship.models import Project, ProjectRepo
 
         async def _live(cls, repo):
             return RepoPolicy.model_validate({"sandbox": {"image": "live"}})
@@ -174,7 +174,7 @@ class TestPolicyKeysParsing:
         _fake_fetch(
             monkeypatch,
             {
-                (REPO, ".druks/build/config.yml"): (
+                (REPO, ".druks/ship/config.yml"): (
                     "gates:\n"
                     "  plan_approval: none\n"
                     "  implementation_approval: human\n"
@@ -193,16 +193,16 @@ class TestPolicyKeysParsing:
         assert policy.verification.test_commands == ("make test",)
 
     async def test_absent_verification_key_means_no_pin(self, monkeypatch):
-        _fake_fetch(monkeypatch, {(REPO, ".druks/build/config.yml"): "on_approval: none\n"})
+        _fake_fetch(monkeypatch, {(REPO, ".druks/ship/config.yml"): "on_approval: none\n"})
         policy = await RepoPolicy.resolve(REPO)
         assert policy.verification is None
 
     async def test_unknown_gate_value_fails_loudly(self, monkeypatch):
         _fake_fetch(
             monkeypatch,
-            {(REPO, ".druks/build/config.yml"): "gates: {implementation_approval: agent}\n"},
+            {(REPO, ".druks/ship/config.yml"): "gates: {implementation_approval: agent}\n"},
         )
-        with pytest.raises(ExtensionConfigError, match="invalid build config"):
+        with pytest.raises(ExtensionConfigError, match="invalid ship config"):
             await RepoPolicy.resolve(REPO)
 
     async def test_gates_default_to_inherit(self, monkeypatch):

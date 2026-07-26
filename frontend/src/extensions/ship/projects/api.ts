@@ -14,10 +14,10 @@ import type {
   UpdateProjectRepoRequest,
   UpdateProjectRequest,
 } from './types'
-import { BUILD } from '../api'
+import { SHIP } from '../api'
 
-// Projects are build-owned, under its own ``/api/build/projects`` namespace.
-const root = `/api/${BUILD}/projects`
+// Projects are Ship-owned, under its own ``/api/ship/projects`` namespace.
+const root = `/api/${SHIP}/projects`
 
 export const projectsApi = {
   list: () => getJSON<ProjectsResponse>(root),

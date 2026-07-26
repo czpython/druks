@@ -2,8 +2,8 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from druks.build.constants import GITHUB_MCP_NAME, GITHUB_MCP_URL
-from druks.build.workflows import BuildWorkflow, BuildWorkspace
+from druks.contrib.ship.constants import GITHUB_MCP_NAME, GITHUB_MCP_URL
+from druks.contrib.ship.workflows import Build, BuildWorkspace
 from druks.mcp.helpers import get_bearer_token_env_var
 from druks.sandbox import host as host_mod
 from druks.sandbox.layout import get_related_root
@@ -74,10 +74,10 @@ def _workspace_kwargs_stubs(monkeypatch: pytest.MonkeyPatch, *, reviewer):
     monkeypatch.setattr(host_mod.Sandbox, "write_secret", _noop)
     monkeypatch.setattr(host_mod.Sandbox, "exec", fake_exec)
     monkeypatch.setattr(
-        "druks.build.workflows.get_github_client",
+        "druks.contrib.ship.workflows.get_github_client",
         lambda _s: SimpleNamespace(token_for_repo=_token),
     )
-    monkeypatch.setattr("druks.build.workflows.get_reviewer_github_client", reviewer)
+    monkeypatch.setattr("druks.contrib.ship.workflows.get_reviewer_github_client", reviewer)
     monkeypatch.setattr("druks.sandbox.repo.ensure", fake_ensure)
     return ensured, execs
 
@@ -95,8 +95,8 @@ async def test_get_workspace_kwargs_clones_primary_only(monkeypatch: pytest.Monk
     )
     sandbox = host_mod.Sandbox(record=SimpleNamespace(id="h1", ssh_username="exedev"))  # type: ignore[arg-type]
 
-    workflow = BuildWorkflow()
-    workflow.input = BuildWorkflow._run_input_model(repo="o/extension")
+    workflow = Build()
+    workflow.input = Build._run_input_model(repo="o/extension")
     kwargs = await workflow.get_workspace_kwargs(sandbox)
 
     assert ensured == ["https://github.com/o/extension"]
@@ -117,8 +117,8 @@ async def test_get_workspace_kwargs_fails_loudly_without_the_reviewer_app(
     _workspace_kwargs_stubs(monkeypatch, reviewer=_no_reviewer)
     sandbox = host_mod.Sandbox(record=SimpleNamespace(id="h1", ssh_username="exedev"))  # type: ignore[arg-type]
 
-    workflow = BuildWorkflow()
-    workflow.input = BuildWorkflow._run_input_model(repo="o/extension")
+    workflow = Build()
+    workflow.input = Build._run_input_model(repo="o/extension")
 
     with pytest.raises(FatalError, match="reviewer GitHub App"):
         await workflow.get_workspace_kwargs(sandbox)

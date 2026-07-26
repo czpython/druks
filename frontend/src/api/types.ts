@@ -109,7 +109,7 @@ export interface ArtifactContent {
 // One run on the subject's timeline, with its agent calls in execution order.
 export interface RunSummary {
   id: string
-  // The durable kind ("build.build_workflow"); label is its backend display name ("Build workflow").
+  // The durable kind ("ship.build"); label is its backend display name ("Build").
   kind: string
   label: string
   state: RunState

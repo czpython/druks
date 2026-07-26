@@ -9,10 +9,10 @@ def test_feed_reads_run_and_milestone_events(db_session):
     Event.emit(
         type="run.running",
         subject=item.identity,
-        extension="build",
-        payload={"kind": "build.build_workflow", "run": "wf1"},
+        extension="ship",
+        payload={"kind": "ship.build", "run": "wf1"},
     )
-    Event.emit(type="shipped", subject=item.identity, extension="build")
+    Event.emit(type="shipped", subject=item.identity, extension="ship")
     db_session.flush()
 
     page, _ = build_feed()
@@ -21,7 +21,7 @@ def test_feed_reads_run_and_milestone_events(db_session):
     shipped = by_kind["milestone.shipped"]
     assert shipped.link_path == f"/work-items/{item.id}"
     assert "ACME-9" in shipped.summary
-    assert "build_workflow started" in by_kind["run.running"].summary
+    assert "build started" in by_kind["run.running"].summary
 
 
 def test_feed_paginates_same_second_events_without_loss_or_repeat(db_session):

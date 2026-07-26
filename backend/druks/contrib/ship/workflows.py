@@ -5,13 +5,13 @@ from typing import TYPE_CHECKING, Any
 from pydantic import BaseModel, Field
 
 from druks.accounts.models import Account
-from druks.build.contracts import ImplementationOutput, ReviewWork
-from druks.build.enums import (
+from druks.contrib.ship.contracts import ImplementationOutput, ReviewWork
+from druks.contrib.ship.enums import (
     EvaluationVerdict,
     HumanFeedbackAction,
     ReviewDecision,
 )
-from druks.build.models import ProjectRepo, WorkItem
+from druks.contrib.ship.models import ProjectRepo, WorkItem
 from druks.core.apis.github import get_github_client, get_reviewer_github_client
 from druks.sandbox import repo as _repo
 from druks.sandbox.datastructures import RequiredMcpServer
@@ -26,7 +26,7 @@ from druks.skills.models import Skill
 from druks.workflows import FatalError, Workflow, step
 
 from .constants import GITHUB_MCP_NAME, GITHUB_MCP_URL, PLAN_DRAFTS_PER_ROUND
-from .extension import Build
+from .extension import Ship
 from .journal import BuildJournal
 from .policy import RepoPolicy
 from .prompt_context import BuildPromptContext
@@ -65,7 +65,7 @@ class BuildWorkspace(RepoWorkspace):
         return kwargs
 
 
-class BuildWorkflow(Workflow):
+class Build(Workflow):
     steps_reuse_sandbox = True
     workspace_class = BuildWorkspace
     journal_class = BuildJournal
@@ -242,7 +242,7 @@ class BuildWorkflow(Workflow):
         }
 
     @step
-    async def _load_settings(self) -> "BuildWorkflow.Settings":
+    async def _load_settings(self) -> "Build.Settings":
         # A step so replay reuses the values the run started with, not later edits.
         return self.settings()
 
@@ -258,14 +258,14 @@ class BuildWorkflow(Workflow):
             for _ in range(PLAN_DRAFTS_PER_ROUND):
                 draft_guidance = unresolved_critique
                 unresolved_critique = ""
-                plan = await Build.generate_plan(
+                plan = await Ship.generate_plan(
                     answered_questions=answered_questions,
                     operator_note=operator_note,
                     reviewer_notes=draft_guidance,
                 )
                 if human_approval_required or plan.questions:
                     break
-                machine_review = await Build.review_plan()
+                machine_review = await Ship.review_plan()
                 if machine_review.decision == ReviewDecision.APPROVE:
                     return True
                 unresolved_critique = machine_review.body
@@ -285,10 +285,10 @@ class BuildWorkflow(Workflow):
     async def _implement_phase(self) -> None:
         while True:
             await self.implement()
-            evaluation = await Build.evaluate_implementation()
+            evaluation = await Ship.evaluate_implementation()
             if evaluation.verdict == EvaluationVerdict.PASS:
                 if self._settings.review_code:
-                    await Build.review_code()
+                    await Ship.review_code()
                 if await self._work_gate():
                     return
                 continue
@@ -313,7 +313,7 @@ class BuildWorkflow(Workflow):
         if decision.action == "request_changes":
             return await self._triage()
         if decision.action == "revise_contract":
-            await Build.revise_contract()
+            await Ship.revise_contract()
         return False
 
     async def _approved_work(self) -> bool:
@@ -325,11 +325,11 @@ class BuildWorkflow(Workflow):
         return True
 
     async def _triage(self) -> bool:
-        feedback = await Build.triage_human_feedback()
+        feedback = await Ship.triage_human_feedback()
         if feedback.action == HumanFeedbackAction.CHANGE_REQUIRED:
             return False  # loop → implement
         if feedback.action == HumanFeedbackAction.CONTRACT_CHANGE_REQUIRED:
-            await Build.revise_contract()
+            await Ship.revise_contract()
             return False
         if feedback.action == HumanFeedbackAction.CLOSE:
             raise FatalError("closed at human triage")
@@ -339,7 +339,7 @@ class BuildWorkflow(Workflow):
     # Body code, never @step: the agent calls inside memoize themselves and land
     # on the record, and set_state must re-run on replay — a @step would skip them.
     async def implement(self) -> ImplementationOutput:
-        delivery = await Build.implement()
+        delivery = await Ship.implement()
         # A bail is a stop, not a result: the implementer hit a contradiction in the
         # binding requirements and couldn't deliver. Fail the run with its own reason,
         # read off the dashboard instead of dug out of the transcript.
@@ -415,7 +415,7 @@ class Profile(Workflow):
     reads the checkout and reports stack, verification commands, and recommended
     skills onto ProjectRepo.profile. ``refresh_only`` skips the agent — it
     re-applies the operator's pinned verification over the stored baseline, for
-    the reaction to a .druks/build/config.yml push."""
+    the reaction to a .druks/ship/config.yml push."""
 
     workspace_class = RepoWorkspace
 
@@ -435,7 +435,7 @@ class Profile(Workflow):
         if refresh_only:
             baseline = project_repo.profile.get("baseline") or {}
         else:
-            baseline = await Build.repo_profiler(repo=project_repo.full_name)
+            baseline = await Ship.repo_profiler(repo=project_repo.full_name)
             # The agent picks from the catalog it was handed, but a skill can be
             # disabled between prompt render and result — read the ground truth again.
             enabled = {skill.name for skill in Skill.list_enabled()}

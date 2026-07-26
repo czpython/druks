@@ -1,6 +1,6 @@
-from druks.build.contracts import ImplementationOutput, PlanData, ReviewWork, TriageOutput
-from druks.build.enums import HumanFeedbackAction
-from druks.build.journal import BuildJournal
+from druks.contrib.ship.contracts import ImplementationOutput, PlanData, ReviewWork, TriageOutput
+from druks.contrib.ship.enums import HumanFeedbackAction
+from druks.contrib.ship.journal import BuildJournal
 
 
 def _journal(*entries) -> BuildJournal:

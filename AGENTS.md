@@ -3,7 +3,7 @@
 Druks runs durable agent applications on DBOS and Postgres. It owns
 workflow execution, persisted state and events, gates, webhooks, sandbox access,
 and the shared dashboard. Apps are **extensions**: standalone Python packages
-that self-register through the `druks.extensions` entry point. `build` is the
+that self-register through the `druks.extensions` entry point. `ship` is the
 bundled reference extension for coordinating coding agents through GitHub PRs.
 
 ## Read map
@@ -26,7 +26,7 @@ For extension-surface changes, inspect the proof extension at
 ## Architectural boundaries
 
 - Keep platform and extension ownership explicit. GitHub issue, branch, PR, and
-  coding-agent policy belongs to `build`, not to Druks core.
+  coding-agent policy belongs to `ship`, not to Druks core.
 - Describe durability precisely: completed durable checkpoints are reused when
   orchestration replays, but an interrupted operation may run again. Do not imply
   arbitrary-line resume or exactly-once external side effects.
@@ -95,7 +95,7 @@ truth for CI, including the proof-extension install phase.
   routing, architectural boundaries, and contributor rules.
 - Link to one canonical explanation instead of copying it into multiple pages.
 - Verify behavioral claims against current source and focused tests. Distinguish
-  framework capabilities from `build` behavior and guarantees from policy.
+  framework capabilities from `ship` behavior and guarantees from policy.
 - Update this file only when contributor routing, repository structure, commands,
   or a load-bearing architectural invariant changes.
 

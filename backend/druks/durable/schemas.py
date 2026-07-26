@@ -26,7 +26,7 @@ def _token_usage(cost_metadata: dict | None) -> TokenUsage | None:
 
 
 def get_display_label(kind: str) -> str:
-    # "build.build_workflow" → "Build workflow"; "implement" → "Implement".
+    # "ship.build" → "Build"; "implement" → "Implement".
     return kind.rsplit(".", 1)[-1].replace("_", " ").capitalize()
 
 
@@ -124,7 +124,7 @@ class AgentCallFiles(BaseResponse):
 
 class RunResponse(BaseResponse):
     id: str
-    # The durable kind ("build.build_workflow"); ``label`` is its display name ("Build workflow").
+    # The durable kind ("ship.build"); ``label`` is its display name ("Build").
     kind: str
     label: str
     state: Literal["scheduled", "running", "pending_input", "finished", "failed", "cancelled"]

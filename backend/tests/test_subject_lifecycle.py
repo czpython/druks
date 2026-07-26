@@ -2,9 +2,9 @@ from datetime import timedelta
 
 import pytest
 from conftest import make_test_work_item, seed_dbos_status
-from druks.build.contracts import ReviewWork
-from druks.build.models import WorkItem
-from druks.build.workflows import BuildWorkflow, Profile
+from druks.contrib.ship.contracts import ReviewWork
+from druks.contrib.ship.models import WorkItem
+from druks.contrib.ship.workflows import Build, Profile
 from druks.durable.models import Run
 from druks.durable.reads import get_subject_phase
 from druks.models import Base
@@ -47,7 +47,7 @@ async def test_gate_answer_resumes_only_a_run_parked_on_its_gate(db_session, mon
     parked = _subject_run(
         db_session,
         subject=subject,
-        kind=BuildWorkflow.kind,
+        kind=Build.kind,
         state="pending_input",
         gate=OperatorReply.name,
     )
@@ -66,7 +66,7 @@ async def test_gate_answer_resumes_only_a_run_parked_on_its_gate(db_session, mon
     _subject_run(
         db_session,
         subject=timed_out,
-        kind=BuildWorkflow.kind,
+        kind=Build.kind,
         state="failed",
         gate=ReviewWork.name,
     )
@@ -81,7 +81,7 @@ async def test_workflow_cancel_takes_its_own_kind_and_passes_over_idle_subjects(
     # Webhooks redeliver, and a PR can close long after its build ended: cancelling what
     # is already gone is the no-op the caller expects, not an error.
     subject = _work_item(remote_key="ENG-748-C")
-    build = _subject_run(db_session, subject=subject, kind=BuildWorkflow.kind, state="running")
+    build = _subject_run(db_session, subject=subject, kind=Build.kind, state="running")
     _subject_run(db_session, subject=subject, kind=Profile.kind, state="running", order=1)
     cancelled = []
 
@@ -90,12 +90,12 @@ async def test_workflow_cancel_takes_its_own_kind_and_passes_over_idle_subjects(
 
     monkeypatch.setattr(Run, "cancel", cancel)
 
-    await BuildWorkflow.cancel(subject)
+    await Build.cancel(subject)
     assert cancelled == [build.id]
 
     idle = _work_item(remote_key="ENG-748-D")
-    _subject_run(db_session, subject=idle, kind=BuildWorkflow.kind, state="finished")
-    await BuildWorkflow.cancel(idle)
+    _subject_run(db_session, subject=idle, kind=Build.kind, state="finished")
+    await Build.cancel(idle)
     assert cancelled == [build.id]
 
 
@@ -104,7 +104,7 @@ async def test_subject_phase_reads_the_driving_running_workflow(db_session, monk
     _subject_run(
         db_session,
         subject=subject,
-        kind=BuildWorkflow.kind,
+        kind=Build.kind,
         state="pending_input",
         gate=OperatorReply.name,
     )

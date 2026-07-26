@@ -1,7 +1,7 @@
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
-import druks.build.subscribers as subs
+import druks.contrib.ship.subscribers as subs
 import druks.core.webhooks.jira as jira_mod
 import pytest
 from conftest import make_settings, seed_run
@@ -146,15 +146,15 @@ async def test_open_category_is_not_terminal(tmp_path, monkeypatch):
 
 
 def _pin_settings(monkeypatch, **over):
-    settings = subs.Build.Settings(**over)
-    monkeypatch.setattr(subs.Build, "settings", classmethod(lambda cls: settings))
+    settings = subs.Ship.Settings(**over)
+    monkeypatch.setattr(subs.Ship, "settings", classmethod(lambda cls: settings))
 
 
 async def test_trigger_status_dispatches_build_with_the_webhook_payload(tmp_path, monkeypatch):
     """The build funnel receives the normalized ticket payload without a refetch."""
     _pin_settings(monkeypatch, jira_trigger_status="Ready")
     build = AsyncMock()
-    monkeypatch.setattr(subs.BuildWorkflow, "dispatch", build)
+    monkeypatch.setattr(subs.Build, "dispatch", build)
     payload = _jira_payload(status="Ready")
 
     await subs.ticket_transition_drives_the_funnel(payload=payload)
@@ -164,7 +164,7 @@ async def test_trigger_status_dispatches_build_with_the_webhook_payload(tmp_path
 
 async def test_trigger_status_routes_a_new_ticket_by_label(tmp_path, db_session, monkeypatch):
     """No work item yet: the label names the repo, the registry routes it."""
-    from druks.build.models import Project, ProjectRepo, WorkItem
+    from druks.contrib.ship.models import Project, ProjectRepo, WorkItem
 
     project = Project.create(name="octo/alfred")
     ProjectRepo.create(project_id=project.id, full_name="octo/alfred")
@@ -175,7 +175,7 @@ async def test_trigger_status_routes_a_new_ticket_by_label(tmp_path, db_session,
     async def fake_start(cls, **kwargs):
         return "run-new"
 
-    monkeypatch.setattr(subs.BuildWorkflow, "start", classmethod(fake_start))
+    monkeypatch.setattr(subs.Build, "start", classmethod(fake_start))
 
     await subs.ticket_transition_drives_the_funnel(
         payload=_jira_payload(key="SHRP-1", status="Ready", project="Octo", labels=["Alfred"]),
@@ -191,7 +191,7 @@ async def test_trigger_status_ignores_an_unroutable_ticket(tmp_path, db_session,
     """No signal matches a registered repo → no build."""
     _pin_settings(monkeypatch, jira_trigger_status="Ready")
     start = AsyncMock()
-    monkeypatch.setattr(subs.BuildWorkflow, "start", start)
+    monkeypatch.setattr(subs.Build, "start", start)
 
     await subs.ticket_transition_drives_the_funnel(
         payload=_jira_payload(key="SHRP-2", status="Ready", project="Octo"),
@@ -203,7 +203,7 @@ async def test_trigger_status_ignores_an_unroutable_ticket(tmp_path, db_session,
 async def test_refinement_candidate_status_no_longer_dispatches(tmp_path, monkeypatch):
     _pin_settings(monkeypatch, jira_trigger_status="Ready")
     build = AsyncMock()
-    monkeypatch.setattr(subs.BuildWorkflow, "dispatch", build)
+    monkeypatch.setattr(subs.Build, "dispatch", build)
 
     await subs.ticket_transition_drives_the_funnel(payload=_jira_payload(status="Backlog"))
 

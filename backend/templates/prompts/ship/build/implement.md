@@ -31,10 +31,10 @@ acceptance criterion — nothing more, nothing less.
 - Do not return `status="success"` when you have left a requirement unmet. The evaluator will
   catch it and the loop cost is the same — except the operator never sees your explanation.
 
-{% include "build/build_workflow/_header.md" %}
-{% include "build/build_workflow/_contract.md" %}
-{% include "build/build_workflow/_related_repos.md" %}
-{% include "build/build_workflow/_skills.md" %}
+{% include "ship/build/_header.md" %}
+{% include "ship/build/_contract.md" %}
+{% include "ship/build/_related_repos.md" %}
+{% include "ship/build/_skills.md" %}
 Implement the approved plan (rendered above as **Current plan**) on the work branch (see "Delivering your work" below). If the **Human feedback** section above carries an entry with implementation instructions, apply those instructions as the current revision request. Do not run ad hoc install, lint, test, build, or smoke commands during implementation unless the plan explicitly requires changing those commands or generated outputs. The evaluator runs and adjudicates the verification profile — you do not run or judge it; report every check as structured evidence (`not_run` or an observed baseline failure). Never leave dependency lockfile, generated, or cache changes unless they are part of the requested implementation. Return structured evidence for every acceptance criterion, every check you ran or intentionally did not run, changed files, and known risks. If a check was not run, include status not_run and a reason.
 
 ## Delivering your work

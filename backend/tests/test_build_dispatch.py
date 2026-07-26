@@ -1,6 +1,6 @@
 from conftest import make_test_work_item, seed_run
-from druks.build.enums import HandoffStatus
-from druks.build.workflows import BuildWorkflow
+from druks.contrib.ship.enums import HandoffStatus
+from druks.contrib.ship.workflows import Build
 
 
 async def test_dispatch_pulls_cancelled_item_back_onto_the_board(db_session, monkeypatch) -> None:
@@ -14,8 +14,8 @@ async def test_dispatch_pulls_cancelled_item_back_onto_the_board(db_session, mon
     async def fake_start(cls, **kwargs):
         return "run-1"
 
-    monkeypatch.setattr(BuildWorkflow, "start", classmethod(fake_start))
-    run_id = await BuildWorkflow.dispatch(
+    monkeypatch.setattr(Build, "start", classmethod(fake_start))
+    run_id = await Build.dispatch(
         ticket={
             "source": item.source,
             "identifier": item.remote_key,
@@ -48,8 +48,8 @@ async def test_redispatch_to_a_new_run_clears_prior_attempt_branch_and_pr(
     async def fake_start(cls, **kwargs):
         return "run-new"
 
-    monkeypatch.setattr(BuildWorkflow, "start", classmethod(fake_start))
-    await BuildWorkflow.dispatch(
+    monkeypatch.setattr(Build, "start", classmethod(fake_start))
+    await Build.dispatch(
         ticket={
             "source": item.source,
             "identifier": item.remote_key,
@@ -78,8 +78,8 @@ async def test_duplicate_dispatch_keeps_the_live_attempt_routing(db_session, mon
     async def dedup_start(cls, **kwargs):
         return "run-live"
 
-    monkeypatch.setattr(BuildWorkflow, "start", classmethod(dedup_start))
-    await BuildWorkflow.dispatch(
+    monkeypatch.setattr(Build, "start", classmethod(dedup_start))
+    await Build.dispatch(
         ticket={
             "source": item.source,
             "identifier": item.remote_key,

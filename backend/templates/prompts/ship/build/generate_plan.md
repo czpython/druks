@@ -47,10 +47,10 @@ your acceptance criteria. Wrong shape here compounds into every step that follow
   migration has a column, or a test covers a new branch.
 - Preserve the source's explicit out-of-scope statements near-verbatim.
 
-{% include "build/build_workflow/_header.md" %}
-{% include "build/build_workflow/_contract.md" %}
-{% include "build/build_workflow/_related_repos.md" %}
-{% include "build/build_workflow/_skills.md" %}
+{% include "ship/build/_header.md" %}
+{% include "ship/build/_contract.md" %}
+{% include "ship/build/_related_repos.md" %}
+{% include "ship/build/_skills.md" %}
 {% if answered_questions %}
 ## Answered questions
 

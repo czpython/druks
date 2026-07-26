@@ -17,7 +17,7 @@ def client(tmp_path: Path, db_session, monkeypatch):
 def _stub_profile_dispatch(monkeypatch):
     """Profile.dispatch hits DBOS's queue — route tests only prove they hand it
     the registered repo."""
-    from druks.build.workflows import Profile
+    from druks.contrib.ship.workflows import Profile
 
     calls: list[dict] = []
 
@@ -32,9 +32,9 @@ def _stub_profile_dispatch(monkeypatch):
 def test_adding_a_repo_dispatches_a_profile_run(client: TestClient, monkeypatch):
     calls = _stub_profile_dispatch(monkeypatch)
 
-    project = client.post("/api/build/projects", json={"name": "Acme"}).json()
+    project = client.post("/api/ship/projects", json={"name": "Acme"}).json()
     repo = client.post(
-        f"/api/build/projects/{project['id']}/repos",
+        f"/api/ship/projects/{project['id']}/repos",
         json={"fullName": "acme/widget"},
     ).json()
 
@@ -50,13 +50,13 @@ def test_adding_a_repo_dispatches_a_profile_run(client: TestClient, monkeypatch)
 def test_profile_endpoint_dispatches(client: TestClient, monkeypatch):
     # Concurrency is the Profile workflow's subject-unique lock, not the route's
     # job — the route always dispatches and start() dedups against a live run.
-    from druks.build.models import Project, ProjectRepo
+    from druks.contrib.ship.models import Project, ProjectRepo
 
     calls = _stub_profile_dispatch(monkeypatch)
     project = Project.create(name="Acme")
     repo = ProjectRepo.create(project_id=project.id, full_name="acme/widget")
 
-    response = client.post(f"/api/build/projects/{project.id}/repos/{repo.id}/profile")
+    response = client.post(f"/api/ship/projects/{project.id}/repos/{repo.id}/profile")
 
     assert response.status_code == 200
     assert calls == [
@@ -70,14 +70,14 @@ def test_profile_endpoint_dispatches(client: TestClient, monkeypatch):
 def test_nested_repo_routes_are_scoped_to_their_project(client: TestClient, monkeypatch):
     """PATCH / profile / DELETE reached through the wrong project's URL are 404 and
     side-effect-free — the routes scope by (project_id, repo_id), not repo_id alone."""
-    from druks.build.models import Project, ProjectRepo
+    from druks.contrib.ship.models import Project, ProjectRepo
 
     profile_calls = _stub_profile_dispatch(monkeypatch)
     owner = Project.create(name="Owner")
     other = Project.create(name="Other")
     repo_id = ProjectRepo.create(project_id=owner.id, full_name="acme/widget").id
 
-    wrong = f"/api/build/projects/{other.id}/repos/{repo_id}"
+    wrong = f"/api/ship/projects/{other.id}/repos/{repo_id}"
     assert client.patch(wrong, json={"purpose": "infra"}).status_code == 404
     assert client.post(f"{wrong}/profile").status_code == 404
     assert client.delete(wrong).status_code == 404
@@ -86,7 +86,7 @@ def test_nested_repo_routes_are_scoped_to_their_project(client: TestClient, monk
     assert profile_calls == []
 
     # Through its own project the repo mutates and deletes as normal.
-    right = f"/api/build/projects/{owner.id}/repos/{repo_id}"
+    right = f"/api/ship/projects/{owner.id}/repos/{repo_id}"
     patched = client.patch(right, json={"purpose": "infra"})
     assert patched.status_code == 200
     assert patched.json()["purpose"] == "infra"

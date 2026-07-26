@@ -49,7 +49,7 @@ name must match `Extension.name`. The same name scopes:
 - any provider credentials or prerequisites specific to that application
 - optional static frontend assets shipped in the extension package
 
-The bundled `build` extension owns projects, work items, ticket intake, GitHub
+The bundled `ship` extension owns projects, work items, ticket intake, GitHub
 branches and pull requests, coding-agent policy, and its dashboard pages. Those
 are useful examples, not platform guarantees.
 

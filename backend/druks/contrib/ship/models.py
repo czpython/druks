@@ -6,8 +6,8 @@ from sqlalchemy import ForeignKey, Index, func, select, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from druks.build.enums import HandoffStatus
-from druks.build.policy import RepoPolicy
+from druks.contrib.ship.enums import HandoffStatus
+from druks.contrib.ship.policy import RepoPolicy
 from druks.core.apis.github import get_github_client
 from druks.db import Base, Subject, db_session
 from druks.settings import load_settings
@@ -284,22 +284,22 @@ class WorkItem(Subject):
     async def ship(self) -> None:
         # A build parked on the operator's review is stranded by their merge; a running
         # one converges on its own, its merge step finding the PR already closed.
-        from druks.build.workflows import BuildWorkflow
+        from druks.contrib.ship.workflows import Build
 
         self.set_status(HandoffStatus.SHIPPED)
-        build = get_subject_status(self.subject_type, str(self.id), kind=BuildWorkflow.kind)
+        build = get_subject_status(self.subject_type, str(self.id), kind=Build.kind)
         if build.is_parked:
-            await BuildWorkflow.cancel(self, failure="pr merged while parked")
+            await Build.cancel(self, failure="pr merged while parked")
         await self.set_remote_status(TicketStatus.DONE)
 
     async def close_external(self) -> None:
         # The attempt was abandoned, not the ticket, so the ticket returns to the
         # provider's resting pool. Branch cleanup is best-effort: a fetch failure
         # must not strand it there.
-        from druks.build.workflows import BuildWorkflow
+        from druks.contrib.ship.workflows import Build
 
         self.set_status(HandoffStatus.CANCELLED, event_payload={"external": True})
-        await BuildWorkflow.cancel(self, failure="pr closed without merge")
+        await Build.cancel(self, failure="pr closed without merge")
         db_session().flush()
         try:
             if (await RepoPolicy.resolve(self.repo)).delete_branch:
@@ -343,9 +343,9 @@ class WorkItem(Subject):
         call-site convention. None clears the lane on (re)dispatch: no event."""
         if status:
             # cycle: the extension imports this module at file scope.
-            import druks.build.extension as build_extension
+            import druks.contrib.ship.extension as ship_extension
 
-            build_extension.Build.record_event(type=status, subject=self, payload=event_payload)
+            ship_extension.Ship.record_event(type=status, subject=self, payload=event_payload)
         self.status = status
         self.updated_at = Base.utc_now()
         db_session().flush()
@@ -354,13 +354,13 @@ class WorkItem(Subject):
         # No-op for sources without a configured tracker (github, absent creds).
         if not is_tracker_source(self.source):
             return
-        # Lazy: the Build extension imports this module, so it can't be imported at top.
-        import druks.build.extension as build_extension
+        # Lazy: the Ship extension imports this module, so it can't be imported at top.
+        import druks.contrib.ship.extension as ship_extension
 
         try:
             tracker = get_tracker(
                 self.source,
-                ready_for_agent_status=build_extension.Build.resting_status(self.source),
+                ready_for_agent_status=ship_extension.Ship.resting_status(self.source),
             )
         except TrackerNotConfigured:
             return

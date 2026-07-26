@@ -1,9 +1,9 @@
 from types import SimpleNamespace
 
-import druks.build.subscribers  # noqa: F401 — registers the pr.closed subscriber
+import druks.contrib.ship.subscribers  # noqa: F401 — registers the pr.closed subscriber
 import pytest
 from conftest import make_settings, make_test_work_item, seed_build_run
-from druks.build.models import WorkItem
+from druks.contrib.ship.models import WorkItem
 from druks.core.webhooks.github import GitHubEvents
 from druks.durable import Run
 from druks.events.models import Event
@@ -12,7 +12,7 @@ from sqlalchemy import func, select
 
 @pytest.fixture(autouse=True)
 def _stub_config_fetch(monkeypatch):
-    # The external-close path resolves the repo's live .druks/build/config.yml;
+    # The external-close path resolves the repo's live .druks/ship/config.yml;
     # default to "no file" (default policy) so tests don't reach GitHub.
     async def _fetch(*, repo, path):
         return None
@@ -200,7 +200,7 @@ async def test_external_close_returns_ticket_to_resting_pool(db_session, tmp_pat
     """Closing the PR abandons the attempt, not the ticket: druks pushes the
     provider's resting status (Linear → Backlog, Jira → Open) so the
     ticket doesn't strand in In Progress/Review."""
-    from druks.build.models import WorkItem
+    from druks.contrib.ship.models import WorkItem
     from druks.ticketing.enums import TicketStatus
 
     pushed = []
@@ -223,7 +223,7 @@ async def test_external_close_returns_ticket_to_resting_pool(db_session, tmp_pat
 @pytest.mark.asyncio
 async def test_external_merge_pushes_done(db_session, tmp_path, monkeypatch):
     """An externally-merged PR mirrors druks's own merge op: ticket → Done."""
-    from druks.build.models import WorkItem
+    from druks.contrib.ship.models import WorkItem
     from druks.ticketing.enums import TicketStatus
 
     pushed = []
@@ -245,9 +245,9 @@ async def test_external_merge_pushes_done(db_session, tmp_path, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_external_close_honors_delete_branch_policy(db_session, tmp_path, monkeypatch):
-    """delete_branch: false in the repo's live .druks/build/config.yml keeps the
+    """delete_branch: false in the repo's live .druks/ship/config.yml keeps the
     head branch on an external close."""
-    from druks.build import models as build_models
+    from druks.contrib.ship import models as build_models
 
     async def _fetch(*, repo, path):
         return "delete_branch: false\n"
@@ -275,7 +275,7 @@ async def test_external_close_honors_delete_branch_policy(db_session, tmp_path, 
 
 @pytest.mark.asyncio
 async def test_external_close_deletes_branch_by_default(db_session, tmp_path, monkeypatch):
-    from druks.build import models as build_models
+    from druks.contrib.ship import models as build_models
 
     deleted = []
 
@@ -300,8 +300,8 @@ async def test_external_close_deletes_branch_by_default(db_session, tmp_path, mo
 async def test_external_close_survives_policy_resolution_failure(db_session, tmp_path, monkeypatch):
     """Branch cleanup is best-effort: a policy-resolution failure must not strand
     the ticket — the cancel and resting-pool reset still happen."""
-    from druks.build import models as build_models
-    from druks.build.policy import RepoPolicy
+    from druks.contrib.ship import models as build_models
+    from druks.contrib.ship.policy import RepoPolicy
     from druks.ticketing.enums import TicketStatus
 
     async def _boom(cls, repo):
