@@ -15,14 +15,17 @@ def subscribe(name: str, **filters: Any) -> Callable[[Subscriber], Subscriber]:
 
     ``filters`` are equality matches against the published kwargs; ``__``
     descends into dicts (``payload__terminal=True``); a ``Gate`` class stands for
-    its ``name``. ``subject=WorkItem`` narrows to that subject and hands the body
-    its row. A non-matching publication skips the subscriber, so the body starts
-    at the real work."""
+    its ``name``. ``workflow=Build`` narrows to that workflow's runs and
+    ``subject=WorkItem`` to that subject, handing the body its row. A non-matching
+    publication skips the subscriber, so the body starts at the real work."""
 
     def register(fn: Subscriber) -> Subscriber:
         # Lazy import: druks.workflows imports this module.
         from druks.workflows import Gate
 
+        workflow_class = filters.pop("workflow", None)
+        if workflow_class:
+            filters["kind"] = workflow_class.kind
         subject_class = filters.pop("subject", None)
         if subject_class:
             filters["subject__type"] = subject_class.subject_type

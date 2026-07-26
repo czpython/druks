@@ -1,6 +1,7 @@
 import pytest
 from conftest import make_test_work_item
 from druks.contrib.ship.models import ProjectRepo, WorkItem
+from druks.contrib.ship.workflows import Build, Profile
 from druks.signals import publish, subscribe
 from druks.workflows import Workflow
 from sqlalchemy.orm import object_session
@@ -68,6 +69,20 @@ async def test_another_subjects_event_skips_the_subscriber(db_session):
     await publish("test.other_subject", subject=None)
 
     assert received == []
+
+
+@pytest.mark.asyncio
+async def test_workflow_filter_narrows_to_that_workflows_runs():
+    received = []
+
+    @subscribe("test.workflow_filter", workflow=Build)
+    async def receive(*, kind: str, **_: object) -> None:
+        received.append(kind)
+
+    await publish("test.workflow_filter", kind=Profile.kind)
+    await publish("test.workflow_filter", kind=Build.kind)
+
+    assert received == [Build.kind]
 
 
 def test_workflow_subject_requires_a_registered_class():
