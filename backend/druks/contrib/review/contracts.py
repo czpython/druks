@@ -8,3 +8,4 @@ class ReviewReport(AgentOutput):
     decision: Literal["approve", "request_changes", "comment"]
     summary: str
     findings: list[FindingOutput]
+    context_repos: list[str]
