@@ -56,6 +56,20 @@ class GitHubEvents(Webhook):
         )
         return _accepted()
 
+    async def on_issue_comment_created(self) -> Response:
+        # GitHub files pull-request comments under issues; only those carry
+        # ``pull_request``. A non-User sender is an app talking to itself.
+        issue, sender = self.data["issue"], self.data["sender"]
+        if sender["type"] != "User" or "pull_request" not in issue:
+            return _accepted()
+        await publish(
+            "pr.commented",
+            repo=_repo_name(self.data),
+            pr_number=issue["number"],
+            payload={"author": sender["login"], "body": self.data["comment"]["body"]},
+        )
+        return _accepted()
+
     async def on_pull_request_closed(self) -> Response:
         pull_request = self.data["pull_request"]
         await publish(
