@@ -273,17 +273,21 @@ class Extension:
         import mimetypes
         from typing import Literal
 
-        from fastapi import APIRouter, HTTPException, status
+        from fastapi import APIRouter, HTTPException, Response, status
         from fastapi.responses import FileResponse, StreamingResponse
 
         from druks.api.dependencies import EngineDep
         from druks.durable import reads
+        from druks.durable.enums import AgentCallStatus
         from druks.durable.live import SSE_HEADERS
         from druks.durable.models import AgentCall
         from druks.durable.schemas import AgentCallFiles, TranscriptChunk
 
         default_limit = 64 * 1024
         max_limit = 256 * 1024
+        # A call that has stopped writing never appends to its log again, so the
+        # byte range this serves is permanent.
+        settled_cache = "public, max-age=31536000, immutable"
 
         router = APIRouter(prefix="/transcripts/{call_id}", tags=[f"{cls.name}:transcripts"])
 
@@ -291,7 +295,7 @@ class Extension:
         async def get_transcript(
             call_id: str,
             stream: Literal["stdout", "stderr"],
-            engine: EngineDep,
+            response: Response,
             offset: int = 0,
             limit: int = default_limit,
         ) -> TranscriptChunk:
@@ -301,10 +305,14 @@ class Extension:
                 raise HTTPException(
                     status.HTTP_400_BAD_REQUEST, f"limit must be in 1..{max_limit}."
                 )
-            chunk = reads.read_transcript_chunk(engine, call_id, stream, offset=offset, limit=limit)
-            if not chunk:
+            call = AgentCall.get(call_id)
+            if not call:
                 raise HTTPException(status.HTTP_404_NOT_FOUND, "Run not found.")
-            return chunk
+            if call.get_live_status() == AgentCallStatus.RUNNING:
+                response.headers["Cache-Control"] = "no-store"
+            else:
+                response.headers["Cache-Control"] = settled_cache
+            return reads.read_transcript_chunk(call, stream, offset=offset, limit=limit)
 
         @router.get("/stream", response_class=StreamingResponse)
         async def stream_transcript(

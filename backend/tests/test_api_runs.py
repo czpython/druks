@@ -21,10 +21,10 @@ def client(tmp_path: Path, db_session, monkeypatch):
         yield client
 
 
-def _seed_run(*, tmp_path: Path) -> str:
+def _seed_run(*, tmp_path: Path, finished: bool = True, run_state: str = "running") -> str:
     from conftest import finish_agent_run, seed_agent_run
 
-    run = seed_agent_run()
+    run = seed_agent_run(run_state=run_state)
 
     # The harness writes every file for a call into run-<run_id>/<call_id>/.
     call_dir = run.call_dir
@@ -34,7 +34,8 @@ def _seed_run(*, tmp_path: Path) -> str:
     (call_dir / "stdout.jsonl").write_bytes(b"hello stdout output")
     (call_dir / "stderr.log").write_bytes(b"warning text")
 
-    finish_agent_run(run)
+    if finished:
+        finish_agent_run(run)
     return run.id
 
 
@@ -69,6 +70,7 @@ def test_transcript_range_fetch_paginates(
         params={"stream": "stdout", "limit": 5},
     )
     assert first.status_code == 200
+    assert first.headers["cache-control"] == "public, max-age=31536000, immutable"
     data = first.json()
     assert data["offset"] == 0
     assert data["nextOffset"] == 5
@@ -83,6 +85,40 @@ def test_transcript_range_fetch_paginates(
     data = second.json()
     assert data["text"] == " stdout output"
     assert data["eof"] is True
+
+
+def test_transcript_of_a_running_call_is_never_cached(
+    client: TestClient,
+    tmp_path: Path,
+    db_session,
+):
+    call_id = _seed_run(tmp_path=tmp_path, finished=False)
+
+    response = client.get(
+        f"/api/build/transcripts/{call_id}",
+        params={"stream": "stdout", "limit": 5},
+    )
+
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-store"
+
+
+def test_transcript_of_an_abandoned_call_is_cached_immutably(
+    client: TestClient,
+    tmp_path: Path,
+    db_session,
+):
+    # The call never wrote finished_at, but its run died — nothing will append
+    # to that log again, so the chunk is as permanent as a finished call's.
+    call_id = _seed_run(tmp_path=tmp_path, finished=False, run_state="failed")
+
+    response = client.get(
+        f"/api/build/transcripts/{call_id}",
+        params={"stream": "stdout", "limit": 5},
+    )
+
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "public, max-age=31536000, immutable"
 
 
 def test_transcript_missing_file_returns_eof(
