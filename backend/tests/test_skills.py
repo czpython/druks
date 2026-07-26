@@ -148,7 +148,11 @@ def test_collection_routes_install_list_remove(tmp_path, monkeypatch):
         assert created.status_code == 200
         body = created.json()
         assert body["name"] == "o/r"
-        assert body["skills"] == [{"name": "alpha", "description": "one", "enabled": True}]
+        skill = body["skills"][0]
+        assert skill["name"] == "alpha"
+        assert skill["description"] == "one"
+        assert skill["enabled"] is True
+        assert "updatedAt" in skill
         collection_id = body["id"]
 
         # Disable the skill — flips enabled, kept in the collection.

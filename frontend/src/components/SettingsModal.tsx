@@ -15,7 +15,7 @@ import {
   type UpdateExtensionsSettingsRequest,
   type UpdateUserSettingsRequest,
 } from '../api/types'
-import { absTime } from '../lib/format'
+import { absTime, relTimeFromIso } from '../lib/format'
 import { harnessColors } from '../lib/harnessColors'
 
 // The harness a model runs on, resolved from the registry — each harness lists
@@ -816,10 +816,11 @@ export function HarnessConnect({ harness }: { harness: Harness }) {
 }
 
 // ---------------------------------------------------------------------------
-// Skills — collections (real); per-skill enable has no backend, so read-only
+// Skills — a collection is a GitHub repo scanned into one-or-more skills,
+// synced or removed as a unit; each skill can be enabled or disabled on its own.
 // ---------------------------------------------------------------------------
 
-function SkillsPane() {
+export function SkillsPane() {
   const queryClient = useQueryClient()
   const collectionsQuery = useQuery({ queryKey: ['skills'], queryFn: () => api.skillCollections() })
   const [repo, setRepo] = useState('')
@@ -957,7 +958,7 @@ function CollectionCard({
           <span className="sc-repo">{collection.name}</span>
           <span className="sc-meta">
             {collection.skills.length} skill{collection.skills.length === 1 ? '' : 's'} ·{' '}
-            {collection.source}
+            {collection.source} · synced {relTimeFromIso(collection.updatedAt)}
           </span>
         </div>
         <button

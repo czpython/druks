@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from pydantic import ConfigDict
 
 from druks.schemas import BaseResponse
@@ -9,6 +11,7 @@ class SkillResponse(BaseResponse):
     name: str
     description: str
     enabled: bool
+    updated_at: datetime
 
 
 class CollectionResponse(BaseResponse):
@@ -17,4 +20,5 @@ class CollectionResponse(BaseResponse):
     id: str
     source: str
     name: str
+    updated_at: datetime
     skills: list[SkillResponse]
