@@ -564,7 +564,7 @@ fixtures directly without a `conftest.py` or `pytest_plugins` declaration:
 | --- | --- |
 | `druks_db` | A SQLAlchemy `Session` bound to a per-test transaction. Commits become savepoints, and teardown rolls the outer transaction back. |
 | `druks_client` | An authenticated `TestClient` with installed extensions mounted, sharing `druks_db`'s connection. |
-| `druks_redis` | The configured Redis database, flushed before the test. |
+| `druks_redis` | The test Redis database, flushed before the test. |
 | `druks_without_dispatch` | Workflow starts and run-phase writes become no-ops, for tests that stand up no durable engine. |
 | `druks_without_remote_config` | Every `.druks` namespace lookup misses, so prompts resolve to bundled templates and config to its declared defaults. |
 
@@ -610,16 +610,18 @@ call = seed_call(
 app when a test needs its own client or an unauthenticated request path;
 `druks_client` covers the normal authenticated case.
 
-Set `DRUKS_DATABASE_URL` to a dedicated disposable Postgres database before
-running tests. Never point it at a live Druks instance. The plugin creates
-`citext`, imports installed extension models, runs SQLAlchemy `create_all`,
-seeds platform reference rows, and builds the DBOS system tables through DBOS's
-database migrations. It never resets or drops a schema; per-test writes made
-through `druks_db` are rolled back.
+The fixtures never read the application's settings. They read
+`DRUKS_TEST_DATABASE_URL` and `DRUKS_TEST_REDIS_URL`, defaulting to a local
+`druks_test` database and Redis index 15, and they point the code under test at
+the same pair — so a run cannot reach whatever `DRUKS_DATABASE_URL` and
+`DRUKS_REDIS_URL` name. Create the database once (`createdb druks_test`); the dev
+Compose project already does.
 
-Redis must also be reachable. Set `DRUKS_REDIS_URL` to a disposable Redis
-database when using `druks_redis`: that fixture runs `FLUSHDB`, so pointing it at
-a live instance wipes it.
+On that database the plugin creates `citext`, imports installed extension models,
+runs SQLAlchemy `create_all`, seeds platform reference rows, and builds the DBOS
+system tables through DBOS's database migrations. It never resets or drops a
+schema; per-test writes made through `druks_db` are rolled back. `druks_redis`
+runs `FLUSHDB` on the test index.
 
 ## Frontends
 

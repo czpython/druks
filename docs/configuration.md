@@ -19,6 +19,8 @@ Drukbox.
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `DRUKS_DATABASE_URL` | local `druks` Postgres | Application and DBOS database |
+| `DRUKS_TEST_DATABASE_URL` | local `druks_test` Postgres | What the shipped pytest fixtures use — never the application's |
+| `DRUKS_TEST_REDIS_URL` | `redis://127.0.0.1:6379/15` | What the shipped pytest fixtures flush |
 | `DRUKS_REDIS_URL` | `redis://127.0.0.1:6379/0` | Short-lived coordination and caches |
 | `DRUKS_DATA_DIR` | `/var/lib/druks` | Logs, artifacts, installed skills |
 | `DRUKS_LOG_LEVEL` | `INFO` | Python and DBOS log level |

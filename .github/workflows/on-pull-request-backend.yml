@@ -26,8 +26,8 @@ jobs:
     timeout-minutes: 15
     # The suite talks to a real Postgres (the harness runs each test in a rolled-back
     # transaction; the durable tests create their own databases) and a real Redis
-    # (flushed between tests). Defaults in backend/tests match localhost:5432 with
-    # druks/druks/druks and localhost:6379, so this mirrors local dev
+    # (flushed between tests). druks.testing carries its own defaults — the druks_test
+    # database and Redis index 15, never the application's — so this mirrors local dev
     # (deploy/compose.dev.yaml) and needs no env wiring. Images track deploy/compose.yaml.
     services:
       postgres:
@@ -35,7 +35,7 @@ jobs:
         env:
           POSTGRES_USER: druks
           POSTGRES_PASSWORD: druks
-          POSTGRES_DB: druks
+          POSTGRES_DB: druks_test
         ports:
           - 5432:5432
         options: >-

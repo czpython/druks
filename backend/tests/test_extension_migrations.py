@@ -1,8 +1,8 @@
-import os
 from pathlib import Path
 
 from alembic import command
 from alembic.config import Config
+from druks.testing import TEST_DATABASE_URL
 from sqlalchemy import Column, Integer, MetaData, String, Table, create_engine
 
 # The real platform ``alembic.ini`` — its script_location is the one shared env.py
@@ -11,9 +11,6 @@ from sqlalchemy import Column, Integer, MetaData, String, Table, create_engine
 # extension's own version_locations and version_table, isolated from core's history.
 _ALEMBIC_INI = Path(__file__).resolve().parent.parent / "alembic.ini"
 
-TEST_DATABASE_URL = os.environ.get(
-    "DRUKS_DATABASE_URL", "postgresql+psycopg://druks:druks@localhost:5432/druks"
-)
 
 _BASELINE = """\
 import sqlalchemy as sa

@@ -1,4 +1,3 @@
-import os
 from unittest import mock
 
 import pytest
@@ -9,6 +8,7 @@ from druks.extensions.loader import (
     register_workflow_package,
 )
 from druks.models import Base
+from druks.testing import TEST_DATABASE_URL
 
 # A Workflow class resolves its declaring extension at definition time, from
 # packages the loader registers before importing. Tests import workflow modules
@@ -62,9 +62,6 @@ def _no_durable_dispatch(request):
         yield
 
 
-TEST_DATABASE_URL = os.environ.get(
-    "DRUKS_DATABASE_URL", "postgresql+psycopg://druks:druks@localhost:5432/druks"
-)
 
 
 
@@ -114,8 +111,6 @@ _OWN_DATABASE_MODULES = {
     "test_build_durable",
     "test_durable_sdk",
     "test_notifications_durable",
-    "test_scope_durable",
-    "test_usage_durable",
     "test_harness_login_persistence",
     "test_extension_migrations",
     "test_proof_extension_migration",
