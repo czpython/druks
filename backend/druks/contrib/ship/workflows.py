@@ -356,14 +356,7 @@ class Build(Workflow):
     async def declare_merge_intent(self) -> bool:
         """Whether GitHub accepted ownership of the merge."""
         github = get_github_client(load_settings())
-        pull_request = await github.get_pull_request(self.input.repo, self.pr_number)
-        if pull_request["state"] == "closed":
-            return True
-
-        await github.update_pull_request_branch(self.input.repo, self.pr_number)
-        if await github.enable_auto_merge(self.input.repo, pull_request["node_id"]):
-            return True
-        return await github.squash_merge_pull_request(self.input.repo, self.pr_number)
+        return await github.merge_when_ready(self.input.repo, self.pr_number)
 
     # The provisioned branch + PR, published by the first implement — None until then
     # (planning runs against the default branch, and there is no PR to point at).

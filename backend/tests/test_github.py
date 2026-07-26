@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import AsyncMock, call
+from unittest.mock import AsyncMock, Mock, call
 
 import druks.core.apis.github as github_api
 import pytest
@@ -158,6 +158,74 @@ async def test_update_pull_request_branch_raises_other_failures() -> None:
         await client.update_pull_request_branch("ClawHaven/example", 7)
 
     assert raised.value is error
+
+
+def _merge_when_ready_client(
+    *,
+    state: str = "open",
+    auto_merge_accepted: bool = True,
+    squash_merge_accepted: bool = True,
+) -> tuple[_TestGitHubClient, Mock]:
+    client = _TestGitHubClient(SimpleNamespace())
+    operations = Mock()
+    get_pull_request = AsyncMock(return_value={"state": state, "node_id": "PR_node"})
+    update_pull_request_branch = AsyncMock()
+    enable_auto_merge = AsyncMock(return_value=auto_merge_accepted)
+    squash_merge_pull_request = AsyncMock(return_value=squash_merge_accepted)
+    operations.attach_mock(get_pull_request, "get_pull_request")
+    operations.attach_mock(update_pull_request_branch, "update_pull_request_branch")
+    operations.attach_mock(enable_auto_merge, "enable_auto_merge")
+    operations.attach_mock(squash_merge_pull_request, "squash_merge_pull_request")
+    client.get_pull_request = get_pull_request
+    client.update_pull_request_branch = update_pull_request_branch
+    client.enable_auto_merge = enable_auto_merge
+    client.squash_merge_pull_request = squash_merge_pull_request
+    return client, operations
+
+
+async def test_merge_when_ready_short_circuits_closed_pull_request() -> None:
+    client, operations = _merge_when_ready_client(state="closed")
+
+    assert await client.merge_when_ready("ClawHaven/example", 7)
+    assert operations.mock_calls == [call.get_pull_request("ClawHaven/example", 7)]
+
+
+async def test_merge_when_ready_queues_after_updating_branch() -> None:
+    client, operations = _merge_when_ready_client()
+
+    assert await client.merge_when_ready("ClawHaven/example", 7)
+    assert operations.mock_calls == [
+        call.get_pull_request("ClawHaven/example", 7),
+        call.update_pull_request_branch("ClawHaven/example", 7),
+        call.enable_auto_merge("ClawHaven/example", "PR_node"),
+    ]
+
+
+async def test_merge_when_ready_falls_back_to_direct_merge() -> None:
+    client, operations = _merge_when_ready_client(auto_merge_accepted=False)
+
+    assert await client.merge_when_ready("ClawHaven/example", 7)
+    assert operations.mock_calls == [
+        call.get_pull_request("ClawHaven/example", 7),
+        call.update_pull_request_branch("ClawHaven/example", 7),
+        call.enable_auto_merge("ClawHaven/example", "PR_node"),
+        call.squash_merge_pull_request("ClawHaven/example", 7),
+    ]
+
+
+async def test_merge_when_ready_reports_unsettled_merge() -> None:
+    client, operations = _merge_when_ready_client(
+        auto_merge_accepted=False,
+        squash_merge_accepted=False,
+    )
+
+    assert not await client.merge_when_ready("ClawHaven/example", 7)
+    assert operations.mock_calls == [
+        call.get_pull_request("ClawHaven/example", 7),
+        call.update_pull_request_branch("ClawHaven/example", 7),
+        call.enable_auto_merge("ClawHaven/example", "PR_node"),
+        call.squash_merge_pull_request("ClawHaven/example", 7),
+    ]
 
 
 class _OwnerReposClient(GitHubClient):

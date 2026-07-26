@@ -111,8 +111,7 @@ def _stub(
     *,
     plan_approval="human",
     auto_dispatch=False,
-    auto_merge_accepted=True,
-    merge_accepted=True,
+    merge_when_ready_accepted=True,
 ):
     import druks.contrib.ship.workflows as m
     from druks.contrib.ship.contracts import (
@@ -197,26 +196,12 @@ def _stub(
 
     github_calls = []
 
-    async def _get_pull_request(*args, **kwargs):
-        github_calls.append("get_pull_request")
-        return {"state": "open", "node_id": "PR_node"}
-
-    async def _update_pull_request_branch(*args, **kwargs):
-        github_calls.append("update_pull_request_branch")
-
-    async def _enable_auto_merge(*args, **kwargs):
-        github_calls.append("enable_auto_merge")
-        return auto_merge_accepted
-
-    async def _squash_merge_pull_request(*args, **kwargs):
-        github_calls.append("squash_merge_pull_request")
-        return merge_accepted
+    async def _merge_when_ready(*args, **kwargs):
+        github_calls.append("merge_when_ready")
+        return merge_when_ready_accepted
 
     fake_github = SimpleNamespace(
-        get_pull_request=_get_pull_request,
-        update_pull_request_branch=_update_pull_request_branch,
-        enable_auto_merge=_enable_auto_merge,
-        squash_merge_pull_request=_squash_merge_pull_request,
+        merge_when_ready=_merge_when_ready,
         create_issue_comment=_noop,
     )
     monkeypatch.setattr(m, "get_github_client", lambda *args, **kwargs: fake_github)
@@ -239,7 +224,7 @@ async def _start_to_work_gate(rt, item):
     return workflow_id, parked
 
 
-async def test_happy_path_enables_auto_merge(rt, monkeypatch):
+async def test_happy_path_declares_merge_intent(rt, monkeypatch):
     _, github_calls = _stub(monkeypatch, rt)
 
     item = _seed_work_item(rt.engine, repo="acme/widget")
@@ -248,11 +233,7 @@ async def test_happy_path_enables_auto_merge(rt, monkeypatch):
 
     done = await _wait(rt.engine, workflow_id, lambda run: run.state == RunState.FINISHED)
     assert not done.failure
-    assert github_calls == [
-        "get_pull_request",
-        "update_pull_request_branch",
-        "enable_auto_merge",
-    ]
+    assert github_calls == ["merge_when_ready"]
 
     # Shipped settles via GitHub's pr.closed webhook (test_webhooks_pull_request),
     # not the run — the run's job ends when GitHub accepts the merge intent. The durable
@@ -269,33 +250,11 @@ async def test_happy_path_enables_auto_merge(rt, monkeypatch):
     assert [e.type for e in events if e.type.startswith("run.")][-1] == "run.finished"
 
 
-async def test_auto_merge_rejection_falls_back_to_squash_merge(rt, monkeypatch):
+async def test_rejected_merge_intent_reparks_work_gate(rt, monkeypatch):
     _, github_calls = _stub(
         monkeypatch,
         rt,
-        auto_merge_accepted=False,
-    )
-
-    item = _seed_work_item(rt.engine, repo="acme/fallback")
-    workflow_id, parked = await _start_to_work_gate(rt, item)
-    await parked.resume(action="approve")
-
-    done = await _wait(rt.engine, workflow_id, lambda run: run.state == RunState.FINISHED)
-    assert not done.failure
-    assert github_calls == [
-        "get_pull_request",
-        "update_pull_request_branch",
-        "enable_auto_merge",
-        "squash_merge_pull_request",
-    ]
-
-
-async def test_rejected_auto_merge_and_squash_merge_repark_work_gate(rt, monkeypatch):
-    _, github_calls = _stub(
-        monkeypatch,
-        rt,
-        auto_merge_accepted=False,
-        merge_accepted=False,
+        merge_when_ready_accepted=False,
     )
 
     item = _seed_work_item(rt.engine, repo="acme/repark")
@@ -313,12 +272,7 @@ async def test_rejected_auto_merge_and_squash_merge_repark_work_gate(rt, monkeyp
         ),
     )
     assert not reparked.failure
-    assert github_calls == [
-        "get_pull_request",
-        "update_pull_request_branch",
-        "enable_auto_merge",
-        "squash_merge_pull_request",
-    ]
+    assert github_calls == ["merge_when_ready"]
     await reparked.cancel()
 
 

@@ -290,6 +290,17 @@ class GitHubClient:
                 return
             raise
 
+    async def merge_when_ready(self, repo: str, pr_number: int) -> bool:
+        """Whether GitHub accepted ownership of the merge."""
+        pull_request = await self.get_pull_request(repo, pr_number)
+        if pull_request["state"] == "closed":
+            return True
+
+        await self.update_pull_request_branch(repo, pr_number)
+        if await self.enable_auto_merge(repo, pull_request["node_id"]):
+            return True
+        return await self.squash_merge_pull_request(repo, pr_number)
+
     @_retry_on_401
     async def update_pull_request_body(
         self,
