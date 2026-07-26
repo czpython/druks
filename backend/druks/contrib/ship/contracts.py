@@ -8,7 +8,7 @@ from druks.contrib.ship.enums import (
     HumanFeedbackAction,
     ReviewDecision,
 )
-from druks.workflows import Gate, Workflow
+from druks.workflows import Gate, OperatorReply, Workflow
 
 if TYPE_CHECKING:
     from druks.contrib.ship.workflows import Build
@@ -99,6 +99,15 @@ class PlanData(BaseModel):
 
     def uses_recommended_answers(self, picks: dict[str, str]) -> bool:
         return all(question.is_recommended(picks.get(question.id)) for question in self.questions)
+
+    def is_confirmed_by(self, reply: OperatorReply) -> bool:
+        """A plan carrying acceptance criteria that the operator approved as it stands."""
+        return bool(
+            self.acceptance_criteria
+            and reply.action == "approve"
+            and not reply.note
+            and self.uses_recommended_answers(reply.answers)
+        )
 
     def get_answered_questions(self, picks: dict[str, str]) -> list[dict[str, str]]:
         # Each question the operator answered, paired with its answer — what the
