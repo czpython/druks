@@ -1,13 +1,14 @@
 import re
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from druks.contrib import ship
 from druks.contrib.ship.contracts import PlanData
 from druks.contrib.ship.journal import BuildJournal
 from druks.contrib.ship.models import Project, ProjectRepo
 from druks.contrib.ship.prompt_context import BuildPromptContext
 from druks.prompts import render_prompt
-from druks.prompts.resolver import PROMPTS_DIR
 from druks.workflows import FatalError
 
 _OP_TEMPLATES = [
@@ -260,7 +261,7 @@ async def test_contract_context_is_omitted_only_from_code_review():
 def test_build_prompt_context_covers_template_attrs():
     # Every build prompt reads build.<attr>; assert BuildPromptContext carries them
     # all, so a template ref can never outrun the context contract.
-    prompts_dir = PROMPTS_DIR / "ship/build"
+    prompts_dir = Path(ship.__file__).parent / "templates/build"
     templates = sorted(prompts_dir.glob("*.md"))
     assert templates, f"no build prompts under {prompts_dir}"
     attrs: set[str] = set()

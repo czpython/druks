@@ -77,17 +77,10 @@ packages = ["backend/druks"]
 [tool.hatch.build.targets.sdist]
 include = [
     "/backend/druks",
-    "/backend/templates",
     "/LICENSE",
     "/pyproject.toml",
     "/README.md",
 ]
-
-# Ship the prompt templates dir alongside the wheel. ``druks.core.prompts``
-# resolves the path relative to ``backend/`` so the directory has to land
-# at the same height as the ``druks`` package in the installed tree.
-[tool.hatch.build.targets.wheel.force-include]
-"backend/templates" = "templates"
 
 [tool.ruff]
 line-length = 100
