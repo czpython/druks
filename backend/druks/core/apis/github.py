@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import Any, Literal, TypeVar
 
 from githubkit import AppAuthStrategy, AppInstallationAuthStrategy, GitHub
-from githubkit.exception import RequestFailed
+from githubkit.exception import GraphQLFailed, RequestFailed
 
 from druks.core.apis.exceptions import GitHubAppNotConfiguredError, GitHubAppNotInstalledError
 from druks.settings import Settings
@@ -242,17 +242,53 @@ class GitHubClient:
         return response.parsed_data.model_dump()
 
     @_retry_on_401
-    async def squash_merge_pull_request(self, repo: str, pr_number: int) -> dict[str, Any]:
+    async def squash_merge_pull_request(self, repo: str, pr_number: int) -> bool:
         # No commit_title: GitHub then titles the squash commit from the PR title.
         owner, name = repo.split("/", 1)
         gh = await self._for_repo(repo)
-        response = await gh.rest.pulls.async_merge(
-            owner,
-            name,
-            pr_number,
-            data={"merge_method": "squash"},
-        )
-        return response.parsed_data.model_dump()
+        try:
+            response = await gh.rest.pulls.async_merge(
+                owner,
+                name,
+                pr_number,
+                data={"merge_method": "squash"},
+            )
+        except RequestFailed as exc:
+            if exc.response.status_code in {405, 409}:
+                return False
+            raise
+        return response.parsed_data.merged
+
+    @_retry_on_401
+    async def enable_auto_merge(self, repo: str, node_id: str) -> bool:
+        gh = await self._for_repo(repo)
+        try:
+            await gh.async_graphql(
+                """
+                mutation EnablePullRequestAutoMerge($id: ID!) {
+                  enablePullRequestAutoMerge(
+                    input: {pullRequestId: $id, mergeMethod: SQUASH}
+                  ) {
+                    pullRequest { id }
+                  }
+                }
+                """,
+                {"id": node_id},
+            )
+        except GraphQLFailed:
+            return False
+        return True
+
+    @_retry_on_401
+    async def update_pull_request_branch(self, repo: str, pr_number: int) -> None:
+        owner, name = repo.split("/", 1)
+        gh = await self._for_repo(repo)
+        try:
+            await gh.rest.pulls.async_update_branch(owner, name, pr_number)
+        except RequestFailed as exc:
+            if exc.response.status_code == 422:
+                return
+            raise
 
     @_retry_on_401
     async def update_pull_request_body(

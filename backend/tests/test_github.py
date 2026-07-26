@@ -7,7 +7,7 @@ import pytest
 from druks.core.apis.exceptions import GitHubAppNotInstalledError
 from druks.core.apis.github import GitHubClient
 from githubkit import GitHub
-from githubkit.exception import RequestFailed
+from githubkit.exception import GraphQLFailed, RequestFailed
 
 
 class _Parsed:
@@ -77,6 +77,18 @@ async def test_create_review_omits_empty_comments() -> None:
     }
 
 
+async def test_enable_auto_merge_uses_squash_mutation() -> None:
+    gh = SimpleNamespace(async_graphql=AsyncMock())
+    client = _TestGitHubClient(gh)
+
+    assert await client.enable_auto_merge("ClawHaven/example", "PR_node")
+
+    query, variables = gh.async_graphql.await_args.args
+    assert "enablePullRequestAutoMerge" in query
+    assert "mergeMethod: SQUASH" in query
+    assert variables == {"id": "PR_node"}
+
+
 class _FakeResponse:
     def __init__(self, status_code: int) -> None:
         self.status_code = status_code
@@ -86,6 +98,66 @@ def _make_request_failed(status_code: int) -> RequestFailed:
     exc = RequestFailed.__new__(RequestFailed)
     exc.response = _FakeResponse(status_code)  # type: ignore[assignment]
     return exc
+
+
+async def test_enable_auto_merge_absorbs_graphql_rejection() -> None:
+    error = GraphQLFailed(SimpleNamespace(errors=["rejected"]))  # type: ignore[arg-type]
+    client = _TestGitHubClient(SimpleNamespace(async_graphql=AsyncMock(side_effect=error)))
+
+    assert not await client.enable_auto_merge("ClawHaven/example", "PR_node")
+
+
+async def test_enable_auto_merge_raises_transport_failure() -> None:
+    error = _make_request_failed(500)
+    client = _TestGitHubClient(SimpleNamespace(async_graphql=AsyncMock(side_effect=error)))
+
+    with pytest.raises(RequestFailed) as raised:
+        await client.enable_auto_merge("ClawHaven/example", "PR_node")
+
+    assert raised.value is error
+
+
+@pytest.mark.parametrize("status_code", [405, 409])
+async def test_squash_merge_pull_request_absorbs_not_mergeable_status(
+    status_code: int,
+) -> None:
+    pulls = SimpleNamespace(async_merge=AsyncMock(side_effect=_make_request_failed(status_code)))
+    client = _TestGitHubClient(SimpleNamespace(rest=SimpleNamespace(pulls=pulls)))
+
+    assert not await client.squash_merge_pull_request("ClawHaven/example", 7)
+
+
+async def test_squash_merge_pull_request_raises_other_failures() -> None:
+    error = _make_request_failed(422)
+    pulls = SimpleNamespace(async_merge=AsyncMock(side_effect=error))
+    client = _TestGitHubClient(SimpleNamespace(rest=SimpleNamespace(pulls=pulls)))
+
+    with pytest.raises(RequestFailed) as raised:
+        await client.squash_merge_pull_request("ClawHaven/example", 7)
+
+    assert raised.value is error
+
+
+async def test_update_pull_request_branch_accepts_already_current_branch() -> None:
+    pulls = SimpleNamespace(
+        async_update_branch=AsyncMock(side_effect=_make_request_failed(422)),
+    )
+    client = _TestGitHubClient(SimpleNamespace(rest=SimpleNamespace(pulls=pulls)))
+
+    await client.update_pull_request_branch("ClawHaven/example", 7)
+
+    pulls.async_update_branch.assert_awaited_once_with("ClawHaven", "example", 7)
+
+
+async def test_update_pull_request_branch_raises_other_failures() -> None:
+    error = _make_request_failed(409)
+    pulls = SimpleNamespace(async_update_branch=AsyncMock(side_effect=error))
+    client = _TestGitHubClient(SimpleNamespace(rest=SimpleNamespace(pulls=pulls)))
+
+    with pytest.raises(RequestFailed) as raised:
+        await client.update_pull_request_branch("ClawHaven/example", 7)
+
+    assert raised.value is error
 
 
 class _OwnerReposClient(GitHubClient):

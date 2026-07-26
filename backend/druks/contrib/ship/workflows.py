@@ -319,9 +319,10 @@ class Build(Workflow):
     async def _approved_work(self) -> bool:
         # GitHub announces the merge; the pr.closed reaction settles shipped.
         if self._policy.on_approval == "merge":
-            await self.merge()
-        else:
-            await self._clear_draft()
+            if await self.declare_merge_intent():
+                return True
+            return await self._work_gate()
+        await self._clear_draft()
         return True
 
     async def _triage(self) -> bool:
@@ -352,22 +353,17 @@ class Build(Workflow):
         return delivery
 
     @step
-    async def merge(self) -> None:
+    async def declare_merge_intent(self) -> bool:
+        """Whether GitHub accepted ownership of the merge."""
         github = get_github_client(load_settings())
         pull_request = await github.get_pull_request(self.input.repo, self.pr_number)
-        if pull_request.get("state") == "closed":
-            return
-        await github.squash_merge_pull_request(self.input.repo, self.pr_number)
-        if self._policy.delete_branch:
-            try:
-                await github.delete_branch(self.input.repo, self.branch)
-            except Exception:  # noqa: BLE001 — cleanup only
-                logger.warning(
-                    "Could not delete branch %s on %s.",
-                    self.branch,
-                    self.input.repo,
-                    exc_info=True,
-                )
+        if pull_request["state"] == "closed":
+            return True
+
+        await github.update_pull_request_branch(self.input.repo, self.pr_number)
+        if await github.enable_auto_merge(self.input.repo, pull_request["node_id"]):
+            return True
+        return await github.squash_merge_pull_request(self.input.repo, self.pr_number)
 
     # The provisioned branch + PR, published by the first implement — None until then
     # (planning runs against the default branch, and there is no PR to point at).
