@@ -9,7 +9,7 @@ from pydantic import BaseModel
 
 from druks.events.feed import generic_entry
 from druks.events.models import Event
-from druks.models import StoredSubject, Subject
+from druks.models import StoredSubject
 from druks.user_settings.models import SettingsOverride
 
 from .registry import agents as agent_registry
@@ -26,6 +26,7 @@ if TYPE_CHECKING:
 
     from druks.agents import Agent
     from druks.doctor import CheckResult
+    from druks.durable.datastructures import Subject
     from druks.durable.schemas import SubjectActivity, SubjectSummary
     from druks.events.feed import FeedItem
     from druks.settings import Settings
@@ -445,7 +446,7 @@ class Extension:
         cls,
         *,
         type: str,
-        subject: Subject | StoredSubject | None = None,
+        subject: "Subject | StoredSubject | None" = None,
         payload: dict[str, Any] | None = None,
     ) -> None:
         """Record one of this extension's domain events to the log, stamped with the

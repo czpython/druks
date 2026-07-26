@@ -24,7 +24,6 @@ AUTHOR_SURFACE = {
         "WorkflowEvent",
         "get_subject_phase",
         "get_subject_status",
-        "open_subjects",
         "set_run_phase",
         "step",
     },

@@ -21,11 +21,12 @@ from uuid_utils import uuid7
 from druks.accounts.context import current_account_id
 from druks.database import db_session
 from druks.durable.activity import set_run_phase
+from druks.durable.datastructures import Subject
 from druks.durable.engine import _step_engine, register_schedule, run_queue, step_session
 from druks.durable.enums import AgentCallStatus, RunState, WorkflowEvent
 from druks.durable.exceptions import FatalError, GateTimeout, SubjectlessGate, WorkflowError
 from druks.durable.models import AgentCall, Run
-from druks.durable.reads import get_subject_phase, get_subject_status, open_subjects
+from druks.durable.reads import get_subject_phase, get_subject_status
 from druks.durable.schemas import AgentCallResponse, SubjectActivity, SubjectStatus, SubjectSummary
 from druks.events.models import Event
 from druks.extensions.loader import resolve_workflow_extension
@@ -35,7 +36,7 @@ from druks.extensions.settings import (
     validate_setting_override,
     validate_settings_declaration,
 )
-from druks.models import Base, StoredSubject, Subject, snake_name
+from druks.models import Base, StoredSubject, snake_name
 from druks.notifications.outbox import notifications_queue, send_notification
 from druks.sandbox.client import sandbox_client
 from druks.sandbox.constants import SANDBOX_HOST_ROTATE_BEFORE_SECONDS
@@ -63,7 +64,6 @@ __all__ = [
     "WorkflowEvent",
     "get_subject_phase",
     "get_subject_status",
-    "open_subjects",
     "set_run_phase",
     "step",
 ]

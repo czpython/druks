@@ -358,15 +358,15 @@ A subject is what your runs are about — a repository, a work item, a pull
 request. Identity is all the platform needs:
 
 ```python
-from druks.workflows import Subject, open_subjects
+from druks.workflows import Subject, get_subject_status
 
-await Review.start(subject=Subject("pull_request", f"{repo}#{pr_number}"))
+await Review.start(subject=Subject(f"{repo}#{pr_number}", "pull_request"))
 
-open_subjects("pull_request")  # the ones still going, newest first, with status
+status = get_subject_status("pull_request", f"{repo}#{pr_number}")
 ```
 
-`get_subject_status`, `list_subject_timeline`, and `open_subjects` answer for
-that identity alone — no table of yours involved.
+Status, timeline, and the run's own subject record answer for that identity
+alone — no table of yours involved.
 
 When the subject is also a row you keep — one you list, edit, and show fields
 from — subclass `StoredSubject` instead of `Base`, and the class name is the

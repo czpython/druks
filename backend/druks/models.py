@@ -1,5 +1,4 @@
 import re
-from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, ClassVar, Self
 
@@ -34,21 +33,6 @@ class Base(DeclarativeBase):
     @staticmethod
     def utc_now() -> datetime:
         return datetime.now(UTC).replace(microsecond=0)
-
-
-@dataclass(frozen=True, slots=True)
-class Subject:
-    """What a run is about, as identity alone — a pull request, an issue, a
-    conversation. ``Subject("pull_request", "owner/repo#7")`` is all a run, an
-    event, or a read ever needs; an extension that also keeps a row of its own
-    subclasses ``StoredSubject`` instead."""
-
-    subject_type: str
-    id: str
-
-    @property
-    def identity(self) -> dict[str, Any]:
-        return {"type": self.subject_type, "id": self.id}
 
 
 class StoredSubject(Base):

@@ -10,8 +10,8 @@ from sqlalchemy import Engine
 from druks.database import db_session, session_scope
 from druks.durable.activity import get_run_phase
 from druks.durable.live import keepalive_comment, serialize_model_event
-from druks.models import Subject
 
+from .datastructures import Subject
 from .enums import RunState
 from .models import AgentCall, Artifact, Run
 from .schemas import (
@@ -62,7 +62,7 @@ def open_subjects(subject_type: str) -> list[tuple[Subject, SubjectStatus]]:
     from. A subject with rows of its own lists them with ``StoredSubject.list_open``."""
     subject_ids = db_session().scalars(Run.open_subject_ids(subject_type))
     return [
-        (Subject(subject_type, subject_id), get_subject_status(subject_type, subject_id))
+        (Subject(subject_id, subject_type), get_subject_status(subject_type, subject_id))
         for subject_id in subject_ids
     ]
 
