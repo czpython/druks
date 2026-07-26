@@ -20,7 +20,7 @@ function kindLabel(kind: string): string {
 }
 
 export function statusLine(status: SubjectStatus): string {
-  if (status.state === 'pending_input') {
+  if (status.state === 'parked') {
     return parkedLine(status.gate) ?? 'Waiting on you'
   }
   if (status.state === 'running' || status.state === 'scheduled') {

@@ -22,7 +22,7 @@
 export type RunState =
   | 'scheduled'
   | 'running'
-  | 'pending_input'
+  | 'parked'
   | 'finished'
   | 'failed'
   | 'cancelled'
