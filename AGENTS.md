@@ -39,6 +39,33 @@ For extension-surface changes, inspect the proof extension at
   their own `dist/`; do not conflate the two delivery paths.
 - Druks owns generic agent, harness, workspace, sandbox, event, gate, webhook, and
   settings plumbing. Domain-specific policy stays in the extension.
+- The author surface grows by parameter, not by namespace. When an extension needs
+  something the SDK lacks, widen the primitive that already owns the concern — a keyword
+  argument, a method on the class holding the data. Do not add a namespace, a facade, a
+  context object, or a helper module whose only justification is that the call site
+  would read shorter.
+- No author-surface module imports an extension. `druks.workflows`, `druks.agents`,
+  `druks.events`, `druks.signals`, `druks.db`, `druks.schemas`, `druks.prompts`,
+  `druks.durable`, `druks.extensions`, and `druks.webhooks` are what an author imports;
+  a reference to `druks.build` or any other extension inside them inverts the platform.
+- Liveness — is this subject still being worked — derives from run state; never mirror
+  it in a column. An extension's own outcome, such as shipped or cancelled, is a domain
+  fact it does own, and it records that by reacting to run lifecycle.
+- `@step` marks a replay checkpoint, not an expensive call. On replay the body
+  re-executes from the top and completed steps return cached results, so code outside a
+  step runs again. Moving the boundary changes correctness, not performance.
+- Transient live state and mutual exclusion live in Redis, keyed by run id. Neither
+  gets a durable column, a row lock, or an in-process lock.
+- Do not add a store before something reads it, and route a workflow's cadence or pause
+  through its schedule overrides rather than a settings column.
+- A contract is one canonical name and shape that fails loudly on anything else. Do not
+  accept two spellings of the same thing.
+- Extension code does not type-switch over a typed stream. When a projection needs
+  ordering or anchoring, grow the SDK primitive instead of an `isinstance` chain.
+- A read-side field carries identity and facts — gate name, kind, reason code. UI
+  wording lives in the extension's own pages, never on the wire.
+- A shared resource gets one global registry delivered everywhere. Add a scoping axis
+  when a second consumer needs a different answer, not in anticipation.
 
 ## Layout
 
