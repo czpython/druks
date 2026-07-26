@@ -273,11 +273,7 @@ class Build(Workflow):
                 questions=plan.questions,
                 context=unresolved_critique,
             )
-            if (
-                operator_reply.action == "approve"
-                and not operator_reply.note
-                and plan.uses_recommended_answers(operator_reply.answers)
-            ):
+            if plan.is_confirmed_by(operator_reply):
                 return True
             answered_questions = plan.get_answered_questions(operator_reply.answers)
             operator_note = operator_reply.note

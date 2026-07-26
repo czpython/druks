@@ -5,6 +5,7 @@
 import pytest
 from druks.contrib.ship import contracts as O
 from druks.contrib.ship.enums import ReviewDecision
+from druks.workflows import OperatorReply
 from pydantic import ValidationError
 
 MODELS = [
@@ -144,6 +145,19 @@ def test_agreement_needs_every_question_picked_as_recommended():
     assert not confirmed.uses_recommended_answers({"q1": "a"})
     assert not without_recommendation.uses_recommended_answers({"q1": "a"})
     assert O.PlanData().uses_recommended_answers({})
+
+
+def test_confirmation_needs_acceptance_criteria_and_an_unchanged_approval():
+    criteria = [
+        O.AcceptanceCriterionOutput(id="AC-1", description="It ships.", verification="Read it.")
+    ]
+    complete = O.PlanData(acceptance_criteria=criteria)
+
+    assert complete.is_confirmed_by(OperatorReply(action="approve"))
+    assert not complete.is_confirmed_by(OperatorReply(action="approve", note="one more thing"))
+    assert not complete.is_confirmed_by(OperatorReply(action="request_changes"))
+    # An empty plan is never confirmed, however the operator answered it.
+    assert not O.PlanData().is_confirmed_by(OperatorReply(action="approve"))
 
 
 def test_ask_contracts_cap_identity_and_cardinality():
