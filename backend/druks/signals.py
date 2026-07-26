@@ -39,19 +39,20 @@ def subscribe(name: str, **filters: Any) -> Callable[[Subscriber], Subscriber]:
                 expected = expected.name
             matches[lookup] = expected
 
-        async def receiver(_sender: Any, **kwargs: Any) -> None:
+        async def receiver(_sender: Any, **published: Any) -> None:
             for lookup, expected in matches.items():
-                value: Any = kwargs
+                value: Any = published
                 for part in lookup.split("__"):
                     value = value.get(part) if isinstance(value, dict) else None
                 if value != expected:
                     return
+            delivered = {key: value for key, value in published.items() if key not in _ROUTING}
             if subject_class:
-                row = db_session().get(subject_class, int(kwargs["subject"]["id"]))
+                row = db_session().get(subject_class, int(published["subject"]["id"]))
                 if not row:
                     return
-                kwargs["subject"] = row
-            await fn(**{key: value for key, value in kwargs.items() if key not in _ROUTING})
+                delivered["subject"] = row
+            await fn(**delivered)
 
         # weak=False: ``receiver`` is a local closure nothing else references, so a
         # weak ref would drop it the moment registration returns.

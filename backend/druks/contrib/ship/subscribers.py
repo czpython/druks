@@ -7,8 +7,6 @@ from druks.signals import subscribe
 from druks.ticketing.enums import TicketStatus
 from druks.workflows import WorkflowEvent, get_subject_status
 
-# Projections
-
 
 @subscribe(WorkflowEvent.RUNNING, subject=WorkItem)
 async def any_workflow_start_returns_item_to_board(*, subject: WorkItem, **_: object) -> None:
@@ -56,9 +54,6 @@ async def policy_push_reprofiles_the_repo(*, repo: str, paths: list, **_: object
 
         if project_repo:
             await Profile.dispatch(project_repo, refresh_only=True)
-
-
-# Routers
 
 
 @subscribe("pr.review_submitted")

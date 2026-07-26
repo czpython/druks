@@ -192,6 +192,14 @@ class SubjectStatus(BaseResponse):
     def is_parked(self) -> bool:
         return self.state == RunState.PENDING_INPUT
 
+    @property
+    def is_running(self) -> bool:
+        return self.state == RunState.RUNNING
+
+    @property
+    def is_failed(self) -> bool:
+        return self.state == RunState.FAILED
+
 
 class SubjectRow(BaseResponse):
     summary: SerializeAsAny[SubjectSummary]

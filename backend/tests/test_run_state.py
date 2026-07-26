@@ -170,8 +170,8 @@ async def test_lifecycle_subscribers_get_the_payload_before_dbos_commits(db_sess
     seen: list[tuple[str, dict]] = []
 
     @subscribe(WorkflowEvent.FINISHED, run=run.id)
-    async def _reads_both(**kwargs: object) -> None:
-        seen.append((Run.get(run.id).state, kwargs))
+    async def _reads_the_payload(**payload: object) -> None:
+        seen.append((Run.get(run.id).state, payload))
 
     await _emit_run_event(
         run.id,

@@ -54,7 +54,6 @@ __all__ = [
     "Gate",
     "Journal",
     "OperatorReply",
-    "RunState",
     "SubjectActivity",
     "SubjectStatus",
     "SubjectSummary",
@@ -338,7 +337,7 @@ _IO_RETRIES: StepOptions = {"retries_allowed": True, "max_attempts": 5}
 
 async def _emit_run_event(
     workflow_id: str,
-    event: RunState,
+    state: RunState,
     *,
     subject: dict[str, Any] | None,
     facts: dict[str, Any] | None = None,
@@ -350,9 +349,8 @@ async def _emit_run_event(
     # DBOS commits the terminal status — subscribers stay idempotent and read
     # the payload, never derived Run.state. subject comes from the workflow's
     # own arguments, so a replay stamps the same routing every time.
-    # The step names stay ``run.<state>`` while the signal says ``workflow.<verb>``:
-    # a step name is a replay checkpoint identity, so renaming one re-runs that step
-    # for every in-flight run. Vocabulary is the author's; checkpoints are DBOS's.
+    # Step names keep the substrate's state word: a step name is a replay
+    # checkpoint identity, so renaming one re-runs that step for every live run.
     async def _transition() -> dict[str, Any] | None:
         async with step_session() as session:
             run = Run.get(workflow_id)
@@ -365,11 +363,11 @@ async def _emit_run_event(
                 return {
                     "kind": run.kind,
                     "subject": subject,
-                    "payload": _log_run_event(run, event, subject, result),
+                    "payload": _log_run_event(run, state, subject, result),
                 }
 
     transition = await DBOS.run_step_async(
-        StepOptions(name=f"run.{event.value}", **_IO_RETRIES), _transition
+        StepOptions(name=f"run.{state.value}", **_IO_RETRIES), _transition
     )
     if not transition:
         return
@@ -377,20 +375,20 @@ async def _emit_run_event(
     async def _propagate() -> None:
         async with step_session():
             await publish(
-                WorkflowEvent.for_state(event),
+                WorkflowEvent.for_state(state),
                 subject=transition["subject"],
                 kind=transition["kind"],
                 **{k: v for k, v in transition["payload"].items() if k != "kind"},
             )
 
     await DBOS.run_step_async(
-        StepOptions(name=f"run.{event.value}:propagate", **_IO_RETRIES), _propagate
+        StepOptions(name=f"run.{state.value}:propagate", **_IO_RETRIES), _propagate
     )
 
 
 def _log_run_event(
     run: Run,
-    event: RunState,
+    state: RunState,
     subject: dict[str, Any],
     result: Any = None,
 ) -> dict[str, Any]:
@@ -408,7 +406,7 @@ def _log_run_event(
     elif isinstance(result, dict):
         payload["result"] = result
     Event.emit(
-        type=WorkflowEvent.for_state(event),
+        type=WorkflowEvent.for_state(state),
         subject=subject,
         payload=payload,
         extension=workflows.get(run.kind).extension,

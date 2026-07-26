@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field
 
 from druks.contrib.ship.models import Project, ProjectRepo, WorkItem
 from druks.schemas import BaseResponse
-from druks.workflows import RunState, SubjectSummary
+from druks.workflows import SubjectSummary
 
 from .enums import HandoffStatus
 
@@ -27,11 +27,11 @@ class ProjectRepoSummary(BaseResponse):
         # "ready" outranks a later failed re-profile: a stored profile stays usable.
         status = repo.profiler_status()
         profile = repo.effective_profile()
-        if status.state == RunState.RUNNING:
+        if status.is_running:
             profile_status, failure = "running", None
         elif profile:
             profile_status, failure = "ready", None
-        elif status.state == RunState.FAILED:
+        elif status.is_failed:
             profile_status, failure = "failed", status.failure
         else:
             profile_status, failure = "unprofiled", None
