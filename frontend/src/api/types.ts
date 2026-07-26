@@ -410,12 +410,14 @@ export interface Skill {
   name: string
   description: string
   enabled: boolean
+  updatedAt: string
 }
 
 export interface SkillCollection {
   id: string
   source: string
   name: string
+  updatedAt: string
   skills: Skill[]
 }
 
