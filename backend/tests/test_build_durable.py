@@ -115,6 +115,7 @@ def _stub(
 ):
     import druks.contrib.ship.workflows as m
     from druks.contrib.ship.contracts import (
+        AcceptanceCriterionOutput,
         CodeReviewOutput,
         EvaluationOutput,
         ImplementationOutput,
@@ -159,7 +160,16 @@ def _stub(
     # projections read them exactly as in prod. Returns the invocation log
     # (agent ids, in order).
     results = {
-        "generate_plan": PlanData(plan_markdown="p"),
+        # Acceptance criteria are what a human approve confirms — an empty plan
+        # is never confirmed, so this fixture needs one to reach the work gate.
+        "generate_plan": PlanData(
+            plan_markdown="p",
+            acceptance_criteria=[
+                AcceptanceCriterionOutput(
+                    id="AC-1", description="It ships.", verification="Read it."
+                )
+            ],
+        ),
         "review_plan": ReviewOutput(decision=ReviewDecision.APPROVE, body=""),
         "implement": ImplementationOutput.model_validate(
             {
