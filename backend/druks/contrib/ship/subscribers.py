@@ -17,7 +17,7 @@ async def run_start_returns_item_to_board(*, subject: WorkItem, **_: object) -> 
     subject.set_status(None)
 
 
-@subscribe("run.state", kind=Build.kind, subject=WorkItem)
+@subscribe("run.state", workflow=Build, subject=WorkItem)
 async def provision_mirrors_onto_item(
     *, subject: WorkItem, pr_number: int, branch: str, **_: object
 ) -> None:
@@ -26,20 +26,20 @@ async def provision_mirrors_onto_item(
     subject.update(pr_number=pr_number, branch=branch)
 
 
-@subscribe("run.running", kind=Build.kind, subject=WorkItem)
+@subscribe("run.running", workflow=Build, subject=WorkItem)
 async def build_start_marks_ticket_in_progress(*, subject: WorkItem, **_: object) -> None:
     # Every (re)start and gate-resume of a build means the ticket is in progress —
     # including the return from a rework loop that had parked it In Review.
     await subject.set_remote_status(TicketStatus.IN_PROGRESS)
 
 
-@subscribe("run.pending_input", kind=Build.kind, gate=ReviewWork, subject=WorkItem)
+@subscribe("run.pending_input", workflow=Build, gate=ReviewWork, subject=WorkItem)
 async def review_park_marks_ticket_in_review(*, subject: WorkItem, **_: object) -> None:
     await subject.set_remote_status(TicketStatus.IN_REVIEW)
 
 
-@subscribe("run.failed", kind=Build.kind, subject=WorkItem)
-@subscribe("run.cancelled", kind=Build.kind, subject=WorkItem)
+@subscribe("run.failed", workflow=Build, subject=WorkItem)
+@subscribe("run.cancelled", workflow=Build, subject=WorkItem)
 async def build_end_settles_the_item(*, subject: WorkItem, **_: object) -> None:
     # Nothing merged, so the attempt was abandoned — unless the PR already spoke:
     # ship() cancels the run it just shipped, and that cancel arrives here.
@@ -66,7 +66,7 @@ async def pr_review_answers_the_gate(*, repo: str, pr_number: int, payload: dict
     item = WorkItem.get_for_pr(repo=repo, pr_number=pr_number, branch=payload["branch"])
     if not item:
         return
-    status = get_subject_status(item.subject_type, str(item.id), kind=Build.kind)
+    status = get_subject_status(item.subject_type, str(item.id), workflow=Build)
     if status.is_parked and status.gate == ReviewWork.name:
         await ReviewWork.answer(
             item,

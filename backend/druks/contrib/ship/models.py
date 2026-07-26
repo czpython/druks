@@ -287,7 +287,7 @@ class WorkItem(Subject):
         from druks.contrib.ship.workflows import Build
 
         self.set_status(HandoffStatus.SHIPPED)
-        build = get_subject_status(self.subject_type, str(self.id), kind=Build.kind)
+        build = get_subject_status(self.subject_type, str(self.id), workflow=Build)
         if build.is_parked:
             await Build.cancel(self, failure="pr merged while parked")
         await self.set_remote_status(TicketStatus.DONE)

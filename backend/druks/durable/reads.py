@@ -3,7 +3,7 @@
 import asyncio
 from collections.abc import AsyncIterator
 from pathlib import Path
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from sqlalchemy import Engine
 
@@ -25,6 +25,9 @@ from .schemas import (
     TranscriptChunk,
 )
 
+if TYPE_CHECKING:
+    from druks.workflows import Workflow
+
 _TRANSCRIPT_POLL_SECONDS = 0.5
 _TRANSCRIPT_KEEPALIVE_SECONDS = 15.0
 _TERMINAL_CALL_STATES = {"succeeded", "failed", "abandoned"}
@@ -45,8 +48,9 @@ def list_subject_timeline(subject_type: str, subject_id: str) -> list[RunRespons
 
 
 def get_subject_status(
-    subject_type: str, subject_id: str, *, kind: str | None = None
+    subject_type: str, subject_id: str, *, workflow: "type[Workflow] | None" = None
 ) -> SubjectStatus:
+    kind = workflow.kind if workflow else None
     latest = Run.get_latest_for_subject(subject_type, subject_id, kind=kind)
     return _status(latest, _running_calls(latest))
 

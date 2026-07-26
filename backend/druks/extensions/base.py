@@ -371,14 +371,16 @@ class Extension:
 
         subject_model = cls.subject
         assert subject_model
-        kind = subject_model.subject_type
+        subject_type = subject_model.subject_type
 
-        router = APIRouter(prefix=f"/{kind}", tags=[f"{cls.name}:{kind}"])
+        router = APIRouter(prefix=f"/{subject_type}", tags=[f"{cls.name}:{subject_type}"])
 
         def board() -> SubjectList:
             return SubjectList(
                 rows=[
-                    SubjectRow(summary=summary, status=reads.get_subject_status(kind, summary.id))
+                    SubjectRow(
+                        summary=summary, status=reads.get_subject_status(subject_type, summary.id)
+                    )
                     for summary in cls.list_subjects()
                 ]
             )
@@ -393,7 +395,9 @@ class Extension:
             if not summary:
                 return
             activity = await cls.subject_activity(subject)
-            return reads.get_subject_response(kind, subject_id, summary=summary, activity=activity)
+            return reads.get_subject_response(
+                subject_type, subject_id, summary=summary, activity=activity
+            )
 
         @router.get("", response_model=SubjectList, response_model_by_alias=True)
         async def list_subjects() -> SubjectList:
@@ -414,7 +418,7 @@ class Extension:
         async def read_subject(subject_id: str) -> SubjectResponse:
             response = await subject_response(subject_id)
             if not response:
-                raise HTTPException(status.HTTP_404_NOT_FOUND, f"No {kind} {subject_id!r}.")
+                raise HTTPException(status.HTTP_404_NOT_FOUND, f"No {subject_type} {subject_id!r}.")
             return response
 
         @router.get("/{subject_id}/stream", response_class=StreamingResponse)
