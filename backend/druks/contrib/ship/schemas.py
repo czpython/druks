@@ -108,7 +108,7 @@ class WorkItemSummary(SubjectSummary):
     # whose Linear project doesn't map to one.
     project_name: str
     title: str
-    remote_key: str | None = None
+    remote_key: str
     remote_url: str | None = None
     pr_number: int | None = None
     branch: str | None = None
@@ -137,7 +137,7 @@ class WorkItemSummary(SubjectSummary):
 class DashboardItem(BaseResponse):
     key: str
     source_id: int | str
-    ticket_ref: str | None = None
+    ticket_ref: str
     title: str
     repo: str | None = None
     pr_number: int | None = None

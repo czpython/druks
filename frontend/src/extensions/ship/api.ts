@@ -42,7 +42,7 @@ export interface WorkItemSummary extends SubjectSummary {
   repo: string
   projectName: string
   title: string
-  remoteKey?: string | null
+  remoteKey: string
   remoteUrl?: string | null
   prNumber?: number | null
   branch?: string | null

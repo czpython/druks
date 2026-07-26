@@ -408,6 +408,7 @@ def _log_run_event(
     Event.emit(
         type=WorkflowEvent.for_state(state),
         subject=subject,
+        label=run.subject_label,
         payload=payload,
         extension=workflows.get(run.kind).extension,
     )
@@ -751,6 +752,7 @@ class Workflow:
             attributes = {
                 "subject_type": subject.subject_type,
                 "subject_id": str(subject.id),
+                "subject_label": subject.label,
             }
         subject_record = subject.identity if subject else None
         try:

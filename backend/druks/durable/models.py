@@ -16,6 +16,7 @@ from druks.database import db_session, get_session
 from druks.durable.dbos_state import (
     state_expression,
     subject_filter,
+    subject_label_expression,
     updated_at_expression,
     workflow_status,
 )
@@ -64,6 +65,9 @@ class Run(Base):
     # fresh; an already-loaded instance keeps what it read until expired.
     # Read-only; an operator ends a run through cancel().
     state: Mapped[str] = column_property(state_expression(id, input_gate, created_at))
+    # How the subject showed itself when this run started — read with the row, so
+    # every event the run writes names it without a second lookup.
+    subject_label: Mapped[str | None] = column_property(subject_label_expression(id))
     # Who asked; the system account when nobody did (crons, background work).
     account_id: Mapped[str] = mapped_column(
         ForeignKey("accounts.id", ondelete="RESTRICT"), default=SYSTEM_ACCOUNT_ID

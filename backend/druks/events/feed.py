@@ -21,6 +21,7 @@ class FeedItem(BaseResponse):
     workflow: str | None = None
     subject_type: str | None = None
     subject_id: str | None = None
+    subject_label: str | None = None
     # Whatever else the event recorded, stated by its writer — a gate, a failure,
     # a ticket key. What a row carries beyond identity is said at write time.
     facts: dict[str, Any] = Field(default_factory=dict)
@@ -37,6 +38,7 @@ class FeedItem(BaseResponse):
             workflow=facts.pop("kind", None),
             subject_type=event.subject_type,
             subject_id=event.subject_id,
+            subject_label=event.subject_label,
             facts=facts,
         )
 

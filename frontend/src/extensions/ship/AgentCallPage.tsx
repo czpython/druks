@@ -99,7 +99,7 @@ function RunView({
               href={workItemPath(workItemId, summary.remoteKey, summary.title)}
               className="breadcrumb"
             >
-              {summary.remoteKey ?? `#${workItemId}`}
+              {summary.remoteKey}
             </Link>
             <span className="dim">/</span>
             <span title={runId}>#{runId.slice(0, 8)}</span>

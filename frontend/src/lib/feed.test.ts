@@ -38,7 +38,7 @@ describe('eventLine', () => {
     expect(line.bucket).toBe('event-kind-audit')
   })
 
-  it('links a row where the extension says its subject lives', () => {
+  it('names the subject as it showed itself, and links where the extension says', () => {
     const line = eventLine(
       event({
         kind: 'workflow.finished',
@@ -46,10 +46,11 @@ describe('eventLine', () => {
         extension: 'ship',
         subjectType: 'work_item',
         subjectId: '42',
+        subjectLabel: 'ENG-767',
       }),
     )
 
-    expect(line.subject).toBe('work item 42')
+    expect(line.subject).toBe('ENG-767')
     expect(line.path).toBe('/work-items/42')
   })
 
@@ -61,17 +62,24 @@ describe('eventLine', () => {
         extension: 'ship',
         subjectType: 'project_repo',
         subjectId: '3',
+        subjectLabel: 'acme/widget',
       }),
     )
 
     expect(line.label).toBe('profile started')
-    expect(line.subject).toBe('project repo 3')
+    expect(line.subject).toBe('acme/widget')
     expect(line.path).toBeUndefined()
   })
 
   it('reads an unregistered extension without words or a page', () => {
     const line = eventLine(
-      event({ kind: 'summarized', extension: 'field_notes', subjectType: 'note', subjectId: '7' }),
+      event({
+        kind: 'summarized',
+        extension: 'field_notes',
+        subjectType: 'note',
+        subjectId: '7',
+        subjectLabel: 'note 7',
+      }),
     )
 
     expect(line.label).toBe('summarized')

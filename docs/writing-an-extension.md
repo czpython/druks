@@ -449,15 +449,14 @@ recorded automatically. Call `record_event()` inside a platform-bound
 transaction such as a request, durable step, or subscriber.
 
 A feed row carries facts, never prose: its kind, the workflow it came from, the
-subject identity, and the event's payload — a client words them. Whatever a row
-should say beyond identity is stated by its writer, on the event:
+subject identity, and the event's payload — a client words them. Give the subject
+a ``label`` — the one line it shows itself as — and every event written about it
+carries that from then on:
 
 ```python
-NightWatch.record_event(
-    type="report.published",
-    subject=repository,
-    payload={"repo": repository.full_name, "url": report_url},
-)
+class Repository(StoredSubject):
+    def get_label(self) -> str:
+        return self.full_name
 ```
 
 React with filters rather than body guards:

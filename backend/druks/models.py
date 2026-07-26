@@ -58,6 +58,16 @@ class StoredSubject(Base):
             return {"type": self.subject_type, "id": self.id}
         raise ValueError(f"unsaved {type(self).__name__} has no identity — flush it first")
 
+    def get_label(self) -> str:
+        """The one line this subject shows itself as. Override with a stable handle —
+        a ticket key, a PR number — never a mutable title: events snapshot it, and
+        the log should not disagree with itself."""
+        return f"{self.subject_type.replace('_', ' ')} {self.id}"
+
+    @property
+    def label(self) -> str:
+        return self.get_label()
+
     @classmethod
     def list_open(cls, *, limit: int = 50) -> list[Self]:
         """The rows whose newest run hasn't handed off — still going, or failed
