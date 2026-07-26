@@ -36,6 +36,9 @@ At boot Druks imports installed entry points and fails loudly on duplicate
 names, a mismatched entry-point key, malformed target, import failure, or
 unprefixed table.
 
+The project root also carries an `AGENTS.md` holding the contracts a coding agent
+cannot infer from the stubs, and a relative path back to this guide.
+
 ## Package layout
 
 The scaffold separates self-registering capability modules from ordinary
