@@ -6,6 +6,7 @@ from pathlib import Path
 from unittest import mock
 
 import pytest
+import redis.asyncio as aioredis
 from dbos import run_dbos_database_migrations
 from fastapi.testclient import TestClient
 from sqlalchemy import text, update
@@ -47,9 +48,20 @@ __all__ = [
     "seed_run",
 ]
 
+# The fixtures never read the application's settings: DRUKS_DATABASE_URL and
+# DRUKS_REDIS_URL name a live instance, and these fixtures create tables and run
+# FLUSHDB. They carry their own keys, defaulting to a database and a Redis index
+# nothing else uses.
 TEST_DATABASE_URL = os.environ.get(
-    "DRUKS_DATABASE_URL", "postgresql+psycopg://druks:druks@localhost:5432/druks"
+    "DRUKS_TEST_DATABASE_URL", "postgresql+psycopg://druks:druks@localhost:5432/druks_test"
 )
+TEST_REDIS_URL = os.environ.get("DRUKS_TEST_REDIS_URL", "redis://127.0.0.1:6379/15")
+
+# Under pytest, druks IS the test instance. Settings are read from the environment
+# wherever they're needed — the app's Redis dialer among them — so overriding here is
+# what keeps the code under test on the same database and Redis the fixtures own.
+os.environ["DRUKS_DATABASE_URL"] = TEST_DATABASE_URL
+os.environ["DRUKS_REDIS_URL"] = TEST_REDIS_URL
 
 
 @pytest.fixture(scope="session")
@@ -132,7 +144,7 @@ def make_settings(tmp_path: Path, **overrides: object) -> Settings:
         "jira_base_url": None,
         "jira_email": None,
         "jira_api_token": None,
-        "redis_url": "redis://127.0.0.1:6379/0",
+        "redis_url": TEST_REDIS_URL,
         "log_level": "WARNING",
     }
     defaults.update(overrides)
@@ -184,11 +196,12 @@ def druks_client(druks_db: Session, tmp_path: Path) -> Iterator[TestClient]:
 
 @pytest.fixture
 async def druks_redis() -> AsyncIterator[None]:
-    # Drop the client the previous test left — its event loop is gone — then flush
-    # on a fresh one and close it again, so the test body starts with none bound
-    # and every consumer dials on the loop it runs on.
-    druks.redis._client = None
-    await druks.redis.get_client().flushdb()
+    # Bind the test Redis directly rather than through get_client(), which dials
+    # whatever the application is configured to use. Flush on a fresh client and
+    # close it again, so the test body starts with none bound and every consumer
+    # dials on the loop it runs on — the previous test's loop is gone.
+    druks.redis._client = aioredis.from_url(TEST_REDIS_URL)
+    await druks.redis._client.flushdb()
     await druks.redis.close_client()
     yield
 

@@ -1,9 +1,8 @@
-import os
 from pathlib import Path
 
 from alembic import command
 from alembic.config import Config
-from druks.testing import init_db
+from druks.testing import TEST_DATABASE_URL, init_db
 from sqlalchemy import create_engine
 
 # The proof extension's real, shipped migration, run through the shared platform env
@@ -16,9 +15,6 @@ _ALEMBIC_INI = Path(__file__).resolve().parent.parent / "alembic.ini"
 _PACKAGE_ROOT = Path(__file__).resolve().parent / "druks-field_notes" / "druks_field_notes"
 _VERSIONS = _PACKAGE_ROOT / "migrations" / "versions"
 
-TEST_DATABASE_URL = os.environ.get(
-    "DRUKS_DATABASE_URL", "postgresql+psycopg://druks:druks@localhost:5432/druks"
-)
 
 
 def _config() -> Config:

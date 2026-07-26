@@ -25,10 +25,12 @@ browser header extension or `curl -H 'X-Edge-Email: you@example.com'`).
 The dev Compose project creates two databases:
 
 - `druks_dev` for the host-run application
-- `druks` for pytest, which rebuilds its schema during the suite
+- `druks_test` for pytest, which rebuilds its schema during the suite
 
-`.env.example` points the application at `druks_dev`. Do not point the
-development server at the pytest database.
+`.env.example` points the application at `druks_dev`. The suite reaches
+`druks_test` and Redis index 15 through `DRUKS_TEST_DATABASE_URL` and
+`DRUKS_TEST_REDIS_URL`, never through the application's own settings, so the two
+cannot be confused.
 
 Start the backend:
 

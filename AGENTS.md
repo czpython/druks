@@ -84,9 +84,10 @@ For extension-surface changes, inspect the proof extension at
 
 ## Verification
 
-Backend tests need Postgres on `localhost:5432`, with user, password, and database
-`druks` by default. `DRUKS_DATABASE_URL` overrides the application/test database;
-DBOS integration tests also read `DRUKS_TEST_PG`. Start the development database
+Backend tests need Postgres on `localhost:5432` with user and password `druks`, and
+the `druks_test` database. `DRUKS_TEST_DATABASE_URL` overrides it —
+`DRUKS_DATABASE_URL` is the application's and the suite never reads it. DBOS
+integration tests also read `DRUKS_TEST_PG`. Start the development database
 with:
 
 ```bash

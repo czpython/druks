@@ -6,10 +6,10 @@
 #
 #   docker compose -f deploy/compose.dev.yaml up -d
 #
-# Postgres carries two databases: `druks` is the test database (the
-# pytest suite DROPs and rebuilds its schema every session — conftest and
-# CI both default to localhost:5432/druks), `druks_dev` is where the dev
-# server keeps its data, out of the suite's blast radius.
+# Postgres carries two databases: `druks_test` is the test database (the
+# pytest suite DROPs and rebuilds its schema every session), `druks_dev` is
+# where the dev server keeps its data. The suite reaches neither by accident —
+# druks.testing reads DRUKS_TEST_DATABASE_URL, never the application's.
 
 # Explicit project name: the default would be this directory's basename
 # ("deploy"), which any other repo's deploy/ compose would collide with.
@@ -24,7 +24,7 @@ services:
     environment:
       POSTGRES_USER: druks
       POSTGRES_PASSWORD: druks
-      POSTGRES_DB: druks
+      POSTGRES_DB: druks_test
     volumes:
       - dev_postgres_data:/var/lib/postgresql/data
       - ./compose.dev.init.sql:/docker-entrypoint-initdb.d/init.sql:ro
