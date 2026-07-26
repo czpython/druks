@@ -1,0 +1,57 @@
+name: Release
+
+on:
+  release:
+    types:
+      - published
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Git tag to publish, for example v0.0.1.
+        required: true
+
+concurrency:
+  group: release-${{ github.workflow }}-${{ inputs.tag || github.ref }}
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  pypi:
+    name: Publish to PyPI
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/druks/
+    permissions:
+      contents: read
+      id-token: write # required for PyPI Trusted Publisher OIDC exchange
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          # A dispatch publishes the tag it was given; a published release
+          # publishes its own tag. Neither builds whatever main happens to be.
+          ref: ${{ inputs.tag || github.event.release.tag_name }}
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          version: "0.10.9"
+
+      - name: Build wheel + sdist
+        run: uv build --out-dir dist
+
+      - name: Validate distribution metadata
+        run: uv run --with twine twine check --strict dist/*
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
