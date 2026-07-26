@@ -1,5 +1,4 @@
 import pytest
-from druks.contrib.ship.workflows import Build, Profile
 from druks.core.workflows import RefreshTokens
 from druks.durable.enums import RunState
 from druks.durable.exceptions import WorkflowError
@@ -100,10 +99,10 @@ def test_none_owned_package_keeps_bare_kinds():
 def test_in_tree_identities_are_stable():
     # These kinds are durable identities (DBOS workflow names, settings keys,
     # dedup prefixes, step-name prefixes) — byte-for-byte pins.
-    assert Build.kind == "ship.build"
-    assert Profile.kind == "ship.profile"
+    assert workflows.get("ship.build") is not None
+    assert workflows.get("ship.profile") is not None
     assert RefreshTokens.kind == "core.refresh_tokens"
-    assert (Build.extension, RefreshTokens.extension) == ("ship", "core")
+    assert (workflows.get("ship.build").extension, RefreshTokens.extension) == ("ship", "core")
 
 
 def test_steps_capture_the_namespaced_kind():
@@ -127,18 +126,18 @@ def test_steps_capture_the_namespaced_kind():
     assert "alpha.pinger" in captured
 
 
-def test_lifecycle_event_stamps_the_declaring_extension(db_session):
+def test_lifecycle_event_stamps_the_declaring_extension(druks_db):
     # The event's extension derives from the run's kind through the registry —
     # never an argument, never a stored copy on the run.
     register_workflow_package("alpha_pkg", "alpha")
     flow = _workflow("Beacon", "alpha_pkg.workflows")
     run = Run(id="wf-identity-1", kind=flow.kind)
-    db_session.add(run)
-    db_session.flush()
+    druks_db.add(run)
+    druks_db.flush()
 
     payload = _log_run_event(run, RunState.FINISHED, {"type": "note", "id": 1})
 
-    event = db_session.query(Event).filter_by(type="workflow.finished").one()
+    event = druks_db.query(Event).filter_by(type="workflow.finished").one()
     assert payload["run"] == run.id
     assert event.extension == "alpha"
 

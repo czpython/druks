@@ -803,13 +803,14 @@ def _make_step(kind: str, name: str, method: Callable) -> Callable:
     return _step
 
 
-async def _run_instance(
+def _bind_instance(
     cls: type[Workflow],
     subject: dict[str, Any] | None = None,
     input: dict[str, Any] | None = None,
-) -> Any:
+) -> tuple[Workflow, dict[str, Any]]:
+    """A workflow instance carrying its subject and validated input, with the
+    keyword arguments its body takes."""
     instance = cls()
-    instance._workflow_id = DBOS.workflow_id  # type: ignore[assignment]
     instance._subject = subject
     # Platform routing comes off before body validation; an old checkpoint
     # without the key replays account-less.
@@ -823,6 +824,16 @@ async def _run_instance(
         validated = cls._run_input_model.model_validate(input)
         instance.input = validated
         run_kwargs = {name: getattr(validated, name) for name in type(validated).model_fields}
+    return instance, run_kwargs
+
+
+async def _run_instance(
+    cls: type[Workflow],
+    subject: dict[str, Any] | None = None,
+    input: dict[str, Any] | None = None,
+) -> Any:
+    instance, run_kwargs = _bind_instance(cls, subject, input)
+    instance._workflow_id = DBOS.workflow_id  # type: ignore[assignment]
     token = current_workflow.set(instance)
     try:
         return await _execute_run(

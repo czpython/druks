@@ -3,6 +3,7 @@ from pathlib import Path
 
 from alembic import command
 from alembic.config import Config
+from druks.testing import init_db
 from sqlalchemy import create_engine
 
 # The proof extension's real, shipped migration, run through the shared platform env
@@ -32,7 +33,7 @@ def _drop(conn) -> None:
     conn.exec_driver_sql("DROP TABLE IF EXISTS field_notes_notes, alembic_version_field_notes")
 
 
-def test_proof_migration_applies_under_its_own_version_table():
+def test_proof_migration_applies_under_its_own_version_table(request):
     """The proof package's baseline creates its table and records its head in
     ``alembic_version_field_notes`` — its own history, not core's shared table."""
     engine = create_engine(TEST_DATABASE_URL, isolation_level="AUTOCOMMIT")
@@ -50,4 +51,8 @@ def test_proof_migration_applies_under_its_own_version_table():
     finally:
         with engine.connect() as conn:
             _drop(conn)
+        # field_notes is installed, so its table is part of the schema the rest of the
+        # suite reads; put it back for the tests that follow.
+        init_db(engine)
         engine.dispose()
+        request.getfixturevalue("_druks_engine").dispose()

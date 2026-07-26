@@ -1,6 +1,6 @@
 import pytest
-from conftest import make_settings
 from druks.settings import Settings, ensure_data_dirs, load_settings
+from druks.testing import make_settings
 from pydantic import ValidationError
 
 

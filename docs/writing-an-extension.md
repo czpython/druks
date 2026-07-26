@@ -555,6 +555,72 @@ An extension may contribute its own `druks doctor` checks through `checks`.
 Return `druks.doctor.CheckResult`; Druks namespaces the result and converts a
 raising or malformed check into a failure without hiding later checks.
 
+## Test an extension
+
+Installing Druks registers its pytest plugin. An extension can request the
+fixtures directly without a `conftest.py` or `pytest_plugins` declaration:
+
+| Fixture | Contract |
+| --- | --- |
+| `druks_db` | A SQLAlchemy `Session` bound to a per-test transaction. Commits become savepoints, and teardown rolls the outer transaction back. |
+| `druks_client` | An authenticated `TestClient` with installed extensions mounted, sharing `druks_db`'s connection. |
+| `druks_redis` | The configured Redis database, flushed before the test. |
+| `druks_without_dispatch` | Workflow starts and run-phase writes become no-ops, for tests that stand up no durable engine. |
+| `druks_without_remote_config` | Every `.druks` namespace lookup misses, so prompts resolve to bundled templates and config to its declared defaults. |
+
+The fixtures are not autouse. A test that requests `druks_client` also gets
+`druks_db`; Redis is touched only when a test requests `druks_redis`.
+
+Run a workflow's body against a subject with no durable engine — no checkpoints,
+no lifecycle events, no retries:
+
+```python
+from druks.testing import run_workflow
+
+summary = await run_workflow(Sweep, subject=repository, since="2026-07-01")
+```
+
+`@step` calls inside a `run_multistep` body still need the real engine.
+
+Seed platform-owned run and agent-call rows with plain functions:
+
+```python
+from druks.testing import seed_call, seed_run
+
+run = seed_run(
+    druks_db,
+    kind=Sweep.kind,
+    subject=repository,
+    state="running",
+)
+call = seed_call(
+    druks_db,
+    run,
+    NightWatch.report,
+    status="running",
+)
+```
+
+`seed_run` writes both the run row and the DBOS workflow status from which
+`Run.state` is derived. Its `kind` is required. Pass `input_gate` when seeding
+`state="pending_input"`. `seed_call` accepts an `Agent` or its string id.
+
+`make_settings(tmp_path, **overrides)` builds isolated application settings.
+`configure_app_for_test(settings=..., authenticated=False)` returns the mounted
+app when a test needs its own client or an unauthenticated request path;
+`druks_client` covers the normal authenticated case.
+
+Set `DRUKS_DATABASE_URL` to a dedicated disposable Postgres database before
+running tests. Never point it at a live Druks instance. The plugin creates
+`citext`, imports installed extension models, runs SQLAlchemy `create_all`,
+seeds platform reference rows, and builds the DBOS system tables through DBOS's
+database migrations. It never resets or drops a schema; per-test writes made
+through `druks_db` are rolled back.
+
+Redis must also be reachable. Set `DRUKS_REDIS_URL` to a disposable Redis
+database when using `druks_redis`: that fixture runs `FLUSHDB`, so pointing it at
+a live instance wipes it.
+
 ## Frontends
 
 The scaffold ships a minimal `druks_night_watch/dist/index.html`. Replace that
@@ -581,5 +647,6 @@ Import from concern namespaces, not from `druks.durable` or internal modules:
 | `druks.events` | `Event`, `FeedItem` |
 | `druks.prompts` | `render_prompt` |
 | `druks.webhooks` | `Webhook`, `verify_hmac_sha256` |
+| `druks.testing` | `run_workflow`, `seed_run`, `seed_call`, `init_db` — plus the fixtures the plugin registers |
 
 The root `druks` package deliberately exports only its version.

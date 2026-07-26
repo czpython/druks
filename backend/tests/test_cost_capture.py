@@ -12,6 +12,9 @@ from druks.harnesses.claude import (
     collapse_claude_stream,
     extract_claude_cost_from_envelope,
 )
+from druks.testing import seed_call, seed_run
+from druks_field_notes.models import Note
+from druks_field_notes.workflows import Summarize
 
 
 def test_extract_claude_cost_pulls_total_and_usage():
@@ -73,29 +76,29 @@ def test_read_cost_returns_none_for_corrupt_file(tmp_path: Path):
     assert metadata is None
 
 
-def test_record_agent_run_cost_persists_to_db(db_session):
-    from conftest import seed_agent_run
-
-    run = seed_agent_run()
-    run.record_cost(
+def test_record_agent_run_cost_persists_to_db(druks_db):
+    note = Note.create(body="cost capture")
+    run = seed_run(druks_db, kind=Summarize.kind, subject=note)
+    call = seed_call(druks_db, run, "summarize", status="running")
+    call.record_cost(
         cost_usd=1.23,
         cost_metadata={"input_tokens": 200, "model": "claude-opus-4-7"},
     )
 
-    fetched = AgentCall.get(run.id)
+    fetched = AgentCall.get(call.id)
     assert fetched is not None
     assert fetched.cost_usd == 1.23
     assert fetched.cost_metadata == {"input_tokens": 200, "model": "claude-opus-4-7"}
 
 
-def test_record_agent_run_cost_noop_when_empty(db_session):
-    from conftest import seed_agent_run
+def test_record_agent_run_cost_noop_when_empty(druks_db):
+    note = Note.create(body="empty cost")
+    run = seed_run(druks_db, kind=Summarize.kind, subject=note)
+    call = seed_call(druks_db, run, "summarize", status="running")
 
-    run = seed_agent_run()
+    call.record_cost(cost_usd=None, cost_metadata=None)
 
-    run.record_cost(cost_usd=None, cost_metadata=None)
-
-    fetched = AgentCall.get(run.id)
+    fetched = AgentCall.get(call.id)
     assert fetched is not None
     assert fetched.cost_usd is None
     assert fetched.cost_metadata is None

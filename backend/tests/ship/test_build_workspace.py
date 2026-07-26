@@ -34,7 +34,7 @@ def test_build_workspace_grants_related_root_add_dir():
     assert "extra_env" not in kwargs
 
 
-async def test_build_workspace_declares_its_github_mcp(db_session):
+async def test_build_workspace_declares_its_github_mcp(druks_db):
     # The github MCP is build's own declaration, credentialed with the per-repo
     # reviewer token — never an operator catalog entry, never optional (there
     # is no build without github). Delivery ships it whole: wire shape + token

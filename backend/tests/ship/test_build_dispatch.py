@@ -1,15 +1,17 @@
-from conftest import make_test_work_item, seed_run
 from druks.contrib.ship.enums import HandoffStatus
 from druks.contrib.ship.workflows import Build
+from druks.testing import seed_run
+
+from ship.factories import make_test_work_item
 
 
-async def test_dispatch_pulls_cancelled_item_back_onto_the_board(db_session, monkeypatch) -> None:
+async def test_dispatch_pulls_cancelled_item_back_onto_the_board(druks_db, monkeypatch) -> None:
     """A cancelled item rests in History; dispatching its build must clear the
     handoff status so the active board shows the run (and its gates) instead
     of a stale "Cancelled" row."""
     item = make_test_work_item(repo="o/r", title="t", remote_key="ACME-1")
     item.set_status(HandoffStatus.CANCELLED)
-    seed_run(db_session, "run-1")
+    seed_run(druks_db, kind=Build.kind, run_id="run-1")
 
     async def fake_start(cls, **kwargs):
         return "run-1"
@@ -35,13 +37,13 @@ async def test_dispatch_pulls_cancelled_item_back_onto_the_board(db_session, mon
 
 
 async def test_redispatch_to_a_new_run_clears_prior_attempt_branch_and_pr(
-    db_session, monkeypatch
+    druks_db, monkeypatch
 ) -> None:
     """A genuinely new run is a fresh attempt: dispatch points the item at it and
     drops the prior attempt's branch/PR, so a late close for the old PR can't
     resolve this item onto the new run."""
-    seed_run(db_session, "run-old")
-    seed_run(db_session, "run-new")
+    seed_run(druks_db, kind=Build.kind, run_id="run-old")
+    seed_run(druks_db, kind=Build.kind, run_id="run-new")
     item = make_test_work_item(repo="o/r", title="t", remote_key="ACME-2")
     item.update(build_run_id="run-old", pr_number=7, branch="agent/old")
 
@@ -68,10 +70,10 @@ async def test_redispatch_to_a_new_run_clears_prior_attempt_branch_and_pr(
     assert item.branch is None
 
 
-async def test_duplicate_dispatch_keeps_the_live_attempt_routing(db_session, monkeypatch) -> None:
+async def test_duplicate_dispatch_keeps_the_live_attempt_routing(druks_db, monkeypatch) -> None:
     """A duplicate dispatch dedups to the live run — start() hands back its id —
     so the item's branch/PR must survive, or PR routing and board links break."""
-    seed_run(db_session, "run-live")
+    seed_run(druks_db, kind=Build.kind, run_id="run-live")
     item = make_test_work_item(repo="o/r", title="t", remote_key="ACME-3")
     item.update(build_run_id="run-live", pr_number=7, branch="agent/live")
 
@@ -98,7 +100,7 @@ async def test_duplicate_dispatch_keeps_the_live_attempt_routing(db_session, mon
     assert item.branch == "agent/live"
 
 
-def test_update_clears_nullable_with_none_and_skips_omitted(db_session) -> None:
+def test_update_clears_nullable_with_none_and_skips_omitted(druks_db) -> None:
     """update() tells a clear from a skip: pr_number=None clears the column,
     while leaving branch out preserves it."""
     item = make_test_work_item(repo="o/r", title="t", remote_key="ACME-4")

@@ -5,8 +5,8 @@ from fastapi.testclient import TestClient
 
 
 @pytest.fixture
-def client(tmp_path: Path, db_session, monkeypatch):
-    from conftest import configure_app_for_test, make_settings
+def client(tmp_path: Path, druks_db, monkeypatch):
+    from druks.testing import configure_app_for_test, make_settings
 
     monkeypatch.setenv("DRUKS_DATA_DIR", str(tmp_path))
     app = configure_app_for_test(settings=make_settings(tmp_path))

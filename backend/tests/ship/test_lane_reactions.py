@@ -1,20 +1,22 @@
 import druks.contrib.ship.subscribers  # noqa: F401 — registers the lane reactions
 import pytest
-from conftest import make_test_work_item, seed_dbos_status
 from druks.contrib.ship.contracts import ReviewWork
 from druks.contrib.ship.enums import HandoffStatus
 from druks.contrib.ship.models import WorkItem
 from druks.contrib.ship.workflows import Build
 from druks.durable import Run
+from druks.durable.enums import WorkflowEvent
 from druks.signals import publish
+from druks.testing import seed_dbos_status
 from druks.ticketing.enums import TicketStatus
-from druks.workflows import WorkflowEvent
 from uuid_utils import uuid7
+
+from ship.factories import make_test_work_item
 
 pytestmark = pytest.mark.asyncio
 
 
-async def test_workflow_running_puts_item_back_on_board(db_session):
+async def test_run_running_puts_item_back_on_board(druks_db):
     item = make_test_work_item(repo="acme/widget", title="t", source="linear", remote_key="ACME-1")
     item.set_status(HandoffStatus.CANCELLED)
 
@@ -23,7 +25,7 @@ async def test_workflow_running_puts_item_back_on_board(db_session):
     assert WorkItem.get(item.id).status is None
 
 
-async def test_build_lifecycle_reaches_the_tracker(db_session, monkeypatch):
+async def test_build_lifecycle_reaches_the_tracker(druks_db, monkeypatch):
     pushed = []
 
     async def _push(self, status):
@@ -42,7 +44,7 @@ async def test_build_lifecycle_reaches_the_tracker(db_session, monkeypatch):
     assert pushed == [TicketStatus.IN_PROGRESS, TicketStatus.IN_REVIEW]
 
 
-async def test_pr_review_answers_through_the_review_gate(db_session, monkeypatch):
+async def test_pr_review_answers_through_the_review_gate(druks_db, monkeypatch):
     item = make_test_work_item(repo="acme/widget", title="t", source="linear", remote_key="ACME-9")
     item.update(pr_number=12, branch="agent/acme-9")
     run = Run(
@@ -51,10 +53,10 @@ async def test_pr_review_answers_through_the_review_gate(db_session, monkeypatch
         input_gate=ReviewWork.name,
         input_request={"presentation": "external", "label": "Review implementation"},
     )
-    db_session.add(run)
-    db_session.flush()
+    druks_db.add(run)
+    druks_db.flush()
     seed_dbos_status(
-        db_session,
+        druks_db,
         run.id,
         "parked",
         subject=item.identity,
@@ -91,7 +93,7 @@ async def test_pr_review_answers_through_the_review_gate(db_session, monkeypatch
     ]
 
 
-async def test_provision_state_reaches_the_work_item(db_session):
+async def test_provision_state_reaches_the_work_item(druks_db):
     item = make_test_work_item(repo="acme/widget", title="t", source="linear", remote_key="ACME-8")
 
     await publish(

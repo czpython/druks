@@ -5,7 +5,6 @@ from types import SimpleNamespace
 
 import psycopg
 import pytest
-from conftest import init_db
 from druks.agents import Agent, AgentOutput
 from druks.database import configure_session, get_session
 from druks.durable import FatalError, Run, RunState
@@ -13,6 +12,7 @@ from druks.durable.dbos_state import workflow_status
 from druks.durable.engine import configure_engine, init_dbos, launch, shutdown
 from druks.extensions.registry import agents, workflows
 from druks.models import StoredSubject
+from druks.testing import init_db
 from druks.workflows import Gate, Workflow, step
 from pydantic import BaseModel
 from sqlalchemy import create_engine, select

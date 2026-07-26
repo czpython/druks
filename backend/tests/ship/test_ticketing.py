@@ -127,7 +127,7 @@ async def test_set_status_unmapped_raises():
 
 
 def test_get_tracker_resolves_configured_linear(tmp_path, monkeypatch):
-    from conftest import make_settings
+    from druks.testing import make_settings
     from druks.ticketing import linear
 
     monkeypatch.setattr(
@@ -146,7 +146,7 @@ def test_get_tracker_unknown_source_raises():
 
 
 def test_get_tracker_unconfigured_raises(tmp_path, monkeypatch):
-    from conftest import make_settings
+    from druks.testing import make_settings
     from druks.ticketing import linear
 
     # linear_api_key defaults to None — provider exists but isn't configured.
@@ -186,9 +186,10 @@ class _FakeTracker:
 
 
 @pytest.mark.asyncio
-async def test_remote_state_pushes_status(db_session, monkeypatch):
-    from conftest import make_test_work_item
+async def test_remote_state_pushes_status(druks_db, monkeypatch):
     from druks.contrib.ship import models
+
+    from ship.factories import make_test_work_item
 
     item = make_test_work_item(repo="acme/widget", source="linear", remote_key="ACME-1", title="t")
     fake = _FakeTracker()
@@ -200,8 +201,8 @@ async def test_remote_state_pushes_status(db_session, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_remote_state_skips_non_tracker_source(db_session):
-    from conftest import make_test_work_item
+async def test_remote_state_skips_non_tracker_source(druks_db):
+    from ship.factories import make_test_work_item
 
     item = make_test_work_item(repo="acme/widget", source="github", remote_key="#5", title="t")
     # github has no tracker — a no-op that must not raise.
@@ -209,10 +210,11 @@ async def test_remote_state_skips_non_tracker_source(db_session):
 
 
 @pytest.mark.asyncio
-async def test_remote_state_closes_on_failure(db_session, monkeypatch):
-    from conftest import make_test_work_item
+async def test_remote_state_closes_on_failure(druks_db, monkeypatch):
     from druks.contrib.ship import models
     from druks.core.apis.linear import LinearAPIError
+
+    from ship.factories import make_test_work_item
 
     item = make_test_work_item(repo="acme/widget", source="linear", remote_key="ACME-2", title="t")
 
@@ -361,7 +363,7 @@ def test_jira_declares_known_exceptions():
 
 
 def test_get_tracker_resolves_configured_jira(tmp_path, monkeypatch):
-    from conftest import make_settings
+    from druks.testing import make_settings
     from druks.ticketing import jira
 
     monkeypatch.setattr(
@@ -396,7 +398,7 @@ def test_jira_status_names_match_internal_tools_workflow():
 
 
 def test_get_tracker_unconfigured_jira_raises(tmp_path, monkeypatch):
-    from conftest import make_settings
+    from druks.testing import make_settings
     from druks.ticketing import jira
 
     monkeypatch.setattr(jira, "load_settings", lambda: make_settings(tmp_path))

@@ -1,7 +1,6 @@
 import json
 from unittest import mock
 
-from conftest import make_settings, seed_agent_run
 from druks.durable.schemas import AgentCallFiles
 from druks.harnesses.artifacts import persist_manifest
 from druks.harnesses.base import Harness
@@ -11,6 +10,9 @@ from druks.mcp.helpers import get_bearer_token_env_var
 from druks.sandbox.datastructures import McpServer
 from druks.skills.datastructures import InstalledSkill
 from druks.skills.models import Skill, SkillCollection
+from druks.testing import make_settings, seed_call, seed_run
+from druks_field_notes.models import Note
+from druks_field_notes.workflows import Summarize
 
 _LINEAR_URL = "https://mcp.linear.app/mcp"
 _LINEAR_ENV = get_bearer_token_env_var("linear")
@@ -46,7 +48,7 @@ def _seed_skills(*names: str, disabled: tuple[str, ...] = ()) -> None:
 # --- the recorded capability set ------------------------------------------
 
 
-def test_manifest_records_the_delivered_capability_set(db_session):
+def test_manifest_records_the_delivered_capability_set(druks_db):
     """Records model, harness, each MCP server's declared/delivered/token
     presence, and the enabled skills."""
     models.McpServer.create(name="linear", url=_LINEAR_URL, token=_TOKEN)
@@ -83,7 +85,7 @@ def test_manifest_records_the_delivered_capability_set(db_session):
     assert github_entry["token_present"] is True
 
 
-def test_missing_mcp_token_records_absence(db_session):
+def test_missing_mcp_token_records_absence(druks_db):
     """A delivered server whose bearer var is absent from the run env reads
     token_present False — recorded, not failed."""
     models.McpServer.create(name="linear", url=_LINEAR_URL, token=_TOKEN)
@@ -98,7 +100,7 @@ def test_missing_mcp_token_records_absence(db_session):
     assert linear_entry["token_present"] is False
 
 
-def test_declared_but_undelivered_server_still_reads_declared(db_session):
+def test_declared_but_undelivered_server_still_reads_declared(druks_db):
     """An enabled registry server is declared even on a call that didn't
     deliver it — declared True, delivered False, so the manifest shows exactly
     what this call ran without."""
@@ -112,7 +114,7 @@ def test_declared_but_undelivered_server_still_reads_declared(db_session):
     assert linear_entry["token_present"] is False
 
 
-def test_records_the_delivered_server_not_the_registry_duplicate(db_session):
+def test_records_the_delivered_server_not_the_registry_duplicate(druks_db):
     """When a workspace requires a server under an enabled entry's name, the
     workspace's wins delivery — the manifest records what the harness actually
     ran (the delivered url/env var), not the registry's values."""
@@ -136,7 +138,7 @@ def test_records_the_delivered_server_not_the_registry_duplicate(db_session):
 # --- hash: identical capabilities bucket together --------------------------
 
 
-def test_hash_is_stable_for_identical_capabilities(db_session):
+def test_hash_is_stable_for_identical_capabilities(druks_db):
     """Identical capability sets hash the same; changing the model, MCP token
     availability, or the enabled skill set moves the hash."""
     models.McpServer.create(name="linear", url=_LINEAR_URL, token=_TOKEN)
@@ -156,7 +158,7 @@ def test_hash_is_stable_for_identical_capabilities(db_session):
     assert without_token["manifest_hash"] != baseline["manifest_hash"]
 
 
-def test_disabling_a_skill_changes_the_recorded_set_and_the_hash(db_session):
+def test_disabling_a_skill_changes_the_recorded_set_and_the_hash(druks_db):
     """The skills tar excludes disabled skills, so the enabled set is the call's
     real skill capability: recorded and hashed, so two calls with different
     enabled skills bucket apart."""
@@ -165,7 +167,7 @@ def test_disabling_a_skill_changes_the_recorded_set_and_the_hash(db_session):
     assert both["skills_enabled"] == ["alpha", "beta"]
 
     Skill.get("beta").enabled = False
-    db_session.flush()
+    druks_db.flush()
     one = _build()
 
     assert one["skills_enabled"] == ["alpha"]
@@ -175,7 +177,7 @@ def test_disabling_a_skill_changes_the_recorded_set_and_the_hash(db_session):
 # --- presence, never the value -------------------------------------------
 
 
-def test_manifest_records_token_presence_never_the_value(db_session):
+def test_manifest_records_token_presence_never_the_value(druks_db):
     """The secret token never lands in the manifest — only its env-var name and
     a presence boolean."""
     models.McpServer.create(name="linear", url=_LINEAR_URL, token=_TOKEN)
@@ -188,7 +190,7 @@ def test_manifest_records_token_presence_never_the_value(db_session):
     assert _LINEAR_ENV in serialized  # the var name is safe to record
 
 
-def test_manifest_stays_presence_only_for_a_declared_header_server(db_session):
+def test_manifest_stays_presence_only_for_a_declared_header_server(druks_db):
     """A server delivered with declared headers records the same presence-only
     entry: no header value — plain or secret — lands in the manifest, and a
     bearer-less server simply reads token_present False."""
@@ -223,7 +225,7 @@ def test_manifest_stays_presence_only_for_a_declared_header_server(db_session):
 # --- persistence + surfacing in transcript files -------------------------
 
 
-def test_persist_writes_manifest_into_the_call_dir(tmp_path, db_session):
+def test_persist_writes_manifest_into_the_call_dir(tmp_path, druks_db):
     manifest = _build()
 
     path = persist_manifest(tmp_path, call_id="call-1", manifest=manifest)
@@ -232,10 +234,12 @@ def test_persist_writes_manifest_into_the_call_dir(tmp_path, db_session):
     assert json.loads(path.read_text())["manifest_hash"] == manifest["manifest_hash"]
 
 
-def test_manifest_surfaces_in_agent_call_files(tmp_path, db_session):
+def test_manifest_surfaces_in_agent_call_files(tmp_path, druks_db):
     """A written manifest.json is inventoried on the call's transcript files, in
     the manifest slot under its downloadable file name."""
-    call = seed_agent_run(agent="implement")
+    note = Note.create(body="manifest")
+    run = seed_run(druks_db, kind=Summarize.kind, subject=note)
+    call = seed_call(druks_db, run, "summarize", status="running")
     manifest = _build()
     with mock.patch("druks.durable.models.load_settings", return_value=make_settings(tmp_path)):
         persist_manifest(call.call_dir.parent, call_id=call.call_dir.name, manifest=manifest)

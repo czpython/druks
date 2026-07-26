@@ -2,7 +2,6 @@ import json
 from pathlib import Path
 
 import pytest
-from conftest import configure_app_for_test, make_settings
 from druks.extensions.registry import mcp_servers
 from druks.harnesses.claude import ClaudeHarness
 from druks.harnesses.codex import CodexHarness
@@ -18,6 +17,7 @@ from druks.mcp.helpers import get_bearer_token_env_var
 from druks.mcp.models import McpServer
 from druks.sandbox.datastructures import RequiredMcpServer, Workspace
 from druks.settings import PACKAGED_MCP_CATALOG
+from druks.testing import configure_app_for_test, make_settings
 from fastapi.testclient import TestClient
 
 _LINEAR_URL = "https://mcp.linear.app/mcp"
@@ -58,7 +58,7 @@ def _requiring_workspace(*servers: RequiredMcpServer) -> Workspace:
 # --- custom servers: CRUD + enable/disable -------------------------------
 
 
-def test_create_lists_and_deletes(db_session):
+def test_create_lists_and_deletes(druks_db):
     server = McpServer.create(name="linear", url=_LINEAR_URL, token=_TOKEN)
 
     by_name = McpServer.get_for_name("linear")
@@ -70,23 +70,23 @@ def test_create_lists_and_deletes(db_session):
     assert not McpServer.get_for_name("linear")
 
 
-def test_enable_disable_moves_in_and_out_of_the_enabled_set(db_session):
+def test_enable_disable_moves_in_and_out_of_the_enabled_set(druks_db):
     server = McpServer.create(name="linear", url=_LINEAR_URL, token=_TOKEN)
     assert "linear" in {s["name"] for s in McpServer.list_enabled()}
 
     server.is_enabled = False
-    db_session.flush()
+    druks_db.flush()
     assert "linear" not in {s["name"] for s in McpServer.list_enabled()}
 
     server.is_enabled = True
-    db_session.flush()
+    druks_db.flush()
     assert "linear" in {s["name"] for s in McpServer.list_enabled()}
 
 
 # --- name validity: one identifier, shell/TOML-safe ----------------------
 
 
-def test_create_rejects_names_that_break_env_or_config(db_session):
+def test_create_rejects_names_that_break_env_or_config(druks_db):
     # A hyphen breaks the sourced ``KEY='value'`` env line and the codex TOML key
     # path; a leading digit and uppercase are rejected for the same reason.
     for bad in ("linear-app", "1linear", "Linear", "linear.app", "linear app"):
@@ -94,7 +94,7 @@ def test_create_rejects_names_that_break_env_or_config(db_session):
             McpServer.create(name=bad, url=_LINEAR_URL, token=_TOKEN)
 
 
-def test_valid_name_derives_shell_safe_env_var(db_session):
+def test_valid_name_derives_shell_safe_env_var(druks_db):
     server = McpServer.create(name="linear_app", url=_LINEAR_URL, token=_TOKEN)
     # Every char of the derived var is a valid shell identifier char.
     var = get_bearer_token_env_var(server.name)
@@ -106,7 +106,7 @@ def test_valid_name_derives_shell_safe_env_var(db_session):
 # --- delivery at the workspace seam --------------------------------------
 
 
-async def test_delivery_carries_static_token_in_env(db_session):
+async def test_delivery_carries_static_token_in_env(druks_db):
     McpServer.create(name="linear", url=_LINEAR_URL, token=_TOKEN)
 
     kwargs = await _delivery()
@@ -118,7 +118,7 @@ async def test_delivery_carries_static_token_in_env(db_session):
     assert _TOKEN not in repr(linear)
 
 
-async def test_required_server_delivers_beside_the_registry(db_session):
+async def test_required_server_delivers_beside_the_registry(druks_db):
     # A workspace declares a server with a run-scoped token it minted itself
     # (Ship's per-repo reviewer token): wire shape + env var ride the same
     # seam as every registry server.
@@ -138,7 +138,7 @@ async def test_required_server_delivers_beside_the_registry(db_session):
     assert "linear" in {s.name for s in kwargs["mcp_servers"]}
 
 
-async def test_required_server_owns_its_name_against_a_registry_twin(db_session):
+async def test_required_server_owns_its_name_against_a_registry_twin(druks_db):
     # Exactly one wire entry per name — the workspace's — and the registry twin
     # is skipped whole: its token neither clobbers the required server's
     # credential in env nor gets resolved at all (a tokenless twin would
@@ -163,7 +163,7 @@ async def test_required_server_owns_its_name_against_a_registry_twin(db_session)
     assert kwargs["extra_env"][get_bearer_token_env_var("notion")] == "notion-token"
 
 
-async def test_duplicate_required_names_are_refused(db_session):
+async def test_duplicate_required_names_are_refused(druks_db):
     # Two servers under one name would collide in the emitted harness config
     # (one TOML table / JSON key per name) — refused loudly at delivery.
     workspace = _requiring_workspace(
@@ -180,7 +180,7 @@ def test_required_server_token_stays_out_of_reprs():
     assert "ghs_secret" not in repr(required)
 
 
-async def test_enabled_static_server_without_token_raises_loudly(db_session):
+async def test_enabled_static_server_without_token_raises_loudly(druks_db):
     # A tokenless enabled static row can't authenticate; delivery raises rather
     # than shipping a header the harness can't fill. (The API rejects creating
     # one; this guards the model-level path.)
@@ -190,7 +190,7 @@ async def test_enabled_static_server_without_token_raises_loudly(db_session):
         await _delivery()
 
 
-async def test_enabled_server_reaches_both_harness_configs_without_token(db_session):
+async def test_enabled_server_reaches_both_harness_configs_without_token(druks_db):
     McpServer.create(name="linear", url=_LINEAR_URL, token=_TOKEN)
     kwargs = await _delivery()
     servers = kwargs["mcp_servers"]
@@ -217,7 +217,7 @@ async def test_enabled_server_reaches_both_harness_configs_without_token(db_sess
     assert kwargs["extra_env"][get_bearer_token_env_var("linear")] == _TOKEN
 
 
-async def test_delivery_tolerates_explicit_none_extra_env(db_session):
+async def test_delivery_tolerates_explicit_none_extra_env(druks_db):
     # ``extra_env=None`` is valid for the underlying run_agent; the fold must treat
     # it like an omitted env, not unpack None (which would crash the call before it
     # starts). A static server still rides via its own delivery env.
@@ -243,7 +243,7 @@ def _grafana_shaped_server() -> None:
     )
 
 
-async def test_declared_headers_deliver_inline_and_secret_values_ride_env(db_session):
+async def test_declared_headers_deliver_inline_and_secret_values_ride_env(druks_db):
     _grafana_shaped_server()
 
     kwargs = await _delivery()
@@ -261,7 +261,7 @@ async def test_declared_headers_deliver_inline_and_secret_values_ride_env(db_ses
     assert get_bearer_token_env_var("grafana") not in kwargs["extra_env"]
 
 
-async def test_two_header_server_emits_both_headers_in_each_harness_config(db_session):
+async def test_two_header_server_emits_both_headers_in_each_harness_config(druks_db):
     _grafana_shaped_server()
     kwargs = await _delivery()
     servers = kwargs["mcp_servers"]
@@ -288,7 +288,7 @@ async def test_two_header_server_emits_both_headers_in_each_harness_config(db_se
     assert "grafana-api-secret" not in codex_config
 
 
-async def test_bearer_and_declared_headers_combine_on_one_server(db_session):
+async def test_bearer_and_declared_headers_combine_on_one_server(druks_db):
     # A static-token server may also declare plain headers; the Authorization
     # bearer keeps its env-ref form beside them.
     McpServer.create(
@@ -309,7 +309,7 @@ async def test_bearer_and_declared_headers_combine_on_one_server(db_session):
     assert kwargs["extra_env"][get_bearer_token_env_var("acme")] == _TOKEN
 
 
-async def test_bearerless_server_delivers_without_a_bearer(db_session):
+async def test_bearerless_server_delivers_without_a_bearer(druks_db):
     # The loud MissingTokenError is a static-source contract; a bearerless
     # server (auth in its headers, or no auth) delivers without any bearer.
     McpServer.create(name="public_docs", url="https://docs.example.com/mcp", token_source="")
@@ -321,7 +321,7 @@ async def test_bearerless_server_delivers_without_a_bearer(db_session):
     assert "extra_env" not in kwargs
 
 
-def test_bearerless_server_resolves_ready_with_its_headers(db_session):
+def test_bearerless_server_resolves_ready_with_its_headers(druks_db):
     _grafana_shaped_server()
 
     grafana = McpServer.get_resolved()["grafana"]
@@ -336,7 +336,7 @@ def test_bearerless_server_resolves_ready_with_its_headers(db_session):
 # --- API: CRUD + enable/disable + redaction ------------------------------
 
 
-def test_routes_crud_and_token_stays_backend_side(tmp_path, db_session):
+def test_routes_crud_and_token_stays_backend_side(tmp_path, druks_db):
     with TestClient(configure_app_for_test(settings=make_settings(tmp_path))) as client:
         created = client.post(
             "/api/mcp-servers", json={"name": "linear", "url": _LINEAR_URL, "token": _TOKEN}
@@ -373,7 +373,7 @@ def test_routes_crud_and_token_stays_backend_side(tmp_path, db_session):
         assert not any(s["name"] == "linear" for s in client.get("/api/mcp-servers").json())
 
 
-def test_routes_reject_invalid_name(tmp_path, db_session):
+def test_routes_reject_invalid_name(tmp_path, druks_db):
     with TestClient(configure_app_for_test(settings=make_settings(tmp_path))) as client:
         created = client.post(
             "/api/mcp-servers", json={"name": "linear-app", "url": _LINEAR_URL, "token": _TOKEN}
@@ -382,7 +382,7 @@ def test_routes_reject_invalid_name(tmp_path, db_session):
         assert "Invalid MCP server name" in created.text
 
 
-def test_routes_reject_creating_a_tokenless_custom_server(tmp_path, db_session):
+def test_routes_reject_creating_a_tokenless_custom_server(tmp_path, druks_db):
     url = "https://mcp.notion.com/sse"
     with TestClient(configure_app_for_test(settings=make_settings(tmp_path))) as client:
         # A custom server is static; a blank (or whitespace-only) token would
@@ -395,7 +395,7 @@ def test_routes_reject_creating_a_tokenless_custom_server(tmp_path, db_session):
         assert not any(s["name"] == "notion" for s in client.get("/api/mcp-servers").json())
 
 
-def test_routes_reject_creating_a_urlless_custom_server(tmp_path, db_session):
+def test_routes_reject_creating_a_urlless_custom_server(tmp_path, druks_db):
     with TestClient(configure_app_for_test(settings=make_settings(tmp_path))) as client:
         # A blank (or whitespace-only) url is an unreachable endpoint that would
         # ship into every VM; rejected server-side, not just disabled in the UI.
@@ -408,7 +408,7 @@ def test_routes_reject_creating_a_urlless_custom_server(tmp_path, db_session):
         assert not any(s["name"] == "notion" for s in client.get("/api/mcp-servers").json())
 
 
-def test_routes_reject_adding_a_builtin(tmp_path, registry_state, db_session):
+def test_routes_reject_adding_a_builtin(tmp_path, registry_state, druks_db):
     load_mcp_catalog(_write_catalog(tmp_path, {"figma_test": _static_entry("https://f/")}))
     with TestClient(configure_app_for_test(settings=make_settings(tmp_path))) as client:
         # A catalog entry is built-in — you configure it, you don't add it.
@@ -419,7 +419,7 @@ def test_routes_reject_adding_a_builtin(tmp_path, registry_state, db_session):
         assert "built-in" in created.text
 
 
-def test_routes_disable_and_refuse_deleting_a_builtin(tmp_path, registry_state, db_session):
+def test_routes_disable_and_refuse_deleting_a_builtin(tmp_path, registry_state, druks_db):
     load_mcp_catalog(_write_catalog(tmp_path, {"figma_test": _static_entry("https://f/")}))
     with TestClient(configure_app_for_test(settings=make_settings(tmp_path))) as client:
         figma = next(s for s in client.get("/api/mcp-servers").json() if s["name"] == "figma_test")
@@ -453,7 +453,7 @@ def _static_entry(url):
     return {"url": url, "auth": {"type": "static"}}
 
 
-def test_packaged_catalog_ships_linear_disabled(registry_state, db_session):
+def test_packaged_catalog_ships_linear_disabled(registry_state, druks_db):
     # The one packaged default: Linear's hosted MCP, shipped dark — an oauth
     # entry has no grant until an operator connects it, and an enabled
     # unconnected one would fail every run's delivery. Ship's github MCP is
@@ -471,7 +471,7 @@ def test_packaged_catalog_ships_linear_disabled(registry_state, db_session):
 
 
 async def test_packaged_catalog_delivers_nothing_until_linear_is_connected(
-    registry_state, db_session
+    registry_state, druks_db
 ):
     # The regression the disabled default exists for: a fresh install has no
     # grant, and delivery fails loudly for an enabled unconnected oauth server
@@ -544,7 +544,7 @@ def test_load_catalog_missing_file_fails_loudly(tmp_path):
         load_mcp_catalog(tmp_path / "absent.json")
 
 
-def test_db_overlay_still_disables_a_catalog_entry(tmp_path, registry_state, db_session):
+def test_db_overlay_still_disables_a_catalog_entry(tmp_path, registry_state, druks_db):
     load_mcp_catalog(
         _write_catalog(tmp_path, {"figma_test": _static_entry("https://mcp.figma.test/")})
     )
@@ -556,7 +556,7 @@ def test_db_overlay_still_disables_a_catalog_entry(tmp_path, registry_state, db_
     assert "figma_test" not in {s["name"] for s in McpServer.list_enabled()}
 
 
-def test_catalog_enabled_false_ships_the_entry_dark(tmp_path, registry_state, db_session):
+def test_catalog_enabled_false_ships_the_entry_dark(tmp_path, registry_state, druks_db):
     # ``enabled`` is the catalog's shipped default, not operator state: false
     # resolves disabled until an operator row says otherwise; an entry without
     # the key stays enabled exactly as before the field existed.
@@ -582,7 +582,7 @@ def test_catalog_enabled_false_ships_the_entry_dark(tmp_path, registry_state, db
 
 
 async def test_static_from_env_delivers_the_token_from_process_env(
-    tmp_path, registry_state, monkeypatch, db_session
+    tmp_path, registry_state, monkeypatch, druks_db
 ):
     load_mcp_catalog(_write_catalog(tmp_path, {"vault_test": _env_entry()}))
     monkeypatch.setenv("VAULT_TEST_TOKEN", "vault-secret")
@@ -598,7 +598,7 @@ async def test_static_from_env_delivers_the_token_from_process_env(
 
 
 async def test_static_from_env_unset_var_fails_loudly_at_delivery(
-    tmp_path, registry_state, monkeypatch, db_session
+    tmp_path, registry_state, monkeypatch, druks_db
 ):
     load_mcp_catalog(_write_catalog(tmp_path, {"vault_test": _env_entry()}))
     monkeypatch.delenv("VAULT_TEST_TOKEN", raising=False)
@@ -608,7 +608,7 @@ async def test_static_from_env_unset_var_fails_loudly_at_delivery(
 
 
 async def test_definition_auth_wins_over_an_overlay_row_token(
-    tmp_path, registry_state, monkeypatch, db_session
+    tmp_path, registry_state, monkeypatch, druks_db
 ):
     # Precedence: for a catalog-managed name the definition's auth strategy
     # decides how the token is sourced — a row token is inert for env-sourced
@@ -623,7 +623,7 @@ async def test_definition_auth_wins_over_an_overlay_row_token(
 
 
 def test_api_has_token_reflects_env_presence_for_env_sourced(
-    tmp_path, registry_state, monkeypatch, db_session
+    tmp_path, registry_state, monkeypatch, druks_db
 ):
     load_mcp_catalog(_write_catalog(tmp_path, {"vault_test": _env_entry()}))
     monkeypatch.delenv("VAULT_TEST_TOKEN", raising=False)

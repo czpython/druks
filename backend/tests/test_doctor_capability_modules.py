@@ -2,8 +2,8 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 
-from conftest import make_settings
 from druks import doctor
+from druks.testing import make_settings
 
 # A module that DEFINES a Webhook self-registers it as an import side effect, but
 # autodiscover only imports leaf modules named for their role. Under the natural

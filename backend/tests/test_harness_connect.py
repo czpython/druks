@@ -47,7 +47,7 @@ _CLAUDE_GRANT = {
 }
 
 
-async def test_claude_connect_start_builds_url_and_stashes_pending(db_session):
+async def test_claude_connect_start_builds_url_and_stashes_pending(druks_db):
     url, flow_id = await ClaudeHarness.connect_start()
     assert url.startswith("https://claude.ai/oauth/authorize?")
     assert "code=true" in url
@@ -60,13 +60,13 @@ async def test_claude_connect_start_builds_url_and_stashes_pending(db_session):
     assert not pending["account_id"]
 
 
-async def test_connect_start_binds_the_operator_account(db_session):
+async def test_connect_start_binds_the_operator_account(druks_db):
     _, flow_id = await ClaudeHarness.connect_start(account_id="acct-1")
     pending = await _pending(flow_id)
     assert pending["account_id"] == "acct-1"
 
 
-async def test_claude_connect_complete_returns_the_exchange(monkeypatch, db_session):
+async def test_claude_connect_complete_returns_the_exchange(monkeypatch, druks_db):
     _, flow_id = await ClaudeHarness.connect_start(account_id="acct-1")
     calls = _mock_post(monkeypatch, _resp(200, _CLAUDE_GRANT))
     completed = await ClaudeHarness.connect_complete(flow_id=flow_id, pasted="thecode")
@@ -86,7 +86,7 @@ async def test_claude_connect_complete_returns_the_exchange(monkeypatch, db_sess
     assert not await _pending(flow_id)
 
 
-async def test_concurrent_connect_flows_do_not_clobber_each_other(monkeypatch, db_session):
+async def test_concurrent_connect_flows_do_not_clobber_each_other(monkeypatch, druks_db):
     # Two people connect the same harness at once: distinct flow ids, both
     # pendings live, and completing one leaves the other completable.
     _, first_flow = await ClaudeHarness.connect_start()
@@ -105,7 +105,7 @@ async def test_concurrent_connect_flows_do_not_clobber_each_other(monkeypatch, d
     assert second.provider_email == "other@example.com"
 
 
-async def test_connect_complete_without_provider_email_raises(monkeypatch, db_session):
+async def test_connect_complete_without_provider_email_raises(monkeypatch, druks_db):
     _, flow_id = await ClaudeHarness.connect_start()
     grant = dict(_CLAUDE_GRANT, account={})
     _mock_post(monkeypatch, _resp(200, grant))
@@ -113,7 +113,7 @@ async def test_connect_complete_without_provider_email_raises(monkeypatch, db_se
         await ClaudeHarness.connect_complete(flow_id=flow_id, pasted="thecode")
 
 
-async def test_codex_connect_complete_is_form_encoded_and_reads_jwt(monkeypatch, db_session):
+async def test_codex_connect_complete_is_form_encoded_and_reads_jwt(monkeypatch, druks_db):
     _, flow_id = await CodexHarness.connect_start()
     pending = await _pending(flow_id)
     access = _jwt(
@@ -140,7 +140,7 @@ async def test_codex_connect_complete_is_form_encoded_and_reads_jwt(monkeypatch,
 
 
 async def test_connect_complete_unreadable_provider_json_raises_connect_error(
-    monkeypatch, db_session
+    monkeypatch, druks_db
 ):
     _, flow_id = await ClaudeHarness.connect_start()
     _mock_post(monkeypatch, _resp(200, "not json"))
@@ -151,18 +151,18 @@ async def test_connect_complete_unreadable_provider_json_raises_connect_error(
     assert "unreadable response" in str(error.value)
 
 
-async def test_connect_complete_without_pending_raises(db_session):
+async def test_connect_complete_without_pending_raises(druks_db):
     with pytest.raises(ConnectError):
         await ClaudeHarness.connect_complete(flow_id="not-a-flow", pasted="code")
 
 
-async def test_connect_complete_state_mismatch_raises(db_session):
+async def test_connect_complete_state_mismatch_raises(druks_db):
     _, flow_id = await ClaudeHarness.connect_start()
     with pytest.raises(ConnectError):
         await ClaudeHarness.connect_complete(flow_id=flow_id, pasted="code#not-the-state")
 
 
-async def test_connect_complete_provider_error_clears_pending(monkeypatch, db_session):
+async def test_connect_complete_provider_error_clears_pending(monkeypatch, druks_db):
     _, flow_id = await ClaudeHarness.connect_start()
     _mock_post(monkeypatch, _resp(400, "invalid_grant: code expired"))
     with pytest.raises(ConnectError) as error:

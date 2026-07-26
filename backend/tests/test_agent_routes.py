@@ -2,19 +2,14 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-from conftest import (
-    configure_app_for_test,
-    make_settings,
-    make_test_work_item,
-    seed_agent_run,
-    seed_build_run,
-    seed_run,
-)
 from druks.accounts.models import Account
 from druks.api.app import app
 from druks.durable.models import Run
 from druks.durable.reads import read_transcript_chunk
 from druks.mcp.gateway import services
+from druks.testing import configure_app_for_test, make_settings, seed_call, seed_run
+from druks_field_notes.models import Note
+from druks_field_notes.workflows import Summarize
 from fastapi.testclient import TestClient
 
 _IN_APP_ASK = {
@@ -33,7 +28,7 @@ _MCP_ROUTES = {
 
 
 @pytest.fixture
-def client(tmp_path: Path, db_session, monkeypatch):
+def client(tmp_path: Path, druks_db, monkeypatch):
     monkeypatch.setenv("DRUKS_DATA_DIR", str(tmp_path))
     app = configure_app_for_test(settings=make_settings(tmp_path))
     with TestClient(app) as client:
@@ -41,7 +36,7 @@ def client(tmp_path: Path, db_session, monkeypatch):
 
 
 @pytest.fixture
-def account(db_session):
+def account(druks_db):
     # The account configure_app_for_test signs requests in as.
     return Account.get_or_create("op@example.com")
 
@@ -57,16 +52,17 @@ def resume_spy(monkeypatch):
     return calls
 
 
-def _park(db_session, item_id):
-    run = seed_build_run(
-        db_session,
-        work_item_id=item_id,
+def _park(druks_db, note):
+    run = seed_run(
+        druks_db,
+        kind=Summarize.kind,
+        subject=note,
         state="parked",
         input_gate="review",
         input_request=dict(_IN_APP_ASK),
     )
     run.input_requested_at = datetime.now(UTC)
-    db_session.flush()
+    druks_db.flush()
     return run
 
 
@@ -81,7 +77,7 @@ def test_openapi_pins_the_five_agent_routes(client: TestClient):
     assert {key: op["operationId"] for key, op in found.items()} == _MCP_ROUTES
 
 
-def test_agent_routes_sit_behind_the_gate(tmp_path, db_session):
+def test_agent_routes_sit_behind_the_gate(tmp_path, druks_db):
     # Header mode: an unasserted request is a 401, not none-mode's setup 409.
     app = configure_app_for_test(
         settings=make_settings(tmp_path, auth_mode="header", auth_header="X-Edge-Email"),
@@ -92,7 +88,7 @@ def test_agent_routes_sit_behind_the_gate(tmp_path, db_session):
         assert anonymous.get("/api/usage/summary").status_code == 401
 
 
-def test_agent_errors_share_one_shape(client: TestClient, db_session):
+def test_agent_errors_share_one_shape(client: TestClient, druks_db):
     missing = client.get("/api/gates/no-such-run")
     assert missing.status_code == 404
     assert missing.json() == {
@@ -101,8 +97,8 @@ def test_agent_errors_share_one_shape(client: TestClient, db_session):
         "retryable": False,
     }
 
-    item = make_test_work_item(repo="o/r", title="t")
-    run = _park(db_session, item.id)
+    note = Note.create(body="stale gate")
+    run = _park(druks_db, note)
     stale = client.post(
         f"/api/gates/{run.id}/answer",
         json={"parkedAt": "2020-01-01T00:00:00+00:00", "control": "approve"},
@@ -113,9 +109,9 @@ def test_agent_errors_share_one_shape(client: TestClient, db_session):
     assert body["retryable"] is True
 
 
-def test_get_gate_then_answer_roundtrip(client: TestClient, db_session, resume_spy):
-    item = make_test_work_item(repo="o/r", title="t")
-    run = _park(db_session, item.id)
+def test_get_gate_then_answer_roundtrip(client: TestClient, druks_db, resume_spy):
+    note = Note.create(body="answer gate")
+    run = _park(druks_db, note)
 
     view = client.get(f"/api/gates/{run.id}")
     assert view.status_code == 200
@@ -132,14 +128,14 @@ def test_get_gate_then_answer_roundtrip(client: TestClient, db_session, resume_s
 
 
 def test_answer_gate_reads_already_answered_off_the_receipt(
-    client: TestClient, db_session, resume_spy
+    client: TestClient, druks_db, resume_spy
 ):
-    item = make_test_work_item(repo="o/r", title="t")
+    note = Note.create(body="answered gate")
     parked_at = datetime.now(UTC)
-    run = seed_build_run(db_session, work_item_id=item.id, state="running")
+    run = seed_run(druks_db, kind=Summarize.kind, subject=note)
     run.input_requested_at = parked_at
     run.answer_parked_at = parked_at
-    db_session.flush()
+    druks_db.flush()
 
     response = client.post(
         f"/api/gates/{run.id}/answer",
@@ -151,9 +147,9 @@ def test_answer_gate_reads_already_answered_off_the_receipt(
     assert resume_spy == []
 
 
-def test_answer_gate_requires_an_aware_parked_at(client: TestClient, db_session):
-    item = make_test_work_item(repo="o/r", title="t")
-    run = _park(db_session, item.id)
+def test_answer_gate_requires_an_aware_parked_at(client: TestClient, druks_db):
+    note = Note.create(body="naive parked timestamp")
+    run = _park(druks_db, note)
 
     naive = client.post(
         f"/api/gates/{run.id}/answer",
@@ -163,14 +159,14 @@ def test_answer_gate_requires_an_aware_parked_at(client: TestClient, db_session)
     assert naive.status_code == 422  # Pydantic's, not the agent taxonomy
 
 
-def test_cancel_run_route(client: TestClient, db_session):
-    item = make_test_work_item(repo="o/r", title="t")
-    run = seed_build_run(db_session, work_item_id=item.id, state="running")
+def test_cancel_run_route(client: TestClient, druks_db):
+    note = Note.create(body="cancelled note")
+    run = seed_run(druks_db, kind=Summarize.kind, subject=note)
     # Parked, so the cancel must clear the gate — and never write the receipt.
     run.input_gate = "review"
     run.input_request = {"presentation": "in_app", "questions": []}
     run.input_requested_at = run.utc_now()
-    db_session.flush()
+    druks_db.flush()
 
     unbounded = client.post(f"/api/runs/{run.id}/cancel", json={"reason": "r" * 501})
     assert unbounded.status_code == 422
@@ -181,8 +177,8 @@ def test_cancel_run_route(client: TestClient, db_session):
     assert cancelled.status_code == 200
     assert cancelled.json() == {"runId": run.id, "result": "cancelled"}
 
-    db_session.expire_all()
-    run = db_session.get(type(run), run.id)
+    druks_db.expire_all()
+    run = druks_db.get(type(run), run.id)
     assert not run.answer_parked_at
     assert not run.input_gate
     assert run.failure == "wrong branch"
@@ -192,14 +188,17 @@ def test_cancel_run_route(client: TestClient, db_session):
     assert again.json()["result"] == "already_cancelled"
 
 
-def test_transcript_route_matches_the_read_machinery(client: TestClient, db_session):
-    call = seed_agent_run()
+def test_transcript_route_matches_the_read_machinery(client: TestClient, druks_db):
+    note = Note.create(body="transcript route")
+    run = seed_run(druks_db, kind=Summarize.kind, subject=note)
+    call = seed_call(druks_db, run, "summarize", status="running")
     call_dir = call.call_dir
     call_dir.mkdir(parents=True, exist_ok=True)
     (call_dir / "stdout.jsonl").write_bytes(b"hello " + "é".encode() + b" transcript")
 
     response = client.get(
-        f"/api/ship/transcripts/{call.id}", params={"stream": "stdout", "limit": 7}
+        f"/api/field_notes/transcripts/{call.id}",
+        params={"stream": "stdout", "limit": 7},
     )
     assert response.status_code == 200
     chunk = read_transcript_chunk(call, "stdout", offset=0, limit=7)
@@ -208,17 +207,17 @@ def test_transcript_route_matches_the_read_machinery(client: TestClient, db_sess
     assert response.json()["text"] == "hello �"
 
 
-def test_resume_route_contract_is_preserved(client: TestClient, db_session, resume_spy):
+def test_resume_route_contract_is_preserved(client: TestClient, druks_db, resume_spy):
     unknown = client.post("/api/runs/no-such-run/resume", json={"control": "approve"})
     assert unknown.status_code == 404
 
-    item = make_test_work_item(repo="o/r", title="t")
-    idle = seed_build_run(db_session, work_item_id=item.id, state="running")
+    idle_note = Note.create(body="idle run")
+    idle = seed_run(druks_db, kind=Summarize.kind, subject=idle_note)
     not_waiting = client.post(f"/api/runs/{idle.id}/resume", json={"control": "approve"})
     assert not_waiting.status_code == 409
 
-    parked_item = make_test_work_item(repo="o/r2", title="t")
-    run = _park(db_session, parked_item.id)
+    parked_note = Note.create(body="parked run")
+    run = _park(druks_db, parked_note)
     bad_control = client.post(f"/api/runs/{run.id}/resume", json={"control": "merge"})
     assert bad_control.status_code == 422
     assert resume_spy == []
@@ -235,17 +234,23 @@ def test_resume_route_contract_is_preserved(client: TestClient, db_session, resu
     run.answer_parked_at = run.input_requested_at
     run.input_gate = None
     run.input_request = None
-    db_session.flush()
+    druks_db.flush()
     late = client.post(f"/api/runs/{run.id}/resume", json={"control": "approve"})
     assert late.status_code == 409
     assert len(resume_spy) == 1
 
 
-def test_usage_agent_route_matches_the_service(client: TestClient, db_session, account):
+def test_usage_agent_route_matches_the_service(client: TestClient, druks_db, account):
     from druks.durable.models import AgentCall
 
-    run = seed_run(db_session, "run-usage-route")
-    db_session.add(
+    note = Note.create(body="usage route")
+    run = seed_run(
+        druks_db,
+        kind=Summarize.kind,
+        subject=note,
+        run_id="run-usage-route",
+    )
+    druks_db.add(
         AgentCall(
             run_id=run.id,
             account_id=account.id,
@@ -257,7 +262,7 @@ def test_usage_agent_route_matches_the_service(client: TestClient, db_session, a
             cost_metadata={"total_tokens": 500},
         )
     )
-    db_session.flush()
+    druks_db.flush()
 
     response = client.get("/api/usage/summary")
     assert response.status_code == 200

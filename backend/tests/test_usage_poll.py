@@ -67,7 +67,7 @@ async def _poll(*harnesses) -> list[dict[str, object]]:
     return [await h.poll_usage(connection) for h in harnesses]
 
 
-async def test_successful_fetch_persists_per_harness(db_session) -> None:
+async def test_successful_fetch_persists_per_harness(druks_db) -> None:
     results = await _poll(
         _harness("claude", lambda: _usage(five=_metric(84), week=_metric(52))),
         _harness(
@@ -75,7 +75,7 @@ async def test_successful_fetch_persists_per_harness(db_session) -> None:
             lambda: _usage(plan_tier="prolite", five=_metric(61), week=_metric(61)),
         ),
     )
-    db_session.flush()
+    druks_db.flush()
 
     assert [r["status"] for r in results] == ["recorded", "recorded"]
     assert all(r["parse_ok"] for r in results)
@@ -91,12 +91,12 @@ async def test_successful_fetch_persists_per_harness(db_session) -> None:
     assert codex_row.week_percent_left == 61
 
 
-async def test_credential_error_records_error_snapshot(db_session) -> None:
+async def test_credential_error_records_error_snapshot(druks_db) -> None:
     results = await _poll(
         _harness("claude", lambda: _usage(ok=False, error="token_expired")),
         _harness("codex", lambda: _usage(ok=False, error="no_credentials")),
     )
-    db_session.flush()
+    druks_db.flush()
     assert all(r["status"] == "recorded" for r in results)
     assert all(not r["parse_ok"] for r in results)
 
@@ -107,12 +107,12 @@ async def test_credential_error_records_error_snapshot(db_session) -> None:
     assert claude_row.five_hour_percent_left is None
 
 
-async def test_fetch_crash_writes_crash_snapshot(db_session) -> None:
+async def test_fetch_crash_writes_crash_snapshot(druks_db) -> None:
     def boom() -> ParsedUsage:
         raise RuntimeError("boom")
 
     results = await _poll(_harness("claude", boom), _harness("codex", boom))
-    db_session.flush()
+    druks_db.flush()
     assert all(r["status"] == "errored" and r["error"] == "crashed" for r in results)
 
     row = UsageScrape.latest_for("claude", _connection().account_id)
@@ -120,7 +120,7 @@ async def test_fetch_crash_writes_crash_snapshot(db_session) -> None:
     assert row.parse_ok is False
 
 
-async def test_snapshot_persists_unlimited_flag(db_session) -> None:
+async def test_snapshot_persists_unlimited_flag(druks_db) -> None:
     await _poll(
         _harness(
             "codex",
@@ -129,21 +129,21 @@ async def test_snapshot_persists_unlimited_flag(db_session) -> None:
             ),
         )
     )
-    db_session.flush()
+    druks_db.flush()
 
     row = UsageScrape.latest_for("codex", _connection().account_id)
     assert row is not None
     assert row.unlimited is True
 
 
-async def test_two_accounts_of_one_harness_snapshot_independently(db_session) -> None:
+async def test_two_accounts_of_one_harness_snapshot_independently(druks_db) -> None:
     snapshots = iter([_usage(five=_metric(84)), _usage(five=_metric(30))])
     fake = _harness("claude", lambda: next(snapshots))
     first, second = _connection("a@example.com"), _connection("b@example.com")
 
     await fake.poll_usage(first)
     await fake.poll_usage(second)
-    db_session.flush()
+    druks_db.flush()
 
     assert UsageScrape.latest_for("claude", first.account_id).five_hour_percent_left == 84
     assert UsageScrape.latest_for("claude", second.account_id).five_hour_percent_left == 30

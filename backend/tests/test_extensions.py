@@ -7,9 +7,9 @@ from fastapi import APIRouter, FastAPI
 from fastapi.testclient import TestClient
 
 
-def test_iter_extensions_discovers_the_in_tree_extensions():
-    """The in-tree extensions resolve from the ``druks.extensions`` entry points."""
-    assert {extension.name for extension in iter_extensions()} == {"core", "ship", "usage"}
+def test_iter_extensions_discovers_the_bundled_extensions():
+    """The bundled extensions resolve from the ``druks.extensions`` entry points."""
+    assert {extension.name for extension in iter_extensions()} >= {"core", "ship", "usage"}
 
 
 def test_ship_app_derives_its_package_from_the_defining_module():

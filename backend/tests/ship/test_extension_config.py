@@ -1,8 +1,8 @@
 import pytest
-from conftest import make_settings
 from druks.contrib.ship.policy import RepoPolicy
 from druks.extensions.config import resolve_extension_config
 from druks.extensions.exceptions import ExtensionConfigError
+from druks.testing import make_settings
 
 REPO = "acme/widget"
 ORG_DRUKS = "acme/.druks"
@@ -131,10 +131,10 @@ class TestLoadPolicyAndProfile:
     needed."""
 
     @pytest.fixture(autouse=True)
-    def _passthrough_step(self, monkeypatch, db_engine):
+    def _passthrough_step(self, monkeypatch, druks_db):
         from druks.durable.engine import configure_engine
 
-        configure_engine(db_engine)
+        configure_engine(druks_db.connection())
 
         async def _run_step(_options, fn):
             return await fn()
@@ -150,7 +150,7 @@ class TestLoadPolicyAndProfile:
         flow.input = Build._run_input_model(repo=repo, pr_number=1, branch="agent/x")
         return flow
 
-    async def test_resolves_live(self, db_session, monkeypatch):
+    async def test_resolves_live(self, druks_db, monkeypatch):
         from druks.contrib.ship.models import Project, ProjectRepo
 
         async def _live(cls, repo):

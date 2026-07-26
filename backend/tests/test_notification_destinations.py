@@ -2,7 +2,6 @@ from types import SimpleNamespace
 
 import httpx
 import pytest
-from conftest import configure_app_for_test, make_settings
 from druks.notifications import delivery
 from druks.notifications.buttons import decode_button, encode_button
 from druks.notifications.exceptions import (
@@ -12,6 +11,7 @@ from druks.notifications.exceptions import (
     UnknownDestinationKindError,
 )
 from druks.notifications.models import Destination, DestinationKind
+from druks.testing import configure_app_for_test, make_settings
 from fastapi.testclient import TestClient
 
 _WEBHOOK_URL = "https://hooks.slack.com/services/T000/B000/secretpart"
@@ -91,7 +91,7 @@ def fake_slack(monkeypatch):
 # --- registry: CRUD round-trip + kind gate --------------------------------
 
 
-def test_create_get_list_delete_round_trip(db_session):
+def test_create_get_list_delete_round_trip(druks_db):
     beta = Destination.create(name="beta", kind="slack_webhook", url=_WEBHOOK_URL)
     alpha = Destination.create(name="alpha", kind="slack_webhook", url=_WEBHOOK_URL)
 
@@ -107,7 +107,7 @@ def test_create_get_list_delete_round_trip(db_session):
     assert [destination.name for destination in Destination.list_all()] == ["alpha"]
 
 
-def test_create_rejects_unknown_kind_without_echoing_the_url(db_session):
+def test_create_rejects_unknown_kind_without_echoing_the_url(druks_db):
     with pytest.raises(UnknownDestinationKindError) as excinfo:
         Destination.create(name="pager", kind="pagerduty", url=_WEBHOOK_URL)
 
@@ -125,7 +125,7 @@ def _create_body(**overrides) -> dict:
     return body
 
 
-def test_routes_create_masks_url(tmp_path, db_session):
+def test_routes_create_masks_url(tmp_path, druks_db):
     with TestClient(configure_app_for_test(settings=make_settings(tmp_path))) as client:
         created = client.post("/api/notifications/destinations", json=_create_body())
 
@@ -140,7 +140,7 @@ def test_routes_create_masks_url(tmp_path, db_session):
         assert "secretpart" not in created.text
 
 
-def test_routes_reject_duplicate_name(tmp_path, db_session):
+def test_routes_reject_duplicate_name(tmp_path, druks_db):
     with TestClient(configure_app_for_test(settings=make_settings(tmp_path))) as client:
         first = client.post("/api/notifications/destinations", json=_create_body())
         assert first.status_code == 200
@@ -150,7 +150,7 @@ def test_routes_reject_duplicate_name(tmp_path, db_session):
         assert "secretpart" not in duplicate.text
 
 
-def test_routes_reject_unknown_kind(tmp_path, db_session):
+def test_routes_reject_unknown_kind(tmp_path, druks_db):
     with TestClient(configure_app_for_test(settings=make_settings(tmp_path))) as client:
         created = client.post(
             "/api/notifications/destinations", json=_create_body(kind="pagerduty")
@@ -160,7 +160,7 @@ def test_routes_reject_unknown_kind(tmp_path, db_session):
         assert not client.get("/api/notifications/destinations").json()
 
 
-def test_routes_reject_undeliverable_url(tmp_path, db_session):
+def test_routes_reject_undeliverable_url(tmp_path, druks_db):
     # Save-time deliverability: the same offline apprise parse the send path
     # uses, so a typo fails while the operator is present — not at first park.
     with TestClient(configure_app_for_test(settings=make_settings(tmp_path))) as client:
@@ -171,7 +171,7 @@ def test_routes_reject_undeliverable_url(tmp_path, db_session):
         assert not client.get("/api/notifications/destinations").json()
 
 
-def test_routes_reject_blank_name(tmp_path, db_session):
+def test_routes_reject_blank_name(tmp_path, druks_db):
     with TestClient(configure_app_for_test(settings=make_settings(tmp_path))) as client:
         for blank in ("", "   "):
             created = client.post("/api/notifications/destinations", json=_create_body(name=blank))
@@ -180,7 +180,7 @@ def test_routes_reject_blank_name(tmp_path, db_session):
         assert not client.get("/api/notifications/destinations").json()
 
 
-def test_routes_toggle_enabled(tmp_path, db_session):
+def test_routes_toggle_enabled(tmp_path, druks_db):
     with TestClient(configure_app_for_test(settings=make_settings(tmp_path))) as client:
         destination_id = client.post("/api/notifications/destinations", json=_create_body()).json()[
             "id"
@@ -206,7 +206,7 @@ def test_routes_toggle_enabled(tmp_path, db_session):
         assert missing.status_code == 404
 
 
-def test_routes_delete(tmp_path, db_session):
+def test_routes_delete(tmp_path, druks_db):
     with TestClient(configure_app_for_test(settings=make_settings(tmp_path))) as client:
         destination_id = client.post("/api/notifications/destinations", json=_create_body()).json()[
             "id"

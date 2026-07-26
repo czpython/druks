@@ -4,10 +4,10 @@ from types import SimpleNamespace
 
 import psycopg
 import pytest
-from conftest import init_db
 from druks.database import configure_session, get_session
 from druks.durable import Run, RunState
 from druks.durable.engine import configure_engine, init_dbos, launch, shutdown
+from druks.testing import init_db
 from sqlalchemy import create_engine
 
 PG_BASE = os.environ.get("DRUKS_TEST_PG", "postgresql://druks:druks@localhost:5432")

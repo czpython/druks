@@ -4,12 +4,12 @@ from datetime import timedelta
 from pathlib import Path
 
 import pytest
-from conftest import configure_app_for_test, make_settings
 from druks.accounts.constants import PAT_TOKEN_TAG
 from druks.accounts.exceptions import InvalidPatError
 from druks.accounts.models import Account, PersonalAccessToken
 from druks.database import db_session as session_registry
 from druks.models import Base
+from druks.testing import configure_app_for_test, make_settings
 from fastapi.testclient import TestClient
 
 HEADER = "X-ExeDev-Email"
@@ -35,7 +35,7 @@ def _mint(username: str = "agent@example.com") -> tuple[PersonalAccessToken, str
     return PersonalAccessToken.create(account_id=account.id, name="agent")
 
 
-def test_the_minted_token_shape_and_hash_are_pinned(db_session):
+def test_the_minted_token_shape_and_hash_are_pinned(druks_db):
     pat, token = _mint()
     prefix, _, secret = token.removeprefix(f"{PAT_TOKEN_TAG}_").partition("_")
     assert token.startswith(f"{PAT_TOKEN_TAG}_")
@@ -50,7 +50,7 @@ def test_the_minted_token_shape_and_hash_are_pinned(db_session):
     assert pat.status == "active"
 
 
-def test_a_prefix_collision_regenerates(db_session, monkeypatch):
+def test_a_prefix_collision_regenerates(druks_db, monkeypatch):
     first, _ = _mint()
     replay = iter(first.token_prefix)
     random_choice = secrets.choice
@@ -67,7 +67,7 @@ def test_a_prefix_collision_regenerates(db_session, monkeypatch):
     assert second.token_prefix != first.token_prefix
 
 
-def test_authenticate_rejects_everything_but_the_live_token(db_session):
+def test_authenticate_rejects_everything_but_the_live_token(druks_db):
     pat, token = _mint()
     assert PersonalAccessToken.authenticate(token).id == pat.id
     with pytest.raises(InvalidPatError):
@@ -85,7 +85,7 @@ def test_authenticate_rejects_everything_but_the_live_token(db_session):
         PersonalAccessToken.authenticate(token)
 
 
-def test_last_used_advances_at_most_hourly(db_session):
+def test_last_used_advances_at_most_hourly(druks_db):
     pat, token = _mint()
     PersonalAccessToken.authenticate(token)
     first_use = pat.last_used_at
@@ -97,7 +97,7 @@ def test_last_used_advances_at_most_hourly(db_session):
     assert pat.last_used_at > first_use - timedelta(hours=2)
 
 
-def test_a_bearer_pat_authenticates_gated_routes(tmp_path, db_session):
+def test_a_bearer_pat_authenticates_gated_routes(tmp_path, druks_db):
     with _client(tmp_path) as client:
         _, token = _mint()
         response = client.get("/api/auth/me", headers=_bearer(token))
@@ -107,7 +107,7 @@ def test_a_bearer_pat_authenticates_gated_routes(tmp_path, db_session):
         assert client.get("/api/settings", headers=_bearer(token)).status_code == 200
 
 
-def test_an_unknown_token_never_falls_through_to_the_assertion(tmp_path, db_session):
+def test_an_unknown_token_never_falls_through_to_the_assertion(tmp_path, druks_db):
     with _client(tmp_path) as client:
         assert client.get("/api/auth/me", headers=OPERATOR).status_code == 200
         response = client.get(
@@ -119,7 +119,7 @@ def test_an_unknown_token_never_falls_through_to_the_assertion(tmp_path, db_sess
 
 
 @pytest.mark.parametrize("header", ["", "Token abc", "Bearer", "Bearer "])
-def test_a_shapeless_authorization_header_is_challenged(tmp_path, db_session, header):
+def test_a_shapeless_authorization_header_is_challenged(tmp_path, druks_db, header):
     with _client(tmp_path) as client:
         response = client.get("/api/auth/me", headers={"Authorization": header})
         assert response.status_code == 401
@@ -127,7 +127,7 @@ def test_a_shapeless_authorization_header_is_challenged(tmp_path, db_session, he
 
 
 @pytest.mark.parametrize("header", ["Bearer a b", "bearer lowercased", "BEARER nope"])
-def test_any_scheme_case_reaches_authentication_and_fails_closed(tmp_path, db_session, header):
+def test_any_scheme_case_reaches_authentication_and_fails_closed(tmp_path, druks_db, header):
     # RFC 7235 schemes are case-insensitive: these parse as credentials and die
     # in authentication — a 401 either way, never a slide to the assertion.
     with _client(tmp_path) as client:
@@ -139,13 +139,13 @@ def test_any_scheme_case_reaches_authentication_and_fails_closed(tmp_path, db_se
     assert not Account.get_for_username("op@example.com")
 
 
-def test_an_empty_authorization_header_never_slides_to_the_assertion(tmp_path, db_session):
+def test_an_empty_authorization_header_never_slides_to_the_assertion(tmp_path, druks_db):
     with _client(tmp_path) as client:
         response = client.get("/api/auth/me", headers={**OPERATOR, "Authorization": ""})
         assert response.status_code == 401
 
 
-def test_a_dead_token_401s_with_its_prefix_only(tmp_path, db_session):
+def test_a_dead_token_401s_with_its_prefix_only(tmp_path, druks_db):
     with _client(tmp_path) as client:
         pat, token = _mint()
         pat.revoke()
@@ -157,7 +157,7 @@ def test_a_dead_token_401s_with_its_prefix_only(tmp_path, db_session):
         assert secret not in response.text
 
 
-def test_a_pat_cannot_manage_pats(tmp_path, db_session):
+def test_a_pat_cannot_manage_pats(tmp_path, druks_db):
     with _client(tmp_path) as client:
         pat, token = _mint()
         assert client.get("/api/auth/personal-tokens", headers=_bearer(token)).status_code == 401
@@ -173,7 +173,7 @@ def test_a_pat_cannot_manage_pats(tmp_path, db_session):
         assert both.status_code == 401
 
 
-def test_a_pat_cannot_disconnect_a_harness(tmp_path, db_session):
+def test_a_pat_cannot_disconnect_a_harness(tmp_path, druks_db):
     # Disconnect destroys a capability a bearer could never create — the same
     # session-only rule as token management.
     with _client(tmp_path) as client:
@@ -186,7 +186,7 @@ def test_a_pat_cannot_disconnect_a_harness(tmp_path, db_session):
         assert beside.status_code == 401
 
 
-def test_the_operator_manages_the_token_lifecycle(tmp_path, db_session):
+def test_the_operator_manages_the_token_lifecycle(tmp_path, druks_db):
     with _client(tmp_path) as client:
         created = client.post(
             "/api/auth/personal-tokens", json={"name": "ci bot"}, headers=OPERATOR
@@ -211,7 +211,7 @@ def test_the_operator_manages_the_token_lifecycle(tmp_path, db_session):
         assert again["revokedAt"] == revoked["revokedAt"]
 
 
-def test_the_none_mode_operator_manages_tokens_too(tmp_path, db_session):
+def test_the_none_mode_operator_manages_tokens_too(tmp_path, druks_db):
     Account.get_or_create("op@example.com")
     with _client(tmp_path, auth_mode="none") as client:
         created = client.post("/api/auth/personal-tokens", json={"name": "local"})
@@ -220,13 +220,13 @@ def test_the_none_mode_operator_manages_tokens_too(tmp_path, db_session):
     assert [item["name"] for item in listed] == ["local"]
 
 
-def test_the_list_is_scoped_to_the_operator(tmp_path, db_session):
+def test_the_list_is_scoped_to_the_operator(tmp_path, druks_db):
     with _client(tmp_path) as client:
         _mint("other@example.com")
         assert client.get("/api/auth/personal-tokens", headers=OPERATOR).json() == []
 
 
-def test_revoking_anothers_token_is_a_404(tmp_path, db_session):
+def test_revoking_anothers_token_is_a_404(tmp_path, druks_db):
     with _client(tmp_path) as client:
         pat, _ = _mint("other@example.com")
         assert (
@@ -237,7 +237,7 @@ def test_revoking_anothers_token_is_a_404(tmp_path, db_session):
         assert not pat.revoked_at
 
 
-def test_a_token_needs_a_name_that_fits(tmp_path, db_session):
+def test_a_token_needs_a_name_that_fits(tmp_path, druks_db):
     with _client(tmp_path) as client:
         no_name = client.post("/api/auth/personal-tokens", json={"name": "   "}, headers=OPERATOR)
         assert no_name.status_code == 422
