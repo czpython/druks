@@ -31,13 +31,6 @@ from druks.models import Base, StoredSubject
 from druks.settings import Settings
 from druks.workflows import Workflow, WorkflowError, _bind_instance, current_workflow
 
-# App commits become savepoints inside the fixture's outer transaction, which
-# remains available for rollback at test teardown.
-_session_factory.configure(join_transaction_mode="create_savepoint")
-os.environ.setdefault("DRUKS_SECRETS_KEY", base64.b64encode(secrets.token_bytes(32)).decode())
-# Workflow classes resolve their extension from package ownership at definition time.
-iter_extensions()
-
 # druks.testing is the author door for testing an extension: these four, plus the
 # fixtures the pytest11 entry point registers. Everything else here is the
 # repository suite's own harness.
@@ -57,15 +50,39 @@ TEST_DATABASE_URL = os.environ.get(
 )
 TEST_REDIS_URL = os.environ.get("DRUKS_TEST_REDIS_URL", "redis://127.0.0.1:6379/15")
 
-# Under pytest, druks IS the test instance. Settings are read from the environment
-# wherever they're needed — the app's Redis dialer among them — so overriding here is
-# what keeps the code under test on the same database and Redis the fixtures own.
-os.environ["DRUKS_DATABASE_URL"] = TEST_DATABASE_URL
-os.environ["DRUKS_REDIS_URL"] = TEST_REDIS_URL
+# Discovery runs once for the session, and a broken extension is an ordinary state to
+# be in mid-edit. Holding the failure here lets a suite that never asks for a druks
+# fixture finish, and gives one that does an error naming the extension.
+_discovery_error: Exception | None = None
+
+
+def pytest_configure(config) -> None:
+    """Put druks into test mode before collection imports anything. Importing this
+    module does nothing on its own — it loads in every pytest run in the environment,
+    including suites that never touch druks."""
+    global _discovery_error
+
+    os.environ.setdefault("DRUKS_SECRETS_KEY", base64.b64encode(secrets.token_bytes(32)).decode())
+    # Under pytest, druks IS the test instance. Settings are read from the environment
+    # wherever they're needed — the app's Redis dialer among them — so overriding here
+    # is what keeps the code under test on the database and Redis the fixtures own.
+    os.environ["DRUKS_DATABASE_URL"] = TEST_DATABASE_URL
+    os.environ["DRUKS_REDIS_URL"] = TEST_REDIS_URL
+    # App commits become savepoints inside the fixture's outer transaction, which
+    # remains available for rollback at test teardown.
+    _session_factory.configure(join_transaction_mode="create_savepoint")
+    # A Workflow class resolves its declaring extension at definition time, so
+    # ownership must be claimed before collection imports a module that defines one.
+    try:
+        iter_extensions()
+    except Exception as error:  # noqa: BLE001 — re-raised from the fixtures below
+        _discovery_error = error
 
 
 @pytest.fixture(scope="session")
 def _druks_engine() -> Iterator[Engine]:
+    if _discovery_error:
+        raise _discovery_error
     engine = create_engine_from_url(TEST_DATABASE_URL)
     yield engine
     engine.dispose()
@@ -196,6 +213,8 @@ def druks_client(druks_db: Session, tmp_path: Path) -> Iterator[TestClient]:
 
 @pytest.fixture
 async def druks_redis() -> AsyncIterator[None]:
+    if _discovery_error:
+        raise _discovery_error
     # Bind the test Redis directly rather than through get_client(), which dials
     # whatever the application is configured to use. Flush on a fresh client and
     # close it again, so the test body starts with none bound and every consumer
