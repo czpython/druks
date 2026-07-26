@@ -33,18 +33,12 @@ class WorkflowEvent(StrEnum):
 
     @classmethod
     def for_state(cls, state: RunState) -> "WorkflowEvent":
-        return _EVENT_BY_STATE[state]
-
-
-# Only the states a transition announces; SCHEDULED and ORPHANED are derived, so
-# a lookup for either is a bug worth the KeyError.
-_EVENT_BY_STATE = {
-    RunState.RUNNING: WorkflowEvent.RUNNING,
-    RunState.PENDING_INPUT: WorkflowEvent.PARKED,
-    RunState.FINISHED: WorkflowEvent.FINISHED,
-    RunState.FAILED: WorkflowEvent.FAILED,
-    RunState.CANCELLED: WorkflowEvent.CANCELLED,
-}
+        # A park is our word for the substrate's pending_input; every other state
+        # already names its own event. A derived state (scheduled, orphaned) never
+        # announces one, so asking raises.
+        if state is RunState.PENDING_INPUT:
+            return cls.PARKED
+        return cls(f"workflow.{state.value}")
 
 
 class AgentCallStatus(StrEnum):
