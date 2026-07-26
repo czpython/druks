@@ -7,9 +7,9 @@ webhooks, and the dashboard.
 ## Read map
 
 - Extension contracts and the full author surface:
-  `{{ druks_path }}/docs/writing-an-extension.md`.
+  https://github.com/czpython/druks/blob/main/docs/writing-an-extension.md.
 - A worked extension to read alongside it:
-  `{{ druks_path }}/backend/tests/druks-field_notes/`.
+  https://github.com/czpython/druks/tree/main/backend/tests/druks-field_notes.
 - Each stub module under `druks_{{ name }}/` documents its own role in comments.
 
 ## Contracts

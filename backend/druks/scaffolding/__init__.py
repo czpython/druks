@@ -1,8 +1,6 @@
-import os
 from importlib import metadata
 from pathlib import Path
 
-import druks
 from druks.extensions.base import NAME_RE
 
 _TEMPLATE = Path(__file__).parent / "extension_template"
@@ -11,16 +9,6 @@ _TEMPLATE = Path(__file__).parent / "extension_template"
 _TPL_SUFFIX = "-tpl"
 # The template's package directory; renamed to ``druks_<name>`` on copy.
 _PACKAGE_DIR = "package"
-
-
-def _druks_path(target: Path) -> str:
-    # The uv source pin for the druks checkout this CLI runs from, relative to the
-    # scaffolded package — cwd varies, so a hardcoded ../druks only resolved when
-    # the target happened to be a sibling of the checkout.
-    for parent in Path(druks.__file__).resolve().parents:
-        if (parent / "pyproject.toml").is_file():
-            return os.path.relpath(parent, target.resolve())
-    return "../druks"  # not a checkout (installed wheel); keep the sibling guess
 
 
 def create_extension(name: str, parent: Path) -> Path:
@@ -45,7 +33,6 @@ def create_extension(name: str, parent: Path) -> Path:
     values = {
         "{{ name }}": name,
         "{{ Name }}": "".join(part.capitalize() for part in name.split("_")),
-        "{{ druks_path }}": _druks_path(target),
     }
     for source in sorted(_TEMPLATE.rglob("*")):
         if source.is_dir():
