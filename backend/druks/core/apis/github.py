@@ -29,6 +29,9 @@ class ReviewComment:
 _INSTALLATION_ACCOUNTS_TTL_SECONDS = 600.0
 _INSTALLATION_ACCOUNTS_CACHE: dict[str, tuple[float, tuple[str, ...]]] = {}
 
+# An App's slug is fixed for the life of the App, so this needs no expiry.
+_MENTION_HANDLE_CACHE: dict[str, str] = {}
+
 
 F = TypeVar("F", bound=Callable[..., Awaitable[Any]])
 
@@ -159,6 +162,18 @@ class GitHubClient:
         result = tuple(dict.fromkeys(accounts))
         _INSTALLATION_ACCOUNTS_CACHE[self._app_id] = (now, result)
         return result
+
+    async def get_mention_handle(self) -> str:
+        """What a comment writes after ``@`` to address this App — its slug, which
+        GitHub resolves to the App's bot user. The App is the one that knows it;
+        nobody should have to configure it."""
+        cached = _MENTION_HANDLE_CACHE.get(self._app_id)
+        if cached:
+            return cached
+        response = await self._app.rest.apps.async_get_authenticated()
+        handle = getattr(response.parsed_data, "slug", None) or ""
+        _MENTION_HANDLE_CACHE[self._app_id] = handle
+        return handle
 
     async def _installation_id(self, repo: str) -> int:
         if repo in self._installation_cache:
