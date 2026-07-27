@@ -5,7 +5,6 @@ from druks.contrib.ship.contracts import ReviewWork
 from druks.contrib.ship.models import WorkItem
 from druks.contrib.ship.workflows import Build, Profile
 from druks.durable.models import Run
-from druks.durable.reads import get_subject_phase
 from druks.models import Base
 from druks.testing import seed_dbos_status
 from druks.workflows import OperatorReply, WorkflowError
@@ -119,5 +118,5 @@ async def test_subject_phase_reads_the_driving_running_workflow(druks_db, monkey
 
     monkeypatch.setattr("druks.durable.reads.get_run_phase", phase)
 
-    assert await get_subject_phase(subject.subject_type, str(subject.id)) == "agent_running"
+    assert await subject.get_phase() == "agent_running"
     assert seen == [driving.id]

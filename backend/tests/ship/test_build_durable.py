@@ -4,11 +4,13 @@ from types import SimpleNamespace
 
 import psycopg
 import pytest
+from druks.contrib.ship.models import Project, WorkItem
 from druks.database import configure_session, get_session
 from druks.durable import Run, RunState
 from druks.durable.engine import configure_engine, init_dbos, launch, shutdown
 from druks.testing import init_db
 from sqlalchemy import create_engine
+from sqlalchemy.orm import Session
 
 PG_BASE = os.environ.get("DRUKS_TEST_PG", "postgresql://druks:druks@localhost:5432")
 DB = "druks_build_durable_test"
@@ -74,9 +76,6 @@ def _seed_work_item(engine, *, repo: str):
     # The run.* subscribers dereference the subject row (a subscriber failure
     # now fails the lifecycle step), so the item must exist, not just its id.
     from uuid import uuid4
-
-    from druks.contrib.ship.models import Project, WorkItem
-    from sqlalchemy.orm import Session
 
     with Session(engine) as session:
         name = f"rt-{uuid4().hex[:8]}"
@@ -206,8 +205,8 @@ def _stub(
 
     github_calls = []
 
-    async def _merge_when_ready(*args, **kwargs):
-        github_calls.append("merge_when_ready")
+    async def _merge_when_ready(repo, pr_number):
+        github_calls.append(("merge_when_ready", repo, pr_number))
         return merge_when_ready_accepted
 
     fake_github = SimpleNamespace(
@@ -243,7 +242,13 @@ async def test_happy_path_declares_merge_intent(rt, monkeypatch):
 
     done = await _wait(rt.engine, workflow_id, lambda run: run.state == RunState.FINISHED)
     assert not done.failure
-    assert github_calls == ["merge_when_ready"]
+    # The merge intent carries the journal-backed number of the first delivery.
+    assert github_calls == [("merge_when_ready", "acme/widget", 42)]
+
+    # The pr.opened announce mirrored the delivery onto the item.
+    with Session(rt.engine) as session:
+        refreshed = session.get(WorkItem, item.id)
+        assert (refreshed.pr_number, refreshed.branch) == (42, "agent/acme-1")
 
     # Shipped settles via GitHub's pr.closed webhook (test_webhooks_pull_request),
     # not the run — the run's job ends when GitHub accepts the merge intent. The durable
@@ -282,7 +287,7 @@ async def test_rejected_merge_intent_reparks_work_gate(rt, monkeypatch):
         ),
     )
     assert not reparked.failure
-    assert github_calls == ["merge_when_ready"]
+    assert [call[0] for call in github_calls] == ["merge_when_ready"]
     await reparked.cancel()
 
 

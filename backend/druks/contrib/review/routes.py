@@ -5,7 +5,7 @@ from druks.accounts.models import Account
 from druks.contrib.review.schemas import ReviewsResponse, ReviewSummary
 from druks.contrib.review.workflows import PullRequestReview
 from druks.contrib.ship.models import ProjectRepo
-from druks.workflows import Subject, get_subject_status, list_subject_timeline
+from druks.workflows import Subject
 
 router = APIRouter(prefix="/pull-requests", tags=["review"])
 
@@ -14,17 +14,11 @@ router = APIRouter(prefix="/pull-requests", tags=["review"])
 async def list_reviews() -> ReviewsResponse:
     """The reviews still going or stopped on a failure. A finished one lives on its
     pull request, so it leaves this list as soon as it has something to show there."""
-    reviews = []
-    for subject in Subject.list_open("pull_request"):
-        timeline = list_subject_timeline(subject.subject_type, subject.id)
-        reviews.append(
-            ReviewSummary.from_subject(
-                subject,
-                status=get_subject_status(subject.subject_type, subject.id),
-                latest_run=timeline[-1],
-            )
-        )
-    return ReviewsResponse(reviews=reviews)
+    return ReviewsResponse(
+        reviews=[
+            ReviewSummary.from_subject(subject) for subject in Subject.list_open("pull_request")
+        ]
+    )
 
 
 @router.post("", status_code=status.HTTP_202_ACCEPTED)

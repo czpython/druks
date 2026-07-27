@@ -74,11 +74,9 @@ def test_history_holds_the_handed_off(druks_db):
 def test_the_newest_run_speaks_for_the_item(druks_db):
     # One rule, two implementations — the bulk board query and the per-subject
     # status must name the same driving run or the board and its lanes disagree.
-    from druks.workflows import get_subject_status
-
     item = make_test_work_item(repo="ClawHaven/acme-app", title="two runs")
     seed_build_run(druks_db, work_item_id=item.id, state="cancelled")
     seed_build_run(druks_db, work_item_id=item.id, state="parked", input_gate="review")
     druks_db.expire_all()
-    assert get_subject_status(item.subject_type, str(item.id)).state == "parked"
+    assert item.get_status().state == "parked"
     assert str(item.id) in _board_ids(druks_db)

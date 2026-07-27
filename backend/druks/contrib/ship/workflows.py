@@ -334,7 +334,7 @@ class Build(Workflow):
         return await self._work_gate()
 
     # Body code, never @step: the agent calls inside memoize themselves and land
-    # on the record, and set_state must re-run on replay — a @step would skip them.
+    # on the journal a @step would skip rebuilding.
     async def implement(self) -> ImplementationOutput:
         delivery = await Ship.implement()
         # A bail is a stop, not a result: the implementer hit a contradiction in the
@@ -342,10 +342,10 @@ class Build(Workflow):
         # read off the dashboard instead of dug out of the transcript.
         if delivery.status == "needs_clarification":
             raise FatalError(f"implementation needs clarification: {delivery.summary}")
-        if not self.pr_number:
-            # First delivery: the implementer provisioned the branch + draft PR alongside
-            # its commits; publish the pair (the run.state signal mirrors it onto the item).
-            await self.set_state(branch=delivery.branch, pr_number=delivery.pr_number)
+        if self.journal.implementation_revision == 1:
+            # First delivery: the implementer provisioned the branch + draft PR
+            # alongside its commits — announce them onto the item.
+            await self.announce("pr.opened", pr_number=delivery.pr_number, branch=delivery.branch)
         return delivery
 
     @step
@@ -354,15 +354,19 @@ class Build(Workflow):
         github = get_github_client(load_settings())
         return await github.merge_when_ready(self.input.repo, self.pr_number)
 
-    # The provisioned branch + PR, published by the first implement — None until then
+    # The provisioned branch + PR, pinned to the FIRST delivery — None until then
     # (planning runs against the default branch, and there is no PR to point at).
+    # Rework deliveries reuse the pair; the item row and webhook routing key on it,
+    # so a delivery reporting different numbers must not move these reads.
     @property
     def branch(self) -> str | None:
-        return getattr(self.state, "branch", None)
+        implementations = self.journal.implementations
+        return implementations[0].branch if implementations else None
 
     @property
     def pr_number(self) -> int | None:
-        return getattr(self.state, "pr_number", None)
+        implementations = self.journal.implementations
+        return implementations[0].pr_number if implementations else None
 
     @step
     async def _clear_draft(self) -> None:

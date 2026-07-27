@@ -1,7 +1,4 @@
 from datetime import datetime
-from typing import Any
-
-from pydantic import Field
 
 from druks.events.models import Event
 from druks.schemas import BaseResponse
@@ -22,24 +19,19 @@ class FeedItem(BaseResponse):
     subject_type: str | None = None
     subject_id: str | None = None
     subject_label: str | None = None
-    # Whatever else the event recorded, stated by its writer — a gate, a failure,
-    # a ticket key. What a row carries beyond identity is said at write time.
-    facts: dict[str, Any] = Field(default_factory=dict)
 
     @classmethod
     def from_event(cls, event: Event) -> "FeedItem":
-        facts = dict(event.payload)
         return cls(
             id=f"event:{event.id}",
             seq=event.id,
             at=event.created_at,
             kind=event.type,
             extension=event.extension,
-            workflow=facts.pop("kind", None),
+            workflow=event.payload.get("kind"),
             subject_type=event.subject_type,
             subject_id=event.subject_id,
             subject_label=event.subject_label,
-            facts=facts,
         )
 
 

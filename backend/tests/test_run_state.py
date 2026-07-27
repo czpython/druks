@@ -11,7 +11,7 @@ from druks.events.models import Event
 from druks.models import Base
 from druks.signals import subscribe
 from druks.testing import seed_run
-from druks.workflows import WorkflowEvent, _emit_run_event, _execute_run
+from druks.workflows import Workflow, WorkflowEvent, _emit_run_event, _execute_run
 from druks_field_notes.models import Note
 from druks_field_notes.workflows import Summarize
 from sqlalchemy import select, update
@@ -271,3 +271,42 @@ async def test_gate_timeout_stamps_its_failure_code(druks_db, _inline_steps):
 
     ambient_session().expire_all()
     assert Run.get(run.id).failure_code == "gate_timeout"
+
+
+@pytest.mark.asyncio
+async def test_announce_carries_the_runs_routing(druks_db):
+    # The body states its facts; the platform injects what subscribers filter on,
+    # and the publish rides its own named checkpoint — the boundary that keeps a
+    # recovery replay from re-firing it.
+    workflow = Workflow()
+    workflow._subject = {"type": "note", "id": 7}
+    received = []
+    checkpoints = []
+
+    @subscribe("test.announced", kind=workflow.kind)
+    async def _receive(*, subject: dict, **facts: object) -> None:
+        received.append((subject, facts))
+
+    async def run_inline(options, fn):
+        checkpoints.append(options["name"])
+        return await fn()
+
+    with mock.patch("druks.workflows.DBOS.run_step_async", side_effect=run_inline):
+        await workflow.announce("test.announced", pr_number=12)
+
+    assert received == [({"type": "note", "id": 7}, {"pr_number": 12})]
+    assert checkpoints == ["test.announced"]
+
+
+@pytest.mark.asyncio
+async def test_announce_refuses_inside_a_step():
+    from druks.durable.exceptions import WorkflowError
+    from druks.workflows import _in_step
+
+    workflow = Workflow()
+    token = _in_step.set(True)
+    try:
+        with pytest.raises(WorkflowError, match="workflow body"):
+            await workflow.announce("test.announced", pr_number=12)
+    finally:
+        _in_step.reset(token)

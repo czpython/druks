@@ -5,7 +5,7 @@ from druks.contrib.ship.models import ProjectRepo, WorkItem
 from druks.contrib.ship.workflows import Build, Profile
 from druks.signals import subscribe
 from druks.ticketing.enums import TicketStatus
-from druks.workflows import WorkflowEvent, get_subject_status
+from druks.workflows import WorkflowEvent
 
 
 @subscribe(WorkflowEvent.RUNNING, subject=WorkItem)
@@ -15,8 +15,8 @@ async def any_workflow_start_returns_item_to_board(*, subject: WorkItem, **_: ob
     subject.set_status(None)
 
 
-@subscribe(WorkflowEvent.STATE, workflow=Build, subject=WorkItem)
-async def provision_mirrors_onto_item(
+@subscribe("pr.opened", workflow=Build, subject=WorkItem)
+async def pr_open_mirrors_onto_item(
     *, subject: WorkItem, pr_number: int, branch: str, **_: object
 ) -> None:
     # The implementer's provisioned PR + branch, mirrored onto the work item —
@@ -61,7 +61,7 @@ async def pr_review_answers_the_gate(*, repo: str, pr_number: int, payload: dict
     item = WorkItem.get_for_pr(repo=repo, pr_number=pr_number, branch=payload["branch"])
     if not item:
         return
-    status = get_subject_status(item.subject_type, str(item.id), workflow=Build)
+    status = item.get_status(workflow=Build)
     if status.is_parked and status.gate == ReviewWork.name:
         await ReviewWork.answer(
             item,

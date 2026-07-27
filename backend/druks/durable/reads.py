@@ -124,6 +124,8 @@ def _status(driving_run: Run | None, calls: list[AgentCall]) -> SubjectStatus:
         gate=driving_run.input_gate if parked else None,
         failure=driving_run.failure,
         reason=driving_run.failure_code,
+        triggered_at=driving_run.created_at,
+        account_username=driving_run.account.username,
     )
 
 

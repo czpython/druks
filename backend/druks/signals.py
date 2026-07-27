@@ -75,6 +75,6 @@ async def publish(name: str, **kwargs: Any) -> None:
 
     A subscriber exception propagates to the publisher: a webhook responds 5xx
     and the provider redelivers; the durable publish steps (run lifecycle,
-    ``set_state`` fan-out) enable DBOS retries. Delivery is therefore
+    ``announce`` fan-out) enable DBOS retries. Delivery is therefore
     at-least-once — subscribers must be idempotent."""
     await signal(name).send_async(None, **kwargs)

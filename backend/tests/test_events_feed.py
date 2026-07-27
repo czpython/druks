@@ -16,7 +16,7 @@ class Pallet(StoredSubject):
     __tablename__ = "faketest_pallets"
 
 
-def test_feed_carries_the_facts_a_row_is_worded_from(druks_db):
+def test_feed_carries_what_a_row_is_worded_from(druks_db):
     note = Note.create(body="the pump ran hot")
     Event.emit(
         type="workflow.running",
@@ -25,13 +25,7 @@ def test_feed_carries_the_facts_a_row_is_worded_from(druks_db):
         extension="field_notes",
         payload={"kind": Summarize.kind, "run": "wf1"},
     )
-    Event.emit(
-        type="summarized",
-        subject=note.identity,
-        label=note.label,
-        extension="field_notes",
-        payload={"words": 12},
-    )
+    Event.emit(type="summarized", subject=note.identity, label=note.label, extension="field_notes")
     druks_db.flush()
 
     by_kind = {row.kind: row for row in build_feed()[0]}
@@ -39,13 +33,11 @@ def test_feed_carries_the_facts_a_row_is_worded_from(druks_db):
     started = by_kind["workflow.running"]
     assert (started.extension, started.workflow) == ("field_notes", Summarize.kind)
     assert (started.subject_type, started.subject_id) == ("note", str(note.id))
-    # A note declares no label of its own, so it shows itself by identity; whatever
-    # is left of the payload once the workflow is promoted out of it is its facts.
-    assert (started.subject_label, started.facts) == (f"note {note.id}", {"run": "wf1"})
+    # A note declares no label of its own, so it shows itself by identity.
+    assert started.subject_label == f"note {note.id}"
 
-    # A milestone has no workflow behind it, and carries what its writer stated.
-    summarized = by_kind["summarized"]
-    assert (summarized.workflow, summarized.facts) == (None, {"words": 12})
+    # A milestone has no workflow behind it.
+    assert by_kind["summarized"].workflow is None
 
 
 def test_every_subject_shows_itself(druks_db):
