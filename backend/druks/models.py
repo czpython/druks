@@ -1,12 +1,17 @@
 import re
 from datetime import UTC, datetime
-from typing import Any, ClassVar, Self
+from typing import TYPE_CHECKING, Any, ClassVar, Self
 
 from sqlalchemy import DateTime, Integer, cast, select
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.types import TypeDecorator
 
 from druks.core.utils.time import ensure_utc
+
+if TYPE_CHECKING:
+    from druks.durable.datastructures import Subject
+    from druks.durable.schemas import RunResponse, SubjectStatus
+    from druks.workflows import Workflow
 
 _CAMEL_BOUNDARY = re.compile(r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])")
 
@@ -67,6 +72,22 @@ class StoredSubject(Base):
     @property
     def label(self) -> str:
         return self.get_label()
+
+    @property
+    def subject(self) -> "Subject":
+        """This row's identity — what a run, an event, or a read is keyed by."""
+        from druks.durable.datastructures import Subject
+
+        return Subject(id=str(self.id), subject_type=self.subject_type)
+
+    def get_status(self, *, workflow: "type[Workflow] | None" = None) -> "SubjectStatus":
+        return self.subject.get_status(workflow=workflow)
+
+    def get_timeline(self) -> "list[RunResponse]":
+        return self.subject.get_timeline()
+
+    async def get_phase(self) -> str | None:
+        return await self.subject.get_phase()
 
     @classmethod
     def list_open(cls, *, limit: int = 50) -> list[Self]:

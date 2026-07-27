@@ -25,7 +25,7 @@ class ProjectRepoSummary(BaseResponse):
     @classmethod
     def from_repo(cls, repo: ProjectRepo) -> "ProjectRepoSummary":
         # "ready" outranks a later failed re-profile: a stored profile stays usable.
-        status = repo.profiler_status()
+        status = repo.get_status()
         profile = repo.effective_profile()
         if status.is_running:
             profile_status, failure = "running", None

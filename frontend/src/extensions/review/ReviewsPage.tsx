@@ -37,7 +37,7 @@ export function ReviewsPage() {
   if (gate) return <Page className="page-reviews">{gate}</Page>
 
   const reviews = reviewsQuery.data!
-  const failed = reviews.filter((review) => review.status.state === 'failed').length
+  const failed = reviews.filter((review) => review.state === 'failed').length
 
   return (
     <Page
@@ -69,16 +69,15 @@ export function ReviewsPage() {
 }
 
 function ReviewRow({ review }: { review: ReviewSummary }) {
-  const { status } = review
-  const failed = status.state === 'failed'
-  const live = status.state === 'running' || status.state === 'scheduled'
+  const failed = review.state === 'failed'
+  const live = review.state === 'running' || review.state === 'scheduled'
   return (
     <div className={`row row-review${failed ? ' row-failed' : ''}`}>
-      <StatusGlyph state={status.state} pulse={live} />
+      <StatusGlyph state={review.state} pulse={live} />
       <RepoCell repoBare={bareName(review.repo)} />
       <PRCell prNumber={review.prNumber} prUrl={review.pullRequestUrl} />
       <span className="review-line mono dim">
-        {live ? `${reviewLine(status)}…` : reviewLine(status)}
+        {live ? `${reviewLine(review)}…` : reviewLine(review)}
       </span>
       <span className="review-when mono dim">
         <RelTime iso={review.triggeredAt} />

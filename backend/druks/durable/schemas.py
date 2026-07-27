@@ -187,6 +187,11 @@ class SubjectStatus(BaseResponse):
     # not a crash.
     failure: str | None = None
     reason: str | None = None
+    # When druks last picked this subject up, and whose work it is. A subject with
+    # a row of its own keeps these in its own columns; one that is identity alone
+    # has only the driving run, which is what everything above already comes from.
+    triggered_at: datetime | None = None
+    account_username: str | None = None
 
     @property
     def is_parked(self) -> bool:

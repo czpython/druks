@@ -14,5 +14,5 @@ def _no_subject_phase(request):
     async def _phase_noop(*args, **kwargs):
         pass
 
-    with mock.patch("druks.contrib.ship.extension.get_subject_phase", _phase_noop):
+    with mock.patch("druks.durable.reads.get_run_phase", _phase_noop):
         yield
