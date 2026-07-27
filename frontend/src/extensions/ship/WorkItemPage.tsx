@@ -37,7 +37,7 @@ export function WorkItemPage({ workItemId }: Props) {
   })
   const data = query.data
   useCanonicalPath(
-    data ? workItemPath(data.summary.id, data.summary.remoteKey, data.summary.title) : null,
+    data ? workItemPath(data.summary.id, data.summary.ticketKey, data.summary.title) : null,
   )
 
   // Push-driven cache: the detail stream re-emits the whole snapshot on any
@@ -270,15 +270,15 @@ function InfoPanel({
           </div>
           <div className="ins-field">
             <span className="ins-field-k">source</span>
-            <span className="ins-field-v" title={wi.remoteKey}>
+            <span className="ins-field-v" title={wi.ticketKey}>
               {wi.links.ticket ? (
                 <a className="ins-link" href={wi.links.ticket} target="_blank" rel="noreferrer">
                   {wi.source}
-                  {` · ${wi.remoteKey}`}
+                  {` · ${wi.ticketKey}`}
                   <span className="ins-link-arrow">↗</span>
                 </a>
               ) : (
-                `${wi.source}${wi.remoteKey ? ` · ${wi.remoteKey}` : ''}`
+                `${wi.source}${wi.ticketKey ? ` · ${wi.ticketKey}` : ''}`
               )}
             </span>
           </div>
@@ -437,8 +437,8 @@ function RightPane({ data, selection }: { data: WorkItemDetail; selection: Selec
   return (
     <>
       <div className="ins-hero">
-        <div className="ins-hero-line" title={`${wi.remoteKey} — ${wi.title}`}>
-          <span className="ins-hero-key">{wi.remoteKey}</span>
+        <div className="ins-hero-line" title={`${wi.ticketKey} — ${wi.title}`}>
+          <span className="ins-hero-key">{wi.ticketKey}</span>
           <span className="ins-hero-dash">—</span>
           {wi.title}
         </div>
@@ -539,7 +539,7 @@ function RunHeader({
           <button
             type="button"
             className="ins-run-link"
-            onClick={() => navigate(agentCallPath(wi.id, wi.remoteKey, wi.title, call.id))}
+            onClick={() => navigate(agentCallPath(wi.id, wi.ticketKey, wi.title, call.id))}
           >
             open full run ↗
           </button>

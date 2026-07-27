@@ -82,7 +82,7 @@ def _seed_work_item(engine, *, repo: str):
         project = Project(name=name)
         session.add(project)
         session.flush()
-        item = WorkItem(project_id=project.id, repo=repo, title="rt", remote_key=name)
+        item = WorkItem(project_id=project.id, repo=repo, title="rt", ticket_key=name)
         session.add(item)
         session.commit()
         session.refresh(item)

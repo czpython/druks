@@ -11,7 +11,7 @@ def make_test_work_item(*, repo: str, **kwargs):
     if not project:
         project = Project.create(name=repo)
         ProjectRepo.create(project_id=project.id, full_name=repo)
-    kwargs.setdefault("remote_key", f"TEST-{uuid7()}")
+    kwargs.setdefault("ticket_key", f"TEST-{uuid7()}")
     return WorkItem.create(project_id=project.id, repo=repo, **kwargs)
 
 

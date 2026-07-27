@@ -28,12 +28,12 @@ async def pr_open_mirrors_onto_item(
 async def build_start_marks_ticket_in_progress(*, subject: WorkItem, **_: object) -> None:
     # Every (re)start and gate-resume of a build means the ticket is in progress —
     # including the return from a rework loop that had parked it In Review.
-    await subject.set_remote_status(TicketStatus.IN_PROGRESS)
+    await subject.set_ticket_status(TicketStatus.IN_PROGRESS)
 
 
 @subscribe(WorkflowEvent.PARKED, workflow=Build, gate=ReviewWork, subject=WorkItem)
 async def review_park_marks_ticket_in_review(*, subject: WorkItem, **_: object) -> None:
-    await subject.set_remote_status(TicketStatus.IN_REVIEW)
+    await subject.set_ticket_status(TicketStatus.IN_REVIEW)
 
 
 @subscribe(WorkflowEvent.FAILED, workflow=Build, subject=WorkItem)

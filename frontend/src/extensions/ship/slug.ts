@@ -76,7 +76,7 @@ export function workItemPath(
 }
 
 export function workItemPathFromSummary(item: WorkItemSummary): string {
-  return workItemPath(item.id, item.remoteKey, item.title)
+  return workItemPath(item.id, item.ticketKey, item.title)
 }
 
 export function dashboardItemPath(item: DashboardItem): string {
@@ -87,10 +87,10 @@ export function dashboardItemPath(item: DashboardItem): string {
 
 export function agentCallPath(
   workItemId: number | string,
-  workItemRemoteKey: string | null | undefined,
+  workItemTicketKey: string | null | undefined,
   workItemTitle: string | null | undefined,
   callId: string,
 ): string {
   // AgentCall id is uuid7 — bare uuid as the URL handle, no slug tail.
-  return `${workItemPath(workItemId, workItemRemoteKey, workItemTitle)}/agent-calls/${callId}`
+  return `${workItemPath(workItemId, workItemTicketKey, workItemTitle)}/agent-calls/${callId}`
 }

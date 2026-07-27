@@ -94,7 +94,7 @@ class Links(BaseResponse):
     @classmethod
     def from_work_item(cls, item: WorkItem) -> "Links":
         pr = f"https://github.com/{item.repo}/pull/{item.pr_number}" if item.pr_number else None
-        return cls(repo=f"https://github.com/{item.repo}", pr=pr, ticket=item.remote_url)
+        return cls(repo=f"https://github.com/{item.repo}", pr=pr, ticket=item.ticket_url)
 
 
 class WorkItemSummary(SubjectSummary):
@@ -108,8 +108,8 @@ class WorkItemSummary(SubjectSummary):
     # whose Linear project doesn't map to one.
     project_name: str
     title: str
-    remote_key: str
-    remote_url: str | None = None
+    ticket_key: str
+    ticket_url: str | None = None
     pr_number: int | None = None
     branch: str | None = None
     created_at: datetime
@@ -124,8 +124,8 @@ class WorkItemSummary(SubjectSummary):
             repo=item.repo,
             project_name=item.project.name,
             title=item.title,
-            remote_key=item.remote_key,
-            remote_url=item.remote_url,
+            ticket_key=item.ticket_key,
+            ticket_url=item.ticket_url,
             pr_number=item.pr_number,
             branch=item.branch,
             created_at=item.created_at,
@@ -154,7 +154,7 @@ class DashboardItem(BaseResponse):
         return cls(
             key=f"code:{item.id}",
             source_id=item.id,
-            ticket_ref=item.remote_key,
+            ticket_ref=item.ticket_key,
             title=item.title,
             repo=item.repo,
             pr_number=item.pr_number,

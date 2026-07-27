@@ -210,7 +210,7 @@ async def test_external_close_returns_ticket_to_resting_pool(druks_db, tmp_path,
     async def _record(self, status):
         pushed.append((self.id, status))
 
-    monkeypatch.setattr(WorkItem, "set_remote_status", _record)
+    monkeypatch.setattr(WorkItem, "set_ticket_status", _record)
 
     repo, pr_number, branch = "ClawHaven/acme-app", 91, "agent/eng-20"
     work_item_id, _ = _park_work_item(repo=repo, pr_number=pr_number, branch=branch)
@@ -233,7 +233,7 @@ async def test_external_merge_pushes_done(druks_db, tmp_path, monkeypatch):
     async def _record(self, status):
         pushed.append((self.id, status))
 
-    monkeypatch.setattr(WorkItem, "set_remote_status", _record)
+    monkeypatch.setattr(WorkItem, "set_ticket_status", _record)
 
     repo, pr_number, branch = "ClawHaven/acme-app", 92, "agent/eng-21"
     work_item_id, _ = _park_work_item(repo=repo, pr_number=pr_number, branch=branch)
@@ -325,7 +325,7 @@ async def test_external_close_survives_policy_resolution_failure(druks_db, tmp_p
     async def _record(self, status):
         pushed.append(status)
 
-    monkeypatch.setattr(WorkItem, "set_remote_status", _record)
+    monkeypatch.setattr(WorkItem, "set_ticket_status", _record)
 
     repo, pr_number, branch = "ClawHaven/acme-app", 95, "agent/eng-24"
     work_item_id, _ = _park_work_item(repo=repo, pr_number=pr_number, branch=branch)
