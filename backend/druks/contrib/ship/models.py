@@ -6,7 +6,6 @@ from sqlalchemy import ForeignKey, Index, func, select
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from druks.contrib.ship.enums import HandoffStatus
 from druks.contrib.ship.policy import RepoPolicy
 from druks.core.apis.github import get_github_client
 from druks.db import Base, StoredSubject, db_session
@@ -181,7 +180,6 @@ class WorkItem(StoredSubject):
         # don't collide once we support multiple providers.
         Index("work_items_ticket_unique", "source", "ticket_key", unique=True),
         Index("work_items_project_idx", "project_id"),
-        Index("work_items_status_idx", "status"),
     )
 
     project_id: Mapped[int] = mapped_column(
@@ -209,7 +207,8 @@ class WorkItem(StoredSubject):
     build_run_id: Mapped[str | None] = mapped_column(
         ForeignKey("durable_runs.id", ondelete="SET NULL"), default=None
     )
-    status: Mapped[str | None] = mapped_column(default=None)
+    pr_merged: Mapped[bool | None] = mapped_column(default=None)
+    pr_resolved_at: Mapped[datetime | None] = mapped_column(default=None)
     created_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
     updated_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
 
@@ -277,7 +276,6 @@ class WorkItem(StoredSubject):
         # one converges on its own, its merge step finding the PR already closed.
         from druks.contrib.ship.workflows import Build
 
-        self.set_status(HandoffStatus.SHIPPED)
         build = self.get_status(workflow=Build)
         if build.is_parked:
             await Build.cancel(self, failure="pr merged while parked")
@@ -289,7 +287,6 @@ class WorkItem(StoredSubject):
         # must not strand it there.
         from druks.contrib.ship.workflows import Build
 
-        self.set_status(HandoffStatus.CANCELLED, event_payload={"external": True})
         await Build.cancel(self, failure="pr closed without merge")
         db_session().flush()
         try:
@@ -320,26 +317,14 @@ class WorkItem(StoredSubject):
 
     @classmethod
     def list_handoff(cls, *, limit: int = 10) -> list["WorkItem"]:
-        # The history list: items at rest in a handoff lane, newest first.
+        # The history list: resolved pull requests, newest first.
         stmt = (
-            select(cls).where(cls.status.is_not(None)).order_by(cls.updated_at.desc()).limit(limit)
+            select(cls)
+            .where(cls.pr_resolved_at.is_not(None))
+            .order_by(cls.pr_resolved_at.desc())
+            .limit(limit)
         )
         return list(db_session().scalars(stmt))
-
-    def set_status(
-        self, status: HandoffStatus | None, *, event_payload: dict[str, Any] | None = None
-    ) -> None:
-        """The handoff-lane write. A non-None status is a milestone, so the
-        matching build event records first — the pairing is structural, not a
-        call-site convention. None clears the lane on (re)dispatch: no event."""
-        if status:
-            # cycle: the extension imports this module at file scope.
-            import druks.contrib.ship.extension as ship_extension
-
-            ship_extension.Ship.record_event(type=status, subject=self, payload=event_payload)
-        self.status = status
-        self.updated_at = Base.utc_now()
-        db_session().flush()
 
     async def set_ticket_status(self, status: TicketStatus) -> None:
         # No-op for sources without a configured tracker (github, absent creds).

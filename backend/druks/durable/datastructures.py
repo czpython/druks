@@ -53,8 +53,12 @@ class Subject:
         the subject is identity alone; a subject with rows of its own lists them with
         ``StoredSubject.list_open``."""
         # Cycle: the durable read side is built on this package's models.
-        from druks.database import db_session
+        from druks.durable.enums import OPEN_STATES
         from druks.durable.models import Run
 
-        open_ids = db_session().scalars(Run.open_subject_ids(subject_type).limit(limit))
-        return [cls(id=subject_id, subject_type=subject_type) for subject_id in open_ids]
+        states = Run.subject_states(subject_type)
+        return [
+            cls(id=subject_id, subject_type=subject_type)
+            for subject_id, state in states.items()
+            if state in OPEN_STATES
+        ][:limit]

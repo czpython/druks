@@ -250,9 +250,8 @@ async def test_happy_path_declares_merge_intent(rt, monkeypatch):
         refreshed = session.get(WorkItem, item.id)
         assert (refreshed.pr_number, refreshed.branch) == (42, "agent/acme-1")
 
-    # Shipped settles via GitHub's pr.closed webhook (test_webhooks_pull_request),
-    # not the run — the run's job ends when GitHub accepts the merge intent. The durable
-    # residue is the event log of its state transitions.
+    # GitHub's pr.closed webhook stores the PR outcome (test_webhooks_pull_request),
+    # not the run — the run's job ends when GitHub accepts the merge intent.
     from druks.events.models import Event
 
     session = get_session(rt.engine)

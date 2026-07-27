@@ -2,6 +2,8 @@ from pathlib import Path
 
 import pytest
 from druks.contrib.ship.models import WorkItem
+from druks.database import db_session
+from druks.models import Base
 from druks.testing import seed_call
 from druks.workflows import Subject
 from fastapi.testclient import TestClient
@@ -54,12 +56,12 @@ def _seed_op(druks_db, work_item_id, *, kind="implement", state, input_gate=None
     seed_call(druks_db, run, kind)
 
 
-def _ship(repo, pr_number):
-    """Merge a work item's PR — the 'shipped' log event that lands it in
-    History, mirroring the merge handler."""
+def _resolve_pr(repo, pr_number, *, merged=True):
     item = WorkItem.get_for_pr(repo=repo, pr_number=pr_number)
     if item:
-        item.set_status("shipped")
+        item.pr_merged = merged
+        item.pr_resolved_at = Base.utc_now()
+        db_session().flush()
 
 
 # The generic subject read-side — Ship declares subject=WorkItem, so the
@@ -76,12 +78,13 @@ def test_subject_list_shows_active_and_excludes_handed_off(client: TestClient, d
     done = make_test_work_item(title="shipped one", repo=repo).id
     WorkItem.get(done).update(pr_number=1)
     _seed_op(druks_db, done, state="finished")
-    _ship(repo, 1)
+    _resolve_pr(repo, 1)
 
     rows = {r["summary"]["title"]: r for r in client.get("/api/ship/work_item").json()["rows"]}
     assert "building" in rows
     assert "shipped one" not in rows
     assert rows["building"]["status"]["state"] == "running"
+    assert rows["building"]["summary"]["resolution"] is None
 
 
 def test_subject_detail_composes_summary_status_and_timeline(client: TestClient, druks_db):
@@ -162,7 +165,7 @@ def test_history_returns_only_done_work_items(client: TestClient, druks_db):
     done_id = make_test_work_item(title="shipped one", repo=repo).id
     WorkItem.get(done_id).update(pr_number=1)
     _seed_op(druks_db, done_id, state="finished")
-    _ship(repo, 1)
+    _resolve_pr(repo, 1)
     # Running → active.
     running_id = make_test_work_item(title="still running", repo=repo).id
     _seed_op(druks_db, running_id, state="running")
@@ -176,19 +179,22 @@ def test_history_returns_only_done_work_items(client: TestClient, druks_db):
     assert "shipped one" in titles
     assert "still running" not in titles
     assert "broke" not in titles  # failed items stay active, not history
+    resolved = next(item for item in items if item["title"] == "shipped one")
+    assert resolved["resolution"] == "merged"
+    assert "status" not in resolved
 
 
-def test_pr_closed_without_merge_is_cancelled_in_history(client: TestClient, druks_db):
+def test_pr_closed_without_merge_is_closed_in_history(client: TestClient, druks_db):
     repo = "ClawHaven/acme-app"
     # A build parked on the operator, whose PR was then closed without merging.
     wid = make_test_work_item(title="abandoned", repo=repo).id
     WorkItem.get(wid).update(pr_number=7)
     _seed_op(druks_db, wid, state="finished")
-    WorkItem.get(wid).set_status("cancelled")
+    _resolve_pr(repo, 7, merged=False)
 
     items = client.get("/api/ship/work-items/history").json()["items"]
     row = next(it for it in items if it["title"] == "abandoned")
-    assert row["status"] == "cancelled"
+    assert row["resolution"] == "closed"
 
 
 def test_history_clamps_limit(client: TestClient, druks_db):
@@ -196,7 +202,7 @@ def test_history_clamps_limit(client: TestClient, druks_db):
         wid = make_test_work_item(title=f"shipped {i}", repo="ClawHaven/acme-app").id
         WorkItem.get(wid).update(pr_number=i + 1)
         _seed_op(druks_db, wid, state="finished")
-        _ship("ClawHaven/acme-app", i + 1)
+        _resolve_pr("ClawHaven/acme-app", i + 1)
 
     # limit > cap → clamps down, doesn't 400.
     response = client.get("/api/ship/work-items/history?limit=10000")

@@ -129,8 +129,6 @@ class Build(Workflow):
         # can't resolve this item onto the new run and cancel it.
         if item.build_run_id != run_id:
             item.update(build_run_id=run_id, branch=None, pr_number=None)
-        # (Re)dispatched → back in flight; clear the handoff lane.
-        item.set_status(None)
         return run_id
 
     async def run_multistep(
@@ -313,7 +311,7 @@ class Build(Workflow):
         return False
 
     async def _approved_work(self) -> bool:
-        # GitHub announces the merge; the pr.closed reaction settles shipped.
+        # GitHub announces the merge; the pr.closed reaction stores its outcome.
         if self._policy.on_approval == "merge":
             if await self.declare_merge_intent():
                 return True

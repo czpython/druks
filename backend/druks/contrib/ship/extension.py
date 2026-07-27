@@ -13,6 +13,7 @@ from druks.contrib.ship.contracts import (
 )
 from druks.contrib.ship.models import WorkItem
 from druks.contrib.ship.schemas import WorkItemSummary
+from druks.durable.models import Run
 from druks.extensions import Extension
 from druks.workflows import Subject, SubjectActivity
 
@@ -134,9 +135,13 @@ class Ship(Extension):
 
     @classmethod
     def list_subjects(cls) -> list[WorkItemSummary]:
-        # The active board: whatever hasn't handed off yet. The 500 most-recent
-        # cover it; paginate if a board outgrows it.
-        return [WorkItemSummary.from_work_item(item) for item in WorkItem.list_open(limit=500)]
+        states = Run.subject_states(cls.subject_type)
+        items = WorkItem.list_recent(limit=500)
+        return [
+            WorkItemSummary.from_work_item(item)
+            for item in items
+            if str(item.id) in states and item.pr_resolved_at is None
+        ]
 
     @classmethod
     async def get_subject_activity(cls, subject: Subject) -> SubjectActivity | None:

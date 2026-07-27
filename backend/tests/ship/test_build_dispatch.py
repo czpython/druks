@@ -1,16 +1,14 @@
-from druks.contrib.ship.enums import HandoffStatus
 from druks.contrib.ship.workflows import Build
+from druks.models import Base
 from druks.testing import seed_run
 
 from ship.factories import make_test_work_item
 
 
-async def test_dispatch_pulls_cancelled_item_back_onto_the_board(druks_db, monkeypatch) -> None:
-    """A cancelled item rests in History; dispatching its build must clear the
-    handoff status so the active board shows the run (and its gates) instead
-    of a stale "Cancelled" row."""
+async def test_dispatch_does_not_clear_a_stored_pr_resolution(druks_db, monkeypatch) -> None:
     item = make_test_work_item(repo="o/r", title="t", ticket_key="ACME-1")
-    item.set_status(HandoffStatus.CANCELLED)
+    item.pr_merged = False
+    item.pr_resolved_at = Base.utc_now()
     seed_run(druks_db, kind=Build.kind, run_id="run-1")
     started = {}
 
@@ -35,7 +33,8 @@ async def test_dispatch_pulls_cancelled_item_back_onto_the_board(druks_db, monke
 
     assert run_id == "run-1"
     assert item.build_run_id == "run-1"
-    assert item.status is None
+    assert item.pr_merged is False
+    assert item.pr_resolved_at is not None
     assert started["ticket_ref"] == "ACME-1"
     assert started["ticket_title"] == "t"
     assert started["ticket_url"] == "https://tracker.test/ACME-1"

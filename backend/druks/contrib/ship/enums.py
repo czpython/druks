@@ -19,8 +19,3 @@ class HumanFeedbackAction(StrEnum):
     CONTRACT_CHANGE_REQUIRED = "contract_change_required"
     QUESTION = "question"
     CLOSE = "close"
-
-
-class HandoffStatus(StrEnum):
-    SHIPPED = "shipped"
-    CANCELLED = "cancelled"

@@ -1,3 +1,4 @@
+from datetime import datetime
 from types import SimpleNamespace
 
 import druks.contrib.ship.subscribers  # noqa: F401 — registers the pr.closed subscriber
@@ -5,9 +6,8 @@ import pytest
 from druks.contrib.ship.models import WorkItem
 from druks.core.webhooks.github import GitHubEvents
 from druks.durable import Run
-from druks.events.models import Event
-from druks.testing import make_settings
-from sqlalchemy import func, select
+from druks.testing import configure_app_for_test, make_settings
+from fastapi.testclient import TestClient
 
 from ship.factories import make_test_work_item, seed_build_run
 
@@ -20,20 +20,6 @@ def _stub_config_fetch(monkeypatch):
         return None
 
     monkeypatch.setattr("druks.extensions.config.fetch_file", _fetch)
-
-
-def _milestone_count(work_item_id, milestone):
-    from druks.database import db_session
-
-    return db_session().scalar(
-        select(func.count())
-        .select_from(Event)
-        .where(
-            Event.subject_type == "work_item",
-            Event.subject_id == str(work_item_id),
-            Event.type == milestone,
-        )
-    )
 
 
 async def _fire_closed(*, repo, pr_number, branch, tmp_path, merged=True):
@@ -79,15 +65,15 @@ def _fresh_run(run_id):
 
 
 @pytest.mark.asyncio
-async def test_external_merge_records_event_and_ends_involvement(druks_db, tmp_path):
+async def test_external_merge_stores_resolution_and_ends_involvement(druks_db, tmp_path):
     repo, pr_number, branch = "ClawHaven/acme-app", 42, "agent/eng-1"
     work_item_id, run_id = _park_work_item(repo=repo, pr_number=pr_number, branch=branch)
 
     await _fire_closed(repo=repo, pr_number=pr_number, branch=branch, tmp_path=tmp_path)
 
-    # Ship-ness is recorded as the 'shipped' milestone...
-    assert _milestone_count(work_item_id, "shipped") == 1
-    # ...and involvement ended: the parked build run is cancelled.
+    resolved = WorkItem.get(work_item_id)
+    assert resolved.pr_merged is True
+    assert resolved.pr_resolved_at is not None
     assert not _fresh_run(run_id).is_active
 
 
@@ -107,26 +93,58 @@ async def test_merge_ships_but_leaves_a_running_build_to_converge(druks_db, tmp_
     await _fire_closed(repo=repo, pr_number=pr_number, branch=branch, tmp_path=tmp_path)
 
     assert Run.get(run_id).state == "running"  # not cancelled from under druks
-    assert _milestone_count(work_item_id, "shipped") == 1
+    assert WorkItem.get(work_item_id).pr_merged is True
 
 
 @pytest.mark.asyncio
-async def test_redelivered_merge_webhook_does_not_double_record(druks_db, tmp_path):
-    """GitHub redelivers webhooks; a shipped item stays shipped once."""
+async def test_redelivered_webhook_does_not_rewrite_resolution(druks_db, tmp_path):
     repo, pr_number, branch = "ClawHaven/acme-app", 44, "agent/eng-3"
     work_item_id, _ = _park_work_item(repo=repo, pr_number=pr_number, branch=branch)
     await _fire_closed(repo=repo, pr_number=pr_number, branch=branch, tmp_path=tmp_path)
+    resolved_at = WorkItem.get(work_item_id).pr_resolved_at
+
+    await _fire_closed(
+        repo=repo,
+        pr_number=pr_number,
+        branch=branch,
+        tmp_path=tmp_path,
+        merged=False,
+    )
+
+    item = WorkItem.get(work_item_id)
+    assert item.pr_merged is True
+    assert item.pr_resolved_at == resolved_at
+
+
+@pytest.mark.asyncio
+async def test_failed_build_later_merged_moves_from_board_to_history(druks_db, tmp_path):
+    repo, pr_number, branch = "ClawHaven/acme-app", 126, "agent/eng-760"
+    work_item_id, _ = _park_work_item(
+        repo=repo,
+        pr_number=pr_number,
+        branch=branch,
+        state="failed",
+    )
 
     await _fire_closed(repo=repo, pr_number=pr_number, branch=branch, tmp_path=tmp_path)
 
-    assert _milestone_count(work_item_id, "shipped") == 1
+    item = WorkItem.get(work_item_id)
+    assert item.pr_merged is True
+    settings = make_settings(tmp_path)
+    with TestClient(configure_app_for_test(settings=settings)) as client:
+        active = client.get("/api/ship/work_item").json()["rows"]
+        history = client.get("/api/ship/work-items/history").json()["items"]
+
+    assert str(work_item_id) not in {row["summary"]["id"] for row in active}
+    resolved = next(row for row in history if row["sourceId"] == work_item_id)
+    assert resolved["resolution"] == "merged"
+    resolved_at = datetime.fromisoformat(resolved["updatedAt"].replace("Z", "+00:00"))
+    assert resolved_at == item.pr_resolved_at
 
 
 @pytest.mark.asyncio
 async def test_closed_unmerged_records_close_and_ends_involvement(druks_db, tmp_path):
-    """A PR closed *without* merging — the operator abandoned it (e.g. deleted
-    the branch). Emit 'cancelled' and un-park so the item derives as cancelled
-    and leaves the active board, rather than being ignored."""
+    """A PR closed without merging stores GitHub's outcome and cancels the run."""
     repo, pr_number, branch = "ClawHaven/acme-app", 45, "agent/eng-4"
     work_item_id, run_id = _park_work_item(repo=repo, pr_number=pr_number, branch=branch)
 
@@ -138,8 +156,9 @@ async def test_closed_unmerged_records_close_and_ends_involvement(druks_db, tmp_
         merged=False,
     )
 
-    assert _milestone_count(work_item_id, "cancelled") == 1
-    assert _milestone_count(work_item_id, "shipped") == 0
+    resolved = WorkItem.get(work_item_id)
+    assert resolved.pr_merged is False
+    assert resolved.pr_resolved_at is not None
     assert not _fresh_run(run_id).is_active
 
 
@@ -158,43 +177,7 @@ async def test_closed_unmerged_cancels_in_flight_run(druks_db, tmp_path):
     )
 
     assert _fresh_run(run_id).state == "cancelled"
-    assert _milestone_count(work_item_id, "cancelled") == 1
-
-
-@pytest.mark.asyncio
-async def test_remerge_after_retrigger_records_a_fresh_shipped(druks_db, tmp_path):
-    """A prior round's 'shipped' must not swallow a second merge after the item
-    was re-triggered — the lane is active again, so the webhook ships it again."""
-    from datetime import UTC, datetime, timedelta
-
-    from druks.database import db_session as ds
-
-    repo, pr_number, branch = "ClawHaven/acme-app", 77, "agent/eng-9"
-    work_item_id, _ = _park_work_item(repo=repo, pr_number=pr_number, branch=branch)
-    # Round 1: shipped.
-    WorkItem.get(work_item_id).set_status("shipped")
-    # Re-trigger: a newer RUNNING build run; dispatch cleared the handoff status.
-    new_run = seed_build_run(ds(), work_item_id=work_item_id, state="running")
-    new_run.created_at = datetime.now(UTC) + timedelta(seconds=5)
-    WorkItem.get(work_item_id).set_status(None)
-    ds().flush()
-
-    await _fire_closed(repo=repo, pr_number=pr_number, branch=branch, tmp_path=tmp_path)
-
-    assert _milestone_count(work_item_id, "shipped") == 2
-
-
-@pytest.mark.asyncio
-async def test_merge_echo_with_no_newer_activity_still_dedups(druks_db, tmp_path):
-    """The echo case: druks's own merge emits 'shipped' and GitHub's closed
-    webhook arrives with nothing newer — still dropped."""
-    repo, pr_number, branch = "ClawHaven/acme-app", 78, "agent/eng-10"
-    work_item_id, _ = _park_work_item(repo=repo, pr_number=pr_number, branch=branch)
-    WorkItem.get(work_item_id).set_status("shipped")
-
-    await _fire_closed(repo=repo, pr_number=pr_number, branch=branch, tmp_path=tmp_path)
-
-    assert _milestone_count(work_item_id, "shipped") == 1  # deduped
+    assert WorkItem.get(work_item_id).pr_merged is False
 
 
 @pytest.mark.asyncio
@@ -336,7 +319,7 @@ async def test_external_close_survives_policy_resolution_failure(druks_db, tmp_p
 
     assert deleted == []  # cleanup skipped when policy can't be resolved
     assert pushed == [TicketStatus.READY_FOR_AGENT]  # ticket still reset
-    assert _milestone_count(work_item_id, "cancelled") == 1
+    assert WorkItem.get(work_item_id).pr_merged is False
 
 
 @pytest.mark.asyncio
@@ -356,4 +339,5 @@ async def test_stale_close_after_redispatch_spares_the_new_run(druks_db, tmp_pat
     await _fire_closed(repo=repo, pr_number=pr_a, branch=branch_a, tmp_path=tmp_path, merged=False)
 
     assert _fresh_run(new_run.id).state == "running"  # the live attempt is untouched
-    assert _milestone_count(item.id, "cancelled") == 0
+    assert item.pr_merged is None
+    assert item.pr_resolved_at is None

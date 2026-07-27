@@ -49,8 +49,8 @@ For extension-surface changes, inspect the proof extension at
   `druks.durable`, `druks.extensions`, and `druks.webhooks` are what an author imports;
   a reference to `druks.build` or any other extension inside them inverts the platform.
 - Liveness — is this subject still being worked — derives from run state; never mirror
-  it in a column. An extension's own outcome, such as shipped or cancelled, is a domain
-  fact it does own, and it records that by reacting to run lifecycle.
+  it in a column. An externally owned PR outcome is stored from the provider event,
+  never inferred from run lifecycle.
 - `@step` marks a replay checkpoint, not an expensive call. On replay the body
   re-executes from the top and completed steps return cached results, so code outside a
   step runs again. Moving the boundary changes correctness, not performance.

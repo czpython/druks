@@ -7,9 +7,14 @@ from druks.contrib.ship.models import Project, ProjectRepo, WorkItem
 from druks.schemas import BaseResponse
 from druks.workflows import SubjectSummary
 
-from .enums import HandoffStatus
-
 ProfileState = Literal["unprofiled", "running", "ready", "failed"]
+PRResolution = Literal["merged", "closed"]
+
+
+def _pr_resolution(merged: bool | None) -> PRResolution | None:
+    if merged is None:
+        return
+    return "merged" if merged else "closed"
 
 
 class ProjectRepoSummary(BaseResponse):
@@ -112,6 +117,7 @@ class WorkItemSummary(SubjectSummary):
     ticket_url: str | None = None
     pr_number: int | None = None
     branch: str | None = None
+    resolution: PRResolution | None = None
     created_at: datetime
     updated_at: datetime
     links: Links
@@ -128,6 +134,7 @@ class WorkItemSummary(SubjectSummary):
             ticket_url=item.ticket_url,
             pr_number=item.pr_number,
             branch=item.branch,
+            resolution=_pr_resolution(item.pr_merged),
             created_at=item.created_at,
             updated_at=item.updated_at,
             links=Links.from_work_item(item),
@@ -142,15 +149,17 @@ class DashboardItem(BaseResponse):
     repo: str | None = None
     pr_number: int | None = None
     project_name: str | None = None
-    # The stored handoff lane, verbatim — the FE words and colors it.
-    status: HandoffStatus
+    resolution: PRResolution
     created_at: datetime
     updated_at: datetime
     links: Links
 
     @classmethod
     def from_work_item(cls, item: WorkItem) -> "DashboardItem":
-        # History is terminal-only, so the stored lane is always set.
+        assert item.pr_merged is not None
+        assert item.pr_resolved_at is not None
+        resolution = _pr_resolution(item.pr_merged)
+        assert resolution is not None
         return cls(
             key=f"code:{item.id}",
             source_id=item.id,
@@ -161,9 +170,9 @@ class DashboardItem(BaseResponse):
             # Druks Project is required on WorkItem, so the dashboard
             # always has a curated project name to render.
             project_name=item.project.name,
-            status=HandoffStatus(item.status),
+            resolution=resolution,
             created_at=item.created_at,
-            updated_at=item.updated_at,
+            updated_at=item.pr_resolved_at,
             links=Links.from_work_item(item),
         )
 

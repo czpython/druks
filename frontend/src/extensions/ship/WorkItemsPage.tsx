@@ -38,8 +38,8 @@ function WorkItemRowView({
   row: WorkItemRow
   onOpen: (row: WorkItemRow) => void
 }) {
-  // Active lanes: parked → parked on you, failed → needs you to retry or
-  // cancel, running/scheduled → a step is live.
+  // Active lanes: parked/failed/finished need the operator; running/scheduled
+  // mean a step is live.
   const { summary: wi, status } = row
   const failed = status.state === 'failed'
   const parked = status.state === 'parked'
@@ -124,15 +124,17 @@ export function WorkItemsPage() {
     )
   }
 
-  // Two lanes: needs-you — parked on the operator OR failed (a failure still
-  // needs you) — and in-flight (a step running or about to). Newest
-  // movement first.
-  const active = [...rows].sort(
+  // Resolution wins before liveness: a provider-resolved PR is History even if
+  // its driving run still looks active or failed.
+  const unresolved = rows.filter((row) => row.summary.resolution === null)
+  const active = [...unresolved].sort(
     (a, b) => updatedAtSortKey(b.summary) - updatedAtSortKey(a.summary),
   )
   const needsYou = active.filter(
     (row) =>
-      (row.status.state === 'parked' || row.status.state === 'failed') &&
+      (row.status.state === 'parked' ||
+        row.status.state === 'failed' ||
+        row.status.state === 'finished') &&
       matchesQuery(row, query),
   )
   const inFlight = active.filter(

@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
 from dbos import DBOS
-from sqlalchemy import ForeignKey, Index, Select, String, func, select, update
+from sqlalchemy import ForeignKey, Index, String, func, select, update
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Mapped, column_property, mapped_column, relationship
@@ -22,7 +22,6 @@ from druks.durable.dbos_state import (
 )
 from druks.durable.enums import (
     ACTIVE_STATES,
-    OPEN_STATES,
     AgentCallStatus,
     RunState,
     WorkflowEvent,
@@ -150,9 +149,8 @@ class Run(Base):
         return db_session().scalars(stmt).first()
 
     @classmethod
-    def open_subject_ids(cls, subject_type: str) -> Select:
-        """The subjects of ``subject_type`` whose newest run hasn't handed off, that
-        run's most recent first — a subquery their own read composes."""
+    def subject_states(cls, subject_type: str) -> dict[str, RunState]:
+        """Every subject's newest driving run state, newest run first."""
         state = state_expression(cls.id, cls.input_gate, cls.created_at).label("state")
         subject_id = workflow_status.c.attributes["subject_id"].as_string().label("subject_id")
         driving = (
@@ -171,14 +169,15 @@ class Run(Base):
             .where(workflow_status.c.attributes["subject_type"].as_string() == subject_type)
             .subquery()
         )
-        return (
-            select(driving.c.subject_id)
-            .where(
-                driving.c.rank == 1,
-                driving.c.state.in_([run_state.value for run_state in OPEN_STATES]),
-            )
+        stmt = (
+            select(driving.c.subject_id, driving.c.state)
+            .where(driving.c.rank == 1)
             .order_by(driving.c.created_at.desc())
         )
+        return {
+            subject_id: RunState(state)
+            for subject_id, state in db_session().execute(stmt)
+        }
 
     def get_ask(self) -> dict[str, Any]:
         # The parked ask, ready to serve. An in-app review's ask names neither
