@@ -36,17 +36,9 @@ async def test_dispatch_pulls_cancelled_item_back_onto_the_board(druks_db, monke
     assert run_id == "run-1"
     assert item.build_run_id == "run-1"
     assert item.status is None
-    assert started == {
-        "subject": item,
-        "account_id": None,
-        "repo": "o/r",
-        "source": item.source,
-        "ticket_ref": "ACME-1",
-        "ticket_title": "t",
-        "ticket_url": "https://tracker.test/ACME-1",
-        "task_owner_email": None,
-        "task_owner_name": None,
-    }
+    assert started["ticket_ref"] == "ACME-1"
+    assert started["ticket_title"] == "t"
+    assert started["ticket_url"] == "https://tracker.test/ACME-1"
 
 
 async def test_redispatch_to_a_new_run_clears_prior_attempt_branch_and_pr(

@@ -82,7 +82,7 @@ export function workItemPathFromSummary(item: WorkItemSummary): string {
 export function dashboardItemPath(item: DashboardItem): string {
   // History items are all work items now (scope is a work item, not a
   // separate kind), so this always resolves to the work-item page.
-  return workItemPath(item.sourceId, item.ticketRef, item.title)
+  return workItemPath(item.sourceId, item.ticketKey, item.title)
 }
 
 export function agentCallPath(

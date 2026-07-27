@@ -55,7 +55,7 @@ export interface DashboardItem {
   /** Stable id like "code:37" — used for React keys and SSE diffs. */
   key: string
   sourceId: number
-  ticketRef?: string | null
+  ticketKey?: string | null
   title: string
   repo?: string | null
   prNumber?: number | null

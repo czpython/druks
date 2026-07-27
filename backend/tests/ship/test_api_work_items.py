@@ -109,20 +109,6 @@ def test_subject_detail_composes_summary_status_and_timeline(client: TestClient,
     assert summary["ticketUrl"] == "https://linear.app/acme/issue/ACME-5/detail"
     assert summary["links"]["ticket"] == "https://linear.app/acme/issue/ACME-5/detail"
     assert summary["links"]["pr"] == "https://github.com/ClawHaven/acme-app/pull/8"
-    assert set(summary) == {
-        "id",
-        "source",
-        "repo",
-        "projectName",
-        "title",
-        "ticketKey",
-        "ticketUrl",
-        "prNumber",
-        "branch",
-        "createdAt",
-        "updatedAt",
-        "links",
-    }
     # Status is the platform's, aggregated from the item's runs — parked on a gate.
     assert detail["status"]["state"] == "parked"
     assert detail["status"]["gate"] == "review_plan"

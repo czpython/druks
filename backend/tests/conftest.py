@@ -114,7 +114,6 @@ _OWN_DATABASE_MODULES = {
     "test_harness_login_persistence",
     "test_extension_migrations",
     "test_proof_extension_migration",
-    "test_work_item_ticket_migration",
 }
 
 

@@ -137,7 +137,7 @@ class WorkItemSummary(SubjectSummary):
 class DashboardItem(BaseResponse):
     key: str
     source_id: int | str
-    ticket_ref: str
+    ticket_key: str
     title: str
     repo: str | None = None
     pr_number: int | None = None
@@ -154,7 +154,7 @@ class DashboardItem(BaseResponse):
         return cls(
             key=f"code:{item.id}",
             source_id=item.id,
-            ticket_ref=item.ticket_key,
+            ticket_key=item.ticket_key,
             title=item.title,
             repo=item.repo,
             pr_number=item.pr_number,
