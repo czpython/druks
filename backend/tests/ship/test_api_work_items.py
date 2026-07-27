@@ -249,11 +249,11 @@ async def test_subject_activity_surfaces_running_phase(druks_db, monkeypatch):
     item = make_test_work_item(repo="ClawHaven/acme-app", title="x")
     seed_build_run(druks_db, work_item_id=item.id, state="running")
 
-    async def phase(_self):
+    async def phase(_run_id):
         return "provisioning_vm"
 
-    monkeypatch.setattr(WorkItem, "get_phase", phase)
-    activity = await ship_extension.Ship.subject_activity(item)
+    monkeypatch.setattr("druks.durable.reads.get_run_phase", phase)
+    activity = await ship_extension.Ship.get_subject_activity(item.subject)
     assert activity is not None
     assert activity.label == "Building sandbox VM…"
     assert activity.kind == "infra"
@@ -266,4 +266,4 @@ async def test_subject_activity_none_when_not_running(druks_db):
     item = make_test_work_item(repo="ClawHaven/acme-app", title="x")
     seed_build_run(druks_db, work_item_id=item.id, state="parked", input_gate="review_plan")
 
-    assert await ship_extension.Ship.subject_activity(item) is None
+    assert await ship_extension.Ship.get_subject_activity(item.subject) is None

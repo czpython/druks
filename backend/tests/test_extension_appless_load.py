@@ -31,13 +31,13 @@ _FILES = {
 
         class Probe(Extension):
             name = "probe"
-            subject = ProbeItem
+            subject_type = ProbeItem.subject_type
 
             class Settings(BaseModel):
                 budget: int = Field(default=3, ge=1)
 
             @classmethod
-            def subject_summary(cls, subject):
+            def get_subject_summary(cls, subject):
                 return None
 
             @classmethod

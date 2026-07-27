@@ -41,7 +41,7 @@ class PullRequestReview(Workflow):
         # review asked for by someone with no account runs as the system's.
         account = Account.get_for_username(requested_by)
         return await cls.start(
-            subject=Subject(id=f"{repo}#{pr_number}", subject_type="pull_request"),
+            subject=Subject(id=f"{repo}#{pr_number}", subject_type=Review.subject_type),
             account_id=account.id if account else None,
             repo=repo,
             pr_number=pr_number,

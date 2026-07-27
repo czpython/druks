@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING, Literal
 from druks.agents import Agent
 from druks.doctor import CheckResult
 from druks.extensions import Extension
+from druks.workflows import Subject
 from pydantic import BaseModel, Field, SecretStr, field_validator
 
 from druks_field_notes.contracts import NoteSummary
@@ -34,7 +35,7 @@ def check_summary_api_key(settings: "Settings") -> CheckResult:
 
 class FieldNotes(Extension):
     name = "field_notes"
-    subject = Note
+    subject_type = Note.subject_type
     icon = "notebook"
     description = "Turns a jotted observation into a one-line summary with an agent."
 
@@ -83,8 +84,11 @@ class FieldNotes(Extension):
     )
 
     @classmethod
-    def subject_summary(cls, subject: Note) -> NoteView:
-        return NoteView.from_note(subject)
+    def get_subject_summary(cls, subject: Subject) -> NoteView | None:
+        note = Note.get_for_subject(subject)
+        if note:
+            return NoteView.from_note(note)
+        return
 
     @classmethod
     def list_subjects(cls) -> list[NoteView]:

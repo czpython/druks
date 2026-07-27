@@ -371,15 +371,30 @@ A subject is what your runs are about — a repository, a work item, a pull
 request. Identity is all the platform needs:
 
 ```python
-from druks.workflows import Subject, get_subject_status
+from druks.workflows import Subject
 
-await Review.start(subject=Subject(id=f"{repo}#{pr_number}", subject_type="pull_request"))
+pull_request = Subject(id=f"{repo}#{pr_number}", subject_type="pull_request")
+await Review.start(subject=pull_request)
 
-status = get_subject_status("pull_request", f"{repo}#{pr_number}")
+status = pull_request.get_status()
 ```
 
 Status, timeline, and the run's own subject record answer for that identity
-alone — no table of yours involved.
+alone — no table of yours involved. Declare that type on the extension and druks
+serves it a board, a page, and a live stream of either:
+
+```python
+class Review(Extension):
+    subject_type = "pull_request"
+
+    @classmethod
+    def get_subject_summary(cls, subject: Subject) -> PullRequestSummary:
+        ...
+
+    @classmethod
+    def list_subjects(cls) -> list[PullRequestSummary]:
+        ...
+```
 
 When the subject is also a row you keep — one you list, edit, and show fields
 from — subclass `StoredSubject` instead of `Base`, and the class name is the
@@ -400,10 +415,11 @@ class RepositorySummary(SubjectSummary):
 
 
 class NightWatch(Extension):
-    subject = Repository
+    subject_type = Repository.subject_type
 
     @classmethod
-    def subject_summary(cls, subject: Repository) -> RepositorySummary:
+    def get_subject_summary(cls, subject: Subject) -> RepositorySummary | None:
+        repository = Repository.get_for_subject(subject)
         ...
 
     @classmethod
@@ -411,11 +427,13 @@ class NightWatch(Extension):
         ...
 ```
 
-Druks then serves that subject under `/api/night_watch/repository`: a board of
-every row, a page for one row, and a live stream of either. Each response pairs
-your summary with the run's status, timeline, agent calls, artifacts, and the
-question it is waiting on. Override `subject_activity()` only to add a passing
-detail of your own, like "Building sandbox VM…".
+The reads are keyed by identity either way, so the row is yours to load —
+`get_for_subject()` turns the identity back into it. Druks serves the same
+`/api/night_watch/repository` surface it serves an identity-only subject: a
+board, a page for one, and a live stream of either. Each response pairs your
+summary with the run's status, timeline, agent calls, artifacts, and the
+question it is waiting on. Override `get_subject_activity()` only to add a
+passing detail of your own, like "Building sandbox VM…".
 
 Hand the row itself to anything that asks for a subject — starting a run,
 answering a gate, recording an event:
@@ -432,16 +450,14 @@ You name what happened to the row: a work item ships, gets cancelled. Whether a
 run is working on it is druks's to say, and you read that off the status:
 
 ```python
-from druks.workflows import get_subject_phase, get_subject_status
-
-status = get_subject_status(repository.subject_type, str(repository.id))
+status = repository.get_status()
 if status.is_parked:
     ...  # a run stopped to ask a human something
 ```
 
 `status.kind` names the workflow currently driving the row and `status.gate` the
-question it stopped on. While a run is working, `get_subject_phase(...)` returns
-the step it is on.
+question it stopped on. While a run is working, `await repository.get_phase()`
+returns the step it is on.
 
 ## Record events and react to signals
 

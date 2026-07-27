@@ -2,6 +2,7 @@ from pathlib import Path
 
 import pytest
 from druks.durable import AgentCall, Run
+from druks.durable.datastructures import Subject
 from druks.durable.schemas import SubjectSummary
 from druks.extensions.base import Extension
 from druks.models import StoredSubject
@@ -21,13 +22,16 @@ class _ThingSummary(SubjectSummary):
 
 class _ThingExtension(Extension):
     name = "faketest"
-    subject = Thing
+    subject_type = Thing.subject_type
 
     _THINGS = {1: "First", 2: "Second"}
 
     @classmethod
-    def subject_summary(cls, subject: Thing) -> _ThingSummary:
-        return _ThingSummary(id=str(subject.id), title=cls._THINGS[subject.id])
+    def get_subject_summary(cls, subject: Subject) -> _ThingSummary | None:
+        thing = Thing.get_for_subject(subject)
+        if thing:
+            return _ThingSummary(id=str(thing.id), title=cls._THINGS[thing.id])
+        return
 
     @classmethod
     def list_subjects(cls) -> list[_ThingSummary]:
@@ -83,7 +87,8 @@ def client(tmp_path: Path, druks_db, monkeypatch):
     app = configure_app_for_test(settings=make_settings(tmp_path))
 
     holder = APIRouter()
-    holder.include_router(_ThingExtension._get_subject_routes(), prefix="/api/faketest")
+    routes = _ThingExtension._get_subject_routes(Thing.subject_type)
+    holder.include_router(routes, prefix="/api/faketest")
     catchall = next(
         i for i, r in enumerate(app.routes) if getattr(r, "path", "") == "/api/{path:path}"
     )
