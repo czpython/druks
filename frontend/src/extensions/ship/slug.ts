@@ -51,7 +51,7 @@ function joinLabels(...parts: Array<string | null | undefined>): string {
 /**
  * Build the canonical ``<id>-<slug>`` segment. Falls back to bare
  * ``<id>`` when there's no usable label text (no title and no ticket
- * ref); the router parses the leading int regardless.
+ * key); the router parses the leading int regardless.
  */
 export function itemSlug(
   id: number | string,
@@ -69,10 +69,10 @@ export function itemSlug(
 
 export function workItemPath(
   id: number | string,
-  ticketRef?: string | null,
+  ticketKey?: string | null,
   title?: string | null,
 ): string {
-  return `/work-items/${itemSlug(id, ticketRef, title)}`
+  return `/work-items/${itemSlug(id, ticketKey, title)}`
 }
 
 export function workItemPathFromSummary(item: WorkItemSummary): string {
