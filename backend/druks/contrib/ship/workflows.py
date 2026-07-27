@@ -94,9 +94,9 @@ class Build(Workflow):
     async def dispatch(cls, *, ticket: dict) -> str | None:
         # The tracker funnel's entry: a ticket at the trigger status opens a build.
         # Resolve-or-refresh the item, then start (start() dedups a live run).
-        item = WorkItem.get_for_remote_key(source=ticket["source"], remote_key=ticket["identifier"])
+        item = WorkItem.get_for_ticket_key(source=ticket["source"], ticket_key=ticket["identifier"])
         if item:
-            item.update(title=ticket["title"], remote_url=ticket["url"])
+            item.update(title=ticket["title"], ticket_url=ticket["url"])
         else:
             repo = ProjectRepo.lookup(project_name=ticket["project_name"], labels=ticket["labels"])
             if repo:
@@ -104,8 +104,8 @@ class Build(Workflow):
                     project_id=repo.project_id,
                     source=ticket["source"],
                     title=ticket["title"] or ticket["identifier"],
-                    remote_key=ticket["identifier"],
-                    remote_url=ticket["url"],
+                    ticket_key=ticket["identifier"],
+                    ticket_url=ticket["url"],
                     repo=repo.full_name,
                 )
             else:
@@ -118,9 +118,9 @@ class Build(Workflow):
             account_id=assignee.id if assignee else None,
             repo=item.repo,
             source=item.source,
-            ticket_ref=item.remote_key,
-            remote_title=item.title,
-            remote_url=item.remote_url,
+            ticket_ref=item.ticket_key,
+            ticket_title=item.title,
+            ticket_url=item.ticket_url,
             task_owner_email=email,
             task_owner_name=ticket["assignee_name"],
         )
@@ -139,13 +139,13 @@ class Build(Workflow):
         issue_number: int | None = None,
         source: str = "github",
         # Human-readable ticket reference ("ACME-270", "#42"). Same value the
-        # WorkItem keeps as ``remote_key``; carried separately on the input
+        # WorkItem keeps as ``ticket_key``; carried separately on the input
         # so the workflow can render it into prompts / PR titles without a
         # WorkItem fetch.
         ticket_ref: str | None = None,
         # Ticket title as intake received it; the implementer uses it for the PR title.
-        remote_title: str | None = None,
-        remote_url: str | None = None,
+        ticket_title: str | None = None,
+        ticket_url: str | None = None,
         task_owner_email: str | None = None,
         task_owner_name: str | None = None,
     ) -> None:

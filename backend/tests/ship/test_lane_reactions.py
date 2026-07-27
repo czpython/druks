@@ -17,7 +17,7 @@ pytestmark = pytest.mark.asyncio
 
 
 async def test_run_running_puts_item_back_on_board(druks_db):
-    item = make_test_work_item(repo="acme/widget", title="t", source="linear", remote_key="ACME-1")
+    item = make_test_work_item(repo="acme/widget", title="t", source="linear", ticket_key="ACME-1")
     item.set_status(HandoffStatus.CANCELLED)
 
     await publish(WorkflowEvent.RUNNING, subject=item.identity, kind=Build.kind)
@@ -31,8 +31,8 @@ async def test_build_lifecycle_reaches_the_tracker(druks_db, monkeypatch):
     async def _push(self, status):
         pushed.append(status)
 
-    monkeypatch.setattr(WorkItem, "set_remote_status", _push)
-    item = make_test_work_item(repo="acme/widget", title="t", source="linear", remote_key="ACME-7")
+    monkeypatch.setattr(WorkItem, "set_ticket_status", _push)
+    item = make_test_work_item(repo="acme/widget", title="t", source="linear", ticket_key="ACME-7")
     subject = item.identity
 
     await publish(WorkflowEvent.RUNNING, subject=subject, kind=Build.kind)
@@ -45,7 +45,7 @@ async def test_build_lifecycle_reaches_the_tracker(druks_db, monkeypatch):
 
 
 async def test_pr_review_answers_through_the_review_gate(druks_db, monkeypatch):
-    item = make_test_work_item(repo="acme/widget", title="t", source="linear", remote_key="ACME-9")
+    item = make_test_work_item(repo="acme/widget", title="t", source="linear", ticket_key="ACME-9")
     item.update(pr_number=12, branch="agent/acme-9")
     run = Run(
         id=str(uuid7()),
@@ -94,7 +94,7 @@ async def test_pr_review_answers_through_the_review_gate(druks_db, monkeypatch):
 
 
 async def test_pr_open_reaches_the_work_item(druks_db):
-    item = make_test_work_item(repo="acme/widget", title="t", source="linear", remote_key="ACME-8")
+    item = make_test_work_item(repo="acme/widget", title="t", source="linear", ticket_key="ACME-8")
 
     await publish(
         "pr.opened",

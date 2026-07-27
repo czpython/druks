@@ -37,7 +37,7 @@ export function AgentCallPage({ workItemId, runId }: Props) {
     query.data
       ? agentCallPath(
           workItemId,
-          query.data.summary.remoteKey,
+          query.data.summary.ticketKey,
           query.data.summary.title,
           query.data.call.id,
         )
@@ -96,10 +96,10 @@ function RunView({
             </Link>
             <span className="dim">/</span>
             <Link
-              href={workItemPath(workItemId, summary.remoteKey, summary.title)}
+              href={workItemPath(workItemId, summary.ticketKey, summary.title)}
               className="breadcrumb"
             >
-              {summary.remoteKey}
+              {summary.ticketKey}
             </Link>
             <span className="dim">/</span>
             <span title={runId}>#{runId.slice(0, 8)}</span>

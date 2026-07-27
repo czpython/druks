@@ -26,7 +26,7 @@ function matchesQuery(row: WorkItemRow, q: string): boolean {
   if (!q.trim()) return true
   const needle = q.toLowerCase()
   const { summary, status } = row
-  return `${summary.title} ${summary.remoteKey} ${summary.repo} ${statusLine(status)}`
+  return `${summary.title} ${summary.ticketKey} ${summary.repo} ${statusLine(status)}`
     .toLowerCase()
     .includes(needle)
 }
@@ -48,7 +48,7 @@ function WorkItemRowView({
   return (
     <div className={`row row-work-item${failed ? ' row-failed' : ''}`} onClick={() => onOpen(row)}>
       <StatusGlyph state={status.state} pulse={parked || live} />
-      <TicketCell ticketRef={wi.remoteKey} ticketUrl={wi.links.ticket} fallback={`#${wi.id}`} />
+      <TicketCell ticketRef={wi.ticketKey} ticketUrl={wi.links.ticket} fallback={`#${wi.id}`} />
       <span className="row-title" title={wi.title}>
         {wi.title}
       </span>

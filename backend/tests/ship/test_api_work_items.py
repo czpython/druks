@@ -86,7 +86,11 @@ def test_subject_list_shows_active_and_excludes_handed_off(client: TestClient, d
 
 def test_subject_detail_composes_summary_status_and_timeline(client: TestClient, druks_db):
     item = make_test_work_item(
-        title="detail", repo="ClawHaven/acme-app", source="linear", remote_key="ACME-5"
+        title="detail",
+        repo="ClawHaven/acme-app",
+        source="linear",
+        ticket_key="ACME-5",
+        ticket_url="https://linear.app/acme/issue/ACME-5/detail",
     )
     WorkItem.get(item.id).update(pr_number=8)
     run = seed_build_run(
@@ -99,9 +103,12 @@ def test_subject_detail_composes_summary_status_and_timeline(client: TestClient,
     seed_call(druks_db, run, "generate_plan")
 
     detail = client.get(f"/api/ship/work_item/{item.id}").json()
-    assert detail["summary"]["id"] == str(item.id)
-    assert detail["summary"]["remoteKey"] == "ACME-5"
-    assert detail["summary"]["links"]["pr"] == "https://github.com/ClawHaven/acme-app/pull/8"
+    summary = detail["summary"]
+    assert summary["id"] == str(item.id)
+    assert summary["ticketKey"] == "ACME-5"
+    assert summary["ticketUrl"] == "https://linear.app/acme/issue/ACME-5/detail"
+    assert summary["links"]["ticket"] == "https://linear.app/acme/issue/ACME-5/detail"
+    assert summary["links"]["pr"] == "https://github.com/ClawHaven/acme-app/pull/8"
     # Status is the platform's, aggregated from the item's runs — parked on a gate.
     assert detail["status"]["state"] == "parked"
     assert detail["status"]["gate"] == "review_plan"
@@ -229,7 +236,7 @@ def test_update_stamps_build_run_id(druks_db):
 def test_timeline_shows_every_build_attempt(druks_db):
     # Each build attempt is its own run; the timeline shows them all, with a
     # failed attempt's failure carried on its run.
-    item = make_test_work_item(repo="ClawHaven/acme-app", title="x", remote_key="ACME-1")
+    item = make_test_work_item(repo="ClawHaven/acme-app", title="x", ticket_key="ACME-1")
     run1 = seed_build_run(druks_db, work_item_id=item.id, state="failed", failure="boom")
     run2 = seed_build_run(druks_db, work_item_id=item.id, state="failed")
     seed_call(druks_db, run1, "generate_plan", status="failed", last_error="boom")

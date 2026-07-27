@@ -163,7 +163,7 @@ def test_linear_declares_known_exceptions():
     assert httpx.HTTPError in Linear.known_exceptions
 
 
-# --- WorkItem.set_remote_status: the status-push consumer -------------------
+# --- WorkItem.set_ticket_status: the status-push consumer -------------------
 
 
 class _FakeTracker:
@@ -186,37 +186,37 @@ class _FakeTracker:
 
 
 @pytest.mark.asyncio
-async def test_remote_state_pushes_status(druks_db, monkeypatch):
+async def test_ticket_state_pushes_status(druks_db, monkeypatch):
     from druks.contrib.ship import models
 
     from ship.factories import make_test_work_item
 
-    item = make_test_work_item(repo="acme/widget", source="linear", remote_key="ACME-1", title="t")
+    item = make_test_work_item(repo="acme/widget", source="linear", ticket_key="ACME-1", title="t")
     fake = _FakeTracker()
     monkeypatch.setattr(models, "get_tracker", lambda source, **_: fake)
 
-    await item.set_remote_status(TicketStatus.DONE)
+    await item.set_ticket_status(TicketStatus.DONE)
 
     assert fake.calls == [("linear", "ACME-1", TicketStatus.DONE), "aclose"]
 
 
 @pytest.mark.asyncio
-async def test_remote_state_skips_non_tracker_source(druks_db):
+async def test_ticket_state_skips_non_tracker_source(druks_db):
     from ship.factories import make_test_work_item
 
-    item = make_test_work_item(repo="acme/widget", source="github", remote_key="#5", title="t")
+    item = make_test_work_item(repo="acme/widget", source="github", ticket_key="#5", title="t")
     # github has no tracker — a no-op that must not raise.
-    await item.set_remote_status(TicketStatus.DONE)
+    await item.set_ticket_status(TicketStatus.DONE)
 
 
 @pytest.mark.asyncio
-async def test_remote_state_closes_on_failure(druks_db, monkeypatch):
+async def test_ticket_state_closes_on_failure(druks_db, monkeypatch):
     from druks.contrib.ship import models
     from druks.core.apis.linear import LinearAPIError
 
     from ship.factories import make_test_work_item
 
-    item = make_test_work_item(repo="acme/widget", source="linear", remote_key="ACME-2", title="t")
+    item = make_test_work_item(repo="acme/widget", source="linear", ticket_key="ACME-2", title="t")
 
     class _Boom(_FakeTracker):
         known_exceptions = (LinearAPIError,)
@@ -227,7 +227,7 @@ async def test_remote_state_closes_on_failure(druks_db, monkeypatch):
     boom = _Boom()
     monkeypatch.setattr(models, "get_tracker", lambda source, **_: boom)
 
-    await item.set_remote_status(TicketStatus.DONE)
+    await item.set_ticket_status(TicketStatus.DONE)
 
     assert "aclose" in boom.calls  # closed even on failure
 

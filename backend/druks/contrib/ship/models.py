@@ -176,10 +176,10 @@ class WorkItem(StoredSubject):
     __tablename__ = "work_items"
     __table_args__ = (
         Index("work_items_repo_idx", "repo", "pr_number"),
-        # One WorkItem per (source, remote_key) — one row per ticket in the remote
+        # One WorkItem per (source, ticket_key) — one row per ticket in the remote
         # tracker. ``source`` is part of the key so Linear "ABC-1" and Jira "ABC-1"
         # don't collide once we support multiple providers.
-        Index("work_items_remote_unique", "source", "remote_key", unique=True),
+        Index("work_items_ticket_unique", "source", "ticket_key", unique=True),
         Index("work_items_project_idx", "project_id"),
         Index("work_items_status_idx", "status"),
     )
@@ -189,15 +189,15 @@ class WorkItem(StoredSubject):
     )
     project: Mapped[Project] = relationship(lazy="joined")
     # Which remote tracker the ticket lives in: ``linear`` / ``github`` /
-    # future ``jira``. Combined with ``remote_key`` to uniquely identify
+    # future ``jira``. Combined with ``ticket_key`` to uniquely identify
     # a ticket.
     source: Mapped[str] = mapped_column(default="github")
     title: Mapped[str] = mapped_column(default="")
     # Human-readable issue key in the source: ``ACME-270`` / ``#42`` /
     # ``JIRA-123``. Every item is born from a ticket, so every item has one;
     # Linear's GraphQL accepts the identifier wherever it accepts the UUID.
-    remote_key: Mapped[str]
-    remote_url: Mapped[str | None]
+    ticket_key: Mapped[str]
+    ticket_url: Mapped[str | None]
     # The PR-target repo. Still on WorkItem (not derived from project)
     # because a Project can hold N repos but every WorkItem PRs into one.
     repo: Mapped[str]
@@ -214,7 +214,7 @@ class WorkItem(StoredSubject):
     updated_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
 
     def get_label(self) -> str:
-        return self.remote_key
+        return self.ticket_key
 
     @classmethod
     def create(
@@ -223,8 +223,8 @@ class WorkItem(StoredSubject):
         project_id: int,
         source: str = "github",
         title: str,
-        remote_key: str,
-        remote_url: str | None = None,
+        ticket_key: str,
+        ticket_url: str | None = None,
         repo: str,
     ) -> "WorkItem":
         session = db_session()
@@ -232,8 +232,8 @@ class WorkItem(StoredSubject):
             project_id=project_id,
             source=source,
             title=title,
-            remote_key=remote_key,
-            remote_url=remote_url,
+            ticket_key=ticket_key,
+            ticket_url=ticket_url,
             repo=repo,
         )
         session.add(item)
@@ -281,7 +281,7 @@ class WorkItem(StoredSubject):
         build = self.get_status(workflow=Build)
         if build.is_parked:
             await Build.cancel(self, failure="pr merged while parked")
-        await self.set_remote_status(TicketStatus.DONE)
+        await self.set_ticket_status(TicketStatus.DONE)
 
     async def close_external(self) -> None:
         # The attempt was abandoned, not the ticket, so the ticket returns to the
@@ -297,20 +297,20 @@ class WorkItem(StoredSubject):
                 await get_github_client(load_settings()).delete_branch(self.repo, self.branch)
         except Exception:  # noqa: BLE001 — cleanup only
             logger.warning("Skipped branch cleanup for %s.", self.repo, exc_info=True)
-        await self.set_remote_status(TicketStatus.READY_FOR_AGENT)
+        await self.set_ticket_status(TicketStatus.READY_FOR_AGENT)
 
     @classmethod
-    def get_for_remote_key(
+    def get_for_ticket_key(
         cls,
         *,
         source: str,
-        remote_key: str,
+        ticket_key: str,
     ) -> "WorkItem | None":
-        """Look up a WorkItem by its source + remote_key pair.
+        """Look up a WorkItem by its source + ticket_key pair.
 
-        The (source, remote_key) unique constraint guarantees at most
+        The (source, ticket_key) unique constraint guarantees at most
         one live row; we return that row or None if no match exists."""
-        stmt = select(cls).where(cls.source == source, cls.remote_key == remote_key).limit(1)
+        stmt = select(cls).where(cls.source == source, cls.ticket_key == ticket_key).limit(1)
         return db_session().scalars(stmt).first()
 
     @classmethod
@@ -341,7 +341,7 @@ class WorkItem(StoredSubject):
         self.updated_at = Base.utc_now()
         db_session().flush()
 
-    async def set_remote_status(self, status: TicketStatus) -> None:
+    async def set_ticket_status(self, status: TicketStatus) -> None:
         # No-op for sources without a configured tracker (github, absent creds).
         if not is_tracker_source(self.source):
             return
@@ -356,7 +356,7 @@ class WorkItem(StoredSubject):
         except TrackerNotConfigured:
             return
 
-        ticket = Ticket.ref(self.source, self.remote_key)
+        ticket = Ticket.ref(self.source, self.ticket_key)
         async with tracker:
             try:
                 await tracker.set_status(ticket, status)
@@ -364,7 +364,7 @@ class WorkItem(StoredSubject):
                 logger.warning(
                     "Could not sync %s ticket %s to %s.",
                     self.source,
-                    self.remote_key,
+                    self.ticket_key,
                     status.value,
                     exc_info=True,
                 )
@@ -373,7 +373,7 @@ class WorkItem(StoredSubject):
         self,
         *,
         title: str = _KEEP,
-        remote_url: str | None = _KEEP,
+        ticket_url: str | None = _KEEP,
         pr_number: int | None = _KEEP,
         branch: str | None = _KEEP,
         build_run_id: str | None = _KEEP,
@@ -381,8 +381,8 @@ class WorkItem(StoredSubject):
     ) -> None:
         if title is not _KEEP:
             self.title = title
-        if remote_url is not _KEEP:
-            self.remote_url = remote_url
+        if ticket_url is not _KEEP:
+            self.ticket_url = ticket_url
         if pr_number is not _KEEP:
             self.pr_number = pr_number
         if branch is not _KEEP:

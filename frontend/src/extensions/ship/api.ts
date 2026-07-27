@@ -42,8 +42,8 @@ export interface WorkItemSummary extends SubjectSummary {
   repo: string
   projectName: string
   title: string
-  remoteKey: string
-  remoteUrl?: string | null
+  ticketKey: string
+  ticketUrl?: string | null
   prNumber?: number | null
   branch?: string | null
   createdAt: string
@@ -55,7 +55,7 @@ export interface DashboardItem {
   /** Stable id like "code:37" — used for React keys and SSE diffs. */
   key: string
   sourceId: number
-  ticketRef?: string | null
+  ticketKey: string
   title: string
   repo?: string | null
   prNumber?: number | null

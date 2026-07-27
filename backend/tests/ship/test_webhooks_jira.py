@@ -182,7 +182,7 @@ async def test_trigger_status_routes_a_new_ticket_by_label(tmp_path, druks_db, m
         payload=_jira_payload(key="SHRP-1", status="Ready", project="Octo", labels=["Alfred"]),
     )
 
-    item = WorkItem.get_for_remote_key(source="jira", remote_key="SHRP-1")
+    item = WorkItem.get_for_ticket_key(source="jira", ticket_key="SHRP-1")
     assert item.build_run_id == "run-new"
     assert item.repo == "octo/alfred"
     assert item.project_id == project.id

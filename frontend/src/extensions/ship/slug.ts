@@ -51,7 +51,7 @@ function joinLabels(...parts: Array<string | null | undefined>): string {
 /**
  * Build the canonical ``<id>-<slug>`` segment. Falls back to bare
  * ``<id>`` when there's no usable label text (no title and no ticket
- * ref); the router parses the leading int regardless.
+ * key); the router parses the leading int regardless.
  */
 export function itemSlug(
   id: number | string,
@@ -69,28 +69,28 @@ export function itemSlug(
 
 export function workItemPath(
   id: number | string,
-  ticketRef?: string | null,
+  ticketKey?: string | null,
   title?: string | null,
 ): string {
-  return `/work-items/${itemSlug(id, ticketRef, title)}`
+  return `/work-items/${itemSlug(id, ticketKey, title)}`
 }
 
 export function workItemPathFromSummary(item: WorkItemSummary): string {
-  return workItemPath(item.id, item.remoteKey, item.title)
+  return workItemPath(item.id, item.ticketKey, item.title)
 }
 
 export function dashboardItemPath(item: DashboardItem): string {
   // History items are all work items now (scope is a work item, not a
   // separate kind), so this always resolves to the work-item page.
-  return workItemPath(item.sourceId, item.ticketRef, item.title)
+  return workItemPath(item.sourceId, item.ticketKey, item.title)
 }
 
 export function agentCallPath(
   workItemId: number | string,
-  workItemRemoteKey: string | null | undefined,
+  workItemTicketKey: string | null | undefined,
   workItemTitle: string | null | undefined,
   callId: string,
 ): string {
   // AgentCall id is uuid7 — bare uuid as the URL handle, no slug tail.
-  return `${workItemPath(workItemId, workItemRemoteKey, workItemTitle)}/agent-calls/${callId}`
+  return `${workItemPath(workItemId, workItemTicketKey, workItemTitle)}/agent-calls/${callId}`
 }

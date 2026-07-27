@@ -45,7 +45,7 @@ export function HistoryPage() {
       if (statusFilter !== 'all' && item.status !== statusFilter) return false
       if (query.trim()) {
         const q = query.toLowerCase()
-        if (!`${item.title} ${item.ticketRef ?? ''}`.toLowerCase().includes(q)) return false
+        if (!`${item.title} ${item.ticketKey}`.toLowerCase().includes(q)) return false
       }
       return true
     })
@@ -125,7 +125,7 @@ export function HistoryPage() {
               onClick={() => navigate(dashboardItemPath(item))}
             >
               <StatusTag status={item.status} />
-              <span className="row-id mono">{item.ticketRef ?? `#${item.sourceId}`}</span>
+              <span className="row-id mono">{item.ticketKey}</span>
               <span className="row-title" title={item.title}>
                 {item.title}
               </span>
