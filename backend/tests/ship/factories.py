@@ -1,14 +1,17 @@
 from druks.contrib.ship.models import Project, ProjectRepo, WorkItem
 from druks.contrib.ship.workflows import Build
 from druks.testing import seed_run
+from uuid_utils import uuid7
 
 
 def make_test_work_item(*, repo: str, **kwargs):
-    """A WorkItem with the Project / ProjectRepo binding it requires."""
+    """A WorkItem with the Project / ProjectRepo binding it requires. Every item
+    carries a ticket key, unique per source — tests that don't care get one."""
     project = Project.get_for_repo(repo)
     if not project:
         project = Project.create(name=repo)
         ProjectRepo.create(project_id=project.id, full_name=repo)
+    kwargs.setdefault("remote_key", f"TEST-{uuid7()}")
     return WorkItem.create(project_id=project.id, repo=repo, **kwargs)
 
 

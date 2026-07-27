@@ -279,11 +279,11 @@ function InfoPanel({
           </div>
           <div className="ins-field">
             <span className="ins-field-k">source</span>
-            <span className="ins-field-v" title={wi.remoteKey ?? wi.source}>
+            <span className="ins-field-v" title={wi.remoteKey}>
               {wi.links.ticket ? (
                 <a className="ins-link" href={wi.links.ticket} target="_blank" rel="noreferrer">
                   {wi.source}
-                  {wi.remoteKey ? ` · ${wi.remoteKey}` : ''}
+                  {` · ${wi.remoteKey}`}
                   <span className="ins-link-arrow">↗</span>
                 </a>
               ) : (
@@ -455,8 +455,8 @@ function RightPane({ data, selection }: { data: WorkItemDetail; selection: Selec
   return (
     <>
       <div className="ins-hero">
-        <div className="ins-hero-line" title={`${wi.remoteKey ?? `#${wi.id}`} — ${wi.title}`}>
-          <span className="ins-hero-key">{wi.remoteKey ?? `#${wi.id}`}</span>
+        <div className="ins-hero-line" title={`${wi.remoteKey} — ${wi.title}`}>
+          <span className="ins-hero-key">{wi.remoteKey}</span>
           <span className="ins-hero-dash">—</span>
           {wi.title}
         </div>

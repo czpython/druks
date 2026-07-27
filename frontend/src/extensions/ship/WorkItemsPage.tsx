@@ -26,7 +26,7 @@ function matchesQuery(row: WorkItemRow, q: string): boolean {
   if (!q.trim()) return true
   const needle = q.toLowerCase()
   const { summary, status } = row
-  return `${summary.title} ${summary.remoteKey ?? ''} ${summary.repo} ${statusLine(status)}`
+  return `${summary.title} ${summary.remoteKey} ${summary.repo} ${statusLine(status)}`
     .toLowerCase()
     .includes(needle)
 }

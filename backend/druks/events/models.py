@@ -25,6 +25,9 @@ class Event(Base):
     # What the event is about (a work item, a signal), supplied by the caller.
     # Opaque here: the log keys events without knowing the subject.
     subject_type: Mapped[str | None] = mapped_column(default=None)
+    # How the subject showed itself when the event was written — the feed labels
+    # rows without ever loading a subject. Absent exactly when the subject is.
+    subject_label: Mapped[str | None] = mapped_column(default=None)
     extension: Mapped[str | None] = mapped_column(default=None)
     # Append-only, so creation time is the event time. No updated_at.
     created_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
@@ -36,6 +39,7 @@ class Event(Base):
         *,
         type: str,
         subject: dict[str, Any] | None = None,
+        label: str | None = None,
         payload: dict[str, Any] | None = None,
         extension: str | None = None,
     ) -> None:
@@ -45,6 +49,7 @@ class Event(Base):
                 type=type,
                 subject_type=subject.get("type"),
                 subject_id=str(subject["id"]) if "id" in subject else None,
+                subject_label=label or None,
                 extension=extension,
                 payload=payload or {},
             )

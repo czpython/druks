@@ -454,6 +454,7 @@ class Extension:
         Event.emit(
             type=type,
             subject=subject.identity if subject else None,
+            label=subject.label if subject else None,
             payload=payload,
             extension=cls.name,
         )

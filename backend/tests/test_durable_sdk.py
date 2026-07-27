@@ -54,6 +54,9 @@ SINK: list[str] = []
 class Widget(StoredSubject):
     __tablename__ = "test_widgets"
 
+    def get_label(self) -> str:
+        return f"W-{self.id}"
+
 
 # run_multistep() below for fixtures using @step/a gate; run() for the rest.
 def _build_units():
@@ -304,7 +307,11 @@ async def test_attribution_rides_the_run_and_survives_resume(rt):
         attributes = conn.execute(
             select(workflow_status.c.attributes).where(workflow_status.c.workflow_uuid == wfid)
         ).scalar_one()
-    assert attributes == {"subject_type": "widget", "subject_id": "878787"}
+    assert attributes == {
+        "subject_type": "widget",
+        "subject_id": "878787",
+        "subject_label": "W-878787",
+    }
     assert parked.account_id == account_id
     assert f"acct-before:{account_id}" in SINK
 
@@ -445,7 +452,11 @@ async def test_subject_gate_parks_unchanged(rt):
         attributes = conn.execute(
             select(workflow_status.c.attributes).where(workflow_status.c.workflow_uuid == wfid)
         ).scalar_one()
-    assert attributes == {"subject_type": "widget", "subject_id": "636363"}
+    assert attributes == {
+        "subject_type": "widget",
+        "subject_id": "636363",
+        "subject_label": "W-636363",
+    }
 
     await parked.resume(action="go")
     await _wait_for(rt.engine, wfid, lambda r: r.state == RunState.FINISHED)
@@ -833,6 +844,9 @@ async def test_run_events_carry_subject(rt):
 
     assert [e.type for e in events] == ["workflow.running", "workflow.finished"]
     assert {e.subject_type for e in events} == {"widget"}
+    # The label was stamped into the run's attributes at start and snapshotted
+    # onto each transition — the identity itself stays the bare key.
+    assert {e.subject_label for e in events} == {"W-4242"}
     assert all(e.payload["run"] == wfid for e in events)
 
 

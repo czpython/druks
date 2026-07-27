@@ -88,6 +88,17 @@ def state_expression(
     return sa.func.coalesce(mapped, missing)
 
 
+def subject_label_expression(run_id: sa.ColumnElement) -> sa.ColumnElement:
+    # How the run's subject showed itself, stamped at start(); a subjectless cron
+    # has none.
+    return (
+        sa.select(workflow_status.c.attributes["subject_label"].as_string())
+        .where(workflow_status.c.workflow_uuid == run_id)
+        .correlate_except(workflow_status)
+        .scalar_subquery()
+    )
+
+
 def updated_at_expression(run_id: sa.ColumnElement) -> sa.ColumnElement:
     # DBOS stamps updated_at in epoch milliseconds; convert so it compares
     # against our timestamptz columns.

@@ -12,7 +12,7 @@ from druks.durable.activity import set_run_phase
 from druks.durable.engine import _step_engine, step_session
 from druks.durable.enums import AgentCallStatus
 from druks.durable.exceptions import WorkflowError
-from druks.durable.models import AgentCall, Artifact
+from druks.durable.models import AgentCall, Artifact, Run
 from druks.events.models import Event
 from druks.extensions.registry import agents
 from druks.harnesses.models import HarnessConnection
@@ -177,6 +177,7 @@ class Agent:
             Event.emit(
                 type="credential.fallback",
                 subject=workflow._subject,
+                label=Run.get(workflow_id).subject_label,
                 payload={"run_id": workflow_id, "harness": harness.name},
                 extension=type(workflow).extension,
             )

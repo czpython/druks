@@ -14,7 +14,8 @@ const LIFECYCLE_VERBS: Record<string, string> = {
 export interface EventLine {
   // What happened, in words: "build started", "shipped".
   label: string
-  // Who it happened to, by identity. Empty for a row about nothing in particular.
+  // Who it happened to, as it showed itself. Empty for a row about nothing in
+  // particular.
   subject: string
   // The feed's source column — the workflow that ran, else the extension.
   source: string
@@ -27,7 +28,7 @@ export interface EventLine {
 export function eventLine(event: FeedItem): EventLine {
   return {
     label: label(event),
-    subject: subjectName(event),
+    subject: event.subjectLabel ?? '',
     source: localName(event.workflow) || event.extension || 'druks',
     path: subjectPath(event),
     bucket: isLifecycle(event) ? 'event-kind-agent' : 'event-kind-audit',
@@ -43,11 +44,6 @@ function label(event: FeedItem): string {
   // An extension's milestone type is its own word ("shipped", "needs_answers"), and an
   // unrecognised kind reads as itself rather than disappearing.
   return words(event.kind)
-}
-
-function subjectName(event: FeedItem): string {
-  if (event.subjectType && event.subjectId) return `${words(event.subjectType)} ${event.subjectId}`
-  return ''
 }
 
 function subjectPath(event: FeedItem): string | undefined {

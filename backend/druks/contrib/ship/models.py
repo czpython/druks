@@ -2,7 +2,7 @@ import logging
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import ForeignKey, Index, func, select, text
+from sqlalchemy import ForeignKey, Index, func, select
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -179,19 +179,10 @@ class WorkItem(StoredSubject):
     __tablename__ = "work_items"
     __table_args__ = (
         Index("work_items_repo_idx", "repo", "pr_number"),
-        # One WorkItem per (source, remote_key) - i.e. one row per ticket
-        # in the remote tracker. Partial because GitHub-source rows
-        # without an ``#NNN`` ticket reference can still exist; the
-        # constraint only fires when remote_key is set. ``source`` is
-        # part of the key so Linear "ABC-1" and Jira "ABC-1" don't
-        # collide once we support multiple providers.
-        Index(
-            "work_items_remote_unique",
-            "source",
-            "remote_key",
-            unique=True,
-            sqlite_where=text("remote_key IS NOT NULL"),
-        ),
+        # One WorkItem per (source, remote_key) — one row per ticket in the remote
+        # tracker. ``source`` is part of the key so Linear "ABC-1" and Jira "ABC-1"
+        # don't collide once we support multiple providers.
+        Index("work_items_remote_unique", "source", "remote_key", unique=True),
         Index("work_items_project_idx", "project_id"),
         Index("work_items_status_idx", "status"),
     )
@@ -206,9 +197,9 @@ class WorkItem(StoredSubject):
     source: Mapped[str] = mapped_column(default="github")
     title: Mapped[str] = mapped_column(default="")
     # Human-readable issue key in the source: ``ACME-270`` / ``#42`` /
-    # ``JIRA-123``. Linear's GraphQL accepts the identifier wherever it
-    # accepts the UUID.
-    remote_key: Mapped[str | None]
+    # ``JIRA-123``. Every item is born from a ticket, so every item has one;
+    # Linear's GraphQL accepts the identifier wherever it accepts the UUID.
+    remote_key: Mapped[str]
     remote_url: Mapped[str | None]
     # The PR-target repo. Still on WorkItem (not derived from project)
     # because a Project can hold N repos but every WorkItem PRs into one.
@@ -225,6 +216,9 @@ class WorkItem(StoredSubject):
     created_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
     updated_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
 
+    def get_label(self) -> str:
+        return self.remote_key
+
     @classmethod
     def create(
         cls,
@@ -232,7 +226,7 @@ class WorkItem(StoredSubject):
         project_id: int,
         source: str = "github",
         title: str,
-        remote_key: str | None = None,
+        remote_key: str,
         remote_url: str | None = None,
         repo: str,
     ) -> "WorkItem":
@@ -345,10 +339,7 @@ class WorkItem(StoredSubject):
             # cycle: the extension imports this module at file scope.
             import druks.contrib.ship.extension as ship_extension
 
-            payload = dict(event_payload or {})
-            if self.remote_key:
-                payload["ticket"] = self.remote_key
-            ship_extension.Ship.record_event(type=status, subject=self, payload=payload)
+            ship_extension.Ship.record_event(type=status, subject=self, payload=event_payload)
         self.status = status
         self.updated_at = Base.utc_now()
         db_session().flush()

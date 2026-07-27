@@ -339,8 +339,10 @@ export interface FeedItem {
   workflow?: string | null
   subjectType?: string | null
   subjectId?: string | null
-  // Whatever else the event recorded, stated by its writer — a gate, a failure,
-  // a ticket key.
+  // How the subject showed itself ("ENG-767"), snapshotted at write. Absent
+  // exactly when the subject is.
+  subjectLabel?: string | null
+  // Whatever else the event recorded, stated by its writer — a gate, a failure.
   facts: Record<string, unknown>
 }
 
