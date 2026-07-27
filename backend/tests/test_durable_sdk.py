@@ -472,7 +472,7 @@ async def test_subjectless_review_fails_loudly(rt):
     assert "'review'" in failed.failure
 
 
-def _fake_ephemeral_returning(action: str, seen: list[dict], pinned: list[int]):
+def _fake_ephemeral_returning(action: str, seen: list[dict], held: list[bool]):
     # Class-method stand-in for Client.ephemeral: a VM whose agent returns
     # ``action``.
     from datetime import UTC, datetime
@@ -484,12 +484,14 @@ def _fake_ephemeral_returning(action: str, seen: list[dict], pinned: list[int]):
     async def _fake_ephemeral(self, **_kw):
         async def _run_agent(**kwargs):
             seen.append(kwargs)
-            # The agent runs for minutes in production; the step's pooled DB
-            # connection must be back in the pool for that wait, not pinned by
-            # an idle-in-transaction session.
-            from druks.durable.engine import _step_engine
+            # The agent runs for minutes in production, so the step commits before
+            # handing over: its own session holds no connection through the wait.
+            # Ask that session — sessions are task-scoped and the agent is awaited
+            # in the step's task, so this is it. The pool cannot answer: it is
+            # shared, and another reader in this instant is not this step pinning.
+            from druks.database import db_session
 
-            pinned.append(_step_engine().pool.checkedout())
+            held.append(db_session().in_transaction())
             # The harness names the on-disk dir (and the row) from the supplied
             # call_id, so the result echoes it back as run_id.
             return AgentResult(
@@ -517,11 +519,11 @@ async def test_run_agent_step(rt, monkeypatch):
     from druks.durable.models import AgentCall
 
     seen: list[dict] = []
-    pinned: list[int] = []
+    held: list[bool] = []
     # Patch the class method (not the singleton instance): an instance-attr
     # patch leaves a shadowing leftover that breaks later sandbox tests.
     monkeypatch.setattr(
-        "druks.sandbox.client.Client.ephemeral", _fake_ephemeral_returning("stop", seen, pinned)
+        "druks.sandbox.client.Client.ephemeral", _fake_ephemeral_returning("stop", seen, held)
     )
     monkeypatch.setattr("druks.agents.render_prompt", _fake_render)
 
@@ -541,7 +543,7 @@ async def test_run_agent_step(rt, monkeypatch):
     # No account on the start: the fallback account (the module's op@ seed)
     # is charged.
     assert recorded[0].account_id == _account_id(rt.engine, "op@example.com")
-    assert pinned == [0]  # connection released while the agent runs
+    assert held == [False]  # the step let its connection go before the agent ran
 
 
 async def test_body_level_agent_output_lands_on_the_journal(rt, monkeypatch):
@@ -549,9 +551,9 @@ async def test_body_level_agent_output_lands_on_the_journal(rt, monkeypatch):
     receives on the journal — AgentBodyFlow asserts identity in-body and sinks
     the projection."""
     seen: list[dict] = []
-    pinned: list[int] = []
+    held: list[bool] = []
     monkeypatch.setattr(
-        "druks.sandbox.client.Client.ephemeral", _fake_ephemeral_returning("ship", seen, pinned)
+        "druks.sandbox.client.Client.ephemeral", _fake_ephemeral_returning("ship", seen, held)
     )
     monkeypatch.setattr("druks.agents.render_prompt", _fake_render)
 
