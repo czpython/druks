@@ -8,9 +8,9 @@ import { Page } from '../../components/Page'
 import { PageHeader } from '../../components/PageHeader'
 import { PRCell } from '../../components/PRCell'
 import { queryGate } from '../../components/QueryGate'
+import { RelTime } from '../../components/RelTime'
 import { RepoCell } from '../../components/RepoCell'
 import { StatusGlyph } from '../../components/StatusGlyph'
-import { relTimeFromIso } from '../../lib/format'
 
 // A finished review lives on its pull request; this page covers the window where
 // GitHub shows nothing — a review still working, or one that stopped on a failure.
@@ -67,7 +67,9 @@ function ReviewRow({ review }: { review: ReviewSummary }) {
       <span className="review-line mono dim">
         {live ? `${reviewLine(status)}…` : reviewLine(status)}
       </span>
-      <span className="review-when mono dim">{relTimeFromIso(review.triggeredAt)}</span>
+      <span className="review-when mono dim">
+        <RelTime iso={review.triggeredAt} />
+      </span>
       <span className="review-asker mono dim">{review.requestedBy}</span>
     </div>
   )
