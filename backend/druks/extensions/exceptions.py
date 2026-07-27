@@ -12,6 +12,13 @@ class SettingsDeclarationError(Exception):
     operator PATCH."""
 
 
+class RouteDeclarationError(Exception):
+    """An extension declares a route inside the subject namespace the platform mounts
+    its own reads on. Raised at load, where the author's routers are enumerated —
+    they mount first, so the collision would otherwise take the board and detail
+    reads silently."""
+
+
 class SubscriberDeclarationError(Exception):
     """A subscriber's signature asks for a routing key — one a filter matches on but
     no body is handed. Raised at declaration, so it fails on import instead of

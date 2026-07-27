@@ -5,7 +5,7 @@ from druks.accounts.models import Account
 from druks.contrib.review.workflows import PullRequestReview
 from druks.contrib.ship.models import ProjectRepo
 
-router = APIRouter(prefix="/pull-requests", tags=["review"])
+router = APIRouter(prefix="/reviews")
 
 
 @router.post("", status_code=status.HTTP_202_ACCEPTED)

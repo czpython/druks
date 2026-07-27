@@ -1,8 +1,9 @@
 from fastapi import APIRouter
 
-# Every APIRouter declared in a ``routes`` module mounts under /api/{{ name }}.
-# For DB access in a handler use ``from druks.db import db_session``.
-router = APIRouter(tags=["{{ name }}"])
+# Every APIRouter declared in a ``routes`` module mounts under /api/{{ name }},
+# tagged with the extension's name — declare only the prefix your own resource
+# is called. For DB access in a handler use ``from druks.db import db_session``.
+router = APIRouter()
 
 
 @router.get("/status")

@@ -11,6 +11,7 @@ from druks.events.models import Event
 from druks.models import StoredSubject
 from druks.user_settings.models import SettingsOverride
 
+from .exceptions import RouteDeclarationError
 from .registry import agents as agent_registry
 from .registry import autodiscover
 from .registry import workflows as workflow_registry
@@ -228,9 +229,15 @@ class Extension:
         modules = cls.discover()
         # /api/<name> wraps the author's own prefix so extensions can't shadow
         # the platform or each other; every route sits behind the identity gate.
+        # The extension's name tags them all, so a router says only what it serves.
         prefix = f"/api/{cls.name}"
         for router in cls.get_routers(modules):
-            app.include_router(router, prefix=prefix, dependencies=[Depends(current_account)])
+            app.include_router(
+                router,
+                prefix=prefix,
+                tags=[cls.name],
+                dependencies=[Depends(current_account)],
+            )
         dist = cls.frontend_dist()
         if dist:
             # /app, not /api: unknown /api/* paths must stay JSON 404s, never fall
@@ -259,6 +266,18 @@ class Extension:
                     declared.append(value)
         routers = [*declared, cls._get_transcript_routes()]
         if cls.subject_type:
+            # Declared routers mount ahead of these, so one that reaches into the
+            # subject's own segment takes the board or a detail read with it — and
+            # nothing collides at import, so the loss shows up as a 404 much later.
+            claimed = f"/{cls.subject_type}"
+            for router in declared:
+                for route in router.routes:
+                    if route.path == claimed or route.path.startswith(f"{claimed}/"):
+                        raise RouteDeclarationError(
+                            f"extension {cls.name!r} declares a route at {route.path}; "
+                            f"{claimed} is the subject read-side the platform mounts. "
+                            "Name your router for what it serves."
+                        )
             routers.append(cls._get_subject_routes(cls.subject_type))
         return routers
 

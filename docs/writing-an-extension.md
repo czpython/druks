@@ -569,7 +569,25 @@ HTTP request, durable step, or other platform-bound session.
 HTTP response models subclass `druks.schemas.BaseResponse`, whose snake_case
 fields serialize as camelCase. Request models are ordinary Pydantic models.
 Every router declared in a discovered `routes.py` is mounted below the
-extension namespace.
+extension namespace, tagged with the extension's name — a router declares only
+the prefix its own resource is called:
+
+```python
+router = APIRouter(prefix="/reviews")
+```
+
+Two spellings run through druks, and they never mean the same thing:
+
+| | |
+| --- | --- |
+| `snake_case` | identity — a subject type, a run's kind, an event's attributes |
+| `kebab-case` | a URL segment — your route prefixes, your frontend paths |
+
+So `pull_request` names the subject the platform serves reads for, and
+`/reviews` names the resource your own POST creates. A router may not declare a
+route inside a subject's own segment: yours mount first, so it would take the
+board or a detail read with it, and druks refuses at load rather than let that
+go quiet.
 
 ## Extension settings and checks
 
