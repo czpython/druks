@@ -1,5 +1,6 @@
 from typing import TYPE_CHECKING, Any
 
+from druks.accounts.models import Account
 from druks.contrib.review.extension import Review
 from druks.contrib.ship.models import ProjectRepo
 from druks.contrib.ship.workspace import RepoWorkspace
@@ -36,8 +37,12 @@ class PullRequestReview(Workflow):
 
     @classmethod
     async def dispatch(cls, *, repo: str, pr_number: int, requested_by: str) -> str:
+        # Attribution follows the requester when druks knows them by that name; a
+        # review asked for by someone with no account runs as the system's.
+        account = Account.get_for_username(requested_by)
         return await cls.start(
             subject=Subject(id=f"{repo}#{pr_number}", subject_type="pull_request"),
+            account_id=account.id if account else None,
             repo=repo,
             pr_number=pr_number,
             requested_by=requested_by,

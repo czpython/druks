@@ -26,8 +26,14 @@ from druks.durable.engine import _step_engine, register_schedule, run_queue, ste
 from druks.durable.enums import AgentCallStatus, RunState, WorkflowEvent
 from druks.durable.exceptions import FatalError, GateTimeout, SubjectlessGate, WorkflowError
 from druks.durable.models import AgentCall, Run
-from druks.durable.reads import get_subject_phase, get_subject_status
-from druks.durable.schemas import AgentCallResponse, SubjectActivity, SubjectStatus, SubjectSummary
+from druks.durable.reads import get_subject_phase, get_subject_status, list_subject_timeline
+from druks.durable.schemas import (
+    AgentCallResponse,
+    RunResponse,
+    SubjectActivity,
+    SubjectStatus,
+    SubjectSummary,
+)
 from druks.events.models import Event
 from druks.extensions.loader import resolve_workflow_extension
 from druks.extensions.registry import workflows
@@ -55,6 +61,7 @@ __all__ = [
     "Gate",
     "Journal",
     "OperatorReply",
+    "RunResponse",
     "Subject",
     "SubjectActivity",
     "SubjectStatus",
@@ -64,6 +71,7 @@ __all__ = [
     "WorkflowEvent",
     "get_subject_phase",
     "get_subject_status",
+    "list_subject_timeline",
     "set_run_phase",
     "step",
 ]
