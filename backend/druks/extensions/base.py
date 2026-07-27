@@ -11,7 +11,6 @@ from druks.events.models import Event
 from druks.models import StoredSubject
 from druks.user_settings.models import SettingsOverride
 
-from .exceptions import RouteDeclarationError
 from .registry import agents as agent_registry
 from .registry import autodiscover
 from .registry import workflows as workflow_registry
@@ -107,6 +106,11 @@ class Extension:
             raise TypeError(
                 f"extension name {name!r} must match {NAME_RE.pattern!r} — it keys the "
                 "/api/<name> namespace, the version table, and settings keys"
+            )
+        if cls.subject_type == "transcripts":
+            raise TypeError(
+                f"extension {name!r} declares a 'transcripts' subject; that segment "
+                "serves every extension's agent-call reads. Name the subject for what it is"
             )
         cls.table_prefix = f"{name}_"
         if "package" not in cls.__dict__:
@@ -250,7 +254,8 @@ class Extension:
         its ``routes`` modules, plus the generic read-side it gets for free —
         ``/transcripts`` always, and the subject read-side
         (``/<subject_type>`` → status + timeline + live stream) when it declares a
-        ``subject_type``. Override to add a router built outside a ``routes`` module."""
+        ``subject_type``. The platform's come first: those two segments are its own.
+        Override to add a router built outside a ``routes`` module."""
         # Local, not module-top: keeps FastAPI off the import graph so the loader
         # stays importable app-lessly; enumerating routers is where it's really needed.
         from fastapi import APIRouter
@@ -264,22 +269,13 @@ class Extension:
                 if isinstance(value, APIRouter) and id(value) not in seen:
                     seen.add(id(value))
                     declared.append(value)
-        routers = [*declared, cls._get_transcript_routes()]
+        # The platform's routers are narrow — each confined to its own segment — so
+        # matching them first costs an extension nothing anywhere else and leaves it
+        # no way to take a read the platform serves, not even with a catch-all.
+        platform = [cls._get_transcript_routes()]
         if cls.subject_type:
-            # Declared routers mount ahead of these, so one that reaches into the
-            # subject's own segment takes the board or a detail read with it — and
-            # nothing collides at import, so the loss shows up as a 404 much later.
-            claimed = f"/{cls.subject_type}"
-            for router in declared:
-                for route in router.routes:
-                    if route.path == claimed or route.path.startswith(f"{claimed}/"):
-                        raise RouteDeclarationError(
-                            f"extension {cls.name!r} declares a route at {route.path}; "
-                            f"{claimed} is the subject read-side the platform mounts. "
-                            "Name your router for what it serves."
-                        )
-            routers.append(cls._get_subject_routes(cls.subject_type))
-        return routers
+            platform.append(cls._get_subject_routes(cls.subject_type))
+        return [*platform, *declared]
 
     @classmethod
     def _get_transcript_routes(cls) -> "APIRouter":

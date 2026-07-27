@@ -23,7 +23,7 @@ from druks.usage.schemas import (
 from druks.usage.trends import FIVE_HOUR_RANGE, WEEK_RANGE, downsample
 from druks.user_settings.models import HarnessSettings, UserSettings
 
-router = APIRouter(tags=["usage"])
+router = APIRouter()
 
 # The /today bucket for calls whose model no current harness claims.
 UNATTRIBUTED = "unattributed"

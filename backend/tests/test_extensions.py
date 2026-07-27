@@ -2,7 +2,6 @@ from types import ModuleType, SimpleNamespace
 
 import pytest
 from druks.extensions import Extension, loader
-from druks.extensions.exceptions import RouteDeclarationError
 from druks.extensions.loader import iter_extensions, load
 from fastapi import APIRouter, FastAPI
 from fastapi.testclient import TestClient
@@ -100,50 +99,82 @@ def _routes_module(name: str, **routers: APIRouter) -> ModuleType:
     return module
 
 
-def test_declared_routers_mount_ahead_of_the_platforms():
-    """Order is the contract: the author's routers are matched first, so the platform's
-    own reads are the fallback, never the shadow."""
+def _mount(extension: type[Extension], monkeypatch) -> TestClient:
+    monkeypatch.setattr(loader, "iter_extensions", lambda: [extension])
+    monkeypatch.setattr(loader, "import_extension_models", lambda: None)
+    app = FastAPI()
+    load(app)
+    from druks.accounts.dependencies import current_account
 
-    class Ordered(Extension):
-        name = "ordered"
-        package = "ordered"
+    app.dependency_overrides[current_account] = lambda: None
+    return TestClient(app)
+
+
+def test_nothing_an_extension_declares_can_take_a_read_the_platform_serves(monkeypatch):
+    """Not even a catch-all: the platform's two segments are matched before any router
+    an extension declares, so an author never has to know they are reserved."""
+    greedy = APIRouter()
+
+    @greedy.get("/{anything:path}")
+    def _greedy(anything: str) -> dict:
+        return {"who": "extension"}
+
+    class Greedy(Extension):
+        name = "greedy"
+        package = "greedy"
         subject_type = "widget"
 
-    module = _routes_module("ordered", router=APIRouter(prefix="/parts"))
-    paths = [router.prefix for router in Ordered.get_routers([module])]
-    assert paths == ["/parts", "/transcripts/{call_id}", "/widget"]
+        @classmethod
+        def discover(cls) -> list[ModuleType]:
+            return [_routes_module("greedy", router=greedy)]
+
+        @classmethod
+        def list_subjects(cls) -> list:
+            return []
+
+    client = _mount(Greedy, monkeypatch)
+    assert client.get("/api/greedy/widget").json() == {"rows": []}
+    assert client.get("/api/greedy/anything-else").json() == {"who": "extension"}
 
 
-@pytest.mark.parametrize("prefix", ["/widget", "/widget/settings"])
-def test_a_router_reaching_into_the_subject_namespace_is_rejected(prefix: str):
-    """Declared routers mount first, so this one would take the board or a detail read
-    with it — and nothing collides at import, so it has to fail here."""
+def test_a_composed_router_loads(monkeypatch):
+    """``parent.include_router(child)`` leaves a lazily-flattened entry behind, and an
+    extension that composes its routes is an ordinary one."""
+    parent, child = APIRouter(prefix="/parts"), APIRouter(prefix="/nested")
 
-    class Claiming(Extension):
-        name = "claiming"
-        package = "claiming"
+    @child.get("")
+    def _nested() -> dict:
+        return {"who": "nested"}
+
+    parent.include_router(child)
+
+    class Composed(Extension):
+        name = "composed"
+        package = "composed"
         subject_type = "widget"
 
-    claimed = APIRouter(prefix=prefix)
+        @classmethod
+        def discover(cls) -> list[ModuleType]:
+            return [_routes_module("composed", router=parent)]
 
-    @claimed.get("")
-    def _read() -> dict:
-        return {}
+        @classmethod
+        def list_subjects(cls) -> list:
+            return []
 
-    with pytest.raises(RouteDeclarationError, match="subject read-side"):
-        Claiming.get_routers([_routes_module("claiming", router=claimed)])
+    assert _mount(Composed, monkeypatch).get("/api/composed/parts/nested").json() == {
+        "who": "nested"
+    }
 
 
-def test_a_router_named_like_the_subject_is_left_alone():
-    """The rule is the segment, not the spelling — ``/widgets`` is an author's own
-    resource and says nothing about the platform's ``/widget``."""
+def test_a_subject_cannot_take_the_transcripts_segment():
+    """Every extension's agent-call reads live there, so the collision is between two
+    platform surfaces — an author would never see which one answered."""
+    with pytest.raises(TypeError, match="agent-call reads"):
 
-    class Neighbour(Extension):
-        name = "neighbour"
-        package = "neighbour"
-        subject_type = "widget"
-
-    Neighbour.get_routers([_routes_module("neighbour", router=APIRouter(prefix="/widgets"))])
+        class Colliding(Extension):
+            name = "colliding"
+            package = "colliding"
+            subject_type = "transcripts"
 
 
 def test_the_extension_name_tags_every_route(monkeypatch):
