@@ -2,6 +2,7 @@ from types import ModuleType, SimpleNamespace
 
 import pytest
 from druks.extensions import Extension, loader
+from druks.extensions.exceptions import RouteDeclarationError
 from druks.extensions.loader import iter_extensions, load
 from fastapi import APIRouter, FastAPI
 from fastapi.testclient import TestClient
@@ -91,3 +92,78 @@ def test_load_confines_extension_routers_to_the_extension_namespace(monkeypatch)
     client = TestClient(app)
     assert client.get("/api/evil/health/ping").status_code == 200
     assert client.get("/health/ping").status_code == 404
+
+
+def _routes_module(name: str, **routers: APIRouter) -> ModuleType:
+    module = ModuleType(f"{name}.routes")
+    module.__dict__.update(routers)
+    return module
+
+
+def test_declared_routers_mount_ahead_of_the_platforms():
+    """Order is the contract: the author's routers are matched first, so the platform's
+    own reads are the fallback, never the shadow."""
+
+    class Ordered(Extension):
+        name = "ordered"
+        package = "ordered"
+        subject_type = "widget"
+
+    module = _routes_module("ordered", router=APIRouter(prefix="/parts"))
+    paths = [router.prefix for router in Ordered.get_routers([module])]
+    assert paths == ["/parts", "/transcripts/{call_id}", "/widget"]
+
+
+@pytest.mark.parametrize("prefix", ["/widget", "/widget/settings"])
+def test_a_router_reaching_into_the_subject_namespace_is_rejected(prefix: str):
+    """Declared routers mount first, so this one would take the board or a detail read
+    with it — and nothing collides at import, so it has to fail here."""
+
+    class Claiming(Extension):
+        name = "claiming"
+        package = "claiming"
+        subject_type = "widget"
+
+    claimed = APIRouter(prefix=prefix)
+
+    @claimed.get("")
+    def _read() -> dict:
+        return {}
+
+    with pytest.raises(RouteDeclarationError, match="subject read-side"):
+        Claiming.get_routers([_routes_module("claiming", router=claimed)])
+
+
+def test_a_router_named_like_the_subject_is_left_alone():
+    """The rule is the segment, not the spelling — ``/widgets`` is an author's own
+    resource and says nothing about the platform's ``/widget``."""
+
+    class Neighbour(Extension):
+        name = "neighbour"
+        package = "neighbour"
+        subject_type = "widget"
+
+    Neighbour.get_routers([_routes_module("neighbour", router=APIRouter(prefix="/widgets"))])
+
+
+def test_the_extension_name_tags_every_route(monkeypatch):
+    """An author writes what their router serves; the platform says whose it is."""
+    router = APIRouter(prefix="/parts")
+
+    @router.get("")
+    def _parts() -> dict:
+        return {}
+
+    class Tagged(Extension):
+        name = "tagged"
+        package = "tagged"
+
+        @classmethod
+        def discover(cls) -> list[ModuleType]:
+            return [_routes_module("tagged", router=router)]
+
+    monkeypatch.setattr(loader, "iter_extensions", lambda: [Tagged])
+    monkeypatch.setattr(loader, "import_extension_models", lambda: None)
+    app = FastAPI()
+    load(app)
+    assert app.openapi()["paths"]["/api/tagged/parts"]["get"]["tags"] == ["tagged"]

@@ -7,7 +7,7 @@ from druks_field_notes.schemas import NoteView
 from druks_field_notes.workflows import Summarize
 
 # Every APIRouter declared here mounts under /api/field_notes.
-router = APIRouter(prefix="/notes", tags=["field_notes"])
+router = APIRouter(prefix="/notes")
 
 
 @router.get("", response_model=list[NoteView], response_model_by_alias=True)
