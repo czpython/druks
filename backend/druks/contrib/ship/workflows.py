@@ -354,17 +354,19 @@ class Build(Workflow):
         github = get_github_client(load_settings())
         return await github.merge_when_ready(self.input.repo, self.pr_number)
 
-    # The provisioned branch + PR off the first delivery — None until then
+    # The provisioned branch + PR, pinned to the FIRST delivery — None until then
     # (planning runs against the default branch, and there is no PR to point at).
+    # Rework deliveries reuse the pair; the item row and webhook routing key on it,
+    # so a delivery reporting different numbers must not move these reads.
     @property
     def branch(self) -> str | None:
-        delivery = self.journal.last_implementation
-        return delivery.branch if delivery else None
+        implementations = self.journal.implementations
+        return implementations[0].branch if implementations else None
 
     @property
     def pr_number(self) -> int | None:
-        delivery = self.journal.last_implementation
-        return delivery.pr_number if delivery else None
+        implementations = self.journal.implementations
+        return implementations[0].pr_number if implementations else None
 
     @step
     async def _clear_draft(self) -> None:
