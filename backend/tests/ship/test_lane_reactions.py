@@ -93,17 +93,15 @@ async def test_pr_review_answers_through_the_review_gate(druks_db, monkeypatch):
     ]
 
 
-async def test_provision_state_reaches_the_work_item(druks_db):
+async def test_pr_open_reaches_the_work_item(druks_db):
     item = make_test_work_item(repo="acme/widget", title="t", source="linear", remote_key="ACME-8")
 
     await publish(
-        WorkflowEvent.STATE,
+        "pr.opened",
         subject=item.identity,
         kind=Build.kind,
         pr_number=12,
         branch="agent/eng-8",
-        ticket_ref="ACME-8",
-        issue_number=None,
     )
 
     refreshed = WorkItem.get(item.id)

@@ -195,6 +195,18 @@ Two rules:
 - Never mutate body-held state inside a `@step`: a completed step is skipped
   on replay, so the write disappears.
 
+### Announcing domain events
+
+When another component should react to something the body just did, announce it:
+
+```python
+await self.announce("pr.opened", pr_number=delivery.pr_number, branch=delivery.branch)
+```
+
+The platform routes it to subscribers filtering on your workflow and subject, and
+the publish is its own durable checkpoint — a recovery replay does not re-fire it.
+Announce from the body, not inside a `@step`.
+
 ### Schedules and settings
 
 Set `every` to declare a cron:
