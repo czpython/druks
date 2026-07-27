@@ -20,7 +20,7 @@ import { Page } from '../../components/Page'
 import { queryGate } from '../../components/QueryGate'
 import { RunTranscript } from '../../components/RunTranscript'
 import { computeElapsed, dur, formatTokenCount, relTime, secondsSince } from '../../lib/format'
-import { parkedLine, statusLine } from './statusLine'
+import { parkedLine, runSubLine, statusLine } from './statusLine'
 import { agentCallPath, workItemPath } from './slug'
 import { useCanonicalPath } from '../../lib/useCanonicalPath'
 import { useTicker } from '../../lib/useTicker'
@@ -87,15 +87,6 @@ const STATE_GLYPH: Record<string, string> = {
   failed: '✕',
   cancelled: '⊘',
   orphaned: '⚠',
-}
-const STATE_LABEL: Record<string, string> = {
-  scheduled: 'scheduled',
-  running: 'running',
-  parked: 'waiting on you',
-  finished: 'finished',
-  failed: 'failed',
-  cancelled: 'cancelled',
-  orphaned: 'orphaned',
 }
 const CALL_GLYPH: Record<string, string> = {
   running: '●',
@@ -368,16 +359,7 @@ function RunRow({
   // A single call duplicates the run's own row (same label, same ledger) —
   // fold it into the parent instead of showing both.
   const collapseCalls = run.agentCalls.length <= 1
-  // A running run shows the live phase ("Building sandbox VM…", "Working…") as
-  // its sub-line; a parked one shows its gate; a failed one its reason.
-  const sub =
-    run.state === 'failed' && run.failure
-      ? (run.failure.split('—')[0] ?? run.failure).trim()
-      : run.state === 'parked'
-        ? (parkedLine(run.gate) ?? STATE_LABEL.parked)
-        : isRunning(run) && activity
-          ? activity.label
-          : (STATE_LABEL[run.state] ?? run.state)
+  const sub = runSubLine(run, activity, collapseCalls)
   return (
     <div className="wic-run">
       <div

@@ -1,4 +1,4 @@
-import type { SubjectStatus } from '../../api/types'
+import type { RunSummary, SubjectActivity, SubjectStatus } from '../../api/types'
 
 // Build's status-line copy, composed from the platform's status facts — the backend
 // ships data; the extension owns its own vocabulary.
@@ -32,4 +32,35 @@ export function statusLine(status: SubjectStatus): string {
     return `${kindLabel(status.kind)} timed out — re-trigger to retry`
   }
   return ''
+}
+
+const STATE_LABEL: Record<string, string> = {
+  scheduled: 'scheduled',
+  running: 'running',
+  parked: 'waiting on you',
+  finished: 'finished',
+  failed: 'failed',
+  cancelled: 'cancelled',
+  orphaned: 'orphaned',
+}
+
+// What a run row says it is doing. A folded-in step names itself, since its own
+// row isn't there to; the activity covers what the timeline can't show at all.
+export function runSubLine(
+  run: RunSummary,
+  activity: SubjectActivity | null | undefined,
+  collapsed: boolean,
+): string {
+  if (run.state === 'failed' && run.failure) {
+    return (run.failure.split('—')[0] ?? run.failure).trim()
+  }
+  if (run.state === 'parked') {
+    return parkedLine(run.gate) ?? STATE_LABEL[run.state] ?? run.state
+  }
+  if (run.state === 'running') {
+    const step = collapsed && run.agentCalls.find((call) => call.status === 'running')
+    if (step) return step.label
+    if (activity) return activity.label
+  }
+  return STATE_LABEL[run.state] ?? run.state
 }
