@@ -576,18 +576,18 @@ the prefix its own resource is called:
 router = APIRouter(prefix="/reviews")
 ```
 
-Two spellings run through druks, and they never mean the same thing:
+Two spellings run through druks, and which one a segment wears says who owns it:
 
 | | |
 | --- | --- |
-| `snake_case` | identity — a subject type, a run's kind, an event's attributes |
-| `kebab-case` | a URL segment — your route prefixes, your frontend paths |
+| `snake_case` | an identity the platform serves — your extension name, a subject type |
+| `kebab-case` | a resource you named — your route prefixes, your frontend paths |
 
-So `pull_request` names the subject the platform serves reads for, and
-`/reviews` names the resource your own POST creates. A router may not declare a
-route inside a subject's own segment: yours mount first, so it would take the
-board or a detail read with it, and druks refuses at load rather than let that
-go quiet.
+So `/api/review/pull_request` is the board of review runs, keyed by subject, and
+`/api/review/reviews` is the resource your own POST creates. The platform's two
+segments — `<subject_type>` and `transcripts` — are matched before your routers,
+so nothing you declare can take a read druks serves, not even a catch-all. Name a
+router for its own resource and the question never comes up.
 
 ## Extension settings and checks
 
