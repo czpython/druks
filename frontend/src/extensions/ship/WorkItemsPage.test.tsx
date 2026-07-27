@@ -61,9 +61,13 @@ afterEach(() => {
 describe('WorkItemsPage', () => {
   it('filters resolution first and renders every active bucket in its count', () => {
     const { container } = render(<WorkItemsPage />)
+    const snapshot = sse.handlers?.snapshot
+    if (!snapshot) {
+      throw new Error('snapshot handler was not registered')
+    }
 
     act(() => {
-      sse.handlers?.snapshot({
+      snapshot({
         rows: [
           row('1', 'parked', null),
           row('2', 'failed', null),
@@ -79,7 +83,9 @@ describe('WorkItemsPage', () => {
     expect(screen.queryByText('running-6')).toBeNull()
     expect(container.querySelector('.dash-h1-count')?.textContent).toBe('(5)')
     expect(
-      [...container.querySelectorAll('.wi-group-count')].map((node) => node.textContent),
+      Array.from(container.querySelectorAll('.wi-group-count')).map(
+        (node) => node.textContent,
+      ),
     ).toEqual(['(3)', '(2)'])
     expect(screen.getByText('3 needs you')).toBeTruthy()
     expect(screen.getByText('2 in flight')).toBeTruthy()
