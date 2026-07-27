@@ -23,14 +23,12 @@ OPEN_STATES = (*ACTIVE_STATES, RunState.FAILED)
 class WorkflowEvent(StrEnum):
     # Each state's signal topic, and what the feed stores. Naming them makes a
     # subscriber's topic typo-proof — a bare string can silently subscribe to a
-    # topic nobody publishes. ``STATE`` is the odd one: facts a running workflow
-    # learned, no state behind it.
+    # topic nobody publishes.
     RUNNING = "workflow.running"
     PARKED = "workflow.parked"
     FINISHED = "workflow.finished"
     FAILED = "workflow.failed"
     CANCELLED = "workflow.cancelled"
-    STATE = "workflow.state"
 
     @classmethod
     def for_state(cls, state: RunState) -> "WorkflowEvent":

@@ -15,8 +15,8 @@ async def any_workflow_start_returns_item_to_board(*, subject: WorkItem, **_: ob
     subject.set_status(None)
 
 
-@subscribe(WorkflowEvent.STATE, workflow=Build, subject=WorkItem)
-async def provision_mirrors_onto_item(
+@subscribe("pr.opened", workflow=Build, subject=WorkItem)
+async def pr_open_mirrors_onto_item(
     *, subject: WorkItem, pr_number: int, branch: str, **_: object
 ) -> None:
     # The implementer's provisioned PR + branch, mirrored onto the work item —

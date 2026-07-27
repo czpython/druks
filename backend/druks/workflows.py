@@ -4,7 +4,6 @@ from contextlib import nullcontext, suppress
 from contextvars import ContextVar
 from datetime import UTC, datetime
 from functools import partial
-from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, Self, TypeVar, get_args, get_type_hints
 
 from croniter import croniter
@@ -537,9 +536,6 @@ class Workflow:
         # key; None on system-owned runs (crons, old checkpoints).
         self.account_id: str | None = None
         self.journal = self.journal_class()
-        # Facts published with set_state, kept warm for sync reads (templates,
-        # workspace kwargs); the durable copy is the run's DBOS events.
-        self._state_facts: dict[str, Any] = {}
         # The run's warm VM, provisioned lazily and reaped at segment boundaries;
         # its lease expiry decides when it must rotate.
         self._host: Sandbox | None = None
@@ -555,39 +551,20 @@ class Workflow:
                 return db_session().get(model, int(subject_id))
         raise LookupError(f"no subject class is named {subject_type!r}")
 
-    @property
-    def state(self) -> Any:
-        # The facts the run published with set_state — nothing else. Input stays
-        # on self.input; a reader names which one it means. Durable by
-        # determinism: a recovery re-runs the body, whose set_state calls
-        # rebuild this in-memory copy (the event writes themselves replay as
-        # memoized steps).
-        return SimpleNamespace(**self._state_facts)
-
-    async def set_state(self, **facts: Any) -> None:
-        # Durably publish facts the run learned mid-flight (a provisioned PR
-        # number, a resolved branch). Body-only, enforced: inside a @step the
-        # in-memory update would vanish on replay (the step is skipped), which
-        # is exactly the state loss this call exists to prevent. Each fact is a
-        # DBOS workflow event (memoized — written once); the ``workflow.state``
-        # signal fans out in its own checkpointed step so reactions fire once,
-        # inside a session.
+    async def announce(self, topic: str, **facts: Any) -> None:
+        # The workflow announcing a domain event in its extension's vocabulary
+        # ("pr.opened", pr_number=12, branch="agent/eng-8"). The platform injects
+        # the routing subscribers filter on, and the publish runs as its own
+        # retrying checkpoint so a recovery replay doesn't re-fire it. Body-only,
+        # enforced: the checkpoint is a step, so it can't nest inside one.
         if _in_step.get():
-            raise WorkflowError("set_state() runs in the workflow body, not inside a @step")
-        for key, value in facts.items():
-            await DBOS.set_event_async(key, value)
-        self._state_facts.update(facts)
+            raise WorkflowError("announce() runs in the workflow body, not inside a @step")
 
         async def _fan_out() -> None:
             async with step_session():
-                await publish(
-                    WorkflowEvent.STATE,
-                    subject=self._subject,
-                    kind=self.kind,
-                    **facts,
-                )
+                await publish(topic, subject=self._subject, kind=self.kind, **facts)
 
-        await DBOS.run_step_async(StepOptions(name="run.state", **_IO_RETRIES), _fan_out)
+        await DBOS.run_step_async(StepOptions(name=topic, **_IO_RETRIES), _fan_out)
 
     async def review(
         self, *, questions: list[BaseModel] | None = None, context: str = ""
