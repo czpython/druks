@@ -80,6 +80,19 @@ class StoredSubject(Base):
 
         return Subject(id=str(self.id), subject_type=self.subject_type)
 
+    @classmethod
+    def get_for_subject(cls, subject: "Subject") -> Self | None:
+        """The row this identity names. A subject id is free text and reaches the
+        read-side straight off a URL, so an id this table could never hold is a miss
+        rather than an error."""
+        from druks.database import db_session
+
+        try:
+            key = int(subject.id)
+        except ValueError:
+            return
+        return db_session().get(cls, key)
+
     def get_status(self, *, workflow: "type[Workflow] | None" = None) -> "SubjectStatus":
         return self.subject.get_status(workflow=workflow)
 

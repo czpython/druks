@@ -9,7 +9,7 @@ def test_boot_loads_the_external_extension():
 
     assert extension.name == "field_notes"
     assert extension.package == _PACKAGE
-    assert extension.subject.subject_type == "note"
+    assert extension.subject_type == "note"
 
 
 def test_discovery_registers_the_tables_and_capabilities():

@@ -4,6 +4,7 @@ from druks.db import Base, StoredSubject
 # start with "{{ name }}_": the platform scopes this extension's migrations to that
 # prefix (its own history in ``alembic_version_{{ name }}``) and enforces it at boot.
 # One of these models is usually the thing your runs work on — a note, a repo, a
-# ticket. Subclass ``StoredSubject`` for that one, and set ``subject = ThatModel`` on the
-# Extension so druks can show it a board and a page.
+# ticket. Subclass ``StoredSubject`` for that one, and set
+# ``subject_type = ThatModel.subject_type`` on the Extension so druks can show it a
+# board and a page.
 # After adding a model: ``druks makemigrations {{ name }} -m "..." && druks init-db``.

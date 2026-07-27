@@ -14,7 +14,7 @@ from druks.contrib.ship.contracts import (
 from druks.contrib.ship.models import WorkItem
 from druks.contrib.ship.schemas import WorkItemSummary
 from druks.extensions import Extension
-from druks.workflows import SubjectActivity
+from druks.workflows import Subject, SubjectActivity
 
 _PHASE_META: dict[str, SubjectActivity] = {
     "provisioning_vm": SubjectActivity(label="Building sandbox VM…", kind="infra"),
@@ -24,7 +24,7 @@ _PHASE_META: dict[str, SubjectActivity] = {
 
 class Ship(Extension):
     name = "ship"
-    subject = WorkItem
+    subject_type = WorkItem.subject_type
     # These tables (projects, work_items, ...) are already unprefixed in core's
     # migration history, so they must stay that way.
     prefix_tables = False
@@ -125,8 +125,11 @@ class Ship(Extension):
     )
 
     @classmethod
-    def subject_summary(cls, subject: WorkItem) -> WorkItemSummary:
-        return WorkItemSummary.from_work_item(subject)
+    def get_subject_summary(cls, subject: Subject) -> WorkItemSummary | None:
+        item = WorkItem.get_for_subject(subject)
+        if item:
+            return WorkItemSummary.from_work_item(item)
+        return
 
     @classmethod
     def list_subjects(cls) -> list[WorkItemSummary]:
@@ -135,6 +138,6 @@ class Ship(Extension):
         return [WorkItemSummary.from_work_item(item) for item in WorkItem.list_open(limit=500)]
 
     @classmethod
-    async def subject_activity(cls, subject: WorkItem) -> SubjectActivity | None:
+    async def get_subject_activity(cls, subject: Subject) -> SubjectActivity | None:
         phase = await subject.get_phase()
         return _PHASE_META.get(phase or "")

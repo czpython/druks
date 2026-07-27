@@ -2,7 +2,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useMemo } from 'react'
 
 import { REVIEW, reviewApi } from './api'
-import type { ReviewSummary } from './api'
+import type { ReviewRow } from './api'
 import { reviewLine } from './reviewLine'
 import { useSSE } from '../../api/sse'
 import { EmptyState } from '../../components/EmptyState'
@@ -36,8 +36,8 @@ export function ReviewsPage() {
   })
   if (gate) return <Page className="page-reviews">{gate}</Page>
 
-  const reviews = reviewsQuery.data!
-  const failed = reviews.filter((review) => review.state === 'failed').length
+  const rows = reviewsQuery.data!
+  const failed = rows.filter((row) => row.status.state === 'failed').length
 
   return (
     <Page
@@ -46,12 +46,12 @@ export function ReviewsPage() {
       header={
         <PageHeader
           eyebrow="reviews"
-          count={reviews.length}
+          count={rows.length}
           meta={failed > 0 && <span>{failed} failed</span>}
         />
       }
     >
-      {reviews.length === 0 ? (
+      {rows.length === 0 ? (
         <EmptyState
           glyph="✓"
           msg="nothing under review"
@@ -59,8 +59,8 @@ export function ReviewsPage() {
         />
       ) : (
         <div className="reviews-list">
-          {reviews.map((review) => (
-            <ReviewRow key={review.pullRequestUrl} review={review} />
+          {rows.map((row) => (
+            <ReviewRowView key={row.summary.id} row={row} />
           ))}
         </div>
       )}
@@ -68,21 +68,22 @@ export function ReviewsPage() {
   )
 }
 
-function ReviewRow({ review }: { review: ReviewSummary }) {
-  const failed = review.state === 'failed'
-  const live = review.state === 'running' || review.state === 'scheduled'
+function ReviewRowView({ row }: { row: ReviewRow }) {
+  const { summary, status } = row
+  const failed = status.state === 'failed'
+  const live = status.state === 'running' || status.state === 'scheduled'
   return (
     <div className={`row row-review${failed ? ' row-failed' : ''}`}>
-      <StatusGlyph state={review.state} pulse={live} />
-      <RepoCell repoBare={bareName(review.repo)} />
-      <PRCell prNumber={review.prNumber} prUrl={review.pullRequestUrl} />
+      <StatusGlyph state={status.state} pulse={live} />
+      <RepoCell repoBare={bareName(summary.repo)} />
+      <PRCell prNumber={summary.prNumber} prUrl={summary.pullRequestUrl} />
       <span className="review-line mono dim">
-        {live ? `${reviewLine(review)}…` : reviewLine(review)}
+        {live ? `${reviewLine(status)}…` : reviewLine(status)}
       </span>
       <span className="review-when mono dim">
-        <RelTime iso={review.triggeredAt} />
+        {status.triggeredAt && <RelTime iso={status.triggeredAt} />}
       </span>
-      <span className="review-asker mono dim">{review.requestedBy}</span>
+      <span className="review-asker mono dim">{status.accountUsername}</span>
     </div>
   )
 }

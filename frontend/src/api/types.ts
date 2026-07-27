@@ -47,6 +47,10 @@ export interface SubjectStatus {
   // ("gate_timeout" = unanswered gate, not a crash).
   failure: string | null
   reason: string | null
+  // When druks last picked this subject up, and whose work it is — what a subject
+  // with a row of its own would keep in its own columns.
+  triggeredAt: string | null
+  accountUsername: string | null
 }
 
 // The live sub-phase a running run pushes ("Building sandbox VM…", "Working…") —
