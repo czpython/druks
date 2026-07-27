@@ -1,10 +1,15 @@
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from druks.contrib.review.datastructures import PullRequest
 from druks.contrib.review.workflows import PullRequestReview
+from druks.prompts import render_prompt
 from druks.testing import seed_run
+from druks.workflows import _bind_instance
 from fastapi.testclient import TestClient
+
+pytestmark = pytest.mark.usefixtures("druks_without_remote_config")
 
 
 @pytest.fixture
@@ -53,3 +58,43 @@ def test_the_pull_request_board_and_page_mount(client: TestClient, druks_db):
     assert detail["summary"]["pullRequestUrl"] == "https://github.com/acme/app/pull/7"
     assert [entry["kind"] for entry in detail["timeline"]] == [PullRequestReview.kind]
     assert client.get("/api/review/pull_request/acme/app").status_code == 404
+
+
+def test_the_run_carries_the_pull_request_once():
+    # The repo and the number are the subject, so they are not also input: the body
+    # takes what only the request knows.
+    assert list(PullRequestReview._run_input_model.model_fields) == ["requested_by"]
+
+
+def test_a_queued_run_replays_through_its_subject():
+    # A review enqueued before the repo and number came off the input still carries
+    # them in its durable payload. The extra keys are ignored and the subject rides
+    # separately, so the body binds and reads the pull request off the declaration.
+    instance, run_kwargs = _bind_instance(
+        PullRequestReview,
+        PullRequest.get("acme/app", 7).identity,
+        {"repo": "acme/app", "pr_number": 7, "requested_by": "dev@example.com"},
+    )
+
+    assert run_kwargs == {"requested_by": "dev@example.com"}
+    assert (instance.subject.repo, instance.subject.number) == ("acme/app", 7)
+
+
+async def test_the_reviewer_prompt_names_the_pull_request_it_is_about():
+    workflow = SimpleNamespace(
+        subject=PullRequest.get("acme/app", 7),
+        input=SimpleNamespace(requested_by="dev@example.com"),
+    )
+    workspace = SimpleNamespace(
+        repo_path="/home/agent/work/repo", related_root="/home/agent/related"
+    )
+
+    output = await render_prompt(
+        "review/review_pull_request.md",
+        workflow=workflow,
+        workspace=workspace,
+        siblings=[],
+    )
+
+    assert "pull request #7 on `acme/app`" in output
+    assert "at dev@example.com's request" in output

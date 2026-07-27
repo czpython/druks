@@ -45,12 +45,10 @@ class PullRequestReview(Workflow):
         return await cls.start(
             subject=PullRequest.get(repo, pr_number),
             account_id=account.id if account else None,
-            repo=repo,
-            pr_number=pr_number,
             requested_by=requested_by,
         )
 
-    async def run(self, repo: str, pr_number: int, requested_by: str) -> None:
+    async def run(self, requested_by: str) -> None:
         await Review.review_pull_request()
 
     async def get_workspace_kwargs(self, sandbox: "Sandbox") -> dict[str, Any]:
@@ -58,7 +56,7 @@ class PullRequestReview(Workflow):
         # The token is the reviewer app's: it authenticates the clone and ``gh``, so the
         # review is authored under that identity. Siblings stay uncloned — the reviewer
         # clones the ones it opens, into a directory that must exist for the grant to hold.
-        repo = self.input.repo
+        repo = self.subject.repo
         github_token = await get_reviewer_github_client(load_settings()).token_for_repo(repo)
         await sandbox.write_secret(
             secret=github_token, remote=get_github_token_remote_path(sandbox.ssh_username)
@@ -77,7 +75,7 @@ class PullRequestReview(Workflow):
         }
 
     async def get_prompt_context(self, **context: Any) -> dict[str, Any]:
-        target = ProjectRepo.get_for_repo(self.input.repo, raise_on_missing=True)
+        target = ProjectRepo.get_for_repo(self.subject.repo, raise_on_missing=True)
         return {
             "siblings": target.siblings(),
             **await super().get_prompt_context(**context),

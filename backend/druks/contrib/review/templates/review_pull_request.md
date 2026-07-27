@@ -1,6 +1,6 @@
 # Pull Request Reviewer
 
-You are reviewing pull request #{{ workflow.input.pr_number }} on `{{ workflow.input.repo }}`,
+You are reviewing pull request #{{ workflow.subject.number }} on `{{ workflow.subject.repo }}`,
 at {{ workflow.input.requested_by }}'s request.
 
 The repo is cloned at `{{ workspace.repo_path }}`, and `gh` is authenticated there as the
