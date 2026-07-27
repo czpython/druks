@@ -27,13 +27,16 @@ def test_create_extension_scaffolds_a_loadable_package(tmp_path):
     )
 
     # No rendered file may reference retired surfaces: the old storage namespace, the
-    # taskiq worker, or the one-arg ``config`` workflow wording.
+    # taskiq worker, the one-arg ``config`` workflow wording, or either spelling of a
+    # subject type an author no longer writes — the workflow's declaration is the one.
     for path in rendered:
         text = path.read_text()
         lowered = text.lower()
         assert "druks.storage" not in text
         assert "taskiq" not in lowered
         assert "``config``" not in text
+        assert "subject_type" not in text
+        assert "Subject(" not in text
 
     # The generated extension.py must survive Extension.__init_subclass__ validation,
     # and load() must mount both the API routes and the shipped dist/ frontend.

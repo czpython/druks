@@ -3,8 +3,22 @@ from types import ModuleType, SimpleNamespace
 import pytest
 from druks.extensions import Extension, loader
 from druks.extensions.loader import iter_extensions, load
+from druks.workflows import Subject
 from fastapi import APIRouter, FastAPI
 from fastapi.testclient import TestClient
+
+
+class Widget(Subject):
+    """What the fake extensions below are about. A workflow is what declares a subject
+    in a real extension; these stand in for that."""
+
+    @classmethod
+    def list_summaries(cls) -> list:
+        return []
+
+
+def _subject_classes(cls) -> list[type[Subject]]:
+    return [Widget]
 
 
 def test_iter_extensions_discovers_the_bundled_extensions():
@@ -122,15 +136,11 @@ def test_nothing_an_extension_declares_can_take_a_read_the_platform_serves(monke
     class Greedy(Extension):
         name = "greedy"
         package = "greedy"
-        subject_type = "widget"
+        subject_classes = classmethod(_subject_classes)
 
         @classmethod
         def discover(cls) -> list[ModuleType]:
             return [_routes_module("greedy", router=greedy)]
-
-        @classmethod
-        def list_subjects(cls) -> list:
-            return []
 
     client = _mount(Greedy, monkeypatch)
     assert client.get("/api/greedy/widget").json() == {"rows": []}
@@ -151,15 +161,11 @@ def test_a_composed_router_loads(monkeypatch):
     class Composed(Extension):
         name = "composed"
         package = "composed"
-        subject_type = "widget"
+        subject_classes = classmethod(_subject_classes)
 
         @classmethod
         def discover(cls) -> list[ModuleType]:
             return [_routes_module("composed", router=parent)]
-
-        @classmethod
-        def list_subjects(cls) -> list:
-            return []
 
     assert _mount(Composed, monkeypatch).get("/api/composed/parts/nested").json() == {
         "who": "nested"
@@ -169,12 +175,37 @@ def test_a_composed_router_loads(monkeypatch):
 def test_a_subject_cannot_take_the_transcripts_segment():
     """Every extension's agent-call reads live there, so the collision is between two
     platform surfaces — an author would never see which one answered."""
-    with pytest.raises(TypeError, match="agent-call reads"):
 
-        class Colliding(Extension):
-            name = "colliding"
-            package = "colliding"
-            subject_type = "transcripts"
+    class Transcripts(Subject):
+        pass
+
+    class Colliding(Extension):
+        name = "colliding"
+        package = "colliding"
+
+        @classmethod
+        def workflows(cls):
+            return [SimpleNamespace(_subject_class=Transcripts)]
+
+    with pytest.raises(TypeError, match="agent-call reads"):
+        Colliding.subject_classes()
+
+
+def test_an_extension_declaring_a_subject_type_is_rejected():
+    """The workflow says what its runs are about; an extension repeating it would be a
+    second spelling that can go stale."""
+    with pytest.raises(TypeError, match="declares subject_type"):
+
+        class Stale(Extension):
+            name = "stale"
+            subject_type = "widget"
+
+
+def test_an_extensions_subjects_come_from_its_workflows():
+    ship = next(extension for extension in iter_extensions() if extension.name == "ship")
+    ship.discover()
+
+    assert [s.subject_type for s in ship.subject_classes()] == ["project_repo", "work_item"]
 
 
 def test_the_extension_name_tags_every_route(monkeypatch):

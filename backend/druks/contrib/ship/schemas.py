@@ -1,13 +1,15 @@
 from datetime import datetime
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, Field
 
-from druks.contrib.ship.models import Project, ProjectRepo, WorkItem
 from druks.schemas import BaseResponse
 from druks.workflows import SubjectSummary
 
 from .enums import HandoffStatus
+
+if TYPE_CHECKING:
+    from druks.contrib.ship.models import Project, ProjectRepo, WorkItem
 
 ProfileState = Literal["unprofiled", "running", "ready", "failed"]
 
@@ -23,7 +25,7 @@ class ProjectRepoSummary(BaseResponse):
     created_at: datetime
 
     @classmethod
-    def from_repo(cls, repo: ProjectRepo) -> "ProjectRepoSummary":
+    def from_repo(cls, repo: "ProjectRepo") -> "ProjectRepoSummary":
         # "ready" outranks a later failed re-profile: a stored profile stays usable.
         status = repo.get_status()
         profile = repo.effective_profile()
@@ -54,7 +56,7 @@ class ProjectSummary(BaseResponse):
     repos: list[ProjectRepoSummary] = Field(default_factory=list)
 
     @classmethod
-    def from_project(cls, project: Project) -> "ProjectSummary":
+    def from_project(cls, project: "Project") -> "ProjectSummary":
         return cls(
             id=project.id,
             name=project.name,
@@ -92,7 +94,7 @@ class Links(BaseResponse):
     ticket: str | None = None
 
     @classmethod
-    def from_work_item(cls, item: WorkItem) -> "Links":
+    def from_work_item(cls, item: "WorkItem") -> "Links":
         pr = f"https://github.com/{item.repo}/pull/{item.pr_number}" if item.pr_number else None
         return cls(repo=f"https://github.com/{item.repo}", pr=pr, ticket=item.ticket_url)
 
@@ -117,9 +119,10 @@ class WorkItemSummary(SubjectSummary):
     links: Links
 
     @classmethod
-    def from_work_item(cls, item: WorkItem) -> "WorkItemSummary":
+    def from_work_item(cls, item: "WorkItem") -> "WorkItemSummary":
         return cls(
             id=str(item.id),
+            label=item.label,
             source=item.source,  # type: ignore[arg-type]
             repo=item.repo,
             project_name=item.project.name,
@@ -149,7 +152,7 @@ class DashboardItem(BaseResponse):
     links: Links
 
     @classmethod
-    def from_work_item(cls, item: WorkItem) -> "DashboardItem":
+    def from_work_item(cls, item: "WorkItem") -> "DashboardItem":
         # History is terminal-only, so the stored lane is always set.
         return cls(
             key=f"code:{item.id}",

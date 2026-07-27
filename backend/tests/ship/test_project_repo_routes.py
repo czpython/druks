@@ -92,3 +92,23 @@ def test_nested_repo_routes_are_scoped_to_their_project(client: TestClient, monk
     assert patched.json()["purpose"] == "infra"
     assert client.delete(right).status_code == 204
     assert ProjectRepo.get(repo_id) is None
+
+
+def test_the_repo_subject_read_side_mounts(client: TestClient, druks_db):
+    """Profile is about a repo, so the repo gets the board and the page it never had —
+    its own runs' status and timeline, keyed by the repo's id."""
+    from druks.contrib.ship.models import Project, ProjectRepo
+    from druks.contrib.ship.workflows import Profile
+    from druks.testing import seed_run
+
+    project = Project.create(name="Acme")
+    repo = ProjectRepo.create(project_id=project.id, full_name="acme/widget")
+    seed_run(druks_db, kind=Profile.kind, subject=repo, state="running")
+
+    (row,) = client.get("/api/ship/project_repo").json()["rows"]
+    assert row["summary"] == {"id": str(repo.id), "label": "acme/widget"}
+    assert row["status"]["state"] == "running"
+
+    detail = client.get(f"/api/ship/project_repo/{repo.id}").json()
+    assert detail["summary"]["label"] == "acme/widget"
+    assert [entry["kind"] for entry in detail["timeline"]] == [Profile.kind]

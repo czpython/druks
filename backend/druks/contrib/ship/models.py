@@ -1,6 +1,6 @@
 import logging
 from datetime import datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import ForeignKey, Index, func, select
 from sqlalchemy.dialects.postgresql import JSONB
@@ -8,6 +8,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from druks.contrib.ship.enums import HandoffStatus
 from druks.contrib.ship.policy import RepoPolicy
+from druks.contrib.ship.schemas import WorkItemSummary
 from druks.core.apis.github import get_github_client
 from druks.db import Base, StoredSubject, db_session
 from druks.settings import load_settings
@@ -16,6 +17,9 @@ from druks.ticketing.enums import TicketStatus
 from druks.ticketing.exceptions import TrackerNotConfigured
 from druks.ticketing.helpers import get_tracker, is_tracker_source
 from druks.workflows import FatalError
+
+if TYPE_CHECKING:
+    from druks.durable.schemas import SubjectSummary
 
 logger = logging.getLogger(__name__)
 
@@ -106,6 +110,15 @@ class ProjectRepo(StoredSubject):
         # a repo reached through the wrong project's URL is a miss, not a hit to reject.
         stmt = select(cls).where(cls.id == repo_id, cls.project_id == project_id).limit(1)
         return db_session().scalars(stmt).first()
+
+    def get_label(self) -> str:
+        return self.full_name
+
+    @classmethod
+    def list_summaries(cls) -> list["SubjectSummary"]:
+        # A repo is registered, not transient, so the board is all of them by name.
+        stmt = select(cls).order_by(cls.full_name)
+        return [repo.get_summary() for repo in db_session().scalars(stmt)]
 
     def siblings(self) -> list["ProjectRepo"]:
         return [repo for repo in self.project.repos if repo.full_name != self.full_name]
@@ -215,6 +228,15 @@ class WorkItem(StoredSubject):
 
     def get_label(self) -> str:
         return self.ticket_key
+
+    def get_summary(self) -> WorkItemSummary:
+        return WorkItemSummary.from_work_item(self)
+
+    @classmethod
+    def list_summaries(cls) -> list[WorkItemSummary]:
+        # The active board: whatever hasn't handed off yet. The 500 most-recent
+        # cover it; paginate if a board outgrows it.
+        return [item.get_summary() for item in cls.list_open(limit=500)]
 
     @classmethod
     def create(

@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import pytest
+from druks.database import db_session
 from druks.durable import AgentCall, Run
 from druks.durable.datastructures import Subject
 from druks.durable.schemas import SubjectSummary
@@ -9,42 +10,54 @@ from druks.models import StoredSubject
 from druks.testing import seed_dbos_status
 from fastapi import APIRouter
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 from uuid_utils import uuid7
-
-
-class Thing(StoredSubject):
-    __tablename__ = "faketest_things"
 
 
 class _ThingSummary(SubjectSummary):
     title: str
 
 
-class _ThingExtension(Extension):
-    name = "faketest"
-    subject_type = Thing.subject_type
+TITLES = {1: "First", 2: "Second"}
 
-    _THINGS = {1: "First", 2: "Second"}
+
+class Thing(StoredSubject):
+    __tablename__ = "faketest_things"
+
+    def get_summary(self) -> _ThingSummary:
+        return _ThingSummary(id=str(self.id), label=self.label, title=TITLES[self.id])
 
     @classmethod
-    def get_subject_summary(cls, subject: Subject) -> _ThingSummary | None:
-        thing = Thing.get_for_subject(subject)
-        if thing:
-            return _ThingSummary(id=str(thing.id), title=cls._THINGS[thing.id])
+    def list_summaries(cls) -> list[_ThingSummary]:
+        return [thing.get_summary() for thing in db_session().scalars(select(cls))]
+
+
+class Ticket(Subject):
+    """The other half of the contract: a subject with no row, whose id spans the
+    separators a URL path is cut on."""
+
+    @classmethod
+    def get_for_subject_id(cls, subject_id: str) -> "Ticket | None":
+        if "#" in subject_id:
+            return cls(id=subject_id)
         return
 
     @classmethod
-    def list_subjects(cls) -> list[_ThingSummary]:
-        return [
-            _ThingSummary(id=str(subject_id), title=title)
-            for subject_id, title in cls._THINGS.items()
-        ]
+    def list_summaries(cls) -> list[SubjectSummary]:
+        # No get_summary() of its own: a subject with nothing to add is named by
+        # the header every subject already has.
+        return [ticket.get_summary() for ticket in cls.list_open()]
+
+
+class _ThingExtension(Extension):
+    name = "faketest"
 
 
 def _seed_run(
     session,
     *,
     subject_id,
+    subject_type="thing",
     kind="faketest.flow",
     state="running",
     input_request=None,
@@ -62,7 +75,7 @@ def _seed_run(
     )
     session.add(run)
     session.flush()
-    seed_dbos_status(session, run.id, state, subject={"type": "thing", "id": subject_id})
+    seed_dbos_status(session, run.id, state, subject={"type": subject_type, "id": subject_id})
     return run
 
 
@@ -81,14 +94,16 @@ def client(tmp_path: Path, druks_db, monkeypatch):
     from druks.testing import configure_app_for_test, make_settings
 
     monkeypatch.setenv("DRUKS_DATA_DIR", str(tmp_path))
-    for subject_id in _ThingExtension._THINGS:
+    for subject_id in TITLES:
         druks_db.merge(Thing(id=subject_id))
     druks_db.flush()
     app = configure_app_for_test(settings=make_settings(tmp_path))
 
     holder = APIRouter()
-    routes = _ThingExtension._get_subject_routes(Thing.subject_type)
-    holder.include_router(routes, prefix="/api/faketest")
+    for subject_class in (Thing, Ticket):
+        holder.include_router(
+            _ThingExtension._get_subject_routes(subject_class), prefix="/api/faketest"
+        )
     catchall = next(
         i for i, r in enumerate(app.routes) if getattr(r, "path", "") == "/api/{path:path}"
     )
@@ -112,7 +127,7 @@ def test_status_aggregates_across_runs_and_timeline_spans_them(client: TestClien
     _seed_call(druks_db, live, agent="implement", status="running")
 
     detail = client.get("/api/faketest/thing/1").json()
-    assert detail["summary"] == {"id": "1", "title": "First"}
+    assert detail["summary"] == {"id": "1", "label": "thing 1", "title": "First"}
     assert detail["status"]["state"] == "running"
     assert [entry["kind"] for entry in detail["timeline"]] == ["faketest.prepare", "faketest.flow"]
     # Calls group under their own run, not the subject at large.
@@ -190,3 +205,45 @@ def test_list_returns_every_subject_with_status(client: TestClient, druks_db):
 
 def test_unknown_subject_is_404(client: TestClient, druks_db):
     assert client.get("/api/faketest/thing/nope").status_code == 404
+    # An id the subject could never wear misses the same way, row or no row.
+    assert client.get("/api/faketest/ticket/nope").status_code == 404
+
+
+def test_an_id_spanning_separators_reaches_the_board_and_its_page(client: TestClient, druks_db):
+    # A row-less subject's id is free text — "owner/repo#7" carries the path
+    # separator and the fragment marker, and both reads still key on the whole id.
+    _seed_run(druks_db, subject_type="ticket", subject_id="owner/repo#7", state="parked")
+
+    board = client.get("/api/faketest/ticket").json()
+    assert [row["summary"]["id"] for row in board["rows"]] == ["owner/repo#7"]
+
+    detail = client.get("/api/faketest/ticket/owner/repo%237").json()
+    assert detail["summary"] == {"id": "owner/repo#7", "label": "owner/repo#7"}
+    assert detail["status"]["state"] == "parked"
+    assert [entry["kind"] for entry in detail["timeline"]] == ["faketest.flow"]
+
+
+@pytest.mark.parametrize("path", ["thing/nope", "ticket/owner/nope"])
+def test_a_subjects_stream_wins_over_the_greedy_id_matcher(client: TestClient, druks_db, path):
+    # The id matcher spans separators, so ``/stream`` has to stay a suffix and not
+    # get swallowed into the id — whatever shape the id is. A stream for a subject
+    # that names nothing closes at once, which is what proves it got there.
+    response = client.get(f"/api/faketest/{path}/stream")
+
+    assert response.status_code == 200
+    assert response.text == ""
+
+
+@pytest.mark.parametrize("subject_class", [Thing, Ticket])
+def test_the_literal_routes_are_declared_ahead_of_the_id_matcher(subject_class):
+    # FastAPI matches in declaration order; both boards would be unreachable if the
+    # id matcher came first.
+    router = _ThingExtension._get_subject_routes(subject_class)
+    prefix = f"/{subject_class.subject_type}"
+
+    assert [route.path for route in router.routes] == [
+        prefix,
+        f"{prefix}/stream",
+        f"{prefix}/{{subject_id:path}}/stream",
+        f"{prefix}/{{subject_id:path}}",
+    ]

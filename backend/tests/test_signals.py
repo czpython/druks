@@ -1,7 +1,6 @@
 import pytest
 from druks.extensions.exceptions import SubscriberDeclarationError
 from druks.signals import publish, subscribe
-from druks.workflows import Workflow
 from druks_field_notes.models import Note
 from druks_field_notes.workflows import Summarize
 from sqlalchemy.orm import object_session
@@ -71,19 +70,40 @@ async def test_another_subjects_event_skips_the_subscriber(druks_db):
 
 
 @pytest.mark.asyncio
-async def test_workflow_filter_narrows_to_that_workflow():
+async def test_workflow_filter_narrows_to_that_workflow(druks_db):
     # The body names the fact it came for; the kind it was matched on is routing,
-    # so it never reaches the signature.
+    # so it never reaches the signature. Summarize declares its subject, so the
+    # filter narrows to notes too and the body is handed the row.
+    item = _note()
     received = []
 
     @subscribe("test.workflow_filter", workflow=Summarize)
-    async def receive(*, ticket: str, **_: object) -> None:
-        received.append(ticket)
+    async def receive(*, subject: Note, ticket: str, **_: object) -> None:
+        received.append((subject, ticket))
 
-    await publish("test.workflow_filter", kind="field_notes.other", ticket="ENG-1")
-    await publish("test.workflow_filter", kind=Summarize.kind, ticket="ENG-2")
+    await publish(
+        "test.workflow_filter", kind="field_notes.other", subject=item.identity, ticket="ENG-1"
+    )
+    await publish("test.workflow_filter", kind=Summarize.kind, subject=None, ticket="ENG-2")
+    await publish(
+        "test.workflow_filter", kind=Summarize.kind, subject=item.identity, ticket="ENG-3"
+    )
 
-    assert received == ["ENG-2"]
+    assert received == [(item, "ENG-3")]
+
+
+def test_a_workflows_subject_and_an_explicit_one_are_never_written_together():
+    with pytest.raises(SubscriberDeclarationError, match="already declares"):
+
+        @subscribe("test.both_spellings", workflow=Summarize, subject=Note)
+        async def receive(*, subject: Note, **_: object) -> None: ...
+
+
+def test_a_subject_filter_must_name_a_subject_class():
+    with pytest.raises(SubscriberDeclarationError, match="not a Subject or StoredSubject"):
+
+        @subscribe("test.not_a_subject", subject=Summarize)
+        async def receive(**_: object) -> None: ...
 
 
 def test_a_subscriber_asking_for_routing_fails_at_declaration():
@@ -93,9 +113,9 @@ def test_a_subscriber_asking_for_routing_fails_at_declaration():
         async def receive(*, run: str, kind: str, **_: object) -> None: ...
 
 
-def test_workflow_subject_requires_a_registered_class():
-    workflow = Workflow()
-    workflow._subject = {"type": "missing", "id": 1}
+def test_a_run_resolves_its_subject_through_the_declaration(druks_db):
+    item = _note()
+    workflow = Summarize()
+    workflow._subject = item.identity
 
-    with pytest.raises(LookupError, match="no subject class is named"):
-        _ = workflow.subject
+    assert workflow.subject is item

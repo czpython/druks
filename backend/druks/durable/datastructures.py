@@ -1,5 +1,9 @@
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar, Self
+
+from druks.durable.schemas import SubjectSummary
+from druks.models import snake_name
 
 if TYPE_CHECKING:
     from druks.durable.schemas import RunResponse, SubjectStatus
@@ -8,14 +12,22 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class Subject:
-    """What a run is about, as identity alone — a pull request, an issue, a
-    conversation. ``Subject(id="owner/repo#7", subject_type="pull_request")`` is
-    all a run, an event, or a read ever needs, and it shows itself as that id.
+    """What a run is about, as identity alone — a pull request, a conversation.
+    Subclass it: the class name is the subject type, so ``PullRequest`` is
+    ``pull_request``, and the id is the whole record — ``owner/repo#7`` is what a
+    run, an event, or a read is keyed by, and what the subject shows itself as.
     An extension that also keeps a row of its own subclasses ``StoredSubject``
     instead."""
 
+    subject_type: ClassVar[str]
+
     id: str
-    subject_type: str
+
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        # Explicit args: ``slots=True`` rebuilds this class, leaving a zero-arg
+        # ``super()`` bound to the one it replaced.
+        super(Subject, cls).__init_subclass__(**kwargs)
+        cls.subject_type = snake_name(cls.__name__)
 
     @property
     def identity(self) -> dict[str, Any]:
@@ -26,6 +38,26 @@ class Subject:
         # An identity-only subject is already named by its id — "owner/repo#7" is
         # the handle, not a surrogate key.
         return self.id
+
+    @classmethod
+    def get_for_subject_id(cls, subject_id: str) -> Self | None:
+        """The subject this id names. Ids reach the read side as free text off a URL,
+        so override to return None for a shape this subject could never wear."""
+        return cls(id=subject_id)
+
+    def get_summary(self) -> SubjectSummary:
+        """The header its board and page show it under. Its id and label already say
+        what it is; override to add the fields only this extension knows."""
+        return SubjectSummary(id=self.id, label=self.label)
+
+    @classmethod
+    def list_summaries(cls) -> Sequence[SubjectSummary]:
+        """The subjects on this class's board, newest-movement first, each as its domain
+        summary. Returns a covariant ``Sequence`` so an extension can return a ``list``
+        of its own ``SubjectSummary`` subclass. Required once a workflow declares it."""
+        raise NotImplementedError(
+            f"a workflow declares {cls.__name__}, so it needs a list_summaries()"
+        )
 
     def get_status(self, *, workflow: "type[Workflow] | None" = None) -> "SubjectStatus":
         """Where this subject stands: the state of the run driving it, narrowed to one
@@ -47,8 +79,8 @@ class Subject:
         return await get_subject_phase(self.subject_type, self.id)
 
     @classmethod
-    def list_open(cls, subject_type: str, *, limit: int = 50) -> list["Subject"]:
-        """The subjects of this type whose newest run hasn't handed off — still going,
+    def list_open(cls, *, limit: int = 50) -> list[Self]:
+        """The subjects of this class whose newest run hasn't handed off — still going,
         or failed and wanting the operator. What an extension's active view lists when
         the subject is identity alone; a subject with rows of its own lists them with
         ``StoredSubject.list_open``."""
@@ -56,5 +88,5 @@ class Subject:
         from druks.database import db_session
         from druks.durable.models import Run
 
-        open_ids = db_session().scalars(Run.open_subject_ids(subject_type).limit(limit))
-        return [cls(id=subject_id, subject_type=subject_type) for subject_id in open_ids]
+        open_ids = db_session().scalars(Run.open_subject_ids(cls.subject_type).limit(limit))
+        return [cls(id=subject_id) for subject_id in open_ids]

@@ -1,6 +1,6 @@
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import Field, SerializeAsAny
 
@@ -8,7 +8,9 @@ from druks.harnesses.artifacts import normalize_token_usage
 from druks.schemas import BaseResponse
 
 from .enums import RunState
-from .models import AgentCall, Artifact, Run
+
+if TYPE_CHECKING:
+    from .models import AgentCall, Artifact, Run
 
 
 class TokenUsage(BaseResponse):
@@ -47,7 +49,7 @@ class AgentCallResponse(BaseResponse):
     tokens: TokenUsage | None = None
 
     @classmethod
-    def from_call(cls, call: AgentCall) -> "AgentCallResponse":
+    def from_call(cls, call: "AgentCall") -> "AgentCallResponse":
         return cls(
             id=call.id,
             agent=call.agent,
@@ -93,7 +95,7 @@ class AgentCallFiles(BaseResponse):
     artifact: ArtifactDescriptor | None = None
 
     @classmethod
-    def from_call(cls, call: AgentCall, artifact: Artifact | None) -> "AgentCallFiles":
+    def from_call(cls, call: "AgentCall", artifact: "Artifact | None") -> "AgentCallFiles":
         layout = call.artifact_layout
 
         def named(path: Path) -> ArtifactFile | None:
@@ -142,8 +144,8 @@ class RunResponse(BaseResponse):
     @classmethod
     def from_run(
         cls,
-        run: Run,
-        calls: list[AgentCall],
+        run: "Run",
+        calls: list["AgentCall"],
         *,
         input_request: dict[str, Any] | None,
     ) -> "RunResponse":
@@ -163,9 +165,11 @@ class RunResponse(BaseResponse):
 
 
 class SubjectSummary(BaseResponse):
-    # The base an extension's subject header subclasses; ``id`` keys the subject's
-    # status, timeline, and detail URL, and the extension adds its own domain fields.
+    # Every subject's header: ``id`` keys its status, timeline and detail URL, and
+    # ``label`` is the one line it shows itself as — read live off the subject, unlike
+    # the copy an event snapshots. A subject with more to say subclasses this.
     id: str
+    label: str
 
 
 class SubjectStatus(BaseResponse):

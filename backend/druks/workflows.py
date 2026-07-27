@@ -18,7 +18,6 @@ from pydantic import BaseModel, Field, create_model
 from uuid_utils import uuid7
 
 from druks.accounts.context import current_account_id
-from druks.database import db_session
 from druks.durable.activity import set_run_phase
 from druks.durable.datastructures import Subject
 from druks.durable.engine import _step_engine, register_schedule, run_queue, step_session
@@ -40,7 +39,7 @@ from druks.extensions.settings import (
     validate_setting_override,
     validate_settings_declaration,
 )
-from druks.models import Base, StoredSubject, snake_name
+from druks.models import StoredSubject, snake_name
 from druks.notifications.outbox import notifications_queue, send_notification
 from druks.sandbox.client import sandbox_client
 from druks.sandbox.constants import SANDBOX_HOST_ROTATE_BEFORE_SECONDS
@@ -133,6 +132,22 @@ def _resolve_body_method(cls: type["Workflow"]) -> str:
     )
 
 
+def _resolve_subject_class(cls: type["Workflow"]) -> "type[Subject] | type[StoredSubject] | None":
+    # The declaration and the run's live subject are the same word, so the class
+    # attribute comes off and the property answers in its place.
+    if "subject" not in cls.__dict__:
+        return cls._subject_class
+    declared = cls.__dict__["subject"]
+    if not (isinstance(declared, type) and issubclass(declared, Subject | StoredSubject)):
+        raise WorkflowError(
+            f"{cls.__name__}.subject must be a Subject or StoredSubject subclass — a run "
+            f"is about a kind of thing, not {declared!r}. A workflow about nothing "
+            "declares no subject at all."
+        )
+    del cls.subject
+    return declared
+
+
 def _input_model_from_signature(cls: type["Workflow"]) -> type[BaseModel] | None:
     # A workflow's input IS its body's signature: plain annotated parameters,
     # Python's native way to declare inputs. The SDK synthesizes a pydantic
@@ -217,6 +232,11 @@ class Gate(BaseModel):
 
     @classmethod
     async def answer(cls, subject: Subject | StoredSubject, **reply: Any) -> None:
+        if not isinstance(subject, Subject | StoredSubject):
+            raise WorkflowError(
+                f"{cls.__name__}.answer() takes the subject whose run is parked on it, "
+                f"not {type(subject).__name__}"
+            )
         runs = Run.list_for_subject(subject.subject_type, str(subject.id))
         parked = next((run for run in runs if run.is_parked and run.input_gate == cls.name), None)
         if parked:
@@ -463,6 +483,10 @@ class Workflow:
     # the loader's package registrations at definition time and namespacing
     # ``kind``. Never supplied or stored per run.
     extension: ClassVar[str | None] = None
+    # The subject class this workflow's runs are about, written ``subject = WorkItem``
+    # on the subclass and lifted off it in __init_subclass__ so the instance property
+    # below keeps the name. None for a workflow about nothing, which says so by silence.
+    _subject_class: ClassVar[type[Subject] | type[StoredSubject] | None] = None
     # When set to a cron string, the workflow also registers a schedule that
     # fires its run() on that cadence (no subject — a framework cron).
     every: ClassVar[str | None] = None
@@ -508,6 +532,7 @@ class Workflow:
                 "the declaring extension supplies the namespace"
             )
         cls.kind = f"{cls.extension}.{local_kind}" if cls.extension else local_kind
+        cls._subject_class = _resolve_subject_class(cls)
         validate_settings_declaration(cls.Settings)
         cls._body_method = _resolve_body_method(cls)
         # Before _wrap_steps: run()'s wrapper signature is (*args, **kwargs).
@@ -542,14 +567,11 @@ class Workflow:
 
     @property
     def subject(self) -> Any:
+        # Live, not a snapshot taken at dispatch: a long-parked run resumes against
+        # whatever the declared class says then, and finds nothing if it went away.
         if not self._subject:
             return
-        subject_type, subject_id = self._subject["type"], self._subject["id"]
-        for mapper in Base.registry.mappers:
-            model = mapper.class_
-            if issubclass(model, StoredSubject) and model.subject_type == subject_type:
-                return db_session().get(model, int(subject_id))
-        raise LookupError(f"no subject class is named {subject_type!r}")
+        return self._subject_class.get_for_subject_id(str(self._subject["id"]))
 
     async def announce(self, topic: str, **facts: Any) -> None:
         # The workflow announcing a domain event in its extension's vocabulary
@@ -678,7 +700,26 @@ class Workflow:
         SettingsOverride.set_workflow_setting(cls.kind, field, value)
 
     @classmethod
+    def _validate_subject(cls, subject: "Subject | StoredSubject | None") -> None:
+        # The declaration is the contract — subscribers derive their subject class
+        # from ``workflow=``, so it has to hold for every run.
+        if cls._subject_class:
+            if isinstance(subject, cls._subject_class):
+                return
+            given = "nothing" if subject is None else type(subject).__name__
+            raise WorkflowError(
+                f"{cls.__name__} is about {cls._subject_class.__name__}, not {given}"
+            )
+        if subject is None:
+            return
+        raise WorkflowError(
+            f"{cls.__name__} declares no subject — declare "
+            f"``subject = {type(subject).__name__}`` on it, or pass subject=None"
+        )
+
+    @classmethod
     async def cancel(cls, subject: Subject | StoredSubject, *, failure: str | None = None) -> None:
+        cls._validate_subject(subject)
         runs = Run.list_for_subject(subject.subject_type, str(subject.id), kind=cls.kind)
         run = next((run for run in runs if run.is_active), None)
         if run:
@@ -702,6 +743,7 @@ class Workflow:
         # fails at start, not inside the run.
         # subject is required (no default) so a run can't silently lose its
         # timeline by omission — pass subject=None explicitly for a background run.
+        cls._validate_subject(subject)
         if not account_id:
             # Browser-origin starts inherit the request's authenticated account;
             # dispatchers that know better pass account_id explicitly.

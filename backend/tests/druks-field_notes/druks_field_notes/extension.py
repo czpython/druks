@@ -4,12 +4,9 @@ from typing import TYPE_CHECKING, Literal
 from druks.agents import Agent
 from druks.doctor import CheckResult
 from druks.extensions import Extension
-from druks.workflows import Subject
 from pydantic import BaseModel, Field, SecretStr, field_validator
 
 from druks_field_notes.contracts import NoteSummary
-from druks_field_notes.models import Note
-from druks_field_notes.schemas import NoteView
 
 if TYPE_CHECKING:
     from druks.settings import Settings
@@ -35,7 +32,6 @@ def check_summary_api_key(settings: "Settings") -> CheckResult:
 
 class FieldNotes(Extension):
     name = "field_notes"
-    subject_type = Note.subject_type
     icon = "notebook"
     description = "Turns a jotted observation into a one-line summary with an agent."
 
@@ -82,18 +78,6 @@ class FieldNotes(Extension):
         contract=NoteSummary,
         model="claude",
     )
-
-    @classmethod
-    def get_subject_summary(cls, subject: Subject) -> NoteView | None:
-        note = Note.get_for_subject(subject)
-        if note:
-            return NoteView.from_note(note)
-        return
-
-    @classmethod
-    def list_subjects(cls) -> list[NoteView]:
-        notes = Note.list_recent(limit=cls.settings().board_size)
-        return [NoteView.from_note(note) for note in notes]
 
     # The extension's own precondition, reported by `druks doctor` beside the
     # platform's: the summarizer's API key must be set.

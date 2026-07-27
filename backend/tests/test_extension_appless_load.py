@@ -26,30 +26,27 @@ _FILES = {
         from druks.extensions import Extension
         from pydantic import BaseModel, Field
 
-        from .models import ProbeItem
-
 
         class Probe(Extension):
             name = "probe"
-            subject_type = ProbeItem.subject_type
 
             class Settings(BaseModel):
                 budget: int = Field(default=3, ge=1)
-
-            @classmethod
-            def get_subject_summary(cls, subject):
-                return None
-
-            @classmethod
-            def list_subjects(cls):
-                return []
     """,
     "models.py": """
         from druks.db import StoredSubject
+        from druks.durable.schemas import SubjectSummary
 
 
         class ProbeItem(StoredSubject):
             __tablename__ = "probe_items"
+
+            def get_summary(self) -> SubjectSummary:
+                return SubjectSummary(id=str(self.id))
+
+            @classmethod
+            def list_summaries(cls) -> list[SubjectSummary]:
+                return []
     """,
     "routes.py": """
         from fastapi import APIRouter
@@ -74,8 +71,12 @@ _FILES = {
     "workflows.py": """
         from druks.workflows import Workflow
 
+        from .models import ProbeItem
+
 
         class Inspect(Workflow):
+            subject = ProbeItem
+
             async def run(self, widget: str) -> None:
                 ...
     """,
@@ -162,6 +163,8 @@ def test_surfaces_are_enumerable_from_the_loaded_extension(installed):
     router_prefixes = {router.prefix for router in extension.routers()}
     assert "/widgets" in router_prefixes  # the extension's own router
     assert "/transcripts/{call_id}" in router_prefixes  # the free read-side
+    # Its one workflow declares ProbeItem, so the subject read-side mounts too.
+    assert "/probe_item" in router_prefixes
 
     capability_modules = {module.__name__ for module in extension.capability_modules()}
     assert f"{_PACKAGE}.subscribers" in capability_modules

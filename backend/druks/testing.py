@@ -24,6 +24,7 @@ import druks.user_settings.models  # noqa: F401
 from druks.bootstrap import seed
 from druks.database import _session_factory, configure_session, create_engine_from_url, db_session
 from druks.durable import AgentCall, Run
+from druks.durable.datastructures import Subject
 from druks.durable.dbos_state import DBOS_SYSTEM_SCHEMA, workflow_status
 from druks.durable.engine import _dbos_database_url, configure_engine
 from druks.extensions.loader import import_extension_models, iter_extensions
@@ -264,11 +265,14 @@ def druks_without_remote_config(monkeypatch) -> None:
     monkeypatch.setattr("druks.extensions.config.fetch_file", _missing)
 
 
-async def run_workflow(workflow_class, *, subject: StoredSubject | None = None, **input) -> object:
+async def run_workflow(
+    workflow_class, *, subject: "Subject | StoredSubject | None" = None, **input
+) -> object:
     """Run a workflow's body against ``subject`` and return its result, without a
     durable engine — no checkpoints, no lifecycle events, no retries. Only the
     single-operation ``run()`` shape: a ``run_multistep`` body checkpoints each
     ``@step`` through the engine, which isn't here."""
+    workflow_class._validate_subject(subject)
     if workflow_class._body_method != "run":
         raise WorkflowError(
             f"{workflow_class.__name__} orchestrates steps, and every @step checkpoints "
@@ -291,7 +295,7 @@ def seed_run(
     session: Session,
     *,
     kind: str,
-    subject: StoredSubject | None = None,
+    subject: Subject | StoredSubject | None = None,
     state: str = "running",
     run_id: str | None = None,
     input_gate: str | None = None,

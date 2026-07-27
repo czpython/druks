@@ -1,4 +1,4 @@
-from druks.workflows import FatalError, Gate, Subject, Workflow, step  # noqa: F401
+from druks.workflows import FatalError, Gate, Workflow, step  # noqa: F401
 
 # Durable workflows. Subclass ``Workflow`` and implement exactly one of:
 #   async def run(self, ...)            — a single durable operation
@@ -7,8 +7,11 @@ from druks.workflows import FatalError, Gate, Subject, Workflow, step  # noqa: F
 # Set ``every = "<cron>"`` to schedule one; raise ``FatalError`` for a clean domain
 # stop; a ``Gate`` subclass parks the run for human input.
 #
-# Callers launch with ``cls.start(subject=..., **input)`` — a ``Subject(type, id)``, a
-# ``StoredSubject`` row, or None for a background run.
+# Declare what a workflow's runs are about with ``subject = YourSubject`` — the class,
+# with a table or without — and druks gives that subject a board and a page.
+#
+# Callers launch with ``cls.start(subject=..., **input)``: an instance of that class,
+# or None for a workflow that declares no subject.
 # Only if a workflow grows launch policy (dedupe, routing, subject lookup) wrap
 # start() in a ``dispatch()`` classmethod and point callers there instead.
 

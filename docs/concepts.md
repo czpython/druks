@@ -42,7 +42,7 @@ name must match `Extension.name`. The same name scopes:
 
 ### An extension owns
 
-- domain workflows and the policy for starting them
+- domain workflows, what each one is about, and the policy for starting them
 - agents, prompts, and structured output contracts
 - domain models, migrations, HTTP routes, and subject summaries
 - normalized reactions to events and provider-specific webhook behavior
@@ -158,12 +158,13 @@ than only on the VM.
 
 ## Events, signals, webhooks, and subjects
 
-A subject is the row a run is about. The extension owns it and hands it to druks
-whenever it starts a run or answers a gate; only the row's type and id travel
-further, because a run outlives the row it points at. Everything that happens to
-a run lands in an append-only event log. Extensions add their own events and
-supply subject summaries; druks supplies pagination, activity composition, and a
-live feed of facts — a row's words are the client's.
+A subject is what a run is about, and it is always a class — a row the extension
+keeps, or identity alone. The workflow declares which, so druks knows the kind of
+thing before any run about it exists; only the subject's type and id travel
+further, because a run outlives what it points at. Everything that happens to a
+run lands in an append-only event log. Extensions add their own events and give
+their subject class a summary; druks supplies pagination, activity composition,
+and a live feed of facts — a subject's words are the client's.
 
 Signals connect producers to extension reactions. They are awaited and
 delivered at least once: webhook failures return an error so the provider can

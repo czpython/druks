@@ -1,6 +1,6 @@
 import importlib.util
 import re
-from collections.abc import Callable, Sequence
+from collections.abc import Callable
 from pathlib import Path
 from types import ModuleType
 from typing import TYPE_CHECKING, Any, ClassVar
@@ -26,7 +26,7 @@ if TYPE_CHECKING:
     from druks.agents import Agent
     from druks.doctor import CheckResult
     from druks.durable.datastructures import Subject
-    from druks.durable.schemas import SubjectActivity, SubjectSummary
+    from druks.durable.schemas import SubjectActivity
     from druks.settings import Settings
     from druks.workflows import Workflow
 
@@ -85,11 +85,6 @@ class Extension:
     # belong to the extension itself rather than one of its workflows. Mirrors a
     # workflow's ``Settings``.
     settings_model: ClassVar[type[BaseModel] | None] = None
-    # What this extension's runs are about ("work_item", "pull_request"). Declaring
-    # it mounts the generic subject read-side; None means the extension has none.
-    # An extension that also keeps a row for its subject spells this
-    # ``WorkItem.subject_type`` rather than repeating the literal.
-    subject_type: ClassVar[str | None] = None
     # The checks this extension contributes to ``druks doctor`` — one per precondition
     # it owns (its API key set, its webhook secret present, its provider reachable).
     # ``druks doctor`` runs each through the same ``CheckResult`` report as its core
@@ -107,10 +102,11 @@ class Extension:
                 f"extension name {name!r} must match {NAME_RE.pattern!r} — it keys the "
                 "/api/<name> namespace, the version table, and settings keys"
             )
-        if cls.subject_type == "transcripts":
+        if "subject_type" in cls.__dict__:
             raise TypeError(
-                f"extension {name!r} declares a 'transcripts' subject; that segment "
-                "serves every extension's agent-call reads. Name the subject for what it is"
+                f"{cls.__name__} declares subject_type — a workflow declares what its runs "
+                "are about (``subject = YourSubject``), and an extension's subjects follow "
+                "from its workflows"
             )
         cls.table_prefix = f"{name}_"
         if "package" not in cls.__dict__:
@@ -156,6 +152,20 @@ class Extension:
         """The workflows living in this extension's package."""
         prefix = cls.package + "."
         return [wf for wf in workflow_registry.all() if wf.__module__.startswith(prefix)]
+
+    @classmethod
+    def subject_classes(cls) -> "list[type[Subject] | type[StoredSubject]]":
+        """What this extension's runs are about, read off the workflows that declare
+        them — each one gets a board and a page, ordered by subject type so the routes
+        it mounts are stable."""
+        declared = {wf._subject_class for wf in cls.workflows() if wf._subject_class}
+        for subject_class in declared:
+            if subject_class.subject_type == "transcripts":
+                raise TypeError(
+                    f"{subject_class.__name__} is a 'transcripts' subject; that segment "
+                    "serves every extension's agent-call reads. Name it for what it is"
+                )
+        return sorted(declared, key=lambda subject_class: subject_class.subject_type)
 
     @classmethod
     def discover(cls) -> list[ModuleType]:
@@ -252,9 +262,9 @@ class Extension:
     def get_routers(cls, modules: list[ModuleType]) -> "list[APIRouter]":
         """Every router mounted under the extension's namespace: the ones it declares in
         its ``routes`` modules, plus the generic read-side it gets for free —
-        ``/transcripts`` always, and the subject read-side
-        (``/<subject_type>`` → status + timeline + live stream) when it declares a
-        ``subject_type``. The platform's come first: those two segments are its own.
+        ``/transcripts`` always, and one subject read-side
+        (``/<subject_type>`` → status + timeline + live stream) per subject its
+        workflows declare. The platform's come first: those segments are its own.
         Override to add a router built outside a ``routes`` module."""
         # Local, not module-top: keeps FastAPI off the import graph so the loader
         # stays importable app-lessly; enumerating routers is where it's really needed.
@@ -272,10 +282,11 @@ class Extension:
         # The platform's routers are narrow — each confined to its own segment — so
         # matching them first costs an extension nothing anywhere else and leaves it
         # no way to take a read the platform serves, not even with a catch-all.
-        platform = [cls._get_transcript_routes()]
-        if cls.subject_type:
-            platform.append(cls._get_subject_routes(cls.subject_type))
-        return [*platform, *declared]
+        return [
+            cls._get_transcript_routes(),
+            *(cls._get_subject_routes(subject) for subject in cls.subject_classes()),
+            *declared,
+        ]
 
     @classmethod
     def _get_transcript_routes(cls) -> "APIRouter":
@@ -372,11 +383,13 @@ class Extension:
         return router
 
     @classmethod
-    def _get_subject_routes(cls, subject_type: str) -> "APIRouter":
+    def _get_subject_routes(
+        cls, subject_class: "type[Subject] | type[StoredSubject]"
+    ) -> "APIRouter":
         """The board and one subject (header + status + timeline + activity), each with a
         point-in-time read and a ``/stream`` that pushes the whole snapshot on change.
-        Mounted at ``/api/<name>/<subject_type>`` once the extension declares
-        ``subject_type``. Every read here is keyed by identity, so an extension that
+        Mounted at ``/api/<name>/<subject_type>`` for every subject the extension's
+        workflows declare. Every read here is keyed by identity, so an extension that
         keeps no row for its subject gets the same surface as one that does."""
         from fastapi import APIRouter, HTTPException, status
         from fastapi.responses import StreamingResponse
@@ -384,10 +397,10 @@ class Extension:
         from druks.api.dependencies import EngineDep
         from druks.database import session_scope
         from druks.durable import reads
-        from druks.durable.datastructures import Subject
         from druks.durable.live import SSE_HEADERS, stream
         from druks.durable.schemas import SubjectList, SubjectResponse, SubjectRow
 
+        subject_type = subject_class.subject_type
         router = APIRouter(prefix=f"/{subject_type}", tags=[f"{cls.name}:{subject_type}"])
 
         def board() -> SubjectList:
@@ -395,20 +408,21 @@ class Extension:
                 rows=[
                     SubjectRow(
                         summary=summary,
-                        status=Subject(id=summary.id, subject_type=subject_type).get_status(),
+                        status=reads.get_subject_status(subject_type, summary.id),
                     )
-                    for summary in cls.list_subjects()
+                    for summary in subject_class.list_summaries()
                 ]
             )
 
         async def subject_response(subject_id: str) -> SubjectResponse | None:
-            subject = Subject(id=subject_id, subject_type=subject_type)
-            summary = cls.get_subject_summary(subject)
-            if not summary:
+            subject = subject_class.get_for_subject_id(subject_id)
+            if subject is None:
                 return
-            activity = await cls.get_subject_activity(subject)
             return reads.get_subject_response(
-                subject_type, subject_id, summary=summary, activity=activity
+                subject_type,
+                subject_id,
+                summary=subject.get_summary(),
+                activity=await cls.get_subject_activity(subject),
             )
 
         @router.get("", response_model=SubjectList, response_model_by_alias=True)
@@ -478,24 +492,9 @@ class Extension:
         )
 
     @classmethod
-    def get_subject_summary(cls, subject: "Subject") -> "SubjectSummary | None":
-        """This extension's domain header for one subject — its own fields only; the
-        read-side composes it with the platform's generic status + timeline. None when
-        the identity names nothing, which is how a subject id off a URL 404s. Required
-        once ``subject_type`` is set."""
-        raise NotImplementedError(
-            f"extension {cls.name!r} sets subject_type but no get_subject_summary"
-        )
-
-    @classmethod
-    def list_subjects(cls) -> "Sequence[SubjectSummary]":
-        """This extension's subjects, newest-movement first, each as its domain summary.
-        Returns a covariant ``Sequence`` so an extension can return ``list`` of its own
-        ``SubjectSummary`` subclass. Required once ``subject_type`` is set."""
-        raise NotImplementedError(f"extension {cls.name!r} sets subject_type but no list_subjects")
-
-    @classmethod
-    async def get_subject_activity(cls, subject: "Subject") -> "SubjectActivity | None":
+    async def get_subject_activity(
+        cls, subject: "Subject | StoredSubject"
+    ) -> "SubjectActivity | None":
         """The subject's live sub-phase, if any (e.g. "Building sandbox VM…"). Optional —
         override to surface a transient signal the running run pushes."""
         return
