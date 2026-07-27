@@ -11,7 +11,6 @@ function event(fields: Partial<FeedItem>): FeedItem {
     seq: 1,
     at: '2026-07-26T12:00:00Z',
     kind: 'workflow.running',
-    facts: {},
     ...fields,
   }
 }
