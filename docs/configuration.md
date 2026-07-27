@@ -151,7 +151,7 @@ DRUKS_WEBHOOK_SECRET=<same secret configured on the app webhook>
 Webhook URL:
 `https://<webhook-host>/_external/github/events/`
 
-Subscribe to pull request, pull request review, and push events.
+Subscribe to issue comment, pull request, pull request review, and push events.
 
 | Repository permission | Access |
 | --- | --- |
