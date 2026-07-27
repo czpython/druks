@@ -1,3 +1,4 @@
+from druks.accounts.models import Account
 from druks.durable.enums import RunState
 from druks.durable.exceptions import GateTimeout
 from druks.durable.models import AgentCall, Run
@@ -20,6 +21,7 @@ def _run(
         input_gate=input_gate,
         failure=failure,
         failure_code=failure_code,
+        account=Account(username="op@example.com"),
     )
 
 

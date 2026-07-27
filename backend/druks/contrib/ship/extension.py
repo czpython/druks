@@ -14,7 +14,7 @@ from druks.contrib.ship.contracts import (
 from druks.contrib.ship.models import WorkItem
 from druks.contrib.ship.schemas import WorkItemSummary
 from druks.extensions import Extension
-from druks.workflows import SubjectActivity, get_subject_phase
+from druks.workflows import SubjectActivity
 
 _PHASE_META: dict[str, SubjectActivity] = {
     "provisioning_vm": SubjectActivity(label="Building sandbox VM…", kind="infra"),
@@ -136,5 +136,5 @@ class Ship(Extension):
 
     @classmethod
     async def subject_activity(cls, subject: WorkItem) -> SubjectActivity | None:
-        phase = await get_subject_phase(subject.subject_type, str(subject.id))
+        phase = await subject.get_phase()
         return _PHASE_META.get(phase or "")

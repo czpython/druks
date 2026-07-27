@@ -1,5 +1,9 @@
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from druks.durable.schemas import RunResponse, SubjectStatus
+    from druks.workflows import Workflow
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -22,6 +26,25 @@ class Subject:
         # An identity-only subject is already named by its id — "owner/repo#7" is
         # the handle, not a surrogate key.
         return self.id
+
+    def get_status(self, *, workflow: "type[Workflow] | None" = None) -> "SubjectStatus":
+        """Where this subject stands: the state of the run driving it, narrowed to one
+        workflow's runs when a subject has several kinds in flight."""
+        from druks.durable.reads import get_subject_status
+
+        return get_subject_status(self.subject_type, self.id, workflow=workflow)
+
+    def get_timeline(self) -> "list[RunResponse]":
+        """Every run about this subject, oldest first, each with its agent calls."""
+        from druks.durable.reads import list_subject_timeline
+
+        return list_subject_timeline(self.subject_type, self.id)
+
+    async def get_phase(self) -> str | None:
+        """The step it is on right now ("provisioning_vm"), while something is running."""
+        from druks.durable.reads import get_subject_phase
+
+        return await get_subject_phase(self.subject_type, self.id)
 
     @classmethod
     def list_open(cls, subject_type: str, *, limit: int = 50) -> list["Subject"]:

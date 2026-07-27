@@ -3,6 +3,7 @@ from pathlib import Path
 import pytest
 from druks.contrib.ship.models import WorkItem
 from druks.testing import seed_call
+from druks.workflows import Subject
 from fastapi.testclient import TestClient
 
 from ship.factories import make_test_work_item, seed_build_run
@@ -120,8 +121,6 @@ def test_subject_detail_unknown_is_404(client: TestClient):
 def test_pending_gate_surfaces_input_request_on_the_run(druks_db):
     # A gate is run-level: the parked run carries its own ask on the timeline,
     # with its agent calls in execution order underneath.
-    from druks.durable.reads import list_subject_timeline
-
     item = make_test_work_item(repo="ClawHaven/acme-app", title="x")
     run = seed_build_run(
         druks_db,
@@ -133,7 +132,7 @@ def test_pending_gate_surfaces_input_request_on_the_run(druks_db):
     seed_call(druks_db, run, "generate_plan")
     seed_call(druks_db, run, "review_plan")
 
-    (entry,) = list_subject_timeline("work_item", str(item.id))
+    (entry,) = item.get_timeline()
     assert entry.input_request == {"next_action": "approve_plan", "label": "Approve plan"}
     assert entry.state == "parked"
     assert [call.agent for call in entry.agent_calls] == ["generate_plan", "review_plan"]
@@ -142,12 +141,10 @@ def test_pending_gate_surfaces_input_request_on_the_run(druks_db):
 def test_detail_surfaces_running_run_before_its_first_call(druks_db):
     """The detail timeline surfaces a run that is running before its first agent
     call exists — the sandbox spin-up window the operator needs to see."""
-    from druks.durable.reads import list_subject_timeline
-
     work_item_id = make_test_work_item(repo="ClawHaven/acme-app", title="x").id
     seed_build_run(druks_db, work_item_id=work_item_id, state="running")
 
-    (entry,) = list_subject_timeline("work_item", str(work_item_id))
+    (entry,) = Subject(id=str(work_item_id), subject_type="work_item").get_timeline()
     assert entry.state == "running"
     assert entry.agent_calls == []  # surfaces even with no call yet
 
@@ -209,13 +206,11 @@ def test_history_clamps_limit(client: TestClient, druks_db):
 
 def test_repeated_runs_on_one_subject_each_surface_separately(druks_db):
     # The timeline must not collapse repeated runs to only the newest one.
-    from druks.durable.reads import list_subject_timeline
-
     item = make_test_work_item(repo="ClawHaven/acme-app", title="repeated")
     for _ in range(3):
         seed_build_run(druks_db, work_item_id=item.id, state="finished")
 
-    entries = list_subject_timeline("work_item", str(item.id))
+    entries = item.get_timeline()
     assert [entry.kind for entry in entries] == ["ship.build"] * 3
     assert len({entry.id for entry in entries}) == 3
 
@@ -234,15 +229,13 @@ def test_update_stamps_build_run_id(druks_db):
 def test_timeline_shows_every_build_attempt(druks_db):
     # Each build attempt is its own run; the timeline shows them all, with a
     # failed attempt's failure carried on its run.
-    from druks.durable.reads import list_subject_timeline
-
     item = make_test_work_item(repo="ClawHaven/acme-app", title="x", remote_key="ACME-1")
     run1 = seed_build_run(druks_db, work_item_id=item.id, state="failed", failure="boom")
     run2 = seed_build_run(druks_db, work_item_id=item.id, state="failed")
     seed_call(druks_db, run1, "generate_plan", status="failed", last_error="boom")
     seed_call(druks_db, run2, "generate_plan", status="failed")
 
-    entries = list_subject_timeline("work_item", str(item.id))
+    entries = item.get_timeline()
     assert len(entries) == 2
     assert all(e.agent_calls[0].agent == "generate_plan" for e in entries)
     assert any(e.failure == "boom" for e in entries)
@@ -256,10 +249,10 @@ async def test_subject_activity_surfaces_running_phase(druks_db, monkeypatch):
     item = make_test_work_item(repo="ClawHaven/acme-app", title="x")
     seed_build_run(druks_db, work_item_id=item.id, state="running")
 
-    async def phase(_subject_type, _subject_id):
+    async def phase(_self):
         return "provisioning_vm"
 
-    monkeypatch.setattr(ship_extension, "get_subject_phase", phase)
+    monkeypatch.setattr(WorkItem, "get_phase", phase)
     activity = await ship_extension.Ship.subject_activity(item)
     assert activity is not None
     assert activity.label == "Building sandbox VM…"
@@ -271,8 +264,6 @@ async def test_subject_activity_none_when_not_running(druks_db):
     from druks.contrib.ship import extension as ship_extension
 
     item = make_test_work_item(repo="ClawHaven/acme-app", title="x")
-    seed_build_run(
-        druks_db, work_item_id=item.id, state="parked", input_gate="review_plan"
-    )
+    seed_build_run(druks_db, work_item_id=item.id, state="parked", input_gate="review_plan")
 
     assert await ship_extension.Ship.subject_activity(item) is None

@@ -365,6 +365,7 @@ class Extension:
         from druks.api.dependencies import EngineDep
         from druks.database import db_session, session_scope
         from druks.durable import reads
+        from druks.durable.datastructures import Subject
         from druks.durable.live import SSE_HEADERS, stream
         from druks.durable.schemas import SubjectList, SubjectResponse, SubjectRow
 
@@ -378,7 +379,8 @@ class Extension:
             return SubjectList(
                 rows=[
                     SubjectRow(
-                        summary=summary, status=reads.get_subject_status(subject_type, summary.id)
+                        summary=summary,
+                        status=Subject(id=summary.id, subject_type=subject_type).get_status(),
                     )
                     for summary in cls.list_subjects()
                 ]

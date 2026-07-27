@@ -15,7 +15,7 @@ from druks.ticketing.datastructures import Ticket
 from druks.ticketing.enums import TicketStatus
 from druks.ticketing.exceptions import TrackerNotConfigured
 from druks.ticketing.helpers import get_tracker, is_tracker_source
-from druks.workflows import FatalError, SubjectStatus, get_subject_status
+from druks.workflows import FatalError
 
 logger = logging.getLogger(__name__)
 
@@ -113,9 +113,6 @@ class ProjectRepo(StoredSubject):
     def effective_profile(self) -> dict[str, Any]:
         # {} until the repo profiler has run — an unprofiled repo is a normal state.
         return self.profile.get("effective") or {}
-
-    def profiler_status(self) -> SubjectStatus:
-        return get_subject_status(self.subject_type, str(self.id))
 
     def set_profile(self, *, baseline: dict[str, Any], effective: dict[str, Any]) -> None:
         self.profile = {"baseline": baseline, "effective": effective}
@@ -281,7 +278,7 @@ class WorkItem(StoredSubject):
         from druks.contrib.ship.workflows import Build
 
         self.set_status(HandoffStatus.SHIPPED)
-        build = get_subject_status(self.subject_type, str(self.id), workflow=Build)
+        build = self.get_status(workflow=Build)
         if build.is_parked:
             await Build.cancel(self, failure="pr merged while parked")
         await self.set_remote_status(TicketStatus.DONE)
