@@ -1,8 +1,10 @@
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useMemo } from 'react'
 
-import { reviewApi } from './api'
+import { REVIEW, reviewApi } from './api'
 import type { ReviewSummary } from './api'
 import { reviewLine } from './reviewLine'
+import { useSSE } from '../../api/sse'
 import { EmptyState } from '../../components/EmptyState'
 import { Page } from '../../components/Page'
 import { PageHeader } from '../../components/PageHeader'
@@ -16,6 +18,17 @@ import { StatusGlyph } from '../../components/StatusGlyph'
 // GitHub shows nothing — a review still working, or one that stopped on a failure.
 export function ReviewsPage() {
   const reviewsQuery = useQuery({ queryKey: ['reviews'], queryFn: () => reviewApi.open() })
+
+  // A review's own lifecycle events (started, parked, finished, failed) land on
+  // the feed; each means the open set changed — re-fetch it. RelTime already
+  // ticks the clock between events, so the feed only has to carry state changes.
+  const queryClient = useQueryClient()
+  useSSE(`/api/events/stream?extension=${REVIEW}`, {
+    handlers: useMemo(
+      () => ({ message: () => void queryClient.invalidateQueries({ queryKey: ['reviews'] }) }),
+      [queryClient],
+    ),
+  })
 
   const gate = queryGate(reviewsQuery, {
     loadingMsg: 'loading',
