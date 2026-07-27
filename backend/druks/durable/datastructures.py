@@ -56,7 +56,7 @@ class Subject:
         from druks.durable.enums import OPEN_STATES
         from druks.durable.models import Run
 
-        states = Run.subject_states(subject_type)
+        states = Run.subject_states(subject_type, limit=limit)
         return [
             cls(id=subject_id, subject_type=subject_type)
             for subject_id, state in states.items()

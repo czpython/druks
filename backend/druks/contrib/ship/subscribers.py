@@ -1,9 +1,10 @@
+from datetime import datetime
+
 from druks.contrib.ship.contracts import ReviewWork
 from druks.contrib.ship.extension import Ship
 from druks.contrib.ship.models import ProjectRepo, WorkItem
 from druks.contrib.ship.workflows import Build, Profile
-from druks.database import db_session
-from druks.models import Base
+from druks.db import db_session
 from druks.signals import subscribe
 from druks.ticketing.enums import TicketStatus
 from druks.workflows import WorkflowEvent
@@ -63,11 +64,13 @@ async def pr_close_settles_the_item(*, repo: str, pr_number: int, payload: dict)
     if not item or item.pr_merged is not None:
         return
     item.pr_merged = payload["merged"]
-    item.pr_resolved_at = Base.utc_now()
+    item.pr_resolved_at = datetime.fromisoformat(payload["resolved_at"].replace("Z", "+00:00"))
     db_session().flush()
     if payload["merged"]:
+        Ship.record_event(type="shipped", subject=item)
         await item.ship()
     else:
+        Ship.record_event(type="cancelled", subject=item)
         await item.close_external()
 
 

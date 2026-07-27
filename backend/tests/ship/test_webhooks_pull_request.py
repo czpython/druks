@@ -6,10 +6,14 @@ import pytest
 from druks.contrib.ship.models import WorkItem
 from druks.core.webhooks.github import GitHubEvents
 from druks.durable import Run
+from druks.events.models import Event
 from druks.testing import configure_app_for_test, make_settings
 from fastapi.testclient import TestClient
 
 from ship.factories import make_test_work_item, seed_build_run
+
+_MERGED_AT = "2026-07-25T21:59:09Z"
+_CLOSED_AT = "2026-07-26T13:30:30Z"
 
 
 @pytest.fixture(autouse=True)
@@ -22,12 +26,23 @@ def _stub_config_fetch(monkeypatch):
     monkeypatch.setattr("druks.extensions.config.fetch_file", _fetch)
 
 
-async def _fire_closed(*, repo, pr_number, branch, tmp_path, merged=True):
+async def _fire_closed(
+    *,
+    repo,
+    pr_number,
+    branch,
+    tmp_path,
+    merged=True,
+    merged_at=_MERGED_AT,
+    closed_at=_CLOSED_AT,
+):
     payload = {
         "repository": {"full_name": repo},
         "pull_request": {
             "number": pr_number,
             "merged": merged,
+            "merged_at": merged_at,
+            "closed_at": closed_at,
             "head": {"ref": branch},
         },
     }
@@ -73,7 +88,11 @@ async def test_external_merge_stores_resolution_and_ends_involvement(druks_db, t
 
     resolved = WorkItem.get(work_item_id)
     assert resolved.pr_merged is True
-    assert resolved.pr_resolved_at is not None
+    assert resolved.pr_resolved_at == datetime.fromisoformat(
+        _MERGED_AT.replace("Z", "+00:00")
+    )
+    events = druks_db.query(Event).filter_by(subject_id=str(work_item_id)).all()
+    assert "shipped" in {event.type for event in events}
     assert not _fresh_run(run_id).is_active
 
 
@@ -158,7 +177,11 @@ async def test_closed_unmerged_records_close_and_ends_involvement(druks_db, tmp_
 
     resolved = WorkItem.get(work_item_id)
     assert resolved.pr_merged is False
-    assert resolved.pr_resolved_at is not None
+    assert resolved.pr_resolved_at == datetime.fromisoformat(
+        _CLOSED_AT.replace("Z", "+00:00")
+    )
+    events = druks_db.query(Event).filter_by(subject_id=str(work_item_id)).all()
+    assert "cancelled" in {event.type for event in events}
     assert not _fresh_run(run_id).is_active
 
 

@@ -156,10 +156,11 @@ class DashboardItem(BaseResponse):
 
     @classmethod
     def from_work_item(cls, item: WorkItem) -> "DashboardItem":
-        assert item.pr_merged is not None
-        assert item.pr_resolved_at is not None
+        if item.pr_merged is None or item.pr_resolved_at is None:
+            raise ValueError(f"work item {item.id} has no stored PR resolution")
         resolution = _pr_resolution(item.pr_merged)
-        assert resolution is not None
+        if resolution is None:
+            raise ValueError(f"work item {item.id} resolution could not be derived")
         return cls(
             key=f"code:{item.id}",
             source_id=item.id,

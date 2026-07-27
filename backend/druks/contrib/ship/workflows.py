@@ -125,10 +125,16 @@ class Build(Workflow):
             task_owner_name=ticket["assignee_name"],
         )
         # A duplicate dispatch gets the live run back; only a genuinely new run
-        # resets routing — drop the old branch/PR so a late close for the prior PR
-        # can't resolve this item onto the new run and cancel it.
+        # resets the attempt — drop the old branch/PR so a late close for the prior PR
+        # can't resolve this item onto the new run, and clear that prior PR's outcome.
         if item.build_run_id != run_id:
-            item.update(build_run_id=run_id, branch=None, pr_number=None)
+            item.update(
+                build_run_id=run_id,
+                branch=None,
+                pr_number=None,
+                pr_merged=None,
+                pr_resolved_at=None,
+            )
         return run_id
 
     async def run_multistep(

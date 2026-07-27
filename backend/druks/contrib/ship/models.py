@@ -362,6 +362,8 @@ class WorkItem(StoredSubject):
         pr_number: int | None = _KEEP,
         branch: str | None = _KEEP,
         build_run_id: str | None = _KEEP,
+        pr_merged: bool | None = _KEEP,
+        pr_resolved_at: datetime | None = _KEEP,
         project_id: int = _KEEP,
     ) -> None:
         if title is not _KEEP:
@@ -374,6 +376,10 @@ class WorkItem(StoredSubject):
             self.branch = branch
         if build_run_id is not _KEEP:
             self.build_run_id = build_run_id
+        if pr_merged is not _KEEP:
+            self.pr_merged = pr_merged
+        if pr_resolved_at is not _KEEP:
+            self.pr_resolved_at = pr_resolved_at
         if project_id is not _KEEP:
             self.project_id = project_id
         self.updated_at = Base.utc_now()

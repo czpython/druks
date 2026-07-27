@@ -79,6 +79,11 @@ class GitHubEvents(Webhook):
             payload={
                 "branch": pull_request["head"]["ref"],
                 "merged": pull_request["merged"],
+                "resolved_at": (
+                    pull_request["merged_at"]
+                    if pull_request["merged"]
+                    else pull_request["closed_at"]
+                ),
             },
         )
         return _accepted()

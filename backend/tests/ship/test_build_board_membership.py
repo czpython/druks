@@ -4,6 +4,7 @@ import druks.contrib.ship.workflows  # noqa: F401  # registers ship.build, the s
 import pytest
 from druks.contrib.ship.extension import Ship
 from druks.contrib.ship.models import WorkItem
+from druks.durable.dbos_state import workflow_status
 from druks.durable.enums import RunState
 from druks.durable.models import Run
 
@@ -36,6 +37,26 @@ def test_a_resolved_pr_leaves_the_board_before_run_state_is_considered(druks_db,
 
 def test_an_item_without_runs_stays_off_the_board(druks_db):
     item = make_test_work_item(repo="ClawHaven/acme-app", title="never dispatched")
+
+    assert str(item.id) not in _board_ids(druks_db)
+
+
+@pytest.mark.parametrize("state", ["cancelled", "orphaned"])
+def test_a_cancelled_or_orphaned_build_with_no_resolution_leaves_the_board(
+    druks_db, state
+):
+    item = make_test_work_item(repo="ClawHaven/acme-app", title=f"{state} build")
+    if state == "cancelled":
+        seed_build_run(druks_db, work_item_id=item.id, state=state)
+    else:
+        run = seed_build_run(druks_db, work_item_id=item.id)
+        druks_db.execute(
+            workflow_status.delete().where(workflow_status.c.workflow_uuid == run.id)
+        )
+        run.created_at = datetime.now(UTC) - timedelta(minutes=10)
+        druks_db.flush()
+        druks_db.expire(run, ["state"])
+        assert Run.get(run.id).state == RunState.ORPHANED
 
     assert str(item.id) not in _board_ids(druks_db)
 

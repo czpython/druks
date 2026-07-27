@@ -13,7 +13,7 @@ from druks.contrib.ship.contracts import (
 )
 from druks.contrib.ship.models import WorkItem
 from druks.contrib.ship.schemas import WorkItemSummary
-from druks.durable.models import Run
+from druks.durable import Run, RunState
 from druks.extensions import Extension
 from druks.workflows import Subject, SubjectActivity
 
@@ -135,12 +135,14 @@ class Ship(Extension):
 
     @classmethod
     def list_subjects(cls) -> list[WorkItemSummary]:
-        states = Run.subject_states(cls.subject_type)
+        states = Run.subject_states(cls.subject_type, limit=500)
         items = WorkItem.list_recent(limit=500)
         return [
             WorkItemSummary.from_work_item(item)
             for item in items
-            if str(item.id) in states and item.pr_resolved_at is None
+            if str(item.id) in states
+            and item.pr_resolved_at is None
+            and states[str(item.id)] not in (RunState.CANCELLED, RunState.ORPHANED)
         ]
 
     @classmethod

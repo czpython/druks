@@ -1,3 +1,4 @@
+from druks.contrib.ship.extension import Ship
 from druks.contrib.ship.workflows import Build
 from druks.models import Base
 from druks.testing import seed_run
@@ -5,11 +6,11 @@ from druks.testing import seed_run
 from ship.factories import make_test_work_item
 
 
-async def test_dispatch_does_not_clear_a_stored_pr_resolution(druks_db, monkeypatch) -> None:
+async def test_dispatch_pulls_cancelled_item_back_onto_the_board(druks_db, monkeypatch) -> None:
     item = make_test_work_item(repo="o/r", title="t", ticket_key="ACME-1")
-    item.pr_merged = False
+    item.pr_merged = True
     item.pr_resolved_at = Base.utc_now()
-    seed_run(druks_db, kind=Build.kind, run_id="run-1")
+    seed_run(druks_db, kind=Build.kind, subject=item, run_id="run-1")
     started = {}
 
     async def fake_start(cls, **kwargs):
@@ -33,8 +34,9 @@ async def test_dispatch_does_not_clear_a_stored_pr_resolution(druks_db, monkeypa
 
     assert run_id == "run-1"
     assert item.build_run_id == "run-1"
-    assert item.pr_merged is False
-    assert item.pr_resolved_at is not None
+    assert item.pr_merged is None
+    assert item.pr_resolved_at is None
+    assert str(item.id) in {summary.id for summary in Ship.list_subjects()}
     assert started["ticket_ref"] == "ACME-1"
     assert started["ticket_title"] == "t"
     assert started["ticket_url"] == "https://tracker.test/ACME-1"
@@ -80,6 +82,9 @@ async def test_duplicate_dispatch_keeps_the_live_attempt_routing(druks_db, monke
     seed_run(druks_db, kind=Build.kind, run_id="run-live")
     item = make_test_work_item(repo="o/r", title="t", ticket_key="ACME-3")
     item.update(build_run_id="run-live", pr_number=7, branch="agent/live")
+    resolved_at = Base.utc_now()
+    item.pr_merged = False
+    item.pr_resolved_at = resolved_at
 
     async def dedup_start(cls, **kwargs):
         return "run-live"
@@ -102,6 +107,8 @@ async def test_duplicate_dispatch_keeps_the_live_attempt_routing(druks_db, monke
     assert item.build_run_id == "run-live"
     assert item.pr_number == 7
     assert item.branch == "agent/live"
+    assert item.pr_merged is False
+    assert item.pr_resolved_at == resolved_at
 
 
 def test_update_clears_nullable_with_none_and_skips_omitted(druks_db) -> None:

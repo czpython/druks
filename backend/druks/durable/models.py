@@ -149,7 +149,7 @@ class Run(Base):
         return db_session().scalars(stmt).first()
 
     @classmethod
-    def subject_states(cls, subject_type: str) -> dict[str, RunState]:
+    def subject_states(cls, subject_type: str, *, limit: int = 500) -> dict[str, RunState]:
         """Every subject's newest driving run state, newest run first."""
         state = state_expression(cls.id, cls.input_gate, cls.created_at).label("state")
         subject_id = workflow_status.c.attributes["subject_id"].as_string().label("subject_id")
@@ -173,6 +173,7 @@ class Run(Base):
             select(driving.c.subject_id, driving.c.state)
             .where(driving.c.rank == 1)
             .order_by(driving.c.created_at.desc())
+            .limit(limit)
         )
         return {
             subject_id: RunState(state)
