@@ -277,10 +277,22 @@ async def test_recovery_supersedes_the_orphaned_running_call(druks_db):
 
     engine = _step_engine()
     AgentCall.start(
-        engine, call_id="a", run_id="wf-9", model="m", agent=None, host_id="h", account_id="system"
+        engine,
+        call_id="a",
+        run_id="wf-9",
+        model="m",
+        agent="summarize",
+        host_id="h",
+        account_id="system",
     )
     AgentCall.start(
-        engine, call_id="b", run_id="wf-9", model="m", agent=None, host_id="h", account_id="system"
+        engine,
+        call_id="b",
+        run_id="wf-9",
+        model="m",
+        agent="summarize",
+        host_id="h",
+        account_id="system",
     )
 
     by_id = {call.id: call for call in AgentCall.list_for_run("wf-9")}

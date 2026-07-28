@@ -31,7 +31,7 @@ class AgentCallResponse(BaseResponse):
 
     id: str
     # Which agent made this call ("scope", "implement") — the timeline's row label.
-    agent: str | None = None
+    agent: str
     # The account charged — differs from the run's on fallback.
     account_username: str = Field(validation_alias=AliasPath("account", "username"))
     status: AgentCallStatus = Field(validation_alias="live_status")
@@ -46,7 +46,7 @@ class AgentCallResponse(BaseResponse):
     @computed_field
     @property
     def label(self) -> str:
-        return get_display_label(self.agent) if self.agent else "Agent"
+        return get_display_label(self.agent)
 
 
 class ArtifactFile(BaseResponse):

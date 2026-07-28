@@ -275,6 +275,7 @@ def test_get_usage_is_a_bounded_pure_read(druks_db, account):
         druks_db.add(
             AgentCall(
                 run_id=run.id,
+                agent="summarize",
                 account_id=account.id,
                 sandbox_host_id="host",
                 model="gpt-5.5",
@@ -321,6 +322,7 @@ def test_get_usage_only_counts_the_callers_spend(druks_db, account):
     druks_db.add(
         AgentCall(
             run_id=run.id,
+            agent="summarize",
             account_id=other.id,
             sandbox_host_id="host",
             model="gpt-5.5",

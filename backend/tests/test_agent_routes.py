@@ -253,6 +253,7 @@ def test_usage_agent_route_matches_the_service(client: TestClient, druks_db, acc
     druks_db.add(
         AgentCall(
             run_id=run.id,
+            agent="summarize",
             account_id=account.id,
             sandbox_host_id="host",
             model="gpt-5.5",
