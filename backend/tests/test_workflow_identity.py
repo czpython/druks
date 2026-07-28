@@ -147,21 +147,25 @@ def test_display_label_reads_the_local_kind():
     assert get_display_label("field_notes.summarize") == "Summarize"
 
 
-def test_a_declared_subject_is_lifted_off_the_class():
-    # The declaration and the run's live subject share the name, so the class
-    # attribute comes off and the instance property answers in its place.
+def test_a_declared_subject_answers_off_the_workflow_and_off_a_run():
+    # One word, two answers: the workflow says what kind of thing its runs are about,
+    # a run of it says which one.
     register_workflow_package("alpha_pkg", "alpha")
     flow = _workflow("Sweep", "alpha_pkg.workflows", subject=Note)
 
-    assert flow._subject_class is Note
-    assert "subject" not in flow.__dict__
+    assert flow.subject is Note
     assert flow().subject is None  # a run with no subject has none to resolve
+
+
+def test_a_workflow_about_nothing_says_so_by_silence():
+    register_workflow_package("alpha_pkg", "alpha")
+    assert _workflow("Sweep", "alpha_pkg.workflows").subject is None
 
 
 @pytest.mark.parametrize("declared", ["note", None])
 def test_a_subject_that_is_not_a_subject_class_is_rejected(declared):
-    # ``subject = None`` included: written out it would shadow the instance
-    # property with a permanent None, so a workflow about nothing writes nothing.
+    # ``subject = None`` included: written out it would shadow the declaration with a
+    # permanent None, so a workflow about nothing writes nothing.
     register_workflow_package("alpha_pkg", "alpha")
     with pytest.raises(WorkflowError, match="must be a Subject or StoredSubject"):
         _workflow("Sweep", "alpha_pkg.workflows", subject=declared)

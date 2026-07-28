@@ -22,7 +22,7 @@ def upgrade() -> None:
         "field_notes_notes",
         sa.Column("id", sa.Integer(), nullable=False),
         sa.Column("body", sa.String(), nullable=False),
-        sa.Column("summary", sa.String(), nullable=True),
+        sa.Column("gist", sa.String(), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.PrimaryKeyConstraint("id"),
     )

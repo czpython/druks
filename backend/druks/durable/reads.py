@@ -198,7 +198,7 @@ async def stream_transcript(
         with session_scope(engine):
             call = AgentCall.get(call_id)
             path = call.get_stream_path(stream) if call else None
-            summary = AgentCallResponse.from_call(call) if call else None
+            summary = AgentCallResponse.model_validate(call) if call else None
 
         if not summary:
             # Unknown (or deleted) call: nothing will ever arrive — close the

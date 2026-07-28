@@ -14,7 +14,7 @@ def build_feed(
     before: int | None = None,
     limit: int = _PAGE_LIMIT_DEFAULT,
 ) -> tuple[list[FeedItem], str | None]:
-    items = [FeedItem.from_event(event) for event in _events(extension, before)]
+    items = [FeedItem.model_validate(event) for event in _events(extension, before)]
     items.sort(key=lambda item: item.seq, reverse=True)
     page = items[:limit]
     next_cursor = str(page[-1].seq) if len(page) == limit and page else None

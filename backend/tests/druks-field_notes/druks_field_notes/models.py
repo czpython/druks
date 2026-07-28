@@ -11,11 +11,10 @@ class Note(StoredSubject):
     __tablename__ = "field_notes_notes"
 
     # What the note is about — the raw observation an operator jotted down. A run's
-    # agent reads this and writes back a one-line summary.
+    # agent reads this and writes back its gist.
     body: Mapped[str]
-    # The agent's summary of ``body``, written when a Summarize run finishes. None
-    # until then.
-    summary: Mapped[str | None]
+    # ``body`` in one line, written when a Summarize run finishes. None until then.
+    gist: Mapped[str | None]
     created_at: Mapped[datetime] = mapped_column(default=StoredSubject.utc_now)
 
     @classmethod
@@ -35,8 +34,8 @@ class Note(StoredSubject):
         stmt = select(cls).order_by(cls.created_at.desc(), cls.id.desc()).limit(limit)
         return list(db_session().scalars(stmt))
 
-    def save_summary(self, summary: str) -> None:
-        self.summary = summary
+    def save_gist(self, gist: str) -> None:
+        self.gist = gist
         db_session().flush()
 
     def get_summary(self) -> NoteSummary:

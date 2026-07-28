@@ -158,7 +158,7 @@ class Extension:
         """What this extension's runs are about, read off the workflows that declare
         them — each one gets a board and a page, ordered by subject type so the routes
         it mounts are stable."""
-        declared = {wf._subject_class for wf in cls.workflows() if wf._subject_class}
+        declared = {wf.subject for wf in cls.workflows() if wf.subject}
         for subject_class in declared:
             if subject_class.subject_type == "transcripts":
                 raise TypeError(
@@ -335,7 +335,7 @@ class Extension:
             call = AgentCall.get(call_id)
             if not call:
                 raise HTTPException(status.HTTP_404_NOT_FOUND, "Run not found.")
-            if call.get_live_status() == AgentCallStatus.RUNNING:
+            if call.live_status == AgentCallStatus.RUNNING:
                 response.headers["Cache-Control"] = "no-store"
             else:
                 response.headers["Cache-Control"] = settled_cache

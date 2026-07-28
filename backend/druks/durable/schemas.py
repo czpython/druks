@@ -2,12 +2,11 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any, Literal
 
-from pydantic import BeforeValidator, ConfigDict, Field, SerializeAsAny
+from pydantic import AliasPath, BeforeValidator, ConfigDict, Field, SerializeAsAny, computed_field
 
-from druks.harnesses.artifacts import normalize_token_usage
 from druks.schemas import BaseResponse
 
-from .enums import RunState
+from .enums import AgentCallStatus, RunState
 
 if TYPE_CHECKING:
     from .models import AgentCall, Artifact, Run
@@ -22,46 +21,32 @@ class TokenUsage(BaseResponse):
     total_tokens: int
 
 
-def _token_usage(cost_metadata: dict | None) -> TokenUsage | None:
-    canonical = normalize_token_usage(cost_metadata)
-    return TokenUsage(**canonical) if canonical else None
-
-
 def get_display_label(kind: str) -> str:
     # "ship.build" → "Build"; "implement" → "Implement".
     return kind.rsplit(".", 1)[-1].replace("_", " ").capitalize()
 
 
 class AgentCallResponse(BaseResponse):
+    model_config = ConfigDict(from_attributes=True)
+
     id: str
     # Which agent made this call ("scope", "implement") — the timeline's row label.
     agent: str | None = None
-    label: str = ""
     # The account charged — differs from the run's on fallback.
-    account_username: str
-    status: Literal["running", "succeeded", "failed", "abandoned"]
+    account_username: str = Field(validation_alias=AliasPath("account", "username"))
+    status: AgentCallStatus = Field(validation_alias="live_status")
     # started_at + finished_at are the facts; the client derives elapsed (a live
     # tick off started_at while running), so nothing here churns between polls.
     started_at: datetime
     finished_at: datetime | None = None
     last_error: str | None = None
     cost_usd: float | None = None
-    tokens: TokenUsage | None = None
+    tokens: TokenUsage | None = Field(default=None, validation_alias="token_usage")
 
-    @classmethod
-    def from_call(cls, call: "AgentCall") -> "AgentCallResponse":
-        return cls(
-            id=call.id,
-            agent=call.agent,
-            label=get_display_label(call.agent) if call.agent else "Agent",
-            account_username=call.account.username,
-            status=call.get_live_status(),  # type: ignore[arg-type]
-            started_at=call.started_at,
-            finished_at=call.finished_at,
-            last_error=call.last_error,
-            cost_usd=call.cost_usd,
-            tokens=_token_usage(call.cost_metadata),
-        )
+    @computed_field
+    @property
+    def label(self) -> str:
+        return get_display_label(self.agent) if self.agent else "Agent"
 
 
 class ArtifactFile(BaseResponse):
@@ -159,7 +144,7 @@ class RunResponse(BaseResponse):
             created_at=run.created_at,
             updated_at=run.updated_at,
             account_username=run.account.username,
-            agent_calls=[AgentCallResponse.from_call(c) for c in calls],
+            agent_calls=[AgentCallResponse.model_validate(call) for call in calls],
         )
 
 

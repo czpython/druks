@@ -1,6 +1,5 @@
 from druks.durable.dbos_state import workflow_status
 from druks.durable.enums import AgentCallStatus
-from druks.durable.schemas import AgentCallResponse
 from druks.testing import seed_call, seed_run
 from druks_field_notes.models import Note
 from druks_field_notes.workflows import Summarize
@@ -13,12 +12,11 @@ def _running_call(druks_db):
     return seed_call(druks_db, run, "summarize", status="running")
 
 
-def test_from_call_derives_running_while_run_active(druks_db):
-    call = _running_call(druks_db)
-    assert AgentCallResponse.from_call(call).status == "running"
+def test_an_unfinished_call_reads_running_while_its_run_is_active(druks_db):
+    assert _running_call(druks_db).live_status == AgentCallStatus.RUNNING
 
 
-def test_from_call_derives_abandoned_when_run_terminal(druks_db):
+def test_an_unfinished_call_reads_abandoned_once_its_run_is_terminal(druks_db):
     call = _running_call(druks_db)
     druks_db.execute(
         update(workflow_status)
@@ -26,10 +24,10 @@ def test_from_call_derives_abandoned_when_run_terminal(druks_db):
         .values(status="ERROR")
     )
     druks_db.expire_all()
-    assert AgentCallResponse.from_call(call).status == "abandoned"
+    assert call.live_status == AgentCallStatus.ABANDONED
 
 
-def test_from_call_keeps_a_finished_calls_outcome(druks_db):
+def test_a_finished_call_keeps_its_outcome(druks_db):
     note = Note.create(body="finished agent call")
     run = seed_run(druks_db, kind=Summarize.kind, subject=note)
     call = seed_call(
@@ -39,4 +37,4 @@ def test_from_call_keeps_a_finished_calls_outcome(druks_db):
         status=AgentCallStatus.SUCCEEDED.value,
     )
     # A finished call keeps its outcome regardless of its run's state.
-    assert AgentCallResponse.from_call(call).status == "succeeded"
+    assert call.live_status == AgentCallStatus.SUCCEEDED
