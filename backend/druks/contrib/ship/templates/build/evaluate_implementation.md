@@ -38,8 +38,7 @@ Evaluate the implementation against the **Current plan** above, the issue, and t
 
 CI-PRIMARY VERIFICATION — the verification block designates every configured command
 individually:
-- For a command labeled CI-primary, CI on exactly `head_sha` is authoritative. Do not execute
-  the profile command locally. First run `gh pr view <pr_number> --json headRefOid` and verify
+- For a command labeled CI-primary, CI on exactly `head_sha` is authoritative. Do not execute the profile command locally. First run `gh pr view <pr_number> --json headRefOid` and verify
   that `headRefOid` equals the rendered `head_sha`; a mismatch or missing authoritative SHA
   cannot be green evidence. Then correlate the exact named check from
   `gh pr checks <pr_number>` with run data restricted by
@@ -47,8 +46,7 @@ individually:
   the associated run/check details or logs. Never rely on the current branch or a check result
   from another commit.
 - If that exact check is green on `head_sha`, record the command as passing without running it
-  locally. If it is red, inspect the failing run/log. You may locally reproduce only the single
-  failing target identified there, never the profile command's complete suite. The CI check
+  locally. If it is red, inspect the failing run/log. You may locally reproduce only the single failing target identified there, never the profile command's complete suite. The CI check
   remains the result recorded for the profile command.
 - If the check is still unsettled after you finish the other work, wait a few minutes. If it
   still has not settled, record it as `not_run`; an unsettled check is non-blocking.
@@ -78,8 +76,7 @@ INFEASIBLE-BLOCKER GATE — return `blocked`, NOT `fail`, when the only thing ke
 2. **Contradictory / forbidden** — satisfying one binding requirement would require a change another binding requirement (or the PR's out-of-scope guard) explicitly forbids. Example: one requirement makes the frontend build mandatory while another forbids touching dependencies or the runtime. The contract is unsatisfiable as written; only a human can relax it. Quote both requirements and return `blocked`.
 3. **Pre-existing baseline failure** — for a red CI-primary check, determine the baseline from
    CI history for that same check on the repository's default branch. Use
-   `gh run list --branch <default>` and inspect the corresponding run/check details. Do not
-   check out `base_sha` or rerun the profile command locally to establish a baseline. If CI
+   `gh run list --branch <default>` and inspect the corresponding run/check details. Do not check out `base_sha` or rerun the profile command locally to establish a baseline. If CI
    history cannot establish the baseline, do not manufacture one. A confirmed pre-existing
    failure did not originate in this diff: mark it `not_run`/baseline; if it is the ONLY
    blocker, return `blocked` with that note rather than `fail`.
