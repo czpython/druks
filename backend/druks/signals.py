@@ -4,7 +4,6 @@ from typing import Any
 
 from blinker import signal
 
-from druks.database import db_session
 from druks.extensions.exceptions import SubscriberDeclarationError
 
 __all__ = ["subscribe"]
@@ -21,12 +20,15 @@ def subscribe(name: str, **filters: Any) -> Callable[[Subscriber], Subscriber]:
 
     ``filters`` are equality matches against the published kwargs; ``__``
     descends into dicts (``payload__terminal=True``); a ``Gate`` class stands for
-    its ``name``. ``workflow=Build`` narrows to that workflow and
-    ``subject=WorkItem`` to that subject, handing the body its row. A non-matching
-    publication skips the subscriber, so the body starts at the real work."""
+    its ``name``. ``workflow=Build`` narrows to that workflow and to the subject
+    that workflow declares, handing the body that subject; ``subject=WorkItem``
+    on its own narrows to any workflow about one. A non-matching publication
+    skips the subscriber, so the body starts at the real work."""
 
     def register(fn: Subscriber) -> Subscriber:
         # Lazy import: druks.workflows imports this module.
+        from druks.durable.datastructures import Subject
+        from druks.models import StoredSubject
         from druks.workflows import Gate
 
         if asked_for_routing := sorted(_ROUTING & set(inspect.signature(fn).parameters)):
@@ -36,10 +38,24 @@ def subscribe(name: str, **filters: Any) -> Callable[[Subscriber], Subscriber]:
                 "the facts you react to."
             )
         workflow_class = filters.pop("workflow", None)
+        subject_class = filters.pop("subject", None)
+        if workflow_class and subject_class:
+            raise SubscriberDeclarationError(
+                f"{fn.__name__}() names both workflow= and subject= — "
+                f"{workflow_class.__name__} already declares what its runs are about."
+            )
         if workflow_class:
             filters["kind"] = workflow_class.kind
-        subject_class = filters.pop("subject", None)
+            subject_class = workflow_class._subject_class
         if subject_class:
+            if not (
+                isinstance(subject_class, type)
+                and issubclass(subject_class, Subject | StoredSubject)
+            ):
+                raise SubscriberDeclarationError(
+                    f"{fn.__name__}() filters on subject={subject_class!r}, which is not a "
+                    "Subject or StoredSubject subclass."
+                )
             filters["subject__type"] = subject_class.subject_type
         matches = {}
         for lookup, expected in filters.items():
@@ -56,10 +72,10 @@ def subscribe(name: str, **filters: Any) -> Callable[[Subscriber], Subscriber]:
                     return
             delivered = {key: value for key, value in published.items() if key not in _ROUTING}
             if subject_class:
-                row = db_session().get(subject_class, int(published["subject"]["id"]))
-                if not row:
+                subject = subject_class.get_for_subject_id(str(published["subject"]["id"]))
+                if subject is None:
                     return
-                delivered["subject"] = row
+                delivered["subject"] = subject
             await fn(**delivered)
 
         # weak=False: ``receiver`` is a local closure nothing else references, so a

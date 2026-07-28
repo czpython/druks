@@ -2,7 +2,7 @@ from datetime import timedelta
 
 import pytest
 from druks.contrib.ship.contracts import ReviewWork
-from druks.contrib.ship.models import WorkItem
+from druks.contrib.ship.models import ProjectRepo, WorkItem
 from druks.contrib.ship.workflows import Build, Profile
 from druks.durable.models import Run
 from druks.models import Base
@@ -98,6 +98,18 @@ async def test_workflow_cancel_takes_its_own_kind_and_passes_over_idle_subjects(
     _subject_run(druks_db, subject=idle, kind=Build.kind, state="finished")
     await Build.cancel(idle)
     assert cancelled == [build.id]
+
+
+async def test_cancel_and_answer_hold_the_caller_to_the_declared_subject(druks_db):
+    # Build is about a work item; a repo names another timeline entirely, and a
+    # non-subject names none. Both fail at the door rather than quietly no-opping.
+    item = _work_item(ticket_key="ENG-748-F")
+    repo = ProjectRepo.create(project_id=item.project_id, full_name="acme/app")
+
+    with pytest.raises(WorkflowError, match="is about WorkItem, not ProjectRepo"):
+        await Build.cancel(repo)
+    with pytest.raises(WorkflowError, match="takes the subject"):
+        await ReviewWork.answer("acme/app", action="approve")
 
 
 async def test_subject_phase_reads_the_driving_running_workflow(druks_db, monkeypatch):

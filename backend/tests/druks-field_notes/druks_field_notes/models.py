@@ -4,6 +4,8 @@ from druks.db import StoredSubject, db_session
 from sqlalchemy import select
 from sqlalchemy.orm import Mapped, mapped_column
 
+from druks_field_notes.schemas import NoteSummary
+
 
 class Note(StoredSubject):
     __tablename__ = "field_notes_notes"
@@ -36,3 +38,14 @@ class Note(StoredSubject):
     def save_summary(self, summary: str) -> None:
         self.summary = summary
         db_session().flush()
+
+    def get_summary(self) -> NoteSummary:
+        return NoteSummary.from_note(self)
+
+    @classmethod
+    def list_summaries(cls) -> list[NoteSummary]:
+        # How many the board shows is an operator knob, so it lives on the extension.
+        from druks_field_notes.extension import FieldNotes
+
+        notes = cls.list_recent(limit=FieldNotes.settings().board_size)
+        return [note.get_summary() for note in notes]

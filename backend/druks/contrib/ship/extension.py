@@ -11,10 +11,9 @@ from druks.contrib.ship.contracts import (
     ReviewOutput,
     TriageOutput,
 )
-from druks.contrib.ship.models import WorkItem
-from druks.contrib.ship.schemas import WorkItemSummary
+from druks.db import StoredSubject
 from druks.extensions import Extension
-from druks.workflows import Subject, SubjectActivity
+from druks.workflows import SubjectActivity
 
 # Only what the timeline can't already show. A running agent has an agent call
 # to name it, so the phase that clears provisioning maps to nothing.
@@ -25,7 +24,6 @@ _PHASE_META: dict[str, SubjectActivity] = {
 
 class Ship(Extension):
     name = "ship"
-    subject_type = WorkItem.subject_type
     # These tables (projects, work_items, ...) are already unprefixed in core's
     # migration history, so they must stay that way.
     prefix_tables = False
@@ -126,19 +124,6 @@ class Ship(Extension):
     )
 
     @classmethod
-    def get_subject_summary(cls, subject: Subject) -> WorkItemSummary | None:
-        item = WorkItem.get_for_subject(subject)
-        if item:
-            return WorkItemSummary.from_work_item(item)
-        return
-
-    @classmethod
-    def list_subjects(cls) -> list[WorkItemSummary]:
-        # The active board: whatever hasn't handed off yet. The 500 most-recent
-        # cover it; paginate if a board outgrows it.
-        return [WorkItemSummary.from_work_item(item) for item in WorkItem.list_open(limit=500)]
-
-    @classmethod
-    async def get_subject_activity(cls, subject: Subject) -> SubjectActivity | None:
+    async def get_subject_activity(cls, subject: StoredSubject) -> SubjectActivity | None:
         phase = await subject.get_phase()
         return _PHASE_META.get(phase or "")

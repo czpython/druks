@@ -29,10 +29,12 @@ export type RunState =
   // The run's DBOS workflow row is gone; it will never start.
   | 'orphaned'
 
-// The base every extension's subject summary satisfies; ``id`` keys its status,
-// timeline, and detail URL.
+// Every subject's header: ``id`` keys its status, timeline and detail URL, and
+// ``label`` is the one line it shows itself as — a work item's ticket key, a repo's
+// full name, a pull request's handle.
 export interface SubjectSummary {
   id: string
+  label: string
 }
 
 export interface SubjectStatus {

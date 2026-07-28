@@ -1,6 +1,7 @@
 from typing import TYPE_CHECKING, Any
 
 from druks.accounts.models import Account
+from druks.contrib.review.datastructures import PullRequest
 from druks.contrib.review.extension import Review
 from druks.contrib.ship.models import ProjectRepo
 from druks.contrib.ship.workspace import RepoWorkspace
@@ -8,7 +9,7 @@ from druks.core.apis.github import get_reviewer_github_client
 from druks.sandbox import repo as _repo
 from druks.sandbox.layout import get_github_token_remote_path, get_related_root, get_repo_root
 from druks.settings import load_settings
-from druks.workflows import Subject, Workflow
+from druks.workflows import Workflow
 
 if TYPE_CHECKING:
     from druks.sandbox.host import Sandbox
@@ -33,6 +34,7 @@ class PullRequestReview(Workflow):
     """Reviews one pull request against a checkout of the repo it targets and the
     repos around it; the reviewer reads, judges, and posts the review itself."""
 
+    subject = PullRequest
     workspace_class = ReviewWorkspace
 
     @classmethod
@@ -41,7 +43,7 @@ class PullRequestReview(Workflow):
         # review asked for by someone with no account runs as the system's.
         account = Account.get_for_username(requested_by)
         return await cls.start(
-            subject=Subject(id=f"{repo}#{pr_number}", subject_type=Review.subject_type),
+            subject=PullRequest.get(repo, pr_number),
             account_id=account.id if account else None,
             repo=repo,
             pr_number=pr_number,

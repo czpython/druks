@@ -55,9 +55,9 @@ application modules:
 
 | Path | Contract |
 | --- | --- |
-| `extension.py` | `Extension` subclass, agents, extension settings, subject read-side |
+| `extension.py` | `Extension` subclass, agents, extension settings |
 | `workflows.py` | durable `Workflow` and `Gate` subclasses |
-| `models.py` | SQLAlchemy models with `<name>_` table names |
+| `models.py` | SQLAlchemy models with `<name>_` table names, `StoredSubject` among them |
 | `contracts.py` | `AgentOutput` contracts |
 | `schemas.py` | HTTP responses and subject summaries |
 | `routes.py` | FastAPI routers |
@@ -133,7 +133,7 @@ again, so use provider idempotency keys for writes. Keep decisions in replayable
 control flow and I/O inside steps. See
 [durability and recovery](concepts.md#durability-and-recovery).
 
-Start a workflow with an explicit subject:
+Start a workflow with an explicit subject — an instance of the class it declares:
 
 ```python
 run_id = await Sweep.start(
@@ -142,7 +142,7 @@ run_id = await Sweep.start(
 )
 ```
 
-Pass `subject=None` deliberately for background work. A subject has at most one
+A workflow that declares none passes `subject=None`. A subject has at most one
 active run of a workflow kind; a duplicate start returns the active run id —
 attribution never changes that (two accounts starting the same subject share
 the one run). Wrap `start()` in a domain `dispatch()` method when the extension
@@ -368,83 +368,91 @@ running is a no-op, so a redelivered webhook stays idempotent.
 ## Give runs a subject read-side
 
 A subject is what your runs are about — a repository, a work item, a pull
-request. Identity is all the platform needs:
+request. It is always a class, and the workflow names it:
 
 ```python
-from druks.workflows import Subject
-
-pull_request = Subject(id=f"{repo}#{pr_number}", subject_type="pull_request")
-await Review.start(subject=pull_request)
-
-status = pull_request.get_status()
+class Sweep(Workflow):
+    subject = Repository
 ```
 
-Status, timeline, and the run's own subject record answer for that identity
-alone — no table of yours involved. Declare that type on the extension and druks
-serves it a board, a page, and a live stream of either:
+That declaration is what lets druks show the subject's life, and offer what may
+be done to it, before any run about it exists. `start()`, `cancel()`, and
+`Gate.answer()` hold you to it: a workflow that declares a subject is launched
+with one of that class, and a workflow about nothing passes `subject=None`.
 
-```python
-class Review(Extension):
-    subject_type = "pull_request"
-
-    @classmethod
-    def get_subject_summary(cls, subject: Subject) -> PullRequestSummary:
-        ...
-
-    @classmethod
-    def list_subjects(cls) -> list[PullRequestSummary]:
-        ...
-```
-
-When the subject is also a row you keep — one you list, edit, and show fields
-from — subclass `StoredSubject` instead of `Base`, and the class name is the
-subject type: `Repository` becomes `repository`.
+When the subject is a row you keep — one you list, edit, and show fields from —
+subclass `StoredSubject` instead of `Base`. The class name is the subject type:
+`Repository` becomes `repository`.
 
 ```python
 from druks.db import StoredSubject
-from druks.workflows import SubjectSummary
 
 
 class Repository(StoredSubject):
     __tablename__ = "repositories"
 
+    def get_label(self) -> str:
+        return self.full_name
+
+    @classmethod
+    def list_summaries(cls) -> list[SubjectSummary]:
+        return [repository.get_summary() for repository in cls.list_open()]
+```
+
+Say which rows are on the board and druks has the rest: every subject already
+answers with its id and its `label`, which is the one line it shows itself as.
+Add a summary of your own only when the board should show more:
+
+```python
+from druks.workflows import SubjectSummary
+
 
 class RepositorySummary(SubjectSummary):
-    name: str
     open_findings: int
 
 
-class NightWatch(Extension):
-    subject_type = Repository.subject_type
-
-    @classmethod
-    def get_subject_summary(cls, subject: Subject) -> RepositorySummary | None:
-        repository = Repository.get_for_subject(subject)
-        ...
-
-    @classmethod
-    def list_subjects(cls) -> list[RepositorySummary]:
-        ...
+class Repository(StoredSubject):
+    def get_summary(self) -> RepositorySummary:
+        return RepositorySummary(
+            id=str(self.id), label=self.label, open_findings=self.findings.count()
+        )
 ```
 
-The reads are keyed by identity either way, so the row is yours to load —
-`get_for_subject()` turns the identity back into it. Druks serves the same
-`/api/night_watch/repository` surface it serves an identity-only subject: a
-board, a page for one, and a live stream of either. Each response pairs your
-summary with the run's status, timeline, agent calls, artifacts, and the
-question it is waiting on. Override `get_subject_activity()` only to add a
-passing detail of your own, like "Building sandbox VM…".
+When you keep no row for it, subclass `Subject` instead — identity is all the
+platform needs, and the id is the whole record, which is also its label:
 
-Hand the row itself to anything that asks for a subject — starting a run,
+```python
+from druks.workflows import Subject
+
+
+class PullRequest(Subject):
+    @classmethod
+    def list_summaries(cls) -> list[SubjectSummary]:
+        return [pull_request.get_summary() for pull_request in cls.list_open()]
+```
+
+Any id names one of these, so a detail read always answers. Override
+`get_for_subject_id()` to return None for a shape yours could never wear —
+`owner/repo#7` is a pull request, `nonsense` is a 404.
+
+Druks serves the same `/api/night_watch/repository` surface either way: a board,
+a page for one, and a live stream of either, mounted for every subject your
+workflows declare. Each response pairs your summary with the run's status,
+timeline, agent calls, artifacts, and the question it is waiting on. Override
+`get_subject_activity()` on the extension only to add a passing detail of your
+own, like "Building sandbox VM…".
+
+Hand the subject itself to anything that asks for one — starting a run,
 answering a gate, recording an event:
 
 ```python
 await NightWatch.dispatch(subject=repository)
 ```
 
-Inside the workflow, `self.subject` is that row — live, not a snapshot taken at
-dispatch. A run that parks on a gate for three days resumes against whatever the
-row says then, and finds nothing if it was deleted meanwhile.
+Inside the workflow, `self.subject` is resolved through the declared class —
+live, not a snapshot taken at dispatch. A run that parks on a gate for three
+days resumes against whatever the row says then, and finds nothing if it was
+deleted meanwhile.
 
 You name what happened to the row: a work item ships, gets cancelled. Whether a
 run is working on it is druks's to say, and you read that off the status:
@@ -498,6 +506,11 @@ from druks.workflows import WorkflowEvent
 async def on_sweep_finished(*, subject: Repository, **_: object) -> None:
     await notify(subject.full_name)
 ```
+
+`subject=Repository` narrows to any workflow about a repository. Narrowing to
+one workflow with `workflow=Sweep` says the same thing and more, because the
+workflow declares its subject — so the two are never written together, and the
+body is handed its subject either way.
 
 Signals are at-least-once. A subscriber exception propagates so webhook
 providers or DBOS retry the publication; make reactions idempotent.

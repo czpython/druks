@@ -1,7 +1,6 @@
 import druks.contrib.ship.workflows  # noqa: F401  # registers ship.build, the seeded kind
 import pytest
 from druks.contrib.ship.enums import HandoffStatus
-from druks.contrib.ship.extension import Ship
 from druks.contrib.ship.models import WorkItem
 
 from ship.factories import make_test_work_item, seed_build_run
@@ -9,7 +8,7 @@ from ship.factories import make_test_work_item, seed_build_run
 
 def _board_ids(druks_db):
     druks_db.expire_all()
-    return {row.id for row in Ship.list_subjects()}
+    return {row.id for row in WorkItem.list_summaries()}
 
 
 @pytest.mark.parametrize("state", ["scheduled", "running", "parked", "failed"])

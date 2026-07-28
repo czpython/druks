@@ -10,6 +10,7 @@ from druks.extensions.exceptions import MalformedExtension
 from druks.extensions.loader import register_workflow_package, resolve_workflow_extension
 from druks.extensions.registry import workflows
 from druks.workflows import Gate, Workflow, _log_run_event, step
+from druks_field_notes.models import Note
 
 
 @pytest.fixture(autouse=True)
@@ -144,3 +145,23 @@ def test_lifecycle_event_stamps_the_declaring_extension(druks_db):
 
 def test_display_label_reads_the_local_kind():
     assert get_display_label("field_notes.summarize") == "Summarize"
+
+
+def test_a_declared_subject_is_lifted_off_the_class():
+    # The declaration and the run's live subject share the name, so the class
+    # attribute comes off and the instance property answers in its place.
+    register_workflow_package("alpha_pkg", "alpha")
+    flow = _workflow("Sweep", "alpha_pkg.workflows", subject=Note)
+
+    assert flow._subject_class is Note
+    assert "subject" not in flow.__dict__
+    assert flow().subject is None  # a run with no subject has none to resolve
+
+
+@pytest.mark.parametrize("declared", ["note", None])
+def test_a_subject_that_is_not_a_subject_class_is_rejected(declared):
+    # ``subject = None`` included: written out it would shadow the instance
+    # property with a permanent None, so a workflow about nothing writes nothing.
+    register_workflow_package("alpha_pkg", "alpha")
+    with pytest.raises(WorkflowError, match="must be a Subject or StoredSubject"):
+        _workflow("Sweep", "alpha_pkg.workflows", subject=declared)

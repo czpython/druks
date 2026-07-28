@@ -3,7 +3,6 @@ from pathlib import Path
 import pytest
 from druks.contrib.ship.models import WorkItem
 from druks.testing import seed_call
-from druks.workflows import Subject
 from fastapi.testclient import TestClient
 
 from ship.factories import make_test_work_item, seed_build_run
@@ -62,8 +61,8 @@ def _ship(repo, pr_number):
         item.set_status("shipped")
 
 
-# The generic subject read-side — Ship declares subject=WorkItem, so the
-# platform mounts /api/ship/work_item (list) and /{id} (detail). Ship supplies
+# The generic subject read-side — Build declares subject = WorkItem, so the
+# platform mounts /api/ship/work_item (list) and /{id} (detail). WorkItem supplies
 # only the domain summary; status (RunState-aggregated) and the timeline are the
 # platform's. See test_generic_subjects.py for the platform-side contract.
 
@@ -148,10 +147,10 @@ def test_pending_gate_surfaces_input_request_on_the_run(druks_db):
 def test_detail_surfaces_running_run_before_its_first_call(druks_db):
     """The detail timeline surfaces a run that is running before its first agent
     call exists — the sandbox spin-up window the operator needs to see."""
-    work_item_id = make_test_work_item(repo="ClawHaven/acme-app", title="x").id
-    seed_build_run(druks_db, work_item_id=work_item_id, state="running")
+    item = make_test_work_item(repo="ClawHaven/acme-app", title="x")
+    seed_build_run(druks_db, work_item_id=item.id, state="running")
 
-    (entry,) = Subject(id=str(work_item_id), subject_type="work_item").get_timeline()
+    (entry,) = item.get_timeline()
     assert entry.state == "running"
     assert entry.agent_calls == []  # surfaces even with no call yet
 
@@ -260,7 +259,7 @@ async def test_subject_activity_surfaces_running_phase(druks_db, monkeypatch):
         return "provisioning_vm"
 
     monkeypatch.setattr("druks.durable.reads.get_run_phase", phase)
-    activity = await ship_extension.Ship.get_subject_activity(item.subject)
+    activity = await ship_extension.Ship.get_subject_activity(item)
     assert activity is not None
     assert activity.label == "Building sandbox VM…"
     assert activity.kind == "infra"
@@ -273,4 +272,4 @@ async def test_subject_activity_none_when_not_running(druks_db):
     item = make_test_work_item(repo="ClawHaven/acme-app", title="x")
     seed_build_run(druks_db, work_item_id=item.id, state="parked", input_gate="review_plan")
 
-    assert await ship_extension.Ship.get_subject_activity(item.subject) is None
+    assert await ship_extension.Ship.get_subject_activity(item) is None

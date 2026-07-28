@@ -66,6 +66,7 @@ class BuildWorkspace(RepoWorkspace):
 
 
 class Build(Workflow):
+    subject = WorkItem
     steps_reuse_sandbox = True
     workspace_class = BuildWorkspace
     journal_class = BuildJournal
@@ -406,6 +407,7 @@ class Profile(Workflow):
     re-applies the operator's pinned verification over the stored baseline, for
     the reaction to a .druks/ship/config.yml push."""
 
+    subject = ProjectRepo
     workspace_class = RepoWorkspace
 
     @classmethod

@@ -68,6 +68,8 @@ def _build_park_flows():
             return
 
     class InAppFlow(Workflow):
+        subject = NotificationProbe
+
         async def run_multistep(self) -> None:
             reply = await self.review(
                 questions=[
@@ -81,12 +83,22 @@ def _build_park_flows():
             _REVIEW_REPLIES.append(reply)
 
     class ExternalFlow(Workflow):
+        subject = NotificationProbe
+
+        async def run_multistep(self) -> None:
+            await ParkNote.wait(
+                input_request={"presentation": "external", "label": "Answer on the ticket"}
+            )
+
+    class SubjectlessFlow(Workflow):
         async def run_multistep(self) -> None:
             await ParkNote.wait(
                 input_request={"presentation": "external", "label": "Answer on the ticket"}
             )
 
     class ExternalUrlFlow(Workflow):
+        subject = NotificationProbe
+
         async def run_multistep(self) -> None:
             await ParkNote.wait(
                 input_request={
@@ -97,11 +109,13 @@ def _build_park_flows():
             )
 
     class DoubleParkFlow(Workflow):
+        subject = NotificationProbe
+
         async def run_multistep(self) -> None:
             await ParkNote.wait(input_request={"presentation": "external", "label": "Round one"})
             await ParkNote.wait(input_request={"presentation": "external", "label": "Round two"})
 
-    return InAppFlow, ExternalFlow, ExternalUrlFlow, DoubleParkFlow
+    return InAppFlow, ExternalFlow, SubjectlessFlow, ExternalUrlFlow, DoubleParkFlow
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -126,7 +140,13 @@ def rt():
         session.commit()
     finally:
         session.close()
-    in_app_flow, external_flow, external_url_flow, double_park_flow = _build_park_flows()
+    (
+        in_app_flow,
+        external_flow,
+        subjectless_flow,
+        external_url_flow,
+        double_park_flow,
+    ) = _build_park_flows()
     os.environ["DRUKS_DATABASE_URL"] = URL
     # The outbox module was imported above — its queue + workflow register
     # before launch(), which is the wiring this whole module runs through.
@@ -137,13 +157,20 @@ def rt():
             engine=engine,
             InAppFlow=in_app_flow,
             ExternalFlow=external_flow,
+            SubjectlessFlow=subjectless_flow,
             ExternalUrlFlow=external_url_flow,
             DoubleParkFlow=double_park_flow,
         )
     finally:
         shutdown()
         engine.dispose()
-        for kind in ("in_app_flow", "external_flow", "external_url_flow", "double_park_flow"):
+        for kind in (
+            "in_app_flow",
+            "external_flow",
+            "subjectless_flow",
+            "external_url_flow",
+            "double_park_flow",
+        ):
             workflows._items.pop(kind, None)
         if db_url_snap is None:
             os.environ.pop("DRUKS_DATABASE_URL", None)
@@ -510,7 +537,7 @@ async def test_subjectless_park_notifies_nothing(rt, deliver_spy):
     )
     _set_gate_park_pointer(rt, destination.id)
 
-    workflow_id = await rt.ExternalFlow.start(subject=None)
+    workflow_id = await rt.SubjectlessFlow.start(subject=None)
     await _wait_run(rt, workflow_id, lambda run: run.state == RunState.PARKED)
 
     await asyncio.sleep(1.0)

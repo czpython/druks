@@ -13,7 +13,7 @@ from druks.durable.engine import configure_engine, init_dbos, launch, shutdown
 from druks.extensions.registry import agents, workflows
 from druks.models import StoredSubject
 from druks.testing import init_db
-from druks.workflows import Gate, Workflow, step
+from druks.workflows import Gate, Subject, Workflow, step
 from pydantic import BaseModel
 from sqlalchemy import create_engine, select
 
@@ -58,6 +58,11 @@ class Widget(StoredSubject):
         return f"W-{self.id}"
 
 
+class Gadget(Subject):
+    # A second subject class, so "not the one this workflow declares" is a real case.
+    pass
+
+
 # run_multistep() below for fixtures using @step/a gate; run() for the rest.
 def _build_units():
     class Approve(Gate):
@@ -76,6 +81,8 @@ def _build_units():
         action: str = ""
 
     class SampleFlow(Workflow):
+        subject = Widget
+
         @step
         async def note_repo(self, repo: str) -> str:
             return f"recorded:{repo}"
@@ -123,6 +130,8 @@ def _build_units():
     class SubjectFlow(Workflow):
         # Records the subject the platform threaded in, and returns a BaseModel
         # so the result rides its workflow.finished event.
+        subject = Widget
+
         async def run(self) -> Decision:
             SINK.append(f"subj-id:{self.subject.id}")
             return Decision(action="ok")
@@ -139,9 +148,17 @@ def _build_units():
             SINK.append(f"gate-journal:{replies}")
 
     class ConfirmFlow(Workflow):
+        subject = Widget
+
         async def run_multistep(self) -> None:
             reply = await Confirm.wait()
             SINK.append(f"confirmed:{reply.action}")
+
+    class SubjectlessConfirmFlow(Workflow):
+        # The same no-on_wait gate, waited on by a run about nothing — nobody
+        # would ever see the park, so it must fail instead.
+        async def run_multistep(self) -> None:
+            await Confirm.wait()
 
     class ReviewFlow(Workflow):
         async def run_multistep(self) -> None:
@@ -150,6 +167,8 @@ def _build_units():
     class AttributedFlow(Workflow):
         # Records the attributed account before and after a park — resume must
         # never swap the payer.
+        subject = Widget
+
         async def run_multistep(self) -> None:
             SINK.append(f"acct-before:{self.account_id}")
             await Approve.wait()
@@ -163,6 +182,7 @@ def _build_units():
         SubjectFlow,
         DoubleGateFlow,
         ConfirmFlow,
+        SubjectlessConfirmFlow,
         ReviewFlow,
         AttributedFlow,
     )
@@ -220,6 +240,7 @@ def rt():
         subject_flow,
         double_gate_flow,
         confirm_flow,
+        subjectless_confirm_flow,
         review_flow,
         attributed_flow,
     ) = _build_units()
@@ -236,6 +257,7 @@ def rt():
             SubjectFlow=subject_flow,
             DoubleGateFlow=double_gate_flow,
             ConfirmFlow=confirm_flow,
+            SubjectlessConfirmFlow=subjectless_confirm_flow,
             ReviewFlow=review_flow,
             AttributedFlow=attributed_flow,
         )
@@ -253,6 +275,7 @@ def rt():
         workflows._items.pop("subject_flow", None)
         workflows._items.pop("double_gate_flow", None)
         workflows._items.pop("confirm_flow", None)
+        workflows._items.pop("subjectless_confirm_flow", None)
         workflows._items.pop("review_flow", None)
         workflows._items.pop("attributed_flow", None)
         if db_url_snap is None:
@@ -352,7 +375,7 @@ async def test_duplicate_start_shares_the_run_across_accounts(rt):
 
 
 async def test_step_gate_resume_finish(rt):
-    wfid = await rt.SampleFlow.start(subject=None, repo="owner/app")
+    wfid = await rt.SampleFlow.start(subject=Widget(id=111111), repo="owner/app")
 
     parked = await _wait_for(rt.engine, wfid, lambda r: r.state == RunState.PARKED)
     assert parked.input_gate == "approve"
@@ -413,7 +436,7 @@ async def test_duplicate_replies_to_one_round_collapse(rt):
 async def test_fail_branch(rt):
     from sqlalchemy import text
 
-    wfid = await rt.SampleFlow.start(subject=None, repo="owner/app")
+    wfid = await rt.SampleFlow.start(subject=Widget(id=222222), repo="owner/app")
     parked = await _wait_for(rt.engine, wfid, lambda r: r.input_gate == "approve")
 
     await parked.resume(action="close")
@@ -432,7 +455,7 @@ async def test_fail_branch(rt):
 async def test_subjectless_gate_fails_loudly(rt):
     """A gate with no on_wait override fails a subjectless run now, instead of
     parking it unseen for the whole gate TTL."""
-    wfid = await rt.ConfirmFlow.start(subject=None)
+    wfid = await rt.SubjectlessConfirmFlow.start(subject=None)
     failed = await _wait_for(rt.engine, wfid, lambda r: r.state == RunState.FAILED)
     assert failed.failure
     assert "'confirm'" in failed.failure
@@ -720,7 +743,7 @@ async def test_a_run_hydrates_the_subject_row_it_was_started_for(rt):
         db_session().flush()
         assert widget.identity == {"type": "widget", "id": widget.id}
 
-        run = Workflow()
+        run = rt.SubjectFlow()
         run._subject = widget.identity
 
         assert run.subject is widget
@@ -733,13 +756,27 @@ async def test_input_is_validated_at_start(rt):
     from pydantic import ValidationError
 
     with pytest.raises(ValidationError):
-        await rt.SampleFlow.start(subject=None, repo=1)  # wrong type
+        await rt.SampleFlow.start(subject=Widget(id=333333), repo=1)  # wrong type
     with pytest.raises(WorkflowError):
-        await rt.SubjectFlow.start(subject=None, repo="x")  # takes no input
+        await rt.SubjectFlow.start(subject=Widget(id=333333), repo="x")  # takes no input
 
     wfid = await rt.RecordFeedback.start(subject=None, repo="owner/flat")
     await _wait_for(rt.engine, wfid, lambda r: r.state == RunState.FINISHED)
     assert "owner/flat" in SINK
+
+
+async def test_start_holds_a_run_to_the_declared_subject(rt):
+    # Subscribers derive their subject class from ``workflow=``, so the declaration
+    # has to be true of every run — a wrong one, a missing one, and an unexpected
+    # one all fail before anything is enqueued.
+    from druks.durable import WorkflowError
+
+    with pytest.raises(WorkflowError, match="is about Widget, not Gadget"):
+        await rt.SubjectFlow.start(subject=Gadget(id="g1"))
+    with pytest.raises(WorkflowError, match="is about Widget, not nothing"):
+        await rt.SubjectFlow.start(subject=None)
+    with pytest.raises(WorkflowError, match="declares no subject"):
+        await rt.ReviewFlow.start(subject=Widget(id=999999))
 
 
 async def test_run_signature_is_enforced(rt):
@@ -835,7 +872,7 @@ async def test_run_events_carry_subject(rt):
     # run-state transition emits a run-level event keyed to it.
     from druks.events.models import Event
 
-    wfid = await rt.RecordFeedback.start(subject=Widget(id=4242), repo="owner/evented")
+    wfid = await rt.SubjectFlow.start(subject=Widget(id=4242))
     await _wait_for(rt.engine, wfid, lambda r: r.state == RunState.FINISHED)
 
     session = get_session(rt.engine)

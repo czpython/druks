@@ -3,7 +3,8 @@ from druks.workflows import WorkflowEvent  # noqa: F401
 
 # React to platform signals with declarative filters (equality against the published
 # kwargs; ``__`` descends into dicts). Defining a handler registers it — no body guards.
-# Filtering by ``subject=`` hands the body that row.
+# Filtering by ``subject=`` hands the body that subject; ``workflow=`` does too, through
+# the subject that workflow declares.
 #
 # @subscribe(WorkflowEvent.FINISHED, subject=YourSubject)
 # async def on_finished(*, subject: YourSubject, **_: object) -> None:

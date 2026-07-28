@@ -8,6 +8,8 @@ class Summarize(Workflow):
     """Reads one note and writes its summary — a single durable operation: the
     agent produces the summary prose, and the run stores it on the note."""
 
+    subject = Note
+
     async def run(self) -> None:
         note = self.subject
         # The note body is the agent's prompt context; the summary it returns is the
