@@ -128,13 +128,7 @@ class Build(Workflow):
         # genuinely new run takes the item over, so a late close for the prior PR
         # can't resolve this item onto the new run and cancel it.
         if item.build_run_id != run_id:
-            item.update(
-                build_run_id=run_id,
-                branch=None,
-                pr_number=None,
-                resolution=None,
-                resolved_at=None,
-            )
+            item.start_attempt(run_id)
         return run_id
 
     async def run_multistep(

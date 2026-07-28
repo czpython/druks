@@ -242,10 +242,7 @@ class WorkItem(StoredSubject):
         # colours the row; it never decides whether the row is here. The 500
         # most-recent cover it; paginate if a board outgrows it.
         stmt = (
-            select(cls)
-            .where(cls.resolution.is_(None))
-            .order_by(cls.updated_at.desc())
-            .limit(500)
+            select(cls).where(cls.resolution.is_(None)).order_by(cls.updated_at.desc()).limit(500)
         )
         return [item.get_summary() for item in db_session().scalars(stmt)]
 
@@ -305,9 +302,20 @@ class WorkItem(StoredSubject):
         )
         return db_session().scalars(stmt).first()
 
+    def start_attempt(self, run_id: str) -> None:
+        """A fresh build owns the item: the branch, PR and verdict left by the
+        previous attempt describe work this one has not done yet."""
+        self.build_run_id = run_id
+        self.branch = None
+        self.pr_number = None
+        self.resolution = None
+        self.resolved_at = None
+        self.updated_at = Base.utc_now()
+        db_session().flush()
+
     def resolve(self, *, merged: bool, at: datetime) -> None:
-        """GitHub's outcome for this item's PR, stored once. The matching milestone
-        records with it — the pairing is structural, not a call-site convention."""
+        """GitHub's verdict on this item's PR, stored once and announced as the
+        milestone of the same name."""
         # cycle: the extension imports this module at file scope.
         import druks.contrib.ship.extension as ship_extension
 
@@ -408,8 +416,6 @@ class WorkItem(StoredSubject):
         pr_number: int | None = _KEEP,
         branch: str | None = _KEEP,
         build_run_id: str | None = _KEEP,
-        resolution: str | None = _KEEP,
-        resolved_at: datetime | None = _KEEP,
         project_id: int = _KEEP,
     ) -> None:
         if title is not _KEEP:
@@ -422,10 +428,6 @@ class WorkItem(StoredSubject):
             self.branch = branch
         if build_run_id is not _KEEP:
             self.build_run_id = build_run_id
-        if resolution is not _KEEP:
-            self.resolution = resolution
-        if resolved_at is not _KEEP:
-            self.resolved_at = resolved_at
         if project_id is not _KEEP:
             self.project_id = project_id
         self.updated_at = Base.utc_now()

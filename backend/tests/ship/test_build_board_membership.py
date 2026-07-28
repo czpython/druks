@@ -44,7 +44,7 @@ def test_a_redispatched_item_returns_to_the_board(druks_db):
     seed_build_run(druks_db, work_item_id=item.id, state="finished")
     _resolve(item, merged=False)
     run = seed_build_run(druks_db, work_item_id=item.id, state="running")
-    item.update(build_run_id=run.id, branch=None, pr_number=None, resolution=None, resolved_at=None)
+    item.start_attempt(run.id)
 
     assert item.resolution is None
     assert str(item.id) in _board_ids(druks_db)

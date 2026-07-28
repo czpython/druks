@@ -16,6 +16,10 @@ import { statusLine } from './statusLine'
 import { workItemPathFromSummary } from './slug'
 
 
+function isInFlight(row: WorkItemRow): boolean {
+  return row.status.state === 'running' || row.status.state === 'scheduled'
+}
+
 function matchesQuery(row: WorkItemRow, q: string): boolean {
   if (!q.trim()) return true
   const needle = q.toLowerCase()
@@ -32,12 +36,10 @@ function WorkItemRowView({
   row: WorkItemRow
   onOpen: (row: WorkItemRow) => void
 }) {
-  // Active lanes: parked → parked on you, failed → needs you to retry or cancel,
-  // finished → its PR is yours to merge or close, running/scheduled → a step is live.
   const { summary: wi, status } = row
   const failed = status.state === 'failed'
   const parked = status.state === 'parked'
-  const live = status.state === 'running' || status.state === 'scheduled'
+  const live = isInFlight(row)
   const next = statusLine(status, wi.resolution)
   const when = relTime(secondsSince(wi.updatedAt))
   return (
@@ -118,20 +120,16 @@ export function WorkItemsPage() {
     )
   }
 
-  // Two lanes, and every row is in one: in-flight is a step running or about to,
-  // and everything else on the board is waiting on the operator — parked, failed,
-  // cancelled, or finished with its PR still open. Newest movement first.
+  // Two lanes that partition the board: a step is live, or the item is waiting on
+  // the operator — parked, failed, cancelled, or finished with its PR still open.
+  // Newest movement first.
   const active = [...rows].sort(
     (a, b) => updatedAtSortKey(b.summary) - updatedAtSortKey(a.summary),
   )
   const matched = active.filter((row) => matchesQuery(row, query))
-  const inFlight = matched.filter(
-    (row) => row.status.state === 'running' || row.status.state === 'scheduled',
-  )
-  const needsYou = matched.filter(
-    (row) => row.status.state !== 'running' && row.status.state !== 'scheduled',
-  )
-  const total = needsYou.length + inFlight.length
+  const inFlight = matched.filter(isInFlight)
+  const needsYou = matched.filter((row) => !isInFlight(row))
+  const total = matched.length
 
   const head = (
     <PageHeader

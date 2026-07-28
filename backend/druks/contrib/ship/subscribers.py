@@ -56,9 +56,8 @@ async def pr_review_answers_the_gate(*, repo: str, pr_number: int, payload: dict
 
 @subscribe("pr.closed")
 async def pr_close_settles_the_item(*, repo: str, pr_number: int, payload: dict) -> None:
-    """A PR druks owns closed on GitHub — the owner announcing its verdict, which
-    druks stores rather than deriving. One path for every merge, druks's own
-    included. A stored verdict makes a redelivery a no-op."""
+    """GitHub announcing the verdict on a PR druks owns — one path for every merge,
+    druks's own included. A stored verdict makes a redelivery a no-op."""
     item = WorkItem.get_for_pr(repo=repo, pr_number=pr_number, branch=payload["branch"])
     if item and not item.resolution:
         item.resolve(merged=payload["merged"], at=payload["resolved_at"])

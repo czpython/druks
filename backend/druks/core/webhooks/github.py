@@ -81,17 +81,19 @@ class GitHubEvents(Webhook):
 
     async def on_pull_request_closed(self) -> Response:
         pull_request = self.data["pull_request"]
+        merged = pull_request["merged"]
         # GitHub's own clock for the verdict, so a redelivered or backfilled close
         # sorts where it happened. A payload missing it leaves receipt time.
-        stamped = pull_request["merged_at"] if pull_request["merged"] else pull_request["closed_at"]
+        announced = pull_request["merged_at"] if merged else pull_request["closed_at"]
+        resolved_at = datetime.fromisoformat(announced) if announced else datetime.now(UTC)
         await publish(
             "pr.closed",
             repo=_repo_name(self.data),
             pr_number=pull_request["number"],
             payload={
                 "branch": pull_request["head"]["ref"],
-                "merged": pull_request["merged"],
-                "resolved_at": datetime.fromisoformat(stamped) if stamped else datetime.now(UTC),
+                "merged": merged,
+                "resolved_at": resolved_at,
             },
         )
         return _accepted()
