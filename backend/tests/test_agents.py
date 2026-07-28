@@ -106,6 +106,14 @@ async def test_run_outside_workflow_raises():
         await DUMMY_AGENT(repo="acme/widget")
 
 
+async def test_run_refuses_an_agent_with_no_id():
+    # Built loose — never assigned to an Extension, never given an explicit id — so
+    # the call it would record would name nobody.
+    loose = agents.Agent(prompt="dummy/agent.md", contract=DummyOutput, model="claude")
+    with pytest.raises(WorkflowError, match="runs under its own id"):
+        await loose(repo="acme/widget")
+
+
 async def test_run_refuses_unconnected_harness(druks_db, tmp_path, monkeypatch, current_run):
     # The precondition fires where the harness is resolved — before any VM work.
     from druks.accounts.models import Account
