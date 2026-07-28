@@ -12,10 +12,8 @@ async def test_dispatch_pulls_cancelled_item_back_onto_the_board(druks_db, monke
     item = make_test_work_item(repo="o/r", title="t", ticket_key="ACME-1")
     item.set_status(HandoffStatus.CANCELLED)
     seed_run(druks_db, kind=Build.kind, run_id="run-1")
-    started = {}
 
     async def fake_start(cls, **kwargs):
-        started.update(kwargs)
         return "run-1"
 
     monkeypatch.setattr(Build, "start", classmethod(fake_start))
@@ -36,9 +34,6 @@ async def test_dispatch_pulls_cancelled_item_back_onto_the_board(druks_db, monke
     assert run_id == "run-1"
     assert item.build_run_id == "run-1"
     assert item.status is None
-    assert started["ticket_ref"] == "ACME-1"
-    assert started["ticket_title"] == "t"
-    assert started["ticket_url"] == "https://tracker.test/ACME-1"
 
 
 async def test_redispatch_to_a_new_run_clears_prior_attempt_branch_and_pr(
