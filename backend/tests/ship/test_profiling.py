@@ -112,7 +112,7 @@ class TestProfileRun:
         repo = ProjectRepo.get(repo.id)
 
         assert repo.profile["baseline"]["languages"] == ["python"]
-        assert repo.effective_profile()["verification"]["lint_commands"] == ["ruff check ."]
+        assert repo.effective_profile["verification"]["lint_commands"] == ["ruff check ."]
 
     async def test_drops_skills_that_are_not_enabled(self, druks_db, monkeypatch):
         _seed_skills("django-patterns", "retired-skill", disabled=("retired-skill",))
@@ -148,8 +148,8 @@ class TestProfileRun:
         repo = ProjectRepo.get(repo.id)
 
         # The pin replaces the whole verification section on the effective profile...
-        assert repo.effective_profile()["verification"]["test_commands"] == ["make test"]
-        assert repo.effective_profile()["verification"]["lint_commands"] == []
+        assert repo.effective_profile["verification"]["test_commands"] == ["make test"]
+        assert repo.effective_profile["verification"]["lint_commands"] == []
         # ...but the detected baseline is preserved underneath it.
         assert repo.profile["baseline"]["verification"]["lint_commands"] == ["ruff check ."]
 
@@ -174,54 +174,4 @@ class TestRefreshOnly:
 
         # Baseline untouched — only the pin re-applies.
         assert repo.profile["baseline"]["verification"]["test_commands"] == ["pytest"]
-        assert repo.effective_profile()["verification"]["test_commands"] == ["make test"]
-
-
-class TestProfileStatus:
-    """ProjectRepoSummary derives profile lifecycle state from the profiler's
-    runs on every read — a repo with a profile is ready even if a later refresh
-    failed, so there's no separate 'ready but stale' state."""
-
-    def _summary(self, repo):
-        from druks.contrib.ship.schemas import ProjectRepoSummary
-
-        return ProjectRepoSummary.from_repo(repo)
-
-    def _seed_run(self, druks_db, repo, *, state, failure=None):
-        from druks.durable import Run
-        from druks.testing import seed_dbos_status
-        from uuid_utils import uuid7
-
-        run = Run(id=str(uuid7()), kind="ship.profile", failure=failure)
-        druks_db.add(run)
-        druks_db.flush()
-        seed_dbos_status(druks_db, run.id, state, subject={"type": "project_repo", "id": repo.id})
-        return run
-
-    def test_unprofiled_when_no_run_and_no_profile(self, druks_db):
-        assert self._summary(_seed_repo()).profile_status == "unprofiled"
-
-    def test_ready_when_profiled(self, druks_db):
-        repo = _seed_repo()
-        repo.set_profile(baseline=_profiled(), effective=_profiled())
-        assert self._summary(repo).profile_status == "ready"
-
-    def test_ready_even_when_a_later_run_failed(self, druks_db):
-        repo = _seed_repo()
-        repo.set_profile(baseline=_profiled(), effective=_profiled())
-        self._seed_run(druks_db, repo, state="failed", failure="refresh boom")
-        assert self._summary(repo).profile_status == "ready"
-
-    def test_failed_when_run_failed_and_no_profile(self, druks_db):
-        repo = _seed_repo()
-        self._seed_run(druks_db, repo, state="failed", failure="boom")
-        summary = self._summary(repo)
-        assert summary.profile_status == "failed"
-        assert summary.profiler_run_failure == "boom"
-
-    def test_running_when_the_profiler_is_in_flight(self, druks_db):
-        repo = _seed_repo()
-        self._seed_run(druks_db, repo, state="running")
-        summary = self._summary(repo)
-        assert summary.profile_status == "running"
-        assert summary.profiler_run_failure is None
+        assert repo.effective_profile["verification"]["test_commands"] == ["make test"]

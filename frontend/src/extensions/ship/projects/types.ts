@@ -1,3 +1,5 @@
+import type { SubjectSummary } from '../../../api/types'
+
 // The profiler agent's stored findings — a raw JSON dict, so keys stay snake_case.
 // Empty ({}) until the repo has been profiled.
 export interface RepoProfile {
@@ -13,15 +15,14 @@ export interface RepoProfile {
   recommended_skills?: string[]
 }
 
+// Where a repo's profiling stands. Derived here from what the repo carries and
+// what its runs say — the platform answers the run half on the repo's own board.
 export type RepoProfileStatus = 'unprofiled' | 'running' | 'ready' | 'failed'
 
-export interface ProjectRepo {
-  id: number
+export interface ProjectRepo extends SubjectSummary {
   fullName: string
   purpose: string | null
   profile: RepoProfile
-  profileStatus: RepoProfileStatus
-  profilerRunFailure: string | null
   createdAt: string
 }
 

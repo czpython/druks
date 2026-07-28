@@ -170,14 +170,12 @@ SubjectId = Annotated[str, BeforeValidator(str)]
 
 
 class SubjectSummary(BaseResponse):
-    # Every subject's header: ``id`` keys its status, timeline and detail URL, and
-    # ``label`` is the one line it shows itself as — read live off the subject, unlike
-    # the copy an event snapshots. A subject with more to say subclasses this, and
-    # ``from_attributes`` builds any of them straight off the subject.
+    # The base an extension's subject header subclasses; ``id`` keys the subject's
+    # status, timeline and detail URL, and ``from_attributes`` builds the header
+    # straight off the subject.
     model_config = ConfigDict(from_attributes=True)
 
     id: SubjectId
-    label: str
 
 
 class SubjectStatus(BaseResponse):

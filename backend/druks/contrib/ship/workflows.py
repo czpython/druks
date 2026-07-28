@@ -231,7 +231,7 @@ class Build(Workflow):
         target = ProjectRepo.get_for_repo(self.input.repo, raise_on_missing=True)
         return {
             "policy": policy.model_dump(mode="json"),
-            "profile": target.effective_profile(),
+            "profile": target.effective_profile,
         }
 
     @step

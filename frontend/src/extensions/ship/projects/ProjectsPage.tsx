@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { EmptyState } from '../../../components/EmptyState'
 import { Page } from '../../../components/Page'
 import { projectsApi } from './api'
+import { repoProfiling, useRepoRuns, type RepoProfiling } from './profiling'
 import type { Project, ProjectRepo } from './types'
 
 function splitRepo(full: string): { org: string; short: string } {
@@ -14,17 +15,14 @@ function splitRepo(full: string): { org: string; short: string } {
 
 export function ProjectsPage() {
   const queryClient = useQueryClient()
+  const runs = useRepoRuns()
+  const anyProfiling = [...runs.values()].some((status) => status.state === 'running')
   const { data, isLoading, isError } = useQuery({
     queryKey: ['projects'],
     queryFn: projectsApi.list,
-    // Poll fast while a profiler run is in flight so its chip settles without a reload.
-    refetchInterval: (query) => {
-      const projects = query.state.data?.projects ?? []
-      const profiling = projects.some((p) =>
-        p.repos.some((r) => r.profileStatus === 'running'),
-      )
-      return profiling ? 3_000 : 30_000
-    },
+    // A finished profiler run changes what a repo stores, so refresh alongside
+    // the board that reports the run.
+    refetchInterval: anyProfiling ? 3_000 : 30_000,
   })
 
   const [draft, setDraft] = useState('')
@@ -275,6 +273,8 @@ function RepoRow({
   onChange: () => void
 }) {
   const { org, short } = splitRepo(repo.fullName)
+  const runs = useRepoRuns()
+  const profiling = repoProfiling(repo.profile, runs.get(repo.id))
   const [editing, setEditing] = useState(false)
   const [purpose, setPurpose] = useState(repo.purpose ?? '')
   const [open, setOpen] = useState(false)
@@ -337,7 +337,7 @@ function RepoRow({
           </span>
         )}
         <ProfileChip
-          repo={repo}
+          profiling={profiling}
           open={open}
           pending={profile.isPending}
           onToggle={() => setOpen((o) => !o)}
@@ -357,6 +357,7 @@ function RepoRow({
       {open && (
         <ProfilePanel
           repo={repo}
+          profiling={profiling}
           pending={profile.isPending}
           onProfile={() => profile.mutate()}
         />
@@ -367,13 +368,13 @@ function RepoRow({
 }
 
 function ProfileChip({
-  repo,
+  profiling,
   open,
   pending,
   onToggle,
   onProfile,
 }: {
-  repo: ProjectRepo
+  profiling: RepoProfiling
   open: boolean
   pending: boolean
   onToggle: () => void
@@ -381,22 +382,22 @@ function ProfileChip({
 }) {
   // The chip is the whole profile affordance: unprofiled → trigger profiling;
   // running → progress; ready/failed → toggle the details panel.
-  if (repo.profileStatus === 'unprofiled') {
+  if (profiling.state === 'unprofiled') {
     return (
       <button type="button" className="pj-profile-chip mono" disabled={pending} onClick={onProfile}>
         {pending ? 'profiling…' : 'profile'}
       </button>
     )
   }
-  if (repo.profileStatus === 'running' || pending) {
+  if (profiling.state === 'running' || pending) {
     return <span className="pj-profile-chip pj-profile-running mono">profiling…</span>
   }
-  const failed = repo.profileStatus === 'failed'
+  const failed = profiling.state === 'failed'
   return (
     <button
       type="button"
       className={`pj-profile-chip mono ${failed ? 'pj-profile-failed' : 'pj-profile-ready'}`}
-      title={failed ? (repo.profilerRunFailure ?? 'profiler run failed') : 'view profile'}
+      title={failed ? (profiling.failure ?? 'profiler run failed') : 'view profile'}
       onClick={onToggle}
     >
       {failed ? 'profile failed' : 'profiled'} {open ? '▴' : '▾'}
@@ -406,10 +407,12 @@ function ProfileChip({
 
 function ProfilePanel({
   repo,
+  profiling,
   pending,
   onProfile,
 }: {
   repo: ProjectRepo
+  profiling: RepoProfiling
   pending: boolean
   onProfile: () => void
 }) {
@@ -426,8 +429,8 @@ function ProfilePanel({
   ]
   return (
     <div className="pj-profile-panel">
-      {repo.profileStatus === 'failed' && (
-        <div className="pj-profile-failure mono">{repo.profilerRunFailure ?? 'profiler run failed'}</div>
+      {profiling.state === 'failed' && (
+        <div className="pj-profile-failure mono">{profiling.failure ?? 'profiler run failed'}</div>
       )}
       {found.stack_summary && <p className="pj-profile-summary">{found.stack_summary}</p>}
       {stack.length > 0 && (

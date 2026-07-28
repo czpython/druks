@@ -75,7 +75,7 @@ function ReviewRowView({ row }: { row: ReviewRow }) {
   return (
     <div className={`row row-review${failed ? ' row-failed' : ''}`}>
       <StatusGlyph state={status.state} pulse={live} />
-      <RepoCell repoBare={bareName(summary.repo)} />
+      <RepoCell repo={summary.repo} />
       <PRCell prNumber={summary.prNumber} prUrl={summary.pullRequestUrl} />
       <span className="review-line mono dim">
         {live ? `${reviewLine(status)}…` : reviewLine(status)}
@@ -88,6 +88,3 @@ function ReviewRowView({ row }: { row: ReviewRow }) {
   )
 }
 
-function bareName(repo: string): string {
-  return repo.includes('/') ? repo.slice(repo.indexOf('/') + 1) : repo
-}

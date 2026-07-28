@@ -26,7 +26,7 @@ class Thing(StoredSubject):
     __tablename__ = "faketest_things"
 
     def get_summary(self) -> _ThingSummary:
-        return _ThingSummary(id=self.id, label=self.label, title=TITLES[self.id])
+        return _ThingSummary(id=self.id, title=TITLES[self.id])
 
     @classmethod
     def list_summaries(cls) -> list[_ThingSummary]:
@@ -43,10 +43,11 @@ class Ticket(Subject):
             return cls(id=subject_id)
         return
 
+    def get_summary(self) -> _ThingSummary:
+        return _ThingSummary(id=self.id, title=self.id.rpartition("#")[2])
+
     @classmethod
-    def list_summaries(cls) -> list[SubjectSummary]:
-        # No get_summary() of its own: a subject with nothing to add is named by
-        # the header every subject already has.
+    def list_summaries(cls) -> list[_ThingSummary]:
         return [ticket.get_summary() for ticket in cls.list_open()]
 
 
@@ -122,13 +123,12 @@ def test_a_subject_id_is_a_string_whatever_the_row_is_keyed_by(druks_db):
     # A row is keyed by an integer and every read of a subject id is a string — the
     # URL segment, the DBOS attribute, the dedup key. The header takes either and is
     # always the string, so no summary hand-stringifies a primary key.
-    summary = SubjectSummary.model_validate(Thing(id=7))
-    assert summary.id == "7"
+    assert SubjectSummary.model_validate(Thing(id=7)).id == "7"
     assert SubjectSummary.model_validate(Ticket(id="owner/repo#7")).id == "owner/repo#7"
 
-    # Only the id widens: a label that arrives as a number is still a mistake.
+    # Only the id widens: a title that arrives as a number is still a mistake.
     with pytest.raises(ValidationError):
-        SubjectSummary(id=7, label=7)
+        _ThingSummary(id=7, title=7)
 
 
 def test_status_aggregates_across_runs_and_timeline_spans_them(client: TestClient, druks_db):
@@ -141,7 +141,7 @@ def test_status_aggregates_across_runs_and_timeline_spans_them(client: TestClien
     _seed_call(druks_db, live, agent="implement", status="running")
 
     detail = client.get("/api/faketest/thing/1").json()
-    assert detail["summary"] == {"id": "1", "label": "thing 1", "title": "First"}
+    assert detail["summary"] == {"id": "1", "title": "First"}
     assert detail["status"]["state"] == "running"
     assert [entry["kind"] for entry in detail["timeline"]] == ["faketest.prepare", "faketest.flow"]
     # Calls group under their own run, not the subject at large.
@@ -232,7 +232,7 @@ def test_an_id_spanning_separators_reaches_the_board_and_its_page(client: TestCl
     assert [row["summary"]["id"] for row in board["rows"]] == ["owner/repo#7"]
 
     detail = client.get("/api/faketest/ticket/owner/repo%237").json()
-    assert detail["summary"] == {"id": "owner/repo#7", "label": "owner/repo#7"}
+    assert detail["summary"] == {"id": "owner/repo#7", "title": "7"}
     assert detail["status"]["state"] == "parked"
     assert [entry["kind"] for entry in detail["timeline"]] == ["faketest.flow"]
 

@@ -17,10 +17,6 @@ import { dashboardItemPath } from './slug'
 
 type StatusFilter = 'all' | HandoffStatus
 
-function repoBareName(repo: string | null | undefined): string | null {
-  if (!repo) return null
-  return repo.includes('/') ? repo.slice(repo.indexOf('/') + 1) : repo
-}
 
 export function HistoryPage() {
   const historyQuery = useQuery({
@@ -129,7 +125,7 @@ export function HistoryPage() {
               <span className="row-title" title={item.title}>
                 {item.title}
               </span>
-              <RepoCell repoBare={repoBareName(item.repo)} project={item.projectName} />
+              <RepoCell repo={item.repo} project={item.projectName} />
               <PRCell prNumber={item.prNumber} prUrl={null} />
               <span className="row-fin-what mono">{item.status}</span>
               <span className="row-fin-dur mono dim">
