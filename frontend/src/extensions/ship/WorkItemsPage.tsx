@@ -48,7 +48,7 @@ function WorkItemRowView({
   return (
     <div className={`row row-work-item${failed ? ' row-failed' : ''}`} onClick={() => onOpen(row)}>
       <StatusGlyph state={status.state} pulse={parked || live} />
-      <TicketCell ticketRef={wi.ticketKey} ticketUrl={wi.links.ticket} fallback={`#${wi.id}`} />
+      <TicketCell ticketKey={wi.ticketKey} ticketUrl={wi.links.ticket} />
       <span className="row-title" title={wi.title}>
         {wi.title}
       </span>

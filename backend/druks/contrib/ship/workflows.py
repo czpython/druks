@@ -119,9 +119,6 @@ class Build(Workflow):
             account_id=assignee.id if assignee else None,
             repo=item.repo,
             source=item.source,
-            ticket_ref=item.ticket_key,
-            ticket_title=item.title,
-            ticket_url=item.ticket_url,
             task_owner_email=email,
             task_owner_name=ticket["assignee_name"],
         )
@@ -139,14 +136,6 @@ class Build(Workflow):
         repo: str,
         issue_number: int | None = None,
         source: str = "github",
-        # Human-readable ticket reference ("ACME-270", "#42"). Same value the
-        # WorkItem keeps as ``ticket_key``; carried separately on the input
-        # so the workflow can render it into prompts / PR titles without a
-        # WorkItem fetch.
-        ticket_ref: str | None = None,
-        # Ticket title as intake received it; the implementer uses it for the PR title.
-        ticket_title: str | None = None,
-        ticket_url: str | None = None,
         task_owner_email: str | None = None,
         task_owner_name: str | None = None,
     ) -> None:
@@ -207,15 +196,16 @@ class Build(Workflow):
         }
 
     async def get_prompt_context(self, **context: Any) -> dict[str, Any]:
+        work_item = self.subject
         target_repo = ProjectRepo.get_for_repo(self.input.repo, raise_on_missing=True)
         endpoint = load_settings().endpoint.rstrip("/")
-        work_item_url = f"{endpoint}/work-items/{self.subject.id}" if endpoint else ""
+        work_item_url = f"{endpoint}/work-items/{work_item.id}" if endpoint else ""
         prompt_context = BuildPromptContext(
             repo=self.input.repo,
             work_item_url=work_item_url,
             branch=self.branch,
             pr_number=self.pr_number,
-            ticket_ref=self.input.ticket_ref,
+            ticket_ref=work_item.ticket_key,
             source=self.input.source,
             issue_number=self.input.issue_number,
             task_owner_name=self.input.task_owner_name,
