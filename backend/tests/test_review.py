@@ -2,10 +2,12 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from druks.contrib.review import subscribers  # noqa: F401 — the import registers it
 from druks.contrib.review.datastructures import PullRequest
 from druks.contrib.review.workflows import PullRequestReview
 from druks.prompts import render_prompt
-from druks.testing import seed_run
+from druks.signals import publish
+from druks.testing import configure_app_for_test, make_settings, seed_run
 from druks.workflows import _bind_instance
 from fastapi.testclient import TestClient
 
@@ -14,8 +16,6 @@ pytestmark = pytest.mark.usefixtures("druks_without_remote_config")
 
 @pytest.fixture
 def client(tmp_path: Path, druks_db, monkeypatch):
-    from druks.testing import configure_app_for_test, make_settings
-
     monkeypatch.setenv("DRUKS_DATA_DIR", str(tmp_path))
     with TestClient(configure_app_for_test(settings=make_settings(tmp_path))) as client:
         yield client
@@ -98,3 +98,23 @@ async def test_the_reviewer_prompt_names_the_pull_request_it_is_about():
 
     assert "pull request #7 on `acme/app`" in output
     assert "at dev@example.com's request" in output
+
+
+async def test_a_passer_by_cannot_spend_a_review(monkeypatch):
+    # The repos druks reviews are public, so the mention is the whole internet's to write
+    # and each one would spend a run. The filter answers before the body asks GitHub.
+    dispatched = []
+
+    async def dispatch(**kwargs):
+        dispatched.append(kwargs)
+
+    monkeypatch.setattr(PullRequestReview, "dispatch", dispatch)
+
+    await publish(
+        "pr.commented",
+        repo="acme/app",
+        pr_number=7,
+        payload={"author": "passer-by", "author_can_write": False, "body": "@druks review"},
+    )
+
+    assert not dispatched

@@ -7,6 +7,10 @@ from druks.webhooks import Webhook, verify_hmac_sha256
 
 _REVIEW_ACTION = {"APPROVED": "approve", "CHANGES_REQUESTED": "request_changes"}
 
+# GitHub's standing for the commenter on that repo. These three write to it;
+# everyone else is a passer-by, and on a public repo that is the whole internet.
+_WRITERS = frozenset({"OWNER", "MEMBER", "COLLABORATOR"})
+
 
 class GitHubEvents(Webhook):
     """Verifies the GitHub HMAC, then emits ``pr.review_submitted`` /
@@ -66,7 +70,11 @@ class GitHubEvents(Webhook):
             "pr.commented",
             repo=_repo_name(self.data),
             pr_number=issue["number"],
-            payload={"author": sender["login"], "body": self.data["comment"]["body"]},
+            payload={
+                "author": sender["login"],
+                "author_can_write": self.data["comment"]["author_association"] in _WRITERS,
+                "body": self.data["comment"]["body"],
+            },
         )
         return _accepted()
 
