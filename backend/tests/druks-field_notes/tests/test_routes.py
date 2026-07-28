@@ -1,4 +1,3 @@
-
 from druks_field_notes.models import Note
 from druks_field_notes.workflows import Summarize
 
@@ -28,4 +27,4 @@ def test_notes_routes_create_and_list_notes(druks_client, monkeypatch):
 
     assert listed.status_code == 200
     assert listed.json()[0]["body"] == "the pump ran hot"
-    assert listed.json()[0]["summary"] is None
+    assert listed.json()[0]["gist"] is None

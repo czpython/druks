@@ -132,11 +132,29 @@ def _resolve_body_method(cls: type["Workflow"]) -> str:
     )
 
 
-def _resolve_subject_class(cls: type["Workflow"]) -> "type[Subject] | type[StoredSubject] | None":
-    # The declaration and the run's live subject are the same word, so the class
-    # attribute comes off and the property answers in its place.
+class _DeclaredSubject:
+    """``subject = WorkItem`` on a workflow: the kind of thing its runs are about, read
+    off the workflow, and the particular one a run is about, read off that run."""
+
+    def __init__(self, subject_class: "type[Subject] | type[StoredSubject] | None") -> None:
+        self.subject_class = subject_class
+
+    def __get__(self, run: "Workflow | None", owner: type) -> Any:
+        if run is None:
+            return self.subject_class
+        # Live, not a snapshot taken at dispatch: a long-parked run resumes against
+        # whatever the declared class says then, and finds nothing if it went away.
+        if not run._subject:
+            return
+        return self.subject_class.get_for_subject_id(str(run._subject["id"]))
+
+
+def _declare_subject(cls: type["Workflow"]) -> None:
+    # The author writes a plain class attribute; it becomes the descriptor above.
+    # Presence in ``cls.__dict__``, not the value: an explicit ``subject = None`` is a
+    # declaration of nothing, which the error below names rather than passing over.
     if "subject" not in cls.__dict__:
-        return cls._subject_class
+        return
     declared = cls.__dict__["subject"]
     if not (isinstance(declared, type) and issubclass(declared, Subject | StoredSubject)):
         raise WorkflowError(
@@ -144,8 +162,7 @@ def _resolve_subject_class(cls: type["Workflow"]) -> "type[Subject] | type[Store
             f"is about a kind of thing, not {declared!r}. A workflow about nothing "
             "declares no subject at all."
         )
-    del cls.subject
-    return declared
+    cls.subject = _DeclaredSubject(declared)
 
 
 def _input_model_from_signature(cls: type["Workflow"]) -> type[BaseModel] | None:
@@ -483,10 +500,9 @@ class Workflow:
     # the loader's package registrations at definition time and namespacing
     # ``kind``. Never supplied or stored per run.
     extension: ClassVar[str | None] = None
-    # The subject class this workflow's runs are about, written ``subject = WorkItem``
-    # on the subclass and lifted off it in __init_subclass__ so the instance property
-    # below keeps the name. None for a workflow about nothing, which says so by silence.
-    _subject_class: ClassVar[type[Subject] | type[StoredSubject] | None] = None
+    # What this workflow's runs are about, written ``subject = WorkItem`` on the
+    # subclass. None for a workflow about nothing, which says so by silence.
+    subject = _DeclaredSubject(None)
     # When set to a cron string, the workflow also registers a schedule that
     # fires its run() on that cadence (no subject — a framework cron).
     every: ClassVar[str | None] = None
@@ -532,7 +548,7 @@ class Workflow:
                 "the declaring extension supplies the namespace"
             )
         cls.kind = f"{cls.extension}.{local_kind}" if cls.extension else local_kind
-        cls._subject_class = _resolve_subject_class(cls)
+        _declare_subject(cls)
         validate_settings_declaration(cls.Settings)
         cls._body_method = _resolve_body_method(cls)
         # Before _wrap_steps: run()'s wrapper signature is (*args, **kwargs).
@@ -564,14 +580,6 @@ class Workflow:
         # The run's warm VM, provisioned lazily and reaped at segment boundaries;
         # its lease expiry decides when it must rotate.
         self._host: Sandbox | None = None
-
-    @property
-    def subject(self) -> Any:
-        # Live, not a snapshot taken at dispatch: a long-parked run resumes against
-        # whatever the declared class says then, and finds nothing if it went away.
-        if not self._subject:
-            return
-        return self._subject_class.get_for_subject_id(str(self._subject["id"]))
 
     async def announce(self, topic: str, **facts: Any) -> None:
         # The workflow announcing a domain event in its extension's vocabulary
@@ -703,13 +711,11 @@ class Workflow:
     def _validate_subject(cls, subject: "Subject | StoredSubject | None") -> None:
         # The declaration is the contract — subscribers derive their subject class
         # from ``workflow=``, so it has to hold for every run.
-        if cls._subject_class:
-            if isinstance(subject, cls._subject_class):
+        if cls.subject:
+            if isinstance(subject, cls.subject):
                 return
             given = "nothing" if subject is None else type(subject).__name__
-            raise WorkflowError(
-                f"{cls.__name__} is about {cls._subject_class.__name__}, not {given}"
-            )
+            raise WorkflowError(f"{cls.__name__} is about {cls.subject.__name__}, not {given}")
         if subject is None:
             return
         raise WorkflowError(

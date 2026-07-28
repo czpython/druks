@@ -185,7 +185,7 @@ def test_a_subject_cannot_take_the_transcripts_segment():
 
         @classmethod
         def workflows(cls):
-            return [SimpleNamespace(_subject_class=Transcripts)]
+            return [SimpleNamespace(subject=Transcripts)]
 
     with pytest.raises(TypeError, match="agent-call reads"):
         Colliding.subject_classes()

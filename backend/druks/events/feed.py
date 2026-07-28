@@ -1,38 +1,31 @@
 from datetime import datetime
 
-from druks.events.models import Event
+from pydantic import AliasPath, ConfigDict, Field, computed_field
+
 from druks.schemas import BaseResponse
 
 
 class FeedItem(BaseResponse):
-    id: str
+    model_config = ConfigDict(from_attributes=True)
+
     # The event's monotonic log position (its pk) — the feed's ordering and
     # pagination key. ``at`` is whole-second and ties constantly; this never does.
-    seq: int
-    at: datetime
+    seq: int = Field(validation_alias="id")
+    at: datetime = Field(validation_alias="created_at")
     # The event type verbatim: a lifecycle topic ("workflow.finished") or the
     # milestone an extension recorded ("shipped"). The words are the client's.
-    kind: str
+    kind: str = Field(validation_alias="type")
     extension: str | None = None
     # The durable kind of the workflow a lifecycle row is about ("ship.build").
-    workflow: str | None = None
+    workflow: str | None = Field(default=None, validation_alias=AliasPath("payload", "kind"))
     subject_type: str | None = None
     subject_id: str | None = None
     subject_label: str | None = None
 
-    @classmethod
-    def from_event(cls, event: Event) -> "FeedItem":
-        return cls(
-            id=f"event:{event.id}",
-            seq=event.id,
-            at=event.created_at,
-            kind=event.type,
-            extension=event.extension,
-            workflow=event.payload.get("kind"),
-            subject_type=event.subject_type,
-            subject_id=event.subject_id,
-            subject_label=event.subject_label,
-        )
+    @computed_field
+    @property
+    def id(self) -> str:
+        return f"event:{self.seq}"
 
 
 class FeedResponse(BaseResponse):

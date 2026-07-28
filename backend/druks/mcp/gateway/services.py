@@ -76,7 +76,7 @@ def get_agent_call(call_id: str) -> schemas.AgentCallDetailResponse:
     layout = call.artifact_layout
     return schemas.AgentCallDetailResponse(
         run_id=call.run_id,
-        call=AgentCallResponse.from_call(call),
+        call=AgentCallResponse.model_validate(call),
         transcript=read_slice(
             layout.transcript, offset=-_TRANSCRIPT_TAIL_BYTES, limit=_TRANSCRIPT_TAIL_BYTES
         ).text,

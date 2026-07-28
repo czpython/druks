@@ -46,7 +46,7 @@ def subscribe(name: str, **filters: Any) -> Callable[[Subscriber], Subscriber]:
             )
         if workflow_class:
             filters["kind"] = workflow_class.kind
-            subject_class = workflow_class._subject_class
+            subject_class = workflow_class.subject
         if subject_class:
             if not (
                 isinstance(subject_class, type)

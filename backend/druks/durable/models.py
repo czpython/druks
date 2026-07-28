@@ -344,13 +344,20 @@ class AgentCall(Base, Uuid7Pk):
     # and treat 404 as the host being gone.
     sandbox_host_id: Mapped[str]
 
-    def get_live_status(self) -> str:
-        # Unfinished: "running" while the run is live, "abandoned" once it's terminal.
+    @property
+    def live_status(self) -> AgentCallStatus:
+        # Unfinished: running while the run is live, abandoned once it's terminal.
         if self.finished_at:
-            return AgentCallStatus(self.status).value
+            return AgentCallStatus(self.status)
         if self.run.is_active:
-            return "running"
-        return "abandoned"
+            return AgentCallStatus.RUNNING
+        return AgentCallStatus.ABANDONED
+
+    @property
+    def token_usage(self) -> dict[str, int] | None:
+        # Each harness reports tokens its own way; this is the one shape, and None
+        # once a call reported nothing countable.
+        return normalize_token_usage(self.cost_metadata)
 
     @property
     def artifact_dir(self) -> str:

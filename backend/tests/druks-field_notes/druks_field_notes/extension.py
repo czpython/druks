@@ -6,7 +6,7 @@ from druks.doctor import CheckResult
 from druks.extensions import Extension
 from pydantic import BaseModel, Field, SecretStr, field_validator
 
-from druks_field_notes.contracts import NoteSummary
+from druks_field_notes.contracts import GistOutput
 
 if TYPE_CHECKING:
     from druks.settings import Settings
@@ -33,7 +33,7 @@ def check_summary_api_key(settings: "Settings") -> CheckResult:
 class FieldNotes(Extension):
     name = "field_notes"
     icon = "notebook"
-    description = "Turns a jotted observation into a one-line summary with an agent."
+    description = "Turns a jotted observation into a one-line gist with an agent."
 
     class Settings(BaseModel):
         # How many recent notes the board shows — an operator knob, so it lives here.
@@ -71,11 +71,11 @@ class FieldNotes(Extension):
                 raise ValueError(f"sync token {value.get_secret_value()!r} must start with 'sk-'")
             return value
 
-    # The one agent this extension runs: it reads a note and writes its summary.
+    # The one agent this extension runs: it reads a note and writes its gist.
     summarize = Agent(
-        description="reads a note and writes a one-line summary",
+        description="reads a note and writes its one-line gist",
         prompt="field_notes/summarize.md",
-        contract=NoteSummary,
+        contract=GistOutput,
         model="claude",
     )
 
