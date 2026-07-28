@@ -4,6 +4,7 @@ import {
   patchJSON,
   postJSON,
 } from '../../../api/client'
+import type { SubjectRow } from '../../../api/types'
 import type {
   AddProjectRepoRequest,
   CreateProjectRequest,
@@ -14,13 +15,17 @@ import type {
   UpdateProjectRepoRequest,
   UpdateProjectRequest,
 } from './types'
-import { SHIP } from '../api'
+import { PROJECT_REPO, SHIP } from '../api'
 
 // Projects are Ship-owned, under its own ``/api/ship/projects`` namespace.
 const root = `/api/${SHIP}/projects`
 
 export const projectsApi = {
   list: () => getJSON<ProjectsResponse>(root),
+  // Where each repo's profiling stands — the platform's board for the subject
+  // Profile runs are about, keyed by the same repo id the projects list carries.
+  repoBoard: () =>
+    getJSON<{ rows: SubjectRow<ProjectRepo>[] }>(`/api/${SHIP}/${PROJECT_REPO}`),
   get: (id: number) => getJSON<Project>(`${root}/${id}`),
   create: (body: CreateProjectRequest) => postJSON<Project>(root, body),
   update: (id: number, body: UpdateProjectRequest) =>
@@ -29,12 +34,12 @@ export const projectsApi = {
   addRepo: (projectId: number, body: AddProjectRepoRequest) =>
     postJSON<ProjectRepo>(`${root}/${projectId}/repos`, body),
   updateRepo: (
-    projectId: number, repoId: number, body: UpdateProjectRepoRequest,
+    projectId: number, repoId: string, body: UpdateProjectRepoRequest,
   ) =>
     patchJSON<ProjectRepo>(`${root}/${projectId}/repos/${repoId}`, body),
-  deleteRepo: (projectId: number, repoId: number) =>
+  deleteRepo: (projectId: number, repoId: string) =>
     deleteRequest(`${root}/${projectId}/repos/${repoId}`),
-  profileRepo: (projectId: number, repoId: number) =>
+  profileRepo: (projectId: number, repoId: string) =>
     postJSON<ProjectRepo>(`${root}/${projectId}/repos/${repoId}/profile`, {}),
   listGithubRepos: (owner?: string) => {
     const qs = owner ? `?owner=${encodeURIComponent(owner)}` : ''

@@ -2,11 +2,10 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, ClassVar, Self
 
-from druks.durable.schemas import SubjectSummary
 from druks.models import snake_name
 
 if TYPE_CHECKING:
-    from druks.durable.schemas import RunResponse, SubjectStatus
+    from druks.durable.schemas import RunResponse, SubjectStatus, SubjectSummary
     from druks.workflows import Workflow
 
 
@@ -45,13 +44,15 @@ class Subject:
         so override to return None for a shape this subject could never wear."""
         return cls(id=subject_id)
 
-    def get_summary(self) -> SubjectSummary:
-        """The header its board and page show it under. Its id and label already say
-        what it is; override to add the fields only this extension knows."""
-        return SubjectSummary.model_validate(self)
+    def get_summary(self) -> "SubjectSummary":
+        """The header its board and page show it under — the extension's own fields;
+        the read side composes it with the platform's status and timeline."""
+        raise NotImplementedError(
+            f"a workflow declares {type(self).__name__}, so it needs a get_summary()"
+        )
 
     @classmethod
-    def list_summaries(cls) -> Sequence[SubjectSummary]:
+    def list_summaries(cls) -> "Sequence[SubjectSummary]":
         """The subjects on this class's board, newest-movement first, each as its domain
         summary. Returns a covariant ``Sequence`` so an extension can return a ``list``
         of its own ``SubjectSummary`` subclass. Required once a workflow declares it."""

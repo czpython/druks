@@ -13,6 +13,7 @@ import type { SubjectResponse, SubjectRow, SubjectSummary } from '../../api/type
 // generic shell reads the extension name off the registry, never hardcodes it.
 export const SHIP = 'ship'
 export const WORK_ITEM = 'work_item'
+export const PROJECT_REPO = 'project_repo'
 
 // build's read-side, specialised from the platform's generic subject endpoints.
 export const buildApi = {

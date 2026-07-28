@@ -15,12 +15,6 @@ import { relTime, secondsSince, updatedAtSortKey } from '../../lib/format'
 import { statusLine } from './statusLine'
 import { workItemPathFromSummary } from './slug'
 
-/** ``owner/name`` -> ``name`` for the repo column. */
-function repoBareName(repo: string): string | null {
-  if (!repo) return null
-  const slash = repo.indexOf('/')
-  return slash >= 0 ? repo.slice(slash + 1) : repo
-}
 
 function matchesQuery(row: WorkItemRow, q: string): boolean {
   if (!q.trim()) return true
@@ -53,7 +47,7 @@ function WorkItemRowView({
         {wi.title}
       </span>
       <span />
-      <RepoCell repoBare={repoBareName(wi.repo)} project={wi.projectName} />
+      <RepoCell repo={wi.repo} project={wi.projectName} />
       <PRCell prNumber={wi.prNumber} prUrl={wi.links.pr} />
       {/* The line is the ask ("Review plan"), the live step ("Implementing…"),
           or the timeout hint — build's copy over the platform's status facts. */}

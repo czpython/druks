@@ -31,7 +31,7 @@ projects_router = APIRouter(prefix="/projects", tags=["projects"])
 @projects_router.get("", response_model=ProjectsResponse, response_model_by_alias=True)
 async def list_projects() -> ProjectsResponse:
     rows = list(db_session().scalars(select(Project).order_by(Project.name)))
-    return ProjectsResponse(projects=[ProjectSummary.from_project(p) for p in rows])
+    return ProjectsResponse(projects=[ProjectSummary.model_validate(p) for p in rows])
 
 
 @projects_router.post(
@@ -45,7 +45,7 @@ async def create_project(body: CreateProjectRequest) -> ProjectSummary:
     if not name:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "name is required")
     project = Project.create(name=name)
-    return ProjectSummary.from_project(project)
+    return ProjectSummary.model_validate(project)
 
 
 # GitHub repo typeahead source. Declared BEFORE the ``/{project_id}``
@@ -99,7 +99,7 @@ async def get_project(project_id: int) -> ProjectSummary:
     project = Project.get(project_id)
     if not project:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "project not found")
-    return ProjectSummary.from_project(project)
+    return ProjectSummary.model_validate(project)
 
 
 @projects_router.patch(
@@ -120,7 +120,7 @@ async def update_project(
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "name cannot be empty")
         project.name = name
         db_session().flush()
-    return ProjectSummary.from_project(project)
+    return ProjectSummary.model_validate(project)
 
 
 @projects_router.delete("/{project_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -178,7 +178,7 @@ async def add_project_repo(
         .values(project_id=project.id)
     )
     await Profile.dispatch(repo)
-    return ProjectRepoSummary.from_repo(repo)
+    return ProjectRepoSummary.model_validate(repo)
 
 
 @projects_router.patch(
@@ -197,7 +197,7 @@ async def update_project_repo(
     if purpose is not None:
         row.purpose = purpose.strip() or None
         db_session().flush()
-    return ProjectRepoSummary.from_repo(row)
+    return ProjectRepoSummary.model_validate(row)
 
 
 @projects_router.post(
@@ -212,7 +212,7 @@ async def profile_project_repo(project_id: int, repo_id: int) -> ProjectRepoSumm
     # Profile is subject-unique: dispatch() returns the live run when one is already
     # active for this repo, so the route just dispatches and lets the lock dedup.
     await Profile.dispatch(row)
-    return ProjectRepoSummary.from_repo(row)
+    return ProjectRepoSummary.model_validate(row)
 
 
 @projects_router.delete(

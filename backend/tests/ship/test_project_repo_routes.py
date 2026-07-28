@@ -40,11 +40,11 @@ def test_adding_a_repo_dispatches_a_profile_run(client: TestClient, monkeypatch)
 
     assert calls == [
         {
-            "repo_id": repo["id"],
+            "repo_id": int(repo["id"]),
             "refresh_only": False,
         }
     ]
-    assert repo["profileStatus"] == "unprofiled"
+    assert repo["profile"] == {}
 
 
 def test_profile_endpoint_dispatches(client: TestClient, monkeypatch):
@@ -106,9 +106,10 @@ def test_the_repo_subject_read_side_mounts(client: TestClient, druks_db):
     seed_run(druks_db, kind=Profile.kind, subject=repo, state="running")
 
     (row,) = client.get("/api/ship/project_repo").json()["rows"]
-    assert row["summary"] == {"id": str(repo.id), "label": "acme/widget"}
+    assert row["summary"]["id"] == str(repo.id)
+    assert row["summary"]["fullName"] == "acme/widget"
     assert row["status"]["state"] == "running"
 
     detail = client.get(f"/api/ship/project_repo/{repo.id}").json()
-    assert detail["summary"]["label"] == "acme/widget"
+    assert detail["summary"]["fullName"] == "acme/widget"
     assert [entry["kind"] for entry in detail["timeline"]] == [Profile.kind]

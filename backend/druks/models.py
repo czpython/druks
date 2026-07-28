@@ -87,13 +87,11 @@ class StoredSubject(Base):
         return db_session().get(cls, key)
 
     def get_summary(self) -> "SubjectSummary":
-        """The header its board and page show it under. Its id and label already say
-        what it is; override to add the fields only this extension knows."""
-        # ``druks.durable`` imports the ORM models this module defines the base for,
-        # so nothing under it can be imported here at module scope.
-        from druks.durable.schemas import SubjectSummary
-
-        return SubjectSummary.model_validate(self)
+        """The header its board and page show it under — the extension's own fields;
+        the read side composes it with the platform's status and timeline."""
+        raise NotImplementedError(
+            f"a workflow declares {type(self).__name__}, so it needs a get_summary()"
+        )
 
     @classmethod
     def list_summaries(cls) -> "Sequence[SubjectSummary]":

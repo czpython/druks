@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, Literal
+from typing import Any, Literal
 
 from pydantic import AliasPath, BaseModel, ConfigDict, Field, computed_field
 
@@ -8,62 +8,26 @@ from druks.workflows import SubjectSummary
 
 from .enums import HandoffStatus
 
-if TYPE_CHECKING:
-    from druks.contrib.ship.models import Project, ProjectRepo
 
-ProfileState = Literal["unprofiled", "running", "ready", "failed"]
-
-
-class ProjectRepoSummary(BaseResponse):
-    id: int
+class ProjectRepoSummary(SubjectSummary):
+    # The repo, wherever it is read: nested in its project, and as the header of its
+    # own board. Where its profiling run stands is the platform's to say — the repo
+    # is a subject, so that answer is its ``SubjectStatus``.
     full_name: str
     purpose: str | None = None
-    # The stored effective profile as-is; {} until the repo profiler has run.
-    profile: dict[str, Any] = Field(default_factory=dict)
-    profile_status: ProfileState
-    profiler_run_failure: str | None = None
+    # The profiler's findings as stored; {} until it has run.
+    profile: dict[str, Any] = Field(default_factory=dict, validation_alias="effective_profile")
     created_at: datetime
-
-    @classmethod
-    def from_repo(cls, repo: "ProjectRepo") -> "ProjectRepoSummary":
-        # "ready" outranks a later failed re-profile: a stored profile stays usable.
-        status = repo.get_status()
-        profile = repo.effective_profile()
-        if status.is_running:
-            profile_status, failure = "running", None
-        elif profile:
-            profile_status, failure = "ready", None
-        elif status.is_failed:
-            profile_status, failure = "failed", status.failure
-        else:
-            profile_status, failure = "unprofiled", None
-        return cls(
-            id=repo.id,
-            full_name=repo.full_name,
-            purpose=repo.purpose,
-            profile=profile,
-            profile_status=profile_status,
-            profiler_run_failure=failure,
-            created_at=repo.created_at,
-        )
 
 
 class ProjectSummary(BaseResponse):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     name: str
     created_at: datetime
     updated_at: datetime
     repos: list[ProjectRepoSummary] = Field(default_factory=list)
-
-    @classmethod
-    def from_project(cls, project: "Project") -> "ProjectSummary":
-        return cls(
-            id=project.id,
-            name=project.name,
-            created_at=project.created_at,
-            updated_at=project.updated_at,
-            repos=[ProjectRepoSummary.from_repo(repo) for repo in project.repos],
-        )
 
 
 class ProjectsResponse(BaseResponse):

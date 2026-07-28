@@ -1,6 +1,6 @@
 import logging
 from datetime import datetime
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from sqlalchemy import ForeignKey, Index, func, select
 from sqlalchemy.dialects.postgresql import JSONB
@@ -8,7 +8,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from druks.contrib.ship.enums import HandoffStatus
 from druks.contrib.ship.policy import RepoPolicy
-from druks.contrib.ship.schemas import WorkItemSummary
+from druks.contrib.ship.schemas import ProjectRepoSummary, WorkItemSummary
 from druks.core.apis.github import get_github_client
 from druks.db import Base, StoredSubject, db_session
 from druks.settings import load_settings
@@ -17,9 +17,6 @@ from druks.ticketing.enums import TicketStatus
 from druks.ticketing.exceptions import TrackerNotConfigured
 from druks.ticketing.helpers import get_tracker, is_tracker_source
 from druks.workflows import FatalError
-
-if TYPE_CHECKING:
-    from druks.durable.schemas import SubjectSummary
 
 logger = logging.getLogger(__name__)
 
@@ -114,8 +111,11 @@ class ProjectRepo(StoredSubject):
     def get_label(self) -> str:
         return self.full_name
 
+    def get_summary(self) -> "ProjectRepoSummary":
+        return ProjectRepoSummary.model_validate(self)
+
     @classmethod
-    def list_summaries(cls) -> list["SubjectSummary"]:
+    def list_summaries(cls) -> list["ProjectRepoSummary"]:
         # A repo is registered, not transient, so the board is all of them by name.
         stmt = select(cls).order_by(cls.full_name)
         return [repo.get_summary() for repo in db_session().scalars(stmt)]
@@ -123,6 +123,7 @@ class ProjectRepo(StoredSubject):
     def siblings(self) -> list["ProjectRepo"]:
         return [repo for repo in self.project.repos if repo.full_name != self.full_name]
 
+    @property
     def effective_profile(self) -> dict[str, Any]:
         # {} until the repo profiler has run — an unprofiled repo is a normal state.
         return self.profile.get("effective") or {}
