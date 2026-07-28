@@ -57,10 +57,29 @@ class RepoPolicy(BaseModel):
         # repo profiler has run — the no-commands branch then carries the "don't
         # invent verification commands" guardrail.
         verification = profile.get("verification") or {}
+        ci_checks = verification.get("ci_checks", {})
         sections = [
-            {"label": "Lint", "commands": verification.get("lint_commands", [])},
-            {"label": "Typecheck", "commands": verification.get("typecheck_commands", [])},
-            {"label": "Tests", "commands": verification.get("test_commands", [])},
+            {
+                "label": "Lint",
+                "commands": [
+                    {"command": command, "ci_check": ci_checks.get(command)}
+                    for command in verification.get("lint_commands", [])
+                ],
+            },
+            {
+                "label": "Typecheck",
+                "commands": [
+                    {"command": command, "ci_check": ci_checks.get(command)}
+                    for command in verification.get("typecheck_commands", [])
+                ],
+            },
+            {
+                "label": "Tests",
+                "commands": [
+                    {"command": command, "ci_check": ci_checks.get(command)}
+                    for command in verification.get("test_commands", [])
+                ],
+            },
         ]
         body = await render_prompt(
             "ship/verification_block.md",

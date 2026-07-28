@@ -11,6 +11,7 @@ export interface RepoProfile {
     test_commands?: string[]
     lint_commands?: string[]
     typecheck_commands?: string[]
+    ci_checks?: Record<string, string>
   }
   recommended_skills?: string[]
 }

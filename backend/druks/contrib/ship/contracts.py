@@ -38,6 +38,7 @@ class RepoProfilerOutput(AgentOutput):
     test_commands: list[str]
     lint_commands: list[str]
     typecheck_commands: list[str]
+    ci_checks: dict[str, str]
     # Skills the profiler judges an implementer will need to build here — not
     # skills bundled in the repo.
     recommended_skills: list[str]
@@ -54,6 +55,7 @@ class RepoProfilerOutput(AgentOutput):
                 "test_commands": self.test_commands,
                 "lint_commands": self.lint_commands,
                 "typecheck_commands": self.typecheck_commands,
+                "ci_checks": self.ci_checks,
             },
             "recommended_skills": self.recommended_skills,
         }

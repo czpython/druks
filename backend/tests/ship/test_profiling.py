@@ -53,6 +53,10 @@ def _profiled(**overrides) -> dict:
             "test_commands": ["pytest"],
             "lint_commands": ["ruff check ."],
             "typecheck_commands": [],
+            "ci_checks": {
+                "pytest": "tests",
+                "ruff check .": "checks",
+            },
         },
         "recommended_skills": ["django-patterns"],
     }
@@ -73,6 +77,10 @@ def test_profiler_output_maps_onto_the_stored_shape():
         test_commands=["pytest"],
         lint_commands=["ruff check ."],
         typecheck_commands=[],
+        ci_checks={
+            "pytest": "tests",
+            "ruff check .": "checks",
+        },
         recommended_skills=["django-patterns"],
     )
     assert output.to_result() == _profiled()
@@ -112,7 +120,15 @@ class TestProfileRun:
         repo = ProjectRepo.get(repo.id)
 
         assert repo.profile["baseline"]["languages"] == ["python"]
+        assert repo.profile["baseline"]["verification"]["ci_checks"] == {
+            "pytest": "tests",
+            "ruff check .": "checks",
+        }
         assert repo.effective_profile["verification"]["lint_commands"] == ["ruff check ."]
+        assert repo.effective_profile["verification"]["ci_checks"] == {
+            "pytest": "tests",
+            "ruff check .": "checks",
+        }
 
     async def test_drops_skills_that_are_not_enabled(self, druks_db, monkeypatch):
         _seed_skills("django-patterns", "retired-skill", disabled=("retired-skill",))
@@ -150,8 +166,13 @@ class TestProfileRun:
         # The pin replaces the whole verification section on the effective profile...
         assert repo.effective_profile["verification"]["test_commands"] == ["make test"]
         assert repo.effective_profile["verification"]["lint_commands"] == []
+        assert "ci_checks" not in repo.effective_profile["verification"]
         # ...but the detected baseline is preserved underneath it.
         assert repo.profile["baseline"]["verification"]["lint_commands"] == ["ruff check ."]
+        assert repo.profile["baseline"]["verification"]["ci_checks"] == {
+            "pytest": "tests",
+            "ruff check .": "checks",
+        }
 
 
 class TestRefreshOnly:
@@ -175,3 +196,30 @@ class TestRefreshOnly:
         # Baseline untouched — only the pin re-applies.
         assert repo.profile["baseline"]["verification"]["test_commands"] == ["pytest"]
         assert repo.effective_profile["verification"]["test_commands"] == ["make test"]
+
+
+async def test_verification_block_distinguishes_ci_and_local_commands():
+    profile = _profiled()
+    profile["verification"]["ci_checks"].pop("pytest")
+
+    output = await RepoPolicy().verification_block(profile=profile, repo="acme/widget")
+
+    assert "`ruff check .` — CI-primary via GitHub check `checks`" in output
+    assert "`pytest` — local execution" in output
+
+
+async def test_verification_block_runs_legacy_commands_locally():
+    profile = _profiled()
+    profile["verification"].pop("ci_checks")
+
+    output = await RepoPolicy().verification_block(profile=profile, repo="acme/widget")
+
+    assert "`ruff check .` — local execution" in output
+    assert "`pytest` — local execution" in output
+
+
+async def test_verification_block_keeps_the_empty_profile_guardrail():
+    output = await RepoPolicy().verification_block(profile={}, repo="acme/widget")
+
+    assert "No lint / typecheck / test / smoke commands are configured" in output
+    assert "Never invent commands" in output

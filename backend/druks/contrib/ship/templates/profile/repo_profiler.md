@@ -24,6 +24,11 @@ its name or a language's usual defaults.
    status with `gh` (authenticated here); never assume a configured or required check is
    green. Report the exact configured command; never invent one. Leave a category empty when
    no command qualifies — empty test, lint, and typecheck categories are correct and common.
+   For every retained command that you can genuinely attribute to CI, add an entry to
+   `ci_checks` whose key is that exact command string and whose value is the exact GitHub
+   check name you observed. Do not infer coverage because a workflow, job, or command has a
+   similar name. If you cannot prove which check runs a command, omit that command from
+   `ci_checks`; its absence deliberately requires local execution.
    Put editor-only or advisory tools, optional linters, and known-red or flaky suites in
    `stack_summary` as context, never in verification. Do not list a command that
    `stack_summary` describes as not a CI gate, red, or flaky.

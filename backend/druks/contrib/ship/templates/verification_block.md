@@ -11,8 +11,12 @@ No lint / typecheck / test / smoke commands are configured for this repo. Take v
 {% else -%}
 {% for section in sections if section.commands -%}
 **{{ section.label }}:**
-{% for command in section.commands -%}
-- `{{ command }}`
+{% for item in section.commands -%}
+{% if item.ci_check -%}
+- `{{ item.command }}` — CI-primary via GitHub check `{{ item.ci_check }}`; CI on `head_sha` is the evidence, so do not run this command locally.
+{% else -%}
+- `{{ item.command }}` — local execution; no CI provenance is recorded, so the evaluator runs this command locally.
+{% endif -%}
 {% endfor %}
 {% endfor -%}
 {% endif -%}

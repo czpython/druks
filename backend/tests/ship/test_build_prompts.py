@@ -96,6 +96,28 @@ async def test_implement_prompt_provisions_when_no_pr_exists():
     assert "dismiss the PR's existing reviews" not in output
 
 
+async def test_evaluator_uses_head_pinned_ci_as_primary_evidence():
+    output = await render_prompt(
+        "ship/build/evaluate_implementation.md",
+        build=_build(),
+        verification="VERIFICATION-BLOCK",
+        workspace=_workspace(),
+    )
+
+    assert "CI-PRIMARY VERIFICATION" in output
+    assert "`gh pr view <pr_number> --json headRefOid`" in output
+    assert "`gh pr checks <pr_number>`" in output
+    assert "`gh run list --commit <head_sha>`" in output
+    assert "Do not execute the profile command locally" in output
+    assert "single failing target" in output
+    assert "never the profile command's complete suite" in output
+    assert "wait a few minutes" in output
+    assert "record it as `not_run`; an unsettled check is non-blocking" in output
+    assert "`gh run list --branch <default>`" in output
+    assert "Do not check out `base_sha`" in output
+    assert "run only the configured verification profile commands when feasible" not in output
+
+
 async def test_generate_plan_prompt_quotes_operator_content():
     """Free-text answers and the operator's note render block-quoted line by line —
     operator words stay answer content in the prompt, never instruction text."""
