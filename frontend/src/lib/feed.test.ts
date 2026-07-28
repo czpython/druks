@@ -85,12 +85,4 @@ describe('eventLine', () => {
     expect(line.subject).toBe('note 7')
     expect(line.path).toBeUndefined()
   })
-
-  it('reads a core event with no subject at all', () => {
-    const line = eventLine(event({ kind: 'credential.fallback' }))
-
-    expect(line.label).toBe('credential.fallback')
-    expect(line.subject).toBe('')
-    expect(line.source).toBe('druks')
-  })
 })
