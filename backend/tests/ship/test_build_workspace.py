@@ -24,12 +24,14 @@ def test_build_workspace_grants_related_root_add_dir():
         branch="b",
         github_token="t",
         mcp_token="ghs_reviewer",
+        skills=("python-house-rules",),
     )
     kwargs = workspace.get_agent_run_kwargs(model="m")
 
     assert kwargs["model"] == "m"  # the run's own kwargs pass through
     assert kwargs["add_dirs"] == (get_related_root("exedev"),)
     assert kwargs["github_token"] == "t"
+    assert kwargs["skills"] == ("python-house-rules",)
     assert "mcp_servers" not in kwargs
     assert "extra_env" not in kwargs
 
@@ -45,6 +47,7 @@ async def test_build_workspace_declares_its_github_mcp(druks_db):
         branch="b",
         github_token="t",
         mcp_token="ghs_reviewer",
+        skills=("python-house-rules",),
     )
     kwargs = await workspace.with_mcp_servers(**workspace.get_agent_run_kwargs())
 
@@ -97,11 +100,13 @@ async def test_get_workspace_kwargs_clones_primary_only(monkeypatch: pytest.Monk
 
     workflow = Build()
     workflow.input = Build._run_input_model(repo="o/extension")
+    workflow._profile = {"recommended_skills": ["python-house-rules"]}
     kwargs = await workflow.get_workspace_kwargs(sandbox)
 
     assert ensured == ["https://github.com/o/extension"]
     assert ["mkdir", "-p", get_related_root("exedev")] in execs
     assert kwargs["mcp_token"] == "ghs_reviewer"
+    assert kwargs["skills"] == ("python-house-rules",)
     assert "related" not in kwargs
 
 
@@ -119,6 +124,7 @@ async def test_get_workspace_kwargs_fails_loudly_without_the_reviewer_app(
 
     workflow = Build()
     workflow.input = Build._run_input_model(repo="o/extension")
+    workflow._profile = {"recommended_skills": ["python-house-rules"]}
 
     with pytest.raises(FatalError, match="reviewer GitHub App"):
         await workflow.get_workspace_kwargs(sandbox)

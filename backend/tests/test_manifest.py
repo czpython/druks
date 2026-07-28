@@ -9,7 +9,7 @@ from druks.mcp import models
 from druks.mcp.helpers import get_bearer_token_env_var
 from druks.sandbox.datastructures import McpServer
 from druks.skills.datastructures import InstalledSkill
-from druks.skills.models import Skill, SkillCollection
+from druks.skills.models import SkillCollection
 from druks.testing import make_settings, seed_call, seed_run
 from druks_field_notes.models import Note
 from druks_field_notes.workflows import Summarize
@@ -23,12 +23,13 @@ def _build(
     *,
     harness: Harness | None = None,
     mcp_servers: tuple[McpServer, ...] = (),
+    skills: tuple[str, ...] = (),
     extra_env: dict[str, str] | None = None,
 ) -> dict:
     # get_manifest never touches the live sandbox, so the harness builds
     # without sandbox settings — the same shape argv unit tests use.
     harness = harness or ClaudeHarness(model="claude-opus-4-8", fast_mode=False, effort=None)
-    return harness.get_manifest(mcp_servers=mcp_servers, extra_env=extra_env)
+    return harness.get_manifest(mcp_servers=mcp_servers, skills=skills, extra_env=extra_env)
 
 
 def _seed_skills(*names: str, disabled: tuple[str, ...] = ()) -> None:
@@ -45,12 +46,9 @@ def _seed_skills(*names: str, disabled: tuple[str, ...] = ()) -> None:
             skill.enabled = False
 
 
-# --- the recorded capability set ------------------------------------------
-
-
 def test_manifest_records_the_delivered_capability_set(druks_db):
     """Records model, harness, each MCP server's declared/delivered/token
-    presence, and the enabled skills."""
+    presence, and the delivered skills."""
     models.McpServer.create(name="linear", url=_LINEAR_URL, token=_TOKEN)
     _seed_skills("alpha", "beta")
 
@@ -64,15 +62,17 @@ def test_manifest_records_the_delivered_capability_set(druks_db):
     # requirement (get_required_mcp_servers), so it reads delivered but not declared.
     manifest = _build(
         mcp_servers=(linear, github),
+        skills=("alpha",),
         extra_env={
             _LINEAR_ENV: _TOKEN,
             get_bearer_token_env_var("github"): "ghs_from_build",
         },
     )
 
+    assert manifest["schema_version"] == 2
     assert manifest["model"] == "claude-opus-4-8"
     assert manifest["harness"] == "claude"
-    assert manifest["skills_enabled"] == ["alpha", "beta"]
+    assert manifest["skills_delivered"] == ["alpha"]
 
     linear_entry = next(s for s in manifest["mcp_servers"] if s["name"] == "linear")
     assert linear_entry["declared"] is True
@@ -135,12 +135,9 @@ def test_records_the_delivered_server_not_the_registry_duplicate(druks_db):
     assert linear_entry["token_present"] is True
 
 
-# --- hash: identical capabilities bucket together --------------------------
-
-
 def test_hash_is_stable_for_identical_capabilities(druks_db):
     """Identical capability sets hash the same; changing the model, MCP token
-    availability, or the enabled skill set moves the hash."""
+    availability, or the delivered skill set moves the hash."""
     models.McpServer.create(name="linear", url=_LINEAR_URL, token=_TOKEN)
     linear = McpServer(name="linear", url=_LINEAR_URL, bearer_token_env_var=_LINEAR_ENV)
     with_token = {"mcp_servers": (linear,), "extra_env": {_LINEAR_ENV: _TOKEN}}
@@ -158,23 +155,15 @@ def test_hash_is_stable_for_identical_capabilities(druks_db):
     assert without_token["manifest_hash"] != baseline["manifest_hash"]
 
 
-def test_disabling_a_skill_changes_the_recorded_set_and_the_hash(druks_db):
-    """The skills tar excludes disabled skills, so the enabled set is the call's
-    real skill capability: recorded and hashed, so two calls with different
-    enabled skills bucket apart."""
-    _seed_skills("alpha", "beta")
-    both = _build()
-    assert both["skills_enabled"] == ["alpha", "beta"]
+def test_curated_skills_change_the_recorded_set_and_the_hash(druks_db):
+    """Curated manifests omit disabled skills and hash each delivered set."""
+    _seed_skills("alpha", "beta", disabled=("beta",))
+    with_enabled = _build(skills=("alpha", "beta"))
+    disabled_only = _build(skills=("beta",))
 
-    Skill.get("beta").enabled = False
-    druks_db.flush()
-    one = _build()
-
-    assert one["skills_enabled"] == ["alpha"]
-    assert one["manifest_hash"] != both["manifest_hash"]
-
-
-# --- presence, never the value -------------------------------------------
+    assert with_enabled["skills_delivered"] == ["alpha"]
+    assert disabled_only["skills_delivered"] == []
+    assert with_enabled["manifest_hash"] != disabled_only["manifest_hash"]
 
 
 def test_manifest_records_token_presence_never_the_value(druks_db):
@@ -220,9 +209,6 @@ def test_manifest_stays_presence_only_for_a_declared_header_server(druks_db):
     assert grafana_entry["declared"] is True
     assert grafana_entry["delivered"] is True
     assert grafana_entry["token_present"] is False
-
-
-# --- persistence + surfacing in transcript files -------------------------
 
 
 def test_persist_writes_manifest_into_the_call_dir(tmp_path, druks_db):

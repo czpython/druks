@@ -62,6 +62,7 @@ class ClaudeHarness(Harness):
         github_token: str | None = None,
         include_plugins: bool = True,
         add_dirs: tuple[str, ...] = (),
+        skills: tuple[str, ...] = (),
         extra_env: dict[str, str] | None = None,
         mcp_servers: tuple[McpServer, ...] = (),
         connection_id: str | None = None,
@@ -120,6 +121,7 @@ class ClaudeHarness(Harness):
                 self.sandbox,
                 github_token=github_token,
                 include_plugins=include_plugins,
+                skills=skills,
                 connection_id=connection_id,
             ),
             env=extra_env,
@@ -360,6 +362,7 @@ def _claude_credentials(
     *,
     github_token: str | None,
     include_plugins: bool = True,
+    skills: tuple[str, ...] = (),
     connection_id: str | None = None,
 ) -> Credentials:
     """Build the Credentials bundle the runner SFTP-pushes into the sandbox.
@@ -408,7 +411,7 @@ def _claude_credentials(
         github_token=github_token,
         extra_config_files=files,
         extra_config_dirs=dirs,
-        extra_dir_excludes={".claude/skills": Skill.disabled_excludes()},
+        extra_dir_excludes={".claude/skills": Skill.delivery_excludes(skills)},
     )
 
 

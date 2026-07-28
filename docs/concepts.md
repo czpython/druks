@@ -193,9 +193,10 @@ encryption envelope; they are ordinary Postgres fields whose values are
 withheld or masked by the API. Database and backup access must therefore be
 treated as credential access.
 
-Enabled MCP servers and skills are injected through both harnesses. A workspace
-may also require and credential an MCP server for its own application. Each
-agent call records what was declared and delivered so later evaluation can
+Enabled MCP servers are injected through both harnesses. A call receives the
+enabled skills it requests, or every enabled skill when it requests none. A
+workspace may also require and credential an MCP server for its own application.
+Each agent call records what was declared and delivered so later evaluation can
 distinguish capability sets without storing the tokens.
 
 ## Process and access topology
