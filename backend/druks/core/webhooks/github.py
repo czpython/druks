@@ -1,3 +1,4 @@
+from datetime import UTC, datetime
 from typing import Any, ClassVar
 
 from fastapi.responses import JSONResponse, Response
@@ -80,6 +81,9 @@ class GitHubEvents(Webhook):
 
     async def on_pull_request_closed(self) -> Response:
         pull_request = self.data["pull_request"]
+        # GitHub's own clock for the verdict, so a redelivered or backfilled close
+        # sorts where it happened. A payload missing it leaves receipt time.
+        stamped = pull_request["merged_at"] if pull_request["merged"] else pull_request["closed_at"]
         await publish(
             "pr.closed",
             repo=_repo_name(self.data),
@@ -87,6 +91,7 @@ class GitHubEvents(Webhook):
             payload={
                 "branch": pull_request["head"]["ref"],
                 "merged": pull_request["merged"],
+                "resolved_at": datetime.fromisoformat(stamped) if stamped else datetime.now(UTC),
             },
         )
         return _accepted()

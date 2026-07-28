@@ -3,7 +3,7 @@ import { useState } from 'react'
 import { useLocation } from 'wouter'
 
 import { buildApi } from './api'
-import type { HandoffStatus } from './api'
+import type { PRResolution } from './api'
 import { EmptyState } from '../../components/EmptyState'
 import { FilterChip } from '../../components/FilterChip'
 import { StatusTag } from './StatusTag'
@@ -15,7 +15,7 @@ import { RepoCell } from '../../components/RepoCell'
 import { relTime, secondsSince, updatedAtSortKey } from '../../lib/format'
 import { dashboardItemPath } from './slug'
 
-type StatusFilter = 'all' | HandoffStatus
+type ResolutionFilter = 'all' | PRResolution
 
 
 export function HistoryPage() {
@@ -23,7 +23,7 @@ export function HistoryPage() {
     queryKey: ['work-items-history'],
     queryFn: () => buildApi.history(),
   })
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
+  const [resolutionFilter, setResolutionFilter] = useState<ResolutionFilter>('all')
   const [query, setQuery] = useState('')
   const [, navigate] = useLocation()
 
@@ -31,14 +31,14 @@ export function HistoryPage() {
   if (gate) return <Page scroll="internal" className="page-history">{gate}</Page>
 
   const items = historyQuery.data!.items
-  const counts: Record<HandoffStatus, number> = {
-    shipped: items.filter((i) => i.status === 'shipped').length,
-    cancelled: items.filter((i) => i.status === 'cancelled').length,
+  const counts: Record<PRResolution, number> = {
+    merged: items.filter((item) => item.resolution === 'merged').length,
+    closed: items.filter((item) => item.resolution === 'closed').length,
   }
 
   const filtered = items
     .filter((item) => {
-      if (statusFilter !== 'all' && item.status !== statusFilter) return false
+      if (resolutionFilter !== 'all' && item.resolution !== resolutionFilter) return false
       if (query.trim()) {
         const q = query.toLowerCase()
         if (!`${item.title} ${item.ticketKey}`.toLowerCase().includes(q)) return false
@@ -54,11 +54,11 @@ export function HistoryPage() {
       meta={
         <>
           <span>
-            <span className="outcome-tag outcome-shipped">✓</span> {counts.shipped} shipped
+            <span className="outcome-tag outcome-merged">✓</span> {counts.merged} merged
           </span>
           <span>·</span>
           <span>
-            <span className="outcome-tag outcome-cancelled">◯</span> {counts.cancelled} cancelled
+            <span className="outcome-tag outcome-closed">◯</span> {counts.closed} closed
           </span>
         </>
       }
@@ -72,23 +72,23 @@ export function HistoryPage() {
             onChange={(e) => setQuery(e.target.value)}
           />
           <span className="filter-sep mono dim">·</span>
-          <FilterChip<StatusFilter>
+          <FilterChip<ResolutionFilter>
             value="all"
-            current={statusFilter}
-            onSelect={setStatusFilter}
+            current={resolutionFilter}
+            onSelect={setResolutionFilter}
             label="all"
           />
-          <FilterChip<StatusFilter>
-            value="shipped"
-            current={statusFilter}
-            onSelect={setStatusFilter}
-            label={`shipped (${counts.shipped})`}
+          <FilterChip<ResolutionFilter>
+            value="merged"
+            current={resolutionFilter}
+            onSelect={setResolutionFilter}
+            label={`merged (${counts.merged})`}
           />
-          <FilterChip<StatusFilter>
-            value="cancelled"
-            current={statusFilter}
-            onSelect={setStatusFilter}
-            label={`cancelled (${counts.cancelled})`}
+          <FilterChip<ResolutionFilter>
+            value="closed"
+            current={resolutionFilter}
+            onSelect={setResolutionFilter}
+            label={`closed (${counts.closed})`}
           />
         </div>
       }
@@ -120,14 +120,14 @@ export function HistoryPage() {
               className="row row-history"
               onClick={() => navigate(dashboardItemPath(item))}
             >
-              <StatusTag status={item.status} />
+              <StatusTag resolution={item.resolution} />
               <span className="row-id mono">{item.ticketKey}</span>
               <span className="row-title" title={item.title}>
                 {item.title}
               </span>
               <RepoCell repo={item.repo} project={item.projectName} />
               <PRCell prNumber={item.prNumber} prUrl={null} />
-              <span className="row-fin-what mono">{item.status}</span>
+              <span className="row-fin-what mono">{item.resolution}</span>
               <span className="row-fin-dur mono dim">
                 {relTime(secondsSince(item.updatedAt))}
               </span>

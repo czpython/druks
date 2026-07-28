@@ -30,9 +30,9 @@ describe('eventLine', () => {
   })
 
   it("reads an extension's own milestone as its own word", () => {
-    const line = eventLine(event({ kind: 'shipped', extension: 'ship' }))
+    const line = eventLine(event({ kind: 'merged', extension: 'ship' }))
 
-    expect(line.label).toBe('shipped')
+    expect(line.label).toBe('merged')
     expect(line.source).toBe('ship')
     expect(line.bucket).toBe('event-kind-audit')
   })

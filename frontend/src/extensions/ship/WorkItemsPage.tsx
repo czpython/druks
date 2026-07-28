@@ -85,9 +85,9 @@ function Group({
 
 export function WorkItemsPage() {
   // Pure stream: the board stream pushes the whole board as one `snapshot` event
-  // on connect and on every change (terminal items live in History, so they never
-  // appear). The board renders the latest snapshot — no query, no refetch, no
-  // polling.
+  // on connect and on every change (an item whose PR GitHub has resolved lives in
+  // History, so it never appears). The board renders the latest snapshot — no
+  // query, no refetch, no polling.
   const [rows, setRows] = useState<WorkItemRow[] | null>(null)
   const [errored, setErrored] = useState(false)
   const [query, setQuery] = useState('')
@@ -118,15 +118,17 @@ export function WorkItemsPage() {
     )
   }
 
-  // Two lanes: needs-you — parked on the operator OR failed (a failure still
-  // needs you) — and in-flight (a step running or about to). Newest
-  // movement first.
+  // Two lanes: needs-you — parked on the operator, failed (a failure still needs
+  // you), or finished with its PR still open — and in-flight (a step running or
+  // about to). Newest movement first.
   const active = [...rows].sort(
     (a, b) => updatedAtSortKey(b.summary) - updatedAtSortKey(a.summary),
   )
   const needsYou = active.filter(
     (row) =>
-      (row.status.state === 'parked' || row.status.state === 'failed') &&
+      (row.status.state === 'parked' ||
+        row.status.state === 'failed' ||
+        row.status.state === 'finished') &&
       matchesQuery(row, query),
   )
   const inFlight = active.filter(

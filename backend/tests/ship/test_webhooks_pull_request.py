@@ -1,3 +1,4 @@
+from datetime import UTC, datetime
 from types import SimpleNamespace
 
 import druks.contrib.ship.subscribers  # noqa: F401 — registers the pr.closed subscriber
@@ -10,6 +11,9 @@ from druks.testing import make_settings
 from sqlalchemy import func, select
 
 from ship.factories import make_test_work_item, seed_build_run
+
+# GitHub's own stamp on the verdict, which druks stores rather than its receipt time.
+_RESOLVED_AT = "2026-07-25T21:59:09Z"
 
 
 @pytest.fixture(autouse=True)
@@ -36,12 +40,14 @@ def _milestone_count(work_item_id, milestone):
     )
 
 
-async def _fire_closed(*, repo, pr_number, branch, tmp_path, merged=True):
+async def _fire_closed(*, repo, pr_number, branch, tmp_path, merged=True, at=_RESOLVED_AT):
     payload = {
         "repository": {"full_name": repo},
         "pull_request": {
             "number": pr_number,
             "merged": merged,
+            "merged_at": at if merged else None,
+            "closed_at": at,
             "head": {"ref": branch},
         },
     }
@@ -79,14 +85,18 @@ def _fresh_run(run_id):
 
 
 @pytest.mark.asyncio
-async def test_external_merge_records_event_and_ends_involvement(druks_db, tmp_path):
+async def test_external_merge_stores_githubs_verdict_and_ends_involvement(druks_db, tmp_path):
     repo, pr_number, branch = "ClawHaven/acme-app", 42, "agent/eng-1"
     work_item_id, run_id = _park_work_item(repo=repo, pr_number=pr_number, branch=branch)
 
     await _fire_closed(repo=repo, pr_number=pr_number, branch=branch, tmp_path=tmp_path)
 
-    # Ship-ness is recorded as the 'shipped' milestone...
-    assert _milestone_count(work_item_id, "shipped") == 1
+    # The verdict is stored with GitHub's own stamp, not druks's receipt time...
+    item = WorkItem.get(work_item_id)
+    assert item.resolution == "merged"
+    assert item.resolved_at == datetime(2026, 7, 25, 21, 59, 9, tzinfo=UTC)
+    # ...announced as the milestone...
+    assert _milestone_count(work_item_id, "merged") == 1
     # ...and involvement ended: the parked build run is cancelled.
     assert not _fresh_run(run_id).is_active
 
@@ -107,26 +117,39 @@ async def test_merge_ships_but_leaves_a_running_build_to_converge(druks_db, tmp_
     await _fire_closed(repo=repo, pr_number=pr_number, branch=branch, tmp_path=tmp_path)
 
     assert Run.get(run_id).state == "running"  # not cancelled from under druks
-    assert _milestone_count(work_item_id, "shipped") == 1
+    assert _milestone_count(work_item_id, "merged") == 1
 
 
 @pytest.mark.asyncio
-async def test_redelivered_merge_webhook_does_not_double_record(druks_db, tmp_path):
-    """GitHub redelivers webhooks; a shipped item stays shipped once."""
+async def test_a_redelivered_webhook_does_not_rewrite_the_verdict(druks_db, tmp_path):
+    """GitHub redelivers webhooks, and druks's own merge echoes back through the
+    same path. The stored verdict is the first one; a contradicting redelivery
+    neither overwrites it nor records a second milestone."""
     repo, pr_number, branch = "ClawHaven/acme-app", 44, "agent/eng-3"
     work_item_id, _ = _park_work_item(repo=repo, pr_number=pr_number, branch=branch)
     await _fire_closed(repo=repo, pr_number=pr_number, branch=branch, tmp_path=tmp_path)
 
-    await _fire_closed(repo=repo, pr_number=pr_number, branch=branch, tmp_path=tmp_path)
+    await _fire_closed(
+        repo=repo,
+        pr_number=pr_number,
+        branch=branch,
+        tmp_path=tmp_path,
+        merged=False,
+        at="2026-07-26T13:30:30Z",
+    )
 
-    assert _milestone_count(work_item_id, "shipped") == 1
+    item = WorkItem.get(work_item_id)
+    assert item.resolution == "merged"
+    assert item.resolved_at == datetime(2026, 7, 25, 21, 59, 9, tzinfo=UTC)
+    assert _milestone_count(work_item_id, "merged") == 1
+    assert _milestone_count(work_item_id, "closed") == 0
 
 
 @pytest.mark.asyncio
-async def test_closed_unmerged_records_close_and_ends_involvement(druks_db, tmp_path):
+async def test_closed_unmerged_stores_closed_and_ends_involvement(druks_db, tmp_path):
     """A PR closed *without* merging — the operator abandoned it (e.g. deleted
-    the branch). Emit 'cancelled' and un-park so the item derives as cancelled
-    and leaves the active board, rather than being ignored."""
+    the branch). Store GitHub's 'closed' and un-park, so the item leaves the
+    active board for History rather than being ignored."""
     repo, pr_number, branch = "ClawHaven/acme-app", 45, "agent/eng-4"
     work_item_id, run_id = _park_work_item(repo=repo, pr_number=pr_number, branch=branch)
 
@@ -138,8 +161,9 @@ async def test_closed_unmerged_records_close_and_ends_involvement(druks_db, tmp_
         merged=False,
     )
 
-    assert _milestone_count(work_item_id, "cancelled") == 1
-    assert _milestone_count(work_item_id, "shipped") == 0
+    assert WorkItem.get(work_item_id).resolution == "closed"
+    assert _milestone_count(work_item_id, "closed") == 1
+    assert _milestone_count(work_item_id, "merged") == 0
     assert not _fresh_run(run_id).is_active
 
 
@@ -158,43 +182,49 @@ async def test_closed_unmerged_cancels_in_flight_run(druks_db, tmp_path):
     )
 
     assert _fresh_run(run_id).state == "cancelled"
-    assert _milestone_count(work_item_id, "cancelled") == 1
+    assert _milestone_count(work_item_id, "closed") == 1
 
 
 @pytest.mark.asyncio
-async def test_remerge_after_retrigger_records_a_fresh_shipped(druks_db, tmp_path):
-    """A prior round's 'shipped' must not swallow a second merge after the item
-    was re-triggered — the lane is active again, so the webhook ships it again."""
-    from datetime import UTC, datetime, timedelta
+async def test_a_merge_after_a_failed_build_still_settles_the_item(druks_db, tmp_path):
+    """The production failure this fixes: the run failed and stays failed, so
+    nothing in the run lifecycle can announce the operator's later manual merge.
+    GitHub's does, and the stored verdict takes the item to History."""
+    repo, pr_number, branch = "ClawHaven/acme-app", 126, "agent/eng-760"
+    work_item_id, _ = _park_work_item(
+        repo=repo,
+        pr_number=pr_number,
+        branch=branch,
+        state="failed",
+    )
 
+    await _fire_closed(repo=repo, pr_number=pr_number, branch=branch, tmp_path=tmp_path)
+
+    item = WorkItem.get(work_item_id)
+    assert item.resolution == "merged"
+    assert item.id not in {summary.id for summary in WorkItem.list_summaries()}
+    assert [row.id for row in WorkItem.list_handoff()] == [item.id]
+
+
+@pytest.mark.asyncio
+async def test_a_remerge_after_redispatch_records_a_fresh_verdict(druks_db, tmp_path):
+    """A new build takes the item over and drops the prior round's verdict, so
+    the next merge is stored on its own terms instead of being read as a
+    redelivery of the last one."""
     from druks.database import db_session as ds
 
     repo, pr_number, branch = "ClawHaven/acme-app", 77, "agent/eng-9"
     work_item_id, _ = _park_work_item(repo=repo, pr_number=pr_number, branch=branch)
-    # Round 1: shipped.
-    WorkItem.get(work_item_id).set_status("shipped")
-    # Re-trigger: a newer RUNNING build run; dispatch cleared the handoff status.
+    await _fire_closed(repo=repo, pr_number=pr_number, branch=branch, tmp_path=tmp_path)
+    # Redispatched: a newer build run owns the item, and its PR is a fresh one.
     new_run = seed_build_run(ds(), work_item_id=work_item_id, state="running")
-    new_run.created_at = datetime.now(UTC) + timedelta(seconds=5)
-    WorkItem.get(work_item_id).set_status(None)
-    ds().flush()
+    WorkItem.get(work_item_id).start_build(new_run.id)
+    WorkItem.get(work_item_id).update(pr_number=pr_number, branch=branch)
 
     await _fire_closed(repo=repo, pr_number=pr_number, branch=branch, tmp_path=tmp_path)
 
-    assert _milestone_count(work_item_id, "shipped") == 2
-
-
-@pytest.mark.asyncio
-async def test_merge_echo_with_no_newer_activity_still_dedups(druks_db, tmp_path):
-    """The echo case: druks's own merge emits 'shipped' and GitHub's closed
-    webhook arrives with nothing newer — still dropped."""
-    repo, pr_number, branch = "ClawHaven/acme-app", 78, "agent/eng-10"
-    work_item_id, _ = _park_work_item(repo=repo, pr_number=pr_number, branch=branch)
-    WorkItem.get(work_item_id).set_status("shipped")
-
-    await _fire_closed(repo=repo, pr_number=pr_number, branch=branch, tmp_path=tmp_path)
-
-    assert _milestone_count(work_item_id, "shipped") == 1  # deduped
+    assert WorkItem.get(work_item_id).resolution == "merged"
+    assert _milestone_count(work_item_id, "merged") == 2
 
 
 @pytest.mark.asyncio
@@ -336,7 +366,7 @@ async def test_external_close_survives_policy_resolution_failure(druks_db, tmp_p
 
     assert deleted == []  # cleanup skipped when policy can't be resolved
     assert pushed == [TicketStatus.READY_FOR_AGENT]  # ticket still reset
-    assert _milestone_count(work_item_id, "cancelled") == 1
+    assert WorkItem.get(work_item_id).resolution == "closed"
 
 
 @pytest.mark.asyncio
@@ -351,9 +381,9 @@ async def test_stale_close_after_redispatch_spares_the_new_run(druks_db, tmp_pat
     item.update(pr_number=pr_a, branch=branch_a)
     # Re-dispatch: a new run takes over and the prior attempt's branch/PR clear.
     new_run = seed_build_run(ds(), work_item_id=item.id, state="running")
-    item.update(branch=None, pr_number=None)
+    item.start_build(new_run.id)
 
     await _fire_closed(repo=repo, pr_number=pr_a, branch=branch_a, tmp_path=tmp_path, merged=False)
 
     assert _fresh_run(new_run.id).state == "running"  # the live attempt is untouched
-    assert _milestone_count(item.id, "cancelled") == 0
+    assert item.resolution is None

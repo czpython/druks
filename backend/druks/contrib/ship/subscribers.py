@@ -1,18 +1,10 @@
 from druks.contrib.ship.contracts import ReviewWork
-from druks.contrib.ship.enums import HandoffStatus
 from druks.contrib.ship.extension import Ship
 from druks.contrib.ship.models import ProjectRepo, WorkItem
 from druks.contrib.ship.workflows import Build, Profile
 from druks.signals import subscribe
 from druks.ticketing.enums import TicketStatus
 from druks.workflows import WorkflowEvent
-
-
-@subscribe(WorkflowEvent.RUNNING, subject=WorkItem)
-async def any_workflow_start_returns_item_to_board(*, subject: WorkItem, **_: object) -> None:
-    # Any workflow starting for a work item puts it back on the active board —
-    # a new build or resume means druks has it in court again.
-    subject.set_status(None)
 
 
 @subscribe("pr.opened", workflow=Build)
@@ -34,15 +26,6 @@ async def build_start_marks_ticket_in_progress(*, subject: WorkItem, **_: object
 @subscribe(WorkflowEvent.PARKED, workflow=Build, gate=ReviewWork)
 async def review_park_marks_ticket_in_review(*, subject: WorkItem, **_: object) -> None:
     await subject.set_ticket_status(TicketStatus.IN_REVIEW)
-
-
-@subscribe(WorkflowEvent.FAILED, workflow=Build)
-@subscribe(WorkflowEvent.CANCELLED, workflow=Build)
-async def build_end_settles_the_item(*, subject: WorkItem, **_: object) -> None:
-    # Nothing merged, so the attempt was abandoned — unless the PR already spoke:
-    # ship() cancels the run it just shipped, and that cancel arrives here.
-    if not subject.status:
-        subject.set_status(HandoffStatus.CANCELLED)
 
 
 @subscribe("repo.pushed", to_default_branch=True)
@@ -73,16 +56,16 @@ async def pr_review_answers_the_gate(*, repo: str, pr_number: int, payload: dict
 
 @subscribe("pr.closed")
 async def pr_close_settles_the_item(*, repo: str, pr_number: int, payload: dict) -> None:
-    """A PR druks owns closed on GitHub — the owner announcing the outcome.
-    One path for every merge, druks's own included: GitHub says merged, druks
-    ships the item. The status guards are redelivery idempotency."""
+    """A PR druks owns closed on GitHub — the owner announcing its verdict, which
+    druks stores rather than deriving. One path for every merge, druks's own
+    included. A stored verdict makes a redelivery a no-op."""
     item = WorkItem.get_for_pr(repo=repo, pr_number=pr_number, branch=payload["branch"])
-    if not item or item.status == HandoffStatus.SHIPPED:
-        return
-    if payload["merged"]:
-        await item.ship()
-    elif item.status != HandoffStatus.CANCELLED:
-        await item.close_external()
+    if item and not item.resolution:
+        item.resolve(merged=payload["merged"], at=payload["resolved_at"])
+        if payload["merged"]:
+            await item.ship()
+        else:
+            await item.close_external()
 
 
 @subscribe("ticket.transitioned")
