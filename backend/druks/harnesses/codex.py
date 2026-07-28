@@ -542,6 +542,7 @@ class CodexHarness(Harness):
         # access so it needs no per-dir grants.
         include_plugins: bool = True,
         add_dirs: tuple[str, ...] = (),
+        skills: tuple[str, ...] = (),
         extra_env: dict[str, str] | None = None,
         mcp_servers: tuple[McpServer, ...] = (),
         connection_id: str | None = None,
@@ -570,7 +571,9 @@ class CodexHarness(Harness):
             args=tuple(cmd),
             stdin=_with_final_message_note(prompt).encode("utf-8"),
             credentials=self._codex_credentials(
-                github_token=github_token, connection_id=connection_id
+                github_token=github_token,
+                skills=skills,
+                connection_id=connection_id,
             ),
             env=extra_env,
             extra_artifact_filenames=("output.json", "session.jsonl"),
@@ -646,7 +649,11 @@ class CodexHarness(Harness):
         return args
 
     def _codex_credentials(
-        self, *, github_token: str | None, connection_id: str | None = None
+        self,
+        *,
+        github_token: str | None,
+        skills: tuple[str, ...] = (),
+        connection_id: str | None = None,
     ) -> Credentials:
         # The credential file is synthesized from the DB row (raises when codex
         # isn't connected); the local config dir only adds config carry on top.
@@ -671,7 +678,7 @@ class CodexHarness(Harness):
             github_token=github_token,
             extra_config_files=files,
             extra_config_dirs=dirs,
-            extra_dir_excludes={".codex/skills": Skill.disabled_excludes()},
+            extra_dir_excludes={".codex/skills": Skill.delivery_excludes(skills)},
         )
 
 

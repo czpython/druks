@@ -45,7 +45,12 @@ def _build() -> SimpleNamespace:
         task_owner_name=None,
         task_owner_email=None,
         related_repos=[],
-        skills=["python-house-rules"],
+        skills=[
+            SimpleNamespace(
+                name="python-house-rules",
+                description="Apply the Python house rules.",
+            )
+        ],
         journal=BuildJournal(),
     )
 
@@ -70,7 +75,7 @@ async def test_build_operation_prompt_renders(template):
     # The build-derived bits resolved — a leftover ``workflow`` ref would have
     # raised on StrictUndefined.
     assert "acme/widget" in output
-    assert "- `/python-house-rules`" in output
+    assert "- `python-house-rules` — Apply the Python house rules." in output
 
 
 async def test_implement_prompt_provisions_when_no_pr_exists():

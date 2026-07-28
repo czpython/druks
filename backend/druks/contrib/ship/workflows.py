@@ -40,8 +40,9 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True, kw_only=True)
 class BuildWorkspace(RepoWorkspace):
-    # The base RepoWorkspace brings the cloned repo + token; a build run adds the
-    # PR branch and the reviewer MCP token its agents push and review through.
+    # The base RepoWorkspace brings the cloned repo + token; a build run adds its
+    # curated skills, PR branch, and reviewer MCP token.
+    skills: tuple[str, ...]
     branch: str | None = None
     # Reviewer-extension installation token for build's github MCP server,
     # minted per repo from the reviewer GitHub App. Required — there is no
@@ -62,6 +63,7 @@ class BuildWorkspace(RepoWorkspace):
         # cwd — Claude wedges (no stdout, forever) on ``--add-dir <cwd>``.
         kwargs = super().get_agent_run_kwargs(**kwargs)
         kwargs["add_dirs"] = (get_related_root(self.sandbox.ssh_username),)
+        kwargs["skills"] = self.skills
         return kwargs
 
 
@@ -147,9 +149,8 @@ class Build(Workflow):
         self._profile = resolved["profile"]
         self._settings = await self._load_settings()
 
-        if not await self._plan_phase():
-            return
-        await self._implement_phase()
+        if await self._plan_phase():
+            await self._implement_phase()
 
     async def get_workspace_kwargs(self, sandbox: "Sandbox") -> dict[str, Any]:
         # The BuildWorkspace fields: mint a fresh GitHub token, push it, and clone the
@@ -193,6 +194,7 @@ class Build(Workflow):
             "branch": branch,
             "github_token": github_token,
             "mcp_token": mcp_token,
+            "skills": tuple(self._profile.get("recommended_skills", [])),
         }
 
     async def get_prompt_context(self, **context: Any) -> dict[str, Any]:
@@ -211,7 +213,7 @@ class Build(Workflow):
             task_owner_name=self.input.task_owner_name,
             task_owner_email=self.input.task_owner_email,
             related_repos=target_repo.siblings(),
-            skills=self._profile.get("recommended_skills", []),
+            skills=Skill.list_delivered(self._profile.get("recommended_skills", [])),
             journal=self.journal,
         )
         return {

@@ -6,6 +6,7 @@ import secrets
 import urllib.parse
 import uuid
 from abc import ABC, abstractmethod
+from collections.abc import Collection
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar
@@ -59,7 +60,7 @@ _REFRESH_LOCK_TTL_SECONDS = 300
 # The capability manifest is a plain JSON dict written per AgentCall. Bump when
 # the recorded shape changes so a reader can tell manifests apart across
 # versions; the value is part of the hash, so a bump reshuffles the buckets.
-MANIFEST_SCHEMA_VERSION = 1
+MANIFEST_SCHEMA_VERSION = 2
 
 Token = OAuthToken | CodexToken
 
@@ -112,6 +113,7 @@ class Harness(ABC):
         self,
         *,
         mcp_servers: tuple["McpServer", ...],
+        skills: Collection[str],
         extra_env: dict[str, str] | None,
     ) -> dict:
         """The capability manifest for one AgentCall: what this harness was
@@ -150,15 +152,14 @@ class Harness(ABC):
                     "token_present": env_var in delivered_env,
                 }
             )
-        # The skills tar both harnesses push excludes disabled skills, so the
-        # enabled set — not merely "a tree exists" — is the call's real skill
-        # capability.
+        # Only the delivered skill set is reachable in either CLI home, so the
+        # manifest records that per-call capability.
         capability = {
             "schema_version": MANIFEST_SCHEMA_VERSION,
             "model": self.model or "",
             "harness": self.name,
             "mcp_servers": mcp,
-            "skills_enabled": sorted(skill.name for skill in Skill.list_enabled()),
+            "skills_delivered": sorted(skill.name for skill in Skill.list_delivered(skills)),
         }
         canonical = json.dumps(capability, sort_keys=True, separators=(",", ":"))
         return {

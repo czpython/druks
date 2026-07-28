@@ -283,9 +283,10 @@ under a derived variable and are never returned by the API.
 
 The dashboard installs skill collections from GitHub repositories.
 `DRUKS_SKILLS_DIR` selects the shared writable directory; otherwise it defaults
-to `<DRUKS_DATA_DIR>/skills`. Enabled skills are copied into both CLI homes in
-each sandbox. Disabled skills are excluded from the upload and from the
-per-agent capability manifest.
+to `<DRUKS_DATA_DIR>/skills`. A call receives the enabled skills it requests, or
+every enabled skill when it requests none; build requests the repo profile's
+recommended set. Other installed skills are excluded from the upload, and the
+per-agent capability manifest records the delivered set.
 
 ## Credential custody and secrets at rest
 

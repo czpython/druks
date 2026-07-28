@@ -102,8 +102,6 @@ class Sandbox:
     def ssh_username(self) -> str:
         return self.record.ssh_username
 
-    # File transfer
-
     async def upload_file(
         self,
         *,
@@ -141,9 +139,8 @@ class Sandbox:
         parts.append(f"printf %s {quoted_secret} > {quoted_remote}")
         parts.append(f"chmod {mode:o} {quoted_remote}")
         result = await self.exec(["sh", "-c", " && ".join(parts)], timeout=10.0)
-        # Fail loudly — this now carries the harness OAuth credentials, so a
-        # silent write failure would start the agent unauthenticated instead of
-        # failing the run. The secret never rides the message (only the path).
+        # A silent write failure would start the agent unauthenticated. The
+        # secret never rides the error message, only its destination path.
         if not result.ok:
             raise SandboxError(
                 f"failed to write secret to {remote}: "
@@ -183,8 +180,6 @@ class Sandbox:
                 f"remote tar exited {completed.exit_status} while extracting into {remote}",
             )
 
-    # One-shot exec
-
     async def run_agent(
         self,
         *,
@@ -199,6 +194,7 @@ class Sandbox:
         github_token: str | None = None,
         include_plugins: bool = True,
         add_dirs: tuple[str, ...] = (),
+        skills: tuple[str, ...] = (),
         extra_env: dict[str, Any] | None = None,
         mcp_servers: tuple[McpServer, ...] = (),
         connection_id: str | None = None,
@@ -251,6 +247,7 @@ class Sandbox:
                 github_token=github_token,
                 include_plugins=include_plugins,
                 add_dirs=add_dirs,
+                skills=skills,
                 extra_env=extra_env,
                 mcp_servers=mcp_servers,
                 call_id=run_id,
@@ -284,6 +281,7 @@ class Sandbox:
         github_token: str | None = None,
         include_plugins: bool = True,
         add_dirs: tuple[str, ...] = (),
+        skills: tuple[str, ...] = (),
         extra_env: dict[str, str] | None = None,
         mcp_servers: tuple[McpServer, ...] = (),
         call_id: str | None = None,
@@ -299,7 +297,11 @@ class Sandbox:
         persist_manifest(
             artifact_dir,
             call_id=run_id,
-            manifest=harness.get_manifest(mcp_servers=mcp_servers, extra_env=extra_env),
+            manifest=harness.get_manifest(
+                mcp_servers=mcp_servers,
+                skills=skills,
+                extra_env=extra_env,
+            ),
         )
 
         invocation = harness.build_invocation(
@@ -310,6 +312,7 @@ class Sandbox:
             github_token=github_token,
             include_plugins=include_plugins,
             add_dirs=add_dirs,
+            skills=skills,
             extra_env=extra_env,
             mcp_servers=mcp_servers,
             connection_id=connection_id,
@@ -519,8 +522,6 @@ class Sandbox:
             stderr=_as_str(completed.stderr),
         )
 
-    # Instruction lifecycle
-
     async def _start_instruction(
         self,
         *,
@@ -569,17 +570,14 @@ class Sandbox:
                 # never-started wrapper).
                 logger.debug("artifact missing or unreadable: %s", remote_path)
 
-    # Connection lifecycle
-
     async def ssh_connection(self) -> asyncssh.SSHClientConnection:
         return await self._ensure_conn()
 
     async def aclose(self) -> None:
-        if not self._conn:
-            return
-        self._conn.close()
-        await self._conn.wait_closed()
-        self._conn = None
+        if self._conn:
+            self._conn.close()
+            await self._conn.wait_closed()
+            self._conn = None
 
     async def __aenter__(self) -> Self:
         return self
@@ -591,8 +589,6 @@ class Sandbox:
         tb: TracebackType | None,
     ) -> None:
         await self.aclose()
-
-    # Internals
 
     async def _ensure_conn(self) -> asyncssh.SSHClientConnection:
         if self._conn:

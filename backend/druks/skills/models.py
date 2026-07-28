@@ -1,3 +1,4 @@
+from collections.abc import Collection
 from datetime import datetime
 
 from sqlalchemy import Boolean, ForeignKey, String, select
@@ -65,8 +66,8 @@ class Skill(Base, Uuid7Pk):
     description: Mapped[str] = mapped_column(String, default="")
     collection: Mapped[SkillCollection] = relationship(back_populates="skills")
     collection_id: Mapped[str] = mapped_column(ForeignKey("skill_collections.id"))
-    # Disabled skills stay on disk but the projection excludes them from the tar
-    # pushed to each VM (the harness drops ``disabled_names()`` from the upload).
+    # Disabled skills stay on disk but the delivery projection excludes them
+    # from every sandbox upload.
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     path: Mapped[str] = mapped_column(String)
     content_hash: Mapped[str] = mapped_column(String)
@@ -79,18 +80,25 @@ class Skill(Base, Uuid7Pk):
 
     @classmethod
     def list_enabled(cls) -> list["Skill"]:
-        # What a VM actually receives — a disabled skill is excluded from the
-        # tar (see disabled_excludes), so it's never really available to recommend.
+        # The operator's enabled catalog.
         stmt = select(cls).where(cls.enabled.is_(True)).order_by(cls.name)
         return list(db_session().scalars(stmt))
 
     @classmethod
-    def disabled_excludes(cls) -> tuple[str, ...]:
-        # ``tar --exclude`` patterns for disabled skills, anchored to the
-        # skills_dir tar root (``-C skills_dir .`` → members ``./<name>/...``),
-        # so the projection ships only enabled skills. They stay on disk.
-        names = db_session().execute(select(cls.name).where(cls.enabled.is_(False))).scalars()
-        return tuple(f"./{name}" for name in sorted(names))
+    def list_delivered(cls, requested: Collection[str]) -> list["Skill"]:
+        # What one call receives: the enabled skills it named, or the whole enabled
+        # catalog when it named none.
+        enabled = cls.list_enabled()
+        if requested:
+            return [skill for skill in enabled if skill.name in requested]
+        return enabled
+
+    @classmethod
+    def delivery_excludes(cls, requested: Collection[str]) -> tuple[str, ...]:
+        # Patterns are anchored to the skills_dir tar root (``-C skills_dir .``);
+        # excluded skills remain installed on disk.
+        delivered = {skill.name for skill in cls.list_delivered(requested)}
+        return tuple(f"./{name}" for name in sorted(cls.installed_names() - delivered))
 
     @classmethod
     def get(cls, name: str) -> "Skill | None":

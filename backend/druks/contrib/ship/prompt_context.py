@@ -2,6 +2,7 @@ from dataclasses import dataclass
 
 from druks.contrib.ship.journal import BuildJournal
 from druks.contrib.ship.models import ProjectRepo
+from druks.skills.models import Skill
 
 
 @dataclass(frozen=True)
@@ -24,5 +25,5 @@ class BuildPromptContext:
     task_owner_name: str | None
     task_owner_email: str | None
     related_repos: list[ProjectRepo]
-    skills: list[str]
+    skills: list[Skill]
     journal: BuildJournal

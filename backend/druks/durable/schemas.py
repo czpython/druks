@@ -89,7 +89,7 @@ class AgentCallFiles(BaseResponse):
     response: ArtifactFile | None = None
     metadata: ArtifactFile | None = None
     # The capability manifest for the call: model, harness, MCP availability,
-    # enabled skills — presence only, never a secret value.
+    # delivered skills — presence only, never a secret value.
     manifest: ArtifactFile | None = None
     # The call's renderable output, rendered by kind; None unless it produced one.
     artifact: ArtifactDescriptor | None = None
@@ -99,14 +99,13 @@ class AgentCallFiles(BaseResponse):
         layout = call.artifact_layout
 
         def named(path: Path) -> ArtifactFile | None:
-            if not path.is_file():
-                return
-            stat = path.stat()
-            return ArtifactFile(
-                name=path.name,
-                size_bytes=stat.st_size,
-                updated_at=datetime.fromtimestamp(stat.st_mtime, tz=UTC),
-            )
+            if path.is_file():
+                stat = path.stat()
+                return ArtifactFile(
+                    name=path.name,
+                    size_bytes=stat.st_size,
+                    updated_at=datetime.fromtimestamp(stat.st_mtime, tz=UTC),
+                )
 
         descriptor = None
         if artifact:

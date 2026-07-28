@@ -117,11 +117,18 @@ def test_collection_create_get_cascade_delete(druks_db):
     assert Skill.installed_names() == {"alpha", "beta"}
     assert [c.name for c in SkillCollection.list_all()] == ["o/r"]
 
-    # Skills land enabled; disabling drops them from the projection's tar.
-    assert Skill.disabled_excludes() == ()
+    assert [skill.name for skill in Skill.list_delivered(())] == ["alpha", "beta"]
+    assert Skill.delivery_excludes(()) == ()
+    assert [skill.name for skill in Skill.list_delivered(("alpha",))] == ["alpha"]
+    assert Skill.delivery_excludes(("alpha",)) == ("./beta",)
+
     Skill.get("alpha").enabled = False
     druks_db.flush()
-    assert Skill.disabled_excludes() == ("./alpha",)
+
+    assert [skill.name for skill in Skill.list_delivered(())] == ["beta"]
+    assert Skill.delivery_excludes(()) == ("./alpha",)
+    assert Skill.list_delivered(("alpha",)) == []
+    assert Skill.delivery_excludes(("alpha",)) == ("./alpha", "./beta")
 
     collection.delete()
     assert SkillCollection.list_all() == []
