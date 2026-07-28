@@ -121,7 +121,7 @@ class WorkItemSummary(SubjectSummary):
     @classmethod
     def from_work_item(cls, item: "WorkItem") -> "WorkItemSummary":
         return cls(
-            id=str(item.id),
+            id=item.id,
             label=item.label,
             source=item.source,  # type: ignore[arg-type]
             repo=item.repo,

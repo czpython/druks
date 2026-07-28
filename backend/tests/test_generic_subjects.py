@@ -10,6 +10,7 @@ from druks.models import StoredSubject
 from druks.testing import seed_dbos_status
 from fastapi import APIRouter
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 from sqlalchemy import select
 from uuid_utils import uuid7
 
@@ -25,7 +26,7 @@ class Thing(StoredSubject):
     __tablename__ = "faketest_things"
 
     def get_summary(self) -> _ThingSummary:
-        return _ThingSummary(id=str(self.id), label=self.label, title=TITLES[self.id])
+        return _ThingSummary(id=self.id, label=self.label, title=TITLES[self.id])
 
     @classmethod
     def list_summaries(cls) -> list[_ThingSummary]:
@@ -115,6 +116,19 @@ def client(tmp_path: Path, druks_db, monkeypatch):
     finally:
         for route in holder.routes:
             app.router.routes.remove(route)
+
+
+def test_a_subject_id_is_a_string_whatever_the_row_is_keyed_by(druks_db):
+    # A row is keyed by an integer and every read of a subject id is a string — the
+    # URL segment, the DBOS attribute, the dedup key. The header takes either and is
+    # always the string, so no summary hand-stringifies a primary key.
+    summary = SubjectSummary.model_validate(Thing(id=7))
+    assert summary.id == "7"
+    assert SubjectSummary.model_validate(Ticket(id="owner/repo#7")).id == "owner/repo#7"
+
+    # Only the id widens: a label that arrives as a number is still a mistake.
+    with pytest.raises(ValidationError):
+        SubjectSummary(id=7, label=7)
 
 
 def test_status_aggregates_across_runs_and_timeline_spans_them(client: TestClient, druks_db):

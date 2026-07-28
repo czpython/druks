@@ -48,7 +48,7 @@ class Subject:
     def get_summary(self) -> SubjectSummary:
         """The header its board and page show it under. Its id and label already say
         what it is; override to add the fields only this extension knows."""
-        return SubjectSummary(id=self.id, label=self.label)
+        return SubjectSummary.model_validate(self)
 
     @classmethod
     def list_summaries(cls) -> Sequence[SubjectSummary]:

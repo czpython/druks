@@ -12,7 +12,7 @@ router = APIRouter(prefix="/notes")
 
 @router.get("", response_model=list[NoteSummary], response_model_by_alias=True)
 async def list_notes() -> list[NoteSummary]:
-    return [NoteSummary.from_note(note) for note in Note.list_recent()]
+    return [note.get_summary() for note in Note.list_recent()]
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
