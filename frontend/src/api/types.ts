@@ -72,7 +72,7 @@ export interface TokenUsage {
 export interface AgentCallSummary {
   id: string
   // Which agent made this call ("scope", "implement"); label is its display name.
-  agent?: string | null
+  agent: string
   label: string
   /** The account charged for this call — differs from the run's on fallback. */
   accountUsername: string

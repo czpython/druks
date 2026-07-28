@@ -106,6 +106,14 @@ async def test_run_outside_workflow_raises():
         await DUMMY_AGENT(repo="acme/widget")
 
 
+async def test_run_refuses_an_agent_with_no_id():
+    # Built loose — never assigned to an Extension, never given an explicit id — so
+    # the call it would record would name nobody.
+    loose = agents.Agent(prompt="dummy/agent.md", contract=DummyOutput, model="claude")
+    with pytest.raises(WorkflowError, match="runs under its own id"):
+        await loose(repo="acme/widget")
+
+
 async def test_run_refuses_unconnected_harness(druks_db, tmp_path, monkeypatch, current_run):
     # The precondition fires where the harness is resolved — before any VM work.
     from druks.accounts.models import Account
@@ -277,10 +285,22 @@ async def test_recovery_supersedes_the_orphaned_running_call(druks_db):
 
     engine = _step_engine()
     AgentCall.start(
-        engine, call_id="a", run_id="wf-9", model="m", agent=None, host_id="h", account_id="system"
+        engine,
+        call_id="a",
+        run_id="wf-9",
+        model="m",
+        agent="summarize",
+        host_id="h",
+        account_id="system",
     )
     AgentCall.start(
-        engine, call_id="b", run_id="wf-9", model="m", agent=None, host_id="h", account_id="system"
+        engine,
+        call_id="b",
+        run_id="wf-9",
+        model="m",
+        agent="summarize",
+        host_id="h",
+        account_id="system",
     )
 
     by_id = {call.id: call for call in AgentCall.list_for_run("wf-9")}

@@ -324,8 +324,9 @@ class AgentCall(Base, Uuid7Pk):
     run_id: Mapped[str] = mapped_column(ForeignKey("durable_runs.id", ondelete="CASCADE"))
     run: Mapped["Run"] = relationship()
     # Which agent (registry id: "scope", "implement", …) made this call — the
-    # timeline's grouping label. Nullable — not every call is agent-attributed.
-    agent: Mapped[str | None] = mapped_column(String, default=None)
+    # timeline's grouping label. An agent is what makes a call, so there is no
+    # unattributed one: the row is written from the registered agent's own id.
+    agent: Mapped[str] = mapped_column(String)
     # The subscription actually charged — differs from the run's account on
     # fallback.
     account_id: Mapped[str] = mapped_column(
@@ -404,7 +405,7 @@ class AgentCall(Base, Uuid7Pk):
         call_id: str,
         run_id: str,
         model: str | None,
-        agent: str | None,
+        agent: str,
         host_id: str,
         account_id: str,
     ) -> None:

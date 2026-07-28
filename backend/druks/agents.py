@@ -134,6 +134,14 @@ class Agent:
         this picks which step does it: its own, or the @step it's already inside.
         workflow_id comes from the workflow context, not the caller; everything
         else (repo, …) is prompt context."""
+        if not self.id:
+            # Built loose — never assigned to an Extension, never given an explicit
+            # id — so its settings, its registry entry and the call it would record
+            # all key on nothing.
+            raise WorkflowError(
+                "an agent runs under its own id — declare it on an Extension, or "
+                "pass id= for a standalone one"
+            )
         workflow = current_workflow.get(None)
         if not workflow:
             raise WorkflowError(
