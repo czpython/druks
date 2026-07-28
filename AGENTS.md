@@ -17,6 +17,7 @@ Start with `README.md`, then read only the material relevant to the task:
 - Remote deployment: `deploy/README.md`.
 - Failure diagnosis: `docs/troubleshooting.md`.
 - Backend contribution, migrations, or verification: `docs/development.md`.
+- The current migration head is `alembic heads` — not a scan of `backend/migrations/versions/`.
 - Shared SPA work: `frontend/README.md`.
 - Documentation navigation and audience ownership: `docs/index.md`.
 
