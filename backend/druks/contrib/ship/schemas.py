@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import AliasPath, BaseModel, ConfigDict, Field, computed_field
 
 from druks.schemas import BaseResponse
 from druks.workflows import SubjectSummary
@@ -9,7 +9,7 @@ from druks.workflows import SubjectSummary
 from .enums import HandoffStatus
 
 if TYPE_CHECKING:
-    from druks.contrib.ship.models import Project, ProjectRepo, WorkItem
+    from druks.contrib.ship.models import Project, ProjectRepo
 
 ProfileState = Literal["unprofiled", "running", "ready", "failed"]
 
@@ -94,9 +94,11 @@ class Links(BaseResponse):
     ticket: str | None = None
 
     @classmethod
-    def from_work_item(cls, item: "WorkItem") -> "Links":
-        pr = f"https://github.com/{item.repo}/pull/{item.pr_number}" if item.pr_number else None
-        return cls(repo=f"https://github.com/{item.repo}", pr=pr, ticket=item.ticket_url)
+    def for_work_item(
+        cls, *, repo: str | None, pr_number: int | None, ticket_url: str | None
+    ) -> "Links":
+        pr = f"https://github.com/{repo}/pull/{pr_number}" if pr_number else None
+        return cls(repo=f"https://github.com/{repo}", pr=pr, ticket=ticket_url)
 
 
 class WorkItemSummary(SubjectSummary):
@@ -108,7 +110,7 @@ class WorkItemSummary(SubjectSummary):
     # Druks Project name (e.g. "Hey Fella"), not the repo. Required —
     # every WorkItem is born into a project, intake refuses tickets
     # whose Linear project doesn't map to one.
-    project_name: str
+    project_name: str = Field(validation_alias=AliasPath("project", "name"))
     title: str
     ticket_key: str
     ticket_url: str | None = None
@@ -116,58 +118,44 @@ class WorkItemSummary(SubjectSummary):
     branch: str | None = None
     created_at: datetime
     updated_at: datetime
-    links: Links
 
-    @classmethod
-    def from_work_item(cls, item: "WorkItem") -> "WorkItemSummary":
-        return cls(
-            id=item.id,
-            label=item.label,
-            source=item.source,  # type: ignore[arg-type]
-            repo=item.repo,
-            project_name=item.project.name,
-            title=item.title,
-            ticket_key=item.ticket_key,
-            ticket_url=item.ticket_url,
-            pr_number=item.pr_number,
-            branch=item.branch,
-            created_at=item.created_at,
-            updated_at=item.updated_at,
-            links=Links.from_work_item(item),
+    @computed_field
+    @property
+    def links(self) -> Links:
+        return Links.for_work_item(
+            repo=self.repo, pr_number=self.pr_number, ticket_url=self.ticket_url
         )
 
 
 class DashboardItem(BaseResponse):
-    key: str
-    source_id: int | str
+    model_config = ConfigDict(from_attributes=True)
+
+    source_id: int | str = Field(validation_alias="id")
     ticket_key: str
     title: str
     repo: str | None = None
     pr_number: int | None = None
-    project_name: str | None = None
-    # The stored handoff lane, verbatim — the FE words and colors it.
+    # Druks Project is required on WorkItem, so the dashboard always has a
+    # curated project name to render.
+    project_name: str | None = Field(default=None, validation_alias=AliasPath("project", "name"))
+    # The stored handoff lane, verbatim — the FE words and colors it. History is
+    # terminal-only, so it is always set.
     status: HandoffStatus
     created_at: datetime
     updated_at: datetime
-    links: Links
+    # Carried for the links below, never serialized on its own.
+    ticket_url: str | None = Field(default=None, exclude=True)
 
-    @classmethod
-    def from_work_item(cls, item: "WorkItem") -> "DashboardItem":
-        # History is terminal-only, so the stored lane is always set.
-        return cls(
-            key=f"code:{item.id}",
-            source_id=item.id,
-            ticket_key=item.ticket_key,
-            title=item.title,
-            repo=item.repo,
-            pr_number=item.pr_number,
-            # Druks Project is required on WorkItem, so the dashboard
-            # always has a curated project name to render.
-            project_name=item.project.name,
-            status=HandoffStatus(item.status),
-            created_at=item.created_at,
-            updated_at=item.updated_at,
-            links=Links.from_work_item(item),
+    @computed_field
+    @property
+    def key(self) -> str:
+        return f"code:{self.source_id}"
+
+    @computed_field
+    @property
+    def links(self) -> Links:
+        return Links.for_work_item(
+            repo=self.repo, pr_number=self.pr_number, ticket_url=self.ticket_url
         )
 
 
