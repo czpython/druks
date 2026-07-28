@@ -230,7 +230,7 @@ class WorkItem(StoredSubject):
         return self.ticket_key
 
     def get_summary(self) -> WorkItemSummary:
-        return WorkItemSummary.from_work_item(self)
+        return WorkItemSummary.model_validate(self)
 
     @classmethod
     def list_summaries(cls) -> list[WorkItemSummary]:

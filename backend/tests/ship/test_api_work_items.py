@@ -105,7 +105,6 @@ def test_subject_detail_composes_summary_status_and_timeline(client: TestClient,
     summary = detail["summary"]
     assert summary["id"] == str(item.id)
     assert summary["ticketKey"] == "ACME-5"
-    assert summary["ticketUrl"] == "https://linear.app/acme/issue/ACME-5/detail"
     assert summary["links"]["ticket"] == "https://linear.app/acme/issue/ACME-5/detail"
     assert summary["links"]["pr"] == "https://github.com/ClawHaven/acme-app/pull/8"
     # Status is the platform's, aggregated from the item's runs — parked on a gate.

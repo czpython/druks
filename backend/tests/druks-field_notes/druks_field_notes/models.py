@@ -40,7 +40,7 @@ class Note(StoredSubject):
         db_session().flush()
 
     def get_summary(self) -> NoteSummary:
-        return NoteSummary.from_note(self)
+        return NoteSummary.model_validate(self)
 
     @classmethod
     def list_summaries(cls) -> list[NoteSummary]:

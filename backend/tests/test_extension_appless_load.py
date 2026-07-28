@@ -41,9 +41,6 @@ _FILES = {
         class ProbeItem(StoredSubject):
             __tablename__ = "probe_items"
 
-            def get_summary(self) -> SubjectSummary:
-                return SubjectSummary(id=str(self.id))
-
             @classmethod
             def list_summaries(cls) -> list[SubjectSummary]:
                 return []

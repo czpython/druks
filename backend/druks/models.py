@@ -93,7 +93,7 @@ class StoredSubject(Base):
         # so nothing under it can be imported here at module scope.
         from druks.durable.schemas import SubjectSummary
 
-        return SubjectSummary(id=str(self.id), label=self.label)
+        return SubjectSummary.model_validate(self)
 
     @classmethod
     def list_summaries(cls) -> "Sequence[SubjectSummary]":

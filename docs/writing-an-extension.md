@@ -413,9 +413,7 @@ class RepositorySummary(SubjectSummary):
 
 class Repository(StoredSubject):
     def get_summary(self) -> RepositorySummary:
-        return RepositorySummary(
-            id=str(self.id), label=self.label, open_findings=self.findings.count()
-        )
+        return RepositorySummary.model_validate(self)
 ```
 
 When you keep no row for it, subclass `Subject` instead — identity is all the

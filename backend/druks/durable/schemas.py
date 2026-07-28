@@ -1,8 +1,8 @@
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Annotated, Any, Literal
 
-from pydantic import Field, SerializeAsAny
+from pydantic import BeforeValidator, ConfigDict, Field, SerializeAsAny
 
 from druks.harnesses.artifacts import normalize_token_usage
 from druks.schemas import BaseResponse
@@ -163,11 +163,20 @@ class RunResponse(BaseResponse):
         )
 
 
+# A subject id is a string wherever it is read — the URL segment, the DBOS
+# attribute, the dedup key — while the row behind one is keyed by an integer. So it
+# takes either and is always a string.
+SubjectId = Annotated[str, BeforeValidator(str)]
+
+
 class SubjectSummary(BaseResponse):
     # Every subject's header: ``id`` keys its status, timeline and detail URL, and
     # ``label`` is the one line it shows itself as — read live off the subject, unlike
-    # the copy an event snapshots. A subject with more to say subclasses this.
-    id: str
+    # the copy an event snapshots. A subject with more to say subclasses this, and
+    # ``from_attributes`` builds any of them straight off the subject.
+    model_config = ConfigDict(from_attributes=True)
+
+    id: SubjectId
     label: str
 
 
