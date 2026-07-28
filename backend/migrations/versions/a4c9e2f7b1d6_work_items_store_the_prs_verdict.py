@@ -1,7 +1,7 @@
 """work items store the pr's verdict
 
 Revision ID: a4c9e2f7b1d6
-Revises: f2c8b81a9d4e
+Revises: c71b3d95e802
 Create Date: 2026-07-28 09:10:00.000000
 
 """
@@ -13,7 +13,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "a4c9e2f7b1d6"
-down_revision: str | Sequence[str] | None = "f2c8b81a9d4e"
+down_revision: str | Sequence[str] | None = "c71b3d95e802"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
