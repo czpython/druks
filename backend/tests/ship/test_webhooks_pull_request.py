@@ -62,7 +62,7 @@ async def _fire_closed(*, repo, pr_number, branch, tmp_path, merged=True, at=_RE
 
 def _park_work_item(*, repo, pr_number, branch, state="parked", input_gate="review_work"):
     """A work item with a build run paused on the operator (review_work) — the
-    haunting case. Returns (work_item_id, build_run_id)."""
+    haunting case. Returns (work_item_id, run_id)."""
     from druks.database import db_session
 
     item = make_test_work_item(repo=repo, title="Externally merged")
@@ -217,8 +217,8 @@ async def test_a_remerge_after_redispatch_records_a_fresh_verdict(druks_db, tmp_
     work_item_id, _ = _park_work_item(repo=repo, pr_number=pr_number, branch=branch)
     await _fire_closed(repo=repo, pr_number=pr_number, branch=branch, tmp_path=tmp_path)
     # Redispatched: a newer build run owns the item, and its PR is a fresh one.
-    new_run = seed_build_run(ds(), work_item_id=work_item_id, state="running")
-    WorkItem.get(work_item_id).start_attempt(new_run.id)
+    seed_build_run(ds(), work_item_id=work_item_id, state="running")
+    WorkItem.get(work_item_id).start_attempt()
     WorkItem.get(work_item_id).update(pr_number=pr_number, branch=branch)
 
     await _fire_closed(repo=repo, pr_number=pr_number, branch=branch, tmp_path=tmp_path)
@@ -372,16 +372,16 @@ async def test_external_close_survives_policy_resolution_failure(druks_db, tmp_p
 @pytest.mark.asyncio
 async def test_stale_close_after_redispatch_spares_the_new_run(druks_db, tmp_path):
     """A delayed pr.closed for a superseded attempt's PR must not touch the new
-    run: re-dispatch cleared the item's branch/PR, so the stale close no longer
-    resolves the item."""
+    run: the new attempt claimed the item, so the stale close no longer resolves
+    it."""
     from druks.database import db_session as ds
 
     repo, pr_a, branch_a = "ClawHaven/acme-app", 61, "agent/eng-old"
     item = make_test_work_item(repo=repo, title="Re-dispatched")
     item.update(pr_number=pr_a, branch=branch_a)
-    # Re-dispatch: a new run takes over and the prior attempt's branch/PR clear.
+    # Re-dispatch: a new run takes over and claims the item.
     new_run = seed_build_run(ds(), work_item_id=item.id, state="running")
-    item.start_attempt(new_run.id)
+    item.start_attempt()
 
     await _fire_closed(repo=repo, pr_number=pr_a, branch=branch_a, tmp_path=tmp_path, merged=False)
 

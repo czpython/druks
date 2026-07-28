@@ -216,16 +216,10 @@ class WorkItem(StoredSubject):
     repo: Mapped[str]
     pr_number: Mapped[int | None]
     branch: Mapped[str | None]
-    # The item's latest durable build id. Build owns this historical link, so the
-    # platform timeline stays oblivious to extensions. SET NULL lets pruning leave
-    # the item without a stale attempt id.
-    build_run_id: Mapped[str | None] = mapped_column(
-        ForeignKey("durable_runs.id", ondelete="SET NULL"), default=None
-    )
-    # GitHub's verdict on the PR above, verbatim: "merged" or "closed". Unset while
-    # the work is still druks's — Board reads the absence, History reads the fact.
+    # GitHub's word, verbatim: "merged" or "closed". Unset while the work is
+    # still druks's, which is what the board reads.
     resolution: Mapped[str | None] = mapped_column(default=None)
-    # When GitHub resolved it, by GitHub's clock — History's order.
+    # GitHub's clock, not druks's receipt time.
     resolved_at: Mapped[datetime | None] = mapped_column(default=None)
     created_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
     updated_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
@@ -238,9 +232,8 @@ class WorkItem(StoredSubject):
 
     @classmethod
     def list_summaries(cls) -> list[WorkItemSummary]:
-        # The active board: work GitHub hasn't answered yet. Where its run stands
-        # colours the row; it never decides whether the row is here. The 500
-        # most-recent cover it; paginate if a board outgrows it.
+        # Where a run stands colours the row; it never decides whether the row is
+        # here. The 500 most-recent cover it; paginate if a board outgrows it.
         stmt = (
             select(cls).where(cls.resolution.is_(None)).order_by(cls.updated_at.desc()).limit(500)
         )
@@ -302,10 +295,7 @@ class WorkItem(StoredSubject):
         )
         return db_session().scalars(stmt).first()
 
-    def start_attempt(self, run_id: str) -> None:
-        """A fresh build owns the item: the branch, PR and verdict left by the
-        previous attempt describe work this one has not done yet."""
-        self.build_run_id = run_id
+    def start_attempt(self) -> None:
         self.branch = None
         self.pr_number = None
         self.resolution = None
@@ -314,8 +304,6 @@ class WorkItem(StoredSubject):
         db_session().flush()
 
     def resolve(self, *, merged: bool, at: datetime) -> None:
-        """GitHub's verdict on this item's PR, stored once and announced as the
-        milestone of the same name."""
         # cycle: the extension imports this module at file scope.
         import druks.contrib.ship.extension as ship_extension
 
@@ -371,7 +359,6 @@ class WorkItem(StoredSubject):
 
     @classmethod
     def list_handoff(cls, *, limit: int = 10) -> list["WorkItem"]:
-        # The history list: PRs GitHub has resolved, its verdict newest first.
         stmt = (
             select(cls)
             .where(cls.resolved_at.is_not(None))
@@ -415,7 +402,6 @@ class WorkItem(StoredSubject):
         ticket_url: str | None = _KEEP,
         pr_number: int | None = _KEEP,
         branch: str | None = _KEEP,
-        build_run_id: str | None = _KEEP,
         project_id: int = _KEEP,
     ) -> None:
         if title is not _KEEP:
@@ -426,8 +412,6 @@ class WorkItem(StoredSubject):
             self.pr_number = pr_number
         if branch is not _KEEP:
             self.branch = branch
-        if build_run_id is not _KEEP:
-            self.build_run_id = build_run_id
         if project_id is not _KEEP:
             self.project_id = project_id
         self.updated_at = Base.utc_now()

@@ -7,6 +7,11 @@ from druks.ticketing.enums import TicketStatus
 from druks.workflows import WorkflowEvent
 
 
+@subscribe(WorkflowEvent.SCHEDULED, workflow=Build)
+async def new_build_claims_the_item(*, subject: WorkItem, **_: object) -> None:
+    subject.start_attempt()
+
+
 @subscribe("pr.opened", workflow=Build)
 async def pr_open_mirrors_onto_item(
     *, subject: WorkItem, pr_number: int, branch: str, **_: object

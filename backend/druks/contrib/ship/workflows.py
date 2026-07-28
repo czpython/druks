@@ -116,7 +116,7 @@ class Build(Workflow):
                 return
         email = ticket["assignee_email"]
         assignee = Account.get_for_username(email.strip()) if email else None
-        run_id = await cls.start(
+        return await cls.start(
             subject=item,
             account_id=assignee.id if assignee else None,
             repo=item.repo,
@@ -124,12 +124,6 @@ class Build(Workflow):
             task_owner_email=email,
             task_owner_name=ticket["assignee_name"],
         )
-        # A duplicate dispatch gets the live run back and leaves it alone; only a
-        # genuinely new run takes the item over, so a late close for the prior PR
-        # can't resolve this item onto the new run and cancel it.
-        if item.build_run_id != run_id:
-            item.start_attempt(run_id)
-        return run_id
 
     async def run_multistep(
         self,

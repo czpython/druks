@@ -24,6 +24,7 @@ class WorkflowEvent(StrEnum):
     # Each state's signal topic, and what the feed stores. Naming them makes a
     # subscriber's topic typo-proof — a bare string can silently subscribe to a
     # topic nobody publishes.
+    SCHEDULED = "workflow.scheduled"
     RUNNING = "workflow.running"
     PARKED = "workflow.parked"
     FINISHED = "workflow.finished"
@@ -32,7 +33,7 @@ class WorkflowEvent(StrEnum):
 
     @classmethod
     def for_state(cls, state: RunState) -> "WorkflowEvent":
-        # A derived state (scheduled, orphaned) announces nothing, so asking raises.
+        # A derived state (orphaned) announces nothing, so asking raises.
         return cls(f"workflow.{state.value}")
 
 

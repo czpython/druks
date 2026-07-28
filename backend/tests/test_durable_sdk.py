@@ -360,15 +360,28 @@ async def test_browser_origin_start_inherits_the_ambient_account(rt):
 
 async def test_duplicate_start_shares_the_run_across_accounts(rt):
     # Attribution is NEVER part of the dedup id: two accounts starting the same
-    # subject share the one active run.
+    # subject share the one active run — and only the mint announces
+    # workflow.scheduled; the deduped start stays silent.
+    from druks.durable.enums import WorkflowEvent
+    from druks.signals import subscribe
+
+    scheduled = []
+
+    @subscribe(WorkflowEvent.SCHEDULED)
+    async def saw(*, subject=None, **_: object) -> None:
+        scheduled.append(subject)
+
     first = _account_id(rt.engine, "op@example.com")
     second = _account_id(rt.engine, "peer@example.com")
     subject = Widget(id=909090)
     wfid = await rt.SampleFlow.start(subject=subject, account_id=first, repo="owner/app")
     parked = await _wait_for(rt.engine, wfid, lambda r: r.state == RunState.PARKED)
+    minted = [s for s in scheduled if s and s.get("id") == 909090]
+    assert len(minted) == 1
 
     dup = await rt.SampleFlow.start(subject=subject, account_id=second, repo="owner/app")
     assert dup == wfid
+    assert len([s for s in scheduled if s and s.get("id") == 909090]) == 1
 
     await parked.resume(action="merge")
     await _wait_for(rt.engine, wfid, lambda r: r.state == RunState.FINISHED)

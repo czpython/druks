@@ -40,7 +40,7 @@ _GATE_REQUESTS = {
 def _seed_op(druks_db, work_item_id, *, kind="implement", state, input_gate=None):
     """A build run on the item in ``state`` whose latest agent call is ``kind``.
     When a run already exists, advance it (re-trigger = a fresh round on the same
-    item), rebinding ``build_run_id`` to the newest run."""
+    item)."""
     if state == "running" and input_gate:
         run = seed_build_run(
             druks_db,
@@ -224,17 +224,6 @@ def test_repeated_runs_on_one_subject_each_surface_separately(druks_db):
     entries = item.get_timeline()
     assert [entry.kind for entry in entries] == ["ship.build"] * 3
     assert len({entry.id for entry in entries}) == 3
-
-
-def test_update_stamps_build_run_id(druks_db):
-    # build intake stamps the owning run via update(build_run_id=...); the kwarg
-    # was missing, so every "Ready for Agent" transition threw a TypeError.
-    from druks.contrib.ship.models import WorkItem
-
-    item = make_test_work_item(repo="ClawHaven/acme-app", title="x")
-    run = seed_build_run(druks_db, work_item_id=item.id, state="running")
-    item.update(build_run_id=run.id)
-    assert WorkItem.get(item.id).build_run_id == run.id
 
 
 def test_timeline_shows_every_build_attempt(druks_db):
