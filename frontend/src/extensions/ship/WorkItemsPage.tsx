@@ -20,7 +20,7 @@ function matchesQuery(row: WorkItemRow, q: string): boolean {
   if (!q.trim()) return true
   const needle = q.toLowerCase()
   const { summary, status } = row
-  return `${summary.title} ${summary.ticketKey} ${summary.repo} ${statusLine(status)}`
+  return `${summary.title} ${summary.ticketKey} ${summary.repo} ${statusLine(status, summary.resolution)}`
     .toLowerCase()
     .includes(needle)
 }
@@ -32,12 +32,13 @@ function WorkItemRowView({
   row: WorkItemRow
   onOpen: (row: WorkItemRow) => void
 }) {
-  // Active lanes: parked → parked on you, failed → needs you to retry or
-  // cancel, running/scheduled → a step is live.
+  // Active lanes: parked → parked on you, failed → needs you to retry or cancel,
+  // finished → its PR is yours to merge or close, running/scheduled → a step is live.
   const { summary: wi, status } = row
   const failed = status.state === 'failed'
   const parked = status.state === 'parked'
   const live = status.state === 'running' || status.state === 'scheduled'
+  const next = statusLine(status, wi.resolution)
   const when = relTime(secondsSince(wi.updatedAt))
   return (
     <div className={`row row-work-item${failed ? ' row-failed' : ''}`} onClick={() => onOpen(row)}>
@@ -49,11 +50,10 @@ function WorkItemRowView({
       <span />
       <RepoCell repo={wi.repo} project={wi.projectName} />
       <PRCell prNumber={wi.prNumber} prUrl={wi.links.pr} />
-      {/* The line is the ask ("Review plan"), the live step ("Implementing…"),
-          or the timeout hint — build's copy over the platform's status facts. */}
-      <span className="wi-next mono dim">
-        {live ? `${statusLine(status)}…` : statusLine(status)}
-      </span>
+      {/* The line is the ask ("Review plan", "Merge or close the PR"), the live
+          step ("Implementing…"), or the timeout hint — build's copy over the
+          platform's status facts. */}
+      <span className="wi-next mono dim">{live ? `${next}…` : next}</span>
       <span className="wi-updated mono dim">
         {failed ? `failed ${when}` : parked ? `parked ${when}` : when}
       </span>
