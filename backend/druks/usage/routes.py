@@ -97,7 +97,7 @@ async def get_usage_today(account: Account = Depends(current_account)) -> UsageT
     timezone_name = str(timezone)
 
     # Every call counts, even one whose model no picker list claims (pinned
-    # outside the list, or never resolved): money spent must not vanish from
+    # outside the list, or an id that churned): money spent must not vanish from
     # the display, and the strip's total_run_spend_between counts them too.
     # Unclaimed calls land in an extra "unattributed" entry — the panel's
     # per-harness cards look up by name and skip it, its grand total sums the

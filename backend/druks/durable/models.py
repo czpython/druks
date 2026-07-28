@@ -316,10 +316,10 @@ class AgentCall(Base, Uuid7Pk):
         Index("agent_calls_account_finished_idx", "account_id", "finished_at"),
     )
 
-    # Which model ran this row, snapshotted at dispatch; cost analysis and the
-    # transcript layout both read it. Nullable — a call may be recorded before
-    # its model is resolved.
-    model: Mapped[str | None] = mapped_column(String, default=None)
+    # Which model ran this row, snapshotted at dispatch — the model is resolved
+    # before the harness is chosen, so a call always knows what ran it. Cost
+    # analysis reads it; the id may name no current harness once ids churn.
+    model: Mapped[str] = mapped_column(String)
     # The run this LLM call ran in. ON DELETE CASCADE, so a call never outlives it.
     run_id: Mapped[str] = mapped_column(ForeignKey("durable_runs.id", ondelete="CASCADE"))
     run: Mapped["Run"] = relationship()
@@ -371,8 +371,7 @@ class AgentCall(Base, Uuid7Pk):
     @property
     def artifact_layout(self) -> RunArtifactLayout:
         # The sandbox runner streams every run's stdout to stdout.jsonl no matter
-        # which harness runs it, so the layout never needs the model (which may
-        # still be unresolved on this row).
+        # which harness runs it, so the layout never needs the model.
         sub = self.call_dir
         return RunArtifactLayout(
             transcript=sub / "stdout.jsonl",
@@ -404,7 +403,7 @@ class AgentCall(Base, Uuid7Pk):
         *,
         call_id: str,
         run_id: str,
-        model: str | None,
+        model: str,
         agent: str,
         host_id: str,
         account_id: str,

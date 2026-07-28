@@ -360,7 +360,7 @@ def seed_call(
     agent: str,
     *,
     status: str = "succeeded",
-    model: str | None = "gpt-5.5",
+    model: str = "gpt-5.5",
     last_error: str | None = None,
 ) -> AgentCall:
     """An agent call on a run, stamped with the id of the agent that made it."""
