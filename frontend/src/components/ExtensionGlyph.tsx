@@ -2,7 +2,7 @@ import {
   Activity, Beaker, Bell, Bookmark, Bot, Box, Brain, Bug, Calendar, Clock, Code, Compass,
   Cpu, Database, Eye, FileSearch, Flame, FlaskConical, Folder, Gauge, GitBranch,
   GitPullRequest, Globe, Hammer, Hexagon, Inbox, Key, Layers, Map, MessageSquare,
-  Microscope, Network, Package, Radar, Rocket, Scan, Search, Shield, Sparkles, Telescope,
+  Microscope, Network, Package, Radar, Rocket, Scan, Search, Shield, Ship, Sparkles, Telescope,
   Terminal, Wand, Workflow, Wrench, Zap, type LucideIcon,
 } from 'lucide-react'
 
@@ -18,7 +18,8 @@ const EXTENSION_ICONS: Record<string, LucideIcon> = {
   bookmark: Bookmark, brain: Brain, calendar: Calendar, clock: Clock, code: Code,
   'file-search': FileSearch, flame: Flame, 'flask-conical': FlaskConical, folder: Folder,
   gauge: Gauge, 'git-pull-request': GitPullRequest, inbox: Inbox, key: Key, map: Map,
-  'message-square': MessageSquare, network: Network, scan: Scan, wand: Wand, workflow: Workflow,
+  'message-square': MessageSquare, network: Network, scan: Scan, ship: Ship, wand: Wand,
+  workflow: Workflow,
 }
 
 export function ExtensionGlyph({ name, size = 15 }: { name: string; size?: number }) {

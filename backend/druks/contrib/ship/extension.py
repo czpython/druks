@@ -27,7 +27,7 @@ class Ship(Extension):
     # These tables (projects, work_items, ...) are already unprefixed in core's
     # migration history, so they must stay that way.
     prefix_tables = False
-    icon = "hammer"
+    icon = "ship"
     description = (
         "Each stage of the build pipeline runs as its own agent. An agent runs its own "
         "model, or inherits its harness default — the backend dispatches the harness "
