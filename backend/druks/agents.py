@@ -12,8 +12,7 @@ from druks.durable.activity import set_run_phase
 from druks.durable.engine import _step_engine, step_session
 from druks.durable.enums import AgentCallStatus
 from druks.durable.exceptions import WorkflowError
-from druks.durable.models import AgentCall, Artifact, Run
-from druks.events.models import Event
+from druks.durable.models import AgentCall, Artifact
 from druks.extensions.registry import agents
 from druks.harnesses.models import HarnessConnection
 from druks.harnesses.registry import get_harness_for_model
@@ -180,15 +179,6 @@ class Agent:
         connection = HarnessConnection.lookup(harness.name, workflow.account_id)
         # Plain snapshots: the commits below expire the ORM row mid-flight.
         connection_id, charged_account_id = connection.id, connection.account_id
-        if charged_account_id != workflow.account_id:
-            # The visible nudge: this call charged the fallback account.
-            Event.emit(
-                type="credential.fallback",
-                subject=workflow._subject,
-                label=Run.get(workflow_id).subject_label,
-                payload={"run_id": workflow_id, "harness": harness.name},
-                extension=type(workflow).extension,
-            )
         # An agent call is a durability boundary — its effects don't roll back —
         # so commit here rather than hold the step's connection idle through the
         # minutes of provisioning and the run.
