@@ -43,7 +43,6 @@ export interface WorkItemSummary extends SubjectSummary {
   projectName: string
   title: string
   ticketKey: string
-  ticketUrl?: string | null
   prNumber?: number | null
   branch?: string | null
   createdAt: string
@@ -63,7 +62,6 @@ export interface DashboardItem {
   status: HandoffStatus
   createdAt: string
   updatedAt: string
-  links: Links
 }
 
 // Build's concrete subject views — the platform's generic board row and timeline

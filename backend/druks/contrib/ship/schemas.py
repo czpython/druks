@@ -93,13 +93,6 @@ class Links(BaseResponse):
     pr: str | None = None
     ticket: str | None = None
 
-    @classmethod
-    def for_work_item(
-        cls, *, repo: str | None, pr_number: int | None, ticket_url: str | None
-    ) -> "Links":
-        pr = f"https://github.com/{repo}/pull/{pr_number}" if pr_number else None
-        return cls(repo=f"https://github.com/{repo}", pr=pr, ticket=ticket_url)
-
 
 class WorkItemSummary(SubjectSummary):
     # The work item's domain header — what only Ship knows. Status (where it is
@@ -113,18 +106,18 @@ class WorkItemSummary(SubjectSummary):
     project_name: str = Field(validation_alias=AliasPath("project", "name"))
     title: str
     ticket_key: str
-    ticket_url: str | None = None
     pr_number: int | None = None
     branch: str | None = None
     created_at: datetime
     updated_at: datetime
+    # Carried for the links below, which is where the UI reads it.
+    ticket_url: str | None = Field(default=None, exclude=True)
 
     @computed_field
     @property
     def links(self) -> Links:
-        return Links.for_work_item(
-            repo=self.repo, pr_number=self.pr_number, ticket_url=self.ticket_url
-        )
+        pr = f"https://github.com/{self.repo}/pull/{self.pr_number}" if self.pr_number else None
+        return Links(repo=f"https://github.com/{self.repo}", pr=pr, ticket=self.ticket_url)
 
 
 class DashboardItem(BaseResponse):
@@ -143,20 +136,11 @@ class DashboardItem(BaseResponse):
     status: HandoffStatus
     created_at: datetime
     updated_at: datetime
-    # Carried for the links below, never serialized on its own.
-    ticket_url: str | None = Field(default=None, exclude=True)
 
     @computed_field
     @property
     def key(self) -> str:
         return f"code:{self.source_id}"
-
-    @computed_field
-    @property
-    def links(self) -> Links:
-        return Links.for_work_item(
-            repo=self.repo, pr_number=self.pr_number, ticket_url=self.ticket_url
-        )
 
 
 class WorkItemsHistoryResponse(BaseResponse):
