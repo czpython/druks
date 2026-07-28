@@ -12,7 +12,9 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 def _seed_call(druks_db) -> AgentCall:
     druks_db.add(Run(id="run-1", kind="build"))
-    call = AgentCall(id="call-1", run_id="run-1", agent="summarize", sandbox_host_id="host-1")
+    call = AgentCall(
+        id="call-1", run_id="run-1", agent="summarize", model="m", sandbox_host_id="host-1"
+    )
     druks_db.add(call)
     druks_db.flush()
     return call
@@ -64,7 +66,9 @@ def test_get_latest_for_run_returns_the_newest_calls_artifact(druks_db, tmp_path
     druks_db.add(Run(id="run-1", kind="build"))
     for call_id, title in (("call-1", "First plan"), ("call-2", "Revised plan")):
         druks_db.add(
-            AgentCall(id=call_id, run_id="run-1", agent="summarize", sandbox_host_id="host-1")
+            AgentCall(
+                id=call_id, run_id="run-1", agent="summarize", model="m", sandbox_host_id="host-1"
+            )
         )
         druks_db.flush()
         Artifact.record(
@@ -89,7 +93,9 @@ def test_get_ask_resolves_the_review_artifact(druks_db, tmp_path):
     )
     druks_db.add(run)
     druks_db.add(
-        AgentCall(id="call-1", run_id="run-1", agent="summarize", sandbox_host_id="host-1")
+        AgentCall(
+            id="call-1", run_id="run-1", agent="summarize", model="m", sandbox_host_id="host-1"
+        )
     )
     druks_db.flush()
     Artifact.record(call_dir=tmp_path, call_id="call-1", kind="markdown", title="Plan", content="x")
@@ -128,7 +134,9 @@ async def test_get_artifact_returns_recorded_content(druks_db, tmp_path, monkeyp
     # call_dir resolves through load_settings().artifacts_dir, so point it at tmp.
     monkeypatch.setenv("DRUKS_DATA_DIR", str(tmp_path))
     druks_db.add(Run(id="run-1", kind="build"))
-    call = AgentCall(id="call-1", run_id="run-1", agent="summarize", sandbox_host_id="host-1")
+    call = AgentCall(
+        id="call-1", run_id="run-1", agent="summarize", model="m", sandbox_host_id="host-1"
+    )
     druks_db.add(call)
     druks_db.flush()
     Artifact.record(
@@ -158,7 +166,9 @@ async def test_get_artifact_404_when_content_gone(druks_db, tmp_path, monkeypatc
     monkeypatch.setenv("DRUKS_DATA_DIR", str(tmp_path))
     druks_db.add(Run(id="run-1", kind="build"))
     druks_db.add(
-        AgentCall(id="call-1", run_id="run-1", agent="summarize", sandbox_host_id="host-1")
+        AgentCall(
+            id="call-1", run_id="run-1", agent="summarize", model="m", sandbox_host_id="host-1"
+        )
     )
     druks_db.flush()
     druks_db.execute(

@@ -231,7 +231,7 @@ def seed_note_run(session, *, note=None, state: str = "running", **kwargs):
     return seed_run(session, kind=Summarize.kind, subject=subject, state=state, **kwargs)
 
 
-def seed_note_agent_run(*, agent: str = "implement", model: str | None = "gpt-5.5", **kwargs):
+def seed_note_agent_run(*, agent: str = "implement", model: str = "gpt-5.5", **kwargs):
     """A run on a fresh note with one agent call on it — the call is what the caller wants."""
     from druks.database import db_session
     from druks.testing import seed_call

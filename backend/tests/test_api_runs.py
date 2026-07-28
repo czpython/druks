@@ -228,11 +228,11 @@ def test_get_file_missing_returns_404(
 
 
 def test_agent_call_artifact_layout(druks_db, tmp_path):
-    # Layout sub-dir is the call id; the sandbox runner streams every run's
-    # stdout to stdout.jsonl, so the layout holds with the model unresolved.
+    # Layout sub-dir is the call id; the sandbox runner streams every run's stdout
+    # to stdout.jsonl, so the layout is the same whichever harness ran the call.
     note = Note.create(body="artifact layout")
     run = seed_run(druks_db, kind=Summarize.kind, subject=note)
-    call = seed_call(druks_db, run, "summarize", model=None, status="running")
+    call = seed_call(druks_db, run, "summarize", model="claude-opus-4-7", status="running")
     sub = Path(call.artifact_dir) / call.id
     assert call.artifact_layout.transcript == sub / "stdout.jsonl"
     assert call.artifact_layout.stderr == sub / "stderr.log"

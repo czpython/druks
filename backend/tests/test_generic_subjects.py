@@ -82,7 +82,7 @@ def _seed_run(
 
 
 def _seed_call(session, run, *, agent, status="succeeded"):
-    call = AgentCall(run_id=run.id, agent=agent, status=status, sandbox_host_id="h")
+    call = AgentCall(run_id=run.id, agent=agent, model="m", status=status, sandbox_host_id="h")
     session.add(call)
     session.flush()
     return call

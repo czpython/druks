@@ -47,7 +47,7 @@ def _harness(body: dict, name: str) -> dict:
     return next(entry for entry in body["harnesses"] if entry["name"] == name)
 
 
-def _seed_agent_call(druks_db, *, model: str | None = "gpt-5.5"):
+def _seed_agent_call(druks_db, *, model: str = "gpt-5.5"):
     note = Note.create(body="usage accounting")
     run = seed_run(druks_db, kind=Summarize.kind, subject=note)
     return seed_call(druks_db, run, "summarize", status="running", model=model)
@@ -57,19 +57,18 @@ def test_usage_today_counts_calls_whose_model_isnt_a_current_harness(client, dru
     # Model ids churn on deploys (opus-4-7 → 4-8), so a call finished earlier today
     # can carry an id no harness claims any more. Money spent must not vanish from
     # the display — the sys-strip's total_run_spend_between counts every call, and
-    # the two surfaces must quote the same number. Unclaimed and unresolved models
-    # land in the "unattributed" bucket the panel's grand total sums.
-    for model in ("claude-opus-4-5", None):
-        call = _seed_agent_call(druks_db, model=model)
-        call.account_id = _account_id()
-        call.finished_at = datetime.now(UTC)
-        call.cost_usd = 2.5
+    # the two surfaces must quote the same number. Unclaimed models land in the
+    # "unattributed" bucket the panel's grand total sums.
+    call = _seed_agent_call(druks_db, model="claude-opus-4-5")
+    call.account_id = _account_id()
+    call.finished_at = datetime.now(UTC)
+    call.cost_usd = 2.5
     druks_db.flush()
 
     body = client.get("/api/usage/today").json()
     bucket = _harness(body, "unattributed")
-    assert bucket["runs"] == 2
-    assert bucket["spendUsd"] == 5.0
+    assert bucket["runs"] == 1
+    assert bucket["spendUsd"] == 2.5
 
 
 def test_get_usage_empty_returns_available_false(client) -> None:
