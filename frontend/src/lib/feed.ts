@@ -12,7 +12,7 @@ const LIFECYCLE_VERBS: Record<string, string> = {
 }
 
 export interface EventLine {
-  // What happened, in words: "build started", "shipped".
+  // What happened, in words: "build started", "merged".
   label: string
   // Who it happened to, as it showed itself. Empty for a row about nothing in
   // particular.
@@ -41,7 +41,7 @@ function label(event: FeedItem): string {
     const workflow = localName(event.workflow)
     return workflow ? `${workflow} ${verb}` : verb
   }
-  // An extension's milestone type is its own word ("shipped", "needs_answers"), and an
+  // An extension's milestone type is its own word ("merged", "needs_answers"), and an
   // unrecognised kind reads as itself rather than disappearing.
   return words(event.kind)
 }

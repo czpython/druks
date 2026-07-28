@@ -1,7 +1,6 @@
 import druks.contrib.ship.subscribers  # noqa: F401 — registers the lane reactions
 import pytest
 from druks.contrib.ship.contracts import ReviewWork
-from druks.contrib.ship.enums import HandoffStatus
 from druks.contrib.ship.models import WorkItem
 from druks.contrib.ship.workflows import Build
 from druks.durable import Run
@@ -14,15 +13,6 @@ from uuid_utils import uuid7
 from ship.factories import make_test_work_item
 
 pytestmark = pytest.mark.asyncio
-
-
-async def test_run_running_puts_item_back_on_board(druks_db):
-    item = make_test_work_item(repo="acme/widget", title="t", source="linear", ticket_key="ACME-1")
-    item.set_status(HandoffStatus.CANCELLED)
-
-    await publish(WorkflowEvent.RUNNING, subject=item.identity, kind=Build.kind)
-
-    assert WorkItem.get(item.id).status is None
 
 
 async def test_build_lifecycle_reaches_the_tracker(druks_db, monkeypatch):

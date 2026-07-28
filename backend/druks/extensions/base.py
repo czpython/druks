@@ -481,7 +481,7 @@ class Extension:
     ) -> None:
         """Record one of this extension's domain events to the log, stamped with the
         extension automatically. Apps record through here so the ``Event`` model
-        stays a platform internal. ``type`` is the milestone's own word ("shipped") —
+        stays a platform internal. ``type`` is the milestone's own word ("merged") —
         the feed reads it as one, so an extension writes no rendering."""
         Event.emit(
             type=type,

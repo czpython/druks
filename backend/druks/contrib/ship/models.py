@@ -6,7 +6,6 @@ from sqlalchemy import ForeignKey, Index, func, select
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from druks.contrib.ship.enums import HandoffStatus
 from druks.contrib.ship.policy import RepoPolicy
 from druks.contrib.ship.schemas import ProjectRepoSummary, WorkItemSummary
 from druks.core.apis.github import get_github_client
@@ -195,7 +194,7 @@ class WorkItem(StoredSubject):
         # don't collide once we support multiple providers.
         Index("work_items_ticket_unique", "source", "ticket_key", unique=True),
         Index("work_items_project_idx", "project_id"),
-        Index("work_items_status_idx", "status"),
+        Index("work_items_resolved_idx", "resolved_at"),
     )
 
     project_id: Mapped[int] = mapped_column(
@@ -223,7 +222,11 @@ class WorkItem(StoredSubject):
     build_run_id: Mapped[str | None] = mapped_column(
         ForeignKey("durable_runs.id", ondelete="SET NULL"), default=None
     )
-    status: Mapped[str | None] = mapped_column(default=None)
+    # GitHub's verdict on the PR above, verbatim: "merged" or "closed". Unset while
+    # the work is still druks's — Board reads the absence, History reads the fact.
+    resolution: Mapped[str | None] = mapped_column(default=None)
+    # When GitHub resolved it, by GitHub's clock — History's order.
+    resolved_at: Mapped[datetime | None] = mapped_column(default=None)
     created_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
     updated_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
 
@@ -235,9 +238,13 @@ class WorkItem(StoredSubject):
 
     @classmethod
     def list_summaries(cls) -> list[WorkItemSummary]:
-        # The active board: whatever hasn't handed off yet. The 500 most-recent
-        # cover it; paginate if a board outgrows it.
-        return [item.get_summary() for item in cls.list_open(limit=500)]
+        # The active board: work GitHub hasn't answered yet. Where its run stands
+        # colours the row; it never decides whether the row is here. The 500
+        # most-recent cover it; paginate if a board outgrows it.
+        stmt = (
+            select(cls).where(cls.resolution.is_(None)).order_by(cls.updated_at.desc()).limit(500)
+        )
+        return [item.get_summary() for item in db_session().scalars(stmt)]
 
     @classmethod
     def create(
@@ -295,12 +302,34 @@ class WorkItem(StoredSubject):
         )
         return db_session().scalars(stmt).first()
 
+    def start_attempt(self, run_id: str) -> None:
+        """A fresh build owns the item: the branch, PR and verdict left by the
+        previous attempt describe work this one has not done yet."""
+        self.build_run_id = run_id
+        self.branch = None
+        self.pr_number = None
+        self.resolution = None
+        self.resolved_at = None
+        self.updated_at = Base.utc_now()
+        db_session().flush()
+
+    def resolve(self, *, merged: bool, at: datetime) -> None:
+        """GitHub's verdict on this item's PR, stored once and announced as the
+        milestone of the same name."""
+        # cycle: the extension imports this module at file scope.
+        import druks.contrib.ship.extension as ship_extension
+
+        self.resolution = "merged" if merged else "closed"
+        self.resolved_at = at
+        self.updated_at = Base.utc_now()
+        ship_extension.Ship.record_event(type=self.resolution, subject=self)
+        db_session().flush()
+
     async def ship(self) -> None:
         # A build parked on the operator's review is stranded by their merge; a running
         # one converges on its own, its merge step finding the PR already closed.
         from druks.contrib.ship.workflows import Build
 
-        self.set_status(HandoffStatus.SHIPPED)
         build = self.get_status(workflow=Build)
         if build.is_parked:
             await Build.cancel(self, failure="pr merged while parked")
@@ -312,7 +341,6 @@ class WorkItem(StoredSubject):
         # must not strand it there.
         from druks.contrib.ship.workflows import Build
 
-        self.set_status(HandoffStatus.CANCELLED, event_payload={"external": True})
         await Build.cancel(self, failure="pr closed without merge")
         db_session().flush()
         try:
@@ -343,26 +371,14 @@ class WorkItem(StoredSubject):
 
     @classmethod
     def list_handoff(cls, *, limit: int = 10) -> list["WorkItem"]:
-        # The history list: items at rest in a handoff lane, newest first.
+        # The history list: PRs GitHub has resolved, its verdict newest first.
         stmt = (
-            select(cls).where(cls.status.is_not(None)).order_by(cls.updated_at.desc()).limit(limit)
+            select(cls)
+            .where(cls.resolved_at.is_not(None))
+            .order_by(cls.resolved_at.desc())
+            .limit(limit)
         )
         return list(db_session().scalars(stmt))
-
-    def set_status(
-        self, status: HandoffStatus | None, *, event_payload: dict[str, Any] | None = None
-    ) -> None:
-        """The handoff-lane write. A non-None status is a milestone, so the
-        matching build event records first — the pairing is structural, not a
-        call-site convention. None clears the lane on (re)dispatch: no event."""
-        if status:
-            # cycle: the extension imports this module at file scope.
-            import druks.contrib.ship.extension as ship_extension
-
-            ship_extension.Ship.record_event(type=status, subject=self, payload=event_payload)
-        self.status = status
-        self.updated_at = Base.utc_now()
-        db_session().flush()
 
     async def set_ticket_status(self, status: TicketStatus) -> None:
         # No-op for sources without a configured tracker (github, absent creds).

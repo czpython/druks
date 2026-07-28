@@ -250,7 +250,6 @@ async def list_work_items_history(
 ) -> WorkItemsHistoryResponse:
     response.headers["Cache-Control"] = "no-store"
     clamped = max(1, min(limit, _HISTORY_MAX_LIMIT))
-    # Recent-history aggregation. History is "handoff" — druks finished a
-    # unit and handed it off as shipped or cancelled.
+    # Recent history: the PRs GitHub has resolved, its verdict newest first.
     items = [DashboardItem.model_validate(wi) for wi in WorkItem.list_handoff(limit=clamped)]
     return WorkItemsHistoryResponse(items=items)

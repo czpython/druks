@@ -1,3 +1,4 @@
+import type { PRResolution } from './api'
 import type { RunSummary, SubjectActivity, SubjectStatus } from '../../api/types'
 
 // Build's status-line copy, composed from the platform's status facts — the backend
@@ -19,7 +20,7 @@ function kindLabel(kind: string): string {
   return spaced.charAt(0).toUpperCase() + spaced.slice(1)
 }
 
-export function statusLine(status: SubjectStatus): string {
+export function statusLine(status: SubjectStatus, resolution: PRResolution | null): string {
   if (status.state === 'parked') {
     return parkedLine(status.gate) ?? 'Waiting on you'
   }
@@ -30,6 +31,11 @@ export function statusLine(status: SubjectStatus): string {
     // An unanswered gate, not a crash — the run is terminal, so a fresh
     // trigger goes straight through; say so instead of a bare "failed".
     return `${kindLabel(status.kind)} timed out — re-trigger to retry`
+  }
+  if (status.state === 'finished' && !resolution) {
+    // Druks is done and GitHub hasn't spoken, which is why the item is still
+    // on the board — name the turn instead of leaving the row wordless.
+    return 'Merge or close the PR'
   }
   return ''
 }

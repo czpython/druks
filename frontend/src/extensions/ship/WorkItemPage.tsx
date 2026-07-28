@@ -5,7 +5,7 @@ import { Link, useLocation } from 'wouter'
 import { api } from '../../api/client'
 import { useSSE } from '../../api/sse'
 import { buildApi } from './api'
-import type { WorkItemDetail, WorkItemSummary } from './api'
+import type { PRResolution, WorkItemDetail, WorkItemSummary } from './api'
 import type {
   AgentCallSummary,
   InputRequest,
@@ -134,9 +134,9 @@ const STATE_CLS: Record<RunState, string> = {
 
 // The pill renders build's status line over the platform's facts; the
 // tone comes from the lifecycle state. Live (a dot animates) while a run is active.
-function statusView(status: SubjectStatus): Status {
+function statusView(status: SubjectStatus, resolution: PRResolution | null): Status {
   const live = status.state === 'running' || status.state === 'parked'
-  return { cls: STATE_CLS[status.state], label: statusLine(status), live }
+  return { cls: STATE_CLS[status.state], label: statusLine(status, resolution), live }
 }
 
 const fmtTok = (n: number) => (n > 0 ? formatTokenCount(n) : '0')
@@ -170,7 +170,7 @@ function WorkItemView({ data }: { data: WorkItemDetail }) {
   const allCalls = runs.flatMap((run) => run.agentCalls)
   const totalCost = allCalls.reduce((s, c) => s + (c.costUsd ?? 0), 0)
   const totalTokens = allCalls.reduce((s, c) => s + (c.tokens?.totalTokens ?? 0), 0)
-  const status = statusView(data.status)
+  const status = statusView(data.status, data.summary.resolution)
 
   // Re-render once a second while anything is live so the elapsed counters
   // (the work-item total, a running run's duration) tick on their own —

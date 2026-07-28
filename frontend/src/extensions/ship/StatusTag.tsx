@@ -1,18 +1,18 @@
-import type { HandoffStatus } from './api'
+import type { PRResolution } from './api'
 
-const GLYPH: Record<HandoffStatus, string> = {
-  shipped: '✓',
-  cancelled: '◯',
+const GLYPH: Record<PRResolution, string> = {
+  merged: '✓',
+  closed: '◯',
 }
 
 interface Props {
-  status: HandoffStatus
+  resolution: PRResolution
 }
 
-export function StatusTag({ status }: Props) {
+export function StatusTag({ resolution }: Props) {
   return (
-    <span className={`outcome-tag outcome-${status}`} title={status}>
-      {GLYPH[status]}
+    <span className={`outcome-tag outcome-${resolution}`} title={resolution}>
+      {GLYPH[resolution]}
     </span>
   )
 }

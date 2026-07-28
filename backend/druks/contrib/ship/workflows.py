@@ -124,13 +124,11 @@ class Build(Workflow):
             task_owner_email=email,
             task_owner_name=ticket["assignee_name"],
         )
-        # A duplicate dispatch gets the live run back; only a genuinely new run
-        # resets routing — drop the old branch/PR so a late close for the prior PR
+        # A duplicate dispatch gets the live run back and leaves it alone; only a
+        # genuinely new run takes the item over, so a late close for the prior PR
         # can't resolve this item onto the new run and cancel it.
         if item.build_run_id != run_id:
-            item.update(build_run_id=run_id, branch=None, pr_number=None)
-        # (Re)dispatched → back in flight; clear the handoff lane.
-        item.set_status(None)
+            item.start_attempt(run_id)
         return run_id
 
     async def run_multistep(
@@ -306,7 +304,7 @@ class Build(Workflow):
         return False
 
     async def _approved_work(self) -> bool:
-        # GitHub announces the merge; the pr.closed reaction settles shipped.
+        # GitHub announces the merge; the pr.closed reaction stores its verdict.
         if self._policy.on_approval == "merge":
             if await self.declare_merge_intent():
                 return True

@@ -1,51 +1,21 @@
-from druks.contrib.ship.enums import HandoffStatus
+from datetime import UTC, datetime
+
 from druks.contrib.ship.workflows import Build
 from druks.testing import seed_run
 
 from ship.factories import make_test_work_item
 
 
-async def test_dispatch_pulls_cancelled_item_back_onto_the_board(druks_db, monkeypatch) -> None:
-    """A cancelled item rests in History; dispatching its build must clear the
-    handoff status so the active board shows the run (and its gates) instead
-    of a stale "Cancelled" row."""
-    item = make_test_work_item(repo="o/r", title="t", ticket_key="ACME-1")
-    item.set_status(HandoffStatus.CANCELLED)
-    seed_run(druks_db, kind=Build.kind, run_id="run-1")
-
-    async def fake_start(cls, **kwargs):
-        return "run-1"
-
-    monkeypatch.setattr(Build, "start", classmethod(fake_start))
-    run_id = await Build.dispatch(
-        ticket={
-            "source": item.source,
-            "identifier": item.ticket_key,
-            "status": "Ready",
-            "title": item.title,
-            "url": "https://tracker.test/ACME-1",
-            "project_name": "r",
-            "labels": [],
-            "assignee_email": None,
-            "assignee_name": None,
-        }
-    )
-
-    assert run_id == "run-1"
-    assert item.build_run_id == "run-1"
-    assert item.status is None
-
-
-async def test_redispatch_to_a_new_run_clears_prior_attempt_branch_and_pr(
-    druks_db, monkeypatch
-) -> None:
+async def test_redispatch_to_a_new_run_clears_the_prior_attempts_pr(druks_db, monkeypatch) -> None:
     """A genuinely new run is a fresh attempt: dispatch points the item at it and
-    drops the prior attempt's branch/PR, so a late close for the old PR can't
-    resolve this item onto the new run."""
+    drops the prior attempt's branch, PR and verdict — so a late close for the old
+    PR can't resolve this item onto the new run, and a closed item comes back onto
+    the board instead of resting in History with a live run."""
     seed_run(druks_db, kind=Build.kind, run_id="run-old")
     seed_run(druks_db, kind=Build.kind, run_id="run-new")
     item = make_test_work_item(repo="o/r", title="t", ticket_key="ACME-2")
     item.update(build_run_id="run-old", pr_number=7, branch="agent/old")
+    item.resolve(merged=False, at=datetime.now(UTC))
 
     async def fake_start(cls, **kwargs):
         return "run-new"
@@ -68,6 +38,8 @@ async def test_redispatch_to_a_new_run_clears_prior_attempt_branch_and_pr(
     assert item.build_run_id == "run-new"
     assert item.pr_number is None
     assert item.branch is None
+    assert item.resolution is None
+    assert item.resolved_at is None
 
 
 async def test_duplicate_dispatch_keeps_the_live_attempt_routing(druks_db, monkeypatch) -> None:

@@ -13,7 +13,7 @@ class FeedItem(BaseResponse):
     seq: int = Field(validation_alias="id")
     at: datetime = Field(validation_alias="created_at")
     # The event type verbatim: a lifecycle topic ("workflow.finished") or the
-    # milestone an extension recorded ("shipped"). The words are the client's.
+    # milestone an extension recorded ("merged"). The words are the client's.
     kind: str = Field(validation_alias="type")
     extension: str | None = None
     # The durable kind of the workflow a lifecycle row is about ("ship.build").

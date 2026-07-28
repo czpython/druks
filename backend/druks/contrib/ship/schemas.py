@@ -6,7 +6,8 @@ from pydantic import AliasPath, BaseModel, ConfigDict, Field, computed_field
 from druks.schemas import BaseResponse
 from druks.workflows import SubjectSummary
 
-from .enums import HandoffStatus
+# GitHub's verdict on a PR, verbatim.
+PRResolution = Literal["merged", "closed"]
 
 
 class ProjectRepoSummary(SubjectSummary):
@@ -72,6 +73,8 @@ class WorkItemSummary(SubjectSummary):
     ticket_key: str
     pr_number: int | None = None
     branch: str | None = None
+    # Unset while the item is druks's to work on; set, it belongs to History.
+    resolution: PRResolution | None = None
     created_at: datetime
     updated_at: datetime
     # Carried for the links below, which is where the UI reads it.
@@ -95,11 +98,11 @@ class DashboardItem(BaseResponse):
     # Druks Project is required on WorkItem, so the dashboard always has a
     # curated project name to render.
     project_name: str | None = Field(default=None, validation_alias=AliasPath("project", "name"))
-    # The stored handoff lane, verbatim — the FE words and colors it. History is
-    # terminal-only, so it is always set.
-    status: HandoffStatus
+    # The stored verdict, verbatim — the FE words and colors it. History holds only
+    # resolved PRs, so both it and the time it carries are always set.
+    resolution: PRResolution
     created_at: datetime
-    updated_at: datetime
+    updated_at: datetime = Field(validation_alias="resolved_at")
 
     @computed_field
     @property

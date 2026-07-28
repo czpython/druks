@@ -16,11 +16,15 @@ import { statusLine } from './statusLine'
 import { workItemPathFromSummary } from './slug'
 
 
+function isInFlight(row: WorkItemRow): boolean {
+  return row.status.state === 'running' || row.status.state === 'scheduled'
+}
+
 function matchesQuery(row: WorkItemRow, q: string): boolean {
   if (!q.trim()) return true
   const needle = q.toLowerCase()
   const { summary, status } = row
-  return `${summary.title} ${summary.ticketKey} ${summary.repo} ${statusLine(status)}`
+  return `${summary.title} ${summary.ticketKey} ${summary.repo} ${statusLine(status, summary.resolution)}`
     .toLowerCase()
     .includes(needle)
 }
@@ -32,12 +36,11 @@ function WorkItemRowView({
   row: WorkItemRow
   onOpen: (row: WorkItemRow) => void
 }) {
-  // Active lanes: parked → parked on you, failed → needs you to retry or
-  // cancel, running/scheduled → a step is live.
   const { summary: wi, status } = row
   const failed = status.state === 'failed'
   const parked = status.state === 'parked'
-  const live = status.state === 'running' || status.state === 'scheduled'
+  const live = isInFlight(row)
+  const next = statusLine(status, wi.resolution)
   const when = relTime(secondsSince(wi.updatedAt))
   return (
     <div className={`row row-work-item${failed ? ' row-failed' : ''}`} onClick={() => onOpen(row)}>
@@ -49,11 +52,10 @@ function WorkItemRowView({
       <span />
       <RepoCell repo={wi.repo} project={wi.projectName} />
       <PRCell prNumber={wi.prNumber} prUrl={wi.links.pr} />
-      {/* The line is the ask ("Review plan"), the live step ("Implementing…"),
-          or the timeout hint — build's copy over the platform's status facts. */}
-      <span className="wi-next mono dim">
-        {live ? `${statusLine(status)}…` : statusLine(status)}
-      </span>
+      {/* The line is the ask ("Review plan", "Merge or close the PR"), the live
+          step ("Implementing…"), or the timeout hint — build's copy over the
+          platform's status facts. */}
+      <span className="wi-next mono dim">{live ? `${next}…` : next}</span>
       <span className="wi-updated mono dim">
         {failed ? `failed ${when}` : parked ? `parked ${when}` : when}
       </span>
@@ -85,9 +87,9 @@ function Group({
 
 export function WorkItemsPage() {
   // Pure stream: the board stream pushes the whole board as one `snapshot` event
-  // on connect and on every change (terminal items live in History, so they never
-  // appear). The board renders the latest snapshot — no query, no refetch, no
-  // polling.
+  // on connect and on every change (an item whose PR GitHub has resolved lives in
+  // History, so it never appears). The board renders the latest snapshot — no
+  // query, no refetch, no polling.
   const [rows, setRows] = useState<WorkItemRow[] | null>(null)
   const [errored, setErrored] = useState(false)
   const [query, setQuery] = useState('')
@@ -118,23 +120,16 @@ export function WorkItemsPage() {
     )
   }
 
-  // Two lanes: needs-you — parked on the operator OR failed (a failure still
-  // needs you) — and in-flight (a step running or about to). Newest
-  // movement first.
+  // Two lanes that partition the board: a step is live, or the item is waiting on
+  // the operator — parked, failed, cancelled, or finished with its PR still open.
+  // Newest movement first.
   const active = [...rows].sort(
     (a, b) => updatedAtSortKey(b.summary) - updatedAtSortKey(a.summary),
   )
-  const needsYou = active.filter(
-    (row) =>
-      (row.status.state === 'parked' || row.status.state === 'failed') &&
-      matchesQuery(row, query),
-  )
-  const inFlight = active.filter(
-    (row) =>
-      (row.status.state === 'running' || row.status.state === 'scheduled') &&
-      matchesQuery(row, query),
-  )
-  const total = needsYou.length + inFlight.length
+  const matched = active.filter((row) => matchesQuery(row, query))
+  const inFlight = matched.filter(isInFlight)
+  const needsYou = matched.filter((row) => !isInFlight(row))
+  const total = matched.length
 
   const head = (
     <PageHeader

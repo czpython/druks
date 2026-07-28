@@ -19,42 +19,50 @@ function status(overrides: Partial<SubjectStatus>): SubjectStatus {
 
 describe('statusLine', () => {
   it('parked renders build’s line for the gate identity', () => {
-    expect(statusLine(status({ state: 'parked', gate: 'review_work' }))).toBe(
+    expect(statusLine(status({ state: 'parked', gate: 'review_work' }), null)).toBe(
       'Review implementation',
     )
-    expect(statusLine(status({ state: 'parked', gate: 'review' }))).toBe(
+    expect(statusLine(status({ state: 'parked', gate: 'review' }), null)).toBe(
       'Review the plan',
     )
   })
 
   it('an unmapped gate reads as a generic park', () => {
-    expect(statusLine(status({ state: 'parked', gate: 'unknown' }))).toBe('Waiting on you')
+    expect(statusLine(status({ state: 'parked', gate: 'unknown' }), null)).toBe('Waiting on you')
   })
 
   it('parked without a gate falls back', () => {
-    expect(statusLine(status({ state: 'parked' }))).toBe('Waiting on you')
+    expect(statusLine(status({ state: 'parked' }), null)).toBe('Waiting on you')
   })
 
   it('running shows the live agent over the kind', () => {
-    expect(statusLine(status({ agent: 'implement' }))).toBe('Implement')
+    expect(statusLine(status({ agent: 'implement' }), null)).toBe('Implement')
   })
 
   it('running before any call shows the kind', () => {
-    expect(statusLine(status({}))).toBe('Build')
+    expect(statusLine(status({}), null)).toBe('Build')
   })
 
   it('a timed-out gate renders the re-trigger hint', () => {
-    expect(statusLine(status({ state: 'failed', reason: 'gate_timeout' }))).toBe(
+    expect(statusLine(status({ state: 'failed', reason: 'gate_timeout' }), null)).toBe(
       'Build timed out — re-trigger to retry',
     )
   })
 
   it('a crash renders no line', () => {
-    expect(statusLine(status({ state: 'failed', failure: 'boom' }))).toBe('')
+    expect(statusLine(status({ state: 'failed', failure: 'boom' }), null)).toBe('')
   })
 
   it('the hint is failed-only — an orphaned run with the code renders nothing', () => {
-    expect(statusLine(status({ state: 'orphaned', reason: 'gate_timeout' }))).toBe('')
+    expect(statusLine(status({ state: 'orphaned', reason: 'gate_timeout' }), null)).toBe('')
+  })
+
+  it('a finished build with an open PR names the operator’s turn', () => {
+    expect(statusLine(status({ state: 'finished' }), null)).toBe('Merge or close the PR')
+  })
+
+  it('a resolved item renders no line — it is History’s, not the board’s', () => {
+    expect(statusLine(status({ state: 'finished' }), 'merged')).toBe('')
   })
 })
 

@@ -396,10 +396,9 @@ button { background: none; border: none; color: inherit; cursor: pointer; font: 
   font-size: 11px;
 }
 .outcome-merged    { color: var(--outcome-merged); }
-.outcome-shipped   { color: var(--outcome-merged); }
+.outcome-closed    { color: var(--outcome-abandoned); }
 .outcome-failed    { color: var(--outcome-failed); }
 .outcome-abandoned { color: var(--outcome-abandoned); }
-.outcome-cancelled { color: var(--outcome-abandoned); }
 
 /* ============================================================
    Empty states

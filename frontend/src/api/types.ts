@@ -336,7 +336,7 @@ export interface FeedItem {
   seq: number
   at: string
   // A lifecycle topic ("workflow.finished") or the milestone an extension recorded
-  // ("shipped"). The words are this client's — see lib/feed.
+  // ("merged"). The words are this client's — see lib/feed.
   kind: string
   extension?: string | null
   // The durable kind of the workflow a lifecycle row is about ("ship.build").

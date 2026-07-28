@@ -1,6 +1,7 @@
+from datetime import UTC, datetime, timedelta
+
 import druks.contrib.ship.workflows  # noqa: F401  # registers ship.build, the seeded kind
 import pytest
-from druks.contrib.ship.enums import HandoffStatus
 from druks.contrib.ship.models import WorkItem
 
 from ship.factories import make_test_work_item, seed_build_run
@@ -11,63 +12,59 @@ def _board_ids(druks_db):
     return {row.id for row in WorkItem.list_summaries()}
 
 
-@pytest.mark.parametrize("state", ["scheduled", "running", "parked", "failed"])
-def test_a_live_or_failed_build_holds_the_board(druks_db, state):
-    # A failed run still wants the operator, so it stays alongside the live ones.
+def _resolve(item, *, merged=True, at=None):
+    item.resolve(merged=merged, at=at or datetime.now(UTC))
+
+
+@pytest.mark.parametrize(
+    "state", ["scheduled", "running", "parked", "failed", "finished", "cancelled"]
+)
+def test_an_unresolved_item_holds_the_board(druks_db, state):
+    # Until GitHub answers, the work is still druks's — whatever its run is doing.
+    # Where the run stands colours the row; it never decides whether the row is here.
     item = make_test_work_item(repo="ClawHaven/acme-app", title=f"build {state}")
     seed_build_run(druks_db, work_item_id=item.id, state=state)
     assert str(item.id) in _board_ids(druks_db)
 
 
-@pytest.mark.parametrize("state", ["finished", "cancelled"])
-def test_an_ended_build_leaves_the_board(druks_db, state):
-    # The strand this fixes: membership used to read work_items.status, which a
-    # cancelled or errored run never wrote, so the item lingered forever.
-    item = make_test_work_item(repo="ClawHaven/acme-app", title=f"build {state}")
+@pytest.mark.parametrize("state", ["running", "failed", "finished"])
+def test_a_resolved_pr_leaves_the_board_whatever_its_run_says(druks_db, state):
+    # The strand this fixes: membership read druks's own opinion, which a manual
+    # merge after a failed run never changed, so the item lingered forever.
+    item = make_test_work_item(repo="ClawHaven/acme-app", title=f"resolved {state}")
     seed_build_run(druks_db, work_item_id=item.id, state=state)
-    druks_db.expire_all()
-    assert item.status is None
+    _resolve(item)
     assert str(item.id) not in _board_ids(druks_db)
 
 
 def test_a_redispatched_item_returns_to_the_board(druks_db):
-    # Its newest run drives it, so a fresh build outranks the handed-off one.
+    # Its newest run drives it, and starting a build drops the previous PR's
+    # verdict along with the branch and number it belonged to.
     item = make_test_work_item(repo="ClawHaven/acme-app", title="rebuilt")
     seed_build_run(druks_db, work_item_id=item.id, state="finished")
-    seed_build_run(druks_db, work_item_id=item.id, state="running")
+    _resolve(item, merged=False)
+    run = seed_build_run(druks_db, work_item_id=item.id, state="running")
+    item.start_attempt(run.id)
+
+    assert item.resolution is None
     assert str(item.id) in _board_ids(druks_db)
 
 
-def test_an_item_without_runs_stays_off_the_board(druks_db):
+def test_the_board_does_not_ask_about_runs(druks_db):
+    # Dispatch creates the item and starts its run in one transaction, so a
+    # run-less item is not a production shape — and the board no longer asks.
     item = make_test_work_item(repo="ClawHaven/acme-app", title="never dispatched")
-    assert str(item.id) not in _board_ids(druks_db)
+    assert str(item.id) in _board_ids(druks_db)
 
 
-async def test_a_cancelled_build_settles_as_cancelled(druks_db):
-    # Nothing merged, so History records the abandonment.
-    from druks.contrib.ship.subscribers import build_end_settles_the_item
-
-    item = make_test_work_item(repo="ClawHaven/acme-app", title="cancelled build")
-    await build_end_settles_the_item(subject=item)
-    assert item.status == HandoffStatus.CANCELLED
-
-
-async def test_a_shipped_item_keeps_its_outcome(druks_db):
-    # ship() lands first and owns the verdict; the run's own cancel must not
-    # overwrite it on the way out.
-    from druks.contrib.ship.subscribers import build_end_settles_the_item
-
-    item = make_test_work_item(repo="ClawHaven/acme-app", title="merged build")
-    item.set_status(HandoffStatus.SHIPPED)
-    await build_end_settles_the_item(subject=item)
-    assert item.status == HandoffStatus.SHIPPED
-
-
-def test_history_holds_the_handed_off(druks_db):
-    shipped = make_test_work_item(repo="ClawHaven/acme-app", title="shipped")
-    shipped.set_status(HandoffStatus.SHIPPED)
+def test_history_holds_the_resolved_newest_verdict_first(druks_db):
+    older = make_test_work_item(repo="ClawHaven/acme-app", title="closed first")
+    _resolve(older, merged=False, at=datetime.now(UTC) - timedelta(minutes=1))
+    newer = make_test_work_item(repo="ClawHaven/acme-app", title="merged after")
+    _resolve(newer)
     make_test_work_item(repo="ClawHaven/acme-app", title="still open")
-    assert [item.id for item in WorkItem.list_handoff()] == [shipped.id]
+
+    assert [item.id for item in WorkItem.list_handoff()] == [newer.id, older.id]
 
 
 def test_the_newest_run_speaks_for_the_item(druks_db):
