@@ -118,23 +118,18 @@ export function WorkItemsPage() {
     )
   }
 
-  // Two lanes: needs-you — parked on the operator, failed (a failure still needs
-  // you), or finished with its PR still open — and in-flight (a step running or
-  // about to). Newest movement first.
+  // Two lanes, and every row is in one: in-flight is a step running or about to,
+  // and everything else on the board is waiting on the operator — parked, failed,
+  // cancelled, or finished with its PR still open. Newest movement first.
   const active = [...rows].sort(
     (a, b) => updatedAtSortKey(b.summary) - updatedAtSortKey(a.summary),
   )
-  const needsYou = active.filter(
-    (row) =>
-      (row.status.state === 'parked' ||
-        row.status.state === 'failed' ||
-        row.status.state === 'finished') &&
-      matchesQuery(row, query),
+  const matched = active.filter((row) => matchesQuery(row, query))
+  const inFlight = matched.filter(
+    (row) => row.status.state === 'running' || row.status.state === 'scheduled',
   )
-  const inFlight = active.filter(
-    (row) =>
-      (row.status.state === 'running' || row.status.state === 'scheduled') &&
-      matchesQuery(row, query),
+  const needsYou = matched.filter(
+    (row) => row.status.state !== 'running' && row.status.state !== 'scheduled',
   )
   const total = needsYou.length + inFlight.length
 

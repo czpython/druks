@@ -16,10 +16,12 @@ def _resolve(item, *, merged=True, at=None):
     item.resolve(merged=merged, at=at or datetime.now(UTC))
 
 
-@pytest.mark.parametrize("state", ["scheduled", "running", "parked", "failed", "finished"])
-def test_an_unresolved_build_holds_the_board(druks_db, state):
-    # Until GitHub speaks the work is druks's, whether a step is live, the run
-    # failed, or it finished and left a PR open for the operator to merge.
+@pytest.mark.parametrize(
+    "state", ["scheduled", "running", "parked", "failed", "finished", "cancelled"]
+)
+def test_an_unresolved_item_holds_the_board(druks_db, state):
+    # Until GitHub answers, the work is still druks's — whatever its run is doing.
+    # Where the run stands colours the row; it never decides whether the row is here.
     item = make_test_work_item(repo="ClawHaven/acme-app", title=f"build {state}")
     seed_build_run(druks_db, work_item_id=item.id, state=state)
     assert str(item.id) in _board_ids(druks_db)
@@ -35,14 +37,6 @@ def test_a_resolved_pr_leaves_the_board_whatever_its_run_says(druks_db, state):
     assert str(item.id) not in _board_ids(druks_db)
 
 
-def test_an_abandoned_run_leaves_the_board(druks_db):
-    # Nothing came of the attempt and no PR will resolve it, so it is not the
-    # operator's turn — a redispatch is what brings the item back.
-    item = make_test_work_item(repo="ClawHaven/acme-app", title="cancelled build")
-    seed_build_run(druks_db, work_item_id=item.id, state="cancelled")
-    assert str(item.id) not in _board_ids(druks_db)
-
-
 def test_a_redispatched_item_returns_to_the_board(druks_db):
     # Its newest run drives it, and starting a build drops the previous PR's
     # verdict along with the branch and number it belonged to.
@@ -50,15 +44,17 @@ def test_a_redispatched_item_returns_to_the_board(druks_db):
     seed_build_run(druks_db, work_item_id=item.id, state="finished")
     _resolve(item, merged=False)
     run = seed_build_run(druks_db, work_item_id=item.id, state="running")
-    item.start_build(run.id)
+    item.update(build_run_id=run.id, branch=None, pr_number=None, resolution=None, resolved_at=None)
 
     assert item.resolution is None
     assert str(item.id) in _board_ids(druks_db)
 
 
-def test_an_item_without_runs_stays_off_the_board(druks_db):
+def test_the_board_does_not_ask_about_runs(druks_db):
+    # Dispatch creates the item and starts its run in one transaction, so a
+    # run-less item is not a production shape — and the board no longer asks.
     item = make_test_work_item(repo="ClawHaven/acme-app", title="never dispatched")
-    assert str(item.id) not in _board_ids(druks_db)
+    assert str(item.id) in _board_ids(druks_db)
 
 
 def test_history_holds_the_resolved_newest_verdict_first(druks_db):

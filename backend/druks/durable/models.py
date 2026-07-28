@@ -1,4 +1,3 @@
-from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -151,12 +150,9 @@ class Run(Base):
         return db_session().scalars(stmt).first()
 
     @classmethod
-    def open_subject_ids(
-        cls, subject_type: str, *, states: Sequence[RunState] = OPEN_STATES
-    ) -> Select:
-        """The subjects of ``subject_type`` whose newest run is in ``states``, that
-        run's most recent first — a subquery their own read composes. A board that
-        holds work after its run ends names the wider set."""
+    def open_subject_ids(cls, subject_type: str) -> Select:
+        """The subjects of ``subject_type`` whose newest run hasn't handed off, that
+        run's most recent first — a subquery their own read composes."""
         state = state_expression(cls.id, cls.input_gate, cls.created_at).label("state")
         subject_id = workflow_status.c.attributes["subject_id"].as_string().label("subject_id")
         driving = (
@@ -179,7 +175,7 @@ class Run(Base):
             select(driving.c.subject_id)
             .where(
                 driving.c.rank == 1,
-                driving.c.state.in_([run_state.value for run_state in states]),
+                driving.c.state.in_([run_state.value for run_state in OPEN_STATES]),
             )
             .order_by(driving.c.created_at.desc())
         )

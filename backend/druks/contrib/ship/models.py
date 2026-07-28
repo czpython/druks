@@ -6,7 +6,6 @@ from sqlalchemy import ForeignKey, Index, func, select
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from druks.contrib.ship.constants import BOARD_STATES
 from druks.contrib.ship.policy import RepoPolicy
 from druks.contrib.ship.schemas import ProjectRepoSummary, WorkItemSummary
 from druks.core.apis.github import get_github_client
@@ -239,11 +238,16 @@ class WorkItem(StoredSubject):
 
     @classmethod
     def list_summaries(cls) -> list[WorkItemSummary]:
-        # The active board: work GitHub hasn't resolved, whatever its run is doing —
-        # a finished build whose PR is still open is the operator's turn. The 500
+        # The active board: work GitHub hasn't answered yet. Where its run stands
+        # colours the row; it never decides whether the row is here. The 500
         # most-recent cover it; paginate if a board outgrows it.
-        items = cls.list_open(cls.resolution.is_(None), limit=500, states=BOARD_STATES)
-        return [item.get_summary() for item in items]
+        stmt = (
+            select(cls)
+            .where(cls.resolution.is_(None))
+            .order_by(cls.updated_at.desc())
+            .limit(500)
+        )
+        return [item.get_summary() for item in db_session().scalars(stmt)]
 
     @classmethod
     def create(
@@ -300,17 +304,6 @@ class WorkItem(StoredSubject):
             .limit(1)
         )
         return db_session().scalars(stmt).first()
-
-    def start_build(self, run_id: str) -> None:
-        """A new build takes the item over: it is about that run's PR now, and the
-        previous one's branch, number and verdict no longer describe it."""
-        self.build_run_id = run_id
-        self.branch = None
-        self.pr_number = None
-        self.resolution = None
-        self.resolved_at = None
-        self.updated_at = Base.utc_now()
-        db_session().flush()
 
     def resolve(self, *, merged: bool, at: datetime) -> None:
         """GitHub's outcome for this item's PR, stored once. The matching milestone
@@ -415,6 +408,8 @@ class WorkItem(StoredSubject):
         pr_number: int | None = _KEEP,
         branch: str | None = _KEEP,
         build_run_id: str | None = _KEEP,
+        resolution: str | None = _KEEP,
+        resolved_at: datetime | None = _KEEP,
         project_id: int = _KEEP,
     ) -> None:
         if title is not _KEEP:
@@ -427,6 +422,10 @@ class WorkItem(StoredSubject):
             self.branch = branch
         if build_run_id is not _KEEP:
             self.build_run_id = build_run_id
+        if resolution is not _KEEP:
+            self.resolution = resolution
+        if resolved_at is not _KEEP:
+            self.resolved_at = resolved_at
         if project_id is not _KEEP:
             self.project_id = project_id
         self.updated_at = Base.utc_now()

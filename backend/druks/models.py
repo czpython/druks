@@ -5,13 +5,11 @@ from typing import TYPE_CHECKING, Any, ClassVar, Self
 
 from sqlalchemy import DateTime, Integer, cast, select
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
-from sqlalchemy.sql import ColumnElement
 from sqlalchemy.types import TypeDecorator
 
 from druks.core.utils.time import ensure_utc
 
 if TYPE_CHECKING:
-    from druks.durable.enums import RunState
     from druks.durable.schemas import RunResponse, SubjectStatus, SubjectSummary
     from druks.workflows import Workflow
 
@@ -120,27 +118,19 @@ class StoredSubject(Base):
         return await get_subject_phase(self.subject_type, str(self.id))
 
     @classmethod
-    def list_open(
-        cls,
-        *criteria: ColumnElement[bool],
-        limit: int = 50,
-        states: "Sequence[RunState] | None" = None,
-    ) -> list[Self]:
+    def list_open(cls, *, limit: int = 50) -> list[Self]:
         """The rows whose newest run hasn't handed off — still going, or failed
-        and wanting the operator. What an extension's active view lists. Extra
-        ``criteria`` narrow it on the extension's own columns, and ``states``
-        names a wider set of runs to count, both in SQL so ``limit`` still fills."""
+        and wanting the operator. What an extension's active view lists."""
         # Cycle: the durable read side is built on this module's Base.
         from druks.database import db_session
-        from druks.durable.enums import OPEN_STATES
         from druks.durable.models import Run
 
         # The durable layer keys subjects by string, so the open ids come back as
         # text and cast to this table's integer key.
-        open_ids = Run.open_subject_ids(cls.subject_type, states=states or OPEN_STATES).subquery()
+        open_ids = Run.open_subject_ids(cls.subject_type).subquery()
         stmt = (
             select(cls)
-            .where(cls.id.in_(select(cast(open_ids.c.subject_id, Integer))), *criteria)
+            .where(cls.id.in_(select(cast(open_ids.c.subject_id, Integer))))
             .order_by(cls.id.desc())
             .limit(limit)
         )

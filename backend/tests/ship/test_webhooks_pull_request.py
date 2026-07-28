@@ -218,7 +218,9 @@ async def test_a_remerge_after_redispatch_records_a_fresh_verdict(druks_db, tmp_
     await _fire_closed(repo=repo, pr_number=pr_number, branch=branch, tmp_path=tmp_path)
     # Redispatched: a newer build run owns the item, and its PR is a fresh one.
     new_run = seed_build_run(ds(), work_item_id=work_item_id, state="running")
-    WorkItem.get(work_item_id).start_build(new_run.id)
+    WorkItem.get(work_item_id).update(
+        build_run_id=new_run.id, branch=None, pr_number=None, resolution=None, resolved_at=None
+    )
     WorkItem.get(work_item_id).update(pr_number=pr_number, branch=branch)
 
     await _fire_closed(repo=repo, pr_number=pr_number, branch=branch, tmp_path=tmp_path)
@@ -381,7 +383,9 @@ async def test_stale_close_after_redispatch_spares_the_new_run(druks_db, tmp_pat
     item.update(pr_number=pr_a, branch=branch_a)
     # Re-dispatch: a new run takes over and the prior attempt's branch/PR clear.
     new_run = seed_build_run(ds(), work_item_id=item.id, state="running")
-    item.start_build(new_run.id)
+    item.update(
+        build_run_id=new_run.id, branch=None, pr_number=None, resolution=None, resolved_at=None
+    )
 
     await _fire_closed(repo=repo, pr_number=pr_a, branch=branch_a, tmp_path=tmp_path, merged=False)
 
