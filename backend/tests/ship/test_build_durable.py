@@ -1,11 +1,12 @@
 import asyncio
 import os
+from datetime import UTC, datetime
 from types import SimpleNamespace
 
 import psycopg
 import pytest
 from druks.contrib.ship.models import Project, WorkItem
-from druks.database import configure_session, get_session
+from druks.database import configure_session, db_session, get_session
 from druks.durable import Run, RunState
 from druks.durable.engine import configure_engine, init_dbos, launch, shutdown
 from druks.testing import init_db
@@ -219,6 +220,9 @@ def _stub(
 
 async def _start_to_work_gate(rt, item):
     workflow_id = await rt.flow.start(repo=item.repo, subject=item)
+    # The claim rides the dispatcher's transaction, so its row lock releases at
+    # the request boundary — which the harness has to stand in for.
+    db_session().commit()
     parked = await _wait(
         rt.engine,
         workflow_id,
@@ -312,3 +316,36 @@ async def test_auto_mode_machine_review_replaces_the_plan_gate(rt, monkeypatch):
     await parked.resume(action="approve")
     done = await _wait(rt.engine, workflow_id, lambda run: run.state == RunState.FINISHED)
     assert not done.failure
+
+
+async def test_the_attempt_claims_the_item_once(rt, monkeypatch):
+    """A gate resume replays the body from the top; the claim must not run again
+    and wipe the PR this attempt already opened."""
+    _stub(monkeypatch, rt)
+
+    item = _seed_work_item(rt.engine, repo="acme/claims")
+    # What a previous attempt left behind, and GitHub's verdict on its PR.
+    with Session(rt.engine) as session:
+        stale = session.get(WorkItem, item.id)
+        stale.branch = "agent/previous"
+        stale.pr_number = 7
+        stale.resolution = "closed"
+        stale.resolved_at = datetime.now(UTC)
+        session.commit()
+
+    workflow_id, parked = await _start_to_work_gate(rt, item)
+
+    # The claim cleared what the previous attempt left...
+    with Session(rt.engine) as session:
+        claimed = session.get(WorkItem, item.id)
+        assert claimed.resolution is None
+        assert claimed.resolved_at is None
+        # ...and this attempt's own delivery then mirrored onto it.
+        assert (claimed.pr_number, claimed.branch) == (42, "agent/acme-1")
+
+    await parked.resume(action="approve")
+    await _wait(rt.engine, workflow_id, lambda run: run.state == RunState.FINISHED)
+
+    with Session(rt.engine) as session:
+        after = session.get(WorkItem, item.id)
+        assert (after.pr_number, after.branch) == (42, "agent/acme-1")

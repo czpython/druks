@@ -805,6 +805,8 @@ class Workflow:
         Run.create_row(
             _step_engine(), workflow_id=workflow_id, kind=cls.kind, account_id=account_id
         )
+        if subject:
+            await publish(WorkflowEvent.SCHEDULED, subject=subject.identity, kind=cls.kind)
         return workflow_id
 
 

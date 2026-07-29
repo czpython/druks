@@ -20,8 +20,6 @@ def _resolve(item, *, merged=True, at=None):
     "state", ["scheduled", "running", "parked", "failed", "finished", "cancelled"]
 )
 def test_an_unresolved_item_holds_the_board(druks_db, state):
-    # Until GitHub answers, the work is still druks's — whatever its run is doing.
-    # Where the run stands colours the row; it never decides whether the row is here.
     item = make_test_work_item(repo="ClawHaven/acme-app", title=f"build {state}")
     seed_build_run(druks_db, work_item_id=item.id, state=state)
     assert str(item.id) in _board_ids(druks_db)
@@ -29,8 +27,6 @@ def test_an_unresolved_item_holds_the_board(druks_db, state):
 
 @pytest.mark.parametrize("state", ["running", "failed", "finished"])
 def test_a_resolved_pr_leaves_the_board_whatever_its_run_says(druks_db, state):
-    # The strand this fixes: membership read druks's own opinion, which a manual
-    # merge after a failed run never changed, so the item lingered forever.
     item = make_test_work_item(repo="ClawHaven/acme-app", title=f"resolved {state}")
     seed_build_run(druks_db, work_item_id=item.id, state=state)
     _resolve(item)
@@ -38,21 +34,15 @@ def test_a_resolved_pr_leaves_the_board_whatever_its_run_says(druks_db, state):
 
 
 def test_a_redispatched_item_returns_to_the_board(druks_db):
-    # Its newest run drives it, and starting a build drops the previous PR's
-    # verdict along with the branch and number it belonged to.
     item = make_test_work_item(repo="ClawHaven/acme-app", title="rebuilt")
-    seed_build_run(druks_db, work_item_id=item.id, state="finished")
     _resolve(item, merged=False)
-    run = seed_build_run(druks_db, work_item_id=item.id, state="running")
-    item.start_attempt(run.id)
 
-    assert item.resolution is None
+    item.start_attempt()
+
     assert str(item.id) in _board_ids(druks_db)
 
 
 def test_the_board_does_not_ask_about_runs(druks_db):
-    # Dispatch creates the item and starts its run in one transaction, so a
-    # run-less item is not a production shape — and the board no longer asks.
     item = make_test_work_item(repo="ClawHaven/acme-app", title="never dispatched")
     assert str(item.id) in _board_ids(druks_db)
 

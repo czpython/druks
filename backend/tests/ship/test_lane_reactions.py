@@ -1,3 +1,5 @@
+from datetime import UTC, datetime
+
 import druks.contrib.ship.subscribers  # noqa: F401 — registers the lane reactions
 import pytest
 from druks.contrib.ship.contracts import ReviewWork
@@ -13,6 +15,20 @@ from uuid_utils import uuid7
 from ship.factories import make_test_work_item
 
 pytestmark = pytest.mark.asyncio
+
+
+async def test_new_build_claims_the_item(druks_db):
+    # A resume replays the body without passing through start(), so this topic —
+    # not RUNNING — is the one that fires once per attempt.
+    item = make_test_work_item(repo="acme/widget", title="t", source="linear", ticket_key="ACME-1")
+    item.update(pr_number=7, branch="agent/old")
+    item.resolve(merged=False, at=datetime.now(UTC))
+
+    await publish(WorkflowEvent.SCHEDULED, subject=item.identity, kind=Build.kind)
+
+    refreshed = WorkItem.get(item.id)
+    assert (refreshed.branch, refreshed.pr_number) == (None, None)
+    assert (refreshed.resolution, refreshed.resolved_at) == (None, None)
 
 
 async def test_build_lifecycle_reaches_the_tracker(druks_db, monkeypatch):
@@ -51,7 +67,6 @@ async def test_pr_review_answers_through_the_review_gate(druks_db, monkeypatch):
         "parked",
         subject=item.identity,
     )
-    item.update(build_run_id=run.id)
     answers = []
 
     async def answer(subject, **reply):

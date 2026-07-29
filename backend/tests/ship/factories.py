@@ -25,8 +25,8 @@ def seed_build_run(
     failure: str | None = None,
     account_id: str | None = None,
 ):
-    """Seed a build Run for a work item and bind it via ``item.build_run_id``. The run
-    and its calls are the item's timeline."""
+    """Seed a build Run for a work item. The run and its calls are the item's
+    timeline; it finds the item through the subject it was started for."""
     if state == "parked" and not input_gate:
         input_gate = "review"  # a parked run always has a gate; derivation needs it
     item = WorkItem.get(work_item_id)
@@ -40,6 +40,5 @@ def seed_build_run(
         failure=failure,
         account_id=account_id or "system",
     )
-    item.build_run_id = run.id
     session.flush()
     return run
