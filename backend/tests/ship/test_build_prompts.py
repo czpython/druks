@@ -96,6 +96,25 @@ async def test_implement_prompt_provisions_when_no_pr_exists():
     assert "dismiss the PR's existing reviews" not in output
 
 
+async def test_evaluator_takes_verification_results_from_ci_first():
+    """CI is the evidence, not a second opinion: a command a green check already ran
+    is recorded from that check, and anything CI cannot be shown to cover is run."""
+    output = await render_prompt(
+        "ship/build/evaluate_implementation.md",
+        build=_build(),
+        verification="VERIFICATION-BLOCK",
+        workspace=_workspace(),
+    )
+
+    assert "the PR's CI is your primary verification evidence" in output
+    assert "Read the checks for exactly `head_sha`" in output
+    assert "do not run it yourself" in output
+    assert "Run a configured command yourself whenever CI does not clearly cover it" in output
+    assert "Never record a command as passing on a check you cannot point at." in output
+    assert "reproduce only the single failing target it names, never the whole suite" in output
+    assert "run only the configured verification profile commands when feasible" not in output
+
+
 async def test_generate_plan_prompt_quotes_operator_content():
     """Free-text answers and the operator's note render block-quoted line by line —
     operator words stay answer content in the prompt, never instruction text."""
