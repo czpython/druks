@@ -25,10 +25,11 @@ explains the exact boundary.
 
 ## Install
 
-The installer supports three sandbox profiles backed by
+The installer supports three deployment shapes backed by
 [Drukbox](https://github.com/czpython/drukbox):
 
-- `exe` (default) and `aws`: remote sandbox VMs, with Druks and Drukbox in Compose
+- `exe` (default): exe.dev sandbox VMs over a tailnet
+- any provider name other than `exe` or `docker`: the generic remote shape
 - `docker`: local sandbox containers, with Drukbox running on the host
 
 For a remote install:
@@ -41,9 +42,10 @@ That command follows the edge channel while Druks has no stable release. Once
 versioned releases exist, install the script and image from the same tag as
 described in [the release process](https://github.com/czpython/druks/blob/main/docs/releasing.md#install-an-immutable-version).
 
-The first run creates `~/druks/.env`, generates secrets, and prints any values
-still required. Re-run the same command after filling them; it pulls images,
-runs migrations, and starts the stack. Re-running is also the upgrade path.
+The first run creates `~/druks/druks.toml`, generates secrets, renders `.env`,
+and prints any values still required. Edit `druks.toml`, then re-run the same
+command; it renders the complete `.env` artifact, pulls images, runs migrations,
+and starts the stack. Re-running is also the upgrade path.
 See the [deployment runbook](https://github.com/czpython/druks/blob/main/deploy/README.md) for prerequisites, access
 control, verification, and rollback.
 

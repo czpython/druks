@@ -1,18 +1,33 @@
 import base64
 import json
+import os
+import subprocess
 import sys
 import urllib.error
 import urllib.request
 from pathlib import Path
 
 ENV_PATH = Path(".env")
+TOML_PATH = Path("druks.toml")
 MANIFEST_DIR = Path(__file__).parent / "manifests"
 SETUP_PAGE = "https://druks.ai/app-setup/"
 
-# (role, env key, pem path, default app name)
+# (role, env key, TOML path, PEM path, default app name)
 ROLES = (
-    ("operator", "GITHUB_OPERATOR_APP_ID", Path("secrets/operator.pem"), "druks-operator"),
-    ("reviewer", "GITHUB_REVIEWER_APP_ID", Path("secrets/reviewer.pem"), "druks-critic"),
+    (
+        "operator",
+        "GITHUB_OPERATOR_APP_ID",
+        "github.operator_app_id",
+        Path("secrets/operator.pem"),
+        "druks-operator",
+    ),
+    (
+        "reviewer",
+        "GITHUB_REVIEWER_APP_ID",
+        "github.reviewer_app_id",
+        Path("secrets/reviewer.pem"),
+        "druks-critic",
+    ),
 )
 
 
@@ -25,15 +40,32 @@ def read_env() -> dict[str, str]:
     return values
 
 
-def patch_env(updates: dict[str, str]) -> None:
-    lines = ENV_PATH.read_text().splitlines()
-    pending = dict(updates)
-    for i, line in enumerate(lines):
-        key = line.partition("=")[0]
-        if key in pending:
-            lines[i] = f"{key}={pending.pop(key)}"
-    lines.extend(f"{key}={value}" for key, value in pending.items())
-    ENV_PATH.write_text("\n".join(lines) + "\n")
+def apply_values(updates: dict[str, str]) -> None:
+    install_dir = Path.cwd()
+    command = [
+        "docker",
+        "run",
+        "--rm",
+        "--user",
+        f"{os.getuid()}:{os.getgid()}",
+        "-v",
+        f"{install_dir}:/bootstrap",
+        os.environ["DRUKS_BACKEND_IMAGE"],
+        "druks",
+        "setup",
+        "/bootstrap/.env",
+        "--install-dir",
+        str(install_dir),
+        "--home",
+        str(Path.home()),
+        "--non-interactive",
+    ]
+    for path, value in updates.items():
+        command.extend(("--set", f"{path}={value}"))
+
+    completed = subprocess.run(command, check=False)
+    if completed.returncode not in {0, 3}:
+        raise subprocess.CalledProcessError(completed.returncode, command)
 
 
 def create_link(manifest: str, org: str) -> str:
@@ -67,6 +99,7 @@ def prompt_code(role: str) -> str:
 def provision(
     role: str,
     env_key: str,
+    toml_path: str,
     pem_path: Path,
     default_name: str,
     public_url: str,
@@ -106,12 +139,12 @@ def provision(
 
     pem_path.write_text(converted["pem"])
     pem_path.chmod(0o600)
-    updates = {env_key: str(converted["id"])}
+    updates = {toml_path: str(converted["id"])}
     if role == "operator":
         # Druks verifies inbound webhooks against this; GitHub generated it
-        # during the conversion, so the pre-seeded random value is replaced.
-        updates["DRUKS_WEBHOOK_SECRET"] = converted["webhook_secret"]
-    patch_env(updates)
+        # during the conversion, so this explicit operator write replaces it.
+        updates["secrets.webhook_secret"] = converted["webhook_secret"]
+    apply_values(updates)
 
     print(f"\n✓ {role} app created: id={converted['id']} slug={converted['slug']}")
     print(f"  PEM → {pem_path}")
@@ -119,20 +152,21 @@ def provision(
 
 
 def main() -> int:
-    if not ENV_PATH.exists():
-        print("No .env here — run install.sh first, then re-run with --apps.")
+    if not TOML_PATH.exists():
+        print("No druks.toml here — run install.sh first, then re-run with --apps.")
         return 1
 
-    public_url = read_env().get("DRUKS_PUBLIC_URL") or input(
+    apply_values({})
+    public_url = read_env().get("DRUKS_ENDPOINT") or input(
         "Public base URL druks will be reachable on (e.g. https://druks.example.com): "
     ).strip().rstrip("/")
     org = input("GitHub org slug (empty for a personal account): ").strip()
 
-    for role, env_key, pem_path, base_name in ROLES:
+    for role, env_key, toml_path, pem_path, base_name in ROLES:
         # App names are globally unique across GitHub; the org prefix gives
         # every deployment its own namespace.
         default_name = f"{org}-{base_name}" if org else base_name
-        provision(role, env_key, pem_path, default_name, public_url, org)
+        provision(role, env_key, toml_path, pem_path, default_name, public_url, org)
     return 0
 
 

@@ -15,10 +15,10 @@ with the route that matches what you are doing.
 
 - [Full local setup](full-local.md) — Druks and sandbox containers on one
   machine.
-- [Deployment runbook](../deploy/README.md) — remote `exe` or `aws` install,
-  upgrades, rollback, logs, and public ingress.
-- [Configuration](configuration.md) — environment settings, dashboard settings,
-  integrations, MCP, skills, and stored-secret handling.
+- [Deployment runbook](../deploy/README.md) — any Drukbox provider, install
+  shapes, upgrades, rollback, logs, and public ingress.
+- [Configuration](configuration.md) — `druks.toml`, process settings, dashboard
+  settings, integrations, MCP, skills, and stored-secret handling.
 - [Connect your agent](connect-your-agent.md) — the `/mcp` endpoint, personal
   access tokens, and client configuration.
 - [Troubleshooting](troubleshooting.md) — symptom-driven diagnosis for boot,

@@ -142,7 +142,7 @@ These terms describe different ownership layers:
 | Harness | Platform adapter that invokes the Claude or Codex CLI for a model |
 | Workspace | Extension customization of what a call receives, such as a cloned repository |
 | Sandbox | Drukbox-provisioned isolated host where the harness process runs |
-| Provider | Drukbox backend that supplies the host; installer profiles are `exe`, `aws`, and `docker` |
+| Provider | Any Drukbox backend name that supplies the host; `docker` and `exe` select install shapes |
 
 Every agent call validates a strict Pydantic output contract, records model and
 cost metadata, and stores transcript, stderr, prompt, output, and a secret-free
@@ -179,7 +179,7 @@ extension or integration owns the provider payload and domain reaction.
 
 Configuration has two planes:
 
-- environment variables configure the process and deployment
+- `druks.toml` configures the deployment and renders the process environment
 - Postgres-backed settings configure operator profile, harness defaults,
   extension/workflow knobs, per-agent overrides, notifications, MCP servers,
   and skills

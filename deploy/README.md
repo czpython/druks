@@ -2,11 +2,12 @@
 
 The whole stack runs in Docker Compose: Druks (`web`, which embeds the DBOS
 durable engine and serves the dashboard SPA), Postgres, and Redis. A
-**remote** install (`DRUKS_PROVIDER=exe`/`aws`) also brings up stock Caddy
-(identity edge + proxy, Caddyfile bind-mounted) and the Drukbox sandbox control
-plane (`sandbox-service`, `sandbox-janitor`). Those three live in the compose
-`remote` profile, which `install.sh` selects by writing `COMPOSE_PROFILES` to
-`.env`, so plain `docker compose` commands in the install dir pick it up.
+**remote** install (any `DRUKS_PROVIDER` except `docker`) also brings up stock
+Caddy (identity edge + proxy, Caddyfile bind-mounted) and the Drukbox sandbox
+control plane (`sandbox-service`, `sandbox-janitor`). Those three live in the
+Compose `remote` profile, which `install.sh` selects by writing
+`COMPOSE_PROFILES` to `.env`, so plain `docker compose` commands in the install
+dir pick it up.
 
 A **local** install (`DRUKS_PROVIDER=docker`) runs neither: the dashboard is
 reached directly on `127.0.0.1:8001` and sandboxes are local Docker
@@ -15,23 +16,24 @@ containers with drukbox on the host — see
 
 The Druks services use the **host network** so they can reach Postgres, Redis,
 Drukbox, and provider-specific sandbox addresses from the host network
-namespace. The default exe.dev profile reaches VMs over the host's tailnet;
+namespace. The default exe.dev shape reaches VMs over the host's tailnet;
 other providers may return directly reachable SSH addresses.
 
 ## First-time setup on a fresh box
 
-Prerequisites: Docker with the Compose plugin. The default exe.dev profile also
+Prerequisites: Docker with the Compose plugin. The default exe.dev shape also
 needs `tailscaled` joined to the intended tailnet (`tailscale status` shows
-peers). AWS uses its own network and credential block; the local Docker profile
-is covered in [Full local](../docs/full-local.md).
+peers). Other remote providers have their own network and credential
+requirements; the local Docker shape is covered in
+[Full local](../docs/full-local.md).
 
 The Druks application and sandbox images are published for both `linux/amd64`
 and `linux/arm64`.
 
-Everything else — `compose.yaml`, the Caddyfile, `.env`, image pulls,
-DB init — is handled by `install.sh`. (While the ghcr.io images
-require auth, export `GHCR_TOKEN` — a PAT with `read:packages` — and
-the installer logs in with it.)
+Everything else — `compose.yaml`, the Caddyfile, `druks.toml`, the rendered
+`.env`, image pulls, and DB init — is handled by `install.sh`. (While the
+ghcr.io images require auth, export `GHCR_TOKEN` — a PAT with `read:packages`
+— and the installer logs in with it.)
 
 ### 1. Run the installer
 
@@ -39,24 +41,28 @@ the installer logs in with it.)
 bash <(curl -fsSL https://raw.githubusercontent.com/czpython/druks/main/scripts/install.sh)
 ```
 
-First pass writes `~/druks/.env` with random secrets pre-filled,
-creates `~/druks/secrets/`, and exits. It tells you exactly what to do
-next:
+First pass writes `~/druks/druks.toml` with random secrets pre-filled, creates
+`~/druks/secrets/`, renders `~/druks/.env`, and exits when required values are
+missing. It tells you exactly what to do next:
 
-- Fill in the blanks at the top of `.env` (the sandbox provider block).
+- Edit `druks.toml`. For a generic remote shape, fill `[sandbox.env]` from
+  Drukbox's [configuration reference](https://github.com/czpython/drukbox).
 - Provision the two GitHub Apps: re-run the installer with `--apps`.
   It registers each app via GitHub's manifest flow — it prints a link
   per app, you open it, click Create, then paste the `?code=...` from
   the redirect back into the SSH session. App ids, PEMs, and the
-  webhook secret are written in place. (Manual fallback: create the
+  webhook secret are applied through `druks setup`, the single
+  `druks.toml` writer. (Manual fallback: create the
   apps by hand per the permission tables in
-  [`docs/configuration.md`](../docs/configuration.md) and upload the
-  PEMs to `~/druks/secrets/{operator,reviewer}.pem`.)
+  [`docs/configuration.md`](../docs/configuration.md), enter their ids under
+  `[github]`, and upload the PEMs to
+  `~/druks/secrets/{operator,reviewer}.pem`.)
+
 The sandbox backend defaults to exe.dev + Tailscale. Pass `DRUKS_PROVIDER`
-on the first run to choose another: `aws` (EC2 — the `.env` carries the
-`AWS_*` block of region, AMI, and credentials instead) or `docker` (local
-sandboxes, drukbox on the host; see [Full local](../docs/full-local.md)).
-Re-runs read the choice back from `.env`, so you only set it once.
+on the first run to choose another. `docker` selects the local shape; any other
+Drukbox provider name selects the generic remote shape and is passed through
+without a Druks provider registry. Re-runs read `[sandbox].provider` from
+`druks.toml`, so the environment flag is only a fresh-install seed.
 
 Override the install dir with `DRUKS_INSTALL_DIR=/srv/druks` if you
 want it elsewhere.
@@ -67,8 +73,8 @@ want it elsewhere.
 bash <(curl -fsSL https://raw.githubusercontent.com/czpython/druks/main/scripts/install.sh)
 ```
 
-Second pass validates that the required `.env` keys and PEMs are present,
-then: `docker compose pull` → migrate the databases out of band
+Second pass renders `.env` from `druks.toml`, validates the required values and
+PEMs, then: `docker compose pull` → migrate the databases out of band
 (`docker compose run --rm web druks init-db`, plus drukbox's schema on a
 remote install) → `docker compose up -d`. Nothing migrates on boot.
 
@@ -111,8 +117,8 @@ Public URLs: `https://<host>/_external/{github,linear,jira}/events/`
 (exe.dev authenticates at the edge; druks maps its asserted email to your
 account).
 
-**Elsewhere (e.g. AWS + Teleport)**, the dashboard goes through your
-identity proxy (set `DRUKS_AUTH_HEADER` to the header it injects), but
+**On another remote provider**, the dashboard goes through your identity proxy
+(set `[identity].header` in `druks.toml` to the header it injects), but
 webhook senders can't authenticate through SSO — they need their own
 public HTTPS path. The stack's Caddy provides it:
 
@@ -122,8 +128,8 @@ Druks' shipped Caddy dashboard listener is loopback HTTP behind that edge.
 
 1. Point an A-record (e.g. `druks.example.com`) at the box and open
    inbound 80 + 443.
-2. Set `DRUKS_WEBHOOK_HOST=druks.example.com` in `.env` and
-   `docker compose up -d caddy`.
+2. Set `[urls].webhook_host = "druks.example.com"` in `druks.toml` and re-run
+   the installer.
 
 Caddy auto-provisions Let's Encrypt for that hostname and serves **only**
 `POST /_external/*` and the PAT-authenticated `/mcp` endpoint on it — no
@@ -132,12 +138,12 @@ the public side. Webhook URLs become
 `https://druks.example.com/_external/<provider>/events/`; agents connect at
 `https://druks.example.com/mcp`
 ([Connect your agent](../docs/connect-your-agent.md)). Leave
-`DRUKS_WEBHOOK_HOST` unset to bring your own ingress instead.
+`[urls].webhook_host` blank to bring your own ingress instead.
 
 ## Update / redeploy
 
-Re-run the installer from the same version you intend to deploy. It always
-refreshes `compose.yaml` and the Caddyfile
+Edit `druks.toml`, then re-run the installer from the same version you intend
+to deploy. It renders `.env`, refreshes `compose.yaml` and the Caddyfile
 from the repo, applies any new migrations out of band
 (`docker compose run --rm web druks init-db`, plus drukbox's on a remote
 install), then runs `docker compose pull && up -d`, so it is the upgrade
