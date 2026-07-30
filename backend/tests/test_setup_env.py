@@ -264,14 +264,14 @@ def test_compose_plane_env_additions_survive_rerender(tmp_path):
     assert "# OPERATOR ADDITIONS" in env_path.read_text()
 
 
-def test_unknown_toml_values_survive_a_writer_pass(tmp_path):
+def test_operator_edits_survive_a_writer_pass(tmp_path):
     env_path = tmp_path / ".env"
     _run(env_path, provider="docker")
     toml_path = tmp_path / "druks.toml"
     body = toml_path.read_text()
     body = body.replace(
         'operator_app_id = ""',
-        'operator_app_id = ""\ncustom_label = "blue"',
+        '# our app, registered 2026-07 by ops\noperator_app_id = ""\ncustom_label = "blue"',
     )
     body += "\n[operator]\nretries = 4\nenabled = true\n"
     toml_path.write_text(body)
@@ -279,9 +279,10 @@ def test_unknown_toml_values_survive_a_writer_pass(tmp_path):
     _run(env_path, set_values=("github.operator_app_id=101",))
 
     config = _read_toml(toml_path)
+    written = toml_path.read_text()
     assert config["github"]["custom_label"] == "blue"
     assert config["operator"] == {"retries": 4, "enabled": True}
-    assert "# OPERATOR ADDITIONS" in toml_path.read_text()
+    assert "# our app, registered 2026-07 by ops" in written
 
 
 def test_missing_known_tables_are_canonicalized_before_rerender(tmp_path):

@@ -4,10 +4,12 @@ import os
 import re
 import secrets
 import tomllib
-from collections.abc import Callable
+from collections.abc import Callable, Mapping, MutableMapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+import tomlkit
 
 GAPS_EXIT_CODE = 3
 MIGRATION_EXIT_CODE = 4
@@ -20,7 +22,6 @@ _COMPOSE_ENV_KEYS = (
     "COMPOSE_PROFILES",
 )
 _ENV_KEY_PATTERN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
-_TOML_KEY_PATTERN = re.compile(r"[A-Za-z0-9_-]+")
 
 
 @dataclass(frozen=True)
@@ -171,16 +172,6 @@ _KNOWN_TOML_KEYS = {
     "sandbox": ("provider", "service_url", "image", "service_tokens"),
     "env": (),
 }
-_TOML_TABLE_COMMENTS = {
-    "identity": '# Browser identity: "header", "jwt", or "none".',
-    "github": "# GitHub Apps may also be provisioned with install.sh --apps.",
-    "ticketing": "# Optional ticketing integration.",
-    "urls": "# Public dashboard and webhook ingress addresses.",
-    "secrets": "# Generated on first write. Do not regenerate a deployed secret.",
-    "paths": "# Host paths. Relative PEM paths are resolved against the install directory.",
-    "sandbox": "# Any drukbox provider name; docker and exe select install shapes.",
-    "env": "# Additional deployment settings; keys render verbatim unless owned above.",
-}
 
 
 def _hex_secret() -> str:
@@ -226,23 +217,25 @@ def run_setup(
             provider = answer or provider
         if not provider:
             raise ValueError("sandbox provider cannot be blank")
-        config = _fresh_config(provider=provider, home=home)
+        document = tomlkit.parse(_TOML_TEMPLATE)
+        for value_path, value in _fresh_values(provider=provider, home=home):
+            _set_value(document, value_path, value)
     else:
-        config = _read_toml(toml_path)
+        document = tomlkit.parse(toml_path.read_text())
 
     is_changed = is_fresh
     for assignment in set_values:
-        path, value = _parse_assignment(assignment)
-        _set_value(config, path, value)
+        value_path, value = _parse_assignment(assignment)
+        _set_value(document, value_path, value)
         is_changed = True
 
-    provider = _get_string(config, ("sandbox", "provider"))
+    provider = _get_string(document, ("sandbox", "provider"))
     print_fn(_shape_message(provider))
 
     if interactive:
         is_changed = (
             _prompt_values(
-                config,
+                document,
                 is_fresh=is_fresh,
                 input_fn=input_fn,
             )
@@ -250,8 +243,8 @@ def run_setup(
         )
 
     if is_changed:
-        _write_toml(toml_path, config)
-        config = _read_toml(toml_path)
+        _write_toml(toml_path, document)
+    config = _read_toml(toml_path)
     if is_fresh:
         _write_gitignore(env_path.parent / ".gitignore")
         (env_path.parent / "secrets").mkdir(mode=0o700, exist_ok=True)
@@ -269,87 +262,112 @@ def run_setup(
     return GAPS_EXIT_CODE if gaps else 0
 
 
-def _fresh_config(*, provider: str, home: str) -> dict[str, Any]:
+_TOML_TEMPLATE = """\
+# druks.toml — the deployment. Edit this file, then re-run the installer
+# to render and apply it. `druks setup` alone re-renders .env but does
+# not restart services.
+
+# Browser identity: "header", "jwt", or "none".
+[identity]
+mode = ""
+header = ""
+jwks_url = ""
+jwt_issuer = ""
+jwt_audience = ""
+jwt_identity_claim = "email"
+
+# GitHub Apps may also be provisioned with install.sh --apps.
+[github]
+operator_app_id = ""
+reviewer_app_id = ""
+operator_pem = "secrets/operator.pem"
+reviewer_pem = "secrets/reviewer.pem"
+
+# Optional ticketing integration.
+[ticketing]
+linear_api_key = ""
+linear_webhook_secret = ""
+
+# Public dashboard and webhook ingress addresses.
+[urls]
+endpoint = ""
+webhook_host = ""
+
+# Generated on first write. Do not regenerate a deployed secret.
+[secrets]
+postgres_password = ""
+webhook_secret = ""
+secrets_key = ""
+sandbox_service_token = ""
+
+# Host paths. Relative PEM paths are resolved against the install directory.
+[paths]
+data_dir = ""
+claude_home = ""
+codex_home = ""
+claude_json = ""
+
+# Any drukbox provider name; docker and exe select install shapes.
+[sandbox]
+provider = ""
+service_url = ""
+image = ""
+service_tokens = ""
+
+# Drukbox environment, passed through to the remote stack verbatim.
+# Local docker shape: host-run drukbox reads its own env, so this table
+# is not rendered. Provider reference: https://github.com/czpython/drukbox
+# (docs/deploy.md).
+[sandbox.env]
+
+# Additional deployment settings; keys render verbatim unless owned by druks.
+[env]
+"""
+
+
+def _fresh_values(*, provider: str, home: str) -> tuple[tuple[tuple[str, ...], str], ...]:
     if provider == "docker":
-        identity_mode = "none"
-        identity_header = ""
-        endpoint = "http://localhost:8001"
-        service_url = "http://127.0.0.1:8000"
-        sandbox_token = "dev-token"
-        sandbox_image = "ghcr.io/czpython/druks-sandbox:latest"
+        shape = (
+            (("identity", "mode"), "none"),
+            (("urls", "endpoint"), "http://localhost:8001"),
+            (("sandbox", "service_url"), "http://127.0.0.1:8000"),
+            (("secrets", "sandbox_service_token"), "dev-token"),
+            (("sandbox", "image"), "ghcr.io/czpython/druks-sandbox:latest"),
+        )
     elif provider == "exe":
-        identity_mode = "header"
-        identity_header = "X-ExeDev-Email"
-        endpoint = ""
-        service_url = "http://127.0.0.1:8780"
-        sandbox_token = _hex_secret()
-        sandbox_image = ""
+        shape = (
+            (("identity", "mode"), "header"),
+            (("identity", "header"), "X-ExeDev-Email"),
+            (("sandbox", "service_url"), "http://127.0.0.1:8780"),
+            (("secrets", "sandbox_service_token"), _hex_secret()),
+            (("sandbox", "env", "EXE_API_TOKEN"), ""),
+            (("sandbox", "env", "TAILSCALE_TAILNET"), ""),
+            (("sandbox", "env", "TAILSCALE_OAUTH_CLIENT_ID"), ""),
+            (("sandbox", "env", "TAILSCALE_OAUTH_CLIENT_SECRET"), ""),
+            (("sandbox", "env", "EXE_API_URL"), "https://exe.dev"),
+            (("sandbox", "env", "EXE_DEFAULT_IMAGE"), "ghcr.io/boldsoftware/exeuntu:latest"),
+            (("sandbox", "env", "TAILSCALE_ENABLED"), "true"),
+            (("sandbox", "env", "TAILSCALE_API_TIMEOUT"), "30"),
+            (("sandbox", "env", "TAILSCALE_AUTH_TAGS"), "tag:sandbox"),
+        )
     else:
-        identity_mode = "header"
-        identity_header = ""
-        endpoint = ""
-        service_url = "http://127.0.0.1:8780"
-        sandbox_token = _hex_secret()
-        sandbox_image = ""
+        shape = (
+            (("identity", "mode"), "header"),
+            (("sandbox", "service_url"), "http://127.0.0.1:8780"),
+            (("secrets", "sandbox_service_token"), _hex_secret()),
+        )
 
-    sandbox_env: dict[str, Any] = {}
-    if provider == "exe":
-        sandbox_env = {
-            "EXE_API_TOKEN": "",
-            "TAILSCALE_TAILNET": "",
-            "TAILSCALE_OAUTH_CLIENT_ID": "",
-            "TAILSCALE_OAUTH_CLIENT_SECRET": "",
-            "EXE_API_URL": "https://exe.dev",
-            "EXE_DEFAULT_IMAGE": "ghcr.io/boldsoftware/exeuntu:latest",
-            "TAILSCALE_ENABLED": "true",
-            "TAILSCALE_API_TIMEOUT": "30",
-            "TAILSCALE_AUTH_TAGS": "tag:sandbox",
-        }
-
-    return {
-        "identity": {
-            "mode": identity_mode,
-            "header": identity_header,
-            "jwks_url": "",
-            "jwt_issuer": "",
-            "jwt_audience": "",
-            "jwt_identity_claim": "email",
-        },
-        "github": {
-            "operator_app_id": "",
-            "reviewer_app_id": "",
-            "operator_pem": "secrets/operator.pem",
-            "reviewer_pem": "secrets/reviewer.pem",
-        },
-        "ticketing": {
-            "linear_api_key": "",
-            "linear_webhook_secret": "",
-        },
-        "urls": {
-            "endpoint": endpoint,
-            "webhook_host": "",
-        },
-        "secrets": {
-            "postgres_password": _hex_secret(),
-            "webhook_secret": _hex_secret(),
-            "secrets_key": _secrets_key(),
-            "sandbox_service_token": sandbox_token,
-        },
-        "paths": {
-            "data_dir": f"{home.rstrip('/')}/druks-data",
-            "claude_home": f"{home.rstrip('/')}/.claude",
-            "codex_home": f"{home.rstrip('/')}/.codex",
-            "claude_json": f"{home.rstrip('/')}/.claude.json",
-        },
-        "sandbox": {
-            "provider": provider,
-            "service_url": service_url,
-            "image": sandbox_image,
-            "service_tokens": "",
-            "env": sandbox_env,
-        },
-        "env": {},
-    }
+    return (
+        (("sandbox", "provider"), provider),
+        (("secrets", "postgres_password"), _hex_secret()),
+        (("secrets", "webhook_secret"), _hex_secret()),
+        (("secrets", "secrets_key"), _secrets_key()),
+        (("paths", "data_dir"), f"{home.rstrip('/')}/druks-data"),
+        (("paths", "claude_home"), f"{home.rstrip('/')}/.claude"),
+        (("paths", "codex_home"), f"{home.rstrip('/')}/.codex"),
+        (("paths", "claude_json"), f"{home.rstrip('/')}/.claude.json"),
+        *shape,
+    )
 
 
 def _read_toml(path: Path) -> dict[str, Any]:
@@ -398,22 +416,20 @@ def _require_scalar(prefix: str, key: str, value: Any) -> None:
         )
 
 
-def _get_string(config: dict[str, Any], path: tuple[str, ...]) -> str:
-    current: object = config
+def _get_string(source: Mapping[str, Any], path: tuple[str, ...]) -> str:
+    current: Any = source
     for part in path:
-        if not isinstance(current, dict):
-            raise ValueError(f"druks.toml: {'.'.join(path)} crosses a non-table value")
+        if not isinstance(current, Mapping):
+            return ""
         current = current.get(part, "")
-    if not isinstance(current, str):
-        raise ValueError(f"druks.toml: {'.'.join(path)} must be a string")
-    return current
+    return current if isinstance(current, str) else ""
 
 
-def _set_value(config: dict[str, Any], path: tuple[str, ...], value: str) -> None:
-    current = config
+def _set_value(target: MutableMapping[str, Any], path: tuple[str, ...], value: str) -> None:
+    current: MutableMapping[str, Any] = target
     for part in path[:-1]:
         child = current.setdefault(part, {})
-        if not isinstance(child, dict):
+        if not isinstance(child, MutableMapping):
             raise ValueError(f"druks.toml: {'.'.join(path)} crosses a non-table value")
         current = child
     current[path[-1]] = value
@@ -428,7 +444,7 @@ def _parse_assignment(assignment: str) -> tuple[tuple[str, ...], str]:
 
 
 def _prompt_values(
-    config: dict[str, Any],
+    document: tomlkit.TOMLDocument,
     *,
     is_fresh: bool,
     input_fn: Callable[[str], str],
@@ -439,7 +455,7 @@ def _prompt_values(
         for entry in section.entries
         if entry.source and entry.prompt
     ]
-    identity_mode = _get_string(config, ("identity", "mode"))
+    identity_mode = _get_string(document, ("identity", "mode"))
     if identity_mode in {"header", "jwt"}:
         prompts.append(
             (
@@ -458,7 +474,7 @@ def _prompt_values(
             )
         )
 
-    if _get_string(config, ("sandbox", "provider")) == "exe":
+    if _get_string(document, ("sandbox", "provider")) == "exe":
         prompts.extend(
             (
                 (("sandbox", "env", "EXE_API_TOKEN"), "exe.dev API token", True),
@@ -482,112 +498,19 @@ def _prompt_values(
 
     is_changed = False
     for path, prompt, is_required in prompts:
-        if _get_string(config, path) or (not is_required and not is_fresh):
+        if _get_string(document, path) or (not is_required and not is_fresh):
             continue
         answer = input_fn(f"{prompt}: ").strip()
         if answer:
-            _set_value(config, path, answer)
+            _set_value(document, path, answer)
             is_changed = True
     return is_changed
 
 
-def _write_toml(path: Path, config: dict[str, Any]) -> None:
-    canonical = _canonical_config(config)
-    text = _render_toml(canonical)
+def _write_toml(path: Path, document: tomlkit.TOMLDocument) -> None:
+    text = tomlkit.dumps(document)
+    _canonical_config(tomllib.loads(text))
     _write_secure_text(path, text)
-    parsed = _read_toml(path)
-    if parsed != canonical:
-        raise ValueError("druks.toml write verification failed: parsed values changed")
-
-
-def _render_toml(config: dict[str, Any]) -> str:
-    lines = [
-        "# druks.toml — the deployment. Edit this file, then re-run the installer",
-        "# to render and apply it. `druks setup` alone re-renders .env but does",
-        "# not restart services.",
-        "",
-    ]
-
-    root_values = {key: value for key, value in config.items() if not isinstance(value, dict)}
-    if root_values:
-        lines.append("# OPERATOR ADDITIONS")
-        for key, value in root_values.items():
-            lines.append(f"{_toml_key(key)} = {_toml_value(value)}")
-        lines.append("")
-
-    for table_name, known_keys in _KNOWN_TOML_KEYS.items():
-        lines.append(_TOML_TABLE_COMMENTS[table_name])
-        lines.append(f"[{table_name}]")
-        table = config[table_name]
-        for key in known_keys:
-            lines.append(f"{key} = {_toml_value(table[key])}")
-        additions = {
-            key: value for key, value in table.items() if key not in known_keys and key != "env"
-        }
-        if additions:
-            if known_keys:
-                lines.append("# OPERATOR ADDITIONS")
-            for key, value in additions.items():
-                lines.append(f"{_toml_key(key)} = {_toml_value(value)}")
-        lines.append("")
-
-        if table_name == "sandbox":
-            provider = table["provider"]
-            if provider == "docker":
-                lines.extend(
-                    (
-                        "# Host-run drukbox reads its own checkout's environment.",
-                        "# Values in this table are preserved but are not rendered to .env.",
-                    )
-                )
-            elif provider == "exe":
-                lines.append("# Drukbox environment passed through to the remote stack.")
-            else:
-                lines.extend(
-                    (
-                        "# Drukbox environment passed through to the remote stack.",
-                        "# Configuration reference: https://github.com/czpython/drukbox",
-                        "# See docs/deploy.md in that repository.",
-                    )
-                )
-            lines.append("[sandbox.env]")
-            for key, value in table["env"].items():
-                lines.append(f"{_toml_key(key)} = {_toml_value(value)}")
-            lines.append("")
-
-    unknown_tables = {
-        key: value
-        for key, value in config.items()
-        if key not in _KNOWN_TOML_KEYS and isinstance(value, dict)
-    }
-    if unknown_tables:
-        lines.extend(("# " + "=" * 60, "# OPERATOR ADDITIONS", "# " + "=" * 60, ""))
-        for name, table in unknown_tables.items():
-            lines.append(f"[{_toml_key(name)}]")
-            lines.extend(f"{_toml_key(key)} = {_toml_value(value)}" for key, value in table.items())
-            lines.append("")
-
-    return "\n".join(lines).rstrip() + "\n"
-
-
-def _toml_key(value: str) -> str:
-    if _TOML_KEY_PATTERN.fullmatch(value):
-        return value
-    return f'"{_escape_toml_string(value)}"'
-
-
-def _toml_value(value: str | int | float | bool) -> str:
-    if isinstance(value, str):
-        return f'"{_escape_toml_string(value)}"'
-    if isinstance(value, bool):
-        return "true" if value else "false"
-    return repr(value)
-
-
-def _escape_toml_string(value: str) -> str:
-    if any(ord(character) < 32 or ord(character) == 127 for character in value):
-        raise ValueError("druks.toml values may not contain newlines or control characters")
-    return value.replace("\\", "\\\\").replace('"', '\\"')
 
 
 def _render_env(

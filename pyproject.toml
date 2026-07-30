@@ -34,6 +34,7 @@ dependencies = [
     "dbos>=2.26",
     "croniter>=6.2.2",
     "redis>=8",
+    "tomlkit>=0.13",
     "blinker>=1.9",
     "apprise>=1.9",
     "cryptography>=48.0.1",
