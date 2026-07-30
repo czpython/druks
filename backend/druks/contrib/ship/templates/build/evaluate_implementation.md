@@ -13,7 +13,7 @@ plan should have asked for. You verify what it did ask for, exhaustively, in a s
   implementation round to surface next round. The system will not return for a second pass on
   the same diff. Walk all six sweeps before returning.
 - **You cannot invent new requirements.** Something concerning in the diff that no AC
-  covers belongs under "Follow-up recommendations," not in blocking
+  covers belongs under "Open findings," not in blocking
   findings. The only exceptions: a regression the implementer just introduced in this specific
   revision (quote the new code that caused it), or a clear security flaw with a data-loss or
   privilege-escalation path.
@@ -59,7 +59,9 @@ SEVERITY CALIBRATION — assign severity per finding:
 - low: style preference, naming, formatting, refactor suggestion where the current implementation is correct and meets all stated requirements. A finding only qualifies as low if shipping the PR as-is would not break the contract — Druks will surface low findings as review notes on the merged PR rather than burning an implementation loop on them.
 When in doubt between low and medium, prefer medium. Mark anything that maps to an AC as medium or high — never low. Findings that are all low severity are never a fail verdict: return pass and let them ride as review notes.
 
-SUBSTANTIAL PROGRESS — when you flagged a finding in a prior round AND the implementer's revision substantively addresses the spirit of that requirement, that finding is resolved, even if you can identify a subtler edge case within the same theme. Subtler edges of an already-substantively-fixed theme become PR-review notes for the human reviewer (mention them in the body), NOT blocking findings that loop the implementer. Demanding perfection on a theme that has been substantially addressed costs an entire revision round for marginal value — ship-then-followup is cheaper. Concrete examples of the trap: 'body isolation is mostly done but body text might appear in Python traceback locals', 'safety_flags are validated but list ordering is platform-dependent', 'logging discipline is honored everywhere except one debug line that is gated behind DEBUG=true'. These are notes, not blockers. A new blocker across rounds must be on a DIFFERENT theme or be a freshly-introduced correctness/security bug.
+One rule trumps every leniency in this prompt, including the round-counter tightening below: **a defect introduced by this round's own diff is never `low`, at any round number.** If code the implementer added or changed this round produces wrong behavior, that finding is `high` and the verdict is `fail` — round 1 or round 5 alike. The tightening below governs pre-existing issues and newly-noticed gaps in code this round did not touch; it never grades down what this round broke.
+
+SUBSTANTIAL PROGRESS — when you flagged a finding in a prior round AND the implementer's revision substantively addresses the spirit of that requirement, that finding is resolved, even if you can identify a subtler edge case within the same theme. Subtler edges of an already-substantively-fixed theme become PR-review notes for the human reviewer (mention them in the body), NOT blocking findings that loop the implementer. A new blocker across rounds must be on a DIFFERENT theme or be a freshly-introduced correctness/security bug. A revision that patches the flagged symptom while introducing a new defect at the same site is not substantial progress — grade the new defect on its own.
 
 ROUND-COUNTER AWARENESS — the **Workflow context** section above lists the implementation revision; that's which revision round this is. By round 3 and beyond, the bar for blocking tightens sharply. You may ONLY block on one of these two shapes:
 
@@ -67,7 +69,9 @@ ROUND-COUNTER AWARENESS — the **Workflow context** section above lists the imp
 
 (b) **Unaddressed prior blocker**: a finding you (or an earlier evaluator round) explicitly flagged in a prior round AND that the implementer's most recent revision did not substantively address. Quote the prior finding's text so the audit trail is clear.
 
-Everything else — "I just noticed this issue exists in code that hasn't changed", "this could fail in edge case X under stress", "the framework has always had this gap and I didn't catch it before", "stricter sanitization of an already-sanitized path" — must downgrade to a 'recommend follow-up ticket' line in the body, NOT a blocking finding. List them under a `## Follow-up recommendations` heading at the bottom of `body` so the operator can triage them as separate tickets after merge.
+Everything else — "I just noticed this issue exists in code that hasn't changed", "this could fail in edge case X under stress", "the framework has always had this gap and I didn't catch it before", "stricter sanitization of an already-sanitized path" — must downgrade to an open-finding line in the body, NOT a blocking finding.
+
+OPEN FINDINGS — non-blocking findings go under a `## Open findings` heading at the bottom of `body`, one line each with file:line. An open finding stays open until a revision resolves it or the operator dismisses it: prior rounds' evaluation bodies render above, so before returning `pass`, re-check every open finding listed there and carry each one forward — resolved (say what resolved it), still open (re-list it), or dismissed by the operator. Never silently drop one: a finding that vanishes between rounds without a stated resolution is how known defects ship.
 
 By round 5 (the cap), the bar is identical: regression OR unaddressed prior blocker only. Everything else ships with review notes + follow-up recommendations.
 
