@@ -401,9 +401,10 @@ def _canonical_config(raw: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(table, dict):
             _require_scalar("", table_name, table)
             continue
-        known = _KNOWN_TOML_KEYS.get(table_name)
         for key, value in table.items():
-            if known is not None and (key in known or (table_name, key) == ("sandbox", "env")):
+            if table_name in _KNOWN_TOML_KEYS and (
+                key in _KNOWN_TOML_KEYS[table_name] or (table_name, key) == ("sandbox", "env")
+            ):
                 continue
             _require_scalar(f"{table_name}.", key, value)
     return config

@@ -12,7 +12,7 @@ TOML_PATH = Path("druks.toml")
 MANIFEST_DIR = Path(__file__).parent / "manifests"
 SETUP_PAGE = "https://druks.ai/app-setup/"
 
-# (role, env key, TOML path, PEM path, default app name)
+# (role, env key, setting path, PEM path, default app name)
 ROLES = (
     (
         "operator",
@@ -99,7 +99,7 @@ def prompt_code(role: str) -> str:
 def provision(
     role: str,
     env_key: str,
-    toml_path: str,
+    setting_path: str,
     pem_path: Path,
     default_name: str,
     public_url: str,
@@ -137,9 +137,10 @@ def provision(
             print(f"✗ exchange failed ({error.code}) — codes are single-use and expire in ~1h.")
             print("  Re-open the HTML page to mint a fresh code, then paste it again.")
 
-    pem_path.write_text(converted["pem"])
-    pem_path.chmod(0o600)
-    updates = {toml_path: str(converted["id"])}
+    pem_descriptor = os.open(pem_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(pem_descriptor, "w") as pem_file:
+        pem_file.write(converted["pem"])
+    updates = {setting_path: str(converted["id"])}
     if role == "operator":
         # Druks verifies inbound webhooks against this; GitHub generated it
         # during the conversion, so this explicit operator write replaces it.
@@ -156,17 +157,19 @@ def main() -> int:
         print("No druks.toml here — run install.sh first, then re-run with --apps.")
         return 1
 
+    # An empty apply still renders .env from druks.toml, so the endpoint
+    # read below sees the operator's current value.
     apply_values({})
     public_url = read_env().get("DRUKS_ENDPOINT") or input(
         "Public base URL druks will be reachable on (e.g. https://druks.example.com): "
     ).strip().rstrip("/")
     org = input("GitHub org slug (empty for a personal account): ").strip()
 
-    for role, env_key, toml_path, pem_path, base_name in ROLES:
+    for role, env_key, setting_path, pem_path, base_name in ROLES:
         # App names are globally unique across GitHub; the org prefix gives
         # every deployment its own namespace.
         default_name = f"{org}-{base_name}" if org else base_name
-        provision(role, env_key, toml_path, pem_path, default_name, public_url, org)
+        provision(role, env_key, setting_path, pem_path, default_name, public_url, org)
     return 0
 
 
