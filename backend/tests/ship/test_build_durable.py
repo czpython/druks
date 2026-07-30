@@ -110,7 +110,7 @@ def _stub(
     rt,
     *,
     plan_approval="human",
-    auto_dispatch=False,
+    plan_gate="human",
     merge_when_ready_accepted=True,
 ):
     import druks.contrib.ship.workflows as m
@@ -146,7 +146,7 @@ def _stub(
 
     async def _settings(self):
         return flow.Settings(
-            auto_dispatch_on_plan_approval=auto_dispatch,
+            plan_gate=plan_gate,
             max_implementation_revisions=5,
             review_code=True,
         )
@@ -295,11 +295,9 @@ async def test_rejected_merge_intent_reparks_work_gate(rt, monkeypatch):
     await reparked.cancel()
 
 
-async def test_auto_mode_machine_review_replaces_the_plan_gate(rt, monkeypatch):
-    """plan_approval resolves to none: the machine reviewer approves the plan and
-    the run reaches the work gate with no plan park — review_plan runs exactly
-    once, where it substitutes for the operator."""
-    invoked, _ = _stub(monkeypatch, rt, plan_approval=None, auto_dispatch=True)
+async def test_machine_mode_reaches_work_gate_without_a_plan_park(rt, monkeypatch):
+    """Machine approval reaches the work gate without an operator plan park."""
+    invoked, _ = _stub(monkeypatch, rt, plan_approval=None, plan_gate="machine")
 
     item = _seed_work_item(rt.engine, repo="acme/gizmo")
     workflow_id = await rt.flow.start(
@@ -316,6 +314,23 @@ async def test_auto_mode_machine_review_replaces_the_plan_gate(rt, monkeypatch):
     await parked.resume(action="approve")
     done = await _wait(rt.engine, workflow_id, lambda run: run.state == RunState.FINISHED)
     assert not done.failure
+
+
+async def test_machine_then_human_reviews_then_parks_at_the_plan_gate(rt, monkeypatch):
+    """Machine approval is followed by the operator plan gate."""
+    invoked, _ = _stub(
+        monkeypatch,
+        rt,
+        plan_approval=None,
+        plan_gate="machine_then_human",
+    )
+
+    item = _seed_work_item(rt.engine, repo="acme/combined-gate")
+    workflow_id, parked = await _start_to_work_gate(rt, item)
+
+    assert invoked[:2] == ["generate_plan", "review_plan"]
+    await parked.cancel()
+    await _wait(rt.engine, workflow_id, lambda run: run.state == RunState.CANCELLED)
 
 
 async def test_the_attempt_claims_the_item_once(rt, monkeypatch):

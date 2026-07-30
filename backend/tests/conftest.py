@@ -113,6 +113,7 @@ _OWN_DATABASE_MODULES = {
     "test_notifications_durable",
     "test_harness_login_persistence",
     "test_extension_migrations",
+    "test_plan_gate_migration",
     "test_proof_extension_migration",
 }
 

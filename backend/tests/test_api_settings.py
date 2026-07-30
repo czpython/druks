@@ -214,7 +214,23 @@ def test_extensions_surface_build_agents_and_workflow_defaults(tmp_path: Path):
     # The workflow's settings surface alongside its agents.
     fields = {f["name"]: f for f in build["workflows"][0]["fields"]}
     assert fields["max_implementation_revisions"]["value"] == 5
-    assert fields["auto_dispatch_on_plan_approval"]["value"] is False
+    assert fields["plan_gate"] == {
+        "name": "plan_gate",
+        "label": "Plan gate",
+        "help": (
+            "human — Operator reviews every plan; the machine reviewer never runs. "
+            "machine — The machine reviewer approves for implementation; the operator is the "
+            "fallback after the draft bound. machine_then_human — The machine reviewer "
+            "critiques first, then the operator approves; the operator also receives the "
+            "standing critique after the draft bound."
+        ),
+        "type": "enum",
+        "value": "human",
+        "default": "human",
+        "choices": ["human", "machine", "machine_then_human"],
+        "secretSet": None,
+        "overridden": False,
+    }
 
 
 def test_extensions_override_agent_model_persists(tmp_path: Path):
@@ -400,6 +416,31 @@ def test_extensions_override_workflow_setting_persists(tmp_path: Path):
 
     assert fields["max_implementation_revisions"]["value"] == 8
     assert fields["max_implementation_revisions"]["overridden"] is True
+
+
+def test_extensions_plan_gate_override_persists(tmp_path: Path):
+    with _build_client(tmp_path) as client:
+        patch = client.patch(
+            "/api/settings/extensions",
+            json={"workflowSettings": {"ship.build": {"plan_gate": "machine_then_human"}}},
+        )
+        assert patch.status_code == 200
+        fields = {f["name"]: f for f in _ship_extension(client)["workflows"][0]["fields"]}
+
+    assert fields["plan_gate"]["value"] == "machine_then_human"
+    assert fields["plan_gate"]["overridden"] is True
+
+
+def test_extensions_reject_removed_auto_dispatch_setting(tmp_path: Path):
+    with _build_client(tmp_path) as client:
+        response = client.patch(
+            "/api/settings/extensions",
+            json={"workflowSettings": {"ship.build": {"auto_dispatch_on_plan_approval": True}}},
+        )
+
+    assert response.status_code == 422
+    detail = response.json()["detail"]
+    assert detail == "Unknown ship.build setting 'auto_dispatch_on_plan_approval'"
 
 
 def test_extensions_reject_out_of_range_workflow_setting(tmp_path: Path):
