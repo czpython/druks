@@ -96,11 +96,6 @@ _SECTIONS = (
                 is_required=True,
             ),
             Entry("DRUKS_WEBHOOK_SECRET", ("secrets", "webhook_secret"), is_required=True),
-            Entry(
-                "ANNOUNCE_TOKEN_SECRET",
-                ("secrets", "announce_token_secret"),
-                is_required=True,
-            ),
             Entry("DRUKS_SECRETS_KEY", ("secrets", "secrets_key"), is_required=True),
         ),
     ),
@@ -171,7 +166,6 @@ _KNOWN_TOML_KEYS = {
     "secrets": (
         "postgres_password",
         "webhook_secret",
-        "announce_token_secret",
         "secrets_key",
         "sandbox_service_token",
     ),
@@ -193,10 +187,6 @@ _TOML_TABLE_COMMENTS = {
 
 def _hex_secret() -> str:
     return secrets.token_hex(32)
-
-
-def _announce_secret() -> str:
-    return secrets.token_urlsafe(32)
 
 
 def _secrets_key() -> str:
@@ -344,7 +334,6 @@ def _fresh_config(*, provider: str, home: str) -> dict[str, object]:
         "secrets": {
             "postgres_password": _hex_secret(),
             "webhook_secret": _hex_secret(),
-            "announce_token_secret": _announce_secret(),
             "secrets_key": _secrets_key(),
             "sandbox_service_token": sandbox_token,
         },
@@ -892,7 +881,6 @@ def _print_migration_recipe(
     print_fn("  - DRUKS_POSTGRES_PASSWORD → [secrets].postgres_password")
     print_fn("  - DRUKS_SECRETS_KEY → [secrets].secrets_key")
     print_fn("  - DRUKS_WEBHOOK_SECRET → [secrets].webhook_secret")
-    print_fn("  - ANNOUNCE_TOKEN_SECRET → [secrets].announce_token_secret")
     print_fn("  - DRUKS_SANDBOX_SERVICE_TOKEN → [secrets].sandbox_service_token")
     print_fn("  - GITHUB_*_APP_ID → [github]")
     print_fn("  - provider and its credentials → [sandbox] and [sandbox.env]")

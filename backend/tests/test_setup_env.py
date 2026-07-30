@@ -42,7 +42,6 @@ def test_fresh_exe_render_matches_the_deployment_contract(tmp_path):
     assert "TAILSCALE_TAILNET" not in values
     assert len(config["secrets"]["postgres_password"]) == 64
     assert len(config["secrets"]["webhook_secret"]) == 64
-    assert len(config["secrets"]["announce_token_secret"]) == 43
     assert len(config["secrets"]["sandbox_service_token"]) == 64
     assert (tmp_path / "secrets").is_dir()
     assert (tmp_path / ".gitignore").read_text().splitlines() == [
@@ -119,7 +118,6 @@ def test_pre_toml_guard_refuses_without_writing(tmp_path):
         "DRUKS_POSTGRES_PASSWORD",
         "DRUKS_SECRETS_KEY",
         "DRUKS_WEBHOOK_SECRET",
-        "ANNOUNCE_TOKEN_SECRET",
         "DRUKS_SANDBOX_SERVICE_TOKEN",
         "GITHUB_*_APP_ID",
         "[sandbox.env]",
