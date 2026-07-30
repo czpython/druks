@@ -62,9 +62,9 @@ def _acceptance_criteria() -> list[AcceptanceCriterionOutput]:
     ]
 
 
-async def test_gate_mode_parks_every_plan_and_never_calls_the_reviewer(monkeypatch):
-    """Gate mode: generate → park, the reviewer never runs; operator answers
-    and notes thread into the next pass."""
+async def test_gate_mode_reviews_each_plan_before_it_parks(monkeypatch):
+    """Gate mode: a question-free plan passes the machine reviewer before it
+    parks; operator answers and notes thread into the next pass."""
     flow = _flow()
     passes = _fake_plans(
         monkeypatch,
@@ -81,7 +81,11 @@ async def test_gate_mode_parks_every_plan_and_never_calls_the_reviewer(monkeypat
         PlanData(plan_markdown="v2"),
         PlanData(plan_markdown="v3", acceptance_criteria=_acceptance_criteria()),
     )
-    _no_review_agent(monkeypatch)
+    _fake_grades(
+        monkeypatch,
+        ReviewOutput(decision=ReviewDecision.APPROVE, body=""),
+        ReviewOutput(decision=ReviewDecision.APPROVE, body=""),
+    )
 
     replies = iter(
         [
@@ -110,6 +114,30 @@ async def test_gate_mode_parks_every_plan_and_never_calls_the_reviewer(monkeypat
         },
         {"answered_questions": [], "operator_note": "add a rollback section", "reviewer_notes": ""},
     ]
+
+
+async def test_gate_mode_folds_the_critique_before_parking(monkeypatch):
+    """Gate mode, question-free plan: REQUEST_CHANGES routes the critique into a
+    redraft before the operator sees anything; the approved redraft parks."""
+    flow = _flow()
+    passes = _fake_plans(monkeypatch, PlanData(plan_markdown="v1"), PlanData(plan_markdown="v2"))
+    _fake_grades(
+        monkeypatch,
+        ReviewOutput(decision=ReviewDecision.REQUEST_CHANGES, body="name the wire schema"),
+        ReviewOutput(decision=ReviewDecision.APPROVE, body=""),
+    )
+    parks: list[tuple[list, str]] = []
+
+    async def fake_review(*, questions=None, context=""):
+        parks.append((list(questions or []), context))
+        return OperatorReply(action="approve")
+
+    flow.review = fake_review
+
+    assert await flow._plan_phase() is True
+    assert [p["reviewer_notes"] for p in passes] == ["", "name the wire schema"]
+    # One park, on the redraft the reviewer approved; the folded critique is spent.
+    assert parks == [([], "")]
 
 
 async def test_approve_confirming_recommendations_proceeds_without_redraft(monkeypatch):
@@ -166,7 +194,7 @@ async def test_approve_confirming_recommendations_on_empty_plan_redrafts(monkeyp
             acceptance_criteria=_acceptance_criteria(),
         ),
     )
-    _no_review_agent(monkeypatch)
+    _fake_grades(monkeypatch, ReviewOutput(decision=ReviewDecision.APPROVE, body=""))
     replies = iter(
         [
             OperatorReply(action="approve", answers={"q1": "a"}),
@@ -204,7 +232,7 @@ async def test_approve_diverging_from_recommendation_redrafts(monkeypatch):
         ),
         PlanData(plan_markdown="v2", acceptance_criteria=_acceptance_criteria()),
     )
-    _no_review_agent(monkeypatch)
+    _fake_grades(monkeypatch, ReviewOutput(decision=ReviewDecision.APPROVE, body=""))
     replies = iter(
         [
             OperatorReply(action="approve", answers={"q1": "b"}),
@@ -239,7 +267,7 @@ async def test_approve_with_note_redrafts(monkeypatch):
         ),
         PlanData(plan_markdown="v2", acceptance_criteria=_acceptance_criteria()),
     )
-    _no_review_agent(monkeypatch)
+    _fake_grades(monkeypatch, ReviewOutput(decision=ReviewDecision.APPROVE, body=""))
     replies = iter(
         [
             OperatorReply(

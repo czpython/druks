@@ -41,7 +41,7 @@ CONSULT REFERENCES BEFORE INVENTING. If the prompt header lists a "Reference rep
 WHAT TO LOOK FOR — beyond AC correctness, which is the evaluator's job, not yours:
 - Reuse: does this invent a new helper / abstraction that already exists in the repo? Name the existing one and where it lives.
 - Idiomatic fit: does the code match how surrounding peer features are organized (layer, naming, file structure, error-handling shape)?
-- Test shape: are the new tests targeting *behavior* (what should be true) or *implementation* (which functions get called)? Behavior tests survive refactors; implementation tests rot.
+- Test shape: are the new tests targeting *behavior* (what should be true) or *implementation* (which functions get called)? Behavior tests survive refactors; implementation tests rot. A test asserting exact prose or substrings of a prompt/template is the worst of this kind — it pins wording, so the next edit reformats production text to satisfy the assertion. Test what a template renders per input, never which words it contains.
 - Dead branches / unreachable code introduced by this change.
 - Foot-guns: surprising default values, unsafe casts, swallowed exceptions, missing input validation on a public boundary, log-then-continue patterns where the caller can't tell something failed.
 - Secret leaks, obvious injection paths, log lines that include sensitive data.

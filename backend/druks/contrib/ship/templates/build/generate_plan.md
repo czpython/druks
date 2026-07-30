@@ -22,6 +22,10 @@ your acceptance criteria. Wrong shape here compounds into every step that follow
 - **Preserve operator contracts verbatim.** Copy exact field shapes, JSON and endpoint
   contracts, template strings, do/don't decisions, and dependency nuance from the description
   and especially operator refinement comments into the plan. When in doubt, copy more.
+  Verbatim preservation covers the operator's decisions, not designs you can shrink: when a
+  meaningfully smaller mechanism meets the ticket's stated goal, raise it as one question
+  with the smaller shape `recommended: true` rather than silently building the heavier one —
+  and never silently substitute your own design either.
 - **ACs are written for a machine, not a human.** Every acceptance criterion will be verified
   by a code-reading evaluator who cannot run a browser, eyeball rendered output, or call
   external services. If you cannot express it as a machine-checkable assertion — diff exists,
@@ -111,7 +115,10 @@ Smoke / manual-verify requests in the source are operator concerns, not implemen
 
 RULED OUT — the `rejected_approaches` schema field. Name each approach you considered and
 dropped, with the reason you dropped it. Every agent after you reads the list and takes it as
-settled, so an approach you rejected silently is one they will propose again.
+settled, so an approach you rejected silently is one they will propose again. A rejection's
+reason must name the concrete behavior or cost it protects — what breaks, what regresses,
+what it would strand — never a restatement of the ticket's design slogan. If the only reason
+you can write is "the ticket says so", the approach is not ruled out; leave it off the list.
 
 ASSIGNEE RESOLUTION — the `assignee_github_login` schema field. Resolve the ticket
 assignee's GitHub login via the github MCP from their name

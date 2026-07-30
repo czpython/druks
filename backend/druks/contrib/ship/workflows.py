@@ -248,10 +248,14 @@ class Build(Workflow):
                     operator_note=operator_note,
                     reviewer_notes=draft_guidance,
                 )
-                if human_approval_required or plan.questions:
+                if plan.questions:
                     break
                 machine_review = await Ship.review_plan()
                 if machine_review.decision == ReviewDecision.APPROVE:
+                    # An approved plan still parks when a human gate is configured —
+                    # the reviewer screens shape before the operator spends time on it.
+                    if human_approval_required:
+                        break
                     return True
                 unresolved_critique = machine_review.body
             operator_reply = await self.review(
