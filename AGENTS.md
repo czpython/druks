@@ -20,6 +20,7 @@ Start with `README.md`, then read only the material relevant to the task:
 - The current migration head is `alembic heads` — not a scan of `backend/migrations/versions/`.
 - Shared SPA work: `frontend/README.md`.
 - Documentation navigation and audience ownership: `docs/index.md`.
+- The checklist and craft gate every change is held to: `.druks/review/checklist.md`.
 
 For extension-surface changes, inspect the proof extension at
 `backend/tests/druks-field_notes/` and its tests as well as the author guide.
