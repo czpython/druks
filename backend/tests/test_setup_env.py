@@ -2,6 +2,7 @@ import stat
 import tomllib
 from pathlib import Path
 
+import pytest
 from druks.setup_env import GAPS_EXIT_CODE, MIGRATION_EXIT_CODE, read_env, run_setup
 
 
@@ -307,6 +308,19 @@ def test_missing_known_tables_are_canonicalized_before_rerender(tmp_path):
     assert config["ticketing"] == {"linear_api_key": "", "linear_webhook_secret": ""}
     assert "ticketing-renamed" in config
     assert config["sandbox"]["env"] == {}
+
+
+def test_nested_operator_content_is_refused(tmp_path):
+    """Operator additions are flat scalars, one table deep — druks.toml is
+    druks' file, and structure it can't own round-trip is refused, not
+    silently re-rendered."""
+    env_path = tmp_path / ".env"
+    _run(env_path, provider="docker")
+    toml_path = tmp_path / "druks.toml"
+    toml_path.write_text(toml_path.read_text() + "\n[operator.nested]\nvalue = 1\n")
+
+    with pytest.raises(ValueError, match="operator.nested"):
+        _run(env_path)
 
 
 def test_interactive_rerun_prompts_only_for_required_blanks(tmp_path):

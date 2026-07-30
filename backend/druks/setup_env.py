@@ -1,15 +1,13 @@
 import base64
 import copy
-import math
 import os
 import re
 import secrets
 import tomllib
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import date, datetime, time
 from pathlib import Path
-from typing import TypeGuard, cast
+from typing import Any
 
 GAPS_EXIT_CODE = 3
 MIGRATION_EXIT_CODE = 4
@@ -271,7 +269,7 @@ def run_setup(
     return GAPS_EXIT_CODE if gaps else 0
 
 
-def _fresh_config(*, provider: str, home: str) -> dict[str, object]:
+def _fresh_config(*, provider: str, home: str) -> dict[str, Any]:
     if provider == "docker":
         identity_mode = "none"
         identity_header = ""
@@ -294,7 +292,7 @@ def _fresh_config(*, provider: str, home: str) -> dict[str, object]:
         sandbox_token = _hex_secret()
         sandbox_image = ""
 
-    sandbox_env: dict[str, object] = {}
+    sandbox_env: dict[str, Any] = {}
     if provider == "exe":
         sandbox_env = {
             "EXE_API_TOKEN": "",
@@ -354,61 +352,53 @@ def _fresh_config(*, provider: str, home: str) -> dict[str, object]:
     }
 
 
-def _read_toml(path: Path) -> dict[str, object]:
+def _read_toml(path: Path) -> dict[str, Any]:
     with path.open("rb") as config_file:
         config = tomllib.load(config_file)
     return _canonical_config(config)
 
 
-def _validate_config(config: dict[str, object]) -> None:
+def _canonical_config(raw: dict[str, Any]) -> dict[str, Any]:
+    """Validated copy with every known table and key present. Operator
+    additions are welcome as flat scalars, one table deep; anything more
+    structured is refused with its key named."""
+    config = copy.deepcopy(raw)
     for table_name, keys in _KNOWN_TOML_KEYS.items():
-        value = config.get(table_name, {})
-        if not isinstance(value, dict):
+        table = config.setdefault(table_name, {})
+        if not isinstance(table, dict):
             raise ValueError(f"druks.toml: [{table_name}] must be a table")
         for key in keys:
-            configured = value.get(key, "")
-            if not isinstance(configured, str):
+            if not isinstance(table.setdefault(key, ""), str):
                 raise ValueError(f"druks.toml: {table_name}.{key} must be a string")
 
-    sandbox = config.get("sandbox", {})
-    if not isinstance(sandbox, dict):
-        raise ValueError("druks.toml: [sandbox] must be a table")
-    sandbox_env = sandbox.get("env", {})
+    sandbox_env = config["sandbox"].setdefault("env", {})
     if not isinstance(sandbox_env, dict):
         raise ValueError("druks.toml: [sandbox.env] must be a table")
-    for key, value in sandbox_env.items():
-        if not isinstance(value, str):
-            raise ValueError(f"druks.toml: sandbox.env.{key} must be a string")
+    for env_name, env_table in (("sandbox.env", sandbox_env), ("env", config["env"])):
+        for key, value in env_table.items():
+            if not isinstance(value, str):
+                raise ValueError(f"druks.toml: {env_name}.{key} must be a string")
 
-    deployment_env = config.get("env", {})
-    if not isinstance(deployment_env, dict):
-        raise ValueError("druks.toml: [env] must be a table")
-    for key, value in deployment_env.items():
-        if not isinstance(value, str):
-            raise ValueError(f"druks.toml: env.{key} must be a string")
-
-
-def _canonical_config(config: dict[str, object]) -> dict[str, object]:
-    _validate_config(config)
-    canonical = copy.deepcopy(config)
-    for table_name, keys in _KNOWN_TOML_KEYS.items():
-        table = cast(dict[str, object], canonical.setdefault(table_name, {}))
-        for key in keys:
-            table.setdefault(key, "")
-    sandbox = cast(dict[str, object], canonical["sandbox"])
-    sandbox.setdefault("env", {})
-    if not sandbox["service_tokens"]:
-        del sandbox["service_tokens"]
-
-    identity = cast(dict[str, object], canonical["identity"])
-    if identity["mode"] != "jwt":
-        for key in ("jwks_url", "jwt_issuer", "jwt_audience", "jwt_identity_claim"):
-            if not identity[key] or key == "jwt_identity_claim" and identity[key] == "email":
-                del identity[key]
-    return canonical
+    for table_name, table in config.items():
+        if not isinstance(table, dict):
+            _require_scalar("", table_name, table)
+            continue
+        known = _KNOWN_TOML_KEYS.get(table_name)
+        for key, value in table.items():
+            if known is not None and (key in known or (table_name, key) == ("sandbox", "env")):
+                continue
+            _require_scalar(f"{table_name}.", key, value)
+    return config
 
 
-def _get_string(config: dict[str, object], path: tuple[str, ...]) -> str:
+def _require_scalar(prefix: str, key: str, value: Any) -> None:
+    if not isinstance(value, (str, int, float, bool)):
+        raise ValueError(
+            f"druks.toml: {prefix}{key} must be a plain value (string, number, or boolean)"
+        )
+
+
+def _get_string(config: dict[str, Any], path: tuple[str, ...]) -> str:
     current: object = config
     for part in path:
         if not isinstance(current, dict):
@@ -419,7 +409,7 @@ def _get_string(config: dict[str, object], path: tuple[str, ...]) -> str:
     return current
 
 
-def _set_value(config: dict[str, object], path: tuple[str, ...], value: str) -> None:
+def _set_value(config: dict[str, Any], path: tuple[str, ...], value: str) -> None:
     current = config
     for part in path[:-1]:
         child = current.setdefault(part, {})
@@ -438,7 +428,7 @@ def _parse_assignment(assignment: str) -> tuple[tuple[str, ...], str]:
 
 
 def _prompt_values(
-    config: dict[str, object],
+    config: dict[str, Any],
     *,
     is_fresh: bool,
     input_fn: Callable[[str], str],
@@ -501,7 +491,7 @@ def _prompt_values(
     return is_changed
 
 
-def _write_toml(path: Path, config: dict[str, object]) -> None:
+def _write_toml(path: Path, config: dict[str, Any]) -> None:
     canonical = _canonical_config(config)
     text = _render_toml(canonical)
     _write_secure_text(path, text)
@@ -510,7 +500,7 @@ def _write_toml(path: Path, config: dict[str, object]) -> None:
         raise ValueError("druks.toml write verification failed: parsed values changed")
 
 
-def _render_toml(config: dict[str, object]) -> str:
+def _render_toml(config: dict[str, Any]) -> str:
     lines = [
         "# druks.toml — the deployment. Edit this file, then re-run the installer",
         "# to render and apply it. `druks setup` alone re-renders .env but does",
@@ -518,11 +508,7 @@ def _render_toml(config: dict[str, object]) -> str:
         "",
     ]
 
-    root_values = {
-        key: value
-        for key, value in config.items()
-        if not isinstance(value, dict) and not _is_table_array(value)
-    }
+    root_values = {key: value for key, value in config.items() if not isinstance(value, dict)}
     if root_values:
         lines.append("# OPERATOR ADDITIONS")
         for key, value in root_values.items():
@@ -532,21 +518,11 @@ def _render_toml(config: dict[str, object]) -> str:
     for table_name, known_keys in _KNOWN_TOML_KEYS.items():
         lines.append(_TOML_TABLE_COMMENTS[table_name])
         lines.append(f"[{table_name}]")
-        table = cast(dict[str, object], config[table_name])
+        table = config[table_name]
         for key in known_keys:
-            if key in table:
-                lines.append(f"{key} = {_toml_value(table[key])}")
-            elif table_name == "identity":
-                lines.append(f'# {key} = "{"email" if key == "jwt_identity_claim" else ""}"')
-            else:
-                lines.append(f'# {key} = ""')
+            lines.append(f"{key} = {_toml_value(table[key])}")
         additions = {
-            key: value
-            for key, value in table.items()
-            if key not in known_keys
-            and key != "env"
-            and not isinstance(value, dict)
-            and not _is_table_array(value)
+            key: value for key, value in table.items() if key not in known_keys and key != "env"
         }
         if additions:
             if known_keys:
@@ -575,65 +551,23 @@ def _render_toml(config: dict[str, object]) -> str:
                     )
                 )
             lines.append("[sandbox.env]")
-            sandbox_env = cast(dict[str, object], table["env"])
-            for key, value in sandbox_env.items():
+            for key, value in table["env"].items():
                 lines.append(f"{_toml_key(key)} = {_toml_value(value)}")
             lines.append("")
 
-    unknown_tables: list[tuple[tuple[str, ...], dict[str, object], bool]] = []
-    for key, value in config.items():
-        if isinstance(value, dict) and key not in _KNOWN_TOML_KEYS:
-            unknown_tables.append(((key,), value, False))
-        elif _is_table_array(value):
-            for table in value:
-                unknown_tables.append(((key,), table, True))
-    for table_name in _KNOWN_TOML_KEYS:
-        table = cast(dict[str, object], config[table_name])
-        for key, value in table.items():
-            if isinstance(value, dict) and not (table_name == "sandbox" and key == "env"):
-                unknown_tables.append(((table_name, key), value, False))
-            elif _is_table_array(value):
-                for item in value:
-                    unknown_tables.append(((table_name, key), item, True))
-
+    unknown_tables = {
+        key: value
+        for key, value in config.items()
+        if key not in _KNOWN_TOML_KEYS and isinstance(value, dict)
+    }
     if unknown_tables:
         lines.extend(("# " + "=" * 60, "# OPERATOR ADDITIONS", "# " + "=" * 60, ""))
-        for path, table, is_array in unknown_tables:
-            lines.extend(_render_unknown_table(path, table, is_array=is_array))
+        for name, table in unknown_tables.items():
+            lines.append(f"[{_toml_key(name)}]")
+            lines.extend(f"{_toml_key(key)} = {_toml_value(value)}" for key, value in table.items())
+            lines.append("")
 
     return "\n".join(lines).rstrip() + "\n"
-
-
-def _render_unknown_table(
-    path: tuple[str, ...],
-    table: dict[str, object],
-    *,
-    is_array: bool,
-) -> list[str]:
-    path_text = ".".join(_toml_key(part) for part in path)
-    brackets = "[[" if is_array else "["
-    closing_brackets = "]]" if is_array else "]"
-    lines = [f"{brackets}{path_text}{closing_brackets}"]
-    nested: list[tuple[str, dict[str, object]]] = []
-    arrays: list[tuple[str, list[dict[str, object]]]] = []
-    for key, value in table.items():
-        if isinstance(value, dict):
-            nested.append((key, value))
-        elif _is_table_array(value):
-            arrays.append((key, value))
-        else:
-            lines.append(f"{_toml_key(key)} = {_toml_value(value)}")
-    lines.append("")
-    for key, value in nested:
-        lines.extend(_render_unknown_table((*path, key), value, is_array=False))
-    for key, values in arrays:
-        for value in values:
-            lines.extend(_render_unknown_table((*path, key), value, is_array=True))
-    return lines
-
-
-def _is_table_array(value: object) -> TypeGuard[list[dict[str, object]]]:
-    return isinstance(value, list) and bool(value) and all(isinstance(item, dict) for item in value)
 
 
 def _toml_key(value: str) -> str:
@@ -642,25 +576,12 @@ def _toml_key(value: str) -> str:
     return f'"{_escape_toml_string(value)}"'
 
 
-def _toml_value(value: object) -> str:
+def _toml_value(value: str | int | float | bool) -> str:
     if isinstance(value, str):
         return f'"{_escape_toml_string(value)}"'
     if isinstance(value, bool):
         return "true" if value else "false"
-    if isinstance(value, int):
-        return str(value)
-    if isinstance(value, float):
-        if not math.isfinite(value):
-            raise ValueError("druks.toml: non-finite floats are unsupported")
-        return repr(value)
-    if isinstance(value, (datetime, date, time)):
-        return value.isoformat()
-    if isinstance(value, list):
-        return "[" + ", ".join(_toml_value(item) for item in value) + "]"
-    if isinstance(value, dict):
-        items = (f"{_toml_key(key)} = {_toml_value(item)}" for key, item in value.items())
-        return "{ " + ", ".join(items) + " }"
-    raise ValueError(f"druks.toml: unsupported operator value {value!r}")
+    return repr(value)
 
 
 def _escape_toml_string(value: str) -> str:
@@ -670,7 +591,7 @@ def _escape_toml_string(value: str) -> str:
 
 
 def _render_env(
-    config: dict[str, object],
+    config: dict[str, Any],
     *,
     install_dir: str,
     extras: dict[str, str],
@@ -695,8 +616,7 @@ def _render_env(
             lines.extend(section_lines)
             lines.append("")
 
-    sandbox = cast(dict[str, object], config["sandbox"])
-    sandbox_env = cast(dict[str, str], sandbox["env"])
+    sandbox_env: dict[str, str] = config["sandbox"]["env"]
     if provider != "docker":
         pass_through = []
         for key, value in sandbox_env.items():
@@ -717,7 +637,7 @@ def _render_env(
                 )
             )
 
-    deployment_env = cast(dict[str, str], config["env"])
+    deployment_env: dict[str, str] = config["env"]
     additions = []
     for key, value in deployment_env.items():
         if key in _OWNED_ENV_KEYS or not value:
@@ -772,7 +692,7 @@ def _is_reserved_env_key(key: str) -> bool:
 
 
 def _collect_gaps(
-    config: dict[str, object],
+    config: dict[str, Any],
     *,
     env_path: Path,
     install_dir: str,
@@ -800,13 +720,12 @@ def _collect_gaps(
                 gaps.append(f"{env_key} is empty")
 
     provider = _get_string(config, ("sandbox", "provider"))
-    sandbox = cast(dict[str, object], config["sandbox"])
-    sandbox_env = cast(dict[str, str], sandbox["env"])
+    sandbox_env: dict[str, str] = config["sandbox"]["env"]
     for key in sandbox_env:
         if _is_reserved_env_key(key):
             gaps.append(f"sandbox.env.{key} is reserved by druks")
 
-    deployment_env = cast(dict[str, str], config["env"])
+    deployment_env: dict[str, str] = config["env"]
     for key in deployment_env:
         if key in _OWNED_ENV_KEYS:
             gaps.append(f"env.{key} is reserved by druks")
