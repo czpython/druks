@@ -1,6 +1,6 @@
 import logging
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field
 
@@ -28,7 +28,7 @@ from druks.workflows import FatalError, Workflow, step
 from .constants import GITHUB_MCP_NAME, GITHUB_MCP_URL, PLAN_DRAFTS_PER_ROUND
 from .extension import Ship
 from .journal import BuildJournal
-from .policy import RepoPolicy
+from .policy import PlanGate, RepoPolicy
 from .prompt_context import BuildPromptContext
 from .workspace import RepoWorkspace
 
@@ -75,7 +75,7 @@ class Build(Workflow):
     journal: BuildJournal
 
     class Settings(BaseModel):
-        plan_gate: Literal["human", "machine", "machine_then_human"] = Field(
+        plan_gate: PlanGate = Field(
             default="human",
             title="Plan gate",
             description=(

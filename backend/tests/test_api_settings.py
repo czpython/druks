@@ -439,9 +439,8 @@ def test_extensions_reject_removed_auto_dispatch_setting(tmp_path: Path):
         )
 
     assert response.status_code == 422
-    assert response.json() == {
-        "detail": "Unknown ship.build setting 'auto_dispatch_on_plan_approval'"
-    }
+    detail = response.json()["detail"]
+    assert detail == "Unknown ship.build setting 'auto_dispatch_on_plan_approval'"
 
 
 def test_extensions_reject_out_of_range_workflow_setting(tmp_path: Path):
