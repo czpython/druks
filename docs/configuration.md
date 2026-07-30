@@ -1,18 +1,61 @@
 # Configuration
 
-Druks has two configuration planes. Use environment variables for process and
+Druks has two authored configuration planes. Use `druks.toml` for process and
 deployment topology. Use the dashboard for operator choices that should change
 without replacing the process.
 
 | Plane | Examples | Stored in |
 | --- | --- | --- |
-| Environment | database, Redis, ingress, GitHub App keys, Drukbox, encryption key | `.env` / process environment |
+| Deployment | database, Redis, ingress, GitHub App keys, Drukbox, encryption key | `~/druks/druks.toml` |
 | Dashboard | timezone, harness connections/defaults, workflow and agent overrides, notifications, MCP servers, skills | Postgres |
 
-The [`Settings` model](../backend/druks/settings.py) is the authority for
-environment variables. [`.env.example`](../.env.example) is a development
-template; `druks setup` writes the larger deployment `.env` used by Compose and
+The installer renders the complete deployment `.env` from `druks.toml`; `.env`
+is a build artifact consumed by Compose, Druks, and Drukbox, not an authored
+configuration file. Edit `druks.toml` and re-run the installer to render and
+apply changes. Running `druks setup` alone re-renders `.env` but does not
+restart services.
+
+Format follows habitat: repository-committed files such as ship's
+`.druks/ship/config.yml` are YAML like the rest of the repository-dotfile
+world; box-resident operator files are TOML because they render to env
+byte-exact. The two files share no keys and no reader.
+
+The [`Settings` model](../backend/druks/settings.py) remains the authority for
+process environment variables. [`.env.example`](../.env.example) is only the
+host-run development template.
+
+## Deployment file
+
+`druks.toml` has one table per operator concern:
+
+| Table | Purpose |
+| --- | --- |
+| `[identity]` | Browser identity mode and header or JWT verification inputs |
+| `[github]` | Operator and reviewer App ids and host PEM paths |
+| `[ticketing]` | Linear credentials |
+| `[urls]` | Dashboard callback base URL and public webhook hostname |
+| `[secrets]` | Generated deployment secrets |
+| `[paths]` | Host data and harness configuration paths |
+| `[sandbox]` | Drukbox provider, service URL, token behavior, and image override |
+| `[sandbox.env]` | Provider environment passed through to the remote stack |
+| `[env]` | Additional deployment environment settings rendered verbatim |
+
+A blank string is unset and is omitted from `.env`. Use `[env]` for settings
+without another `druks.toml` home, including additional `DRUKS_*` settings. A
+key already owned by the renderer is reported as a configuration gap instead
+of overriding its canonical value. On a remote shape,
+`[sandbox.env]` accepts the variables documented by
+[Drukbox](https://github.com/czpython/drukbox); Druks does not enumerate
+providers. `docker` and `exe` select shape-specific first-write templates.
+Every other provider name selects the generic remote shape and is validated by
 Drukbox.
+The local `docker` shape does not render `[sandbox.env]` because host-run
+Drukbox reads its own checkout's environment.
+
+Secrets are generated only when the TOML is first created. Preserve
+`[secrets]` when moving or recovering an installation. Use repeatable
+`druks setup ... --set key.path=value` arguments for explicit scripted writes;
+this is the same single-writer path used by `install.sh --apps`.
 
 ## Core process settings
 
@@ -138,7 +181,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/czpython/druks/main/scripts/
 
 This uses the GitHub manifest files under
 [`scripts/manifests/`](../scripts/manifests) and writes the returned App ids,
-PEMs, and webhook secret into the install.
+PEMs, and webhook secret into the install through `druks setup`.
 
 ### Operator app
 
@@ -230,10 +273,12 @@ connected.
 | `DRUKS_SANDBOX_IMAGE` | Optional provider image override |
 | `DRUKS_SANDBOX_KEYS_DIR` | Per-host SSH private-key directory |
 
-`druks setup` also writes the selected Drukbox provider settings. The installer
-profiles are `exe`, `aws`, and `docker`; provider-specific credentials and host
-options are interpreted by Drukbox. See [deployment](../deploy/README.md) or
-[full local setup](full-local.md) for the topology.
+`[sandbox].provider` accepts any Drukbox provider name. `docker` selects the
+local install shape, `exe` selects the exe.dev + tailnet shape, and every other
+name selects the generic remote shape. Provider-specific credentials and host
+options live in `[sandbox.env]` and are interpreted by Drukbox. See
+[deployment](../deploy/README.md) or [full local setup](full-local.md) for the
+topology.
 
 ## Notifications
 
@@ -300,10 +345,11 @@ python3 -c 'import base64, os; print(base64.b64encode(os.urandom(32)).decode())'
 ```
 
 The first key encrypts new values; every listed key may decrypt. To rotate,
-prepend a new key:
+prepend a new key in `druks.toml`, then re-run the installer:
 
-```dotenv
-DRUKS_SECRETS_KEY=<new>,<old>
+```toml
+[secrets]
+secrets_key = "<new>,<old>"
 ```
 
 Keep the old key until no stored row depends on it. Losing every key used for a

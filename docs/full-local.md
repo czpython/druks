@@ -32,7 +32,8 @@ DRUKS_PROVIDER=docker bash <(curl -fsSL https://raw.githubusercontent.com/czpyth
 
 The first run:
 
-- writes `~/druks/.env` with `DEFAULT_HOST_PROVIDER=docker`
+- writes `~/druks/druks.toml` with `[sandbox].provider = "docker"`
+- renders `~/druks/.env` with `DEFAULT_HOST_PROVIDER=docker`
 - generates the database, webhook, notification, and stored-secret keys
 - points Druks at Drukbox on `127.0.0.1:8000`
 - prints blank required fields and exits without booting if setup is incomplete
@@ -62,12 +63,12 @@ Tailscale disabled, and the `dev-token` expected by the local Druks setup.
 `DOCKER_SSH_USERNAME=druks` matches the non-root user in the shipped sandbox
 image.
 
-If port 8000 is already occupied, run Drukbox on another port and update
-`DRUKS_SANDBOX_SERVICE_URL` in `~/druks/.env`, then recreate the web service:
+If port 8000 is already occupied, run Drukbox on another port, set its URL in
+`~/druks/druks.toml`, then re-run the installer:
 
-```bash
-cd ~/druks
-docker compose up -d --force-recreate web
+```toml
+[sandbox]
+service_url = "http://127.0.0.1:8100"
 ```
 
 ## 3. Verify the first working system
@@ -140,9 +141,15 @@ Build it from the repository when changing the sandbox:
 docker build -t druks-sandbox deploy/sandbox
 ```
 
-Set `DRUKS_SANDBOX_IMAGE=druks-sandbox` in `~/druks/.env` and recreate the web
-service. Existing hosts keep their original image; new acquisitions use the
-updated value.
+Set the image in `~/druks/druks.toml`, then re-run the installer:
+
+```toml
+[sandbox]
+image = "druks-sandbox"
+```
+
+Existing hosts keep their original image; new acquisitions use the updated
+value.
 
 ## Webhook caveat
 

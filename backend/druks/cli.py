@@ -35,15 +35,17 @@ def main() -> None:
     setup_parser = subparsers.add_parser(
         "setup",
         help=(
-            "Write/complete the install .env interactively. Idempotent: an "
-            "existing file is preserved and only blank required values are "
-            "prompted for. Exits 0 when boot-ready, 3 when gaps remain."
+            "Create or update druks.toml and render the install .env. "
+            "Exits 0 when boot-ready, 3 when gaps remain, and 4 when an "
+            "existing pre-TOML .env needs hand migration."
         ),
     )
-    setup_parser.add_argument("env_path", help="Path to the .env to write/patch.")
-    # No enumeration here — setup owns the provider names and lists the
-    # valid ones itself when handed an unknown one.
-    setup_parser.add_argument("--provider", default="exe", help="Sandbox provider.")
+    setup_parser.add_argument("env_path", help="Path to the rendered .env.")
+    setup_parser.add_argument(
+        "--provider",
+        default="exe",
+        help="Fresh-install sandbox provider; ignored when druks.toml exists.",
+    )
     setup_parser.add_argument(
         "--install-dir",
         required=True,
@@ -58,6 +60,14 @@ def main() -> None:
         "--non-interactive",
         action="store_true",
         help="Never prompt: write the template, report gaps, exit.",
+    )
+    setup_parser.add_argument(
+        "--set",
+        action="append",
+        default=[],
+        dest="set_values",
+        metavar="KEY.PATH=VALUE",
+        help="Set a druks.toml value before rendering; repeat for multiple values.",
     )
     create_parser = subparsers.add_parser("create", help="Scaffold a new druks artifact.")
     create_subparsers = create_parser.add_subparsers(dest="artifact", required=True)
@@ -99,6 +109,7 @@ def main() -> None:
                 install_dir=args.install_dir,
                 home=args.home,
                 interactive=not args.non_interactive and sys.stdin.isatty(),
+                set_values=tuple(args.set_values),
             )
         )
 

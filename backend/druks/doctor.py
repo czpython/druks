@@ -258,7 +258,11 @@ def check_database(settings: Settings) -> CheckResult:
 
 def check_drukbox(settings: Settings) -> CheckResult:
     if not settings.sandbox_service_url:
-        return CheckResult(name="drukbox", ok=True, detail="not configured")
+        return CheckResult(
+            name="drukbox",
+            ok=True,
+            detail="not configured (deployments: [sandbox].service_url in druks.toml)",
+        )
     try:
         report = asyncio.run(_drukbox_doctor(settings))
     except Exception as error:  # noqa: BLE001 — surface any SDK/transport failure as fail

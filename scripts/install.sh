@@ -2,18 +2,18 @@
 # Druks installer — the only thing you fetch on a fresh box.
 #
 # Idempotent: re-run any time to pull a fresh compose.yaml + new images.
-# Configuration lives in ``druks setup`` (run from the backend image): it
-# writes the .env, prompts interactively for any blank required values,
-# and preserves hand edits on re-runs. When everything needed to boot is
-# present the same run migrates the DB (out of band, once — never on boot)
-# and brings the stack up; otherwise it prints the remaining checklist
-# (PEMs / provider auth) and exits — do those, then re-run. Claude/Codex
-# subscription auth is NOT a prerequisite: connect them from the dashboard
-# after boot.
+# Deployment configuration lives in druks.toml. ``druks setup`` (run from
+# the backend image) creates it on a fresh box, prompts for required values,
+# and renders the complete .env artifact. Edit druks.toml and re-run this
+# installer to render and apply it. When everything needed to boot is present
+# the same run migrates the DB (out of band, once — never on boot) and brings
+# the stack up; otherwise it prints the remaining checklist and exits.
+# Claude/Codex subscription auth is NOT a prerequisite: connect them from the
+# dashboard after boot.
 #
-# Two install shapes, chosen by DRUKS_PROVIDER (below): `exe`/`aws` run the
-# full stack in containers against a remote VM provider; `docker` runs a
-# local stack whose sandboxes are local containers, with drukbox on the host.
+# Three install shapes are selected from DRUKS_PROVIDER: `docker` is local,
+# `exe` pre-seeds exe.dev + tailnet configuration, and every other drukbox
+# provider name uses the generic remote shape.
 #
 # Usage:
 #
@@ -26,16 +26,16 @@
 #   DRUKS_REF             default main — tag or full SHA to fetch deploy files from
 #   DRUKS_TAG             image tag to pull/run; defaults to the v* DRUKS_REF,
 #                         sha-<DRUKS_REF> for a full SHA, or latest for main
-#   DRUKS_PROVIDER        default exe — install shape / sandbox backend:
-#                         `exe` or `aws` (remote VMs, drukbox in containers)
-#                         or `docker` (local: sandboxes as local containers,
-#                         drukbox on the host).
-#                         Only read on first run (when the .env is written).
+#   DRUKS_PROVIDER        default exe — sandbox provider on the first run.
+#                         `docker` selects the local shape, `exe` selects the
+#                         exe.dev shape, and any other name selects the generic
+#                         remote shape. Drukbox validates provider names.
+#                         Ignored after druks.toml exists.
 #
 # Flags:
 #   --apps                provision the operator + reviewer GitHub Apps via
 #                         the manifest flow and exit. Run between
-#                         the first run (.env written) and the boot run.
+#                         the first run (druks.toml written) and the boot run.
 
 set -euo pipefail
 
@@ -85,20 +85,6 @@ mkdir -p caddy
 fetch_from_repo deploy/caddy/Caddyfile caddy/Caddyfile
 
 # ---------------------------------------------------------------------------
-# --apps — provision the GitHub Apps via the manifest flow
-# ---------------------------------------------------------------------------
-if [ "${1:-}" = "--apps" ]; then
-  [ -f .env ] || { echo "no .env yet — run the installer once first" >&2; exit 1; }
-  need python3
-  echo "→ fetching app-setup script + manifests from $REPO@$REF"
-  mkdir -p manifests
-  fetch_from_repo scripts/_github_app_setup.py _github_app_setup.py
-  fetch_from_repo scripts/manifests/operator.json manifests/operator.json
-  fetch_from_repo scripts/manifests/reviewer.json manifests/reviewer.json
-  exec python3 _github_app_setup.py
-fi
-
-# ---------------------------------------------------------------------------
 # 2. ghcr login + backend image — ``druks setup`` runs from the image
 # ---------------------------------------------------------------------------
 if [ -n "${GHCR_TOKEN:-}" ]; then
@@ -111,8 +97,25 @@ echo "→ pulling $BACKEND_IMAGE"
 docker pull -q "$BACKEND_IMAGE" >/dev/null
 
 # ---------------------------------------------------------------------------
-# 3. .env setup — the template + required-values brain is ``druks setup``
-#    (idempotent: prompts only for blanks; exit 0 = boot-ready, 3 = gaps)
+# --apps — provision the GitHub Apps through the single TOML writer
+# ---------------------------------------------------------------------------
+if [ "${1:-}" = "--apps" ]; then
+  [ -f druks.toml ] || {
+    echo "no druks.toml yet — run the installer once first" >&2
+    exit 1
+  }
+  need python3
+  echo "→ fetching app-setup script + manifests from $REPO@$REF"
+  mkdir -p manifests
+  fetch_from_repo scripts/_github_app_setup.py _github_app_setup.py
+  fetch_from_repo scripts/manifests/operator.json manifests/operator.json
+  fetch_from_repo scripts/manifests/reviewer.json manifests/reviewer.json
+  DRUKS_BACKEND_IMAGE="$BACKEND_IMAGE" exec python3 _github_app_setup.py
+fi
+
+# ---------------------------------------------------------------------------
+# 3. TOML setup + .env render — the required-values brain is ``druks setup``
+#    (exit 0 = boot-ready, 3 = gaps, 4 = pre-TOML hand migration required)
 # ---------------------------------------------------------------------------
 TTY_FLAGS=(-i)
 SETUP_ARGS=(--provider "$PROVIDER" --install-dir "$INSTALL_DIR" --home "$HOME")
@@ -133,9 +136,8 @@ case "$setup_rc" in
   *) echo "druks setup failed (exit $setup_rc)" >&2; exit "$setup_rc" ;;
 esac
 
-# setup persisted the provider (first run: the flag; re-runs: whatever the
-# .env already had) — read it back so the shape branches below follow the
-# .env, not a flag that a re-run didn't pass.
+# setup rendered the provider from druks.toml — read the artifact so the
+# shape branches below follow the authored configuration.
 PROVIDER=$(sed -n 's/^DEFAULT_HOST_PROVIDER=//p' .env)
 DATA_HOST_DIR=$(sed -n 's/^DRUKS_DATA_HOST_DIR=//p' .env)
 if [ -z "$DATA_HOST_DIR" ]; then
@@ -242,12 +244,19 @@ Sandboxes run as local Docker containers — start drukbox on the host:
   cd drukbox && DOCKER_SSH_USERNAME=druks make dev
 ------------------------------------------------------------
 MSG
-else
+elif [ "$PROVIDER" = "exe" ]; then
   cat <<MSG
 
 Public URLs (once exe.dev port-share is configured):
   https://<your-host>/webhooks/{github,linear}
   https://<your-host>/
+------------------------------------------------------------
+MSG
+else
+  cat <<MSG
+
+Remote shape ($PROVIDER): configure public ingress and identity per:
+  https://github.com/czpython/druks/tree/main/deploy
 ------------------------------------------------------------
 MSG
 fi

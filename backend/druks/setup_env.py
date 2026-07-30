@@ -1,277 +1,196 @@
 import base64
+import copy
+import os
+import re
 import secrets
-from collections.abc import Callable
+import tomllib
+from collections.abc import Callable, Mapping, MutableMapping
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
+
+import tomlkit
 
 GAPS_EXIT_CODE = 3
+MIGRATION_EXIT_CODE = 4
+
+_COMPOSE_ENV_KEYS = (
+    "DRUKS_UID",
+    "DRUKS_GID",
+    "DRUKS_TAG",
+    "DRUKS_WEB_BIND_HOST",
+    "COMPOSE_PROFILES",
+)
+_ENV_KEY_PATTERN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
 
 @dataclass(frozen=True)
 class Entry:
     key: str
-    # Static default, or a zero-arg callable evaluated once on first write
-    # (secrets). ``{install_dir}`` / ``{home}`` placeholders are expanded.
-    default: str | Callable[[], str] = ""
-    prompt: str | None = None
-    required: bool = False
-    comment: str | None = None
+    source: tuple[str, ...] = ()
+    fixed: str = ""
+    is_required: bool = False
+    prompt: str = ""
+    is_install_path: bool = False
+    is_remote_only: bool = False
 
 
 @dataclass(frozen=True)
 class Section:
     title: str
-    entries: tuple[Entry, ...] = ()
-    # Free-form commented lines appended after the entries (documented
-    # optional knobs the operator uncomments by hand).
-    trailer: str | None = None
+    entries: tuple[Entry, ...]
+
+
+_SECTIONS = (
+    Section(
+        "GITHUB AND TICKETING",
+        (
+            Entry(
+                "GITHUB_OPERATOR_APP_ID",
+                ("github", "operator_app_id"),
+                is_required=True,
+                prompt="Operator GitHub App id (or run install.sh --apps later)",
+            ),
+            Entry(
+                "GITHUB_OPERATOR_PRIVATE_KEY_PATH",
+                ("github", "operator_pem"),
+                is_install_path=True,
+            ),
+            Entry("GITHUB_OPERATOR_PEM", ("github", "operator_pem"), is_install_path=True),
+            Entry(
+                "GITHUB_REVIEWER_APP_ID",
+                ("github", "reviewer_app_id"),
+                is_required=True,
+                prompt="Reviewer GitHub App id (or run install.sh --apps later)",
+            ),
+            Entry(
+                "GITHUB_REVIEWER_PRIVATE_KEY_PATH",
+                ("github", "reviewer_pem"),
+                is_install_path=True,
+            ),
+            Entry("GITHUB_REVIEWER_PEM", ("github", "reviewer_pem"), is_install_path=True),
+            Entry(
+                "LINEAR_API_KEY",
+                ("ticketing", "linear_api_key"),
+                prompt="Linear API key (enter to skip Linear)",
+            ),
+            Entry(
+                "LINEAR_WEBHOOK_SECRET",
+                ("ticketing", "linear_webhook_secret"),
+                prompt="Linear webhook secret (enter to skip)",
+            ),
+            Entry(
+                "DRUKS_ENDPOINT",
+                ("urls", "endpoint"),
+                prompt="Base URL the operator's browser reaches druks at (enter to skip)",
+            ),
+        ),
+    ),
+    Section(
+        "GENERATED SECRETS",
+        (
+            Entry(
+                "DRUKS_POSTGRES_PASSWORD",
+                ("secrets", "postgres_password"),
+                is_required=True,
+            ),
+            Entry("DRUKS_WEBHOOK_SECRET", ("secrets", "webhook_secret"), is_required=True),
+            Entry("DRUKS_SECRETS_KEY", ("secrets", "secrets_key"), is_required=True),
+        ),
+    ),
+    Section(
+        "DEPLOYMENT DEFAULTS",
+        (
+            Entry("DRUKS_DATA_DIR", ("paths", "data_dir")),
+            Entry("DRUKS_UPSTREAM", fixed="127.0.0.1:8001"),
+            Entry("DRUKS_CLAUDE_HOME", ("paths", "claude_home")),
+            Entry("DRUKS_CODEX_HOME", ("paths", "codex_home")),
+            Entry("DRUKS_CLAUDE_JSON", ("paths", "claude_json")),
+            Entry("DRUKS_WEBHOOK_HOST", ("urls", "webhook_host")),
+            Entry("DATABASE_URL", fixed="sqlite+aiosqlite:////data/drukbox.db"),
+            Entry("REDIS_URL", fixed="redis://127.0.0.1:6379/2"),
+        ),
+    ),
+    Section(
+        "IDENTITY",
+        (
+            Entry("DRUKS_AUTH_MODE", ("identity", "mode"), is_required=True),
+            Entry("DRUKS_AUTH_HEADER", ("identity", "header")),
+            Entry("DRUKS_AUTH_JWKS_URL", ("identity", "jwks_url")),
+            Entry("DRUKS_AUTH_JWT_ISSUER", ("identity", "jwt_issuer")),
+            Entry("DRUKS_AUTH_JWT_AUDIENCE", ("identity", "jwt_audience")),
+            Entry(
+                "DRUKS_AUTH_JWT_IDENTITY_CLAIM",
+                ("identity", "jwt_identity_claim"),
+            ),
+        ),
+    ),
+    Section(
+        "SANDBOX",
+        (
+            Entry("DEFAULT_HOST_PROVIDER", ("sandbox", "provider"), is_required=True),
+            Entry(
+                "DRUKS_SANDBOX_SERVICE_URL",
+                ("sandbox", "service_url"),
+                is_required=True,
+            ),
+            Entry(
+                "DRUKS_SANDBOX_SERVICE_TOKEN",
+                ("secrets", "sandbox_service_token"),
+                is_required=True,
+            ),
+            Entry(
+                "SERVICE_TOKENS",
+                ("sandbox", "service_tokens"),
+                is_remote_only=True,
+            ),
+            Entry("DRUKS_SANDBOX_IMAGE", ("sandbox", "image")),
+        ),
+    ),
+)
+
+_OWNED_ENV_KEYS = frozenset(entry.key for section in _SECTIONS for entry in section.entries)
+_KNOWN_TOML_KEYS = {
+    "identity": (
+        "mode",
+        "header",
+        "jwks_url",
+        "jwt_issuer",
+        "jwt_audience",
+        "jwt_identity_claim",
+    ),
+    "github": ("operator_app_id", "reviewer_app_id", "operator_pem", "reviewer_pem"),
+    "ticketing": ("linear_api_key", "linear_webhook_secret"),
+    "urls": ("endpoint", "webhook_host"),
+    "secrets": (
+        "postgres_password",
+        "webhook_secret",
+        "secrets_key",
+        "sandbox_service_token",
+    ),
+    "paths": ("data_dir", "claude_home", "codex_home", "claude_json"),
+    "sandbox": ("provider", "service_url", "image", "service_tokens"),
+    "env": (),
+}
 
 
 def _hex_secret() -> str:
     return secrets.token_hex(32)
 
 
-def _announce_secret() -> str:
-    return secrets.token_urlsafe(40).replace("-", "").replace("_", "")[:43]
-
-
 def _secrets_key() -> str:
     return base64.b64encode(secrets.token_bytes(32)).decode()
 
 
-_COMMON_SECTIONS: tuple[Section, ...] = (
-    Section(
-        "EDIT THESE (the installer refuses to boot until they're filled in)",
-        (
-            # Where druks may act is NOT configured here — it's wherever the
-            # operator GitHub App is installed. Install/uninstall the App to
-            # grant/revoke; `druks doctor` shows the effective set.
-            Entry(
-                "GITHUB_OPERATOR_APP_ID",
-                prompt="Operator GitHub App id (or run install.sh --apps later)",
-                required=True,
-                comment=(
-                    "GitHub Apps — provision via ``install.sh --apps`` (manifest\n"
-                    "flow, fills these in) or create by hand and upload the PEMs."
-                ),
-            ),
-            Entry("GITHUB_OPERATOR_PRIVATE_KEY_PATH", "{install_dir}/secrets/operator.pem"),
-            Entry("GITHUB_OPERATOR_PEM", "{install_dir}/secrets/operator.pem"),
-            Entry(
-                "GITHUB_REVIEWER_APP_ID",
-                prompt="Reviewer GitHub App id (or run install.sh --apps later)",
-                required=True,
-            ),
-            Entry("GITHUB_REVIEWER_PRIVATE_KEY_PATH", "{install_dir}/secrets/reviewer.pem"),
-            Entry("GITHUB_REVIEWER_PEM", "{install_dir}/secrets/reviewer.pem"),
-            Entry(
-                "LINEAR_API_KEY",
-                prompt="Linear API key (enter to skip Linear)",
-                comment="Linear (optional — leave blank to skip)",
-            ),
-            Entry("LINEAR_WEBHOOK_SECRET", prompt="Linear webhook secret (enter to skip)"),
-            Entry(
-                "DRUKS_ENDPOINT",
-                prompt="Base URL the operator's browser reaches druks at (enter to skip)",
-                comment=(
-                    "Public base URL of the dashboard, e.g. https://druks.example.com —\n"
-                    "needed only to connect OAuth MCP servers (it hosts their callback)."
-                ),
-            ),
-        ),
-    ),
-    Section(
-        "AUTO-GENERATED — do not regenerate without redeploying the stack",
-        (
-            # Postgres reads it at initdb only — regenerating later means
-            # ALTER ROLE (or a fresh volume), not just a redeploy.
-            Entry("DRUKS_POSTGRES_PASSWORD", _hex_secret),
-            Entry("DRUKS_WEBHOOK_SECRET", _hex_secret),
-            Entry("ANNOUNCE_TOKEN_SECRET", _announce_secret),
-            # Encrypts stored secrets (MCP tokens, OAuth grants) at rest.
-            # Rotatable: comma-separated, first key encrypts, all decrypt —
-            # see docs/configuration.md.
-            Entry("DRUKS_SECRETS_KEY", _secrets_key),
-        ),
-    ),
-    Section(
-        "DEFAULTS (rarely changed)",
-        (
-            Entry("DRUKS_DATA_DIR", "{home}/druks-data"),
-            Entry("DRUKS_UPSTREAM", "127.0.0.1:8001"),
-            Entry("DRUKS_CLAUDE_HOME", "{home}/.claude"),
-            Entry("DRUKS_CODEX_HOME", "{home}/.codex"),
-            Entry("DRUKS_CLAUDE_JSON", "{home}/.claude.json"),
-            Entry(
-                "DRUKS_WEBHOOK_HOST",
-                comment=(
-                    "Public webhook hostname (e.g. druks.example.com). Point an\n"
-                    "A-record at this box and open 80/443; Caddy auto-provisions\n"
-                    "TLS and serves only /_external/*. Leave empty when the edge\n"
-                    "already carries webhooks (exe.dev port-share) or you bring\n"
-                    "your own ingress."
-                ),
-            ),
-            Entry(
-                "DATABASE_URL",
-                "sqlite+aiosqlite:////data/drukbox.db",
-                comment=(
-                    "Drukbox internals. DATABASE_URL is overridden by compose to the\n"
-                    "shared SQLite file; kept here only as a documented default for\n"
-                    "non-compose runs."
-                ),
-            ),
-            Entry("REDIS_URL", "redis://127.0.0.1:6379/2"),
-        ),
-    ),
-)
-
-# How each install shape resolves browser identity. Both Caddy and druks read
-# DRUKS_AUTH_HEADER: Caddy requires the edge's assertion, druks maps it to an
-# account.
-_EXE_IDENTITY_SECTION = Section(
-    "IDENTITY — exe.dev authenticates at the edge; druks maps the asserted email",
-    (
-        Entry("DRUKS_AUTH_MODE", "header"),
-        Entry("DRUKS_AUTH_HEADER", "X-ExeDev-Email"),
-    ),
-)
-
-_AWS_IDENTITY_SECTION = Section(
-    "IDENTITY — your edge proxy authenticates; druks maps the asserted email",
-    (
-        Entry("DRUKS_AUTH_MODE", "header"),
-        Entry(
-            "DRUKS_AUTH_HEADER",
-            prompt="Identity header your edge proxy injects (e.g. X-Forwarded-Email)",
-            required=True,
-            comment=(
-                "The header your identity proxy (Teleport, Cloudflare Access, …)\n"
-                "injects after authenticating. The proxy must strip any\n"
-                "client-supplied copy before inserting its own."
-            ),
-        ),
-    ),
-)
-
-_LOCAL_IDENTITY_SECTION = Section(
-    "IDENTITY — loopback dashboard, no authentication; one operator account",
-    (Entry("DRUKS_AUTH_MODE", "none"),),
-)
-
-_IDENTITY_SECTIONS = {
-    "exe": _EXE_IDENTITY_SECTION,
-    "aws": _AWS_IDENTITY_SECTION,
-    "docker": _LOCAL_IDENTITY_SECTION,
-}
-
-# How druks reaches drukbox. The remote shapes run drukbox itself from this
-# same .env (compose `remote` profile): container on :8780, generated token;
-# SERVICE_TOKENS is drukbox's accepted-token list, mirrored from the sandbox
-# token when blank.
-_REMOTE_DRUKBOX_ENTRIES: tuple[Entry, ...] = (
-    Entry("DRUKS_SANDBOX_SERVICE_URL", "http://127.0.0.1:8780"),
-    Entry("DRUKS_SANDBOX_SERVICE_TOKEN", _hex_secret),
-    Entry("SERVICE_TOKENS"),
-    Entry(
-        "DRUKS_SANDBOX_IMAGE",
-        comment="Leave empty so drukbox picks per-provider; set as override only.",
-    ),
-)
-
-_AWS_SECTION = Section(
-    "SANDBOX PROVIDER — AWS EC2 (drukbox)",
-    (
-        Entry(
-            "AWS_REGION",
-            prompt="AWS region (e.g. eu-central-1)",
-            required=True,
-            comment=(
-                "Control-plane credentials reach boto via the container env; an\n"
-                "IAM instance profile on this box works too — leave the key pair\n"
-                "blank and boto's default chain picks the role up automatically."
-            ),
-        ),
-        Entry("AWS_DEFAULT_IMAGE", prompt="AMI id for sandbox VMs", required=True),
-        Entry("AWS_ACCESS_KEY_ID", prompt="AWS access key id (enter to use instance profile)"),
-        Entry("AWS_SECRET_ACCESS_KEY", prompt="AWS secret access key (enter to skip)"),
-        Entry("DEFAULT_HOST_PROVIDER", "aws"),
-        Entry("TAILSCALE_ENABLED", "false"),
-        Entry("AWS_INSTANCE_TYPE", "t3.medium"),
-        *_REMOTE_DRUKBOX_ENTRIES,
-    ),
-    trailer=(
-        "# AWS_SUBNET_ID=          # default VPC subnet if unset\n"
-        "# AWS_SECURITY_GROUP_ID=  # drukbox manages one if unset\n"
-        "# AWS_SSH_USERNAME=ubuntu # override if the AMI uses a different user\n"
-        "# AWS_INSTANCE_PROFILE=   # IAM profile attached to the SANDBOX VMs\n"
-        "#                         # drukbox launches (not control-plane auth)"
-    ),
-)
-
-_EXE_SECTION = Section(
-    "SANDBOX PROVIDER — exe.dev + Tailscale (drukbox)",
-    (
-        Entry(
-            "TAILSCALE_TAILNET",
-            prompt='Tailscale magic-DNS suffix (e.g. "yourtail.ts.net")',
-            required=True,
-        ),
-        Entry("TAILSCALE_OAUTH_CLIENT_ID", prompt="Tailscale OAuth client id"),
-        Entry("TAILSCALE_OAUTH_CLIENT_SECRET", prompt="Tailscale OAuth client secret"),
-        Entry("EXE_API_TOKEN", prompt="exe.dev API token", required=True),
-        Entry("DEFAULT_HOST_PROVIDER", "exe"),
-        Entry("TAILSCALE_ENABLED", "true"),
-        Entry("EXE_API_URL", "https://exe.dev"),
-        Entry("EXE_DEFAULT_IMAGE", "ghcr.io/boldsoftware/exeuntu:latest"),
-        Entry("TAILSCALE_API_TIMEOUT", "30"),
-        Entry("TAILSCALE_AUTH_TAGS", "tag:sandbox"),
-        *_REMOTE_DRUKBOX_ENTRIES,
-    ),
-)
-
-_LOCAL_SECTION = Section(
-    "SANDBOX PROVIDER — local Docker containers (drukbox on the host)",
-    (
-        Entry("DEFAULT_HOST_PROVIDER", "docker"),
-        # drukbox runs on the host (`make dev`: port 8000, fixed dev-token)
-        # and reads its own env there — nothing in this file configures it.
-        Entry("DRUKS_SANDBOX_SERVICE_URL", "http://127.0.0.1:8000"),
-        Entry("DRUKS_SANDBOX_SERVICE_TOKEN", "dev-token"),
-        Entry("DRUKS_SANDBOX_IMAGE", "ghcr.io/czpython/druks-sandbox:latest"),
-    ),
-    trailer=(
-        "# Sandboxes are local Docker containers. Run drukbox on the host so\n"
-        "# its docker provider reaches your Docker daemon:\n"
-        "#   git clone https://github.com/czpython/drukbox\n"
-        "#   cd drukbox && DOCKER_SSH_USERNAME=druks make dev"
-    ),
-)
-
-_PROVIDER_SECTIONS = {"exe": _EXE_SECTION, "aws": _AWS_SECTION, "docker": _LOCAL_SECTION}
-
-
-def sections_for(provider: str) -> tuple[Section, ...]:
-    return (*_COMMON_SECTIONS, _IDENTITY_SECTIONS[provider], _PROVIDER_SECTIONS[provider])
-
-
 def read_env(path: Path) -> dict[str, str]:
-    """KEY=VALUE lines → dict. Comments/blank lines skipped; values kept raw
-    (quotes and all) so we round-trip exactly what the operator wrote."""
     values: dict[str, str] = {}
-    if not path.exists():
-        return values
-    for line in path.read_text().splitlines():
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#") or "=" not in stripped:
-            continue
-        key, _, value = stripped.partition("=")
-        values[key.strip()] = value.strip()
+    if path.exists():
+        for line in path.read_text().splitlines():
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, value = line.partition("=")
+            values[key.strip()] = value
     return values
-
-
-def _is_blank(value: str | None) -> bool:
-    return value is None or value.strip().strip("\"'") == ""
 
 
 def run_setup(
@@ -281,128 +200,535 @@ def run_setup(
     install_dir: str,
     home: str,
     interactive: bool,
+    set_values: tuple[str, ...] = (),
     input_fn: Callable[[str], str] = input,
     print_fn: Callable[[str], None] = print,
 ) -> int:
-    fresh = not env_path.exists()
-    existing = read_env(env_path)
-    # A re-run keeps the provider the .env was written with; the flag only
-    # decides the very first write.
-    provider = existing.get("DEFAULT_HOST_PROVIDER", "").strip() or provider
-    if provider not in _PROVIDER_SECTIONS:
-        print_fn(f"unknown provider {provider!r} (expected one of {', '.join(_PROVIDER_SECTIONS)})")
-        return 1
+    toml_path = env_path.parent / "druks.toml"
+    if env_path.exists() and not toml_path.exists():
+        _print_migration_recipe(print_fn, env_path, toml_path)
+        return MIGRATION_EXIT_CODE
 
-    sections = sections_for(provider)
-    placeholders = {"install_dir": install_dir.rstrip("/"), "home": home.rstrip("/")}
+    is_fresh = not toml_path.exists()
+    if is_fresh:
+        provider = provider.strip()
+        if interactive:
+            answer = input_fn(f"Sandbox provider [{provider}]: ").strip()
+            provider = answer or provider
+        if not provider:
+            raise ValueError("sandbox provider cannot be blank")
+        document = tomlkit.parse(_TOML_TEMPLATE)
+        for value_path, value in _fresh_values(provider=provider, home=home):
+            _set_value(document, value_path, value)
+    else:
+        document = tomlkit.parse(toml_path.read_text())
 
-    values: dict[str, str] = {}
-    for section in sections:
-        for entry in section.entries:
-            current = existing.get(entry.key)
-            if not _is_blank(current):
-                values[entry.key] = current  # type: ignore[assignment]
-                continue
-            default = entry.default() if callable(entry.default) else entry.default
-            values[entry.key] = default.format(**placeholders)
-    # drukbox's accepted-token list mirrors the sandbox token (remote shapes
-    # only — the local shape's drukbox brings its own env).
-    if "SERVICE_TOKENS" in values and _is_blank(values["SERVICE_TOKENS"]):
-        values["SERVICE_TOKENS"] = values["DRUKS_SANDBOX_SERVICE_TOKEN"]
-    # A local install's dashboard sits at a fixed localhost port, so its
-    # OAuth-MCP callback base is knowable up front — default it so connecting
-    # an OAuth MCP server (e.g. Linear) works out of the box. Remote shapes
-    # reach the dashboard through their own edge, so they supply this.
-    if provider == "docker" and _is_blank(values.get("DRUKS_ENDPOINT")):
-        values["DRUKS_ENDPOINT"] = "http://localhost:8001"
+    is_changed = is_fresh
+    for assignment in set_values:
+        value_path, value = _parse_assignment(assignment)
+        _set_value(document, value_path, value)
+        is_changed = True
+
+    provider = _get_string(document, ("sandbox", "provider"))
+    print_fn(_shape_message(provider))
 
     if interactive:
-        for section in sections:
-            for entry in section.entries:
-                if not entry.prompt or not _is_blank(values.get(entry.key)):
-                    continue
-                # Optional values get one offer — on the fresh write. Re-runs
-                # only nag about what actually blocks the boot; a blank
-                # optional is a decision, not a gap.
-                if not entry.required and not fresh:
-                    continue
-                answer = input_fn(f"{entry.prompt}: ").strip()
-                if answer:
-                    values[entry.key] = answer
+        is_changed = (
+            _prompt_values(
+                document,
+                is_fresh=is_fresh,
+                input_fn=input_fn,
+            )
+            or is_changed
+        )
 
-    template_keys = {entry.key for section in sections for entry in section.entries}
-    extras = {key: value for key, value in existing.items() if key not in template_keys}
+    if is_changed:
+        _write_toml(toml_path, document)
+    config = _read_toml(toml_path)
+    if is_fresh:
+        _write_gitignore(env_path.parent / ".gitignore")
+        (env_path.parent / "secrets").mkdir(mode=0o700, exist_ok=True)
 
-    _write_env(env_path, sections, values, extras)
-    (env_path.parent / "secrets").mkdir(mode=0o700, exist_ok=True)
+    existing_env = env_path.read_text() if env_path.exists() else ""
+    extras = {key: value for key, value in read_env(env_path).items() if key in _COMPOSE_ENV_KEYS}
+    env_text = _render_env(config, install_dir=install_dir, extras=extras)
+    _write_secure_text(env_path, env_text)
 
-    gaps = _collect_gaps(sections, values, env_path=env_path, install_dir=install_dir)
-    aws_keys_blank = provider == "aws" and _is_blank(values.get("AWS_ACCESS_KEY_ID"))
-    _print_outcome(
-        print_fn,
-        env_path=env_path,
-        provider=provider,
-        gaps=gaps,
-        aws_keys_blank=aws_keys_blank,
+    if existing_env and existing_env != env_text:
+        print_fn("Rendered .env changed. Apply it with: docker compose up -d")
+
+    gaps = _collect_gaps(config, env_path=env_path, install_dir=install_dir)
+    _print_outcome(print_fn, env_path=env_path, provider=provider, gaps=gaps)
+    return GAPS_EXIT_CODE if gaps else 0
+
+
+_TOML_TEMPLATE = """\
+# druks.toml — the deployment. Edit this file, then re-run the installer
+# to render and apply it. `druks setup` alone re-renders .env but does
+# not restart services.
+
+# Browser identity: "header", "jwt", or "none".
+[identity]
+mode = ""
+header = ""
+jwks_url = ""
+jwt_issuer = ""
+jwt_audience = ""
+jwt_identity_claim = "email"
+
+# GitHub Apps may also be provisioned with install.sh --apps.
+[github]
+operator_app_id = ""
+reviewer_app_id = ""
+operator_pem = "secrets/operator.pem"
+reviewer_pem = "secrets/reviewer.pem"
+
+# Optional ticketing integration.
+[ticketing]
+linear_api_key = ""
+linear_webhook_secret = ""
+
+# Public dashboard and webhook ingress addresses.
+[urls]
+endpoint = ""
+webhook_host = ""
+
+# Generated on first write. Do not regenerate a deployed secret.
+[secrets]
+postgres_password = ""
+webhook_secret = ""
+secrets_key = ""
+sandbox_service_token = ""
+
+# Host paths. Relative PEM paths are resolved against the install directory.
+[paths]
+data_dir = ""
+claude_home = ""
+codex_home = ""
+claude_json = ""
+
+# Any drukbox provider name; docker and exe select install shapes.
+[sandbox]
+provider = ""
+service_url = ""
+image = ""
+service_tokens = ""
+
+# Drukbox environment, passed through to the remote stack verbatim.
+# Local docker shape: host-run drukbox reads its own env, so this table
+# is not rendered. Provider reference: https://github.com/czpython/drukbox
+# (docs/deploy.md).
+[sandbox.env]
+
+# Additional deployment settings; keys render verbatim unless owned by druks.
+[env]
+"""
+
+
+def _fresh_values(*, provider: str, home: str) -> tuple[tuple[tuple[str, ...], str], ...]:
+    if provider == "docker":
+        shape = (
+            (("identity", "mode"), "none"),
+            (("urls", "endpoint"), "http://localhost:8001"),
+            (("sandbox", "service_url"), "http://127.0.0.1:8000"),
+            (("secrets", "sandbox_service_token"), "dev-token"),
+            (("sandbox", "image"), "ghcr.io/czpython/druks-sandbox:latest"),
+        )
+    elif provider == "exe":
+        shape = (
+            (("identity", "mode"), "header"),
+            (("identity", "header"), "X-ExeDev-Email"),
+            (("sandbox", "service_url"), "http://127.0.0.1:8780"),
+            (("secrets", "sandbox_service_token"), _hex_secret()),
+            (("sandbox", "env", "EXE_API_TOKEN"), ""),
+            (("sandbox", "env", "TAILSCALE_TAILNET"), ""),
+            (("sandbox", "env", "TAILSCALE_OAUTH_CLIENT_ID"), ""),
+            (("sandbox", "env", "TAILSCALE_OAUTH_CLIENT_SECRET"), ""),
+            (("sandbox", "env", "EXE_API_URL"), "https://exe.dev"),
+            (("sandbox", "env", "EXE_DEFAULT_IMAGE"), "ghcr.io/boldsoftware/exeuntu:latest"),
+            (("sandbox", "env", "TAILSCALE_ENABLED"), "true"),
+            (("sandbox", "env", "TAILSCALE_API_TIMEOUT"), "30"),
+            (("sandbox", "env", "TAILSCALE_AUTH_TAGS"), "tag:sandbox"),
+        )
+    else:
+        shape = (
+            (("identity", "mode"), "header"),
+            (("sandbox", "service_url"), "http://127.0.0.1:8780"),
+            (("secrets", "sandbox_service_token"), _hex_secret()),
+        )
+
+    return (
+        (("sandbox", "provider"), provider),
+        (("secrets", "postgres_password"), _hex_secret()),
+        (("secrets", "webhook_secret"), _hex_secret()),
+        (("secrets", "secrets_key"), _secrets_key()),
+        (("paths", "data_dir"), f"{home.rstrip('/')}/druks-data"),
+        (("paths", "claude_home"), f"{home.rstrip('/')}/.claude"),
+        (("paths", "codex_home"), f"{home.rstrip('/')}/.codex"),
+        (("paths", "claude_json"), f"{home.rstrip('/')}/.claude.json"),
+        *shape,
     )
-    return 0 if not gaps else GAPS_EXIT_CODE
 
 
-def _write_env(
-    env_path: Path,
-    sections: tuple[Section, ...],
-    values: dict[str, str],
+def _read_toml(path: Path) -> dict[str, Any]:
+    with path.open("rb") as config_file:
+        config = tomllib.load(config_file)
+    return _canonical_config(config)
+
+
+def _canonical_config(raw: dict[str, Any]) -> dict[str, Any]:
+    """Validated copy with every known table and key present. Operator
+    additions are welcome as flat scalars, one table deep; anything more
+    structured is refused with its key named."""
+    config = copy.deepcopy(raw)
+    for table_name, keys in _KNOWN_TOML_KEYS.items():
+        table = config.setdefault(table_name, {})
+        if not isinstance(table, dict):
+            raise ValueError(f"druks.toml: [{table_name}] must be a table")
+        for key in keys:
+            if not isinstance(table.setdefault(key, ""), str):
+                raise ValueError(f"druks.toml: {table_name}.{key} must be a string")
+
+    sandbox_env = config["sandbox"].setdefault("env", {})
+    if not isinstance(sandbox_env, dict):
+        raise ValueError("druks.toml: [sandbox.env] must be a table")
+    for env_name, env_table in (("sandbox.env", sandbox_env), ("env", config["env"])):
+        for key, value in env_table.items():
+            if not isinstance(value, str):
+                raise ValueError(f"druks.toml: {env_name}.{key} must be a string")
+
+    for table_name, table in config.items():
+        if not isinstance(table, dict):
+            _require_scalar("", table_name, table)
+            continue
+        for key, value in table.items():
+            if table_name in _KNOWN_TOML_KEYS and (
+                key in _KNOWN_TOML_KEYS[table_name] or (table_name, key) == ("sandbox", "env")
+            ):
+                continue
+            _require_scalar(f"{table_name}.", key, value)
+    return config
+
+
+def _require_scalar(prefix: str, key: str, value: Any) -> None:
+    if not isinstance(value, (str, int, float, bool)):
+        raise ValueError(
+            f"druks.toml: {prefix}{key} must be a plain value (string, number, or boolean)"
+        )
+
+
+def _get_string(source: Mapping[str, Any], path: tuple[str, ...]) -> str:
+    current: Any = source
+    for part in path:
+        if not isinstance(current, Mapping):
+            return ""
+        current = current.get(part, "")
+    return current if isinstance(current, str) else ""
+
+
+def _set_value(target: MutableMapping[str, Any], path: tuple[str, ...], value: str) -> None:
+    current: MutableMapping[str, Any] = target
+    for part in path[:-1]:
+        child = current.setdefault(part, {})
+        if not isinstance(child, MutableMapping):
+            raise ValueError(f"druks.toml: {'.'.join(path)} crosses a non-table value")
+        current = child
+    current[path[-1]] = value
+
+
+def _parse_assignment(assignment: str) -> tuple[tuple[str, ...], str]:
+    path_text, separator, value = assignment.partition("=")
+    path = tuple(path_text.split("."))
+    if not separator or len(path) < 2 or any(not part for part in path):
+        raise ValueError(f"invalid --set {assignment!r}; expected key.path=value")
+    return path, value
+
+
+def _prompt_values(
+    document: tomlkit.TOMLDocument,
+    *,
+    is_fresh: bool,
+    input_fn: Callable[[str], str],
+) -> bool:
+    prompts = [
+        (entry.source, entry.prompt, entry.is_required)
+        for section in _SECTIONS
+        for entry in section.entries
+        if entry.source and entry.prompt
+    ]
+    identity_mode = _get_string(document, ("identity", "mode"))
+    if identity_mode in {"header", "jwt"}:
+        prompts.append(
+            (
+                ("identity", "header"),
+                "Identity header your edge injects (e.g. X-Forwarded-Email)",
+                True,
+            )
+        )
+    if identity_mode == "jwt":
+        prompts.extend(
+            (
+                (("identity", "jwks_url"), "Identity edge JWKS URL", True),
+                (("identity", "jwt_issuer"), "Identity token issuer", True),
+                (("identity", "jwt_audience"), "Identity token audience", True),
+                (("identity", "jwt_identity_claim"), "Identity claim containing the email", True),
+            )
+        )
+
+    if _get_string(document, ("sandbox", "provider")) == "exe":
+        prompts.extend(
+            (
+                (("sandbox", "env", "EXE_API_TOKEN"), "exe.dev API token", True),
+                (
+                    ("sandbox", "env", "TAILSCALE_TAILNET"),
+                    'Tailscale magic-DNS suffix (e.g. "yourtail.ts.net")',
+                    True,
+                ),
+                (
+                    ("sandbox", "env", "TAILSCALE_OAUTH_CLIENT_ID"),
+                    "Tailscale OAuth client id",
+                    False,
+                ),
+                (
+                    ("sandbox", "env", "TAILSCALE_OAUTH_CLIENT_SECRET"),
+                    "Tailscale OAuth client secret",
+                    False,
+                ),
+            )
+        )
+
+    is_changed = False
+    for path, prompt, is_required in prompts:
+        if _get_string(document, path) or (not is_required and not is_fresh):
+            continue
+        answer = input_fn(f"{prompt}: ").strip()
+        if answer:
+            _set_value(document, path, answer)
+            is_changed = True
+    return is_changed
+
+
+def _write_toml(path: Path, document: tomlkit.TOMLDocument) -> None:
+    text = tomlkit.dumps(document)
+    _canonical_config(tomllib.loads(text))
+    _write_secure_text(path, text)
+
+
+def _render_env(
+    config: dict[str, Any],
+    *,
+    install_dir: str,
     extras: dict[str, str],
-) -> None:
+) -> str:
+    provider = _get_string(config, ("sandbox", "provider"))
     lines: list[str] = []
-    for section in sections:
-        lines.append("# " + "=" * 60)
-        lines.append(f"# {section.title}")
-        lines.append("# " + "=" * 60)
-        lines.append("")
+    for section in _SECTIONS:
+        section_lines: list[str] = []
         for entry in section.entries:
-            if entry.comment:
-                lines.extend(f"# {comment_line}" for comment_line in entry.comment.splitlines())
-            lines.append(f"{entry.key}={values.get(entry.key, '')}")
-        if section.trailer:
-            lines.append(section.trailer)
+            if entry.is_remote_only and provider == "docker":
+                continue
+            value = entry.fixed or _get_string(config, entry.source)
+            if entry.key == "SERVICE_TOKENS" and not value:
+                value = _get_string(config, ("secrets", "sandbox_service_token"))
+            if entry.is_install_path and value:
+                value = _resolve_install_path(value, install_dir)
+            if not value:
+                continue
+            section_lines.append(_env_line(entry.key, value))
+        if section_lines:
+            lines.extend(("# " + "=" * 60, f"# {section.title}", "# " + "=" * 60, ""))
+            lines.extend(section_lines)
+            lines.append("")
+
+    sandbox_env: dict[str, str] = config["sandbox"]["env"]
+    if provider != "docker":
+        pass_through = []
+        for key, value in sandbox_env.items():
+            if _is_reserved_env_key(key) or not value:
+                continue
+            if not _ENV_KEY_PATTERN.fullmatch(key):
+                raise ValueError(f"druks.toml: sandbox.env key {key!r} is not an env name")
+            pass_through.append(_env_line(key, value))
+        if pass_through:
+            lines.extend(
+                (
+                    "# " + "=" * 60,
+                    "# SANDBOX ENVIRONMENT",
+                    "# " + "=" * 60,
+                    "",
+                    *pass_through,
+                    "",
+                )
+            )
+
+    deployment_env: dict[str, str] = config["env"]
+    additions = []
+    for key, value in deployment_env.items():
+        if key in _OWNED_ENV_KEYS or not value:
+            continue
+        if not _ENV_KEY_PATTERN.fullmatch(key):
+            raise ValueError(f"druks.toml: env key {key!r} is not an env name")
+        additions.append(_env_line(key, value))
+    if additions:
+        lines.extend(
+            (
+                "# " + "=" * 60,
+                "# DEPLOYMENT ENVIRONMENT ADDITIONS",
+                "# " + "=" * 60,
+                "",
+                *additions,
+                "",
+            )
+        )
+
+    compose_extras = {key: value for key, value in extras.items() if key not in deployment_env}
+    if compose_extras:
+        lines.extend(
+            (
+                "# " + "=" * 60,
+                "# OPERATOR ADDITIONS (preserved verbatim by druks setup)",
+                "# " + "=" * 60,
+                "",
+            )
+        )
+        for key in _COMPOSE_ENV_KEYS:
+            if key in compose_extras:
+                lines.append(_env_line(key, compose_extras[key]))
         lines.append("")
-    if extras:
-        lines.append("# " + "=" * 60)
-        lines.append("# OPERATOR ADDITIONS (preserved verbatim by druks setup)")
-        lines.append("# " + "=" * 60)
-        lines.append("")
-        lines.extend(f"{key}={value}" for key, value in extras.items())
-        lines.append("")
-    env_path.write_text("\n".join(lines))
-    env_path.chmod(0o600)
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _env_line(key: str, value: str) -> str:
+    if "\n" in value or "\r" in value:
+        raise ValueError(f".env value for {key} may not contain a newline")
+    return f"{key}={value}"
+
+
+def _resolve_install_path(value: str, install_dir: str) -> str:
+    path = Path(value)
+    if path.is_absolute():
+        return str(path)
+    return str(Path(install_dir.rstrip("/")) / path)
+
+
+def _is_reserved_env_key(key: str) -> bool:
+    return key.startswith("DRUKS_") or key in _OWNED_ENV_KEYS
 
 
 def _collect_gaps(
-    sections: tuple[Section, ...],
-    values: dict[str, str],
+    config: dict[str, Any],
     *,
     env_path: Path,
     install_dir: str,
 ) -> list[str]:
     gaps = [
         f"{entry.key} is empty"
-        for section in sections
+        for section in _SECTIONS
         for entry in section.entries
-        if entry.required and _is_blank(values.get(entry.key))
+        if entry.is_required and not _get_string(config, entry.source)
     ]
-    # PEM files must exist to boot. The configured paths are HOST paths;
-    # when they live under the install dir we can check them through the
-    # bootstrap mount (env_path's directory IS the install dir).
-    prefix = install_dir.rstrip("/") + "/"
-    for key in ("GITHUB_OPERATOR_PEM", "GITHUB_REVIEWER_PEM"):
-        configured = values.get(key, "").strip()
-        if not configured.startswith(prefix):
-            continue  # custom location — doctor verifies it post-boot
-        local = env_path.parent / configured.removeprefix(prefix)
-        if not local.is_file():
-            gaps.append(f"{configured} is missing (upload the PEM, or run install.sh --apps)")
+
+    identity_mode = _get_string(config, ("identity", "mode"))
+    if identity_mode not in {"none", "header", "jwt"}:
+        gaps.append("identity.mode must be one of: header, jwt, none")
+    if identity_mode in {"header", "jwt"} and not _get_string(config, ("identity", "header")):
+        gaps.append("DRUKS_AUTH_HEADER is empty")
+    if identity_mode == "jwt":
+        for path, env_key in (
+            (("identity", "jwks_url"), "DRUKS_AUTH_JWKS_URL"),
+            (("identity", "jwt_issuer"), "DRUKS_AUTH_JWT_ISSUER"),
+            (("identity", "jwt_audience"), "DRUKS_AUTH_JWT_AUDIENCE"),
+            (("identity", "jwt_identity_claim"), "DRUKS_AUTH_JWT_IDENTITY_CLAIM"),
+        ):
+            if not _get_string(config, path):
+                gaps.append(f"{env_key} is empty")
+
+    provider = _get_string(config, ("sandbox", "provider"))
+    sandbox_env: dict[str, str] = config["sandbox"]["env"]
+    for key in sandbox_env:
+        if _is_reserved_env_key(key):
+            gaps.append(f"sandbox.env.{key} is reserved by druks")
+
+    deployment_env: dict[str, str] = config["env"]
+    for key in deployment_env:
+        if key in _OWNED_ENV_KEYS:
+            gaps.append(f"env.{key} is reserved by druks")
+
+    if provider == "exe":
+        for key in ("EXE_API_TOKEN", "TAILSCALE_TAILNET"):
+            if not _get_string(config, ("sandbox", "env", key)):
+                gaps.append(f"{key} is empty")
+    elif provider != "docker" and not any(
+        value for key, value in sandbox_env.items() if not _is_reserved_env_key(key)
+    ):
+        gaps.append(f"[sandbox.env] has no configured values for remote provider {provider!r}")
+
+    for key in ("operator_pem", "reviewer_pem"):
+        configured = _get_string(config, ("github", key))
+        if not configured:
+            gaps.append(f"github.{key} is empty")
+            continue
+        host_path = Path(_resolve_install_path(configured, install_dir))
+        install_path = Path(install_dir.rstrip("/"))
+        if host_path.is_relative_to(install_path):
+            local_path = env_path.parent / host_path.relative_to(install_path)
+        elif Path(configured).is_absolute():
+            continue
+        else:
+            local_path = env_path.parent / configured
+        if not local_path.is_file():
+            gaps.append(f"{host_path} is missing (upload the PEM, or run install.sh --apps)")
     return gaps
+
+
+def _write_secure_text(path: Path, text: str) -> None:
+    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        os.fchmod(descriptor, 0o600)
+        with os.fdopen(descriptor, "w") as output:
+            descriptor = -1
+            output.write(text)
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+
+
+def _write_gitignore(path: Path) -> None:
+    existing = path.read_text().splitlines() if path.exists() else []
+    missing = [entry for entry in ("druks.toml", ".env", "secrets/") if entry not in existing]
+    if missing:
+        body = "\n".join((*existing, *missing)).lstrip("\n") + "\n"
+        path.write_text(body)
+
+
+def _shape_message(provider: str) -> str:
+    if not provider:
+        return "sandbox provider is not configured"
+    if provider == "docker":
+        return "provider 'docker' → local shape; host-run drukbox validates its configuration"
+    if provider == "exe":
+        return "provider 'exe' → exe shape; check `druks doctor` after boot"
+    return (
+        f"provider {provider!r} → remote shape; drukbox validates the name — "
+        "check `druks doctor` after boot"
+    )
+
+
+def _print_migration_recipe(
+    print_fn: Callable[[str], None],
+    env_path: Path,
+    toml_path: Path,
+) -> None:
+    print_fn(f"Refusing to replace existing {env_path}: {toml_path} does not exist.")
+    print_fn("Back up .env and hand-write druks.toml, copying values verbatim:")
+    print_fn("  - DRUKS_POSTGRES_PASSWORD → [secrets].postgres_password")
+    print_fn("  - DRUKS_SECRETS_KEY → [secrets].secrets_key")
+    print_fn("  - DRUKS_WEBHOOK_SECRET → [secrets].webhook_secret")
+    print_fn("  - DRUKS_SANDBOX_SERVICE_TOKEN → [secrets].sandbox_service_token")
+    print_fn("  - GITHUB_*_APP_ID → [github]")
+    print_fn("  - provider and its credentials → [sandbox] and [sandbox.env]")
+    print_fn("  - other hand-added .env keys → [env]")
+    print_fn("Nothing was written.")
 
 
 def _print_outcome(
@@ -411,20 +737,15 @@ def _print_outcome(
     env_path: Path,
     provider: str,
     gaps: list[str],
-    aws_keys_blank: bool,
 ) -> None:
-    if not gaps:
+    if gaps:
+        print_fn(f"Wrote {env_path} (provider: {provider}). Still needed before boot:")
+        for gap in gaps:
+            print_fn(f"  - {gap}")
+        print_fn("")
+        if provider == "docker":
+            print_fn("Start host-run drukbox, then re-run the installer.")
+        else:
+            print_fn("Complete the remote shape values, then re-run the installer.")
+    else:
         print_fn(f"✓ {env_path} is complete (provider: {provider}).")
-        return
-    print_fn(f"Wrote {env_path} (provider: {provider}). Still needed before boot:")
-    for gap in gaps:
-        print_fn(f"  - {gap}")
-    print_fn("")
-    if aws_keys_blank:
-        print_fn("Outside this installer:")
-        print_fn("  - AWS auth: with the key pair blank, attach an EC2-launch")
-        print_fn("    IAM role to this box (or fill AWS_ACCESS_KEY_ID/SECRET).")
-    elif provider == "exe":
-        print_fn("Outside this installer:")
-        print_fn("  - Make sure tailscaled is up (`tailscale status`).")
-    print_fn("Then re-run the installer.")

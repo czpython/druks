@@ -32,11 +32,11 @@ Read the named field in the error. Common causes:
 
 - `DRUKS_SECRETS_KEY` is empty, not valid base64, or does not decode to 32 bytes
 - a mounted PEM path differs from the path visible inside the container
-- a hand-edited `.env` contains a malformed value
+- a `druks.toml` value renders an invalid process setting
 
-Re-running `install.sh` preserves existing values, fills generated values, and
-prints remaining prerequisites. It does not overwrite a nonblank broken value;
-fix that value in `~/druks/.env`.
+Re-running `install.sh` renders `.env` from `druks.toml` and prints remaining
+prerequisites. It does not replace a nonblank broken value; fix that value in
+`~/druks/druks.toml` and re-run the installer.
 
 ### Postgres or Redis is unreachable
 
@@ -234,12 +234,12 @@ migration namespaces. See [writing an extension](writing-an-extension.md).
 Record:
 
 - Druks image tag and `git` revision if running from a checkout
-- provider profile (`exe`, `aws`, or `docker`)
+- sandbox provider name and install shape (`exe`, `docker`, or generic remote)
 - affected workflow id, subject, state, and last agent-call id
 - `druks doctor` output
 - relevant web and Drukbox logs with secret values removed
 - whether the failure happened before a step completed, during a gate, or after
   a deploy
 
-Do not include `.env`, PEM files, OAuth grants, sandbox credential files, or
-raw MCP tokens.
+Do not include `druks.toml`, `.env`, PEM files, OAuth grants, sandbox credential
+files, or raw MCP tokens.
