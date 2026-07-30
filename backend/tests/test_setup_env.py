@@ -285,7 +285,9 @@ def test_operator_edits_survive_a_writer_pass(tmp_path):
     assert "# our app, registered 2026-07 by ops" in written
 
 
-def test_missing_known_tables_are_canonicalized_before_rerender(tmp_path):
+def test_missing_known_tables_gap_without_rewriting_the_operators_file(tmp_path):
+    """Canonicalization fills missing tables in memory for the render; the
+    operator's file keeps exactly the shape they wrote."""
     env_path = tmp_path / ".env"
     _run(env_path, provider="docker")
     toml_path = tmp_path / "druks.toml"
@@ -306,9 +308,11 @@ def test_missing_known_tables_are_canonicalized_before_rerender(tmp_path):
     assert rc == GAPS_EXIT_CODE
     assert "DEFAULT_HOST_PROVIDER is empty" in "\n".join(printed)
     assert "GITHUB_REVIEWER_APP_ID is empty" in "\n".join(printed)
-    assert config["ticketing"] == {"linear_api_key": "", "linear_webhook_secret": ""}
+    assert "ticketing" not in config
     assert "ticketing-renamed" in config
-    assert config["sandbox"]["env"] == {}
+    assert "env" not in config["sandbox"]
+    assert config["github"]["operator_app_id"] == "101"
+    assert read_env(env_path)["GITHUB_OPERATOR_APP_ID"] == "101"
 
 
 def test_nested_operator_content_is_refused(tmp_path):
