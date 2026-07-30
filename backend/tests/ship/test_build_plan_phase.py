@@ -120,7 +120,11 @@ async def test_gate_mode_folds_the_critique_before_parking(monkeypatch):
     """Gate mode, question-free plan: REQUEST_CHANGES routes the critique into a
     redraft before the operator sees anything; the approved redraft parks."""
     flow = _flow()
-    passes = _fake_plans(monkeypatch, PlanData(plan_markdown="v1"), PlanData(plan_markdown="v2"))
+    passes = _fake_plans(
+        monkeypatch,
+        PlanData(plan_markdown="v1"),
+        PlanData(plan_markdown="v2", acceptance_criteria=_acceptance_criteria()),
+    )
     _fake_grades(
         monkeypatch,
         ReviewOutput(decision=ReviewDecision.REQUEST_CHANGES, body="name the wire schema"),
