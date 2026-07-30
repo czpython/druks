@@ -176,8 +176,8 @@ class TestPolicyKeysParsing:
             {
                 (REPO, ".druks/ship/config.yml"): (
                     "gates:\n"
-                    "  plan_approval: none\n"
-                    "  implementation_approval: human\n"
+                    "  plan_approval: machine\n"
+                    "  implementation_approval: none\n"
                     "on_approval: none\n"
                     "delete_branch: false\n"
                     "verification:\n"
@@ -186,11 +186,39 @@ class TestPolicyKeysParsing:
             },
         )
         policy = await RepoPolicy.resolve(REPO)
-        assert policy.gates.plan_approval == "none"
-        assert policy.gates.implementation_approval == "human"
+        assert policy.gates.plan_approval == "machine"
+        assert policy.gates.implementation_approval == "none"
         assert policy.on_approval == "none"
         assert policy.delete_branch is False
         assert policy.verification.test_commands == ("make test",)
+
+    @pytest.mark.parametrize("plan_gate", ["human", "machine", "machine_then_human"])
+    async def test_every_plan_gate_value_parses(self, monkeypatch, plan_gate):
+        _fake_fetch(
+            monkeypatch,
+            {(REPO, ".druks/ship/config.yml"): f"gates: {{plan_approval: {plan_gate}}}\n"},
+        )
+        policy = await RepoPolicy.resolve(REPO)
+        assert policy.gates.plan_approval == plan_gate
+
+    @pytest.mark.parametrize("workflow_setting", ["human", "machine", "machine_then_human"])
+    async def test_declared_plan_gate_overrides_each_workflow_setting(
+        self, monkeypatch, workflow_setting
+    ):
+        _fake_fetch(
+            monkeypatch,
+            {(REPO, ".druks/ship/config.yml"): "gates: {plan_approval: machine}\n"},
+        )
+        policy = await RepoPolicy.resolve(REPO)
+        assert policy.plan_approval_gate(workflow_setting) == "machine"
+
+    async def test_legacy_none_plan_gate_fails_loudly(self, monkeypatch):
+        _fake_fetch(
+            monkeypatch,
+            {(REPO, ".druks/ship/config.yml"): "gates: {plan_approval: none}\n"},
+        )
+        with pytest.raises(ExtensionConfigError, match="invalid ship config"):
+            await RepoPolicy.resolve(REPO)
 
     async def test_absent_verification_key_means_no_pin(self, monkeypatch):
         _fake_fetch(monkeypatch, {(REPO, ".druks/ship/config.yml"): "on_approval: none\n"})
@@ -206,11 +234,11 @@ class TestPolicyKeysParsing:
             await RepoPolicy.resolve(REPO)
 
     async def test_gates_default_to_inherit(self, monkeypatch):
-        """Absent gates resolve via the global tier: the workflow's
-        auto-dispatch setting for plan approval, human for implementation approval."""
+        """Absent gates use the workflow plan setting and human implementation approval."""
         _fake_fetch(monkeypatch, {})
         policy = await RepoPolicy.resolve(REPO)
         assert policy.gates.plan_approval is None
         assert policy.implementation_approval_gate() == "human"
-        assert policy.plan_approval_gate(auto_dispatch=True) == "none"
-        assert policy.plan_approval_gate(auto_dispatch=False) == "human"
+        assert policy.plan_approval_gate("human") == "human"
+        assert policy.plan_approval_gate("machine") == "machine"
+        assert policy.plan_approval_gate("machine_then_human") == "machine_then_human"

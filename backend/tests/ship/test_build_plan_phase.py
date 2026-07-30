@@ -11,16 +11,16 @@ from druks.contrib.ship.contracts import (
 )
 from druks.contrib.ship.enums import ReviewDecision
 from druks.contrib.ship.extension import Ship
-from druks.contrib.ship.policy import RepoPolicy
+from druks.contrib.ship.policy import PlanGate, RepoPolicy
 from druks.contrib.ship.workflows import Build
 from druks.workflows import FatalError, OperatorReply, Run
 
 
-def _flow(*, auto_dispatch: bool = False) -> Build:
+def _flow(*, plan_gate: PlanGate = "human") -> Build:
     flow = Build()
-    # plan_approval is undeclared: the gate resolves to "none" iff auto_dispatch.
+    # plan_approval is undeclared, so the workflow setting resolves the gate.
     flow._policy = RepoPolicy()
-    flow._settings = Build.Settings(auto_dispatch_on_plan_approval=auto_dispatch)
+    flow._settings = Build.Settings(plan_gate=plan_gate)
     return flow
 
 
@@ -261,10 +261,10 @@ async def test_approve_with_note_redrafts(monkeypatch):
     assert passes[1]["operator_note"] == "include the rollback command"
 
 
-async def test_auto_mode_folds_the_critique_into_one_redraft(monkeypatch):
-    """Auto mode, no questions: REQUEST_CHANGES routes the critique into one
+async def test_machine_mode_folds_the_critique_into_one_redraft(monkeypatch):
+    """Machine mode, no questions: REQUEST_CHANGES routes the critique into one
     redraft (reviewer_notes), the re-review approves, and nothing parks."""
-    flow = _flow(auto_dispatch=True)
+    flow = _flow(plan_gate="machine")
     passes = _fake_plans(monkeypatch, PlanData(plan_markdown="v1"), PlanData(plan_markdown="v2"))
     _fake_grades(
         monkeypatch,
@@ -273,7 +273,7 @@ async def test_auto_mode_folds_the_critique_into_one_redraft(monkeypatch):
     )
 
     async def fail_park(*, questions=None, context=""):
-        raise AssertionError("an approved auto-mode plan must not park")
+        raise AssertionError("an approved machine-mode plan must not park")
 
     flow.review = fail_park
 
@@ -281,9 +281,9 @@ async def test_auto_mode_folds_the_critique_into_one_redraft(monkeypatch):
     assert [p["reviewer_notes"] for p in passes] == ["", "name the wire schema"]
 
 
-async def test_auto_mode_redraft_questions_park_without_the_folded_critique(monkeypatch):
+async def test_machine_mode_redraft_questions_park_without_the_folded_critique(monkeypatch):
     """A redraft's questions park without repeating the critique already folded into it."""
-    flow = _flow(auto_dispatch=True)
+    flow = _flow(plan_gate="machine")
     passes = _fake_plans(
         monkeypatch,
         PlanData(plan_markdown="v1"),
@@ -317,10 +317,10 @@ async def test_auto_mode_redraft_questions_park_without_the_folded_critique(monk
     ]
 
 
-async def test_auto_mode_parks_after_the_bounded_redraft(monkeypatch):
+async def test_machine_mode_parks_after_the_bounded_redraft(monkeypatch):
     """Two straight rejections exhaust the machine loop — the run parks with the
     critique standing. The operator's request_changes re-arms one fresh redraft."""
-    flow = _flow(auto_dispatch=True)
+    flow = _flow(plan_gate="machine")
     passes = _fake_plans(
         monkeypatch,
         PlanData(plan_markdown="v1"),
@@ -351,28 +351,108 @@ async def test_auto_mode_parks_after_the_bounded_redraft(monkeypatch):
     assert [p["operator_note"] for p in passes] == ["", "", "steer left", "steer left"]
 
 
-async def test_questions_park_in_auto_mode_too(monkeypatch):
+@pytest.mark.parametrize("plan_gate", ["machine", "machine_then_human"])
+async def test_questions_park_before_machine_review(monkeypatch, plan_gate):
     """Open questions always park for the operator — the machine reviewer only
     ever sees a question-free plan."""
-    flow = _flow(auto_dispatch=True)
+    flow = _flow(plan_gate=plan_gate)
     _fake_plans(
         monkeypatch,
         PlanData(
             plan_markdown="v1",
             questions=[QuestionOutput(id="q1", prompt="Feature flag?", options=[])],
         ),
-        PlanData(plan_markdown="v2"),
+        PlanData(plan_markdown="v2", acceptance_criteria=_acceptance_criteria()),
     )
     _fake_grades(monkeypatch, ReviewOutput(decision=ReviewDecision.APPROVE, body=""))
-    replies = iter([OperatorReply(action="request_changes", answers={"q1": "yes, behind a flag"})])
+    replies = iter(
+        [
+            OperatorReply(action="request_changes", answers={"q1": "yes, behind a flag"}),
+            OperatorReply(action="approve"),
+        ]
+    )
+    parks: list[list[QuestionOutput]] = []
 
     async def fake_review(*, questions=None, context=""):
-        assert questions  # the park carries the open questions
+        parks.append(list(questions or []))
         return next(replies)
 
     flow.review = fake_review
 
     assert await flow._plan_phase() is True
+    assert [question.id for question in parks[0]] == ["q1"]
+    assert len(parks) == (1 if plan_gate == "machine" else 2)
+
+
+async def test_machine_then_human_approval_parks_for_operator_approval(monkeypatch):
+    """A machine-approved plan still parks for operator approval."""
+    flow = _flow(plan_gate="machine_then_human")
+    _fake_plans(
+        monkeypatch,
+        PlanData(plan_markdown="v1", acceptance_criteria=_acceptance_criteria()),
+    )
+    _fake_grades(monkeypatch, ReviewOutput(decision=ReviewDecision.APPROVE, body=""))
+    parks: list[tuple[list, str]] = []
+
+    async def fake_review(*, questions=None, context=""):
+        parks.append((list(questions or []), context))
+        return OperatorReply(action="approve")
+
+    flow.review = fake_review
+
+    assert await flow._plan_phase() is True
+    assert parks == [([], "")]
+
+
+async def test_machine_then_human_critiques_force_redrafts_before_the_park(monkeypatch):
+    """Machine critique is folded into a redraft before operator approval."""
+    flow = _flow(plan_gate="machine_then_human")
+    passes = _fake_plans(
+        monkeypatch,
+        PlanData(plan_markdown="v1"),
+        PlanData(plan_markdown="v2", acceptance_criteria=_acceptance_criteria()),
+    )
+    _fake_grades(
+        monkeypatch,
+        ReviewOutput(decision=ReviewDecision.REQUEST_CHANGES, body="name the wire schema"),
+        ReviewOutput(decision=ReviewDecision.APPROVE, body=""),
+    )
+    parks: list[tuple[list, str]] = []
+
+    async def fake_review(*, questions=None, context=""):
+        parks.append((list(questions or []), context))
+        return OperatorReply(action="approve")
+
+    flow.review = fake_review
+
+    assert await flow._plan_phase() is True
+    assert [passing["reviewer_notes"] for passing in passes] == ["", "name the wire schema"]
+    assert parks == [([], "")]
+
+
+async def test_machine_then_human_exhaustion_parks_with_the_standing_critique(monkeypatch):
+    """The final machine critique remains attached when the draft bound parks."""
+    flow = _flow(plan_gate="machine_then_human")
+    _fake_plans(
+        monkeypatch,
+        PlanData(plan_markdown="v1"),
+        PlanData(plan_markdown="v2", acceptance_criteria=_acceptance_criteria()),
+    )
+    _fake_grades(
+        monkeypatch,
+        ReviewOutput(decision=ReviewDecision.REQUEST_CHANGES, body="critique-1"),
+        ReviewOutput(decision=ReviewDecision.REQUEST_CHANGES, body="critique-2"),
+    )
+    parks: list[tuple[list, str]] = []
+
+    async def fake_review(*, questions=None, context=""):
+        parks.append((list(questions or []), context))
+        return OperatorReply(action="approve")
+
+    flow.review = fake_review
+
+    assert await flow._plan_phase() is True
+    assert parks == [([], "critique-2")]
 
 
 async def test_review_work_ask_renders_a_notification_body(monkeypatch):

@@ -7,15 +7,15 @@ from druks.prompts import render_prompt
 from druks.sandbox.datastructures import Profile
 
 GateValue = Literal["human", "none"]
+PlanGate = Literal["human", "machine", "machine_then_human"]
 
 
 class Gates(BaseModel):
-    # Whether each human gate parks for approval, grouped so config.yml reads
-    # them apart from on_approval. None inherits the global tier (see the
-    # RepoPolicy gate methods).
+    # Each approval gate's routing, grouped so config.yml reads them apart from
+    # on_approval. None defers to the defaults resolved by RepoPolicy's gate methods.
     model_config = {"frozen": True, "extra": "forbid"}
 
-    plan_approval: GateValue | None = None
+    plan_approval: PlanGate | None = None
     implementation_approval: GateValue | None = None
 
 
@@ -45,8 +45,8 @@ class RepoPolicy(BaseModel):
     async def resolve(cls, repo: str | None) -> "RepoPolicy":
         return await resolve_extension_config("ship", repo=repo, model=cls)
 
-    def plan_approval_gate(self, auto_dispatch: bool) -> GateValue:
-        return self.gates.plan_approval or ("none" if auto_dispatch else "human")
+    def plan_approval_gate(self, workflow_setting: PlanGate) -> PlanGate:
+        return self.gates.plan_approval or workflow_setting
 
     def implementation_approval_gate(self) -> GateValue:
         return self.gates.implementation_approval or "human"

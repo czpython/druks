@@ -1,6 +1,6 @@
 import logging
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -75,10 +75,16 @@ class Build(Workflow):
     journal: BuildJournal
 
     class Settings(BaseModel):
-        auto_dispatch_on_plan_approval: bool = Field(
-            default=False,
-            title="Auto-dispatch on plan approval",
-            description="Skip the human gate when the plan reviewer approves cleanly.",
+        plan_gate: Literal["human", "machine", "machine_then_human"] = Field(
+            default="human",
+            title="Plan gate",
+            description=(
+                "human — Operator reviews every plan; the machine reviewer never runs. "
+                "machine — The machine reviewer approves for implementation; the operator is the "
+                "fallback after the draft bound. machine_then_human — The machine reviewer "
+                "critiques first, then the operator approves; the operator also receives the "
+                "standing critique after the draft bound."
+            ),
         )
         max_implementation_revisions: int = Field(
             default=5,
@@ -233,9 +239,7 @@ class Build(Workflow):
 
     async def _plan_phase(self) -> bool:
         """True → implement."""
-        human_approval_required = (
-            self._policy.plan_approval_gate(self._settings.auto_dispatch_on_plan_approval) != "none"
-        )
+        plan_gate = self._policy.plan_approval_gate(self._settings.plan_gate)
         answered_questions: list[dict[str, str]] = []
         operator_note = ""
         while True:
@@ -248,11 +252,13 @@ class Build(Workflow):
                     operator_note=operator_note,
                     reviewer_notes=draft_guidance,
                 )
-                if human_approval_required or plan.questions:
+                if plan_gate == "human" or plan.questions:
                     break
                 machine_review = await Ship.review_plan()
                 if machine_review.decision == ReviewDecision.APPROVE:
-                    return True
+                    if plan_gate == "machine":
+                        return True
+                    break
                 unresolved_critique = machine_review.body
             operator_reply = await self.review(
                 questions=plan.questions,
