@@ -68,6 +68,18 @@ async def cancel_run(
     return await services.cancel_run(run_id, reason=reason)
 
 
+@router.post(
+    "/runs/{run_id}/retry",
+    operation_id="retry_run",
+    response_model=schemas.RetryRunResponse,
+    response_model_by_alias=True,
+)
+async def retry_run(run_id: str) -> schemas.RetryRunResponse:
+    """Retry a failed run from its failed step; a repeat reports the active
+    fork as already_retried."""
+    return await services.retry_run(run_id)
+
+
 @router.get(
     "/usage/summary",
     operation_id="get_usage",

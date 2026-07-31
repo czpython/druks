@@ -23,6 +23,7 @@ _MCP_ROUTES = {
     ("post", "/api/gates/{run_id}/answer"): "answer_gate",
     ("get", "/api/agent-calls/{call_id}"): "get_agent_call",
     ("post", "/api/runs/{run_id}/cancel"): "cancel_run",
+    ("post", "/api/runs/{run_id}/retry"): "retry_run",
     ("get", "/api/usage/summary"): "get_usage",
 }
 
@@ -66,7 +67,7 @@ def _park(druks_db, note):
     return run
 
 
-def test_openapi_pins_the_five_agent_routes(client: TestClient):
+def test_openapi_pins_the_six_agent_routes(client: TestClient):
     schema = app.openapi()
     found = {
         (method, path): operation

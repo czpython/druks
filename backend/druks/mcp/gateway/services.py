@@ -97,6 +97,25 @@ async def cancel_run(run_id: str, *, reason: str) -> schemas.CancelRunResponse:
     return schemas.CancelRunResponse(run_id=run.id, result="cancelled")
 
 
+async def retry_run(run_id: str) -> schemas.RetryRunResponse:
+    run = Run.get(run_id)
+    if not run:
+        raise exceptions.RunNotFound(run_id)
+    if run.state != RunState.FAILED.value:
+        raise exceptions.RunNotFailed(run_id)
+
+    subject = run.subject
+    if subject:
+        latest = Run.get_latest_for_subject(subject["type"], subject["id"])
+        if latest and latest.is_active:
+            if latest.forked_from == run.id:
+                return schemas.RetryRunResponse(run_id=latest.id, result="already_retried")
+            raise exceptions.SubjectBusy(latest.id)
+
+    retried_run_id = await run.retry()
+    return schemas.RetryRunResponse(run_id=retried_run_id, result="retried")
+
+
 def _artifact_content(artifact: Artifact | None) -> schemas.ArtifactContent | None:
     if not artifact:
         return

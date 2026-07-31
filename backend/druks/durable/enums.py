@@ -30,6 +30,7 @@ class WorkflowEvent(StrEnum):
     FINISHED = "workflow.finished"
     FAILED = "workflow.failed"
     CANCELLED = "workflow.cancelled"
+    RETRIED = "workflow.retried"
 
     @classmethod
     def for_state(cls, state: RunState) -> "WorkflowEvent":
