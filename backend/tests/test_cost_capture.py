@@ -8,10 +8,10 @@ from druks.harnesses.artifacts import (
     write_cost,
 )
 from druks.harnesses.claude import (
-    StreamJsonError,
     collapse_claude_stream,
     extract_claude_cost_from_envelope,
 )
+from druks.harnesses.exceptions import StreamJsonError
 from druks.testing import seed_call, seed_run
 from druks_field_notes.models import Note
 from druks_field_notes.workflows import Summarize
