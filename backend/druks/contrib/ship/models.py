@@ -11,7 +11,6 @@ from druks.contrib.ship.schemas import ProjectRepoSummary, WorkItemSummary
 from druks.core.apis.github import get_github_client
 from druks.db import Base, StoredSubject, db_session
 from druks.settings import load_settings
-from druks.ticketing.datastructures import Ticket
 from druks.ticketing.enums import TicketStatus
 from druks.ticketing.exceptions import TrackerNotConfigured
 from druks.ticketing.helpers import get_tracker, is_tracker_source
@@ -382,10 +381,9 @@ class WorkItem(StoredSubject):
         except TrackerNotConfigured:
             return
 
-        ticket = Ticket.ref(self.source, self.ticket_key)
         async with tracker:
             try:
-                await tracker.set_status(ticket, status)
+                await tracker.set_status(self.ticket_key, status)
             except (ValueError, *tracker.known_exceptions):
                 logger.warning(
                     "Could not sync %s ticket %s to %s.",

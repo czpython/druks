@@ -62,9 +62,6 @@ def _no_durable_dispatch(request):
         yield
 
 
-
-
-
 @pytest.fixture(scope="session", autouse=True)
 def _reset_test_database():
     # The repository suite owns its scratch database and starts from a clean
@@ -78,14 +75,6 @@ def _reset_test_database():
         connection.commit()
     engine.dispose()
     yield
-
-
-class FakeLinear:
-    def __init__(self, *, description: str = "") -> None:
-        self._description = description
-
-    async def get_issue(self, issue_id: str) -> dict[str, object]:
-        return {"description": self._description}
 
 
 @pytest.fixture
@@ -178,9 +167,6 @@ def connect_harness(harness_cls, payload: dict, *, provider_email: str = "op@exa
     )
 
 
-
-
-
 def make_agent_result(output, *, agent="agent", status=None, cost_usd=None, cost_metadata=None):
     # An AgentResult to return from a faked run_agent, so the agent call records/parses it.
     from datetime import UTC, datetime
@@ -211,8 +197,6 @@ def finish_agent_run(call, *, status=None, last_error=None):
     call.finished_at = Base.utc_now()
     db_session().flush()
     return call
-
-
 
 
 def make_test_note(body: str = "a note"):
