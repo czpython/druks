@@ -7,17 +7,8 @@ from druks.core.apis.jira import JiraClient
 from druks.settings import load_settings
 
 from .base import Tracker
-from .datastructures import Ticket
-from .enums import StatusKind, TicketStatus
+from .enums import TicketStatus
 from .exceptions import TrackerNotConfigured
-
-# Jira's statusCategory.key → druks's normalized kind. Jira folds done+canceled
-# into one "done" category, so canceled isn't distinguishable here.
-_CATEGORY_KIND: dict[str, StatusKind] = {
-    "new": StatusKind.BACKLOG,
-    "indeterminate": StatusKind.STARTED,
-    "done": StatusKind.DONE,
-}
 
 # These status names belong to the "Internal tools" issue type used for druks-managed tickets;
 # its transitions have no validators or required fields, unlike security issues whose Done gate
@@ -68,43 +59,11 @@ class Jira(Tracker):
             status_names=names,
         )
 
-    def _normalize(self, raw: dict[str, Any]) -> Ticket:
-        # Structured fields only — the engine reads these (status routing, repo
-        # binding, label guards). Description + comments are left to the agent,
-        # which reads the ticket itself; raw is kept for the write-side splice.
-        fields = raw.get("fields") or {}
-        status = fields.get("status") or {}
-        category = (status.get("statusCategory") or {}).get("key", "")
-        project = fields.get("project") or {}
-        assignee = fields.get("assignee") or {}
-        return Ticket(
-            provider="jira",
-            id=raw["id"],
-            key=raw["key"],
-            title=fields.get("summary") or "",
-            url=f"{self._client.base_url}/browse/{raw['key']}",
-            status_name=status.get("name"),
-            status_kind=_CATEGORY_KIND.get(category, StatusKind.UNKNOWN),
-            assignee_email=assignee.get("emailAddress"),
-            assignee_name=assignee.get("displayName"),
-            assignee_id=assignee.get("accountId"),
-            project_name=project.get("name"),
-            project_id=project.get("id"),
-            labels=list(fields.get("labels") or []),
-            # Jira creates sub-tasks + addresses labels by project key.
-            container_id=project.get("key"),
-            container_name=project.get("name"),
-            raw=raw,
-        )
-
-    async def fetch_ticket(self, key: str) -> Ticket:
-        return self._normalize(await self._client.get_issue(key))
-
-    async def set_status(self, ticket: Ticket, status: TicketStatus) -> None:
+    async def set_status(self, key: str, status: TicketStatus) -> None:
         name = self._status_names.get(status)
         if not name:
             raise ValueError(f"Jira has no configured status name for {status}")
-        await self._client.transition_issue(ticket.key, name)
+        await self._client.transition_issue(key, name)
 
     async def aclose(self) -> None:
         await self._client.aclose()

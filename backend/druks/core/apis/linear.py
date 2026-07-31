@@ -58,36 +58,6 @@ class LinearClient:
     async def aclose(self) -> None:
         await self._client.aclose()
 
-    async def get_issue(self, issue_id: str) -> dict[str, Any]:
-        data = await self._execute(
-            """
-            query DruksFetchIssue($issueId: String!) {
-              issue(id: $issueId) {
-                id
-                identifier
-                title
-                description
-                url
-                priority
-                updatedAt
-                state { id name type }
-                project { id name }
-                team { id name }
-                labels { nodes { name } }
-                assignee { id email name }
-                comments(first: 50) {
-                  nodes { body createdAt user { email name } }
-                }
-              }
-            }
-            """,
-            {"issueId": issue_id},
-        )
-        issue = data["issue"]
-        if issue is None:
-            raise LinearAPIError(f"Linear issue {issue_id} was not found.")
-        return issue
-
     async def update_issue_status(self, issue_id: str, status_name: str) -> dict[str, Any]:
         data = await self._execute(
             """

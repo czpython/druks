@@ -6,7 +6,6 @@ from .exceptions import JiraAPIError
 
 _DEFAULT_TIMEOUT = httpx.Timeout(30.0, connect=5.0, write=10.0, pool=5.0)
 _DEFAULT_LIMITS = httpx.Limits(max_connections=20, max_keepalive_connections=10)
-_ISSUE_FIELDS = "summary,description,status,labels,priority,project,assignee,comment"
 
 
 class JiraClient:
@@ -35,21 +34,13 @@ class JiraClient:
         path: str,
         *,
         json: dict[str, Any] | None = None,
-        params: dict[str, str] | None = None,
     ) -> dict[str, Any]:
-        response = await self._client.request(
-            method, f"{self.base_url}{path}", json=json, params=params
-        )
+        response = await self._client.request(method, f"{self.base_url}{path}", json=json)
         if not response.is_success:
             raise JiraAPIError(f"{method} {path} -> {response.status_code}: {response.text[:300]}")
         if response.status_code == 204 or not response.content:
             return {}
         return response.json()
-
-    async def get_issue(self, key: str) -> dict[str, Any]:
-        return await self._request(
-            "GET", f"/rest/api/3/issue/{key}", params={"fields": _ISSUE_FIELDS}
-        )
 
     async def transition_issue(self, key: str, status_name: str) -> None:
         # Jira moves status only via transitions: find the one whose target is
@@ -65,36 +56,4 @@ class JiraClient:
             "POST",
             f"/rest/api/3/issue/{key}/transitions",
             json={"transition": {"id": transition_id}},
-        )
-
-    async def upsert_remote_link(
-        self, key: str, *, url: str, title: str, summary: str = ""
-    ) -> None:
-        # globalId keyed on the url makes re-posting the same link an upsert.
-        await self._request(
-            "POST",
-            f"/rest/api/3/issue/{key}/remotelink",
-            json={"globalId": url, "object": {"url": url, "title": title, "summary": summary}},
-        )
-
-    async def create_subtask(
-        self,
-        *,
-        project_key: str,
-        parent_key: str,
-        summary: str,
-        description_adf: dict[str, Any],
-    ) -> dict[str, Any]:
-        return await self._request(
-            "POST",
-            "/rest/api/3/issue",
-            json={
-                "fields": {
-                    "project": {"key": project_key},
-                    "parent": {"key": parent_key},
-                    "issuetype": {"name": "Sub-task"},
-                    "summary": summary,
-                    "description": description_adf,
-                },
-            },
         )

@@ -1,32 +1,9 @@
 import pytest
-from druks.ticketing.datastructures import Ticket
-from druks.ticketing.enums import StatusKind, TicketStatus
+from druks.ticketing.enums import TicketStatus
 from druks.ticketing.exceptions import TrackerNotConfigured
 from druks.ticketing.helpers import get_tracker
 from druks.ticketing.jira import Jira
 from druks.ticketing.linear import Linear
-
-# A representative LinearClient.get_issue() payload — the shape Linear._normalize
-# must map onto a Ticket.
-SAMPLE_ISSUE = {
-    "id": "uuid-issue-1",
-    "identifier": "ACME-270",
-    "title": "Add local verification baseline",
-    "description": "the problem",
-    "url": "https://linear.app/x/issue/ACME-270",
-    "priority": 2,
-    "updatedAt": "2026-06-05T00:00:00Z",
-    "state": {"id": "s1", "name": "In Progress", "type": "started"},
-    "project": {"id": "p1", "name": "acme-mcp"},
-    "team": {"id": "team-1", "name": "Engineering"},
-    "labels": {"nodes": [{"name": "bug"}, {"name": "druks-scoped"}]},
-    "assignee": {"id": "a1", "email": "dev@clawhaven.com"},
-    "comments": {
-        "nodes": [
-            {"body": "first", "createdAt": "2026-06-01", "user": {"email": "u@x.com", "name": "U"}},
-        ],
-    },
-}
 
 
 class _FakeLinearClient:
@@ -35,22 +12,8 @@ class _FakeLinearClient:
     def __init__(self) -> None:
         self.calls: list[tuple] = []
 
-    async def get_issue(self, key):
-        self.calls.append(("get_issue", key))
-        return SAMPLE_ISSUE
-
     async def update_issue_status(self, issue_id, status_name):
         self.calls.append(("update_issue_status", issue_id, status_name))
-
-    async def add_issue_comment(self, issue_id, body):
-        self.calls.append(("add_issue_comment", issue_id, body))
-        return "comment-1"
-
-    async def add_issue_label(self, *, issue_id, team_id, label_name):
-        self.calls.append(("add_issue_label", issue_id, team_id, label_name))
-
-    async def update_issue_description(self, issue_id, description):
-        self.calls.append(("update_issue_description", issue_id, description))
 
     async def aclose(self):
         self.calls.append(("aclose",))
@@ -69,61 +32,23 @@ def _linear_with(fake: _FakeLinearClient, *, status_names=None) -> Linear:
     return provider
 
 
-def test_normalize_maps_linear_dict_to_ticket():
-    ticket = Linear.__new__(Linear)._normalize(SAMPLE_ISSUE)
-    assert isinstance(ticket, Ticket)
-    assert ticket.provider == "linear"
-    assert ticket.id == "uuid-issue-1"
-    assert ticket.key == "ACME-270"
-    assert ticket.title == "Add local verification baseline"
-    assert ticket.description == "the problem"
-    assert ticket.status_name == "In Progress"
-    assert ticket.status_kind is StatusKind.STARTED
-    assert ticket.project_name == "acme-mcp"
-    assert ticket.container_id == "team-1"
-    assert ticket.labels == ["bug", "druks-scoped"]
-    assert ticket.has_label("druks-scoped")
-    assert not ticket.has_label("nope")
-    assert ticket.raw is SAMPLE_ISSUE
-
-
-def test_normalize_tolerates_missing_optional_blocks():
-    ticket = Linear.__new__(Linear)._normalize(
-        {"id": "i", "identifier": "ACME-1", "title": "t"},
-    )
-    assert ticket.project_name is None
-    assert ticket.container_id is None
-    assert ticket.labels == []
-    assert ticket.status_kind is StatusKind.UNKNOWN
-
-
-@pytest.mark.asyncio
-async def test_fetch_ticket_normalizes():
-    fake = _FakeLinearClient()
-    ticket = await _linear_with(fake).fetch_ticket("ACME-270")
-    assert fake.calls == [("get_issue", "ACME-270")]
-    assert ticket.key == "ACME-270"
-
-
 @pytest.mark.asyncio
 async def test_set_status_maps_the_ticket_status_to_a_provider_name():
     fake = _FakeLinearClient()
     provider = _linear_with(fake)
-    ticket = provider._normalize(SAMPLE_ISSUE)
-    await provider.set_status(ticket, TicketStatus.DONE)
-    await provider.set_status(ticket, TicketStatus.READY_FOR_AGENT)
+    await provider.set_status("ACME-270", TicketStatus.DONE)
+    await provider.set_status("ACME-270", TicketStatus.READY_FOR_AGENT)
     assert fake.calls == [
-        ("update_issue_status", "uuid-issue-1", "Done"),
-        ("update_issue_status", "uuid-issue-1", "Ready for Agent"),
+        ("update_issue_status", "ACME-270", "Done"),
+        ("update_issue_status", "ACME-270", "Ready for Agent"),
     ]
 
 
 @pytest.mark.asyncio
 async def test_set_status_unmapped_raises():
     provider = _linear_with(_FakeLinearClient(), status_names={TicketStatus.DONE: "Done"})
-    ticket = provider._normalize(SAMPLE_ISSUE)
     with pytest.raises(ValueError, match="no configured status"):
-        await provider.set_status(ticket, TicketStatus.IN_REVIEW)
+        await provider.set_status("ACME-270", TicketStatus.IN_REVIEW)
 
 
 def test_get_tracker_resolves_configured_linear(tmp_path, monkeypatch):
@@ -178,8 +103,8 @@ class _FakeTracker:
     async def __aexit__(self, *exc):
         await self.aclose()
 
-    async def set_status(self, ticket, status):
-        self.calls.append((ticket.provider, ticket.key, status))
+    async def set_status(self, key, status):
+        self.calls.append((key, status))
 
     async def aclose(self):
         self.calls.append("aclose")
@@ -197,7 +122,7 @@ async def test_ticket_state_pushes_status(druks_db, monkeypatch):
 
     await item.set_ticket_status(TicketStatus.DONE)
 
-    assert fake.calls == [("linear", "ACME-1", TicketStatus.DONE), "aclose"]
+    assert fake.calls == [("ACME-1", TicketStatus.DONE), "aclose"]
 
 
 @pytest.mark.asyncio
@@ -221,7 +146,7 @@ async def test_ticket_state_closes_on_failure(druks_db, monkeypatch):
     class _Boom(_FakeTracker):
         known_exceptions = (LinearAPIError,)
 
-        async def set_status(self, ticket, status):
+        async def set_status(self, key, status):
             raise LinearAPIError("boom")
 
     boom = _Boom()
@@ -232,43 +157,7 @@ async def test_ticket_state_closes_on_failure(druks_db, monkeypatch):
     assert "aclose" in boom.calls  # closed even on failure
 
 
-# --- Jira provider (Phase B, step 1: engine ops, no rich ADF) ----------------
-
-SAMPLE_JIRA_ISSUE = {
-    "id": "10042",
-    "key": "PROJ-7",
-    "fields": {
-        "summary": "Add the widget",
-        "description": {
-            "type": "doc",
-            "version": 1,
-            "content": [
-                {"type": "paragraph", "content": [{"type": "text", "text": "the problem"}]}
-            ],
-        },
-        "status": {"name": "In Progress", "statusCategory": {"key": "indeterminate"}},
-        "labels": ["bug", "druks-scoped"],
-        "priority": {"id": "2", "name": "High"},
-        "project": {"id": "10000", "key": "PROJ", "name": "acme-app"},
-        "assignee": {"accountId": "acc-1", "emailAddress": "dev@clawhaven.com"},
-        "comment": {
-            "comments": [
-                {
-                    "id": "c1",
-                    "body": {
-                        "type": "doc",
-                        "version": 1,
-                        "content": [
-                            {"type": "paragraph", "content": [{"type": "text", "text": "first"}]},
-                        ],
-                    },
-                    "author": {"accountId": "u1", "emailAddress": "u@x.com"},
-                    "created": "2026-06-01T00:00:00.000+0000",
-                },
-            ],
-        },
-    },
-}
+# --- Jira provider ----------------------------------------------------------
 
 
 class _FakeJiraClient:
@@ -277,22 +166,8 @@ class _FakeJiraClient:
     def __init__(self) -> None:
         self.calls: list = []
 
-    async def get_issue(self, key):
-        self.calls.append(("get_issue", key))
-        return SAMPLE_JIRA_ISSUE
-
     async def transition_issue(self, key, status_name):
         self.calls.append(("transition_issue", key, status_name))
-
-    async def add_comment(self, key, body_adf):
-        self.calls.append(("add_comment", key, body_adf))
-        return "jira-comment-1"
-
-    async def add_label(self, key, label):
-        self.calls.append(("add_label", key, label))
-
-    async def set_description(self, key, description_adf):
-        self.calls.append(("set_description", key, description_adf))
 
     async def aclose(self):
         self.calls.append("aclose")
@@ -309,49 +184,11 @@ def _jira_with(fake: _FakeJiraClient) -> Jira:
     return provider
 
 
-def test_jira_normalize_maps_issue_to_ticket():
-    ticket = _jira_with(_FakeJiraClient())._normalize(SAMPLE_JIRA_ISSUE)
-    assert ticket.provider == "jira"
-    assert ticket.id == "10042"
-    assert ticket.key == "PROJ-7"
-    assert ticket.title == "Add the widget"
-    # The agent self-fetches the description/comments; _normalize keeps only the
-    # structured engine fields and the raw payload (write splice reads raw ADF).
-    assert ticket.description is None
-    assert ticket.url == "https://jira.test/browse/PROJ-7"
-    assert ticket.status_name == "In Progress"
-    assert ticket.status_kind is StatusKind.STARTED
-    assert ticket.labels == ["bug", "druks-scoped"]
-    assert ticket.has_label("druks-scoped")
-    assert ticket.assignee_email == "dev@clawhaven.com"
-    assert ticket.assignee_id == "acc-1"
-    assert ticket.project_name == "acme-app"
-    assert ticket.project_id == "10000"
-    assert ticket.container_id == "PROJ"  # project key drives sub-task/label
-
-
-def test_jira_normalize_tolerates_empty_fields():
-    ticket = _jira_with(_FakeJiraClient())._normalize({"id": "1", "key": "P-1", "fields": {}})
-    assert ticket.description is None
-    assert ticket.labels == []
-    assert ticket.status_kind is StatusKind.UNKNOWN
-
-
 @pytest.mark.asyncio
 async def test_jira_set_status_uses_transition():
     fake = _FakeJiraClient()
-    provider = _jira_with(fake)
-    ticket = provider._normalize(SAMPLE_JIRA_ISSUE)
-    await provider.set_status(ticket, TicketStatus.DONE)
-    assert ("transition_issue", "PROJ-7", "Done") in fake.calls
-
-
-@pytest.mark.asyncio
-async def test_jira_fetch_ticket_normalizes():
-    fake = _FakeJiraClient()
-    ticket = await _jira_with(fake).fetch_ticket("PROJ-7")
-    assert fake.calls == [("get_issue", "PROJ-7")]
-    assert ticket.key == "PROJ-7"
+    await _jira_with(fake).set_status("PROJ-7", TicketStatus.DONE)
+    assert fake.calls == [("transition_issue", "PROJ-7", "Done")]
 
 
 def test_jira_declares_known_exceptions():

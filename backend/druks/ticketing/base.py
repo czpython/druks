@@ -1,7 +1,6 @@
 from abc import ABC, abstractmethod
 from typing import ClassVar, Self
 
-from .datastructures import Ticket
 from .enums import TicketStatus
 
 
@@ -31,10 +30,7 @@ class Tracker(ABC):
         await self.aclose()
 
     @abstractmethod
-    async def fetch_ticket(self, key: str) -> Ticket: ...
-
-    @abstractmethod
-    async def set_status(self, ticket: Ticket, status: TicketStatus) -> None: ...
+    async def set_status(self, key: str, status: TicketStatus) -> None: ...
 
     @abstractmethod
     async def aclose(self) -> None: ...
