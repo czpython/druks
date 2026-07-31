@@ -21,9 +21,16 @@ from druks.sandbox.layout import get_runs_root, get_work_root
 from druks.skills.models import Skill
 
 from .artifacts import write_cost
-from .base import Harness, check_returncode, jwt_claims, jwt_expiry, post_token
+from .base import Harness, jwt_claims, jwt_expiry, post_token
 from .datastructures import CodexToken, ParsedMetric, ParsedModels, ParsedUsage
-from .exceptions import HarnessError, OAuthTokenError
+from .exceptions import (
+    HarnessAuthError,
+    HarnessError,
+    HarnessOverloadedError,
+    HarnessRateLimitError,
+    HarnessUsageLimitError,
+    OAuthTokenError,
+)
 from .subprocess import read_result_json
 
 logger = logging.getLogger(__name__)
@@ -279,6 +286,20 @@ class CodexHarness(Harness):
     # catches it if the server ever starts rejecting unknown versions.
     model_discovery_url = "https://chatgpt.com/backend-api/codex/models?client_version=99.99.99"
     command = "codex"
+
+    # The CLI's terminal {"type":"error"} event carries prose, not status
+    # shapes: stream drops after its internal retries, usage windows, 429s.
+    failure_markers = {
+        "usage limit": HarnessUsageLimitError,
+        "rate limit": HarnessRateLimitError,
+        "429": HarnessRateLimitError,
+        "401": HarnessAuthError,
+        "unauthorized": HarnessAuthError,
+        "stream disconnected": HarnessOverloadedError,
+        "stream error": HarnessOverloadedError,
+        "overloaded": HarnessOverloadedError,
+        "internal server error": HarnessOverloadedError,
+    }
 
     # OAuth refresh config (consumed by the Harness templates).
     REFRESH_MARGIN = timedelta(hours=24)
@@ -580,7 +601,7 @@ class CodexHarness(Harness):
         )
 
     def parse(self, result: HarnessRunResult, *, artifact_dir: Path, run_id: str) -> Any:
-        check_returncode(result, name=self.name)
+        self.check_returncode(result)
 
         call_dir = artifact_dir / run_id
         payload = read_result_json(

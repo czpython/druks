@@ -10,7 +10,6 @@ from pydantic import BaseModel, ConfigDict
 from druks.database import db_session
 from druks.durable.activity import set_run_phase
 from druks.durable.engine import _step_engine, step_session
-from druks.durable.enums import AgentCallStatus
 from druks.durable.exceptions import WorkflowError
 from druks.durable.models import AgentCall, Artifact
 from druks.extensions.registry import agents
@@ -222,12 +221,12 @@ class Agent:
                         runner, model, prompt, artifact_dir, call_id, connection_id
                     )
                 except BaseException as error:
-                    AgentCall.fail(engine, call_id=call_id, error=str(error))
+                    AgentCall.fail(engine, call_id=call_id, error=error)
                     raise
                 AgentCall.finish(engine, call_id=call_id, result=result)
 
-        if result.status is AgentCallStatus.FAILED:
-            raise WorkflowError(result.last_error or f"agent {self.id!r} failed")
+        if result.error:
+            raise result.error
 
         output = self.contract.model_validate(result.output)
         if spec := output.get_artifact():

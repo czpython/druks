@@ -21,6 +21,7 @@ from druks.sandbox.constants import MAX_AGENT_TIMEOUT_SECONDS
 from druks.skills.models import Skill
 from druks.usage.models import UsageScrape
 
+from . import exceptions
 from .constants import CONNECT_PENDING_PREFIX, REFRESH_LOCK_PREFIX
 from .datastructures import (
     AgentInvocation,
@@ -32,13 +33,6 @@ from .datastructures import (
     ParsedUsage,
     RotationResult,
     SandboxSettings,
-)
-from .exceptions import (
-    ConnectError,
-    GrantError,
-    HarnessError,
-    HarnessNotConnectedError,
-    OAuthTokenError,
 )
 from .models import HarnessConnection
 
@@ -76,6 +70,11 @@ class Harness(ABC):
     default_model: ClassVar[str]
     # The provider's model-list endpoint the picker refresh fetches.
     model_discovery_url: ClassVar[str]
+    # This CLI's terminal-error vocabulary: phrase → the failure it names, the
+    # first phrase found in a death's text winning in declaration order; no
+    # match stays a bare, never-retried HarnessError. The terminal event has no
+    # structured error subtype, so words are the only signal.
+    failure_markers: ClassVar[dict[str, type[exceptions.HarnessError]]] = {}
     default_effort: ClassVar[str] = "high"
     default_timeout: ClassVar[int] = 1800
     # Per-CLI OAuth refresh config (set by subclasses).
@@ -108,6 +107,17 @@ class Harness(ABC):
     def parse(self, result: HarnessRunResult, *, artifact_dir: Path, run_id: str) -> object:
         """Turn a finished run into the structured payload (and write the
         cost/output sidecars under ``artifact_dir / run_id``)."""
+
+    @classmethod
+    def check_returncode(cls, result: HarnessRunResult) -> None:
+        if result.returncode != 0:
+            detail = _terminal_detail(result.stdout)
+            message = f"{cls.name} exited with {result.returncode}.{detail}"
+            lowered = detail.lower()
+            for marker, error in cls.failure_markers.items():
+                if marker in lowered:
+                    raise error(message)
+            raise exceptions.HarnessError(message)
 
     def get_manifest(
         self,
@@ -189,7 +199,7 @@ class Harness(ABC):
         data = dict(row.payload) if row else None
         if data:
             return data
-        raise HarnessNotConnectedError(
+        raise exceptions.HarnessNotConnectedError(
             f"{cls.name} is not connected — connect it in Settings → Harnesses."
         )
 
@@ -202,7 +212,7 @@ class Harness(ABC):
         row = HarnessConnection.get(connection_id)
         if row:
             return json.dumps(dict(row.payload))
-        raise HarnessNotConnectedError(
+        raise exceptions.HarnessNotConnectedError(
             f"the selected {cls.name} connection was removed — reconnect it in "
             "Settings → Harnesses."
         )
@@ -234,18 +244,20 @@ class Harness(ABC):
         so a retry re-starts cleanly."""
         pending = await get_client().getdel(f"{CONNECT_PENDING_PREFIX}{flow_id}")  # single-use
         if not pending:
-            raise ConnectError("This connect attempt expired — start it again.")
+            raise exceptions.ConnectError("This connect attempt expired — start it again.")
         expected = json.loads(pending)
 
         code, pasted_state = _parse_pasted(pasted)
         if not code:
-            raise ConnectError("Couldn't find an authorization code in what you pasted.")
+            raise exceptions.ConnectError("Couldn't find an authorization code in what you pasted.")
         if pasted_state and pasted_state != expected["state"]:
-            raise ConnectError("That code is from a different connect attempt — start it again.")
+            raise exceptions.ConnectError(
+                "That code is from a different connect attempt — start it again."
+            )
 
         payload, provider_email = await cls.exchange(code=code, verifier=expected["verifier"])
         if not provider_email:
-            raise ConnectError(
+            raise exceptions.ConnectError(
                 "The provider returned no account email — authorize with an account "
                 "that has one and try again."
             )
@@ -277,7 +289,7 @@ class Harness(ABC):
         token = cls._token_from_credentials(dict(connection.payload))
         moment = now or _utc_now()
         if token.expires_at and token.expires_at <= moment:
-            raise OAuthTokenError(
+            raise exceptions.OAuthTokenError(
                 "token_expired", f"access token expired at {token.expires_at.isoformat()}"
             )
         return token
@@ -343,7 +355,7 @@ class Harness(ABC):
             try:
                 grant = await _post_grant(cls._TOKEN_URL, cls._grant_body(refresh_token))
                 new_expiry = cls._apply_refresh(data, grant, moment)
-            except GrantError as exc:
+            except exceptions.GrantError as exc:
                 if exc.tag == "invalid_grant":
                     # The provider revoked this row's refresh lineage;
                     # presenting it again can never succeed. Drop only this
@@ -390,7 +402,7 @@ class Harness(ABC):
         or expired reads False: nothing live to protect, rotate ungated."""
         try:
             token = cls._token_from_credentials(dict(connection.payload))
-        except OAuthTokenError:
+        except exceptions.OAuthTokenError:
             return False
         if not token.expires_at:
             return False
@@ -425,7 +437,7 @@ class Harness(ABC):
         '0 metrics'."""
         try:
             token = cls.load_token(connection, now=now)
-        except OAuthTokenError as exc:
+        except exceptions.OAuthTokenError as exc:
             return ParsedUsage(ok=False, error=exc.tag)
 
         url, headers = cls._usage_request(token)
@@ -515,7 +527,7 @@ class Harness(ABC):
         only ever advances, it is never wiped by a bad fetch."""
         try:
             token = cls.load_token(connection)
-        except OAuthTokenError as exc:
+        except exceptions.OAuthTokenError as exc:
             return ParsedModels(ok=False, error=exc.tag)
 
         headers = cls.get_model_discovery_headers(token)
@@ -602,7 +614,7 @@ async def _post_grant(url: str, body: dict) -> dict:
             response = await client.post(url, json=body)
     except httpx.HTTPError as exc:
         logger.warning("token refresh request failed (%s): %s", url, exc, exc_info=True)
-        raise GrantError("network") from exc
+        raise exceptions.GrantError("network") from exc
     if response.status_code != 200:
         logger.warning(
             "token refresh returned %s (%s): %s",
@@ -614,11 +626,11 @@ async def _post_grant(url: str, body: dict) -> dict:
             tag = "invalid_grant"
         else:
             tag = f"http_{response.status_code}"
-        raise GrantError(tag)
+        raise exceptions.GrantError(tag)
     try:
         return response.json()
     except ValueError as exc:
-        raise GrantError("bad_response") from exc
+        raise exceptions.GrantError("bad_response") from exc
 
 
 def _b64url(raw: bytes) -> str:
@@ -655,7 +667,7 @@ async def post_token(url: str, body: dict, *, form: bool) -> dict:
                 response = await client.post(url, json=body)
     except httpx.HTTPError as exc:
         logger.warning("token exchange request failed (%s): %s", url, exc, exc_info=True)
-        raise ConnectError("The request to the provider failed — try again.") from exc
+        raise exceptions.ConnectError("The request to the provider failed — try again.") from exc
     if response.status_code != 200:
         logger.warning(
             "token exchange returned %s (%s): %s",
@@ -664,17 +676,11 @@ async def post_token(url: str, body: dict, *, form: bool) -> dict:
             response.text[:300],
         )
         detail = response.text.strip()[:300] or f"HTTP {response.status_code}"
-        raise ConnectError(f"The provider rejected the connect: {detail}")
+        raise exceptions.ConnectError(f"The provider rejected the connect: {detail}")
     try:
         return response.json()
     except ValueError as exc:
-        raise ConnectError("The provider returned an unreadable response.") from exc
-
-
-def check_returncode(result: HarnessRunResult, *, name: str) -> None:
-    if result.returncode != 0:
-        detail = _terminal_detail(result.stdout)
-        raise HarnessError(f"{name} exited with {result.returncode}.{detail}")
+        raise exceptions.ConnectError("The provider returned an unreadable response.") from exc
 
 
 def _terminal_detail(stdout: bytes) -> str:
@@ -690,6 +696,9 @@ def _terminal_detail(stdout: bytes) -> str:
             continue
         if event.get("is_error") and isinstance(event.get("result"), str):
             return f" {event['result'][:300]}"
+        message = event.get("message")
+        if event.get("type") == "error" and isinstance(message, str) and message:
+            return f" {message[:300]}"
         error = event.get("error")
         if isinstance(error, dict):
             error = error.get("message")

@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from .exceptions import HarnessError
+from .exceptions import HarnessInvalidOutputError
 
 
 def read_result_json(output_path: Path, *, name: str) -> dict[str, Any]:
@@ -14,7 +14,7 @@ def read_result_json(output_path: Path, *, name: str) -> dict[str, Any]:
     try:
         text = output_path.read_text().strip()
     except FileNotFoundError as error:
-        raise HarnessError(f"{name} did not write result JSON.") from error
+        raise HarnessInvalidOutputError(f"{name} did not write result JSON.") from error
 
     if text[:3] == "```":
         lines = text.splitlines()
@@ -27,9 +27,9 @@ def read_result_json(output_path: Path, *, name: str) -> dict[str, Any]:
     try:
         payload = json.loads(text)
     except json.JSONDecodeError as error:
-        raise HarnessError(f"{name} wrote invalid result JSON.") from error
+        raise HarnessInvalidOutputError(f"{name} wrote invalid result JSON.") from error
 
     if not isinstance(payload, dict):
-        raise HarnessError(f"{name} result JSON must be an object.")
+        raise HarnessInvalidOutputError(f"{name} result JSON must be an object.")
 
     return payload

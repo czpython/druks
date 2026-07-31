@@ -55,9 +55,9 @@ class Run(Base):
     # The receipt: the input_requested_at stamp an answer last resumed.
     answer_parked_at: Mapped[datetime | None] = mapped_column(default=None)
     failure: Mapped[str | None] = mapped_column(default=None)
-    # The FatalError subtype's code when the run stopped on a deliberate domain
-    # error, so read-sides tell e.g. a gate timeout from a crash without parsing
-    # `failure`. Empty/None for a crash.
+    # The stopping error's stable code — FatalError's or a classified harness
+    # failure's — so read-sides tell a gate timeout or a provider outage from
+    # a crash without parsing `failure`. Empty/None for a crash.
     failure_code: Mapped[str | None] = mapped_column(default=None)
     created_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
     # Derived, never stored: DBOS owns whether the workflow is live — every
@@ -339,6 +339,8 @@ class AgentCall(Base, Uuid7Pk):
     status: Mapped[str] = mapped_column(default=AgentCallStatus.RUNNING.value)
     finished_at: Mapped[datetime | None]
     last_error: Mapped[str | None]
+    # The classified failure's code, mirroring the run's failure_code.
+    failure_code: Mapped[str | None] = mapped_column(default=None)
     cost_usd: Mapped[float | None]
     cost_metadata: Mapped[dict[str, Any] | None] = mapped_column(JSONB, default=None)
     # The VM this run executed on. Resolve via the sandbox service when needed
@@ -442,19 +444,20 @@ class AgentCall(Base, Uuid7Pk):
             call.started_at = result.started_at
             call.finished_at = Base.utc_now()
             call.last_error = result.last_error
+            call.failure_code = result.error.code if result.error else ""
             call.cost_usd = result.cost_usd
             call.cost_metadata = result.cost_metadata
             session.commit()
 
     @classmethod
-    def fail(cls, engine, *, call_id: str, error: str) -> None:
+    def fail(cls, engine, *, call_id: str, error: BaseException) -> None:
         # The run raised after the call started (a cancel, or a crash past the
         # agent body) — close the row so it doesn't linger as a phantom step.
         with get_session(engine) as session:
             call = session.get(cls, call_id)
             call.status = AgentCallStatus.FAILED.value
             call.finished_at = Base.utc_now()
-            call.last_error = error
+            call.last_error = str(error)
             session.commit()
 
     @classmethod
