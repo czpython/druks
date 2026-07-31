@@ -475,6 +475,7 @@ export interface McpServer {
   url: string
   isEnabled: boolean
   tokenSource: string
+  identityMode: string | null
   // A catalog-declared server — managed by druks, can't be removed here,
   // only disabled.
   builtin: boolean

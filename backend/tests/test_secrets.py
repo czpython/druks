@@ -2,6 +2,7 @@ import base64
 import os
 
 import pytest
+from druks.accounts.constants import SYSTEM_ACCOUNT_ID
 from druks.core.models import Uuid7Pk
 from druks.mcp.models import McpOauthGrant, McpServer
 from druks.models import Base
@@ -31,6 +32,7 @@ def _key() -> str:
 def _store_grant(refresh_token: str = "rt-secret", client_secret: str = "") -> McpOauthGrant:
     return McpOauthGrant.store(
         server_name="notion",
+        account_id=SYSTEM_ACCOUNT_ID,
         refresh_token=refresh_token,
         token_endpoint="https://auth.test/token",
         resource="https://mcp.notion.test/sse",
@@ -47,18 +49,17 @@ def test_stored_secrets_are_ciphertext_and_reads_restore_them(druks_db):
     druks_db.expire_all()
     row = McpServer.get_for_name("linear")
     assert row.token.decrypt() == _TOKEN
-    # The resolved view every consumer reads carries the Secret itself, so it
+    # The merged view every consumer reads carries the Secret itself, so the
     # plaintext exists only where decrypt() is called.
-    resolved = McpServer.get_resolved()["linear"]
-    assert resolved["token"].decrypt() == _TOKEN
-    assert resolved["has_token"] is True
+    merged = McpServer._merged()["linear"]
+    assert merged["token"].decrypt() == _TOKEN
 
 
 def test_grant_secret_halves_round_trip(druks_db):
     _store_grant(refresh_token="rt-secret", client_secret="cs-secret")
 
     druks_db.expire_all()
-    grant = McpOauthGrant.get_for_server("notion")
+    grant = McpOauthGrant.get_for_scope("notion", SYSTEM_ACCOUNT_ID)
     assert grant.refresh_token.decrypt() == "rt-secret"
     assert grant.client_secret.decrypt() == "cs-secret"
 
@@ -159,7 +160,7 @@ def test_ciphertext_is_bound_to_its_column(druks_db):
     druks_db.execute(text("UPDATE mcp_oauth_grants SET client_secret = refresh_token"))
     druks_db.expire_all()
 
-    grant = McpOauthGrant.get_for_server("notion")
+    grant = McpOauthGrant.get_for_scope("notion", SYSTEM_ACCOUNT_ID)
     with pytest.raises(SecretDecryptError):
         grant.refresh_token.decrypt()
     with pytest.raises(SecretDecryptError):
@@ -177,7 +178,10 @@ def test_prepended_key_still_decrypts(monkeypatch, druks_db):
     monkeypatch.setenv("DRUKS_SECRETS_KEY", f"{_key()},{old_key}")
     druks_db.expire_all()
     assert McpServer.get_for_name("linear").token.decrypt() == _TOKEN
-    assert McpOauthGrant.get_for_server("notion").refresh_token.decrypt() == "rt-secret"
+    assert (
+        McpOauthGrant.get_for_scope("notion", SYSTEM_ACCOUNT_ID).refresh_token.decrypt()
+        == "rt-secret"
+    )
 
 
 # --- EncryptedJsonField (via the test-only model) ---------------------------

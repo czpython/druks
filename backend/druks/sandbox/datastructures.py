@@ -13,6 +13,7 @@ from druks.mcp.constants import TOKEN_ENV_PREFIX
 from druks.mcp.enums import TokenSource
 from druks.mcp.exceptions import MissingTokenError, SourceEnvVarUnsetError
 from druks.mcp.helpers import get_bearer_token_env_var
+from druks.user_settings.models import UserSettings
 
 if TYPE_CHECKING:
     from druks.durable.enums import AgentCallStatus
@@ -146,14 +147,14 @@ class Workspace:
         # credentials itself. Base: none.
         return ()
 
-    async def run_agent(self, **kwargs: Any) -> AgentResult:
-        run_kwargs = await self.with_mcp_servers(**self.get_agent_run_kwargs(**kwargs))
+    async def run_agent(self, *, account_id: str | None, **kwargs: Any) -> AgentResult:
+        run_kwargs = await self.with_mcp_servers(account_id, **self.get_agent_run_kwargs(**kwargs))
         # with_mcp_servers is the run's last DB read; commit so the step's
         # connection isn't held idle through the minutes the agent runs.
         db_session().commit()
         return await self.sandbox.run_agent(**run_kwargs)
 
-    async def with_mcp_servers(self, **kwargs: Any) -> dict[str, Any]:
+    async def with_mcp_servers(self, account_id: str | None, **kwargs: Any) -> dict[str, Any]:
         # Fold every MCP server into this call — the workspace's required
         # servers, then the operator registry's enabled entries. Each becomes a
         # wire shape on ``mcp_servers`` (url + derived env var, never the
@@ -167,6 +168,7 @@ class Workspace:
         enabled = mcp_models.McpServer.list_enabled()
         if not required and not enabled:
             return kwargs
+        run_account = account_id or UserSettings.get().fallback_account_id
         # ``extra_env`` may be omitted or an explicit ``None`` (both valid for the
         # underlying run_agent); treat them the same so the merge never unpacks None.
         env = dict(kwargs.get("extra_env") or {})
@@ -203,7 +205,10 @@ class Workspace:
                 if not token:
                     raise SourceEnvVarUnsetError(server["name"], server["source_env_var"])
             else:  # oauth
-                token = await oauth.mint_access_token(server["name"])
+                scope_account_id = mcp_models.McpOauthGrant.scope_account(
+                    server["identity_mode"], run_account
+                )
+                token = await oauth.mint_access_token(server["name"], scope_account_id)
             bearer_token_env_var = ""
             if token:
                 bearer_token_env_var = get_bearer_token_env_var(server["name"])

@@ -3,9 +3,12 @@ import base64
 import hashlib
 import json
 import secrets
+from typing import cast
 from urllib.parse import urlencode, urlparse
 
 import httpx
+from sqlalchemy import select, update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from druks.database import db_session
 from druks.mcp.constants import (
@@ -19,8 +22,9 @@ from druks.mcp.constants import (
     OAUTH_REFRESH_LOCK_TTL_SECONDS,
     OAUTH_TOKEN_TTL_SKEW_SECONDS,
 )
+from druks.mcp.enums import IdentityMode
 from druks.mcp.exceptions import GrantRefreshError, MissingGrantError, OauthConnectError
-from druks.mcp.models import McpOauthGrant
+from druks.mcp.models import McpOauthGrant, McpServer
 from druks.redis import get_client
 
 
@@ -139,7 +143,14 @@ async def _register_client(
     return registration
 
 
-async def begin_connect(name: str, server_url: str, endpoint: str) -> str:
+async def begin_connect(
+    name: str,
+    server_url: str,
+    endpoint: str,
+    *,
+    account_id: str | None,
+    identity_mode: IdentityMode,
+) -> str:
     """Start the operator's authorization-code + PKCE flow for one server:
     discover the authorization server, register druks as a public client, stash
     the pending exchange (verifier + endpoints) in Redis under the state, and
@@ -164,6 +175,8 @@ async def begin_connect(name: str, server_url: str, endpoint: str) -> str:
     pending = {
         "name": name,
         "server_url": server_url,
+        "account_id": account_id,
+        "identity_mode": identity_mode,
         "code_verifier": code_verifier,
         "token_endpoint": metadata["token_endpoint"],
         "client_id": registration["client_id"],
@@ -227,8 +240,29 @@ async def complete_connect(*, state: str, code: str) -> str:
         raise OauthConnectError(
             name, "the authorization server granted no refresh token; druks needs offline access"
         )
+    session = db_session()
+    session.execute(
+        pg_insert(McpServer)
+        .values(
+            name=name,
+            url=pending["server_url"],
+            identity_mode=pending["identity_mode"],
+        )
+        .on_conflict_do_nothing(index_elements=["name"])
+    )
+    session.scalar(
+        update(McpServer)
+        .where(McpServer.name == name, McpServer.identity_mode.is_(None))
+        .values(identity_mode=pending["identity_mode"])
+        .returning(McpServer.identity_mode)
+    )
+    effective_identity_mode = session.scalar(
+        select(McpServer.identity_mode).where(McpServer.name == name)
+    )
+    account_id = McpOauthGrant.scope_account(effective_identity_mode, pending["account_id"])
     McpOauthGrant.store(
         server_name=name,
+        account_id=account_id,
         refresh_token=tokens["refresh_token"],
         token_endpoint=pending["token_endpoint"],
         resource=pending["server_url"],
@@ -238,36 +272,36 @@ async def complete_connect(*, state: str, code: str) -> str:
     return name
 
 
-async def evict_access_token(name: str) -> None:
-    await get_client().delete(f"{OAUTH_ACCESS_TOKEN_PREFIX}{name}")
+async def evict_access_token(name: str, account_id: str) -> None:
+    await get_client().delete(f"{OAUTH_ACCESS_TOKEN_PREFIX}{name}:{account_id}")
 
 
-async def mint_access_token(name: str) -> str:
+async def mint_access_token(name: str, account_id: str) -> str:
     """The delivery-side token for a connected server: the cached access token
     while it lives, else one refreshed from the grant. The provider may rotate
     the refresh token on use — two concurrent refreshes trip its reuse
     detection and can revoke the whole grant — so the Redis that fronts the
-    cache also elects one refresher per server (the run lock's SET NX idiom;
+    cache also elects one refresher per grant (the run lock's SET NX idiom;
     the TTL is a crash backstop a live refresh cannot outlive). Losers poll
     for the winner's cache fill, for about one token-endpoint round trip, then
     fail loudly — delivery never ships a server the agent can't authenticate
     to."""
     redis = get_client()
-    token_key = f"{OAUTH_ACCESS_TOKEN_PREFIX}{name}"
-    lock_key = f"{OAUTH_REFRESH_LOCK_PREFIX}{name}"
+    token_key = f"{OAUTH_ACCESS_TOKEN_PREFIX}{name}:{account_id}"
+    lock_key = f"{OAUTH_REFRESH_LOCK_PREFIX}{name}:{account_id}"
     for _ in range(OAUTH_MINT_WAIT_ATTEMPTS):
         cached = await redis.get(token_key)
         if cached:
-            return cached.decode()
+            return cast(bytes, cached).decode()
         if await redis.set(lock_key, "1", nx=True, ex=OAUTH_REFRESH_LOCK_TTL_SECONDS):
             break
         await asyncio.sleep(OAUTH_MINT_WAIT_INTERVAL_SECONDS)
     else:
         raise GrantRefreshError(name, "timed out waiting for a concurrent refresh to finish")
     try:
-        grant = McpOauthGrant.get_for_server(name)
+        grant = McpOauthGrant.get_for_scope(name, account_id)
         if not grant:
-            raise MissingGrantError(name)
+            raise MissingGrantError(name, account_id)
         # The grant's secret halves are ciphertext at rest; the plaintext
         # exists only in this request body.
         data = {
@@ -286,7 +320,7 @@ async def mint_access_token(name: str) -> str:
             except httpx.HTTPError as error:
                 raise GrantRefreshError(name, str(error)) from error
         if response.status_code != 200:
-            await evict_access_token(name)
+            await evict_access_token(name, account_id)
             raise GrantRefreshError(name, f"HTTP {response.status_code} from the token endpoint")
         try:
             tokens = response.json()
