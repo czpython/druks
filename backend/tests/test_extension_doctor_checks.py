@@ -48,6 +48,21 @@ def test_failing_extension_check_reports_under_the_extension(installed, tmp_path
     assert "FIELD_NOTES_API_KEY" in result.detail
 
 
+def test_unreachable_settings_database_is_an_extension_check_failure(
+    installed, tmp_path: Path
+) -> None:
+    settings = make_settings(
+        tmp_path,
+        database_url="postgresql+psycopg://druks:druks@127.0.0.1:1/druks",
+    )
+
+    results = doctor.check_extensions(settings)
+
+    result = _named(results, "ship:check_linear")
+    assert not result.ok
+    assert "check raised" in result.detail
+
+
 def test_extension_checks_are_wired_into_the_check_battery(installed, tmp_path: Path) -> None:
     """``run_checks`` runs the extension checks: ``check_extensions`` is one of the
     battery's entries and, like ``check_harness_credentials``, fans its several
@@ -68,10 +83,10 @@ def test_raising_extension_check_is_isolated_and_does_not_stop_siblings(
     and the extension's other checks still run."""
     from druks_field_notes import extension as field_notes
 
-    def boom(_settings: doctor.Settings) -> doctor.CheckResult:
+    def boom() -> doctor.CheckResult:
         raise RuntimeError("provider unreachable")
 
-    def healthy(_settings: doctor.Settings) -> doctor.CheckResult:
+    def healthy() -> doctor.CheckResult:
         return doctor.CheckResult(name="healthy", ok=True, detail="ok")
 
     monkeypatch.setattr(field_notes.FieldNotes, "checks", [boom, healthy])
@@ -95,7 +110,7 @@ def test_broken_extension_check_does_not_hide_core_failures(
     a broken extension can't abort or hide the core checks."""
     from druks_field_notes import extension as field_notes
 
-    def boom(_settings: doctor.Settings) -> doctor.CheckResult:
+    def boom() -> doctor.CheckResult:
         raise RuntimeError("kaboom")
 
     monkeypatch.setattr(field_notes.FieldNotes, "checks", [boom])
@@ -118,8 +133,8 @@ def test_broken_extension_check_does_not_hide_core_failures(
 
 
 def test_default_extension_contributes_no_checks(tmp_path: Path) -> None:
-    """An extension that doesn't declare ``checks`` adds nothing — the base attribute
-    is an empty list, so the built-in extensions leave the report unchanged."""
+    """An extension that doesn't declare ``checks`` adds nothing because the base
+    attribute is an empty list."""
     from druks.extensions import Extension
 
     class Plain(Extension):
@@ -136,10 +151,10 @@ def test_malformed_check_return_is_contained(
     crashing the run with ``AttributeError`` and hiding later checks."""
     from druks_field_notes import extension as field_notes
 
-    def check_forgot_return(_settings: doctor.Settings) -> doctor.CheckResult:
+    def check_forgot_return() -> doctor.CheckResult:
         return None  # type: ignore[return-value]  # the bug under test: no real return
 
-    def healthy(_settings: doctor.Settings) -> doctor.CheckResult:
+    def healthy() -> doctor.CheckResult:
         return doctor.CheckResult(name="healthy", ok=True, detail="ok")
 
     # The malformed check runs before a healthy one, which must still report.

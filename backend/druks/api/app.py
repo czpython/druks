@@ -86,13 +86,6 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         yield
     finally:
         shutdown()
-        # Release HTTP connection pools owned by long-lived API clients.
-        linear = getattr(app.state, "linear", None)
-        if linear:
-            await linear.aclose()
-        github = getattr(app.state, "github", None)
-        if github:
-            await github.aclose()
         engine = getattr(app.state, "engine", None)
         if engine:
             engine.dispose()

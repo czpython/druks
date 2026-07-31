@@ -372,7 +372,7 @@ def step(method: Callable | None = None, *, name: str | None = None) -> Callable
     return stamp(method) if method else stamp
 
 
-# Lifecycle steps do real IO (DB, Redis, subscribers reaching trackers), so a
+# Lifecycle steps do real IO (DB, Redis, event subscribers), so a
 # transient failure must not become a failed run — a lost reaction has no
 # redelivery, unlike a webhook.
 _IO_RETRIES: StepOptions = {"retries_allowed": True, "max_attempts": 5}

@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 
 from .agents import Agent
 from .core.apis.github import get_github_client
-from .database import create_engine_from_url
+from .database import create_engine_from_url, db_session
 from .extensions.loader import iter_extensions
 from .extensions.registry import _ROLES, agents, autodiscover, webhooks, workflows
 from .harnesses.models import HarnessConnection
@@ -123,30 +123,6 @@ async def _github_app_slug(*, app_id: str, private_key: str) -> str:
     async with GitHub(AppAuthStrategy(app_id, private_key)) as gh:
         response = await gh.rest.apps.async_get_authenticated()
         return response.parsed_data.slug
-
-
-def check_linear(settings: Settings) -> CheckResult:
-    if not settings.linear_api_key:
-        return CheckResult(name="linear", ok=True, detail="not configured")
-    if not settings.linear_webhook_secret:
-        return CheckResult(
-            name="linear",
-            ok=False,
-            detail="LINEAR_API_KEY set but LINEAR_WEBHOOK_SECRET empty.",
-        )
-    return CheckResult(name="linear", ok=True, detail="set")
-
-
-def check_jira(settings: Settings) -> CheckResult:
-    if not (settings.jira_base_url and settings.jira_email and settings.jira_api_token):
-        return CheckResult(name="jira", ok=True, detail="not configured")
-    if not settings.jira_webhook_secret:
-        return CheckResult(
-            name="jira",
-            ok=False,
-            detail="Jira configured but JIRA_WEBHOOK_SECRET empty.",
-        )
-    return CheckResult(name="jira", ok=True, detail="set")
 
 
 def _harness_credential_check(
@@ -409,20 +385,27 @@ def check_extensions(settings: Settings) -> list[CheckResult]:
     modules. A check that raises when run is contained under the extension's name by
     ``_run_extension_check``, and the core checks are separate ``CHECKS`` entries a
     broken extension can't hide."""
-    results: list[CheckResult] = []
-    for extension in iter_extensions():
-        for check in extension.checks or ():
-            results.append(_run_extension_check(extension.name, check, settings))
-    return results
+    engine = create_engine_from_url(settings.database_url)
+    try:
+        with Session(engine) as session:
+            db_session.registry.set(session)
+            results: list[CheckResult] = []
+            for extension in iter_extensions():
+                for check in extension.checks or ():
+                    results.append(_run_extension_check(extension.name, check))
+            return results
+    finally:
+        db_session.remove()
+        engine.dispose()
 
 
-def _run_extension_check(extension_name: str, check, settings: Settings) -> CheckResult:
+def _run_extension_check(extension_name: str, check) -> CheckResult:
     """One extension check, its result namespaced under the extension. A check that
     raises, or returns anything but a ``CheckResult`` (a missing ``return`` yields
     ``None``), becomes a failing result rather than escaping and hiding later checks."""
     label = getattr(check, "__name__", repr(check))
     try:
-        outcome = check(settings)
+        outcome = check()
         if not isinstance(outcome, CheckResult):
             raise TypeError(f"check returned {type(outcome).__name__}, expected CheckResult")
     except Exception as error:  # noqa: BLE001 — the check fails, never aborts
@@ -440,8 +423,6 @@ CHECKS = (
     check_installations,
     check_github_operator_app,
     check_github_reviewer_app,
-    check_linear,
-    check_jira,
     check_harness_credentials,
     check_data_dir,
     check_database,

@@ -233,7 +233,7 @@ async def test_external_close_returns_ticket_to_resting_pool(druks_db, tmp_path,
     provider's resting status (Linear → Backlog, Jira → Open) so the
     ticket doesn't strand in In Progress/Review."""
     from druks.contrib.ship.models import WorkItem
-    from druks.ticketing.enums import TicketStatus
+    from druks.contrib.ship.ticketing.enums import TicketStatus
 
     pushed = []
 
@@ -256,7 +256,7 @@ async def test_external_close_returns_ticket_to_resting_pool(druks_db, tmp_path,
 async def test_external_merge_pushes_done(druks_db, tmp_path, monkeypatch):
     """An externally-merged PR mirrors druks's own merge op: ticket → Done."""
     from druks.contrib.ship.models import WorkItem
-    from druks.ticketing.enums import TicketStatus
+    from druks.contrib.ship.ticketing.enums import TicketStatus
 
     pushed = []
 
@@ -334,7 +334,7 @@ async def test_external_close_survives_policy_resolution_failure(druks_db, tmp_p
     the ticket — the cancel and resting-pool reset still happen."""
     from druks.contrib.ship import models as build_models
     from druks.contrib.ship.policy import RepoPolicy
-    from druks.ticketing.enums import TicketStatus
+    from druks.contrib.ship.ticketing.enums import TicketStatus
 
     async def _boom(cls, repo):
         raise RuntimeError("github down")

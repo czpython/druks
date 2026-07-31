@@ -27,14 +27,11 @@ if TYPE_CHECKING:
     from druks.doctor import CheckResult
     from druks.durable.datastructures import Subject
     from druks.durable.schemas import SubjectActivity
-    from druks.settings import Settings
     from druks.workflows import Workflow
 
-    # A check the extension owns: given the resolved settings, it returns a verdict on
-    # one of the extension's own preconditions (its API key, a webhook secret, a
-    # provider being reachable). Same signature and ``CheckResult`` shape as a core
-    # check, so the operator sees one uniform report.
-    Check = Callable[[Settings], CheckResult]
+    # A check the extension owns returns a verdict on one of its own preconditions
+    # using the same ``CheckResult`` shape as a core check.
+    Check = Callable[[], CheckResult]
 
 # An extension name keys the ``/api/<name>`` namespace, the ``alembic_version_<name>``
 # table, the ``<name>_`` table prefix, and ``extension:<name>:`` settings — so it must

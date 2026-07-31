@@ -166,15 +166,6 @@ def test_generated_secrets_never_regenerate_on_rerun(tmp_path):
     assert _read_toml(tmp_path / "druks.toml")["secrets"] == first
 
 
-def test_blank_toml_value_is_omitted_from_env(tmp_path):
-    env_path = tmp_path / ".env"
-
-    _run(env_path, set_values=("ticketing.linear_api_key=",))
-
-    assert "LINEAR_API_KEY" not in read_env(env_path)
-    assert "LINEAR_API_KEY=" not in env_path.read_text()
-
-
 def test_deployment_env_addition_renders_verbatim_and_survives_rerender(tmp_path):
     env_path = tmp_path / ".env"
     _run(
@@ -198,10 +189,10 @@ def test_deployment_env_addition_renders_verbatim_and_survives_rerender(tmp_path
 def test_blank_deployment_env_addition_is_omitted(tmp_path):
     env_path = tmp_path / ".env"
 
-    _run(env_path, provider="docker", set_values=("env.JIRA_API_TOKEN=",))
+    _run(env_path, provider="docker", set_values=("env.EXAMPLE_OPTION=",))
 
-    assert "JIRA_API_TOKEN" not in read_env(env_path)
-    assert "JIRA_API_TOKEN=" not in env_path.read_text()
+    assert "EXAMPLE_OPTION" not in read_env(env_path)
+    assert "EXAMPLE_OPTION=" not in env_path.read_text()
 
 
 def test_owned_deployment_env_key_is_a_named_gap_and_is_not_rendered(tmp_path):
@@ -292,7 +283,6 @@ def test_missing_known_tables_gap_without_rewriting_the_operators_file(tmp_path)
     _run(env_path, provider="docker")
     toml_path = tmp_path / "druks.toml"
     body = toml_path.read_text()
-    body = body.replace("[ticketing]", "[ticketing-renamed]")
     body = body.replace("[sandbox.env]\n", "")
     body = body.replace('provider = "docker"\n', "")
     toml_path.write_text(body)
@@ -308,8 +298,6 @@ def test_missing_known_tables_gap_without_rewriting_the_operators_file(tmp_path)
     assert rc == GAPS_EXIT_CODE
     assert "DEFAULT_HOST_PROVIDER is empty" in "\n".join(printed)
     assert "GITHUB_REVIEWER_APP_ID is empty" in "\n".join(printed)
-    assert "ticketing" not in config
-    assert "ticketing-renamed" in config
     assert "env" not in config["sandbox"]
     assert config["github"]["operator_app_id"] == "101"
     assert read_env(env_path)["GITHUB_OPERATOR_APP_ID"] == "101"

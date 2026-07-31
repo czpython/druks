@@ -112,7 +112,7 @@ ssh exe.dev share set-public druks
 ```
 
 Public URLs: `https://<host>/_external/{github,linear,jira}/events/`
-(HMAC-gated webhooks), `https://<host>/mcp` (PAT-authenticated MCP endpoint —
+(authenticated provider webhooks), `https://<host>/mcp` (PAT-authenticated MCP endpoint —
 [Connect your agent](../docs/connect-your-agent.md)), and `https://<host>/`
 (exe.dev authenticates at the edge; druks maps its asserted email to your
 account).

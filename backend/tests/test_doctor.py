@@ -156,37 +156,6 @@ def test_github_app_fails_when_live_mint_raises(
     assert "401" in result.detail
 
 
-def test_linear_passes_when_unconfigured(tmp_path: Path) -> None:
-    settings = make_settings(tmp_path, linear_api_key=None, linear_webhook_secret="")
-
-    result = doctor.check_linear(settings)
-
-    assert result.ok
-    assert "not configured" in result.detail
-
-
-def test_linear_fails_when_configured_but_webhook_secret_missing(tmp_path: Path) -> None:
-    settings = make_settings(tmp_path, linear_api_key="lin_api_x", linear_webhook_secret="")
-
-    result = doctor.check_linear(settings)
-
-    assert not result.ok
-
-
-def test_jira_fails_when_configured_but_webhook_secret_missing(tmp_path: Path) -> None:
-    settings = make_settings(
-        tmp_path,
-        jira_base_url="https://jira.test",
-        jira_email="a@b.com",
-        jira_api_token="tok",
-        jira_webhook_secret="",
-    )
-
-    result = doctor.check_jira(settings)
-
-    assert not result.ok
-
-
 def test_data_dir_fails_when_missing(tmp_path: Path) -> None:
     missing = tmp_path / "absent"
     settings = make_settings(tmp_path, data_dir=missing)
@@ -249,8 +218,8 @@ def test_run_checks_covers_all_check_names(tmp_path: Path) -> None:
         "installations",
         "github_operator_app",
         "github_reviewer_app",
-        "linear",
-        "jira",
+        "ship:linear",
+        "ship:jira",
         "claude_credentials",
         "codex_credentials",
         "data_dir",

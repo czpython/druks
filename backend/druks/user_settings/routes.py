@@ -2,7 +2,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from druks.accounts.dependencies import current_account
+from druks.accounts.dependencies import current_account, current_session_account
 from druks.accounts.models import Account
 from druks.durable.engine import apply_schedules
 from druks.extensions.loader import get_extension, iter_extensions
@@ -153,7 +153,10 @@ def _validate_timeout(value: int | None) -> None:
 
 
 @router.patch(
-    "/extensions", response_model=ExtensionsSettingsResponse, response_model_by_alias=True
+    "/extensions",
+    response_model=ExtensionsSettingsResponse,
+    response_model_by_alias=True,
+    dependencies=[Depends(current_session_account)],
 )
 async def update_extension_settings(body: ExtensionsSettingsUpdate) -> ExtensionsSettingsResponse:
     for name, model in body.agent_models.items():

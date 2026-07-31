@@ -155,13 +155,6 @@ def make_settings(tmp_path: Path, **overrides: object) -> Settings:
         "github_operator_private_key_path": None,
         "github_reviewer_app_id": None,
         "github_reviewer_private_key_path": None,
-        "linear_webhook_secret": "",
-        "linear_api_key": None,
-        # Null jira explicitly so a developer's real JIRA_* env vars don't leak
-        # in and make "unconfigured" tests see a configured tracker.
-        "jira_base_url": None,
-        "jira_email": None,
-        "jira_api_token": None,
         "redis_url": TEST_REDIS_URL,
         "log_level": "WARNING",
     }

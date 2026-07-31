@@ -233,6 +233,27 @@ def test_extensions_surface_build_agents_and_workflow_defaults(tmp_path: Path):
     }
 
 
+def test_extension_secret_write_never_returns_the_value(tmp_path: Path):
+    secret = "linear-secret-value"
+    with _build_client(tmp_path) as client:
+        written = client.patch(
+            "/api/settings/extensions",
+            json={"extensionSettings": {"ship": {"linear_api_key": secret}}},
+        )
+        read = client.get("/api/settings/extensions")
+
+    assert written.status_code == 200
+    assert read.status_code == 200
+    assert secret not in written.text
+    assert secret not in read.text
+    ship = next(extension for extension in read.json()["extensions"] if extension["name"] == "ship")
+    field = next(setting for setting in ship["settings"] if setting["name"] == "linear_api_key")
+    assert field["type"] == "secret"
+    assert field["value"] is None
+    assert field["default"] is None
+    assert field["secretSet"] is True
+
+
 def test_extensions_override_agent_model_persists(tmp_path: Path):
     with _build_client(tmp_path) as client:
         patch = client.patch(

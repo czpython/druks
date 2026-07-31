@@ -17,13 +17,13 @@ EXEMPT_API_PATHS = {
     "/api/{path:path}",  # the JSON-404 catch-all
 }
 
-# Capability management admits the session identity only — never a PAT, so a
-# token cannot mint or revoke tokens, nor remove the harness connection it
-# could never create.
-SESSION_ONLY_API_PATHS = {
-    "/api/auth/personal-tokens",
-    "/api/auth/personal-tokens/{pat_id}",
-    "/api/harnesses/{name}/connection",
+# Capability management admits the session identity only — never a PAT.
+SESSION_ONLY_API_ROUTES = {
+    ("GET", "/api/auth/personal-tokens"),
+    ("POST", "/api/auth/personal-tokens"),
+    ("DELETE", "/api/auth/personal-tokens/{pat_id}"),
+    ("DELETE", "/api/harnesses/{name}/connection"),
+    ("PATCH", "/api/settings/extensions"),
 }
 
 # The connection flow must answer during none/zero setup, before any account
@@ -57,13 +57,17 @@ def _gated_by(route, gate) -> bool:
     return any(dependency.call is gate for dependency in route.dependant.dependencies)
 
 
+def _is_session_only(route) -> bool:
+    return any((method, route.path) in SESSION_ONLY_API_ROUTES for method in route.methods)
+
+
 def test_every_internal_api_route_sits_behind_the_identity_gate(api_routes):
     unguarded = [
         route.path
         for route in api_routes
         if route.path.startswith("/api/")
         and route.path not in EXEMPT_API_PATHS
-        and route.path not in SESSION_ONLY_API_PATHS
+        and not _is_session_only(route)
         and not _gated_by(route, current_account)
     ]
     assert unguarded == []
@@ -103,12 +107,18 @@ def test_connection_setup_uses_only_the_session_or_setup_resolver(api_routes):
 
 
 def test_capability_management_is_session_only(api_routes):
-    listed = [route for route in api_routes if route.path in SESSION_ONLY_API_PATHS]
-    assert {route.path for route in listed} == SESSION_ONLY_API_PATHS
+    listed = [route for route in api_routes if _is_session_only(route)]
+    assert {
+        (method, route.path)
+        for route in listed
+        for method in route.methods
+        if (method, route.path) in SESSION_ONLY_API_ROUTES
+    } == SESSION_ONLY_API_ROUTES
     for route in listed:
         assert _gated_by(route, current_session_account), route.path
-        assert not _gated_by(route, current_account), route.path
+        if route.path != "/api/settings/extensions":
+            assert not _gated_by(route, current_account), route.path
     # And nothing else carries the session-only gate.
     for route in api_routes:
-        if route.path not in SESSION_ONLY_API_PATHS:
+        if not _is_session_only(route):
             assert not _gated_by(route, current_session_account), route.path

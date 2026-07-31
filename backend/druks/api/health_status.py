@@ -3,7 +3,6 @@ from datetime import UTC, datetime, timedelta
 from druks.api import schemas as api_schemas
 from druks.core.utils.time import operator_local_day
 from druks.durable import AgentCall
-from druks.ticketing.helpers import configured_source
 from druks.user_settings.models import UserSettings
 from druks.webhooks.deliveries import last_delivery_at
 
@@ -19,12 +18,8 @@ def _spend_for_local_today(*, timezone_name: str, now: datetime) -> tuple[float,
 async def build_health() -> api_schemas.DashboardHealth:
     now = datetime.now(UTC)
     spend, tokens = _spend_for_local_today(timezone_name=UserSettings.get().timezone, now=now)
-    # github is the code host (always present); the tracker is whichever provider
-    # is configured. Both report freshness through the same per-source shape.
+    # GitHub is the code host and is always present.
     sources = ["github"]
-    tracker = configured_source()
-    if tracker:
-        sources.append(tracker)
     return api_schemas.DashboardHealth(
         web="ok",
         webhook_freshness=api_schemas.WebhookFreshness(

@@ -186,6 +186,22 @@ def test_a_pat_cannot_disconnect_a_harness(tmp_path, druks_db):
         assert beside.status_code == 401
 
 
+def test_a_pat_reads_but_cannot_write_extension_settings(tmp_path, druks_db):
+    with _client(tmp_path) as client:
+        _, token = _mint("op@example.com")
+        headers = _bearer(token)
+
+        read = client.get("/api/settings/extensions", headers=headers)
+        write = client.patch(
+            "/api/settings/extensions",
+            json={"extensionSettings": {"ship": {"linear_api_key": "lin_secret"}}},
+            headers=headers,
+        )
+
+    assert read.status_code == 200
+    assert write.status_code == 401
+
+
 def test_the_operator_manages_the_token_lifecycle(tmp_path, druks_db):
     with _client(tmp_path) as client:
         created = client.post(

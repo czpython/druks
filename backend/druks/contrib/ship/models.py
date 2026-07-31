@@ -8,12 +8,10 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from druks.contrib.ship.policy import RepoPolicy
 from druks.contrib.ship.schemas import ProjectRepoSummary, WorkItemSummary
+from druks.contrib.ship.ticketing.enums import TicketStatus
 from druks.core.apis.github import get_github_client
 from druks.db import Base, StoredSubject, db_session
 from druks.settings import load_settings
-from druks.ticketing.enums import TicketStatus
-from druks.ticketing.exceptions import TrackerNotConfigured
-from druks.ticketing.helpers import get_tracker, is_tracker_source
 from druks.workflows import FatalError
 
 logger = logging.getLogger(__name__)
@@ -367,18 +365,12 @@ class WorkItem(StoredSubject):
         return list(db_session().scalars(stmt))
 
     async def set_ticket_status(self, status: TicketStatus) -> None:
-        # No-op for sources without a configured tracker (github, absent creds).
-        if not is_tracker_source(self.source):
-            return
         # Lazy: the Ship extension imports this module, so it can't be imported at top.
         import druks.contrib.ship.extension as ship_extension
 
-        try:
-            tracker = get_tracker(
-                self.source,
-                ready_for_agent_status=ship_extension.Ship.resting_status(self.source),
-            )
-        except TrackerNotConfigured:
+        tracker = ship_extension.Ship.tracker(self.source)
+        # No tracker means nothing to sync (github, or credentials not set yet).
+        if not tracker:
             return
 
         async with tracker:

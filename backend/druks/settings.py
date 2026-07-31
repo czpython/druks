@@ -133,16 +133,6 @@ class Settings(BaseSettings):
         alias="GITHUB_REVIEWER_PRIVATE_KEY_PATH",
     )
 
-    linear_webhook_secret: str = Field(default="", alias="LINEAR_WEBHOOK_SECRET")
-    linear_api_key: EmptyToNone = Field(default=None, alias="LINEAR_API_KEY")
-
-    # Jira Cloud (the second ticketing provider). All three are required to
-    # enable the Jira tracker; the webhook secret gates inbound deliveries.
-    jira_base_url: EmptyToNone = Field(default=None, alias="JIRA_BASE_URL")
-    jira_email: EmptyToNone = Field(default=None, alias="JIRA_EMAIL")
-    jira_api_token: EmptyToNone = Field(default=None, alias="JIRA_API_TOKEN")
-    jira_webhook_secret: str = Field(default="", alias="JIRA_WEBHOOK_SECRET")
-
     # The Slack app's signing secret, gating inbound interactivity callbacks —
     # distinct from the per-destination outbound webhook URLs.
     slack_signing_secret: str = Field(default="", alias="SLACK_SIGNING_SECRET")

@@ -15,16 +15,3 @@ class GitHubAppNotInstalledError(Exception):
 class GitHubAppNotConfiguredError(Exception):
     """Operator or reviewer GitHub App credentials are absent from settings;
     the message names the env vars to set."""
-
-
-class JiraAPIError(Exception):
-    """Jira REST returned a non-2xx response. Distinct from ``httpx.HTTPError``
-    (transport) so callers can ``except (httpx.HTTPError, JiraAPIError)``."""
-
-
-class LinearAPIError(Exception):
-    """Raised when Linear's GraphQL endpoint returns a logical error.
-
-    Distinct from ``httpx.HTTPError`` (transport / HTTP-status failures)
-    so callers can catch both failure classes precisely.
-    """
