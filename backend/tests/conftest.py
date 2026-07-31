@@ -167,8 +167,9 @@ def connect_harness(harness_cls, payload: dict, *, provider_email: str = "op@exa
     )
 
 
-def make_agent_result(output, *, agent="agent", status=None, cost_usd=None, cost_metadata=None):
+def make_agent_result(output, *, agent="agent", error=None, cost_usd=None, cost_metadata=None):
     # An AgentResult to return from a faked run_agent, so the agent call records/parses it.
+    # Status follows the error, as the sandbox does it — a failed result always says why.
     from datetime import UTC, datetime
 
     from druks.durable.enums import AgentCallStatus
@@ -180,10 +181,11 @@ def make_agent_result(output, *, agent="agent", status=None, cost_usd=None, cost
         sandbox_host_id="host-test",
         model="claude-opus-4-7",
         agent=agent,
-        status=status or AgentCallStatus.SUCCEEDED,
+        status=AgentCallStatus.FAILED if error else AgentCallStatus.SUCCEEDED,
         started_at=datetime.now(UTC),
         cost_usd=cost_usd,
         cost_metadata=cost_metadata,
+        error=error,
     )
 
 

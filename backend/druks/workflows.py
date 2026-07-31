@@ -39,6 +39,7 @@ from druks.extensions.settings import (
     validate_setting_override,
     validate_settings_declaration,
 )
+from druks.harnesses.exceptions import HarnessError
 from druks.models import StoredSubject, snake_name
 from druks.notifications.outbox import notifications_queue, send_notification
 from druks.sandbox.client import sandbox_client
@@ -474,21 +475,20 @@ async def _execute_run(
     # status, so it passes through untouched.
     Run.create_row(_step_engine(), workflow_id=workflow_id, kind=kind, account_id=account_id)
     await _emit_run_event(workflow_id, RunState.RUNNING, subject=subject)
+
+    async def record_failed(exc: BaseException, code: str) -> None:
+        facts = {**_GATE_CLEARED, "failure": str(exc), "failure_code": code}
+        await _emit_run_event(workflow_id, RunState.FAILED, subject=subject, facts=facts)
+
     try:
         result = await body()
     except (DBOSAwaitedWorkflowCancelledError, DBOSWorkflowCancelledError):
         raise
+    except (FatalError, HarnessError) as exc:
+        await record_failed(exc, exc.code)
+        raise
     except Exception as exc:
-        await _emit_run_event(
-            workflow_id,
-            RunState.FAILED,
-            subject=subject,
-            facts={
-                **_GATE_CLEARED,
-                "failure": str(exc),
-                "failure_code": exc.code if isinstance(exc, FatalError) else "",
-            },
-        )
+        await record_failed(exc, "")
         raise
     await _emit_run_event(workflow_id, RunState.FINISHED, subject=subject, result=result)
     return result

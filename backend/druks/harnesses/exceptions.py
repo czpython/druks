@@ -1,5 +1,19 @@
+from enum import StrEnum
+from typing import ClassVar
+
+
+class Retry(StrEnum):
+    # Spaced attempts now, once the quota window resets, or not at all.
+    TRANSIENT = "transient"
+    QUOTA = "quota"
+    NEVER = "never"
+
+
 class HarnessError(Exception):
-    pass
+    # Recorded beside the message on the failed call and its run; "" means
+    # unclassified, which is never retried.
+    code: ClassVar[str] = ""
+    retry: ClassVar[Retry] = Retry.NEVER
 
 
 class StreamJsonError(ValueError):
@@ -7,7 +21,42 @@ class StreamJsonError(ValueError):
 
 
 class HarnessTimeoutError(HarnessError):
-    pass
+    """The full per-operation budget elapsed. Never auto-retried: the spend
+    was real and a rerun may just spend it again — that's the operator's
+    call."""
+
+    code = "timeout"
+
+
+class HarnessOverloadedError(HarnessError):
+    code = "overloaded"
+    retry = Retry.TRANSIENT
+
+
+class HarnessRateLimitError(HarnessError):
+    code = "rate_limited"
+    retry = Retry.QUOTA
+
+
+class HarnessUsageLimitError(HarnessError):
+    code = "usage_limit"
+    retry = Retry.QUOTA
+
+
+class HarnessAuthError(HarnessError):
+    code = "auth"
+
+
+class HarnessInvalidOutputError(HarnessError):
+    code = "invalid_output"
+
+
+class HarnessSandboxError(HarnessError):
+    """Transient because every attempt provisions or re-attaches its host,
+    which covers both the unreachable and the gone-for-good VM."""
+
+    code = "sandbox"
+    retry = Retry.TRANSIENT
 
 
 class OAuthTokenError(Exception):
@@ -48,6 +97,8 @@ class HarnessNotConnectedError(HarnessError):
     path — there is no host-file or baked-API-key fallback — which is what
     makes "is this harness runnable" decidable before any VM work."""
 
+    code = "not_connected"
+
 
 class HarnessFirstByteTimeoutError(HarnessError):
     """A harness subprocess produced zero stdout bytes within the
@@ -60,3 +111,6 @@ class HarnessFirstByteTimeoutError(HarnessError):
     upstream HTTP stall the CLI didn't surface) rather than slow
     legitimate inference, so retries are usually safe.
     """
+
+    code = "first_byte"
+    retry = Retry.TRANSIENT

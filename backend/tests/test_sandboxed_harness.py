@@ -2,18 +2,33 @@ import asyncio
 import json
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from druks.harnesses.base import Harness, check_returncode
+from druks.durable.enums import AgentCallStatus
+from druks.harnesses.base import Harness
+from druks.harnesses.claude import ClaudeHarness
+from druks.harnesses.codex import CodexHarness
 from druks.harnesses.exceptions import (
+    HarnessAuthError,
     HarnessError,
     HarnessFirstByteTimeoutError,
+    HarnessOverloadedError,
+    HarnessRateLimitError,
+    HarnessSandboxError,
     HarnessTimeoutError,
+    HarnessUsageLimitError,
+    Retry,
 )
-from druks.sandbox.datastructures import AgentInvocation, Credentials, HarnessRunResult
+from druks.sandbox.datastructures import (
+    AgentInvocation,
+    AgentResult,
+    Credentials,
+    HarnessRunResult,
+)
 from druks.sandbox.exceptions import SandboxUnreachable
 from druks.sandbox.host import Sandbox
 
@@ -278,7 +293,7 @@ async def test_sandbox_unreachable_translates_to_harness_error(
     sandbox._start_instruction = boom
     sandbox._download_artifacts = _download_artifacts
 
-    with pytest.raises(HarnessError, match="sandbox failure"):
+    with pytest.raises(HarnessSandboxError, match="sandbox failure") as excinfo:
         await Sandbox._exec(
             sandbox,
             _inv(("claude",)),
@@ -287,6 +302,7 @@ async def test_sandbox_unreachable_translates_to_harness_error(
             timeout=60,
         )
 
+    assert excinfo.value.retry is Retry.TRANSIENT
     # Start never produced a run → nothing to download from.
     assert downloads == []
 
@@ -356,16 +372,180 @@ def test_check_returncode_surfaces_the_streams_terminal_error():
         b'"result":"You\'ve hit your session limit \xc2\xb7 resets 5:10pm (UTC)"}\n'
     )
     with pytest.raises(HarnessError, match="session limit"):
-        check_returncode(
-            HarnessRunResult(returncode=1, stdout=stdout, stderr=b""),
-            name="claude",
-        )
+        ClaudeHarness.check_returncode(HarnessRunResult(returncode=1, stdout=stdout, stderr=b""))
 
 
 def test_check_returncode_stays_bare_without_a_terminal_event():
 
-    with pytest.raises(HarnessError, match=r"claude exited with 2\.$"):
-        check_returncode(
-            HarnessRunResult(returncode=2, stdout=b"not json\n", stderr=b""),
-            name="claude",
+    with pytest.raises(HarnessError, match=r"claude exited with 2\.$") as excinfo:
+        ClaudeHarness.check_returncode(
+            HarnessRunResult(returncode=2, stdout=b"not json\n", stderr=b"")
         )
+
+    assert type(excinfo.value) is HarnessError
+    assert excinfo.value.code == ""
+    assert excinfo.value.retry is Retry.NEVER
+
+
+def _claude_result_event(text: str) -> bytes:
+    payload = {"type": "result", "subtype": "success", "is_error": True, "result": text}
+    return json.dumps(payload).encode() + b"\n"
+
+
+@pytest.mark.parametrize(
+    ("harness", "stdout", "expected", "code"),
+    [
+        (
+            ClaudeHarness,
+            _claude_result_event(
+                'API Error: 529 {"type":"error","error":'
+                '{"type":"overloaded_error","message":"Overloaded"}}'
+            ),
+            HarnessOverloadedError,
+            "overloaded",
+        ),
+        (
+            ClaudeHarness,
+            _claude_result_event(
+                'API Error: 429 {"type":"error","error":'
+                '{"type":"rate_limit_error","message":"Request rate limit exceeded"}}'
+            ),
+            HarnessRateLimitError,
+            "rate_limited",
+        ),
+        (
+            ClaudeHarness,
+            _claude_result_event("You've hit your session limit · resets 5:10pm (UTC)"),
+            HarnessUsageLimitError,
+            "usage_limit",
+        ),
+        (
+            ClaudeHarness,
+            _claude_result_event(
+                'API Error: 401 {"type":"error","error":'
+                '{"type":"authentication_error","message":"OAuth token has expired"}}'
+            ),
+            HarnessAuthError,
+            "auth",
+        ),
+        (
+            ClaudeHarness,
+            _claude_result_event(
+                'API Error: 503 {"type":"error","error":'
+                '{"type":"api_error","message":"Internal server error"}}'
+            ),
+            HarnessOverloadedError,
+            "overloaded",
+        ),
+        (
+            CodexHarness,
+            b'{"type":"error","message":"stream error: stream disconnected before completion"}\n',
+            HarnessOverloadedError,
+            "overloaded",
+        ),
+        (
+            CodexHarness,
+            b'{"type":"error","message":"You\'ve hit your usage limit."}\n',
+            HarnessUsageLimitError,
+            "usage_limit",
+        ),
+    ],
+)
+def test_check_returncode_classifies_the_terminal_error(
+    harness: type[Harness], stdout: bytes, expected: type[HarnessError], code: str
+):
+    with pytest.raises(expected) as excinfo:
+        harness.check_returncode(HarnessRunResult(returncode=1, stdout=stdout, stderr=b""))
+
+    assert type(excinfo.value) is expected
+    assert excinfo.value.code == code
+    assert str(excinfo.value).startswith(f"{harness.name} exited with 1. ")
+
+
+def test_agent_result_names_the_agent_in_its_failure():
+    result = AgentResult(
+        output=None,
+        run_id=_DEFAULT_RUN_ID,
+        sandbox_host_id="host-abc",
+        model="claude-opus-5",
+        agent="evaluate_implementation",
+        status=AgentCallStatus.FAILED,
+        started_at=datetime.now(UTC),
+        error=HarnessOverloadedError("claude exited with 1. API Error: 529"),
+    )
+
+    assert result.last_error == (
+        "evaluate_implementation: HarnessOverloadedError: claude exited with 1. API Error: 529"
+    )
+    assert result.error.code == "overloaded"
+
+
+def _patch_harness_resolution(monkeypatch: pytest.MonkeyPatch) -> None:
+    # run_agent resolves the harness + its settings from the DB; these tests
+    # are about the failure boundary, not resolution.
+    from druks.harnesses.claude import ClaudeHarness
+
+    monkeypatch.setattr(
+        "druks.harnesses.registry.get_harness_for_model", lambda model: ClaudeHarness
+    )
+    monkeypatch.setattr(
+        "druks.user_settings.models.HarnessSettings.require",
+        staticmethod(lambda name: SimpleNamespace(effort="high", timeout=60, fast_mode=False)),
+    )
+
+
+async def test_run_agent_carries_foreign_failures_as_harness_errors(
+    ctx: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+):
+    """The result's error is always from the taxonomy: a foreign failure is
+    wrapped unclassified, keeps its traceback via the chain, and — unlike an
+    asyncssh or httpx error — survives DBOS's pickled step record."""
+    import pickle
+
+    _patch_harness_resolution(monkeypatch)
+    sandbox = SimpleNamespace(id="host-abc", ssh_username="root")
+    original = RuntimeError("kaboom")
+
+    async def run_prompt(harness: Any, **_kwargs: Any) -> Any:
+        raise original
+
+    sandbox.run_prompt = run_prompt
+    result = await Sandbox.run_agent(
+        sandbox,
+        model="claude-opus-4-7",
+        prompt="p",
+        schema={"type": "object"},
+        agent="evaluate",
+        artifact_dir=ctx.artifact_dir,
+    )
+
+    assert result.status is AgentCallStatus.FAILED
+    assert type(result.error) is HarnessError
+    assert result.error.code == ""
+    assert result.error.__cause__ is original
+    assert result.last_error == "evaluate: HarnessError: RuntimeError: kaboom"
+    revived = pickle.loads(pickle.dumps(result.error))
+    assert type(revived) is HarnessError and revived.__cause__ is None
+
+
+async def test_run_agent_carries_a_taxonomy_failure_as_itself(
+    ctx: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+):
+    _patch_harness_resolution(monkeypatch)
+    sandbox = SimpleNamespace(id="host-abc", ssh_username="root")
+    timeout = HarnessTimeoutError("claude timed out after 60s.")
+
+    async def run_prompt(harness: Any, **_kwargs: Any) -> Any:
+        raise timeout
+
+    sandbox.run_prompt = run_prompt
+    result = await Sandbox.run_agent(
+        sandbox,
+        model="claude-opus-4-7",
+        prompt="p",
+        schema={"type": "object"},
+        agent="evaluate",
+        artifact_dir=ctx.artifact_dir,
+    )
+
+    assert result.error is timeout

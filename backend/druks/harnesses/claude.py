@@ -17,10 +17,10 @@ from druks.sandbox.datastructures import (
 from druks.sandbox.layout import get_runs_root
 from druks.skills.models import Skill
 
+from . import exceptions
 from .artifacts import call_dir, write_cost
-from .base import Harness, check_returncode, parse_epoch_expiry, post_token
+from .base import Harness, parse_epoch_expiry, post_token
 from .datastructures import OAuthToken, ParsedMetric, ParsedModels, ParsedUsage, SandboxSettings
-from .exceptions import HarnessError, OAuthTokenError, StreamJsonError
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +52,23 @@ class ClaudeHarness(Harness):
     # body.
     redirect_uri = "https://console.anthropic.com/oauth/code/callback"
 
+    # The CLI dies with the raw API error in the result text ("API Error: 529
+    # {…overloaded_error…}"), so "api error: 5" covers 529 and every 5xx; 429
+    # and 401 are their own families.
+    failure_markers = {
+        "session limit": exceptions.HarnessUsageLimitError,
+        "usage limit": exceptions.HarnessUsageLimitError,
+        "api error: 429": exceptions.HarnessRateLimitError,
+        "rate limit": exceptions.HarnessRateLimitError,
+        "rate_limit": exceptions.HarnessRateLimitError,
+        "api error: 401": exceptions.HarnessAuthError,
+        "authentication_error": exceptions.HarnessAuthError,
+        "oauth token": exceptions.HarnessAuthError,
+        "invalid api key": exceptions.HarnessAuthError,
+        "overloaded": exceptions.HarnessOverloadedError,
+        "api error: 5": exceptions.HarnessOverloadedError,
+    }
+
     def build_invocation(
         self,
         *,
@@ -68,7 +85,7 @@ class ClaudeHarness(Harness):
         connection_id: str | None = None,
     ) -> AgentInvocation:
         if not self.sandbox:
-            raise HarnessError(
+            raise exceptions.HarnessError(
                 "claude harness requires sandbox settings — set DRUKS_SANDBOX_SERVICE_URL et al.",
             )
 
@@ -129,13 +146,13 @@ class ClaudeHarness(Harness):
         )
 
     def parse(self, result: HarnessRunResult, *, artifact_dir: Path, run_id: str) -> Any:
-        check_returncode(result, name="claude")
+        self.check_returncode(result)
 
         try:
             envelope = collapse_claude_stream(result.stdout)
-        except StreamJsonError as error:
+        except exceptions.StreamJsonError as error:
             transcript = artifact_dir / run_id / "stdout.jsonl"
-            raise HarnessError(
+            raise exceptions.HarnessInvalidOutputError(
                 f"claude wrote invalid stream-json. See {transcript}",
             ) from error
 
@@ -193,7 +210,7 @@ class ClaudeHarness(Harness):
         block = _oauth_block(data)
         access = block.get("accessToken") or block.get("access_token")
         if not access:
-            raise OAuthTokenError("no_token", "credentials file has no access token")
+            raise exceptions.OAuthTokenError("no_token", "credentials file has no access token")
         return OAuthToken(
             access_token=access,
             expires_at=parse_epoch_expiry(block.get("expiresAt")),
@@ -442,9 +459,9 @@ def collapse_claude_stream(stdout: bytes) -> dict[str, Any]:
                 envelope[key] = value
             result_seen = True
     if not parsed_any:
-        raise StreamJsonError("claude stream-json contained no parseable events")
+        raise exceptions.StreamJsonError("claude stream-json contained no parseable events")
     if not result_seen:
-        raise StreamJsonError("claude stream-json had no 'result' event")
+        raise exceptions.StreamJsonError("claude stream-json had no 'result' event")
     return envelope
 
 

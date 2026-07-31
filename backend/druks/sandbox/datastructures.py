@@ -16,6 +16,7 @@ from druks.mcp.helpers import get_bearer_token_env_var
 
 if TYPE_CHECKING:
     from druks.durable.enums import AgentCallStatus
+    from druks.harnesses.exceptions import HarnessError
 
     from .host import Sandbox
 
@@ -56,7 +57,13 @@ class AgentResult:
     started_at: datetime
     cost_usd: float | None = None
     cost_metadata: dict[str, Any] | None = None
-    last_error: str | None = None
+    error: "HarnessError | None" = None
+
+    @property
+    def last_error(self) -> str | None:
+        if self.error:
+            return f"{self.agent}: {type(self.error).__name__}: {self.error}"
+        return
 
 
 @dataclass

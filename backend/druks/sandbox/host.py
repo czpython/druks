@@ -18,6 +18,7 @@ from druks.harnesses.artifacts import persist_manifest, persist_prompt, read_cos
 from druks.harnesses.exceptions import (
     HarnessError,
     HarnessFirstByteTimeoutError,
+    HarnessSandboxError,
     HarnessTimeoutError,
 )
 from druks.settings import load_settings
@@ -200,7 +201,8 @@ class Sandbox:
         connection_id: str | None = None,
     ) -> AgentResult:
         """Run the harness and return a pure ``AgentResult`` — no database write.
-        A failure is captured on the result (``status=FAILED``), not raised.
+        A failure is carried on the result's ``error``, not raised, so the call
+        still records what it cost before the agent call re-raises it.
 
         The repo is a *precondition*, not an input: callers that need one clone
         it into the VM first (see Ship's workspace). ``include_plugins=False`` (Claude only)
@@ -234,8 +236,7 @@ class Sandbox:
         # back to a fresh uuid for callers that record the call after the fact.
         run_id = harness.mint_run_id(call_id)
         started_at = datetime.now(UTC)
-        status = AgentCallStatus.SUCCEEDED
-        last_error: str | None = None
+        error: HarnessError | None = None
         output: Any = None
         try:
             output = await self.run_prompt(
@@ -253,9 +254,14 @@ class Sandbox:
                 call_id=run_id,
                 connection_id=connection_id,
             )
-        except Exception as exc:  # noqa: BLE001 — captured on the result, not raised
-            status = AgentCallStatus.FAILED
-            last_error = f"{agent}: {type(exc).__name__}: {exc}"
+        except HarnessError as exc:
+            error = exc
+        except Exception as exc:  # noqa: BLE001 — carried on the result, not raised
+            # A foreign failure rides as an unclassified HarnessError: the chain
+            # keeps the live traceback, and pickle drops the chain, so DBOS's
+            # step record stays loadable (asyncssh/httpx errors don't unpickle).
+            error = HarnessError(f"{type(exc).__name__}: {exc}")
+            error.__cause__ = exc
         cost_usd, cost_metadata = read_cost(artifact_dir / run_id)
         return AgentResult(
             output=output,
@@ -263,11 +269,11 @@ class Sandbox:
             sandbox_host_id=self.id,
             model=model,
             agent=agent,
-            status=status,
+            status=AgentCallStatus.FAILED if error else AgentCallStatus.SUCCEEDED,
             started_at=started_at,
             cost_usd=cost_usd,
             cost_metadata=cost_metadata,
-            last_error=last_error,
+            error=error,
         )
 
     async def run_prompt(
@@ -463,7 +469,7 @@ class Sandbox:
             # SSH unreachable, host gone, sandbox-service down. Translate
             # into the existing HarnessError taxonomy so callers don't
             # have to learn a new exception family.
-            raise HarnessError(f"{invocation.name} sandbox failure: {exc}") from exc
+            raise HarnessSandboxError(f"{invocation.name} sandbox failure: {exc}") from exc
 
         ended_at = datetime.now(UTC)
         elapsed = (ended_at - started_at).total_seconds()

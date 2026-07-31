@@ -278,6 +278,35 @@ async def test_crash_after_start_fails_the_call(druks_db, tmp_path, monkeypatch,
     assert "kaboom" in call.last_error
 
 
+async def test_a_carried_failure_is_raised_with_its_code(
+    druks_db, tmp_path, monkeypatch, current_run
+):
+    """The sandbox captures a harness failure on the result so the call can
+    record its cost; the agent call then re-raises that same error, and the row
+    keeps the code a retry decides on."""
+    from druks.harnesses.exceptions import HarnessOverloadedError
+
+    sandbox = _patch_runtime(monkeypatch, tmp_path, {"ok": True})
+    overloaded = HarnessOverloadedError("claude exited with 1. API Error: 529 Overloaded.")
+
+    async def _run_agent(**_kwargs):
+        return make_agent_result(None, agent="dummy", error=overloaded)
+
+    sandbox.run_agent = _run_agent
+    _patch_ephemeral(monkeypatch, sandbox)
+
+    with pytest.raises(HarnessOverloadedError) as excinfo:
+        await DUMMY_AGENT._run(workflow_id="wf-9")
+
+    assert excinfo.value is overloaded
+    [call] = AgentCall.list_for_run("wf-9")
+    assert call.status == "failed"
+    assert call.failure_code == "overloaded"
+    assert call.last_error == (
+        "dummy: HarnessOverloadedError: claude exited with 1. API Error: 529 Overloaded."
+    )
+
+
 async def test_recovery_supersedes_the_orphaned_running_call(druks_db):
     """A worker crash leaves a RUNNING row; the recovered step re-runs with a
     fresh id and abandons the orphan, so the timeline shows one live step."""
