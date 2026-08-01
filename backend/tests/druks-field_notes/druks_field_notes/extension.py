@@ -55,6 +55,10 @@ class FieldNotes(Extension):
         sync_token: Secret = Field(
             title="Sync token",
             description="API key for syncing notes to an external service.",
+            json_schema_extra={
+                "section": "Sharing",
+                "visible_when": {"visibility": "public"},
+            },
         )
 
         @field_validator("sync_token")

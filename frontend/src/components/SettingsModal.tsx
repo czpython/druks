@@ -15,6 +15,7 @@ import {
   type UpdateHarnessRequest,
   type UpdateExtensionsSettingsRequest,
   type UpdateUserSettingsRequest,
+  type WorkflowSettingField,
 } from '../api/types'
 import { absTime, relTimeFromIso } from '../lib/format'
 import { harnessColors } from '../lib/harnessColors'
@@ -49,13 +50,28 @@ function _withField(
   return next
 }
 
-function _extensionEditsDirty(edits: UpdateExtensionsSettingsRequest): boolean {
+function _areExtensionEditsDirty(edits: UpdateExtensionsSettingsRequest): boolean {
   if (Object.keys(edits.agentModels ?? {}).length > 0) return true
   if (Object.keys(edits.agentEfforts ?? {}).length > 0) return true
   if (Object.keys(edits.agentTimeouts ?? {}).length > 0) return true
   if (Object.values(edits.workflowSettings ?? {}).some((fields) => Object.keys(fields).length > 0))
     return true
-  return Object.values(edits.extensionSettings ?? {}).some((m) => Object.keys(m).length > 0)
+  return Object.values(edits.extensionSettings ?? {}).some(
+    (fields) => Object.keys(fields).length > 0,
+  )
+}
+
+function isFieldVisible(
+  field: WorkflowSettingField,
+  fields: WorkflowSettingField[],
+  changes: Record<string, unknown> | undefined,
+): boolean {
+  if (!field.visibleWhenField) return true
+  const controller = fields.find(({ name }) => name === field.visibleWhenField)
+  if (!controller) return true
+  const edit = changes?.[controller.name]
+  const current = edit !== undefined ? edit : controller.value
+  return String(current) === String(field.visibleWhenValue)
 }
 
 function _listTimezones(): string[] {
@@ -172,6 +188,30 @@ export function SettingsModal({ open, onClose }: Props) {
     setBusy(true)
     setError(null)
     setExtensionProblems({})
+    const workflows = allExtensions.flatMap((extension) => extension.workflows)
+    const submittedExtensionEdits: UpdateExtensionsSettingsRequest = {
+      ...extensionEdits,
+      extensionSettings: Object.fromEntries(
+        Object.entries(extensionEdits.extensionSettings ?? {}).map(([extensionName, changes]) => {
+          const fields = allExtensions.find(({ name }) => name === extensionName)?.settings ?? []
+          const visibleChanges = Object.entries(changes).filter(([fieldName]) => {
+            const field = fields.find(({ name }) => name === fieldName)
+            return field ? isFieldVisible(field, fields, changes) : true
+          })
+          return [extensionName, Object.fromEntries(visibleChanges)]
+        }),
+      ),
+      workflowSettings: Object.fromEntries(
+        Object.entries(extensionEdits.workflowSettings ?? {}).map(([kind, changes]) => {
+          const fields = workflows.find((workflow) => workflow.kind === kind)?.fields ?? []
+          const visibleChanges = Object.entries(changes).filter(([fieldName]) => {
+            const field = fields.find(({ name }) => name === fieldName)
+            return field ? isFieldVisible(field, fields, changes) : true
+          })
+          return [kind, Object.fromEntries(visibleChanges)]
+        }),
+      ),
+    }
     try {
       const body: UpdateUserSettingsRequest = {}
       if (settingsQuery.data?.timezone !== timezone) {
@@ -181,8 +221,8 @@ export function SettingsModal({ open, onClose }: Props) {
         await api.updateSettings(body)
         await queryClient.invalidateQueries({ queryKey: ['settings'] })
       }
-      if (_extensionEditsDirty(extensionEdits)) {
-        await api.updateExtensionSettings(extensionEdits)
+      if (_areExtensionEditsDirty(submittedExtensionEdits)) {
+        await api.updateExtensionSettings(submittedExtensionEdits)
         await queryClient.invalidateQueries({ queryKey: ['extensionSettings'] })
       }
       const harnessChanges = Object.entries(harnessEdits).filter(([, patch]) => Object.keys(patch).length > 0)
@@ -210,7 +250,7 @@ export function SettingsModal({ open, onClose }: Props) {
 
   const savedTz = settingsQuery.data?.timezone
   const tzDirty = savedTz !== undefined && savedTz !== timezone
-  const extensionsDirty = _extensionEditsDirty(extensionEdits)
+  const extensionsDirty = _areExtensionEditsDirty(extensionEdits)
   const harnessesDirty = Object.values(harnessEdits).some((patch) => Object.keys(patch).length > 0)
   const dirty = tzDirty || extensionsDirty || harnessesDirty
 
@@ -1811,10 +1851,34 @@ function ExtensionPane({
     ),
     ...extension.settings.map((f) => ({ scope: 'extension' as const, kind: extension.name, f })),
   ]
-  const boolFields = optionFields.filter((o) => o.f.type === 'bool')
-  const otherFields = optionFields.filter((o) => o.f.type !== 'bool')
   const optionEdit = (o: (typeof optionFields)[number]) =>
     (o.scope === 'workflow' ? edits.workflowSettings : edits.extensionSettings)?.[o.kind]?.[o.f.name]
+  const optionValue = (o: (typeof optionFields)[number]) => {
+    const edit = optionEdit(o)
+    return edit !== undefined ? edit : o.f.value
+  }
+  const isOptionVisible = (o: (typeof optionFields)[number]) => {
+    const fields = optionFields
+      .filter(({ scope, kind }) => scope === o.scope && kind === o.kind)
+      .map(({ f }) => f)
+    const changes = (o.scope === 'workflow' ? edits.workflowSettings : edits.extensionSettings)?.[
+      o.kind
+    ]
+    return isFieldVisible(o.f, fields, changes)
+  }
+  const visibleOptions = optionFields.filter(isOptionVisible)
+  // Ungrouped fields first, then each section in the order it was declared.
+  const sectionLabels = [
+    '',
+    ...new Set(visibleOptions.map(({ f }) => f.section).filter((label) => label !== '')),
+  ]
+  const visibleExtensionFields = new Set(
+    visibleOptions.filter(({ scope }) => scope === 'extension').map(({ f }) => f.name),
+  )
+  const hiddenFieldErrors = optionFields.filter(
+    ({ scope, f }) =>
+      scope === 'extension' && fieldErrors[f.name] && !visibleExtensionFields.has(f.name),
+  )
   const setOption = (o: (typeof optionFields)[number], value: unknown) =>
     o.scope === 'workflow' ? onWorkflowField(o.kind, o.f.name, value) : onExtensionSetting(o.kind, o.f.name, value)
   return (
@@ -1828,88 +1892,114 @@ function ExtensionPane({
       {optionFields.length > 0 && (
         <div className="set-group">
           <div className="set-group-label">{extension.name} options</div>
-          {boolFields.length > 0 && (
-            <div className="set-extension-toggles">
-              {boolFields.map((o) => {
-                const override = optionEdit(o)
-                const on = override !== undefined ? Boolean(override) : Boolean(o.f.value)
-                const fieldError = o.scope === 'extension' ? fieldErrors[o.f.name] : undefined
-                return (
-                  <div key={o.scope + '.' + o.kind + '.' + o.f.name} className="set-extension-toggle">
-                    <div className="mt-text">
-                      <span className="mt-name">{o.f.label}</span>
-                      {o.f.help && <span className="mt-desc">{o.f.help}</span>}
-                      {fieldError && <span className="set-field-error">{fieldError}</span>}
+          {sectionLabels
+            .map((sectionLabel) => ({
+              sectionLabel,
+              sectionFields: visibleOptions.filter(({ f }) => f.section === sectionLabel),
+            }))
+            .filter(({ sectionFields }) => sectionFields.length > 0)
+            .map(({ sectionLabel, sectionFields }) => {
+              const boolFields = sectionFields.filter((o) => o.f.type === 'bool')
+              const otherFields = sectionFields.filter((o) => o.f.type !== 'bool')
+              return (
+                <Fragment key={sectionLabel}>
+                  {sectionLabel && <div className="set-group-label">{sectionLabel}</div>}
+                  {boolFields.length > 0 && (
+                    <div className="set-extension-toggles">
+                      {boolFields.map((o) => {
+                        const on = Boolean(optionValue(o))
+                        const fieldError =
+                          o.scope === 'extension' ? fieldErrors[o.f.name] : undefined
+                        return (
+                          <div
+                            key={o.scope + '.' + o.kind + '.' + o.f.name}
+                            className="set-extension-toggle"
+                          >
+                            <div className="mt-text">
+                              <span className="mt-name">{o.f.label}</span>
+                              {o.f.help && <span className="mt-desc">{o.f.help}</span>}
+                              {fieldError && (
+                                <span className="set-field-error">{fieldError}</span>
+                              )}
+                            </div>
+                            <Switch on={on} onClick={() => setOption(o, !on)} disabled={busy} />
+                          </div>
+                        )
+                      })}
                     </div>
-                    <Switch on={on} onClick={() => setOption(o, !on)} disabled={busy} />
-                  </div>
-                )
-              })}
+                  )}
+                  {otherFields.length > 0 && (
+                    <div className="set-field-row" style={{ maxWidth: 440 }}>
+                      {otherFields.map((o) => {
+                        const override = optionEdit(o)
+                        const cur = optionValue(o)
+                        const fieldError =
+                          o.scope === 'extension' ? fieldErrors[o.f.name] : undefined
+                        return (
+                          <div key={o.scope + '.' + o.kind + '.' + o.f.name} className="set-field">
+                            <span className="set-field-label">{o.f.label}</span>
+                            {o.f.help && <span className="set-field-help">{o.f.help}</span>}
+                            {o.f.type === 'enum' ? (
+                              <select
+                                className="set-select"
+                                value={String(cur ?? '')}
+                                onChange={(e) => setOption(o, e.target.value)}
+                                disabled={busy}
+                              >
+                                {(o.f.choices ?? []).map((choice) => (
+                                  <option key={choice} value={choice}>
+                                    {choice}
+                                  </option>
+                                ))}
+                              </select>
+                            ) : o.f.type === 'cron' ? (
+                              <CronField
+                                value={String(cur ?? '')}
+                                onChange={(v) => setOption(o, v)}
+                                disabled={busy}
+                              />
+                            ) : o.f.type === 'secret' ? (
+                              // The stored secret never reaches the client — the field shows
+                              // only whether one is set. Clearing the box records no edit (the
+                              // previous secret stays); typing a non-empty value replaces it.
+                              <input
+                                className="set-select"
+                                type="password"
+                                value={override !== undefined ? String(override ?? '') : ''}
+                                placeholder={o.f.secretSet ? '•••••••• (set)' : 'not set'}
+                                onChange={(e) => setOption(o, e.target.value || undefined)}
+                                disabled={busy}
+                              />
+                            ) : (
+                              <input
+                                className="set-select"
+                                type={o.f.type === 'int' ? 'number' : 'text'}
+                                value={String(cur ?? '')}
+                                onChange={(e) => {
+                                  if (o.f.type === 'int') {
+                                    const parsed = Number.parseInt(e.target.value, 10)
+                                    if (Number.isFinite(parsed)) setOption(o, parsed)
+                                  } else {
+                                    setOption(o, e.target.value)
+                                  }
+                                }}
+                                disabled={busy}
+                              />
+                            )}
+                            {fieldError && <span className="set-field-error">{fieldError}</span>}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
+                </Fragment>
+              )
+            })}
+          {hiddenFieldErrors.map(({ f }) => (
+            <div key={f.name} className="set-field-error">
+              {f.label}: {fieldErrors[f.name]}
             </div>
-          )}
-          {otherFields.length > 0 && (
-            <div className="set-field-row" style={{ maxWidth: 440 }}>
-              {otherFields.map((o) => {
-                const override = optionEdit(o)
-                const cur = override !== undefined ? override : o.f.value
-                const fieldError = o.scope === 'extension' ? fieldErrors[o.f.name] : undefined
-                return (
-                  <div key={o.scope + '.' + o.kind + '.' + o.f.name} className="set-field">
-                    <span className="set-field-label">{o.f.label}</span>
-                    {o.f.help && <span className="set-field-help">{o.f.help}</span>}
-                    {o.f.type === 'enum' ? (
-                      <select
-                        className="set-select"
-                        value={String(cur ?? '')}
-                        onChange={(e) => setOption(o, e.target.value)}
-                        disabled={busy}
-                      >
-                        {(o.f.choices ?? []).map((choice) => (
-                          <option key={choice} value={choice}>
-                            {choice}
-                          </option>
-                        ))}
-                      </select>
-                    ) : o.f.type === 'cron' ? (
-                      <CronField
-                        value={String(cur ?? '')}
-                        onChange={(v) => setOption(o, v)}
-                        disabled={busy}
-                      />
-                    ) : o.f.type === 'secret' ? (
-                      // The stored secret never reaches the client — the field shows
-                      // only whether one is set. Clearing the box records no edit (the
-                      // previous secret stays); typing a non-empty value replaces it.
-                      <input
-                        className="set-select"
-                        type="password"
-                        value={override !== undefined ? String(override ?? '') : ''}
-                        placeholder={o.f.secretSet ? '•••••••• (set)' : 'not set'}
-                        onChange={(e) => setOption(o, e.target.value || undefined)}
-                        disabled={busy}
-                      />
-                    ) : (
-                      <input
-                        className="set-select"
-                        type={o.f.type === 'int' ? 'number' : 'text'}
-                        value={String(cur ?? '')}
-                        onChange={(e) => {
-                          if (o.f.type === 'int') {
-                            const parsed = Number.parseInt(e.target.value, 10)
-                            if (Number.isFinite(parsed)) setOption(o, parsed)
-                          } else {
-                            setOption(o, e.target.value)
-                          }
-                        }}
-                        disabled={busy}
-                      />
-                    )}
-                    {fieldError && <span className="set-field-error">{fieldError}</span>}
-                  </div>
-                )
-              })}
-            </div>
-          )}
+          ))}
         </div>
       )}
 

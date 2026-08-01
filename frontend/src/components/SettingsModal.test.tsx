@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { SettingsModal } from './SettingsModal'
@@ -16,6 +16,20 @@ const extensionSettings = {
       workflows: [],
       settings: [
         {
+          name: 'tracker',
+          label: 'Tracker',
+          help: '',
+          type: 'enum',
+          value: 'linear',
+          default: 'linear',
+          choices: ['none', 'linear', 'jira'],
+          section: '',
+          visibleWhenField: '',
+          visibleWhenValue: null,
+          secretSet: null,
+          overridden: false,
+        },
+        {
           name: 'linear_api_key',
           label: 'Linear API key',
           help: '',
@@ -23,6 +37,9 @@ const extensionSettings = {
           value: null,
           default: null,
           choices: null,
+          section: 'Linear',
+          visibleWhenField: 'tracker',
+          visibleWhenValue: 'linear',
           secretSet: false,
           overridden: false,
         },
@@ -34,6 +51,9 @@ const extensionSettings = {
           value: null,
           default: null,
           choices: null,
+          section: 'Linear',
+          visibleWhenField: 'tracker',
+          visibleWhenValue: 'linear',
           secretSet: false,
           overridden: false,
         },
@@ -45,6 +65,9 @@ const extensionSettings = {
           value: null,
           default: null,
           choices: null,
+          section: 'Jira',
+          visibleWhenField: 'tracker',
+          visibleWhenValue: 'jira',
           secretSet: false,
           overridden: false,
         },
@@ -53,18 +76,19 @@ const extensionSettings = {
   ],
 }
 
-function stubFetch() {
+function stubFetch(shouldRejectPatch = true) {
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
       const path = String(input)
       if (path === '/api/settings/extensions' && init?.method === 'PATCH') {
+        if (!shouldRejectPatch) return new Response('{}', { status: 200 })
         return new Response(
           JSON.stringify({
             detail: {
               ship: {
+                linear_api_key: 'The Linear API key is invalid.',
                 linear_webhook_secret: 'Required once the Linear API key is set.',
-                jira_webhook_secret: 'Required once the Jira API token is set.',
               },
             },
           }),
@@ -102,7 +126,7 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-describe('SettingsModal extension coherence errors', () => {
+describe('SettingsModal extension fields', () => {
   it('renders every 422 message under the field named by the backend', async () => {
     stubFetch()
     const onClose = renderModal()
@@ -115,9 +139,60 @@ describe('SettingsModal extension coherence errors', () => {
     fireEvent.click(screen.getByRole('button', { name: 'save' }))
 
     const linearError = await screen.findByText('Required once the Linear API key is set.')
-    const jiraError = await screen.findByText('Required once the Jira API token is set.')
+    const apiKeyError = await screen.findByText('The Linear API key is invalid.')
     expect(linearError.closest('.set-field')?.textContent).toContain('Linear webhook secret')
-    expect(jiraError.closest('.set-field')?.textContent).toContain('Jira webhook secret')
+    expect(apiKeyError.closest('.set-field')?.textContent).toContain('Linear API key')
     expect(onClose).not.toHaveBeenCalled()
+  })
+
+  it('reveals the chosen section immediately and prunes edits hidden before save', async () => {
+    stubFetch(false)
+    const onClose = renderModal()
+
+    fireEvent.click(await screen.findByRole('button', { name: 'ship' }))
+    const options = screen.getByText('ship options').closest('.set-group')
+    expect(options?.textContent?.indexOf('Tracker')).toBeLessThan(
+      options?.textContent?.indexOf('Linear') ?? -1,
+    )
+    const apiKeyField = screen.getByText('Linear API key').closest('.set-field')
+    fireEvent.change(apiKeyField?.querySelector('input') as HTMLInputElement, {
+      target: { value: 'lin-secret' },
+    })
+    const trackerField = screen.getByText('Tracker').closest('.set-field')
+    fireEvent.change(trackerField?.querySelector('select') as HTMLSelectElement, {
+      target: { value: 'jira' },
+    })
+
+    expect(screen.queryByText('Linear API key')).toBeNull()
+    expect(screen.getByText('Jira webhook secret')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'save' }))
+
+    await waitFor(() => expect(onClose).toHaveBeenCalled())
+    const patchCall = vi
+      .mocked(fetch)
+      .mock.calls.find(
+        ([input, init]) =>
+          String(input) === '/api/settings/extensions' && init?.method === 'PATCH',
+      )
+    const body = JSON.parse(String(patchCall?.[1]?.body))
+    expect(body.extensionSettings.ship).toEqual({ tracker: 'jira' })
+  })
+
+  it('renders a 422 message for a field hidden by the tracker selection', async () => {
+    stubFetch()
+    renderModal()
+
+    fireEvent.click(await screen.findByRole('button', { name: 'ship' }))
+    const trackerField = screen.getByText('Tracker').closest('.set-field')
+    fireEvent.change(trackerField?.querySelector('select') as HTMLSelectElement, {
+      target: { value: 'jira' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'save' }))
+
+    expect(
+      await screen.findByText(
+        'Linear webhook secret: Required once the Linear API key is set.',
+      ),
+    ).toBeTruthy()
   })
 })

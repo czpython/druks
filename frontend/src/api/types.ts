@@ -14,6 +14,7 @@
  */
 
 // --- Platform: subjects, runs, agent calls ---------------------------------
+
 // Served by the platform layer (durable/schemas.py) for every extension. An
 // extension keys its board/detail on its own subject summary; SubjectRow and
 // SubjectResponse are generic over that summary (a WorkItemSummary for build).
@@ -190,8 +191,6 @@ export interface DashboardHealth {
   tokensToday: number
 }
 
-// --- Settings --------------------------------------------------------------
-
 export type AgentEffort = 'low' | 'medium' | 'high'
 
 /** One picker entry — the provider's model id and its display label. */
@@ -249,6 +248,8 @@ export interface UpdateHarnessRequest {
   timeout?: number
 }
 
+// --- Settings --------------------------------------------------------------
+
 export interface UserSettings {
   timezone: string
   updatedAt: string
@@ -257,8 +258,6 @@ export interface UserSettings {
 export interface UpdateUserSettingsRequest {
   timezone?: string
 }
-
-// --- Per-extension settings (declaration-driven) --------------------------------
 
 /** Where an agent's resolved model came from: its own override, or the
  * family-token default. */
@@ -280,6 +279,8 @@ export interface AgentSetting {
   timeoutSource: EffortSource
 }
 
+// --- Per-extension settings (declaration-driven) --------------------------------
+
 export interface WorkflowSettingField {
   name: string
   /** Human label + one-line help from the field's Field(title=, description=). */
@@ -291,6 +292,12 @@ export interface WorkflowSettingField {
   default: unknown
   /** An enum field's allowed values; null for every other kind. */
   choices: string[] | null
+  /** The heading this field groups under; empty for an ungrouped one. */
+  section: string
+  /** The sibling field this one is shown for, and the value that field must hold.
+   * The name is empty when the field is always shown. */
+  visibleWhenField: string
+  visibleWhenValue: unknown
   /** For a secret field, whether a value is currently stored; null otherwise. */
   secretSet: boolean | null
   overridden: boolean

@@ -1,3 +1,5 @@
+from typing import Literal
+
 from pydantic import Field
 
 from druks.agents import Agent
@@ -38,31 +40,20 @@ class Ship(Extension):
     )
 
     class Settings(ExtensionSettings):
+        tracker: Literal["none", "linear", "jira"] = Field(
+            default="linear",
+            title="Tracker",
+            description="Which ticket tracker this installation uses.",
+        )
         linear_api_key: Secret = Field(
             title="Linear API key",
             description="API key used to read and update Linear tickets.",
+            json_schema_extra={"section": "Linear", "visible_when": {"tracker": "linear"}},
         )
         linear_webhook_secret: Secret = Field(
             title="Linear webhook secret",
             description="Secret used to authenticate Linear webhook deliveries.",
-        )
-        jira_base_url: str = Field(
-            default="",
-            title="Jira base URL",
-            description="Base URL of the Jira Cloud site.",
-        )
-        jira_email: str = Field(
-            default="",
-            title="Jira email",
-            description="Email address used to authenticate with Jira Cloud.",
-        )
-        jira_api_token: Secret = Field(
-            title="Jira API token",
-            description="API token used to read and update Jira tickets.",
-        )
-        jira_webhook_secret: Secret = Field(
-            title="Jira webhook secret",
-            description="Secret used to authenticate Jira webhook deliveries.",
+            json_schema_extra={"section": "Linear", "visible_when": {"tracker": "linear"}},
         )
         # The tracker status names that drive build's funnel. They're operator
         # knobs — the names an operator's Linear/Jira workflow actually uses — so
@@ -71,11 +62,7 @@ class Ship(Extension):
             default="Ready for Agent",
             title="Linear trigger status",
             description="A Linear ticket entering this status opens a build.",
-        )
-        jira_trigger_status: str = Field(
-            default="",
-            title="Jira trigger status",
-            description="A Jira ticket entering this status opens a build; empty disables Jira.",
+            json_schema_extra={"section": "Linear", "visible_when": {"tracker": "linear"}},
         )
         linear_resting_status: str = Field(
             default="Backlog",
@@ -83,6 +70,35 @@ class Ship(Extension):
             description=(
                 "Status druks returns a ticket to when it stops working on it; empty leaves it put."
             ),
+            json_schema_extra={"section": "Linear", "visible_when": {"tracker": "linear"}},
+        )
+        jira_base_url: str = Field(
+            default="",
+            title="Jira base URL",
+            description="Base URL of the Jira Cloud site.",
+            json_schema_extra={"section": "Jira", "visible_when": {"tracker": "jira"}},
+        )
+        jira_email: str = Field(
+            default="",
+            title="Jira email",
+            description="Email address used to authenticate with Jira Cloud.",
+            json_schema_extra={"section": "Jira", "visible_when": {"tracker": "jira"}},
+        )
+        jira_api_token: Secret = Field(
+            title="Jira API token",
+            description="API token used to read and update Jira tickets.",
+            json_schema_extra={"section": "Jira", "visible_when": {"tracker": "jira"}},
+        )
+        jira_webhook_secret: Secret = Field(
+            title="Jira webhook secret",
+            description="Secret used to authenticate Jira webhook deliveries.",
+            json_schema_extra={"section": "Jira", "visible_when": {"tracker": "jira"}},
+        )
+        jira_trigger_status: str = Field(
+            default="Ready for Agent",
+            title="Jira trigger status",
+            description="A Jira ticket entering this status opens a build.",
+            json_schema_extra={"section": "Jira", "visible_when": {"tracker": "jira"}},
         )
         jira_resting_status: str = Field(
             default="Open",
@@ -90,7 +106,17 @@ class Ship(Extension):
             description=(
                 "Status druks returns a ticket to when it stops working on it; empty leaves it put."
             ),
+            json_schema_extra={"section": "Jira", "visible_when": {"tracker": "jira"}},
         )
+
+        @property
+        def trigger_status(self) -> str:
+            """The status that opens a build, on the tracker this installation uses."""
+            if self.tracker == "linear":
+                return self.linear_trigger_status
+            if self.tracker == "jira":
+                return self.jira_trigger_status
+            return ""
 
         def clean(self) -> dict[str, str]:
             problems: dict[str, str] = {}
@@ -102,9 +128,10 @@ class Ship(Extension):
 
     @classmethod
     def tracker(cls, source: str) -> Tracker | None:
-        """The configured tracker behind ``source``, or None when that source has
-        no tracker (github) or its credentials aren't set yet."""
+        """The chosen tracker behind ``source``, once its credentials are set."""
         settings = cls.settings()
+        if source != settings.tracker:
+            return
         if source == "linear" and settings.linear_api_key:
             return Linear(
                 api_key=settings.linear_api_key.get_secret_value(),

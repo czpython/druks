@@ -12,13 +12,13 @@ from .exceptions import SettingsDeclarationError
 _SCALAR_KINDS: dict[type, str] = {bool: "bool", int: "int", str: "str"}
 
 
-def _declares_secret(annotation: object) -> bool:
+def _is_secret_annotation(annotation: object) -> bool:
     # ``SecretStr`` anywhere in the annotation tree marks the field secret — bare, in a
     # union (``SecretStr | None``), or in a container (``list[SecretStr]``) — so a
     # secret can't slip through as a plaintext value from any shape it's declared in.
     if annotation is SecretStr:
         return True
-    return any(_declares_secret(arg) for arg in get_args(annotation))
+    return any(_is_secret_annotation(arg) for arg in get_args(annotation))
 
 
 def _literal_members(annotation: object) -> tuple[Any, ...] | None:
@@ -34,7 +34,7 @@ def _literal_members(annotation: object) -> tuple[Any, ...] | None:
 
 def field_kind(field: FieldInfo) -> str:
     annotation = field.annotation
-    if _declares_secret(annotation):
+    if _is_secret_annotation(annotation):
         return "secret"
     if _literal_members(annotation):
         return "enum"
@@ -51,6 +51,26 @@ def field_choices(field: FieldInfo) -> list[str] | None:
     if not members:
         return None
     return [str(member) for member in members]
+
+
+def field_section(field: FieldInfo) -> str:
+    # The heading a field groups under; empty when it is ungrouped.
+    metadata = field.json_schema_extra
+    if isinstance(metadata, dict):
+        return str(metadata.get("section", ""))
+    return ""
+
+
+def field_visibility(field: FieldInfo) -> tuple[str, Any]:
+    # The sibling field this one is shown for and the value that field must hold. The
+    # name is empty when the field is always shown.
+    metadata = field.json_schema_extra
+    if isinstance(metadata, dict):
+        condition = metadata.get("visible_when")
+        if isinstance(condition, dict):
+            controller, target = next(iter(condition.items()))
+            return str(controller), target
+    return "", None
 
 
 def _nested_model(annotation: object) -> type[BaseModel] | None:
@@ -75,6 +95,39 @@ def validate_settings_declaration(model: type[BaseModel]) -> None:
                 f"settings field {name!r}: nested models are not a supported settings "
                 f"shape (found {nested.__name__}); declare scalar, SecretStr, or Literal fields"
             )
+        _validate_visible_when(model, name, field)
+
+
+def _validate_visible_when(model: type[BaseModel], name: str, field: FieldInfo) -> None:
+    # One equality condition against a sibling field, which the client must be able to
+    # read back to evaluate it: never a secret, whose value never leaves the server, and
+    # never itself conditional, which would let a condition hang off a hidden control.
+    controller_name, target = field_visibility(field)
+    if not controller_name:
+        return
+    controller = model.model_fields.get(controller_name)
+    if not controller:
+        raise SettingsDeclarationError(
+            f"settings field {name!r}: visible_when controller {controller_name!r} is not declared"
+        )
+    if _is_secret_annotation(controller.annotation):
+        raise SettingsDeclarationError(
+            f"settings field {name!r}: visible_when controller {controller_name!r} cannot be secret"
+        )
+    chained, _ = field_visibility(controller)
+    if chained:
+        raise SettingsDeclarationError(
+            f"settings field {name!r}: visible_when controller "
+            f"{controller_name!r} cannot itself declare visible_when"
+        )
+    members = _literal_members(controller.annotation)
+    # ``True == 1`` in Python, so a target must match a member's type as well as its
+    # value — otherwise it passes here and then never matches the client's comparison.
+    if members and not any(type(target) is type(member) and target == member for member in members):
+        raise SettingsDeclarationError(
+            f"settings field {name!r}: visible_when target {target!r} is not a member of "
+            f"{controller_name!r}"
+        )
 
 
 def coerce_setting_value(model: type[BaseModel], field: str, value: Any) -> Any:
