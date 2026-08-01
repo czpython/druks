@@ -251,10 +251,10 @@ export const api = {
   removeMcpServer: (name: string) => deleteRequest(`/api/mcp-servers/${encodeURIComponent(name)}`),
   // OAuth servers: connect returns the consent URL to open; the grant lands via
   // the provider's redirect to druks' callback, never through this client.
-  connectMcpServer: (name: string) =>
+  connectMcpServer: (name: string, identityMode: string) =>
     postJSON<{ authorizationUrl: string }>(
       `/api/mcp-servers/${encodeURIComponent(name)}/connect`,
-      {},
+      { identity_mode: identityMode },
     ),
   disconnectMcpServer: (name: string) =>
     deleteRequest(`/api/mcp-servers/${encodeURIComponent(name)}/grant`),

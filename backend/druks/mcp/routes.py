@@ -1,11 +1,13 @@
 import json
+from typing import Annotated
 
 from fastapi import APIRouter, Body, HTTPException, Request
 from fastapi.responses import HTMLResponse
 
+from druks.accounts.context import current_account_id
 from druks.extensions.registry import mcp_servers
 from druks.mcp import oauth, registry
-from druks.mcp.enums import TokenSource
+from druks.mcp.enums import IdentityMode, TokenSource
 from druks.mcp.exceptions import (
     InvalidServerNameError,
     OauthConnectError,
@@ -24,13 +26,14 @@ router = APIRouter(prefix="/api/mcp-servers", tags=["mcp-servers"])
 
 
 def _response(name: str) -> McpServerResponse:
-    return McpServerResponse.model_validate(McpServer.get_resolved()[name])
+    return McpServerResponse.model_validate(McpServer.get_resolved(current_account_id.get())[name])
 
 
 @router.get("", response_model=list[McpServerResponse])
 async def list_mcp_servers() -> list[McpServerResponse]:
     return [
-        McpServerResponse.model_validate(server) for server in McpServer.get_resolved().values()
+        McpServerResponse.model_validate(server)
+        for server in McpServer.get_resolved(current_account_id.get()).values()
     ]
 
 
@@ -158,18 +161,27 @@ async def remove_mcp_server(name: str) -> None:
     server = McpServer.get_for_name(name)
     if not server:
         raise HTTPException(status_code=404, detail=f"MCP server {name!r} not found")
+    grants = McpOauthGrant.list_for_server(name)
     server.delete()
-    if grant := McpOauthGrant.get_for_server(name):
-        # An orphan grant would revive as this name's credential on re-add.
+    for grant in grants:
         grant.delete()
-        await oauth.evict_access_token(name)
+        await oauth.evict_access_token(name, grant.account_id)
 
 
 @router.post("/{name}/connect", response_model=ConnectMcpServerResponse)
-async def connect_mcp_server(name: str, request: Request) -> ConnectMcpServerResponse:
-    server = McpServer.get_resolved().get(name)
+async def connect_mcp_server(
+    name: str,
+    request: Request,
+    identity_mode: Annotated[IdentityMode, Body(embed=True)],
+) -> ConnectMcpServerResponse:
+    server = McpServer.get_resolved(current_account_id.get()).get(name)
     if not server or server["token_source"] != TokenSource.OAUTH:
         raise HTTPException(status_code=404, detail=f"MCP server {name!r} is not an OAuth server.")
+    if McpOauthGrant.list_for_server(name) and server["identity_mode"] != identity_mode:
+        raise HTTPException(
+            status_code=409,
+            detail=f"MCP server {name!r} already uses {server['identity_mode']!r} identity.",
+        )
     endpoint = request.app.state.settings.endpoint
     if not endpoint:
         # The authorization server redirects the operator's browser back to
@@ -180,7 +192,13 @@ async def connect_mcp_server(name: str, request: Request) -> ConnectMcpServerRes
             "at, to connect OAuth MCP servers.",
         )
     try:
-        authorization_url = await oauth.begin_connect(name, server["url"], endpoint)
+        authorization_url = await oauth.begin_connect(
+            name,
+            server["url"],
+            endpoint,
+            account_id=current_account_id.get(),
+            identity_mode=identity_mode,
+        )
     except OauthConnectError as error:
         raise HTTPException(status_code=502, detail=str(error)) from error
     return ConnectMcpServerResponse(authorization_url=authorization_url)
@@ -203,7 +221,7 @@ async def oauth_callback(state: str = "", code: str = "", error: str = "") -> HT
         raise HTTPException(status_code=400, detail=str(exchange_error)) from exchange_error
     # Connecting is the operator's explicit "use this server" — a
     # connected-but-disabled server is a dead end nobody asks for.
-    McpServer.set_enabled(name, True)
+    McpServer.set_enabled(name, is_enabled=True)
     # druks opened this tab via window.open, so the page may close itself; the
     # broadcast tells the settings modal to refetch before the tab goes. The
     # text stays for browsers that refuse the close.
@@ -217,11 +235,25 @@ async def oauth_callback(state: str = "", code: str = "", error: str = "") -> HT
 
 @router.delete("/{name}/grant", status_code=204)
 async def disconnect_mcp_server(name: str) -> None:
-    grant = McpOauthGrant.get_for_server(name)
-    if not grant:
+    server = McpServer.get_resolved(current_account_id.get()).get(name)
+    if not server or server["token_source"] != TokenSource.OAUTH:
+        raise HTTPException(status_code=404, detail=f"MCP server {name!r} is not an OAuth server.")
+    if not server["identity_mode"]:
         raise HTTPException(status_code=404, detail=f"MCP server {name!r} has no grant.")
+    account_id = McpOauthGrant.get_grant_account(server["identity_mode"], current_account_id.get())
+    grant = McpOauthGrant.get_for_account(name, account_id)
+    if not grant:
+        raise HTTPException(
+            status_code=404,
+            detail=f"MCP server {name!r} has no grant for account {account_id!r}.",
+        )
+    await oauth.evict_access_token(name, grant.account_id)
     grant.delete()
-    await oauth.evict_access_token(name)
-    # The mirror of connect-enables: a disconnected OAuth server can't serve
-    # a single call, so leaving it enabled just ships a dead entry to VMs.
-    McpServer.set_enabled(name, False)
+    if not McpOauthGrant.list_for_server(name):
+        # The last grant leaving reopens the mode choice: the next connect is
+        # a first connect again.
+        server_row = McpServer.get_for_name(name)
+        if server_row:
+            server_row.identity_mode = None
+    if server["identity_mode"] == IdentityMode.SHARED:
+        McpServer.set_enabled(name, is_enabled=False)

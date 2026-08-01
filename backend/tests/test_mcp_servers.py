@@ -42,7 +42,9 @@ def _sandbox_config() -> SandboxSettings:
 async def _delivery(**kwargs) -> dict:
     # Delivery is resolved at the workspace seam: the enabled servers become wire
     # shapes on ``mcp_servers`` and their tokens land in ``extra_env``.
-    return await Workspace(sandbox=_FakeSandbox()).with_mcp_servers(**kwargs)  # type: ignore[arg-type]
+    return await Workspace(sandbox=_FakeSandbox()).with_mcp_servers(  # type: ignore[arg-type]
+        None, **kwargs
+    )
 
 
 def _requiring_workspace(*servers: RequiredMcpServer) -> Workspace:
@@ -129,7 +131,7 @@ async def test_required_server_delivers_beside_the_registry(druks_db):
         )
     )
 
-    kwargs = await workspace.with_mcp_servers()
+    kwargs = await workspace.with_mcp_servers(None)
 
     github = next(s for s in kwargs["mcp_servers"] if s.name == "github")
     assert github.url == "https://api.githubcopilot.com/mcp/"
@@ -154,7 +156,7 @@ async def test_required_server_owns_its_name_against_a_registry_twin(druks_db):
         ),
     )
 
-    kwargs = await workspace.with_mcp_servers()
+    kwargs = await workspace.with_mcp_servers(None)
 
     delivered = [s for s in kwargs["mcp_servers"] if s.name == "linear"]
     assert len(delivered) == 1
@@ -172,7 +174,7 @@ async def test_duplicate_required_names_are_refused(druks_db):
     )
 
     with pytest.raises(ValueError, match="duplicate required"):
-        await workspace.with_mcp_servers()
+        await workspace.with_mcp_servers(None)
 
 
 def test_required_server_token_stays_out_of_reprs():
@@ -321,15 +323,12 @@ async def test_bearerless_server_delivers_without_a_bearer(druks_db):
     assert "extra_env" not in kwargs
 
 
-def test_bearerless_server_resolves_ready_with_its_headers(druks_db):
+def test_bearerless_server_merges_with_its_headers(druks_db):
     _grafana_shaped_server()
 
-    grafana = McpServer.get_resolved()["grafana"]
+    grafana = McpServer._merged()["grafana"]
     assert grafana["token_source"] == ""
     assert grafana["headers"] == {"X-Grafana-URL": "https://acme.grafana.net"}
-    # Nothing blocks delivery auth — the secret header is stored — so the
-    # API reads it ready.
-    assert grafana["has_token"] is True
     assert grafana["secret_headers"]["X-Api-Key"] == "grafana-api-secret"
 
 
@@ -461,7 +460,7 @@ def test_packaged_catalog_ships_linear_disabled(registry_state, druks_db):
     load_mcp_catalog(PACKAGED_MCP_CATALOG)
 
     assert "github" not in mcp_servers
-    builtins = [s for s in McpServer.get_resolved().values() if s["builtin"]]
+    builtins = [s for s in McpServer._merged().values() if s["builtin"]]
     assert [s["name"] for s in builtins] == ["linear"]
     linear = builtins[0]
     assert linear["url"] == "https://mcp.linear.app/mcp"
@@ -551,7 +550,7 @@ def test_db_overlay_still_disables_a_catalog_entry(tmp_path, registry_state, dru
 
     McpServer.create(name="figma_test", url="https://mcp.figma.test/", is_enabled=False)
 
-    resolved = McpServer.get_resolved()["figma_test"]
+    resolved = McpServer._merged()["figma_test"]
     assert resolved["builtin"] is True
     assert "figma_test" not in {s["name"] for s in McpServer.list_enabled()}
 
@@ -570,7 +569,7 @@ def test_catalog_enabled_false_ships_the_entry_dark(tmp_path, registry_state, dr
         )
     )
 
-    resolved = McpServer.get_resolved()
+    resolved = McpServer._merged()
     assert resolved["dark_test"]["is_enabled"] is False
     assert resolved["lit_test"]["is_enabled"] is True
     enabled_names = {s["name"] for s in McpServer.list_enabled()}

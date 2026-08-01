@@ -2,16 +2,18 @@ import os
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import Boolean, String, select
+from sqlalchemy import Boolean, ForeignKey, String, UniqueConstraint, select
 from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Mapped, mapped_column
 
+from druks.accounts.constants import SYSTEM_ACCOUNT_ID
 from druks.core.models import Uuid7Pk
 from druks.database import db_session
 from druks.extensions.registry import mcp_servers
 from druks.mcp.constants import NAME_PATTERN
-from druks.mcp.enums import TokenSource
-from druks.mcp.exceptions import InvalidServerNameError
+from druks.mcp.enums import IdentityMode, TokenSource
+from druks.mcp.exceptions import InvalidServerNameError, UnresolvedGrantAccountError
 from druks.models import Base
 from druks.secrets.fields import EncryptedJsonField, EncryptedTextField, Secret
 
@@ -36,11 +38,14 @@ class McpServer(Base, Uuid7Pk):
     headers: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
     secret_headers = EncryptedJsonField()
     is_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    # The first completed OAuth connect claims the credential-sharing policy.
+    # A registry install or enable overlay alone carries no such decision.
+    identity_mode: Mapped[str | None]
     created_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
 
     @classmethod
     def list_all(cls) -> list["McpServer"]:
-        # The raw overlay rows — not the merged registry view (get_resolved).
+        # The raw overlay rows — not the merged registry view (_merged).
         return list(db_session().execute(select(cls).order_by(cls.name)).scalars())
 
     @classmethod
@@ -48,8 +53,8 @@ class McpServer(Base, Uuid7Pk):
         return db_session().execute(select(cls).where(cls.name == name)).scalar_one_or_none()
 
     @classmethod
-    def get_resolved(cls) -> dict[str, dict]:
-        # The full view the API reads and delivery resolves from, keyed by
+    def _merged(cls) -> dict[str, dict]:
+        # The full view the API and delivery build from, keyed by
         # name: each built-in definition (url + auth from the registry)
         # overlaid with its operator row's enable choice and secrets, then any
         # fully custom rows.
@@ -66,6 +71,7 @@ class McpServer(Base, Uuid7Pk):
                 "token": row.token if row else Secret(b"", ""),
                 "headers": row.headers if row else {},
                 "secret_headers": row.secret_headers if row else {},
+                "identity_mode": row.identity_mode if row else None,
                 "builtin": True,
             }
         for row in rows.values():
@@ -78,8 +84,14 @@ class McpServer(Base, Uuid7Pk):
                 "token": row.token,
                 "headers": row.headers,
                 "secret_headers": row.secret_headers,
+                "identity_mode": row.identity_mode,
                 "builtin": False,
             }
+        return servers
+
+    @classmethod
+    def get_resolved(cls, account_id: str | None) -> dict[str, dict]:
+        servers = cls._merged()
         # has_token = nothing blocks this server's auth at delivery, read from
         # wherever its source keeps the secret: druks' env for an env-sourced
         # server, a stored grant for a connected one, the stored token for a
@@ -91,7 +103,14 @@ class McpServer(Base, Uuid7Pk):
             elif source == TokenSource.STATIC_FROM_ENV:
                 server["has_token"] = bool(os.environ.get(server["source_env_var"]))
             elif source == TokenSource.OAUTH:
-                server["has_token"] = bool(McpOauthGrant.get_for_server(server["name"]))
+                server["has_token"] = False
+                if server["identity_mode"]:
+                    grant_account = McpOauthGrant.get_grant_account(
+                        server["identity_mode"], account_id
+                    )
+                    server["has_token"] = bool(
+                        McpOauthGrant.get_for_account(server["name"], grant_account)
+                    )
             else:
                 server["has_token"] = bool(server["token"])
         return servers
@@ -99,7 +118,7 @@ class McpServer(Base, Uuid7Pk):
     @classmethod
     def list_enabled(cls) -> list[dict]:
         # The enabled subset — what a run delivers and the settings UI shows active.
-        return [server for server in cls.get_resolved().values() if server["is_enabled"]]
+        return [server for server in cls._merged().values() if server["is_enabled"]]
 
     @classmethod
     def set_enabled(cls, name: str, is_enabled: bool) -> bool:
@@ -151,13 +170,17 @@ class McpServer(Base, Uuid7Pk):
 
 class McpOauthGrant(Base, Uuid7Pk):
     __tablename__ = "mcp_oauth_grants"
+    __table_args__ = (UniqueConstraint("server_name", "account_id"),)
 
-    # One grant per server: the durable outcome of the operator's connect flow —
-    # exactly what mint needs to refresh an access token. Connect-time material
-    # (authorization endpoint, PKCE verifier, state) is transient and lives in
-    # Redis, never here. The refresh token never leaves the backend; the API
-    # exposes only that a grant exists.
-    server_name: Mapped[str] = mapped_column(String, unique=True)
+    # One grant per (server, account): the durable outcome of an OAuth
+    # connect flow — exactly what mint needs to refresh an access token.
+    # Connect-time material (authorization endpoint, PKCE verifier, state) is
+    # transient and lives in Redis, never here. The refresh token never leaves
+    # the backend; the API exposes only that a grant exists.
+    server_name: Mapped[str] = mapped_column(String)
+    account_id: Mapped[str] = mapped_column(
+        ForeignKey("accounts.id", ondelete="RESTRICT"), default=SYSTEM_ACCOUNT_ID
+    )
     # Ciphertext at rest; decrypted only into the refresh request body.
     refresh_token = EncryptedTextField()
     token_endpoint: Mapped[str] = mapped_column(String)
@@ -173,40 +196,67 @@ class McpOauthGrant(Base, Uuid7Pk):
     # row is upserted on re-connect, so row-creation time would lie.
     connected_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
 
+    @staticmethod
+    def get_grant_account(identity_mode: str | None, run_account_id: str | None) -> str:
+        # Whose grant serves this caller: a shared server's grant lives under
+        # the system account whoever asks; a per-user server's under the asker.
+        if identity_mode == IdentityMode.PER_USER and run_account_id:
+            return run_account_id
+        if identity_mode == IdentityMode.PER_USER:
+            raise UnresolvedGrantAccountError(identity_mode, run_account_id)
+        if identity_mode == IdentityMode.SHARED:
+            return SYSTEM_ACCOUNT_ID
+        raise UnresolvedGrantAccountError(identity_mode, run_account_id)
+
     @classmethod
-    def get_for_server(cls, server_name: str) -> "McpOauthGrant | None":
+    def get_for_account(cls, server_name: str, account_id: str) -> "McpOauthGrant | None":
         return (
             db_session()
-            .execute(select(cls).where(cls.server_name == server_name))
+            .execute(
+                select(cls).where(cls.server_name == server_name, cls.account_id == account_id)
+            )
             .scalar_one_or_none()
         )
+
+    @classmethod
+    def list_for_server(cls, server_name: str) -> list["McpOauthGrant"]:
+        return list(db_session().scalars(select(cls).where(cls.server_name == server_name)))
 
     @classmethod
     def store(
         cls,
         *,
         server_name: str,
+        account_id: str,
         refresh_token: str,
         token_endpoint: str,
         resource: str,
         client_id: str,
         client_secret: str = "",
     ) -> "McpOauthGrant":
-        # Connecting again replaces the grant — the recovery path for a revoked
-        # or rotten refresh token.
         session = db_session()
-        grant = cls.get_for_server(server_name)
-        if not grant:
-            grant = cls(server_name=server_name)
-            session.add(grant)
-        grant.refresh_token = refresh_token
-        grant.token_endpoint = token_endpoint
-        grant.resource = resource
-        grant.client_id = client_id
-        grant.client_secret = client_secret
-        grant.connected_at = cls.utc_now()
-        session.flush()
-        return grant
+        statement = pg_insert(cls).values(
+            server_name=server_name,
+            account_id=account_id,
+            refresh_token=refresh_token,
+            token_endpoint=token_endpoint,
+            resource=resource,
+            client_id=client_id,
+            client_secret=client_secret,
+            connected_at=cls.utc_now(),
+        )
+        statement = statement.on_conflict_do_update(
+            index_elements=["server_name", "account_id"],
+            set_={
+                "refresh_token": statement.excluded.refresh_token,
+                "token_endpoint": statement.excluded.token_endpoint,
+                "resource": statement.excluded.resource,
+                "client_id": statement.excluded.client_id,
+                "client_secret": statement.excluded.client_secret,
+                "connected_at": statement.excluded.connected_at,
+            },
+        ).returning(cls)
+        return session.scalars(statement, execution_options={"populate_existing": True}).one()
 
     def delete(self) -> None:
         session = db_session()

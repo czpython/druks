@@ -2,7 +2,9 @@ import json
 
 import httpx
 import pytest
+from druks.accounts.constants import SYSTEM_ACCOUNT_ID
 from druks.mcp import registry
+from druks.mcp.enums import IdentityMode
 from druks.mcp.exceptions import RegistryUnavailableError
 from druks.mcp.models import McpOauthGrant, McpServer
 from druks.mcp.registry import derive_server_name, resolve_candidates, search_registry
@@ -339,9 +341,7 @@ def test_add_from_registry_writes_the_row_and_redacts_the_secret(tmp_path, monke
     assert row.secret_headers["X-Api-Key"] == "acme-api-secret"
 
 
-def test_add_from_registry_oauth_candidate_ships_dark_and_connects(
-    tmp_path, monkeypatch, druks_db
-):
+def test_add_from_registry_oauth_candidate_ships_dark_and_connects(tmp_path, monkeypatch, druks_db):
     with _client_with_registry(tmp_path, monkeypatch, _GRAFANA) as client:
         created = client.post(
             "/api/mcp-servers/registry",
@@ -359,21 +359,32 @@ def test_add_from_registry_oauth_candidate_ships_dark_and_connects(
         # would fail every delivery.
         assert body["isEnabled"] is False
         assert body["hasToken"] is False
+        assert body["identityMode"] is None
 
         # The added row connects through the existing flow, against the row's
         # registry-supplied url.
         begun = []
 
-        async def fake_begin_connect(name, server_url, endpoint):
-            begun.append((name, server_url, endpoint))
+        async def fake_begin_connect(name, server_url, endpoint, *, account_id, identity_mode):
+            begun.append((name, server_url, endpoint, account_id, identity_mode))
             return "https://consent.example/authorize"
 
         monkeypatch.setattr("druks.mcp.oauth.begin_connect", fake_begin_connect)
-        connect = client.post("/api/mcp-servers/grafana/connect")
+        connect = client.post(
+            "/api/mcp-servers/grafana/connect",
+            json={"identity_mode": IdentityMode.PER_USER},
+        )
 
         assert connect.status_code == 200
         assert connect.json()["authorizationUrl"] == "https://consent.example/authorize"
-        assert begun == [("grafana", "https://mcp.grafana.com/mcp", "http://druks.test")]
+        assert len(begun) == 1
+        assert begun[0][0:3] == (
+            "grafana",
+            "https://mcp.grafana.com/mcp",
+            "http://druks.test",
+        )
+        assert begun[0][3]
+        assert begun[0][4] == IdentityMode.PER_USER
 
     row = McpServer.get_for_name("grafana")
     assert row.headers == {"X-Grafana-URL": "https://acme.grafana.net"}
@@ -411,9 +422,7 @@ def test_add_from_registry_rejects_missing_required_and_unknown_headers(
         assert not McpServer.get_for_name("observer")
 
 
-def test_add_from_registry_rejects_an_entry_without_an_http_remote(
-    tmp_path, monkeypatch, druks_db
-):
+def test_add_from_registry_rejects_an_entry_without_an_http_remote(tmp_path, monkeypatch, druks_db):
     # stdio/oci-only and unpinned: resolvable in search, not installable.
     with _client_with_registry(tmp_path, monkeypatch, _entry("com.mcparmory/grafana")) as client:
         created = client.post(
@@ -433,6 +442,7 @@ def test_removing_a_connected_row_drops_its_grant(tmp_path, monkeypatch, druks_d
         )
         McpOauthGrant.store(
             server_name="grafana",
+            account_id=SYSTEM_ACCOUNT_ID,
             refresh_token="rt",
             token_endpoint="https://as.example/token",
             resource="https://mcp.grafana.com/mcp",
@@ -443,4 +453,4 @@ def test_removing_a_connected_row_drops_its_grant(tmp_path, monkeypatch, druks_d
 
     # An orphan grant would revive as this name's credential on re-add.
     assert not McpServer.get_for_name("grafana")
-    assert not McpOauthGrant.get_for_server("grafana")
+    assert not McpOauthGrant.list_for_server("grafana")

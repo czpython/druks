@@ -49,7 +49,7 @@ async def test_build_workspace_declares_its_github_mcp(druks_db):
         mcp_token="ghs_reviewer",
         skills=("python-house-rules",),
     )
-    kwargs = await workspace.with_mcp_servers(**workspace.get_agent_run_kwargs())
+    kwargs = await workspace.with_mcp_servers(None, **workspace.get_agent_run_kwargs())
 
     assert kwargs["extra_env"] == {get_bearer_token_env_var(GITHUB_MCP_NAME): "ghs_reviewer"}
     github = next(s for s in kwargs["mcp_servers"] if s.name == GITHUB_MCP_NAME)

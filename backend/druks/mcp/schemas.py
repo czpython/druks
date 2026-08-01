@@ -8,13 +8,14 @@ NonBlank = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)
 
 
 class McpServerResponse(BaseResponse):
-    # A pure projection of one ``McpServer.get_resolved()`` item — the dict's
+    # A pure projection of one account's ``McpServer.get_resolved()`` item — the dict's
     # ``token`` is not a field here, so the secret can't serialize (and it
     # arrives as a Secret, redacted even if it did).
     name: str
     url: str
     is_enabled: bool
     token_source: str
+    identity_mode: str | None
     builtin: bool
     # The deployment env var an env-sourced server reads its token from
     # ("" otherwise) — a var name, never a value.

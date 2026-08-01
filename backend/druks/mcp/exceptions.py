@@ -1,3 +1,6 @@
+from druks.mcp.enums import IdentityMode
+
+
 class McpServerError(Exception):
     pass
 
@@ -65,16 +68,28 @@ class OauthConnectError(McpServerError):
         self.reason = reason
 
 
+class UnresolvedGrantAccountError(McpServerError):
+    def __init__(self, identity_mode: str | None, account_id: str | None):
+        if identity_mode == IdentityMode.PER_USER:
+            reason = "per-user grants require an account"
+        else:
+            reason = f"identity mode {identity_mode!r} is not resolved"
+        super().__init__(f"Cannot resolve which account's grant to use: {reason}.")
+        self.identity_mode = identity_mode
+        self.account_id = account_id
+
+
 class MissingGrantError(McpServerError):
     # An enabled OAuth server has no stored grant, so delivery can't mint a
     # token for it. Raised loudly at delivery — the operator must run the
     # connect flow (or disable the server), not discover a dead server mid-run.
-    def __init__(self, name: str):
+    def __init__(self, name: str, account_id: str):
         super().__init__(
-            f"Enabled MCP server {name!r} is not connected; complete its OAuth "
-            "connect flow or disable it."
+            f"Enabled MCP server {name!r} is not connected for account {account_id!r}; "
+            "complete its OAuth connect flow or disable it."
         )
         self.name = name
+        self.account_id = account_id
 
 
 class GrantRefreshError(McpServerError):

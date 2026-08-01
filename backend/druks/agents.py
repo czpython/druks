@@ -305,7 +305,13 @@ class Agent:
                 )
                 try:
                     result = await self._execute(
-                        runner, model, prompt, artifact_dir, call_id, connection_id
+                        runner,
+                        model,
+                        prompt,
+                        artifact_dir,
+                        call_id,
+                        connection_id,
+                        account_id=workflow.account_id,
                     )
                 except BaseException as error:
                     AgentCall.fail(engine, call_id=call_id, error=error)
@@ -328,9 +334,12 @@ class Agent:
         artifact_dir: Path,
         call_id: str,
         connection_id: str,
+        *,
+        account_id: str | None,
     ) -> "AgentResult":
         schema = self.contract.model_json_schema()
         return await runner.run_agent(
+            account_id=account_id,
             model=model,
             prompt=prompt,
             schema=schema,
