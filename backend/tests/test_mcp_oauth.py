@@ -470,7 +470,7 @@ async def test_mint_times_out_loudly_when_the_refresh_lock_never_frees(druks_db,
         await oauth.mint_access_token(_NAME, SYSTEM_ACCOUNT_ID)
 
 
-async def test_mint_cache_and_refresh_lock_are_per_scope(auth_server, druks_db):
+async def test_mint_cache_and_refresh_lock_are_per_account(auth_server, druks_db):
     first = Account.get_or_create("first@example.com")
     second = Account.get_or_create("second@example.com")
     _store_grant(account_id=first.id, identity_mode=IdentityMode.PER_USER)

@@ -240,6 +240,9 @@ async def complete_connect(*, state: str, code: str) -> str:
         raise OauthConnectError(
             name, "the authorization server granted no refresh token; druks needs offline access"
         )
+    # The first completed connect claims the mode: insert the row if absent,
+    # fill the mode if unclaimed. A concurrent claim wins the row lock; the
+    # select reads whichever choice landed, and the grant goes under it.
     session = db_session()
     session.execute(
         pg_insert(McpServer)
@@ -250,11 +253,10 @@ async def complete_connect(*, state: str, code: str) -> str:
         )
         .on_conflict_do_nothing(index_elements=["name"])
     )
-    session.scalar(
+    session.execute(
         update(McpServer)
         .where(McpServer.name == name, McpServer.identity_mode.is_(None))
         .values(identity_mode=pending["identity_mode"])
-        .returning(McpServer.identity_mode)
     )
     effective_identity_mode = session.scalar(
         select(McpServer.identity_mode).where(McpServer.name == name)
