@@ -8,6 +8,9 @@ from druks.schemas import BaseResponse
 class UsageMetricSummary(BaseResponse):
     percent_left: int | None = None
     resets_at: datetime | None = None
+    # Set when this window meters one model separately from the rest,
+    # naming it. None covers every model.
+    model: str | None = None
 
 
 class UsageHarnessSummary(BaseResponse):

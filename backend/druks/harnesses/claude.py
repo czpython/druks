@@ -319,12 +319,11 @@ class ClaudeHarness(Harness):
             return ParsedUsage(ok=False, error="unparseable", raw=raw)
         if not isinstance(data, dict) or not any(k in data for k in ("five_hour", "seven_day")):
             return ParsedUsage(ok=False, error="unexpected_payload", raw=raw)
-        return ParsedUsage(
-            ok=True,
-            five_hour=_claude_metric(data.get("five_hour")),
-            week=_claude_metric(data.get("seven_day")),
-            raw=raw,
-        )
+        try:
+            five_hour, week = _claude_windows(data)
+        except (KeyError, TypeError, ValueError):
+            return ParsedUsage(ok=False, error="unexpected_payload", raw=raw)
+        return ParsedUsage(ok=True, five_hour=five_hour, week=week, raw=raw)
 
     @classmethod
     def _parse_models(cls, raw: str) -> ParsedModels:
@@ -350,6 +349,29 @@ def _oauth_block(data: dict) -> dict:
     flat shape too."""
     block = data.get("claudeAiOauth") if isinstance(data, dict) else None
     return block if isinstance(block, dict) else data
+
+
+def _claude_windows(data: dict) -> tuple[ParsedMetric | None, ParsedMetric | None]:
+    """The five-hour and weekly quotas that bind. A plan can meter one model
+    tighter than the rest, and that limit stops work first."""
+    five_hour, weekly = [], []
+    for limit in data.get("limits") or []:
+        # A limit can be scoped to something other than a model, which leaves
+        # it counting toward the quota but with no model to name.
+        scope = limit["scope"] or {}
+        window = ParsedMetric(
+            percent_left=max(0, min(100, round(100 - limit["percent"]))),
+            resets_at=_parse_iso(limit.get("resets_at")),
+            model=(scope.get("model") or {}).get("display_name"),
+        )
+        if limit["group"] == "weekly":
+            weekly.append(window)
+        elif limit["group"] == "session":
+            five_hour.append(window)
+    return (
+        ParsedMetric.binding(five_hour) or _claude_metric(data.get("five_hour")),
+        ParsedMetric.binding(weekly) or _claude_metric(data.get("seven_day")),
+    )
 
 
 def _claude_metric(block: object) -> ParsedMetric | None:

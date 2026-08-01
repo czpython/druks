@@ -1,3 +1,4 @@
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -55,6 +56,20 @@ class RotationResult:
 class ParsedMetric:
     percent_left: int | None
     resets_at: datetime | None
+    # Set when a plan meters this model separately; None covers them all.
+    model: str | None = None
+
+    @classmethod
+    def binding(cls, windows: Sequence[Self]) -> Self | None:
+        """The window closest to exhaustion — whichever stops work first."""
+        binding = None
+        remaining = 0
+        for window in windows:
+            if window.percent_left is None:
+                continue
+            if binding is None or window.percent_left < remaining:
+                binding, remaining = window, window.percent_left
+        return binding
 
 
 @dataclass(frozen=True)

@@ -430,7 +430,7 @@ class CodexHarness(Harness):
             return ParsedUsage(ok=False, error="unexpected_payload", raw=raw)
         plan = data.get("plan_type") if isinstance(data.get("plan_type"), str) else None
         try:
-            five_hour, week = _codex_windows(data["rate_limit"] or {})
+            five_hour, week = _codex_windows(data)
         except (AttributeError, KeyError, TypeError, ValueError):
             return ParsedUsage(ok=False, error="unexpected_payload", plan_tier=plan, raw=raw)
         if not five_hour and not week:
@@ -708,21 +708,27 @@ class CodexHarness(Harness):
         )
 
 
-def _codex_windows(rate_limit: dict) -> tuple[ParsedMetric | None, ParsedMetric | None]:
-    """The five-hour and weekly quotas, in that order. Raises if a window the
-    payload reports is unreadable — a window we cannot place is a broken
-    payload, not a missing quota."""
-    five_hour = week = None
-    for slot in ("primary_window", "secondary_window"):
-        block = rate_limit.get(slot)
-        if not block:
-            continue
-        window = ParsedMetric(
-            percent_left=max(0, min(100, round(100 - block["used_percent"]))),
-            resets_at=datetime.fromtimestamp(block["reset_at"], tz=UTC),
-        )
-        if block["limit_window_seconds"] >= _WEEKLY_WINDOW_MINIMUM_SECONDS:
-            week = window
-        else:
-            five_hour = window
-    return five_hour, week
+def _codex_windows(usage: dict) -> tuple[ParsedMetric | None, ParsedMetric | None]:
+    """The five-hour and weekly quotas that bind. A window's declared length
+    names it, not the slot it arrives in, and a separately metered model
+    exhausts before the account-wide quota does."""
+    rate_limits = [(None, usage["rate_limit"] or {})]
+    for metered in usage.get("additional_rate_limits") or []:
+        rate_limits.append((metered["limit_name"], metered["rate_limit"] or {}))
+
+    five_hour, weekly = [], []
+    for model, rate_limit in rate_limits:
+        for slot in ("primary_window", "secondary_window"):
+            block = rate_limit.get(slot)
+            if not block:
+                continue
+            window = ParsedMetric(
+                percent_left=max(0, min(100, round(100 - block["used_percent"]))),
+                resets_at=datetime.fromtimestamp(block["reset_at"], tz=UTC),
+                model=model,
+            )
+            if block["limit_window_seconds"] >= _WEEKLY_WINDOW_MINIMUM_SECONDS:
+                weekly.append(window)
+            else:
+                five_hour.append(window)
+    return ParsedMetric.binding(five_hour), ParsedMetric.binding(weekly)

@@ -500,6 +500,7 @@ class Harness(ABC):
         if parsed.week:
             snapshot.week_percent_left = parsed.week.percent_left
             snapshot.week_resets_at = parsed.week.resets_at
+            snapshot.week_model = parsed.week.model
         snapshot.save()
         return {
             "harness": cls.name,
