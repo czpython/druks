@@ -58,15 +58,18 @@ class RepoPolicy(BaseModel):
         # invent verification commands" guardrail.
         verification = profile.get("verification") or {}
         sections = [
-            {"label": "Lint", "commands": verification.get("lint_commands", [])},
-            {"label": "Typecheck", "commands": verification.get("typecheck_commands", [])},
-            {"label": "Tests", "commands": verification.get("test_commands", [])},
+            {"label": "Lint", "command_entries": verification.get("lint_commands", [])},
+            {
+                "label": "Typecheck",
+                "command_entries": verification.get("typecheck_commands", []),
+            },
+            {"label": "Tests", "command_entries": verification.get("test_commands", [])},
         ]
         body = await render_prompt(
             "ship/verification_block.md",
             repo=repo,
             sections=sections,
-            has_commands=any(section["commands"] for section in sections),
+            has_commands=any(section["command_entries"] for section in sections),
             sandbox_env_keys=sorted(self.sandbox.env),
         )
         return body.rstrip() + "\n"

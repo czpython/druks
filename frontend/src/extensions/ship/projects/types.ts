@@ -8,9 +8,9 @@ export interface RepoProfile {
   frameworks?: string[]
   package_managers?: string[]
   verification?: {
-    test_commands?: string[]
-    lint_commands?: string[]
-    typecheck_commands?: string[]
+    test_commands?: { command: string; ci_check: string | null }[]
+    lint_commands?: { command: string; ci_check: string | null }[]
+    typecheck_commands?: { command: string; ci_check: string | null }[]
   }
   recommended_skills?: string[]
 }

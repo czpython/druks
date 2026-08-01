@@ -47,6 +47,34 @@ def test_output_contract_is_strict(model):
         assert not missing, f"{model.__name__}: non-required properties {missing} break strict mode"
 
 
+def test_repo_profiler_output_maps_verification_commands_to_plain_dicts():
+    output = O.RepoProfilerOutput.model_validate(
+        {
+            "languages": ["python"],
+            "frameworks": ["django"],
+            "package_managers": ["uv"],
+            "stack_summary": "A Django backend.",
+            "test_commands": [{"command": "pytest", "ci_check": "Backend / tests"}],
+            "lint_commands": [{"command": "ruff check .", "ci_check": None}],
+            "typecheck_commands": [],
+            "recommended_skills": ["django-patterns"],
+        }
+    )
+
+    assert output.to_result() == {
+        "languages": ["python"],
+        "frameworks": ["django"],
+        "package_managers": ["uv"],
+        "stack_summary": "A Django backend.",
+        "verification": {
+            "test_commands": [{"command": "pytest", "ci_check": "Backend / tests"}],
+            "lint_commands": [{"command": "ruff check .", "ci_check": None}],
+            "typecheck_commands": [],
+        },
+        "recommended_skills": ["django-patterns"],
+    }
+
+
 def _implementation(**overrides):
     fields = {
         "type": "result",

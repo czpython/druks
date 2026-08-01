@@ -447,9 +447,9 @@ function ProfilePanel({
         <div className="pj-profile-row">
           <span className="pj-profile-label">verification</span>
           <div className="pj-profile-cmds">
-            {verification.map((command) => (
-              <code key={command} className="pj-profile-cmd mono">
-                {command}
+            {verification.map((entry) => (
+              <code key={entry.command} className="pj-profile-cmd mono">
+                {entry.command}
               </code>
             ))}
           </div>
