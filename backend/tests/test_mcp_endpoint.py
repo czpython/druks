@@ -174,7 +174,8 @@ async def test_tools_list_pins_the_six_derived_from_agent_routes(app, pat_token)
         annotations = tool.annotations
         assert annotations.readOnlyHint == (name in read_only)
         assert annotations.destructiveHint == (None if name in read_only else name == "cancel_run")
-        assert annotations.idempotentHint == (None if name in read_only else True)
+        # A repeat retry answers SUBJECT_BUSY, so it alone is not idempotent.
+        assert annotations.idempotentHint == (None if name in read_only else name != "retry_run")
         assert tool.description, name
 
     # Derived schemas keep the routes' own shapes and constraints.
