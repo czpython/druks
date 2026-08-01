@@ -366,6 +366,7 @@ async def test_claude_fetch_usage_success(monkeypatch, druks_db):
     assert parsed.week.percent_left == 52
     assert calls[0]["headers"]["Authorization"] == "Bearer tok"
     assert calls[0]["headers"]["anthropic-beta"] == "oauth-2025-04-20"
+    assert calls[0]["headers"]["User-Agent"].startswith("claude-code/")
 
 
 async def test_claude_fetch_usage_http_error(monkeypatch, druks_db):

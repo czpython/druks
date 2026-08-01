@@ -215,22 +215,26 @@ function ProviderPanel({
             <UnmeteredWindow today={today} />
           ) : (
             <>
-              <WindowRow
-                label="5h window"
-                metric={usage.fiveHour}
-                spark={history?.fiveHour}
-                sparkLabel="remaining · last 5h"
-                sparkId={`${label}-5h`}
-                rateNoun="window"
-              />
-              <WindowRow
-                label="weekly"
-                metric={usage.week}
-                spark={history?.week}
-                sparkLabel="remaining · this week"
-                sparkId={`${label}-wk`}
-                rateNoun="week"
-              />
+              {usage.fiveHour && (
+                <WindowRow
+                  label="5h window"
+                  metric={usage.fiveHour}
+                  spark={history?.fiveHour}
+                  sparkLabel="remaining · last 5h"
+                  sparkId={`${label}-5h`}
+                  rateNoun="window"
+                />
+              )}
+              {usage.week && (
+                <WindowRow
+                  label="weekly"
+                  metric={usage.week}
+                  spark={history?.week}
+                  sparkLabel="remaining · this week"
+                  sparkId={`${label}-wk`}
+                  rateNoun="week"
+                />
+              )}
             </>
           )}
         </div>
@@ -269,7 +273,7 @@ function WindowRow({
   rateNoun,
 }: {
   label: string
-  metric: UsageMetric | null
+  metric: UsageMetric
   spark: UsageHistoryPoint[] | undefined
   sparkLabel: string
   sparkId: string
@@ -277,7 +281,7 @@ function WindowRow({
 }) {
   const now = useNow(1000)
 
-  if (!metric || metric.percentLeft === null) {
+  if (metric.percentLeft === null) {
     return (
       <div className="us-win us-win-missing">
         <div className="us-win-top">

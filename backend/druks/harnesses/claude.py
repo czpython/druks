@@ -29,6 +29,7 @@ _USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
 # Beta flag the Claude CLI sends for OAuth-scoped endpoints.
 _OAUTH_BETA = "oauth-2025-04-20"
 _ANTHROPIC_VERSION = "2023-06-01"
+_CLAUDE_CODE_USER_AGENT = "claude-code/2.1.0"
 
 
 class ClaudeHarness(Harness):
@@ -300,6 +301,7 @@ class ClaudeHarness(Harness):
             "Authorization": f"Bearer {token.access_token}",
             "anthropic-beta": _OAUTH_BETA,
             "anthropic-version": _ANTHROPIC_VERSION,
+            "User-Agent": _CLAUDE_CODE_USER_AGENT,
         }
         return _USAGE_URL, headers
 
@@ -309,6 +311,7 @@ class ClaudeHarness(Harness):
             "Authorization": f"Bearer {token.access_token}",
             "anthropic-beta": _OAUTH_BETA,
             "anthropic-version": _ANTHROPIC_VERSION,
+            "User-Agent": _CLAUDE_CODE_USER_AGENT,
         }
 
     @classmethod
