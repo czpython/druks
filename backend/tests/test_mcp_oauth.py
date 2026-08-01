@@ -146,9 +146,9 @@ def _store_grant(
         (IdentityMode.PER_USER, None),
     ),
 )
-def test_grant_account_rejects_unresolved_modes(identity_mode, account_id):
+def test_get_grant_account_rejects_unresolved_modes(identity_mode, account_id):
     with pytest.raises(UnresolvedGrantAccountError):
-        McpOauthGrant.grant_account(identity_mode, account_id)
+        McpOauthGrant.get_grant_account(identity_mode, account_id)
 
 
 # --- connect: discovery + DCR + PKCE ---------------------------------------
