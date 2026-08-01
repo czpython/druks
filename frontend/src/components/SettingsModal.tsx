@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
+import { Fragment, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { api } from '../api/client'
@@ -444,7 +444,17 @@ function RailGlyph({ name }: { name: string }) {
 // Switch + dropdown menu
 // ---------------------------------------------------------------------------
 
-function Switch({ on, onClick, disabled }: { on: boolean; onClick: () => void; disabled?: boolean }) {
+function Switch({
+  on,
+  onClick,
+  disabled,
+  label,
+}: {
+  on: boolean
+  onClick: () => void
+  disabled?: boolean
+  label?: string
+}) {
   return (
     <button
       type="button"
@@ -452,6 +462,7 @@ function Switch({ on, onClick, disabled }: { on: boolean; onClick: () => void; d
       onClick={onClick}
       disabled={disabled}
       aria-pressed={on}
+      aria-label={label}
     />
   )
 }
@@ -1022,6 +1033,7 @@ function McpServersPane() {
   const [candidates, setCandidates] = useState<McpRegistryCandidate[] | null>(null)
   const [selected, setSelected] = useState<McpRegistryCandidate | null>(null)
   const [headerValues, setHeaderValues] = useState<Record<string, string>>({})
+  const fieldId = useId()
   const servers = serversQuery.data ?? []
 
   const refresh = () => queryClient.invalidateQueries({ queryKey: ['mcpServers'] })
@@ -1158,19 +1170,34 @@ function McpServersPane() {
   )
 
   return (
-    <div className="set-pane">
-      <div className="set-pane-head">
-        <div className="set-pane-sub">
-          Add an <b>MCP server</b> your agents can call. Enabled servers are carried into every
-          sandbox VM; secrets ride the run env and never land in emitted config.
+    <div className="set-pane mcp-pane">
+      <header className="mcp-pane-head">
+        <h2 className="mcp-pane-title">MCP Servers</h2>
+        <p className="mcp-pane-sub">
+          Tools your agents can call. Enabled servers are carried into every sandbox VM; secrets
+          ride the run env and never land in emitted config.
+        </p>
+      </header>
+
+      {error && (
+        <div className="mcp-error" role="alert">
+          {error}
         </div>
-      </div>
-      <div className="set-group">
-        <div className="set-group-label">add from registry</div>
+      )}
+
+      <section className="mcp-section">
+        <h3 className="mcp-h">Add from registry</h3>
+        <p className="mcp-help">
+          Search the official MCP registry — most servers install with no token at all.
+        </p>
         <div className="mcp-reg-search">
+          <label className="mcp-sr-only" htmlFor={`${fieldId}-search`}>
+            Search the MCP registry
+          </label>
           <input
+            id={`${fieldId}-search`}
             className="skill-add-input"
-            placeholder="search the official MCP registry — grafana, sentry, …"
+            placeholder="grafana, sentry, …"
             value={registryQuery}
             onChange={(e) => setRegistryQuery(e.target.value)}
             onKeyDown={(e) => {
@@ -1182,17 +1209,18 @@ function McpServersPane() {
             disabled={searching}
           />
           <button
-            className="set-btn ghost"
+            className="set-btn primary"
             disabled={searching || !registryQuery.trim()}
+            aria-busy={searching}
             onClick={() => void searchRegistry()}
           >
-            {searching ? 'searching…' : 'search'}
+            {searching ? 'Searching…' : 'Search'}
           </button>
         </div>
         {candidates && candidates.length === 0 && (
-          <div className="set-field-help">
+          <p className="mcp-help">
             No matching servers with a hosted (HTTP) endpoint in the registry.
-          </div>
+          </p>
         )}
         {candidates && candidates.length > 0 && (
           <div className="mcp-reg-results">
@@ -1203,30 +1231,35 @@ function McpServersPane() {
                     'mcp-reg-row' +
                     (selected?.registryName === candidate.registryName ? ' is-selected' : '')
                   }
+                  aria-expanded={selected?.registryName === candidate.registryName}
                   onClick={() => select(candidate)}
                   disabled={busy}
                 >
-                  <span className="mcp-name">{candidate.name}</span>
-                  <span className={'mcp-reg-badge' + (candidate.official ? ' official' : '')}>
-                    {candidate.official ? 'official' : 'community'}
+                  <span className="mcp-reg-top">
+                    <span className="mcp-name">{candidate.name}</span>
+                    <span className={'mcp-reg-badge' + (candidate.official ? ' official' : '')}>
+                      {candidate.official ? 'official' : 'community'}
+                    </span>
                   </span>
+                  <span className="mcp-url">{candidate.url}</span>
                   <span className="mcp-reg-desc" title={candidate.registryName}>
                     {candidate.description}
                   </span>
-                  <span className="mcp-url">{candidate.url}</span>
                 </button>
                 {selected?.registryName === candidate.registryName && (
                   <div className="mcp-reg-form">
                     {selected.headers.map((header) => (
-                      <div className="set-field" key={header.name}>
-                        <span className="set-field-label">
+                      <div className="mcp-field" key={header.name}>
+                        <label className="mcp-label tech" htmlFor={`${fieldId}-${header.name}`}>
                           {header.name}
-                          {header.isRequired ? ' *' : ''}
-                        </span>
+                          {header.isRequired && <span className="mcp-req"> (required)</span>}
+                        </label>
                         <input
+                          id={`${fieldId}-${header.name}`}
                           className="skill-add-input"
                           type={header.isSecret ? 'password' : 'text'}
                           placeholder={header.placeholder}
+                          required={header.isRequired}
                           value={headerValues[header.name] ?? ''}
                           onChange={(e) =>
                             setHeaderValues((values) => ({
@@ -1239,23 +1272,22 @@ function McpServersPane() {
                           data-lpignore="true"
                           disabled={busy}
                         />
-                        {header.description && (
-                          <span className="set-field-help">{header.description}</span>
-                        )}
+                        {header.description && <p className="mcp-help">{header.description}</p>}
                       </div>
                     ))}
                     {!selected.headers.some((header) => header.isSecret) && (
-                      <div className="set-field-help">
-                        Uses OAuth — click <b>connect</b> on the added server to authorize it.
-                      </div>
+                      <p className="mcp-help">
+                        Uses OAuth — use <b>Connect</b> on the added server to authorize it.
+                      </p>
                     )}
                     <div>
                       <button
                         className="set-btn primary"
                         disabled={busy || missingRequired}
+                        aria-busy={busy}
                         onClick={() => void install(selected)}
                       >
-                        {busy ? 'installing…' : 'install'}
+                        {busy ? 'Installing…' : 'Install'}
                       </button>
                     </div>
                   </div>
@@ -1264,73 +1296,89 @@ function McpServersPane() {
             ))}
           </div>
         )}
-      </div>
-      <div className="set-group">
-        <div className="set-group-label">add custom server</div>
-        <div className="mcp-add">
-          <div className="set-field">
-            <span className="set-field-label">name</span>
-            <input
-              className="skill-add-input"
-              placeholder="linear"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              autoComplete="off"
-              data-1p-ignore=""
-              data-lpignore="true"
-              disabled={busy}
-            />
+      </section>
+
+      <details className="mcp-custom">
+        <summary className="mcp-custom-summary">Add a custom server</summary>
+        <div className="mcp-custom-body">
+          <p className="mcp-help">
+            For a server that isn&apos;t in the registry. All three fields are required.
+          </p>
+          <div className="mcp-form-grid">
+            <div className="mcp-field">
+              <label className="mcp-label" htmlFor={`${fieldId}-name`}>
+                Name <span className="mcp-req">(required)</span>
+              </label>
+              <input
+                id={`${fieldId}-name`}
+                className="skill-add-input"
+                placeholder="linear"
+                required
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                autoComplete="off"
+                data-1p-ignore=""
+                data-lpignore="true"
+                disabled={busy}
+              />
+            </div>
+            <div className="mcp-field">
+              <label className="mcp-label" htmlFor={`${fieldId}-url`}>
+                URL <span className="mcp-req">(required)</span>
+              </label>
+              <input
+                id={`${fieldId}-url`}
+                className="skill-add-input"
+                placeholder="https://mcp.linear.app/mcp"
+                required
+                value={url}
+                onChange={(e) => setUrl(e.target.value)}
+                autoComplete="off"
+                data-1p-ignore=""
+                data-lpignore="true"
+                disabled={busy}
+              />
+            </div>
+            <div className="mcp-field">
+              <label className="mcp-label" htmlFor={`${fieldId}-token`}>
+                Bearer token <span className="mcp-req">(required)</span>
+              </label>
+              <input
+                id={`${fieldId}-token`}
+                className="skill-add-input"
+                type="password"
+                required
+                value={token}
+                onChange={(e) => setToken(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') void add()
+                }}
+                autoComplete="new-password"
+                data-1p-ignore=""
+                data-lpignore="true"
+                disabled={busy}
+              />
+              <p className="mcp-help">Stored write-only — never returned or emitted in config.</p>
+            </div>
           </div>
-          <div className="set-field">
-            <span className="set-field-label">url</span>
-            <input
-              className="skill-add-input"
-              placeholder="https://mcp.linear.app/mcp"
-              value={url}
-              onChange={(e) => setUrl(e.target.value)}
-              autoComplete="off"
-              data-1p-ignore=""
-              data-lpignore="true"
-              disabled={busy}
-            />
-          </div>
-          <div className="set-field">
-            <span className="set-field-label">bearer token</span>
-            <input
-              className="skill-add-input"
-              type="password"
-              value={token}
-              onChange={(e) => setToken(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') void add()
-              }}
-              autoComplete="new-password"
-              data-1p-ignore=""
-              data-lpignore="true"
-              disabled={busy}
-            />
-          </div>
-          {/* The empty label keeps the button in the inputs' row under top
-              alignment — same offset as the real labels, so it tracks their
-              height instead of hardcoding it. */}
-          <div className="set-field">
-            <span className="set-field-label">&nbsp;</span>
+          <div>
             <button
               className="set-btn primary"
               disabled={busy || !name.trim() || !url.trim() || !token.trim()}
+              aria-busy={busy}
               onClick={() => void add()}
             >
-              {busy ? 'adding…' : 'add'}
+              {busy ? 'Adding…' : 'Add server'}
             </button>
           </div>
         </div>
-        {error && <div className="set-skill-error">{error}</div>}
-      </div>
+      </details>
+
       {servers.length > 0 && (
-        <div className="set-group">
-          <div className="set-group-label">
-            servers<span className="gl-count">{servers.length}</span>
-          </div>
+        <section className="mcp-section">
+          <h3 className="mcp-h">
+            Servers<span className="gl-count">{servers.length}</span>
+          </h3>
           <div className="mcp-servers">
             {servers.map((server: McpServer) => (
               <McpServerRow
@@ -1344,7 +1392,7 @@ function McpServersPane() {
               />
             ))}
           </div>
-        </div>
+        </section>
       )}
     </div>
   )
@@ -1352,16 +1400,16 @@ function McpServersPane() {
 
 function tokenStatusLabel(server: McpServer): string {
   if (server.tokenSource === 'static_from_env') {
-    return `${server.sourceEnvVar}${server.hasToken ? ' set' : ' unset'}`
+    return `${server.sourceEnvVar} ${server.hasToken ? 'set' : 'unset'}`
   }
   if (server.tokenSource === 'oauth') {
-    return server.hasToken ? 'connected' : 'not connected'
+    return server.hasToken ? 'Connected' : 'Not connected'
   }
   if (!server.tokenSource) {
     // No bearer — header-auth'd (or auth-free): nothing to connect or store.
-    return 'ready'
+    return 'Ready'
   }
-  return server.hasToken ? 'token set' : 'no token'
+  return server.hasToken ? 'Token set' : 'No token'
 }
 
 function McpServerRow({
@@ -1380,75 +1428,90 @@ function McpServerRow({
   onDisconnect: (name: string) => Promise<void>
 }) {
   const claimedMode = server.identityMode
-  // A built-in (catalog entry) is managed by druks: disable, never remove.
+  // A header-auth'd (or auth-free) server holds no credential to connect.
+  const isLive = server.hasToken || !server.tokenSource
   return (
     <div className={'mcp-row' + (server.isEnabled ? '' : ' is-off')}>
       <div className="mcp-id">
-        <span className="mcp-name">{server.name}</span>
-        <span className="mcp-url">{server.url}</span>
+        <span className="mcp-name" title={server.name}>
+          {server.name}
+        </span>
+        <span className="mcp-url" title={server.url}>
+          {server.url}
+        </span>
       </div>
-      <span className={'mcp-tok' + (server.hasToken ? ' ok' : ' missing')}>
+      <span className={'mcp-conn' + (isLive ? ' is-live' : '')}>
+        <span className="mcp-conn-dot" />
         {tokenStatusLabel(server)}
       </span>
-      {server.tokenSource === 'oauth' &&
-        (claimedMode === null ? (
-          // The first connect claims how this server's credential is held;
-          // afterwards the choice is fixed until the last grant is dropped.
-          <>
-            <button
-              className="set-btn primary"
-              onClick={() => void onConnect(server.name, 'shared')}
-              disabled={busy}
-              title="One connection every run uses; opens the provider's consent page."
-            >
-              connect for everyone
-            </button>
-            <button
-              className="set-btn"
-              onClick={() => void onConnect(server.name, 'per_user')}
-              disabled={busy}
-              title="Each account connects its own; opens the provider's consent page."
-            >
-              connect your account
-            </button>
-          </>
-        ) : (
-          <>
-            <button
-              className="set-btn primary"
-              onClick={() => void onConnect(server.name, claimedMode)}
-              disabled={busy}
-              title="Opens the provider's consent page."
-            >
-              {server.hasToken ? 'reconnect' : 'connect'}
-            </button>
-            {server.hasToken && (
-              <button
-                className="sc-remove"
-                onClick={() => void onDisconnect(server.name)}
-                disabled={busy}
-                title="Drop this account's stored grant."
-              >
-                disconnect
-              </button>
-            )}
-          </>
-        ))}
-      <Switch on={server.isEnabled} onClick={() => void onToggle(server.name, !server.isEnabled)} disabled={busy} />
-      {server.builtin ? (
-        <span className="mcp-managed" title="Managed by druks — disable it instead of removing.">
-          managed
+      <div className="mcp-row-foot">
+        <span className="mcp-enable">
+          <Switch
+            on={server.isEnabled}
+            onClick={() => void onToggle(server.name, !server.isEnabled)}
+            disabled={busy}
+            label={`Enabled — ${server.name}`}
+          />
+          <span className="mcp-enable-label">Enabled</span>
         </span>
-      ) : (
-        <button
-          className="sc-remove"
-          onClick={() => void onRemove(server.name)}
-          disabled={busy}
-          title="remove server"
-        >
-          ✕ remove
-        </button>
-      )}
+        <div className="mcp-actions">
+          {server.tokenSource === 'oauth' &&
+            (claimedMode === null ? (
+              // The first connect claims how this server's credential is held;
+              // afterwards the choice is fixed until the last grant is dropped.
+              <>
+                <button
+                  className="set-btn primary"
+                  onClick={() => void onConnect(server.name, 'shared')}
+                  disabled={busy}
+                  title="One connection every run uses; opens the provider's consent page."
+                >
+                  Connect for everyone
+                </button>
+                <button
+                  className="set-btn ghost"
+                  onClick={() => void onConnect(server.name, 'per_user')}
+                  disabled={busy}
+                  title="Each account connects its own; opens the provider's consent page."
+                >
+                  Connect your account
+                </button>
+              </>
+            ) : (
+              <>
+                <button
+                  className={'set-btn ' + (server.hasToken ? 'ghost' : 'primary')}
+                  onClick={() => void onConnect(server.name, claimedMode)}
+                  disabled={busy}
+                  title="Opens the provider's consent page."
+                >
+                  {server.hasToken ? 'Reconnect' : 'Connect'}
+                </button>
+                {server.hasToken && (
+                  <button
+                    className="set-btn danger"
+                    onClick={() => void onDisconnect(server.name)}
+                    disabled={busy}
+                    title="Drop this account's stored grant."
+                  >
+                    Disconnect
+                  </button>
+                )}
+              </>
+            ))}
+          {/* A built-in (catalog entry) is managed by druks: disable, never remove. */}
+          {!server.builtin && (
+            <button
+              className="set-btn danger quiet"
+              onClick={() => void onRemove(server.name)}
+              disabled={busy}
+              title="Remove this server from every sandbox."
+            >
+              Remove
+            </button>
+          )}
+        </div>
+      </div>
     </div>
   )
 }
