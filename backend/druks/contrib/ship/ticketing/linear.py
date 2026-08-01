@@ -3,6 +3,8 @@ from typing import Any
 
 import httpx
 
+from .base import Tracker
+from .enums import TicketStatus
 from .exceptions import LinearAPIError
 
 LINEAR_GRAPHQL_URL = "https://api.linear.app/graphql"
@@ -132,3 +134,39 @@ def _status_id_by_name(states: list[dict[str, Any]], status_name: str) -> str:
 
     available = ", ".join(state["name"] for state in states)
     raise LinearAPIError(f"Linear status {status_name!r} was not found. Available: {available}")
+
+
+class Linear(Tracker):
+    known_exceptions = (LinearAPIError, httpx.HTTPError)
+
+    # READY_FOR_AGENT is operator-named; the rest are fixed.
+    _STATIC_STATUS_NAMES: dict[TicketStatus, str] = {
+        TicketStatus.IN_PROGRESS: "In Progress",
+        TicketStatus.IN_REVIEW: "In Review",
+        TicketStatus.DONE: "Done",
+        TicketStatus.CANCELED: "Canceled",
+    }
+
+    def __init__(
+        self,
+        *,
+        api_key: str,
+        ready_for_agent_status: str = "",
+        client: Any | None = None,
+    ) -> None:
+        self._client = LinearClient(api_key=api_key, client=client)
+        self._status_names = dict(self._STATIC_STATUS_NAMES)
+        # Empty leaves READY_FOR_AGENT unmapped.
+        if ready_for_agent_status:
+            self._status_names[TicketStatus.READY_FOR_AGENT] = ready_for_agent_status
+
+    async def set_status(self, key: str, status: TicketStatus) -> None:
+        name = self._status_names.get(status)
+        if not name:
+            raise ValueError(f"Linear has no configured status name for {status}")
+        # The status mutation resolves the issue by identifier, so the key is
+        # the id Linear wants.
+        await self._client.update_issue_status(key, name)
+
+    async def aclose(self) -> None:
+        await self._client.aclose()

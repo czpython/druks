@@ -1,9 +1,97 @@
 import pytest
-from druks.ticketing.enums import TicketStatus
-from druks.ticketing.exceptions import TrackerNotConfigured
-from druks.ticketing.helpers import get_tracker
-from druks.ticketing.jira import Jira
-from druks.ticketing.linear import Linear
+from druks.contrib.ship.checks import check_jira, check_linear
+from druks.contrib.ship.extension import Ship, secret_value
+from druks.contrib.ship.ticketing.enums import TicketStatus
+from druks.contrib.ship.ticketing.exceptions import JiraAPIError, LinearAPIError
+from druks.contrib.ship.ticketing.jira import Jira
+from druks.contrib.ship.ticketing.linear import Linear
+
+
+def _pin_ship_settings(monkeypatch, **values):
+    settings = Ship.Settings(**values)
+    monkeypatch.setattr(Ship, "settings", classmethod(lambda cls: settings))
+
+
+def test_secret_value_unwraps_and_defaults_empty():
+    settings = Ship.Settings(linear_api_key="lin_secret")
+    assert secret_value(settings.linear_api_key) == "lin_secret"
+    assert secret_value(settings.jira_api_token) == ""
+
+
+# --- Ship.tracker: source → configured tracker ------------------------------
+
+
+def test_tracker_builds_linear_from_settings(monkeypatch):
+    _pin_ship_settings(
+        monkeypatch, linear_api_key="lin_secret", linear_resting_status="Ready for Agent"
+    )
+
+    tracker = Ship.tracker("linear")
+
+    assert isinstance(tracker, Linear)
+    assert tracker._status_names[TicketStatus.READY_FOR_AGENT] == "Ready for Agent"
+
+
+def test_tracker_builds_jira_from_settings(monkeypatch):
+    _pin_ship_settings(
+        monkeypatch,
+        jira_base_url="https://jira.test",
+        jira_email="a@b.com",
+        jira_api_token="jira_secret",
+        jira_resting_status="Open",
+    )
+
+    tracker = Ship.tracker("jira")
+
+    assert isinstance(tracker, Jira)
+    assert tracker._status_names[TicketStatus.READY_FOR_AGENT] == "Open"
+
+
+def test_tracker_is_none_for_github_and_missing_credentials(monkeypatch):
+    _pin_ship_settings(monkeypatch, linear_api_key="lin_secret")
+
+    assert not Ship.tracker("github")
+    assert not Ship.tracker("jira")
+
+    _pin_ship_settings(monkeypatch, jira_base_url="https://jira.test", jira_email="a@b.com")
+    assert not Ship.tracker("jira")
+    assert not Ship.tracker("linear")
+
+
+def test_empty_resting_status_leaves_ready_for_agent_unmapped(monkeypatch):
+    _pin_ship_settings(monkeypatch, linear_api_key="lin_secret", linear_resting_status="")
+
+    tracker = Ship.tracker("linear")
+
+    assert TicketStatus.READY_FOR_AGENT not in tracker._status_names
+
+
+# --- Doctor checks ----------------------------------------------------------
+
+
+def test_ship_tracker_checks_read_extension_settings(monkeypatch):
+    _pin_ship_settings(monkeypatch, linear_api_key="lin_secret")
+    assert not check_linear().ok
+    assert "webhook secret" in check_linear().detail
+
+    _pin_ship_settings(
+        monkeypatch,
+        jira_base_url="https://jira.test",
+        jira_email="a@b.com",
+        jira_api_token="jira_secret",
+    )
+    assert not check_jira().ok
+    assert "webhook secret" in check_jira().detail
+
+
+def test_ship_tracker_checks_pass_when_unconfigured(monkeypatch):
+    _pin_ship_settings(monkeypatch)
+
+    assert check_linear().ok
+    assert check_jira().ok
+
+
+# --- Linear provider --------------------------------------------------------
 
 
 class _FakeLinearClient:
@@ -19,23 +107,11 @@ class _FakeLinearClient:
         self.calls.append(("aclose",))
 
 
-def _linear_with(fake: _FakeLinearClient, *, status_names=None) -> Linear:
-    """A Linear provider wired to the fake client (skips real-client init)."""
-    provider = Linear.__new__(Linear)
-    provider._client = fake  # type: ignore[attr-defined]
-    provider._status_names = status_names or {  # type: ignore[attr-defined]
-        TicketStatus.IN_PROGRESS: "In Progress",
-        TicketStatus.DONE: "Done",
-        TicketStatus.CANCELED: "Canceled",
-        TicketStatus.READY_FOR_AGENT: "Ready for Agent",
-    }
-    return provider
-
-
 @pytest.mark.asyncio
 async def test_set_status_maps_the_ticket_status_to_a_provider_name():
     fake = _FakeLinearClient()
-    provider = _linear_with(fake)
+    provider = Linear(api_key="lin_x", ready_for_agent_status="Ready for Agent", client=object())
+    provider._client = fake  # the unit seam is the API client, not HTTP
     await provider.set_status("ACME-270", TicketStatus.DONE)
     await provider.set_status("ACME-270", TicketStatus.READY_FOR_AGENT)
     assert fake.calls == [
@@ -46,43 +122,14 @@ async def test_set_status_maps_the_ticket_status_to_a_provider_name():
 
 @pytest.mark.asyncio
 async def test_set_status_unmapped_raises():
-    provider = _linear_with(_FakeLinearClient(), status_names={TicketStatus.DONE: "Done"})
+    provider = Linear(api_key="lin_x", client=object())
+    provider._client = _FakeLinearClient()
     with pytest.raises(ValueError, match="no configured status"):
-        await provider.set_status("ACME-270", TicketStatus.IN_REVIEW)
-
-
-def test_get_tracker_resolves_configured_linear(tmp_path, monkeypatch):
-    from druks.testing import make_settings
-    from druks.ticketing import linear
-
-    monkeypatch.setattr(
-        linear,
-        "load_settings",
-        lambda: make_settings(tmp_path, linear_api_key="lin_abc"),
-    )
-    tracker = get_tracker("linear")
-    assert isinstance(tracker, Linear)
-    assert tracker.source == "linear"
-
-
-def test_get_tracker_unknown_source_raises():
-    with pytest.raises(KeyError):
-        get_tracker("github")
-
-
-def test_get_tracker_unconfigured_raises(tmp_path, monkeypatch):
-    from druks.testing import make_settings
-    from druks.ticketing import linear
-
-    # linear_api_key defaults to None — provider exists but isn't configured.
-    monkeypatch.setattr(linear, "load_settings", lambda: make_settings(tmp_path))
-    with pytest.raises(TrackerNotConfigured):
-        get_tracker("linear")
+        await provider.set_status("ACME-270", TicketStatus.READY_FOR_AGENT)
 
 
 def test_linear_declares_known_exceptions():
     import httpx
-    from druks.core.apis.linear import LinearAPIError
 
     assert LinearAPIError in Linear.known_exceptions
     assert httpx.HTTPError in Linear.known_exceptions
@@ -112,13 +159,11 @@ class _FakeTracker:
 
 @pytest.mark.asyncio
 async def test_ticket_state_pushes_status(druks_db, monkeypatch):
-    from druks.contrib.ship import models
-
     from ship.factories import make_test_work_item
 
     item = make_test_work_item(repo="acme/widget", source="linear", ticket_key="ACME-1", title="t")
     fake = _FakeTracker()
-    monkeypatch.setattr(models, "get_tracker", lambda source, **_: fake)
+    monkeypatch.setattr(Ship, "tracker", classmethod(lambda cls, source: fake))
 
     await item.set_ticket_status(TicketStatus.DONE)
 
@@ -136,9 +181,6 @@ async def test_ticket_state_skips_non_tracker_source(druks_db):
 
 @pytest.mark.asyncio
 async def test_ticket_state_closes_on_failure(druks_db, monkeypatch):
-    from druks.contrib.ship import models
-    from druks.core.apis.linear import LinearAPIError
-
     from ship.factories import make_test_work_item
 
     item = make_test_work_item(repo="acme/widget", source="linear", ticket_key="ACME-2", title="t")
@@ -150,7 +192,7 @@ async def test_ticket_state_closes_on_failure(druks_db, monkeypatch):
             raise LinearAPIError("boom")
 
     boom = _Boom()
-    monkeypatch.setattr(models, "get_tracker", lambda source, **_: boom)
+    monkeypatch.setattr(Ship, "tracker", classmethod(lambda cls, source: boom))
 
     await item.set_ticket_status(TicketStatus.DONE)
 
@@ -173,51 +215,20 @@ class _FakeJiraClient:
         self.calls.append("aclose")
 
 
-def _jira_with(fake: _FakeJiraClient) -> Jira:
-    provider = Jira.__new__(Jira)
-    provider._client = fake  # type: ignore[attr-defined]
-    provider._status_names = {  # type: ignore[attr-defined]
-        TicketStatus.IN_PROGRESS: "In Progress",
-        TicketStatus.DONE: "Done",
-        TicketStatus.READY_FOR_AGENT: "Ready for Agent",
-    }
-    return provider
-
-
 @pytest.mark.asyncio
 async def test_jira_set_status_uses_transition():
     fake = _FakeJiraClient()
-    await _jira_with(fake).set_status("PROJ-7", TicketStatus.DONE)
+    provider = Jira(base_url="https://jira.test", email="a@b.com", api_token="tok", client=object())
+    provider._client = fake  # the unit seam is the API client, not HTTP
+    await provider.set_status("PROJ-7", TicketStatus.DONE)
     assert fake.calls == [("transition_issue", "PROJ-7", "Done")]
 
 
 def test_jira_declares_known_exceptions():
     import httpx
-    from druks.core.apis.jira import JiraAPIError
 
     assert JiraAPIError in Jira.known_exceptions
     assert httpx.HTTPError in Jira.known_exceptions
-
-
-def test_get_tracker_resolves_configured_jira(tmp_path, monkeypatch):
-    from druks.testing import make_settings
-    from druks.ticketing import jira
-
-    monkeypatch.setattr(
-        jira,
-        "load_settings",
-        lambda: make_settings(
-            tmp_path,
-            jira_base_url="https://jira.test",
-            jira_email="a@b.com",
-            jira_api_token="tok",
-        ),
-    )
-    tracker = get_tracker("jira", ready_for_agent_status="Open")
-    assert isinstance(tracker, Jira)
-    assert tracker.source == "jira"
-    # The operator names their own READY_FOR_AGENT status; the move looks it up here.
-    assert tracker._status_names[TicketStatus.READY_FOR_AGENT] == "Open"
 
 
 def test_jira_status_names_match_internal_tools_workflow():
@@ -225,19 +236,9 @@ def test_jira_status_names_match_internal_tools_workflow():
     # druks-managed tickets use. A regression here means set_status silently
     # fails against real Jira ("no transition to status X") — caught and logged,
     # so the ticket just never moves. Pin them.
-    from druks.ticketing.jira import _STATIC_STATUS_NAMES
-
-    assert _STATIC_STATUS_NAMES[TicketStatus.IN_PROGRESS] == "In Progress"
-    assert _STATIC_STATUS_NAMES[TicketStatus.IN_REVIEW] == "Waiting CR"
-    assert _STATIC_STATUS_NAMES[TicketStatus.DONE] == "Done"
+    names = Jira._STATIC_STATUS_NAMES
+    assert names[TicketStatus.IN_PROGRESS] == "In Progress"
+    assert names[TicketStatus.IN_REVIEW] == "Waiting CR"
+    assert names[TicketStatus.DONE] == "Done"
     # No cancel state in this workflow — abandoned work closes as Done.
-    assert _STATIC_STATUS_NAMES[TicketStatus.CANCELED] == "Done"
-
-
-def test_get_tracker_unconfigured_jira_raises(tmp_path, monkeypatch):
-    from druks.testing import make_settings
-    from druks.ticketing import jira
-
-    monkeypatch.setattr(jira, "load_settings", lambda: make_settings(tmp_path))
-    with pytest.raises(TrackerNotConfigured):
-        get_tracker("jira")
+    assert names[TicketStatus.CANCELED] == "Done"

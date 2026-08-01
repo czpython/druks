@@ -43,7 +43,7 @@ class Section:
 
 _SECTIONS = (
     Section(
-        "GITHUB AND TICKETING",
+        "GITHUB",
         (
             Entry(
                 "GITHUB_OPERATOR_APP_ID",
@@ -69,16 +69,6 @@ _SECTIONS = (
                 is_install_path=True,
             ),
             Entry("GITHUB_REVIEWER_PEM", ("github", "reviewer_pem"), is_install_path=True),
-            Entry(
-                "LINEAR_API_KEY",
-                ("ticketing", "linear_api_key"),
-                prompt="Linear API key (enter to skip Linear)",
-            ),
-            Entry(
-                "LINEAR_WEBHOOK_SECRET",
-                ("ticketing", "linear_webhook_secret"),
-                prompt="Linear webhook secret (enter to skip)",
-            ),
             Entry(
                 "DRUKS_ENDPOINT",
                 ("urls", "endpoint"),
@@ -160,7 +150,6 @@ _KNOWN_TOML_KEYS = {
         "jwt_identity_claim",
     ),
     "github": ("operator_app_id", "reviewer_app_id", "operator_pem", "reviewer_pem"),
-    "ticketing": ("linear_api_key", "linear_webhook_secret"),
     "urls": ("endpoint", "webhook_host"),
     "secrets": (
         "postgres_password",
@@ -282,11 +271,6 @@ operator_app_id = ""
 reviewer_app_id = ""
 operator_pem = "secrets/operator.pem"
 reviewer_pem = "secrets/reviewer.pem"
-
-# Optional ticketing integration.
-[ticketing]
-linear_api_key = ""
-linear_webhook_secret = ""
 
 # Public dashboard and webhook ingress addresses.
 [urls]

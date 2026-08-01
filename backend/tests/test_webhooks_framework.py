@@ -32,7 +32,6 @@ def settings(tmp_path) -> Settings:
     return Settings(
         data_dir=tmp_path,
         webhook_secret="test-secret",
-        linear_webhook_secret="",
     )
 
 

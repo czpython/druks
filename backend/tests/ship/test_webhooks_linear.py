@@ -1,14 +1,20 @@
+import hashlib
+import hmac
 from types import SimpleNamespace
 from typing import Any, cast
 
-import druks.core.webhooks.linear as linear_mod
-from druks.core.webhooks.linear import LinearEvents
+import pytest
+from druks.contrib.ship import webhooks as webhook_module
+from druks.contrib.ship.extension import Ship
+from druks.contrib.ship.webhooks import LinearEvents
 from druks.testing import make_settings
+from druks.webhooks.router import router as webhooks_router
+from fastapi import HTTPException
 
 
-def _provider(tmp_path, *, payload):
+def _provider(tmp_path, *, payload, headers=None):
     events = LinearEvents(
-        request=cast(Any, SimpleNamespace(headers={})),
+        request=cast(Any, SimpleNamespace(headers=headers or {})),
         kwargs={},
         settings=make_settings(tmp_path),
     )
@@ -38,8 +44,41 @@ def _capture(monkeypatch):
     async def _emit(event_type, **kwargs):
         events.append((event_type, kwargs["payload"]))
 
-    monkeypatch.setattr(linear_mod, "publish", _emit)
+    monkeypatch.setattr(webhook_module, "publish", _emit)
     return events
+
+
+def test_route_is_unchanged():
+    assert f"{webhooks_router.prefix}/{LinearEvents.path}" == "/_external/linear/events/"
+
+
+def test_authentication_reads_the_ship_secret(tmp_path, druks_db):
+    secret = "linear-secret"
+    raw_body = b"{}"
+    signature = hmac.new(secret.encode(), raw_body, hashlib.sha256).hexdigest()
+    Ship.override_setting("linear_webhook_secret", secret)
+    events = _provider(
+        tmp_path,
+        payload={},
+        headers={"linear-signature": signature},
+    )
+    events.raw_body = raw_body
+
+    assert events.request_is_authentic()
+
+
+def test_unconfigured_secret_keeps_signature_failure(tmp_path, druks_db):
+    events = _provider(
+        tmp_path,
+        payload={},
+        headers={"linear-signature": "anything"},
+    )
+    events.raw_body = b"{}"
+
+    with pytest.raises(HTTPException) as error:
+        events.request_is_authentic()
+
+    assert error.value.status_code == 500
 
 
 async def test_terminal_state_types_mark_the_transition_terminal(tmp_path, monkeypatch):

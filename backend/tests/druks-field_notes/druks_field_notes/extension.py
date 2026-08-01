@@ -1,5 +1,5 @@
 import os
-from typing import TYPE_CHECKING, Literal
+from typing import Literal
 
 from druks.agents import Agent
 from druks.doctor import CheckResult
@@ -8,9 +8,6 @@ from pydantic import BaseModel, Field, SecretStr, field_validator
 
 from druks_field_notes.contracts import GistOutput
 
-if TYPE_CHECKING:
-    from druks.settings import Settings
-
 # The env var field_notes would read its summarizer credential from. Unset in a
 # bare install, so the check below reports it missing — the "extension owns a check
 # for its own API key" case, kept to an env read so the proof package needs no real
@@ -18,7 +15,7 @@ if TYPE_CHECKING:
 API_KEY_ENV = "FIELD_NOTES_API_KEY"
 
 
-def check_summary_api_key(settings: "Settings") -> CheckResult:
+def check_summary_api_key() -> CheckResult:
     """The summarizer needs its provider credential; report a missing one as a
     failure the operator can act on rather than letting the first run blow up."""
     if not os.environ.get(API_KEY_ENV):

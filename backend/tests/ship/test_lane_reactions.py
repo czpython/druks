@@ -4,12 +4,12 @@ import druks.contrib.ship.subscribers  # noqa: F401 — registers the lane react
 import pytest
 from druks.contrib.ship.contracts import ReviewWork
 from druks.contrib.ship.models import WorkItem
+from druks.contrib.ship.ticketing.enums import TicketStatus
 from druks.contrib.ship.workflows import Build
 from druks.durable import Run
 from druks.durable.enums import WorkflowEvent
 from druks.signals import publish
 from druks.testing import seed_dbos_status
-from druks.ticketing.enums import TicketStatus
 from uuid_utils import uuid7
 
 from ship.factories import make_test_work_item

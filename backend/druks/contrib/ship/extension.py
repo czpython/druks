@@ -1,6 +1,7 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, SecretStr
 
 from druks.agents import Agent
+from druks.contrib.ship.checks import check_jira, check_linear
 from druks.contrib.ship.contracts import (
     CodeReviewOutput,
     ContractRevisionOutput,
@@ -11,6 +12,9 @@ from druks.contrib.ship.contracts import (
     ReviewOutput,
     TriageOutput,
 )
+from druks.contrib.ship.ticketing.base import Tracker
+from druks.contrib.ship.ticketing.jira import Jira
+from druks.contrib.ship.ticketing.linear import Linear
 from druks.db import StoredSubject
 from druks.extensions import Extension
 from druks.workflows import SubjectActivity
@@ -20,6 +24,10 @@ from druks.workflows import SubjectActivity
 _PHASE_META: dict[str, SubjectActivity] = {
     "provisioning_vm": SubjectActivity(label="Building sandbox VM…", kind="infra"),
 }
+
+
+def secret_value(secret: SecretStr | None) -> str:
+    return secret.get_secret_value() if secret else ""
 
 
 class Ship(Extension):
@@ -33,8 +41,39 @@ class Ship(Extension):
         "model, or inherits its harness default — the backend dispatches the harness "
         "from the model you pick."
     )
+    checks = [check_linear, check_jira]
 
     class Settings(BaseModel):
+        linear_api_key: SecretStr | None = Field(
+            default=None,
+            title="Linear API key",
+            description="API key used to read and update Linear tickets.",
+        )
+        linear_webhook_secret: SecretStr | None = Field(
+            default=None,
+            title="Linear webhook secret",
+            description="Secret used to authenticate Linear webhook deliveries.",
+        )
+        jira_base_url: str = Field(
+            default="",
+            title="Jira base URL",
+            description="Base URL of the Jira Cloud site.",
+        )
+        jira_email: str = Field(
+            default="",
+            title="Jira email",
+            description="Email address used to authenticate with Jira Cloud.",
+        )
+        jira_api_token: SecretStr | None = Field(
+            default=None,
+            title="Jira API token",
+            description="API token used to read and update Jira tickets.",
+        )
+        jira_webhook_secret: SecretStr | None = Field(
+            default=None,
+            title="Jira webhook secret",
+            description="Secret used to authenticate Jira webhook deliveries.",
+        )
         # The tracker status names that drive build's funnel. They're operator
         # knobs — the names an operator's Linear/Jira workflow actually uses — so
         # they live here, not on core Settings.
@@ -64,12 +103,28 @@ class Ship(Extension):
         )
 
     @classmethod
-    def resting_status(cls, source: str) -> str:
-        # Core ticketing can't import this extension, so it takes the name as an argument.
+    def tracker(cls, source: str) -> Tracker | None:
+        """The configured tracker behind ``source``, or None when that source has
+        no tracker (github) or its credentials aren't set yet."""
         settings = cls.settings()
-        if source == "jira":
-            return settings.jira_resting_status
-        return settings.linear_resting_status
+        if source == "linear" and secret_value(settings.linear_api_key):
+            return Linear(
+                api_key=secret_value(settings.linear_api_key),
+                ready_for_agent_status=settings.linear_resting_status,
+            )
+        if (
+            source == "jira"
+            and settings.jira_base_url
+            and settings.jira_email
+            and secret_value(settings.jira_api_token)
+        ):
+            return Jira(
+                base_url=settings.jira_base_url,
+                email=settings.jira_email,
+                api_token=secret_value(settings.jira_api_token),
+                ready_for_agent_status=settings.jira_resting_status,
+            )
+        return
 
     # The build pipeline's agents — the extension owns them; any of its workflows run
     # them. The attribute name is each agent's id (its durable settings/timeline key).

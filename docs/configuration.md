@@ -7,7 +7,7 @@ without replacing the process.
 | Plane | Examples | Stored in |
 | --- | --- | --- |
 | Deployment | database, Redis, ingress, GitHub App keys, Drukbox, encryption key | `~/druks/druks.toml` |
-| Dashboard | timezone, harness connections/defaults, workflow and agent overrides, notifications, MCP servers, skills | Postgres |
+| Dashboard | timezone, harness and tracker credentials, workflow and agent overrides, notifications, MCP servers, skills | Postgres |
 
 The installer renders the complete deployment `.env` from `druks.toml`; `.env`
 is a build artifact consumed by Compose, Druks, and Drukbox, not an authored
@@ -32,7 +32,6 @@ host-run development template.
 | --- | --- |
 | `[identity]` | Browser identity mode and header or JWT verification inputs |
 | `[github]` | Operator and reviewer App ids and host PEM paths |
-| `[ticketing]` | Linear credentials |
 | `[urls]` | Dashboard callback base URL and public webhook hostname |
 | `[secrets]` | Generated deployment secrets |
 | `[paths]` | Host data and harness configuration paths |
@@ -79,7 +78,7 @@ caches, and the sandbox provisioning gate.
 | --- | --- |
 | `DRUKS_ENDPOINT` | Browser-visible dashboard base URL used to build MCP OAuth callbacks |
 | `DRUKS_WEBHOOK_HOST` | Public webhook hostname used by `druks doctor` for its ingress probe |
-| `DRUKS_WEBHOOK_SECRET` | Shared HMAC secret used by bundled webhook integrations |
+| `DRUKS_WEBHOOK_SECRET` | Shared HMAC secret used by the GitHub webhook integration |
 | `DRUKS_AUTH_MODE` | `none` (default; no authentication, single operator), `header` (edge-asserted identity), or `jwt` (edge-signed assertion, verified) |
 | `DRUKS_AUTH_HEADER` | The trusted identity header; read by both the shipped Caddy edge and Druks. No default — header and jwt modes refuse to start without it |
 | `DRUKS_AUTH_JWKS_URL` | `jwt` mode: where the edge publishes its signing keys |
@@ -133,9 +132,9 @@ publish it.
 
 Any public listener that bypasses the identity edge must never forward
 `DRUKS_AUTH_HEADER` upstream. The shipped webhook listener already serves
-only HMAC-verified `/_external/*` and the PAT-authenticated `/mcp` — nothing
-that resolves the header — and any future public listener (for example the
-planned MCP integrations listener) must keep that same isolation.
+only provider-authenticated `/_external/*` and the PAT-authenticated `/mcp` —
+nothing that resolves the header — and any future public listener (for example
+the planned MCP integrations listener) must keep that same isolation.
 
 Public `POST /_external/*` routes bypass the identity gate and carry their
 own authentication — webhook signature verification, and the notification
@@ -220,31 +219,17 @@ at another compatible GitHub API endpoint.
 
 ## Ticketing integrations
 
-The bundled integrations support Linear and Jira. Configure only one ticketing
-source for `ship` intake.
+Configure one tracker in **Settings → Ship**. Linear needs an API key and webhook
+secret; Jira Cloud needs its base URL, email, API token, and webhook secret.
+Tracker credentials and the statuses that trigger or move `ship` work are stored
+as ship extension settings.
 
-Linear:
-
-```dotenv
-LINEAR_API_KEY=
-LINEAR_WEBHOOK_SECRET=
-```
-
-Jira Cloud:
-
-```dotenv
-JIRA_BASE_URL=https://example.atlassian.net
-JIRA_EMAIL=operator@example.com
-JIRA_API_TOKEN=
-JIRA_WEBHOOK_SECRET=
-```
-
-`druks doctor` treats an entirely absent integration as optional. Once the main
-credential fields are present, its webhook secret is required. Webhook URLs use
-`/_external/linear/events/` and `/_external/jira/events/`.
-
-The statuses that trigger or move `ship` work are settings declared by the
-extension and edited in the dashboard, not environment variables.
+Webhook URLs remain `/_external/linear/events/` and
+`/_external/jira/events/`. The Jira webhook is a Jira Automation "Send web
+request" action with **Issue data (Jira format)** as its body — the REST issue
+JSON under `issue` is the one accepted shape — and the shared token in the
+`x-druks-webhook-token` header. `druks doctor` treats an unconfigured tracker as
+optional and requires its webhook secret once its credentials are complete.
 
 ## Harnesses
 
@@ -356,8 +341,8 @@ Keep the old key until no stored row depends on it. Losing every key used for a
 row makes that secret unrecoverable; reconnect OAuth grants and re-enter static
 tokens. Validation and API errors intentionally omit submitted secret values.
 
-The encryption envelope does **not** currently cover harness subscription
-payloads or notification webhook URLs. They are stored as ordinary Postgres
-fields, although APIs withhold or mask their values. Treat access to Postgres
-and its backups as access to those credentials. GitHub App private keys remain
-files mounted into the process rather than database values.
+The encryption envelope does **not** currently cover tracker extension settings,
+harness subscription payloads, or notification webhook URLs. They are stored as
+ordinary Postgres fields, although APIs withhold or mask their values. Treat
+access to Postgres and its backups as access to those credentials. GitHub App
+private keys remain files mounted into the process rather than database values.

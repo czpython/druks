@@ -40,8 +40,8 @@ class WebhookSource(BaseResponse):
 
 
 class WebhookFreshness(BaseResponse):
-    # One entry per active webhook source (the code host plus the configured tracker),
-    # each with its newest delivery timestamp; the strip labels a tile per source.
+    # One entry per monitored webhook source, with its newest delivery timestamp;
+    # the strip labels a tile per source.
     sources: list[WebhookSource] = Field(default_factory=list)
 
 
