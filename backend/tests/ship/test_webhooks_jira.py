@@ -146,7 +146,7 @@ async def test_open_category_is_not_terminal(tmp_path, monkeypatch):
 
 
 def _pin_settings(monkeypatch, **over):
-    settings = subs.Ship.Settings(**over)
+    settings = subs.Ship.Settings(**{"tracker": "jira", **over})
     monkeypatch.setattr(subs.Ship, "settings", classmethod(lambda cls: settings))
 
 
@@ -205,5 +205,15 @@ async def test_refinement_candidate_status_no_longer_dispatches(tmp_path, monkey
     monkeypatch.setattr(subs.Build, "dispatch", build)
 
     await subs.ticket_transition_drives_the_funnel(payload=_jira_payload(status="Backlog"))
+
+    build.assert_not_called()
+
+
+async def test_nonchosen_tracker_status_does_not_dispatch(monkeypatch):
+    _pin_settings(monkeypatch, tracker="linear", jira_trigger_status="Ready")
+    build = AsyncMock()
+    monkeypatch.setattr(subs.Build, "dispatch", build)
+
+    await subs.ticket_transition_drives_the_funnel(payload=_jira_payload(status="Ready"))
 
     build.assert_not_called()

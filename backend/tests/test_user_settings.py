@@ -52,6 +52,10 @@ class _Declared(BaseModel):
     flag: bool = False
     count: int = Field(default=1, ge=0)
     label: str = ""
+    conditional_label: str = Field(
+        default="",
+        json_schema_extra={"section": "Advanced", "visible_when": {"flag": True}},
+    )
     choice: Literal["a", "b", "c"] = "a"
     numeric_choice: Literal[1, 2, 3] = 1
     optional_choice: Literal["x", "y"] | None = None
@@ -84,6 +88,15 @@ def test_scalar_fields_project_their_wire_kind():
     assert _field("flag", value=True)["type"] == "bool"
     assert _field("count", value=3)["type"] == "int"
     assert _field("label", value="hi")["type"] == "str"
+
+
+def test_field_metadata_projects_section_and_raw_visibility_target():
+    projected = _field("conditional_label", value="shown")
+
+    assert projected["section"] == "Advanced"
+    assert projected["visibleWhenField"] == "flag"
+    # The target keeps its declared type; "True" would never match on the client.
+    assert projected["visibleWhenValue"] is True
 
 
 def test_enum_field_exposes_its_choices():
@@ -163,6 +176,42 @@ def test_nested_model_settings_field_is_rejected_at_declaration():
 
     with pytest.raises(SettingsDeclarationError, match="inner"):
         validate_settings_declaration(_NestedSettings)
+
+
+def test_visible_when_rejects_an_unknown_controller():
+    class _Settings(BaseModel):
+        dependent: str = Field(json_schema_extra={"visible_when": {"missing": True}})
+
+    with pytest.raises(SettingsDeclarationError, match="missing.*not declared"):
+        validate_settings_declaration(_Settings)
+
+
+def test_visible_when_rejects_a_target_outside_the_controller_literal():
+    class _Settings(BaseModel):
+        controller: Literal["one", "two"] = "one"
+        dependent: str = Field(json_schema_extra={"visible_when": {"controller": "three"}})
+
+    with pytest.raises(SettingsDeclarationError, match="three.*not a member"):
+        validate_settings_declaration(_Settings)
+
+
+def test_visible_when_rejects_a_secret_controller():
+    class _Settings(BaseModel):
+        controller: SecretStr | None = None
+        dependent: str = Field(json_schema_extra={"visible_when": {"controller": "set"}})
+
+    with pytest.raises(SettingsDeclarationError, match="controller.*cannot be secret"):
+        validate_settings_declaration(_Settings)
+
+
+def test_visible_when_rejects_a_controller_with_its_own_condition():
+    class _Settings(BaseModel):
+        root: bool = True
+        controller: str = Field(json_schema_extra={"visible_when": {"root": True}})
+        dependent: str = Field(json_schema_extra={"visible_when": {"controller": "shown"}})
+
+    with pytest.raises(SettingsDeclarationError, match="controller.*itself.*visible_when"):
+        validate_settings_declaration(_Settings)
 
 
 def test_extension_settings_must_subclass_extension_settings():

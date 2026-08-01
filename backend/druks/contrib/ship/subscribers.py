@@ -74,9 +74,7 @@ async def pr_close_settles_the_item(*, repo: str, pr_number: int, payload: dict)
 
 @subscribe("ticket.transitioned")
 async def ticket_transition_drives_the_funnel(*, payload: dict) -> None:
-    """Dispatch a build when a tracker ticket enters its provider's trigger status."""
-    source, status = payload["source"], payload["status"]
+    """Dispatch a build when a ticket from the chosen tracker enters its trigger status."""
     settings = Ship.settings()
-    trigger = settings.linear_trigger_status if source == "linear" else settings.jira_trigger_status
-    if trigger and status == trigger:
+    if payload["source"] == settings.tracker and payload["status"] == settings.trigger_status:
         await Build.dispatch(ticket=payload)

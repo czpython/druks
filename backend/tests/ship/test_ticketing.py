@@ -1,9 +1,12 @@
+import httpx
 import pytest
 from druks.contrib.ship.extension import Ship
 from druks.contrib.ship.ticketing.enums import TicketStatus
 from druks.contrib.ship.ticketing.exceptions import JiraAPIError, LinearAPIError
 from druks.contrib.ship.ticketing.jira import Jira
 from druks.contrib.ship.ticketing.linear import Linear
+
+from ship.factories import make_test_work_item
 
 
 def _pin_ship_settings(monkeypatch, **values):
@@ -40,6 +43,7 @@ def test_tracker_builds_linear_from_settings(monkeypatch):
 def test_tracker_builds_jira_from_settings(monkeypatch):
     _pin_ship_settings(
         monkeypatch,
+        tracker="jira",
         jira_base_url="https://jira.test",
         jira_email="a@b.com",
         jira_api_token="jira_secret",
@@ -58,8 +62,16 @@ def test_tracker_is_none_for_github_and_missing_credentials(monkeypatch):
     assert not Ship.tracker("github")
     assert not Ship.tracker("jira")
 
-    _pin_ship_settings(monkeypatch, jira_base_url="https://jira.test", jira_email="a@b.com")
+    _pin_ship_settings(
+        monkeypatch, tracker="jira", jira_base_url="https://jira.test", jira_email="a@b.com"
+    )
     assert not Ship.tracker("jira")
+    assert not Ship.tracker("linear")
+
+
+def test_tracker_ignores_a_nonchosen_source_with_credentials(monkeypatch):
+    _pin_ship_settings(monkeypatch, tracker="jira", linear_api_key="lin_secret")
+
     assert not Ship.tracker("linear")
 
 
@@ -109,8 +121,6 @@ async def test_set_status_unmapped_raises():
 
 
 def test_linear_declares_known_exceptions():
-    import httpx
-
     assert LinearAPIError in Linear.known_exceptions
     assert httpx.HTTPError in Linear.known_exceptions
 
@@ -139,8 +149,6 @@ class _FakeTracker:
 
 @pytest.mark.asyncio
 async def test_ticket_state_pushes_status(druks_db, monkeypatch):
-    from ship.factories import make_test_work_item
-
     item = make_test_work_item(repo="acme/widget", source="linear", ticket_key="ACME-1", title="t")
     fake = _FakeTracker()
     monkeypatch.setattr(Ship, "tracker", classmethod(lambda cls, source: fake))
@@ -152,8 +160,6 @@ async def test_ticket_state_pushes_status(druks_db, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_ticket_state_skips_non_tracker_source(druks_db):
-    from ship.factories import make_test_work_item
-
     item = make_test_work_item(repo="acme/widget", source="github", ticket_key="#5", title="t")
     # github has no tracker — a no-op that must not raise.
     await item.set_ticket_status(TicketStatus.DONE)
@@ -161,8 +167,6 @@ async def test_ticket_state_skips_non_tracker_source(druks_db):
 
 @pytest.mark.asyncio
 async def test_ticket_state_closes_on_failure(druks_db, monkeypatch):
-    from ship.factories import make_test_work_item
-
     item = make_test_work_item(repo="acme/widget", source="linear", ticket_key="ACME-2", title="t")
 
     class _Boom(_FakeTracker):
@@ -205,8 +209,6 @@ async def test_jira_set_status_uses_transition():
 
 
 def test_jira_declares_known_exceptions():
-    import httpx
-
     assert JiraAPIError in Jira.known_exceptions
     assert httpx.HTTPError in Jira.known_exceptions
 

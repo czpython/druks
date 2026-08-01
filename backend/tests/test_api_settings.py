@@ -236,6 +236,9 @@ def test_extensions_surface_build_agents_and_workflow_defaults(tmp_path: Path):
         "value": "human",
         "default": "human",
         "choices": ["human", "machine", "machine_then_human"],
+        "section": "",
+        "visibleWhenField": "",
+        "visibleWhenValue": None,
         "secretSet": None,
         "overridden": False,
     }

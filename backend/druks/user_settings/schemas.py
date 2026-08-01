@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.fields import FieldInfo
 
-from druks.extensions.settings import field_choices, field_kind
+from druks.extensions.settings import field_choices, field_kind, field_section, field_visibility
 from druks.schemas import BaseResponse
 
 if TYPE_CHECKING:
@@ -105,6 +105,12 @@ class SettingsFieldResponse(BaseResponse):
     default: Any
     # An enum field's allowed values; None for every other kind.
     choices: list[str] | None
+    # The heading this field groups under; empty for an ungrouped one.
+    section: str
+    # The sibling field this one is shown for, and the value that field must hold. The
+    # name is empty when the field is always shown.
+    visible_when_field: str
+    visible_when_value: Any
     # For a secret field, whether a non-empty value is currently stored (override or
     # default). None for every other kind — the UI shows a "set / not set" hint only
     # for secrets.
@@ -117,6 +123,7 @@ class SettingsFieldResponse(BaseResponse):
     ) -> "SettingsFieldResponse":
         kind = field_kind(field)
         secret = kind == "secret"
+        controller, target = field_visibility(field)
         return cls(
             name=name,
             label=field.title or name,
@@ -125,6 +132,9 @@ class SettingsFieldResponse(BaseResponse):
             value=None if secret else value,
             default=None if secret else field.default,
             choices=field_choices(field),
+            section=field_section(field),
+            visible_when_field=controller,
+            visible_when_value=target,
             secret_set=bool(value) if secret else None,
             overridden=overridden,
         )
