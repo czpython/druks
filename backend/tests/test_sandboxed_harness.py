@@ -431,6 +431,14 @@ def _claude_result_event(text: str) -> bytes:
         (
             ClaudeHarness,
             _claude_result_event(
+                "Failed to authenticate: OAuth session expired and could not be refreshed"
+            ),
+            HarnessAuthError,
+            "auth",
+        ),
+        (
+            ClaudeHarness,
+            _claude_result_event(
                 'API Error: 503 {"type":"error","error":'
                 '{"type":"api_error","message":"Internal server error"}}'
             ),

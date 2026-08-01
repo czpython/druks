@@ -14,6 +14,7 @@ class HarnessError(Exception):
     # unclassified, which is never retried.
     code: ClassVar[str] = ""
     retry: ClassVar[Retry] = Retry.NEVER
+    retry_delays: ClassVar[tuple[int, ...]] = ()
 
 
 class StreamJsonError(ValueError):
@@ -31,6 +32,7 @@ class HarnessTimeoutError(HarnessError):
 class HarnessOverloadedError(HarnessError):
     code = "overloaded"
     retry = Retry.TRANSIENT
+    retry_delays = (300, 900)
 
 
 class HarnessRateLimitError(HarnessError):
@@ -57,6 +59,7 @@ class HarnessSandboxError(HarnessError):
 
     code = "sandbox"
     retry = Retry.TRANSIENT
+    retry_delays = (60, 300)
 
 
 class OAuthTokenError(Exception):
@@ -114,3 +117,6 @@ class HarnessFirstByteTimeoutError(HarnessError):
 
     code = "first_byte"
     retry = Retry.TRANSIENT
+    # Two immediate retries: the failed attempt cost 90 seconds, not minutes,
+    # and the wedge is CLI-local — waiting buys nothing.
+    retry_delays = (0, 0)

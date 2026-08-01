@@ -63,6 +63,7 @@ class ClaudeHarness(Harness):
         "rate_limit": exceptions.HarnessRateLimitError,
         "api error: 401": exceptions.HarnessAuthError,
         "authentication_error": exceptions.HarnessAuthError,
+        "failed to authenticate": exceptions.HarnessAuthError,
         "oauth token": exceptions.HarnessAuthError,
         "invalid api key": exceptions.HarnessAuthError,
         "overloaded": exceptions.HarnessOverloadedError,
