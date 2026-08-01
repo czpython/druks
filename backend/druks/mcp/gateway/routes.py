@@ -1,6 +1,4 @@
-from typing import Annotated
-
-from fastapi import APIRouter, Body, Depends
+from fastapi import APIRouter, Depends
 
 from druks.accounts.dependencies import current_account
 from druks.accounts.models import Account
@@ -52,32 +50,6 @@ async def get_agent_call(call_id: str) -> schemas.AgentCallDetailResponse:
     """One agent call's metadata with bounded transcript and stderr tails and
     an artifact chunk."""
     return services.get_agent_call(call_id)
-
-
-@router.post(
-    "/runs/{run_id}/cancel",
-    operation_id="cancel_run",
-    response_model=schemas.CancelRunResponse,
-    response_model_by_alias=True,
-)
-async def cancel_run(
-    run_id: str, reason: Annotated[str, Body(embed=True, min_length=1, max_length=500)]
-) -> schemas.CancelRunResponse:
-    """Cancel an active run, recording the reason as its failure; a repeat
-    cancel reports already_cancelled."""
-    return await services.cancel_run(run_id, reason=reason)
-
-
-@router.post(
-    "/runs/{run_id}/retry",
-    operation_id="retry_run",
-    response_model=schemas.RetryRunResponse,
-    response_model_by_alias=True,
-)
-async def retry_run(run_id: str) -> schemas.RetryRunResponse:
-    """Rerun a failed run from the step that killed it, reusing every
-    completed step."""
-    return await services.retry_run(run_id)
 
 
 @router.get(

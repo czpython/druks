@@ -17,6 +17,15 @@ class ResumeRequest(BaseModel):
     note: str = ""
 
 
+class CancelRunResponse(BaseResponse):
+    run_id: str
+    result: Literal["cancelled", "already_cancelled"]
+
+
+class RetryRunResponse(BaseResponse):
+    run_id: str
+
+
 class ArtifactContent(BaseResponse):
     # A call's renderable output, served to the in-app review so it can show the
     # plan (or other markdown) beside its controls.

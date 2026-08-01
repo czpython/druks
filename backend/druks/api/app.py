@@ -15,6 +15,7 @@ from druks.accounts.dependencies import current_account, resolve_single_operator
 from druks.accounts.exceptions import AuthConfigurationError
 from druks.accounts.routes import router as auth_router
 from druks.api.artifacts import router as artifacts_router
+from druks.api.exceptions import AgentApiError
 from druks.api.runs import router as runs_router
 from druks.database import configure_session, create_engine_from_url, db_session, session_scope
 from druks.durable.engine import init_dbos, launch, shutdown
@@ -22,7 +23,6 @@ from druks.events.routes import router as events_router
 from druks.extensions.loader import iter_extensions, load
 from druks.harnesses.routes import router as harness_connection_router
 from druks.mcp.catalog import load_mcp_catalog
-from druks.mcp.gateway.exceptions import AgentApiError
 from druks.mcp.gateway.routes import router as gateway_router
 from druks.mcp.routes import router as mcp_router
 from druks.notifications.routes import external_router as notifications_external_router

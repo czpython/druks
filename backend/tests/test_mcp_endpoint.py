@@ -36,13 +36,14 @@ _WIRE_HEADERS = {
     "Content-Type": "application/json",
 }
 
-# tools/list order is the gateway router's declaration order.
+# tools/list order is route declaration order: the runs router mounts before
+# the gateway router.
 _TOOL_NAMES = [
+    "cancel_run",
+    "retry_run",
     "get_gate",
     "answer_gate",
     "get_agent_call",
-    "cancel_run",
-    "retry_run",
     "get_usage",
 ]
 
