@@ -1,6 +1,9 @@
+import asyncio
 import contextlib
+import random
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -13,6 +16,7 @@ from druks.durable.engine import _step_engine, step_session
 from druks.durable.exceptions import WorkflowError
 from druks.durable.models import AgentCall, Artifact
 from druks.extensions.registry import agents
+from druks.harnesses.exceptions import HarnessError, Retry
 from druks.harnesses.models import HarnessConnection
 from druks.harnesses.registry import get_harness_for_model
 from druks.prompts import render_prompt
@@ -20,6 +24,7 @@ from druks.sandbox import gate as sandbox_gate
 from druks.sandbox.client import sandbox_client
 from druks.sandbox.constants import MAX_AGENT_TIMEOUT_SECONDS
 from druks.settings import load_settings
+from druks.usage.models import UsageScrape
 from druks.user_settings.models import SettingsOverride
 from druks.workflows import _in_step, current_workflow
 
@@ -28,6 +33,10 @@ if TYPE_CHECKING:
     from druks.workflows import Workflow
 
 __all__ = ["Agent", "AgentOutput"]
+
+_QUOTA_FALLBACK_WAIT_SECONDS = 30 * 60
+_QUOTA_MAX_WAIT_SECONDS = 6 * 60 * 60
+_REAP_BEFORE_WAIT_SECONDS = 120
 
 
 @contextlib.asynccontextmanager
@@ -151,19 +160,97 @@ class Agent:
             return await self._run(workflow_id=workflow.workflow_id, **context)
 
         if _in_step.get():
-            return await _invoke()  # the enclosing @step owns the session + memoizes it
+            transient_retry_index = 0
+            while True:
+                try:
+                    return await _invoke()  # the enclosing @step owns the session + memoizes it
+                except HarnessError as error:
+                    # Transient only, on the error's own schedule. Quota waits
+                    # are hours; nothing that long belongs inside a held step,
+                    # so those fail here instead of sleeping.
+                    if error.retry is not Retry.TRANSIENT or transient_retry_index >= len(
+                        error.retry_delays
+                    ):
+                        raise
+                    delay = error.retry_delays[transient_retry_index]
+                    transient_retry_index += 1
+                    # Plain sleep: nothing checkpoints inside a step — a crash
+                    # re-runs the whole enclosing step from attempt one anyway.
+                    await asyncio.sleep(delay * random.uniform(0.9, 1.1))
 
         async def _do() -> Any:  # a standalone run is its own memoized step + session
             async with step_session():
                 return await _invoke()
 
-        result = await DBOS.run_step_async(
-            StepOptions(name=f"{workflow.kind}.agent.{self.id}"), _do
-        )
-        # Body-level only, on both passes: in-step calls hit the early return
-        # live and are skipped with their step on replay.
-        workflow.journal.add(result)
-        return result
+        async def _quota_retry_wait() -> float:
+            # Runs as its own step: the body does no IO, and replay reuses the
+            # recorded wait instead of re-reading the scrape.
+            async with step_session():
+                harness = get_harness_for_model(self.get_model_name())
+                # The scrape belongs to the charged connection — its account
+                # differs from the run's on fallback.
+                connection = HarnessConnection.lookup(harness.name, workflow.account_id)
+                scrape = UsageScrape.latest_for(harness.name, connection.account_id)
+                if scrape:
+                    now = datetime.now(UTC)
+                    # The nearest window still ahead: the five-hour one usually
+                    # turns first; an exhausted week is what the caller caps on.
+                    reset = scrape.five_hour_resets_at
+                    if reset and reset > now:
+                        return (reset - now).total_seconds()
+                    reset = scrape.week_resets_at
+                    if reset and reset > now:
+                        return (reset - now).total_seconds()
+                # No scrape yet, or nothing ahead of now: a blind half hour.
+                return _QUOTA_FALLBACK_WAIT_SECONDS
+
+        transient_retry_index = 0
+        quota_retried = False
+        while True:
+            try:
+                result = await DBOS.run_step_async(
+                    StepOptions(name=f"{workflow.kind}.agent.{self.id}"), _do
+                )
+            except HarnessError as error:
+                if error.retry is Retry.TRANSIENT:
+                    # One retry per delay on the error's own schedule; past it,
+                    # the failure stands.
+                    if transient_retry_index >= len(error.retry_delays):
+                        raise
+                    delay = error.retry_delays[transient_retry_index]
+                    transient_retry_index += 1
+                    # Jitter, so a provider outage doesn't wake every run at once.
+                    wait_seconds = delay * random.uniform(0.9, 1.1)
+                elif error.retry is Retry.QUOTA:
+                    # One shot: sleep until the provider's window turns, read
+                    # off the latest usage scrape.
+                    if quota_retried:
+                        raise
+                    quota_retried = True
+                    wait_seconds = await DBOS.run_step_async(
+                        StepOptions(name=f"{workflow.kind}.agent.{self.id}.retry_wait"),
+                        _quota_retry_wait,
+                    )
+                    # A far-off reset (an exhausted weekly window) isn't worth
+                    # sleeping into — fail now.
+                    if wait_seconds > _QUOTA_MAX_WAIT_SECONDS:
+                        raise
+                    wait_seconds += random.uniform(60, 120)
+                else:
+                    # Permanent or unclassified — never retried.
+                    raise
+                # A long sleep shouldn't hold a VM; the next attempt rebuilds
+                # its workspace from git, like a gate park.
+                if wait_seconds >= _REAP_BEFORE_WAIT_SECONDS:
+                    await workflow._reap_run()
+                # Durable: the end time checkpoints now, so a restart resumes
+                # with the remaining wait, and replay skips it entirely.
+                await DBOS.sleep_async(wait_seconds)
+            else:
+                # Body-level only, on both passes: in-step calls hit the early return
+                # live and are skipped with their step on replay.
+                workflow.journal.add(result)
+                return result
 
     async def _run(self, *, workflow_id: str, **context: Any) -> Any:
         """The raw execution: provision or attach a host, record the AgentCall, run

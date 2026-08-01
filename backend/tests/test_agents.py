@@ -1,4 +1,6 @@
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -95,9 +97,27 @@ def current_run():
     # An agent call reads its workflow from current_workflow; set it like the run engine does.
     from druks.workflows import Workflow, current_workflow
 
-    token = current_workflow.set(Workflow())
-    yield
+    workflow = Workflow()
+    workflow._workflow_id = "wf-9"
+    workflow.kind = "test"
+    token = current_workflow.set(workflow)
+    yield workflow
     current_workflow.reset(token)
+
+
+@pytest.fixture
+def _inline_agent_steps(monkeypatch):
+    # Run agent attempts and quota lookups inline while retaining their DBOS step boundaries.
+    checkpoints = []
+
+    async def run_inline(options, function):
+        checkpoints.append(options)
+        return await function()
+
+    sleep = AsyncMock()
+    monkeypatch.setattr(agents.DBOS, "run_step_async", run_inline)
+    monkeypatch.setattr(agents.DBOS, "sleep_async", sleep)
+    return checkpoints, sleep
 
 
 async def test_run_outside_workflow_raises():
@@ -305,6 +325,242 @@ async def test_a_carried_failure_is_raised_with_its_code(
     assert call.last_error == (
         "dummy: HarnessOverloadedError: claude exited with 1. API Error: 529 Overloaded."
     )
+
+
+async def test_body_level_overload_retries_as_separate_durable_attempts(
+    druks_db, tmp_path, monkeypatch, current_run, _inline_agent_steps
+):
+    from druks.harnesses.exceptions import HarnessOverloadedError
+
+    failures = [
+        HarnessOverloadedError("overloaded once"),
+        HarnessOverloadedError("overloaded twice"),
+    ]
+    sandbox = _patch_runtime(monkeypatch, tmp_path, {"ok": True})
+    sandbox.run_agent = AsyncMock(
+        side_effect=[
+            make_agent_result(None, agent="dummy", error=failures[0]),
+            make_agent_result(None, agent="dummy", error=failures[1]),
+            make_agent_result({"ok": True}, agent="dummy"),
+        ]
+    )
+    _patch_ephemeral(monkeypatch, sandbox)
+    monkeypatch.setattr(agents.random, "uniform", MagicMock(side_effect=[0.95, 1.05]))
+    current_run._reap_run = AsyncMock()
+    checkpoints, sleep = _inline_agent_steps
+
+    result = await DUMMY_AGENT()
+
+    assert result == DummyOutput(ok=True)
+    assert [awaited.args[0] for awaited in sleep.await_args_list] == [285.0, 945.0]
+    assert [options["name"] for options in checkpoints] == ["test.agent.dummy"] * 3
+    assert current_run._reap_run.await_count == 2
+    calls = AgentCall.list_for_run("wf-9")
+    assert len(calls) == 3
+    assert sum(call.status == "failed" for call in calls) == 2
+    assert sum(call.status == "succeeded" for call in calls) == 1
+    assert {call.failure_code for call in calls if call.status == "failed"} == {"overloaded"}
+    assert current_run.journal.filter(DummyOutput) == [result]
+
+
+async def test_body_level_first_byte_retries_immediately_then_reraises(
+    druks_db, tmp_path, monkeypatch, current_run, _inline_agent_steps
+):
+    from druks.harnesses.exceptions import HarnessFirstByteTimeoutError
+
+    failures = [HarnessFirstByteTimeoutError(f"wedged {attempt}") for attempt in range(3)]
+    sandbox = _patch_runtime(monkeypatch, tmp_path, {"ok": True})
+    sandbox.run_agent = AsyncMock(
+        side_effect=[make_agent_result(None, agent="dummy", error=failure) for failure in failures]
+    )
+    _patch_ephemeral(monkeypatch, sandbox)
+    monkeypatch.setattr(agents.random, "uniform", lambda _low, _high: 1.0)
+    current_run._reap_run = AsyncMock()
+    _, sleep = _inline_agent_steps
+
+    with pytest.raises(HarnessFirstByteTimeoutError) as excinfo:
+        await DUMMY_AGENT()
+
+    assert excinfo.value is failures[-1]
+    assert excinfo.value.code == "first_byte"
+    assert [awaited.args[0] for awaited in sleep.await_args_list] == [0.0, 0.0]
+    current_run._reap_run.assert_not_awaited()
+    calls = AgentCall.list_for_run("wf-9")
+    assert len(calls) == 3
+    assert all(call.status == "failed" for call in calls)
+
+
+async def test_body_level_quota_waits_for_the_reset_once(
+    druks_db, tmp_path, monkeypatch, current_run, _inline_agent_steps
+):
+    from druks.harnesses.exceptions import HarnessRateLimitError
+
+    now = datetime(2026, 8, 1, 10, tzinfo=UTC)
+    failures = [HarnessRateLimitError(f"quota {attempt}") for attempt in range(2)]
+    sandbox = _patch_runtime(monkeypatch, tmp_path, {"ok": True})
+    sandbox.run_agent = AsyncMock(
+        side_effect=[make_agent_result(None, agent="dummy", error=failure) for failure in failures]
+    )
+    _patch_ephemeral(monkeypatch, sandbox)
+    clock = MagicMock()
+    clock.now.return_value = now
+    monkeypatch.setattr(agents, "datetime", clock)
+    monkeypatch.setattr(
+        agents.UsageScrape,
+        "latest_for",
+        classmethod(
+            lambda _cls, _harness, _account_id: SimpleNamespace(
+                five_hour_resets_at=now + timedelta(hours=1),
+                week_resets_at=now + timedelta(days=1),
+            )
+        ),
+    )
+    jitter = MagicMock(return_value=90.0)
+    monkeypatch.setattr(agents.random, "uniform", jitter)
+    current_run._reap_run = AsyncMock()
+    checkpoints, sleep = _inline_agent_steps
+
+    with pytest.raises(HarnessRateLimitError) as excinfo:
+        await DUMMY_AGENT()
+
+    assert excinfo.value is failures[-1]
+    sleep.assert_awaited_once_with(60 * 60 + 90.0)
+    jitter.assert_called_once_with(60.0, 120.0)
+    current_run._reap_run.assert_awaited_once()
+    assert [options["name"] for options in checkpoints] == [
+        "test.agent.dummy",
+        "test.agent.dummy.retry_wait",
+        "test.agent.dummy",
+    ]
+    calls = AgentCall.list_for_run("wf-9")
+    assert len(calls) == 2
+    assert all(call.failure_code == "rate_limited" for call in calls)
+
+
+async def test_body_level_quota_reset_over_six_hours_reraises_without_sleeping(
+    druks_db, tmp_path, monkeypatch, current_run, _inline_agent_steps
+):
+    from druks.harnesses.exceptions import HarnessUsageLimitError
+
+    now = datetime(2026, 8, 1, 10, tzinfo=UTC)
+    failure = HarnessUsageLimitError("weekly quota")
+    sandbox = _patch_runtime(monkeypatch, tmp_path, {"ok": True})
+    sandbox.run_agent = AsyncMock(
+        return_value=make_agent_result(None, agent="dummy", error=failure)
+    )
+    _patch_ephemeral(monkeypatch, sandbox)
+    clock = MagicMock()
+    clock.now.return_value = now
+    monkeypatch.setattr(agents, "datetime", clock)
+    monkeypatch.setattr(
+        agents.UsageScrape,
+        "latest_for",
+        classmethod(
+            lambda _cls, _harness, _account_id: SimpleNamespace(
+                five_hour_resets_at=now + timedelta(hours=7),
+                week_resets_at=now + timedelta(days=1),
+            )
+        ),
+    )
+    jitter = MagicMock()
+    monkeypatch.setattr(agents.random, "uniform", jitter)
+    current_run._reap_run = AsyncMock()
+    _, sleep = _inline_agent_steps
+
+    with pytest.raises(HarnessUsageLimitError) as excinfo:
+        await DUMMY_AGENT()
+
+    assert excinfo.value is failure
+    sleep.assert_not_awaited()
+    jitter.assert_not_called()
+    current_run._reap_run.assert_not_awaited()
+    [call] = AgentCall.list_for_run("wf-9")
+    assert call.failure_code == "usage_limit"
+
+
+@pytest.mark.parametrize("error_name", [pytest.param("bare"), pytest.param("auth")])
+async def test_body_level_never_retry_errors_run_once(
+    error_name, druks_db, tmp_path, monkeypatch, current_run, _inline_agent_steps
+):
+    from druks.harnesses.exceptions import HarnessAuthError, HarnessError, Retry
+
+    failures = {"bare": HarnessError, "auth": HarnessAuthError}
+    failure = failures[error_name]("terminal")
+    sandbox = _patch_runtime(monkeypatch, tmp_path, {"ok": True})
+    sandbox.run_agent = AsyncMock(
+        return_value=make_agent_result(None, agent="dummy", error=failure)
+    )
+    _patch_ephemeral(monkeypatch, sandbox)
+    current_run._reap_run = AsyncMock()
+    checkpoints, sleep = _inline_agent_steps
+
+    with pytest.raises(type(failure)) as excinfo:
+        await DUMMY_AGENT()
+
+    assert excinfo.value is failure
+    assert failure.retry is Retry.NEVER
+    assert [options["name"] for options in checkpoints] == ["test.agent.dummy"]
+    sleep.assert_not_awaited()
+    current_run._reap_run.assert_not_awaited()
+    sandbox.run_agent.assert_awaited_once()
+    assert len(AgentCall.list_for_run("wf-9")) == 1
+
+
+async def test_in_step_transient_retry_uses_asyncio_sleep(monkeypatch, current_run):
+    from druks.harnesses.exceptions import HarnessOverloadedError
+    from druks.workflows import _in_step
+
+    attempts = 0
+
+    async def run_agent(_self, **_context):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise HarnessOverloadedError("overloaded")
+        return DummyOutput(ok=True)
+
+    monkeypatch.setattr(agents.Agent, "_run", run_agent)
+    monkeypatch.setattr(agents.random, "uniform", lambda _low, _high: 1.0)
+    memory_sleep = AsyncMock()
+    durable_sleep = AsyncMock()
+    monkeypatch.setattr(agents.asyncio, "sleep", memory_sleep)
+    monkeypatch.setattr(agents.DBOS, "sleep_async", durable_sleep)
+    token = _in_step.set(True)
+    try:
+        result = await DUMMY_AGENT()
+    finally:
+        _in_step.reset(token)
+
+    assert result == DummyOutput(ok=True)
+    assert attempts == 2
+    memory_sleep.assert_awaited_once_with(300.0)
+    durable_sleep.assert_not_awaited()
+
+
+async def test_in_step_quota_reraises_without_sleeping(monkeypatch, current_run):
+    from druks.harnesses.exceptions import HarnessRateLimitError
+    from druks.workflows import _in_step
+
+    failure = HarnessRateLimitError("quota")
+
+    async def run_agent(_self, **_context):
+        raise failure
+
+    monkeypatch.setattr(agents.Agent, "_run", run_agent)
+    memory_sleep = AsyncMock()
+    durable_sleep = AsyncMock()
+    monkeypatch.setattr(agents.asyncio, "sleep", memory_sleep)
+    monkeypatch.setattr(agents.DBOS, "sleep_async", durable_sleep)
+    token = _in_step.set(True)
+    try:
+        with pytest.raises(HarnessRateLimitError) as excinfo:
+            await DUMMY_AGENT()
+    finally:
+        _in_step.reset(token)
+
+    assert excinfo.value is failure
+    memory_sleep.assert_not_awaited()
+    durable_sleep.assert_not_awaited()
 
 
 async def test_recovery_supersedes_the_orphaned_running_call(druks_db):
