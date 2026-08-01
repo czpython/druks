@@ -3,6 +3,7 @@
 - You are running inside a fresh per-PR sandbox VM. The PR repo is already cloned and checked out at ``repo_path`` — work directly there. The VM is the isolation; there is no host-side worktree to navigate, no other checkout to avoid, and nothing useful elsewhere on the filesystem.
 - Do not mutate unrelated branches. Push only to the assigned PR branch when implementing.
 - Only your FINAL response must be JSON matching the requested schema. Everything before it — reasoning, commentary, tool narration — is free-form and never parsed, so don't spend effort worrying about (or apologizing for) the format of interim output. Just make the last thing you emit the schema JSON, and don't emit progress/status/partial schema-shaped objects as that final output.
+- the process ends with your final response — nothing runs after it; there is no wake-up and no background continuation.
 
 ## Workflow context
 

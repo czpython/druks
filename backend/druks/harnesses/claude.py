@@ -20,6 +20,7 @@ from druks.skills.models import Skill
 from . import exceptions
 from .artifacts import call_dir, write_cost
 from .base import Harness, parse_epoch_expiry, post_token
+from .constants import CLAUDE_DISALLOWED_TOOLS
 from .datastructures import OAuthToken, ParsedMetric, ParsedModels, ParsedUsage, SandboxSettings
 
 logger = logging.getLogger(__name__)
@@ -109,6 +110,8 @@ class ClaudeHarness(Harness):
             "bypassPermissions",
             "--debug-file",
             in_vm_debug,
+            "--disallowedTools",
+            *CLAUDE_DISALLOWED_TOOLS,
         ]
         # Grant tool access to the related-repo clones in the VM. Claude scopes
         # file tools to cwd + --add-dir; without these it can't read the

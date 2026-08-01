@@ -3,3 +3,11 @@
 # refresh.
 CONNECT_PENDING_PREFIX = "druks:harness:connect:pending:"
 REFRESH_LOCK_PREFIX = "druks:harness:refresh:"
+
+CLAUDE_DISALLOWED_TOOLS = (
+    "CronCreate",
+    "CronDelete",
+    "CronList",
+    "Monitor",
+    "ScheduleWakeup",
+)
