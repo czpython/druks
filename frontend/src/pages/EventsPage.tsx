@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { useLocation } from 'wouter'
+import { useLocation, useSearch } from 'wouter'
 
 import { api } from '../api/client'
 import { useSSE } from '../api/sse'
@@ -8,6 +8,7 @@ import type { FeedItem } from '../api/types'
 import { BackToExtension } from '../components/BackToExtension'
 import { EmptyState } from '../components/EmptyState'
 import { Page } from '../components/Page'
+import { registeredExtensions } from '../extensions/registry'
 import { eventLine } from '../lib/feed'
 import { relTimeFromIso } from '../lib/format'
 import { useFormatters } from '../lib/preferences'
@@ -19,33 +20,49 @@ const FEED_CAP = 500
 const INITIAL_FETCH = 200
 
 /**
- * Activity feed: a unified live view of "what is Druks doing right now".
+ * Activity feed: one global live view of "what is Druks doing right now".
  *
  * Loads an initial page via ``GET /api/events`` and keeps the feed
  * fresh via the SSE stream. Inserts dedupe by ``id`` so the boundary
  * between the initial fetch and the SSE backfill doesn't double-render.
+ *
+ * The feed spans every extension by default. The extension filter lives
+ * in the URL query (``/events?extension=ship``, absent = all) so the view
+ * is shareable, survives a refresh, and moves with back/forward.
  */
-export function EventsPage({ extension }: { extension: string }) {
+export function EventsPage() {
   const [, navigate] = useLocation()
+  const search = useSearch()
   const { absTimeCompact } = useFormatters()
+
+  // Null = every extension plus anything unscoped. Both the page fetch and the
+  // stream take the same filter, so a narrowed view stays narrow as it streams.
+  const filter = new URLSearchParams(search).get('extension')
 
   // Initial backfill. The SSE stream's first tick will also send a
   // window; the dedupe in ``mergeEvents`` covers the overlap so the
-  // operator never sees a row twice. Scoped to the current extension (plus
-  // any core events); the page is keyed by extension so a switch starts clean.
+  // operator never sees a row twice.
   const initial = useQuery({
-    queryKey: ['events', 'initial', extension],
-    queryFn: () => api.listEvents({ limit: INITIAL_FETCH, extension }),
+    queryKey: ['events', 'initial', filter],
+    queryFn: () => api.listEvents({ limit: INITIAL_FETCH, extension: filter ?? undefined }),
     // The SSE feed owns freshness — don't refetch this on focus.
     staleTime: Infinity,
   })
 
-  // Live events accumulated from the SSE stream. The initial-fetch
-  // page is the seed; we merge SSE deltas on top of it at render time
-  // rather than mutating a single ``events`` state from an effect (the
-  // lint rule ``react-hooks/set-state-in-effect`` is the carrot, but
-  // the underlying win is keeping the merge deterministic from inputs).
+  // Live events accumulated from the SSE stream. The initial-fetch page is the
+  // seed; SSE deltas merge on top of it at render time rather than mutating one
+  // ``events`` state from an effect, which keeps the merge deterministic from
+  // its inputs.
   const [sseEvents, setSseEvents] = useState<FeedItem[]>([])
+
+  // Rows accumulated under the previous filter don't belong in the new one.
+  // Dropped during render rather than from an effect, so the narrowed feed
+  // never paints stale.
+  const [sseFilter, setSseFilter] = useState(filter)
+  if (sseFilter !== filter) {
+    setSseFilter(filter)
+    setSseEvents([])
+  }
 
   const handleMessage = useCallback((raw: unknown) => {
     const event = raw as FeedItem
@@ -54,30 +71,40 @@ export function EventsPage({ extension }: { extension: string }) {
   }, [])
 
   const sseHandlers = useMemo(() => ({ message: handleMessage }), [handleMessage])
-  useSSE(`/api/events/stream?extension=${extension}`, { handlers: sseHandlers })
+  useSSE(`/api/events/stream${filter ? `?extension=${encodeURIComponent(filter)}` : ''}`, {
+    handlers: sseHandlers,
+  })
 
   const events = useMemo(() => {
     const seed = initial.data?.items ?? []
     return combineFeeds(seed, sseEvents)
   }, [initial.data, sseEvents])
 
+  const header = (count: number | null) => (
+    <EventsHeader
+      count={count}
+      filter={filter}
+      onPick={(name) => navigate(name ? `/events?extension=${encodeURIComponent(name)}` : '/events')}
+    />
+  )
+
   if (initial.isLoading) {
     return (
-      <Page className="page-events" header={<EventsHeader count={null} />}>
+      <Page className="page-events" header={header(null)}>
         <EmptyState glyph="…" msg="loading" />
       </Page>
     )
   }
   if (initial.isError) {
     return (
-      <Page className="page-events" header={<EventsHeader count={null} />}>
+      <Page className="page-events" header={header(null)}>
         <EmptyState glyph="!" msg="could not load events" />
       </Page>
     )
   }
 
   return (
-    <Page className="page-events" header={<EventsHeader count={events.length} />}>
+    <Page className="page-events" header={header(events.length)}>
       {events.length === 0 ? (
         <EmptyState glyph="∅" msg="no recent activity" />
       ) : (
@@ -96,12 +123,15 @@ export function EventsPage({ extension }: { extension: string }) {
   )
 }
 
-function EventsHeader({ count }: { count: number | null }) {
-  // The previous shape used ``dash-h1-eyebrow`` (12px) + ``dash-h1-count``
-  // (12px) which read as a label, not a title — nothing on the page
-  // anchored. Now using a dedicated ``events-h1`` so the page has a
-  // proper heading. Pattern: ``events  217`` in monospace caps, count
-  // in cyan to match the existing dashboard counter colour.
+function EventsHeader({
+  count,
+  filter,
+  onPick,
+}: {
+  count: number | null
+  filter: string | null
+  onPick: (extension: string | null) => void
+}) {
   return (
     <div className="active-page-head">
       <div className="active-page-title">
@@ -117,8 +147,48 @@ function EventsHeader({ count }: { count: number | null }) {
           <span>·</span>
           <span>capped at {FEED_CAP}</span>
         </div>
+        <ExtensionFilter filter={filter} onPick={onPick} />
       </div>
       <BackToExtension />
+    </div>
+  )
+}
+
+function ExtensionFilter({
+  filter,
+  onPick,
+}: {
+  filter: string | null
+  onPick: (extension: string | null) => void
+}) {
+  // The local registry paints the pills on a cold load; the installed list adds
+  // the extensions that ship no UI — the platform's own chores and webhooks emit
+  // events too. Same query key as the extension dropdown, so this reads its cache
+  // rather than issuing a request of its own.
+  const installed = useQuery({
+    queryKey: ['extensionSettings'],
+    queryFn: api.getExtensionSettings,
+    staleTime: 60_000,
+  })
+  const options = useMemo(() => {
+    const names = new Set(registeredExtensions().map((e) => e.name))
+    for (const entry of installed.data?.extensions ?? []) names.add(entry.name)
+    // Leading null is the unfiltered view the bare URL lands on.
+    return [null, ...names]
+  }, [installed.data])
+
+  return (
+    <div className="events-filter">
+      {options.map((name) => (
+        <button
+          key={name ?? 'all'}
+          type="button"
+          className={`events-filter-pill mono${name === filter ? ' active' : ''}`}
+          onClick={() => onPick(name)}
+        >
+          {name ?? 'all'}
+        </button>
+      ))}
     </div>
   )
 }
