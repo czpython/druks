@@ -35,7 +35,7 @@ mention it.
 
 {% include "ship/build/_header.md" %}
 
-**MANDATORY FIRST ACTION — read the diff. This is not a suggestion.** Your very first tool call MUST be `git diff <base_sha>..<head_sha>` using the SHAs rendered above. Then read every changed file END TO END — the whole file, not the changed hunks — before writing any finding. You are reviewing code, not a plan: you have no plan and no acceptance criteria here by design, because correctness against the contract was already adjudicated by the evaluator. Fetch the ticket when you need its scope to judge a finding, and to file the follow-up sub-issue below.
+**MANDATORY FIRST ACTION — read the diff. This is not a suggestion.** Your very first tool call MUST be `git diff <pr_base_sha>...<head_sha>` using the SHAs rendered above. Then read every changed file END TO END — the whole file, not the changed hunks — before writing any finding. You are reviewing code, not a plan: you have no plan and no acceptance criteria here by design, because correctness against the contract was already adjudicated by the evaluator. Fetch the ticket when you need its scope to judge a finding, and to file the follow-up sub-issue below.
 
 {% include "ship/build/_related_repos.md" %}
 {% include "ship/build/_skills.md" %}
