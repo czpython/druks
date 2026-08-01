@@ -1,6 +1,7 @@
 from pydantic import BaseModel, Field, SecretStr
 
 from druks.agents import Agent
+from druks.contrib.ship.checks import check_jira, check_linear
 from druks.contrib.ship.contracts import (
     CodeReviewOutput,
     ContractRevisionOutput,
@@ -12,7 +13,6 @@ from druks.contrib.ship.contracts import (
     TriageOutput,
 )
 from druks.contrib.ship.ticketing.base import Tracker
-from druks.contrib.ship.ticketing.checks import check_jira, check_linear
 from druks.contrib.ship.ticketing.jira import Jira
 from druks.contrib.ship.ticketing.linear import Linear
 from druks.db import StoredSubject

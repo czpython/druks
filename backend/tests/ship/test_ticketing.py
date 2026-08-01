@@ -1,6 +1,6 @@
 import pytest
+from druks.contrib.ship.checks import check_jira, check_linear
 from druks.contrib.ship.extension import Ship, secret_value
-from druks.contrib.ship.ticketing.checks import check_jira, check_linear
 from druks.contrib.ship.ticketing.enums import TicketStatus
 from druks.contrib.ship.ticketing.exceptions import JiraAPIError, LinearAPIError
 from druks.contrib.ship.ticketing.jira import Jira

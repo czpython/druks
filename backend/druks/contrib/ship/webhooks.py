@@ -1,7 +1,7 @@
 import hashlib
 import hmac
 import logging
-from typing import Any, ClassVar
+from typing import Any
 
 from fastapi import HTTPException, status
 from fastapi.responses import JSONResponse, Response
@@ -18,13 +18,11 @@ class LinearEvents(Webhook):
     provider = "linear"
     category = "events"
 
-    SIGNATURE_HEADER: ClassVar[str] = "linear-signature"
-
     def request_is_authentic(self) -> bool:
         settings = Ship.settings()
         verify_hmac_sha256(
             self.raw_body,
-            self.request.headers.get(self.SIGNATURE_HEADER),
+            self.request.headers.get("linear-signature"),
             secret_value(settings.linear_webhook_secret),
             prefix="",
         )
@@ -89,14 +87,12 @@ class JiraEvents(Webhook):
     provider = "jira"
     category = "events"
 
-    TOKEN_HEADER: ClassVar[str] = "x-druks-webhook-token"
-
     def request_is_authentic(self) -> bool:
         settings = Ship.settings()
         webhook_secret = secret_value(settings.jira_webhook_secret)
         if not webhook_secret:
             raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Jira webhook secret not configured.")
-        provided = self.request.headers.get(self.TOKEN_HEADER) or ""
+        provided = self.request.headers.get("x-druks-webhook-token") or ""
         if not hmac.compare_digest(provided, webhook_secret):
             raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid Jira webhook token.")
         return True
@@ -105,12 +101,9 @@ class JiraEvents(Webhook):
         return "issue_event"
 
     def delivery_key(self) -> str:
-        # No delivery id from Automation: key on the issue's change marker +
-        # a body digest, so a retry hashes the same and a new transition doesn't.
-        issue = self.issue
-        updated = str((issue.get("fields") or {}).get("updated") or "")
-        digest = hashlib.sha256(self.raw_body).hexdigest()[:16]
-        return f"{issue.get('key', '')}:{updated}:{digest}"
+        # No delivery id from Automation: a retry resends the same body, so its
+        # digest is the dedup key; a new transition changes the body.
+        return hashlib.sha256(self.raw_body).hexdigest()[:16]
 
     @property
     def issue(self) -> dict[str, Any]:

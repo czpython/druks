@@ -65,23 +65,22 @@ class JiraClient:
         )
 
 
-# These status names belong to the "Internal tools" issue type used for druks-managed tickets;
-# its transitions have no validators or required fields, unlike security issues whose Done gate
-# requires a resolution and Fix versions, so native status moves work like Linear's.
-# READY_FOR_AGENT is supplied by the caller as the resting status; "Backlog" is the operator's
-# dispatch trigger, so druks deliberately does not land there.
-_STATIC_STATUS_NAMES: dict[TicketStatus, str] = {
-    TicketStatus.IN_PROGRESS: "In Progress",
-    TicketStatus.IN_REVIEW: "Waiting CR",  # CR = code review; PR open, awaiting review
-    TicketStatus.DONE: "Done",
-    # This workflow has no cancel state; abandoned work closes as Done (its Done
-    # transition takes no resolution/Fix-versions fields, so the move succeeds).
-    TicketStatus.CANCELED: "Done",
-}
-
-
 class Jira(Tracker):
     known_exceptions = (JiraAPIError, httpx.HTTPError)
+
+    # These status names belong to the "Internal tools" issue type used for druks-managed
+    # tickets; its transitions have no validators or required fields, unlike security issues
+    # whose Done gate requires a resolution and Fix versions, so native status moves work
+    # like Linear's. READY_FOR_AGENT is supplied by the caller as the resting status;
+    # "Backlog" is the operator's dispatch trigger, so druks deliberately does not land there.
+    _STATIC_STATUS_NAMES: dict[TicketStatus, str] = {
+        TicketStatus.IN_PROGRESS: "In Progress",
+        TicketStatus.IN_REVIEW: "Waiting CR",  # CR = code review; PR open, awaiting review
+        TicketStatus.DONE: "Done",
+        # This workflow has no cancel state; abandoned work closes as Done (its Done
+        # transition takes no resolution/Fix-versions fields, so the move succeeds).
+        TicketStatus.CANCELED: "Done",
+    }
 
     def __init__(
         self,
@@ -95,7 +94,7 @@ class Jira(Tracker):
         self._client = JiraClient(
             base_url=base_url, email=email, api_token=api_token, client=client
         )
-        self._status_names = dict(_STATIC_STATUS_NAMES)
+        self._status_names = dict(self._STATIC_STATUS_NAMES)
         # Empty leaves READY_FOR_AGENT unmapped.
         if ready_for_agent_status:
             self._status_names[TicketStatus.READY_FOR_AGENT] = ready_for_agent_status

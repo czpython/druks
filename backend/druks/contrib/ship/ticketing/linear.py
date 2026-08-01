@@ -136,17 +136,16 @@ def _status_id_by_name(states: list[dict[str, Any]], status_name: str) -> str:
     raise LinearAPIError(f"Linear status {status_name!r} was not found. Available: {available}")
 
 
-# READY_FOR_AGENT is operator-named; the rest are fixed.
-_STATIC_STATUS_NAMES: dict[TicketStatus, str] = {
-    TicketStatus.IN_PROGRESS: "In Progress",
-    TicketStatus.IN_REVIEW: "In Review",
-    TicketStatus.DONE: "Done",
-    TicketStatus.CANCELED: "Canceled",
-}
-
-
 class Linear(Tracker):
     known_exceptions = (LinearAPIError, httpx.HTTPError)
+
+    # READY_FOR_AGENT is operator-named; the rest are fixed.
+    _STATIC_STATUS_NAMES: dict[TicketStatus, str] = {
+        TicketStatus.IN_PROGRESS: "In Progress",
+        TicketStatus.IN_REVIEW: "In Review",
+        TicketStatus.DONE: "Done",
+        TicketStatus.CANCELED: "Canceled",
+    }
 
     def __init__(
         self,
@@ -156,7 +155,7 @@ class Linear(Tracker):
         client: Any | None = None,
     ) -> None:
         self._client = LinearClient(api_key=api_key, client=client)
-        self._status_names = dict(_STATIC_STATUS_NAMES)
+        self._status_names = dict(self._STATIC_STATUS_NAMES)
         # Empty leaves READY_FOR_AGENT unmapped.
         if ready_for_agent_status:
             self._status_names[TicketStatus.READY_FOR_AGENT] = ready_for_agent_status
