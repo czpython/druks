@@ -389,16 +389,24 @@ async def test_fetch_usage_without_a_token_skips_http(monkeypatch, druks_db):
 async def test_codex_fetch_usage_success(monkeypatch, druks_db):
     connection = _seed_codex(account_id="acc-7")
     body = {
-        "plan_type": "prolite",
+        "plan_type": "pro",
         "rate_limit": {
-            "primary_window": {"used_percent": 39, "reset_at": 1780625132},
-            "secondary_window": {"used_percent": 39, "reset_at": 1781211932},
+            "primary_window": {
+                "used_percent": 39,
+                "limit_window_seconds": 18000,
+                "reset_at": 1780625132,
+            },
+            "secondary_window": {
+                "used_percent": 39,
+                "limit_window_seconds": 604800,
+                "reset_at": 1781211932,
+            },
         },
     }
     calls = _mock_get(monkeypatch, _resp(200, body))
     parsed = await CodexHarness.fetch_usage(connection, now=_NOW)
     assert parsed.ok is True
-    assert parsed.plan_tier == "prolite"
+    assert parsed.plan_tier == "pro"
     assert parsed.five_hour.percent_left == 61
     assert parsed.week.percent_left == 61
     assert calls[0]["headers"]["ChatGPT-Account-Id"] == "acc-7"
