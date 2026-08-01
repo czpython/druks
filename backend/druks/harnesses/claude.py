@@ -429,6 +429,7 @@ def _claude_credentials(
         files = (
             (config_dir.parent / ".claude.json", ".claude.json"),
             (config_dir / "settings.json", ".claude/settings.json"),
+            (config_dir / "CLAUDE.md", ".claude/CLAUDE.md"),
         )
         if include_plugins:
             files += (
