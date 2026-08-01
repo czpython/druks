@@ -236,10 +236,9 @@ def test_jira_status_names_match_internal_tools_workflow():
     # druks-managed tickets use. A regression here means set_status silently
     # fails against real Jira ("no transition to status X") — caught and logged,
     # so the ticket just never moves. Pin them.
-    from druks.contrib.ship.ticketing.jira import _STATIC_STATUS_NAMES
-
-    assert _STATIC_STATUS_NAMES[TicketStatus.IN_PROGRESS] == "In Progress"
-    assert _STATIC_STATUS_NAMES[TicketStatus.IN_REVIEW] == "Waiting CR"
-    assert _STATIC_STATUS_NAMES[TicketStatus.DONE] == "Done"
+    names = Jira._STATIC_STATUS_NAMES
+    assert names[TicketStatus.IN_PROGRESS] == "In Progress"
+    assert names[TicketStatus.IN_REVIEW] == "Waiting CR"
+    assert names[TicketStatus.DONE] == "Done"
     # No cancel state in this workflow — abandoned work closes as Done.
-    assert _STATIC_STATUS_NAMES[TicketStatus.CANCELED] == "Done"
+    assert names[TicketStatus.CANCELED] == "Done"
