@@ -75,8 +75,8 @@ async def cancel_run(
     response_model_by_alias=True,
 )
 async def retry_run(run_id: str) -> schemas.RetryRunResponse:
-    """Retry a failed run from its failed step; a repeat reports the active
-    fork as already_retried."""
+    """Rerun a failed run from the step that killed it, reusing every
+    completed step."""
     return await services.retry_run(run_id)
 
 

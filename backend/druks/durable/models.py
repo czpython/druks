@@ -69,12 +69,6 @@ class Run(Base):
     # How the subject showed itself when this run started — read with the row, so
     # every event the run writes names it without a second lookup.
     subject_label: Mapped[str | None] = column_property(subject_label_expression(id))
-    forked_from: Mapped[str | None] = column_property(
-        select(workflow_status.c.forked_from)
-        .where(workflow_status.c.workflow_uuid == id)
-        .correlate_except(workflow_status)
-        .scalar_subquery()
-    )
     # Who asked; the system account when nobody did (crons, background work).
     account_id: Mapped[str] = mapped_column(
         ForeignKey("accounts.id", ondelete="RESTRICT"), default=SYSTEM_ACCOUNT_ID

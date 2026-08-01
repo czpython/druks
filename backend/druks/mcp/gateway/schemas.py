@@ -55,7 +55,6 @@ class CancelRunResponse(BaseResponse):
 
 class RetryRunResponse(BaseResponse):
     run_id: str
-    result: Literal["retried", "already_retried"]
 
 
 class AgentHarnessUsage(BaseResponse):

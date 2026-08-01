@@ -26,7 +26,6 @@ workflow_status = sa.Table(
     sa.Column("status", sa.String),
     sa.Column("updated_at", sa.BigInteger),
     sa.Column("attributes", JSONB),
-    sa.Column("forked_from", sa.String),
 )
 
 

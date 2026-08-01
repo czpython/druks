@@ -6,7 +6,6 @@ from unittest import mock
 import pytest
 from conftest import make_test_note, seed_note_run
 from druks.accounts.models import Account
-from druks.durable.dbos_state import workflow_status
 from druks.durable.engine import run_queue
 from druks.durable.enums import WorkflowEvent
 from druks.durable.models import Artifact, Run
@@ -285,11 +284,6 @@ async def test_run_retry_forks_from_the_failed_step(druks_db, monkeypatch):
             "scheduled",
             subject=item.identity,
         )
-        druks_db.execute(
-            workflow_status.update()
-            .where(workflow_status.c.workflow_uuid == retried_run_id)
-            .values(forked_from=workflow_id)
-        )
         return SimpleNamespace(workflow_id=retried_run_id)
 
     async def _publish(event, **facts):
@@ -310,11 +304,16 @@ async def test_run_retry_forks_from_the_failed_step(druks_db, monkeypatch):
     assert retried.kind == run.kind
     assert retried.account_id == run.account_id
     assert retried.state == "scheduled"
-    assert retried.forked_from == run.id
     assert events == [
         (
             WorkflowEvent.RETRIED,
-            {"subject": item.identity, "kind": run.kind, "run": retried_run_id},
+            # Subject ids ride the DBOS attributes as strings — the one shape
+            # every reader compares.
+            {
+                "subject": {"type": "note", "id": str(item.id)},
+                "kind": run.kind,
+                "run": retried_run_id,
+            },
         )
     ]
 
@@ -360,26 +359,6 @@ async def test_retry_run_refuses_a_busy_subject(druks_db, monkeypatch):
     retry.assert_not_awaited()
 
 
-async def test_retry_run_returns_the_active_fork_on_replay(druks_db, monkeypatch):
-    item = make_test_note()
-    failed = seed_note_run(druks_db, note=item, state="failed")
-    retried = seed_note_run(druks_db, note=item, state="running")
-    druks_db.execute(
-        workflow_status.update()
-        .where(workflow_status.c.workflow_uuid == retried.id)
-        .values(forked_from=failed.id)
-    )
-    druks_db.expire_all()
-    retry = mock.AsyncMock()
-    monkeypatch.setattr(Run, "retry", retry)
-
-    result = await services.retry_run(failed.id)
-
-    assert result.run_id == retried.id
-    assert result.result == "already_retried"
-    retry.assert_not_awaited()
-
-
 async def test_retry_run_retries_a_failed_run(druks_db, monkeypatch):
     run = seed_note_run(druks_db, state="failed")
     retry = mock.AsyncMock(return_value="retried-run")
@@ -388,7 +367,6 @@ async def test_retry_run_retries_a_failed_run(druks_db, monkeypatch):
     result = await services.retry_run(run.id)
 
     assert result.run_id == "retried-run"
-    assert result.result == "retried"
     retry.assert_awaited_once_with()
 
 
