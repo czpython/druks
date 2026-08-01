@@ -380,17 +380,39 @@ def check_capability_modules(settings: Settings) -> CheckResult:
 
 
 def check_extensions(settings: Settings) -> list[CheckResult]:
-    """Each installed extension's own checks, namespaced under it. Read off the class
-    app-lessly through the loader, so doctor never imports an extension's private
-    modules. A check that raises when run is contained under the extension's name by
-    ``_run_extension_check``, and the core checks are separate ``CHECKS`` entries a
-    broken extension can't hide."""
+    """Each installed extension's resolved settings and own checks, namespaced under it.
+    Read off the class app-lessly through the loader, so doctor never imports an
+    extension's private modules. A check or settings clean that raises is contained
+    under the extension's name, and core checks remain separate ``CHECKS`` entries."""
     engine = create_engine_from_url(settings.database_url)
     try:
         with Session(engine) as session:
             db_session.registry.set(session)
             results: list[CheckResult] = []
             for extension in iter_extensions():
+                if settings_model := extension.settings_model:
+                    try:
+                        problems = extension.settings().clean()
+                        detail = "; ".join(
+                            f"{settings_model.model_fields[field].title or field}: {message}"
+                            for field, message in problems.items()
+                        )
+                    except Exception as error:  # noqa: BLE001 — settings fail, doctor continues
+                        results.append(
+                            CheckResult(
+                                name=f"{extension.name}:settings",
+                                ok=False,
+                                detail=f"check raised: {error}",
+                            )
+                        )
+                    else:
+                        results.append(
+                            CheckResult(
+                                name=f"{extension.name}:settings",
+                                ok=not problems,
+                                detail=detail or "coherent",
+                            )
+                        )
                 for check in extension.checks or ():
                     results.append(_run_extension_check(extension.name, check))
             return results

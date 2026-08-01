@@ -1,12 +1,13 @@
 import { Fragment, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 
-import { api } from '../api/client'
+import { ApiError, api } from '../api/client'
 import { ExtensionGlyph } from './ExtensionGlyph'
 import { ConnectSteps, useHarnessConnect } from './HarnessConnectFlow'
 import {
   type Harness,
   type ExtensionSettings,
+  type ExtensionSettingsProblems,
   type McpRegistryCandidate,
   type McpServer,
   type Pat,
@@ -115,6 +116,7 @@ export function SettingsModal({ open, onClose }: Props) {
   const [section, setSection] = useState<string>('general')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [extensionProblems, setExtensionProblems] = useState<ExtensionSettingsProblems>({})
   const [tick, setTick] = useState(0)
   const initialised = useRef(false)
 
@@ -129,6 +131,7 @@ export function SettingsModal({ open, onClose }: Props) {
     if (!initialised.current && settingsQuery.data) {
       setTimezone(settingsQuery.data.timezone)
       setExtensionEdits({})
+      setExtensionProblems({})
       setHarnessEdits({})
       initialised.current = true
     }
@@ -168,6 +171,7 @@ export function SettingsModal({ open, onClose }: Props) {
   async function submit() {
     setBusy(true)
     setError(null)
+    setExtensionProblems({})
     try {
       const body: UpdateUserSettingsRequest = {}
       if (settingsQuery.data?.timezone !== timezone) {
@@ -187,8 +191,18 @@ export function SettingsModal({ open, onClose }: Props) {
         await queryClient.invalidateQueries({ queryKey: ['harnesses'] })
       }
       onClose()
-    } catch (e) {
-      setError((e as Error).message)
+    } catch (caught) {
+      if (
+        caught instanceof ApiError &&
+        caught.status === 422 &&
+        caught.detail &&
+        typeof caught.detail === 'object' &&
+        !Array.isArray(caught.detail)
+      ) {
+        setExtensionProblems(caught.detail as ExtensionSettingsProblems)
+      } else {
+        setError((caught as Error).message)
+      }
     } finally {
       setBusy(false)
     }
@@ -239,6 +253,11 @@ export function SettingsModal({ open, onClose }: Props) {
         [extension]: _withField(prev.extensionSettings?.[extension], field, value),
       },
     }))
+    setExtensionProblems((prev) => {
+      const remaining = { ...prev[extension] }
+      delete remaining[field]
+      return { ...prev, [extension]: remaining }
+    })
   }
 
   function setHarnessField(name: string, patch: UpdateHarnessRequest) {
@@ -335,6 +354,7 @@ export function SettingsModal({ open, onClose }: Props) {
               <ExtensionPane
                 extension={extensionSection}
                 edits={extensionEdits}
+                fieldErrors={extensionProblems[extensionSection.name] ?? {}}
                 harnessColor={harnessColor}
                 harnessByName={harnessByName}
                 allowedEfforts={allowedEfforts}
@@ -1758,6 +1778,7 @@ export function CronField({
 function ExtensionPane({
   extension,
   edits,
+  fieldErrors,
   harnessByName,
   harnessColor,
   allowedEfforts,
@@ -1770,6 +1791,7 @@ function ExtensionPane({
 }: {
   extension: ExtensionSettings
   edits: UpdateExtensionsSettingsRequest
+  fieldErrors: Record<string, string>
   harnessByName: Record<string, Harness>
   harnessColor: Record<string, string>
   allowedEfforts: string[]
@@ -1811,11 +1833,13 @@ function ExtensionPane({
               {boolFields.map((o) => {
                 const override = optionEdit(o)
                 const on = override !== undefined ? Boolean(override) : Boolean(o.f.value)
+                const fieldError = o.scope === 'extension' ? fieldErrors[o.f.name] : undefined
                 return (
                   <div key={o.scope + '.' + o.kind + '.' + o.f.name} className="set-extension-toggle">
                     <div className="mt-text">
                       <span className="mt-name">{o.f.label}</span>
                       {o.f.help && <span className="mt-desc">{o.f.help}</span>}
+                      {fieldError && <span className="set-field-error">{fieldError}</span>}
                     </div>
                     <Switch on={on} onClick={() => setOption(o, !on)} disabled={busy} />
                   </div>
@@ -1828,6 +1852,7 @@ function ExtensionPane({
               {otherFields.map((o) => {
                 const override = optionEdit(o)
                 const cur = override !== undefined ? override : o.f.value
+                const fieldError = o.scope === 'extension' ? fieldErrors[o.f.name] : undefined
                 return (
                   <div key={o.scope + '.' + o.kind + '.' + o.f.name} className="set-field">
                     <span className="set-field-label">{o.f.label}</span>
@@ -1879,6 +1904,7 @@ function ExtensionPane({
                         disabled={busy}
                       />
                     )}
+                    {fieldError && <span className="set-field-error">{fieldError}</span>}
                   </div>
                 )
               })}

@@ -29,6 +29,17 @@ import type {
 // into onboarding.
 export class UnauthorizedError extends Error {}
 
+export class ApiError extends Error {
+  readonly status: number
+  readonly detail: unknown
+
+  constructor(message: string, status: number, detail: unknown) {
+    super(message)
+    this.status = status
+    this.detail = detail
+  }
+}
+
 export const IDENTITY_INVALIDATED_EVENT = 'druks:identity-invalidated'
 
 // FastAPI puts the human-readable message in ``detail``; throw that as the
@@ -50,7 +61,7 @@ async function throwApiError(response: Response, path: string): Promise<never> {
     window.dispatchEvent(new Event(IDENTITY_INVALIDATED_EVENT))
     throw new UnauthorizedError(message)
   }
-  throw new Error(message)
+  throw new ApiError(message, response.status, detail)
 }
 
 const SAME_ORIGIN: RequestCredentials = 'same-origin'

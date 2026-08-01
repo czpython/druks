@@ -3,14 +3,15 @@ import re
 from collections.abc import Callable
 from pathlib import Path
 from types import ModuleType
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Annotated, Any, ClassVar
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, SecretStr
 
 from druks.events.models import Event
 from druks.models import StoredSubject
 from druks.user_settings.models import SettingsOverride
 
+from .exceptions import SettingsDeclarationError
 from .registry import agents as agent_registry
 from .registry import autodiscover
 from .registry import workflows as workflow_registry
@@ -39,6 +40,19 @@ if TYPE_CHECKING:
 # be a lowercase SQL/URL-safe identifier. Public: the scaffolder validates against the
 # same rule so ``druks create extension`` can't emit a package that fails this check.
 NAME_RE = re.compile(r"^[a-z][a-z0-9_]*$")
+
+
+# A secret-kind settings field: unset is an empty ``SecretStr`` — falsy, so
+# ``if self.token:`` reads set-ness and ``.get_secret_value()`` never needs a guard.
+Secret = Annotated[SecretStr, Field(default=SecretStr(""))]
+
+
+class ExtensionSettings(BaseModel):
+    def clean(self) -> dict[str, str]:
+        """Problems with the resolved settings, keyed by the field the operator
+        must fix. Advisory at rest, blocking on save: the settings form rejects
+        a save that would create them; doctor reports the ones already stored."""
+        return {}
 
 
 class Extension:
@@ -82,9 +96,9 @@ class Extension:
     # The extension's declared ``Settings`` inner class, if any — operator knobs that
     # belong to the extension itself rather than one of its workflows. Mirrors a
     # workflow's ``Settings``.
-    settings_model: ClassVar[type[BaseModel] | None] = None
+    settings_model: ClassVar[type[ExtensionSettings] | None] = None
     # The checks this extension contributes to ``druks doctor`` — one per precondition
-    # it owns (its API key set, its webhook secret present, its provider reachable).
+    # beyond resolved-settings coherence (for example, whether its provider is reachable).
     # ``druks doctor`` runs each through the same ``CheckResult`` report as its core
     # checks, isolating a raising one under this extension's name so it can't hide a
     # core failure. Default none; declare a list to add them.
@@ -110,12 +124,16 @@ class Extension:
         if "package" not in cls.__dict__:
             cls.package = cls.__module__.rpartition(".")[0]
         declared = cls.__dict__.get("Settings")
-        if isinstance(declared, type) and issubclass(declared, BaseModel):
+        if declared is not None:
+            if not isinstance(declared, type) or not issubclass(declared, ExtensionSettings):
+                raise SettingsDeclarationError(
+                    f"{cls.__name__}.Settings must subclass ExtensionSettings"
+                )
             validate_settings_declaration(declared)
             cls.settings_model = declared
 
     @classmethod
-    def settings(cls) -> BaseModel:
+    def settings(cls) -> ExtensionSettings:
         """The extension's settings, resolved through the override store keyed by extension
         name. Raises if the extension declares no ``Settings``."""
         model = cls.settings_model

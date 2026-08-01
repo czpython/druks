@@ -24,3 +24,10 @@ def test_settings_validate_the_sync_token():
 
     with pytest.raises(ValidationError, match="must start with 'sk-'"):
         FieldNotes.Settings(sync_token="malformed-token")
+
+
+def test_settings_require_a_sync_token_for_public_visibility():
+    assert FieldNotes.Settings(visibility="public").clean() == {
+        "sync_token": "Required when visibility is public."
+    }
+    assert FieldNotes.Settings(visibility="public", sync_token="sk-sync-token").clean() == {}

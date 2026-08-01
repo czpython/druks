@@ -2,14 +2,15 @@ from pathlib import Path
 
 import pytest
 from druks import doctor
+from druks.database import db_session
+from druks.extensions import Extension, ExtensionSettings
 from druks.testing import make_settings
+from druks.user_settings.models import SettingsOverride
 
 # field_notes is the out-of-tree proof extension (``backend/tests/druks-field_notes``).
-# It declares one check on its class — its summarizer API key, which passes when the
-# credential is set and fails in a bare install when it's unset. These tests drive it
-# through the platform's own doctor, proving an extension contributes checks through the
-# loader without doctor importing the extension's private modules, and that a broken
-# extension check can't hide a core one.
+# It declares settings coherence and one check on its class. These tests drive both
+# through the platform's own doctor without doctor importing the extension's private
+# modules, and prove that a broken extension check can't hide a core one.
 
 
 @pytest.fixture
@@ -58,9 +59,71 @@ def test_unreachable_settings_database_is_an_extension_check_failure(
 
     results = doctor.check_extensions(settings)
 
-    result = _named(results, "ship:check_linear")
+    result = _named(results, "ship:settings")
     assert not result.ok
     assert "check raised" in result.detail
+
+
+def test_stored_incoherent_settings_fail_with_declared_field_titles(
+    installed, tmp_path: Path, druks_db, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    SettingsOverride.set_extension_setting("ship", "linear_api_key", "lin-secret", is_secret=True)
+    monkeypatch.setattr(doctor, "create_engine_from_url", lambda _: druks_db.get_bind())
+
+    try:
+        result = _named(doctor.check_extensions(make_settings(tmp_path)), "ship:settings")
+    finally:
+        db_session.registry.set(druks_db)
+
+    assert not result.ok
+    assert result.detail == ("Linear webhook secret: Required once the Linear API key is set.")
+
+
+def test_coherent_stored_settings_pass(
+    installed, tmp_path: Path, druks_db, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    SettingsOverride.set_extension_setting("ship", "linear_api_key", "lin-secret", is_secret=True)
+    SettingsOverride.set_extension_setting(
+        "ship", "linear_webhook_secret", "webhook-secret", is_secret=True
+    )
+    monkeypatch.setattr(doctor, "create_engine_from_url", lambda _: druks_db.get_bind())
+
+    try:
+        result = _named(doctor.check_extensions(make_settings(tmp_path)), "ship:settings")
+    finally:
+        db_session.registry.set(druks_db)
+
+    assert result.ok
+    assert result.detail == "coherent"
+
+
+def test_extension_without_settings_has_no_settings_row(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class Plain(Extension):
+        name = "plain_without_settings"
+
+    monkeypatch.setattr(doctor, "iter_extensions", lambda: iter([Plain]))
+
+    assert doctor.check_extensions(make_settings(tmp_path)) == []
+
+
+def test_raising_settings_clean_is_contained(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class Broken(Extension):
+        name = "broken_settings"
+
+        class Settings(ExtensionSettings):
+            def clean(self) -> dict[str, str]:
+                raise RuntimeError("coherence crashed")
+
+    monkeypatch.setattr(doctor, "iter_extensions", lambda: iter([Broken]))
+
+    result = _named(doctor.check_extensions(make_settings(tmp_path)), "broken_settings:settings")
+
+    assert not result.ok
+    assert "coherence crashed" in result.detail
 
 
 def test_extension_checks_are_wired_into_the_check_battery(installed, tmp_path: Path) -> None:

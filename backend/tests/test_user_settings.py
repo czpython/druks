@@ -1,6 +1,7 @@
 from typing import Literal
 
 import pytest
+from druks.extensions import Extension, ExtensionSettings
 from druks.extensions.exceptions import SettingsDeclarationError
 from druks.extensions.settings import (
     coerce_setting_value,
@@ -9,6 +10,7 @@ from druks.extensions.settings import (
 )
 from druks.user_settings.models import HarnessSettings, UserSettings
 from druks.user_settings.schemas import SettingsFieldResponse
+from druks.workflows import Workflow
 from pydantic import BaseModel, Field, SecretStr, field_validator
 
 
@@ -161,6 +163,21 @@ def test_nested_model_settings_field_is_rejected_at_declaration():
 
     with pytest.raises(SettingsDeclarationError, match="inner"):
         validate_settings_declaration(_NestedSettings)
+
+
+def test_extension_settings_must_subclass_extension_settings():
+    with pytest.raises(SettingsDeclarationError, match="must subclass ExtensionSettings"):
+
+        class InvalidSettingsExtension(Extension):
+            name = "invalid_settings"
+
+            class Settings(BaseModel):
+                enabled: bool = True
+
+
+def test_workflow_settings_remain_plain_base_models():
+    assert not issubclass(Workflow.Settings, ExtensionSettings)
+    validate_settings_declaration(Workflow.Settings)
 
 
 def test_coerce_maps_a_submitted_string_back_to_the_literal_member_type():

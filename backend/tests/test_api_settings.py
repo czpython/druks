@@ -179,6 +179,10 @@ def _ship_extension(client: TestClient) -> dict:
     return next(m for m in body["extensions"] if m["name"] == "ship")
 
 
+def _ship_settings_fields(client: TestClient) -> dict:
+    return {field["name"]: field for field in _ship_extension(client)["settings"]}
+
+
 def test_extensions_surface_build_agents(tmp_path: Path):
     """The build pipeline's agents all tune under the Ship extension."""
     with _build_client(tmp_path) as client:
@@ -239,11 +243,19 @@ def test_extensions_surface_build_agents_and_workflow_defaults(tmp_path: Path):
 
 def test_extension_secret_round_trip_encrypts_at_rest(tmp_path: Path):
     secret = "linear-secret-value"
+    webhook_secret = "linear-webhook-secret"
     key = "extension:ship:linear_api_key"
     with _build_client(tmp_path) as client:
         written = client.patch(
             "/api/settings/extensions",
-            json={"extensionSettings": {"ship": {"linear_api_key": secret}}},
+            json={
+                "extensionSettings": {
+                    "ship": {
+                        "linear_api_key": secret,
+                        "linear_webhook_secret": webhook_secret,
+                    }
+                }
+            },
         )
         stored = (
             db_session()
@@ -267,14 +279,17 @@ def test_extension_secret_round_trip_encrypts_at_rest(tmp_path: Path):
     assert secret.encode() not in stored.secret_value
     assert secret not in written.text
     assert secret not in read.text
+    assert webhook_secret not in written.text
+    assert webhook_secret not in read.text
     assert resolved and resolved.get_secret_value() == secret
     ship = next(extension for extension in read.json()["extensions"] if extension["name"] == "ship")
-    field = next(setting for setting in ship["settings"] if setting["name"] == "linear_api_key")
-    assert field["type"] == "secret"
-    assert field["value"] is None
-    assert field["default"] is None
-    assert field["secretSet"] is True
-    assert field["overridden"] is True
+    fields = {field["name"]: field for field in ship["settings"]}
+    assert fields["linear_api_key"]["type"] == "secret"
+    assert fields["linear_api_key"]["value"] is None
+    assert fields["linear_api_key"]["default"] is None
+    assert fields["linear_api_key"]["secretSet"] is True
+    assert fields["linear_api_key"]["overridden"] is True
+    assert fields["linear_webhook_secret"]["secretSet"] is True
 
 
 def test_extension_secret_plaintext_row_is_unset_until_resaved(tmp_path: Path):
@@ -288,7 +303,14 @@ def test_extension_secret_plaintext_row_is_unset_until_resaved(tmp_path: Path):
         resolved_initial = Ship.settings().linear_api_key
         saved = client.patch(
             "/api/settings/extensions",
-            json={"extensionSettings": {"ship": {"linear_api_key": secret}}},
+            json={
+                "extensionSettings": {
+                    "ship": {
+                        "linear_api_key": secret,
+                        "linear_webhook_secret": "webhook-secret",
+                    }
+                }
+            },
         )
         stored = (
             db_session()
@@ -306,7 +328,7 @@ def test_extension_secret_plaintext_row_is_unset_until_resaved(tmp_path: Path):
         setting for setting in initial["settings"] if setting["name"] == "linear_api_key"
     )
     assert initial_field["secretSet"] is False
-    assert resolved_initial is None
+    assert not resolved_initial
     assert saved.status_code == 200
     assert stored.value is None
     assert stored.value_is_null is True
@@ -342,13 +364,48 @@ def test_extension_non_secret_setting_stays_in_value(tmp_path: Path):
     assert field["overridden"] is True
 
 
-def test_clearing_extension_secret_deletes_the_override(tmp_path: Path):
+def test_incoherent_extension_save_is_rejected_and_rolled_back_before_schedules(
+    tmp_path: Path, monkeypatch
+):
+    reconciled = []
+    monkeypatch.setattr(
+        "druks.user_settings.routes.apply_schedules", lambda: reconciled.append(True)
+    )
+    with _build_client(tmp_path) as client:
+        response = client.patch(
+            "/api/settings/extensions",
+            json={
+                "agentModels": {"generate_plan": "claude-opus-4-7"},
+                "workflowSettings": {"core.refresh_tokens": {"schedule": "0 9 * * *"}},
+                "extensionSettings": {"ship": {"linear_api_key": "lin-secret"}},
+            },
+        )
+
+        assert response.status_code == 422
+        assert response.json()["detail"] == {
+            "ship": {"linear_webhook_secret": "Required once the Linear API key is set."}
+        }
+        assert not reconciled
+        assert _ship_settings_fields(client)["linear_api_key"]["secretSet"] is False
+        agents = {agent["name"]: agent for agent in _ship_extension(client)["agents"]}
+        assert agents["generate_plan"]["model"] == "gpt-5.5"
+        assert _refresh_tokens_fields(client)["schedule"]["value"] == "*/15 * * * *"
+
+
+def test_clearing_the_api_key_deletes_its_override_and_stays_coherent(tmp_path: Path):
     key = "extension:ship:linear_api_key"
 
     with _build_client(tmp_path) as client:
-        client.patch(
+        configured = client.patch(
             "/api/settings/extensions",
-            json={"extensionSettings": {"ship": {"linear_api_key": "linear-secret-value"}}},
+            json={
+                "extensionSettings": {
+                    "ship": {
+                        "linear_api_key": "lin-secret",
+                        "linear_webhook_secret": "webhook-secret",
+                    }
+                }
+            },
         )
         cleared = client.patch(
             "/api/settings/extensions",
@@ -362,13 +419,14 @@ def test_clearing_extension_secret_deletes_the_override(tmp_path: Path):
             )
             .one_or_none()
         )
-        ship = _ship_extension(client)
+        fields = _ship_settings_fields(client)
 
-    field = next(setting for setting in ship["settings"] if setting["name"] == "linear_api_key")
+    assert configured.status_code == 200
     assert cleared.status_code == 200
     assert stored is None
-    assert Ship.settings().linear_api_key is None
-    assert field["secretSet"] is False
+    assert not Ship.settings().linear_api_key
+    assert fields["linear_api_key"]["secretSet"] is False
+    assert fields["linear_webhook_secret"]["secretSet"] is True
 
 
 def test_extensions_override_agent_model_persists(tmp_path: Path):

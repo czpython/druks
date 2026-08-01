@@ -3,8 +3,8 @@ from typing import Literal
 
 from druks.agents import Agent
 from druks.doctor import CheckResult
-from druks.extensions import Extension
-from pydantic import BaseModel, Field, SecretStr, field_validator
+from druks.extensions import Extension, ExtensionSettings, Secret
+from pydantic import Field, SecretStr, field_validator
 
 from druks_field_notes.contracts import GistOutput
 
@@ -32,7 +32,7 @@ class FieldNotes(Extension):
     icon = "notebook"
     description = "Turns a jotted observation into a one-line gist with an agent."
 
-    class Settings(BaseModel):
+    class Settings(ExtensionSettings):
         # How many recent notes the board shows — an operator knob, so it lives here.
         board_size: int = Field(
             default=50,
@@ -49,24 +49,27 @@ class FieldNotes(Extension):
             description="Who the field-notes board is shared with.",
         )
         # A secret: the key the extension would use to reach an outside notes service.
-        # SecretStr, so its value is redacted everywhere it surfaces; optional with a
-        # length floor, so unset is None and a too-short key is rejected server-side
-        # (with its raw value kept out of the error).
-        sync_token: SecretStr | None = Field(
-            default=None,
-            min_length=8,
+        # SecretStr, so its value is redacted everywhere it surfaces; empty means
+        # unset, and a malformed key is rejected server-side (with its raw value
+        # kept out of the error).
+        sync_token: Secret = Field(
             title="Sync token",
             description="API key for syncing notes to an external service.",
         )
 
         @field_validator("sync_token")
         @classmethod
-        def _well_formed_token(cls, value: SecretStr | None) -> SecretStr | None:
+        def _well_formed_token(cls, value: SecretStr) -> SecretStr:
             # A format check whose message names the offending value — the platform
             # must keep that raw value out of the surfaced error for a secret field.
-            if value is not None and not value.get_secret_value().startswith("sk-"):
+            if value and not value.get_secret_value().startswith("sk-"):
                 raise ValueError(f"sync token {value.get_secret_value()!r} must start with 'sk-'")
             return value
+
+        def clean(self) -> dict[str, str]:
+            if self.visibility == "public" and not self.sync_token:
+                return {"sync_token": "Required when visibility is public."}
+            return {}
 
     # The one agent this extension runs: it reads a note and writes its gist.
     summarize = Agent(
