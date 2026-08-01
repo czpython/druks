@@ -1379,6 +1379,7 @@ function McpServerRow({
   onConnect: (name: string, identityMode: string) => Promise<void>
   onDisconnect: (name: string) => Promise<void>
 }) {
+  const claimedMode = server.identityMode
   // A built-in (catalog entry) is managed by druks: disable, never remove.
   return (
     <div className={'mcp-row' + (server.isEnabled ? '' : ' is-off')}>
@@ -1390,7 +1391,7 @@ function McpServerRow({
         {tokenStatusLabel(server)}
       </span>
       {server.tokenSource === 'oauth' &&
-        (server.identityMode === null ? (
+        (claimedMode === null ? (
           // The first connect claims how this server's credential is held;
           // afterwards the choice is fixed until the last grant is dropped.
           <>
@@ -1415,7 +1416,7 @@ function McpServerRow({
           <>
             <button
               className="set-btn primary"
-              onClick={() => void onConnect(server.name, server.identityMode)}
+              onClick={() => void onConnect(server.name, claimedMode)}
               disabled={busy}
               title="Opens the provider's consent page."
             >
