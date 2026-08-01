@@ -24,6 +24,12 @@ class BuildJournal(Journal):
         return self.filter(ImplementationOutput, status="success")
 
     @property
+    def pr_base_sha(self) -> str | None:
+        with suppress(IndexError):
+            return self.implementations[0].base_sha
+        return
+
+    @property
     def last_implementation(self) -> ImplementationOutput | None:
         with suppress(IndexError):
             return self.implementations[-1]

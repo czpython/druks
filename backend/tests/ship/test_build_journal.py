@@ -10,15 +10,17 @@ def _journal(*entries) -> BuildJournal:
     return journal
 
 
-def _implementation(status: str = "success") -> ImplementationOutput:
+def _implementation(
+    status: str = "success", *, base_sha: str = "a", head_sha: str = "b"
+) -> ImplementationOutput:
     delivered = status == "success"
     return ImplementationOutput.model_validate(
         {
             "type": "result",
             "status": status,
-            "base_sha": "a" if delivered else None,
-            "head_sha": "b" if delivered else None,
-            "commit_sha": "b" if delivered else None,
+            "base_sha": base_sha if delivered else None,
+            "head_sha": head_sha if delivered else None,
+            "commit_sha": head_sha if delivered else None,
             "branch": "agent/eng-1" if delivered else None,
             "pr_number": 7 if delivered else None,
             "files_changed": [],
@@ -46,6 +48,15 @@ def test_only_shipped_deliveries_count_as_implementations():
     last = journal.last_implementation
     assert last and last.status == "success"
     assert _journal().last_implementation is None
+
+
+def test_pr_base_sha_comes_from_the_first_successful_implementation():
+    journal = _journal(
+        _implementation(base_sha="round-1-base", head_sha="round-1-head"),
+        _implementation(base_sha="round-2-base", head_sha="round-2-head"),
+    )
+    assert journal.pr_base_sha == "round-1-base"
+    assert _journal().pr_base_sha is None
 
 
 def test_assignee_scan_falls_through_unresolved_revisions():

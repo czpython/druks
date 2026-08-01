@@ -14,9 +14,11 @@
 {% endif %}
 - **Plan revision:** {{ build.journal.plan_revision }}
 - **Implementation revision:** {{ build.journal.implementation_revision }}{% if build.journal.implementation_revision == 0 %} (first attempt){% endif %}
-{% if build.journal.last_implementation %}
-- **base_sha:** `{{ build.journal.last_implementation.base_sha }}`
-- **head_sha:** `{{ build.journal.last_implementation.head_sha }}`
+{% if build.journal.pr_base_sha and build.journal.last_implementation and build.journal.last_implementation.head_sha %}
+- **PR range:** `{{ build.journal.pr_base_sha }}` → `{{ build.journal.last_implementation.head_sha }}`
+{% endif %}
+{% if build.journal.last_implementation and build.journal.last_implementation.base_sha and build.journal.last_implementation.head_sha %}
+- **This round:** `{{ build.journal.last_implementation.base_sha }}` → `{{ build.journal.last_implementation.head_sha }}`
 {% endif %}
 
 ### Workspace paths (inside this sandbox VM)
