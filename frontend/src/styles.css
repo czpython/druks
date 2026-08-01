@@ -1075,6 +1075,11 @@ input.set-select { background-image: none; padding-right: 12px; }
 .set-btn.primary { background: color-mix(in oklch, var(--accent) 18%, var(--surface)); color: var(--accent); border: 1px solid color-mix(in oklch, var(--accent) 50%, transparent); }
 .set-btn.primary:hover { background: color-mix(in oklch, var(--accent) 28%, var(--surface)); border-color: var(--accent); }
 .set-btn.primary:disabled { opacity: 0.45; cursor: default; box-shadow: none; }
+.set-btn.danger { color: var(--bucket-dead); border: 1px solid color-mix(in oklch, var(--bucket-dead) 38%, transparent); background: color-mix(in oklch, var(--bucket-dead) 8%, transparent); }
+.set-btn.danger:hover { background: color-mix(in oklch, var(--bucket-dead) 18%, var(--surface)); border-color: var(--bucket-dead); }
+/* Destructive but not the point of the row — it earns its red on hover. */
+.set-btn.danger.quiet { color: var(--text-dim); border-color: var(--border); background: none; }
+.set-btn.danger.quiet:hover { color: var(--bucket-dead); }
 
 .skill-add { display: flex; align-items: center; gap: 10px; max-width: 620px; }
 .skill-add-input { flex: 1; height: 36px; border: 1px solid var(--border); border-radius: 5px; background: var(--bg); outline: none; color: var(--text); font-family: var(--font-mono); font-size: 13px; padding: 0 12px; }
@@ -1105,37 +1110,82 @@ input.set-select { background-image: none; padding-right: 12px; }
 .skill-row.is-off .sk-name { color: var(--text-dim); }
 .skill-row.is-off .sk-desc { color: var(--text-faint); }
 
-/* Columns sized to their content: slug, url (longest), token. Top-aligned:
-   password managers inject widgets below an input, and with bottom alignment
-   that extra height shoves the input up. Top alignment pins the inputs' row
-   no matter what an extension appends inside a field. */
-.mcp-add { display: grid; grid-template-columns: 150px minmax(0, 1.6fr) minmax(0, 1fr) auto; gap: 12px; align-items: start; max-width: 760px; }
-/* skill-add-input's flex: 1 means "grow wide" in the skills row; inside the
-   column-flex set-field the axis flips and its basis: 0 collapses the fixed
-   height. Neutralize it so height: 36px holds. */
-.mcp-add .skill-add-input { flex: none; }
-.mcp-add .set-btn { height: 36px; }
-.mcp-reg-search { display: flex; gap: 12px; max-width: 760px; }
-.mcp-reg-search .skill-add-input { flex: 1; }
-.mcp-reg-results { display: flex; flex-direction: column; gap: 8px; max-width: 760px; }
-.mcp-reg-row { display: grid; grid-template-columns: auto auto minmax(0, 1fr) auto; gap: 12px; align-items: center; width: 100%; padding: 10px 14px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface-2); cursor: pointer; text-align: left; font: inherit; }
-.mcp-reg-row:hover { border-color: var(--border-loud); }
-.mcp-reg-row.is-selected { border-color: color-mix(in oklch, var(--accent) 50%, transparent); border-radius: 7px 7px 0 0; }
-.mcp-reg-badge { font-family: var(--font-mono); font-size: 10px; padding: 2px 7px; border-radius: 4px; border: 1px solid var(--border); color: var(--text-dim); }
-.mcp-reg-badge.official { color: var(--accent-violet); border-color: color-mix(in oklch, var(--accent-violet) 40%, transparent); }
-.mcp-reg-desc { font-size: 12px; color: var(--text-mid); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.mcp-reg-form { display: flex; flex-direction: column; gap: 12px; max-width: 760px; padding: 12px 14px; border: 1px solid color-mix(in oklch, var(--accent) 50%, transparent); border-top: none; border-radius: 0 0 7px 7px; background: var(--surface); }
-.mcp-reg-form .skill-add-input { flex: none; }
+/* The agent-access pane reuses the row primitives (.mcp-row / .mcp-id /
+   .mcp-tok) for its token list, so everything the MCP pane redefines is
+   scoped under .mcp-pane. */
 .mcp-servers { display: flex; flex-direction: column; gap: 8px; }
 .mcp-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto auto; gap: 14px; align-items: center; padding: 10px 14px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface-2); }
 .mcp-row.is-off { opacity: 0.6; }
 .mcp-id { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.mcp-name { font-family: var(--font-mono); font-size: 12.5px; color: var(--text); }
-.mcp-url { font-size: 12px; color: var(--text-mid); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mcp-name { font-family: var(--font-mono); font-size: 12.5px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mcp-url { font-family: var(--font-mono); font-size: 11.5px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .mcp-tok { font-family: var(--font-mono); font-size: 10px; padding: 2px 7px; border-radius: 4px; border: 1px solid var(--border); color: var(--text-dim); }
-.mcp-tok.ok { color: var(--accent-violet); border-color: color-mix(in oklch, var(--accent-violet) 40%, transparent); }
-.mcp-tok.missing { color: var(--bucket-dead); border-color: color-mix(in oklch, var(--bucket-dead) 45%, transparent); }
-.mcp-managed { font-family: var(--font-mono); font-size: 11px; color: var(--text-faint); padding: 5px 10px; }
+
+/* One measure for every band, so search, form and server list share an edge. */
+.mcp-pane { gap: 24px; }
+.mcp-pane > * { max-width: 760px; }
+.mcp-pane-head { display: flex; flex-direction: column; gap: 6px; }
+.mcp-pane-title { margin: 0; font-size: 17px; font-weight: 600; letter-spacing: -0.01em; color: var(--text); }
+.mcp-pane-sub { margin: 0; font-size: 13px; line-height: 1.5; color: var(--text-mid); }
+.mcp-section { display: flex; flex-direction: column; gap: 12px; }
+.mcp-h { margin: 0; font-size: 14px; font-weight: 600; color: var(--text); }
+.mcp-h .gl-count { font-weight: 400; }
+.mcp-help { margin: 0; font-size: 12px; line-height: 1.45; color: var(--text-dim); }
+.mcp-h + .mcp-help { margin-top: -8px; }
+.mcp-error { padding: 9px 12px; border: 1px solid color-mix(in oklch, var(--bucket-dead) 40%, transparent); border-radius: 6px; background: color-mix(in oklch, var(--bucket-dead) 8%, var(--surface)); font-size: 12.5px; color: var(--bucket-dead); }
+
+.mcp-field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.mcp-label { font-size: 12px; font-weight: 500; color: var(--text-mid); }
+.mcp-label.tech { font-family: var(--font-mono); font-size: 11.5px; }
+.mcp-req { font-weight: 400; color: var(--text-faint); }
+.mcp-sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+/* skill-add-input's flex: 1 means "grow wide" in the skills row; inside a
+   column-flex field the axis flips and its basis: 0 collapses the fixed
+   height. Neutralize it so height: 36px holds. */
+.mcp-pane .skill-add-input { flex: none; width: 100%; }
+.mcp-pane .set-btn { display: inline-flex; align-items: center; height: 36px; padding: 0 14px; font-family: var(--font-sans); font-size: 12.5px; letter-spacing: 0; }
+.mcp-pane :is(button, input, summary):focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.mcp-pane button:disabled { opacity: 0.45; cursor: default; }
+.mcp-pane input:disabled { opacity: 0.6; cursor: default; }
+
+.mcp-reg-search { display: flex; gap: 10px; }
+.mcp-pane .mcp-reg-search .skill-add-input { flex: 1; min-width: 0; }
+.mcp-reg-results { display: flex; flex-direction: column; gap: 8px; }
+.mcp-reg-row { display: flex; flex-direction: column; gap: 3px; width: 100%; padding: 10px 13px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface-2); cursor: pointer; text-align: left; font: inherit; }
+.mcp-reg-row:hover { border-color: var(--border-loud); background: var(--surface-3); }
+.mcp-reg-row.is-selected { border-color: color-mix(in oklch, var(--accent) 50%, transparent); border-radius: 7px 7px 0 0; background: var(--surface-3); }
+.mcp-reg-top { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.mcp-reg-badge { flex-shrink: 0; font-family: var(--font-mono); font-size: 10px; padding: 2px 7px; border-radius: 4px; border: 1px solid var(--border); color: var(--text-dim); }
+.mcp-reg-badge.official { color: var(--accent-violet); border-color: color-mix(in oklch, var(--accent-violet) 40%, transparent); }
+.mcp-reg-desc { font-size: 12px; color: var(--text-mid); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mcp-reg-form { display: flex; flex-direction: column; gap: 13px; padding: 14px; border: 1px solid color-mix(in oklch, var(--accent) 50%, transparent); border-top: none; border-radius: 0 0 7px 7px; background: var(--surface); }
+
+/* Secondary by weight, not by hiding: one quiet control until it is wanted. */
+.mcp-custom { border: 1px solid var(--border); border-radius: 7px; background: var(--surface-2); }
+.mcp-custom-summary { display: flex; align-items: center; gap: 8px; padding: 11px 14px; border-radius: 7px; font-size: 13px; color: var(--text-mid); cursor: pointer; list-style: none; }
+.mcp-custom-summary::-webkit-details-marker { display: none; }
+.mcp-custom-summary::before { content: '›'; font-family: var(--font-mono); color: var(--text-faint); transition: transform 120ms; }
+.mcp-custom-summary:hover { color: var(--text); }
+.mcp-custom[open] .mcp-custom-summary { border-bottom: 1px solid var(--border); border-radius: 7px 7px 0 0; color: var(--text); }
+.mcp-custom[open] .mcp-custom-summary::before { transform: rotate(90deg); }
+.mcp-custom-body { display: flex; flex-direction: column; gap: 14px; padding: 14px; }
+.mcp-form-grid { display: grid; grid-template-columns: minmax(160px, 1fr) minmax(200px, 1.4fr); gap: 14px; }
+.mcp-form-grid > .mcp-field:last-child { grid-column: 1 / -1; }
+
+/* Two tiers — identity + connection, then availability + actions. Placement is
+   explicit so no control can wrap into an orphaned position. */
+.mcp-pane .mcp-row { grid-template-columns: minmax(0, 1fr) auto; gap: 10px 14px; align-items: start; padding: 12px 14px; transition: border-color 120ms, background 120ms; }
+.mcp-pane .mcp-row:hover { border-color: var(--border-loud); }
+.mcp-pane .mcp-row.is-off { opacity: 1; background: var(--surface); }
+.mcp-pane .mcp-row.is-off :is(.mcp-id, .mcp-conn) { opacity: 0.5; }
+.mcp-conn { display: inline-flex; align-items: center; gap: 7px; justify-self: end; padding-top: 2px; font-size: 12px; font-weight: 500; color: var(--decision-request-revision); white-space: nowrap; }
+.mcp-conn-dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; flex-shrink: 0; }
+.mcp-conn.is-live { color: var(--outcome-merged); }
+.mcp-conn.is-live .mcp-conn-dot { box-shadow: 0 0 8px color-mix(in oklch, var(--outcome-merged) 60%, transparent); }
+.mcp-row-foot { grid-column: 1 / -1; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px 12px; padding-top: 11px; border-top: 1px solid var(--border-soft); }
+.mcp-enable { display: inline-flex; align-items: center; gap: 9px; }
+.mcp-enable-label { font-size: 12.5px; color: var(--text-mid); }
+.mcp-actions { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px; }
 
 @media (max-width: 720px) {
   .set-extension-toggles { grid-template-columns: 1fr; }
@@ -1144,9 +1194,9 @@ input.set-select { background-image: none; padding-right: 12px; }
   .skill-row { grid-template-columns: 1fr; }
   .skill-row .sk-desc { display: none; }
   .mcp-row { grid-template-columns: 1fr auto; row-gap: 8px; }
-  .mcp-add { grid-template-columns: 1fr; align-items: stretch; }
-  .mcp-reg-row { grid-template-columns: auto auto; row-gap: 6px; }
-  .mcp-reg-row .mcp-url { display: none; }
+  .mcp-pane .mcp-row { grid-template-columns: minmax(0, 1fr); }
+  .mcp-conn { justify-self: start; }
+  .mcp-form-grid { grid-template-columns: 1fr; }
 }
 
 
