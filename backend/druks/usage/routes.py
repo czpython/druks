@@ -174,7 +174,7 @@ def _summarize(
         connected=connected,
         plan_tier=row.plan_tier,
         five_hour=_metric(row.five_hour_percent_left, row.five_hour_resets_at),
-        week=_metric(row.week_percent_left, row.week_resets_at),
+        week=_metric(row.week_percent_left, row.week_resets_at, row.week_model),
         unlimited=row.unlimited,
         scraped_at=row.scraped_at,
         age_seconds=age,
@@ -184,10 +184,12 @@ def _summarize(
     )
 
 
-def _metric(percent_left: int | None, resets_at: datetime | None) -> UsageMetricSummary | None:
+def _metric(
+    percent_left: int | None, resets_at: datetime | None, model: str | None = None
+) -> UsageMetricSummary | None:
     if percent_left is None and resets_at is None:
         return
-    return UsageMetricSummary(percent_left=percent_left, resets_at=resets_at)
+    return UsageMetricSummary(percent_left=percent_left, resets_at=resets_at, model=model)
 
 
 def _age_seconds(scraped_at: datetime | None, *, now: datetime) -> int | None:

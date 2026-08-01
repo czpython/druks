@@ -358,6 +358,7 @@ export interface FeedResponse {
 export interface UsageMetric {
   percentLeft: number | null
   resetsAt: string | null
+  model: string | null
 }
 
 export interface UsageHarnessSummary {

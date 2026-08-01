@@ -36,6 +36,9 @@ class UsageScrape(Base):
     # Weekly window — both CLIs expose this.
     week_percent_left: Mapped[int | None]
     week_resets_at: Mapped[datetime | None]
+    # Set when the weekly window meters one model separately from the
+    # rest, naming it. None covers every model.
+    week_model: Mapped[str | None]
     # Unmetered plan (Codex business/enterprise with unlimited credits).
     # The window percentages above are synthesized permanently-full
     # buckets when this is set — the UI renders "unmetered" instead of

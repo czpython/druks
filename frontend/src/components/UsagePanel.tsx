@@ -303,6 +303,7 @@ function WindowRow({
       <div className="us-win-top">
         <span className="us-win-label mono">
           <b>{label}</b>
+          {metric.model ? ` · ${metric.model}` : ''}
           {note ? ` · ${note}` : ''}
         </span>
         <span className={`us-win-pct mono h-${tone}`}>
@@ -434,14 +435,13 @@ function Spark({ data, tone, id }: { data: number[]; tone: UsageTone; id: string
 function TodaySection({ today }: { today: UsageTodayResponse }) {
   const totalSpend = today.harnesses.reduce((sum, h) => sum + h.spendUsd, 0)
   const totalTokens = today.harnesses.reduce((sum, h) => sum + h.tokens, 0)
-  const tzLabel = today.timezone === 'UTC' ? 'utc' : today.timezone.toLowerCase()
   const harnessColor = harnessColors(today.harnesses.map((h) => h.name))
 
   return (
     <>
       <div className="us-section-head">
         <span className="us-section-rule" />
-        <span className="us-section-title mono">today · since 00:00 {tzLabel}</span>
+        <span className="us-section-title mono">druks runs · today</span>
         <span className="us-section-sub mono">{describeLoad(today)}</span>
       </div>
       <div className="us-today">
