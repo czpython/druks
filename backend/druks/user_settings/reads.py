@@ -4,6 +4,8 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic.fields import FieldInfo
 
+from druks.database import db_session
+from druks.extensions.settings import field_kind
 from druks.harnesses.registry import get_harness_for_model
 
 from .models import SettingsOverride
@@ -41,9 +43,8 @@ def get_agent_setting(agent: "Agent") -> AgentSettingResponse:
 def get_settings_field(
     name: str, field: FieldInfo, *, value: Any, override_key: str
 ) -> SettingsFieldResponse:
-    return SettingsFieldResponse.from_field(
-        name, field, value=value, overridden=SettingsOverride.read(override_key) is not None
-    )
+    overridden = db_session().get(SettingsOverride, override_key) is not None
+    return SettingsFieldResponse.from_field(name, field, value=value, overridden=overridden)
 
 
 def get_workflow_settings(workflow: "type[Workflow]") -> WorkflowSettingsResponse:
@@ -109,7 +110,12 @@ def get_extension_settings(extension: "type[Extension]") -> ExtensionSettingsRes
             get_settings_field(
                 name,
                 field,
-                value=SettingsOverride.extension_setting(extension.name, name, field.default),
+                value=SettingsOverride.extension_setting(
+                    extension.name,
+                    name,
+                    field.default,
+                    is_secret=field_kind(field) == "secret",
+                ),
                 override_key=f"extension:{extension.name}:{name}",
             )
             for name, field in (model.model_fields if model else {}).items()

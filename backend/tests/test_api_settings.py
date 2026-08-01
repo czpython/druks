@@ -1,7 +1,11 @@
 from pathlib import Path
 
+from druks.contrib.ship.extension import Ship
+from druks.database import db_session
 from druks.testing import configure_app_for_test, make_settings
+from druks.user_settings.models import SettingsOverride
 from fastapi.testclient import TestClient
+from sqlalchemy import text
 
 
 def _build_client(tmp_path: Path) -> TestClient:
@@ -233,25 +237,138 @@ def test_extensions_surface_build_agents_and_workflow_defaults(tmp_path: Path):
     }
 
 
-def test_extension_secret_write_never_returns_the_value(tmp_path: Path):
+def test_extension_secret_round_trip_encrypts_at_rest(tmp_path: Path):
     secret = "linear-secret-value"
+    key = "extension:ship:linear_api_key"
     with _build_client(tmp_path) as client:
         written = client.patch(
             "/api/settings/extensions",
             json={"extensionSettings": {"ship": {"linear_api_key": secret}}},
         )
+        stored = (
+            db_session()
+            .execute(
+                text(
+                    "SELECT value, value IS NULL AS value_is_null, secret_value "
+                    "FROM settings_overrides WHERE key = :key"
+                ),
+                {"key": key},
+            )
+            .one()
+        )
         read = client.get("/api/settings/extensions")
+        resolved = Ship.settings().linear_api_key
 
     assert written.status_code == 200
     assert read.status_code == 200
+    assert stored.value is None
+    assert stored.value_is_null is True
+    assert stored.secret_value
+    assert secret.encode() not in stored.secret_value
     assert secret not in written.text
     assert secret not in read.text
+    assert resolved and resolved.get_secret_value() == secret
     ship = next(extension for extension in read.json()["extensions"] if extension["name"] == "ship")
     field = next(setting for setting in ship["settings"] if setting["name"] == "linear_api_key")
     assert field["type"] == "secret"
     assert field["value"] is None
     assert field["default"] is None
     assert field["secretSet"] is True
+    assert field["overridden"] is True
+
+
+def test_extension_secret_plaintext_row_is_unset_until_resaved(tmp_path: Path):
+    secret = "legacy-plaintext-secret"
+    key = "extension:ship:linear_api_key"
+    db_session().add(SettingsOverride(key=key, value=secret))
+    db_session().flush()
+
+    with _build_client(tmp_path) as client:
+        initial = _ship_extension(client)
+        resolved_initial = Ship.settings().linear_api_key
+        saved = client.patch(
+            "/api/settings/extensions",
+            json={"extensionSettings": {"ship": {"linear_api_key": secret}}},
+        )
+        stored = (
+            db_session()
+            .execute(
+                text(
+                    "SELECT value, value IS NULL AS value_is_null, secret_value "
+                    "FROM settings_overrides WHERE key = :key"
+                ),
+                {"key": key},
+            )
+            .one()
+        )
+
+    initial_field = next(
+        setting for setting in initial["settings"] if setting["name"] == "linear_api_key"
+    )
+    assert initial_field["secretSet"] is False
+    assert resolved_initial is None
+    assert saved.status_code == 200
+    assert stored.value is None
+    assert stored.value_is_null is True
+    assert stored.secret_value
+    assert secret.encode() not in stored.secret_value
+
+
+def test_extension_non_secret_setting_stays_in_value(tmp_path: Path):
+    url = "https://example.atlassian.net"
+    key = "extension:ship:jira_base_url"
+
+    with _build_client(tmp_path) as client:
+        written = client.patch(
+            "/api/settings/extensions",
+            json={"extensionSettings": {"ship": {"jira_base_url": url}}},
+        )
+        stored = (
+            db_session()
+            .execute(
+                text("SELECT value, secret_value FROM settings_overrides WHERE key = :key"),
+                {"key": key},
+            )
+            .one()
+        )
+        ship = _ship_extension(client)
+
+    field = next(setting for setting in ship["settings"] if setting["name"] == "jira_base_url")
+    assert written.status_code == 200
+    assert stored.value == url
+    assert stored.secret_value == b""
+    assert Ship.settings().jira_base_url == url
+    assert field["value"] == url
+    assert field["overridden"] is True
+
+
+def test_clearing_extension_secret_deletes_the_override(tmp_path: Path):
+    key = "extension:ship:linear_api_key"
+
+    with _build_client(tmp_path) as client:
+        client.patch(
+            "/api/settings/extensions",
+            json={"extensionSettings": {"ship": {"linear_api_key": "linear-secret-value"}}},
+        )
+        cleared = client.patch(
+            "/api/settings/extensions",
+            json={"extensionSettings": {"ship": {"linear_api_key": None}}},
+        )
+        stored = (
+            db_session()
+            .execute(
+                text("SELECT 1 FROM settings_overrides WHERE key = :key"),
+                {"key": key},
+            )
+            .one_or_none()
+        )
+        ship = _ship_extension(client)
+
+    field = next(setting for setting in ship["settings"] if setting["name"] == "linear_api_key")
+    assert cleared.status_code == 200
+    assert stored is None
+    assert Ship.settings().linear_api_key is None
+    assert field["secretSet"] is False
 
 
 def test_extensions_override_agent_model_persists(tmp_path: Path):

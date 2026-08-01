@@ -16,7 +16,6 @@ _PACKAGE_ROOT = Path(__file__).resolve().parent / "druks-field_notes" / "druks_f
 _VERSIONS = _PACKAGE_ROOT / "migrations" / "versions"
 
 
-
 def _config() -> Config:
     config = Config(str(_ALEMBIC_INI))
     config.set_main_option("version_locations", str(_VERSIONS))

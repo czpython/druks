@@ -16,6 +16,7 @@ from .registry import autodiscover
 from .registry import workflows as workflow_registry
 from .settings import (
     coerce_setting_value,
+    field_kind,
     validate_setting_override,
     validate_settings_declaration,
 )
@@ -121,7 +122,12 @@ class Extension:
         if not model:
             raise TypeError(f"extension {cls.name!r} declares no Settings")
         values = {
-            name: SettingsOverride.extension_setting(cls.name, name, field.default)
+            name: SettingsOverride.extension_setting(
+                cls.name,
+                name,
+                field.default,
+                is_secret=field_kind(field) == "secret",
+            )
             for name, field in model.model_fields.items()
         }
         return model.model_validate(values)
@@ -136,7 +142,12 @@ class Extension:
         if value is not None:
             value = coerce_setting_value(model, field, value)
             validate_setting_override(model, cls.settings().model_dump(), field, value)
-        SettingsOverride.set_extension_setting(cls.name, field, value)
+        SettingsOverride.set_extension_setting(
+            cls.name,
+            field,
+            value,
+            is_secret=field_kind(model.model_fields[field]) == "secret",
+        )
 
     @classmethod
     def agents(cls) -> "list[Agent]":

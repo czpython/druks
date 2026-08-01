@@ -207,9 +207,7 @@ async def test_malformed_payloads_400_never_500_never_resume(tmp_path, druks_db,
     assert Notification.get(notification.id).state == "pending"
 
 
-async def test_unknown_interactivity_type_is_acknowledged_unhandled(
-    tmp_path, druks_db, resume_spy
-):
+async def test_unknown_interactivity_type_is_acknowledged_unhandled(tmp_path, druks_db, resume_spy):
     _parked_notification(druks_db)
     body = urlencode({"payload": json.dumps({"type": "view_submission"})}).encode()
 
