@@ -6,6 +6,8 @@ from unittest import mock
 import pytest
 from conftest import make_test_note, seed_note_run
 from druks.accounts.models import Account
+from druks.api import runs
+from druks.api.exceptions import RunNotActive, RunNotFailed, RunNotFound, SubjectBusy
 from druks.durable.engine import run_queue
 from druks.durable.enums import WorkflowEvent
 from druks.durable.models import Artifact, Run
@@ -130,7 +132,7 @@ def test_get_gate_serves_the_artifact(druks_db):
 
 
 def test_get_gate_refuses_when_not_parked_or_external(druks_db):
-    with pytest.raises(exceptions.RunNotFound):
+    with pytest.raises(RunNotFound):
         services.get_gate("no-such-run")
 
     item = make_test_note()
@@ -154,7 +156,7 @@ def test_get_gate_refuses_when_not_parked_or_external(druks_db):
 
 
 async def test_answer_gate_error_taxonomy(druks_db, resume_spy):
-    with pytest.raises(exceptions.RunNotFound):
+    with pytest.raises(RunNotFound):
         await services.answer_gate(
             "no-such-run", parked_at=datetime.now(UTC), control="approve", answers={}, note=""
         )
@@ -247,22 +249,22 @@ async def test_cancel_run_paths(druks_db):
     item = make_test_note()
     run = seed_note_run(druks_db, note=item, state="running")
 
-    result = await services.cancel_run(run.id, reason="stuck")
+    result = await runs.cancel_run(run.id, reason="stuck")
     assert result.result == "cancelled"
     druks_db.expire_all()
     assert Run.get(run.id).state == "cancelled"
     assert Run.get(run.id).failure == "stuck"
 
-    again = await services.cancel_run(run.id, reason="stuck")
+    again = await runs.cancel_run(run.id, reason="stuck")
     assert again.result == "already_cancelled"
 
     finished_item = make_test_note()
     finished = seed_note_run(druks_db, note=finished_item, state="finished")
-    with pytest.raises(exceptions.RunNotActive):
-        await services.cancel_run(finished.id, reason="late")
+    with pytest.raises(RunNotActive):
+        await runs.cancel_run(finished.id, reason="late")
 
-    with pytest.raises(exceptions.RunNotFound):
-        await services.cancel_run("no-such-run", reason="x")
+    with pytest.raises(RunNotFound):
+        await runs.cancel_run("no-such-run", reason="x")
 
 
 async def test_run_retry_forks_from_the_failed_step(druks_db, monkeypatch):
@@ -336,8 +338,8 @@ async def test_retry_run_refuses_a_non_failed_run(druks_db, monkeypatch):
     retry = mock.AsyncMock()
     monkeypatch.setattr(Run, "retry", retry)
 
-    with pytest.raises(exceptions.RunNotFailed) as error:
-        await services.retry_run(run.id)
+    with pytest.raises(RunNotFailed) as error:
+        await runs.retry_run(run.id)
 
     assert error.value.code == "RUN_NOT_FAILED"
     assert error.value.retryable is False
@@ -351,8 +353,8 @@ async def test_retry_run_refuses_a_busy_subject(druks_db, monkeypatch):
     retry = mock.AsyncMock()
     monkeypatch.setattr(Run, "retry", retry)
 
-    with pytest.raises(exceptions.SubjectBusy) as error:
-        await services.retry_run(failed.id)
+    with pytest.raises(SubjectBusy) as error:
+        await runs.retry_run(failed.id)
 
     assert str(error.value) == f"The subject already has active run {active.id}."
     assert error.value.retryable is True
@@ -364,15 +366,15 @@ async def test_retry_run_retries_a_failed_run(druks_db, monkeypatch):
     retry = mock.AsyncMock(return_value="retried-run")
     monkeypatch.setattr(Run, "retry", retry)
 
-    result = await services.retry_run(run.id)
+    result = await runs.retry_run(run.id)
 
     assert result.run_id == "retried-run"
     retry.assert_awaited_once_with()
 
 
 async def test_retry_run_refuses_a_missing_run(druks_db):
-    with pytest.raises(exceptions.RunNotFound) as error:
-        await services.retry_run("no-such-run")
+    with pytest.raises(RunNotFound) as error:
+        await runs.retry_run("no-such-run")
 
     assert error.value.code == "RUN_NOT_FOUND"
     assert error.value.retryable is False

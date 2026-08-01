@@ -73,7 +73,7 @@ def test_openapi_pins_the_six_agent_routes(client: TestClient):
         (method, path): operation
         for path, operations in schema["paths"].items()
         for method, operation in operations.items()
-        if operation.get("tags") == ["agent"]
+        if "agent" in operation.get("tags", [])
     }
     assert {key: op["operationId"] for key, op in found.items()} == _MCP_ROUTES
 

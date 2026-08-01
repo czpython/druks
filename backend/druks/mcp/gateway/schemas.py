@@ -48,15 +48,6 @@ class AgentCallDetailResponse(BaseResponse):
     artifact: ArtifactContent | None = None
 
 
-class CancelRunResponse(BaseResponse):
-    run_id: str
-    result: Literal["cancelled", "already_cancelled"]
-
-
-class RetryRunResponse(BaseResponse):
-    run_id: str
-
-
 class AgentHarnessUsage(BaseResponse):
     # *_history: percent-left trend samples, oldest first.
     name: str
