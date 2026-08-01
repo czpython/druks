@@ -1,0 +1,29 @@
+# Host-run development configuration. Copy to `druks.toml`.
+# Reference: docs/configuration.md.
+
+[identity]
+mode = "none"
+header = ""
+jwks_url = ""
+jwt_issuer = ""
+jwt_audience = ""
+jwt_identity_claim = "email"
+
+[github]
+operator_app_id = ""
+reviewer_app_id = ""
+
+[urls]
+endpoint = ""
+webhook_host = ""
+
+[secrets]
+webhook_secret = "change-me"
+# python3 -c 'import base64, os; print(base64.b64encode(os.urandom(32)).decode())'
+secrets_key = ""
+
+[sandbox]
+service_url = ""
+service_token = ""
+image = ""
+timeout = 180

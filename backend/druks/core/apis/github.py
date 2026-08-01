@@ -500,26 +500,26 @@ def _fold_comments_into_body(body: str, comments: list[ReviewComment]) -> str:
 
 
 def get_github_client(settings: Settings) -> GitHubClient:
-    if settings.github_operator_app_id and settings.github_operator_private_key_path:
+    if settings.github.operator_app_id and settings.github_operator_private_key_path:
         return GitHubClient(
-            app_id=settings.github_operator_app_id,
+            app_id=settings.github.operator_app_id,
             private_key=settings.github_operator_private_key_path.read_text(),
             base_url=settings.github_api_url,
         )
     raise GitHubAppNotConfiguredError(
-        "Operator GitHub App credentials are required: set GITHUB_OPERATOR_APP_ID and "
+        "Operator GitHub App credentials are required: set github.operator_app_id and "
         "GITHUB_OPERATOR_PRIVATE_KEY_PATH."
     )
 
 
 def get_reviewer_github_client(settings: Settings) -> GitHubClient:
-    if settings.github_reviewer_app_id and settings.github_reviewer_private_key_path:
+    if settings.github.reviewer_app_id and settings.github_reviewer_private_key_path:
         return GitHubClient(
-            app_id=settings.github_reviewer_app_id,
+            app_id=settings.github.reviewer_app_id,
             private_key=settings.github_reviewer_private_key_path.read_text(),
             base_url=settings.github_api_url,
         )
     raise GitHubAppNotConfiguredError(
-        "Reviewer GitHub App credentials are required: set GITHUB_REVIEWER_APP_ID and "
+        "Reviewer GitHub App credentials are required: set github.reviewer_app_id and "
         "GITHUB_REVIEWER_PRIVATE_KEY_PATH."
     )

@@ -19,7 +19,7 @@ REGISTRY_CACHE_TTL_SECONDS = 300
 
 # OAuth connect + mint plumbing. The callback path is public API surface — the
 # authorization server redirects the operator's browser to
-# {DRUKS_ENDPOINT}{OAUTH_CALLBACK_PATH} after consent. Access tokens cache in
+# {urls.endpoint}{OAUTH_CALLBACK_PATH} after consent. Access tokens cache in
 # Redis under the token key prefix for their lifetime minus the skew (so a
 # token injected into a run never expires moments after delivery); pending
 # connect state (PKCE verifier + endpoints) lives under the connect prefix for

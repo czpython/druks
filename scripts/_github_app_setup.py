@@ -7,37 +7,32 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-ENV_PATH = Path(".env")
+try:
+    import tomllib
+except ModuleNotFoundError:
+    tomllib = None
+
 TOML_PATH = Path("druks.toml")
 MANIFEST_DIR = Path(__file__).parent / "manifests"
 SETUP_PAGE = "https://druks.ai/app-setup/"
 
-# (role, env key, setting path, PEM path, default app name)
+# (role, TOML path, setting path, PEM path, default app name)
 ROLES = (
     (
         "operator",
-        "GITHUB_OPERATOR_APP_ID",
+        ("github", "operator_app_id"),
         "github.operator_app_id",
         Path("secrets/operator.pem"),
         "druks-operator",
     ),
     (
         "reviewer",
-        "GITHUB_REVIEWER_APP_ID",
+        ("github", "reviewer_app_id"),
         "github.reviewer_app_id",
         Path("secrets/reviewer.pem"),
         "druks-critic",
     ),
 )
-
-
-def read_env() -> dict[str, str]:
-    values = {}
-    for line in ENV_PATH.read_text().splitlines():
-        if line and not line.startswith("#") and "=" in line:
-            key, _, value = line.partition("=")
-            values[key] = value
-    return values
 
 
 def apply_values(updates: dict[str, str]) -> None:
@@ -98,16 +93,17 @@ def prompt_code(role: str) -> str:
 
 def provision(
     role: str,
-    env_key: str,
+    toml_path: tuple[str, str],
+    app_id: str,
     setting_path: str,
     pem_path: Path,
     default_name: str,
     public_url: str,
     org: str,
 ) -> None:
-    env = read_env()
-    if env.get(env_key):
-        answer = input(f"{env_key}={env[env_key]} already configured. Re-create? [y/N] ")
+    key = ".".join(toml_path)
+    if app_id:
+        answer = input(f"{key}={app_id} already configured. Re-create? [y/N] ")
         if answer.strip().lower() != "y":
             print(f"→ skipping {role}")
             return
@@ -157,19 +153,46 @@ def main() -> int:
         print("No druks.toml here — run install.sh first, then re-run with --apps.")
         return 1
 
-    # An empty apply still renders .env from druks.toml, so the endpoint
-    # read below sees the operator's current value.
-    apply_values({})
-    public_url = read_env().get("DRUKS_ENDPOINT") or input(
+    if not tomllib:
+        print("GitHub App setup requires Python 3.11+ (tomllib).", file=sys.stderr)
+        return 1
+
+    # .get chains: a hand-written druks.toml (the pre-TOML migration path) may
+    # omit tables the canonical writer always emits.
+    with TOML_PATH.open("rb") as config_file:
+        config = tomllib.load(config_file)
+    roles = tuple(
+        (
+            role,
+            toml_path,
+            config.get(toml_path[0], {}).get(toml_path[1], ""),
+            setting_path,
+            pem_path,
+            base_name,
+        )
+        for role, toml_path, setting_path, pem_path, base_name in ROLES
+    )
+    public_url = config.get("urls", {}).get("endpoint", "") or input(
         "Public base URL druks will be reachable on (e.g. https://druks.example.com): "
     ).strip().rstrip("/")
+
+    apply_values({})
     org = input("GitHub org slug (empty for a personal account): ").strip()
 
-    for role, env_key, setting_path, pem_path, base_name in ROLES:
+    for role, toml_path, app_id, setting_path, pem_path, base_name in roles:
         # App names are globally unique across GitHub; the org prefix gives
         # every deployment its own namespace.
         default_name = f"{org}-{base_name}" if org else base_name
-        provision(role, env_key, setting_path, pem_path, default_name, public_url, org)
+        provision(
+            role,
+            toml_path,
+            app_id,
+            setting_path,
+            pem_path,
+            default_name,
+            public_url,
+            org,
+        )
     return 0
 
 

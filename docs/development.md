@@ -10,17 +10,25 @@ From the repository root:
 ```bash
 docker compose -f deploy/compose.dev.yaml up -d
 uv sync --locked --dev
+cp druks.toml.example druks.toml
 cp .env.example .env
-python3 -c 'import base64, os; print("DRUKS_SECRETS_KEY=" + base64.b64encode(os.urandom(32)).decode())' >> .env
+python3 -c 'import base64, os; print(base64.b64encode(os.urandom(32)).decode())'
+```
+
+Paste the generated value into `secrets.secrets_key` in `druks.toml`, then
+initialize the development database:
+
+```bash
 uv run druks init-db
 ```
 
-Local development runs `DRUKS_AUTH_MODE=none` (the `.env.example` default):
-the loopback dashboard has no authentication and exactly one operator
-account, created by your first harness connection. To exercise `header` mode
-against the dev server, set `DRUKS_AUTH_MODE=header`, name a header in
-`DRUKS_AUTH_HEADER` (no default), and send it yourself (for example with a
-browser header extension or `curl -H 'X-Edge-Email: you@example.com'`).
+Settings reads `./druks.toml` from the current working directory. The example
+runs with `[identity].mode = "none"`: the loopback dashboard has no
+authentication and exactly one operator account, created by your first harness
+connection. To exercise `header` mode against the dev server, set
+`identity.mode = "header"` and `identity.header` in `druks.toml`, then send the
+header yourself (for example with a browser header extension or
+`curl -H 'X-Edge-Email: you@example.com'`).
 
 The dev Compose project creates two databases:
 
@@ -145,10 +153,11 @@ currently ship a Markdown linter or link-check command.
 Backend tests mock most provider boundaries. For a real local sandbox, run
 Drukbox on the host as described in [Full local setup](full-local.md) and set:
 
-```dotenv
-DRUKS_SANDBOX_SERVICE_URL=http://127.0.0.1:8000
-DRUKS_SANDBOX_SERVICE_TOKEN=dev-token
-DRUKS_SANDBOX_IMAGE=ghcr.io/czpython/druks-sandbox:latest
+```toml
+[sandbox]
+service_url = "http://127.0.0.1:8000"
+service_token = "dev-token"
+image = "ghcr.io/czpython/druks-sandbox:latest"
 ```
 
 `uv run druks doctor --sandbox` creates a real host. Run it deliberately; it is

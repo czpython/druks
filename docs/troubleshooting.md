@@ -30,7 +30,7 @@ provider capacity and can take about a VM minute.
 
 Read the named field in the error. Common causes:
 
-- `DRUKS_SECRETS_KEY` is empty, not valid base64, or does not decode to 32 bytes
+- `secrets.secrets_key` is empty, not valid base64, or does not decode to 32 bytes
 - a mounted PEM path differs from the path visible inside the container
 - a `druks.toml` value renders an invalid process setting
 
@@ -72,15 +72,15 @@ Distinguish the failure by what you see:
 - **A redirect to `__exe.dev/login`** — no trusted identity header reached
   Caddy; sign in at the edge.
 - **A "couldn't resolve your identity" page (`header` mode 401)** — the
-  request reached Druks without exactly one nonblank `DRUKS_AUTH_HEADER`
+  request reached Druks without exactly one nonblank `identity.header`
   value. Confirm the proxy injects the header Druks expects, and that
   nothing between them drops or duplicates it.
 - **An "Assertion rejected: …" 401 (`jwt` mode)** — the edge asserted a token
   Druks could not verify. The named failure class says which check failed:
-  signature or key problems point at `DRUKS_AUTH_JWKS_URL` (is it reachable
+  signature or key problems point at `identity.jwks_url` (is it reachable
   from the container? did the edge rotate keys?), issuer/audience mismatches
-  at the `DRUKS_AUTH_JWT_*` values, and expiry classes at clock skew between
-  edge and host.
+  at `identity.jwt_issuer` or `identity.jwt_audience`, and expiry classes at
+  clock skew between edge and host.
 - **Onboarding ("connect a harness to finish setup")** — identity resolved
   but that account has no harness connection yet; in a fresh `none`-mode
   install the first completed connection creates the operator account.
@@ -97,12 +97,13 @@ in-flight connect attempts and other transient coordination.
 Check:
 
 ```bash
-grep -E '^(DRUKS_AUTH_MODE|DRUKS_AUTH_HEADER|DRUKS_UPSTREAM)=' ~/druks/.env
+sed -n '/^\[identity\]/,/^\[/p' ~/druks/druks.toml | grep '^mode ='
+grep -E '^(DRUKS_AUTH_HEADER|DRUKS_UPSTREAM)=' ~/druks/.env
 docker compose logs --tail=200 caddy web
 ```
 
 The local `docker` profile intentionally skips Caddy; use
-<http://127.0.0.1:8001>. It runs `DRUKS_AUTH_MODE=none` — no authentication —
+<http://127.0.0.1:8001>. It runs with `[identity].mode = "none"` — no authentication —
 and must remain loopback-only.
 
 ## Webhooks are not arriving
@@ -111,10 +112,10 @@ and must remain loopback-only.
    before debugging the provider.
 2. Confirm the provider URL is
    `https://<host>/_external/<provider>/events/`.
-3. Confirm its webhook secret matches the corresponding environment value.
+3. Confirm its webhook secret matches the corresponding `druks.toml` value.
 4. Inspect the provider's delivery log and `docker compose logs web`.
 
-When `DRUKS_WEBHOOK_HOST` is set, the doctor sends an unsigned GitHub probe and
+When `urls.webhook_host` is set, the doctor sends an unsigned GitHub probe and
 expects HTTP 401 from Druks. A different response means the request did not
 reach the webhook verifier.
 
@@ -158,7 +159,7 @@ docker compose logs --tail=200 sandbox-service sandbox-janitor
 ```
 
 For the local provider, Drukbox runs on the host, not in this Compose project.
-Confirm it listens at the URL in `DRUKS_SANDBOX_SERVICE_URL`. For remote
+Confirm it listens at `[sandbox].service_url` in `druks.toml`. For remote
 providers, a healthy Drukbox API does not prove SSH reachability; follow with
 `druks doctor --sandbox`.
 

@@ -1,4 +1,5 @@
 .env
+druks.toml
 .claude/
 .DS_Store
 .venv/

@@ -14,7 +14,7 @@ async def get_identity(
     request: Request, account: Account | None = Depends(current_account_or_setup)
 ) -> IdentityResponse:
     return IdentityResponse(
-        auth_mode=request.app.state.settings.auth_mode,
+        auth_mode=request.app.state.settings.identity.mode,
         account=AccountResponse.model_validate(account) if account else None,
         # An account needs onboarding exactly while it has no harness
         # connection; none/zero is onboarding before the account exists.

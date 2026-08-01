@@ -1,6 +1,7 @@
 import base64
 import os
 import secrets
+import tempfile
 from collections.abc import AsyncIterator, Iterator
 from pathlib import Path
 from unittest import mock
@@ -63,10 +64,17 @@ def pytest_configure(config) -> None:
     including suites that never touch druks."""
     global _discovery_error
 
-    os.environ.setdefault("DRUKS_SECRETS_KEY", base64.b64encode(secrets.token_bytes(32)).decode())
-    # Under pytest, druks IS the test instance. Settings are read from the environment
-    # wherever they're needed — the app's Redis dialer among them — so overriding here
-    # is what keeps the code under test on the database and Redis the fixtures own.
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".toml", delete=False) as settings_file:
+        settings_file.write(
+            f'[secrets]\nsecrets_key = "{base64.b64encode(secrets.token_bytes(32)).decode()}"\n'
+        )
+    settings_path = Path(settings_file.name)
+    os.environ.setdefault("DRUKS_CONFIG", str(settings_path))
+    config.add_cleanup(settings_path.unlink)
+    # Under pytest, druks IS the test instance. Infrastructure settings are read from
+    # the environment wherever they're needed — the app's Redis dialer among them — so
+    # overriding here keeps the code under test on the database and Redis the fixtures
+    # own.
     os.environ["DRUKS_DATABASE_URL"] = TEST_DATABASE_URL
     os.environ["DRUKS_REDIS_URL"] = TEST_REDIS_URL
     # App commits become savepoints inside the fixture's outer transaction, which
@@ -149,11 +157,12 @@ def make_settings(tmp_path: Path, **overrides: object) -> Settings:
     defaults = {
         "data_dir": tmp_path,
         "database_url": TEST_DATABASE_URL,
-        "webhook_secret": "test-secret",
+        "secrets": {
+            "webhook_secret": "test-secret",
+            "secrets_key": "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=",
+        },
         "github_api_url": "https://api.github.com",
-        "github_operator_app_id": None,
         "github_operator_private_key_path": None,
-        "github_reviewer_app_id": None,
         "github_reviewer_private_key_path": None,
         "redis_url": TEST_REDIS_URL,
         "log_level": "WARNING",

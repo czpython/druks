@@ -53,11 +53,11 @@ async def _resolve_operator(request: Request) -> Account | None:
     """None only during none/zero setup. header maps the asserted email; jwt
     maps its verified identity claim; none ignores the header entirely."""
     settings = request.app.state.settings
-    if settings.auth_mode == "none":
+    if settings.identity.mode == "none":
         return resolve_single_operator()
-    values = request.headers.getlist(settings.auth_header)
+    values = request.headers.getlist(settings.identity.header)
     if len(values) == 1 and (asserted := values[0].strip()):
-        if settings.auth_mode == "header":
+        if settings.identity.mode == "header":
             return Account.get_or_create(asserted)
         try:
             email = await verify_assertion(asserted, settings)
@@ -66,7 +66,7 @@ async def _resolve_operator(request: Request) -> Account | None:
         return Account.get_or_create(email)
     raise HTTPException(
         status_code=401,
-        detail=f"The edge must assert exactly one nonblank {settings.auth_header} identity.",
+        detail=f"The edge must assert exactly one nonblank {settings.identity.header} identity.",
     )
 
 

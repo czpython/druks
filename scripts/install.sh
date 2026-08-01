@@ -105,6 +105,10 @@ if [ "${1:-}" = "--apps" ]; then
     exit 1
   }
   need python3
+  python3 -c 'import tomllib' >/dev/null 2>&1 || {
+    echo "GitHub App setup requires Python 3.11+ (tomllib)." >&2
+    exit 1
+  }
   echo "→ fetching app-setup script + manifests from $REPO@$REF"
   mkdir -p manifests
   fetch_from_repo scripts/_github_app_setup.py _github_app_setup.py

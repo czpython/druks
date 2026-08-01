@@ -73,7 +73,7 @@ class Client:
         api = self._api()
         try:
             settings = load_settings()
-            image = image_override or settings.sandbox_image
+            image = image_override or settings.sandbox.image
             # Fixed lease: drukbox reaps the host when this lapses, so a run whose
             # worker dies frees its VM without a druks-side reconciler.
             expires_at = datetime.now(UTC) + timedelta(seconds=SANDBOX_HOST_LEASE_SECONDS)
@@ -188,9 +188,9 @@ class Client:
     def _api(self) -> SandboxAPI:
         settings = load_settings()
         return SandboxAPI(
-            base_url=settings.sandbox_service_url,
-            token=settings.sandbox_service_token,
-            timeout=settings.sandbox_service_timeout,
+            base_url=settings.sandbox.service_url,
+            token=settings.sandbox.service_token,
+            timeout=settings.sandbox.timeout,
         )
 
 

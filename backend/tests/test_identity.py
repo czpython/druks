@@ -28,7 +28,7 @@ def _client(tmp_path: Path, **settings_overrides) -> TestClient:
 
 
 def _header_client(tmp_path: Path) -> TestClient:
-    return _client(tmp_path, auth_mode="header", auth_header=HEADER)
+    return _client(tmp_path, identity={"mode": "header", "header": HEADER})
 
 
 def _grant(email: str = "me@example.com") -> dict:

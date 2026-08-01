@@ -5,7 +5,6 @@ import re
 import secrets
 import tomllib
 from collections.abc import Callable, Mapping, MutableMapping
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -23,123 +22,41 @@ _COMPOSE_ENV_KEYS = (
 )
 _ENV_KEY_PATTERN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
-
-@dataclass(frozen=True)
-class Entry:
-    key: str
-    source: tuple[str, ...] = ()
-    fixed: str = ""
-    is_required: bool = False
-    prompt: str = ""
-    is_install_path: bool = False
-    is_remote_only: bool = False
-
-
-@dataclass(frozen=True)
-class Section:
-    title: str
-    entries: tuple[Entry, ...]
-
-
-_SECTIONS = (
-    Section(
-        "GITHUB",
-        (
-            Entry(
-                "GITHUB_OPERATOR_APP_ID",
-                ("github", "operator_app_id"),
-                is_required=True,
-                prompt="Operator GitHub App id (or run install.sh --apps later)",
-            ),
-            Entry(
-                "GITHUB_OPERATOR_PRIVATE_KEY_PATH",
-                ("github", "operator_pem"),
-                is_install_path=True,
-            ),
-            Entry("GITHUB_OPERATOR_PEM", ("github", "operator_pem"), is_install_path=True),
-            Entry(
-                "GITHUB_REVIEWER_APP_ID",
-                ("github", "reviewer_app_id"),
-                is_required=True,
-                prompt="Reviewer GitHub App id (or run install.sh --apps later)",
-            ),
-            Entry(
-                "GITHUB_REVIEWER_PRIVATE_KEY_PATH",
-                ("github", "reviewer_pem"),
-                is_install_path=True,
-            ),
-            Entry("GITHUB_REVIEWER_PEM", ("github", "reviewer_pem"), is_install_path=True),
-            Entry(
-                "DRUKS_ENDPOINT",
-                ("urls", "endpoint"),
-                prompt="Base URL the operator's browser reaches druks at (enter to skip)",
-            ),
-        ),
-    ),
-    Section(
-        "GENERATED SECRETS",
-        (
-            Entry(
-                "DRUKS_POSTGRES_PASSWORD",
-                ("secrets", "postgres_password"),
-                is_required=True,
-            ),
-            Entry("DRUKS_WEBHOOK_SECRET", ("secrets", "webhook_secret"), is_required=True),
-            Entry("DRUKS_SECRETS_KEY", ("secrets", "secrets_key"), is_required=True),
-        ),
-    ),
-    Section(
-        "DEPLOYMENT DEFAULTS",
-        (
-            Entry("DRUKS_DATA_DIR", ("paths", "data_dir")),
-            Entry("DRUKS_UPSTREAM", fixed="127.0.0.1:8001"),
-            Entry("DRUKS_CLAUDE_HOME", ("paths", "claude_home")),
-            Entry("DRUKS_CODEX_HOME", ("paths", "codex_home")),
-            Entry("DRUKS_CLAUDE_JSON", ("paths", "claude_json")),
-            Entry("DRUKS_WEBHOOK_HOST", ("urls", "webhook_host")),
-            Entry("DATABASE_URL", fixed="sqlite+aiosqlite:////data/drukbox.db"),
-            Entry("REDIS_URL", fixed="redis://127.0.0.1:6379/2"),
-        ),
-    ),
-    Section(
-        "IDENTITY",
-        (
-            Entry("DRUKS_AUTH_MODE", ("identity", "mode"), is_required=True),
-            Entry("DRUKS_AUTH_HEADER", ("identity", "header")),
-            Entry("DRUKS_AUTH_JWKS_URL", ("identity", "jwks_url")),
-            Entry("DRUKS_AUTH_JWT_ISSUER", ("identity", "jwt_issuer")),
-            Entry("DRUKS_AUTH_JWT_AUDIENCE", ("identity", "jwt_audience")),
-            Entry(
-                "DRUKS_AUTH_JWT_IDENTITY_CLAIM",
-                ("identity", "jwt_identity_claim"),
-            ),
-        ),
-    ),
-    Section(
-        "SANDBOX",
-        (
-            Entry("DEFAULT_HOST_PROVIDER", ("sandbox", "provider"), is_required=True),
-            Entry(
-                "DRUKS_SANDBOX_SERVICE_URL",
-                ("sandbox", "service_url"),
-                is_required=True,
-            ),
-            Entry(
-                "DRUKS_SANDBOX_SERVICE_TOKEN",
-                ("secrets", "sandbox_service_token"),
-                is_required=True,
-            ),
-            Entry(
-                "SERVICE_TOKENS",
-                ("sandbox", "service_tokens"),
-                is_remote_only=True,
-            ),
-            Entry("DRUKS_SANDBOX_IMAGE", ("sandbox", "image")),
-        ),
-    ),
+# Env keys druks owns — setup renders them into .env, or the app reads their
+# value from druks.toml directly. [env] and provider tables may not carry them.
+_OWNED_ENV_KEYS = frozenset(
+    {
+        "GITHUB_OPERATOR_PEM",
+        "GITHUB_REVIEWER_PEM",
+        "DRUKS_POSTGRES_PASSWORD",
+        "DRUKS_DATA_DIR",
+        "DRUKS_UPSTREAM",
+        "DRUKS_CLAUDE_HOME",
+        "DRUKS_CODEX_HOME",
+        "DRUKS_CLAUDE_JSON",
+        "DRUKS_WEBHOOK_HOST",
+        "DATABASE_URL",
+        "REDIS_URL",
+        "DRUKS_AUTH_HEADER",
+        "DEFAULT_HOST_PROVIDER",
+        "SERVICE_TOKENS",
+        "DRUKS_AUTH_MODE",
+        "DRUKS_AUTH_JWKS_URL",
+        "DRUKS_AUTH_JWT_ISSUER",
+        "DRUKS_AUTH_JWT_AUDIENCE",
+        "DRUKS_AUTH_JWT_IDENTITY_CLAIM",
+        "DRUKS_ENDPOINT",
+        "DRUKS_WEBHOOK_SECRET",
+        "DRUKS_SECRETS_KEY",
+        "GITHUB_OPERATOR_APP_ID",
+        "GITHUB_OPERATOR_PRIVATE_KEY_PATH",
+        "GITHUB_REVIEWER_APP_ID",
+        "GITHUB_REVIEWER_PRIVATE_KEY_PATH",
+        "DRUKS_SANDBOX_SERVICE_URL",
+        "DRUKS_SANDBOX_SERVICE_TOKEN",
+        "DRUKS_SANDBOX_IMAGE",
+    }
 )
-
-_OWNED_ENV_KEYS = frozenset(entry.key for section in _SECTIONS for entry in section.entries)
 _KNOWN_TOML_KEYS = {
     "identity": (
         "mode",
@@ -155,10 +72,9 @@ _KNOWN_TOML_KEYS = {
         "postgres_password",
         "webhook_secret",
         "secrets_key",
-        "sandbox_service_token",
     ),
     "paths": ("data_dir", "claude_home", "codex_home", "claude_json"),
-    "sandbox": ("provider", "service_url", "image", "service_tokens"),
+    "sandbox": ("provider", "service_url", "service_token", "image", "service_tokens", "timeout"),
     "env": (),
 }
 
@@ -199,6 +115,7 @@ def run_setup(
         return MIGRATION_EXIT_CODE
 
     is_fresh = not toml_path.exists()
+    is_changed = is_fresh
     if is_fresh:
         provider = provider.strip()
         if interactive:
@@ -211,8 +128,19 @@ def run_setup(
             _set_value(document, value_path, value)
     else:
         document = tomlkit.parse(toml_path.read_text())
+        sandbox = document.get("sandbox")
+        configured_provider = _get_string(document, ("sandbox", "provider"))
+        if (
+            isinstance(sandbox, MutableMapping)
+            and configured_provider
+            and "env" in sandbox
+            and configured_provider not in sandbox
+        ):
+            sandbox[configured_provider] = sandbox["env"]
+            del sandbox["env"]
+            print_fn(f"Renamed [sandbox.env] to [sandbox.{configured_provider}].")
+            is_changed = True
 
-    is_changed = is_fresh
     for assignment in set_values:
         value_path, value = _parse_assignment(assignment)
         _set_value(document, value_path, value)
@@ -282,7 +210,6 @@ webhook_host = ""
 postgres_password = ""
 webhook_secret = ""
 secrets_key = ""
-sandbox_service_token = ""
 
 # Host paths. Relative PEM paths are resolved against the install directory.
 [paths]
@@ -295,16 +222,17 @@ claude_json = ""
 [sandbox]
 provider = ""
 service_url = ""
+service_token = ""
 image = ""
 service_tokens = ""
+timeout = 180
 
-# Drukbox environment, passed through to the remote stack verbatim.
-# Local docker shape: host-run drukbox reads its own env, so this table
-# is not rendered. Provider reference: https://github.com/czpython/drukbox
-# (docs/deploy.md).
-[sandbox.env]
+# Put drukbox environment in [sandbox.<provider>]. The table is passed through
+# to remote stacks verbatim; the local docker shape renders no provider table.
+# Provider reference: https://github.com/czpython/drukbox (docs/deploy.md).
 
-# Additional deployment settings; keys render verbatim unless owned by druks.
+# Raw environment for processes druks does not model (drukbox, Caddy, libraries
+# reading os.environ); keys render verbatim unless owned by druks.
 [env]
 """
 
@@ -315,7 +243,7 @@ def _fresh_values(*, provider: str, home: str) -> tuple[tuple[tuple[str, ...], s
             (("identity", "mode"), "none"),
             (("urls", "endpoint"), "http://localhost:8001"),
             (("sandbox", "service_url"), "http://127.0.0.1:8000"),
-            (("secrets", "sandbox_service_token"), "dev-token"),
+            (("sandbox", "service_token"), "dev-token"),
             (("sandbox", "image"), "ghcr.io/czpython/druks-sandbox:latest"),
         )
     elif provider == "exe":
@@ -323,22 +251,22 @@ def _fresh_values(*, provider: str, home: str) -> tuple[tuple[tuple[str, ...], s
             (("identity", "mode"), "header"),
             (("identity", "header"), "X-ExeDev-Email"),
             (("sandbox", "service_url"), "http://127.0.0.1:8780"),
-            (("secrets", "sandbox_service_token"), _hex_secret()),
-            (("sandbox", "env", "EXE_API_TOKEN"), ""),
-            (("sandbox", "env", "TAILSCALE_TAILNET"), ""),
-            (("sandbox", "env", "TAILSCALE_OAUTH_CLIENT_ID"), ""),
-            (("sandbox", "env", "TAILSCALE_OAUTH_CLIENT_SECRET"), ""),
-            (("sandbox", "env", "EXE_API_URL"), "https://exe.dev"),
-            (("sandbox", "env", "EXE_DEFAULT_IMAGE"), "ghcr.io/boldsoftware/exeuntu:latest"),
-            (("sandbox", "env", "TAILSCALE_ENABLED"), "true"),
-            (("sandbox", "env", "TAILSCALE_API_TIMEOUT"), "30"),
-            (("sandbox", "env", "TAILSCALE_AUTH_TAGS"), "tag:sandbox"),
+            (("sandbox", "service_token"), _hex_secret()),
+            (("sandbox", "exe", "EXE_API_TOKEN"), ""),
+            (("sandbox", "exe", "TAILSCALE_TAILNET"), ""),
+            (("sandbox", "exe", "TAILSCALE_OAUTH_CLIENT_ID"), ""),
+            (("sandbox", "exe", "TAILSCALE_OAUTH_CLIENT_SECRET"), ""),
+            (("sandbox", "exe", "EXE_API_URL"), "https://exe.dev"),
+            (("sandbox", "exe", "EXE_DEFAULT_IMAGE"), "ghcr.io/boldsoftware/exeuntu:latest"),
+            (("sandbox", "exe", "TAILSCALE_ENABLED"), "true"),
+            (("sandbox", "exe", "TAILSCALE_API_TIMEOUT"), "30"),
+            (("sandbox", "exe", "TAILSCALE_AUTH_TAGS"), "tag:sandbox"),
         )
     else:
         shape = (
             (("identity", "mode"), "header"),
             (("sandbox", "service_url"), "http://127.0.0.1:8780"),
-            (("secrets", "sandbox_service_token"), _hex_secret()),
+            (("sandbox", "service_token"), _hex_secret()),
         )
 
     return (
@@ -370,28 +298,44 @@ def _canonical_config(raw: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(table, dict):
             raise ValueError(f"druks.toml: [{table_name}] must be a table")
         for key in keys:
-            if not isinstance(table.setdefault(key, ""), str):
+            value = table.setdefault(key, "")
+            if table_name == "sandbox" and key == "timeout":
+                if type(value) not in (str, int, float):
+                    raise ValueError("druks.toml: sandbox.timeout must be a number or string")
+            elif not isinstance(value, str):
                 raise ValueError(f"druks.toml: {table_name}.{key} must be a string")
 
-    sandbox_env = config["sandbox"].setdefault("env", {})
-    if not isinstance(sandbox_env, dict):
-        raise ValueError("druks.toml: [sandbox.env] must be a table")
-    for env_name, env_table in (("sandbox.env", sandbox_env), ("env", config["env"])):
-        for key, value in env_table.items():
+    provider_tables = _provider_tables(config["sandbox"])
+    for provider_name, provider_table in provider_tables.items():
+        if not isinstance(provider_table, dict):
+            raise ValueError(f"druks.toml: [sandbox.{provider_name}] must be a table")
+        for key, value in provider_table.items():
             if not isinstance(value, str):
-                raise ValueError(f"druks.toml: {env_name}.{key} must be a string")
+                raise ValueError(f"druks.toml: sandbox.{provider_name}.{key} must be a string")
+            if not _ENV_KEY_PATTERN.fullmatch(key):
+                raise ValueError(
+                    f"druks.toml: sandbox.{provider_name} key {key!r} is not an env name"
+                )
+
+    for key, value in config["env"].items():
+        if not isinstance(value, str):
+            raise ValueError(f"druks.toml: env.{key} must be a string")
 
     for table_name, table in config.items():
         if not isinstance(table, dict):
             _require_scalar("", table_name, table)
             continue
         for key, value in table.items():
-            if table_name in _KNOWN_TOML_KEYS and (
-                key in _KNOWN_TOML_KEYS[table_name] or (table_name, key) == ("sandbox", "env")
-            ):
+            if table_name in _KNOWN_TOML_KEYS and key in _KNOWN_TOML_KEYS[table_name]:
+                continue
+            if table_name == "sandbox" and key in provider_tables:
                 continue
             _require_scalar(f"{table_name}.", key, value)
     return config
+
+
+def _provider_tables(sandbox: dict[str, Any]) -> dict[str, Any]:
+    return {key: value for key, value in sandbox.items() if key not in _KNOWN_TOML_KEYS["sandbox"]}
 
 
 def _require_scalar(prefix: str, key: str, value: Any) -> None:
@@ -435,10 +379,21 @@ def _prompt_values(
     input_fn: Callable[[str], str],
 ) -> bool:
     prompts = [
-        (entry.source, entry.prompt, entry.is_required)
-        for section in _SECTIONS
-        for entry in section.entries
-        if entry.source and entry.prompt
+        (
+            ("github", "operator_app_id"),
+            "Operator GitHub App id (or run install.sh --apps later)",
+            True,
+        ),
+        (
+            ("github", "reviewer_app_id"),
+            "Reviewer GitHub App id (or run install.sh --apps later)",
+            True,
+        ),
+        (
+            ("urls", "endpoint"),
+            "Base URL the operator's browser reaches druks at (enter to skip)",
+            False,
+        ),
     ]
     identity_mode = _get_string(document, ("identity", "mode"))
     if identity_mode in {"header", "jwt"}:
@@ -462,19 +417,19 @@ def _prompt_values(
     if _get_string(document, ("sandbox", "provider")) == "exe":
         prompts.extend(
             (
-                (("sandbox", "env", "EXE_API_TOKEN"), "exe.dev API token", True),
+                (("sandbox", "exe", "EXE_API_TOKEN"), "exe.dev API token", True),
                 (
-                    ("sandbox", "env", "TAILSCALE_TAILNET"),
+                    ("sandbox", "exe", "TAILSCALE_TAILNET"),
                     'Tailscale magic-DNS suffix (e.g. "yourtail.ts.net")',
                     True,
                 ),
                 (
-                    ("sandbox", "env", "TAILSCALE_OAUTH_CLIENT_ID"),
+                    ("sandbox", "exe", "TAILSCALE_OAUTH_CLIENT_ID"),
                     "Tailscale OAuth client id",
                     False,
                 ),
                 (
-                    ("sandbox", "env", "TAILSCALE_OAUTH_CLIENT_SECRET"),
+                    ("sandbox", "exe", "TAILSCALE_OAUTH_CLIENT_SECRET"),
                     "Tailscale OAuth client secret",
                     False,
                 ),
@@ -505,33 +460,66 @@ def _render_env(
     extras: dict[str, str],
 ) -> str:
     provider = _get_string(config, ("sandbox", "provider"))
+
+    def pem(key: str) -> str:
+        configured = _get_string(config, ("github", key))
+        return _resolve_install_path(configured, install_dir) if configured else ""
+
+    service_tokens = ""
+    if provider != "docker":
+        service_tokens = _get_string(config, ("sandbox", "service_tokens")) or _get_string(
+            config, ("sandbox", "service_token")
+        )
+
+    sections = (
+        (
+            "GITHUB",
+            (
+                ("GITHUB_OPERATOR_PEM", pem("operator_pem")),
+                ("GITHUB_REVIEWER_PEM", pem("reviewer_pem")),
+            ),
+        ),
+        (
+            "GENERATED SECRETS",
+            (("DRUKS_POSTGRES_PASSWORD", _get_string(config, ("secrets", "postgres_password"))),),
+        ),
+        (
+            "DEPLOYMENT DEFAULTS",
+            (
+                ("DRUKS_DATA_DIR", _get_string(config, ("paths", "data_dir"))),
+                ("DRUKS_UPSTREAM", "127.0.0.1:8001"),
+                ("DRUKS_CLAUDE_HOME", _get_string(config, ("paths", "claude_home"))),
+                ("DRUKS_CODEX_HOME", _get_string(config, ("paths", "codex_home"))),
+                ("DRUKS_CLAUDE_JSON", _get_string(config, ("paths", "claude_json"))),
+                ("DRUKS_WEBHOOK_HOST", _get_string(config, ("urls", "webhook_host"))),
+                ("DATABASE_URL", "sqlite+aiosqlite:////data/drukbox.db"),
+                ("REDIS_URL", "redis://127.0.0.1:6379/2"),
+            ),
+        ),
+        ("IDENTITY", (("DRUKS_AUTH_HEADER", _get_string(config, ("identity", "header"))),)),
+        (
+            "SANDBOX",
+            (
+                ("DEFAULT_HOST_PROVIDER", provider),
+                ("SERVICE_TOKENS", service_tokens),
+            ),
+        ),
+    )
+
     lines: list[str] = []
-    for section in _SECTIONS:
-        section_lines: list[str] = []
-        for entry in section.entries:
-            if entry.is_remote_only and provider == "docker":
-                continue
-            value = entry.fixed or _get_string(config, entry.source)
-            if entry.key == "SERVICE_TOKENS" and not value:
-                value = _get_string(config, ("secrets", "sandbox_service_token"))
-            if entry.is_install_path and value:
-                value = _resolve_install_path(value, install_dir)
-            if not value:
-                continue
-            section_lines.append(_env_line(entry.key, value))
+    for title, pairs in sections:
+        section_lines = [_env_line(key, value) for key, value in pairs if value]
         if section_lines:
-            lines.extend(("# " + "=" * 60, f"# {section.title}", "# " + "=" * 60, ""))
+            lines.extend(("# " + "=" * 60, f"# {title}", "# " + "=" * 60, ""))
             lines.extend(section_lines)
             lines.append("")
 
-    sandbox_env: dict[str, str] = config["sandbox"]["env"]
+    provider_environment: dict[str, str] = config["sandbox"].get(provider, {})
     if provider != "docker":
         pass_through = []
-        for key, value in sandbox_env.items():
+        for key, value in provider_environment.items():
             if _is_reserved_env_key(key) or not value:
                 continue
-            if not _ENV_KEY_PATTERN.fullmatch(key):
-                raise ValueError(f"druks.toml: sandbox.env key {key!r} is not an env name")
             pass_through.append(_env_line(key, value))
         if pass_through:
             lines.extend(
@@ -606,46 +594,61 @@ def _collect_gaps(
     install_dir: str,
 ) -> list[str]:
     gaps = [
-        f"{entry.key} is empty"
-        for section in _SECTIONS
-        for entry in section.entries
-        if entry.is_required and not _get_string(config, entry.source)
+        f"{'.'.join(path)} is empty"
+        for path in (
+            ("github", "operator_app_id"),
+            ("github", "reviewer_app_id"),
+            ("secrets", "postgres_password"),
+            ("secrets", "webhook_secret"),
+            ("secrets", "secrets_key"),
+            ("identity", "mode"),
+            ("sandbox", "provider"),
+            ("sandbox", "service_url"),
+            ("sandbox", "service_token"),
+        )
+        if not _get_string(config, path)
     ]
 
     identity_mode = _get_string(config, ("identity", "mode"))
     if identity_mode not in {"none", "header", "jwt"}:
         gaps.append("identity.mode must be one of: header, jwt, none")
     if identity_mode in {"header", "jwt"} and not _get_string(config, ("identity", "header")):
-        gaps.append("DRUKS_AUTH_HEADER is empty")
+        gaps.append("identity.header is empty")
     if identity_mode == "jwt":
-        for path, env_key in (
-            (("identity", "jwks_url"), "DRUKS_AUTH_JWKS_URL"),
-            (("identity", "jwt_issuer"), "DRUKS_AUTH_JWT_ISSUER"),
-            (("identity", "jwt_audience"), "DRUKS_AUTH_JWT_AUDIENCE"),
-            (("identity", "jwt_identity_claim"), "DRUKS_AUTH_JWT_IDENTITY_CLAIM"),
+        for path in (
+            ("identity", "jwks_url"),
+            ("identity", "jwt_issuer"),
+            ("identity", "jwt_audience"),
+            ("identity", "jwt_identity_claim"),
         ):
             if not _get_string(config, path):
-                gaps.append(f"{env_key} is empty")
+                gaps.append(f"{'.'.join(path)} is empty")
 
     provider = _get_string(config, ("sandbox", "provider"))
-    sandbox_env: dict[str, str] = config["sandbox"]["env"]
-    for key in sandbox_env:
-        if _is_reserved_env_key(key):
-            gaps.append(f"sandbox.env.{key} is reserved by druks")
+    provider_tables = _provider_tables(config["sandbox"])
+    for provider_name, provider_environment in provider_tables.items():
+        if provider_name != provider:
+            gaps.append(f"sandbox.{provider_name} is a stale provider table")
+        for key in provider_environment:
+            if _is_reserved_env_key(key):
+                gaps.append(f"sandbox.{provider_name}.{key} is reserved by druks")
 
     deployment_env: dict[str, str] = config["env"]
     for key in deployment_env:
         if key in _OWNED_ENV_KEYS:
             gaps.append(f"env.{key} is reserved by druks")
 
+    provider_environment = provider_tables.get(provider, {})
     if provider == "exe":
         for key in ("EXE_API_TOKEN", "TAILSCALE_TAILNET"):
-            if not _get_string(config, ("sandbox", "env", key)):
-                gaps.append(f"{key} is empty")
+            if not _get_string(config, ("sandbox", "exe", key)):
+                gaps.append(f"sandbox.exe.{key} is empty")
     elif provider != "docker" and not any(
-        value for key, value in sandbox_env.items() if not _is_reserved_env_key(key)
+        value for key, value in provider_environment.items() if not _is_reserved_env_key(key)
     ):
-        gaps.append(f"[sandbox.env] has no configured values for remote provider {provider!r}")
+        gaps.append(
+            f"[sandbox.{provider}] has no configured values for remote provider {provider!r}"
+        )
 
     for key in ("operator_pem", "reviewer_pem"):
         configured = _get_string(config, ("github", key))
@@ -708,9 +711,9 @@ def _print_migration_recipe(
     print_fn("  - DRUKS_POSTGRES_PASSWORD → [secrets].postgres_password")
     print_fn("  - DRUKS_SECRETS_KEY → [secrets].secrets_key")
     print_fn("  - DRUKS_WEBHOOK_SECRET → [secrets].webhook_secret")
-    print_fn("  - DRUKS_SANDBOX_SERVICE_TOKEN → [secrets].sandbox_service_token")
+    print_fn("  - DRUKS_SANDBOX_SERVICE_TOKEN → [sandbox].service_token")
     print_fn("  - GITHUB_*_APP_ID → [github]")
-    print_fn("  - provider and its credentials → [sandbox] and [sandbox.env]")
+    print_fn("  - provider and its credentials → [sandbox] and [sandbox.<provider>]")
     print_fn("  - other hand-added .env keys → [env]")
     print_fn("Nothing was written.")
 

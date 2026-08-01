@@ -1,5 +1,6 @@
 import asyncio
 import importlib
+import os
 import pkgutil
 import socket
 import time
@@ -37,12 +38,12 @@ class CheckResult:
 
 
 def check_webhook_secret(settings: Settings) -> CheckResult:
-    secret = settings.webhook_secret
+    secret = settings.secrets.webhook_secret
     if not secret or secret == "change-me":
         return CheckResult(
             name="webhook_secret",
             ok=False,
-            detail="DRUKS_WEBHOOK_SECRET is empty or the placeholder.",
+            detail="secrets.webhook_secret is empty or the placeholder.",
         )
     return CheckResult(name="webhook_secret", ok=True, detail="set")
 
@@ -74,9 +75,9 @@ def check_installations(settings: Settings) -> CheckResult:
 def check_github_operator_app(settings: Settings) -> CheckResult:
     return _check_github_app(
         name="github_operator_app",
-        app_id=settings.github_operator_app_id,
+        app_id=settings.github.operator_app_id,
         pem_path=settings.github_operator_private_key_path,
-        env_id="GITHUB_OPERATOR_APP_ID",
+        id_key="github.operator_app_id",
         env_pem="GITHUB_OPERATOR_PRIVATE_KEY_PATH",
     )
 
@@ -84,9 +85,9 @@ def check_github_operator_app(settings: Settings) -> CheckResult:
 def check_github_reviewer_app(settings: Settings) -> CheckResult:
     return _check_github_app(
         name="github_reviewer_app",
-        app_id=settings.github_reviewer_app_id,
+        app_id=settings.github.reviewer_app_id,
         pem_path=settings.github_reviewer_private_key_path,
-        env_id="GITHUB_REVIEWER_APP_ID",
+        id_key="github.reviewer_app_id",
         env_pem="GITHUB_REVIEWER_PRIVATE_KEY_PATH",
     )
 
@@ -96,11 +97,11 @@ def _check_github_app(
     name: str,
     app_id: str | None,
     pem_path: Path | None,
-    env_id: str,
+    id_key: str,
     env_pem: str,
 ) -> CheckResult:
     if not app_id:
-        return CheckResult(name=name, ok=False, detail=f"{env_id} is unset.")
+        return CheckResult(name=name, ok=False, detail=f"{id_key} is unset.")
     if not pem_path:
         return CheckResult(name=name, ok=False, detail=f"{env_pem} is unset.")
     if not pem_path.exists():
@@ -186,7 +187,7 @@ def check_webhook_ingress(settings: Settings) -> CheckResult:
     """An unsigned probe POST must come back 401 — druks itself rejecting
     it proves the path DNS → TLS → edge → druks works. Anything else means
     the request died in front of druks (wrong DNS record, foreign proxy)."""
-    host = settings.webhook_host
+    host = settings.urls.webhook_host
     if not host:
         return CheckResult(name="webhook_ingress", ok=True, detail="not configured")
     url = f"https://{host}/_external/github/events/"
@@ -233,7 +234,7 @@ def check_database(settings: Settings) -> CheckResult:
 
 
 def check_drukbox(settings: Settings) -> CheckResult:
-    if not settings.sandbox_service_url:
+    if not settings.sandbox.service_url:
         return CheckResult(
             name="drukbox",
             ok=True,
@@ -254,9 +255,9 @@ def check_drukbox(settings: Settings) -> CheckResult:
 
 async def _drukbox_doctor(settings: Settings):
     api = SandboxAPI(
-        base_url=settings.sandbox_service_url,
-        token=settings.sandbox_service_token,
-        timeout=settings.sandbox_service_timeout,
+        base_url=settings.sandbox.service_url,
+        token=settings.sandbox.service_token,
+        timeout=settings.sandbox.timeout,
     )
     try:
         return await api.doctor()
@@ -269,7 +270,7 @@ def check_sandbox_e2e(settings: Settings) -> CheckResult:
     the acquire-time connection and a reattach from a GET-built record.
     Costs one VM-minute — opt-in via ``druks doctor --sandbox``, never
     part of the default check set."""
-    if not settings.sandbox_service_url:
+    if not settings.sandbox.service_url:
         return CheckResult(name="sandbox_e2e", ok=True, detail="not configured")
     try:
         detail = asyncio.run(_sandbox_e2e())
@@ -483,11 +484,14 @@ def print_results(results: list[CheckResult]) -> int:
 
 
 def main(*, sandbox: bool = False) -> int:
+    config_path = os.environ.get("DRUKS_CONFIG")
+    config_source = config_path or ("./druks.toml" if Path("druks.toml").exists() else "env only")
+    print(f"doctor: config source: {config_source}")
     try:
         settings = load_settings()
     except Exception as error:  # noqa: BLE001 — Settings can raise any validator error
         print(f"✗  load_settings           {error}")
         print()
-        print("doctor: could not load Settings. Fix .env and re-run.")
+        print("doctor: could not load Settings. Fix the configuration and re-run.")
         return 1
     return print_results(run_checks(settings, sandbox=sandbox))
