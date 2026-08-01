@@ -11,7 +11,7 @@ import type { UsageHarnessSummary } from '../api/types'
  *
  *   ◯ c 82%   ◯ x 36%
  *
- * The colour key is the "headline" metric — whichever of 5h vs weekly
+ * The colour key is the "headline" metric — whichever rate-limit window
  * has less left. Click navigates to ``/usage`` for the full detail
  * panel. Tooltip carries the breakdown so a quick hover gives you the
  * full picture without leaving the current page.
@@ -73,13 +73,15 @@ function MiniPill({ usage, short }: { usage: UsageHarnessSummary; short: string 
   )
 }
 
-// "Headline" metric — the smaller of (5h, week). That's the one most
-// likely to bite you next; the panel shows both side-by-side.
+// "Headline" metric — the smallest reported window is the one most
+// likely to bite you next; the panel identifies its scope.
 function headlineMetric(usage: UsageHarnessSummary): number | null {
   if (!usage.available) return null
   const candidates: number[] = []
   if (usage.fiveHour && usage.fiveHour.percentLeft !== null) candidates.push(usage.fiveHour.percentLeft)
-  if (usage.week && usage.week.percentLeft !== null) candidates.push(usage.week.percentLeft)
+  for (const week of usage.weeks) {
+    if (week.percentLeft !== null) candidates.push(week.percentLeft)
+  }
   if (candidates.length === 0) return null
   return Math.min(...candidates)
 }
@@ -111,8 +113,11 @@ function buildTooltip(usage: UsageHarnessSummary): string {
   if (usage.fiveHour && usage.fiveHour.percentLeft !== null) {
     lines.push(`  5h: ${usage.fiveHour.percentLeft}% left${formatResets(usage.fiveHour.resetsAt)}`)
   }
-  if (usage.week && usage.week.percentLeft !== null) {
-    lines.push(`  week: ${usage.week.percentLeft}% left${formatResets(usage.week.resetsAt)}`)
+  for (const week of usage.weeks) {
+    if (week.percentLeft !== null) {
+      const scope = week.model ? ` · ${week.model}` : ''
+      lines.push(`  week${scope}: ${week.percentLeft}% left${formatResets(week.resetsAt)}`)
+    }
   }
   if (usage.scrapedAt) {
     lines.push(`scraped ${formatAge(usage.ageSeconds)} ago`)

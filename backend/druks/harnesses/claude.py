@@ -324,10 +324,10 @@ class ClaudeHarness(Harness):
         if not isinstance(data, dict) or not any(k in data for k in ("five_hour", "seven_day")):
             return ParsedUsage(ok=False, error="unexpected_payload", raw=raw)
         try:
-            five_hour, week = _claude_windows(data)
+            five_hour, weeks = _claude_windows(data)
         except (KeyError, TypeError, ValueError):
             return ParsedUsage(ok=False, error="unexpected_payload", raw=raw)
-        return ParsedUsage(ok=True, five_hour=five_hour, week=week, raw=raw)
+        return ParsedUsage(ok=True, five_hour=five_hour, weeks=weeks, raw=raw)
 
     @classmethod
     def _parse_models(cls, raw: str) -> ParsedModels:
@@ -355,9 +355,8 @@ def _oauth_block(data: dict) -> dict:
     return block if isinstance(block, dict) else data
 
 
-def _claude_windows(data: dict) -> tuple[ParsedMetric | None, ParsedMetric | None]:
-    """The five-hour and weekly quotas that bind. A plan can meter one model
-    tighter than the rest, and that limit stops work first."""
+def _claude_windows(data: dict) -> tuple[ParsedMetric | None, tuple[ParsedMetric, ...]]:
+    """The binding five-hour window and every weekly window in provider order."""
     five_hour, weekly = [], []
     for limit in data.get("limits") or []:
         # A limit can be scoped to something other than a model, which leaves
@@ -372,10 +371,11 @@ def _claude_windows(data: dict) -> tuple[ParsedMetric | None, ParsedMetric | Non
             weekly.append(window)
         elif limit["group"] == "session":
             five_hour.append(window)
-    return (
-        ParsedMetric.binding(five_hour) or _claude_metric(data.get("five_hour")),
-        ParsedMetric.binding(weekly) or _claude_metric(data.get("seven_day")),
-    )
+    if not weekly and (fallback_week := _claude_metric(data.get("seven_day"))):
+        weekly.append(fallback_week)
+    binding_five_hour = ParsedMetric.binding(five_hour) or _claude_metric(data.get("five_hour"))
+    weekly_windows = tuple(weekly)
+    return binding_five_hour, weekly_windows
 
 
 def _claude_metric(block: object) -> ParsedMetric | None:

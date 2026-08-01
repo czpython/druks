@@ -78,7 +78,7 @@ class ParsedUsage:
     error: str | None = None
     plan_tier: str | None = None
     five_hour: ParsedMetric | None = None
-    week: ParsedMetric | None = None
+    weeks: tuple[ParsedMetric, ...] = ()
     # Unmetered plan (e.g. Codex business with unlimited credits). The
     # windows above are synthesized permanently-full buckets; consumers
     # should render "unmetered" rather than a quota that never moves.

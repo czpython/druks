@@ -1,6 +1,8 @@
 from datetime import datetime, timedelta
+from typing import Any
 
 from sqlalchemy import ForeignKey, Index, delete, select
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from druks.db import Base, db_session
@@ -33,12 +35,8 @@ class UsageScrape(Base):
     # doesn't have a 5h concept yet so it stays null for the codex row.
     five_hour_percent_left: Mapped[int | None]
     five_hour_resets_at: Mapped[datetime | None]
-    # Weekly window — both CLIs expose this.
-    week_percent_left: Mapped[int | None]
-    week_resets_at: Mapped[datetime | None]
-    # Set when the weekly window meters one model separately from the
-    # rest, naming it. None covers every model.
-    week_model: Mapped[str | None]
+    # Weekly windows in provider order, including separately metered models.
+    weeks: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, default=list)
     # Unmetered plan (Codex business/enterprise with unlimited credits).
     # The window percentages above are synthesized permanently-full
     # buckets when this is set — the UI renders "unmetered" instead of
@@ -68,6 +66,24 @@ class UsageScrape(Base):
             .order_by(cls.scraped_at.asc())
         )
         return list(db_session().execute(stmt).scalars())
+
+    def binding_week(self) -> dict[str, Any] | None:
+        """The window closest to exhaustion — whichever stops work first."""
+        reported_windows = [week for week in self.weeks if week["percent_left"] is not None]
+        if reported_windows:
+            return min(reported_windows, key=lambda week: week["percent_left"])
+
+    def soonest_reset_after(self, now: datetime) -> datetime | None:
+        resets = []
+        if self.five_hour_resets_at and self.five_hour_resets_at > now:
+            resets.append(self.five_hour_resets_at)
+        for week in self.weeks:
+            if week["resets_at"]:
+                reset = datetime.fromisoformat(week["resets_at"])
+                if reset > now:
+                    resets.append(reset)
+        if resets:
+            return min(resets)
 
     def save(self) -> None:
         if not self.scraped_at:

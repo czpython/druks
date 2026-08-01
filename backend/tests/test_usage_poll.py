@@ -1,7 +1,9 @@
 import gc
+import json
 
 import pytest
 from druks.harnesses.base import Harness
+from druks.harnesses.claude import ClaudeHarness
 from druks.harnesses.datastructures import ParsedMetric, ParsedUsage
 from druks.usage.models import UsageScrape
 
@@ -22,14 +24,14 @@ def _metric(percent_left: int) -> ParsedMetric:
 
 
 def _usage(
-    *, ok=True, error=None, plan_tier=None, five=None, week=None, unlimited=False
+    *, ok=True, error=None, plan_tier=None, five=None, weeks=(), unlimited=False
 ) -> ParsedUsage:
     return ParsedUsage(
         ok=ok,
         error=error,
         plan_tier=plan_tier,
         five_hour=five,
-        week=week,
+        weeks=weeks,
         unlimited=unlimited,
         raw="{}" if ok else "",
     )
@@ -69,10 +71,10 @@ async def _poll(*harnesses) -> list[dict[str, object]]:
 
 async def test_successful_fetch_persists_per_harness(druks_db) -> None:
     results = await _poll(
-        _harness("claude", lambda: _usage(five=_metric(84), week=_metric(52))),
+        _harness("claude", lambda: _usage(five=_metric(84), weeks=(_metric(52),))),
         _harness(
             "codex",
-            lambda: _usage(plan_tier="prolite", five=_metric(61), week=_metric(61)),
+            lambda: _usage(plan_tier="prolite", five=_metric(61), weeks=(_metric(61),)),
         ),
     )
     druks_db.flush()
@@ -83,12 +85,43 @@ async def test_successful_fetch_persists_per_harness(druks_db) -> None:
     claude_row = UsageScrape.latest_for("claude", _connection().account_id)
     assert claude_row is not None
     assert claude_row.five_hour_percent_left == 84
-    assert claude_row.week_percent_left == 52
+    assert claude_row.weeks == [
+        {"percent_left": 52, "resets_at": None, "model": None},
+    ]
 
     codex_row = UsageScrape.latest_for("codex", _connection().account_id)
     assert codex_row is not None
     assert codex_row.plan_tier == "prolite"
-    assert codex_row.week_percent_left == 61
+    assert codex_row.weeks[0]["percent_left"] == 61
+
+
+async def test_claude_weekly_windows_survive_parse_and_poll_in_order(druks_db) -> None:
+    parsed = ClaudeHarness._parse_usage(
+        json.dumps(
+            {
+                "five_hour": {"utilization": 20},
+                "seven_day": {"utilization": 30},
+                "limits": [
+                    {"group": "weekly", "percent": 30, "scope": None},
+                    {
+                        "group": "weekly",
+                        "percent": 100,
+                        "scope": {"model": {"display_name": "Fable"}},
+                    },
+                ],
+            }
+        )
+    )
+
+    await _poll(_harness("claude", lambda: parsed))
+    druks_db.flush()
+
+    row = UsageScrape.latest_for("claude", _connection().account_id)
+    assert row is not None
+    assert [(week["percent_left"], week["model"]) for week in row.weeks] == [
+        (70, None),
+        (0, "Fable"),
+    ]
 
 
 async def test_credential_error_records_error_snapshot(druks_db) -> None:
@@ -125,7 +158,10 @@ async def test_snapshot_persists_unlimited_flag(druks_db) -> None:
         _harness(
             "codex",
             lambda: _usage(
-                plan_tier="business", five=_metric(100), week=_metric(100), unlimited=True
+                plan_tier="business",
+                five=_metric(100),
+                weeks=(_metric(100),),
+                unlimited=True,
             ),
         )
     )

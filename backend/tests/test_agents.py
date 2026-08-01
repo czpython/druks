@@ -1,12 +1,12 @@
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
-from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from conftest import make_agent_result
 from druks import agents
 from druks.durable import AgentCall, WorkflowError
+from druks.usage.models import UsageScrape
 
 
 class DummyOutput(agents.AgentOutput):
@@ -409,9 +409,20 @@ async def test_body_level_quota_waits_for_the_reset_once(
         agents.UsageScrape,
         "latest_for",
         classmethod(
-            lambda _cls, _harness, _account_id: SimpleNamespace(
-                five_hour_resets_at=now + timedelta(hours=1),
-                week_resets_at=now + timedelta(days=1),
+            lambda _cls, _harness, _account_id: UsageScrape(
+                five_hour_resets_at=now + timedelta(hours=2),
+                weeks=[
+                    {
+                        "percent_left": 0,
+                        "resets_at": (now + timedelta(hours=1)).isoformat(),
+                        "model": "Fable",
+                    },
+                    {
+                        "percent_left": 20,
+                        "resets_at": (now + timedelta(days=1)).isoformat(),
+                        "model": None,
+                    },
+                ],
             )
         ),
     )
@@ -456,9 +467,15 @@ async def test_body_level_quota_reset_over_six_hours_reraises_without_sleeping(
         agents.UsageScrape,
         "latest_for",
         classmethod(
-            lambda _cls, _harness, _account_id: SimpleNamespace(
+            lambda _cls, _harness, _account_id: UsageScrape(
                 five_hour_resets_at=now + timedelta(hours=7),
-                week_resets_at=now + timedelta(days=1),
+                weeks=[
+                    {
+                        "percent_left": 0,
+                        "resets_at": (now + timedelta(days=1)).isoformat(),
+                        "model": None,
+                    }
+                ],
             )
         ),
     )

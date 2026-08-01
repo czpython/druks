@@ -372,7 +372,7 @@ export interface UsageHarnessSummary {
   connected: boolean
   planTier: string | null
   fiveHour: UsageMetric | null
-  week: UsageMetric | null
+  weeks: UsageMetric[]
   // Unmetered plan (e.g. Codex business). The window metrics are
   // synthesized permanently-full buckets — render "unmetered" plus
   // actual consumption instead of a quota bar that never moves.
@@ -393,10 +393,15 @@ export interface UsageHistoryPoint {
   pct: number
 }
 
+export interface UsageWindowHistory {
+  model: string | null
+  points: UsageHistoryPoint[]
+}
+
 export interface UsageHarnessHistory {
   name: string
   fiveHour: UsageHistoryPoint[]
-  week: UsageHistoryPoint[]
+  weeks: UsageWindowHistory[]
 }
 
 export interface UsageHistoryResponse {

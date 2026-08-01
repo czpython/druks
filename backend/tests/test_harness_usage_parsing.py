@@ -4,9 +4,7 @@ from druks.harnesses.claude import ClaudeHarness
 from druks.harnesses.codex import CodexHarness
 
 
-def test_claude_parse_reports_the_weekly_limit_that_binds() -> None:
-    """A weekly limit scoped to one model can bind well before the all-models
-    one — reporting the all-models figure overstates what is left."""
+def test_claude_parse_keeps_every_weekly_limit_in_provider_order() -> None:
     parsed = ClaudeHarness._parse_usage(
         json.dumps(
             {
@@ -17,7 +15,7 @@ def test_claude_parse_reports_the_weekly_limit_that_binds() -> None:
                     {"group": "weekly", "percent": 63, "scope": None},
                     {
                         "group": "weekly",
-                        "percent": 75,
+                        "percent": 100,
                         "scope": {"model": {"display_name": "Fable"}},
                     },
                 ],
@@ -26,9 +24,10 @@ def test_claude_parse_reports_the_weekly_limit_that_binds() -> None:
     )
 
     assert parsed.ok
-    assert parsed.week is not None
-    assert parsed.week.percent_left == 25
-    assert parsed.week.model == "Fable"
+    assert [(week.percent_left, week.model) for week in parsed.weeks] == [
+        (37, None),
+        (0, "Fable"),
+    ]
 
 
 def test_claude_parse_counts_a_limit_scoped_to_something_other_than_a_model() -> None:
@@ -52,9 +51,10 @@ def test_claude_parse_counts_a_limit_scoped_to_something_other_than_a_model() ->
     )
 
     assert parsed.ok
-    assert parsed.week is not None
-    assert parsed.week.percent_left == 10
-    assert parsed.week.model is None
+    assert [(week.percent_left, week.model) for week in parsed.weeks] == [
+        (80, None),
+        (10, None),
+    ]
 
 
 def test_claude_parse_falls_back_to_seven_day_without_limits() -> None:
@@ -63,13 +63,12 @@ def test_claude_parse_falls_back_to_seven_day_without_limits() -> None:
     )
 
     assert parsed.ok
-    assert parsed.week is not None and parsed.week.percent_left == 52
-    assert parsed.week.model is None
+    assert len(parsed.weeks) == 1
+    assert parsed.weeks[0].percent_left == 52
+    assert parsed.weeks[0].model is None
 
 
-def test_codex_parse_reports_the_metered_model_that_binds() -> None:
-    """Codex meters some models separately, and such a quota exhausts before
-    the account-wide one."""
+def test_codex_parse_keeps_every_weekly_limit_in_provider_order() -> None:
     parsed = CodexHarness._parse_usage(
         json.dumps(
             {
@@ -100,9 +99,10 @@ def test_codex_parse_reports_the_metered_model_that_binds() -> None:
     )
 
     assert parsed.ok
-    assert parsed.week is not None
-    assert parsed.week.percent_left == 20
-    assert parsed.week.model == "GPT-5.3-Codex-Spark"
+    assert [(week.percent_left, week.model) for week in parsed.weeks] == [
+        (98, None),
+        (20, "GPT-5.3-Codex-Spark"),
+    ]
 
 
 def test_codex_parse_treats_unlimited_credits_as_full_buckets() -> None:
@@ -121,7 +121,7 @@ def test_codex_parse_treats_unlimited_credits_as_full_buckets() -> None:
     assert parsed.ok
     assert parsed.plan_tier == "business"
     assert parsed.five_hour is not None and parsed.five_hour.percent_left == 100
-    assert parsed.week is not None and parsed.week.percent_left == 100
+    assert len(parsed.weeks) == 1 and parsed.weeks[0].percent_left == 100
     assert parsed.unlimited is True
 
 
@@ -145,7 +145,7 @@ def test_codex_parse_places_a_weekly_only_plan_in_the_week_window() -> None:
 
     assert parsed.ok
     assert parsed.five_hour is None
-    assert parsed.week is not None and parsed.week.percent_left == 98
+    assert len(parsed.weeks) == 1 and parsed.weeks[0].percent_left == 98
 
 
 def test_codex_parse_rejects_an_unreadable_window() -> None:

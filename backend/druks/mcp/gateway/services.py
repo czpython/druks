@@ -136,18 +136,19 @@ def _harness_usage(name: str, account_id: str, *, now: datetime) -> schemas.Agen
         if point.five_hour_percent_left is not None and point.scraped_at >= five_hour_cutoff
     ]
     week = [
-        UsageHistoryPoint(t=point.scraped_at, pct=point.week_percent_left)
+        UsageHistoryPoint(t=point.scraped_at, pct=binding["percent_left"])
         for point in history
-        if point.week_percent_left is not None
+        if (binding := point.binding_week())
     ]
+    binding_week = row.binding_week() or {}
     return schemas.AgentHarnessUsage(
         name=name,
         is_connected=is_connected,
         plan_tier=row.plan_tier,
         five_hour_percent_left=row.five_hour_percent_left,
         five_hour_resets_at=row.five_hour_resets_at,
-        week_percent_left=row.week_percent_left,
-        week_resets_at=row.week_resets_at,
+        week_percent_left=binding_week.get("percent_left"),
+        week_resets_at=binding_week.get("resets_at"),
         is_unlimited=row.unlimited,
         scraped_at=row.scraped_at,
         five_hour_history=downsample(five_hour, cap=_HISTORY_POINTS),
