@@ -445,6 +445,41 @@ def test_claude_builder_puts_db_credentials_on_the_bundle(druks_db):
     assert bundle.codex_credentials is None
 
 
+def test_credentials_builders_carry_global_instructions(druks_db):
+    from pathlib import Path
+
+    from druks.harnesses.claude import _claude_credentials
+    from druks.harnesses.datastructures import SandboxSettings
+
+    _seed_claude()
+    _seed_codex()
+    claude_config_dir = Path("/home/agent/.claude")
+    codex_config_dir = Path("/home/agent/.codex")
+    sandbox = SandboxSettings(
+        service_url="x",
+        service_token="x",
+        service_timeout=30.0,
+        image="x",
+        claude_config_dir=claude_config_dir,
+        codex_config_dir=codex_config_dir,
+    )
+
+    claude_credentials = _claude_credentials(sandbox, github_token=None)
+    codex_credentials = CodexHarness(
+        model=CodexHarness.default_model,
+        fast_mode=False,
+        effort=None,
+        sandbox=sandbox,
+    )._codex_credentials(github_token=None)
+
+    assert (claude_config_dir / "CLAUDE.md", ".claude/CLAUDE.md") in (
+        claude_credentials.extra_config_files
+    )
+    assert (codex_config_dir / "AGENTS.md", ".codex/AGENTS.md") in (
+        codex_credentials.extra_config_files
+    )
+
+
 def test_no_config_dir_ships_credential_only(druks_db):
     # No local config dir for the CLI => nothing of the host's config/plugins
     # reaches the sandbox — but the DB credential still ships: connection state

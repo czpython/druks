@@ -225,7 +225,7 @@ class Settings(BaseSettings):
         alias="DRUKS_SANDBOX_KEYS_DIR",
     )
     # Local CLI config each harness carries into a VM at push time: Claude's
-    # ``settings.json`` + plugin state (plus ``.claude.json`` beside the dir),
+    # ``settings.json`` / ``CLAUDE.md`` + plugin state (plus ``.claude.json`` beside the dir),
     # Codex's ``config.toml`` / ``AGENTS.md`` / MCP ``.credentials.json``, and
     # each CLI's ``skills`` subdir when DRUKS_SKILLS_DIR is unset. Subscription
     # auth never reads these — credentials live in the DB, written by the
