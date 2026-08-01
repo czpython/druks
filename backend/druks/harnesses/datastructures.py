@@ -117,10 +117,10 @@ class SandboxSettings:
     @classmethod
     def from_settings(cls, settings: Settings) -> Self:
         return cls(
-            service_url=settings.sandbox_service_url,
-            service_token=settings.sandbox_service_token,
-            service_timeout=settings.sandbox_service_timeout,
-            image=settings.sandbox_image,
+            service_url=settings.sandbox.service_url,
+            service_token=settings.sandbox.service_token,
+            service_timeout=settings.sandbox.timeout,
+            image=settings.sandbox.image,
             claude_config_dir=settings.claude_config_dir,
             codex_config_dir=settings.codex_config_dir,
             skills_dir=settings.skills_dir,
@@ -128,6 +128,6 @@ class SandboxSettings:
 
     @classmethod
     def maybe_from_settings(cls, settings: Settings) -> Self | None:
-        if not settings.sandbox_service_url:
+        if not settings.sandbox.service_url:
             return None
         return cls.from_settings(settings)

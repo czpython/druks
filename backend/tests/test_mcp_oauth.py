@@ -568,7 +568,7 @@ def test_connect_route_requires_druks_endpoint(tmp_path, registry_state, druks_d
             json={"identity_mode": IdentityMode.SHARED},
         )
         assert response.status_code == 409
-        assert "DRUKS_ENDPOINT" in response.text
+        assert "urls.endpoint" in response.text
 
 
 def test_connect_route_rejects_a_non_oauth_server(tmp_path, druks_db):
@@ -584,7 +584,7 @@ def test_connect_route_rejects_a_non_oauth_server(tmp_path, druks_db):
 
 def test_connect_route_returns_the_consent_url(tmp_path, registry_state, auth_server, druks_db):
     _register_oauth_server()
-    settings = make_settings(tmp_path, endpoint=_ENDPOINT)
+    settings = make_settings(tmp_path, urls={"endpoint": _ENDPOINT})
     with TestClient(configure_app_for_test(settings=settings)) as client:
         response = client.post(
             f"/api/mcp-servers/{_NAME}/connect",
@@ -596,7 +596,7 @@ def test_connect_route_returns_the_consent_url(tmp_path, registry_state, auth_se
 
 def test_callback_route_completes_the_connect(tmp_path, registry_state, auth_server, druks_db):
     _register_oauth_server(enabled=False)
-    settings = make_settings(tmp_path, endpoint=_ENDPOINT)
+    settings = make_settings(tmp_path, urls={"endpoint": _ENDPOINT})
 
     with TestClient(configure_app_for_test(settings=settings)) as client:
         url = client.post(
@@ -661,7 +661,7 @@ def test_shared_disconnect_allows_per_user_reconnect(
 ):
     _register_oauth_server()
     operator = Account.get_or_create("op@example.com")
-    settings = make_settings(tmp_path, endpoint=_ENDPOINT)
+    settings = make_settings(tmp_path, urls={"endpoint": _ENDPOINT})
 
     with TestClient(configure_app_for_test(settings=settings)) as client:
         shared_url = client.post(
@@ -726,7 +726,10 @@ def test_api_has_token_is_scoped_to_the_requesting_account(tmp_path, druks_db):
     connected = Account.get_or_create("connected@example.com")
     unconnected = Account.get_or_create("unconnected@example.com")
     _store_grant(account_id=connected.id, identity_mode=IdentityMode.PER_USER)
-    settings = make_settings(tmp_path, auth_mode="header", auth_header="X-Test-User")
+    settings = make_settings(
+        tmp_path,
+        identity={"mode": "header", "header": "X-Test-User"},
+    )
 
     with TestClient(configure_app_for_test(settings=settings, authenticated=False)) as client:
         connected_response = client.get(
@@ -759,7 +762,10 @@ async def test_per_user_disconnect_preserves_other_accounts_grant_and_cache(tmp_
     await redis.set(disconnected_key, "disconnect-token")
     await redis.set(connected_key, "connected-token")
     await close_client()
-    settings = make_settings(tmp_path, auth_mode="header", auth_header="X-Test-User")
+    settings = make_settings(
+        tmp_path,
+        identity={"mode": "header", "header": "X-Test-User"},
+    )
 
     with TestClient(configure_app_for_test(settings=settings, authenticated=False)) as client:
         response = client.delete(

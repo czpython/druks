@@ -49,11 +49,13 @@ def _jwt_client(tmp_path: Path) -> TestClient:
     app = configure_app_for_test(
         settings=make_settings(
             tmp_path,
-            auth_mode="jwt",
-            auth_header=HEADER,
-            auth_jwks_url="https://edge.example.com/jwks.json",
-            auth_jwt_issuer=ISSUER,
-            auth_jwt_audience=AUDIENCE,
+            identity={
+                "mode": "jwt",
+                "header": HEADER,
+                "jwks_url": "https://edge.example.com/jwks.json",
+                "jwt_issuer": ISSUER,
+                "jwt_audience": AUDIENCE,
+            },
         ),
         authenticated=False,
     )

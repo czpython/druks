@@ -88,7 +88,8 @@ class ClaudeHarness(Harness):
     ) -> AgentInvocation:
         if not self.sandbox:
             raise exceptions.HarnessError(
-                "claude harness requires sandbox settings — set DRUKS_SANDBOX_SERVICE_URL et al.",
+                "claude harness requires sandbox settings — set sandbox.service_url and "
+                "related TOML settings.",
             )
 
         in_vm_run_dir = f"{get_runs_root(ssh_username)}/{run_id}"

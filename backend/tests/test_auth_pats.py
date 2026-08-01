@@ -16,12 +16,11 @@ HEADER = "X-ExeDev-Email"
 OPERATOR = {HEADER: "op@example.com"}
 
 
-def _client(tmp_path: Path, **settings_overrides) -> TestClient:
-    settings_overrides.setdefault("auth_mode", "header")
-    if settings_overrides["auth_mode"] == "header":
-        settings_overrides.setdefault("auth_header", HEADER)
+def _client(tmp_path: Path, *, identity: dict[str, str] | None = None) -> TestClient:
+    if identity is None:
+        identity = {"mode": "header", "header": HEADER}
     app = configure_app_for_test(
-        settings=make_settings(tmp_path, **settings_overrides), authenticated=False
+        settings=make_settings(tmp_path, identity=identity), authenticated=False
     )
     return TestClient(app)
 
@@ -229,7 +228,7 @@ def test_the_operator_manages_the_token_lifecycle(tmp_path, druks_db):
 
 def test_the_none_mode_operator_manages_tokens_too(tmp_path, druks_db):
     Account.get_or_create("op@example.com")
-    with _client(tmp_path, auth_mode="none") as client:
+    with _client(tmp_path, identity={"mode": "none"}) as client:
         created = client.post("/api/auth/personal-tokens", json={"name": "local"})
         assert created.status_code == 200
         listed = client.get("/api/auth/personal-tokens").json()

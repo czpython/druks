@@ -576,7 +576,7 @@ class CodexHarness(Harness):
         if not self.sandbox:
             raise HarnessError(
                 f"{self.name} harness requires sandbox settings — set "
-                "DRUKS_SANDBOX_SERVICE_URL et al.",
+                "sandbox.service_url and related TOML settings.",
             )
 
         cmd = self._build_codex_wrapper(

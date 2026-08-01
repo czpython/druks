@@ -184,7 +184,7 @@ class Build(Workflow):
             raise FatalError(
                 f"Could not mint the reviewer GitHub App token for {repo}; build "
                 "requires it for its github MCP server. Configure "
-                "GITHUB_REVIEWER_APP_ID and its private key."
+                "github.reviewer_app_id and its private key."
             ) from error
         return {
             **await super().get_workspace_kwargs(sandbox),
@@ -198,7 +198,7 @@ class Build(Workflow):
     async def get_prompt_context(self, **context: Any) -> dict[str, Any]:
         work_item = self.subject
         target_repo = ProjectRepo.get_for_repo(self.input.repo, raise_on_missing=True)
-        endpoint = load_settings().endpoint.rstrip("/")
+        endpoint = load_settings().urls.endpoint.rstrip("/")
         work_item_url = f"{endpoint}/work-items/{work_item.id}" if endpoint else ""
         prompt_context = BuildPromptContext(
             repo=self.input.repo,

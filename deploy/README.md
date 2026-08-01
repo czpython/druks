@@ -45,7 +45,7 @@ First pass writes `~/druks/druks.toml` with random secrets pre-filled, creates
 `~/druks/secrets/`, renders `~/druks/.env`, and exits when required values are
 missing. It tells you exactly what to do next:
 
-- Edit `druks.toml`. For a generic remote shape, fill `[sandbox.env]` from
+- Edit `druks.toml`. For a generic remote shape, fill `[sandbox.<provider>]` from
   Drukbox's [configuration reference](https://github.com/czpython/drukbox).
 - Provision the two GitHub Apps: re-run the installer with `--apps`.
   It registers each app via GitHub's manifest flow — it prints a link
@@ -194,8 +194,9 @@ DRUKS_TAG=sha-0123456789abcdef0123456789abcdef01234567 docker compose up -d
 
 This rolls back the image, not the database schema. `druks init-db` only
 upgrades; it does not downgrade migrations. Before pinning an older image,
-confirm that its code can read the current schema and that in-flight workflows
-are compatible with that code.
+confirm that its code can read the current schema, the current `druks.toml`
+and rendered `.env`, and that in-flight workflows are compatible with that
+code.
 
 ## Logs / stop
 

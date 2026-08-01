@@ -61,7 +61,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         # workflows may deliver MCP servers immediately. A bad catalog stops
         # boot here, loudly. (The suite loads it from a conftest fixture.)
         load_mcp_catalog(settings.mcp_catalog_path)
-        if settings.auth_mode == "none":
+        if settings.identity.mode == "none":
             # A drifted none-mode install (more than one operator account) must
             # refuse at boot, not per request; the per-request resolver repeats
             # the check for drift that happens while running.

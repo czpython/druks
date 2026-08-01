@@ -28,7 +28,7 @@ class GitHubEvents(Webhook):
         verify_hmac_sha256(
             self.raw_body,
             self.request.headers.get(self.SIGNATURE_HEADER),
-            self.settings.webhook_secret,
+            self.settings.secrets.webhook_secret,
         )
         return True
 

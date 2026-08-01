@@ -31,7 +31,10 @@ def _isolated_registry():
 def settings(tmp_path) -> Settings:
     return Settings(
         data_dir=tmp_path,
-        webhook_secret="test-secret",
+        secrets={
+            "webhook_secret": "test-secret",
+            "secrets_key": "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=",
+        },
     )
 
 

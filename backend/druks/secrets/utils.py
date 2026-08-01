@@ -29,7 +29,7 @@ _HKDF_INFO = b"druks-secrets-v1"
 
 @lru_cache
 def keys(raw: str) -> tuple[bytes, ...]:
-    # ``raw`` arrives settings-validated (Settings.secrets_key): non-empty,
+    # ``raw`` arrives settings-validated (Settings.secrets.secrets_key): non-empty,
     # every segment base64 for 32 bytes. First key encrypts, every key
     # decrypts.
     return tuple(base64.b64decode(segment.strip()) for segment in raw.split(","))
@@ -42,7 +42,7 @@ def _derive_key(master: bytes, salt: bytes) -> bytes:
 def encrypt(plaintext: bytes, aad: str) -> bytes:
     salt = os.urandom(_SALT_LEN)
     nonce = os.urandom(_NONCE_LEN)
-    ciphertext = AESGCM(_derive_key(keys(load_settings().secrets_key)[0], salt)).encrypt(
+    ciphertext = AESGCM(_derive_key(keys(load_settings().secrets.secrets_key)[0], salt)).encrypt(
         nonce, plaintext, aad.encode()
     )
     return _ENVELOPE_V1 + salt + nonce + ciphertext
@@ -56,7 +56,7 @@ def decrypt(envelope: bytes, aad: str) -> bytes:
     salt = envelope[1 : 1 + _SALT_LEN]
     nonce = envelope[1 + _SALT_LEN : _HEADER_LEN]
     ciphertext = envelope[_HEADER_LEN:]
-    for master in keys(load_settings().secrets_key):
+    for master in keys(load_settings().secrets.secrets_key):
         try:
             return AESGCM(_derive_key(master, salt)).decrypt(nonce, ciphertext, aad.encode())
         except (InvalidTag, ValueError):

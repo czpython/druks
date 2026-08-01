@@ -157,7 +157,10 @@ def _stub_acquire_settings(
         lambda: type(
             "_S",
             (),
-            {"sandbox_image": sandbox_image, "sandbox_keys_dir": tmp_path},
+            {
+                "sandbox": type("_Sandbox", (), {"image": sandbox_image})(),
+                "sandbox_keys_dir": tmp_path,
+            },
         )(),
     )
     return client_module.Client(), create_calls

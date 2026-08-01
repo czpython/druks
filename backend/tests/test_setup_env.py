@@ -3,7 +3,26 @@ import tomllib
 from pathlib import Path
 
 import pytest
+from druks.settings import Settings
 from druks.setup_env import GAPS_EXIT_CODE, MIGRATION_EXIT_CODE, read_env, run_setup
+
+DROPPED_RENDER_KEYS = {
+    "DRUKS_AUTH_MODE": ("identity.mode", "jwt"),
+    "DRUKS_AUTH_JWKS_URL": ("identity.jwks_url", "https://edge.example/jwks"),
+    "DRUKS_AUTH_JWT_ISSUER": ("identity.jwt_issuer", "https://edge.example"),
+    "DRUKS_AUTH_JWT_AUDIENCE": ("identity.jwt_audience", "druks"),
+    "DRUKS_AUTH_JWT_IDENTITY_CLAIM": ("identity.jwt_identity_claim", "sub"),
+    "DRUKS_ENDPOINT": ("urls.endpoint", "https://druks.example"),
+    "DRUKS_WEBHOOK_SECRET": ("secrets.webhook_secret", "webhook-secret"),
+    "DRUKS_SECRETS_KEY": ("secrets.secrets_key", "secrets-key"),
+    "GITHUB_OPERATOR_APP_ID": ("github.operator_app_id", "101"),
+    "GITHUB_REVIEWER_APP_ID": ("github.reviewer_app_id", "202"),
+    "GITHUB_OPERATOR_PRIVATE_KEY_PATH": ("github.operator_pem", "operator.pem"),
+    "GITHUB_REVIEWER_PRIVATE_KEY_PATH": ("github.reviewer_pem", "reviewer.pem"),
+    "DRUKS_SANDBOX_SERVICE_URL": ("sandbox.service_url", "http://sandbox:8000"),
+    "DRUKS_SANDBOX_SERVICE_TOKEN": ("sandbox.service_token", "token"),
+    "DRUKS_SANDBOX_IMAGE": ("sandbox.image", "sandbox:latest"),
+}
 
 
 def _run(env_path: Path, **overrides):
@@ -34,16 +53,15 @@ def test_fresh_exe_render_matches_the_deployment_contract(tmp_path):
     assert values["TAILSCALE_ENABLED"] == "true"
     assert values["EXE_API_URL"] == "https://exe.dev"
     assert values["EXE_DEFAULT_IMAGE"] == "ghcr.io/boldsoftware/exeuntu:latest"
-    assert values["DRUKS_AUTH_MODE"] == "header"
     assert values["DRUKS_AUTH_HEADER"] == "X-ExeDev-Email"
-    assert values["SERVICE_TOKENS"] == values["DRUKS_SANDBOX_SERVICE_TOKEN"]
+    assert values["SERVICE_TOKENS"] == config["sandbox"]["service_token"]
     assert values["GITHUB_OPERATOR_PEM"] == "/home/op/druks/secrets/operator.pem"
     assert values["DRUKS_DATA_DIR"] == "/home/op/druks-data"
     assert "EXE_API_TOKEN" not in values
     assert "TAILSCALE_TAILNET" not in values
     assert len(config["secrets"]["postgres_password"]) == 64
     assert len(config["secrets"]["webhook_secret"]) == 64
-    assert len(config["secrets"]["sandbox_service_token"]) == 64
+    assert len(config["sandbox"]["service_token"]) == 64
     assert (tmp_path / "secrets").is_dir()
     assert (tmp_path / ".gitignore").read_text().splitlines() == [
         "druks.toml",
@@ -52,6 +70,21 @@ def test_fresh_exe_render_matches_the_deployment_contract(tmp_path):
     ]
     assert stat.S_IMODE(env_path.stat().st_mode) == 0o600
     assert stat.S_IMODE((tmp_path / "druks.toml").stat().st_mode) == 0o600
+
+
+@pytest.mark.parametrize(
+    ("rendered_key", "assignment"),
+    [
+        (rendered_key, f"{toml_path}={value}")
+        for rendered_key, (toml_path, value) in DROPPED_RENDER_KEYS.items()
+    ],
+)
+def test_toml_application_setting_is_not_rendered(tmp_path, rendered_key, assignment):
+    env_path = tmp_path / ".env"
+
+    _run(env_path, provider="docker", set_values=(assignment,))
+
+    assert rendered_key not in read_env(env_path)
 
 
 def test_generic_remote_passes_provider_environment_without_enumeration(tmp_path):
@@ -67,7 +100,7 @@ def test_generic_remote_passes_provider_environment_without_enumeration(tmp_path
         provider="exoscale",
         interactive=True,
         input_fn=answer,
-        set_values=("sandbox.env.EXOSCALE_API_KEY=key",),
+        set_values=("sandbox.exoscale.EXOSCALE_API_KEY=key",),
     )
 
     values = read_env(env_path)
@@ -79,28 +112,112 @@ def test_generic_remote_passes_provider_environment_without_enumeration(tmp_path
     assert "TAILSCALE_ENABLED" not in values
 
 
-def test_docker_shape_matches_local_wiring_and_ignores_sandbox_env(tmp_path):
+def test_docker_shape_matches_local_wiring_and_ignores_provider_environment(tmp_path):
     env_path = tmp_path / ".env"
 
     assert (
         _run(
             env_path,
             provider="docker",
-            set_values=("sandbox.env.DOCKER_HOST=tcp://elsewhere",),
+            set_values=("sandbox.docker.DOCKER_HOST=tcp://elsewhere",),
         )
         == GAPS_EXIT_CODE
     )
 
     values = read_env(env_path)
     assert values["DEFAULT_HOST_PROVIDER"] == "docker"
-    assert values["DRUKS_SANDBOX_SERVICE_URL"] == "http://127.0.0.1:8000"
-    assert values["DRUKS_SANDBOX_SERVICE_TOKEN"] == "dev-token"
-    assert values["DRUKS_SANDBOX_IMAGE"] == "ghcr.io/czpython/druks-sandbox:latest"
-    assert values["DRUKS_ENDPOINT"] == "http://localhost:8001"
-    assert values["DRUKS_AUTH_MODE"] == "none"
     assert "DRUKS_AUTH_HEADER" not in values
     assert "SERVICE_TOKENS" not in values
     assert "DOCKER_HOST" not in values
+
+
+def test_exe_provider_environment_renders_verbatim(tmp_path):
+    env_path = tmp_path / ".env"
+
+    _run(
+        env_path,
+        set_values=(
+            "sandbox.exe.EXE_API_TOKEN=exe-token",
+            "sandbox.exe.TAILSCALE_TAILNET=tail.ts.net",
+            "sandbox.exe.CUSTOM_DRUKBOX_VALUE=verbatim",
+        ),
+    )
+
+    values = read_env(env_path)
+    assert values["EXE_API_TOKEN"] == "exe-token"
+    assert values["TAILSCALE_TAILNET"] == "tail.ts.net"
+    assert values["CUSTOM_DRUKBOX_VALUE"] == "verbatim"
+
+
+def test_legacy_sandbox_table_is_renamed_to_the_provider_table(tmp_path):
+    env_path = tmp_path / ".env"
+    _run(env_path)
+    toml_path = tmp_path / "druks.toml"
+    toml_path.write_text(
+        toml_path.read_text().replace(
+            "[sandbox.exe]",
+            "# credentials for this provider\n[sandbox.env]",
+        )
+    )
+    printed = []
+
+    _run(env_path, print_fn=printed.append)
+
+    written = toml_path.read_text()
+    assert "Renamed [sandbox.env] to [sandbox.exe]." in printed
+    assert "[sandbox.exe]" in written
+    assert "[sandbox.env]" not in written
+    assert "# credentials for this provider" in written
+    assert read_env(env_path)["EXE_API_URL"] == "https://exe.dev"
+
+
+def test_foreign_provider_table_is_a_named_gap(tmp_path):
+    env_path = tmp_path / ".env"
+    printed = []
+
+    rc = _run(
+        env_path,
+        set_values=("sandbox.other.OTHER_TOKEN=token",),
+        print_fn=printed.append,
+    )
+
+    assert rc == GAPS_EXIT_CODE
+    assert "sandbox.other is a stale provider table" in "\n".join(printed)
+    assert "OTHER_TOKEN" not in read_env(env_path)
+
+
+def test_docker_shape_renders_no_provider_environment(tmp_path):
+    env_path = tmp_path / ".env"
+
+    _run(
+        env_path,
+        provider="docker",
+        set_values=("sandbox.docker.LOCAL_DRUKBOX_VALUE=local",),
+    )
+
+    assert "LOCAL_DRUKBOX_VALUE" not in read_env(env_path)
+
+
+def test_integer_sandbox_timeout_round_trips(tmp_path):
+    env_path = tmp_path / ".env"
+
+    _run(env_path, provider="docker")
+    _run(env_path)
+
+    timeout = _read_toml(tmp_path / "druks.toml")["sandbox"]["timeout"]
+    assert timeout == 180
+    assert isinstance(timeout, int)
+
+
+def test_non_string_known_setting_is_refused(tmp_path):
+    env_path = tmp_path / ".env"
+    _run(env_path, provider="docker")
+    toml_path = tmp_path / "druks.toml"
+    body = toml_path.read_text().replace('operator_app_id = ""', "operator_app_id = 123")
+    toml_path.write_text(body)
+
+    with pytest.raises(ValueError, match="github.operator_app_id must be a string"):
+        _run(env_path)
 
 
 def test_pre_toml_guard_refuses_without_writing(tmp_path):
@@ -121,7 +238,7 @@ def test_pre_toml_guard_refuses_without_writing(tmp_path):
         "DRUKS_WEBHOOK_SECRET",
         "DRUKS_SANDBOX_SERVICE_TOKEN",
         "GITHUB_*_APP_ID",
-        "[sandbox.env]",
+        "[sandbox.<provider>]",
         "other hand-added .env keys → [env]",
     ):
         assert key in output
@@ -142,7 +259,10 @@ def test_set_updates_toml_and_rerender_preserves_the_values(tmp_path):
     _run(
         env_path,
         provider="exoscale",
-        set_values=("secrets.webhook_secret=rotated-secret",),
+        set_values=(
+            "secrets.webhook_secret=rotated-secret",
+            "urls.webhook_host=hooks.example.com",
+        ),
         print_fn=printed.append,
     )
 
@@ -151,8 +271,9 @@ def test_set_updates_toml_and_rerender_preserves_the_values(tmp_path):
     assert config["github"]["operator_app_id"] == "101"
     assert config["secrets"]["webhook_secret"] == "rotated-secret"
     assert config["sandbox"]["provider"] == "docker"
-    assert values["GITHUB_OPERATOR_APP_ID"] == "101"
-    assert values["DRUKS_WEBHOOK_SECRET"] == "rotated-secret"
+    assert "GITHUB_OPERATOR_APP_ID" not in values
+    assert "DRUKS_WEBHOOK_SECRET" not in values
+    assert values["DRUKS_WEBHOOK_HOST"] == "hooks.example.com"
     assert "docker compose up -d" in "\n".join(printed)
 
 
@@ -208,7 +329,7 @@ def test_owned_deployment_env_key_is_a_named_gap_and_is_not_rendered(tmp_path):
 
     assert rc == GAPS_EXIT_CODE
     assert "env.DRUKS_ENDPOINT is reserved by druks" in "\n".join(printed)
-    assert read_env(env_path)["DRUKS_ENDPOINT"] == "http://localhost:8001"
+    assert "DRUKS_ENDPOINT" not in read_env(env_path)
 
 
 def test_reserved_sandbox_env_key_is_a_named_gap_and_is_not_rendered(tmp_path):
@@ -219,14 +340,14 @@ def test_reserved_sandbox_env_key_is_a_named_gap_and_is_not_rendered(tmp_path):
         env_path,
         provider="exoscale",
         set_values=(
-            "sandbox.env.EXOSCALE_API_KEY=key",
-            "sandbox.env.DATABASE_URL=wrong",
+            "sandbox.exoscale.EXOSCALE_API_KEY=key",
+            "sandbox.exoscale.DATABASE_URL=wrong",
         ),
         print_fn=printed.append,
     )
 
     assert rc == GAPS_EXIT_CODE
-    assert "sandbox.env.DATABASE_URL is reserved by druks" in "\n".join(printed)
+    assert "sandbox.exoscale.DATABASE_URL is reserved by druks" in "\n".join(printed)
     assert read_env(env_path)["DATABASE_URL"] == "sqlite+aiosqlite:////data/drukbox.db"
 
 
@@ -283,7 +404,6 @@ def test_missing_known_tables_gap_without_rewriting_the_operators_file(tmp_path)
     _run(env_path, provider="docker")
     toml_path = tmp_path / "druks.toml"
     body = toml_path.read_text()
-    body = body.replace("[sandbox.env]\n", "")
     body = body.replace('provider = "docker"\n', "")
     toml_path.write_text(body)
     printed = []
@@ -296,11 +416,10 @@ def test_missing_known_tables_gap_without_rewriting_the_operators_file(tmp_path)
 
     config = _read_toml(toml_path)
     assert rc == GAPS_EXIT_CODE
-    assert "DEFAULT_HOST_PROVIDER is empty" in "\n".join(printed)
-    assert "GITHUB_REVIEWER_APP_ID is empty" in "\n".join(printed)
-    assert "env" not in config["sandbox"]
+    assert "sandbox.provider is empty" in "\n".join(printed)
+    assert "github.reviewer_app_id is empty" in "\n".join(printed)
     assert config["github"]["operator_app_id"] == "101"
-    assert read_env(env_path)["GITHUB_OPERATOR_APP_ID"] == "101"
+    assert "GITHUB_OPERATOR_APP_ID" not in read_env(env_path)
 
 
 def test_nested_operator_content_is_refused(tmp_path):
@@ -352,3 +471,40 @@ def test_fresh_interactive_run_prompts_for_provider_first(tmp_path):
 
     assert prompts[0] == "Sandbox provider [exe]: "
     assert _read_toml(tmp_path / "druks.toml")["sandbox"]["provider"] == "docker"
+
+
+def test_setup_toml_is_the_settings_source(tmp_path, monkeypatch):
+    env_path = tmp_path / ".env"
+    secrets_dir = tmp_path / "secrets"
+    secrets_dir.mkdir()
+    (secrets_dir / "operator.pem").write_text("operator-pem")
+    (secrets_dir / "reviewer.pem").write_text("reviewer-pem")
+
+    rc = _run(
+        env_path,
+        set_values=(
+            "github.operator_app_id=101",
+            "github.reviewer_app_id=202",
+            "urls.endpoint=https://druks.example",
+            "urls.webhook_host=hooks.druks.example",
+            "sandbox.image=druks-sandbox:test",
+            "sandbox.timeout=240",
+            "sandbox.exe.EXE_API_TOKEN=exe-token",
+            "sandbox.exe.TAILSCALE_TAILNET=tail.ts.net",
+        ),
+    )
+
+    assert rc == 0
+    toml_path = tmp_path / "druks.toml"
+    config = _read_toml(toml_path)
+    monkeypatch.setenv("DRUKS_CONFIG", str(toml_path))
+    settings = Settings()
+
+    assert settings.identity.model_dump() == config["identity"]
+    assert settings.urls.model_dump() == config["urls"]
+    assert settings.secrets.webhook_secret == config["secrets"]["webhook_secret"]
+    assert settings.secrets.secrets_key == config["secrets"]["secrets_key"]
+    assert settings.sandbox.service_token == config["sandbox"]["service_token"]
+    assert settings.sandbox.service_url == config["sandbox"]["service_url"]
+    assert settings.sandbox.image == config["sandbox"]["image"]
+    assert settings.sandbox.timeout == float(config["sandbox"]["timeout"])

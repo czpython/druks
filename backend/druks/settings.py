@@ -1,11 +1,17 @@
 import base64
 import logging
+import os
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
 import asyncssh
-from pydantic import BeforeValidator, Field, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import BaseModel, BeforeValidator, Field, model_validator
+from pydantic_settings import (
+    BaseSettings,
+    PydanticBaseSettingsSource,
+    SettingsConfigDict,
+    TomlConfigSettingsSource,
+)
 
 DEFAULT_DATA_DIR = Path("/var/lib/druks")
 
@@ -64,6 +70,109 @@ ExpandedPath = Annotated[Path, BeforeValidator(_expand_path)]
 OptionalExpandedPath = Annotated[Path | None, BeforeValidator(_expand_optional_path)]
 
 
+def _config_path() -> Path | None:
+    if configured := os.environ.get("DRUKS_CONFIG"):
+        path = Path(configured).expanduser()
+        if path.is_file():
+            return path
+        raise ValueError(f"DRUKS_CONFIG is not a file: {path}")
+    default = Path("druks.toml")
+    return default if default.is_file() else None
+
+
+class _PrunedTomlSource(TomlConfigSettingsSource):
+    def __call__(self) -> dict[str, Any]:
+        def drop_blank_values(value: Any) -> Any:
+            if isinstance(value, dict):
+                return {key: drop_blank_values(item) for key, item in value.items() if item != ""}
+            return value
+
+        return drop_blank_values(super().__call__())
+
+
+class Identity(BaseModel):
+    # How a browser request resolves an account. ``none``: no authentication —
+    # loopback-only deployments with a single operator account. ``header``: the
+    # edge (exe.dev, Teleport, Cloudflare Access, …) authenticates and asserts
+    # the operator's email in ``identity.header``; druks maps it to an account.
+    # ``jwt``: the edge asserts a signed JWT in ``identity.header`` instead;
+    # druks verifies it against the JWKS below and maps its identity claim.
+    # Bearer personal access tokens resolve first in every mode.
+    mode: Literal["none", "header", "jwt"] = "none"
+    # No default: the operator names their edge's header explicitly — druks
+    # blesses no provider.
+    header: str = ""
+    jwks_url: str = ""
+    jwt_issuer: str = ""
+    jwt_audience: str = ""
+    jwt_identity_claim: str = "email"
+
+    @model_validator(mode="after")
+    def _auth_mode_is_fully_configured(self) -> "Identity":
+        if self.mode != "none" and not self.header.strip():
+            raise ValueError(
+                "identity.header must name the edge's identity header "
+                f"when identity.mode={self.mode}"
+            )
+        if self.mode != "none" and self.header.strip().lower() == "authorization":
+            # Authorization is the PAT slot and always parses bearer-first — an
+            # assertion configured there could never be read, locking everyone out.
+            raise ValueError("identity.header cannot be Authorization — that slot is PAT-only")
+        if self.mode == "jwt":
+            required = {
+                "identity.jwks_url": self.jwks_url,
+                "identity.jwt_issuer": self.jwt_issuer,
+                "identity.jwt_audience": self.jwt_audience,
+                "identity.jwt_identity_claim": self.jwt_identity_claim,
+            }
+            missing = [name for name, value in required.items() if not value.strip()]
+            if missing:
+                raise ValueError(f"identity.mode=jwt requires {', '.join(missing)}")
+        return self
+
+
+class GitHub(BaseModel):
+    # Where druks may act is the operator Extension's installation set — GitHub's
+    # own state: webhooks only arrive from installations, tokens only mint
+    # for them. See GitHubClient.list_installation_accounts.
+    operator_app_id: EmptyToNone = None
+    reviewer_app_id: EmptyToNone = None
+
+
+class Urls(BaseModel):
+    # The base URL the operator's browser reaches druks at (the dashboard host,
+    # not the webhook ingress). The OAuth connect flow builds its callback
+    # redirect from it; empty disables connecting OAuth MCP servers, loudly.
+    endpoint: str = ""
+    # Public hostname webhook senders POST to (Caddy serves it; see
+    # deploy/compose.yaml). Druks itself only reads it for the doctor's
+    # ingress probe — empty when the edge carries webhooks some other way.
+    webhook_host: str = ""
+
+
+class Secrets(BaseModel):
+    webhook_secret: str = ""
+    # Encrypts stored secrets (MCP tokens, OAuth grants) at rest. Required —
+    # a missing or malformed key refuses boot; `druks setup` generates one.
+    secrets_key: SecretsKey
+
+
+class Sandbox(BaseModel):
+    # Connection details for clawhaven-sandbox-service. Druks calls
+    # ``POST /hosts`` per agent run to provision a VM, then SSHes in
+    # over Tailscale to execute the CLI inside it. See
+    # ``docs/design/sandboxed-execution.md`` for the full architecture.
+    #
+    # An empty URL disables sandbox-backed execution; workflows that call an
+    # agent then fail when they try to acquire a host.
+    service_url: str = ""
+    service_token: str = ""
+    # Empty → drukbox decides.
+    image: str = ""
+    # Sized for the slowest provisioner.
+    timeout: float = 180.0
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         populate_by_name=True,
@@ -74,10 +183,16 @@ class Settings(BaseSettings):
         # silently mutating shared state.
         frozen=True,
         # Validation errors surface in boot logs and doctor output; a bad
-        # DRUKS_SECRETS_KEY (or any secret-bearing field) must not echo its
+        # secrets.secrets_key (or any secret-bearing field) must not echo its
         # value there.
         hide_input_in_errors=True,
     )
+
+    identity: Identity = Identity()
+    github: GitHub = GitHub()
+    urls: Urls = Urls()
+    secrets: Secrets
+    sandbox: Sandbox = Sandbox()
 
     # ``data_dir`` is the root for run artifacts and logs (via computed
     # properties below).
@@ -89,45 +204,11 @@ class Settings(BaseSettings):
         alias="DRUKS_DATABASE_URL",
     )
 
-    # How a browser request resolves an account. ``none``: no authentication —
-    # loopback-only deployments with a single operator account. ``header``: the
-    # edge (exe.dev, Teleport, Cloudflare Access, …) authenticates and asserts
-    # the operator's email in ``auth_header``; druks maps it to an account.
-    # ``jwt``: the edge asserts a signed JWT in ``auth_header`` instead; druks
-    # verifies it against the JWKS below and maps its identity claim. Bearer
-    # personal access tokens resolve first in every mode.
-    auth_mode: Literal["none", "header", "jwt"] = Field(default="none", alias="DRUKS_AUTH_MODE")
-    # No default: the operator names their edge's header explicitly — druks
-    # blesses no provider.
-    auth_header: str = Field(default="", alias="DRUKS_AUTH_HEADER")
-    auth_jwks_url: str = Field(default="", alias="DRUKS_AUTH_JWKS_URL")
-    auth_jwt_issuer: str = Field(default="", alias="DRUKS_AUTH_JWT_ISSUER")
-    auth_jwt_audience: str = Field(default="", alias="DRUKS_AUTH_JWT_AUDIENCE")
-    auth_jwt_identity_claim: str = Field(default="email", alias="DRUKS_AUTH_JWT_IDENTITY_CLAIM")
-
-    webhook_secret: str = Field(default="", alias="DRUKS_WEBHOOK_SECRET")
-    # Public hostname webhook senders POST to (Caddy serves it; see
-    # deploy/compose.yaml). Druks itself only reads it for the doctor's
-    # ingress probe — empty when the edge carries webhooks some other way.
-    webhook_host: str = Field(default="", alias="DRUKS_WEBHOOK_HOST")
-    # The base URL the operator's browser reaches druks at (the dashboard host,
-    # not the webhook ingress). The OAuth connect flow builds its callback
-    # redirect from it; empty disables connecting OAuth MCP servers, loudly.
-    endpoint: str = Field(default="", alias="DRUKS_ENDPOINT")
-    # Encrypts stored secrets (MCP tokens, OAuth grants) at rest. Required —
-    # a missing or malformed key refuses boot; `druks setup` generates one.
-    secrets_key: SecretsKey = Field(alias="DRUKS_SECRETS_KEY")
-    # Where druks may act is the operator Extension's installation set — GitHub's
-    # own state: webhooks only arrive from installations, tokens only mint
-    # for them. See GitHubClient.list_installation_accounts.
-
     github_api_url: str = Field(default="https://api.github.com", alias="GITHUB_API_URL")
-    github_operator_app_id: EmptyToNone = Field(default=None, alias="GITHUB_OPERATOR_APP_ID")
     github_operator_private_key_path: OptionalExpandedPath = Field(  # type: ignore[assignment]
         default=None,
         alias="GITHUB_OPERATOR_PRIVATE_KEY_PATH",
     )
-    github_reviewer_app_id: EmptyToNone = Field(default=None, alias="GITHUB_REVIEWER_APP_ID")
     github_reviewer_private_key_path: OptionalExpandedPath = Field(  # type: ignore[assignment]
         default=None,
         alias="GITHUB_REVIEWER_PRIVATE_KEY_PATH",
@@ -138,22 +219,6 @@ class Settings(BaseSettings):
     slack_signing_secret: str = Field(default="", alias="SLACK_SIGNING_SECRET")
 
     redis_url: str = Field(default="redis://127.0.0.1:6379/0", alias="DRUKS_REDIS_URL")
-    # Connection details for clawhaven-sandbox-service. Druks calls
-    # ``POST /hosts`` per agent run to provision a VM, then SSHes in
-    # over Tailscale to execute the CLI inside it. See
-    # ``docs/design/sandboxed-execution.md`` for the full architecture.
-    #
-    # An empty URL disables sandbox-backed execution; workflows that call an
-    # agent then fail when they try to acquire a host.
-    sandbox_service_url: str = Field(default="", alias="DRUKS_SANDBOX_SERVICE_URL")
-    sandbox_service_token: str = Field(default="", alias="DRUKS_SANDBOX_SERVICE_TOKEN")
-    # Sized for the slowest provisioner.
-    sandbox_service_timeout: float = Field(
-        default=180.0,
-        alias="DRUKS_SANDBOX_SERVICE_TIMEOUT",
-    )
-    # Empty → drukbox decides.
-    sandbox_image: str = Field(default="", alias="DRUKS_SANDBOX_IMAGE")
     # Per-VM SSH keys when drukbox returns them; empty otherwise.
     sandbox_keys_dir: ExpandedPath = Field(
         default=DEFAULT_DATA_DIR / "sandbox-keys",
@@ -203,28 +268,21 @@ class Settings(BaseSettings):
 
     log_level: str = Field(default="INFO", alias="DRUKS_LOG_LEVEL")
 
-    @model_validator(mode="after")
-    def _auth_mode_is_fully_configured(self) -> "Settings":
-        if self.auth_mode != "none" and not self.auth_header.strip():
-            raise ValueError(
-                "DRUKS_AUTH_HEADER must name the edge's identity header "
-                f"when DRUKS_AUTH_MODE={self.auth_mode}"
-            )
-        if self.auth_mode != "none" and self.auth_header.strip().lower() == "authorization":
-            # Authorization is the PAT slot and always parses bearer-first — an
-            # assertion configured there could never be read, locking everyone out.
-            raise ValueError("DRUKS_AUTH_HEADER cannot be Authorization — that slot is PAT-only")
-        if self.auth_mode == "jwt":
-            required = {
-                "DRUKS_AUTH_JWKS_URL": self.auth_jwks_url,
-                "DRUKS_AUTH_JWT_ISSUER": self.auth_jwt_issuer,
-                "DRUKS_AUTH_JWT_AUDIENCE": self.auth_jwt_audience,
-                "DRUKS_AUTH_JWT_IDENTITY_CLAIM": self.auth_jwt_identity_claim,
-            }
-            missing = [name for name, value in required.items() if not value.strip()]
-            if missing:
-                raise ValueError(f"DRUKS_AUTH_MODE=jwt requires {', '.join(missing)}")
-        return self
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        return (
+            init_settings,
+            _PrunedTomlSource(settings_cls, toml_file=_config_path()),
+            env_settings,
+            dotenv_settings,
+        )
 
     @property
     def logs_dir(self) -> Path:
@@ -261,9 +319,9 @@ def setup_logging(settings: Settings) -> None:
     asyncssh.set_log_level(logging.WARNING)
     asyncssh.set_sftp_log_level(logging.WARNING)
 
-    if not settings.webhook_secret:
+    if not settings.secrets.webhook_secret:
         logging.getLogger(__name__).warning(
-            "DRUKS_WEBHOOK_SECRET is not set — all webhooks will be rejected.",
+            "secrets.webhook_secret is not set — all webhooks will be rejected.",
         )
 
 

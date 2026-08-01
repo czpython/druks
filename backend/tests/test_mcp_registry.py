@@ -278,7 +278,9 @@ def _client_with_registry(tmp_path, monkeypatch, *entries):
         "_http",
         _client_returning(lambda _r: httpx.Response(200, json=payload)),
     )
-    app = configure_app_for_test(settings=make_settings(tmp_path, endpoint="http://druks.test"))
+    app = configure_app_for_test(
+        settings=make_settings(tmp_path, urls={"endpoint": "http://druks.test"})
+    )
     return TestClient(app)
 
 

@@ -1,61 +1,148 @@
+import re
+
 import pytest
-from druks.settings import Settings, ensure_data_dirs, load_settings
+from druks.settings import Settings, ensure_data_dirs
 from druks.testing import make_settings
 from pydantic import ValidationError
 
-
-def test_auth_defaults_to_none_and_blesses_no_header(tmp_path, monkeypatch):
-    monkeypatch.setenv("DRUKS_DATA_DIR", str(tmp_path))
-    monkeypatch.delenv("DRUKS_AUTH_MODE", raising=False)
-    monkeypatch.delenv("DRUKS_AUTH_HEADER", raising=False)
-    settings = load_settings()
-    assert settings.auth_mode == "none"
-    assert not settings.auth_header
+_SECRETS_KEY = "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA="
 
 
-@pytest.mark.parametrize("auth_header", ["", "   "])
-def test_header_mode_requires_the_operator_to_name_the_header(tmp_path, monkeypatch, auth_header):
-    monkeypatch.setenv("DRUKS_DATA_DIR", str(tmp_path))
+def test_auth_defaults_to_none_and_blesses_no_header(tmp_path):
+    settings = make_settings(tmp_path)
+    assert settings.identity.mode == "none"
+    assert not settings.identity.header
+
+
+@pytest.mark.parametrize("header", ["", "   "])
+def test_header_mode_requires_the_operator_to_name_the_header(tmp_path, header):
     with pytest.raises(ValidationError):
-        Settings(auth_mode="header", auth_header=auth_header)  # type: ignore[call-arg]
+        make_settings(tmp_path, identity={"mode": "header", "header": header})
 
 
 def test_jwt_mode_requires_its_verification_targets(tmp_path):
     complete = {
-        "auth_header": "X-Edge-Assertion",
-        "auth_jwks_url": "https://edge.example.com/jwks.json",
-        "auth_jwt_issuer": "https://edge.example.com",
-        "auth_jwt_audience": "druks",
+        "header": "X-Edge-Assertion",
+        "jwks_url": "https://edge.example.com/jwks.json",
+        "jwt_issuer": "https://edge.example.com",
+        "jwt_audience": "druks",
     }
-    settings = make_settings(tmp_path, auth_mode="jwt", **complete)
-    assert settings.auth_jwt_identity_claim == "email"
+    settings = make_settings(tmp_path, identity={"mode": "jwt", **complete})
+    assert settings.identity.jwt_identity_claim == "email"
     # Each required field, blanked in turn, refuses jwt mode.
     for name in complete:
         with pytest.raises(ValidationError):
-            make_settings(tmp_path, auth_mode="jwt", **{**complete, name: "  "})
+            make_settings(
+                tmp_path,
+                identity={"mode": "jwt", **complete, name: "  "},
+            )
 
 
-@pytest.mark.parametrize("auth_mode", ["header", "jwt"])
-def test_the_pat_slot_cannot_be_the_identity_header(tmp_path, auth_mode):
+@pytest.mark.parametrize("mode", ["header", "jwt"])
+def test_the_pat_slot_cannot_be_the_identity_header(tmp_path, mode):
     # Authorization always parses bearer-first, so an assertion configured
     # there could never be read — a total lockout, refused at startup.
     with pytest.raises(ValidationError):
         make_settings(
             tmp_path,
-            auth_mode=auth_mode,
-            auth_header="authorization",
-            auth_jwks_url="https://edge.example.com/jwks.json",
-            auth_jwt_issuer="https://edge.example.com",
-            auth_jwt_audience="druks",
+            identity={
+                "mode": mode,
+                "header": "authorization",
+                "jwks_url": "https://edge.example.com/jwks.json",
+                "jwt_issuer": "https://edge.example.com",
+                "jwt_audience": "druks",
+            },
         )
 
 
-def test_ensure_data_dirs_provisions_skills_dir(tmp_path, monkeypatch):
+def test_toml_populates_authored_submodels(tmp_path, monkeypatch):
+    config_path = tmp_path / "druks.toml"
+    config_path.write_text(
+        f"""
+[identity]
+mode = "header"
+header = "X-Edge-Email"
+
+[github]
+operator_app_id = "123"
+reviewer_app_id = "456"
+
+[urls]
+endpoint = "https://druks.example.com"
+webhook_host = "hooks.example.com"
+
+[secrets]
+webhook_secret = "webhook-secret"
+secrets_key = "{_SECRETS_KEY}"
+
+[sandbox]
+service_url = "https://sandbox.example.com"
+service_token = "sandbox-token"
+image = "sandbox:latest"
+timeout = 180
+""".strip()
+        + "\n"
+    )
+    monkeypatch.setenv("DRUKS_CONFIG", str(config_path))
+
+    settings = Settings()
+
+    assert settings.identity.mode == "header"
+    assert settings.identity.header == "X-Edge-Email"
+    assert settings.github.operator_app_id == "123"
+    assert settings.github.reviewer_app_id == "456"
+    assert settings.urls.endpoint == "https://druks.example.com"
+    assert settings.urls.webhook_host == "hooks.example.com"
+    assert settings.secrets.webhook_secret == "webhook-secret"
+    assert settings.secrets.secrets_key == _SECRETS_KEY
+    assert settings.sandbox.service_token == "sandbox-token"
+    assert settings.sandbox.service_url == "https://sandbox.example.com"
+    assert settings.sandbox.image == "sandbox:latest"
+    assert settings.sandbox.timeout == 180.0
+
+
+def test_auth_mode_environment_variable_is_ignored(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("DRUKS_CONFIG", raising=False)
+    monkeypatch.setenv("DRUKS_AUTH_MODE", "header")
+
+    settings = Settings(secrets={"secrets_key": _SECRETS_KEY})
+
+    assert settings.identity.mode == "none"
+
+
+def test_blank_toml_value_uses_submodel_default(tmp_path, monkeypatch):
+    config_path = tmp_path / "druks.toml"
+    config_path.write_text(
+        f"""
+[identity]
+jwt_identity_claim = ""
+
+[secrets]
+secrets_key = "{_SECRETS_KEY}"
+""".strip()
+        + "\n"
+    )
+    monkeypatch.setenv("DRUKS_CONFIG", str(config_path))
+
+    settings = Settings()
+
+    assert settings.identity.jwt_identity_claim == "email"
+
+
+def test_missing_explicit_config_refuses_construction(tmp_path, monkeypatch):
+    config_path = tmp_path / "missing.toml"
+    monkeypatch.setenv("DRUKS_CONFIG", str(config_path))
+
+    with pytest.raises(ValueError, match=re.escape(str(config_path))):
+        Settings()
+
+
+def test_ensure_data_dirs_provisions_skills_dir(tmp_path):
     # The settings UI installs skill collections into skills_dir; if startup
     # doesn't create it, the first install's write raises OSError → opaque 500.
     # This is the DRUKS_SKILLS_DIR-outside-data_dir case that bit us.
-    monkeypatch.setenv("DRUKS_DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("DRUKS_SKILLS_DIR", str(tmp_path / "shared" / "skills"))
-    settings = load_settings()
+    skills_dir = tmp_path / "shared" / "skills"
+    settings = make_settings(tmp_path, sandbox_skills_dir=skills_dir)
     ensure_data_dirs(settings)
     assert settings.skills_dir.is_dir()

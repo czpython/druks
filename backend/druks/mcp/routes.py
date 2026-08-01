@@ -182,13 +182,13 @@ async def connect_mcp_server(
             status_code=409,
             detail=f"MCP server {name!r} already uses {server['identity_mode']!r} identity.",
         )
-    endpoint = request.app.state.settings.endpoint
+    endpoint = request.app.state.settings.urls.endpoint
     if not endpoint:
         # The authorization server redirects the operator's browser back to
         # druks, so the flow needs the address that browser reaches druks at.
         raise HTTPException(
             status_code=409,
-            detail="Set DRUKS_ENDPOINT to the base URL the operator's browser reaches druks "
+            detail="Set urls.endpoint to the base URL the operator's browser reaches druks "
             "at, to connect OAuth MCP servers.",
         )
     try:

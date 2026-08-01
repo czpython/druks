@@ -6,7 +6,7 @@ without replacing the process.
 
 | Plane | Examples | Stored in |
 | --- | --- | --- |
-| Deployment | database, Redis, ingress, GitHub App keys, Drukbox, encryption key | `~/druks/druks.toml` |
+| Deployment | identity, ingress, GitHub App keys, Drukbox, encryption key | `~/druks/druks.toml` |
 | Dashboard | timezone, harness and tracker credentials, workflow and agent overrides, notifications, MCP servers, skills | Postgres |
 
 The installer renders the complete deployment `.env` from `druks.toml`; `.env`
@@ -20,9 +20,10 @@ Format follows habitat: repository-committed files such as ship's
 world; box-resident operator files are TOML because they render to env
 byte-exact. The two files share no keys and no reader.
 
-The [`Settings` model](../backend/druks/settings.py) remains the authority for
-process environment variables. [`.env.example`](../.env.example) is only the
-host-run development template.
+`druks.toml` is the authority for authored process configuration. Environment
+variables are reserved for Compose-injected infrastructure such as database,
+Redis, data, and container paths. [`.env.example`](../.env.example) is the
+host-run development template for that environment plane.
 
 ## Deployment file
 
@@ -36,19 +37,19 @@ host-run development template.
 | `[secrets]` | Generated deployment secrets |
 | `[paths]` | Host data and harness configuration paths |
 | `[sandbox]` | Drukbox provider, service URL, token behavior, and image override |
-| `[sandbox.env]` | Provider environment passed through to the remote stack |
+| `[sandbox.<provider>]` | Provider environment passed through to the remote stack |
 | `[env]` | Additional deployment environment settings rendered verbatim |
 
 A blank string is unset and is omitted from `.env`. Use `[env]` for settings
 without another `druks.toml` home, including additional `DRUKS_*` settings. A
 key already owned by the renderer is reported as a configuration gap instead
 of overriding its canonical value. On a remote shape,
-`[sandbox.env]` accepts the variables documented by
+`[sandbox.<provider>]` accepts the variables documented by
 [Drukbox](https://github.com/czpython/drukbox); Druks does not enumerate
 providers. `docker` and `exe` select shape-specific first-write templates.
 Every other provider name selects the generic remote shape and is validated by
 Drukbox.
-The local `docker` shape does not render `[sandbox.env]` because host-run
+The local `docker` shape does not render `[sandbox.<provider>]` because host-run
 Drukbox reads its own checkout's environment.
 
 Secrets are generated only when the TOML is first created. Preserve
@@ -66,7 +67,6 @@ this is the same single-writer path used by `install.sh --apps`.
 | `DRUKS_REDIS_URL` | `redis://127.0.0.1:6379/0` | Short-lived coordination and caches |
 | `DRUKS_DATA_DIR` | `/var/lib/druks` | Logs, artifacts, installed skills |
 | `DRUKS_LOG_LEVEL` | `INFO` | Python and DBOS log level |
-| `DRUKS_SECRETS_KEY` | none; required | MCP/OAuth secret encryption keys |
 
 Postgres is durable state. Redis is not the workflow state store: it supports
 short-lived concerns including webhook delivery claims, OAuth state and token
@@ -74,19 +74,19 @@ caches, and the sandbox provisioning gate.
 
 ## Public URLs and access control
 
-| Variable | Purpose |
+| TOML key | Purpose |
 | --- | --- |
-| `DRUKS_ENDPOINT` | Browser-visible dashboard base URL used to build MCP OAuth callbacks |
-| `DRUKS_WEBHOOK_HOST` | Public webhook hostname used by `druks doctor` for its ingress probe |
-| `DRUKS_WEBHOOK_SECRET` | Shared HMAC secret used by the GitHub webhook integration |
-| `DRUKS_AUTH_MODE` | `none` (default; no authentication, single operator), `header` (edge-asserted identity), or `jwt` (edge-signed assertion, verified) |
-| `DRUKS_AUTH_HEADER` | The trusted identity header; read by both the shipped Caddy edge and Druks. No default — header and jwt modes refuse to start without it |
-| `DRUKS_AUTH_JWKS_URL` | `jwt` mode: where the edge publishes its signing keys |
-| `DRUKS_AUTH_JWT_ISSUER` | `jwt` mode: required `iss` claim value |
-| `DRUKS_AUTH_JWT_AUDIENCE` | `jwt` mode: required `aud` claim value |
-| `DRUKS_AUTH_JWT_IDENTITY_CLAIM` | `jwt` mode: the claim mapped to the account (default `email`) |
+| `urls.endpoint` | Browser-visible dashboard base URL used to build MCP OAuth callbacks |
+| `urls.webhook_host` | Public webhook hostname used by `druks doctor` for its ingress probe |
+| `secrets.webhook_secret` | Shared HMAC secret used by the GitHub webhook integration |
+| `identity.mode` | `none` (default; no authentication, single operator), `header` (edge-asserted identity), or `jwt` (edge-signed assertion, verified) |
+| `identity.header` | The trusted identity header; rendered for the shipped Caddy edge too. No default — header and jwt modes refuse to start without it |
+| `identity.jwks_url` | `jwt` mode: where the edge publishes its signing keys |
+| `identity.jwt_issuer` | `jwt` mode: required `iss` claim value |
+| `identity.jwt_audience` | `jwt` mode: required `aud` claim value |
+| `identity.jwt_identity_claim` | `jwt` mode: the claim mapped to the account (default `email`) |
 
-`DRUKS_ENDPOINT` and `DRUKS_WEBHOOK_HOST` are different. The first is where an
+`urls.endpoint` and `urls.webhook_host` are different. The first is where an
 operator's browser reaches Druks; the second is the public ingress webhook
 senders reach. They may share a hostname on exe.dev.
 
@@ -98,15 +98,15 @@ order:
    through to the modes below.
 2. **`header` mode.** The edge (exe.dev, Teleport, Cloudflare Access, …)
    authenticates and asserts the operator's email as exactly one nonblank
-   `DRUKS_AUTH_HEADER` value; Druks trims outer whitespace and maps it to an
+   `identity.header` value; Druks trims outer whitespace and maps it to an
    account, creating one on first sight (open enrollment — the edge decides
    who reaches Druks at all; the account column is case-insensitive).
 3. **`jwt` mode.** The same assertion channel as `header` mode, but the value
    is a signed JWT: Druks verifies the RS256 signature against
-   `DRUKS_AUTH_JWKS_URL` (keys cached for five minutes and refetched on
+   `identity.jwks_url` (keys cached for five minutes and refetched on
    rotation), requires `exp`, `iss`, and `aud` to match the configured
    issuer and audience, and maps the verified
-   `DRUKS_AUTH_JWT_IDENTITY_CLAIM` through the same open enrollment. A
+   `identity.jwt_identity_claim` through the same open enrollment. A
    failed verification is a 401 naming only the failure class — never the
    token. Confirm the real edge's header name, claims, and rotation story
    before enabling the mode; the RS256 profile is pinned, not negotiated.
@@ -118,9 +118,9 @@ order:
    requests (and startup) loudly rather than guess.
 
 Trust requirements for `header` mode: the edge must authenticate every
-dashboard request, must strip any client-supplied copy of
-`DRUKS_AUTH_HEADER` before inserting its authenticated value — a client that
-can inject the header can be anyone — and must terminate TLS and set HSTS.
+dashboard request, must strip any client-supplied copy of the configured
+identity header before inserting its authenticated value — a client that can
+inject the header can be anyone — and must terminate TLS and set HSTS.
 `jwt` mode keeps the same strip requirement but adds cryptographic
 provenance: a forged header value fails signature verification instead of
 becoming an identity, so a misconfigured proxy degrades to a 401 rather
@@ -130,9 +130,9 @@ web listener itself binds loopback by default. In `none` mode there is no
 authentication at all, so the listener must stay loopback-only — never
 publish it.
 
-Any public listener that bypasses the identity edge must never forward
-`DRUKS_AUTH_HEADER` upstream. The shipped webhook listener already serves
-only provider-authenticated `/_external/*` and the PAT-authenticated `/mcp` —
+Any public listener that bypasses the identity edge must never forward the
+configured identity header upstream. The shipped webhook listener already
+serves only provider-authenticated `/_external/*` and the PAT-authenticated `/mcp` —
 nothing that resolves the header — and any future public listener (for example
 the planned MCP integrations listener) must keep that same isolation.
 
@@ -184,10 +184,13 @@ PEMs, and webhook secret into the install through `druks setup`.
 
 ### Operator app
 
-```dotenv
-GITHUB_OPERATOR_APP_ID=123456
-GITHUB_OPERATOR_PRIVATE_KEY_PATH=/secrets/github_operator.pem
-DRUKS_WEBHOOK_SECRET=<same secret configured on the app webhook>
+```toml
+[github]
+operator_app_id = "123456"
+operator_pem = "secrets/operator.pem"
+
+[secrets]
+webhook_secret = "<same secret configured on the app webhook>"
 ```
 
 Webhook URL:
@@ -206,9 +209,10 @@ Subscribe to issue comment, pull request, pull request review, and push events.
 
 ### Reviewer app
 
-```dotenv
-GITHUB_REVIEWER_APP_ID=123457
-GITHUB_REVIEWER_PRIVATE_KEY_PATH=/secrets/github_reviewer.pem
+```toml
+[github]
+reviewer_app_id = "123457"
+reviewer_pem = "secrets/reviewer.pem"
 ```
 
 It needs read access to metadata and contents and read/write access to pull
@@ -216,6 +220,8 @@ requests. It does not need a webhook.
 
 `GITHUB_API_URL` defaults to `https://api.github.com` and can point both clients
 at another compatible GitHub API endpoint.
+Compose pins `GITHUB_OPERATOR_PRIVATE_KEY_PATH` and
+`GITHUB_REVIEWER_PRIVATE_KEY_PATH` to the mounted in-container PEM paths.
 
 ## Ticketing integrations
 
@@ -250,18 +256,20 @@ connected.
 
 ## Sandboxes
 
-| Variable | Purpose |
+| TOML key | Purpose |
 | --- | --- |
-| `DRUKS_SANDBOX_SERVICE_URL` | Drukbox API base URL; empty disables sandbox-backed execution |
-| `DRUKS_SANDBOX_SERVICE_TOKEN` | Drukbox API token |
-| `DRUKS_SANDBOX_SERVICE_TIMEOUT` | Control-plane request timeout; default 180 seconds |
-| `DRUKS_SANDBOX_IMAGE` | Optional provider image override |
-| `DRUKS_SANDBOX_KEYS_DIR` | Per-host SSH private-key directory |
+| `sandbox.service_url` | Drukbox API base URL; empty disables sandbox-backed execution |
+| `sandbox.service_token` | Drukbox API token |
+| `sandbox.timeout` | Control-plane request timeout; default 180 seconds |
+| `sandbox.image` | Optional provider image override |
+
+`DRUKS_SANDBOX_KEYS_DIR` remains a process environment override for the
+per-host SSH private-key directory.
 
 `[sandbox].provider` accepts any Drukbox provider name. `docker` selects the
 local install shape, `exe` selects the exe.dev + tailnet shape, and every other
 name selects the generic remote shape. Provider-specific credentials and host
-options live in `[sandbox.env]` and are interpreted by Drukbox. See
+options live in `[sandbox.<provider>]` and are interpreted by Drukbox. See
 [deployment](../deploy/README.md) or [full local setup](full-local.md) for the
 topology.
 
@@ -303,7 +311,7 @@ is one of:
 
 - static token stored encrypted in Postgres
 - token read from a named process environment variable
-- OAuth connection, which requires `DRUKS_ENDPOINT`
+- OAuth connection, which requires `urls.endpoint`
 
 Enabled servers are delivered to both harnesses unless an extension workspace
 owns a required server with the same name. Tokens enter the agent environment
@@ -320,7 +328,7 @@ per-agent capability manifest records the delivered set.
 
 ## Credential custody and secrets at rest
 
-`DRUKS_SECRETS_KEY` encrypts MCP tokens and OAuth grants with AES-256-GCM.
+`secrets.secrets_key` encrypts MCP tokens and OAuth grants with AES-256-GCM.
 Each database column supplies authenticated associated data, and each value
 gets a derived encryption key. The setting is one or more comma-separated,
 base64-encoded 32-byte master keys:

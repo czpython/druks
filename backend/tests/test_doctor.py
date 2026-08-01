@@ -6,22 +6,30 @@ import pytest
 from druks import doctor
 from druks.testing import make_settings
 
+_SECRETS_KEY = "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA="
+
 
 def _named(results: list[doctor.CheckResult], name: str) -> doctor.CheckResult:
     return next(result for result in results if result.name == name)
 
 
 def test_webhook_secret_fails_on_placeholder(tmp_path: Path) -> None:
-    settings = make_settings(tmp_path, webhook_secret="change-me")
+    settings = make_settings(
+        tmp_path,
+        secrets={"webhook_secret": "change-me", "secrets_key": _SECRETS_KEY},
+    )
 
     result = doctor.check_webhook_secret(settings)
 
     assert not result.ok
-    assert "DRUKS_WEBHOOK_SECRET" in result.detail
+    assert "secrets.webhook_secret" in result.detail
 
 
 def test_webhook_secret_passes_when_set(tmp_path: Path) -> None:
-    settings = make_settings(tmp_path, webhook_secret="a-real-secret")
+    settings = make_settings(
+        tmp_path,
+        secrets={"webhook_secret": "a-real-secret", "secrets_key": _SECRETS_KEY},
+    )
 
     result = doctor.check_webhook_secret(settings)
 
@@ -72,7 +80,7 @@ def test_installations_fails_when_app_has_none(tmp_path: Path, monkeypatch) -> N
 def test_github_app_fails_when_pem_missing(tmp_path: Path) -> None:
     settings = make_settings(
         tmp_path,
-        github_operator_app_id="12345",
+        github={"operator_app_id": "12345"},
         github_operator_private_key_path=None,
     )
 
@@ -85,7 +93,7 @@ def test_github_app_fails_when_pem_missing(tmp_path: Path) -> None:
 def test_github_app_fails_when_pem_does_not_exist(tmp_path: Path) -> None:
     settings = make_settings(
         tmp_path,
-        github_operator_app_id="12345",
+        github={"operator_app_id": "12345"},
         github_operator_private_key_path=tmp_path / "missing.pem",
     )
 
@@ -100,7 +108,7 @@ def test_github_app_fails_when_pem_is_not_a_key(tmp_path: Path) -> None:
     pem_path.write_text("not actually a PEM key\n")
     settings = make_settings(
         tmp_path,
-        github_operator_app_id="12345",
+        github={"operator_app_id": "12345"},
         github_operator_private_key_path=pem_path,
     )
 
@@ -123,7 +131,7 @@ def test_github_app_passes_when_live_mint_succeeds(
     monkeypatch.setattr(doctor, "_github_app_slug", fake_slug)
     settings = make_settings(
         tmp_path,
-        github_operator_app_id="12345",
+        github={"operator_app_id": "12345"},
         github_operator_private_key_path=pem_path,
     )
 
@@ -146,7 +154,7 @@ def test_github_app_fails_when_live_mint_raises(
     monkeypatch.setattr(doctor, "_github_app_slug", fake_slug)
     settings = make_settings(
         tmp_path,
-        github_operator_app_id="12345",
+        github={"operator_app_id": "12345"},
         github_operator_private_key_path=pem_path,
     )
 
@@ -198,7 +206,7 @@ def test_redis_fails_on_unreachable_host(tmp_path: Path) -> None:
 def test_drukbox_passes_when_unconfigured(tmp_path: Path) -> None:
     """Sandbox URL empty → no drukbox to talk to."""
     settings = make_settings(tmp_path)
-    assert settings.sandbox_service_url == ""
+    assert settings.sandbox.service_url == ""
 
     result = doctor.check_drukbox(settings)
 
@@ -259,7 +267,7 @@ def test_webhook_ingress_passes_on_druks_401(tmp_path: Path, monkeypatch) -> Non
         "post",
         lambda url, content, timeout: httpx.Response(401),
     )
-    settings = make_settings(tmp_path, webhook_host="hooks.example.com")
+    settings = make_settings(tmp_path, urls={"webhook_host": "hooks.example.com"})
 
     result = doctor.check_webhook_ingress(settings)
 
@@ -274,7 +282,7 @@ def test_webhook_ingress_fails_on_foreign_404(tmp_path: Path, monkeypatch) -> No
         "post",
         lambda url, content, timeout: httpx.Response(404, headers={"server": "nginx"}),
     )
-    settings = make_settings(tmp_path, webhook_host="hooks.example.com")
+    settings = make_settings(tmp_path, urls={"webhook_host": "hooks.example.com"})
 
     result = doctor.check_webhook_ingress(settings)
 
@@ -342,7 +350,7 @@ def _fake_sandbox_client(monkeypatch, *, reattach_fails=False):
 
 
 def test_sandbox_e2e_not_configured_is_ok(tmp_path: Path) -> None:
-    settings = make_settings(tmp_path, sandbox_service_url="")
+    settings = make_settings(tmp_path, sandbox={"service_url": ""})
 
     result = doctor.check_sandbox_e2e(settings)
 
@@ -352,7 +360,7 @@ def test_sandbox_e2e_not_configured_is_ok(tmp_path: Path) -> None:
 
 def test_sandbox_e2e_exercises_dial_and_reattach(tmp_path: Path, monkeypatch) -> None:
     calls = _fake_sandbox_client(monkeypatch)
-    settings = make_settings(tmp_path, sandbox_service_url="http://127.0.0.1:8780")
+    settings = make_settings(tmp_path, sandbox={"service_url": "http://127.0.0.1:8780"})
 
     result = doctor.check_sandbox_e2e(settings)
 
@@ -365,7 +373,7 @@ def test_sandbox_e2e_failure_names_the_phase_and_releases(tmp_path: Path, monkey
     """A reattach failure is the bug class worth this check — the error
     surfaces in the detail, and the VM must still be released."""
     calls = _fake_sandbox_client(monkeypatch, reattach_fails=True)
-    settings = make_settings(tmp_path, sandbox_service_url="http://127.0.0.1:8780")
+    settings = make_settings(tmp_path, sandbox={"service_url": "http://127.0.0.1:8780"})
 
     result = doctor.check_sandbox_e2e(settings)
 
@@ -375,7 +383,7 @@ def test_sandbox_e2e_failure_names_the_phase_and_releases(tmp_path: Path, monkey
 
 
 def test_run_checks_includes_sandbox_e2e_only_when_flagged(tmp_path: Path) -> None:
-    settings = make_settings(tmp_path, sandbox_service_url="")
+    settings = make_settings(tmp_path, sandbox={"service_url": ""})
 
     default = {r.name for r in doctor.run_checks(settings)}
     flagged = {r.name for r in doctor.run_checks(settings, sandbox=True)}

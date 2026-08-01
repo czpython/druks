@@ -29,6 +29,12 @@ def _key() -> str:
     return base64.b64encode(os.urandom(32)).decode()
 
 
+def _set_key(monkeypatch, tmp_path, value: str) -> None:
+    config_path = tmp_path / "druks.toml"
+    config_path.write_text(f'[secrets]\nsecrets_key = "{value}"\n')
+    monkeypatch.setenv("DRUKS_CONFIG", str(config_path))
+
+
 def _store_grant(refresh_token: str = "rt-secret", client_secret: str = "") -> McpOauthGrant:
     return McpOauthGrant.store(
         server_name="notion",
@@ -64,21 +70,21 @@ def test_grant_secret_halves_round_trip(druks_db):
     assert grant.client_secret.decrypt() == "cs-secret"
 
 
-def test_loaded_secrets_are_lazy_and_redacted(monkeypatch, druks_db):
+def test_loaded_secrets_are_lazy_and_redacted(monkeypatch, tmp_path, druks_db):
     McpServer.create(name="linear", url="https://mcp.linear.app/sse", token=_TOKEN)
     druks_db.expire_all()
 
     # Loading and logging a row never touches key material — decryption
     # happens only on decrypt(), and repr leaks nothing either way.
     row = McpServer.get_for_name("linear")
-    monkeypatch.setenv("DRUKS_SECRETS_KEY", "")
+    _set_key(monkeypatch, tmp_path, "")
     assert repr(row.token) == "Secret(<redacted>)"
     assert str(row.token) == "Secret(<redacted>)"
-    with pytest.raises(ValidationError, match="at least one"):
+    with pytest.raises(ValidationError, match="Field required"):
         row.token.decrypt()
 
 
-def test_empty_value_needs_no_key(monkeypatch, druks_db):
+def test_empty_value_needs_no_key(monkeypatch, tmp_path, druks_db):
     # "" stores as empty bytes — presence checks and decrypt() of an absent
     # secret never touch key material (proven by breaking the key first).
     McpServer.create(name="linear", url="https://mcp.linear.app/sse", token="")
@@ -86,7 +92,7 @@ def test_empty_value_needs_no_key(monkeypatch, druks_db):
 
     assert bytes(druks_db.execute(text("SELECT token FROM mcp_servers")).scalar_one()) == b""
     row = McpServer.get_for_name("linear")
-    monkeypatch.setenv("DRUKS_SECRETS_KEY", "")
+    _set_key(monkeypatch, tmp_path, "")
     assert not row.token
     assert row.token.decrypt() == ""
 
@@ -99,39 +105,39 @@ def test_non_str_assignment_is_rejected(druks_db):
         druks_db.flush()
 
 
-def test_missing_key_refuses_boot(monkeypatch):
+def test_missing_key_refuses_boot(monkeypatch, tmp_path):
     # Blank and comma-noise-only both read as "no key" — the required setting
     # refuses at construction rather than falling back to plaintext.
     for broken in ("", ",", " , "):
-        monkeypatch.setenv("DRUKS_SECRETS_KEY", broken)
-        with pytest.raises(ValidationError, match="at least one"):
+        _set_key(monkeypatch, tmp_path, broken)
+        with pytest.raises(ValidationError, match="Field required|at least one"):
             load_settings()
 
 
-def test_key_validation_error_never_echoes_the_key(monkeypatch):
+def test_key_validation_error_never_echoes_the_key(monkeypatch, tmp_path):
     # A half-valid list fails validation, and the failure surfaces in boot
     # logs and doctor output — it must not echo the valid segment.
     good = _key()
-    monkeypatch.setenv("DRUKS_SECRETS_KEY", f"{good},not-base64!!")
+    _set_key(monkeypatch, tmp_path, f"{good},not-base64!!")
 
     with pytest.raises(ValidationError) as error_info:
         load_settings()
     assert good not in str(error_info.value)
 
 
-def test_malformed_key_refuses_boot(monkeypatch):
+def test_malformed_key_refuses_boot(monkeypatch, tmp_path):
     for broken in ("not-base64!!", base64.b64encode(b"short").decode()):
-        monkeypatch.setenv("DRUKS_SECRETS_KEY", broken)
+        _set_key(monkeypatch, tmp_path, broken)
         with pytest.raises(ValidationError, match="base64|32 bytes"):
             load_settings()
 
 
-def test_undecryptable_secret_raises_the_named_error(monkeypatch, druks_db):
+def test_undecryptable_secret_raises_the_named_error(monkeypatch, tmp_path, druks_db):
     # A key dropped from the list while rows written under it existed is the
     # usual cause — the error must say so, not surface a bare crypto traceback.
     McpServer.create(name="linear", url="https://mcp.linear.app/sse", token=_TOKEN)
     druks_db.expire_all()
-    monkeypatch.setenv("DRUKS_SECRETS_KEY", _key())
+    _set_key(monkeypatch, tmp_path, _key())
 
     with pytest.raises(SecretDecryptError, match="rotated out"):
         McpServer.get_for_name("linear").token.decrypt()
@@ -167,15 +173,15 @@ def test_ciphertext_is_bound_to_its_column(druks_db):
         grant.client_secret.decrypt()
 
 
-def test_prepended_key_still_decrypts(monkeypatch, druks_db):
+def test_prepended_key_still_decrypts(monkeypatch, tmp_path, druks_db):
     # Rotation is prepend-only: new writes use the first key; rows written
     # under an older key keep decrypting as long as it stays in the list.
     old_key = _key()
-    monkeypatch.setenv("DRUKS_SECRETS_KEY", old_key)
+    _set_key(monkeypatch, tmp_path, old_key)
     McpServer.create(name="linear", url="https://mcp.linear.app/sse", token=_TOKEN)
     _store_grant(refresh_token="rt-secret")
 
-    monkeypatch.setenv("DRUKS_SECRETS_KEY", f"{_key()},{old_key}")
+    _set_key(monkeypatch, tmp_path, f"{_key()},{old_key}")
     druks_db.expire_all()
     assert McpServer.get_for_name("linear").token.decrypt() == _TOKEN
     assert (

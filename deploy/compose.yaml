@@ -13,6 +13,7 @@ x-druks: &druks
   env_file:
     - ./.env
   environment:
+    DRUKS_CONFIG: /app/druks.toml
     DRUKS_REDIS_URL: ${DRUKS_REDIS_URL:-redis://127.0.0.1:6379/0}
     DRUKS_DATABASE_URL: ${DRUKS_DATABASE_URL:-postgresql+psycopg://${DRUKS_POSTGRES_USER:-druks}:${DRUKS_POSTGRES_PASSWORD}@127.0.0.1:5432/${DRUKS_POSTGRES_DB:-druks}}
     DRUKS_DATA_DIR: /app/data
@@ -25,12 +26,10 @@ x-druks: &druks
     # VM at both ~/.claude/skills and ~/.codex/skills.
     DRUKS_SKILLS_DIR: /app/data/skills
     DRUKS_SANDBOX_KEYS_DIR: /app/sandbox-keys
-    # Encrypts stored secrets (MCP tokens, OAuth grants) at rest; the app
-    # refuses to boot without it. `druks setup` generates one into .env.
-    DRUKS_SECRETS_KEY: ${DRUKS_SECRETS_KEY:?set DRUKS_SECRETS_KEY in .env — druks setup generates one}
     GITHUB_OPERATOR_PRIVATE_KEY_PATH: /secrets/github_operator.pem
     GITHUB_REVIEWER_PRIVATE_KEY_PATH: /secrets/github_reviewer.pem
   volumes:
+    - ./druks.toml:/app/druks.toml:ro
     - ${DRUKS_DATA_HOST_DIR:-${DRUKS_DATA_DIR:-${HOME}/druks-data}}:/app/data
     # claude/codex config dirs (settings.json/plugins, config.toml/AGENTS.md),
     # carried into each sandbox at push time. Auth never reads them — tokens
@@ -118,7 +117,7 @@ services:
 
   caddy:
     # Stock Caddy — the identity edge + webhook TLS. A local install skips it
-    # (dashboard reached directly on 127.0.0.1:8001, DRUKS_AUTH_MODE=none), so
+    # (dashboard reached directly on 127.0.0.1:8001, identity.mode=none), so
     # it lives in the ``remote`` profile. Caddyfile is fetched next to this
     # compose file by install.sh.
     image: caddy:2.10-alpine
@@ -127,9 +126,9 @@ services:
     restart: unless-stopped
     environment:
       DRUKS_UPSTREAM: ${DRUKS_UPSTREAM:-127.0.0.1:8001}
-      # Both Caddy and druks read DRUKS_AUTH_HEADER (web gets it from env_file):
-      # Caddy requires the edge's assertion, druks maps it to an account. No
-      # default anywhere — the backend refuses header mode without it.
+      # Setup renders identity.header for Caddy; druks reads it from druks.toml.
+      # Caddy requires the edge's assertion, and druks maps it to an account.
+      # No default anywhere — the backend refuses header mode without it.
       DRUKS_AUTH_HEADER: ${DRUKS_AUTH_HEADER:-}
       # ``:-`` so an empty .env value still collapses to the inert loopback
       # default — Caddy treats set-but-empty as a real (broken) site address.
