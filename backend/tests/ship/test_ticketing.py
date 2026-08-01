@@ -1,6 +1,5 @@
 import pytest
-from druks.contrib.ship.checks import check_jira, check_linear
-from druks.contrib.ship.extension import Ship, secret_value
+from druks.contrib.ship.extension import Ship
 from druks.contrib.ship.ticketing.enums import TicketStatus
 from druks.contrib.ship.ticketing.exceptions import JiraAPIError, LinearAPIError
 from druks.contrib.ship.ticketing.jira import Jira
@@ -12,10 +11,16 @@ def _pin_ship_settings(monkeypatch, **values):
     monkeypatch.setattr(Ship, "settings", classmethod(lambda cls: settings))
 
 
-def test_secret_value_unwraps_and_defaults_empty():
-    settings = Ship.Settings(linear_api_key="lin_secret")
-    assert secret_value(settings.linear_api_key) == "lin_secret"
-    assert secret_value(settings.jira_api_token) == ""
+def test_settings_require_linear_webhook_secret_once_the_api_key_is_set():
+    settings = Ship.Settings(linear_api_key="x")
+
+    assert settings.clean() == {"linear_webhook_secret": "Required once the Linear API key is set."}
+
+
+def test_settings_require_jira_webhook_secret_once_the_api_token_is_set():
+    settings = Ship.Settings(jira_api_token="x")
+
+    assert settings.clean() == {"jira_webhook_secret": "Required once the Jira API token is set."}
 
 
 # --- Ship.tracker: source → configured tracker ------------------------------
@@ -64,31 +69,6 @@ def test_empty_resting_status_leaves_ready_for_agent_unmapped(monkeypatch):
     tracker = Ship.tracker("linear")
 
     assert TicketStatus.READY_FOR_AGENT not in tracker._status_names
-
-
-# --- Doctor checks ----------------------------------------------------------
-
-
-def test_ship_tracker_checks_read_extension_settings(monkeypatch):
-    _pin_ship_settings(monkeypatch, linear_api_key="lin_secret")
-    assert not check_linear().ok
-    assert "webhook secret" in check_linear().detail
-
-    _pin_ship_settings(
-        monkeypatch,
-        jira_base_url="https://jira.test",
-        jira_email="a@b.com",
-        jira_api_token="jira_secret",
-    )
-    assert not check_jira().ok
-    assert "webhook secret" in check_jira().detail
-
-
-def test_ship_tracker_checks_pass_when_unconfigured(monkeypatch):
-    _pin_ship_settings(monkeypatch)
-
-    assert check_linear().ok
-    assert check_jira().ok
 
 
 # --- Linear provider --------------------------------------------------------

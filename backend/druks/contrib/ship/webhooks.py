@@ -5,7 +5,7 @@ import logging
 from fastapi import HTTPException, status
 from fastapi.responses import JSONResponse, Response
 
-from druks.contrib.ship.extension import Ship, secret_value
+from druks.contrib.ship.extension import Ship
 from druks.contrib.ship.ticketing.linear import compute_delivery_key
 from druks.signals import publish
 from druks.webhooks import Webhook, verify_hmac_sha256
@@ -22,7 +22,7 @@ class LinearEvents(Webhook):
         verify_hmac_sha256(
             self.raw_body,
             self.request.headers.get("linear-signature"),
-            secret_value(settings.linear_webhook_secret),
+            settings.linear_webhook_secret.get_secret_value(),
             prefix="",
         )
         return True
@@ -89,7 +89,7 @@ class JiraEvents(Webhook):
 
     def request_is_authentic(self) -> bool:
         settings = Ship.settings()
-        webhook_secret = secret_value(settings.jira_webhook_secret)
+        webhook_secret = settings.jira_webhook_secret.get_secret_value()
         if not webhook_secret:
             raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Jira webhook secret not configured.")
         provided = self.request.headers.get("x-druks-webhook-token") or ""

@@ -1,7 +1,6 @@
-from pydantic import BaseModel, Field, SecretStr
+from pydantic import Field
 
 from druks.agents import Agent
-from druks.contrib.ship.checks import check_jira, check_linear
 from druks.contrib.ship.contracts import (
     CodeReviewOutput,
     ContractRevisionOutput,
@@ -16,7 +15,7 @@ from druks.contrib.ship.ticketing.base import Tracker
 from druks.contrib.ship.ticketing.jira import Jira
 from druks.contrib.ship.ticketing.linear import Linear
 from druks.db import StoredSubject
-from druks.extensions import Extension
+from druks.extensions import Extension, ExtensionSettings, Secret
 from druks.workflows import SubjectActivity
 
 # Only what the timeline can't already show. A running agent has an agent call
@@ -24,10 +23,6 @@ from druks.workflows import SubjectActivity
 _PHASE_META: dict[str, SubjectActivity] = {
     "provisioning_vm": SubjectActivity(label="Building sandbox VM…", kind="infra"),
 }
-
-
-def secret_value(secret: SecretStr | None) -> str:
-    return secret.get_secret_value() if secret else ""
 
 
 class Ship(Extension):
@@ -41,16 +36,13 @@ class Ship(Extension):
         "model, or inherits its harness default — the backend dispatches the harness "
         "from the model you pick."
     )
-    checks = [check_linear, check_jira]
 
-    class Settings(BaseModel):
-        linear_api_key: SecretStr | None = Field(
-            default=None,
+    class Settings(ExtensionSettings):
+        linear_api_key: Secret = Field(
             title="Linear API key",
             description="API key used to read and update Linear tickets.",
         )
-        linear_webhook_secret: SecretStr | None = Field(
-            default=None,
+        linear_webhook_secret: Secret = Field(
             title="Linear webhook secret",
             description="Secret used to authenticate Linear webhook deliveries.",
         )
@@ -64,13 +56,11 @@ class Ship(Extension):
             title="Jira email",
             description="Email address used to authenticate with Jira Cloud.",
         )
-        jira_api_token: SecretStr | None = Field(
-            default=None,
+        jira_api_token: Secret = Field(
             title="Jira API token",
             description="API token used to read and update Jira tickets.",
         )
-        jira_webhook_secret: SecretStr | None = Field(
-            default=None,
+        jira_webhook_secret: Secret = Field(
             title="Jira webhook secret",
             description="Secret used to authenticate Jira webhook deliveries.",
         )
@@ -102,26 +92,34 @@ class Ship(Extension):
             ),
         )
 
+        def clean(self) -> dict[str, str]:
+            problems: dict[str, str] = {}
+            if self.linear_api_key and not self.linear_webhook_secret:
+                problems["linear_webhook_secret"] = "Required once the Linear API key is set."
+            if self.jira_api_token and not self.jira_webhook_secret:
+                problems["jira_webhook_secret"] = "Required once the Jira API token is set."
+            return problems
+
     @classmethod
     def tracker(cls, source: str) -> Tracker | None:
         """The configured tracker behind ``source``, or None when that source has
         no tracker (github) or its credentials aren't set yet."""
         settings = cls.settings()
-        if source == "linear" and secret_value(settings.linear_api_key):
+        if source == "linear" and settings.linear_api_key:
             return Linear(
-                api_key=secret_value(settings.linear_api_key),
+                api_key=settings.linear_api_key.get_secret_value(),
                 ready_for_agent_status=settings.linear_resting_status,
             )
         if (
             source == "jira"
             and settings.jira_base_url
             and settings.jira_email
-            and secret_value(settings.jira_api_token)
+            and settings.jira_api_token
         ):
             return Jira(
                 base_url=settings.jira_base_url,
                 email=settings.jira_email,
-                api_token=secret_value(settings.jira_api_token),
+                api_token=settings.jira_api_token.get_secret_value(),
                 ready_for_agent_status=settings.jira_resting_status,
             )
         return

@@ -319,6 +319,8 @@ export interface ExtensionsSettingsResponse {
   extensions: ExtensionSettings[]
 }
 
+export type ExtensionSettingsProblems = Record<string, Record<string, string>>
+
 export interface UpdateExtensionsSettingsRequest {
   agentModels?: Record<string, string | null>
   agentEfforts?: Record<string, string | null>

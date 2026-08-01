@@ -171,6 +171,7 @@ async def update_extension_settings(body: ExtensionsSettingsUpdate) -> Extension
         _validate_timeout(timeout)
         SettingsOverride.set_agent_timeout(name, timeout)
 
+    changed_extensions = []
     try:
         for kind, changes in body.workflow_settings.items():
             workflow = workflows.get(kind)
@@ -187,11 +188,19 @@ async def update_extension_settings(body: ExtensionsSettingsUpdate) -> Extension
                 ) from exc
             for field, value in changes.items():
                 extension.override_setting(field, value)
+            changed_extensions.append(extension)
     except ValueError as exc:
         # Domain rejections (unknown field, bad cron, failed constraint) → 422.
         # override_setting has already redacted any submitted value out of the
         # message, so this is safe to surface even for a rejected secret.
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    settings_problems = {}
+    for extension in changed_extensions:
+        if problems := extension.settings().clean():
+            settings_problems[extension.name] = problems
+    if settings_problems:
+        raise HTTPException(status_code=422, detail=settings_problems)
 
     if any(
         field in ("schedule", "schedule_enabled")

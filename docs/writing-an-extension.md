@@ -602,28 +602,45 @@ router for its own resource and the question never comes up.
 
 ## Extension settings and checks
 
-An inner Pydantic `Settings` class defines dashboard-editable knobs:
+An inner `ExtensionSettings` class defines dashboard-editable knobs and owns their
+cross-field coherence:
 
 ```python
 from typing import Literal
 
-from pydantic import BaseModel, Field, SecretStr
+from pydantic import Field
+
+from druks.extensions import Extension, ExtensionSettings, Secret
 
 
 class NightWatch(Extension):
-    class Settings(BaseModel):
+    name = "night_watch"
+
+    class Settings(ExtensionSettings):
         severity: Literal["warning", "critical"] = "warning"
-        service_token: SecretStr | None = Field(default=None, min_length=8)
+        service_token: Secret
+        webhook_secret: Secret = Field(title="Webhook secret")
+
+        def clean(self) -> dict[str, str]:
+            if self.service_token and not self.webhook_secret:
+                return {"webhook_secret": "Required once the service token is set."}
+            return {}
 ```
 
 Supported display shapes are scalar values, `Literal` choices, and
 `SecretStr`, including optional forms. Nested Pydantic models are rejected.
-Secret values and submitted validation errors are redacted. Read the resolved
-model with `NightWatch.settings()`.
+Secret values and submitted validation errors are redacted. Declare a secret
+field as `Secret`: an unset one is an empty, falsy `SecretStr`, so
+`if self.service_token:` reads set-ness and `.get_secret_value()` never needs
+a guard. Read the resolved
+model with `NightWatch.settings()`. The settings form runs `clean()` against the
+resolved settings after the proposed edits and rejects an incoherent save. `druks doctor`
+runs the same method over stored settings so rows from older releases or manual database
+edits remain visible. Workflow settings stay plain Pydantic `BaseModel` declarations.
 
-An extension may contribute its own `druks doctor` checks through `checks`.
-Return `druks.doctor.CheckResult`; Druks namespaces the result and converts a
-raising or malformed check into a failure without hiding later checks.
+An extension may contribute precondition checks beyond settings coherence through
+`checks`. Return `druks.doctor.CheckResult`; Druks namespaces the result and converts
+a raising or malformed check into a failure without hiding later checks.
 
 ## Test an extension
 
@@ -710,7 +727,7 @@ Import from concern namespaces, not from `druks.durable` or internal modules:
 
 | Namespace | Public names |
 | --- | --- |
-| `druks.extensions` | `Extension` |
+| `druks.extensions` | `Extension`, `ExtensionSettings`, `Secret` |
 | `druks.agents` | `Agent`, `AgentOutput` |
 | `druks.workflows` | `Workflow`, `Gate`, `step`, run/agent response types, lifecycle enums and workflow errors |
 | `druks.db` | `Base`, `StoredSubject`, `db_session` |

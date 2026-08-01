@@ -23,14 +23,14 @@ from druks.extensions.loader import load_extension
 _PACKAGE = "druks_probe"
 _FILES = {
     "extension.py": """
-        from druks.extensions import Extension
-        from pydantic import BaseModel, Field
+        from druks.extensions import Extension, ExtensionSettings
+        from pydantic import Field
 
 
         class Probe(Extension):
             name = "probe"
 
-            class Settings(BaseModel):
+            class Settings(ExtensionSettings):
                 budget: int = Field(default=3, ge=1)
     """,
     "models.py": """
