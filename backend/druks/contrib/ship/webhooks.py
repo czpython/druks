@@ -1,7 +1,6 @@
 import hashlib
 import hmac
 import logging
-from typing import Any
 
 from fastapi import HTTPException, status
 from fastapi.responses import JSONResponse, Response
@@ -42,26 +41,26 @@ class LinearEvents(Webhook):
 
     async def on_state_transition(self) -> Response:
         issue = self.data["data"]
-        state = issue.get("state") or {}
+        state = issue["state"]
+        # An issue outside any project has none; assignee is null when unassigned.
         project = issue.get("project") or {}
         assignee = issue.get("assignee") or {}
-        identifier = issue["identifier"]
         await publish(
             "ticket.transitioned",
             payload={
                 "source": "linear",
-                "identifier": identifier,
-                "status": state.get("name", ""),
-                "title": str(issue.get("title") or ""),
-                "url": str(issue.get("url") or "") or None,
+                "identifier": issue["identifier"],
+                "status": state["name"],
+                "title": issue["title"],
+                "url": issue["url"],
                 "project_name": project.get("name"),
                 "labels": [],
-                "assignee_email": assignee.get("email") or None,
-                "assignee_name": assignee.get("name") or None,
-                "completed": state.get("type") == "completed",
+                "assignee_email": assignee.get("email"),
+                "assignee_name": assignee.get("name"),
+                "completed": state["type"] == "completed",
                 # State types are Linear's fixed vocabulary — terminal-ness can't
                 # be read off status names, which every team customizes.
-                "terminal": state.get("type") in ("completed", "canceled"),
+                "terminal": state["type"] in ("completed", "canceled"),
             },
         )
         return _accepted()
@@ -72,8 +71,9 @@ class LinearEvents(Webhook):
             "ticket.commented",
             payload={
                 "source": "linear",
+                # Top-level comments have no parent.
                 "parent_id": comment.get("parentId"),
-                "issue_id": comment.get("issueId"),
+                "issue_id": comment["issueId"],
             },
         )
         return _accepted()
@@ -105,43 +105,42 @@ class JiraEvents(Webhook):
         # digest is the dedup key; a new transition changes the body.
         return hashlib.sha256(self.raw_body).hexdigest()[:16]
 
-    @property
-    def issue(self) -> dict[str, Any]:
-        # Automation wraps the issue under ``issue``; a bare issue body works too.
-        body = self.data if isinstance(self.data, dict) else {}
-        nested = body.get("issue")
-        return nested if isinstance(nested, dict) else body
-
     async def on_issue_event(self) -> Response:
-        issue = self.issue
-        fields = issue.get("fields") or {}
-        key = str(issue.get("key") or "")
-        if not key:
-            self.log_ignored(event="jira", reason="jira_no_issue_key")
-            return JSONResponse({"accepted": True})
-        assignee = fields.get("assignee") or {}
-        issue_status = fields.get("status") or {}
+        # The body is authored by the operator's Automation rule, not by Jira,
+        # so druks names the one accepted shape: Automation's "Issue data"
+        # payload, the REST issue JSON under ``issue``. Anything else 400s,
+        # which Automation surfaces in the rule's audit log.
+        issue = self.data.get("issue")
+        if not isinstance(issue, dict):
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                "Body must carry the Jira issue JSON under 'issue'.",
+            )
+        fields = issue["fields"]
+        issue_status = fields["status"]
+        key = issue["key"]
+        # Unassigned issues carry a null assignee; privacy settings can hide the email.
+        assignee = fields["assignee"] or {}
         await publish(
             "ticket.transitioned",
             payload={
                 "source": "jira",
                 "identifier": key,
-                "status": issue_status.get("name") or "",
-                "title": str(fields.get("summary") or ""),
+                "status": issue_status["name"],
+                "title": fields["summary"],
                 "url": self._issue_url(key),
-                "project_name": (fields.get("project") or {}).get("name"),
-                "labels": list(fields.get("labels") or []),
-                "assignee_email": assignee.get("emailAddress") or None,
-                "assignee_name": assignee.get("displayName") or None,
+                "project_name": fields["project"]["name"],
+                "labels": fields["labels"],
+                "assignee_email": assignee.get("emailAddress"),
+                "assignee_name": assignee.get("displayName"),
                 "completed": False,
                 # The "done" status category is Jira's terminal marker — it covers
                 # Done/Closed/Won't Do however the workflow names its statuses.
-                "terminal": (issue_status.get("statusCategory") or {}).get("key") == "done",
+                "terminal": issue_status["statusCategory"]["key"] == "done",
             },
         )
         return JSONResponse({"accepted": True})
 
     def _issue_url(self, key: str) -> str | None:
-        settings = Ship.settings()
-        base_url = settings.jira_base_url
-        return f"{base_url.rstrip('/')}/browse/{key}" if base_url and key else None
+        base_url = Ship.settings().jira_base_url
+        return f"{base_url.rstrip('/')}/browse/{key}" if base_url else None

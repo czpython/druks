@@ -225,7 +225,10 @@ Tracker credentials and the statuses that trigger or move `ship` work are stored
 as ship extension settings.
 
 Webhook URLs remain `/_external/linear/events/` and
-`/_external/jira/events/`. `druks doctor` treats an unconfigured tracker as
+`/_external/jira/events/`. The Jira webhook is a Jira Automation "Send web
+request" action with **Issue data (Jira format)** as its body — the REST issue
+JSON under `issue` is the one accepted shape — and the shared token in the
+`x-druks-webhook-token` header. `druks doctor` treats an unconfigured tracker as
 optional and requires its webhook secret once its credentials are complete.
 
 ## Harnesses

@@ -22,15 +22,15 @@ def _provider(tmp_path, *, payload, headers=None):
     return events
 
 
-def _issue(*, key="IT-12", status="Open", status_category=None, project="acme-app"):
-    category = {"statusCategory": {"key": status_category}} if status_category else {}
+def _issue(*, key="IT-12", status="Open", status_category="new", project="acme-app", labels=()):
     return {
         "issue": {
             "key": key,
             "fields": {
-                "status": {"name": status, **category},
+                "status": {"name": status, "statusCategory": {"key": status_category}},
                 "project": {"name": project},
                 "summary": "Add an endpoint",
+                "labels": list(labels),
                 "assignee": {"emailAddress": "dev@acme.co", "displayName": "Dev"},
             },
         },
@@ -85,9 +85,10 @@ def test_rejects_when_token_missing_or_wrong(tmp_path, druks_db):
     assert exc.value.status_code == 401
 
 
-def test_issue_unwraps_both_envelope_shapes(tmp_path):
-    assert _provider(tmp_path, payload=_issue()).issue["key"] == "IT-12"
-    assert _provider(tmp_path, payload=_issue()["issue"]).issue["key"] == "IT-12"
+async def test_body_without_the_issue_envelope_is_rejected(tmp_path):
+    with pytest.raises(HTTPException) as error:
+        await _provider(tmp_path, payload=_issue()["issue"]).on_issue_event()
+    assert error.value.status_code == 400
 
 
 async def test_emits_normalized_ticket_transition(tmp_path, druks_db, monkeypatch):
@@ -107,13 +108,6 @@ async def test_emits_normalized_ticket_transition(tmp_path, druks_db, monkeypatc
     assert payload["status"] == "Ready"
     assert payload["assignee_email"] == "dev@acme.co"
     assert payload["url"] == "https://jira.test/browse/IT-9"
-
-
-async def test_missing_key_does_not_emit(tmp_path, monkeypatch):
-    send = AsyncMock()
-    monkeypatch.setattr(webhook_module, "publish", send)
-    await _provider(tmp_path, payload={"issue": {"fields": {}}}).on_issue_event()
-    send.assert_not_called()
 
 
 async def test_done_category_marks_the_transition_terminal(tmp_path, monkeypatch):
