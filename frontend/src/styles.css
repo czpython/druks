@@ -1794,6 +1794,33 @@ input.set-select { background-image: none; padding-right: 12px; }
   text-transform: none;
 }
 
+/* Extension filter — one global log, so the pills narrow the view rather than
+   switch between feeds. Options come from the registry; no name lands here. */
+.events-filter {
+  display: flex; flex-wrap: wrap; gap: 6px;
+}
+.events-filter-pill {
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  padding: 3px 9px;
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  background: var(--surface);
+  cursor: pointer;
+  transition: color 80ms, border-color 80ms, background 80ms;
+}
+.events-filter-pill:hover {
+  color: var(--text-mid);
+  border-color: var(--border-loud);
+  background: var(--surface-2);
+}
+.events-filter-pill.active {
+  color: var(--text);
+  border-color: var(--border-loud);
+  background: var(--surface-2);
+}
+
 .events-feed {
   /* Inner feed is a plain flex column of rows; scrolling is handled
      by the .page-shell wrapper that <Page scroll="page"> emits. */

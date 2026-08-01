@@ -202,7 +202,7 @@ function AppShell() {
             <UsagePage />
           </Route>
           <Route path="/events">
-            {extension ? <EventsPage key={extension} extension={extension} /> : <NotFound />}
+            <EventsPage />
           </Route>
           <Route>
             <NotFound />
