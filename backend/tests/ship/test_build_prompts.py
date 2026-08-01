@@ -6,6 +6,7 @@ import pytest
 from druks.contrib import ship
 from druks.contrib.ship.journal import BuildJournal
 from druks.contrib.ship.models import Project, ProjectRepo
+from druks.contrib.ship.policy import RepoPolicy
 from druks.contrib.ship.prompt_context import BuildPromptContext
 from druks.prompts import render_prompt
 from druks.workflows import FatalError
@@ -66,6 +67,28 @@ async def test_build_operation_prompt_renders(template):
         workspace=_workspace(),
         **_CALL_KWARGS.get(template, {}),
     )
+
+
+async def test_verification_profile_renders_ci_provenance_per_command():
+    block = await RepoPolicy().verification_block(
+        profile={
+            "verification": {
+                "lint_commands": [{"command": "ruff check .", "ci_check": "Backend / lint"}],
+                "typecheck_commands": [],
+                "test_commands": [{"command": "pytest", "ci_check": None}],
+            }
+        },
+        repo=None,
+    )
+
+    assert block.splitlines() == [
+        "## Verification profile",
+        "",
+        "**Lint:**",
+        "- `ruff check .` — CI: `Backend / lint`",
+        "**Tests:**",
+        "- `pytest`",
+    ]
 
 
 def test_build_prompt_context_covers_template_attrs():

@@ -427,7 +427,20 @@ class Profile(Workflow):
         policy = await RepoPolicy.resolve(project_repo.full_name)
         effective = dict(baseline)
         if policy.verification:
-            effective["verification"] = policy.verification.model_dump(mode="json")
+            effective["verification"] = {
+                "test_commands": [
+                    {"command": command, "ci_check": None}
+                    for command in policy.verification.test_commands
+                ],
+                "lint_commands": [
+                    {"command": command, "ci_check": None}
+                    for command in policy.verification.lint_commands
+                ],
+                "typecheck_commands": [
+                    {"command": command, "ci_check": None}
+                    for command in policy.verification.typecheck_commands
+                ],
+            }
         project_repo.set_profile(baseline=baseline, effective=effective)
 
     async def get_workspace_kwargs(self, sandbox: "Sandbox") -> dict[str, Any]:

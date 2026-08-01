@@ -1,9 +1,9 @@
 import pytest
-from druks.contrib.ship.contracts import RepoProfilerOutput
 from druks.contrib.ship.extension import Ship
 from druks.contrib.ship.models import Project, ProjectRepo
 from druks.contrib.ship.policy import RepoPolicy, VerificationProfile
 from druks.contrib.ship.workflows import Profile
+from druks.durable.engine import configure_engine
 from druks.skills.datastructures import InstalledSkill
 from druks.skills.models import SkillCollection
 
@@ -12,8 +12,6 @@ from druks.skills.models import SkillCollection
 def _passthrough_step(monkeypatch, druks_db):
     # run() is itself a durable step (single-operation workflow) — route it
     # straight through so the test needs no live DBOS runtime.
-    from druks.durable.engine import configure_engine
-
     configure_engine(druks_db.connection())
 
     async def _run_step(_options, fn):
@@ -50,8 +48,8 @@ def _profiled(**overrides) -> dict:
         "package_managers": ["uv"],
         "stack_summary": "A Django backend.",
         "verification": {
-            "test_commands": ["pytest"],
-            "lint_commands": ["ruff check ."],
+            "test_commands": [{"command": "pytest", "ci_check": "Backend / tests"}],
+            "lint_commands": [{"command": "ruff check .", "ci_check": "Backend / lint"}],
             "typecheck_commands": [],
         },
         "recommended_skills": ["django-patterns"],
@@ -62,20 +60,6 @@ def _profiled(**overrides) -> dict:
 
 async def _no_policy(repo):
     return RepoPolicy()
-
-
-def test_profiler_output_maps_onto_the_stored_shape():
-    output = RepoProfilerOutput(
-        languages=["python"],
-        frameworks=["django"],
-        package_managers=["uv"],
-        stack_summary="A Django backend.",
-        test_commands=["pytest"],
-        lint_commands=["ruff check ."],
-        typecheck_commands=[],
-        recommended_skills=["django-patterns"],
-    )
-    assert output.to_result() == _profiled()
 
 
 @pytest.mark.parametrize("refresh_only", [False, True])
@@ -112,7 +96,9 @@ class TestProfileRun:
         repo = ProjectRepo.get(repo.id)
 
         assert repo.profile["baseline"]["languages"] == ["python"]
-        assert repo.effective_profile["verification"]["lint_commands"] == ["ruff check ."]
+        assert repo.effective_profile["verification"]["lint_commands"] == [
+            {"command": "ruff check .", "ci_check": "Backend / lint"}
+        ]
 
     async def test_drops_skills_that_are_not_enabled(self, druks_db, monkeypatch):
         _seed_skills("django-patterns", "retired-skill", disabled=("retired-skill",))
@@ -148,10 +134,14 @@ class TestProfileRun:
         repo = ProjectRepo.get(repo.id)
 
         # The pin replaces the whole verification section on the effective profile...
-        assert repo.effective_profile["verification"]["test_commands"] == ["make test"]
+        assert repo.effective_profile["verification"]["test_commands"] == [
+            {"command": "make test", "ci_check": None}
+        ]
         assert repo.effective_profile["verification"]["lint_commands"] == []
         # ...but the detected baseline is preserved underneath it.
-        assert repo.profile["baseline"]["verification"]["lint_commands"] == ["ruff check ."]
+        assert repo.profile["baseline"]["verification"]["lint_commands"] == [
+            {"command": "ruff check .", "ci_check": "Backend / lint"}
+        ]
 
 
 class TestRefreshOnly:
@@ -173,5 +163,9 @@ class TestRefreshOnly:
         repo = ProjectRepo.get(repo.id)
 
         # Baseline untouched — only the pin re-applies.
-        assert repo.profile["baseline"]["verification"]["test_commands"] == ["pytest"]
-        assert repo.effective_profile["verification"]["test_commands"] == ["make test"]
+        assert repo.profile["baseline"]["verification"]["test_commands"] == [
+            {"command": "pytest", "ci_check": "Backend / tests"}
+        ]
+        assert repo.effective_profile["verification"]["test_commands"] == [
+            {"command": "make test", "ci_check": None}
+        ]

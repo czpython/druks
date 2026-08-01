@@ -22,11 +22,14 @@ its name or a language's usual defaults.
    required checks and commands the repo's CI or docs treat as must-pass. Confirm each
    candidate is actually passing on the default branch — check its latest run or commit
    status with `gh` (authenticated here); never assume a configured or required check is
-   green. Report the exact configured command; never invent one. Leave a category empty when
-   no command qualifies — empty test, lint, and typecheck categories are correct and common.
-   Put editor-only or advisory tools, optional linters, and known-red or flaky suites in
-   `stack_summary` as context, never in verification. Do not list a command that
-   `stack_summary` describes as not a CI gate, red, or flaky.
+   green. Report the exact configured command; never invent one. Beside each command, record
+   `ci_check` as the exact CI check name whose green run confirmed it. Set `ci_check` to null
+   when no CI check runs that command; never guess or approximate a check name — a wrong name
+   is worse than null. Leave a category empty when no command qualifies — empty test, lint,
+   and typecheck categories are correct and common. Put editor-only or advisory tools,
+   optional linters, and known-red or flaky suites in `stack_summary` as context, never in
+   verification. Do not list a command that `stack_summary` describes as not a CI gate, red,
+   or flaky.
 
 3. **Recommend the skills an implementer will need to build here.** Pick from the catalog
    below — do not invent skill names. A skill belongs in `recommended_skills` only when its

@@ -30,14 +30,19 @@ class ReviewWork(Gate):
         await build.request_assignee_review()
 
 
+class VerificationCommandOutput(AgentOutput):
+    command: str
+    ci_check: str | None
+
+
 class RepoProfilerOutput(AgentOutput):
     languages: list[str]
     frameworks: list[str]
     package_managers: list[str]
     stack_summary: str
-    test_commands: list[str]
-    lint_commands: list[str]
-    typecheck_commands: list[str]
+    test_commands: list[VerificationCommandOutput]
+    lint_commands: list[VerificationCommandOutput]
+    typecheck_commands: list[VerificationCommandOutput]
     # Skills the profiler judges an implementer will need to build here — not
     # skills bundled in the repo.
     recommended_skills: list[str]
@@ -51,9 +56,18 @@ class RepoProfilerOutput(AgentOutput):
             "package_managers": self.package_managers,
             "stack_summary": self.stack_summary,
             "verification": {
-                "test_commands": self.test_commands,
-                "lint_commands": self.lint_commands,
-                "typecheck_commands": self.typecheck_commands,
+                "test_commands": [
+                    {"command": entry.command, "ci_check": entry.ci_check}
+                    for entry in self.test_commands
+                ],
+                "lint_commands": [
+                    {"command": entry.command, "ci_check": entry.ci_check}
+                    for entry in self.lint_commands
+                ],
+                "typecheck_commands": [
+                    {"command": entry.command, "ci_check": entry.ci_check}
+                    for entry in self.typecheck_commands
+                ],
             },
             "recommended_skills": self.recommended_skills,
         }
