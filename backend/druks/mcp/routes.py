@@ -240,7 +240,7 @@ async def disconnect_mcp_server(name: str) -> None:
         raise HTTPException(status_code=404, detail=f"MCP server {name!r} is not an OAuth server.")
     if not server["identity_mode"]:
         raise HTTPException(status_code=404, detail=f"MCP server {name!r} has no grant.")
-    account_id = McpOauthGrant.account_for(server["identity_mode"], current_account_id.get())
+    account_id = McpOauthGrant.grant_account(server["identity_mode"], current_account_id.get())
     grant = McpOauthGrant.get_for_account(name, account_id)
     if not grant:
         raise HTTPException(

@@ -105,7 +105,7 @@ class McpServer(Base, Uuid7Pk):
             elif source == TokenSource.OAUTH:
                 server["has_token"] = False
                 if server["identity_mode"]:
-                    grant_account = McpOauthGrant.account_for(server["identity_mode"], account_id)
+                    grant_account = McpOauthGrant.grant_account(server["identity_mode"], account_id)
                     server["has_token"] = bool(
                         McpOauthGrant.get_for_account(server["name"], grant_account)
                     )
@@ -195,7 +195,7 @@ class McpOauthGrant(Base, Uuid7Pk):
     connected_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
 
     @staticmethod
-    def account_for(identity_mode: str | None, run_account_id: str | None) -> str:
+    def grant_account(identity_mode: str | None, run_account_id: str | None) -> str:
         # Whose grant serves this caller: a shared server's grant lives under
         # the system account whoever asks; a per-user server's under the asker.
         if identity_mode == IdentityMode.PER_USER and run_account_id:

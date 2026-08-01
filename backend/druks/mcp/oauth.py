@@ -261,7 +261,7 @@ async def complete_connect(*, state: str, code: str) -> str:
     effective_identity_mode = session.scalar(
         select(McpServer.identity_mode).where(McpServer.name == name)
     )
-    account_id = McpOauthGrant.account_for(effective_identity_mode, pending["account_id"])
+    account_id = McpOauthGrant.grant_account(effective_identity_mode, pending["account_id"])
     McpOauthGrant.store(
         server_name=name,
         account_id=account_id,
