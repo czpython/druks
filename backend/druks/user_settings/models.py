@@ -10,6 +10,7 @@ from sqlalchemy.types import String
 
 from druks.database import db_session
 from druks.models import Base
+from druks.secrets.fields import EncryptedTextField
 
 from .datastructures import (
     ResolvedEffort,
@@ -151,7 +152,8 @@ class SettingsOverride(Base):
     __tablename__ = "settings_overrides"
 
     key: Mapped[str] = mapped_column(String, primary_key=True)
-    value: Mapped[Any] = mapped_column(JSONB)
+    value: Mapped[Any] = mapped_column(JSONB(none_as_null=True), nullable=True)
+    secret_value = EncryptedTextField(default="")
 
     @classmethod
     def read(cls, key: str) -> Any | None:
@@ -221,10 +223,29 @@ class SettingsOverride(Base):
         cls.write(f"workflow:{kind}:{field}", value)
 
     @classmethod
-    def extension_setting(cls, extension: str, field: str, default: Any) -> Any:
-        value = cls.read(f"extension:{extension}:{field}")
-        return default if value is None else value
+    def extension_setting(cls, extension: str, field: str, default: Any, *, is_secret: bool) -> Any:
+        row = db_session().get(cls, f"extension:{extension}:{field}")
+        if is_secret:
+            return row.secret_value.decrypt() if row and row.secret_value else default
+        return row.value if row else default
 
     @classmethod
-    def set_extension_setting(cls, extension: str, field: str, value: Any) -> None:
-        cls.write(f"extension:{extension}:{field}", value)
+    def set_extension_setting(
+        cls, extension: str, field: str, value: Any, *, is_secret: bool
+    ) -> None:
+        key = f"extension:{extension}:{field}"
+        if value is None or not is_secret:
+            cls.write(key, value)
+            return
+        session = db_session()
+        row = session.get(cls, key)
+        if row:
+            row.value = None
+            row.secret_value = value
+        else:
+            row = cls(key=key, value=None, secret_value=value)
+            session.add(row)
+        session.flush()
+        # Assignment leaves the plaintext str on the instance; expire it so the
+        # next read loads the envelope.
+        session.expire(row)
