@@ -37,7 +37,14 @@ _WIRE_HEADERS = {
 }
 
 # tools/list order is the gateway router's declaration order.
-_TOOL_NAMES = ["get_gate", "answer_gate", "get_agent_call", "cancel_run", "get_usage"]
+_TOOL_NAMES = [
+    "get_gate",
+    "answer_gate",
+    "get_agent_call",
+    "cancel_run",
+    "retry_run",
+    "get_usage",
+]
 
 
 @pytest.fixture
@@ -156,7 +163,7 @@ async def test_mcp_subpaths_never_reach_the_spa(app):
             assert stray.headers["content-type"].startswith("application/json")
 
 
-async def test_tools_list_pins_the_five_derived_from_agent_routes(app, pat_token):
+async def test_tools_list_pins_the_six_derived_from_agent_routes(app, pat_token):
     async with live(app), _client(app, pat_token) as client:
         assert "parkedAt" in (client.initialize_result.instructions or "")
         tools = {tool.name: tool for tool in await client.list_tools()}
@@ -167,7 +174,8 @@ async def test_tools_list_pins_the_five_derived_from_agent_routes(app, pat_token
         annotations = tool.annotations
         assert annotations.readOnlyHint == (name in read_only)
         assert annotations.destructiveHint == (None if name in read_only else name == "cancel_run")
-        assert annotations.idempotentHint == (None if name in read_only else True)
+        # A repeat retry answers SUBJECT_BUSY, so it alone is not idempotent.
+        assert annotations.idempotentHint == (None if name in read_only else name != "retry_run")
         assert tool.description, name
 
     # Derived schemas keep the routes' own shapes and constraints.

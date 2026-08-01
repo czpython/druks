@@ -65,3 +65,20 @@ class RunNotActive(AgentApiError):
 
     def __init__(self, run_id: str) -> None:
         super().__init__(f"Run {run_id} already ended.")
+
+
+class RunNotFailed(AgentApiError):
+    status_code = 409
+    code = "RUN_NOT_FAILED"
+
+    def __init__(self, run_id: str) -> None:
+        super().__init__(f"Run {run_id} did not fail.")
+
+
+class SubjectBusy(AgentApiError):
+    status_code = 409
+    code = "SUBJECT_BUSY"
+    retryable = True
+
+    def __init__(self, run_id: str) -> None:
+        super().__init__(f"The subject already has active run {run_id}.")

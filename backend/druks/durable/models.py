@@ -20,6 +20,7 @@ from druks.durable.dbos_state import (
     updated_at_expression,
     workflow_status,
 )
+from druks.durable.engine import _step_engine, run_queue
 from druks.durable.enums import (
     ACTIVE_STATES,
     OPEN_STATES,
@@ -289,6 +290,34 @@ class Run(Base):
                 kind=self.kind,
                 failure=failure,
             )
+
+    async def retry(self) -> str:
+        steps = await DBOS.list_workflow_steps_async(self.id)
+        start_step = max(
+            (step["function_id"] for step in steps if step["error"]),
+            default=1,
+        )
+        handle = await DBOS.fork_workflow_async(
+            self.id,
+            start_step,
+            queue_name=run_queue.name,
+        )
+        workflow_id = handle.workflow_id
+        Run.create_row(
+            _step_engine(),
+            workflow_id=workflow_id,
+            kind=self.kind,
+            account_id=self.account_id,
+        )
+        subject = self.subject
+        if subject:
+            await publish(
+                WorkflowEvent.RETRIED,
+                subject=subject,
+                kind=self.kind,
+                run=workflow_id,
+            )
+        return workflow_id
 
 
 @dataclass(frozen=True)

@@ -1,13 +1,17 @@
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
+from unittest import mock
 
 import pytest
 from conftest import make_test_note, seed_note_run
 from druks.accounts.models import Account
+from druks.durable.engine import run_queue
+from druks.durable.enums import WorkflowEvent
 from druks.durable.models import Artifact, Run
 from druks.durable.reads import read_slice
 from druks.mcp.gateway import exceptions, services
-from druks.testing import seed_call
+from druks.testing import seed_call, seed_dbos_status
 from druks.usage.models import UsageScrape
 
 pytestmark = pytest.mark.usefixtures("_data_dir")
@@ -259,6 +263,119 @@ async def test_cancel_run_paths(druks_db):
 
     with pytest.raises(exceptions.RunNotFound):
         await services.cancel_run("no-such-run", reason="x")
+
+
+async def test_run_retry_forks_from_the_failed_step(druks_db, monkeypatch):
+    item = make_test_note()
+    run = seed_note_run(druks_db, note=item, state="failed")
+    retried_run_id = "retried-run"
+    steps = [
+        {"function_id": 2, "error": None},
+        {"function_id": 6, "error": RuntimeError("first failure")},
+        {"function_id": 8, "error": RuntimeError("final failure")},
+    ]
+    list_steps = mock.AsyncMock(return_value=steps)
+    events = []
+
+    async def _fork(workflow_id, start_step, *, queue_name):
+        seed_dbos_status(
+            druks_db,
+            retried_run_id,
+            "scheduled",
+            subject=item.identity,
+        )
+        return SimpleNamespace(workflow_id=retried_run_id)
+
+    async def _publish(event, **facts):
+        events.append((event, facts))
+
+    fork = mock.AsyncMock(side_effect=_fork)
+    monkeypatch.setattr("dbos.DBOS.list_workflow_steps_async", list_steps)
+    monkeypatch.setattr("dbos.DBOS.fork_workflow_async", fork)
+    monkeypatch.setattr("druks.durable.models.publish", _publish)
+
+    result = await run.retry()
+
+    assert result == retried_run_id
+    list_steps.assert_awaited_once_with(run.id)
+    fork.assert_awaited_once_with(run.id, 8, queue_name=run_queue.name)
+    druks_db.expire_all()
+    retried = Run.get(retried_run_id)
+    assert retried.kind == run.kind
+    assert retried.account_id == run.account_id
+    assert retried.state == "scheduled"
+    assert events == [
+        (
+            WorkflowEvent.RETRIED,
+            # Subject ids ride the DBOS attributes as strings — the one shape
+            # every reader compares.
+            {
+                "subject": {"type": "note", "id": str(item.id)},
+                "kind": run.kind,
+                "run": retried_run_id,
+            },
+        )
+    ]
+
+
+async def test_run_retry_restarts_at_step_one_without_a_failed_checkpoint(druks_db, monkeypatch):
+    run = seed_note_run(druks_db, state="failed")
+    list_steps = mock.AsyncMock(return_value=[{"function_id": 2, "error": None}])
+    fork = mock.AsyncMock(return_value=SimpleNamespace(workflow_id="clean-retry"))
+    monkeypatch.setattr("dbos.DBOS.list_workflow_steps_async", list_steps)
+    monkeypatch.setattr("dbos.DBOS.fork_workflow_async", fork)
+    monkeypatch.setattr("druks.durable.models.publish", mock.AsyncMock())
+
+    await run.retry()
+
+    fork.assert_awaited_once_with(run.id, 1, queue_name=run_queue.name)
+
+
+async def test_retry_run_refuses_a_non_failed_run(druks_db, monkeypatch):
+    run = seed_note_run(druks_db, state="finished")
+    retry = mock.AsyncMock()
+    monkeypatch.setattr(Run, "retry", retry)
+
+    with pytest.raises(exceptions.RunNotFailed) as error:
+        await services.retry_run(run.id)
+
+    assert error.value.code == "RUN_NOT_FAILED"
+    assert error.value.retryable is False
+    retry.assert_not_awaited()
+
+
+async def test_retry_run_refuses_a_busy_subject(druks_db, monkeypatch):
+    item = make_test_note()
+    failed = seed_note_run(druks_db, note=item, state="failed")
+    active = seed_note_run(druks_db, note=item, state="running")
+    retry = mock.AsyncMock()
+    monkeypatch.setattr(Run, "retry", retry)
+
+    with pytest.raises(exceptions.SubjectBusy) as error:
+        await services.retry_run(failed.id)
+
+    assert str(error.value) == f"The subject already has active run {active.id}."
+    assert error.value.retryable is True
+    retry.assert_not_awaited()
+
+
+async def test_retry_run_retries_a_failed_run(druks_db, monkeypatch):
+    run = seed_note_run(druks_db, state="failed")
+    retry = mock.AsyncMock(return_value="retried-run")
+    monkeypatch.setattr(Run, "retry", retry)
+
+    result = await services.retry_run(run.id)
+
+    assert result.run_id == "retried-run"
+    retry.assert_awaited_once_with()
+
+
+async def test_retry_run_refuses_a_missing_run(druks_db):
+    with pytest.raises(exceptions.RunNotFound) as error:
+        await services.retry_run("no-such-run")
+
+    assert error.value.code == "RUN_NOT_FOUND"
+    assert error.value.retryable is False
 
 
 # ---- usage ----------------------------------------------------------------

@@ -53,6 +53,10 @@ class CancelRunResponse(BaseResponse):
     result: Literal["cancelled", "already_cancelled"]
 
 
+class RetryRunResponse(BaseResponse):
+    run_id: str
+
+
 class AgentHarnessUsage(BaseResponse):
     # *_history: percent-left trend samples, oldest first.
     name: str

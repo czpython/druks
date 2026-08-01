@@ -535,6 +535,9 @@ function RunHeader({
       </span>
       <span className="ins-sh-actions">
         {isActiveRun(run) && <CancelRun runId={run.id} />}
+        {run.state === 'failed' && data.timeline.at(-1)?.id === run.id && (
+          <RetryRun runId={run.id} />
+        )}
         {call && (
           <button
             type="button"
@@ -600,6 +603,31 @@ function CancelRun({ runId }: { runId: string }) {
       </button>
       {error && <span className="review-error">{error}</span>}
     </span>
+  )
+}
+
+function RetryRun({ runId }: { runId: string }) {
+  const [pending, setPending] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  async function retry() {
+    setPending(true)
+    setError(null)
+    try {
+      await api.retryRun(runId)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'could not retry')
+      setPending(false)
+    }
+  }
+
+  return (
+    <>
+      <button type="button" className="ins-run-link" disabled={pending} onClick={retry}>
+        {pending ? 'retrying…' : 'retry run'}
+      </button>
+      {error && <span className="review-error">{error}</span>}
+    </>
   )
 }
 

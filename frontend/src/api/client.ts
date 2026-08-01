@@ -176,6 +176,8 @@ export const api = {
   // Cancel is a run-level action, not a review verdict — it ends any active run.
   cancelRun: (runId: string, reason: string) =>
     postJSON<{ runId: string; result: string }>(`/api/runs/${runId}/cancel`, { reason }),
+  retryRun: (runId: string) =>
+    postJSON<{ runId: string }>(`/api/runs/${runId}/retry`, undefined),
   listEvents: (params: { limit?: number; before?: string; extension?: string } = {}) => {
     const query = new URLSearchParams()
     if (params.limit !== undefined) query.set('limit', String(params.limit))

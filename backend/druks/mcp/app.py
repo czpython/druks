@@ -24,9 +24,9 @@ chunk, and parkedAt; answer_gate must echo that parkedAt unchanged — it
 names the exact question being answered, and a repeat answer reports
 already_answered. get_agent_call returns bounded transcript and stderr
 tails, never full payloads. cancel_run records its reason as the run's
-failure. get_usage is the caller's quota and today's spend. There is no
-push channel; poll. Tool failures embed {code, message, retryable} from the
-HTTP surface.
+failure. retry_run reruns a failed run from the step that killed it.
+get_usage is the caller's quota and today's spend. There is no push channel;
+poll. Tool failures embed {code, message, retryable} from the HTTP surface.
 """
 
 # FastMCP logs component-fn errors instead of raising, so the tools/list
@@ -36,6 +36,7 @@ _TOOL_ANNOTATIONS = {
     "answer_gate": ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True),
     "get_agent_call": ToolAnnotations(readOnlyHint=True),
     "cancel_run": ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=True),
+    "retry_run": ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False),
     "get_usage": ToolAnnotations(readOnlyHint=True),
 }
 
