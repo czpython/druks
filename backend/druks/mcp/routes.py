@@ -221,7 +221,7 @@ async def oauth_callback(state: str = "", code: str = "", error: str = "") -> HT
         raise HTTPException(status_code=400, detail=str(exchange_error)) from exchange_error
     # Connecting is the operator's explicit "use this server" — a
     # connected-but-disabled server is a dead end nobody asks for.
-    McpServer.set_enabled(name, True)
+    McpServer.set_enabled(name, is_enabled=True)
     # druks opened this tab via window.open, so the page may close itself; the
     # broadcast tells the settings modal to refetch before the tab goes. The
     # text stays for browsers that refuse the close.
@@ -241,8 +241,8 @@ async def disconnect_mcp_server(name: str) -> None:
     account_id = current_account_id.get()
     grant = None
     if server["identity_mode"]:
-        account_id = McpOauthGrant.scope_account(server["identity_mode"], account_id)
-        grant = McpOauthGrant.get_for_scope(name, account_id)
+        account_id = McpOauthGrant.account_for(server["identity_mode"], account_id)
+        grant = McpOauthGrant.get_for_account(name, account_id)
     if not grant:
         raise HTTPException(
             status_code=404,
@@ -257,4 +257,4 @@ async def disconnect_mcp_server(name: str) -> None:
         if server_row:
             server_row.identity_mode = None
     if server["identity_mode"] == IdentityMode.SHARED:
-        McpServer.set_enabled(name, False)
+        McpServer.set_enabled(name, is_enabled=False)

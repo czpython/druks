@@ -1379,7 +1379,6 @@ function McpServerRow({
   onConnect: (name: string, identityMode: string) => Promise<void>
   onDisconnect: (name: string) => Promise<void>
 }) {
-  const [identityMode, setIdentityMode] = useState('shared')
   // A built-in (catalog entry) is managed by druks: disable, never remove.
   return (
     <div className={'mcp-row' + (server.isEnabled ? '' : ' is-off')}>
@@ -1390,44 +1389,50 @@ function McpServerRow({
       <span className={'mcp-tok' + (server.hasToken ? ' ok' : ' missing')}>
         {tokenStatusLabel(server)}
       </span>
-      {server.tokenSource === 'oauth' && (
-        <>
-          {server.identityMode === null && (
-            <select
-              className="set-select"
-              value={identityMode}
-              onChange={(event) => setIdentityMode(event.target.value)}
-              disabled={busy}
-              aria-label={`Identity mode for ${server.name}`}
-            >
-              <option value="shared">shared</option>
-              <option value="per_user">per user</option>
-            </select>
-          )}
-          <button
-            className="set-btn primary"
-            onClick={() => void onConnect(server.name, server.identityMode ?? identityMode)}
-            disabled={busy}
-            title={
-              server.hasToken
-                ? "Replace this account's grant through the provider's consent page."
-                : "Authorize druks with this server; opens the provider's consent page."
-            }
-          >
-            {server.hasToken ? 'reconnect' : 'connect'}
-          </button>
-          {server.hasToken && (
+      {server.tokenSource === 'oauth' &&
+        (server.identityMode === null ? (
+          // The first connect claims how this server's credential is held;
+          // afterwards the choice is fixed until the last grant is dropped.
+          <>
             <button
-              className="sc-remove"
-              onClick={() => void onDisconnect(server.name)}
+              className="set-btn primary"
+              onClick={() => void onConnect(server.name, 'shared')}
               disabled={busy}
-              title="Drop this account's stored grant."
+              title="One connection every run uses; opens the provider's consent page."
             >
-              disconnect
+              connect for everyone
             </button>
-          )}
-        </>
-      )}
+            <button
+              className="set-btn"
+              onClick={() => void onConnect(server.name, 'per_user')}
+              disabled={busy}
+              title="Each account connects its own; opens the provider's consent page."
+            >
+              connect your account
+            </button>
+          </>
+        ) : (
+          <>
+            <button
+              className="set-btn primary"
+              onClick={() => void onConnect(server.name, server.identityMode)}
+              disabled={busy}
+              title="Opens the provider's consent page."
+            >
+              {server.hasToken ? 'reconnect' : 'connect'}
+            </button>
+            {server.hasToken && (
+              <button
+                className="sc-remove"
+                onClick={() => void onDisconnect(server.name)}
+                disabled={busy}
+                title="Drop this account's stored grant."
+              >
+                disconnect
+              </button>
+            )}
+          </>
+        ))}
       <Switch on={server.isEnabled} onClick={() => void onToggle(server.name, !server.isEnabled)} disabled={busy} />
       {server.builtin ? (
         <span className="mcp-managed" title="Managed by druks — disable it instead of removing.">

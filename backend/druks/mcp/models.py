@@ -13,7 +13,7 @@ from druks.database import db_session
 from druks.extensions.registry import mcp_servers
 from druks.mcp.constants import NAME_PATTERN
 from druks.mcp.enums import IdentityMode, TokenSource
-from druks.mcp.exceptions import InvalidGrantScopeError, InvalidServerNameError
+from druks.mcp.exceptions import InvalidServerNameError, UnresolvedGrantAccountError
 from druks.models import Base
 from druks.secrets.fields import EncryptedJsonField, EncryptedTextField, Secret
 
@@ -105,11 +105,9 @@ class McpServer(Base, Uuid7Pk):
             elif source == TokenSource.OAUTH:
                 server["has_token"] = False
                 if server["identity_mode"]:
-                    scope_account_id = McpOauthGrant.scope_account(
-                        server["identity_mode"], account_id
-                    )
+                    grant_account = McpOauthGrant.account_for(server["identity_mode"], account_id)
                     server["has_token"] = bool(
-                        McpOauthGrant.get_for_scope(server["name"], scope_account_id)
+                        McpOauthGrant.get_for_account(server["name"], grant_account)
                     )
             else:
                 server["has_token"] = bool(server["token"])
@@ -172,7 +170,7 @@ class McpOauthGrant(Base, Uuid7Pk):
     __tablename__ = "mcp_oauth_grants"
     __table_args__ = (UniqueConstraint("server_name", "account_id"),)
 
-    # One grant per server and account scope: the durable outcome of an OAuth
+    # One grant per (server, account): the durable outcome of an OAuth
     # connect flow — exactly what mint needs to refresh an access token.
     # Connect-time material (authorization endpoint, PKCE verifier, state) is
     # transient and lives in Redis, never here. The refresh token never leaves
@@ -197,17 +195,19 @@ class McpOauthGrant(Base, Uuid7Pk):
     connected_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
 
     @staticmethod
-    def scope_account(identity_mode: str | None, run_account_id: str | None) -> str:
+    def account_for(identity_mode: str | None, run_account_id: str | None) -> str:
+        # Whose grant serves this caller: a shared server's grant lives under
+        # the system account whoever asks; a per-user server's under the asker.
         if identity_mode == IdentityMode.PER_USER and run_account_id:
             return run_account_id
         if identity_mode == IdentityMode.PER_USER:
-            raise InvalidGrantScopeError(identity_mode, run_account_id)
+            raise UnresolvedGrantAccountError(identity_mode, run_account_id)
         if identity_mode == IdentityMode.SHARED:
             return SYSTEM_ACCOUNT_ID
-        raise InvalidGrantScopeError(identity_mode, run_account_id)
+        raise UnresolvedGrantAccountError(identity_mode, run_account_id)
 
     @classmethod
-    def get_for_scope(cls, server_name: str, account_id: str) -> "McpOauthGrant | None":
+    def get_for_account(cls, server_name: str, account_id: str) -> "McpOauthGrant | None":
         return (
             db_session()
             .execute(

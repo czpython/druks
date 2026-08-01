@@ -205,10 +205,10 @@ class Workspace:
                 if not token:
                     raise SourceEnvVarUnsetError(server["name"], server["source_env_var"])
             else:  # oauth
-                scope_account_id = mcp_models.McpOauthGrant.scope_account(
+                grant_account = mcp_models.McpOauthGrant.account_for(
                     server["identity_mode"], run_account
                 )
-                token = await oauth.mint_access_token(server["name"], scope_account_id)
+                token = await oauth.mint_access_token(server["name"], grant_account)
             bearer_token_env_var = ""
             if token:
                 bearer_token_env_var = get_bearer_token_env_var(server["name"])

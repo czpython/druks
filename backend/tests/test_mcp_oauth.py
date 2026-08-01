@@ -19,9 +19,9 @@ from druks.mcp.constants import (
 from druks.mcp.enums import IdentityMode, TokenSource
 from druks.mcp.exceptions import (
     GrantRefreshError,
-    InvalidGrantScopeError,
     MissingGrantError,
     OauthConnectError,
+    UnresolvedGrantAccountError,
 )
 from druks.mcp.helpers import get_bearer_token_env_var
 from druks.mcp.models import McpOauthGrant, McpServer
@@ -146,9 +146,9 @@ def _store_grant(
         (IdentityMode.PER_USER, None),
     ),
 )
-def test_scope_account_rejects_unresolved_scopes(identity_mode, account_id):
-    with pytest.raises(InvalidGrantScopeError):
-        McpOauthGrant.scope_account(identity_mode, account_id)
+def test_account_for_rejects_unresolved_modes(identity_mode, account_id):
+    with pytest.raises(UnresolvedGrantAccountError):
+        McpOauthGrant.account_for(identity_mode, account_id)
 
 
 # --- connect: discovery + DCR + PKCE ---------------------------------------
@@ -268,7 +268,7 @@ async def test_complete_connect_exchanges_code_and_stores_the_grant(auth_server,
     name = await oauth.complete_connect(state=state, code="code-1")
 
     assert name == _NAME
-    grant = McpOauthGrant.get_for_scope(_NAME, SYSTEM_ACCOUNT_ID)
+    grant = McpOauthGrant.get_for_account(_NAME, SYSTEM_ACCOUNT_ID)
     assert grant.refresh_token.decrypt() == "rt-1"
     assert grant.resource == _SERVER_URL
     assert grant.client_id == "client-123"
@@ -401,7 +401,8 @@ async def test_mint_refreshes_on_cache_miss_and_persists_rotation(auth_server, d
     assert refresh["refresh_token"] == "rt-old"
     assert refresh["resource"] == _SERVER_URL
     # Rotation: the provider's new refresh token replaced the stored one.
-    assert McpOauthGrant.get_for_scope(_NAME, SYSTEM_ACCOUNT_ID).refresh_token.decrypt() == "rt-new"
+    stored = McpOauthGrant.get_for_account(_NAME, SYSTEM_ACCOUNT_ID)
+    assert stored.refresh_token.decrypt() == "rt-new"
 
     # A second mint within the TTL reuses the cache — no second refresh.
     assert await oauth.mint_access_token(_NAME, SYSTEM_ACCOUNT_ID) == "at-2"
@@ -609,7 +610,7 @@ def test_callback_route_completes_the_connect(tmp_path, registry_state, auth_ser
         # The page notifies the opener tab, then closes itself.
         assert "BroadcastChannel('druks-mcp-connect')" in page.text
         assert "window.close()" in page.text
-        assert McpOauthGrant.get_for_scope(_NAME, SYSTEM_ACCOUNT_ID)
+        assert McpOauthGrant.get_for_account(_NAME, SYSTEM_ACCOUNT_ID)
         # Connecting is the explicit "use this server" — it enables too.
         assert McpServer.get_for_name(_NAME).is_enabled is True
 
@@ -641,7 +642,7 @@ async def test_disconnect_route_drops_grant_and_cache(
 
     with TestClient(configure_app_for_test(settings=make_settings(tmp_path))) as client:
         assert client.delete(f"/api/mcp-servers/{_NAME}/grant").status_code == 204
-        assert not McpOauthGrant.get_for_scope(_NAME, SYSTEM_ACCOUNT_ID)
+        assert not McpOauthGrant.get_for_account(_NAME, SYSTEM_ACCOUNT_ID)
         # The mirror of connect-enables: no grant, no calls, so no dead entry
         # riding into VMs.
         assert McpServer.get_for_name(_NAME).is_enabled is False
@@ -767,8 +768,8 @@ async def test_per_user_disconnect_preserves_other_accounts_grant_and_cache(tmp_
         )
         assert response.status_code == 204
 
-    assert not McpOauthGrant.get_for_scope(_NAME, disconnected.id)
-    assert McpOauthGrant.get_for_scope(_NAME, connected.id)
+    assert not McpOauthGrant.get_for_account(_NAME, disconnected.id)
+    assert McpOauthGrant.get_for_account(_NAME, connected.id)
     assert McpServer.get_for_name(_NAME).is_enabled is True
     druks.redis._client = None
     assert not await get_client().get(disconnected_key)

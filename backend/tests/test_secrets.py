@@ -59,7 +59,7 @@ def test_grant_secret_halves_round_trip(druks_db):
     _store_grant(refresh_token="rt-secret", client_secret="cs-secret")
 
     druks_db.expire_all()
-    grant = McpOauthGrant.get_for_scope("notion", SYSTEM_ACCOUNT_ID)
+    grant = McpOauthGrant.get_for_account("notion", SYSTEM_ACCOUNT_ID)
     assert grant.refresh_token.decrypt() == "rt-secret"
     assert grant.client_secret.decrypt() == "cs-secret"
 
@@ -160,7 +160,7 @@ def test_ciphertext_is_bound_to_its_column(druks_db):
     druks_db.execute(text("UPDATE mcp_oauth_grants SET client_secret = refresh_token"))
     druks_db.expire_all()
 
-    grant = McpOauthGrant.get_for_scope("notion", SYSTEM_ACCOUNT_ID)
+    grant = McpOauthGrant.get_for_account("notion", SYSTEM_ACCOUNT_ID)
     with pytest.raises(SecretDecryptError):
         grant.refresh_token.decrypt()
     with pytest.raises(SecretDecryptError):
@@ -179,7 +179,7 @@ def test_prepended_key_still_decrypts(monkeypatch, druks_db):
     druks_db.expire_all()
     assert McpServer.get_for_name("linear").token.decrypt() == _TOKEN
     assert (
-        McpOauthGrant.get_for_scope("notion", SYSTEM_ACCOUNT_ID).refresh_token.decrypt()
+        McpOauthGrant.get_for_account("notion", SYSTEM_ACCOUNT_ID).refresh_token.decrypt()
         == "rt-secret"
     )
 

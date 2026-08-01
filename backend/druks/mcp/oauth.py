@@ -259,7 +259,7 @@ async def complete_connect(*, state: str, code: str) -> str:
     effective_identity_mode = session.scalar(
         select(McpServer.identity_mode).where(McpServer.name == name)
     )
-    account_id = McpOauthGrant.scope_account(effective_identity_mode, pending["account_id"])
+    account_id = McpOauthGrant.account_for(effective_identity_mode, pending["account_id"])
     McpOauthGrant.store(
         server_name=name,
         account_id=account_id,
@@ -299,7 +299,7 @@ async def mint_access_token(name: str, account_id: str) -> str:
     else:
         raise GrantRefreshError(name, "timed out waiting for a concurrent refresh to finish")
     try:
-        grant = McpOauthGrant.get_for_scope(name, account_id)
+        grant = McpOauthGrant.get_for_account(name, account_id)
         if not grant:
             raise MissingGrantError(name, account_id)
         # The grant's secret halves are ciphertext at rest; the plaintext

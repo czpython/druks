@@ -68,13 +68,13 @@ class OauthConnectError(McpServerError):
         self.reason = reason
 
 
-class InvalidGrantScopeError(McpServerError):
+class UnresolvedGrantAccountError(McpServerError):
     def __init__(self, identity_mode: str | None, account_id: str | None):
         if identity_mode == IdentityMode.PER_USER:
             reason = "per-user grants require an account"
         else:
             reason = f"identity mode {identity_mode!r} is not resolved"
-        super().__init__(f"Cannot resolve an MCP OAuth grant scope: {reason}.")
+        super().__init__(f"Cannot resolve which account's grant to use: {reason}.")
         self.identity_mode = identity_mode
         self.account_id = account_id
 
