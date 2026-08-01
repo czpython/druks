@@ -470,6 +470,42 @@ def test_check_returncode_classifies_the_terminal_error(
     assert str(excinfo.value).startswith(f"{harness.name} exited with 1. ")
 
 
+def test_parse_classifies_an_error_result_despite_exit_zero(ctx: SimpleNamespace):
+    stdout = (
+        b'{"type":"result","subtype":"error_during_execution","is_error":true,'
+        b'"result":"You\'ve hit your session limit \xc2\xb7 resets 5:10pm (UTC)",'
+        b'"total_cost_usd":0.42,"usage":{"input_tokens":10}}\n'
+    )
+    harness = ClaudeHarness(model=None, fast_mode=False, effort=None)
+
+    with pytest.raises(HarnessUsageLimitError) as excinfo:
+        harness.parse(
+            HarnessRunResult(returncode=0, stdout=stdout, stderr=b""),
+            artifact_dir=ctx.artifact_dir,
+            run_id="call-0",
+        )
+
+    assert str(excinfo.value).startswith("claude reported an error.")
+    # The run really happened, so its cost still lands before the raise.
+    cost = json.loads((ctx.artifact_dir / "call-0" / "cost.json").read_text())
+    assert cost["cost_usd"] == 0.42
+
+
+def test_parse_keeps_an_unmatched_error_result_bare(ctx: SimpleNamespace):
+    stdout = b'{"type":"result","subtype":"error_max_turns","is_error":true,"result":"max turns"}\n'
+    harness = ClaudeHarness(model=None, fast_mode=False, effort=None)
+
+    with pytest.raises(HarnessError) as excinfo:
+        harness.parse(
+            HarnessRunResult(returncode=0, stdout=stdout, stderr=b""),
+            artifact_dir=ctx.artifact_dir,
+            run_id="call-0",
+        )
+
+    assert type(excinfo.value) is HarnessError
+    assert excinfo.value.retry is Retry.NEVER
+
+
 def test_agent_result_names_the_agent_in_its_failure():
     result = AgentResult(
         output=None,

@@ -160,6 +160,13 @@ class ClaudeHarness(Harness):
         cost_usd, cost_metadata = extract_claude_cost_from_envelope(envelope)
         write_cost(artifact_dir / run_id, cost_usd=cost_usd, metadata=cost_metadata)
 
+        if envelope.get("is_error"):
+            # The CLI can finish cleanly around a failed turn (max turns, an
+            # error result on exit 0); unclassified it would fall through to
+            # contract validation and read as bad agent output.
+            detail = str(envelope.get("result") or "")[:300]
+            raise self.classify(detail, f"claude reported an error. {detail}".rstrip())
+
         structured: Any = envelope.get("structured_output")
         if structured is None:
             structured = envelope.get("result")

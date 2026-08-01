@@ -112,12 +112,15 @@ class Harness(ABC):
     def check_returncode(cls, result: HarnessRunResult) -> None:
         if result.returncode != 0:
             detail = _terminal_detail(result.stdout)
-            message = f"{cls.name} exited with {result.returncode}.{detail}"
-            lowered = detail.lower()
-            for marker, error in cls.failure_markers.items():
-                if marker in lowered:
-                    raise error(message)
-            raise exceptions.HarnessError(message)
+            raise cls.classify(detail, f"{cls.name} exited with {result.returncode}.{detail}")
+
+    @classmethod
+    def classify(cls, detail: str, message: str) -> exceptions.HarnessError:
+        lowered = detail.lower()
+        for marker, error in cls.failure_markers.items():
+            if marker in lowered:
+                return error(message)
+        return exceptions.HarnessError(message)
 
     def get_manifest(
         self,
