@@ -49,6 +49,10 @@ _TOKEN_COUNT_MARKERS = ('"type":"token_count"', '"type": "token_count"')
 _CODEX_USAGE_URL = "https://chatgpt.com/backend-api/wham/usage"
 _CODEX_USER_AGENT = "codex-cli"
 
+# A quota window is named by its declared length, not the slot it arrives in:
+# a plan whose only quota is weekly reports it as the primary window.
+_WEEKLY_WINDOW_MINIMUM_SECONDS = 24 * 3600
+
 
 @dataclass(frozen=True)
 class _Usage:
@@ -424,11 +428,12 @@ class CodexHarness(Harness):
             return ParsedUsage(ok=False, error="unparseable", raw=raw)
         if not isinstance(data, dict) or "rate_limit" not in data:
             return ParsedUsage(ok=False, error="unexpected_payload", raw=raw)
-        rate_limit = data.get("rate_limit") or {}
         plan = data.get("plan_type") if isinstance(data.get("plan_type"), str) else None
-        five_hour = _codex_window(rate_limit.get("primary_window"))
-        week = _codex_window(rate_limit.get("secondary_window"))
-        if five_hour is None and week is None:
+        try:
+            five_hour, week = _codex_windows(data["rate_limit"] or {})
+        except (AttributeError, KeyError, TypeError, ValueError):
+            return ParsedUsage(ok=False, error="unexpected_payload", plan_tier=plan, raw=raw)
+        if not five_hour and not week:
             # Business/enterprise accounts with unlimited credits carry
             # ``rate_limit: null`` — no windows is the expected shape, not
             # a parse failure. Report permanently-full buckets.
@@ -703,23 +708,21 @@ class CodexHarness(Harness):
         )
 
 
-def _codex_window(block: object) -> ParsedMetric | None:
-    if not isinstance(block, dict):
-        return None
-    used = block.get("used_percent")
-    percent_left = None
-    if isinstance(used, (int, float)):
-        percent_left = max(0, min(100, int(round(100 - used))))
-    resets_at = _codex_reset(block.get("reset_at"))
-    if percent_left is None and resets_at is None:
-        return None
-    return ParsedMetric(percent_left=percent_left, resets_at=resets_at)
-
-
-def _codex_reset(value: object) -> datetime | None:
-    if not isinstance(value, (int, float)):
-        return None
-    try:
-        return datetime.fromtimestamp(value, tz=UTC)
-    except (OverflowError, OSError, ValueError):
-        return None
+def _codex_windows(rate_limit: dict) -> tuple[ParsedMetric | None, ParsedMetric | None]:
+    """The five-hour and weekly quotas, in that order. Raises if a window the
+    payload reports is unreadable — a window we cannot place is a broken
+    payload, not a missing quota."""
+    five_hour = week = None
+    for slot in ("primary_window", "secondary_window"):
+        block = rate_limit.get(slot)
+        if not block:
+            continue
+        window = ParsedMetric(
+            percent_left=max(0, min(100, round(100 - block["used_percent"]))),
+            resets_at=datetime.fromtimestamp(block["reset_at"], tz=UTC),
+        )
+        if block["limit_window_seconds"] >= _WEEKLY_WINDOW_MINIMUM_SECONDS:
+            week = window
+        else:
+            five_hour = window
+    return five_hour, week
