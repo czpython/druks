@@ -26,7 +26,7 @@ class UsageHarnessSummary(BaseResponse):
     connected: bool
     plan_tier: str | None = None
     five_hour: UsageMetricSummary | None = None
-    week: UsageMetricSummary | None = None
+    weeks: list[UsageMetricSummary] = Field(default_factory=list)
     # Unmetered plan (Codex business/enterprise). The window buckets are
     # synthesized permanently-full — the UI shows "unmetered" plus
     # actual consumption from druks' own run records instead of a
@@ -59,14 +59,19 @@ class UsageHistoryPoint(BaseResponse):
     pct: int
 
 
+class UsageWindowHistory(BaseResponse):
+    model: str | None = None
+    points: list[UsageHistoryPoint] = Field(default_factory=list)
+
+
 class UsageHarnessHistory(BaseResponse):
     name: str
     # Percent-left samples, oldest first. ``five_hour`` covers the last
-    # ~6h (one full 5h window plus headroom); ``week`` covers the last
-    # 7 days, downsampled. Either list is empty when the harness never
-    # reported that window.
+    # ~6h (one full 5h window plus headroom); ``weeks`` covers the last
+    # 7 days as one downsampled series per weekly window. Either list is
+    # empty when the harness never reported that window.
     five_hour: list[UsageHistoryPoint] = Field(default_factory=list)
-    week: list[UsageHistoryPoint] = Field(default_factory=list)
+    weeks: list[UsageWindowHistory] = Field(default_factory=list)
 
 
 class UsageHistoryResponse(BaseResponse):

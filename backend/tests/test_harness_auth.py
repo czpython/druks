@@ -363,7 +363,7 @@ async def test_claude_fetch_usage_success(monkeypatch, druks_db):
     parsed = await ClaudeHarness.fetch_usage(connection, now=_NOW)
     assert parsed.ok is True
     assert parsed.five_hour.percent_left == 84
-    assert parsed.week.percent_left == 52
+    assert parsed.weeks[0].percent_left == 52
     assert calls[0]["headers"]["Authorization"] == "Bearer tok"
     assert calls[0]["headers"]["anthropic-beta"] == "oauth-2025-04-20"
     assert calls[0]["headers"]["User-Agent"].startswith("claude-code/")
@@ -409,7 +409,7 @@ async def test_codex_fetch_usage_success(monkeypatch, druks_db):
     assert parsed.ok is True
     assert parsed.plan_tier == "pro"
     assert parsed.five_hour.percent_left == 61
-    assert parsed.week.percent_left == 61
+    assert parsed.weeks[0].percent_left == 61
     assert calls[0]["headers"]["ChatGPT-Account-Id"] == "acc-7"
 
 

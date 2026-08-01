@@ -412,8 +412,18 @@ def test_get_usage_is_a_bounded_pure_read(druks_db, account):
             plan_tier="max",
             five_hour_percent_left=90 - tick,
             five_hour_resets_at=now + timedelta(hours=2),
-            week_percent_left=80 - tick,
-            week_resets_at=now + timedelta(days=3),
+            weeks=[
+                {
+                    "percent_left": 80 - tick,
+                    "resets_at": (now + timedelta(days=3)).isoformat(),
+                    "model": None,
+                },
+                {
+                    "percent_left": 40 - tick,
+                    "resets_at": (now + timedelta(days=2)).isoformat(),
+                    "model": "Fable",
+                },
+            ],
         ).save()
 
     usage = services.get_usage(account)
@@ -424,10 +434,12 @@ def test_get_usage_is_a_bounded_pure_read(druks_db, account):
     claude = next(h for h in usage.harnesses if h.name == "claude")
     assert claude.plan_tier == "max"
     assert claude.five_hour_percent_left == 90
+    assert claude.week_percent_left == 40
+    assert claude.week_resets_at == now + timedelta(days=2)
     assert len(claude.five_hour_history) <= 8
     assert len(claude.week_history) <= 8
     # The newest sample anchors each trend.
-    assert claude.week_history[-1].pct == 80
+    assert claude.week_history[-1].pct == 40
     assert len(usage.model_dump_json(by_alias=True).encode()) <= 4 * 1024
 
 

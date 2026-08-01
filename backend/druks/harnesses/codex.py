@@ -430,10 +430,10 @@ class CodexHarness(Harness):
             return ParsedUsage(ok=False, error="unexpected_payload", raw=raw)
         plan = data.get("plan_type") if isinstance(data.get("plan_type"), str) else None
         try:
-            five_hour, week = _codex_windows(data)
+            five_hour, weeks = _codex_windows(data)
         except (AttributeError, KeyError, TypeError, ValueError):
             return ParsedUsage(ok=False, error="unexpected_payload", plan_tier=plan, raw=raw)
-        if not five_hour and not week:
+        if not five_hour and not weeks:
             # Business/enterprise accounts with unlimited credits carry
             # ``rate_limit: null`` — no windows is the expected shape, not
             # a parse failure. Report permanently-full buckets.
@@ -444,7 +444,7 @@ class CodexHarness(Harness):
                     ok=True,
                     plan_tier=plan,
                     five_hour=full,
-                    week=full,
+                    weeks=(full,),
                     unlimited=True,
                     raw=raw,
                 )
@@ -453,7 +453,7 @@ class CodexHarness(Harness):
             ok=True,
             plan_tier=plan,
             five_hour=five_hour,
-            week=week,
+            weeks=weeks,
             raw=raw,
         )
 
@@ -708,10 +708,11 @@ class CodexHarness(Harness):
         )
 
 
-def _codex_windows(usage: dict) -> tuple[ParsedMetric | None, ParsedMetric | None]:
-    """The five-hour and weekly quotas that bind. A window's declared length
-    names it, not the slot it arrives in, and a separately metered model
-    exhausts before the account-wide quota does."""
+def _codex_windows(usage: dict) -> tuple[ParsedMetric | None, tuple[ParsedMetric, ...]]:
+    """The binding five-hour window and every weekly window in provider order.
+
+    A window's declared length names it, not the slot it arrives in.
+    """
     rate_limits = [(None, usage["rate_limit"] or {})]
     for metered in usage.get("additional_rate_limits") or []:
         rate_limits.append((metered["limit_name"], metered["rate_limit"] or {}))
@@ -731,4 +732,4 @@ def _codex_windows(usage: dict) -> tuple[ParsedMetric | None, ParsedMetric | Non
                 weekly.append(window)
             else:
                 five_hour.append(window)
-    return ParsedMetric.binding(five_hour), ParsedMetric.binding(weekly)
+    return ParsedMetric.binding(five_hour), tuple(weekly)

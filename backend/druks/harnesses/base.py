@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar
 
 import httpx
+from pydantic import TypeAdapter
 
 from druks.database import db_session
 from druks.mcp import models as mcp_models
@@ -29,6 +30,7 @@ from .datastructures import (
     CompletedConnect,
     HarnessRunResult,
     OAuthToken,
+    ParsedMetric,
     ParsedModels,
     ParsedUsage,
     RotationResult,
@@ -57,6 +59,8 @@ _REFRESH_LOCK_TTL_SECONDS = 300
 MANIFEST_SCHEMA_VERSION = 2
 
 Token = OAuthToken | CodexToken
+
+_WEEKLY_WINDOWS = TypeAdapter(tuple[ParsedMetric, ...])
 
 
 class Harness(ABC):
@@ -497,10 +501,7 @@ class Harness(ABC):
         if parsed.five_hour:
             snapshot.five_hour_percent_left = parsed.five_hour.percent_left
             snapshot.five_hour_resets_at = parsed.five_hour.resets_at
-        if parsed.week:
-            snapshot.week_percent_left = parsed.week.percent_left
-            snapshot.week_resets_at = parsed.week.resets_at
-            snapshot.week_model = parsed.week.model
+        snapshot.weeks = _WEEKLY_WINDOWS.dump_python(parsed.weeks, mode="json")
         snapshot.save()
         return {
             "harness": cls.name,

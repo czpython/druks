@@ -114,38 +114,47 @@ interface Exhausted {
   harness: string
   windowLabel: string
   resetsAt: string | null
+  model: string | null
 }
 
 function findExhausted(usage: UsageHarnessSummary): Exhausted | null {
   if (!usage.available || usage.unlimited) return null
-  const windows: Array<[string, UsageMetric | null]> = [
-    ['5-hour', usage.fiveHour],
-    ['weekly', usage.week],
-  ]
-  for (const [label, metric] of windows) {
-    if (metric && metric.percentLeft === 0) {
-      return { harness: usage.name, windowLabel: label, resetsAt: metric.resetsAt }
-    }
+  const windows = usage.weeks.map((metric) => ({ label: 'weekly', metric }))
+  if (usage.fiveHour) windows.unshift({ label: '5-hour', metric: usage.fiveHour })
+
+  const empty = windows.filter(({ metric }) => metric.percentLeft === 0)
+  const exhausted = empty.find(({ metric }) => !metric.model) ?? empty[0]
+  if (!exhausted) return null
+  return {
+    harness: usage.name,
+    windowLabel: exhausted.label,
+    resetsAt: exhausted.metric.resetsAt,
+    model: exhausted.metric.model,
   }
-  return null
 }
 
 function hasCapacity(usage: UsageHarnessSummary): boolean {
   if (!usage.available) return false
   if (usage.unlimited) return true
-  const percents = [usage.fiveHour, usage.week]
-    .map((m) => m?.percentLeft)
-    .filter((v): v is number => v !== null && v !== undefined)
-  return percents.length > 0 && percents.every((v) => v > 0)
+  const windows = usage.fiveHour ? [usage.fiveHour, ...usage.weeks] : usage.weeks
+  const unscopedExhausted = windows.some((metric) => !metric.model && metric.percentLeft === 0)
+  const hasRoom = windows.some((metric) => metric.percentLeft !== null && metric.percentLeft > 0)
+  return !unscopedExhausted && hasRoom
 }
 
 function ExhaustionAlert({ harnesses }: { harnesses: UsageHarnessSummary[] }) {
   const now = useNow(1000)
-  const exhausted = harnesses.map(findExhausted).find((e) => e !== null) ?? null
+  const exhaustedWindows = harnesses
+    .map(findExhausted)
+    .filter((window): window is Exhausted => window !== null)
+  const exhausted = exhaustedWindows.find((window) => !window.model) ?? exhaustedWindows[0] ?? null
   if (!exhausted) return null
 
   const alternative = harnesses.find((h) => h.name !== exhausted.harness && hasCapacity(h))
   const resetSeconds = secondsUntil(exhausted.resetsAt, now)
+  const title = exhausted.model
+    ? `${exhausted.model} ${exhausted.windowLabel} limit reached`
+    : `${capitalize(exhausted.harness)} ${exhausted.windowLabel} limit reached`
 
   return (
     <div className="us-alert" role="alert">
@@ -154,20 +163,29 @@ function ExhaustionAlert({ harnesses }: { harnesses: UsageHarnessSummary[] }) {
       </div>
       <div className="us-alert-body">
         <div className="us-alert-line1">
-          <span className="us-alert-title">
-            {capitalize(exhausted.harness)} {exhausted.windowLabel} limit reached
+          <span className="us-alert-title">{title}</span>
+          <span className="us-alert-tag mono">
+            {exhausted.model ? 'model exhausted' : 'no capacity'}
           </span>
-          <span className="us-alert-tag mono">no capacity</span>
         </div>
         <div className="us-alert-sub">
-          New {exhausted.harness} runs will fail until the window resets.{' '}
-          {alternative ? (
+          {exhausted.model ? (
             <span>
-              <b>{capitalize(alternative.name)} has capacity</b> — route new work there to keep
-              builds moving.
+              New {exhausted.harness} runs on {exhausted.model} will fail until the window resets.{' '}
+              <b>{capitalize(exhausted.harness)} still has capacity for other models.</b>
             </span>
           ) : (
-            <span>No other provider has spare capacity either.</span>
+            <>
+              New {exhausted.harness} runs will fail until the window resets.{' '}
+              {alternative ? (
+                <span>
+                  <b>{capitalize(alternative.name)} has capacity</b> — route new work there to keep
+                  builds moving.
+                </span>
+              ) : (
+                <span>No other provider has spare capacity either.</span>
+              )}
+            </>
           )}
         </div>
       </div>
@@ -225,15 +243,8 @@ function ProviderPanel({
                   rateNoun="window"
                 />
               )}
-              {usage.week && (
-                <WindowRow
-                  label="weekly"
-                  metric={usage.week}
-                  spark={history?.week}
-                  sparkLabel="remaining · this week"
-                  sparkId={`${label}-wk`}
-                  rateNoun="week"
-                />
+              {usage.weeks.length > 0 && (
+                <WeeklyCarousel harness={label} weeks={usage.weeks} history={history} />
               )}
             </>
           )}
@@ -262,6 +273,80 @@ function ProviderPanel({
   )
 }
 
+/** Which window binds — closest to exhaustion, whichever stops work first. */
+function indexOfBinding(weeks: UsageMetric[]): number {
+  let binding = 0
+  weeks.forEach((week, index) => {
+    const room = week.percentLeft ?? Infinity
+    if (room < (weeks[binding]?.percentLeft ?? Infinity)) binding = index
+  })
+  return binding
+}
+
+function WeeklyCarousel({
+  harness,
+  weeks,
+  history,
+}: {
+  harness: string
+  weeks: UsageMetric[]
+  history: UsageHarnessHistory | undefined
+}) {
+  const bindingIndex = indexOfBinding(weeks)
+  const [selectedIndex, setSelectedIndex] = useState(bindingIndex)
+  const currentIndex = selectedIndex < weeks.length ? selectedIndex : bindingIndex
+  const metric = weeks[currentIndex]
+  if (!metric) return null
+  const multiple = weeks.length > 1
+  const previousIndex = (currentIndex - 1 + weeks.length) % weeks.length
+  const nextIndex = (currentIndex + 1) % weeks.length
+  const spark = history?.weeks.find((window) => window.model === metric.model)?.points
+  return (
+    <div className="us-week-carousel">
+      <WindowRow
+        label="weekly"
+        metric={metric}
+        spark={spark}
+        sparkLabel="remaining · this week"
+        sparkId={`${harness}-wk-${currentIndex}`}
+        rateNoun="week"
+      />
+      {multiple && (
+        <div className="us-week-pages">
+          <button
+            type="button"
+            className="us-week-arrow"
+            aria-label="Previous weekly window"
+            onClick={() => setSelectedIndex(previousIndex)}
+          >
+            ‹
+          </button>
+          <div className="us-week-dots">
+            {weeks.map((window, index) => (
+              <button
+                key={index}
+                type="button"
+                className={`us-week-dot ${index === currentIndex ? 'is-current' : ''}`}
+                aria-label={`Show weekly window ${index + 1} of ${weeks.length}: ${window.model ?? 'all models'}`}
+                aria-current={index === currentIndex ? 'true' : undefined}
+                onClick={() => setSelectedIndex(index)}
+              />
+            ))}
+          </div>
+          <button
+            type="button"
+            className="us-week-arrow"
+            aria-label="Next weekly window"
+            onClick={() => setSelectedIndex(nextIndex)}
+          >
+            ›
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ---- Window block -----------------------------------------------------------
 
 function WindowRow({
@@ -287,6 +372,7 @@ function WindowRow({
         <div className="us-win-top">
           <span className="us-win-label mono">
             <b>{label}</b>
+            {metric.model ? ` · ${metric.model}` : ''}
           </span>
           <span className="us-win-pct mono dim">—</span>
         </div>

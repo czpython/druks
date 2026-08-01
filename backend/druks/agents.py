@@ -193,13 +193,8 @@ class Agent:
                 scrape = UsageScrape.latest_for(harness.name, connection.account_id)
                 if scrape:
                     now = datetime.now(UTC)
-                    # The nearest window still ahead: the five-hour one usually
-                    # turns first; an exhausted week is what the caller caps on.
-                    reset = scrape.five_hour_resets_at
-                    if reset and reset > now:
-                        return (reset - now).total_seconds()
-                    reset = scrape.week_resets_at
-                    if reset and reset > now:
+                    reset = scrape.soonest_reset_after(now)
+                    if reset:
                         return (reset - now).total_seconds()
                 # No scrape yet, or nothing ahead of now: a blind half hour.
                 return _QUOTA_FALLBACK_WAIT_SECONDS

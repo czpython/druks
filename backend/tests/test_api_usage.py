@@ -91,7 +91,10 @@ def test_get_usage_serializes_latest_per_harness(client, extension_settings) -> 
                 plan_tier="Max",
                 five_hour_percent_left=54,
                 five_hour_resets_at=datetime(2026, 5, 23, 18, 40, tzinfo=UTC),
-                week_percent_left=38,
+                weeks=[
+                    {"percent_left": 38, "resets_at": None, "model": None},
+                    {"percent_left": 0, "resets_at": None, "model": "Fable"},
+                ],
                 scraped_at=datetime.now(UTC) - timedelta(seconds=45),
             ),
         ],
@@ -105,7 +108,10 @@ def test_get_usage_serializes_latest_per_harness(client, extension_settings) -> 
     assert claude["available"] is True
     assert claude["planTier"] == "Max"
     assert claude["fiveHour"]["percentLeft"] == 54
-    assert claude["week"]["percentLeft"] == 38
+    assert [(week["percentLeft"], week["model"]) for week in claude["weeks"]] == [
+        (38, None),
+        (0, "Fable"),
+    ]
     assert claude["ageSeconds"] is not None
     assert 30 <= claude["ageSeconds"] <= 90  # close to the planted 45s
     assert claude["stale"] is False
@@ -140,7 +146,7 @@ def test_get_usage_exposes_unlimited_flag(client, extension_settings) -> None:
                 parse_ok=True,
                 plan_tier="business",
                 five_hour_percent_left=100,
-                week_percent_left=100,
+                weeks=[{"percent_left": 100, "resets_at": None, "model": None}],
                 unlimited=True,
             ),
         ],
@@ -159,7 +165,10 @@ def test_usage_history_serializes_series_oldest_first(client, extension_settings
             harness="claude",
             parse_ok=True,
             five_hour_percent_left=pct,
-            week_percent_left=90 - i,
+            weeks=[
+                {"percent_left": 90 - i, "resets_at": None, "model": None},
+                {"percent_left": 40 - i, "resets_at": None, "model": "Fable"},
+            ],
             scraped_at=now - timedelta(minutes=10 * i),
         )
         for i, pct in enumerate([20, 40, 60])
@@ -170,7 +179,10 @@ def test_usage_history_serializes_series_oldest_first(client, extension_settings
             harness="claude",
             parse_ok=True,
             five_hour_percent_left=95,
-            week_percent_left=99,
+            weeks=[
+                {"percent_left": 99, "resets_at": None, "model": None},
+                {"percent_left": 49, "resets_at": None, "model": "Fable"},
+            ],
             scraped_at=now - timedelta(hours=12),
         ),
     )
@@ -183,9 +195,21 @@ def test_usage_history_serializes_series_oldest_first(client, extension_settings
     body = client.get("/api/usage/history").json()
 
     assert [p["pct"] for p in _harness(body, "claude")["fiveHour"]] == [60, 40, 20]
-    assert [p["pct"] for p in _harness(body, "claude")["week"]] == [99, 88, 89, 90]
+    assert [series["model"] for series in _harness(body, "claude")["weeks"]] == [None, "Fable"]
+    assert [p["pct"] for p in _harness(body, "claude")["weeks"][0]["points"]] == [
+        99,
+        88,
+        89,
+        90,
+    ]
+    assert [p["pct"] for p in _harness(body, "claude")["weeks"][1]["points"]] == [
+        49,
+        38,
+        39,
+        40,
+    ]
     assert _harness(body, "codex")["fiveHour"] == []
-    assert _harness(body, "codex")["week"] == []
+    assert _harness(body, "codex")["weeks"] == []
 
 
 def test_usage_today_aggregates_spend_and_tokens_by_provider(
@@ -290,7 +314,7 @@ def _fake_fetch(fetched: list):
             error=None,
             plan_tier=None,
             five_hour=ParsedMetric(percent_left=50, resets_at=None),
-            week=None,
+            weeks=(),
             unlimited=False,
             raw="{}",
         )

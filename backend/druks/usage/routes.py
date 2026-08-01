@@ -19,6 +19,7 @@ from druks.usage.schemas import (
     UsageMetricSummary,
     UsageResponse,
     UsageTodayResponse,
+    UsageWindowHistory,
 )
 from druks.usage.trends import FIVE_HOUR_RANGE, WEEK_RANGE, downsample
 from druks.user_settings.models import HarnessSettings, UserSettings
@@ -146,15 +147,23 @@ def _harness_history(name: str, account_id: str, *, now: datetime) -> UsageHarne
         for row in rows
         if row.five_hour_percent_left is not None and row.scraped_at >= five_hour_cutoff
     ]
-    week = [
-        UsageHistoryPoint(t=row.scraped_at, pct=row.week_percent_left)
-        for row in rows
-        if row.week_percent_left is not None
-    ]
+    weekly_points: dict[str | None, list[UsageHistoryPoint]] = {}
+    for row in rows:
+        for week in row.weeks:
+            if week["percent_left"] is not None:
+                weekly_points.setdefault(week["model"], []).append(
+                    UsageHistoryPoint(t=row.scraped_at, pct=week["percent_left"])
+                )
     return UsageHarnessHistory(
         name=name,
         five_hour=downsample(five_hour, cap=_MAX_SPARK_POINTS),
-        week=downsample(week, cap=_MAX_SPARK_POINTS),
+        weeks=[
+            UsageWindowHistory(
+                model=model,
+                points=downsample(points, cap=_MAX_SPARK_POINTS),
+            )
+            for model, points in weekly_points.items()
+        ],
     )
 
 
@@ -168,13 +177,19 @@ def _summarize(
     if not row:
         return UsageHarnessSummary(name=name, available=False, connected=connected)
     age = _age_seconds(row.scraped_at, now=now)
+    five_hour = None
+    if row.five_hour_percent_left is not None or row.five_hour_resets_at:
+        five_hour = UsageMetricSummary(
+            percent_left=row.five_hour_percent_left,
+            resets_at=row.five_hour_resets_at,
+        )
     return UsageHarnessSummary(
         name=name,
         available=row.parse_ok,
         connected=connected,
         plan_tier=row.plan_tier,
-        five_hour=_metric(row.five_hour_percent_left, row.five_hour_resets_at),
-        week=_metric(row.week_percent_left, row.week_resets_at, row.week_model),
+        five_hour=five_hour,
+        weeks=[UsageMetricSummary.model_validate(week) for week in row.weeks],
         unlimited=row.unlimited,
         scraped_at=row.scraped_at,
         age_seconds=age,
@@ -182,14 +197,6 @@ def _summarize(
         error=row.error,
         raw_output=row.raw_output,
     )
-
-
-def _metric(
-    percent_left: int | None, resets_at: datetime | None, model: str | None = None
-) -> UsageMetricSummary | None:
-    if percent_left is None and resets_at is None:
-        return
-    return UsageMetricSummary(percent_left=percent_left, resets_at=resets_at, model=model)
 
 
 def _age_seconds(scraped_at: datetime | None, *, now: datetime) -> int | None:
