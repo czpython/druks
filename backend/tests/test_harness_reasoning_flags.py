@@ -70,6 +70,12 @@ def test_claude_build_invocation_carries_every_flag():
         "--permission-mode bypassPermissions",
         "--debug-file",
         "/work/runs/run-1/debug.log",
+        "--disallowedTools",
+        "CronCreate",
+        "CronDelete",
+        "CronList",
+        "Monitor",
+        "ScheduleWakeup",
         "--add-dir /work/related/sib",
         "--mcp-config",
         # The session-snapshot wrapper (claude's CODEX_HOME equivalent).
