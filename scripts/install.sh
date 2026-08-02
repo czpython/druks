@@ -105,7 +105,7 @@ fi
 
 # ---------------------------------------------------------------------------
 # 3. TOML setup + .env render — the required-values brain is ``druks setup``
-#    (exit 0 = boot-ready, 3 = gaps, 4 = pre-TOML hand migration required)
+#    (exit 0 = boot-ready, 3 = gaps)
 # ---------------------------------------------------------------------------
 TTY_FLAGS=(-i)
 SETUP_ARGS=(--provider "$PROVIDER" --install-dir "$INSTALL_DIR" --home "$HOME")
@@ -123,7 +123,6 @@ set -e
 case "$setup_rc" in
   0) ;;        # boot-ready — fall through to pull + boot
   3) exit 0 ;; # gaps remain — setup printed the checklist; re-run when done
-  4) exit 4 ;; # pre-TOML .env — setup printed the hand-migration recipe
   *) echo "druks setup failed (exit $setup_rc)" >&2; exit "$setup_rc" ;;
 esac
 
