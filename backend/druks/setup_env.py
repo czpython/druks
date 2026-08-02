@@ -207,7 +207,6 @@ provider = ""
 service_url = ""
 service_token = ""
 image = ""
-service_tokens = ""
 timeout = 180
 
 # Put drukbox environment in [sandbox.<provider>]. The table is passed through
