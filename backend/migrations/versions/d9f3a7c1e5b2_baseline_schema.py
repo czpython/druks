@@ -1,12 +1,14 @@
 """baseline schema
 
-Collapsed the migration chain (40cfd4c2aeee + the two-headed
-0ec9db44973e/b3f1a9c47d20/ff43df27a2e0 branches) into one create-all
-baseline; schema proven identical to both heads applied.
+Collapsed the migration chain (1ba6e314b314 through the 18 revisions after
+it) into one create-all baseline; schema proven identical to the chain
+applied. Reuses the old head's revision id so an installation already at
+head needs no stamp. The system account the old chain seeded comes from
+``seed_system_account`` at startup.
 
-Revision ID: 1ba6e314b314
+Revision ID: d9f3a7c1e5b2
 Revises:
-Create Date: 2026-07-24 00:08:01.159354
+Create Date: 2026-08-01 00:00:00.000000
 
 """
 
@@ -17,7 +19,7 @@ from alembic import op
 from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
-revision: str = "1ba6e314b314"
+revision: str = "d9f3a7c1e5b2"
 down_revision: str | Sequence[str] | None = None
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
@@ -42,6 +44,7 @@ def upgrade() -> None:
         sa.Column("extension", sa.String(), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("payload", postgresql.JSONB(astext_type=sa.Text()), nullable=False),
+        sa.Column("subject_label", sa.String(), nullable=True),
         sa.PrimaryKeyConstraint("id"),
     )
     op.create_index(
@@ -69,8 +72,10 @@ def upgrade() -> None:
         sa.Column("client_secret", sa.LargeBinary(), nullable=False),
         sa.Column("connected_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("id", sa.String(), nullable=False),
+        sa.Column("account_id", sa.String(), server_default="system", nullable=False),
+        sa.ForeignKeyConstraint(["account_id"], ["accounts.id"], ondelete="RESTRICT"),
         sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint("server_name"),
+        sa.UniqueConstraint("server_name", "account_id"),
     )
     op.create_table(
         "mcp_servers",
@@ -90,6 +95,7 @@ def upgrade() -> None:
         sa.Column("is_enabled", sa.Boolean(), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("id", sa.String(), nullable=False),
+        sa.Column("identity_mode", sa.String(), nullable=True),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("name"),
     )
@@ -117,7 +123,13 @@ def upgrade() -> None:
     op.create_table(
         "settings_overrides",
         sa.Column("key", sa.String(), nullable=False),
-        sa.Column("value", postgresql.JSONB(astext_type=sa.Text()), nullable=False),
+        sa.Column("value", postgresql.JSONB(astext_type=sa.Text()), nullable=True),
+        sa.Column(
+            "secret_value",
+            sa.LargeBinary(),
+            server_default=sa.text("''::bytea"),
+            nullable=False,
+        ),
         sa.PrimaryKeyConstraint("key"),
     )
     op.create_table(
@@ -229,9 +241,13 @@ def upgrade() -> None:
         sa.Column("plan_tier", sa.String(), nullable=True),
         sa.Column("five_hour_percent_left", sa.Integer(), nullable=True),
         sa.Column("five_hour_resets_at", sa.DateTime(timezone=True), nullable=True),
-        sa.Column("week_percent_left", sa.Integer(), nullable=True),
-        sa.Column("week_resets_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("unlimited", sa.Boolean(), nullable=False),
+        sa.Column(
+            "weeks",
+            postgresql.JSONB(astext_type=sa.Text()),
+            server_default=sa.text("'[]'::jsonb"),
+            nullable=False,
+        ),
         sa.ForeignKeyConstraint(["account_id"], ["accounts.id"], ondelete="RESTRICT"),
         sa.PrimaryKeyConstraint("id"),
     )
@@ -256,9 +272,9 @@ def upgrade() -> None:
     )
     op.create_table(
         "agent_calls",
-        sa.Column("model", sa.String(), nullable=True),
+        sa.Column("model", sa.String(), nullable=False),
         sa.Column("run_id", sa.String(), nullable=False),
-        sa.Column("agent", sa.String(), nullable=True),
+        sa.Column("agent", sa.String(), nullable=False),
         sa.Column("account_id", sa.String(), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("started_at", sa.DateTime(timezone=True), nullable=False),
@@ -269,6 +285,7 @@ def upgrade() -> None:
         sa.Column("cost_metadata", postgresql.JSONB(astext_type=sa.Text()), nullable=True),
         sa.Column("sandbox_host_id", sa.String(), nullable=False),
         sa.Column("id", sa.String(), nullable=False),
+        sa.Column("failure_code", sa.String(), nullable=True),
         sa.ForeignKeyConstraint(["account_id"], ["accounts.id"], ondelete="RESTRICT"),
         sa.ForeignKeyConstraint(["run_id"], ["durable_runs.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
@@ -312,16 +329,15 @@ def upgrade() -> None:
         sa.Column("project_id", sa.Integer(), nullable=False),
         sa.Column("source", sa.String(), nullable=False),
         sa.Column("title", sa.String(), nullable=False),
-        sa.Column("remote_key", sa.String(), nullable=True),
-        sa.Column("remote_url", sa.String(), nullable=True),
+        sa.Column("ticket_key", sa.String(), nullable=False),
+        sa.Column("ticket_url", sa.String(), nullable=True),
         sa.Column("repo", sa.String(), nullable=False),
         sa.Column("pr_number", sa.Integer(), nullable=True),
         sa.Column("branch", sa.String(), nullable=True),
-        sa.Column("build_run_id", sa.String(), nullable=True),
-        sa.Column("status", sa.String(), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
-        sa.ForeignKeyConstraint(["build_run_id"], ["durable_runs.id"], ondelete="SET NULL"),
+        sa.Column("resolution", sa.String(), nullable=True),
+        sa.Column("resolved_at", sa.DateTime(timezone=True), nullable=True),
         sa.ForeignKeyConstraint(
             ["project_id"],
             ["projects.id"],
@@ -329,15 +345,11 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("id"),
     )
     op.create_index("work_items_project_idx", "work_items", ["project_id"], unique=False)
-    op.create_index(
-        "work_items_remote_unique",
-        "work_items",
-        ["source", "remote_key"],
-        unique=True,
-        sqlite_where=sa.text("remote_key IS NOT NULL"),
-    )
     op.create_index("work_items_repo_idx", "work_items", ["repo", "pr_number"], unique=False)
-    op.create_index("work_items_status_idx", "work_items", ["status"], unique=False)
+    op.create_index("work_items_resolved_idx", "work_items", ["resolved_at"], unique=False)
+    op.create_index(
+        "work_items_ticket_unique", "work_items", ["source", "ticket_key"], unique=True
+    )
     op.create_table(
         "agent_call_artifacts",
         sa.Column("agent_call_id", sa.String(), nullable=False),
@@ -353,13 +365,9 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.drop_table("agent_call_artifacts")
-    op.drop_index("work_items_status_idx", table_name="work_items")
+    op.drop_index("work_items_ticket_unique", table_name="work_items")
+    op.drop_index("work_items_resolved_idx", table_name="work_items")
     op.drop_index("work_items_repo_idx", table_name="work_items")
-    op.drop_index(
-        "work_items_remote_unique",
-        table_name="work_items",
-        sqlite_where=sa.text("remote_key IS NOT NULL"),
-    )
     op.drop_index("work_items_project_idx", table_name="work_items")
     op.drop_table("work_items")
     op.drop_table("notifications")
