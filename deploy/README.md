@@ -31,9 +31,7 @@ The Druks application and sandbox images are published for both `linux/amd64`
 and `linux/arm64`.
 
 Everything else — `compose.yaml`, the Caddyfile, `druks.toml`, the rendered
-`.env`, image pulls, and DB init — is handled by `install.sh`. (While the
-ghcr.io images require auth, export `GHCR_TOKEN` — a PAT with `read:packages`
-— and the installer logs in with it.)
+`.env`, image pulls, and DB init — is handled by `install.sh`.
 
 ### 1. Run the installer
 
