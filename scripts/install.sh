@@ -2,35 +2,26 @@
 # Druks installer — the only thing you fetch on a fresh box.
 #
 # Idempotent: re-run any time to pull a fresh compose.yaml + new images.
-# Deployment configuration lives in druks.toml. ``druks setup`` (run from
-# the backend image) creates it on a fresh box, prompts for required values,
-# and renders the complete .env artifact. Edit druks.toml and re-run this
-# installer to render and apply it. When everything needed to boot is present
-# the same run migrates the DB (out of band, once — never on boot) and brings
-# the stack up; otherwise it prints the remaining checklist and exits.
-# Claude/Codex subscription auth is NOT a prerequisite: connect them from the
-# dashboard after boot.
-#
-# Three install shapes are selected from DRUKS_PROVIDER: `docker` is local,
-# `exe` pre-seeds exe.dev + tailnet configuration, and every other drukbox
-# provider name uses the generic remote shape.
+# Deployment configuration lives in druks.toml; ``druks setup`` (run from the
+# backend image) creates it, prompts for required values, and renders .env.
+# When everything needed to boot is present the same run migrates the DB (out
+# of band, once — never on boot) and brings the stack up; otherwise it prints
+# the remaining checklist and exits. Claude/Codex subscription auth is not a
+# prerequisite: connect them from the dashboard after boot.
 #
 # Usage:
 #
 #   bash <(curl -fsSL https://raw.githubusercontent.com/czpython/druks/main/scripts/install.sh)
 #
 # Env knobs:
-#   GHCR_TOKEN            optional — GitHub PAT with `read:packages` scope,
-#                         only needed while the ghcr.io images require auth.
 #   DRUKS_INSTALL_DIR     default ~/druks
 #   DRUKS_REF             default main — tag or full SHA to fetch deploy files from
 #   DRUKS_TAG             image tag to pull/run; defaults to the v* DRUKS_REF,
 #                         sha-<DRUKS_REF> for a full SHA, or latest for main
-#   DRUKS_PROVIDER        default exe — sandbox provider on the first run.
-#                         `docker` selects the local shape, `exe` selects the
-#                         exe.dev shape, and any other name selects the generic
-#                         remote shape. Drukbox validates provider names.
-#                         Ignored after druks.toml exists.
+#   DRUKS_PROVIDER        default exe — sandbox provider on the first run, which
+#                         picks the install shape: `docker` local, `exe` exe.dev
+#                         + tailnet, any other name generic remote. Drukbox
+#                         validates it. Ignored after druks.toml exists.
 #
 # Flags:
 #   --apps                provision the operator + reviewer GitHub Apps via
@@ -85,13 +76,8 @@ mkdir -p caddy
 fetch_from_repo deploy/caddy/Caddyfile caddy/Caddyfile
 
 # ---------------------------------------------------------------------------
-# 2. ghcr login + backend image — ``druks setup`` runs from the image
+# 2. backend image — ``druks setup`` runs from it
 # ---------------------------------------------------------------------------
-if [ -n "${GHCR_TOKEN:-}" ]; then
-  echo "→ logging in to ghcr.io"
-  echo "$GHCR_TOKEN" | docker login ghcr.io -u token --password-stdin >/dev/null
-fi
-
 BACKEND_IMAGE="ghcr.io/czpython/druks:$IMAGE_TAG"
 echo "→ pulling $BACKEND_IMAGE"
 docker pull -q "$BACKEND_IMAGE" >/dev/null
@@ -137,6 +123,7 @@ set -e
 case "$setup_rc" in
   0) ;;        # boot-ready — fall through to pull + boot
   3) exit 0 ;; # gaps remain — setup printed the checklist; re-run when done
+  4) exit 4 ;; # pre-TOML .env — setup printed the hand-migration recipe
   *) echo "druks setup failed (exit $setup_rc)" >&2; exit "$setup_rc" ;;
 esac
 
@@ -206,8 +193,8 @@ if [ "$PROVIDER" != "docker" ]; then
 fi
 
 # Migrations run out of band, once, before the app serves — never on boot.
-# `run --rm` starts the DB deps, applies the schema, and exits (Django's
-# `migrate`, not a service). Idempotent, so it doubles as the upgrade step.
+# `run --rm` starts the DB deps, applies the alembic schema, seeds, and exits.
+# Idempotent, so it doubles as the upgrade step.
 echo "→ druks init-db (idempotent)"
 docker compose run --rm web druks init-db
 if [ "$PROVIDER" != "docker" ]; then
@@ -221,8 +208,7 @@ docker compose up -d
 # ---------------------------------------------------------------------------
 # 5. Done — surface the next steps
 # ---------------------------------------------------------------------------
-common_next() {
-  cat <<MSG
+cat <<MSG
 
 ------------------------------------------------------------
 Stack is up. Verify with:
@@ -235,9 +221,7 @@ Then connect the coding CLIs from the dashboard — Settings →
 Harnesses → Connect for each of Claude and Codex. Agent runs
 refuse to start on a harness that isn't connected.
 MSG
-}
 
-common_next
 if [ "$PROVIDER" = "docker" ]; then
   cat <<MSG
 
