@@ -21,6 +21,7 @@ with the route that matches what you are doing.
   settings, integrations, MCP, skills, and stored-secret handling.
 - [Connect your agent](connect-your-agent.md) — the `/mcp` endpoint, personal
   access tokens, and client configuration.
+- [Changelog](../CHANGELOG.md) — what each release added, changed, and removed.
 - [Troubleshooting](troubleshooting.md) — symptom-driven diagnosis for boot,
   webhooks, harnesses, sandboxes, gates, and recovery.
 
