@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 /**
  * Render the harness transcript (Claude or Codex) as readable rows.
@@ -32,7 +32,14 @@ import { useEffect, useMemo, useRef } from 'react'
  * stderr leakage stays legible.
  */
 export function StreamTranscript({ text, complete = false }: { text: string; complete?: boolean }) {
-  const rows = useMemo(() => parseStream(text, complete), [text, complete])
+  const [parseState, setParseState] = useState(() =>
+    appendStreamText(emptyParseState, text, complete),
+  )
+  const rows = parseState.rows
+
+  useEffect(() => {
+    setParseState((previous) => appendStreamText(previous, text, complete))
+  }, [text, complete])
 
   // Stick-to-bottom: when the transcript renders inside its own scroll box
   // (the detail page caps `.ins-xscript .stream-transcript`), follow new rows
@@ -92,6 +99,47 @@ type Row =
   | { kind: 'unknown'; label: string; detail: string }
   | { kind: 'raw'; line: string }
 
+interface IncrementalParseState {
+  rows: Row[]
+  receivedLength: number
+  partialLine: string
+  tailFlushed: boolean
+}
+
+const emptyParseState: IncrementalParseState = {
+  rows: [],
+  receivedLength: 0,
+  partialLine: '',
+  tailFlushed: false,
+}
+
+function appendStreamText(
+  previous: IncrementalParseState,
+  text: string,
+  complete: boolean,
+): IncrementalParseState {
+  const suffix = text.slice(previous.receivedLength)
+  if (suffix === '' && complete === previous.tailFlushed) return previous
+
+  const pending = previous.partialLine + suffix
+  const lastNewline = pending.lastIndexOf('\n')
+  const terminated = lastNewline === -1 ? [] : pending.slice(0, lastNewline).split('\n')
+  let partialLine = lastNewline === -1 ? pending : pending.slice(lastNewline + 1)
+  const newRows = rowsForLines(terminated)
+
+  if (complete && partialLine !== '') {
+    newRows.push(...rowsForLines([partialLine]))
+    partialLine = ''
+  }
+
+  return {
+    rows: newRows.length === 0 ? previous.rows : [...previous.rows, ...newRows],
+    receivedLength: text.length,
+    partialLine,
+    tailFlushed: complete,
+  }
+}
+
 // Exported for unit tests; not a component (HMR fast-refresh warning is moot).
 // eslint-disable-next-line react-refresh/only-export-components
 export function parseStream(text: string, complete: boolean): Row[] {
@@ -107,8 +155,12 @@ export function parseStream(text: string, complete: boolean): Row[] {
     // complete list is already correct.
   }
 
+  return rowsForLines(completeLines)
+}
+
+function rowsForLines(lines: string[]): Row[] {
   const rows: Row[] = []
-  for (const line of completeLines) {
+  for (const line of lines) {
     if (!line.trim()) continue
     const event = tryParse(line)
     if (event === null) {
