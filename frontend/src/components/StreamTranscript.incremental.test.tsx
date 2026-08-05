@@ -31,6 +31,18 @@ describe('StreamTranscript incremental parsing', () => {
     expect(parseSpy.mock.calls.filter(([input]) => input === second)).toHaveLength(1)
   })
 
+  it('does not parse identical props again', () => {
+    const line = eventLine('only row')
+    const text = `${line}\n`
+    const parseSpy = vi.spyOn(JSON, 'parse')
+    const { rerender } = render(<StreamTranscript text={text} />)
+
+    rerender(<StreamTranscript text={text} />)
+
+    expect(screen.getAllByText('only row')).toHaveLength(1)
+    expect(parseSpy.mock.calls.filter(([input]) => input === line)).toHaveLength(1)
+  })
+
   it('buffers split lines and flushes an unterminated final line once', () => {
     const split = eventLine('split row')
     const final = eventLine('final row')

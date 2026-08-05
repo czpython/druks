@@ -35,11 +35,12 @@ export function StreamTranscript({ text, complete = false }: { text: string; com
   const [parseState, setParseState] = useState(() =>
     appendStreamText(emptyParseState, text, complete),
   )
-  const rows = parseState.rows
-
-  useEffect(() => {
-    setParseState((previous) => appendStreamText(previous, text, complete))
-  }, [text, complete])
+  let rows = parseState.rows
+  if (parseState.receivedLength !== text.length || parseState.tailFlushed !== complete) {
+    const nextParseState = appendStreamText(parseState, text, complete)
+    setParseState(nextParseState)
+    rows = nextParseState.rows
+  }
 
   // Stick-to-bottom: when the transcript renders inside its own scroll box
   // (the detail page caps `.ins-xscript .stream-transcript`), follow new rows
