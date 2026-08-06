@@ -28,6 +28,7 @@ from druks.durable.enums import (
     RunState,
     WorkflowEvent,
 )
+from druks.durable.exceptions import AgentCallNotFound
 from druks.harnesses.artifacts import normalize_token_usage
 from druks.models import Base
 from druks.notifications.models import Notification
@@ -490,8 +491,11 @@ class AgentCall(Base, Uuid7Pk):
             session.commit()
 
     @classmethod
-    def get(cls, agent_call_id: str) -> "AgentCall | None":
-        return db_session().get(cls, agent_call_id)
+    def get(cls, agent_call_id: str) -> "AgentCall":
+        call = db_session().get(cls, agent_call_id)
+        if not call:
+            raise AgentCallNotFound(agent_call_id)
+        return call
 
     @classmethod
     def list_for_run(cls, run_id: str) -> list["AgentCall"]:

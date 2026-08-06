@@ -2,7 +2,8 @@ from fastapi import APIRouter, Depends
 
 from druks.accounts.dependencies import current_account
 from druks.accounts.models import Account
-from druks.mcp.gateway import schemas, services
+from druks.durable import exceptions as durable_exceptions
+from druks.mcp.gateway import exceptions, schemas, services
 
 # Docstrings here are the derived tool descriptions and operation_id is the
 # tool name — renaming one is a break, never a refactor side effect.
@@ -49,7 +50,10 @@ async def answer_gate(run_id: str, body: schemas.AnswerGateRequest) -> schemas.G
 async def get_agent_call(call_id: str) -> schemas.AgentCallDetailResponse:
     """One agent call's metadata with bounded transcript and stderr tails and
     an artifact chunk."""
-    return services.get_agent_call(call_id)
+    try:
+        return services.get_agent_call(call_id)
+    except durable_exceptions.AgentCallNotFound as error:
+        raise exceptions.AgentCallNotFound(call_id) from error
 
 
 @router.get(

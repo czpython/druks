@@ -8,9 +8,10 @@ from conftest import make_test_note, seed_note_run
 from druks.accounts.models import Account
 from druks.api import runs
 from druks.api.exceptions import RunNotActive, RunNotFailed, RunNotFound, SubjectBusy
+from druks.durable import exceptions as durable_exceptions
 from druks.durable.engine import run_queue
 from druks.durable.enums import WorkflowEvent
-from druks.durable.models import Artifact, Run
+from druks.durable.models import AgentCall, Artifact, Run
 from druks.durable.reads import read_slice
 from druks.mcp.gateway import exceptions, services
 from druks.testing import seed_call, seed_dbos_status
@@ -203,6 +204,12 @@ async def test_answer_gate_error_taxonomy(druks_db, resume_spy):
 # ---- agent calls ----------------------------------------------------------
 
 
+def test_agent_call_get_raises_for_missing_call(druks_db):
+    with pytest.raises(durable_exceptions.AgentCallNotFound) as error:
+        AgentCall.get("no-such-call")
+    assert str(error.value) == "No agent call no-such-call."
+
+
 def test_get_agent_call_serves_bounded_tails(druks_db):
     from conftest import finish_agent_run, seed_note_agent_run
 
@@ -226,7 +233,7 @@ def test_get_agent_call_serves_bounded_tails(druks_db):
     assert detail.artifact is not None
     assert detail.artifact.content == "a" * 4096
 
-    with pytest.raises(exceptions.AgentCallNotFound):
+    with pytest.raises(durable_exceptions.AgentCallNotFound):
         services.get_agent_call("no-such-call")
 
 

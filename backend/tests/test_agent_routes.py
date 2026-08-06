@@ -113,6 +113,17 @@ def test_agent_errors_share_one_shape(client: TestClient, druks_db):
     assert body["retryable"] is True
 
 
+def test_missing_agent_call_returns_wire_error(client: TestClient):
+    response = client.get("/api/agent-calls/no-such-call")
+
+    assert response.status_code == 404
+    assert response.json() == {
+        "code": "AGENT_CALL_NOT_FOUND",
+        "message": "No agent call no-such-call.",
+        "retryable": False,
+    }
+
+
 def test_get_gate_then_answer_roundtrip(client: TestClient, druks_db, resume_spy):
     note = Note.create(body="answer gate")
     run = _park(druks_db, note)

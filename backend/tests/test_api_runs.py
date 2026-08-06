@@ -147,6 +147,16 @@ def test_transcript_missing_file_returns_eof(
     assert data["text"] == ""
 
 
+def test_transcript_range_missing_call_returns_404(client: TestClient):
+    response = client.get(
+        "/api/field_notes/transcripts/no-such-call",
+        params={"stream": "stdout"},
+    )
+
+    assert response.status_code == 404
+    assert response.json() == {"error": "HTTP_404", "detail": "Run not found."}
+
+
 def test_transcript_stream_emits_chunk_then_finishes(
     client: TestClient,
     tmp_path: Path,
@@ -197,6 +207,20 @@ def test_get_file_serves_inventory_paths(
     response = client.get(f"/api/field_notes/transcripts/{run_id}/files/{name}")
     assert response.status_code == 200
     assert response.json() == {"ok": True}
+
+
+def test_file_inventory_missing_call_returns_404(client: TestClient):
+    response = client.get("/api/field_notes/transcripts/no-such-call/files")
+
+    assert response.status_code == 404
+    assert response.json() == {"error": "HTTP_404", "detail": "Agent call not found."}
+
+
+def test_file_download_missing_call_returns_404(client: TestClient):
+    response = client.get("/api/field_notes/transcripts/no-such-call/files/output.json")
+
+    assert response.status_code == 404
+    assert response.json() == {"error": "HTTP_404", "detail": "Agent call not found."}
 
 
 def test_get_file_rejects_path_traversal(

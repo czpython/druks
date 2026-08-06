@@ -12,6 +12,7 @@ from druks.durable.activity import get_run_phase
 from druks.durable.live import keepalive_comment, serialize_model_event
 
 from .enums import RunState
+from .exceptions import AgentCallNotFound
 from .models import AgentCall, Artifact, Run
 from .schemas import (
     AgentCallFiles,
@@ -34,8 +35,9 @@ _TERMINAL_CALL_STATES = {"succeeded", "failed", "abandoned"}
 
 
 def get_agent_call_files(call_id: str) -> AgentCallFiles | None:
-    call = AgentCall.get(call_id)
-    if not call:
+    try:
+        call = AgentCall.get(call_id)
+    except AgentCallNotFound:
         return
     return AgentCallFiles.from_call(call, Artifact.get_for_call(call.id))
 
@@ -196,14 +198,14 @@ async def stream_transcript(
     last_keepalive = 0.0
     while True:
         with session_scope(engine):
-            call = AgentCall.get(call_id)
-            path = call.get_stream_path(stream) if call else None
-            summary = AgentCallResponse.model_validate(call) if call else None
-
-        if not summary:
-            # Unknown (or deleted) call: nothing will ever arrive — close the
-            # stream instead of keepaliving forever.
-            return
+            try:
+                call = AgentCall.get(call_id)
+            except AgentCallNotFound:
+                # Unknown (or deleted) call: nothing will ever arrive — close the
+                # stream instead of keepaliving forever.
+                return
+            path = call.get_stream_path(stream)
+            summary = AgentCallResponse.model_validate(call)
 
         if path and path.exists():
             size = path.stat().st_size
