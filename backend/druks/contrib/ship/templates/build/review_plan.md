@@ -30,6 +30,13 @@ implementation — your verdict is the gate.
   output, and the planner folds it.
 - Do not require changes beyond what the issue and the existing codebase support.
 
+## What this repo asks of its reviewers
+
+`.druks/review/checklist.md`, when the checkout has one, is the repo's standing rules and
+the last word: where it and anything else in this prompt disagree, it wins. Its rules bind
+the plan's choices too — a mechanism the checklist forbids is a shape problem to raise now,
+not a line-level finding for later.
+
 {% include "ship/build/_header.md" %}
 {% include "ship/build/_contract.md" %}
 {% include "ship/build/_related_repos.md" %}

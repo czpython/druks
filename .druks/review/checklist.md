@@ -66,6 +66,9 @@ the code is wrong: fix the code, delete the explanation.
 - Prefer no new surface. A parameter or an inline beats a new function; a new
   function beats a new class; a new class beats a new package. Cheap to write is
   not a reason to exist.
+- Before adding a layer, name the existing mechanism that already does the job
+  and why it falls short — a second copy of one the repo already runs is the
+  finding.
 
 The author-facing surface (extensions/SDK) is the product, not the plumbing.
 Design it by writing the example first: the obvious call is the correct one, the

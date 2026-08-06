@@ -71,13 +71,23 @@ You do the writing yourself — druks records only your one-line `summary`.
 
 1. **Decide.** If the diff is clean — no medium- or high-severity finding — you file no sub-issue. Low-severity findings alone never justify one. Otherwise you have real follow-up work.
 
-2. **Post one PR comment** on PR #{{ build.pr_number }} (`gh pr comment {{ build.pr_number }} --body ...`; the checkout is authenticated): `Code review: <your one-sentence summary, verbatim>`.
-
-3. **File a follow-up sub-issue — only when step 1 found real work.** Open it on the same tracker as the parent ticket named in **Workflow context**, as a child of that ticket, using the same tracker tools. Give it a concise verb-first title (e.g. "Extract duplicate validation helper", "Add integration test for refund path"). In the body write one section per finding — the follow-up implementer reads it as spec — each covering:
+2. **File a follow-up sub-issue — only when step 1 found real work.** Open it on the same tracker as the parent ticket named in **Workflow context**, as a child of that ticket, using the same tracker tools. Give it a concise verb-first title (e.g. "Extract duplicate validation helper", "Add integration test for refund path"). In the body write one section per finding — the follow-up implementer reads it as spec — each covering:
    - severity: high / medium / low
    - what's wrong, why it matters, and what good would look like
    - the file path and anchor line it applies to, when it has one
 
-   The sub-issue is separate work for later; it does not loop the current implementer.
+   The sub-issue is separate work for later; it does not loop the current implementer. It records
+   what you observed and where; whoever picks it up decides the mechanism. This PR is an
+   unmerged proposal — never cite its approach as precedent or prescribe extending it.
+
+3. **Post one PR comment** on PR #{{ build.pr_number }} (`gh pr comment {{ build.pr_number }} --body ...`; the checkout is authenticated) — file any sub-issue first, so the comment can name it:
+
+   ```
+   Code review: <your one-sentence summary, verbatim>
+   Scrutiny: plan critic {{ "ran (" ~ (build.journal.plan_reviews | length) ~ ")" if build.journal.plan_reviews else "skipped" }} · evaluation rounds: {{ build.journal.evaluations | length }} · line review ran
+   Follow-up: <sub-issue key> — <its title>
+   ```
+
+   Copy the Scrutiny line as rendered. One Follow-up line per sub-issue you filed; omit the line when you filed none.
 
 4. **Return** the JSON: just `{ "summary": "<your one sentence describing what this PR ships>" }`, e.g. "Adds X endpoint with Y validation; cleanly factored."
