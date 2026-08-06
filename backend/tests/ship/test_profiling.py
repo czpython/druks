@@ -143,6 +143,28 @@ class TestProfileRun:
             {"command": "ruff check .", "ci_check": "Backend / lint"}
         ]
 
+    async def test_pinned_command_keeps_the_check_detected_for_it(self, druks_db, monkeypatch):
+        repo = _seed_repo()
+
+        async def _profiler(*, repo: str):
+            return _profiled()
+
+        async def _pinning_policy(repo):
+            return RepoPolicy(
+                verification=VerificationProfile(test_commands=("pytest", "make e2e"))
+            )
+
+        monkeypatch.setattr(Ship, "repo_profiler", _profiler)
+        monkeypatch.setattr(RepoPolicy, "resolve", staticmethod(_pinning_policy))
+
+        await Profile().run(repo_id=repo.id)
+        repo = ProjectRepo.get(repo.id)
+
+        assert repo.effective_profile["verification"]["test_commands"] == [
+            {"command": "pytest", "ci_check": "Backend / tests"},
+            {"command": "make e2e", "ci_check": None},
+        ]
+
 
 class TestRefreshOnly:
     async def test_skips_the_agent_and_reapplies_the_pin(self, druks_db, monkeypatch):
