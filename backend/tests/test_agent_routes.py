@@ -2,10 +2,11 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
-from druks.accounts.models import Account
+from druks.accounts.models import Account, PersonalAccessToken
 from druks.api.app import app
 from druks.contrib.review.workflows import PullRequestReview
-from druks.contrib.ship.models import Project, ProjectRepo
+from druks.contrib.ship.models import Project, ProjectRepo, WorkItem
+from druks.contrib.ship.workflows import Build
 from druks.durable.dbos_state import workflow_status
 from druks.durable.models import AgentCall, Run
 from druks.durable.reads import read_transcript_chunk
@@ -71,7 +72,7 @@ def _park(druks_db, note):
     return run
 
 
-def test_openapi_pins_platform_routes_and_review_request(client: TestClient):
+def test_openapi_pins_platform_and_extension_agent_routes(client: TestClient):
     schema = app.openapi()
     found = {
         (method, path): operation
@@ -81,6 +82,7 @@ def test_openapi_pins_platform_routes_and_review_request(client: TestClient):
     }
     assert {key: found[key]["operationId"] for key in _MCP_ROUTES} == _MCP_ROUTES
     assert found[("post", "/api/review/reviews")]["operationId"] == "review_request"
+    assert found[("post", "/api/ship/work-items/{ticket}/start")]["operationId"] == "ship_start"
 
     extensions = {
         key: {name: value for name, value in found[key].items() if name.startswith("x-")}
@@ -99,6 +101,11 @@ def test_openapi_pins_platform_routes_and_review_request(client: TestClient):
         ("get", "/api/usage/summary"): {},
     }
     assert not {name for name in found[("post", "/api/review/reviews")] if name.startswith("x-")}
+    assert not {
+        name
+        for name in found[("post", "/api/ship/work-items/{ticket}/start")]
+        if name.startswith("x-")
+    }
 
 
 def test_review_request_returns_the_run_id_start_hands_back(
@@ -124,15 +131,81 @@ def test_review_request_returns_the_run_id_start_hands_back(
     ]
 
     assert [response.status_code for response in responses] == [202, 202]
-    assert [response.json() for response in responses] == [
-        {"run": live_run_id},
-        {"run": live_run_id},
-    ]
+    assert [response.json() for response in responses] == [live_run_id, live_run_id]
     assert [call["subject"].identity for call in starts] == [
         {"type": "pull_request", "id": "acme/app#7"},
         {"type": "pull_request", "id": "acme/app#7"},
     ]
     assert {call["account_id"] for call in starts} == {account.id}
+
+
+def test_ship_start_returns_the_live_run_and_attributes_the_pat_account(
+    client: TestClient, account: Account, monkeypatch
+):
+    project = Project.create(name="Acme")
+    ProjectRepo.create(project_id=project.id, full_name="acme/app")
+    item = WorkItem.create(
+        project_id=project.id,
+        source="linear",
+        title="Build the agent route",
+        ticket_key="ENG-831",
+        repo="acme/app",
+    )
+    _, pat_token = PersonalAccessToken.create(account_id=account.id, name="agent")
+    live_run_id = "build-run-id"
+    starts = []
+
+    async def start(cls, **kwargs):
+        # The subject detaches with the request's session; keep its identity.
+        starts.append({**kwargs, "subject": kwargs["subject"].id})
+        return live_run_id
+
+    monkeypatch.setattr(Build, "start", classmethod(start))
+
+    responses = [
+        client.post(
+            f"/api/ship/work-items/{item.ticket_key}/start",
+            headers={"Authorization": f"Bearer {pat_token}"},
+        )
+        for _ in range(2)
+    ]
+
+    assert [response.status_code for response in responses] == [202, 202]
+    assert [response.json() for response in responses] == [live_run_id, live_run_id]
+    assert [call["subject"] for call in starts] == [item.id, item.id]
+    assert {call["account_id"] for call in starts} == {account.id}
+    assert all("repo" not in call for call in starts)
+    assert all("task_owner_email" not in call for call in starts)
+    assert all("task_owner_name" not in call for call in starts)
+
+
+def test_ship_start_rejects_an_unknown_ticket(client: TestClient):
+    response = client.post("/api/ship/work-items/ENG-000/start")
+
+    assert response.status_code == 404
+    assert response.json() == {
+        "error": "HTTP_404",
+        "detail": "no work item for ticket ENG-000",
+    }
+
+
+def test_ship_start_rejects_a_work_item_without_a_registered_repo(client: TestClient):
+    project = Project.create(name="Acme")
+    item = WorkItem.create(
+        project_id=project.id,
+        source="linear",
+        title="Unroutable work",
+        ticket_key="ENG-832",
+        repo="acme/missing",
+    )
+
+    response = client.post(f"/api/ship/work-items/{item.ticket_key}/start")
+
+    assert response.status_code == 409
+    assert response.json() == {
+        "error": "HTTP_409",
+        "detail": "acme/missing is not a registered project repo — add it to a project first",
+    }
 
 
 def test_agent_routes_sit_behind_the_gate(tmp_path, druks_db):

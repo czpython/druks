@@ -155,14 +155,14 @@ async def test_mcp_subpaths_never_reach_the_spa(app):
             assert stray.headers["content-type"].startswith("application/json")
 
 
-async def test_tools_list_pins_platform_tools_and_review_request(app, pat_token):
+async def test_tools_list_pins_platform_and_extension_tools(app, pat_token):
     async with live(app), _client(app, pat_token) as client:
         assert "list_open_subjects" in (client.initialize_result.instructions or "")
         assert "parkedAt" in (client.initialize_result.instructions or "")
         tools = {tool.name: tool for tool in await client.list_tools()}
 
     assert list(tools)[:7] == _TOOL_NAMES
-    assert list(tools)[7:] == ["review_request"]
+    assert list(tools)[7:] == ["review_request", "ship_start"]
 
     expected_annotations = {
         "cancel_run": (False, True, True),
@@ -182,13 +182,14 @@ async def test_tools_list_pins_platform_tools_and_review_request(app, pat_token)
         ) == expected
         assert tools[name].description
 
-    review_request = tools["review_request"]
-    assert (
-        review_request.annotations.readOnlyHint,
-        review_request.annotations.destructiveHint,
-        review_request.annotations.idempotentHint,
-    ) == (False, True, False)
-    assert review_request.description
+    for name in ("review_request", "ship_start"):
+        extension_tool = tools[name]
+        assert (
+            extension_tool.annotations.readOnlyHint,
+            extension_tool.annotations.destructiveHint,
+            extension_tool.annotations.idempotentHint,
+        ) == (False, True, False)
+        assert extension_tool.description
 
     # Derived schemas keep the routes' own shapes and constraints.
     assert tools["answer_gate"].inputSchema["required"] == ["run_id", "parkedAt", "control"]
@@ -197,6 +198,9 @@ async def test_tools_list_pins_platform_tools_and_review_request(app, pat_token)
     )
     reason = tools["cancel_run"].inputSchema["properties"]["reason"]
     assert (reason["minLength"], reason["maxLength"]) == (1, 500)
+    assert tools["ship_start"].inputSchema["properties"]["ticket"]["description"] == (
+        "The work item's ticket key, e.g. ENG-831 — its subjectLabel in list_open_subjects."
+    )
     assert not tools["list_open_subjects"].inputSchema.get("required")
     assert not tools["get_usage"].inputSchema.get("required")
 
