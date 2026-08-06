@@ -77,4 +77,9 @@ async def ticket_transition_drives_the_funnel(*, payload: dict) -> None:
     """Dispatch a build when a ticket from the chosen tracker enters its trigger status."""
     settings = Ship.settings()
     if payload["source"] == settings.tracker and payload["status"] == settings.trigger_status:
-        await Build.dispatch(ticket=payload)
+        item = WorkItem.get_for_ticket_key(
+            source=payload["source"],
+            ticket_key=payload["identifier"],
+        )
+        if not item or (not item.resolution and not item.get_status(workflow=Build).is_active):
+            await Build.dispatch(ticket=payload)

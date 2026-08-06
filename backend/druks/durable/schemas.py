@@ -6,7 +6,7 @@ from pydantic import AliasPath, BeforeValidator, ConfigDict, Field, SerializeAsA
 
 from druks.schemas import BaseResponse
 
-from .enums import AgentCallStatus, RunState
+from .enums import ACTIVE_STATES, AgentCallStatus, RunState
 
 if TYPE_CHECKING:
     from .models import AgentCall, Artifact, Run
@@ -187,6 +187,10 @@ class SubjectStatus(BaseResponse):
     # has only the driving run, which is what everything above already comes from.
     triggered_at: datetime | None = None
     account_username: str | None = None
+
+    @property
+    def is_active(self) -> bool:
+        return bool(self.kind) and self.state in ACTIVE_STATES
 
     @property
     def is_parked(self) -> bool:
