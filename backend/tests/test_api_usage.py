@@ -7,6 +7,7 @@ from conftest import connect_harness
 from druks.accounts.models import Account
 from druks.harnesses.claude import ClaudeHarness
 from druks.harnesses.datastructures import ParsedMetric, ParsedUsage
+from druks.harnesses.models import HarnessConnection
 from druks.settings import Settings
 from druks.testing import configure_app_for_test, make_settings, seed_call, seed_run
 from druks.usage.models import UsageScrape
@@ -276,13 +277,28 @@ def test_usage_excludes_another_accounts_scrape(client, druks_db) -> None:
     assert _harness(history, "claude")["fiveHour"] == []
 
 
-def test_usage_reports_connection_state(client, druks_db) -> None:
+def test_usage_reports_viewers_connection_identity(client, druks_db) -> None:
+    HarnessConnection.connect(
+        harness="claude",
+        account=Account.get_or_create("other@example.com"),
+        payload={"claudeAiOauth": {"accessToken": "other"}},
+        expires_at=None,
+        provider_email="other-seat@example.com",
+    )
     body = client.get("/api/usage").json()
     assert _harness(body, "claude")["connected"] is False
+    assert _harness(body, "claude")["providerEmail"] is None
 
-    connect_harness(ClaudeHarness, {"claudeAiOauth": {"accessToken": "t"}})
+    HarnessConnection.connect(
+        harness="claude",
+        account=Account.get_or_create("op@example.com"),
+        payload={"claudeAiOauth": {"accessToken": "mine"}},
+        expires_at=None,
+        provider_email="subscription@example.com",
+    )
     body = client.get("/api/usage").json()
     assert _harness(body, "claude")["connected"] is True
+    assert _harness(body, "claude")["providerEmail"] == "subscription@example.com"
 
 
 def test_usage_today_counts_only_the_viewers_calls(client, druks_db) -> None:

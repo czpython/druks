@@ -11,6 +11,7 @@ const usage: UsageResponse = {
       name: 'claude',
       available: true,
       connected: true,
+      providerEmail: 'subscription@example.com',
       planTier: 'max',
       fiveHour: { percentLeft: 81, resetsAt: null, model: null },
       weeks: [
@@ -79,6 +80,13 @@ afterEach(() => {
 })
 
 describe('UsagePanel', () => {
+  it('labels a connected panel with the subscription email', async () => {
+    stubFetch()
+    renderPanel()
+
+    expect(await screen.findByText('subscription@example.com')).toBeTruthy()
+  })
+
   it('pages model-scoped weekly capacity without exhausting the harness', async () => {
     stubFetch()
     const { container } = renderPanel()

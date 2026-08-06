@@ -24,6 +24,7 @@ class UsageHarnessSummary(BaseResponse):
     # False renders the connect action — the account has no connection
     # for this harness.
     connected: bool
+    provider_email: str | None
     plan_tier: str | None = None
     five_hour: UsageMetricSummary | None = None
     weeks: list[UsageMetricSummary] = Field(default_factory=list)

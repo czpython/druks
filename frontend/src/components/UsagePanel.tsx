@@ -213,13 +213,14 @@ function ProviderPanel({
   today: UsageHarnessToday | undefined
 }) {
   const [rawOpen, setRawOpen] = useState(false)
-  const label = usage.name
 
   return (
     <section className="us-prov" style={{ '--fam': color } as CSSProperties}>
       <header className="us-prov-head">
         <span className="us-prov-dot" />
-        <span className="us-prov-name">{label}</span>
+        <span className="us-prov-name">
+          {usage.connected ? usage.providerEmail : usage.name}
+        </span>
         {usage.planTier && <span className="us-prov-plan mono">{usage.planTier}</span>}
         <span className="us-prov-spacer" />
         <span className="us-prov-scraped mono">
@@ -239,12 +240,12 @@ function ProviderPanel({
                   metric={usage.fiveHour}
                   spark={history?.fiveHour}
                   sparkLabel="remaining · last 5h"
-                  sparkId={`${label}-5h`}
+                  sparkId={`${usage.name}-5h`}
                   rateNoun="window"
                 />
               )}
               {usage.weeks.length > 0 && (
-                <WeeklyCarousel harness={label} weeks={usage.weeks} history={history} />
+                <WeeklyCarousel harness={usage.name} weeks={usage.weeks} history={history} />
               )}
             </>
           )}
