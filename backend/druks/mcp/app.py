@@ -32,8 +32,9 @@ being answered, and a repeat answer reports already_answered. get_agent_call
 returns bounded transcript and stderr tails, never full payloads. cancel_run
 records its reason as the run's failure. retry_run reruns a failed run from
 the step that killed it. get_usage is the caller's quota and today's spend.
-There is no push channel; poll. Tool failures embed {code, message, retryable}
-from the HTTP surface.
+There is no push channel; poll list_open_subjects at ~30s intervals while
+waiting. Tool failures embed {code, message, retryable} from the HTTP
+surface.
 """
 
 

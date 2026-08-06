@@ -34,10 +34,18 @@ class GateAnswerResponse(BaseResponse):
 class AnswerGateRequest(BaseModel):
     # parked_at echoes get_gate's value unchanged.
     model_config = ConfigDict(str_strip_whitespace=True, alias_generator=to_camel)
-    parked_at: AwareDatetime
-    control: str
-    answers: dict[str, str] = Field(default_factory=dict)
-    note: str = ""
+    parked_at: AwareDatetime = Field(
+        description="When the run parked, echoed from get_gate unchanged — it names the "
+        "exact question being answered."
+    )
+    control: str = Field(
+        description="The decision to take: one of the ids the ask offers as controls, e.g. approve."
+    )
+    answers: dict[str, str] = Field(
+        default_factory=dict,
+        description="One answer per ask question, keyed by the question's id.",
+    )
+    note: str = Field(default="", description="The optional note to submit with this answer.")
 
 
 class AgentCallDetailResponse(BaseResponse):

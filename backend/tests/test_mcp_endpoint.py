@@ -115,19 +115,6 @@ def _wire_size(structured: dict) -> int:
     return len(json.dumps(structured, separators=(",", ":"), default=str).encode())
 
 
-def _park(druks_db, note):
-    run = seed_note_run(
-        druks_db,
-        note=note,
-        state="parked",
-        input_gate="review",
-        input_request=dict(_IN_APP_ASK),
-    )
-    run.input_requested_at = datetime.now(UTC)
-    druks_db.flush()
-    return run
-
-
 async def test_mcp_rejects_missing_and_dead_tokens(app, account, druks_db):
     row, token = PersonalAccessToken.create(account_id=account.id, name="agent")
     async with httpx.AsyncClient(
@@ -205,6 +192,9 @@ async def test_tools_list_pins_platform_tools_and_review_request(app, pat_token)
 
     # Derived schemas keep the routes' own shapes and constraints.
     assert tools["answer_gate"].inputSchema["required"] == ["run_id", "parkedAt", "control"]
+    assert tools["answer_gate"].inputSchema["properties"]["control"]["description"] == (
+        "The decision to take: one of the ids the ask offers as controls, e.g. approve."
+    )
     reason = tools["cancel_run"].inputSchema["properties"]["reason"]
     assert (reason["minLength"], reason["maxLength"]) == (1, 500)
     assert not tools["list_open_subjects"].inputSchema.get("required")
@@ -271,7 +261,15 @@ async def test_gate_cycle_reads_answers_and_reports_stale_rounds(
     app, pat_token, druks_db, resume_spy
 ):
     item = make_test_note()
-    run = _park(druks_db, item)
+    run = seed_note_run(
+        druks_db,
+        note=item,
+        state="parked",
+        input_gate="review",
+        input_request=dict(_IN_APP_ASK),
+    )
+    run.input_requested_at = datetime.now(UTC)
+    druks_db.flush()
 
     async with live(app), _client(app, pat_token) as client:
         gate = (await client.call_tool("get_gate", {"run_id": run.id})).structured_content
