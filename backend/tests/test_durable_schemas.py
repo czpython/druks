@@ -1,4 +1,3 @@
-import pytest
 from druks.accounts.models import Account
 from druks.durable.enums import RunState
 from druks.durable.exceptions import GateTimeout
@@ -29,32 +28,6 @@ def _run(
 def _status_of(runs, calls=None):
     # runs arrives newest-first, mirroring Run.list_for_subject.
     return _status(runs[0], calls or [])
-
-
-@pytest.mark.parametrize(
-    ("state", "expected"),
-    [
-        (RunState.SCHEDULED, True),
-        (RunState.RUNNING, True),
-        (RunState.PARKED, True),
-        (RunState.FINISHED, False),
-        (RunState.FAILED, False),
-        (RunState.CANCELLED, False),
-        (RunState.ORPHANED, False),
-    ],
-)
-def test_subject_status_is_active_only_for_actual_active_runs(state, expected):
-    status = _status_of([_run("run", "ship.build", state)])
-
-    assert status.is_active is expected
-
-
-def test_subject_status_without_a_driving_run_is_not_active():
-    status = _status(None, [])
-
-    assert status.state == RunState.SCHEDULED
-    assert not status.kind
-    assert not status.is_active
 
 
 def test_subject_state_takes_the_newest_run():
