@@ -1,4 +1,9 @@
+from druks.schemas import BaseResponse
 from druks.workflows import SubjectSummary
+
+
+class ReviewRequestedResponse(BaseResponse):
+    run: str
 
 
 class ReviewSummary(SubjectSummary):

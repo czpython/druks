@@ -38,6 +38,7 @@ async def resume_run(run_id: str, body: ResumeRequest) -> None:
     "/{run_id}/cancel",
     operation_id="cancel_run",
     tags=["agent"],
+    openapi_extra={"x-idempotent": True},
     response_model=CancelRunResponse,
     response_model_by_alias=True,
 )
@@ -50,17 +51,18 @@ async def cancel_run(
     if not run:
         raise RunNotFound(run_id)
     if run.state == RunState.CANCELLED.value:
-        return CancelRunResponse(run_id=run.id, result="already_cancelled")
+        return CancelRunResponse(run=run.id, result="already_cancelled")
     if not run.is_active:
         raise RunNotActive(run_id)
     await run.cancel(failure=reason)
-    return CancelRunResponse(run_id=run.id, result="cancelled")
+    return CancelRunResponse(run=run.id, result="cancelled")
 
 
 @router.post(
     "/{run_id}/retry",
     operation_id="retry_run",
     tags=["agent"],
+    openapi_extra={"x-destructive": False},
     response_model=RetryRunResponse,
     response_model_by_alias=True,
 )
@@ -79,4 +81,4 @@ async def retry_run(run_id: str) -> RetryRunResponse:
         if latest and latest.is_active:
             raise SubjectBusy(latest.id)
 
-    return RetryRunResponse(run_id=await run.retry())
+    return RetryRunResponse(run=await run.retry())

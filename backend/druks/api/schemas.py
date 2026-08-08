@@ -19,12 +19,12 @@ class ResumeRequest(BaseModel):
 
 
 class CancelRunResponse(BaseResponse):
-    run_id: str
+    run: str
     result: Literal["cancelled", "already_cancelled"]
 
 
 class RetryRunResponse(BaseResponse):
-    run_id: str
+    run: str
 
 
 class OpenWorkflowResponse(BaseResponse):

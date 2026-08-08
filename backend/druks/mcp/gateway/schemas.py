@@ -18,7 +18,7 @@ class ArtifactContent(BaseResponse):
 
 class GateResponse(BaseResponse):
     # parked_at is the park identity answer_gate must echo back.
-    run_id: str
+    run: str
     gate: str
     parked_at: datetime
     ask: dict[str, Any]
@@ -26,7 +26,7 @@ class GateResponse(BaseResponse):
 
 
 class GateAnswerResponse(BaseResponse):
-    run_id: str
+    run: str
     parked_at: datetime
     result: Literal["answered", "already_answered"]
 
@@ -41,7 +41,7 @@ class AnswerGateRequest(BaseModel):
 
 
 class AgentCallDetailResponse(BaseResponse):
-    run_id: str
+    run: str
     call: AgentCallResponse
     transcript: str
     stderr: str
