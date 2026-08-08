@@ -75,7 +75,7 @@ describe('InAppReview', () => {
     expect(requestChanges.disabled).toBe(true)
 
     if (guidance === 'answer') {
-      fireEvent.click(screen.getByLabelText('Use a flag'))
+      fireEvent.click(screen.getByRole('radio', { name: /Use a flag/ }))
     } else {
       fireEvent.change(screen.getByPlaceholderText(/optional note/), {
         target: { value: 'keep the migration reversible' },
