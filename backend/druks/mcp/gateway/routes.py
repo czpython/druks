@@ -24,6 +24,7 @@ async def get_gate(run_id: str) -> schemas.GateResponse:
 @router.post(
     "/gates/{run_id}/answer",
     operation_id="answer_gate",
+    openapi_extra={"x-destructive": False, "x-idempotent": True},
     response_model=schemas.GateAnswerResponse,
     response_model_by_alias=True,
 )

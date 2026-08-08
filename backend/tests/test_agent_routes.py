@@ -4,6 +4,8 @@ from pathlib import Path
 import pytest
 from druks.accounts.models import Account
 from druks.api.app import app
+from druks.contrib.review.workflows import PullRequestReview
+from druks.contrib.ship.models import Project, ProjectRepo
 from druks.durable.dbos_state import workflow_status
 from druks.durable.models import AgentCall, Run
 from druks.durable.reads import read_transcript_chunk
@@ -69,7 +71,7 @@ def _park(druks_db, note):
     return run
 
 
-def test_openapi_pins_the_seven_agent_routes(client: TestClient):
+def test_openapi_pins_platform_routes_and_review_request(client: TestClient):
     schema = app.openapi()
     found = {
         (method, path): operation
@@ -77,7 +79,60 @@ def test_openapi_pins_the_seven_agent_routes(client: TestClient):
         for method, operation in operations.items()
         if "agent" in operation.get("tags", [])
     }
-    assert {key: op["operationId"] for key, op in found.items()} == _MCP_ROUTES
+    assert {key: found[key]["operationId"] for key in _MCP_ROUTES} == _MCP_ROUTES
+    assert found[("post", "/api/review/reviews")]["operationId"] == "review_request"
+
+    extensions = {
+        key: {name: value for name, value in found[key].items() if name.startswith("x-")}
+        for key in _MCP_ROUTES
+    }
+    assert extensions == {
+        ("get", "/api/gates/{run_id}"): {},
+        ("post", "/api/gates/{run_id}/answer"): {
+            "x-destructive": False,
+            "x-idempotent": True,
+        },
+        ("get", "/api/agent-calls/{call_id}"): {},
+        ("post", "/api/runs/{run_id}/cancel"): {"x-idempotent": True},
+        ("post", "/api/runs/{run_id}/retry"): {"x-destructive": False},
+        ("get", "/api/open-subjects"): {},
+        ("get", "/api/usage/summary"): {},
+    }
+    assert not {name for name in found[("post", "/api/review/reviews")] if name.startswith("x-")}
+
+
+def test_review_request_returns_the_run_id_start_hands_back(
+    client: TestClient, account: Account, monkeypatch
+):
+    project = Project.create(name="Acme")
+    ProjectRepo.create(project_id=project.id, full_name="acme/app")
+    live_run_id = "review-run-id"
+    starts = []
+
+    async def start(cls, **kwargs):
+        starts.append(kwargs)
+        return live_run_id
+
+    monkeypatch.setattr(PullRequestReview, "start", classmethod(start))
+
+    responses = [
+        client.post(
+            "/api/review/reviews",
+            json={"repo": "acme/app", "prNumber": 7},
+        )
+        for _ in range(2)
+    ]
+
+    assert [response.status_code for response in responses] == [202, 202]
+    assert [response.json() for response in responses] == [
+        {"run": live_run_id},
+        {"run": live_run_id},
+    ]
+    assert [call["subject"].identity for call in starts] == [
+        {"type": "pull_request", "id": "acme/app#7"},
+        {"type": "pull_request", "id": "acme/app#7"},
+    ]
+    assert {call["account_id"] for call in starts} == {account.id}
 
 
 def test_agent_routes_sit_behind_the_gate(tmp_path, druks_db):
@@ -327,7 +382,7 @@ def test_cancel_run_route(client: TestClient, druks_db):
 
     cancelled = client.post(f"/api/runs/{run.id}/cancel", json={"reason": "wrong branch"})
     assert cancelled.status_code == 200
-    assert cancelled.json() == {"runId": run.id, "result": "cancelled"}
+    assert cancelled.json() == {"run": run.id, "result": "cancelled"}
 
     druks_db.expire_all()
     run = druks_db.get(type(run), run.id)

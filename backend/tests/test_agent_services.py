@@ -108,7 +108,7 @@ def test_get_gate_returns_the_ask_and_parked_at(druks_db):
 
     view = services.get_gate(run.id)
 
-    assert view.run_id == run.id
+    assert view.run == run.id
     assert view.gate == "review"
     assert view.parked_at == run.input_requested_at
     assert view.ask["controls"] == ["approve", "request_changes"]
@@ -218,7 +218,7 @@ def test_get_agent_call_serves_bounded_tails(druks_db):
 
     detail = services.get_agent_call(call.id)
 
-    assert detail.run_id == call.run_id
+    assert detail.run == call.run_id
     assert detail.call.id == call.id
     assert detail.call.last_error == "boom " * 100
     assert detail.transcript == "s" * 8192
@@ -368,7 +368,7 @@ async def test_retry_run_retries_a_failed_run(druks_db, monkeypatch):
 
     result = await runs.retry_run(run.id)
 
-    assert result.run_id == "retried-run"
+    assert result.run == "retried-run"
     retry.assert_awaited_once_with()
 
 

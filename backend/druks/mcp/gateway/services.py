@@ -36,7 +36,7 @@ def get_gate(run_id: str) -> schemas.GateResponse:
     if not ask or ask.get("presentation") != "in_app":
         raise exceptions.GateNotAnswerable(run_id)
     return schemas.GateResponse(
-        run_id=run.id,
+        run=run.id,
         gate=run.input_gate,  # type: ignore[arg-type]
         parked_at=run.input_requested_at,  # type: ignore[arg-type]
         ask=run.get_ask(),
@@ -53,7 +53,7 @@ async def answer_gate(
     db_session().expire(run)  # the receipt/park comparison must read fresh
     if run.answer_parked_at == parked_at:
         return schemas.GateAnswerResponse(
-            run_id=run.id, parked_at=parked_at, result="already_answered"
+            run=run.id, parked_at=parked_at, result="already_answered"
         )
     if run.state != RunState.PARKED.value:
         raise exceptions.GateNotOpen(run_id)
@@ -67,7 +67,7 @@ async def answer_gate(
     except InvalidChoiceError as error:
         raise exceptions.InvalidGateAnswer(str(error)) from error
     await run.resume(**payload)
-    return schemas.GateAnswerResponse(run_id=run.id, parked_at=parked_at, result="answered")
+    return schemas.GateAnswerResponse(run=run.id, parked_at=parked_at, result="answered")
 
 
 def get_agent_call(call_id: str) -> schemas.AgentCallDetailResponse:
@@ -76,7 +76,7 @@ def get_agent_call(call_id: str) -> schemas.AgentCallDetailResponse:
         raise exceptions.AgentCallNotFound(call_id)
     layout = call.artifact_layout
     return schemas.AgentCallDetailResponse(
-        run_id=call.run_id,
+        run=call.run_id,
         call=AgentCallResponse.model_validate(call),
         transcript=read_slice(
             layout.transcript, offset=-_TRANSCRIPT_TAIL_BYTES, limit=_TRANSCRIPT_TAIL_BYTES
