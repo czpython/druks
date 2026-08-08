@@ -102,8 +102,12 @@ Run the backend gates:
 ```bash
 uv run ruff check backend
 uv run ruff format --check backend
+uv pip install -e backend/tests/druks-field_notes
 uv run pytest backend/
 ```
+
+The suite collects the proof extension, so `pytest backend/` fails at collection
+until that editable install has run.
 
 If the public extension surface changed, also install and exercise the proof
 extension as described in `docs/development.md`.
