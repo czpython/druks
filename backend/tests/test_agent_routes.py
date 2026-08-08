@@ -23,11 +23,11 @@ _IN_APP_ASK = {
 }
 
 _MCP_ROUTES = {
-    ("get", "/api/gates/{run_id}"): "get_gate",
-    ("post", "/api/gates/{run_id}/answer"): "answer_gate",
-    ("get", "/api/agent-calls/{call_id}"): "get_agent_call",
-    ("post", "/api/runs/{run_id}/cancel"): "cancel_run",
-    ("post", "/api/runs/{run_id}/retry"): "retry_run",
+    ("get", "/api/gates/{run}"): "get_gate",
+    ("post", "/api/gates/{run}/answer"): "answer_gate",
+    ("get", "/api/agent-calls/{call}"): "get_agent_call",
+    ("post", "/api/runs/{run}/cancel"): "cancel_run",
+    ("post", "/api/runs/{run}/retry"): "retry_run",
     ("get", "/api/open-subjects"): "list_open_subjects",
     ("get", "/api/usage/summary"): "get_usage",
 }
@@ -89,14 +89,14 @@ def test_openapi_pins_platform_and_extension_agent_routes(client: TestClient):
         for key in _MCP_ROUTES
     }
     assert extensions == {
-        ("get", "/api/gates/{run_id}"): {},
-        ("post", "/api/gates/{run_id}/answer"): {
+        ("get", "/api/gates/{run}"): {},
+        ("post", "/api/gates/{run}/answer"): {
             "x-destructive": False,
             "x-idempotent": True,
         },
-        ("get", "/api/agent-calls/{call_id}"): {},
-        ("post", "/api/runs/{run_id}/cancel"): {"x-idempotent": True},
-        ("post", "/api/runs/{run_id}/retry"): {"x-destructive": False},
+        ("get", "/api/agent-calls/{call}"): {},
+        ("post", "/api/runs/{run}/cancel"): {"x-idempotent": True},
+        ("post", "/api/runs/{run}/retry"): {"x-destructive": False},
         ("get", "/api/open-subjects"): {},
         ("get", "/api/usage/summary"): {},
     }

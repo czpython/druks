@@ -18,8 +18,8 @@ from druks.notifications.services import validate_in_app_answer
 router = APIRouter(prefix="/api/runs", tags=["runs"])
 
 
-@router.post("/{run_id}/resume", status_code=status.HTTP_204_NO_CONTENT)
-async def resume_run(run_id: str, body: ResumeRequest) -> None:
+@router.post("/{run}/resume", status_code=status.HTTP_204_NO_CONTENT)
+async def resume_run(run_id: Annotated[str, Path(alias="run")], body: ResumeRequest) -> None:
     # The in-app half of a gate: the operator answers the parked run from Druks
     # (external gates resume through their own webhook).
     run = Run.get(run_id)
@@ -41,7 +41,7 @@ async def resume_run(run_id: str, body: ResumeRequest) -> None:
 
 
 @router.post(
-    "/{run_id}/cancel",
+    "/{run}/cancel",
     operation_id="cancel_run",
     tags=["agent"],
     openapi_extra={"x-idempotent": True},
@@ -50,7 +50,9 @@ async def resume_run(run_id: str, body: ResumeRequest) -> None:
     responses=agent_error_responses(RunNotFound("run-123"), RunNotActive("run-123")),
 )
 async def cancel_run(
-    run_id: Annotated[str, Path(description="The active run's id, run in list_open_subjects.")],
+    run_id: Annotated[
+        str, Path(alias="run", description="The active run, from list_open_subjects.")
+    ],
     reason: Annotated[
         str,
         Body(
@@ -75,7 +77,7 @@ async def cancel_run(
 
 
 @router.post(
-    "/{run_id}/retry",
+    "/{run}/retry",
     operation_id="retry_run",
     tags=["agent"],
     openapi_extra={"x-destructive": False},
@@ -86,7 +88,9 @@ async def cancel_run(
     ),
 )
 async def retry_run(
-    run_id: Annotated[str, Path(description="The failed run's id, run in list_open_subjects.")],
+    run_id: Annotated[
+        str, Path(alias="run", description="The failed run, from list_open_subjects.")
+    ],
 ) -> RetryRunResponse:
     """Rerun a failed run from the step that killed it, reusing every
     completed step."""
