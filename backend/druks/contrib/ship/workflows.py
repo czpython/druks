@@ -105,6 +105,11 @@ class Build(Workflow):
         # Resolve-or-refresh the item, then start (start() dedups a live run).
         item = WorkItem.get_for_ticket_key(source=ticket["source"], ticket_key=ticket["identifier"])
         if item:
+            if item.resolution == "merged":
+                logger.info(
+                    "Ticket %s is already merged; skipping redelivery.", ticket["identifier"]
+                )
+                return
             item.update(title=ticket["title"], ticket_url=ticket["url"])
         else:
             repo = ProjectRepo.lookup(project_name=ticket["project_name"], labels=ticket["labels"])

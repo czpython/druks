@@ -11,6 +11,8 @@ from druks.testing import make_settings, seed_run
 from druks.webhooks.router import router as webhooks_router
 from fastapi import HTTPException
 
+from ship.factories import make_test_work_item
+
 
 def _provider(tmp_path, *, payload, headers=None):
     events = JiraEvents(
@@ -160,6 +162,42 @@ async def test_trigger_status_dispatches_build_with_the_webhook_payload(tmp_path
     await subs.ticket_transition_drives_the_funnel(payload=payload)
 
     build.assert_awaited_once_with(ticket=payload)
+
+
+async def test_trigger_status_does_not_redispatch_a_merged_item(druks_db, monkeypatch):
+    item = make_test_work_item(
+        repo="octo/alfred",
+        source="jira",
+        ticket_key="IT-12",
+        title="Add an endpoint",
+    )
+    item.resolution = "merged"
+    druks_db.flush()
+    _pin_settings(monkeypatch, jira_trigger_status="Ready")
+    start = AsyncMock()
+    monkeypatch.setattr(subs.Build, "start", start)
+
+    await subs.ticket_transition_drives_the_funnel(payload=_jira_payload(status="Ready"))
+
+    start.assert_not_awaited()
+
+
+async def test_trigger_status_redispatches_a_closed_item(druks_db, monkeypatch):
+    item = make_test_work_item(
+        repo="octo/alfred",
+        source="jira",
+        ticket_key="IT-12",
+        title="Add an endpoint",
+    )
+    item.resolution = "closed"
+    druks_db.flush()
+    _pin_settings(monkeypatch, jira_trigger_status="Ready")
+    start = AsyncMock()
+    monkeypatch.setattr(subs.Build, "start", start)
+
+    await subs.ticket_transition_drives_the_funnel(payload=_jira_payload(status="Ready"))
+
+    start.assert_awaited_once()
 
 
 async def test_trigger_status_routes_a_new_ticket_by_label(tmp_path, druks_db, monkeypatch):
