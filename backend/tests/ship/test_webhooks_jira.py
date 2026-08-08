@@ -11,7 +11,7 @@ from druks.testing import make_settings, seed_run
 from druks.webhooks.router import router as webhooks_router
 from fastapi import HTTPException
 
-from ship.factories import make_test_work_item, seed_build_run
+from ship.factories import make_test_work_item
 
 
 def _provider(tmp_path, *, payload, headers=None):
@@ -152,9 +152,7 @@ def _pin_settings(monkeypatch, **over):
     monkeypatch.setattr(subs.Ship, "settings", classmethod(lambda cls: settings))
 
 
-async def test_trigger_status_dispatches_build_with_the_webhook_payload(
-    tmp_path, druks_db, monkeypatch
-):
+async def test_trigger_status_dispatches_build_with_the_webhook_payload(tmp_path, monkeypatch):
     """The build funnel receives the normalized ticket payload without a refetch."""
     _pin_settings(monkeypatch, jira_trigger_status="Ready")
     build = AsyncMock()
@@ -166,7 +164,7 @@ async def test_trigger_status_dispatches_build_with_the_webhook_payload(
     build.assert_awaited_once_with(ticket=payload)
 
 
-async def test_trigger_status_does_not_redispatch_a_resolved_item(druks_db, monkeypatch):
+async def test_trigger_status_does_not_redispatch_a_merged_item(druks_db, monkeypatch):
     item = make_test_work_item(
         repo="octo/alfred",
         source="jira",
@@ -176,48 +174,30 @@ async def test_trigger_status_does_not_redispatch_a_resolved_item(druks_db, monk
     item.resolution = "merged"
     druks_db.flush()
     _pin_settings(monkeypatch, jira_trigger_status="Ready")
-    build = AsyncMock()
-    monkeypatch.setattr(subs.Build, "dispatch", build)
+    start = AsyncMock()
+    monkeypatch.setattr(subs.Build, "start", start)
 
     await subs.ticket_transition_drives_the_funnel(payload=_jira_payload(status="Ready"))
 
-    build.assert_not_awaited()
+    start.assert_not_awaited()
 
 
-@pytest.mark.parametrize("state", ["scheduled", "running", "parked"])
-async def test_trigger_status_does_not_redispatch_an_active_build(state, druks_db, monkeypatch):
+async def test_trigger_status_redispatches_a_closed_item(druks_db, monkeypatch):
     item = make_test_work_item(
         repo="octo/alfred",
         source="jira",
         ticket_key="IT-12",
         title="Add an endpoint",
     )
-    seed_build_run(druks_db, work_item_id=item.id, state=state)
+    item.resolution = "closed"
+    druks_db.flush()
     _pin_settings(monkeypatch, jira_trigger_status="Ready")
-    build = AsyncMock()
-    monkeypatch.setattr(subs.Build, "dispatch", build)
+    start = AsyncMock()
+    monkeypatch.setattr(subs.Build, "start", start)
 
     await subs.ticket_transition_drives_the_funnel(payload=_jira_payload(status="Ready"))
 
-    build.assert_not_awaited()
-
-
-async def test_trigger_status_redispatches_after_a_failed_build(druks_db, monkeypatch):
-    item = make_test_work_item(
-        repo="octo/alfred",
-        source="jira",
-        ticket_key="IT-12",
-        title="Add an endpoint",
-    )
-    seed_build_run(druks_db, work_item_id=item.id, state="failed", failure="boom")
-    _pin_settings(monkeypatch, jira_trigger_status="Ready")
-    build = AsyncMock()
-    monkeypatch.setattr(subs.Build, "dispatch", build)
-    payload = _jira_payload(status="Ready")
-
-    await subs.ticket_transition_drives_the_funnel(payload=payload)
-
-    build.assert_awaited_once_with(ticket=payload)
+    start.assert_awaited_once()
 
 
 async def test_trigger_status_routes_a_new_ticket_by_label(tmp_path, druks_db, monkeypatch):
