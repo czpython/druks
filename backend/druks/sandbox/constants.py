@@ -11,3 +11,6 @@ SANDBOX_HOST_ROTATE_BEFORE_SECONDS = MAX_AGENT_TIMEOUT_SECONDS + 10 * 60  # 75 m
 # a refresh runs, and the zset of active users scored by expiry.
 ROTATING_PREFIX = "druks:sandbox:rotating:"
 GATE_USERS_PREFIX = "druks:sandbox:gate:users:"
+
+GIT_USER_NAME = "druks-operator[bot]"
+GIT_USER_EMAIL = "284423593+druks-operator[bot]@users.noreply.github.com"

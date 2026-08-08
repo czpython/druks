@@ -2,6 +2,8 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from druks.accounts.constants import SYSTEM_ACCOUNT_ID
+from druks.accounts.models import Account
 from druks.contrib.ship.constants import GITHUB_MCP_NAME, GITHUB_MCP_URL
 from druks.contrib.ship.workflows import Build, BuildWorkspace
 from druks.mcp.helpers import get_bearer_token_env_var
@@ -58,7 +60,7 @@ async def test_build_workspace_declares_its_github_mcp(druks_db):
 
 
 def _workspace_kwargs_stubs(monkeypatch: pytest.MonkeyPatch, *, reviewer):
-    ensured: list[str] = []
+    ensured: list[tuple[str, str | None]] = []
     execs: list[list[str]] = []
 
     async def _token(_repo: str) -> str:
@@ -67,8 +69,15 @@ def _workspace_kwargs_stubs(monkeypatch: pytest.MonkeyPatch, *, reviewer):
     async def _noop(self: Any, **_kw: Any) -> None:
         pass
 
-    async def fake_ensure(_sb: Any, *, repo_url: str, ref: Any, target_path: str) -> None:
-        ensured.append(repo_url)
+    async def fake_ensure(
+        _sandbox: Any,
+        *,
+        repo_url: str,
+        ref: Any,
+        co_author: str | None,
+        target_path: str,
+    ) -> None:
+        ensured.append((repo_url, co_author))
 
     async def fake_exec(self: Any, argv: list[str], **_kw: Any) -> Any:
         execs.append(argv)
@@ -96,6 +105,11 @@ async def test_get_workspace_kwargs_clones_primary_only(monkeypatch: pytest.Monk
     ensured, execs = _workspace_kwargs_stubs(
         monkeypatch, reviewer=lambda _s: SimpleNamespace(token_for_repo=_reviewer_token)
     )
+    monkeypatch.setattr(
+        Account,
+        "get",
+        lambda _account_id: pytest.fail("account-less builds must not look up an account"),
+    )
     sandbox = host_mod.Sandbox(record=SimpleNamespace(id="h1", ssh_username="exedev"))  # type: ignore[arg-type]
 
     workflow = Build()
@@ -104,11 +118,63 @@ async def test_get_workspace_kwargs_clones_primary_only(monkeypatch: pytest.Monk
     workflow._profile = {"recommended_skills": ["python-house-rules"]}
     kwargs = await workflow.get_workspace_kwargs(sandbox)
 
-    assert ensured == ["https://github.com/o/extension"]
+    assert ensured == [("https://github.com/o/extension", None)]
     assert ["mkdir", "-p", get_related_root("exedev")] in execs
     assert kwargs["mcp_token"] == "ghs_reviewer"
     assert kwargs["skills"] == ("python-house-rules",)
     assert "related" not in kwargs
+
+
+@pytest.mark.asyncio
+async def test_get_workspace_kwargs_uses_the_dispatching_account_username(
+    druks_db,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    async def _reviewer_token(_repo: str) -> str:
+        return "ghs_reviewer"
+
+    account = Account(username="first@example.com")
+    druks_db.add(account)
+    druks_db.flush()
+    ensured, _ = _workspace_kwargs_stubs(
+        monkeypatch, reviewer=lambda _s: SimpleNamespace(token_for_repo=_reviewer_token)
+    )
+    sandbox = host_mod.Sandbox(record=SimpleNamespace(id="h1", ssh_username="exedev"))  # type: ignore[arg-type]
+    workflow = Build()
+    workflow.input = Build._run_input_model()
+    workflow.subject = SimpleNamespace(repo="o/extension")
+    workflow._profile = {"recommended_skills": []}
+    workflow.account_id = account.id
+
+    await workflow.get_workspace_kwargs(sandbox)
+
+    assert ensured == [("https://github.com/o/extension", "first@example.com")]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("account_id", [SYSTEM_ACCOUNT_ID, "vanished-account"])
+async def test_get_workspace_kwargs_omits_unknown_and_system_accounts(
+    account_id: str,
+    druks_db,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    async def _reviewer_token(_repo: str) -> str:
+        return "ghs_reviewer"
+
+    assert Account.get(SYSTEM_ACCOUNT_ID) is not None
+    ensured, _ = _workspace_kwargs_stubs(
+        monkeypatch, reviewer=lambda _s: SimpleNamespace(token_for_repo=_reviewer_token)
+    )
+    sandbox = host_mod.Sandbox(record=SimpleNamespace(id="h1", ssh_username="exedev"))  # type: ignore[arg-type]
+    workflow = Build()
+    workflow.input = Build._run_input_model()
+    workflow.subject = SimpleNamespace(repo="o/extension")
+    workflow._profile = {"recommended_skills": []}
+    workflow.account_id = account_id
+
+    await workflow.get_workspace_kwargs(sandbox)
+
+    assert ensured == [("https://github.com/o/extension", None)]
 
 
 @pytest.mark.asyncio

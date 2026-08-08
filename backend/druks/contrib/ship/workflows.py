@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field
 
+from druks.accounts.constants import SYSTEM_ACCOUNT_ID
 from druks.accounts.models import Account
 from druks.contrib.ship.contracts import ImplementationOutput, ReviewWork
 from druks.contrib.ship.enums import (
@@ -169,10 +170,16 @@ class Build(Workflow):
         await sandbox.write_secret(
             secret=github_token, remote=get_github_token_remote_path(sandbox.ssh_username)
         )
+        co_author = None
+        if self.account_id and self.account_id != SYSTEM_ACCOUNT_ID:
+            account = Account.get(self.account_id)
+            if account:
+                co_author = account.username
         await _repo.ensure(
             sandbox,
             repo_url=f"https://github.com/{repo}",
             ref=branch,
+            co_author=co_author,
             target_path=get_repo_root(sandbox.ssh_username),
         )
         await sandbox.exec(["mkdir", "-p", get_related_root(sandbox.ssh_username)], timeout=10.0)
@@ -444,6 +451,7 @@ class Profile(Workflow):
             sandbox,
             repo_url=f"https://github.com/{repo}",
             ref=None,
+            co_author=None,
             target_path=get_repo_root(sandbox.ssh_username),
         )
         return {

@@ -1,3 +1,6 @@
+import os
+import shlex
+import subprocess
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -30,13 +33,16 @@ class _FakeSandbox:
         self.secrets: list[tuple[str, str]] = []  # (secret, remote)
         self.aclose_calls = 0
         # Per-test injection points.
-        self.exec_results: dict[int, ExecResult] = {}
+        self.exec_results: dict[str, ExecResult] = {}
         self.default_exec_result = ExecResult(0, "", "")
 
     async def exec(self, cmd: list[str], *, timeout: float = 30.0) -> ExecResult:
-        idx = len(self.exec_log)
         self.exec_log.append((cmd, timeout))
-        return self.exec_results.get(idx, self.default_exec_result)
+        command = " ".join(cmd)
+        for content, result in self.exec_results.items():
+            if content in command:
+                return result
+        return self.default_exec_result
 
     async def upload_file(
         self,
@@ -141,6 +147,15 @@ def _record(
         instance_type=None,
         disk_gb=None,
     )
+
+
+def _commands_containing(sandbox: _FakeSandbox, content: str) -> list[list[str]]:
+    return [command for command, _ in sandbox.exec_log if content in " ".join(command)]
+
+
+def _command_containing(sandbox: _FakeSandbox, content: str) -> list[str]:
+    [command] = _commands_containing(sandbox, content)
+    return command
 
 
 # NOTE: ``Sandbox.upload_file`` (mkdir + sftp + chmod) and
@@ -282,7 +297,7 @@ async def test_clone_uses_custom_target_path():
 
 async def test_clone_raises_exec_failed_on_clone_failure():
     sandbox = _FakeSandbox()
-    sandbox.exec_results = {0: ExecResult(128, "", "fatal: not found")}
+    sandbox.exec_results = {"git clone": ExecResult(128, "", "fatal: not found")}
 
     with pytest.raises(ExecFailed, match="git clone"):
         await repo.clone(
@@ -295,7 +310,7 @@ async def test_clone_raises_exec_failed_on_clone_failure():
 async def test_clone_redacts_token_from_error_output():
     sandbox = _FakeSandbox()
     sandbox.exec_results = {
-        0: ExecResult(
+        "git clone": ExecResult(
             128,
             "",
             "fatal: could not read from https://x-access-token:gho_secret@github.com/x.git",
@@ -324,42 +339,49 @@ async def test_clone_rejects_non_github_urls():
         )
 
 
-async def test_ensure_clones_when_repo_absent():
+async def test_ensure_clones_and_installs_hook_when_repo_absent():
     sandbox = _FakeSandbox()
-    # exec 0 = the `test -d` probe → make it fail (absent).
-    sandbox.exec_results = {0: ExecResult(1, "", "")}
+    sandbox.exec_results = {"test -d": ExecResult(1, "", "")}
 
     await repo.ensure(
         sandbox,  # type: ignore[arg-type]
         repo_url="https://github.com/owner/repo.git",
         ref="main",
+        co_author="first@example.com",
     )
 
-    # First call probes existence; second is the clone chain.
-    probe, _ = sandbox.exec_log[0]
+    probe = _command_containing(sandbox, "test -d")
     assert probe == ["test", "-d", f"{layout.get_repo_root('root')}/.git"]
-    clone_cmd, _ = sandbox.exec_log[1]
+    clone_cmd = _command_containing(sandbox, "git clone")
     assert "git clone https://github.com/owner/repo.git" in clone_cmd[2]
+    hook_command = _command_containing(sandbox, repo.CO_AUTHOR_HOOK_SENTINEL)
+    assert "chmod 755" in hook_command[2]
+    assert len(sandbox.exec_log) == 3
 
 
-async def test_ensure_fetches_and_checks_out_when_repo_present():
+async def test_ensure_fetches_and_installs_hook_when_repo_present():
     sandbox = _FakeSandbox()  # default ExecResult(0) → probe says present
 
     await repo.ensure(
         sandbox,  # type: ignore[arg-type]
         repo_url="https://github.com/owner/repo.git",
         ref="feature/x",
+        co_author="first@example.com",
     )
 
-    # Probe, then a single fetch+checkout chain — no clone.
-    assert sandbox.exec_log[0][0] == ["test", "-d", f"{layout.get_repo_root('root')}/.git"]
-    body = sandbox.exec_log[1][0][2]
+    assert _command_containing(sandbox, "test -d") == [
+        "test",
+        "-d",
+        f"{layout.get_repo_root('root')}/.git",
+    ]
+    body = _command_containing(sandbox, "git fetch")[2]
     assert "git clone" not in body
     assert f"cd {layout.get_repo_root('root')}" in body
     assert "git fetch origin feature/x" in body
-    # -fB: discard warm-VM drift AND (re)point the named local branch.
     assert "git checkout -fB feature/x FETCH_HEAD" in body
     assert "git config push.default current" in body
+    assert len(_commands_containing(sandbox, repo.CO_AUTHOR_HOOK_SENTINEL)) == 1
+    assert len(sandbox.exec_log) == 3
 
 
 async def test_ensure_present_with_ref_none_is_a_noop():
@@ -369,25 +391,199 @@ async def test_ensure_present_with_ref_none_is_a_noop():
         sandbox,  # type: ignore[arg-type]
         repo_url="https://github.com/owner/refrepo.git",
         ref=None,
+        co_author="first@example.com",
         target_path="/work/related/refrepo",
     )
 
-    # Only the probe ran — no fetch, no clone.
-    assert len(sandbox.exec_log) == 1
-    assert sandbox.exec_log[0][0][0] == "test"
+    assert _commands_containing(sandbox, "git fetch") == []
+    assert _commands_containing(sandbox, "git clone") == []
+    assert len(_commands_containing(sandbox, repo.CO_AUTHOR_HOOK_SENTINEL)) == 1
+    assert len(sandbox.exec_log) == 2
 
 
 async def test_ensure_raises_exec_failed_on_fetch_failure():
     sandbox = _FakeSandbox()
-    # Probe ok (present), fetch/checkout fails.
-    sandbox.exec_results = {1: ExecResult(128, "", "fatal: bad ref")}
+    sandbox.exec_results = {"git fetch": ExecResult(128, "", "fatal: bad ref")}
 
     with pytest.raises(ExecFailed, match="git fetch/checkout"):
         await repo.ensure(
             sandbox,  # type: ignore[arg-type]
             repo_url="https://github.com/owner/repo.git",
             ref="nope",
+            co_author="first@example.com",
         )
+
+    assert _commands_containing(sandbox, repo.CO_AUTHOR_HOOK_SENTINEL) == []
+
+
+async def test_generated_hook_formats_preserves_and_deduplicates_trailers(tmp_path: Path):
+    target = tmp_path / "repo"
+    hooks = target / ".git" / "hooks"
+    hooks.mkdir(parents=True)
+    sandbox = _FakeSandbox()
+
+    await repo.ensure(
+        sandbox,  # type: ignore[arg-type]
+        repo_url="https://github.com/owner/repo.git",
+        ref=None,
+        co_author="first@example.com",
+        target_path=str(target),
+    )
+    subprocess.run(
+        _command_containing(sandbox, repo.CO_AUTHOR_HOOK_SENTINEL),
+        check=True,
+    )
+
+    hook = hooks / "prepare-commit-msg"
+    hook_body = hook.read_text()
+    assert repo.CO_AUTHOR_HOOK_SENTINEL in hook_body
+    assert hook_body.endswith("exit 0\n")
+    assert hook.stat().st_mode & 0o777 == 0o755
+
+    message = tmp_path / "message"
+    message.write_text("subject\n")
+    subprocess.run([hook, message], check=True)
+    assert message.read_text() == (
+        "subject\n\nCo-Authored-By: first@example.com <first@example.com>\n"
+    )
+
+    message.write_text("subject\n\nSigned-off-by: Reviewer <reviewer@example.com>\n")
+    subprocess.run([hook, message], check=True)
+    subprocess.run([hook, message], check=True)
+    assert message.read_text() == (
+        "subject\n\nSigned-off-by: Reviewer <reviewer@example.com>\n"
+        "Co-Authored-By: first@example.com <first@example.com>\n"
+    )
+
+
+async def test_generated_hook_does_not_abort_when_trailer_tooling_fails(tmp_path: Path):
+    target = tmp_path / "repo"
+    hooks = target / ".git" / "hooks"
+    hooks.mkdir(parents=True)
+    sandbox = _FakeSandbox()
+    await repo.ensure(
+        sandbox,  # type: ignore[arg-type]
+        repo_url="https://github.com/owner/repo.git",
+        ref=None,
+        co_author="first@example.com",
+        target_path=str(target),
+    )
+    subprocess.run(_command_containing(sandbox, repo.CO_AUTHOR_HOOK_SENTINEL), check=True)
+
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    fake_git = fake_bin / "git"
+    fake_git.write_text("#!/bin/sh\nexit 1\n")
+    fake_git.chmod(0o755)
+    message = tmp_path / "message"
+    message.write_text("subject\n")
+    env = {**os.environ, "PATH": str(fake_bin)}
+
+    result = subprocess.run([hooks / "prepare-commit-msg", message], env=env, check=False)
+
+    assert result.returncode == 0
+    assert message.read_text() == "subject\n"
+
+
+async def test_consecutive_assignments_replace_the_dispatcher_hook(tmp_path: Path):
+    target = tmp_path / "repo"
+    (target / ".git" / "hooks").mkdir(parents=True)
+    sandbox = _FakeSandbox()
+
+    for co_author in ("first@example.com", "second@example.com"):
+        await repo.ensure(
+            sandbox,  # type: ignore[arg-type]
+            repo_url="https://github.com/owner/repo.git",
+            ref=None,
+            co_author=co_author,
+            target_path=str(target),
+        )
+        subprocess.run(
+            _commands_containing(sandbox, "printf %s")[-1],
+            check=True,
+        )
+
+    hook = target / ".git" / "hooks" / "prepare-commit-msg"
+    assert "first@example.com" not in hook.read_text()
+    assert "second@example.com" in hook.read_text()
+    message = tmp_path / "message"
+    message.write_text("subject\n")
+    subprocess.run([hook, message], check=True)
+    assert message.read_text().endswith("Co-Authored-By: second@example.com <second@example.com>\n")
+
+
+async def test_no_dispatcher_removes_only_a_managed_hook(tmp_path: Path):
+    target = tmp_path / "repo"
+    hooks = target / ".git" / "hooks"
+    hooks.mkdir(parents=True)
+    hook = hooks / "prepare-commit-msg"
+    sandbox = _FakeSandbox()
+
+    hook.write_text(f"#!/bin/sh\n{repo.CO_AUTHOR_HOOK_SENTINEL}\nexit 0\n")
+    await repo.ensure(
+        sandbox,  # type: ignore[arg-type]
+        repo_url="https://github.com/owner/repo.git",
+        ref=None,
+        co_author=None,
+        target_path=str(target),
+    )
+    subprocess.run(_command_containing(sandbox, "grep -qF"), check=True)
+    assert not hook.exists()
+
+    hook.write_text("#!/bin/sh\necho unmanaged\n")
+    sandbox.exec_log.clear()
+    await repo.ensure(
+        sandbox,  # type: ignore[arg-type]
+        repo_url="https://github.com/owner/repo.git",
+        ref=None,
+        co_author=None,
+        target_path=str(target),
+    )
+    subprocess.run(_command_containing(sandbox, "grep -qF"), check=True)
+    assert hook.read_text() == "#!/bin/sh\necho unmanaged\n"
+
+
+async def test_dispatcher_assignment_overwrites_an_unmanaged_hook(tmp_path: Path):
+    target = tmp_path / "repo"
+    hooks = target / ".git" / "hooks"
+    hooks.mkdir(parents=True)
+    hook = hooks / "prepare-commit-msg"
+    hook.write_text("#!/bin/sh\necho unmanaged\n")
+    sandbox = _FakeSandbox()
+
+    await repo.ensure(
+        sandbox,  # type: ignore[arg-type]
+        repo_url="https://github.com/owner/repo.git",
+        ref=None,
+        co_author="first@example.com",
+        target_path=str(target),
+    )
+    subprocess.run(_command_containing(sandbox, "printf %s"), check=True)
+
+    assert "echo unmanaged" not in hook.read_text()
+    assert repo.CO_AUTHOR_HOOK_SENTINEL in hook.read_text()
+
+
+@pytest.mark.parametrize(
+    ("co_author", "command_content"),
+    [("first@example.com", "printf %s"), (None, "grep -qF")],
+)
+async def test_ensure_raises_exec_failed_on_hook_reconciliation_failure(
+    co_author: str | None,
+    command_content: str,
+):
+    sandbox = _FakeSandbox()
+    sandbox.exec_results = {command_content: ExecResult(73, "", "reconciliation failed")}
+
+    with pytest.raises(ExecFailed) as excinfo:
+        await repo.ensure(
+            sandbox,  # type: ignore[arg-type]
+            repo_url="https://github.com/owner/repo.git",
+            ref=None,
+            co_author=co_author,
+        )
+
+    assert excinfo.value.exit_code == 73
 
 
 @pytest.fixture
@@ -452,6 +648,14 @@ async def test_acquire_uploads_helper_and_closes_ssh_without_releasing(
     fake = patched_real_sandbox[0]
     assert any(u.remote.endswith("/druks-sandbox") for u in fake.uploads), (
         "expected druks-sandbox helper upload"
+    )
+    gitconfig_command = _command_containing(fake, ".gitconfig")
+    gitconfig_body = shlex.split(gitconfig_command[2])[2]
+    helper_path = layout.get_helper_script_path(fake.ssh_username)
+    assert gitconfig_body == (
+        "[user]\n\tname = druks-operator[bot]\n"
+        "\temail = 284423593+druks-operator[bot]@users.noreply.github.com\n"
+        f'[credential "https://github.com"]\n\thelper = !{helper_path} git-credential\n'
     )
     # acquire closes the SSH connection on exit but does NOT release
     # the provider host.

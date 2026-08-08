@@ -15,7 +15,7 @@ from uuid_utils import uuid7
 
 from druks.settings import load_settings
 
-from .constants import SANDBOX_HOST_LEASE_SECONDS
+from .constants import GIT_USER_EMAIL, GIT_USER_NAME, SANDBOX_HOST_LEASE_SECONDS
 from .exceptions import HostGone, SandboxUnreachable
 from .host import Sandbox
 from .layout import get_helper_script_path, get_remote_home
@@ -208,6 +208,7 @@ async def _upload_helper_script(sandbox: Sandbox) -> None:
     # ``git credential-``.
     gitconfig_path = f"{get_remote_home(sandbox.ssh_username)}/.gitconfig"
     gitconfig_body = (
+        f"[user]\n\tname = {GIT_USER_NAME}\n\temail = {GIT_USER_EMAIL}\n"
         f'[credential "https://github.com"]\n\thelper = !{helper_path} git-credential\n'
     )
     write_cmd = f"printf %s {shlex.quote(gitconfig_body)} > {shlex.quote(gitconfig_path)}"

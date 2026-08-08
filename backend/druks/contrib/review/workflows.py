@@ -65,6 +65,7 @@ class PullRequestReview(Workflow):
             sandbox,
             repo_url=f"https://github.com/{repo}",
             ref=None,
+            co_author=None,
             target_path=get_repo_root(sandbox.ssh_username),
         )
         await sandbox.exec(["mkdir", "-p", get_related_root(sandbox.ssh_username)], timeout=10.0)
