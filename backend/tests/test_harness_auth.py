@@ -1,4 +1,3 @@
-import asyncio
 import base64
 import json
 from datetime import UTC, datetime, timedelta
@@ -63,9 +62,6 @@ def _mock_post(monkeypatch, response):
 
     async def fake_post(self, url, *, json=None, **_kwargs):
         calls.append({"url": url, "json": json})
-        # Yield to the event loop so a concurrent rotation attempt can run
-        # while this grant is "in flight" — the shape the lock exists for.
-        await asyncio.sleep(0)
         if isinstance(response, Exception):
             raise response
         return response
@@ -281,40 +277,17 @@ async def test_invalid_grant_drops_only_the_addressed_row(monkeypatch, druks_db)
     assert HarnessConnection.get(kept_id)
 
 
-async def test_concurrent_rotations_produce_one_grant(monkeypatch, druks_db):
+async def test_rotation_stands_down_while_the_lock_is_held(monkeypatch, druks_db):
     connection = _seed_claude(access="old", refresh="R0", expires_at=_NOW + timedelta(minutes=30))
-    connection_id = connection.id
-    calls = []
-    in_flight = asyncio.Event()
-    resume = asyncio.Event()
-
-    async def fake_post(self, url, *, json=None, **_kwargs):
-        calls.append({"url": url, "json": json})
-        in_flight.set()
-        await resume.wait()
-        return _resp(200, {"access_token": "new", "refresh_token": "R1", "expires_in": 100})
-
-    monkeypatch.setattr(hbase.httpx.AsyncClient, "post", fake_post)
-
-    # Park the winner mid-grant so the second attempt runs while the lock is
-    # provably held — racing two rotations lets the loser's lock attempt land
-    # after the winner's release, and two winners mean two grants.
-    winner = asyncio.create_task(ClaudeHarness.rotate_token(connection_id, now=_NOW))
-    await asyncio.wait_for(in_flight.wait(), timeout=5)
-    # The second rotation runs on this task: every session binds to the
-    # fixture's one connection, and a second concurrent task-scoped session
-    # would interleave its savepoints with the winner's on that shared stack.
-    loser = await ClaudeHarness.rotate_token(connection_id, now=_NOW)
-    resume.set()
-    winner_result = await winner
-
-    assert winner_result.action == "refreshed"
-    assert loser.action == "locked"
-    assert len(calls) == 1  # one provider grant, one persisted lineage
-    # The winner committed in its own task-scoped session — read past this
-    # task's identity map for what persisted.
-    payload = dict(HarnessConnection.reload(connection_id).payload)
-    assert payload["claudeAiOauth"]["refreshToken"] == "R1"
+    calls = _mock_post(
+        monkeypatch, _resp(200, {"access_token": "new", "refresh_token": "R1", "expires_in": 100})
+    )
+    # A second grant on a lineage another refresher is mid-flight on trips the
+    # provider's reuse detection — a held lock means no provider call at all.
+    await druks.redis.get_client().set(f"druks:harness:refresh:{connection.id}", "1", ex=60)
+    result = await ClaudeHarness.rotate_token(connection.id, now=_NOW)
+    assert result.action == "locked"
+    assert calls == []
 
 
 async def test_rotation_lock_is_released_after_refresh(monkeypatch, druks_db):
