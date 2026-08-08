@@ -49,17 +49,19 @@ _MAX_SPARK_POINTS = 72
 )
 async def get_usage(account: Account = Depends(current_account)) -> UsageResponse:
     now = datetime.now(UTC)
-    return UsageResponse(
-        harnesses=[
+    summaries = []
+    for harness in get_harnesses():
+        connection = HarnessConnection.get_for_account(harness.name, account.id)
+        summaries.append(
             _summarize(
-                UsageScrape.latest_for(h.name, account.id),
-                name=h.name,
+                UsageScrape.latest_for(harness.name, account.id),
+                name=harness.name,
                 now=now,
-                connected=bool(HarnessConnection.get_for_account(h.name, account.id)),
+                connected=bool(connection),
+                provider_email=connection.provider_email if connection else None,
             )
-            for h in get_harnesses()
-        ],
-    )
+        )
+    return UsageResponse(harnesses=summaries)
 
 
 @router.post("/refresh")
@@ -173,9 +175,15 @@ def _summarize(
     name: str,
     now: datetime,
     connected: bool,
+    provider_email: str | None,
 ) -> UsageHarnessSummary:
     if not row:
-        return UsageHarnessSummary(name=name, available=False, connected=connected)
+        return UsageHarnessSummary(
+            name=name,
+            available=False,
+            connected=connected,
+            provider_email=provider_email,
+        )
     age = _age_seconds(row.scraped_at, now=now)
     five_hour = None
     if row.five_hour_percent_left is not None or row.five_hour_resets_at:
@@ -187,6 +195,7 @@ def _summarize(
         name=name,
         available=row.parse_ok,
         connected=connected,
+        provider_email=provider_email,
         plan_tier=row.plan_tier,
         five_hour=five_hour,
         weeks=[UsageMetricSummary.model_validate(week) for week in row.weeks],

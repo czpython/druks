@@ -1,8 +1,11 @@
 import logging
 
-from fastapi import APIRouter, Body, HTTPException, Query, Response, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query, Response, status
 from sqlalchemy import func, select, update
 
+from druks.accounts.dependencies import current_account
+from druks.accounts.models import Account
+from druks.contrib.ship.extension import Ship
 from druks.contrib.ship.models import Project, ProjectRepo, WorkItem
 from druks.contrib.ship.schemas import (
     AddProjectRepoRequest,
@@ -15,7 +18,7 @@ from druks.contrib.ship.schemas import (
     ProjectSummary,
     WorkItemsHistoryResponse,
 )
-from druks.contrib.ship.workflows import Profile
+from druks.contrib.ship.workflows import Build, Profile
 from druks.core.apis.github import get_github_client
 from druks.db import db_session
 from druks.settings import load_settings
@@ -253,3 +256,56 @@ async def list_work_items_history(
     # Recent history: the PRs GitHub has resolved, its verdict newest first.
     items = [DashboardItem.model_validate(wi) for wi in WorkItem.list_handoff(limit=clamped)]
     return WorkItemsHistoryResponse(items=items)
+
+
+@work_items_router.post(
+    "/{ticket}/start",
+    status_code=status.HTTP_202_ACCEPTED,
+    operation_id="ship_start",
+    tags=["agent"],
+    responses={
+        404: {
+            "description": "Unknown ticket.",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "error": "HTTP_404",
+                        "detail": "no work item for ticket ENG-831",
+                    }
+                }
+            },
+        },
+        409: {
+            "description": "The work item has no registered target repository.",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "error": "HTTP_409",
+                        "detail": (
+                            "acme/app is not a registered project repo — add it to a project first"
+                        ),
+                    }
+                }
+            },
+        },
+    },
+)
+async def start_work_item(
+    ticket: str = Path(
+        ...,
+        description=(
+            "The work item's ticket key, e.g. ENG-831 — its subjectLabel in list_open_subjects."
+        ),
+    ),
+    account: Account = Depends(current_account),
+) -> str:
+    """Start agents building the ticket's work item."""
+    item = WorkItem.get_for_ticket_key(source=Ship.settings().tracker, ticket_key=ticket)
+    if not item:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"no work item for ticket {ticket}")
+    if not ProjectRepo.get_for_repo(item.repo):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"{item.repo} is not a registered project repo — add it to a project first",
+        )
+    return await Build.start(subject=item, account_id=account.id)

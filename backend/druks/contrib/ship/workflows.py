@@ -125,17 +125,13 @@ class Build(Workflow):
         return await cls.start(
             subject=item,
             account_id=assignee.id if assignee else None,
-            repo=item.repo,
-            source=item.source,
             task_owner_email=email,
             task_owner_name=ticket["assignee_name"],
         )
 
     async def run_multistep(
         self,
-        repo: str,
         issue_number: int | None = None,
-        source: str = "github",
         task_owner_email: str | None = None,
         task_owner_name: str | None = None,
     ) -> None:
@@ -160,7 +156,7 @@ class Build(Workflow):
         # ones they actually need under get_related_root (the prompt names them, the
         # credential helper handles auth). The mkdir keeps Claude's --add-dir target
         # valid before the first on-demand clone.
-        repo = self.input.repo
+        repo = self.subject.repo
         # Planning agents run before the first implement provisions the branch — their
         # VMs clone the default branch; every agent after delivery gets the PR branch.
         branch = self.branch
@@ -197,16 +193,16 @@ class Build(Workflow):
 
     async def get_prompt_context(self, **context: Any) -> dict[str, Any]:
         work_item = self.subject
-        target_repo = ProjectRepo.get_for_repo(self.input.repo, raise_on_missing=True)
+        target_repo = ProjectRepo.get_for_repo(work_item.repo, raise_on_missing=True)
         endpoint = load_settings().urls.endpoint.rstrip("/")
         work_item_url = f"{endpoint}/work-items/{work_item.id}" if endpoint else ""
         prompt_context = BuildPromptContext(
-            repo=self.input.repo,
+            repo=work_item.repo,
             work_item_url=work_item_url,
             branch=self.branch,
             pr_number=self.pr_number,
             ticket_ref=work_item.ticket_key,
-            source=self.input.source,
+            source=work_item.source,
             issue_number=self.input.issue_number,
             task_owner_name=self.input.task_owner_name,
             task_owner_email=self.input.task_owner_email,
@@ -216,7 +212,7 @@ class Build(Workflow):
         )
         return {
             "verification": await self._policy.verification_block(
-                profile=self._profile, repo=self.input.repo
+                profile=self._profile, repo=work_item.repo
             ),
             "build": prompt_context,
             **await super().get_prompt_context(**context),
@@ -224,9 +220,10 @@ class Build(Workflow):
 
     @step
     async def _load_policy_and_profile(self) -> dict[str, Any]:
-        # One memoized read: the live policy + the repo's profiled facts.
-        policy = await RepoPolicy.resolve(self.input.repo)
-        target = ProjectRepo.get_for_repo(self.input.repo, raise_on_missing=True)
+        # One memoized read: the live policy + the work item's repo profiled facts.
+        repo = self.subject.repo
+        policy = await RepoPolicy.resolve(repo)
+        target = ProjectRepo.get_for_repo(repo, raise_on_missing=True)
         return {
             "policy": policy.model_dump(mode="json"),
             "profile": target.effective_profile,
@@ -343,7 +340,7 @@ class Build(Workflow):
     async def declare_merge_intent(self) -> bool:
         """Whether GitHub accepted ownership of the merge."""
         github = get_github_client(load_settings())
-        return await github.merge_when_ready(self.input.repo, self.pr_number)
+        return await github.merge_when_ready(self.subject.repo, self.pr_number)
 
     # The provisioned branch + PR, pinned to the FIRST delivery — None until then
     # (planning runs against the default branch, and there is no PR to point at).
@@ -365,29 +362,29 @@ class Build(Workflow):
 
     async def request_assignee_review(self) -> None:
         login = self.journal.assignee_github_login
-        if login and self.input.repo and self.pr_number:
+        repo = self.subject.repo
+        if login and self.pr_number:
             try:
                 await get_github_client(load_settings()).request_pull_request_reviewers(
-                    self.input.repo, self.pr_number, [login]
+                    repo, self.pr_number, [login]
                 )
             except Exception:  # noqa: BLE001 — a missed ping must not fail the park
                 logger.warning(
                     "could not request review from %s on %s#%s",
                     login,
-                    self.input.repo,
+                    repo,
                     self.pr_number,
                 )
 
     async def set_pr_draft(self, *, draft: bool) -> None:
-        if self.input.repo and self.pr_number:
+        repo = self.subject.repo
+        if self.pr_number:
             try:
                 await get_github_client(load_settings()).set_pull_request_draft_state(
-                    self.input.repo, self.pr_number, draft=draft
+                    repo, self.pr_number, draft=draft
                 )
             except Exception:  # noqa: BLE001 — a draft merge fails loudly anyway
-                logger.warning(
-                    "Could not set draft=%s on %s#%s.", draft, self.input.repo, self.pr_number
-                )
+                logger.warning("Could not set draft=%s on %s#%s.", draft, repo, self.pr_number)
 
 
 class Profile(Workflow):
@@ -427,20 +424,9 @@ class Profile(Workflow):
         policy = await RepoPolicy.resolve(project_repo.full_name)
         effective = dict(baseline)
         if policy.verification:
-            effective["verification"] = {
-                "test_commands": [
-                    {"command": command, "ci_check": None}
-                    for command in policy.verification.test_commands
-                ],
-                "lint_commands": [
-                    {"command": command, "ci_check": None}
-                    for command in policy.verification.lint_commands
-                ],
-                "typecheck_commands": [
-                    {"command": command, "ci_check": None}
-                    for command in policy.verification.typecheck_commands
-                ],
-            }
+            effective["verification"] = policy.verification.get_commands(
+                detected=baseline.get("verification") or {}
+            )
         project_repo.set_profile(baseline=baseline, effective=effective)
 
     async def get_workspace_kwargs(self, sandbox: "Sandbox") -> dict[str, Any]:

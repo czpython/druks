@@ -36,8 +36,7 @@ def main() -> None:
         "setup",
         help=(
             "Create or update druks.toml and render the install .env. "
-            "Exits 0 when boot-ready, 3 when gaps remain, and 4 when an "
-            "existing pre-TOML .env needs hand migration."
+            "Exits 0 when boot-ready and 3 when gaps remain."
         ),
     )
     setup_parser.add_argument("env_path", help="Path to the rendered .env.")

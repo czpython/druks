@@ -219,7 +219,7 @@ def _stub(
 
 
 async def _start_to_work_gate(rt, item):
-    workflow_id = await rt.flow.start(repo=item.repo, subject=item)
+    workflow_id = await rt.flow.start(subject=item)
     # The claim rides the dispatcher's transaction, so its row lock releases at
     # the request boundary — which the harness has to stand in for.
     db_session().commit()
@@ -300,10 +300,7 @@ async def test_machine_mode_reaches_work_gate_without_a_plan_park(rt, monkeypatc
     invoked, _ = _stub(monkeypatch, rt, plan_approval=None, plan_gate="machine")
 
     item = _seed_work_item(rt.engine, repo="acme/gizmo")
-    workflow_id = await rt.flow.start(
-        repo="acme/gizmo",
-        subject=item,
-    )
+    workflow_id = await rt.flow.start(subject=item)
 
     parked = await _wait(
         rt.engine,

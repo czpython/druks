@@ -21,12 +21,11 @@ class HarnessConnection(Base, Uuid7Pk):
     harness: Mapped[str]
     account_id: Mapped[str] = mapped_column(ForeignKey("accounts.id", ondelete="RESTRICT"))
     # The email the provider reported at the token exchange (citext — matched
-    # case-insensitively). Cached because Claude states it once and its stored
-    # payload carries no identity at all — without this the connection is
-    # anonymous forever. A connect-time snapshot, not an identifier: it goes
-    # stale if the account is renamed upstream, and refreshes on the next
-    # connect. Null on a row migrated without one.
-    provider_email: Mapped[str | None] = mapped_column(CITEXT)
+    # case-insensitively). Required as a connect-time snapshot because Claude
+    # states it once and its stored payload carries no identity at all. It can
+    # go stale if the account is renamed upstream and refreshes on the next
+    # connect.
+    provider_email: Mapped[str] = mapped_column(CITEXT)
     kind: Mapped[str] = mapped_column(String, default="subscription")
     payload = EncryptedJsonField()
     expires_at: Mapped[datetime | None]

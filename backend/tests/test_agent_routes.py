@@ -1,10 +1,14 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
-from druks.accounts.models import Account
+from druks.accounts.models import Account, PersonalAccessToken
 from druks.api.app import app
-from druks.durable.models import Run
+from druks.contrib.review.workflows import PullRequestReview
+from druks.contrib.ship.models import Project, ProjectRepo, WorkItem
+from druks.contrib.ship.workflows import Build
+from druks.durable.dbos_state import workflow_status
+from druks.durable.models import AgentCall, Run
 from druks.durable.reads import read_transcript_chunk
 from druks.mcp.gateway import services
 from druks.testing import configure_app_for_test, make_settings, seed_call, seed_run
@@ -24,6 +28,7 @@ _MCP_ROUTES = {
     ("get", "/api/agent-calls/{call_id}"): "get_agent_call",
     ("post", "/api/runs/{run_id}/cancel"): "cancel_run",
     ("post", "/api/runs/{run_id}/retry"): "retry_run",
+    ("get", "/api/open-subjects"): "list_open_subjects",
     ("get", "/api/usage/summary"): "get_usage",
 }
 
@@ -67,7 +72,7 @@ def _park(druks_db, note):
     return run
 
 
-def test_openapi_pins_the_six_agent_routes(client: TestClient):
+def test_openapi_pins_platform_and_extension_agent_routes(client: TestClient):
     schema = app.openapi()
     found = {
         (method, path): operation
@@ -75,7 +80,132 @@ def test_openapi_pins_the_six_agent_routes(client: TestClient):
         for method, operation in operations.items()
         if "agent" in operation.get("tags", [])
     }
-    assert {key: op["operationId"] for key, op in found.items()} == _MCP_ROUTES
+    assert {key: found[key]["operationId"] for key in _MCP_ROUTES} == _MCP_ROUTES
+    assert found[("post", "/api/review/reviews")]["operationId"] == "review_request"
+    assert found[("post", "/api/ship/work-items/{ticket}/start")]["operationId"] == "ship_start"
+
+    extensions = {
+        key: {name: value for name, value in found[key].items() if name.startswith("x-")}
+        for key in _MCP_ROUTES
+    }
+    assert extensions == {
+        ("get", "/api/gates/{run_id}"): {},
+        ("post", "/api/gates/{run_id}/answer"): {
+            "x-destructive": False,
+            "x-idempotent": True,
+        },
+        ("get", "/api/agent-calls/{call_id}"): {},
+        ("post", "/api/runs/{run_id}/cancel"): {"x-idempotent": True},
+        ("post", "/api/runs/{run_id}/retry"): {"x-destructive": False},
+        ("get", "/api/open-subjects"): {},
+        ("get", "/api/usage/summary"): {},
+    }
+    assert not {name for name in found[("post", "/api/review/reviews")] if name.startswith("x-")}
+    assert not {
+        name
+        for name in found[("post", "/api/ship/work-items/{ticket}/start")]
+        if name.startswith("x-")
+    }
+
+
+def test_review_request_returns_the_run_id_start_hands_back(
+    client: TestClient, account: Account, monkeypatch
+):
+    project = Project.create(name="Acme")
+    ProjectRepo.create(project_id=project.id, full_name="acme/app")
+    live_run_id = "review-run-id"
+    starts = []
+
+    async def start(cls, **kwargs):
+        starts.append(kwargs)
+        return live_run_id
+
+    monkeypatch.setattr(PullRequestReview, "start", classmethod(start))
+
+    responses = [
+        client.post(
+            "/api/review/reviews",
+            json={"repo": "acme/app", "prNumber": 7},
+        )
+        for _ in range(2)
+    ]
+
+    assert [response.status_code for response in responses] == [202, 202]
+    assert [response.json() for response in responses] == [live_run_id, live_run_id]
+    assert [call["subject"].identity for call in starts] == [
+        {"type": "pull_request", "id": "acme/app#7"},
+        {"type": "pull_request", "id": "acme/app#7"},
+    ]
+    assert {call["account_id"] for call in starts} == {account.id}
+
+
+def test_ship_start_returns_the_live_run_and_attributes_the_pat_account(
+    client: TestClient, account: Account, monkeypatch
+):
+    project = Project.create(name="Acme")
+    ProjectRepo.create(project_id=project.id, full_name="acme/app")
+    item = WorkItem.create(
+        project_id=project.id,
+        source="linear",
+        title="Build the agent route",
+        ticket_key="ENG-831",
+        repo="acme/app",
+    )
+    _, pat_token = PersonalAccessToken.create(account_id=account.id, name="agent")
+    live_run_id = "build-run-id"
+    starts = []
+
+    async def start(cls, **kwargs):
+        # The subject detaches with the request's session; keep its identity.
+        starts.append({**kwargs, "subject": kwargs["subject"].id})
+        return live_run_id
+
+    monkeypatch.setattr(Build, "start", classmethod(start))
+
+    responses = [
+        client.post(
+            f"/api/ship/work-items/{item.ticket_key}/start",
+            headers={"Authorization": f"Bearer {pat_token}"},
+        )
+        for _ in range(2)
+    ]
+
+    assert [response.status_code for response in responses] == [202, 202]
+    assert [response.json() for response in responses] == [live_run_id, live_run_id]
+    assert [call["subject"] for call in starts] == [item.id, item.id]
+    assert {call["account_id"] for call in starts} == {account.id}
+    assert all("repo" not in call for call in starts)
+    assert all("task_owner_email" not in call for call in starts)
+    assert all("task_owner_name" not in call for call in starts)
+
+
+def test_ship_start_rejects_an_unknown_ticket(client: TestClient):
+    response = client.post("/api/ship/work-items/ENG-000/start")
+
+    assert response.status_code == 404
+    assert response.json() == {
+        "error": "HTTP_404",
+        "detail": "no work item for ticket ENG-000",
+    }
+
+
+def test_ship_start_rejects_a_work_item_without_a_registered_repo(client: TestClient):
+    project = Project.create(name="Acme")
+    item = WorkItem.create(
+        project_id=project.id,
+        source="linear",
+        title="Unroutable work",
+        ticket_key="ENG-832",
+        repo="acme/missing",
+    )
+
+    response = client.post(f"/api/ship/work-items/{item.ticket_key}/start")
+
+    assert response.status_code == 409
+    assert response.json() == {
+        "error": "HTTP_409",
+        "detail": "acme/missing is not a registered project repo — add it to a project first",
+    }
 
 
 def test_agent_routes_sit_behind_the_gate(tmp_path, druks_db):
@@ -89,6 +219,7 @@ def test_agent_routes_sit_behind_the_gate(tmp_path, druks_db):
     )
     with TestClient(app) as anonymous:
         assert anonymous.get("/api/gates/x").status_code == 401
+        assert anonymous.get("/api/open-subjects").status_code == 401
         assert anonymous.get("/api/usage/summary").status_code == 401
 
 
@@ -111,6 +242,162 @@ def test_agent_errors_share_one_shape(client: TestClient, druks_db):
     body = stale.json()
     assert body["code"] == "GATE_ROUND_STALE"
     assert body["retryable"] is True
+
+
+def test_missing_agent_call_uses_the_unified_shape(client: TestClient, druks_db):
+    response = client.get("/api/agent-calls/missing")
+
+    assert response.status_code == 404
+    assert response.json() == {
+        "code": "AGENT_CALL_NOT_FOUND",
+        "message": "No agent call missing.",
+        "retryable": False,
+    }
+
+
+def test_list_open_subjects_returns_newest_open_work_and_latest_calls(client: TestClient, druks_db):
+    finished_note = Note.create(body="finished")
+    seed_run(druks_db, kind=Summarize.kind, subject=finished_note, state="finished")
+
+    failed_note = Note.create(body="failed")
+    older = seed_run(druks_db, kind=Summarize.kind, subject=failed_note)
+    older.created_at = datetime(2026, 1, 1, tzinfo=UTC)
+    seed_call(druks_db, older, "older")
+    failure = "discarded failure prefix " + "f" * 512
+    newest = seed_run(
+        druks_db,
+        kind=Summarize.kind,
+        subject=failed_note,
+        state="failed",
+        failure=failure,
+    )
+    newest.created_at = older.created_at + timedelta(days=1)
+    seed_call(druks_db, newest, "first")
+    latest_call = seed_call(druks_db, newest, "latest")
+    subject_label = "long label kept whole " + "l" * 512
+    druks_db.execute(
+        workflow_status.update()
+        .where(workflow_status.c.workflow_uuid == newest.id)
+        .values(
+            attributes={
+                "subject_type": failed_note.subject_type,
+                "subject_id": str(failed_note.id),
+                "subject_label": subject_label,
+            }
+        )
+    )
+
+    callless_note = Note.create(body="callless")
+    seed_run(druks_db, kind="field_notes.audit", subject=callless_note)
+    seed_run(druks_db, kind="usage.scrape")
+
+    response = client.get("/api/open-subjects")
+
+    assert response.status_code == 200
+    body = response.json()
+    subjects = {subject["subjectId"]: subject for subject in body["subjects"]}
+    assert set(subjects) == {str(failed_note.id), str(callless_note.id)}
+    assert subjects[str(failed_note.id)] == {
+        "subjectType": failed_note.subject_type,
+        "subjectId": str(failed_note.id),
+        "subjectLabel": subject_label,
+        "workflows": [
+            {
+                "extension": "field_notes",
+                "state": "failed",
+                "run": newest.id,
+                "latestAgentCall": latest_call.id,
+                "failure": "f" * 512,
+                "createdAt": newest.created_at.isoformat().replace("+00:00", "Z"),
+            }
+        ],
+    }
+    assert subjects[str(callless_note.id)]["workflows"][0]["latestAgentCall"] is None
+
+
+def test_list_open_subjects_keeps_type_and_kind_partitions(client: TestClient, druks_db):
+    typed_note = Note.create(body="two types")
+    note_run = seed_run(druks_db, kind=Summarize.kind, subject=typed_note)
+    ticket_run = seed_run(druks_db, kind=Summarize.kind, subject=typed_note)
+    druks_db.execute(
+        workflow_status.update()
+        .where(workflow_status.c.workflow_uuid == ticket_run.id)
+        .values(
+            attributes={
+                "subject_type": "ticket",
+                "subject_id": str(typed_note.id),
+                "subject_label": "T-1",
+            }
+        )
+    )
+
+    multi_kind_note = Note.create(body="two kinds")
+    scan = seed_run(druks_db, kind="field_notes.scan", subject=multi_kind_note)
+    audit = seed_run(druks_db, kind="field_notes.audit", subject=multi_kind_note)
+
+    terminal_sibling_note = Note.create(body="terminal sibling")
+    failed_scan = seed_run(
+        druks_db,
+        kind="field_notes.scan",
+        subject=terminal_sibling_note,
+        state="failed",
+    )
+    failed_scan.created_at = datetime(2026, 1, 1, tzinfo=UTC)
+    finished_audit = seed_run(
+        druks_db,
+        kind="field_notes.audit",
+        subject=terminal_sibling_note,
+        state="finished",
+    )
+    finished_audit.created_at = failed_scan.created_at + timedelta(days=1)
+    druks_db.flush()
+
+    body = client.get("/api/open-subjects").json()
+
+    assert len(body["subjects"]) == 4
+    run_ids = {workflow["run"] for subject in body["subjects"] for workflow in subject["workflows"]}
+    assert run_ids == {note_run.id, ticket_run.id, scan.id, audit.id, failed_scan.id}
+    assert finished_audit.id not in run_ids
+    multi_kind = next(
+        subject
+        for subject in body["subjects"]
+        if subject["subjectId"] == str(multi_kind_note.id)
+        and subject["subjectType"] == multi_kind_note.subject_type
+    )
+    assert {workflow["run"] for workflow in multi_kind["workflows"]} == {scan.id, audit.id}
+    shared_id_types = {
+        subject["subjectType"]
+        for subject in body["subjects"]
+        if subject["subjectId"] == str(typed_note.id)
+    }
+    assert shared_id_types == {typed_note.subject_type, "ticket"}
+
+
+def test_list_open_subjects_excludes_historical_runs(client: TestClient, druks_db):
+    note = Note.create(body="one open subject")
+    start = datetime(2026, 1, 1, tzinfo=UTC)
+    for number in range(10):
+        historical = seed_run(druks_db, kind=Summarize.kind, subject=note, state="finished")
+        historical.created_at = start + timedelta(seconds=number)
+    current = seed_run(druks_db, kind=Summarize.kind, subject=note)
+    current.created_at = start + timedelta(seconds=10)
+    druks_db.flush()
+
+    body = client.get("/api/open-subjects").json()
+
+    assert [
+        workflow["run"] for subject in body["subjects"] for workflow in subject["workflows"]
+    ] == [current.id]
+
+
+def test_list_open_subjects_caps_the_workflows(client: TestClient, druks_db):
+    for number in range(51):
+        note = Note.create(body=f"open {number}")
+        seed_run(druks_db, kind=Summarize.kind, subject=note)
+
+    body = client.get("/api/open-subjects").json()
+
+    assert len(body["subjects"]) == 50
 
 
 def test_get_gate_then_answer_roundtrip(client: TestClient, druks_db, resume_spy):
@@ -179,7 +466,7 @@ def test_cancel_run_route(client: TestClient, druks_db):
 
     cancelled = client.post(f"/api/runs/{run.id}/cancel", json={"reason": "wrong branch"})
     assert cancelled.status_code == 200
-    assert cancelled.json() == {"runId": run.id, "result": "cancelled"}
+    assert cancelled.json() == {"run": run.id, "result": "cancelled"}
 
     druks_db.expire_all()
     run = druks_db.get(type(run), run.id)
@@ -245,8 +532,6 @@ def test_resume_route_contract_is_preserved(client: TestClient, druks_db, resume
 
 
 def test_usage_agent_route_matches_the_service(client: TestClient, druks_db, account):
-    from druks.durable.models import AgentCall
-
     note = Note.create(body="usage route")
     run = seed_run(
         druks_db,

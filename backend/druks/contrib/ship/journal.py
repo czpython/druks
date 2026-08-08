@@ -4,6 +4,7 @@ from druks.contrib.ship.contracts import (
     EvaluationOutput,
     ImplementationOutput,
     PlanData,
+    ReviewOutput,
     ReviewWork,
     TriageOutput,
 )
@@ -42,6 +43,10 @@ class BuildJournal(Journal):
     @property
     def evaluations(self) -> list[EvaluationOutput]:
         return self.filter(EvaluationOutput)
+
+    @property
+    def plan_reviews(self) -> list[ReviewOutput]:
+        return self.filter(ReviewOutput)
 
     @property
     def assignee_github_login(self) -> str | None:
