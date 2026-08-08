@@ -16,10 +16,36 @@ router = APIRouter(prefix="/reviews")
     tags=["agent"],
     response_model=ReviewRequestedResponse,
     response_model_by_alias=True,
+    responses={
+        404: {
+            "description": "The repository is not registered.",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "error": "HTTP_404",
+                        "detail": (
+                            "owner/name is not a registered project repo — "
+                            "add it to a project first"
+                        ),
+                    }
+                }
+            },
+        }
+    },
 )
 async def request_review(
-    repo: str = Body(..., embed=True),
-    pr_number: int = Body(..., embed=True, alias="prNumber", gt=0),
+    repo: str = Body(
+        ...,
+        embed=True,
+        description="A registered project repository in owner/name form.",
+    ),
+    pr_number: int = Body(
+        ...,
+        embed=True,
+        alias="prNumber",
+        gt=0,
+        description="The pull request number in that repository.",
+    ),
     account: Account = Depends(current_account),
 ) -> ReviewRequestedResponse:
     """Start a pull request review. The returned run feeds the run tools and

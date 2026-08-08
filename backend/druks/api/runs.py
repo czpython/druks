@@ -1,8 +1,14 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Body, HTTPException, status
+from fastapi import APIRouter, Body, HTTPException, Path, status
 
-from druks.api.exceptions import RunNotActive, RunNotFailed, RunNotFound, SubjectBusy
+from druks.api.exceptions import (
+    RunNotActive,
+    RunNotFailed,
+    RunNotFound,
+    SubjectBusy,
+    agent_error_responses,
+)
 from druks.api.schemas import CancelRunResponse, ResumeRequest, RetryRunResponse
 from druks.durable.enums import RunState
 from druks.durable.models import Run
@@ -41,9 +47,19 @@ async def resume_run(run_id: str, body: ResumeRequest) -> None:
     openapi_extra={"x-idempotent": True},
     response_model=CancelRunResponse,
     response_model_by_alias=True,
+    responses=agent_error_responses(RunNotFound("run-123"), RunNotActive("run-123")),
 )
 async def cancel_run(
-    run_id: str, reason: Annotated[str, Body(embed=True, min_length=1, max_length=500)]
+    run_id: Annotated[str, Path(description="The active run's id, run in list_open_subjects.")],
+    reason: Annotated[
+        str,
+        Body(
+            embed=True,
+            min_length=1,
+            max_length=500,
+            description="The failure reason to record on the cancelled run.",
+        ),
+    ],
 ) -> CancelRunResponse:
     """Cancel an active run, recording the reason as its failure; a repeat
     cancel reports already_cancelled."""
@@ -65,8 +81,13 @@ async def cancel_run(
     openapi_extra={"x-destructive": False},
     response_model=RetryRunResponse,
     response_model_by_alias=True,
+    responses=agent_error_responses(
+        RunNotFound("run-123"), RunNotFailed("run-123"), SubjectBusy("run-456")
+    ),
 )
-async def retry_run(run_id: str) -> RetryRunResponse:
+async def retry_run(
+    run_id: Annotated[str, Path(description="The failed run's id, run in list_open_subjects.")],
+) -> RetryRunResponse:
     """Rerun a failed run from the step that killed it, reusing every
     completed step."""
     run = Run.get(run_id)
