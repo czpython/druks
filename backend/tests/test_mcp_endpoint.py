@@ -192,7 +192,7 @@ async def test_tools_list_pins_platform_and_extension_tools(app, pat_token):
         assert extension_tool.description
 
     # Derived schemas keep the routes' own shapes and constraints.
-    assert tools["answer_gate"].inputSchema["required"] == ["run_id", "parkedAt", "control"]
+    assert tools["answer_gate"].inputSchema["required"] == ["run", "parkedAt", "control"]
     assert tools["answer_gate"].inputSchema["properties"]["control"]["description"] == (
         "The decision to take: one of the ids the ask offers as controls, e.g. approve."
     )
@@ -276,14 +276,14 @@ async def test_gate_cycle_reads_answers_and_reports_stale_rounds(
     druks_db.flush()
 
     async with live(app), _client(app, pat_token) as client:
-        gate = (await client.call_tool("get_gate", {"run_id": run.id})).structured_content
+        gate = (await client.call_tool("get_gate", {"run": run.id})).structured_content
         assert gate["run"] == run.id
         assert gate["ask"]["controls"] == ["approve", "request_changes"]
 
         stale = await _call_error(
             client,
             "answer_gate",
-            {"run_id": run.id, "parkedAt": "2020-01-01T00:00:00+00:00", "control": "approve"},
+            {"run": run.id, "parkedAt": "2020-01-01T00:00:00+00:00", "control": "approve"},
         )
         assert stale["code"] == "GATE_ROUND_STALE"
         assert stale["retryable"] is True
@@ -291,7 +291,7 @@ async def test_gate_cycle_reads_answers_and_reports_stale_rounds(
         answered = (
             await client.call_tool(
                 "answer_gate",
-                {"run_id": run.id, "parkedAt": gate["parkedAt"], "control": "approve"},
+                {"run": run.id, "parkedAt": gate["parkedAt"], "control": "approve"},
             )
         ).structured_content
         assert answered["result"] == "answered"
@@ -302,7 +302,7 @@ async def test_gate_cycle_reads_answers_and_reports_stale_rounds(
         repeat = (
             await client.call_tool(
                 "answer_gate",
-                {"run_id": run.id, "parkedAt": gate["parkedAt"], "control": "approve"},
+                {"run": run.id, "parkedAt": gate["parkedAt"], "control": "approve"},
             )
         ).structured_content
         assert repeat["result"] == "already_answered"
@@ -310,7 +310,7 @@ async def test_gate_cycle_reads_answers_and_reports_stale_rounds(
         missing = await _call_error(
             client,
             "answer_gate",
-            {"run_id": "no-such-run", "parkedAt": gate["parkedAt"], "control": "approve"},
+            {"run": "no-such-run", "parkedAt": gate["parkedAt"], "control": "approve"},
         )
         assert missing["code"] == "RUN_NOT_FOUND"
 
@@ -324,7 +324,7 @@ async def test_gate_cycle_reads_answers_and_reports_stale_rounds(
         )
         external.input_requested_at = datetime.now(UTC)
         druks_db.flush()
-        unanswerable = await _call_error(client, "get_gate", {"run_id": external.id})
+        unanswerable = await _call_error(client, "get_gate", {"run": external.id})
     assert unanswerable["code"] == "GATE_NOT_ANSWERABLE"
 
 
@@ -340,14 +340,14 @@ async def test_get_agent_call_serves_bounded_tails(app, pat_token, druks_db):
     )
 
     async with live(app), _client(app, pat_token) as client:
-        detail = (await client.call_tool("get_agent_call", {"call_id": call.id})).structured_content
+        detail = (await client.call_tool("get_agent_call", {"call": call.id})).structured_content
         assert detail["run"] == call.run_id
         assert len(detail["transcript"].encode()) <= 8 * 1024
         assert len(detail["stderr"].encode()) <= 4 * 1024
         assert len(detail["artifact"]["content"].encode()) <= 4 * 1024
         assert _wire_size(detail) <= 20 * 1024
 
-        error = await _call_error(client, "get_agent_call", {"call_id": "missing"})
+        error = await _call_error(client, "get_agent_call", {"call": "missing"})
     assert error == {
         "code": "AGENT_CALL_NOT_FOUND",
         "message": "No agent call missing.",
@@ -371,24 +371,22 @@ async def test_cancel_run_is_destructive_but_repeatable(app, pat_token, druks_db
 
     async with live(app), _client(app, pat_token) as client:
         cancelled = (
-            await client.call_tool("cancel_run", {"run_id": active.id, "reason": "wrong branch"})
+            await client.call_tool("cancel_run", {"run": active.id, "reason": "wrong branch"})
         ).structured_content
         assert cancelled == {"run": active.id, "result": "cancelled"}
         assert cancels == [{"id": active.id, "failure": "wrong branch"}]
 
         repeat = (
-            await client.call_tool("cancel_run", {"run_id": gone.id, "reason": "again"})
+            await client.call_tool("cancel_run", {"run": gone.id, "reason": "again"})
         ).structured_content
         assert repeat["result"] == "already_cancelled"
 
-        terminal = await _call_error(
-            client, "cancel_run", {"run_id": done.id, "reason": "too late"}
-        )
+        terminal = await _call_error(client, "cancel_run", {"run": done.id, "reason": "too late"})
         assert terminal["code"] == "RUN_NOT_ACTIVE"
 
         # A blank reason dies at route validation (422), before the service.
         blank = await client.call_tool(
-            "cancel_run", {"run_id": active.id, "reason": ""}, raise_on_error=False
+            "cancel_run", {"run": active.id, "reason": ""}, raise_on_error=False
         )
     assert blank.is_error
     assert cancels == [{"id": active.id, "failure": "wrong branch"}]

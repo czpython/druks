@@ -14,7 +14,7 @@ router = APIRouter(prefix="/api", tags=["agent"])
 
 
 @router.get(
-    "/gates/{run_id}",
+    "/gates/{run}",
     operation_id="get_gate",
     response_model=schemas.GateResponse,
     response_model_by_alias=True,
@@ -25,15 +25,15 @@ router = APIRouter(prefix="/api", tags=["agent"])
     ),
 )
 async def get_gate(
-    run_id: Annotated[str, Path(description="The parked run's id, run in list_open_subjects.")],
+    run: Annotated[str, Path(description="The parked run, from list_open_subjects.")],
 ) -> schemas.GateResponse:
     """A parked run's open gate: the ask, a bounded artifact chunk, and
     parkedAt — echo parkedAt unchanged to answer_gate."""
-    return services.get_gate(run_id)
+    return services.get_gate(run)
 
 
 @router.post(
-    "/gates/{run_id}/answer",
+    "/gates/{run}/answer",
     operation_id="answer_gate",
     openapi_extra={"x-destructive": False, "x-idempotent": True},
     response_model=schemas.GateAnswerResponse,
@@ -47,14 +47,14 @@ async def get_gate(
     ),
 )
 async def answer_gate(
-    run_id: Annotated[str, Path(description="The parked run's id from get_gate.")],
+    run: Annotated[str, Path(description="The parked run from get_gate.")],
     body: schemas.AnswerGateRequest,
 ) -> schemas.GateAnswerResponse:
     """Answer the gate get_gate showed, resuming the run. parkedAt must echo
     get_gate's value unchanged; a repeat answer to the same parkedAt reports
     already_answered."""
     return await services.answer_gate(
-        run_id,
+        run,
         parked_at=body.parked_at,
         control=body.control,
         answers=body.answers,
@@ -63,20 +63,18 @@ async def answer_gate(
 
 
 @router.get(
-    "/agent-calls/{call_id}",
+    "/agent-calls/{call}",
     operation_id="get_agent_call",
     response_model=schemas.AgentCallDetailResponse,
     response_model_by_alias=True,
     responses=agent_error_responses(gate_errors.AgentCallNotFound("call-123")),
 )
 async def get_agent_call(
-    call_id: Annotated[
-        str, Path(description="An agent call id, latestAgentCall in list_open_subjects.")
-    ],
+    call: Annotated[str, Path(description="An agent call, latestAgentCall in list_open_subjects.")],
 ) -> schemas.AgentCallDetailResponse:
     """One agent call's metadata with bounded transcript and stderr tails and
     an artifact chunk."""
-    return services.get_agent_call(call_id)
+    return services.get_agent_call(call)
 
 
 @router.get(
