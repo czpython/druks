@@ -4,6 +4,7 @@ from druks.accounts.models import Account
 from druks.api.exceptions import RunNotFound
 from druks.core.utils.time import operator_local_day
 from druks.database import db_session
+from druks.durable import exceptions as durable_exceptions
 from druks.durable.enums import RunState
 from druks.durable.models import AgentCall, Artifact, Run
 from druks.durable.reads import read_slice
@@ -71,9 +72,10 @@ async def answer_gate(
 
 
 def get_agent_call(call_id: str) -> schemas.AgentCallDetailResponse:
-    call = AgentCall.get(call_id)
-    if not call:
-        raise exceptions.AgentCallNotFound(call_id)
+    try:
+        call = AgentCall.get(call_id)
+    except durable_exceptions.AgentCallNotFound as error:
+        raise exceptions.AgentCallNotFound(call_id) from error
     layout = call.artifact_layout
     return schemas.AgentCallDetailResponse(
         run_id=call.run_id,
@@ -89,8 +91,11 @@ def get_agent_call(call_id: str) -> schemas.AgentCallDetailResponse:
 def _artifact_content(artifact: Artifact | None) -> schemas.ArtifactContent | None:
     if not artifact:
         return
-    call = AgentCall.get(artifact.agent_call_id)
-    path = call.get_file_path(artifact.path) if call else None
+    try:
+        call = AgentCall.get(artifact.agent_call_id)
+    except durable_exceptions.AgentCallNotFound:
+        return
+    path = call.get_file_path(artifact.path)
     if not path:
         return
     return schemas.ArtifactContent(

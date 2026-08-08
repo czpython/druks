@@ -6,6 +6,7 @@ import pytest
 from conftest import make_agent_result
 from druks import agents
 from druks.durable import AgentCall, WorkflowError
+from druks.durable import exceptions as durable_exceptions
 from druks.usage.models import UsageScrape
 
 
@@ -259,6 +260,14 @@ async def test_running_call_visible_then_finished(druks_db, tmp_path, monkeypatc
     assert call.status == "succeeded"
     assert call.sandbox_host_id == "host-test"
     assert call.finished_at is not None
+
+
+def test_agent_call_get_unknown_id_raises(druks_db):
+    with pytest.raises(
+        durable_exceptions.AgentCallNotFound,
+        match=r"No agent call no-such-call\.",
+    ):
+        AgentCall.get("no-such-call")
 
 
 async def test_provisioning_failure_records_no_call(druks_db, tmp_path, monkeypatch, current_run):

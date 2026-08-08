@@ -15,6 +15,11 @@ class WorkflowError(Exception):
     pass
 
 
+class AgentCallNotFound(Exception):
+    def __init__(self, call_id: str) -> None:
+        super().__init__(f"No agent call {call_id}.")
+
+
 class GateTimeout(FatalError):
     code = "gate_timeout"
 

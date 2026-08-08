@@ -332,6 +332,7 @@ class Extension:
         from druks.api.dependencies import EngineDep
         from druks.durable import reads
         from druks.durable.enums import AgentCallStatus
+        from druks.durable.exceptions import AgentCallNotFound
         from druks.durable.live import SSE_HEADERS
         from druks.durable.models import AgentCall
         from druks.durable.schemas import AgentCallFiles, TranscriptChunk
@@ -358,9 +359,10 @@ class Extension:
                 raise HTTPException(
                     status.HTTP_400_BAD_REQUEST, f"limit must be in 1..{max_limit}."
                 )
-            call = AgentCall.get(call_id)
-            if not call:
-                raise HTTPException(status.HTTP_404_NOT_FOUND, "Run not found.")
+            try:
+                call = AgentCall.get(call_id)
+            except AgentCallNotFound as error:
+                raise HTTPException(status.HTTP_404_NOT_FOUND, "Run not found.") from error
             if call.live_status == AgentCallStatus.RUNNING:
                 response.headers["Cache-Control"] = "no-store"
             else:
@@ -393,9 +395,10 @@ class Extension:
             file_name: str,
             disposition: Literal["inline", "attachment"] = "inline",
         ) -> FileResponse:
-            call = AgentCall.get(call_id)
-            if not call:
-                raise HTTPException(status.HTTP_404_NOT_FOUND, "Agent call not found.")
+            try:
+                call = AgentCall.get(call_id)
+            except AgentCallNotFound as error:
+                raise HTTPException(status.HTTP_404_NOT_FOUND, "Agent call not found.") from error
             resolved = call.get_file_path(file_name)
             if not resolved:
                 raise HTTPException(status.HTTP_404_NOT_FOUND, "File not found for this call.")
