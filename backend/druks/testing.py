@@ -319,7 +319,7 @@ def seed_run(
     session.flush()
     identity = None
     if subject:
-        identity = subject.identity
+        identity = {**subject.identity, "label": subject.label}
     seed_dbos_status(session, run.id, state, subject=identity)
     session.expire(run, ["state", "updated_at"])
     return run
@@ -344,7 +344,13 @@ def seed_dbos_status(
     }[state]
     attributes = None
     if subject:
-        attributes = {"subject_type": subject["type"], "subject_id": str(subject["id"])}
+        attributes = {
+            "subject_type": subject["type"],
+            "subject_id": str(subject["id"]),
+            # start() always stamps a label; an identity dict without one labels
+            # itself by its id — Subject.label's own rule.
+            "subject_label": subject.get("label") or str(subject["id"]),
+        }
     session.execute(
         workflow_status.insert().values(
             workflow_uuid=run_id,

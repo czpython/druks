@@ -36,11 +36,12 @@ _WIRE_HEADERS = {
     "Content-Type": "application/json",
 }
 
-# tools/list order is route declaration order: the runs router mounts before
-# the gateway router.
+# tools/list order is route declaration order: the subjects router mounts
+# between the runs and gateway routers.
 _TOOL_NAMES = [
     "cancel_run",
     "retry_run",
+    "list_open_subjects",
     "get_gate",
     "answer_gate",
     "get_agent_call",
@@ -164,13 +165,14 @@ async def test_mcp_subpaths_never_reach_the_spa(app):
             assert stray.headers["content-type"].startswith("application/json")
 
 
-async def test_tools_list_pins_the_six_derived_from_agent_routes(app, pat_token):
+async def test_tools_list_pins_the_seven_derived_from_agent_routes(app, pat_token):
     async with live(app), _client(app, pat_token) as client:
+        assert "list_open_subjects" in (client.initialize_result.instructions or "")
         assert "parkedAt" in (client.initialize_result.instructions or "")
         tools = {tool.name: tool for tool in await client.list_tools()}
 
     assert list(tools) == _TOOL_NAMES
-    read_only = {"get_gate", "get_agent_call", "get_usage"}
+    read_only = {"list_open_subjects", "get_gate", "get_agent_call", "get_usage"}
     for name, tool in tools.items():
         annotations = tool.annotations
         assert annotations.readOnlyHint == (name in read_only)
@@ -183,6 +185,7 @@ async def test_tools_list_pins_the_six_derived_from_agent_routes(app, pat_token)
     assert tools["answer_gate"].inputSchema["required"] == ["run_id", "parkedAt", "control"]
     reason = tools["cancel_run"].inputSchema["properties"]["reason"]
     assert (reason["minLength"], reason["maxLength"]) == (1, 500)
+    assert not tools["list_open_subjects"].inputSchema.get("required")
     assert not tools["get_usage"].inputSchema.get("required")
 
 
