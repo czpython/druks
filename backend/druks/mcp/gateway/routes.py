@@ -1,7 +1,11 @@
-from fastapi import APIRouter, Depends
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, Path
 
 from druks.accounts.dependencies import current_account
 from druks.accounts.models import Account
+from druks.api.exceptions import RunNotFound, agent_error_responses
+from druks.mcp.gateway import exceptions as gate_errors
 from druks.mcp.gateway import schemas, services
 
 # Docstrings here are the derived tool descriptions and operation_id is the
@@ -14,8 +18,15 @@ router = APIRouter(prefix="/api", tags=["agent"])
     operation_id="get_gate",
     response_model=schemas.GateResponse,
     response_model_by_alias=True,
+    responses=agent_error_responses(
+        RunNotFound("run-123"),
+        gate_errors.GateNotOpen("run-123"),
+        gate_errors.GateNotAnswerable("run-123"),
+    ),
 )
-async def get_gate(run_id: str) -> schemas.GateResponse:
+async def get_gate(
+    run_id: Annotated[str, Path(description="The parked run's id, run in list_open_subjects.")],
+) -> schemas.GateResponse:
     """A parked run's open gate: the ask, a bounded artifact chunk, and
     parkedAt — echo parkedAt unchanged to answer_gate."""
     return services.get_gate(run_id)
@@ -24,10 +35,21 @@ async def get_gate(run_id: str) -> schemas.GateResponse:
 @router.post(
     "/gates/{run_id}/answer",
     operation_id="answer_gate",
+    openapi_extra={"x-destructive": False, "x-idempotent": True},
     response_model=schemas.GateAnswerResponse,
     response_model_by_alias=True,
+    responses=agent_error_responses(
+        gate_errors.InvalidGateAnswer("unknown control 'merge'"),
+        RunNotFound("run-123"),
+        gate_errors.GateRoundStale("run-123"),
+        gate_errors.GateNotOpen("run-123"),
+        gate_errors.GateNotAnswerable("run-123"),
+    ),
 )
-async def answer_gate(run_id: str, body: schemas.AnswerGateRequest) -> schemas.GateAnswerResponse:
+async def answer_gate(
+    run_id: Annotated[str, Path(description="The parked run's id from get_gate.")],
+    body: schemas.AnswerGateRequest,
+) -> schemas.GateAnswerResponse:
     """Answer the gate get_gate showed, resuming the run. parkedAt must echo
     get_gate's value unchanged; a repeat answer to the same parkedAt reports
     already_answered."""
@@ -45,8 +67,13 @@ async def answer_gate(run_id: str, body: schemas.AnswerGateRequest) -> schemas.G
     operation_id="get_agent_call",
     response_model=schemas.AgentCallDetailResponse,
     response_model_by_alias=True,
+    responses=agent_error_responses(gate_errors.AgentCallNotFound("call-123")),
 )
-async def get_agent_call(call_id: str) -> schemas.AgentCallDetailResponse:
+async def get_agent_call(
+    call_id: Annotated[
+        str, Path(description="An agent call id, latestAgentCall in list_open_subjects.")
+    ],
+) -> schemas.AgentCallDetailResponse:
     """One agent call's metadata with bounded transcript and stderr tails and
     an artifact chunk."""
     return services.get_agent_call(call_id)

@@ -9,8 +9,11 @@ from conftest import finish_agent_run, make_test_note, seed_note_agent_run, seed
 from druks.accounts.models import Account, PersonalAccessToken
 from druks.api.app import mcp_app
 from druks.durable.models import Artifact, Run
+from druks.mcp.app import create_mcp_app
+from druks.mcp.exceptions import InvalidAgentToolError
 from druks.testing import configure_app_for_test, make_settings
 from druks.usage.models import UsageScrape
+from fastapi import APIRouter, FastAPI
 from fastapi.testclient import TestClient
 from fastmcp.client import Client
 from fastmcp.client.transports import StreamableHttpTransport
@@ -36,11 +39,12 @@ _WIRE_HEADERS = {
     "Content-Type": "application/json",
 }
 
-# tools/list order is route declaration order: the runs router mounts before
-# the gateway router.
+# tools/list order is route declaration order: the subjects router mounts
+# between the runs and gateway routers.
 _TOOL_NAMES = [
     "cancel_run",
     "retry_run",
+    "list_open_subjects",
     "get_gate",
     "answer_gate",
     "get_agent_call",
@@ -111,19 +115,6 @@ def _wire_size(structured: dict) -> int:
     return len(json.dumps(structured, separators=(",", ":"), default=str).encode())
 
 
-def _park(druks_db, note):
-    run = seed_note_run(
-        druks_db,
-        note=note,
-        state="parked",
-        input_gate="review",
-        input_request=dict(_IN_APP_ASK),
-    )
-    run.input_requested_at = datetime.now(UTC)
-    druks_db.flush()
-    return run
-
-
 async def test_mcp_rejects_missing_and_dead_tokens(app, account, druks_db):
     row, token = PersonalAccessToken.create(account_id=account.id, name="agent")
     async with httpx.AsyncClient(
@@ -164,26 +155,83 @@ async def test_mcp_subpaths_never_reach_the_spa(app):
             assert stray.headers["content-type"].startswith("application/json")
 
 
-async def test_tools_list_pins_the_six_derived_from_agent_routes(app, pat_token):
+async def test_tools_list_pins_platform_and_extension_tools(app, pat_token):
     async with live(app), _client(app, pat_token) as client:
+        assert "list_open_subjects" in (client.initialize_result.instructions or "")
         assert "parkedAt" in (client.initialize_result.instructions or "")
         tools = {tool.name: tool for tool in await client.list_tools()}
 
-    assert list(tools) == _TOOL_NAMES
-    read_only = {"get_gate", "get_agent_call", "get_usage"}
-    for name, tool in tools.items():
-        annotations = tool.annotations
-        assert annotations.readOnlyHint == (name in read_only)
-        assert annotations.destructiveHint == (None if name in read_only else name == "cancel_run")
-        # A repeat retry answers SUBJECT_BUSY, so it alone is not idempotent.
-        assert annotations.idempotentHint == (None if name in read_only else name != "retry_run")
-        assert tool.description, name
+    assert list(tools)[:7] == _TOOL_NAMES
+    assert list(tools)[7:] == ["review_request", "ship_start"]
+
+    expected_annotations = {
+        "cancel_run": (False, True, True),
+        "retry_run": (False, False, False),
+        "list_open_subjects": (True, False, False),
+        "get_gate": (True, False, False),
+        "answer_gate": (False, False, True),
+        "get_agent_call": (True, False, False),
+        "get_usage": (True, False, False),
+    }
+    for name, expected in expected_annotations.items():
+        annotations = tools[name].annotations
+        assert (
+            annotations.readOnlyHint,
+            annotations.destructiveHint,
+            annotations.idempotentHint,
+        ) == expected
+        assert tools[name].description
+
+    for name in ("review_request", "ship_start"):
+        extension_tool = tools[name]
+        assert (
+            extension_tool.annotations.readOnlyHint,
+            extension_tool.annotations.destructiveHint,
+            extension_tool.annotations.idempotentHint,
+        ) == (False, True, False)
+        assert extension_tool.description
 
     # Derived schemas keep the routes' own shapes and constraints.
     assert tools["answer_gate"].inputSchema["required"] == ["run_id", "parkedAt", "control"]
+    assert tools["answer_gate"].inputSchema["properties"]["control"]["description"] == (
+        "The decision to take: one of the ids the ask offers as controls, e.g. approve."
+    )
     reason = tools["cancel_run"].inputSchema["properties"]["reason"]
     assert (reason["minLength"], reason["maxLength"]) == (1, 500)
+    assert tools["ship_start"].inputSchema["properties"]["ticket"]["description"] == (
+        "The work item's ticket key, e.g. ENG-831 — its subjectLabel in list_open_subjects."
+    )
+    assert not tools["list_open_subjects"].inputSchema.get("required")
     assert not tools["get_usage"].inputSchema.get("required")
+
+
+@pytest.mark.parametrize(
+    ("operation_id", "docstring", "message"),
+    [
+        (None, "Start a review.", "explicit operation_id"),
+        ("start_review", "Start a review.", "must start with 'review_'"),
+        ("review_start", None, "docstring"),
+    ],
+)
+def test_invalid_extension_agent_route_stops_boot(operation_id, docstring, message):
+    api = FastAPI()
+    router = APIRouter()
+
+    async def endpoint():
+        pass
+
+    endpoint.__doc__ = docstring
+    router.add_api_route(
+        "/reviews",
+        endpoint,
+        methods=["POST"],
+        operation_id=operation_id,
+        tags=["agent"],
+    )
+    api.include_router(router, prefix="/api/review", tags=["review"])
+
+    with pytest.raises(InvalidAgentToolError, match=message):
+        create_mcp_app(api)
 
 
 async def test_claims_resolve_the_calling_account(app, druks_db):
@@ -217,11 +265,19 @@ async def test_gate_cycle_reads_answers_and_reports_stale_rounds(
     app, pat_token, druks_db, resume_spy
 ):
     item = make_test_note()
-    run = _park(druks_db, item)
+    run = seed_note_run(
+        druks_db,
+        note=item,
+        state="parked",
+        input_gate="review",
+        input_request=dict(_IN_APP_ASK),
+    )
+    run.input_requested_at = datetime.now(UTC)
+    druks_db.flush()
 
     async with live(app), _client(app, pat_token) as client:
         gate = (await client.call_tool("get_gate", {"run_id": run.id})).structured_content
-        assert gate["runId"] == run.id
+        assert gate["run"] == run.id
         assert gate["ask"]["controls"] == ["approve", "request_changes"]
 
         stale = await _call_error(
@@ -285,14 +341,18 @@ async def test_get_agent_call_serves_bounded_tails(app, pat_token, druks_db):
 
     async with live(app), _client(app, pat_token) as client:
         detail = (await client.call_tool("get_agent_call", {"call_id": call.id})).structured_content
-        assert detail["runId"] == call.run_id
+        assert detail["run"] == call.run_id
         assert len(detail["transcript"].encode()) <= 8 * 1024
         assert len(detail["stderr"].encode()) <= 4 * 1024
         assert len(detail["artifact"]["content"].encode()) <= 4 * 1024
         assert _wire_size(detail) <= 20 * 1024
 
-        error = await _call_error(client, "get_agent_call", {"call_id": "no-such-call"})
-    assert error["code"] == "AGENT_CALL_NOT_FOUND"
+        error = await _call_error(client, "get_agent_call", {"call_id": "missing"})
+    assert error == {
+        "code": "AGENT_CALL_NOT_FOUND",
+        "message": "No agent call missing.",
+        "retryable": False,
+    }
 
 
 async def test_cancel_run_is_destructive_but_repeatable(app, pat_token, druks_db, monkeypatch):
@@ -313,7 +373,7 @@ async def test_cancel_run_is_destructive_but_repeatable(app, pat_token, druks_db
         cancelled = (
             await client.call_tool("cancel_run", {"run_id": active.id, "reason": "wrong branch"})
         ).structured_content
-        assert cancelled == {"runId": active.id, "result": "cancelled"}
+        assert cancelled == {"run": active.id, "result": "cancelled"}
         assert cancels == [{"id": active.id, "failure": "wrong branch"}]
 
         repeat = (

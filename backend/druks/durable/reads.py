@@ -9,6 +9,7 @@ from sqlalchemy import Engine
 
 from druks.database import session_scope
 from druks.durable.activity import get_run_phase
+from druks.durable.exceptions import AgentCallNotFound
 from druks.durable.live import keepalive_comment, serialize_model_event
 
 from .enums import RunState
@@ -33,10 +34,8 @@ _TRANSCRIPT_KEEPALIVE_SECONDS = 15.0
 _TERMINAL_CALL_STATES = {"succeeded", "failed", "abandoned"}
 
 
-def get_agent_call_files(call_id: str) -> AgentCallFiles | None:
+def get_agent_call_files(call_id: str) -> AgentCallFiles:
     call = AgentCall.get(call_id)
-    if not call:
-        return
     return AgentCallFiles.from_call(call, Artifact.get_for_call(call.id))
 
 
@@ -44,7 +43,7 @@ def list_subject_timeline(subject_type: str, subject_id: str) -> list[RunRespons
     # The subject's whole timeline: every run about it, oldest first, each
     # with its agent calls.
     runs = Run.list_for_subject(subject_type, subject_id)
-    return _timeline(runs, AgentCall.by_run([run.id for run in runs]))
+    return _timeline(runs, AgentCall.get_by_run([run.id for run in runs]))
 
 
 def get_subject_status(
@@ -71,7 +70,7 @@ def get_subject_response(
     activity: SubjectActivity | None = None,
 ) -> SubjectResponse:
     runs = Run.list_for_subject(subject_type, subject_id)
-    calls_by_run = AgentCall.by_run([run.id for run in runs])
+    calls_by_run = AgentCall.get_by_run([run.id for run in runs])
     latest = Run.get_latest_for_subject(subject_type, subject_id)
     return SubjectResponse(
         summary=summary,
@@ -82,7 +81,7 @@ def get_subject_response(
 
 
 def _timeline(runs: list[Run], calls_by_run: dict[str, list[AgentCall]]) -> list[RunResponse]:
-    # by_run keys every run id, so the lookup is total.
+    # get_by_run keys every run id, so the lookup is total.
     ordered = sorted(runs, key=lambda run: (run.created_at, run.id))
     return [
         RunResponse.from_run(
@@ -196,14 +195,12 @@ async def stream_transcript(
     last_keepalive = 0.0
     while True:
         with session_scope(engine):
-            call = AgentCall.get(call_id)
-            path = call.get_stream_path(stream) if call else None
-            summary = AgentCallResponse.model_validate(call) if call else None
-
-        if not summary:
-            # Unknown (or deleted) call: nothing will ever arrive — close the
-            # stream instead of keepaliving forever.
-            return
+            try:
+                call = AgentCall.get(call_id)
+            except AgentCallNotFound:
+                return
+            path = call.get_stream_path(stream)
+            summary = AgentCallResponse.model_validate(call)
 
         if path and path.exists():
             size = path.stat().st_size

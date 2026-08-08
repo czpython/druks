@@ -1,11 +1,11 @@
 # Connect your agent
 
 Druks serves an MCP endpoint at `/mcp` (streamable HTTP, stateless). Its
-tools are derived from the agent-tagged API routes — the same five operations,
-one contract: `get_gate`, `answer_gate`, `get_agent_call`, `cancel_run`,
-`get_usage` — authenticated per request with a personal access token sent
-as `Authorization: Bearer <token>`. Mint and revoke tokens in **Settings →
-Agent access**; see
+tools are derived from the agent-tagged API routes — the same eight operations,
+one contract: `list_open_subjects`, `get_gate`, `answer_gate`, `get_agent_call`,
+`cancel_run`, `retry_run`, `get_usage`, `review_request` — authenticated per
+request with a personal access token sent as `Authorization: Bearer <token>`.
+Mint and revoke tokens in **Settings → Tokens**; see
 [personal access tokens](configuration.md#personal-access-tokens) for
 lifecycle and compromise handling.
 
@@ -37,17 +37,20 @@ bearer_token_env_var = "DRUKS_PAT"
 
 ## What to expect
 
-- **Polling only (v1).** There is no push channel and no discovery tool yet
-  — the parked run's id arrives through the dashboard or the park
-  notification. Call `get_gate` before `answer_gate` and echo its `parkedAt`
+- **Discovery first.** There is no push channel. Call `list_open_subjects`
+  first and poll it about every 30 seconds while waiting. Each workflow's `run` feeds
+  the gate and run tools, and `latestAgentCall` feeds `get_agent_call`;
+  `review_request` starts or reuses a review run that enters the same flow.
+  Call `get_gate` before `answer_gate` and echo its `parkedAt`
   value unchanged; it names the exact question being answered, and a repeat
   answer to the same `parkedAt` reports `already_answered` instead of
   failing.
 - **Bounded responses.** Tool reads are windowed (call detail: 8KiB
   transcript tail + 4KiB stderr tail + 4KiB artifact chunk) — expect tails,
   not full payloads.
-- **One error taxonomy for domain failures.** A failed tool call embeds the
-  agent routes' `{"code", "message", "retryable"}` body in its error text —
-  the codes (`GATE_ROUND_STALE`, `RUN_NOT_ACTIVE`, …) are stable and safe to
-  match on. Requests that fail shape validation carry `VALIDATION_ERROR`
-  detail instead.
+- **Stable error shapes.** Gateway and run tool failures embed the agent
+  routes' `{"code", "message", "retryable"}` body in their error text — the
+  codes (`GATE_ROUND_STALE`, `RUN_NOT_ACTIVE`, …) are stable and safe to match
+  on. `review_request` uses the API's `{"error", "detail"}` shape for an
+  unregistered-repository 404. Requests that fail shape validation carry
+  `VALIDATION_ERROR` detail instead.

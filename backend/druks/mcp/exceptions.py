@@ -5,6 +5,13 @@ class McpServerError(Exception):
     pass
 
 
+class InvalidAgentToolError(McpServerError):
+    def __init__(self, route: str, reason: str):
+        super().__init__(f"Invalid agent tool route {route}: {reason}.")
+        self.route = route
+        self.reason = reason
+
+
 class InvalidServerNameError(McpServerError):
     # The name is one identifier reused as the MCP config key and the bearer
     # env-var stem, so it must be a lowercase shell/TOML-safe token — reject

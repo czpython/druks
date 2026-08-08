@@ -859,7 +859,7 @@ export function HarnessConnect({ harness }: { harness: Harness }) {
       <div className="hr-conn-status">
         {harness.connected ? (
           <span className="hr-chip hr-chip-on">
-            connected{harness.account ? ` · ${harness.account}` : ''}
+            connected · {harness.providerEmail}
           </span>
         ) : (
           <span className="hr-chip hr-chip-off">not connected</span>

@@ -359,8 +359,6 @@ class Extension:
                     status.HTTP_400_BAD_REQUEST, f"limit must be in 1..{max_limit}."
                 )
             call = AgentCall.get(call_id)
-            if not call:
-                raise HTTPException(status.HTTP_404_NOT_FOUND, "Run not found.")
             if call.live_status == AgentCallStatus.RUNNING:
                 response.headers["Cache-Control"] = "no-store"
             else:
@@ -382,10 +380,7 @@ class Extension:
 
         @router.get("/files", response_model=AgentCallFiles, response_model_by_alias=True)
         async def list_files(call_id: str) -> AgentCallFiles:
-            files = reads.get_agent_call_files(call_id)
-            if not files:
-                raise HTTPException(status.HTTP_404_NOT_FOUND, "Agent call not found.")
-            return files
+            return reads.get_agent_call_files(call_id)
 
         @router.get("/files/{file_name:path}")
         async def get_file(
@@ -394,8 +389,6 @@ class Extension:
             disposition: Literal["inline", "attachment"] = "inline",
         ) -> FileResponse:
             call = AgentCall.get(call_id)
-            if not call:
-                raise HTTPException(status.HTTP_404_NOT_FOUND, "Agent call not found.")
             resolved = call.get_file_path(file_name)
             if not resolved:
                 raise HTTPException(status.HTTP_404_NOT_FOUND, "File not found for this call.")

@@ -46,10 +46,26 @@ async function flush() {
 }
 
 describe('HarnessConnect', () => {
-  it('shows the connected account identity', () => {
-    renderCard(harness({ connected: true, account: 'ops@corp.com' }))
-    expect(screen.getByText('connected · ops@corp.com')).toBeTruthy()
-    expect(screen.getByText('Reconnect')).toBeTruthy()
+  it('shows each connected subscription identity instead of the operator account', () => {
+    renderCard(
+      harness({
+        connected: true,
+        account: 'ops@corp.com',
+        providerEmail: 'claude-seat@corp.com',
+      }),
+    )
+    renderCard(
+      harness({
+        name: 'codex',
+        connected: true,
+        account: 'ops@corp.com',
+        providerEmail: 'codex-seat@corp.com',
+      }),
+    )
+
+    expect(screen.getByText('connected · claude-seat@corp.com')).toBeTruthy()
+    expect(screen.getByText('connected · codex-seat@corp.com')).toBeTruthy()
+    expect(screen.queryByText('connected · ops@corp.com')).toBeNull()
   })
 
   it('drives the connection flow end to end and refreshes only the harness query', async () => {

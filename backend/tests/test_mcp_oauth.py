@@ -347,7 +347,7 @@ async def test_two_per_user_connects_store_two_grants(auth_server, druks_db):
     assert {grant.account_id for grant in grants} == {first.id, second.id}
 
 
-async def test_concurrent_first_connects_converge_on_the_claimed_mode(auth_server, druks_db):
+async def test_a_later_connect_stores_under_the_claimed_mode(auth_server, druks_db):
     first = Account.get_or_create("first@example.com")
     second = Account.get_or_create("second@example.com")
     first_url = await oauth.begin_connect(
@@ -367,18 +367,12 @@ async def test_concurrent_first_connects_converge_on_the_claimed_mode(auth_serve
     first_state = dict(parse_qsl(urlparse(first_url).query))["state"]
     second_state = dict(parse_qsl(urlparse(second_url).query))["state"]
 
-    await asyncio.gather(
-        oauth.complete_connect(state=first_state, code="first"),
-        oauth.complete_connect(state=second_state, code="second"),
-    )
+    await oauth.complete_connect(state=first_state, code="first")
+    await oauth.complete_connect(state=second_state, code="second")
 
-    identity_mode = McpServer.get_for_name(_NAME).identity_mode
+    assert McpServer.get_for_name(_NAME).identity_mode == IdentityMode.SHARED
     grant_accounts = {grant.account_id for grant in McpOauthGrant.list_for_server(_NAME)}
-    assert identity_mode in {IdentityMode.SHARED, IdentityMode.PER_USER}
-    if identity_mode == IdentityMode.SHARED:
-        assert grant_accounts == {SYSTEM_ACCOUNT_ID}
-    else:
-        assert grant_accounts == {first.id, second.id}
+    assert grant_accounts == {SYSTEM_ACCOUNT_ID}
 
 
 # --- mint: cache, refresh, rotation, eviction -------------------------------

@@ -71,16 +71,13 @@ async def update_harness_settings(
     if "model" in updates:
         try:
             resolved = get_harness_for_model(updates["model"])
+            if resolved.name != harness.name:
+                raise HarnessError
         except HarnessError as exc:
             raise HTTPException(
                 status_code=422,
                 detail=f"{updates['model']!r} is not a {harness.name} model.",
             ) from exc
-        if resolved.name != harness.name:
-            raise HTTPException(
-                status_code=422,
-                detail=f"{updates['model']!r} is not a {harness.name} model.",
-            )
     _validate_effort(updates.get("effort"))
     _validate_timeout(updates.get("timeout"))
     if updates:
