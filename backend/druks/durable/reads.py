@@ -44,7 +44,7 @@ def list_subject_timeline(subject_type: str, subject_id: str) -> list[RunRespons
     # The subject's whole timeline: every run about it, oldest first, each
     # with its agent calls.
     runs = Run.list_for_subject(subject_type, subject_id)
-    return _timeline(runs, AgentCall.by_run([run.id for run in runs]))
+    return _timeline(runs, AgentCall.get_by_run([run.id for run in runs]))
 
 
 def get_subject_status(
@@ -71,7 +71,7 @@ def get_subject_response(
     activity: SubjectActivity | None = None,
 ) -> SubjectResponse:
     runs = Run.list_for_subject(subject_type, subject_id)
-    calls_by_run = AgentCall.by_run([run.id for run in runs])
+    calls_by_run = AgentCall.get_by_run([run.id for run in runs])
     latest = Run.get_latest_for_subject(subject_type, subject_id)
     return SubjectResponse(
         summary=summary,
@@ -82,7 +82,7 @@ def get_subject_response(
 
 
 def _timeline(runs: list[Run], calls_by_run: dict[str, list[AgentCall]]) -> list[RunResponse]:
-    # by_run keys every run id, so the lookup is total.
+    # get_by_run keys every run id, so the lookup is total.
     ordered = sorted(runs, key=lambda run: (run.created_at, run.id))
     return [
         RunResponse.from_run(
