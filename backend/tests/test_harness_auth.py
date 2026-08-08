@@ -2,14 +2,17 @@ import asyncio
 import base64
 import json
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
+import druks.redis
 import httpx
 import pytest
 from conftest import connect_harness
 from druks.accounts.models import Account
 from druks.harnesses import base as hbase
-from druks.harnesses.claude import ClaudeHarness
+from druks.harnesses.claude import ClaudeHarness, _claude_credentials
 from druks.harnesses.codex import CodexHarness
+from druks.harnesses.datastructures import SandboxSettings
 from druks.harnesses.exceptions import HarnessNotConnectedError, OAuthTokenError
 from druks.harnesses.models import HarnessConnection
 from druks.user_settings.models import UserSettings
@@ -281,17 +284,35 @@ async def test_invalid_grant_drops_only_the_addressed_row(monkeypatch, druks_db)
 async def test_concurrent_rotations_produce_one_grant(monkeypatch, druks_db):
     connection = _seed_claude(access="old", refresh="R0", expires_at=_NOW + timedelta(minutes=30))
     connection_id = connection.id
-    calls = _mock_post(
-        monkeypatch, _resp(200, {"access_token": "new", "refresh_token": "R1", "expires_in": 100})
-    )
-    first, second = await asyncio.gather(
-        ClaudeHarness.rotate_token(connection_id, now=_NOW),
-        ClaudeHarness.rotate_token(connection_id, now=_NOW),
-    )
+    calls = []
+    in_flight = asyncio.Event()
+    resume = asyncio.Event()
+
+    async def fake_post(self, url, *, json=None, **_kwargs):
+        calls.append({"url": url, "json": json})
+        in_flight.set()
+        await resume.wait()
+        return _resp(200, {"access_token": "new", "refresh_token": "R1", "expires_in": 100})
+
+    monkeypatch.setattr(hbase.httpx.AsyncClient, "post", fake_post)
+
+    # Park the winner mid-grant so the second attempt runs while the lock is
+    # provably held — racing two rotations lets the loser's lock attempt land
+    # after the winner's release, and two winners mean two grants.
+    winner = asyncio.create_task(ClaudeHarness.rotate_token(connection_id, now=_NOW))
+    await asyncio.wait_for(in_flight.wait(), timeout=5)
+    # The second rotation runs on this task: every session binds to the
+    # fixture's one connection, and a second concurrent task-scoped session
+    # would interleave its savepoints with the winner's on that shared stack.
+    loser = await ClaudeHarness.rotate_token(connection_id, now=_NOW)
+    resume.set()
+    winner_result = await winner
+
+    assert winner_result.action == "refreshed"
+    assert loser.action == "locked"
     assert len(calls) == 1  # one provider grant, one persisted lineage
-    assert {first.action, second.action} == {"refreshed", "locked"}
-    # Sessions are task-scoped: the winner ran (and committed) inside its own
-    # gather task, so read past this task's identity map for what persisted.
+    # The winner committed in its own task-scoped session — read past this
+    # task's identity map for what persisted.
     payload = dict(HarnessConnection.reload(connection_id).payload)
     assert payload["claudeAiOauth"]["refreshToken"] == "R1"
 
@@ -302,9 +323,7 @@ async def test_rotation_lock_is_released_after_refresh(monkeypatch, druks_db):
         monkeypatch, _resp(200, {"access_token": "new", "refresh_token": "R1", "expires_in": 100})
     )
     await ClaudeHarness.rotate_token(connection.id, now=_NOW)
-    import druks.redis
-
-    assert await druks.redis.get_client().get(f"druks:harness:refresh:{connection.id}") is None
+    assert not await druks.redis.get_client().get(f"druks:harness:refresh:{connection.id}")
 
 
 def test_disconnect_removes_only_the_addressed_login(druks_db):
@@ -426,11 +445,6 @@ def test_render_credentials_file_raises_when_not_connected(druks_db):
 
 
 def test_claude_builder_puts_db_credentials_on_the_bundle(druks_db):
-    from pathlib import Path
-
-    from druks.harnesses.claude import _claude_credentials
-    from druks.harnesses.datastructures import SandboxSettings
-
     _seed_claude(access="live", refresh="R0")
     sandbox = SandboxSettings(
         service_url="x",
@@ -446,11 +460,6 @@ def test_claude_builder_puts_db_credentials_on_the_bundle(druks_db):
 
 
 def test_credentials_builders_carry_global_instructions(druks_db):
-    from pathlib import Path
-
-    from druks.harnesses.claude import _claude_credentials
-    from druks.harnesses.datastructures import SandboxSettings
-
     _seed_claude()
     _seed_codex()
     claude_config_dir = Path("/home/agent/.claude")
@@ -484,10 +493,6 @@ def test_no_config_dir_ships_credential_only(druks_db):
     # No local config dir for the CLI => nothing of the host's config/plugins
     # reaches the sandbox — but the DB credential still ships: connection state
     # alone decides whether a harness can run.
-
-    from druks.harnesses.claude import _claude_credentials
-    from druks.harnesses.datastructures import SandboxSettings
-
     _seed_claude(access="live")
     sandbox = SandboxSettings(
         service_url="x",
@@ -505,11 +510,6 @@ def test_no_config_dir_ships_credential_only(druks_db):
 
 
 def test_claude_builder_raises_when_not_connected(druks_db):
-    from pathlib import Path
-
-    from druks.harnesses.claude import _claude_credentials
-    from druks.harnesses.datastructures import SandboxSettings
-
     sandbox = SandboxSettings(
         service_url="x",
         service_token="x",
