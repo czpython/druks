@@ -4,6 +4,8 @@ from types import SimpleNamespace
 
 import pytest
 from druks.contrib import ship
+from druks.contrib.ship.contracts import ReviewOutput
+from druks.contrib.ship.enums import ReviewDecision
 from druks.contrib.ship.journal import BuildJournal
 from druks.contrib.ship.models import Project, ProjectRepo
 from druks.contrib.ship.policy import RepoPolicy
@@ -89,6 +91,32 @@ async def test_verification_profile_renders_ci_provenance_per_command():
         "**Tests:**",
         "- `pytest`",
     ]
+
+
+async def test_reviewer_scrutiny_line_reports_each_seat():
+    async def scrutiny(build) -> str:
+        prompt = await render_prompt(
+            "ship/build/review_code.md",
+            build=build,
+            verification="VERIFICATION-BLOCK",
+            workspace=_workspace(),
+        )
+        lines = (line.strip() for line in prompt.splitlines())
+        return next(line for line in lines if line.startswith("Scrutiny:"))
+
+    unreviewed = _build()
+    assert (
+        await scrutiny(unreviewed)
+        == "Scrutiny: plan critic skipped · evaluation rounds: 0 · line review ran"
+    )
+
+    reviewed = _build()
+    reviewed.journal.add(ReviewOutput(decision=ReviewDecision.REQUEST_CHANGES, body="split it"))
+    reviewed.journal.add(ReviewOutput(decision=ReviewDecision.APPROVE, body="clean"))
+    assert (
+        await scrutiny(reviewed)
+        == "Scrutiny: plan critic ran (2) · evaluation rounds: 0 · line review ran"
+    )
 
 
 def test_build_prompt_context_covers_template_attrs():

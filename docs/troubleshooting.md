@@ -126,7 +126,7 @@ be idempotent.
 ## An agent cannot reach `/mcp`
 
 1. A 401 means the personal access token is missing, malformed, expired, or
-   revoked — mint a fresh one in **Settings → Agent access** and resend it as
+   revoked — mint a fresh one in **Settings → Tokens** and resend it as
    `Authorization: Bearer <token>` ([Connect your agent](connect-your-agent.md)).
 2. A redirect or 404 at the edge means the host's Caddyfile predates the
    `/mcp` handlers: deploys never refresh the host copy, so re-run the

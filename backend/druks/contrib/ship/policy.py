@@ -26,6 +26,22 @@ class VerificationProfile(BaseModel):
     lint_commands: tuple[str, ...] = ()
     typecheck_commands: tuple[str, ...] = ()
 
+    def get_commands(self, *, detected: dict[str, Any]) -> dict[str, Any]:
+        """These commands, each paired with the CI check the profiler detected for it."""
+        checks = {
+            entry["command"]: entry["ci_check"]
+            for entries in detected.values()
+            for entry in entries
+        }
+        return {
+            key: [{"command": command, "ci_check": checks.get(command)} for command in commands]
+            for key, commands in (
+                ("test_commands", self.test_commands),
+                ("lint_commands", self.lint_commands),
+                ("typecheck_commands", self.typecheck_commands),
+            )
+        }
+
 
 class RepoPolicy(BaseModel):
     """The operator's ``.druks/ship/config.yml``, validated whole so a typo'd

@@ -99,7 +99,8 @@ async def test_get_workspace_kwargs_clones_primary_only(monkeypatch: pytest.Monk
     sandbox = host_mod.Sandbox(record=SimpleNamespace(id="h1", ssh_username="exedev"))  # type: ignore[arg-type]
 
     workflow = Build()
-    workflow.input = Build._run_input_model(repo="o/extension")
+    workflow.input = Build._run_input_model()
+    workflow.subject = SimpleNamespace(repo="o/extension")
     workflow._profile = {"recommended_skills": ["python-house-rules"]}
     kwargs = await workflow.get_workspace_kwargs(sandbox)
 
@@ -123,7 +124,8 @@ async def test_get_workspace_kwargs_fails_loudly_without_the_reviewer_app(
     sandbox = host_mod.Sandbox(record=SimpleNamespace(id="h1", ssh_username="exedev"))  # type: ignore[arg-type]
 
     workflow = Build()
-    workflow.input = Build._run_input_model(repo="o/extension")
+    workflow.input = Build._run_input_model()
+    workflow.subject = SimpleNamespace(repo="o/extension")
     workflow._profile = {"recommended_skills": ["python-house-rules"]}
 
     with pytest.raises(FatalError, match="reviewer GitHub App"):

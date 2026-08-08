@@ -28,6 +28,7 @@ from druks.durable.enums import (
     RunState,
     WorkflowEvent,
 )
+from druks.durable.exceptions import AgentCallNotFound
 from druks.harnesses.artifacts import normalize_token_usage
 from druks.models import Base
 from druks.notifications.models import Notification
@@ -179,6 +180,53 @@ class Run(Base):
                 driving.c.state.in_([run_state.value for run_state in OPEN_STATES]),
             )
             .order_by(driving.c.created_at.desc())
+        )
+
+    @classmethod
+    def get_open_subjects(cls) -> Select:
+        """Every open workflow — the newest run of each kind on each subject, still
+        going or failed — newest first across every installed extension."""
+        state = state_expression(cls.id, cls.input_gate, cls.created_at).label("state")
+        attributes = workflow_status.c.attributes
+        subject_type = attributes["subject_type"].as_string().label("subject_type")
+        subject_id = attributes["subject_id"].as_string().label("subject_id")
+        subject_label = attributes["subject_label"].as_string().label("subject_label")
+        driving = (
+            select(
+                subject_type,
+                subject_id,
+                subject_label,
+                cls.id.label("run_id"),
+                cls.kind,
+                cls.failure,
+                cls.created_at,
+                state,
+                func.row_number()
+                .over(
+                    partition_by=(cls.kind, subject_type, subject_id),
+                    order_by=(cls.created_at.desc(), cls.id.desc()),
+                )
+                .label("rank"),
+            )
+            .join_from(cls, workflow_status, workflow_status.c.workflow_uuid == cls.id)
+            .where(subject_id.is_not(None))
+            .subquery()
+        )
+        latest_call_id = (
+            select(AgentCall.id)
+            .where(AgentCall.run_id == driving.c.run_id)
+            .order_by(AgentCall.created_at.desc(), AgentCall.id.desc())
+            .limit(1)
+            .scalar_subquery()
+            .label("latest_call_id")
+        )
+        return (
+            select(driving, latest_call_id)
+            .where(
+                driving.c.rank == 1,
+                driving.c.state.in_([run_state.value for run_state in OPEN_STATES]),
+            )
+            .order_by(driving.c.created_at.desc(), driving.c.run_id.desc())
         )
 
     def get_ask(self) -> dict[str, Any]:
@@ -490,8 +538,11 @@ class AgentCall(Base, Uuid7Pk):
             session.commit()
 
     @classmethod
-    def get(cls, agent_call_id: str) -> "AgentCall | None":
-        return db_session().get(cls, agent_call_id)
+    def get(cls, agent_call_id: str) -> "AgentCall":
+        call = db_session().get(cls, agent_call_id)
+        if not call:
+            raise AgentCallNotFound(agent_call_id)
+        return call
 
     @classmethod
     def list_for_run(cls, run_id: str) -> list["AgentCall"]:
@@ -500,7 +551,7 @@ class AgentCall(Base, Uuid7Pk):
         return list(db_session().scalars(stmt))
 
     @classmethod
-    def by_run(cls, run_ids: list[str]) -> dict[str, list["AgentCall"]]:
+    def get_by_run(cls, run_ids: list[str]) -> dict[str, list["AgentCall"]]:
         # The calls under each run, in execution order — one query for a timeline.
         stmt = select(cls).where(cls.run_id.in_(run_ids)).order_by(cls.created_at, cls.id)
         grouped: dict[str, list[AgentCall]] = {run_id: [] for run_id in run_ids}

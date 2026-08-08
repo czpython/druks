@@ -377,6 +377,7 @@ export interface UsageHarnessSummary {
   available: boolean
   /** The requesting account has its own connection; false renders a connect action. */
   connected: boolean
+  providerEmail: string | null
   planTier: string | null
   fiveHour: UsageMetric | null
   weeks: UsageMetric[]

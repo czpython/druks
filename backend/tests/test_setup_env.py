@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 from druks.settings import Settings
-from druks.setup_env import GAPS_EXIT_CODE, MIGRATION_EXIT_CODE, read_env, run_setup
+from druks.setup_env import GAPS_EXIT_CODE, read_env, run_setup
 
 DROPPED_RENDER_KEYS = {
     "DRUKS_AUTH_MODE": ("identity.mode", "jwt"),
@@ -149,28 +149,6 @@ def test_exe_provider_environment_renders_verbatim(tmp_path):
     assert values["CUSTOM_DRUKBOX_VALUE"] == "verbatim"
 
 
-def test_legacy_sandbox_table_is_renamed_to_the_provider_table(tmp_path):
-    env_path = tmp_path / ".env"
-    _run(env_path)
-    toml_path = tmp_path / "druks.toml"
-    toml_path.write_text(
-        toml_path.read_text().replace(
-            "[sandbox.exe]",
-            "# credentials for this provider\n[sandbox.env]",
-        )
-    )
-    printed = []
-
-    _run(env_path, print_fn=printed.append)
-
-    written = toml_path.read_text()
-    assert "Renamed [sandbox.env] to [sandbox.exe]." in printed
-    assert "[sandbox.exe]" in written
-    assert "[sandbox.env]" not in written
-    assert "# credentials for this provider" in written
-    assert read_env(env_path)["EXE_API_URL"] == "https://exe.dev"
-
-
 def test_foreign_provider_table_is_a_named_gap(tmp_path):
     env_path = tmp_path / ".env"
     printed = []
@@ -218,30 +196,6 @@ def test_non_string_known_setting_is_refused(tmp_path):
 
     with pytest.raises(ValueError, match="github.operator_app_id must be a string"):
         _run(env_path)
-
-
-def test_pre_toml_guard_refuses_without_writing(tmp_path):
-    env_path = tmp_path / ".env"
-    env_path.write_text("DRUKS_POSTGRES_PASSWORD=keep\n")
-    before = env_path.read_bytes()
-    printed = []
-
-    rc = _run(env_path, print_fn=printed.append)
-
-    assert rc == MIGRATION_EXIT_CODE
-    assert env_path.read_bytes() == before
-    assert {path.name for path in tmp_path.iterdir()} == {".env"}
-    output = "\n".join(printed)
-    for key in (
-        "DRUKS_POSTGRES_PASSWORD",
-        "DRUKS_SECRETS_KEY",
-        "DRUKS_WEBHOOK_SECRET",
-        "DRUKS_SANDBOX_SERVICE_TOKEN",
-        "GITHUB_*_APP_ID",
-        "[sandbox.<provider>]",
-        "other hand-added .env keys → [env]",
-    ):
-        assert key in output
 
 
 def test_set_updates_toml_and_rerender_preserves_the_values(tmp_path):

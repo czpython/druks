@@ -11,7 +11,6 @@ from typing import Any
 import tomlkit
 
 GAPS_EXIT_CODE = 3
-MIGRATION_EXIT_CODE = 4
 
 _COMPOSE_ENV_KEYS = (
     "DRUKS_UID",
@@ -74,7 +73,7 @@ _KNOWN_TOML_KEYS = {
         "secrets_key",
     ),
     "paths": ("data_dir", "claude_home", "codex_home", "claude_json"),
-    "sandbox": ("provider", "service_url", "service_token", "image", "service_tokens", "timeout"),
+    "sandbox": ("provider", "service_url", "service_token", "image", "timeout"),
     "env": (),
 }
 
@@ -110,10 +109,6 @@ def run_setup(
     print_fn: Callable[[str], None] = print,
 ) -> int:
     toml_path = env_path.parent / "druks.toml"
-    if env_path.exists() and not toml_path.exists():
-        _print_migration_recipe(print_fn, env_path, toml_path)
-        return MIGRATION_EXIT_CODE
-
     is_fresh = not toml_path.exists()
     is_changed = is_fresh
     if is_fresh:
@@ -128,18 +123,6 @@ def run_setup(
             _set_value(document, value_path, value)
     else:
         document = tomlkit.parse(toml_path.read_text())
-        sandbox = document.get("sandbox")
-        configured_provider = _get_string(document, ("sandbox", "provider"))
-        if (
-            isinstance(sandbox, MutableMapping)
-            and configured_provider
-            and "env" in sandbox
-            and configured_provider not in sandbox
-        ):
-            sandbox[configured_provider] = sandbox["env"]
-            del sandbox["env"]
-            print_fn(f"Renamed [sandbox.env] to [sandbox.{configured_provider}].")
-            is_changed = True
 
     for assignment in set_values:
         value_path, value = _parse_assignment(assignment)
@@ -224,7 +207,6 @@ provider = ""
 service_url = ""
 service_token = ""
 image = ""
-service_tokens = ""
 timeout = 180
 
 # Put drukbox environment in [sandbox.<provider>]. The table is passed through
@@ -467,9 +449,7 @@ def _render_env(
 
     service_tokens = ""
     if provider != "docker":
-        service_tokens = _get_string(config, ("sandbox", "service_tokens")) or _get_string(
-            config, ("sandbox", "service_token")
-        )
+        service_tokens = _get_string(config, ("sandbox", "service_token"))
 
     sections = (
         (
@@ -699,23 +679,6 @@ def _shape_message(provider: str) -> str:
         f"provider {provider!r} → remote shape; drukbox validates the name — "
         "check `druks doctor` after boot"
     )
-
-
-def _print_migration_recipe(
-    print_fn: Callable[[str], None],
-    env_path: Path,
-    toml_path: Path,
-) -> None:
-    print_fn(f"Refusing to replace existing {env_path}: {toml_path} does not exist.")
-    print_fn("Back up .env and hand-write druks.toml, copying values verbatim:")
-    print_fn("  - DRUKS_POSTGRES_PASSWORD → [secrets].postgres_password")
-    print_fn("  - DRUKS_SECRETS_KEY → [secrets].secrets_key")
-    print_fn("  - DRUKS_WEBHOOK_SECRET → [secrets].webhook_secret")
-    print_fn("  - DRUKS_SANDBOX_SERVICE_TOKEN → [sandbox].service_token")
-    print_fn("  - GITHUB_*_APP_ID → [github]")
-    print_fn("  - provider and its credentials → [sandbox] and [sandbox.<provider>]")
-    print_fn("  - other hand-added .env keys → [env]")
-    print_fn("Nothing was written.")
 
 
 def _print_outcome(

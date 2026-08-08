@@ -1,5 +1,3 @@
-from druks.user_settings.models import HarnessSettings
-
 from .base import Harness
 from .exceptions import HarnessError
 
@@ -24,6 +22,8 @@ def get_harness_for_model(model: str) -> type[Harness]:
     A miss raises loudly; namespace-shaped models do not route until a fetch
     stores them on the harness settings row.
     """
+    from druks.user_settings.models import HarnessSettings
+
     for row in HarnessSettings.all():
         if model == row.name or any(m["id"] == model for m in row.allowed_models):
             return row.harness
