@@ -145,7 +145,7 @@ setup state.
 ## Personal access tokens
 
 Agents and other non-browser clients authenticate the same internal API with
-personal access tokens minted in Settings → Agent access, sent as
+personal access tokens minted in Settings → Tokens, sent as
 `Authorization: Bearer <token>`. A token serializes as
 `druks_pat_<prefix>_<secret>`; Druks stores only the SHA-256 of the full
 token, shows the plaintext exactly once at mint, and expires it 365 days
@@ -153,7 +153,7 @@ after creation. When the header is present it must authenticate — a bad
 token is a 401, never a fall back to edge identity — and token management
 itself accepts the signed-in identity only (edge-asserted, or the none-mode
 operator) and refuses any `Authorization` header, so a leaked token cannot
-mint or revoke tokens. On compromise, revoke the token in Settings → Agent access
+mint or revoke tokens. On compromise, revoke the token in Settings → Tokens
 (immediate; the list shows each token's prefix and last use, tracked hourly,
 to identify it) and mint a replacement — rotation is mint first, revoke
 second. Agents consume the API through the MCP endpoint; see

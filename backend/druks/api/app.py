@@ -17,12 +17,15 @@ from druks.accounts.routes import router as auth_router
 from druks.api.artifacts import router as artifacts_router
 from druks.api.exceptions import AgentApiError
 from druks.api.runs import router as runs_router
+from druks.api.subjects import router as subjects_router
 from druks.database import configure_session, create_engine_from_url, db_session, session_scope
 from druks.durable.engine import init_dbos, launch, shutdown
+from druks.durable.exceptions import AgentCallNotFound
 from druks.events.routes import router as events_router
 from druks.extensions.loader import iter_extensions, load
 from druks.harnesses.routes import router as harness_connection_router
 from druks.mcp.catalog import load_mcp_catalog
+from druks.mcp.gateway import exceptions as gate_errors
 from druks.mcp.gateway.routes import router as gateway_router
 from druks.mcp.routes import router as mcp_router
 from druks.notifications.routes import external_router as notifications_external_router
@@ -154,6 +157,13 @@ async def _agent_api_error_handler(request: Request, exc: AgentApiError) -> JSON
     )
 
 
+# The engine reports a missing agent call in its own vocabulary; here it
+# becomes the agent surface's wire error, serialized like every other one.
+@app.exception_handler(AgentCallNotFound)
+async def _agent_call_not_found_handler(request: Request, exc: AgentCallNotFound) -> JSONResponse:
+    return await _agent_api_error_handler(request, gate_errors.AgentCallNotFound(exc.agent_call_id))
+
+
 # Auth-mode drift (e.g. none mode grew a second operator account) is an
 # operator problem, not a caller problem: log it loudly, answer 503.
 @app.exception_handler(AuthConfigurationError)
@@ -225,6 +235,7 @@ app.include_router(mcp_router, dependencies=_identity_gate)
 app.include_router(notifications_router, dependencies=_identity_gate)
 app.include_router(events_router, dependencies=_identity_gate)
 app.include_router(runs_router, dependencies=_identity_gate)
+app.include_router(subjects_router, dependencies=_identity_gate)
 app.include_router(gateway_router, dependencies=_identity_gate)
 app.include_router(artifacts_router, dependencies=_identity_gate)
 load(app)

@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 import pytest
 from druks.contrib.ship.policy import RepoPolicy
 from druks.extensions.config import resolve_extension_config
@@ -147,7 +149,8 @@ class TestLoadPolicyAndProfile:
         from druks.contrib.ship.workflows import Build
 
         flow = Build()
-        flow.input = Build._run_input_model(repo=repo, pr_number=1, branch="agent/x")
+        flow.input = Build._run_input_model()
+        flow.subject = SimpleNamespace(repo=repo)
         return flow
 
     async def test_resolves_live(self, druks_db, monkeypatch):

@@ -44,15 +44,25 @@ def test_settings_reject_model_missing_from_lists_returns_422(druks_db):
     assert error.value.detail == "No installed harness runs model 'llama-3-70b'."
 
 
-async def test_settings_reject_model_from_another_harness_returns_422(druks_db):
+@pytest.mark.parametrize(
+    ("model", "detail"),
+    [
+        ("gpt-5.5", "'gpt-5.5' is not a claude model."),
+        ("llama-3-70b", "'llama-3-70b' is not a claude model."),
+    ],
+)
+async def test_settings_reject_invalid_model_returns_422(druks_db, model, detail):
     account = Account.get_or_create("op@example.com")
+    settings = HarnessSettings.require("claude")
+    original_model = settings.model
 
     with pytest.raises(HTTPException) as error:
         await update_harness_settings(
             name="claude",
-            body=HarnessUpdate(model="gpt-5.5"),
+            body=HarnessUpdate(model=model),
             account=account,
         )
 
     assert error.value.status_code == 422
-    assert "is not a claude model" in error.value.detail
+    assert error.value.detail == detail
+    assert settings.model == original_model

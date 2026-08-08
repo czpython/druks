@@ -342,10 +342,8 @@ class WorkItem(StoredSubject):
         source: str,
         ticket_key: str,
     ) -> "WorkItem | None":
-        """Look up a WorkItem by its source + ticket_key pair.
-
-        The (source, ticket_key) unique constraint guarantees at most
-        one live row; we return that row or None if no match exists."""
+        """The item a ticket names in its tracker — (source, ticket_key) is the
+        row's identity."""
         stmt = select(cls).where(cls.source == source, cls.ticket_key == ticket_key).limit(1)
         return db_session().scalars(stmt).first()
 

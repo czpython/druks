@@ -16,9 +16,9 @@ def read_result_json(output_path: Path, *, name: str) -> dict[str, Any]:
     except FileNotFoundError as error:
         raise HarnessInvalidOutputError(f"{name} did not write result JSON.") from error
 
-    if text[:3] == "```":
+    if text.startswith("```"):
         lines = text.splitlines()
-        if lines and lines[0][:3] == "```":
+        if lines and lines[0].startswith("```"):
             lines = lines[1:]
         if lines and lines[-1].strip() == "```":
             lines = lines[:-1]
