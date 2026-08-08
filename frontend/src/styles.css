@@ -2339,6 +2339,7 @@ input.set-select { background-image: none; padding-right: 12px; }
 .review-note { display: block; width: 100%; min-height: 44px; margin-top: 12px; border: 1px solid var(--border); border-radius: 5px; background: var(--surface-2); color: var(--text-mid); font-family: inherit; font-size: 13px; line-height: 1.45; padding: 6px 10px; resize: vertical; }
 .review-note:focus { outline: none; border-color: color-mix(in oklch, var(--bucket-human) 50%, transparent); }
 .review-note::placeholder { color: var(--text-faint); }
+.review-helper { margin-top: 5px; color: var(--text-dim); font-size: 11px; line-height: 1.4; }
 .review-controls { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
 .review-btn { border: 1px solid var(--border); border-radius: 5px; background: var(--surface-2); color: var(--text-mid); font-size: 12px; padding: 6px 14px; }
 .review-btn:hover:not(:disabled) { border-color: var(--text-dim); }

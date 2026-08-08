@@ -14,13 +14,16 @@ _ASK = {
 }
 
 
-def _park(druks_db) -> None:
+def _park(druks_db, *, context: str | None = None) -> None:
+    ask = dict(_ASK)
+    if context is not None:
+        ask["context"] = context
     druks_db.add(
         Run(
             id="r1",
             kind="build",
             input_gate="review_plan",
-            input_request=_ASK,
+            input_request=ask,
             input_requested_at=Run.utc_now(),
         )
     )
@@ -96,18 +99,39 @@ async def test_resume_rejects_an_answer_to_a_question_that_was_not_asked(druks_d
     assert exc.value.status_code == 422
 
 
-async def test_resume_rejects_request_changes_without_guidance(druks_db, monkeypatch):
+@pytest.mark.parametrize("context", [None, "", "   "])
+async def test_resume_rejects_request_changes_without_guidance(druks_db, monkeypatch, context):
     # request_changes exists to redirect the next pass; with no answer and a blank
     # note it would only re-run the same plan blind, so the reply is rejected.
     async def fake_resume(self, **fields):
         raise AssertionError("must not resume a guidance-free request_changes")
 
     monkeypatch.setattr(Run, "resume", fake_resume)
-    _park(druks_db)
+    _park(druks_db, context=context)
 
     with pytest.raises(HTTPException) as exc:
         await resume_run("r1", ResumeRequest(control="request_changes", note="   "))
     assert exc.value.status_code == 422
+    assert exc.value.detail == "request_changes needs an answer or a note to guide the re-plan"
+
+
+async def test_resume_accepts_empty_request_changes_with_ask_context(druks_db, monkeypatch):
+    captured: dict = {}
+
+    async def fake_resume(self, **fields):
+        captured.update(id=self.id, **fields)
+
+    monkeypatch.setattr(Run, "resume", fake_resume)
+    _park(druks_db, context="name the rollback boundary")
+
+    await resume_run("r1", ResumeRequest(control="request_changes", answers={}, note=""))
+
+    assert captured == {
+        "id": "r1",
+        "action": "request_changes",
+        "answers": {},
+        "note": "",
+    }
 
 
 async def test_resume_request_changes_with_a_note_passes(druks_db, monkeypatch):

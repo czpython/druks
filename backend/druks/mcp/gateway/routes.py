@@ -52,7 +52,8 @@ async def answer_gate(
 ) -> schemas.GateAnswerResponse:
     """Answer the gate get_gate showed, resuming the run. parkedAt must echo
     get_gate's value unchanged; a repeat answer to the same parkedAt reports
-    already_answered."""
+    already_answered. Empty request_changes is valid only when get_gate's ask
+    has non-blank context."""
     return await services.answer_gate(
         run,
         parked_at=body.parked_at,

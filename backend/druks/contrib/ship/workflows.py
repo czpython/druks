@@ -244,8 +244,8 @@ class Build(Workflow):
         plan_gate = self._policy.plan_approval_gate(self._settings.plan_gate)
         answered_questions: list[dict[str, str]] = []
         operator_note = ""
+        unresolved_critique = ""
         while True:
-            unresolved_critique = ""
             for _ in range(PLAN_DRAFTS_PER_ROUND):
                 draft_guidance = unresolved_critique
                 unresolved_critique = ""
