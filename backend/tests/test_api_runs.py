@@ -24,10 +24,9 @@ def client(tmp_path: Path, druks_db, monkeypatch):
         yield client
 
 
-def _seed_run(
+def _seed_call_id(
     druks_db,
     *,
-    tmp_path: Path,
     finished: bool = True,
     run_state: str = "running",
 ) -> str:
@@ -49,12 +48,11 @@ def _seed_run(
 
 def test_list_files_inventories_call_artifacts(
     client: TestClient,
-    tmp_path: Path,
     druks_db,
 ):
-    run_id = _seed_run(druks_db, tmp_path=tmp_path)
+    call_id = _seed_call_id(druks_db)
 
-    response = client.get(f"/api/field_notes/transcripts/{run_id}/files")
+    response = client.get(f"/api/field_notes/transcripts/{call_id}/files")
 
     assert response.status_code == 200
     files = response.json()
@@ -109,13 +107,12 @@ def test_file_download_unknown_call_returns_unified_404(client: TestClient, druk
 
 def test_transcript_range_fetch_paginates(
     client: TestClient,
-    tmp_path: Path,
     druks_db,
 ):
-    run_id = _seed_run(druks_db, tmp_path=tmp_path)
+    call_id = _seed_call_id(druks_db)
 
     first = client.get(
-        f"/api/field_notes/transcripts/{run_id}",
+        f"/api/field_notes/transcripts/{call_id}",
         params={"stream": "stdout", "limit": 5},
     )
     assert first.status_code == 200
@@ -127,7 +124,7 @@ def test_transcript_range_fetch_paginates(
     assert data["text"] == "hello"
 
     second = client.get(
-        f"/api/field_notes/transcripts/{run_id}",
+        f"/api/field_notes/transcripts/{call_id}",
         params={"stream": "stdout", "offset": 5, "limit": 1024},
     )
     assert second.status_code == 200
@@ -138,10 +135,9 @@ def test_transcript_range_fetch_paginates(
 
 def test_transcript_of_a_running_call_is_never_cached(
     client: TestClient,
-    tmp_path: Path,
     druks_db,
 ):
-    call_id = _seed_run(druks_db, tmp_path=tmp_path, finished=False)
+    call_id = _seed_call_id(druks_db, finished=False)
 
     response = client.get(
         f"/api/field_notes/transcripts/{call_id}",
@@ -154,12 +150,11 @@ def test_transcript_of_a_running_call_is_never_cached(
 
 def test_transcript_of_an_abandoned_call_is_cached_immutably(
     client: TestClient,
-    tmp_path: Path,
     druks_db,
 ):
     # The call never wrote finished_at, but its run died — nothing will append
     # to that log again, so the chunk is as permanent as a finished call's.
-    call_id = _seed_run(druks_db, tmp_path=tmp_path, finished=False, run_state="failed")
+    call_id = _seed_call_id(druks_db, finished=False, run_state="failed")
 
     response = client.get(
         f"/api/field_notes/transcripts/{call_id}",
@@ -172,7 +167,6 @@ def test_transcript_of_an_abandoned_call_is_cached_immutably(
 
 def test_transcript_missing_file_returns_eof(
     client: TestClient,
-    tmp_path: Path,
     druks_db,
 ):
     note = Note.create(body="missing transcript")
@@ -192,15 +186,14 @@ def test_transcript_missing_file_returns_eof(
 
 def test_transcript_stream_emits_chunk_then_finishes(
     client: TestClient,
-    tmp_path: Path,
     druks_db,
 ):
     # The terminal seeded run streams its stdout in one tick: a transcript.chunk
     # carrying the log, then agent_call.finished (which ends the SSE).
-    run_id = _seed_run(druks_db, tmp_path=tmp_path)
+    call_id = _seed_call_id(druks_db)
 
     response = client.get(
-        f"/api/field_notes/transcripts/{run_id}/stream",
+        f"/api/field_notes/transcripts/{call_id}/stream",
         params={"stream": "stdout"},
     )
 
@@ -227,30 +220,28 @@ def test_transcript_stream_unknown_call_closes(
 
 def test_get_file_serves_inventory_paths(
     client: TestClient,
-    tmp_path: Path,
     druks_db,
 ):
-    run_id = _seed_run(druks_db, tmp_path=tmp_path)
+    call_id = _seed_call_id(druks_db)
 
-    files = client.get(f"/api/field_notes/transcripts/{run_id}/files").json()
+    files = client.get(f"/api/field_notes/transcripts/{call_id}/files").json()
     # Compose the download URL the way the client does: the listing's own route
     # plus the file's name — the wire carries names only.
     name = files["response"]["name"]
 
-    response = client.get(f"/api/field_notes/transcripts/{run_id}/files/{name}")
+    response = client.get(f"/api/field_notes/transcripts/{call_id}/files/{name}")
     assert response.status_code == 200
     assert response.json() == {"ok": True}
 
 
 def test_get_file_rejects_path_traversal(
     client: TestClient,
-    tmp_path: Path,
     druks_db,
 ):
-    run_id = _seed_run(druks_db, tmp_path=tmp_path)
+    call_id = _seed_call_id(druks_db)
 
     response = client.get(
-        f"/api/field_notes/transcripts/{run_id}/files/..%2F..%2Fetc%2Fpasswd",
+        f"/api/field_notes/transcripts/{call_id}/files/..%2F..%2Fetc%2Fpasswd",
     )
 
     assert response.status_code == 404
@@ -262,13 +253,12 @@ def test_get_file_rejects_path_traversal(
 
 def test_get_file_missing_returns_404(
     client: TestClient,
-    tmp_path: Path,
     druks_db,
 ):
-    run_id = _seed_run(druks_db, tmp_path=tmp_path)
+    call_id = _seed_call_id(druks_db)
 
     response = client.get(
-        f"/api/field_notes/transcripts/{run_id}/files/nope.json",
+        f"/api/field_notes/transcripts/{call_id}/files/nope.json",
     )
 
     assert response.status_code == 404
