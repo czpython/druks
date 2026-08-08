@@ -681,11 +681,12 @@ function RunNeedsInput({ run, prUrl }: { run: RunSummary; prUrl?: string | null 
 // note, and the workflow's controls. A click resumes the run with
 // {control, answers, note}; free text is content for the next plan pass, never a
 // control.
-function InAppReview({ runId, ask }: { runId: string; ask: InputRequest }) {
+export function InAppReview({ runId, ask }: { runId: string; ask: InputRequest }) {
   const [answers, setAnswers] = useState<Record<string, string>>({})
   const [note, setNote] = useState('')
   const [pending, setPending] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const critique = ask.context?.trim() ?? ''
 
   const artifact = useQuery({
     queryKey: ['artifact', ask.artifact_id],
@@ -708,10 +709,10 @@ function InAppReview({ runId, ask }: { runId: string; ask: InputRequest }) {
 
   return (
     <div className="ins-needs">
-      {ask.context && (
+      {critique && (
         <div className="review-artifact">
           <div className="review-artifact-title">Plan reviewer critique</div>
-          <Markdown source={ask.context} />
+          <Markdown source={critique} />
         </div>
       )}
       {artifact.data && (
@@ -750,13 +751,14 @@ function InAppReview({ runId, ask }: { runId: string; ask: InputRequest }) {
         value={note}
         onChange={(e) => setNote(e.target.value)}
       />
+      <div className="review-helper">
+        Approving with a note starts another plan pass instead of confirming the plan.
+      </div>
       <div className="review-controls">
         {ask.controls?.map((control) => {
-          // request_changes exists to redirect the next pass — empty-handed it
-          // would only re-run the same plan blind, so the button waits for an
-          // answer or a note (the server rejects it too).
           const needsGuidance =
             control === 'request_changes' &&
+            !critique &&
             note.trim() === '' &&
             Object.keys(answers).length === 0
           return (

@@ -344,12 +344,15 @@ several workflows at once; the gate identifies which one answers.
 For a subject-backed decision inside the Druks dashboard, use:
 
 ```python
-reply = await self.review(questions=report.questions)
+reply = await self.review(questions=report.questions, context=review_context)
 ```
 
-It offers `approve`, `request_changes`, and `cancel`. A subjectless workflow
-cannot use in-app review. A subjectless custom gate must override `on_wait()` so
-the wait is visible; otherwise Druks raises instead of parking silently.
+It offers `approve` and `request_changes`. Optional non-blank `context` is rendered
+beside the review and permits `request_changes` without answers or a note; authors
+must treat that response as another pass that folds the context in. A subjectless
+workflow cannot use in-app review. A subjectless custom gate must override
+`on_wait()` so the wait is visible; otherwise Druks raises instead of parking
+silently.
 
 Raise `FatalError` for a deliberate domain stop. Subclass it and set `code`
 when readers need a stable machine failure code. Unexpected exceptions fail

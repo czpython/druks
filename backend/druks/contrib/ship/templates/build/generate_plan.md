@@ -77,11 +77,12 @@ The operator requested changes on your previous plan in their own words. The blo
 ## Plan reviewer critique
 
 The plan reviewer rejected your previous draft with the critique below. Fold every point into this redraft — the reviewer never edits the plan; you produce the complete corrected plan yourself. If the redraft still fails review, the run parks for the operator — resolve every point now:
+Where the operator's note conflicts with this critique, the operator's note wins.
 
 > {{ reviewer_notes | replace("\n", "\n> ") }}
 
 {% endif %}
-{% if not answered_questions and not operator_note %}
+{% if not answered_questions and not operator_note and not reviewer_notes %}
 Before deep code reading, judge only whether the ticket is genuinely ambiguous about which
 change the operator wants. Ambiguity is never uncertainty about how the change works. A question
 the repo can answer is not ambiguity: read the code and decide. A question about observable

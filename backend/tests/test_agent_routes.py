@@ -58,14 +58,17 @@ def resume_spy(monkeypatch):
     return calls
 
 
-def _park(druks_db, note):
+def _park(druks_db, note, *, context: str = ""):
+    ask = dict(_IN_APP_ASK)
+    if context:
+        ask["context"] = context
     run = seed_run(
         druks_db,
         kind=Summarize.kind,
         subject=note,
         state="parked",
         input_gate="review",
-        input_request=dict(_IN_APP_ASK),
+        input_request=ask,
     )
     run.input_requested_at = datetime.now(UTC)
     druks_db.flush()
@@ -418,6 +421,65 @@ def test_get_gate_then_answer_roundtrip(client: TestClient, druks_db, resume_spy
     assert resume_spy == [{"id": run.id, "action": "approve", "answers": {}, "note": "ship it"}]
 
 
+def test_answer_gate_keys_empty_request_changes_on_ask_context(
+    client: TestClient, druks_db, resume_spy
+):
+    critique_note = Note.create(body="critique-backed gate")
+    critique_run = _park(druks_db, critique_note, context="name the rollback boundary")
+    critique_parked_at = services.get_gate(critique_run.id).model_dump(mode="json", by_alias=True)[
+        "parkedAt"
+    ]
+
+    answered = client.post(
+        f"/api/gates/{critique_run.id}/answer",
+        json={
+            "parkedAt": critique_parked_at,
+            "control": "request_changes",
+            "answers": {},
+            "note": "",
+        },
+    )
+
+    assert answered.status_code == 200
+    assert answered.json() == {
+        "run": critique_run.id,
+        "parkedAt": critique_parked_at,
+        "result": "answered",
+    }
+    assert resume_spy == [
+        {
+            "id": critique_run.id,
+            "action": "request_changes",
+            "answers": {},
+            "note": "",
+        }
+    ]
+
+    contextless_note = Note.create(body="contextless gate")
+    contextless_run = _park(druks_db, contextless_note)
+    contextless_parked_at = services.get_gate(contextless_run.id).model_dump(
+        mode="json", by_alias=True
+    )["parkedAt"]
+
+    rejected = client.post(
+        f"/api/gates/{contextless_run.id}/answer",
+        json={
+            "parkedAt": contextless_parked_at,
+            "control": "request_changes",
+            "answers": {},
+            "note": "",
+        },
+    )
+
+    assert rejected.status_code == 400
+    assert rejected.json() == {
+        "code": "INVALID_GATE_ANSWER",
+        "message": "request_changes needs an answer or a note to guide the re-plan",
+        "retryable": False,
+    }
+    assert len(resume_spy) == 1
+
+
 def test_answer_gate_reads_already_answered_off_the_receipt(
     client: TestClient, druks_db, resume_spy
 ):
@@ -511,6 +573,17 @@ def test_resume_route_contract_is_preserved(client: TestClient, druks_db, resume
     run = _park(druks_db, parked_note)
     bad_control = client.post(f"/api/runs/{run.id}/resume", json={"control": "merge"})
     assert bad_control.status_code == 422
+    assert resume_spy == []
+
+    empty_changes = client.post(
+        f"/api/runs/{run.id}/resume",
+        json={"control": "request_changes", "answers": {}, "note": ""},
+    )
+    assert empty_changes.status_code == 422
+    assert empty_changes.json() == {
+        "error": "HTTP_422",
+        "detail": "request_changes needs an answer or a note to guide the re-plan",
+    }
     assert resume_spy == []
 
     ok = client.post(

@@ -317,16 +317,34 @@ async def test_machine_mode_redraft_questions_park_without_the_folded_critique(m
     ]
 
 
-async def test_machine_mode_parks_after_the_bounded_redraft(monkeypatch):
-    """Two straight rejections exhaust the machine loop — the run parks with the
-    critique standing. The operator's request_changes re-arms one fresh redraft."""
-    flow = _flow(plan_gate="machine")
+@pytest.mark.parametrize("plan_gate", ["machine", "machine_then_human"])
+@pytest.mark.parametrize(
+    ("operator_reply", "operator_note"),
+    [
+        pytest.param(OperatorReply(action="request_changes"), "", id="empty-request-changes"),
+        pytest.param(
+            OperatorReply(action="request_changes", note="steer left"),
+            "steer left",
+            id="guided-request-changes",
+        ),
+        pytest.param(
+            OperatorReply(action="approve", note="steer left"),
+            "steer left",
+            id="approve-with-guidance",
+        ),
+    ],
+)
+async def test_machine_gate_preserves_bounded_critique_across_operator_park(
+    monkeypatch, plan_gate, operator_reply, operator_note
+):
+    """The parked critique guides the first next-round draft before machine review."""
+    flow = _flow(plan_gate=plan_gate)
     passes = _fake_plans(
         monkeypatch,
         PlanData(plan_markdown="v1"),
         PlanData(plan_markdown="v2"),
         PlanData(plan_markdown="v3"),
-        PlanData(plan_markdown="v4"),
+        PlanData(plan_markdown="v4", acceptance_criteria=_acceptance_criteria()),
     )
     _fake_grades(
         monkeypatch,
@@ -336,7 +354,10 @@ async def test_machine_mode_parks_after_the_bounded_redraft(monkeypatch):
         ReviewOutput(decision=ReviewDecision.APPROVE, body=""),
     )
     parks: list[tuple[list, str]] = []
-    replies = iter([OperatorReply(action="request_changes", note="steer left")])
+    replies = iter(
+        [operator_reply]
+        + ([OperatorReply(action="approve")] if plan_gate == "machine_then_human" else [])
+    )
 
     async def fake_review(*, questions=None, context=""):
         parks.append((list(questions or []), context))
@@ -345,10 +366,69 @@ async def test_machine_mode_parks_after_the_bounded_redraft(monkeypatch):
     flow.review = fake_review
 
     assert await flow._plan_phase() is True
-    # One park, after the exhausted redraft, carrying the final critique.
-    assert parks == [([], "critique-2")]
-    assert [p["reviewer_notes"] for p in passes] == ["", "critique-1", "", "critique-3"]
-    assert [p["operator_note"] for p in passes] == ["", "", "steer left", "steer left"]
+    expected_parks = [([], "critique-2")]
+    if plan_gate == "machine_then_human":
+        expected_parks.append(([], ""))
+    assert parks == expected_parks
+    assert [passing["reviewer_notes"] for passing in passes] == [
+        "",
+        "critique-1",
+        "critique-2",
+        "critique-3",
+    ]
+    assert [passing["operator_note"] for passing in passes] == [
+        "",
+        "",
+        operator_note,
+        operator_note,
+    ]
+
+
+async def test_bounded_critique_is_consumed_when_the_post_park_redraft_asks_a_question(
+    monkeypatch,
+):
+    """A question emitted after the critique-backed park does not repeat that critique."""
+    flow = _flow(plan_gate="machine")
+    passes = _fake_plans(
+        monkeypatch,
+        PlanData(plan_markdown="v1"),
+        PlanData(plan_markdown="v2"),
+        PlanData(
+            plan_markdown="v3",
+            questions=[QuestionOutput(id="q1", prompt="Feature flag?", options=[])],
+        ),
+        PlanData(plan_markdown="v4", acceptance_criteria=_acceptance_criteria()),
+    )
+    _fake_grades(
+        monkeypatch,
+        ReviewOutput(decision=ReviewDecision.REQUEST_CHANGES, body="critique-1"),
+        ReviewOutput(decision=ReviewDecision.REQUEST_CHANGES, body="critique-2"),
+        ReviewOutput(decision=ReviewDecision.APPROVE, body=""),
+    )
+    replies = iter(
+        [
+            OperatorReply(action="request_changes"),
+            OperatorReply(action="request_changes", answers={"q1": "behind a flag"}),
+        ]
+    )
+    parks: list[tuple[list[QuestionOutput], str]] = []
+
+    async def fake_review(*, questions=None, context=""):
+        parks.append((list(questions or []), context))
+        return next(replies)
+
+    flow.review = fake_review
+
+    assert await flow._plan_phase() is True
+    assert [passing["reviewer_notes"] for passing in passes] == [
+        "",
+        "critique-1",
+        "critique-2",
+        "",
+    ]
+    assert parks[0] == ([], "critique-2")
+    assert [question.id for question in parks[1][0]] == ["q1"]
+    assert parks[1][1] == ""
 
 
 @pytest.mark.parametrize("plan_gate", ["machine", "machine_then_human"])

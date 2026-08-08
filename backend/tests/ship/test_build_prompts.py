@@ -71,6 +71,52 @@ async def test_build_operation_prompt_renders(template):
     )
 
 
+async def _generate_plan_prompt(
+    *, answered_questions=None, operator_note="", reviewer_notes=""
+) -> str:
+    return await render_prompt(
+        "ship/build/generate_plan.md",
+        build=_build(),
+        verification="VERIFICATION-BLOCK",
+        workspace=_workspace(),
+        answered_questions=answered_questions or [],
+        operator_note=operator_note,
+        reviewer_notes=reviewer_notes,
+    )
+
+
+async def test_generate_plan_prompt_prioritizes_operator_note_over_reviewer_critique():
+    prompt = await _generate_plan_prompt(
+        operator_note="keep the existing endpoint",
+        reviewer_notes="replace the endpoint",
+    )
+
+    assert "## Operator note" in prompt
+    assert "> keep the existing endpoint" in prompt
+    assert "## Plan reviewer critique" in prompt
+    assert "> replace the endpoint" in prompt
+    assert (
+        prompt.count(
+            "Where the operator's note conflicts with this critique, the operator's note wins."
+        )
+        == 1
+    )
+    assert "Before deep code reading" not in prompt
+
+
+async def test_generate_plan_prompt_without_reviewer_notes_omits_critique_instructions():
+    prompt = await _generate_plan_prompt(operator_note="keep the existing endpoint")
+
+    assert "## Plan reviewer critique" not in prompt
+    assert "Where the operator's note conflicts with this critique" not in prompt
+
+
+async def test_generate_plan_prompt_keeps_first_draft_ambiguity_instructions():
+    prompt = await _generate_plan_prompt()
+
+    assert "Before deep code reading" in prompt
+
+
 async def test_verification_profile_renders_ci_provenance_per_command():
     block = await RepoPolicy().verification_block(
         profile={
