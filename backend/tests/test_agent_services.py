@@ -10,7 +10,8 @@ from druks.api import runs
 from druks.api.exceptions import RunNotActive, RunNotFailed, RunNotFound, SubjectBusy
 from druks.durable.engine import run_queue
 from druks.durable.enums import WorkflowEvent
-from druks.durable.models import Artifact, Run
+from druks.durable.exceptions import AgentCallNotFound
+from druks.durable.models import AgentCall, Artifact, Run
 from druks.durable.reads import read_slice
 from druks.mcp.gateway import exceptions, services
 from druks.testing import seed_call, seed_dbos_status
@@ -203,6 +204,16 @@ async def test_answer_gate_error_taxonomy(druks_db, resume_spy):
 # ---- agent calls ----------------------------------------------------------
 
 
+def test_agent_call_get_returns_the_call_or_raises(druks_db):
+    run = seed_note_run(druks_db)
+    call = seed_call(druks_db, run, "summarize")
+
+    assert AgentCall.get(call.id) == call
+    with pytest.raises(AgentCallNotFound) as error:
+        AgentCall.get("missing")
+    assert str(error.value) == "No agent call missing."
+
+
 def test_get_agent_call_serves_bounded_tails(druks_db):
     from conftest import finish_agent_run, seed_note_agent_run
 
@@ -226,7 +237,7 @@ def test_get_agent_call_serves_bounded_tails(druks_db):
     assert detail.artifact is not None
     assert detail.artifact.content == "a" * 4096
 
-    with pytest.raises(exceptions.AgentCallNotFound):
+    with pytest.raises(AgentCallNotFound):
         services.get_agent_call("no-such-call")
 
 
@@ -240,6 +251,17 @@ def test_get_agent_call_without_files_reads_empty(druks_db):
     assert detail.transcript == ""
     assert detail.stderr == ""
     assert detail.artifact is None
+
+
+def test_artifact_content_omits_an_unknown_call(druks_db):
+    artifact = Artifact(
+        agent_call_id="missing",
+        kind="markdown",
+        title="Plan",
+        path="artifact.md",
+    )
+
+    assert services._artifact_content(artifact) is None
 
 
 # ---- cancel ---------------------------------------------------------------

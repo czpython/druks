@@ -343,8 +343,12 @@ async def test_get_agent_call_serves_bounded_tails(app, pat_token, druks_db):
         assert len(detail["artifact"]["content"].encode()) <= 4 * 1024
         assert _wire_size(detail) <= 20 * 1024
 
-        error = await _call_error(client, "get_agent_call", {"call_id": "no-such-call"})
-    assert error["code"] == "AGENT_CALL_NOT_FOUND"
+        error = await _call_error(client, "get_agent_call", {"call_id": "missing"})
+    assert error == {
+        "code": "AGENT_CALL_NOT_FOUND",
+        "message": "No agent call missing.",
+        "retryable": False,
+    }
 
 
 async def test_cancel_run_is_destructive_but_repeatable(app, pat_token, druks_db, monkeypatch):
