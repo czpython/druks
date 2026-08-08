@@ -15,7 +15,7 @@ async def get_artifact(artifact_id: str) -> ArtifactContent:
     if not artifact:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "artifact not found")
     call = AgentCall.get(artifact.agent_call_id)
-    path = call.get_file_path(artifact.path) if call else None
+    path = call.get_file_path(artifact.path)
     if not path:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "artifact content missing")
     return ArtifactContent(kind=artifact.kind, title=artifact.title, content=path.read_text())

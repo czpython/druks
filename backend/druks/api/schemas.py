@@ -3,6 +3,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from druks.durable.enums import RunState
 from druks.schemas import BaseResponse
 
 
@@ -18,12 +19,34 @@ class ResumeRequest(BaseModel):
 
 
 class CancelRunResponse(BaseResponse):
-    run_id: str
+    run: str
     result: Literal["cancelled", "already_cancelled"]
 
 
 class RetryRunResponse(BaseResponse):
-    run_id: str
+    run: str
+
+
+class OpenWorkflowResponse(BaseResponse):
+    extension: str
+    state: RunState
+    run: str = Field(description="What get_gate, cancel_run, and retry_run take.")
+    latest_agent_call: str | None = Field(
+        description="What get_agent_call takes; null before the first call."
+    )
+    failure: str | None
+    created_at: datetime
+
+
+class OpenSubjectResponse(BaseResponse):
+    subject_type: str
+    subject_id: str
+    subject_label: str
+    workflows: list[OpenWorkflowResponse]
+
+
+class OpenSubjectsResponse(BaseResponse):
+    subjects: list[OpenSubjectResponse]
 
 
 class ArtifactContent(BaseResponse):

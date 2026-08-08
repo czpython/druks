@@ -1,6 +1,8 @@
 from pathlib import Path
 
 import pytest
+from druks.durable.exceptions import AgentCallNotFound
+from druks.durable.reads import get_agent_call_files
 from druks.testing import configure_app_for_test, make_settings, seed_call, seed_run
 from druks_field_notes.models import Note
 from druks_field_notes.workflows import Summarize
@@ -62,6 +64,47 @@ def test_list_files_inventories_call_artifacts(
     assert files["stderr"]["name"] == "stderr.log"
     assert files["response"]["name"] == "output.json"
     assert files["metadata"] is not None
+
+
+def test_get_agent_call_files_raises_for_unknown_call(druks_db):
+    with pytest.raises(AgentCallNotFound):
+        get_agent_call_files("missing")
+
+
+def test_transcript_unknown_call_returns_unified_404(client: TestClient, druks_db):
+    response = client.get(
+        "/api/field_notes/transcripts/missing",
+        params={"stream": "stdout"},
+    )
+
+    assert response.status_code == 404
+    assert response.json() == {
+        "code": "AGENT_CALL_NOT_FOUND",
+        "message": "No agent call missing.",
+        "retryable": False,
+    }
+
+
+def test_file_listing_unknown_call_returns_unified_404(client: TestClient, druks_db):
+    response = client.get("/api/field_notes/transcripts/missing/files")
+
+    assert response.status_code == 404
+    assert response.json() == {
+        "code": "AGENT_CALL_NOT_FOUND",
+        "message": "No agent call missing.",
+        "retryable": False,
+    }
+
+
+def test_file_download_unknown_call_returns_unified_404(client: TestClient, druks_db):
+    response = client.get("/api/field_notes/transcripts/missing/files/output.json")
+
+    assert response.status_code == 404
+    assert response.json() == {
+        "code": "AGENT_CALL_NOT_FOUND",
+        "message": "No agent call missing.",
+        "retryable": False,
+    }
 
 
 def test_transcript_range_fetch_paginates(
@@ -211,6 +254,10 @@ def test_get_file_rejects_path_traversal(
     )
 
     assert response.status_code == 404
+    assert response.json() == {
+        "error": "HTTP_404",
+        "detail": "File not found for this call.",
+    }
 
 
 def test_get_file_missing_returns_404(
@@ -225,6 +272,10 @@ def test_get_file_missing_returns_404(
     )
 
     assert response.status_code == 404
+    assert response.json() == {
+        "error": "HTTP_404",
+        "detail": "File not found for this call.",
+    }
 
 
 def test_agent_call_artifact_layout(druks_db, tmp_path):

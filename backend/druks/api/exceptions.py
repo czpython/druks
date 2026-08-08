@@ -12,6 +12,28 @@ class AgentApiError(Exception):
     retryable: ClassVar[bool] = False
 
 
+def agent_error_responses(*errors: AgentApiError) -> dict:
+    # One response per status; the first error listed for a status is the example.
+    by_status: dict[int, list[AgentApiError]] = {}
+    for error in errors:
+        by_status.setdefault(error.status_code, []).append(error)
+    return {
+        status: {
+            "description": ", ".join(error.code for error in grouped) + ".",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "code": grouped[0].code,
+                        "message": str(grouped[0]),
+                        "retryable": grouped[0].retryable,
+                    }
+                }
+            },
+        }
+        for status, grouped in by_status.items()
+    }
+
+
 class RunNotFound(AgentApiError):
     status_code = 404
     code = "RUN_NOT_FOUND"
