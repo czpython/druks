@@ -3,6 +3,7 @@ from druks.contrib.ship.extension import Ship
 from druks.contrib.ship.models import ProjectRepo, WorkItem
 from druks.contrib.ship.ticketing.enums import TicketStatus
 from druks.contrib.ship.workflows import Build, Profile
+from druks.db import Base
 from druks.signals import subscribe
 from druks.workflows import WorkflowEvent
 
@@ -10,6 +11,13 @@ from druks.workflows import WorkflowEvent
 @subscribe(WorkflowEvent.SCHEDULED, workflow=Build)
 async def new_build_claims_the_item(*, subject: WorkItem, **_: object) -> None:
     subject.start_attempt()
+
+
+@subscribe(WorkflowEvent.CANCELLED, workflow=Build)
+async def cancelled_build_settles_the_item(*, subject: WorkItem, **_: object) -> None:
+    """An operator cancellation explicitly abandons the work item."""
+    if not subject.resolution:
+        subject.resolve(merged=False, at=Base.utc_now())
 
 
 @subscribe("pr.opened", workflow=Build)

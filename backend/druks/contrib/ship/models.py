@@ -213,10 +213,11 @@ class WorkItem(StoredSubject):
     repo: Mapped[str]
     pr_number: Mapped[int | None]
     branch: Mapped[str | None]
-    # GitHub's word, verbatim: "merged" or "closed". Unset while the work is
-    # still druks's, which is what the board reads.
+    # PR outcomes use GitHub's "merged" or "closed" verdict; operator cancellation
+    # uses druks's "closed" verdict. Unset while the work is still druks's.
     resolution: Mapped[str | None] = mapped_column(default=None)
-    # GitHub's clock, not druks's receipt time.
+    # PR outcomes use GitHub's verdict time; operator cancellation uses druks's
+    # cancellation reaction time.
     resolved_at: Mapped[datetime | None] = mapped_column(default=None)
     created_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
     updated_at: Mapped[datetime] = mapped_column(default=Base.utc_now)

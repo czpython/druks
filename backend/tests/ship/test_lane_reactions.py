@@ -31,6 +31,57 @@ async def test_new_build_claims_the_item(druks_db):
     assert (refreshed.resolution, refreshed.resolved_at) == (None, None)
 
 
+async def test_cancelled_build_settles_the_item(druks_db):
+    item = make_test_work_item(repo="acme/widget", title="t", source="linear", ticket_key="ACME-2")
+
+    await publish(
+        WorkflowEvent.CANCELLED,
+        subject=item.identity,
+        kind=Build.kind,
+        failure="operator cancelled",
+    )
+
+    refreshed = WorkItem.get(item.id)
+    assert refreshed.resolution == "closed"
+    assert refreshed.resolved_at
+    druks_db.expire_all()
+    assert str(item.id) not in {summary.id for summary in WorkItem.list_summaries()}
+
+
+@pytest.mark.parametrize(("merged", "resolution"), [(True, "merged"), (False, "closed")])
+async def test_cancelled_build_preserves_an_existing_resolution(druks_db, merged, resolution):
+    item = make_test_work_item(repo="acme/widget", title="t", source="linear", ticket_key="ACME-3")
+    resolved_at = datetime(2026, 8, 8, 12, tzinfo=UTC)
+    item.resolve(merged=merged, at=resolved_at)
+
+    await publish(
+        WorkflowEvent.CANCELLED,
+        subject=item.identity,
+        kind=Build.kind,
+        failure="operator cancelled",
+    )
+
+    refreshed = WorkItem.get(item.id)
+    assert refreshed.resolution == resolution
+    assert refreshed.resolved_at == resolved_at
+
+
+async def test_failed_build_remains_unresolved_on_the_board(druks_db):
+    item = make_test_work_item(repo="acme/widget", title="t", source="linear", ticket_key="ACME-4")
+
+    await publish(
+        WorkflowEvent.FAILED,
+        subject=item.identity,
+        kind=Build.kind,
+        failure="build failed",
+    )
+
+    refreshed = WorkItem.get(item.id)
+    assert (refreshed.resolution, refreshed.resolved_at) == (None, None)
+    druks_db.expire_all()
+    assert str(item.id) in {summary.id for summary in WorkItem.list_summaries()}
+
+
 async def test_build_lifecycle_reaches_the_tracker(druks_db, monkeypatch):
     pushed = []
 
