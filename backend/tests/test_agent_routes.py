@@ -171,6 +171,17 @@ def test_agent_errors_share_one_shape(client: TestClient, druks_db):
     assert body["retryable"] is True
 
 
+def test_missing_agent_call_uses_the_unified_shape(client: TestClient, druks_db):
+    response = client.get("/api/agent-calls/missing")
+
+    assert response.status_code == 404
+    assert response.json() == {
+        "code": "AGENT_CALL_NOT_FOUND",
+        "message": "No agent call missing.",
+        "retryable": False,
+    }
+
+
 def test_list_open_subjects_returns_newest_open_work_and_latest_calls(client: TestClient, druks_db):
     finished_note = Note.create(body="finished")
     seed_run(druks_db, kind=Summarize.kind, subject=finished_note, state="finished")
