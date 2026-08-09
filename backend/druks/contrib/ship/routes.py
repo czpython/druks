@@ -5,6 +5,8 @@ from sqlalchemy import func, select, update
 
 from druks.accounts.dependencies import current_account
 from druks.accounts.models import Account
+from druks.api.exceptions import agent_error_responses
+from druks.contrib.ship.exceptions import TicketNotFound, TrackerNotConfigured
 from druks.contrib.ship.extension import Ship
 from druks.contrib.ship.models import Project, ProjectRepo, WorkItem
 from druks.contrib.ship.schemas import (
@@ -18,7 +20,9 @@ from druks.contrib.ship.schemas import (
     ProjectSummary,
     WorkItemsHistoryResponse,
 )
-from druks.contrib.ship.workflows import Build, Profile
+from druks.contrib.ship.ticketing.enums import TicketStatus
+from druks.contrib.ship.ticketing.exceptions import UnknownTicketError
+from druks.contrib.ship.workflows import Profile
 from druks.core.apis.github import get_github_client
 from druks.db import db_session
 from druks.settings import load_settings
@@ -263,49 +267,23 @@ async def list_work_items_history(
     status_code=status.HTTP_202_ACCEPTED,
     operation_id="ship_start",
     tags=["agent"],
-    responses={
-        404: {
-            "description": "Unknown ticket.",
-            "content": {
-                "application/json": {
-                    "example": {
-                        "error": "HTTP_404",
-                        "detail": "no work item for ticket ENG-831",
-                    }
-                }
-            },
-        },
-        409: {
-            "description": "The work item has no registered target repository.",
-            "content": {
-                "application/json": {
-                    "example": {
-                        "error": "HTTP_409",
-                        "detail": (
-                            "acme/app is not a registered project repo — add it to a project first"
-                        ),
-                    }
-                }
-            },
-        },
-    },
+    responses=agent_error_responses(TicketNotFound("ENG-9999", "Linear"), TrackerNotConfigured()),
 )
 async def start_work_item(
     ticket: str = Path(
         ...,
-        description=(
-            "The work item's ticket key, e.g. ENG-831 — its subjectLabel in list_open_subjects."
-        ),
+        description="The tracker's ticket key, e.g. ENG-831.",
     ),
     account: Account = Depends(current_account),
-) -> str:
-    """Start agents building the ticket's work item."""
-    item = WorkItem.get_for_ticket_key(source=Ship.settings().tracker, ticket_key=ticket)
-    if not item:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, f"no work item for ticket {ticket}")
-    if not ProjectRepo.get_for_repo(item.repo):
-        raise HTTPException(
-            status.HTTP_409_CONFLICT,
-            f"{item.repo} is not a registered project repo — add it to a project first",
-        )
-    return await Build.start(subject=item, account_id=account.id)
+) -> None:
+    """Move the tracker ticket to the configured trigger status; webhook intake
+    then opens the build. No run exists yet when this returns — poll
+    list_open_subjects while waiting for it."""
+    tracker = Ship.tracker(Ship.settings().tracker)
+    if not tracker:
+        raise TrackerNotConfigured()
+    async with tracker:
+        try:
+            await tracker.set_status(ticket, TicketStatus.TRIGGER)
+        except UnknownTicketError as error:
+            raise TicketNotFound(error.key, error.tracker) from error

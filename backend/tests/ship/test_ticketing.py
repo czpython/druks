@@ -1,10 +1,16 @@
+import json
+
 import httpx
 import pytest
 from druks.contrib.ship.extension import Ship
 from druks.contrib.ship.ticketing.enums import TicketStatus
-from druks.contrib.ship.ticketing.exceptions import JiraAPIError, LinearAPIError
-from druks.contrib.ship.ticketing.jira import Jira
-from druks.contrib.ship.ticketing.linear import Linear
+from druks.contrib.ship.ticketing.exceptions import (
+    JiraAPIError,
+    LinearAPIError,
+    UnknownTicketError,
+)
+from druks.contrib.ship.ticketing.jira import Jira, JiraClient
+from druks.contrib.ship.ticketing.linear import Linear, LinearClient
 
 from ship.factories import make_test_work_item
 
@@ -31,13 +37,17 @@ def test_settings_require_jira_webhook_secret_once_the_api_token_is_set():
 
 def test_tracker_builds_linear_from_settings(monkeypatch):
     _pin_ship_settings(
-        monkeypatch, linear_api_key="lin_secret", linear_resting_status="Ready for Agent"
+        monkeypatch,
+        linear_api_key="lin_secret",
+        linear_resting_status="Ready for Agent",
+        linear_trigger_status="To Agent",
     )
 
     tracker = Ship.tracker("linear")
 
     assert isinstance(tracker, Linear)
     assert tracker._status_names[TicketStatus.READY_FOR_AGENT] == "Ready for Agent"
+    assert tracker._status_names[TicketStatus.TRIGGER] == "To Agent"
 
 
 def test_tracker_builds_jira_from_settings(monkeypatch):
@@ -48,12 +58,14 @@ def test_tracker_builds_jira_from_settings(monkeypatch):
         jira_email="a@b.com",
         jira_api_token="jira_secret",
         jira_resting_status="Open",
+        jira_trigger_status="To Agent",
     )
 
     tracker = Ship.tracker("jira")
 
     assert isinstance(tracker, Jira)
     assert tracker._status_names[TicketStatus.READY_FOR_AGENT] == "Open"
+    assert tracker._status_names[TicketStatus.TRIGGER] == "To Agent"
 
 
 def test_tracker_is_none_for_github_and_missing_credentials(monkeypatch):
@@ -102,13 +114,20 @@ class _FakeLinearClient:
 @pytest.mark.asyncio
 async def test_set_status_maps_the_ticket_status_to_a_provider_name():
     fake = _FakeLinearClient()
-    provider = Linear(api_key="lin_x", ready_for_agent_status="Ready for Agent", client=object())
+    provider = Linear(
+        api_key="lin_x",
+        ready_for_agent_status="Ready for Agent",
+        trigger_status="To Agent",
+        client=object(),
+    )
     provider._client = fake  # the unit seam is the API client, not HTTP
     await provider.set_status("ACME-270", TicketStatus.DONE)
     await provider.set_status("ACME-270", TicketStatus.READY_FOR_AGENT)
+    await provider.set_status("ACME-270", TicketStatus.TRIGGER)
     assert fake.calls == [
         ("update_issue_status", "ACME-270", "Done"),
         ("update_issue_status", "ACME-270", "Ready for Agent"),
+        ("update_issue_status", "ACME-270", "To Agent"),
     ]
 
 
@@ -118,11 +137,101 @@ async def test_set_status_unmapped_raises():
     provider._client = _FakeLinearClient()
     with pytest.raises(ValueError, match="no configured status"):
         await provider.set_status("ACME-270", TicketStatus.READY_FOR_AGENT)
+    with pytest.raises(ValueError, match="no configured status"):
+        await provider.set_status("ACME-270", TicketStatus.TRIGGER)
 
 
 def test_linear_declares_known_exceptions():
     assert LinearAPIError in Linear.known_exceptions
+    assert UnknownTicketError in Linear.known_exceptions
     assert httpx.HTTPError in Linear.known_exceptions
+
+
+# --- LinearClient: the GraphQL request sequences ----------------------------
+
+
+def _linear_client(handler) -> LinearClient:
+    wire = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    return LinearClient(api_key="lin_x", client=wire)
+
+
+def _linear_issue_response(*, current: str, states: list[tuple[str, str]]) -> httpx.Response:
+    return httpx.Response(
+        200,
+        json={
+            "data": {
+                "issue": {
+                    "id": "issue-uuid",
+                    "identifier": "ENG-831",
+                    "state": {"id": "current-id", "name": current},
+                    "team": {
+                        "states": {"nodes": [{"id": id_, "name": name} for id_, name in states]}
+                    },
+                }
+            }
+        },
+    )
+
+
+@pytest.mark.asyncio
+async def test_linear_client_skips_the_mutation_when_already_at_the_status():
+    requests = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(json.loads(request.content))
+        return _linear_issue_response(
+            current="Ready for Agent", states=[("current-id", "Ready for Agent")]
+        )
+
+    result = await _linear_client(handler).update_issue_status("ENG-831", "Ready for Agent")
+
+    assert result == {"identifier": "ENG-831", "status": "Ready for Agent", "changed": False}
+    # Equal state is a successful no-op: the lookup query, no update mutation.
+    assert len(requests) == 1
+    assert "mutation" not in requests[0]["query"]
+
+
+@pytest.mark.asyncio
+async def test_linear_client_mutates_a_ticket_not_at_the_status():
+    requests = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        requests.append(body)
+        if "mutation" in body["query"]:
+            return httpx.Response(
+                200,
+                json={
+                    "data": {
+                        "issueUpdate": {
+                            "success": True,
+                            "issue": {
+                                "identifier": "ENG-831",
+                                "state": {"name": "Ready for Agent"},
+                            },
+                        }
+                    }
+                },
+            )
+        return _linear_issue_response(
+            current="Backlog",
+            states=[("current-id", "Backlog"), ("target-id", "Ready for Agent")],
+        )
+
+    result = await _linear_client(handler).update_issue_status("ENG-831", "Ready for Agent")
+
+    assert result == {"identifier": "ENG-831", "status": "Ready for Agent", "changed": True}
+    assert ["mutation" in body["query"] for body in requests] == [False, True]
+    assert requests[1]["variables"] == {"issueId": "ENG-831", "statusId": "target-id"}
+
+
+@pytest.mark.asyncio
+async def test_linear_client_translates_a_null_issue_to_unknown_ticket():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"data": {"issue": None}})
+
+    with pytest.raises(UnknownTicketError, match="ENG-9999 doesn't exist in Linear"):
+        await _linear_client(handler).update_issue_status("ENG-9999", "Ready for Agent")
 
 
 # --- WorkItem.set_ticket_status: the status-push consumer -------------------
@@ -202,15 +311,90 @@ class _FakeJiraClient:
 @pytest.mark.asyncio
 async def test_jira_set_status_uses_transition():
     fake = _FakeJiraClient()
-    provider = Jira(base_url="https://jira.test", email="a@b.com", api_token="tok", client=object())
+    provider = Jira(
+        base_url="https://jira.test",
+        email="a@b.com",
+        api_token="tok",
+        trigger_status="To Agent",
+        client=object(),
+    )
     provider._client = fake  # the unit seam is the API client, not HTTP
     await provider.set_status("PROJ-7", TicketStatus.DONE)
-    assert fake.calls == [("transition_issue", "PROJ-7", "Done")]
+    await provider.set_status("PROJ-7", TicketStatus.TRIGGER)
+    assert fake.calls == [
+        ("transition_issue", "PROJ-7", "Done"),
+        ("transition_issue", "PROJ-7", "To Agent"),
+    ]
 
 
 def test_jira_declares_known_exceptions():
     assert JiraAPIError in Jira.known_exceptions
+    assert UnknownTicketError in Jira.known_exceptions
     assert httpx.HTTPError in Jira.known_exceptions
+
+
+# --- JiraClient: transition lookups over the wire ---------------------------
+
+
+def _jira_client(handler) -> JiraClient:
+    wire = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    return JiraClient(base_url="https://jira.test", email="a@b.com", api_token="tok", client=wire)
+
+
+@pytest.mark.asyncio
+async def test_jira_client_executes_the_transition_to_the_status():
+    requests = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append((request.method, request.url.path))
+        if request.method == "GET":
+            return httpx.Response(
+                200,
+                json={
+                    "transitions": [
+                        {"id": "11", "to": {"name": "In Progress"}},
+                        {"id": "21", "to": {"name": "Ready for Agent"}},
+                    ]
+                },
+            )
+        assert json.loads(request.content) == {"transition": {"id": "21"}}
+        return httpx.Response(204)
+
+    await _jira_client(handler).transition_issue("PROJ-7", "Ready for Agent")
+
+    assert requests == [
+        ("GET", "/rest/api/3/issue/PROJ-7/transitions"),
+        ("POST", "/rest/api/3/issue/PROJ-7/transitions"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_jira_client_translates_a_transitions_404_to_unknown_ticket():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(404, json={"errorMessages": ["Issue does not exist"]})
+
+    with pytest.raises(UnknownTicketError, match="PROJ-9 doesn't exist in Jira"):
+        await _jira_client(handler).transition_issue("PROJ-9", "Ready for Agent")
+
+
+@pytest.mark.asyncio
+async def test_jira_client_keeps_other_failures_as_api_errors():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(502, text="bad gateway")
+
+    with pytest.raises(JiraAPIError, match="-> 502"):
+        await _jira_client(handler).transition_issue("PROJ-9", "Ready for Agent")
+
+
+@pytest.mark.asyncio
+async def test_jira_client_still_errors_without_a_matching_transition():
+    # Already-at-trigger with no self-transition stays a JiraAPIError — druks
+    # does not paper over Jira's transition model.
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"transitions": [{"id": "31", "to": {"name": "Done"}}]})
+
+    with pytest.raises(JiraAPIError, match="no transition to status"):
+        await _jira_client(handler).transition_issue("PROJ-7", "Ready for Agent")
 
 
 def test_jira_status_names_match_internal_tools_workflow():

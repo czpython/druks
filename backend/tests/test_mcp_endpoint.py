@@ -8,6 +8,8 @@ import pytest
 from conftest import finish_agent_run, make_test_note, seed_note_agent_run, seed_note_run
 from druks.accounts.models import Account, PersonalAccessToken
 from druks.api.app import mcp_app
+from druks.contrib.ship.extension import Ship
+from druks.contrib.ship.ticketing.exceptions import UnknownTicketError
 from druks.durable.models import Artifact, Run
 from druks.mcp.app import create_mcp_app
 from druks.mcp.exceptions import InvalidAgentToolError
@@ -199,8 +201,13 @@ async def test_tools_list_pins_platform_and_extension_tools(app, pat_token):
     reason = tools["cancel_run"].inputSchema["properties"]["reason"]
     assert (reason["minLength"], reason["maxLength"]) == (1, 500)
     assert tools["ship_start"].inputSchema["properties"]["ticket"]["description"] == (
-        "The work item's ticket key, e.g. ENG-831 — its subjectLabel in list_open_subjects."
+        "The tracker's ticket key, e.g. ENG-831."
     )
+    # ship_start moves the tracker ticket and waits on webhook intake — its
+    # derived description must say so, run-id-free.
+    assert "trigger status" in tools["ship_start"].description
+    assert "webhook intake" in tools["ship_start"].description
+    assert "list_open_subjects" in tools["ship_start"].description
     assert not tools["list_open_subjects"].inputSchema.get("required")
     assert not tools["get_usage"].inputSchema.get("required")
 
@@ -390,6 +397,32 @@ async def test_cancel_run_is_destructive_but_repeatable(app, pat_token, druks_db
         )
     assert blank.is_error
     assert cancels == [{"id": active.id, "failure": "wrong branch"}]
+
+
+async def test_ship_start_embeds_the_typed_ticket_error(app, pat_token, druks_db, monkeypatch):
+    class _UnknownTicketTracker:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            pass
+
+        async def set_status(self, key, status):
+            raise UnknownTicketError(key, "Linear")
+
+        async def aclose(self):
+            pass
+
+    monkeypatch.setattr(Ship, "tracker", classmethod(lambda cls, source: _UnknownTicketTracker()))
+
+    async with live(app), _client(app, pat_token) as client:
+        error = await _call_error(client, "ship_start", {"ticket": "ENG-9999"})
+
+    assert error == {
+        "code": "TICKET_NOT_FOUND",
+        "message": "ENG-9999 doesn't exist in Linear",
+        "retryable": False,
+    }
 
 
 async def test_get_usage_reads_within_budget(app, pat_token):

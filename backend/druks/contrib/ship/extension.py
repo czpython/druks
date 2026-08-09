@@ -136,6 +136,7 @@ class Ship(Extension):
             return Linear(
                 api_key=settings.linear_api_key.get_secret_value(),
                 ready_for_agent_status=settings.linear_resting_status,
+                trigger_status=settings.trigger_status,
             )
         if (
             source == "jira"
@@ -148,6 +149,7 @@ class Ship(Extension):
                 email=settings.jira_email,
                 api_token=settings.jira_api_token.get_secret_value(),
                 ready_for_agent_status=settings.jira_resting_status,
+                trigger_status=settings.trigger_status,
             )
         return
 
