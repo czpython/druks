@@ -24,14 +24,14 @@ SESSION_ONLY_API_ROUTES = {
     ("DELETE", "/api/auth/personal-tokens/{pat_id}"),
     ("DELETE", "/api/harnesses/{name}/connection"),
     ("PATCH", "/api/settings/extensions"),
-    ("POST", "/api/service-identities/{name}"),
+    ("POST", "/api/services/{name}"),
 }
 
 # Session-gated routes that also sit behind their router's identity gate —
 # the route-level session dependency is the stricter of the two.
 DUAL_GATED_API_PATHS = {
     "/api/settings/extensions",
-    "/api/service-identities/{name}",
+    "/api/services/{name}",
 }
 
 # The connection flow must answer during none/zero setup, before any account

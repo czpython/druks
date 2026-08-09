@@ -18,9 +18,9 @@ class ServiceFieldSpec(BaseResponse):
     multiline: bool
 
 
-class ServiceIdentityResponse(BaseResponse):
+class ServiceResponse(BaseResponse):
     # Connection state and identity facts only — never a stored secret.
-    service: str
+    name: str
     title: str
     description: str
     required: bool
@@ -30,11 +30,9 @@ class ServiceIdentityResponse(BaseResponse):
     fields: list[ServiceFieldSpec]
 
     @classmethod
-    def from_row(
-        cls, service: "type[Service]", row: "ServiceIdentity | None"
-    ) -> "ServiceIdentityResponse":
+    def from_row(cls, service: "type[Service]", row: "ServiceIdentity | None") -> "ServiceResponse":
         return cls(
-            service=service.name,
+            name=service.name,
             title=service.title,
             description=service.description,
             required=service.required,

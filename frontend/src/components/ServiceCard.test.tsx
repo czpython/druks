@@ -2,8 +2,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import type { ServiceIdentity } from '../api/types'
-import { ServiceIdentityCards } from './SettingsModal'
+import type { Service } from '../api/types'
+import { ServiceCards } from './SettingsModal'
 
 const PEM = '-----BEGIN RSA PRIVATE KEY-----\nline-one\nline-two\n-----END RSA PRIVATE KEY-----'
 const SECRET = 'hook-secret-value'
@@ -14,8 +14,8 @@ const githubFields = [
   { name: 'webhook_secret', label: 'Webhook secret', help: '', type: 'secret', multiline: false },
 ]
 
-const disconnected: ServiceIdentity = {
-  service: 'github',
+const disconnected: Service = {
+  name: 'github',
   title: 'GitHub',
   description: 'The GitHub App druks acts as.',
   required: true,
@@ -25,15 +25,15 @@ const disconnected: ServiceIdentity = {
   fields: githubFields,
 }
 
-const connected: ServiceIdentity = {
+const connected: Service = {
   ...disconnected,
   connected: true,
   facts: { app_id: '12345', slug: 'druks-operator' },
   connectedAt: '2026-08-09T00:00:00Z',
 }
 
-const pasteOnly: ServiceIdentity = {
-  service: 'gmail',
+const pasteOnly: Service = {
+  name: 'gmail',
   title: 'Google OAuth client',
   description: 'The OAuth client every mailbox authenticates against.',
   required: true,
@@ -46,16 +46,16 @@ const pasteOnly: ServiceIdentity = {
   ],
 }
 
-function stubFetch(states: ServiceIdentity[][]) {
+function stubFetch(states: Service[][]) {
   // GET serves the list states in order (post-connect refetch sees the next
   // one); POST answers with the connected github entry.
   const gets = [...states]
   const fetchMock = vi.fn<(url: string, init?: RequestInit) => Promise<Response>>(
     async (url, init) => {
-      if (url === '/api/service-identities/github' && init?.method === 'POST') {
+      if (url === '/api/services/github' && init?.method === 'POST') {
         return new Response(JSON.stringify(connected), { status: 200 })
       }
-      if (url === '/api/service-identities') {
+      if (url === '/api/services') {
         const state = gets.length > 1 ? gets.shift() : gets[0]
         return new Response(JSON.stringify(state), { status: 200 })
       }
@@ -70,7 +70,7 @@ function renderCards() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   render(
     <QueryClientProvider client={queryClient}>
-      <ServiceIdentityCards />
+      <ServiceCards />
     </QueryClientProvider>,
   )
 }
@@ -86,7 +86,7 @@ async function flush() {
   })
 }
 
-describe('ServiceIdentityCards', () => {
+describe('ServiceCards', () => {
   it('renders the disconnected paste-in form from the field spec', async () => {
     stubFetch([[disconnected]])
     renderCards()
@@ -119,7 +119,7 @@ describe('ServiceIdentityCards', () => {
     await flush()
 
     const post = fetchMock.mock.calls.find(
-      ([url, init]) => url === '/api/service-identities/github' && init?.method === 'POST',
+      ([url, init]) => url === '/api/services/github' && init?.method === 'POST',
     )
     expect(JSON.parse(String(post?.[1]?.body))).toEqual({
       app_id: '12345',
@@ -138,7 +138,7 @@ describe('ServiceIdentityCards', () => {
   it('keeps a rejected paste out of the row and shows the error', async () => {
     const fetchMock = vi.fn<(url: string, init?: RequestInit) => Promise<Response>>(
       async (url, init) => {
-        if (url === '/api/service-identities/github' && init?.method === 'POST') {
+        if (url === '/api/services/github' && init?.method === 'POST') {
           return new Response(
             JSON.stringify({ detail: 'GitHub did not accept these credentials — check the App ID and PEM private key.' }),
             { status: 422, statusText: 'Unprocessable Entity' },

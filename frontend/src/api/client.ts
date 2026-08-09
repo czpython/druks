@@ -19,7 +19,7 @@ import type {
   UsageTodayResponse,
   McpRegistryCandidate,
   McpServer,
-  ServiceIdentity,
+  Service,
   Skill,
   SkillCollection,
   UserSettings,
@@ -218,9 +218,9 @@ export const api = {
   // The appliance's own identities at external services — connect verifies the
   // pasted credentials against the provider before anything replaces a working
   // identity. Field names come from each entry's spec.
-  serviceIdentities: () => getJSON<ServiceIdentity[]>('/api/service-identities'),
-  connectServiceIdentity: (service: string, fields: Record<string, string>) =>
-    postJSON<ServiceIdentity>(`/api/service-identities/${encodeURIComponent(service)}`, fields),
+  services: () => getJSON<Service[]>('/api/services'),
+  connectService: (name: string, fields: Record<string, string>) =>
+    postJSON<Service>(`/api/services/${encodeURIComponent(name)}`, fields),
   getExtensionSettings: () => getJSON<ExtensionsSettingsResponse>('/api/settings/extensions'),
   updateExtensionSettings: (body: UpdateExtensionsSettingsRequest) =>
     patchJSON<ExtensionsSettingsResponse>('/api/settings/extensions', body),

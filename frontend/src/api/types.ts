@@ -258,7 +258,7 @@ export interface UpdateHarnessRequest {
   timeout?: number
 }
 
-export interface ServiceIdentityField {
+export interface ServiceField {
   name: string
   label: string
   help: string
@@ -268,15 +268,15 @@ export interface ServiceIdentityField {
 
 /** One declared service: the appliance's own registered app at an external
  * provider. Facts are identity only — stored secrets never leave the backend. */
-export interface ServiceIdentity {
-  service: string
+export interface Service {
+  name: string
   title: string
   description: string
   required: boolean
   connected: boolean
   facts: Record<string, string>
   connectedAt: string | null
-  fields: ServiceIdentityField[]
+  fields: ServiceField[]
 }
 
 // --- Settings --------------------------------------------------------------
