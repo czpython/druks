@@ -109,6 +109,15 @@ def test_jira_api_error_retains_status_code():
     assert error.status_code == 403
 
 
+def test_jira_status_names_match_internal_tools_workflow():
+    names = Jira._STATIC_STATUS_NAMES
+
+    assert names[TicketStatus.IN_PROGRESS] == "In Progress"
+    assert names[TicketStatus.IN_REVIEW] == "Waiting CR"
+    assert names[TicketStatus.DONE] == "Done"
+    assert names[TicketStatus.CANCELED] == "Done"
+
+
 class _FakeLinearClient:
     def __init__(self, outcomes: list[bool]) -> None:
         self.outcomes = outcomes
@@ -699,4 +708,5 @@ async def test_jira_lifecycle_initial_404_is_logged_swallowed_and_stops(
         await item.set_ticket_status(TicketStatus.DONE)
 
     assert len(requests) == 1
+    assert transport_client.is_closed
     assert "Could not sync jira ticket ENG-833 to done" in caplog.text
