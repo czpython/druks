@@ -326,9 +326,9 @@ def test_operator_edits_survive_a_writer_pass(tmp_path):
     toml_path = tmp_path / "druks.toml"
     body = toml_path.read_text()
     body = body.replace(
-        'endpoint = "http://localhost:8001"',
+        'endpoint = "http://127.0.0.1:8001"',
         "# our dashboard host, registered 2026-07 by ops\n"
-        'endpoint = "http://localhost:8001"\ncustom_label = "blue"',
+        'endpoint = "http://127.0.0.1:8001"\ncustom_label = "blue"',
     )
     body += "\n[operator]\nretries = 4\nenabled = true\n"
     toml_path.write_text(body)

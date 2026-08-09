@@ -189,7 +189,10 @@ def _fresh_values(*, provider: str, home: str) -> tuple[tuple[tuple[str, ...], s
     if provider == "docker":
         shape = (
             (("identity", "mode"), "none"),
-            (("urls", "endpoint"), "http://localhost:8001"),
+            # The same origin every local doc and the installer banner print —
+            # browser flows built from the endpoint (the GitHub manifest
+            # callback's BroadcastChannel) are origin-scoped.
+            (("urls", "endpoint"), "http://127.0.0.1:8001"),
             (("sandbox", "service_url"), "http://127.0.0.1:8000"),
             (("sandbox", "service_token"), "dev-token"),
             (("sandbox", "image"), "ghcr.io/czpython/druks-sandbox:latest"),

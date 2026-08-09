@@ -31,7 +31,6 @@ provider capacity and can take about a VM minute.
 Read the named field in the error. Common causes:
 
 - `secrets.secrets_key` is empty, not valid base64, or does not decode to 32 bytes
-- a mounted PEM path differs from the path visible inside the container
 - a `druks.toml` value renders an invalid process setting
 
 Re-running `install.sh` renders `.env` from `druks.toml` and prints remaining
