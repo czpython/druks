@@ -107,6 +107,50 @@ def test_nested_repo_routes_are_scoped_to_their_project(client: TestClient, monk
     assert ProjectRepo.get(repo_id) is None
 
 
+def _make_work_item(project_id: int, ticket_key: str, *, resolved: bool = False):
+    from datetime import datetime
+
+    from druks.contrib.ship.models import WorkItem
+
+    item = WorkItem.create(
+        project_id=project_id,
+        title=ticket_key,
+        ticket_key=ticket_key,
+        repo="acme/widget",
+    )
+    if resolved:
+        item.resolution = "closed"
+        item.resolved_at = datetime(2026, 1, 1)
+    return item
+
+
+def test_deleting_a_project_cascades_its_work_items_and_spares_others(client: TestClient, druks_db):
+    """DELETE cascades: the project and every work item it owns go, with no 409
+    reference guard — while another project's graph is left fully intact."""
+    from druks.contrib.ship.models import Project, WorkItem
+
+    target = Project.create(name="Target")
+    control = Project.create(name="Control")
+    doomed = _make_work_item(target.id, "ENG-1")
+    doomed_resolved = _make_work_item(target.id, "ENG-2", resolved=True)
+    survivor = _make_work_item(control.id, "ENG-3")
+    target_id, control_id = target.id, control.id
+    doomed_id, doomed_resolved_id, survivor_id = doomed.id, doomed_resolved.id, survivor.id
+
+    response = client.delete(f"/api/ship/projects/{target_id}")
+
+    assert response.status_code == 204
+    # The route committed on its own session; drop this session's identity map so
+    # the reads below reflect the committed graph rather than cached instances.
+    druks_db.expire_all()
+    assert Project.get(target_id) is None
+    assert WorkItem.get(doomed_id) is None
+    assert WorkItem.get(doomed_resolved_id) is None
+    # The control project and its work item are untouched.
+    assert Project.get(control_id) is not None
+    assert WorkItem.get(survivor_id) is not None
+
+
 def test_the_repo_subject_read_side_mounts(client: TestClient, druks_db):
     """Profile is about a repo, so the repo gets the board and the page it never had —
     its own runs' status and timeline, keyed by the repo's id."""

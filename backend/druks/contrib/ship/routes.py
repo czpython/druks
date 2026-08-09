@@ -1,7 +1,7 @@
 import logging
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query, Response, status
-from sqlalchemy import func, select, update
+from sqlalchemy import delete, func, select, update
 
 from druks.accounts.dependencies import current_account
 from druks.accounts.models import Account
@@ -131,21 +131,15 @@ async def update_project(
 
 @projects_router.delete("/{project_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_project(project_id: int) -> None:
-    """Delete a project. Refuses when any WorkItem still points at it —
-    ``work_items.project_id`` is NOT NULL, so the operator must move
-    or delete the children first."""
+    """Delete a project and everything it owns. A project's work items are its own
+    children, so they go with it — ``work_items.project_id`` is a plain FK, so the
+    cascade is an explicit child delete in the same session before the project (and
+    its repo ``delete-orphan`` cascade) is deleted."""
     session = db_session()
     project = Project.get(project_id)
     if not project:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "project not found")
-    referencing = session.scalar(
-        select(func.count()).select_from(WorkItem).where(WorkItem.project_id == project_id)
-    )
-    if referencing:
-        raise HTTPException(
-            status.HTTP_409_CONFLICT,
-            f"{referencing} work item(s) still reference this project; move or delete them first.",
-        )
+    session.execute(delete(WorkItem).where(WorkItem.project_id == project_id))
     session.delete(project)
     session.flush()
 

@@ -2066,6 +2066,16 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
 
 .pj-err { display: block; margin-top: 8px; font-size: 11px; color: var(--bucket-dead); }
 
+/* page-level transient toast — e.g. a project delete that failed */
+.pj-toast {
+  margin-bottom: 16px; padding: 10px 14px; border-radius: 4px; font-size: 12px;
+}
+.pj-toast-error {
+  color: var(--bucket-dead);
+  border: 1px solid color-mix(in oklch, var(--bucket-dead) 45%, transparent);
+  background: color-mix(in oklch, var(--bucket-dead) 12%, transparent);
+}
+
 /* create-project row */
 .pj-create { display: flex; gap: 10px; margin-bottom: 26px; }
 .pj-create-input {
