@@ -338,6 +338,68 @@ async def test_adaptive_high_confidence_approved_plan_implements_without_parking
     assert await flow._plan_phase() is True
 
 
+async def test_adaptive_questions_park_before_confidence_counts(monkeypatch):
+    """Adaptive: open questions always park — confidence never outranks them."""
+    flow = _flow(plan_gate="adaptive")
+    _fake_plans(
+        monkeypatch,
+        PlanData(
+            plan_markdown="v1",
+            confidence="high",
+            questions=[QuestionOutput(id="q1", prompt="Feature flag?", options=[])],
+        ),
+        PlanData(
+            plan_markdown="v2",
+            acceptance_criteria=_acceptance_criteria(),
+            confidence="high",
+        ),
+    )
+    _fake_grades(monkeypatch, ReviewOutput(decision=ReviewDecision.APPROVE, body=""))
+    parks: list[list[QuestionOutput]] = []
+    replies = iter(
+        [
+            OperatorReply(action="request_changes", answers={"q1": "behind a flag"}),
+        ]
+    )
+
+    async def fake_review(*, questions=None, context=""):
+        parks.append(list(questions or []))
+        return next(replies)
+
+    flow.review = fake_review
+
+    assert await flow._plan_phase() is True
+    assert [question.id for question in parks[0]] == ["q1"]
+    assert len(parks) == 1
+
+
+async def test_adaptive_confident_plan_without_acceptance_criteria_parks(monkeypatch):
+    """Adaptive: skipping the operator takes the same bar the human path holds —
+    no acceptance criteria, no auto-proceed."""
+    flow = _flow(plan_gate="adaptive")
+    _fake_plans(
+        monkeypatch,
+        PlanData(plan_markdown="v1", confidence="high"),
+        PlanData(
+            plan_markdown="v2",
+            acceptance_criteria=_acceptance_criteria(),
+            confidence="high",
+        ),
+    )
+    _fake_grades(monkeypatch, ReviewOutput(decision=ReviewDecision.APPROVE, body=""))
+    parks = 0
+
+    async def fake_review(*, questions=None, context=""):
+        nonlocal parks
+        parks += 1
+        return OperatorReply(action="approve")
+
+    flow.review = fake_review
+
+    assert await flow._plan_phase() is True
+    assert parks == 2
+
+
 @pytest.mark.parametrize("confidence", ["medium", "low"])
 async def test_adaptive_parks_unless_the_planner_is_confident(monkeypatch, confidence):
     """Adaptive: a critic-approved plan still parks when the planner hedges."""

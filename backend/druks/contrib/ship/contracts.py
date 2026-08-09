@@ -184,10 +184,17 @@ class ContractRevisionOutput(AgentOutput):
 
 
 class ReviewOutput(AgentOutput):
-    # No get_artifact: the plan must stay the parked ask's resolved document;
-    # the fallback park sends the critique as ask context instead.
+    # No get_artifact: the plan must stay the parked ask's resolved document.
     decision: Literal[ReviewDecision.APPROVE, ReviewDecision.REQUEST_CHANGES]
     body: str
+
+    @model_validator(mode="after")
+    def _request_changes_carries_the_critique(self) -> "ReviewOutput":
+        # An empty critique would redraft blind — the planner regenerates with
+        # no guidance and the result proceeds unreviewed.
+        if self.decision == ReviewDecision.REQUEST_CHANGES and not self.body.strip():
+            raise ValueError("REQUEST_CHANGES needs the critique in body")
+        return self
 
 
 class TriageOutput(AgentOutput):

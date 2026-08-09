@@ -265,7 +265,11 @@ class Build(Workflow):
                         continue
                     if plan_gate == "machine":
                         return True
-                    if plan_gate == "adaptive" and plan.confidence == "high":
+                    if (
+                        plan_gate == "adaptive"
+                        and plan.confidence == "high"
+                        and plan.acceptance_criteria
+                    ):
                         return True
                 elif plan_gate == "machine":
                     return True
