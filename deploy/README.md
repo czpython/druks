@@ -1,18 +1,23 @@
 # Druks Deployment
 
-The whole stack runs in Docker Compose: Druks (`web`, which embeds the DBOS
-durable engine and serves the dashboard SPA), Postgres, and Redis. A
-**remote** install (any `DRUKS_PROVIDER` except `docker`) also brings up stock
-Caddy (identity edge + proxy, Caddyfile bind-mounted) and the Drukbox sandbox
-control plane (`sandbox-service`, `sandbox-janitor`). Those three live in the
-Compose `remote` profile, which `install.sh` selects by writing
-`COMPOSE_PROFILES` to `.env`, so plain `docker compose` commands in the install
-dir pick it up.
+The base `compose.yaml` is Druks (`web`, which embeds the DBOS durable engine
+and serves the dashboard SPA), Postgres, and Redis. A shape overlay adds the
+Drukbox sandbox control plane on top: `install.sh` writes `COMPOSE_FILE` to
+`.env` (e.g. `compose.yaml:compose.remote.yaml`), so plain `docker compose`
+commands in the install dir load the right pair.
 
-A **local** install (`DRUKS_PROVIDER=docker`) runs neither: the dashboard is
-reached directly on `127.0.0.1:8001` and sandboxes are local Docker
-containers with drukbox on the host — see
-[Full local](../docs/full-local.md).
+A **remote** install (any `DRUKS_PROVIDER` except `docker`) uses
+`compose.remote.yaml`: the Drukbox control plane (`drukbox`, `drukbox-janitor`)
+against a cloud provider, plus stock Caddy (identity edge + proxy, Caddyfile
+bind-mounted).
+
+A **local** install (`DRUKS_PROVIDER=docker`) uses `compose.local.yaml`: one
+`drukbox` with the host's Docker socket mounted, so sandboxes are sibling
+containers on the host daemon, and no Caddy — the dashboard is reached directly
+on `127.0.0.1:8001`. See [Full local](../docs/full-local.md).
+
+Drukbox keeps its own schema in a `drukbox` database in the same Postgres, so
+there is no second datastore to run or back up separately.
 
 The Druks services use the **host network** so they can reach Postgres, Redis,
 Drukbox, and provider-specific sandbox addresses from the host network
@@ -192,7 +197,7 @@ code.
 
 ```bash
 docker compose logs -f web
-docker compose logs -f sandbox-service sandbox-janitor   # remote install only
+docker compose logs -f drukbox               # the sandbox control plane
 docker compose down
 ```
 

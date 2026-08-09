@@ -309,14 +309,17 @@ def test_deleted_env_is_regenerated_byte_identically(tmp_path):
 def test_compose_plane_env_additions_survive_rerender(tmp_path):
     env_path = tmp_path / ".env"
     _run(env_path, provider="docker")
-    env_path.write_text(env_path.read_text() + "DRUKS_UID=1000\nCOMPOSE_PROFILES=\n")
+    env_path.write_text(
+        env_path.read_text()
+        + "DRUKS_UID=1000\nDRUKS_DOCKER_GID=988\nCOMPOSE_FILE=compose.yaml:compose.local.yaml\n"
+    )
 
     _run(env_path)
 
     values = read_env(env_path)
     assert values["DRUKS_UID"] == "1000"
-    assert "COMPOSE_PROFILES" in values
-    assert values["COMPOSE_PROFILES"] == ""
+    assert values["DRUKS_DOCKER_GID"] == "988"
+    assert values["COMPOSE_FILE"] == "compose.yaml:compose.local.yaml"
     assert "# OPERATOR ADDITIONS" in env_path.read_text()
 
 

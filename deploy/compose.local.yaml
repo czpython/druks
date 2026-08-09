@@ -1,0 +1,41 @@
+# Local overlay: drukbox drives sandboxes as sibling containers on the host
+# Docker daemon through the mounted socket. install.sh writes
+# COMPOSE_FILE=compose.yaml:compose.local.yaml into .env, so plain
+# `docker compose` loads this with the base. The dashboard is reached directly
+# on 127.0.0.1:8001 — no Caddy.
+
+services:
+  drukbox:
+    image: ${DRUKS_SANDBOX_SERVICE_IMAGE:-ghcr.io/czpython/drukbox:latest}
+    network_mode: host
+    restart: unless-stopped
+    # Runs as the image's non-root appuser (uid 1001). The Docker socket is
+    # group-owned; install.sh records its gid (DRUKS_DOCKER_GID) so appuser may
+    # use it — on macOS the mounted socket is group root, so setup writes 0.
+    group_add:
+      - "${DRUKS_DOCKER_GID:-0}"
+    env_file:
+      - ./.env
+    environment:
+      DATABASE_URL: postgresql+psycopg://${DRUKS_POSTGRES_USER:-druks}:${DRUKS_POSTGRES_PASSWORD}@127.0.0.1:5432/drukbox
+      DEFAULT_HOST_PROVIDER: docker
+      TAILSCALE_ENABLED: "false"
+      DOCKER_SSH_USERNAME: druks
+      SERVICE_TOKENS: dev-token
+      # Loopback + port 8000 to match the service_url local setup writes; the
+      # image healthcheck follows below.
+      UVICORN_HOST: 127.0.0.1
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    command: [".venv/bin/uvicorn", "api.app:app", "--port", "8000"]
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=2)",
+        ]
+    depends_on:
+      postgres:
+        condition: service_healthy

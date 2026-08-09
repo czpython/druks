@@ -1,0 +1,60 @@
+# Remote overlay: drukbox drives a cloud sandbox provider (exe/aws/…), plus
+# Caddy as the identity edge + webhook TLS. install.sh writes
+# COMPOSE_FILE=compose.yaml:compose.remote.yaml into .env. Provider credentials
+# ride in .env (the [sandbox.<provider>] passthrough from setup); the exe shape
+# additionally reaches its VMs over the host tailscaled.
+
+x-drukbox: &drukbox
+  image: ${DRUKS_SANDBOX_SERVICE_IMAGE:-ghcr.io/czpython/drukbox:latest}
+  network_mode: host
+  env_file:
+    - ./.env
+  environment:
+    DATABASE_URL: postgresql+psycopg://${DRUKS_POSTGRES_USER:-druks}:${DRUKS_POSTGRES_PASSWORD}@127.0.0.1:5432/drukbox
+  depends_on:
+    postgres:
+      condition: service_healthy
+
+services:
+  drukbox:
+    <<: *drukbox
+    restart: unless-stopped
+
+  # Periodic janitor — drukbox ships no scheduler, so loop with sleep; a
+  # real timer belongs in the drukbox service/image, not in compose.
+  drukbox-janitor:
+    <<: *drukbox
+    restart: unless-stopped
+    entrypoint:
+      - sh
+      - -c
+      - "while true; do .venv/bin/python -m hosts.janitor || true; sleep 60; done"
+    # The image HEALTHCHECK probes the HTTP API — on host networking the
+    # janitor would health-check the *service's* port, doubling /healthz
+    # traffic and reporting a status that isn't its own.
+    healthcheck:
+      disable: true
+
+  caddy:
+    # Stock Caddy — the identity edge + webhook TLS. Caddyfile is fetched next
+    # to this compose file by install.sh.
+    image: caddy:2.10-alpine
+    network_mode: host
+    restart: unless-stopped
+    environment:
+      DRUKS_UPSTREAM: ${DRUKS_UPSTREAM:-127.0.0.1:8001}
+      # Setup renders identity.header for Caddy; druks reads it from druks.toml.
+      # Caddy requires the edge's assertion, and druks maps it to an account.
+      # No default anywhere — the backend refuses header mode without it.
+      DRUKS_AUTH_HEADER: ${DRUKS_AUTH_HEADER:-}
+      # ``:-`` so an empty .env value still collapses to the inert loopback
+      # default — Caddy treats set-but-empty as a real (broken) site address.
+      DRUKS_WEBHOOK_HOST: ${DRUKS_WEBHOOK_HOST:-http://127.0.0.1:8081}
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  caddy_data:
+  caddy_config:

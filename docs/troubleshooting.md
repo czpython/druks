@@ -52,12 +52,12 @@ state.
 
 ### A migration is missing
 
-The web service never migrates on boot. Apply both Druks and, on a remote
-profile, Drukbox migrations before starting the new images:
+The web service never migrates on boot. Apply both the Druks and the Drukbox
+migrations before starting the new images:
 
 ```bash
 docker compose run --rm web druks init-db
-docker compose run --rm sandbox-service .venv/bin/alembic upgrade head
+docker compose run --rm drukbox .venv/bin/alembic upgrade head
 docker compose up -d
 ```
 
@@ -101,7 +101,7 @@ grep -E '^(DRUKS_AUTH_HEADER|DRUKS_UPSTREAM)=' ~/druks/.env
 docker compose logs --tail=200 caddy web
 ```
 
-The local `docker` profile intentionally skips Caddy; use
+The local `docker` shape intentionally skips Caddy; use
 <http://127.0.0.1:8001>. It runs with `[identity].mode = "none"` — no authentication —
 and must remain loopback-only.
 
@@ -154,13 +154,12 @@ Run:
 
 ```bash
 docker compose exec web druks doctor
-docker compose logs --tail=200 sandbox-service sandbox-janitor
+docker compose logs --tail=200 drukbox
 ```
 
-For the local provider, Drukbox runs on the host, not in this Compose project.
-Confirm it listens at `[sandbox].service_url` in `druks.toml`. For remote
-providers, a healthy Drukbox API does not prove SSH reachability; follow with
-`druks doctor --sandbox`.
+Confirm the service listens at `[sandbox].service_url` in `druks.toml`. For
+remote providers, a healthy Drukbox API does not prove SSH reachability;
+follow with `druks doctor --sandbox`.
 
 ### A sandbox process appears stuck
 
