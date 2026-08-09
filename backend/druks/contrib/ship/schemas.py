@@ -112,3 +112,7 @@ class DashboardItem(BaseResponse):
 
 class WorkItemsHistoryResponse(BaseResponse):
     items: list[DashboardItem]
+
+
+class ShipStartResponse(BaseResponse):
+    result: Literal["stamped", "already_stamped"]

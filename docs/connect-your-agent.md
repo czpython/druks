@@ -41,8 +41,10 @@ bearer_token_env_var = "DRUKS_PAT"
 
 - **Discovery first.** There is no push channel. Call `list_open_subjects`
   first and poll it about every 30 seconds while waiting. Each workflow's `run` feeds
-  the gate and run tools, and `latestAgentCall` feeds `get_agent_call`;
-  An extension's verbs open work whose run enters the same flow.
+  the gate and run tools, and `latestAgentCall` feeds `get_agent_call`.
+  The `review_request` extension verb opens work whose run enters the existing
+  gate and run-tool flow. `ship_start` returns no run; after either result, poll
+  `list_open_subjects` and never reissue it.
   Call `get_gate` before `answer_gate` and echo its `parkedAt`
   value unchanged; it names the exact question being answered, and a repeat
   answer to the same `parkedAt` reports `already_answered` instead of

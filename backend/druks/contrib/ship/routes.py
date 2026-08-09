@@ -1,10 +1,9 @@
 import logging
+from typing import cast
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query, Response, status
+from fastapi import APIRouter, Body, HTTPException, Path, Query, Response, status
 from sqlalchemy import func, select, update
 
-from druks.accounts.dependencies import current_account
-from druks.accounts.models import Account
 from druks.contrib.ship.extension import Ship
 from druks.contrib.ship.models import Project, ProjectRepo, WorkItem
 from druks.contrib.ship.schemas import (
@@ -16,9 +15,14 @@ from druks.contrib.ship.schemas import (
     ProjectRepoSummary,
     ProjectsResponse,
     ProjectSummary,
+    ShipStartResponse,
     WorkItemsHistoryResponse,
 )
-from druks.contrib.ship.workflows import Build, Profile
+from druks.contrib.ship.ticketing.exceptions import (
+    TrackerStatusUnavailable,
+    TrackerTicketNotFound,
+)
+from druks.contrib.ship.workflows import Profile
 from druks.core.apis.github import get_github_client
 from druks.db import db_session
 from druks.settings import load_settings
@@ -260,6 +264,8 @@ async def list_work_items_history(
 
 @work_items_router.post(
     "/{ticket}/start",
+    response_model=ShipStartResponse,
+    response_model_by_alias=True,
     status_code=status.HTTP_202_ACCEPTED,
     operation_id="ship_start",
     tags=["agent"],
@@ -270,19 +276,61 @@ async def list_work_items_history(
                 "application/json": {
                     "example": {
                         "error": "HTTP_404",
-                        "detail": "no work item for ticket ENG-831",
+                        "detail": "Linear knows no ENG-9999",
                     }
                 }
             },
         },
         409: {
-            "description": "The work item has no registered target repository.",
+            "description": "Tracker configuration or workflow status conflict.",
+            "content": {
+                "application/json": {
+                    "examples": {
+                        "no_tracker": {
+                            "value": {
+                                "error": "HTTP_409",
+                                "detail": "No ticket tracker is configured.",
+                            }
+                        },
+                        "linear_not_configured": {
+                            "value": {
+                                "error": "HTTP_409",
+                                "detail": "Linear is not configured.",
+                            }
+                        },
+                        "jira_not_configured": {
+                            "value": {
+                                "error": "HTTP_409",
+                                "detail": "Jira is not configured.",
+                            }
+                        },
+                        "trigger_status_not_configured": {
+                            "value": {
+                                "error": "HTTP_409",
+                                "detail": "Linear trigger status is not configured.",
+                            }
+                        },
+                        "status_unavailable": {
+                            "value": {
+                                "error": "HTTP_409",
+                                "detail": (
+                                    "Linear cannot move ENG-833 to status 'Ready for Agent'."
+                                ),
+                            }
+                        },
+                    }
+                }
+            },
+        },
+        502: {
+            "description": "Tracker request failed.",
             "content": {
                 "application/json": {
                     "example": {
-                        "error": "HTTP_409",
+                        "error": "HTTP_502",
                         "detail": (
-                            "acme/app is not a registered project repo — add it to a project first"
+                            "Linear could not move ENG-833 to the build-trigger status; ask the "
+                            "operator to check tracker access and availability."
                         ),
                     }
                 }
@@ -294,18 +342,62 @@ async def start_work_item(
     ticket: str = Path(
         ...,
         description=(
-            "The work item's ticket key, e.g. ENG-831 — its subjectLabel in list_open_subjects."
+            "Tracker ticket key in uppercase PROJECT-NUMBER form, e.g. ENG-833. It need not "
+            "yet appear in list_open_subjects; lowercase and surrounding whitespace are rejected."
         ),
+        max_length=64,
+        pattern=r"^[A-Z][A-Z0-9]*-[1-9][0-9]*$",
     ),
-    account: Account = Depends(current_account),
-) -> str:
-    """Start agents building the ticket's work item."""
-    item = WorkItem.get_for_ticket_key(source=Ship.settings().tracker, ticket_key=ticket)
-    if not item:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, f"no work item for ticket {ticket}")
-    if not ProjectRepo.get_for_repo(item.repo):
+) -> ShipStartResponse:
+    # fmt: off
+    (
+        "Move a tracker ticket into the configured build-trigger status. `stamped` means this "
+        "call changed the tracker; poll list_open_subjects for webhook intake, but a 202 still "
+        "does not confirm a build will start. `already_stamped` means the ticket was already in "
+        "the trigger status, so this call emitted no webhook; work may already be in the funnel "
+        "from an earlier stamp, or the ticket may have been resting there without Druks ever "
+        "ingesting it. Poll list_open_subjects after either result and never re-issue ship_start. "
+        "If work never appears, intake may have declined unroutable or already-merged work, "
+        "webhook delivery may have been lost, or an already-stamped ticket may never have been "
+        "ingested; this is terminal for the caller, so escalate rather than retry. Calling "
+        "ship_start on a ticket already being built moves the tracker back to the trigger status "
+        "without starting a second build, and the tracker will misreport until the run's next "
+        "lifecycle event."
+    )
+    # fmt: on
+    settings = cast(Ship.Settings, Ship.settings())
+    if settings.tracker == "none":
+        raise HTTPException(status.HTTP_409_CONFLICT, "No ticket tracker is configured.")
+
+    tracker_name = settings.tracker.title()
+    if not settings.trigger_status.strip():
         raise HTTPException(
             status.HTTP_409_CONFLICT,
-            f"{item.repo} is not a registered project repo — add it to a project first",
+            f"{tracker_name} trigger status is not configured.",
         )
-    return await Build.start(subject=item, account_id=account.id)
+
+    tracker = Ship.tracker(settings.tracker)
+    if not tracker:
+        raise HTTPException(status.HTTP_409_CONFLICT, f"{tracker_name} is not configured.")
+
+    try:
+        async with tracker:
+            changed = await tracker.move_ticket(ticket, settings.trigger_status)
+    except TrackerTicketNotFound as error:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(error)) from error
+    except TrackerStatusUnavailable as error:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(error)) from error
+    except tracker.known_exceptions as error:
+        logger.warning(
+            "%s could not move ticket %s to the build-trigger status.",
+            tracker_name,
+            ticket,
+            exc_info=True,
+        )
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY,
+            f"{tracker_name} could not move {ticket} to the build-trigger status; ask the "
+            "operator to check tracker access and availability.",
+        ) from error
+
+    return ShipStartResponse(result="stamped" if changed else "already_stamped")

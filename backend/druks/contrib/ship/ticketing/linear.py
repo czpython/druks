@@ -5,7 +5,7 @@ import httpx
 
 from .base import Tracker
 from .enums import TicketStatus
-from .exceptions import LinearAPIError
+from .exceptions import LinearAPIError, TrackerStatusUnavailable, TrackerTicketNotFound
 
 LINEAR_GRAPHQL_URL = "https://api.linear.app/graphql"
 
@@ -40,11 +40,13 @@ class LinearClient:
         self,
         *,
         api_key: str,
+        tracker_name: str,
         api_url: str = LINEAR_GRAPHQL_URL,
         client: httpx.AsyncClient | None = None,
     ) -> None:
         self.api_key = api_key
         self.api_url = api_url
+        self.tracker_name = tracker_name
         # One long-lived AsyncClient per LinearClient instance — pools
         # connections across the many GraphQL calls a single build run
         # makes. Tests inject a stub client; production builds the default.
@@ -60,66 +62,116 @@ class LinearClient:
     async def aclose(self) -> None:
         await self._client.aclose()
 
-    async def update_issue_status(self, issue_id: str, status_name: str) -> dict[str, Any]:
+    async def update_issue_status(self, ticket_key: str, status_name: str) -> bool:
+        team_key, separator, issue_number_text = ticket_key.rpartition("-")
+        if (
+            not separator
+            or not team_key
+            or not issue_number_text.isdecimal()
+            or int(issue_number_text) <= 0
+        ):
+            raise LinearAPIError(f"Invalid Linear ticket key: {ticket_key!r}.")
+
         data = await self._execute(
             """
-            query DruksIssueWorkflowStates($issueId: String!) {
-              issue(id: $issueId) {
-                id
-                identifier
-                state { id name }
-                team {
-                  states {
-                    nodes { id name }
+            query DruksIssueWorkflowStates($teamKey: String!, $issueNumber: Float!) {
+              issues(
+                first: 1
+                includeArchived: true
+                filter: { team: { key: { eq: $teamKey } }, number: { eq: $issueNumber } }
+              ) {
+                nodes {
+                  id
+                  state { name }
+                  team {
+                    states {
+                      nodes { id name }
+                    }
                   }
                 }
               }
             }
             """,
-            {"issueId": issue_id},
+            {"teamKey": team_key, "issueNumber": float(issue_number_text)},
         )
-        issue = data["issue"]
-        current_status = issue["state"]["name"]
-        if current_status == status_name:
-            return {
-                "identifier": issue["identifier"],
-                "status": current_status,
-                "changed": False,
-            }
 
-        status_id = _status_id_by_name(issue["team"]["states"]["nodes"], status_name)
+        issues = data.get("issues")
+        if not isinstance(issues, dict) or not isinstance(issues.get("nodes"), list):
+            raise LinearAPIError("Linear issue query returned malformed data.")
+        nodes = issues["nodes"]
+        if not nodes:
+            raise TrackerTicketNotFound(self.tracker_name, ticket_key)
+        issue = nodes[0]
+        if not isinstance(issue, dict):
+            raise LinearAPIError("Linear issue query returned a malformed issue.")
+        issue_id = issue.get("id")
+        state = issue.get("state")
+        if (
+            not isinstance(issue_id, str)
+            or not issue_id
+            or not isinstance(state, dict)
+            or not isinstance(state.get("name"), str)
+        ):
+            raise LinearAPIError("Linear issue query returned a malformed issue.")
+
+        current_status = state["name"]
+        if current_status == status_name:
+            return False
+
+        team = issue.get("team")
+        if not isinstance(team, dict):
+            raise LinearAPIError("Linear issue query returned malformed team states.")
+        states = team.get("states")
+        if not isinstance(states, dict) or not isinstance(states.get("nodes"), list):
+            raise LinearAPIError("Linear issue query returned malformed team states.")
+
+        status_id = None
+        for candidate in states["nodes"]:
+            if (
+                not isinstance(candidate, dict)
+                or not isinstance(candidate.get("id"), str)
+                or not candidate["id"]
+                or not isinstance(candidate.get("name"), str)
+            ):
+                raise LinearAPIError("Linear issue query returned malformed team states.")
+            if candidate["name"] == status_name:
+                status_id = candidate["id"]
+                break
+        if not status_id:
+            raise TrackerStatusUnavailable(self.tracker_name, ticket_key, status_name)
+
         result = await self._execute(
             """
             mutation DruksIssueUpdateStatus($issueId: String!, $statusId: String!) {
               issueUpdate(id: $issueId, input: { stateId: $statusId }) {
                 success
-                issue {
-                  identifier
-                  state { name }
-                }
               }
             }
             """,
             {"issueId": issue_id, "statusId": status_id},
         )
-        issue_result = result["issueUpdate"]["issue"]
-        return {
-            "identifier": issue_result["identifier"],
-            "status": issue_result["state"]["name"],
-            "changed": bool(result["issueUpdate"]["success"]),
-        }
+        update = result.get("issueUpdate")
+        if not isinstance(update, dict) or update.get("success") is not True:
+            raise LinearAPIError("Linear issue update did not succeed.")
+        return True
 
     async def _execute(self, query: str, variables: dict[str, Any]) -> dict[str, Any]:
         response = await self._client.post(
             self.api_url,
             json={"query": query, "variables": variables},
         )
-        response.raise_for_status()
-        body = response.json()
-        errors = body.get("errors")
-        if errors:
+        try:
+            body = response.json()
+        except ValueError:
+            body = None
+
+        errors = body.get("errors") if isinstance(body, dict) else None
+        if isinstance(errors, list) and errors:
             raise LinearAPIError(f"Linear API returned errors: {errors}")
 
+        response.raise_for_status()
+        if not isinstance(body, dict):
+            raise LinearAPIError("Linear API response was not a JSON object.")
         data = body.get("data")
         if not isinstance(data, dict):
             raise LinearAPIError("Linear API response did not include data.")
@@ -127,17 +179,9 @@ class LinearClient:
         return data
 
 
-def _status_id_by_name(states: list[dict[str, Any]], status_name: str) -> str:
-    for state in states:
-        if state["name"] == status_name:
-            return state["id"]
-
-    available = ", ".join(state["name"] for state in states)
-    raise LinearAPIError(f"Linear status {status_name!r} was not found. Available: {available}")
-
-
 class Linear(Tracker):
-    known_exceptions = (LinearAPIError, httpx.HTTPError)
+    display_name = "Linear"
+    known_exceptions = (*Tracker.known_exceptions, LinearAPIError, httpx.HTTPError)
 
     # READY_FOR_AGENT is operator-named; the rest are fixed.
     _STATIC_STATUS_NAMES: dict[TicketStatus, str] = {
@@ -154,19 +198,15 @@ class Linear(Tracker):
         ready_for_agent_status: str = "",
         client: Any | None = None,
     ) -> None:
-        self._client = LinearClient(api_key=api_key, client=client)
-        self._status_names = dict(self._STATIC_STATUS_NAMES)
-        # Empty leaves READY_FOR_AGENT unmapped.
-        if ready_for_agent_status:
-            self._status_names[TicketStatus.READY_FOR_AGENT] = ready_for_agent_status
+        super().__init__(ready_for_agent_status)
+        self._client = LinearClient(
+            api_key=api_key,
+            tracker_name=self.display_name,
+            client=client,
+        )
 
-    async def set_status(self, key: str, status: TicketStatus) -> None:
-        name = self._status_names.get(status)
-        if not name:
-            raise ValueError(f"Linear has no configured status name for {status}")
-        # The status mutation resolves the issue by identifier, so the key is
-        # the id Linear wants.
-        await self._client.update_issue_status(key, name)
+    async def move_ticket(self, key: str, status_name: str) -> bool:
+        return await self._client.update_issue_status(key, status_name)
 
     async def aclose(self) -> None:
         await self._client.aclose()

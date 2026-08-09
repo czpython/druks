@@ -1,7 +1,14 @@
+from druks.contrib.ship.extension import Ship
 from druks.contrib.ship.models import Project, ProjectRepo, WorkItem
 from druks.contrib.ship.workflows import Build
 from druks.testing import seed_run
 from uuid_utils import uuid7
+
+
+def pin_ship_settings(monkeypatch, **values):
+    settings = Ship.Settings(**values)
+    monkeypatch.setattr(Ship, "settings", classmethod(lambda cls: settings))
+    return settings
 
 
 def make_test_work_item(*, repo: str, **kwargs):

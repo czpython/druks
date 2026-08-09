@@ -2,11 +2,20 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
-from druks.accounts.models import Account, PersonalAccessToken
+from druks.accounts.models import Account
 from druks.api.app import app
 from druks.contrib.review.workflows import PullRequestReview
-from druks.contrib.ship.models import Project, ProjectRepo, WorkItem
-from druks.contrib.ship.workflows import Build
+from druks.contrib.ship import routes as ship_routes
+from druks.contrib.ship.extension import Ship
+from druks.contrib.ship.models import Project, ProjectRepo
+from druks.contrib.ship.ticketing.exceptions import (
+    JiraAPIError,
+    LinearAPIError,
+    TrackerStatusUnavailable,
+    TrackerTicketNotFound,
+)
+from druks.contrib.ship.ticketing.jira import Jira
+from druks.contrib.ship.ticketing.linear import Linear
 from druks.durable.dbos_state import workflow_status
 from druks.durable.models import AgentCall, Run
 from druks.durable.reads import read_transcript_chunk
@@ -15,6 +24,7 @@ from druks.testing import configure_app_for_test, make_settings, seed_call, seed
 from druks_field_notes.models import Note
 from druks_field_notes.workflows import Summarize
 from fastapi.testclient import TestClient
+from ship.factories import pin_ship_settings
 
 _IN_APP_ASK = {
     "presentation": "in_app",
@@ -110,6 +120,42 @@ def test_openapi_pins_platform_and_extension_agent_routes(client: TestClient):
         if name.startswith("x-")
     }
 
+    ship_start = found[("post", "/api/ship/work-items/{ticket}/start")]
+    ticket = ship_start["parameters"][0]["schema"]
+    assert ticket == {
+        "type": "string",
+        "maxLength": 64,
+        "pattern": "^[A-Z][A-Z0-9]*-[1-9][0-9]*$",
+        "description": (
+            "Tracker ticket key in uppercase PROJECT-NUMBER form, e.g. ENG-833. It need not "
+            "yet appear in list_open_subjects; lowercase and surrounding whitespace are rejected."
+        ),
+        "title": "Ticket",
+    }
+    assert ship_start["responses"]["202"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/ShipStartResponse"
+    }
+    assert schema["components"]["schemas"]["ShipStartResponse"] == {
+        "properties": {
+            "result": {
+                "type": "string",
+                "enum": ["stamped", "already_stamped"],
+                "title": "Result",
+            }
+        },
+        "type": "object",
+        "required": ["result"],
+        "title": "ShipStartResponse",
+    }
+    examples = ship_start["responses"]["409"]["content"]["application/json"]["examples"]
+    assert set(examples) == {
+        "no_tracker",
+        "linear_not_configured",
+        "jira_not_configured",
+        "trigger_status_not_configured",
+        "status_unavailable",
+    }
+
 
 def test_review_request_returns_the_run_id_start_hands_back(
     client: TestClient, account: Account, monkeypatch
@@ -142,76 +188,287 @@ def test_review_request_returns_the_run_id_start_hands_back(
     assert {call["account_id"] for call in starts} == {account.id}
 
 
-def test_ship_start_returns_the_live_run_and_attributes_the_pat_account(
-    client: TestClient, account: Account, monkeypatch
+class _RouteTracker:
+    known_exceptions = (LinearAPIError, JiraAPIError)
+
+    def __init__(self, outcomes=None, error=None):
+        self.outcomes = list(outcomes or [])
+        self.error = error
+        self.calls = []
+        self.closed = 0
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        await self.aclose()
+
+    async def move_ticket(self, ticket, status_name):
+        self.calls.append((ticket, status_name))
+        if self.error:
+            raise self.error
+        return self.outcomes.pop(0)
+
+    async def aclose(self):
+        self.closed += 1
+
+
+def test_ship_start_stamps_unknown_to_druks_and_acknowledges_repeated_noop(
+    client: TestClient,
+    monkeypatch,
 ):
-    project = Project.create(name="Acme")
-    ProjectRepo.create(project_id=project.id, full_name="acme/app")
-    item = WorkItem.create(
-        project_id=project.id,
-        source="linear",
-        title="Build the agent route",
-        ticket_key="ENG-831",
-        repo="acme/app",
+    pin_ship_settings(
+        monkeypatch,
+        linear_api_key="lin_secret",
+        linear_trigger_status="  Ready for Agent  ",
     )
-    _, pat_token = PersonalAccessToken.create(account_id=account.id, name="agent")
-    live_run_id = "build-run-id"
-    starts = []
+    tracker = _RouteTracker(outcomes=[True, False, False])
+    constructions = []
 
-    async def start(cls, **kwargs):
-        # The subject detaches with the request's session; keep its identity.
-        starts.append({**kwargs, "subject": kwargs["subject"].id})
-        return live_run_id
+    def build_tracker(cls, source):
+        constructions.append(source)
+        return tracker
 
-    monkeypatch.setattr(Build, "start", classmethod(start))
+    monkeypatch.setattr(Ship, "tracker", classmethod(build_tracker))
 
-    responses = [
-        client.post(
-            f"/api/ship/work-items/{item.ticket_key}/start",
-            headers={"Authorization": f"Bearer {pat_token}"},
-        )
-        for _ in range(2)
+    responses = [client.post("/api/ship/work-items/ENG-833/start") for _ in range(3)]
+
+    assert [response.status_code for response in responses] == [202, 202, 202]
+    assert [response.json() for response in responses] == [
+        {"result": "stamped"},
+        {"result": "already_stamped"},
+        {"result": "already_stamped"},
     ]
-
-    assert [response.status_code for response in responses] == [202, 202]
-    assert [response.json() for response in responses] == [live_run_id, live_run_id]
-    assert [call["subject"] for call in starts] == [item.id, item.id]
-    assert {call["account_id"] for call in starts} == {account.id}
-    assert all("repo" not in call for call in starts)
-    assert all("task_owner_email" not in call for call in starts)
-    assert all("task_owner_name" not in call for call in starts)
+    assert constructions == ["linear", "linear", "linear"]
+    assert tracker.calls == [("ENG-833", "  Ready for Agent  ")] * 3
+    assert tracker.closed == 3
 
 
-def test_ship_start_rejects_an_unknown_ticket(client: TestClient):
-    response = client.post("/api/ship/work-items/ENG-000/start")
+@pytest.mark.parametrize(
+    ("error", "status_code", "detail"),
+    [
+        (
+            TrackerTicketNotFound("Linear", "ENG-9999"),
+            404,
+            "Linear knows no ENG-9999",
+        ),
+        (
+            TrackerStatusUnavailable("Linear", "ENG-833", "Ready for Agent"),
+            409,
+            "Linear cannot move ENG-833 to status 'Ready for Agent'.",
+        ),
+    ],
+)
+def test_ship_start_maps_typed_tracker_errors_before_general_failures(
+    client: TestClient,
+    monkeypatch,
+    error,
+    status_code,
+    detail,
+):
+    pin_ship_settings(monkeypatch, linear_api_key="lin_secret")
+    tracker = _RouteTracker(error=error)
+    monkeypatch.setattr(Ship, "tracker", classmethod(lambda cls, source: tracker))
 
-    assert response.status_code == 404
-    assert response.json() == {
-        "error": "HTTP_404",
-        "detail": "no work item for ticket ENG-000",
-    }
+    response = client.post(f"/api/ship/work-items/{error.ticket_key}/start")
+
+    assert response.status_code == status_code
+    assert response.json() == {"error": f"HTTP_{status_code}", "detail": detail}
+    assert tracker.closed == 1
 
 
-def test_ship_start_rejects_a_work_item_without_a_registered_repo(client: TestClient):
-    project = Project.create(name="Acme")
-    item = WorkItem.create(
-        project_id=project.id,
-        source="linear",
-        title="Unroutable work",
-        ticket_key="ENG-832",
-        repo="acme/missing",
+def test_ship_start_sanitizes_general_failure_and_logs_once(
+    client: TestClient,
+    monkeypatch,
+):
+    pin_ship_settings(monkeypatch, linear_api_key="lin_secret")
+    tracker = _RouteTracker(error=LinearAPIError("secret provider payload"))
+    monkeypatch.setattr(Ship, "tracker", classmethod(lambda cls, source: tracker))
+    logs = []
+    monkeypatch.setattr(
+        ship_routes.logger,
+        "warning",
+        lambda *args, **kwargs: logs.append((args, kwargs)),
     )
 
-    response = client.post(f"/api/ship/work-items/{item.ticket_key}/start")
+    response = client.post("/api/ship/work-items/ENG-833/start")
+
+    assert response.status_code == 502
+    assert response.json() == {
+        "error": "HTTP_502",
+        "detail": (
+            "Linear could not move ENG-833 to the build-trigger status; ask the operator to "
+            "check tracker access and availability."
+        ),
+    }
+    assert len(logs) == 1
+    assert logs[0][0][1:] == ("Linear", "ENG-833")
+    assert logs[0][1] == {"exc_info": True}
+    assert "secret provider payload" not in response.text
+    assert tracker.closed == 1
+
+
+@pytest.mark.parametrize(
+    ("error", "provider_detail"),
+    [
+        (LinearAPIError("Linear API returned errors: [{'message': 'denied'}]"), "denied"),
+        (JiraAPIError("GET /issue -> 500: jira response detail"), "jira response detail"),
+    ],
+)
+def test_ship_start_traceback_keeps_provider_detail_while_body_is_sanitized(
+    client: TestClient,
+    monkeypatch,
+    caplog,
+    error,
+    provider_detail,
+):
+    pin_ship_settings(monkeypatch, linear_api_key="lin_secret")
+    monkeypatch.setattr(
+        Ship,
+        "tracker",
+        classmethod(lambda cls, source: _RouteTracker(error=error)),
+    )
+
+    with caplog.at_level("WARNING"):
+        response = client.post("/api/ship/work-items/ENG-833/start")
+
+    assert response.status_code == 502
+    assert provider_detail in caplog.text
+    assert provider_detail not in response.text
+
+
+@pytest.mark.parametrize(
+    ("values", "detail"),
+    [
+        ({"tracker": "none"}, "No ticket tracker is configured."),
+        (
+            {"linear_api_key": "lin_secret", "linear_trigger_status": "   "},
+            "Linear trigger status is not configured.",
+        ),
+        ({}, "Linear is not configured."),
+        (
+            {"tracker": "jira", "jira_email": "a@b.com", "jira_api_token": "token"},
+            "Jira is not configured.",
+        ),
+        (
+            {
+                "tracker": "jira",
+                "jira_base_url": "https://jira.test",
+                "jira_api_token": "token",
+            },
+            "Jira is not configured.",
+        ),
+        (
+            {
+                "tracker": "jira",
+                "jira_base_url": "https://jira.test",
+                "jira_email": "a@b.com",
+            },
+            "Jira is not configured.",
+        ),
+    ],
+)
+def test_ship_start_configuration_conflicts(client: TestClient, monkeypatch, values, detail):
+    pin_ship_settings(monkeypatch, **values)
+
+    response = client.post("/api/ship/work-items/ENG-833/start")
 
     assert response.status_code == 409
-    assert response.json() == {
-        "error": "HTTP_409",
-        "detail": "acme/missing is not a registered project repo — add it to a project first",
-    }
+    assert response.json() == {"error": "HTTP_409", "detail": detail}
 
 
-def test_agent_routes_sit_behind_the_gate(tmp_path, druks_db):
+@pytest.mark.parametrize("tracker_name", ["linear", "jira"])
+def test_ship_start_rejects_blank_trigger_before_tracker_construction(
+    client: TestClient,
+    monkeypatch,
+    tracker_name,
+):
+    values = {"tracker": tracker_name, f"{tracker_name}_trigger_status": "\t "}
+    pin_ship_settings(monkeypatch, **values)
+    constructions = []
+    monkeypatch.setattr(
+        Ship,
+        "tracker",
+        classmethod(lambda cls, source: constructions.append(source)),
+    )
+
+    response = client.post("/api/ship/work-items/ENG-833/start")
+
+    assert response.status_code == 409
+    assert constructions == []
+
+
+@pytest.mark.parametrize(
+    ("tracker_name", "provider_class"),
+    [("linear", Linear), ("jira", Jira)],
+)
+def test_route_and_provider_display_names_agree(
+    client: TestClient,
+    monkeypatch,
+    tracker_name,
+    provider_class,
+):
+    pin_ship_settings(monkeypatch, tracker=tracker_name)
+    typed = TrackerTicketNotFound(provider_class.display_name, "ENG-833")
+    monkeypatch.setattr(
+        Ship,
+        "tracker",
+        classmethod(lambda cls, source: _RouteTracker(error=typed)),
+    )
+
+    response = client.post("/api/ship/work-items/ENG-833/start")
+
+    assert tracker_name.title() == provider_class.display_name
+    assert response.json()["detail"] == str(typed)
+
+
+@pytest.mark.parametrize(
+    "ticket",
+    [
+        "eng-833",
+        "%20ENG-833%20",
+        "ENG-0",
+        "ENG-000",
+        "E" * 63 + "-1",
+        "%2E%2E",
+    ],
+)
+def test_ship_start_rejects_noncanonical_ticket_before_tracker(
+    client: TestClient,
+    monkeypatch,
+    ticket,
+):
+    constructions = []
+    monkeypatch.setattr(
+        Ship,
+        "tracker",
+        classmethod(lambda cls, source: constructions.append(source)),
+    )
+
+    response = client.post(f"/api/ship/work-items/{ticket}/start")
+
+    assert response.status_code == 422
+    assert constructions == []
+    if ticket == "%2E%2E":
+        assert response.json()["detail"][0]["loc"][-1] == "ticket"
+
+
+def test_ship_start_slash_bearing_ticket_misses_route(client: TestClient, monkeypatch):
+    constructions = []
+    monkeypatch.setattr(
+        Ship,
+        "tracker",
+        classmethod(lambda cls, source: constructions.append(source)),
+    )
+
+    response = client.post("/api/ship/work-items/ENG%2F833/start")
+
+    assert response.status_code == 404
+    assert response.json()["error"] == "HTTP_404"
+    assert constructions == []
+
+
+def test_agent_routes_sit_behind_the_gate(tmp_path, druks_db, monkeypatch):
     # Header mode: an unasserted request is a 401, not none-mode's setup 409.
     app = configure_app_for_test(
         settings=make_settings(
@@ -220,10 +477,18 @@ def test_agent_routes_sit_behind_the_gate(tmp_path, druks_db):
         ),
         authenticated=False,
     )
+    tracker_calls = []
+    monkeypatch.setattr(
+        Ship,
+        "tracker",
+        classmethod(lambda cls, source: tracker_calls.append(source)),
+    )
     with TestClient(app) as anonymous:
         assert anonymous.get("/api/gates/x").status_code == 401
         assert anonymous.get("/api/open-subjects").status_code == 401
         assert anonymous.get("/api/usage/summary").status_code == 401
+        assert anonymous.post("/api/ship/work-items/ENG-833/start").status_code == 401
+    assert tracker_calls == []
 
 
 def test_agent_errors_share_one_shape(client: TestClient, druks_db):

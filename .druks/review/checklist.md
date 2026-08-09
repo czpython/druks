@@ -17,8 +17,8 @@ and in scope for review even on lines the diff leaves alone.
 6. spelled-out names (workflow not wf); no one-caller abstractions
 7. no platform plumbing in app code: `Artifact.add` / `Run.get` / `record_event` /
    `set_status`
-8. druks reacts, never stamps — owner webhooks + run lifecycle are the only status
-   sources
+8. owner webhooks + run lifecycle are the only reactive status sources; an explicit
+   authenticated operator/agent command may stamp ticket status
 9. the agent does agent work: it fetches, posts, and writes its own prose — never
    render Jinja or thread metadata on its behalf; identity is the minimal key
 10. one noun per concept: input = identity, state = learned facts; never compose

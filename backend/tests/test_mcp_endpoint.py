@@ -198,9 +198,37 @@ async def test_tools_list_pins_platform_and_extension_tools(app, pat_token):
     )
     reason = tools["cancel_run"].inputSchema["properties"]["reason"]
     assert (reason["minLength"], reason["maxLength"]) == (1, 500)
-    assert tools["ship_start"].inputSchema["properties"]["ticket"]["description"] == (
-        "The work item's ticket key, e.g. ENG-831 — its subjectLabel in list_open_subjects."
+    ticket = tools["ship_start"].inputSchema["properties"]["ticket"]
+    assert ticket["description"] == (
+        "Tracker ticket key in uppercase PROJECT-NUMBER form, e.g. ENG-833. It need not "
+        "yet appear in list_open_subjects; lowercase and surrounding whitespace are rejected."
     )
+    assert ticket["pattern"] == "^[A-Z][A-Z0-9]*-[1-9][0-9]*$"
+    assert ticket["maxLength"] == 64
+    assert "minLength" not in ticket
+    assert tools["ship_start"].description == (
+        "Move a tracker ticket into the configured build-trigger status. `stamped` means this "
+        "call changed the tracker; poll list_open_subjects for webhook intake, but a 202 still "
+        "does not confirm a build will start. `already_stamped` means the ticket was already in "
+        "the trigger status, so this call emitted no webhook; work may already be in the funnel "
+        "from an earlier stamp, or the ticket may have been resting there without Druks ever "
+        "ingesting it. Poll list_open_subjects after either result and never re-issue ship_start. "
+        "If work never appears, intake may have declined unroutable or already-merged work, "
+        "webhook delivery may have been lost, or an already-stamped ticket may never have been "
+        "ingested; this is terminal for the caller, so escalate rather than retry. Calling "
+        "ship_start on a ticket already being built moves the tracker back to the trigger status "
+        "without starting a second build, and the tracker will misreport until the run's next "
+        "lifecycle event."
+    )
+    route_schema = app.openapi()["components"]["schemas"]["ShipStartResponse"]
+    output_schema = dict(tools["ship_start"].outputSchema)
+    assert output_schema.pop("x-fastmcp-top-level-schema") == "ShipStartResponse"
+    assert output_schema == route_schema
+    assert output_schema["properties"]["result"]["enum"] == [
+        "stamped",
+        "already_stamped",
+    ]
+    assert "x-fastmcp-wrap-result" not in output_schema
     assert not tools["list_open_subjects"].inputSchema.get("required")
     assert not tools["get_usage"].inputSchema.get("required")
 
