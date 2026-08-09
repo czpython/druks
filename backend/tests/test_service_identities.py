@@ -1,7 +1,10 @@
 import hashlib
 import hmac
+import html
+import json
 from types import SimpleNamespace
 
+import httpx
 import pytest
 from druks.core.apis.github import GitHubClient, get_github_client
 from druks.core.webhooks.github import GitHubEvents
@@ -223,5 +226,120 @@ def test_blank_fields_are_rejected_without_touching_github(
     )
 
     assert response.status_code == 422
+    with pytest.raises(ServiceNotConnectedError):
+        ServiceIdentity.get("github")
+
+
+# --- The manifest flow (dashboard-created App) -------------------------------
+
+
+def _manifest_from(page: str) -> dict:
+    value = page.partition('name="manifest" value="')[2].partition('">')[0]
+    return json.loads(html.unescape(value))
+
+
+def test_manifest_page_submits_the_documented_app_to_github(druks_client: TestClient, tmp_path):
+    druks_client.app.state.settings = make_settings(
+        tmp_path, urls={"endpoint": "https://druks.example/"}
+    )
+
+    response = druks_client.get("/api/service-identities/github/manifest")
+
+    assert response.status_code == 200
+    assert 'action="https://github.com/settings/apps/new"' in response.text
+    manifest = _manifest_from(response.text)
+    assert manifest["name"] == "druks"
+    assert manifest["url"] == "https://druks.example"
+    assert (
+        manifest["redirect_url"]
+        == "https://druks.example/api/service-identities/github/manifest/callback"
+    )
+    assert manifest["hook_attributes"] == {
+        "url": "https://druks.example/_external/github/events/",
+        "active": True,
+    }
+    assert manifest["public"] is False
+    assert manifest["default_permissions"]["contents"] == "write"
+    assert "pull_request_review" in manifest["default_events"]
+
+
+def test_manifest_page_prefers_the_webhook_host_for_deliveries(druks_client: TestClient, tmp_path):
+    druks_client.app.state.settings = make_settings(
+        tmp_path,
+        urls={"endpoint": "https://druks.example", "webhook_host": "hooks.druks.example"},
+    )
+
+    manifest = _manifest_from(druks_client.get("/api/service-identities/github/manifest").text)
+
+    assert (
+        manifest["hook_attributes"]["url"] == "https://hooks.druks.example/_external/github/events/"
+    )
+
+
+def test_manifest_page_targets_the_org_form(druks_client: TestClient, tmp_path):
+    druks_client.app.state.settings = make_settings(
+        tmp_path, urls={"endpoint": "https://druks.example"}
+    )
+
+    response = druks_client.get("/api/service-identities/github/manifest", params={"org": "acme"})
+
+    assert 'action="https://github.com/organizations/acme/settings/apps/new"' in response.text
+
+
+def test_manifest_page_refuses_without_an_endpoint(druks_client: TestClient):
+    response = druks_client.get("/api/service-identities/github/manifest")
+
+    assert response.status_code == 409
+    assert "urls.endpoint" in response.json()["detail"]
+
+
+def test_manifest_callback_exchanges_the_code_and_connects(
+    druks_client: TestClient, druks_db, monkeypatch
+):
+    exchanged = []
+
+    async def fake_post(self, url, **kwargs):
+        exchanged.append(url)
+        return httpx.Response(
+            200,
+            json={
+                "id": 4242,
+                "slug": "druks",
+                "pem": _PEM,
+                "webhook_secret": _SECRET,
+                "html_url": "https://github.com/apps/druks",
+            },
+        )
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", fake_post)
+
+    response = druks_client.get(
+        "/api/service-identities/github/manifest/callback", params={"code": "fresh-code"}
+    )
+
+    assert response.status_code == 200
+    assert exchanged == ["https://api.github.com/app-manifests/fresh-code/conversions"]
+    assert "https://github.com/apps/druks/installations/new" in response.text
+    # The page never carries the stored secrets.
+    assert "line-one" not in response.text
+    assert _SECRET not in response.text
+    druks_db.expire_all()
+    row = ServiceIdentity.get("github")
+    assert row.identity == {"app_id": "4242", "slug": "druks"}
+    assert row.secrets == {"private_key": _PEM, "webhook_secret": _SECRET}
+
+
+def test_manifest_callback_rejects_a_dead_code(druks_client: TestClient, druks_db, monkeypatch):
+    async def fake_post(self, url, **kwargs):
+        return httpx.Response(404, json={"message": "Not Found"})
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", fake_post)
+
+    response = druks_client.get(
+        "/api/service-identities/github/manifest/callback", params={"code": "stale"}
+    )
+
+    assert response.status_code == 400
+    assert "restart" in response.json()["detail"]
     with pytest.raises(ServiceNotConnectedError):
         ServiceIdentity.get("github")
