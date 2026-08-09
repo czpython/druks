@@ -65,7 +65,7 @@ class WorkItemSummary(SubjectSummary):
     # which composes this with them; ``id`` is the platform subject key (str).
     source: Literal["linear", "github", "jira"]
     repo: str
-    # Druks Project name (e.g. "Hey Fella"), not the repo. Required —
+    # Druks Project name (e.g. "Acme"), not the repo. Required —
     # every WorkItem is born into a project, intake refuses tickets
     # whose Linear project doesn't map to one.
     project_name: str = Field(validation_alias=AliasPath("project", "name"))
