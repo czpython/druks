@@ -25,7 +25,7 @@ from druks.contrib.ship.ticketing.exceptions import UnknownTicketError
 from druks.contrib.ship.workflows import Profile
 from druks.core.apis.github import get_github_client
 from druks.db import db_session
-from druks.settings import load_settings
+from druks.service_identities.exceptions import ServiceNotConnectedError
 
 logger = logging.getLogger(__name__)
 
@@ -72,8 +72,7 @@ async def list_github_repos(
         ),
     ),
 ) -> GitHubReposResponse:
-    settings = load_settings()
-    github = get_github_client(settings)
+    github = get_github_client()
     resolved = (owner or "").strip()
     if resolved:
         owners: tuple[str, ...] = (resolved,)
@@ -184,7 +183,12 @@ async def add_project_repo(
         )
         .values(project_id=project.id)
     )
-    await Profile.dispatch(repo)
+    try:
+        await Profile.dispatch(repo)
+    except ServiceNotConnectedError:
+        # Registering the repo is metadata and must survive; profiling needs the
+        # operator App, so defer it — a later push or a manual profile picks it up.
+        logger.info("Registered %s without profiling: GitHub is not connected.", full_name)
     return ProjectRepoSummary.model_validate(repo)
 
 

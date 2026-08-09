@@ -6,8 +6,10 @@ from druks.contrib.review.extension import Review
 from druks.contrib.review.github import get_review_actor
 from druks.contrib.ship.models import ProjectRepo
 from druks.contrib.ship.workspace import RepoWorkspace
+from druks.core.apis.github import GITHUB
 from druks.sandbox import repo as _repo
 from druks.sandbox.layout import get_github_token_remote_path, get_related_root, get_repo_root
+from druks.service_identities.models import ServiceIdentity
 from druks.workflows import Workflow
 
 if TYPE_CHECKING:
@@ -38,6 +40,10 @@ class PullRequestReview(Workflow):
 
     @classmethod
     async def dispatch(cls, *, repo: str, pr_number: int, requested_by: str) -> str:
+        # Even a distinct review identity clones alongside the operator App, so
+        # resolve the operator identity before the start spends a run and
+        # provisions a VM — the raising lookup surfaces the actionable error.
+        ServiceIdentity.get(GITHUB)
         # Attribution follows the requester when druks knows them by that name; a
         # review asked for by someone with no account runs as the system's.
         account = Account.get_for_username(requested_by)

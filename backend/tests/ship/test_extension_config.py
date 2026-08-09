@@ -57,7 +57,7 @@ class TestFetchFile:
     def _wire(self, monkeypatch, tmp_path, github):
         settings = make_settings(tmp_path)
         monkeypatch.setattr("druks.extensions.fetcher.load_settings", lambda: settings)
-        monkeypatch.setattr("druks.extensions.fetcher.get_github_client", lambda _settings: github)
+        monkeypatch.setattr("druks.extensions.fetcher.get_github_client", lambda: github)
 
     async def test_404_is_cached_as_empty(self, monkeypatch, tmp_path):
         from druks.extensions.fetcher import fetch_file

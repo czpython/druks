@@ -824,7 +824,131 @@ function HarnessesPane({
               </div>
             )
           })}
+          <GitHubConnectCard />
         </div>
+      </div>
+    </div>
+  )
+}
+
+// The appliance's own GitHub App — one hand-placed card beside the
+// registry-driven harness cards. Connection persists immediately, outside the
+// modal's Save, so it owns its query, submit, busy, and error state. The
+// pasted PEM and webhook secret are write-only: a success drops them from
+// state, and the connected rendering shows identity facts only.
+export function GitHubConnectCard() {
+  const queryClient = useQueryClient()
+  const identityQuery = useQuery({
+    queryKey: ['githubIdentity'],
+    queryFn: () => api.githubIdentity(),
+    staleTime: 60_000,
+  })
+  const [replacing, setReplacing] = useState(false)
+  const [appId, setAppId] = useState('')
+  const [privateKey, setPrivateKey] = useState('')
+  const [webhookSecret, setWebhookSecret] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const identity = identityQuery.data
+  const formOpen = (identity && !identity.connected) || replacing
+  const complete = appId.trim() !== '' && privateKey.trim() !== '' && webhookSecret !== ''
+
+  const submit = () => {
+    setBusy(true)
+    setError(null)
+    void api
+      .connectGithubIdentity({ appId: appId.trim(), privateKey, webhookSecret })
+      .then(async () => {
+        setAppId('')
+        setPrivateKey('')
+        setWebhookSecret('')
+        setReplacing(false)
+        await queryClient.invalidateQueries({ queryKey: ['githubIdentity'] })
+      })
+      .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+      .finally(() => setBusy(false))
+  }
+
+  return (
+    <div className="set-card harness-row" style={{ '--fam': 'var(--accent-violet)' } as CSSProperties}>
+      <div className="hr-head">
+        <span className="set-card-name">
+          <span className="dot" />
+          github
+        </span>
+        <span className="set-card-tag">service identity</span>
+      </div>
+      <div className="set-pane-sub">
+        The GitHub App druks acts as — it receives webhooks and writes branches, pull requests, and comments. Paste the App&apos;s credentials from the GitHub developer settings page.
+      </div>
+      <div className="hr-connect">
+        <div className="hr-conn-status">
+          {identity?.connected ? (
+            <span className="hr-chip hr-chip-on">
+              connected · {identity.slug} (app {identity.appId})
+            </span>
+          ) : (
+            <span className="hr-chip hr-chip-off">not connected</span>
+          )}
+          {identity?.connected && identity.connectedAt && (
+            <span className="hr-conn-exp">connected {new Date(identity.connectedAt).toLocaleString()}</span>
+          )}
+          <span className="hr-conn-actions">
+            {identity?.connected && !replacing && (
+              <button className="hr-conn-btn" onClick={() => setReplacing(true)} disabled={busy}>
+                Replace
+              </button>
+            )}
+          </span>
+        </div>
+        {formOpen && (
+          <div className="gh-connect-form">
+            <div className="set-field">
+              <span className="set-field-label">app id</span>
+              <input
+                className="set-select"
+                aria-label="App ID"
+                value={appId}
+                onChange={(e) => setAppId(e.target.value)}
+                disabled={busy}
+              />
+            </div>
+            <div className="set-field">
+              <span className="set-field-label">private key (PEM)</span>
+              <textarea
+                className="set-select set-textarea"
+                aria-label="Private key (PEM)"
+                value={privateKey}
+                placeholder="-----BEGIN RSA PRIVATE KEY-----"
+                onChange={(e) => setPrivateKey(e.target.value)}
+                disabled={busy}
+              />
+            </div>
+            <div className="set-field">
+              <span className="set-field-label">webhook secret</span>
+              <input
+                className="set-select"
+                type="password"
+                aria-label="Webhook secret"
+                value={webhookSecret}
+                onChange={(e) => setWebhookSecret(e.target.value)}
+                disabled={busy}
+              />
+            </div>
+            <span className="hr-conn-actions">
+              {replacing && (
+                <button className="hr-conn-btn hr-conn-ghost" onClick={() => setReplacing(false)} disabled={busy}>
+                  Cancel
+                </button>
+              )}
+              <button className="hr-conn-btn" onClick={submit} disabled={busy || !complete}>
+                {identity?.connected ? 'Replace connection' : 'Connect GitHub'}
+              </button>
+            </span>
+          </div>
+        )}
+        {error && <div className="hr-conn-error">{error}</div>}
       </div>
     </div>
   )
@@ -1956,6 +2080,17 @@ function ExtensionPane({
                               <CronField
                                 value={String(cur ?? '')}
                                 onChange={(v) => setOption(o, v)}
+                                disabled={busy}
+                              />
+                            ) : o.f.type === 'secret' && o.f.multiline ? (
+                              // A pasted multiline secret (a PEM): same write-only
+                              // semantics as the secret input, but a textarea so the
+                              // paste keeps its newlines.
+                              <textarea
+                                className="set-select set-textarea"
+                                value={override !== undefined ? String(override ?? '') : ''}
+                                placeholder={o.f.secretSet ? '•••••••• (set)' : 'not set'}
+                                onChange={(e) => setOption(o, e.target.value || undefined)}
                                 disabled={busy}
                               />
                             ) : o.f.type === 'secret' ? (

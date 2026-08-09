@@ -9,10 +9,13 @@ from typing import Any, Literal, TypeVar
 from githubkit import AppAuthStrategy, AppInstallationAuthStrategy, GitHub
 from githubkit.exception import GraphQLFailed, RequestFailed
 
-from druks.core.apis.exceptions import GitHubAppNotConfiguredError, GitHubAppNotInstalledError
-from druks.settings import Settings
+from druks.core.apis.exceptions import GitHubAppNotInstalledError
+from druks.service_identities.models import ServiceIdentity
+from druks.settings import load_settings
 
 logger = logging.getLogger(__name__)
+
+GITHUB = "github"
 
 
 @dataclass(frozen=True)
@@ -63,10 +66,12 @@ class GitHubClient:
         app_id: str,
         private_key: str,
         base_url: str = "https://api.github.com",
+        slug: str = "",
     ) -> None:
         self._app_id = app_id
         self._private_key = private_key
         self._base_url = base_url
+        self._slug = slug
         self._app = GitHub(
             AppAuthStrategy(app_id, private_key),
             base_url=base_url,
@@ -165,8 +170,11 @@ class GitHubClient:
 
     async def get_mention_handle(self) -> str:
         """What a comment writes after ``@`` to address this App — its slug, which
-        GitHub resolves to the App's bot user. The App is the one that knows it;
-        nobody should have to configure it."""
+        GitHub resolves to the App's bot user. The operator client carries the
+        slug stored at connect time and never refetches it; a client constructed
+        without one (the review identity) asks GitHub once and caches it."""
+        if self._slug:
+            return self._slug
         cached = _MENTION_HANDLE_CACHE.get(self._app_id)
         if cached:
             return cached
@@ -174,6 +182,17 @@ class GitHubClient:
         handle = getattr(response.parsed_data, "slug", None) or ""
         _MENTION_HANDLE_CACHE[self._app_id] = handle
         return handle
+
+    async def get_authenticated_app_slug(self) -> str:
+        """The slug GitHub reports for these credentials — a live App-JWT call,
+        so it proves the App ID matches the PEM. The connect flow's validation;
+        mention resolution reads the stored slug instead."""
+        async with GitHub(
+            AppAuthStrategy(self._app_id, self._private_key),
+            base_url=self._base_url,
+        ) as gh:
+            response = await gh.rest.apps.async_get_authenticated()
+            return str(getattr(response.parsed_data, "slug", None) or "")
 
     async def _installation_id(self, repo: str) -> int:
         if repo in self._installation_cache:
@@ -499,14 +518,16 @@ def _fold_comments_into_body(body: str, comments: list[ReviewComment]) -> str:
     return "\n".join(lines)
 
 
-def get_github_client(settings: Settings) -> GitHubClient:
-    if settings.github.operator_app_id and settings.github_operator_private_key_path:
-        return GitHubClient(
-            app_id=settings.github.operator_app_id,
-            private_key=settings.github_operator_private_key_path.read_text(),
-            base_url=settings.github_api_url,
-        )
-    raise GitHubAppNotConfiguredError(
-        "Operator GitHub App credentials are required: set github.operator_app_id and "
-        "GITHUB_OPERATOR_PRIVATE_KEY_PATH."
+def get_github_client() -> GitHubClient:
+    """The operator client, resolved from the GitHub service-identity row —
+    the only credential source; there is no settings or file fallback. Raises
+    ``ServiceNotConnectedError`` when GitHub isn't connected. ``github_api_url``
+    stays a Settings input because it is transport, not identity. PEM plaintext
+    exists only here, feeding the client's auth strategy."""
+    row = ServiceIdentity.get(GITHUB)
+    return GitHubClient(
+        app_id=row.identity["app_id"],
+        private_key=row.secrets["private_key"],
+        base_url=load_settings().github_api_url,
+        slug=row.identity["slug"],
     )

@@ -1,8 +1,12 @@
 from datetime import UTC, datetime
 from typing import Any, ClassVar
 
+from fastapi import HTTPException, status
 from fastapi.responses import JSONResponse, Response
 
+from druks.core.apis.github import GITHUB
+from druks.service_identities.exceptions import ServiceNotConnectedError
+from druks.service_identities.models import ServiceIdentity
 from druks.signals import publish
 from druks.webhooks import Webhook, verify_hmac_sha256
 
@@ -25,10 +29,20 @@ class GitHubEvents(Webhook):
     DELIVERY_HEADER: ClassVar[str] = "x-github-delivery"
 
     def request_is_authentic(self) -> bool:
+        # The delivery secret lives on the GitHub service-identity row — the
+        # same paste that connected the App. No identity, no secret to verify
+        # against: reject before any event dispatch.
+        try:
+            identity = ServiceIdentity.get(GITHUB)
+        except ServiceNotConnectedError as error:
+            raise HTTPException(
+                status.HTTP_401_UNAUTHORIZED,
+                "GitHub is not connected — connect it in Settings → Harnesses.",
+            ) from error
         verify_hmac_sha256(
             self.raw_body,
             self.request.headers.get(self.SIGNATURE_HEADER),
-            self.settings.secrets.webhook_secret,
+            identity.secrets["webhook_secret"],
         )
         return True
 

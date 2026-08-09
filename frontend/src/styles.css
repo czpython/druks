@@ -980,6 +980,8 @@ a.row-repo:hover { color: var(--bucket-run); text-decoration: underline; }
 .set-select:focus { outline: none; border-color: var(--accent); }
 /* Text inputs share .set-select's frame but must not wear its dropdown chevron. */
 input.set-select { background-image: none; padding-right: 12px; }
+/* Multiline secrets (a pasted PEM): the same frame, grown into a textarea. */
+textarea.set-textarea { background-image: none; height: auto; min-height: 96px; padding: 8px 12px; line-height: 1.45; resize: vertical; white-space: pre; }
 
 .set-cards { display: flex; flex-direction: column; gap: 12px; }
 .set-card { border: 1px solid var(--border); border-radius: 7px; background: var(--surface-2); padding: 16px; display: flex; flex-direction: column; gap: 13px; }
@@ -1018,6 +1020,9 @@ input.set-select { background-image: none; padding-right: 12px; }
 .hr-conn-input { flex: 1; min-width: 200px; padding: 6px 10px; border-radius: 4px; background: var(--surface-2); border: 1px solid var(--border); color: var(--text); font-family: var(--font-mono); font-size: 12px; }
 .hr-conn-input:focus { outline: none; border-color: color-mix(in oklch, var(--fam, var(--accent)) 55%, transparent); }
 .hr-conn-error { font-size: 11.5px; color: var(--outcome-failed); font-family: var(--font-mono); }
+/* Connect GitHub — the service-identity paste-in form on its hand-placed card. */
+.gh-connect-form { display: flex; flex-direction: column; gap: 12px; padding: 11px 12px; border-radius: 5px; background: var(--surface); border: 1px solid var(--border); }
+.gh-connect-form .hr-conn-actions { margin-left: 0; justify-content: flex-end; }
 
 .set-switch { position: relative; width: 34px; height: 18px; border-radius: 10px; flex-shrink: 0; background: var(--surface-3); border: 1px solid var(--border-loud); transition: all 140ms; cursor: pointer; }
 .set-switch::after { content: ''; position: absolute; top: 1.5px; left: 1.5px; width: 12px; height: 12px; border-radius: 50%; background: var(--text-dim); transition: all 140ms; }

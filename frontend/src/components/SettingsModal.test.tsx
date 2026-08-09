@@ -73,6 +73,46 @@ const extensionSettings = {
         },
       ],
     },
+    {
+      name: 'review',
+      description: 'Review settings',
+      icon: 'git-pull-request',
+      builtin: false,
+      agents: [],
+      workflows: [],
+      settings: [
+        {
+          name: 'app_id',
+          label: 'Review App ID',
+          help: '',
+          type: 'secret',
+          value: null,
+          default: null,
+          choices: null,
+          section: '',
+          visibleWhenField: '',
+          visibleWhenValue: null,
+          secretSet: false,
+          multiline: false,
+          overridden: false,
+        },
+        {
+          name: 'private_key',
+          label: 'Review App private key',
+          help: '',
+          type: 'secret',
+          value: null,
+          default: null,
+          choices: null,
+          section: '',
+          visibleWhenField: '',
+          visibleWhenValue: null,
+          secretSet: true,
+          multiline: true,
+          overridden: true,
+        },
+      ],
+    },
   ],
 }
 
@@ -176,6 +216,38 @@ describe('SettingsModal extension fields', () => {
       )
     const body = JSON.parse(String(patchCall?.[1]?.body))
     expect(body.extensionSettings.ship).toEqual({ tracker: 'jira' })
+  })
+
+  it('renders a multiline secret as a textarea and PATCHes the paste with newlines intact', async () => {
+    stubFetch(false)
+    const onClose = renderModal()
+
+    fireEvent.click(await screen.findByRole('button', { name: 'review' }))
+    const pemField = screen.getByText('Review App private key').closest('.set-field')
+    const textarea = pemField?.querySelector('textarea')
+    expect(textarea).toBeTruthy()
+    // A stored secret never redisplays — the control shows only the set hint.
+    expect((textarea as HTMLTextAreaElement).value).toBe('')
+    expect((textarea as HTMLTextAreaElement).placeholder).toBe('•••••••• (set)')
+    // The single-line secret sibling keeps its password input.
+    const appIdField = screen.getByText('Review App ID').closest('.set-field')
+    expect(appIdField?.querySelector('input')).toBeTruthy()
+    expect(appIdField?.querySelector('textarea')).toBeNull()
+
+    const pem =
+      '-----BEGIN RSA PRIVATE KEY-----\nline-one\nline-two\n-----END RSA PRIVATE KEY-----'
+    fireEvent.change(textarea as HTMLTextAreaElement, { target: { value: pem } })
+    fireEvent.click(screen.getByRole('button', { name: 'save' }))
+
+    await waitFor(() => expect(onClose).toHaveBeenCalled())
+    const patchCall = vi
+      .mocked(fetch)
+      .mock.calls.find(
+        ([input, init]) =>
+          String(input) === '/api/settings/extensions' && init?.method === 'PATCH',
+      )
+    const body = JSON.parse(String(patchCall?.[1]?.body))
+    expect(body.extensionSettings.review).toEqual({ private_key: pem })
   })
 
   it('renders a 422 message for a field hidden by the tracker selection', async () => {

@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from typing import Literal
 
+from druks.contrib.review.extension import Review
 from druks.core.apis.github import GitHubClient, get_github_client
 from druks.settings import load_settings
 
@@ -18,14 +19,16 @@ class ReviewActor:
 
 
 def get_review_actor() -> ReviewActor:
-    settings = load_settings()
-    if settings.github.reviewer_app_id and settings.github_reviewer_private_key_path:
+    settings = Review.settings()
+    if settings.app_id and settings.private_key:
+        # Only a complete pair selects the distinct identity — a half-configured
+        # one (flagged by clean()) still borrows the operator client below.
         return ReviewActor(
             client=GitHubClient(
-                app_id=settings.github.reviewer_app_id,
-                private_key=settings.github_reviewer_private_key_path.read_text(),
-                base_url=settings.github_api_url,
+                app_id=settings.app_id.get_secret_value(),
+                private_key=settings.private_key.get_secret_value(),
+                base_url=load_settings().github_api_url,
             ),
             mode="approve",
         )
-    return ReviewActor(client=get_github_client(settings), mode="comment")
+    return ReviewActor(client=get_github_client(), mode="comment")

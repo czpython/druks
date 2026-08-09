@@ -6,8 +6,8 @@ without replacing the process.
 
 | Plane | Examples | Stored in |
 | --- | --- | --- |
-| Deployment | identity, ingress, GitHub App keys, Drukbox, encryption key | `~/druks/druks.toml` |
-| Dashboard | timezone, harness and tracker credentials, workflow and agent overrides, notifications, MCP servers, skills | Postgres |
+| Deployment | identity, ingress, Drukbox, encryption key | `~/druks/druks.toml` |
+| Dashboard | timezone, the GitHub connection, harness and tracker credentials, workflow and agent overrides, notifications, MCP servers, skills | Postgres |
 
 The installer renders the complete deployment `.env` from `druks.toml`; `.env`
 is a build artifact consumed by Compose, Druks, and Drukbox, not an authored
@@ -32,7 +32,6 @@ host-run development template for that environment plane.
 | Table | Purpose |
 | --- | --- |
 | `[identity]` | Browser identity mode and header or JWT verification inputs |
-| `[github]` | Operator and reviewer App ids and host PEM paths |
 | `[urls]` | Dashboard callback base URL and public webhook hostname |
 | `[secrets]` | Generated deployment secrets |
 | `[paths]` | Host data and harness configuration paths |
@@ -78,7 +77,6 @@ caches, and the sandbox provisioning gate.
 | --- | --- |
 | `urls.endpoint` | Browser-visible dashboard base URL used to build MCP OAuth callbacks |
 | `urls.webhook_host` | Public webhook hostname used by `druks doctor` for its ingress probe |
-| `secrets.webhook_secret` | Shared HMAC secret used by the GitHub webhook integration |
 | `identity.mode` | `none` (default; no authentication, single operator), `header` (edge-asserted identity), or `jwt` (edge-signed assertion, verified) |
 | `identity.header` | The trusted identity header; rendered for the shipped Caddy edge too. No default — header and jwt modes refuse to start without it |
 | `identity.jwks_url` | `jwt` mode: where the edge publishes its signing keys |
@@ -159,39 +157,21 @@ to identify it) and mint a replacement — rotation is mint first, revoke
 second. Agents consume the API through the MCP endpoint; see
 [Connect your agent](connect-your-agent.md).
 
-## GitHub Apps
+## GitHub
 
-The bundled `ship` extension requires two GitHub Apps. These are application
-requirements, not requirements of the Druks extension mechanism itself.
+Druks acts at GitHub as one **operator App** — its service identity. The App
+receives webhooks and performs application-owned writes such as branches,
+pull requests, comments, labels, and merges. Its credentials live encrypted
+in Postgres, pasted in from **Settings → Harnesses → Connect GitHub**: the
+App ID, the PEM private key exactly as GitHub issued it, and the webhook
+secret. Connecting validates the pasted credentials against GitHub and stores
+the App's slug; from then on every operator client resolves from that row and
+webhook deliveries verify against its stored secret. There is no TOML,
+environment, or PEM-file source — until GitHub is connected, agent runs
+refuse with a pointed message and `druks doctor` reports the identity as not
+connected.
 
-- **Operator app:** receives webhooks and performs application-owned writes
-  such as branches, pull requests, comments, labels, and merges.
-- **Reviewer app:** submits reviews through a distinct GitHub identity.
-
-Personal access tokens are not a supported substitute. Install both Apps on
-the same repositories; that installation set is where `ship` may act.
-
-The fast path is:
-
-```bash
-cd ~/druks
-bash <(curl -fsSL https://raw.githubusercontent.com/czpython/druks/main/scripts/install.sh) --apps
-```
-
-This uses the GitHub manifest files under
-[`scripts/manifests/`](../scripts/manifests) and writes the returned App ids,
-PEMs, and webhook secret into the install through `druks setup`.
-
-### Operator app
-
-```toml
-[github]
-operator_app_id = "123456"
-operator_pem = "secrets/operator.pem"
-
-[secrets]
-webhook_secret = "<same secret configured on the app webhook>"
-```
+Registering the App by hand:
 
 Webhook URL:
 `https://<webhook-host>/_external/github/events/`
@@ -207,21 +187,28 @@ Subscribe to issue comment, pull request, pull request review, and push events.
 | Checks | Read |
 | Commit statuses | Read |
 
-### Reviewer app
+Install the App on the repositories Druks should work in; that installation
+set is where `ship` may act. Personal access tokens are not a supported
+substitute.
 
-```toml
-[github]
-reviewer_app_id = "123457"
-reviewer_pem = "secrets/reviewer.pem"
-```
+**Upgrading an existing installation** is a one-time paste on each live box
+after rollout: open Settings → Harnesses and connect GitHub with the existing
+operator App's ID, private key, and webhook secret. Do not create a
+replacement App — the current App's webhook and installations keep working
+under the pasted credentials.
 
-It needs read access to metadata and contents and read/write access to pull
-requests. It does not need a webhook.
+### Review identity (optional)
 
-`GITHUB_API_URL` defaults to `https://api.github.com` and can point both clients
-at another compatible GitHub API endpoint.
-Compose pins `GITHUB_OPERATOR_PRIVATE_KEY_PATH` and
-`GITHUB_REVIEWER_PRIVATE_KEY_PATH` to the mounted in-container PEM paths.
+The bundled `review` extension can post its verdict reviews as a second
+GitHub App, so GitHub accepts approvals on Druks-authored pull requests.
+Configure it in **Settings → Review**: the review App ID and its PEM private
+key, both stored encrypted and empty-as-unset. Leave the pair empty and
+reviews publish as operator comments; setting both flips reviews to distinct
+approving reviews. The review App needs read access to metadata and contents,
+read/write access to pull requests, and no webhook.
+
+`GITHUB_API_URL` defaults to `https://api.github.com` and can point every
+client at another compatible GitHub API endpoint.
 
 ## Ticketing integrations
 
@@ -328,7 +315,8 @@ per-agent capability manifest records the delivered set.
 
 ## Credential custody and secrets at rest
 
-`secrets.secrets_key` encrypts MCP tokens and OAuth grants with AES-256-GCM.
+`secrets.secrets_key` encrypts MCP tokens, OAuth grants, and the GitHub
+service identity's private key and webhook secret with AES-256-GCM.
 Each database column supplies authenticated associated data, and each value
 gets a derived encryption key. The setting is one or more comma-separated,
 base64-encoded 32-byte master keys:
@@ -353,4 +341,5 @@ The encryption envelope does **not** currently cover tracker extension settings,
 harness subscription payloads, or notification webhook URLs. They are stored as
 ordinary Postgres fields, although APIs withhold or mask their values. Treat
 access to Postgres and its backups as access to those credentials. GitHub App
-private keys remain files mounted into the process rather than database values.
+private keys — the operator identity's and the review extension's — are
+database values under the envelope, no longer files mounted into the process.

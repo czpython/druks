@@ -63,16 +63,11 @@ def test_toml_populates_authored_submodels(tmp_path, monkeypatch):
 mode = "header"
 header = "X-Edge-Email"
 
-[github]
-operator_app_id = "123"
-reviewer_app_id = "456"
-
 [urls]
 endpoint = "https://druks.example.com"
 webhook_host = "hooks.example.com"
 
 [secrets]
-webhook_secret = "webhook-secret"
 secrets_key = "{_SECRETS_KEY}"
 
 [sandbox]
@@ -89,11 +84,8 @@ timeout = 180
 
     assert settings.identity.mode == "header"
     assert settings.identity.header == "X-Edge-Email"
-    assert settings.github.operator_app_id == "123"
-    assert settings.github.reviewer_app_id == "456"
     assert settings.urls.endpoint == "https://druks.example.com"
     assert settings.urls.webhook_host == "hooks.example.com"
-    assert settings.secrets.webhook_secret == "webhook-secret"
     assert settings.secrets.secrets_key == _SECRETS_KEY
     assert settings.sandbox.service_token == "sandbox-token"
     assert settings.sandbox.service_url == "https://sandbox.example.com"

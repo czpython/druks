@@ -4,11 +4,16 @@ from types import SimpleNamespace
 import pytest
 from druks.contrib.review import subscribers  # noqa: F401 — the import registers it
 from druks.contrib.review.datastructures import PullRequest
+from druks.contrib.review.extension import Review, check_review_identity
 from druks.contrib.review.github import get_review_actor
 from druks.contrib.review.workflows import PullRequestReview
+from druks.extensions.settings import field_kind, field_multiline
 from druks.prompts import render_prompt
+from druks.service_identities.exceptions import ServiceNotConnectedError
+from druks.service_identities.models import ServiceIdentity
 from druks.signals import publish
 from druks.testing import configure_app_for_test, make_settings, seed_run
+from druks.user_settings.models import SettingsOverride
 from druks.workflows import _bind_instance
 from fastapi.testclient import TestClient
 
@@ -125,30 +130,113 @@ async def test_comment_mode_reviews_publish_as_comments():
     assert "`COMMENT` event" in output
 
 
-def test_a_configured_review_identity_approves(tmp_path: Path, monkeypatch):
-    pem = tmp_path / "review.pem"
-    pem.write_text("test-key")
-    settings = make_settings(
-        tmp_path,
-        github={"operator_app_id": "1", "reviewer_app_id": "2"},
-        github_reviewer_private_key_path=pem,
+def _connect_operator() -> None:
+    ServiceIdentity.connect(
+        "github",
+        identity={"app_id": "1", "slug": "druks-operator"},
+        secrets={"private_key": "operator-pem", "webhook_secret": "hook-secret"},
     )
-    monkeypatch.setattr("druks.contrib.review.github.load_settings", lambda: settings)
-
-    assert get_review_actor().mode == "approve"
 
 
-def test_an_unset_review_identity_means_comment_mode(tmp_path: Path, monkeypatch):
-    pem = tmp_path / "operator.pem"
-    pem.write_text("test-key")
-    settings = make_settings(
-        tmp_path,
-        github={"operator_app_id": "1"},
-        github_operator_private_key_path=pem,
+def _set_review_setting(field: str, value: str) -> None:
+    SettingsOverride.set_extension_setting("review", field, value, is_secret=True)
+
+
+def test_a_configured_review_identity_approves(druks_db):
+    _set_review_setting("app_id", "2")
+    _set_review_setting("private_key", "review-pem\nline-two")
+
+    actor = get_review_actor()
+
+    assert actor.mode == "approve"
+    assert actor.client._app_id == "2"
+
+
+def test_an_unset_review_identity_borrows_the_operator_in_comment_mode(druks_db):
+    _connect_operator()
+
+    actor = get_review_actor()
+
+    assert actor.mode == "comment"
+    assert actor.client._app_id == "1"
+
+
+def test_a_half_configured_review_identity_still_borrows_the_operator(druks_db):
+    # Only a complete pair selects the distinct client; app_id alone is the
+    # incoherent state clean() flags, not a mode switch.
+    _connect_operator()
+    _set_review_setting("app_id", "2")
+
+    actor = get_review_actor()
+
+    assert actor.mode == "comment"
+    assert actor.client._app_id == "1"
+
+
+def test_review_settings_reject_a_half_configured_pair():
+    assert Review.Settings(app_id="2").clean() == {
+        "private_key": "Required once the review App ID is set."
+    }
+    assert Review.Settings(private_key="review-pem").clean() == {
+        "app_id": "Required once the review App private key is set."
+    }
+    assert Review.Settings().clean() == {}
+    assert Review.Settings(app_id="2", private_key="review-pem").clean() == {}
+
+
+def test_the_review_pem_declares_the_multiline_secret_presentation():
+    field = Review.Settings.model_fields["private_key"]
+
+    assert field_kind(field) == "secret"
+    assert field_multiline(field)
+    assert not field_multiline(Review.Settings.model_fields["app_id"])
+
+
+def test_review_identity_check_is_healthy_set_or_unset(druks_db):
+    assert check_review_identity().ok
+    assert "unset" in check_review_identity().detail
+
+    _set_review_setting("app_id", "2")
+    _set_review_setting("private_key", "review-pem")
+
+    result = check_review_identity()
+    assert result.ok
+    assert "distinct App" in result.detail
+
+
+async def test_review_dispatch_refuses_before_start_without_github(druks_db, monkeypatch):
+    started = []
+
+    async def _start(cls, **kwargs):
+        started.append(kwargs)
+        return "run-review"
+
+    monkeypatch.setattr(PullRequestReview, "start", classmethod(_start))
+
+    with pytest.raises(ServiceNotConnectedError, match="github is not connected"):
+        await PullRequestReview.dispatch(
+            repo="acme/app", pr_number=7, requested_by="dev@example.com"
+        )
+
+    assert not started
+
+
+async def test_review_dispatch_starts_once_github_is_connected(druks_db, monkeypatch):
+    _connect_operator()
+    started = []
+
+    async def _start(cls, **kwargs):
+        started.append(kwargs)
+        return "run-review"
+
+    monkeypatch.setattr(PullRequestReview, "start", classmethod(_start))
+
+    run_id = await PullRequestReview.dispatch(
+        repo="acme/app", pr_number=7, requested_by="dev@example.com"
     )
-    monkeypatch.setattr("druks.contrib.review.github.load_settings", lambda: settings)
 
-    assert get_review_actor().mode == "comment"
+    assert run_id == "run-review"
+    assert len(started) == 1
 
 
 async def test_a_passer_by_cannot_spend_a_review(monkeypatch):

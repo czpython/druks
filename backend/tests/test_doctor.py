@@ -4,6 +4,8 @@ from pathlib import Path
 import httpx
 import pytest
 from druks import doctor
+from druks.database import db_session
+from druks.service_identities.models import ServiceIdentity
 from druks.testing import make_settings
 
 _SECRETS_KEY = "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA="
@@ -13,155 +15,105 @@ def _named(results: list[doctor.CheckResult], name: str) -> doctor.CheckResult:
     return next(result for result in results if result.name == name)
 
 
-def test_webhook_secret_fails_on_placeholder(tmp_path: Path) -> None:
-    settings = make_settings(
-        tmp_path,
-        secrets={"webhook_secret": "change-me", "secrets_key": _SECRETS_KEY},
+@pytest.fixture
+def doctor_db(druks_db, monkeypatch: pytest.MonkeyPatch):
+    """Point doctor's one-off engines at the test transaction. Doctor's checks
+    remove their session from the ambient registry, so rebind the fixture's
+    afterwards for the teardown that still needs it."""
+    monkeypatch.setattr(doctor, "create_engine_from_url", lambda _url: druks_db.get_bind())
+    yield druks_db
+    db_session.registry.set(druks_db)
+
+
+def _connect_github(slug: str = "druks-operator") -> ServiceIdentity:
+    return ServiceIdentity.connect(
+        "github",
+        identity={"app_id": "12345", "slug": slug},
+        secrets={
+            "private_key": "-----BEGIN RSA PRIVATE KEY-----\n...\n-----END RSA PRIVATE KEY-----\n",
+            "webhook_secret": "hook-secret",
+        },
     )
 
-    result = doctor.check_webhook_secret(settings)
+
+def test_github_identity_fails_when_absent(tmp_path: Path, doctor_db) -> None:
+    result = doctor.check_github_identity(make_settings(tmp_path))
 
     assert not result.ok
-    assert "secrets.webhook_secret" in result.detail
+    assert "not connected" in result.detail
 
 
-def test_webhook_secret_passes_when_set(tmp_path: Path) -> None:
-    settings = make_settings(
-        tmp_path,
-        secrets={"webhook_secret": "a-real-secret", "secrets_key": _SECRETS_KEY},
-    )
+def test_github_identity_reports_the_connected_row(tmp_path: Path, doctor_db) -> None:
+    _connect_github()
 
-    result = doctor.check_webhook_secret(settings)
+    result = doctor.check_github_identity(make_settings(tmp_path))
 
     assert result.ok
+    assert "app_id=12345" in result.detail
+    assert "slug=druks-operator" in result.detail
 
 
-def test_installations_fails_without_app_creds(tmp_path: Path) -> None:
-    # No operator app configured → the client can't even be built; doctor
+def test_installations_fails_without_a_connected_identity(tmp_path: Path, doctor_db) -> None:
+    # No github row → the zero-argument client can't even be built; doctor
     # reports the failure instead of raising.
-    settings = make_settings(tmp_path)
-
-    result = doctor.check_installations(settings)
+    result = doctor.check_installations(make_settings(tmp_path))
 
     assert not result.ok
     assert "installations" in result.name
+    assert "not connected" in result.detail
 
 
-def test_installations_lists_accounts(tmp_path: Path, monkeypatch) -> None:
-    settings = make_settings(tmp_path)
-
+def test_installations_lists_accounts(tmp_path: Path, doctor_db, monkeypatch) -> None:
     class _FakeClient:
         async def list_installation_accounts(self):
             return ("clawhaven",)
 
-    monkeypatch.setattr("druks.doctor.get_github_client", lambda _s: _FakeClient())
+    monkeypatch.setattr("druks.doctor.get_github_client", lambda: _FakeClient())
 
-    result = doctor.check_installations(settings)
+    result = doctor.check_installations(make_settings(tmp_path))
 
     assert result.ok
     assert "clawhaven" in result.detail
 
 
-def test_installations_fails_when_app_has_none(tmp_path: Path, monkeypatch) -> None:
-    settings = make_settings(tmp_path)
-
+def test_installations_fails_when_app_has_none(tmp_path: Path, doctor_db, monkeypatch) -> None:
     class _FakeClient:
         async def list_installation_accounts(self):
             return ()
 
-    monkeypatch.setattr("druks.doctor.get_github_client", lambda _s: _FakeClient())
+    monkeypatch.setattr("druks.doctor.get_github_client", lambda: _FakeClient())
 
-    result = doctor.check_installations(settings)
+    result = doctor.check_installations(make_settings(tmp_path))
 
     assert not result.ok
     assert "no installations" in result.detail
 
 
-def test_github_app_fails_when_pem_missing(tmp_path: Path) -> None:
-    settings = make_settings(
-        tmp_path,
-        github={"operator_app_id": "12345"},
-        github_operator_private_key_path=None,
-    )
-
-    result = doctor.check_github_operator_app(settings)
-
-    assert not result.ok
-    assert "GITHUB_OPERATOR_PRIVATE_KEY_PATH" in result.detail
-
-
-def test_github_app_fails_when_pem_does_not_exist(tmp_path: Path) -> None:
-    settings = make_settings(
-        tmp_path,
-        github={"operator_app_id": "12345"},
-        github_operator_private_key_path=tmp_path / "missing.pem",
-    )
-
-    result = doctor.check_github_operator_app(settings)
-
-    assert not result.ok
-    assert "does not exist" in result.detail
-
-
-def test_github_app_fails_when_pem_is_not_a_key(tmp_path: Path) -> None:
-    pem_path = tmp_path / "fake.pem"
-    pem_path.write_text("not actually a PEM key\n")
-    settings = make_settings(
-        tmp_path,
-        github={"operator_app_id": "12345"},
-        github_operator_private_key_path=pem_path,
-    )
-
-    result = doctor.check_github_operator_app(settings)
-
-    assert not result.ok
-    assert "PEM" in result.detail
-
-
-def test_github_app_passes_when_live_mint_succeeds(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+def test_installations_builds_the_client_from_the_row(
+    tmp_path: Path, doctor_db, monkeypatch
 ) -> None:
-    pem_path = tmp_path / "real.pem"
-    pem_path.write_text("-----BEGIN RSA PRIVATE KEY-----\n...\n-----END RSA PRIVATE KEY-----\n")
+    # The real zero-argument factory resolves the row inside doctor's own
+    # bound session; the fake transport keeps GitHub out of it.
+    _connect_github()
 
-    async def fake_slug(*, app_id: str, private_key: str) -> str:
-        return "druks-operator"
+    class _FakeClient:
+        async def list_installation_accounts(self):
+            return ("clawhaven",)
 
-    monkeypatch.setattr(doctor, "_github_app_slug", fake_slug)
-    settings = make_settings(
-        tmp_path,
-        github={"operator_app_id": "12345"},
-        github_operator_private_key_path=pem_path,
-    )
+    real_factory = doctor.get_github_client
+    built: list[str] = []
 
-    result = doctor.check_github_operator_app(settings)
+    def _tracking_factory():
+        client = real_factory()
+        built.append(client._app_id)
+        return _FakeClient()
+
+    monkeypatch.setattr(doctor, "get_github_client", _tracking_factory)
+
+    result = doctor.check_installations(make_settings(tmp_path))
 
     assert result.ok
-    assert "druks-operator" in result.detail
-
-
-def test_github_app_fails_when_live_mint_raises(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    pem_path = tmp_path / "real.pem"
-    pem_path.write_text("-----BEGIN RSA PRIVATE KEY-----\n...\n-----END RSA PRIVATE KEY-----\n")
-
-    async def fake_slug(*, app_id: str, private_key: str) -> str:
-        raise RuntimeError("401 Unauthorized")
-
-    monkeypatch.setattr(doctor, "_github_app_slug", fake_slug)
-    settings = make_settings(
-        tmp_path,
-        github={"operator_app_id": "12345"},
-        github_operator_private_key_path=pem_path,
-    )
-
-    result = doctor.check_github_operator_app(settings)
-
-    assert not result.ok
-    assert "401" in result.detail
+    assert built == ["12345"]
 
 
 def test_data_dir_fails_when_missing(tmp_path: Path) -> None:
@@ -221,12 +173,11 @@ def test_run_checks_covers_all_check_names(tmp_path: Path) -> None:
 
     # Installed extensions contribute their own checks alongside the platform's.
     assert {result.name for result in results} >= {
-        "webhook_secret",
         "webhook_ingress",
+        "github_identity",
         "installations",
-        "github_operator_app",
-        "github_reviewer_app",
         "ship:settings",
+        "review:settings",
         "claude_credentials",
         "codex_credentials",
         "data_dir",

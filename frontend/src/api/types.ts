@@ -258,6 +258,22 @@ export interface UpdateHarnessRequest {
   timeout?: number
 }
 
+/** The appliance's own GitHub App connection state — identity facts only;
+ * the stored PEM and webhook secret never leave the backend. */
+export interface GitHubServiceIdentity {
+  connected: boolean
+  appId: string | null
+  slug: string | null
+  connectedAt: string | null
+}
+
+export interface ConnectGitHubRequest {
+  appId: string
+  /** Pasted PEM private key — newlines are meaningful and preserved. */
+  privateKey: string
+  webhookSecret: string
+}
+
 // --- Settings --------------------------------------------------------------
 
 export interface UserSettings {
@@ -310,6 +326,8 @@ export interface WorkflowSettingField {
   visibleWhenValue: unknown
   /** For a secret field, whether a value is currently stored; null otherwise. */
   secretSet: boolean | null
+  /** The value carries meaningful newlines (a pasted PEM) — render a textarea. */
+  multiline: boolean
   overridden: boolean
 }
 

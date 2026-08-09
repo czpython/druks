@@ -456,7 +456,6 @@ def test_setup_toml_is_the_settings_source(tmp_path, monkeypatch):
 
     assert settings.identity.model_dump() == config["identity"]
     assert settings.urls.model_dump() == config["urls"]
-    assert settings.secrets.webhook_secret == config["secrets"]["webhook_secret"]
     assert settings.secrets.secrets_key == config["secrets"]["secrets_key"]
     assert settings.sandbox.service_token == config["sandbox"]["service_token"]
     assert settings.sandbox.service_url == config["sandbox"]["service_url"]

@@ -647,7 +647,11 @@ Supported display shapes are scalar values, `Literal` choices, and
 Secret values and submitted validation errors are redacted. Declare a secret
 field as `Secret`: an unset one is an empty, falsy `SecretStr`, so
 `if self.service_token:` reads set-ness and `.get_secret_value()` never needs
-a guard. `section` is a plain heading rendered in first-declaration order, with
+a guard. A secret whose pasted value carries meaningful newlines — a PEM
+private key — may declare `json_schema_extra={"multiline": True}`: the
+settings form renders a textarea and the paste keeps its newlines; storage,
+redaction, and write-only semantics are unchanged. `section` is a plain
+heading rendered in first-declaration order, with
 unsectioned fields first. `visible_when` takes one same-model `{field: value}`
 equality condition. Its controller must be non-secret and unconditional, and a
 `Literal` controller requires one of its declared members.

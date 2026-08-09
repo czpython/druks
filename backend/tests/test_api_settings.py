@@ -241,6 +241,7 @@ def test_extensions_surface_build_agents_and_workflow_defaults(tmp_path: Path):
         "visibleWhenField": "",
         "visibleWhenValue": None,
         "secretSet": None,
+        "multiline": False,
         "overridden": False,
     }
 

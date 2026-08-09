@@ -4,7 +4,13 @@ from typing import TYPE_CHECKING, Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.fields import FieldInfo
 
-from druks.extensions.settings import field_choices, field_kind, field_section, field_visibility
+from druks.extensions.settings import (
+    field_choices,
+    field_kind,
+    field_multiline,
+    field_section,
+    field_visibility,
+)
 from druks.schemas import BaseResponse
 
 if TYPE_CHECKING:
@@ -115,6 +121,9 @@ class SettingsFieldResponse(BaseResponse):
     # default). None for every other kind — the UI shows a "set / not set" hint only
     # for secrets.
     secret_set: bool | None
+    # The value carries meaningful newlines (a pasted PEM) — the UI renders a
+    # textarea. Presentation only; declared via json_schema_extra.
+    multiline: bool = False
     overridden: bool
 
     @classmethod
@@ -136,6 +145,7 @@ class SettingsFieldResponse(BaseResponse):
             visible_when_field=controller,
             visible_when_value=target,
             secret_set=bool(value) if secret else None,
+            multiline=field_multiline(field),
             overridden=overridden,
         )
 

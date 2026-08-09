@@ -6,6 +6,7 @@ import druks.durable.models  # noqa: F401
 import druks.harnesses.models  # noqa: F401
 import druks.mcp.models  # noqa: F401
 import druks.notifications.models  # noqa: F401
+import druks.service_identities.models  # noqa: F401
 import druks.skills.models  # noqa: F401
 import druks.user_settings.models  # noqa: F401
 from alembic import context

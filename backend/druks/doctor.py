@@ -12,18 +12,19 @@ from urllib.parse import urlparse
 
 import httpx
 from drukbox_sdk import SandboxAPI
-from githubkit import AppAuthStrategy, GitHub
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from .agents import Agent
-from .core.apis.github import get_github_client
+from .core.apis.github import GITHUB, get_github_client
 from .database import create_engine_from_url, db_session
 from .extensions.loader import iter_extensions
 from .extensions.registry import _ROLES, agents, autodiscover, webhooks, workflows
 from .harnesses.models import HarnessConnection
 from .harnesses.registry import get_harnesses
 from .sandbox.client import sandbox_client
+from .service_identities.exceptions import ServiceNotConnectedError
+from .service_identities.models import ServiceIdentity
 from .settings import Settings, load_settings
 from .user_settings.models import UserSettings
 from .webhooks.base import Webhook
@@ -37,28 +38,54 @@ class CheckResult:
     detail: str
 
 
-def check_webhook_secret(settings: Settings) -> CheckResult:
-    secret = settings.secrets.webhook_secret
-    if not secret or secret == "change-me":
+def check_github_identity(settings: Settings) -> CheckResult:
+    """The GitHub service identity is database-backed like a harness
+    connection: this reports the row's presence, not a file or setting."""
+    engine = create_engine_from_url(settings.database_url)
+    try:
+        with Session(engine) as session:
+            db_session.registry.set(session)
+            row = ServiceIdentity.get(GITHUB)
+    except ServiceNotConnectedError:
         return CheckResult(
-            name="webhook_secret",
+            name="github_identity",
             ok=False,
-            detail="secrets.webhook_secret is empty or the placeholder.",
+            detail="not connected — connect GitHub in Settings → Harnesses.",
         )
-    return CheckResult(name="webhook_secret", ok=True, detail="set")
+    except Exception as error:  # noqa: BLE001 — a DB-read failure is a fail, not a crash
+        return CheckResult(
+            name="github_identity", ok=False, detail=f"cannot read the identity: {error}"
+        )
+    finally:
+        db_session.remove()
+        engine.dispose()
+    return CheckResult(
+        name="github_identity",
+        ok=True,
+        detail=f"connected; app_id={row.identity['app_id']} slug={row.identity['slug']}",
+    )
 
 
 def check_installations(settings: Settings) -> CheckResult:
     """Where druks may act = the operator App's installation accounts;
-    this check is the audit surface for that set."""
+    this check is the audit surface for that set. The zero-argument client
+    factory reads the service-identity row, so a one-off Session is bound
+    into the ambient ``db_session`` registry for the duration."""
+    engine = create_engine_from_url(settings.database_url)
     try:
-        accounts = asyncio.run(get_github_client(settings).list_installation_accounts())
+        with Session(engine) as session:
+            db_session.registry.set(session)
+            client = get_github_client()
+        accounts = asyncio.run(client.list_installation_accounts())
     except Exception as exc:  # noqa: BLE001 — doctor reports, never raises
         return CheckResult(
             name="installations",
             ok=False,
             detail=f"could not list operator App installations: {exc}",
         )
+    finally:
+        db_session.remove()
+        engine.dispose()
     if not accounts:
         return CheckResult(
             name="installations",
@@ -70,60 +97,6 @@ def check_installations(settings: Settings) -> CheckResult:
         ok=True,
         detail=f"operator App installed on: {', '.join(accounts)}",
     )
-
-
-def check_github_operator_app(settings: Settings) -> CheckResult:
-    return _check_github_app(
-        name="github_operator_app",
-        app_id=settings.github.operator_app_id,
-        pem_path=settings.github_operator_private_key_path,
-        id_key="github.operator_app_id",
-        env_pem="GITHUB_OPERATOR_PRIVATE_KEY_PATH",
-    )
-
-
-def check_github_reviewer_app(settings: Settings) -> CheckResult:
-    return _check_github_app(
-        name="github_reviewer_app",
-        app_id=settings.github.reviewer_app_id,
-        pem_path=settings.github_reviewer_private_key_path,
-        id_key="github.reviewer_app_id",
-        env_pem="GITHUB_REVIEWER_PRIVATE_KEY_PATH",
-    )
-
-
-def _check_github_app(
-    *,
-    name: str,
-    app_id: str | None,
-    pem_path: Path | None,
-    id_key: str,
-    env_pem: str,
-) -> CheckResult:
-    if not app_id:
-        return CheckResult(name=name, ok=False, detail=f"{id_key} is unset.")
-    if not pem_path:
-        return CheckResult(name=name, ok=False, detail=f"{env_pem} is unset.")
-    if not pem_path.exists():
-        return CheckResult(name=name, ok=False, detail=f"{pem_path} does not exist.")
-    body = pem_path.read_text(errors="replace")
-    if "BEGIN RSA PRIVATE KEY" not in body and "BEGIN PRIVATE KEY" not in body:
-        return CheckResult(name=name, ok=False, detail=f"{pem_path} is not a PEM private key.")
-    # Live-mint a JWT and ask the GitHub API who we are. Proves the App ID
-    # matches the PEM and the App still exists.
-    try:
-        slug = asyncio.run(_github_app_slug(app_id=app_id, private_key=body))
-    except Exception as error:  # noqa: BLE001 — auth failures surface as fail
-        return CheckResult(name=name, ok=False, detail=f"GitHub auth failed: {error}")
-    return CheckResult(name=name, ok=True, detail=f"app_id={app_id} slug={slug}")
-
-
-async def _github_app_slug(*, app_id: str, private_key: str) -> str:
-    # ``async with`` lazily creates the underlying httpx client on entry
-    # and closes it on exit; a bare ``GitHub(...)`` has no client to close.
-    async with GitHub(AppAuthStrategy(app_id, private_key)) as gh:
-        response = await gh.rest.apps.async_get_authenticated()
-        return response.parsed_data.slug
 
 
 def _harness_credential_check(
@@ -441,11 +414,9 @@ def _run_extension_check(extension_name: str, check) -> CheckResult:
 
 
 CHECKS = (
-    check_webhook_secret,
     check_webhook_ingress,
+    check_github_identity,
     check_installations,
-    check_github_operator_app,
-    check_github_reviewer_app,
     check_harness_credentials,
     check_data_dir,
     check_database,

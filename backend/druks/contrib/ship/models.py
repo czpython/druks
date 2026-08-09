@@ -11,7 +11,6 @@ from druks.contrib.ship.schemas import ProjectRepoSummary, WorkItemSummary
 from druks.contrib.ship.ticketing.enums import TicketStatus
 from druks.core.apis.github import get_github_client
 from druks.db import Base, StoredSubject, db_session
-from druks.settings import load_settings
 from druks.workflows import FatalError
 
 logger = logging.getLogger(__name__)
@@ -331,7 +330,7 @@ class WorkItem(StoredSubject):
         db_session().flush()
         try:
             if (await RepoPolicy.resolve(self.repo)).delete_branch:
-                await get_github_client(load_settings()).delete_branch(self.repo, self.branch)
+                await get_github_client().delete_branch(self.repo, self.branch)
         except Exception:  # noqa: BLE001 — cleanup only
             logger.warning("Skipped branch cleanup for %s.", self.repo, exc_info=True)
         await self.set_ticket_status(TicketStatus.BACKLOG)

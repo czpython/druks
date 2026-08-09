@@ -10,8 +10,3 @@ class GitHubAppNotInstalledError(Exception):
             "repo (or add it to the installation's selected repositories)."
         )
         self.repo = repo
-
-
-class GitHubAppNotConfiguredError(Exception):
-    """Operator or reviewer GitHub App credentials are absent from settings;
-    the message names the env vars to set."""

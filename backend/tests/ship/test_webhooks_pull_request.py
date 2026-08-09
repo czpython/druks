@@ -292,7 +292,7 @@ async def test_external_close_honors_delete_branch_policy(druks_db, tmp_path, mo
         deleted.append((repo, branch))
 
     monkeypatch.setattr(
-        build_models, "get_github_client", lambda settings: SimpleNamespace(delete_branch=_record)
+        build_models, "get_github_client", lambda: SimpleNamespace(delete_branch=_record)
     )
 
     repo, pr_number, branch = "ClawHaven/acme-app", 93, "agent/eng-22"
@@ -315,7 +315,7 @@ async def test_external_close_deletes_branch_by_default(druks_db, tmp_path, monk
         deleted.append((repo, branch))
 
     monkeypatch.setattr(
-        build_models, "get_github_client", lambda settings: SimpleNamespace(delete_branch=_record)
+        build_models, "get_github_client", lambda: SimpleNamespace(delete_branch=_record)
     )
 
     repo, pr_number, branch = "ClawHaven/acme-app", 94, "agent/eng-23"
@@ -347,7 +347,7 @@ async def test_external_close_survives_policy_resolution_failure(druks_db, tmp_p
         deleted.append((repo, branch))
 
     monkeypatch.setattr(
-        build_models, "get_github_client", lambda settings: SimpleNamespace(delete_branch=_delete)
+        build_models, "get_github_client", lambda: SimpleNamespace(delete_branch=_delete)
     )
 
     pushed = []

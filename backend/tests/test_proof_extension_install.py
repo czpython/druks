@@ -14,7 +14,12 @@ _CHECK = textwrap.dedent(
     extension = load_extension("field_notes")
     assert [subject.__name__ for subject in extension.subject_classes()] == ["Note"]
     assert extension.settings_model is not None
-    assert list(extension.settings_model.model_fields) == ["board_size", "visibility", "sync_token"]
+    assert list(extension.settings_model.model_fields) == [
+        "board_size",
+        "visibility",
+        "sync_signing_key",
+        "sync_token",
+    ]
     assert [workflow.__name__ for workflow in extension.workflows()] == ["Summarize"]
     assert {router.prefix for router in extension.routers()} >= {"/notes", "/note"}
     assert extension.migrations_dir() is not None

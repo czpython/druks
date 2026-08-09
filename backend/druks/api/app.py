@@ -31,6 +31,8 @@ from druks.mcp.routes import router as mcp_router
 from druks.notifications.routes import external_router as notifications_external_router
 from druks.notifications.routes import router as notifications_router
 from druks.redis import close_client
+from druks.service_identities.exceptions import ServiceNotConnectedError
+from druks.service_identities.routes import router as service_identities_router
 from druks.settings import Settings, ensure_data_dirs, load_settings, setup_logging
 from druks.skills.routes import router as skills_router
 from druks.user_settings.routes import router as settings_router
@@ -174,6 +176,16 @@ async def _auth_configuration_handler(
     return JSONResponse(status_code=503, content={"error": "HTTP_503", "detail": str(exc)})
 
 
+# Any route that resolves a service identity it hasn't connected — directly or
+# through a workflow dispatch — raises this. Map it once so no entry point has
+# to carry its own catch to turn it into a 409.
+@app.exception_handler(ServiceNotConnectedError)
+async def _service_not_connected_handler(
+    request: Request, exc: ServiceNotConnectedError
+) -> JSONResponse:
+    return JSONResponse(status_code=409, content={"error": "HTTP_409", "detail": str(exc)})
+
+
 @app.exception_handler(RequestValidationError)
 async def _validation_exception_handler(
     request: Request,
@@ -230,6 +242,7 @@ app.include_router(webhooks_router)
 app.include_router(auth_router)
 app.include_router(harness_connection_router)
 app.include_router(settings_router, dependencies=_identity_gate)
+app.include_router(service_identities_router, dependencies=_identity_gate)
 app.include_router(skills_router, dependencies=_identity_gate)
 app.include_router(mcp_router, dependencies=_identity_gate)
 app.include_router(notifications_router, dependencies=_identity_gate)

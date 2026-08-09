@@ -3,9 +3,11 @@ import type {
   AgentCallFiles,
   ArtifactContent,
   ConnectChallenge,
+  ConnectGitHubRequest,
   DashboardHealth,
   FeedResponse,
   ExtensionsSettingsResponse,
+  GitHubServiceIdentity,
   Harness,
   Identity,
   Pat,
@@ -214,6 +216,11 @@ export const api = {
     }),
   disconnectHarness: (name: string) =>
     deleteJSON<Harness>(`/api/harnesses/${encodeURIComponent(name)}/connection`),
+  // The appliance's own GitHub App identity — connect validates the pasted
+  // credentials against GitHub before anything replaces a working identity.
+  githubIdentity: () => getJSON<GitHubServiceIdentity>('/api/service-identities/github'),
+  connectGithubIdentity: (body: ConnectGitHubRequest) =>
+    postJSON<GitHubServiceIdentity>('/api/service-identities/github', body),
   getExtensionSettings: () => getJSON<ExtensionsSettingsResponse>('/api/settings/extensions'),
   updateExtensionSettings: (body: UpdateExtensionsSettingsRequest) =>
     patchJSON<ExtensionsSettingsResponse>('/api/settings/extensions', body),
