@@ -26,8 +26,6 @@ x-druks: &druks
     # VM at both ~/.claude/skills and ~/.codex/skills.
     DRUKS_SKILLS_DIR: /app/data/skills
     DRUKS_SANDBOX_KEYS_DIR: /app/sandbox-keys
-    GITHUB_OPERATOR_PRIVATE_KEY_PATH: /secrets/github_operator.pem
-    GITHUB_REVIEWER_PRIVATE_KEY_PATH: /secrets/github_reviewer.pem
   volumes:
     - ./druks.toml:/app/druks.toml:ro
     - ${DRUKS_DATA_HOST_DIR:-${DRUKS_DATA_DIR:-${HOME}/druks-data}}:/app/data
@@ -42,8 +40,6 @@ x-druks: &druks
     # mount needed.
     # Shared so a reattaching worker reads the key the acquirer wrote.
     - druks_sandbox_keys:/app/sandbox-keys
-    - ${GITHUB_OPERATOR_PEM:?set GITHUB_OPERATOR_PEM}:/secrets/github_operator.pem:ro
-    - ${GITHUB_REVIEWER_PEM:?set GITHUB_REVIEWER_PEM}:/secrets/github_reviewer.pem:ro
   depends_on:
     redis:
       condition: service_healthy

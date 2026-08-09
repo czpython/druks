@@ -46,19 +46,9 @@ def main() -> None:
         help="Fresh-install sandbox provider; ignored when druks.toml exists.",
     )
     setup_parser.add_argument(
-        "--install-dir",
-        required=True,
-        help="HOST path of the install dir (PEM defaults render against it).",
-    )
-    setup_parser.add_argument(
         "--home",
         required=True,
         help="HOST home dir (data/credential path defaults render against it).",
-    )
-    setup_parser.add_argument(
-        "--non-interactive",
-        action="store_true",
-        help="Never prompt: write the template, report gaps, exit.",
     )
     setup_parser.add_argument(
         "--set",
@@ -96,7 +86,6 @@ def main() -> None:
     # Setup runs BEFORE a valid config exists — that's its whole job — so
     # it must not pass through load_settings() below either.
     if args.command == "setup":
-        import sys
         from pathlib import Path
 
         from . import setup_env
@@ -105,9 +94,7 @@ def main() -> None:
             setup_env.run_setup(
                 Path(args.env_path),
                 provider=args.provider,
-                install_dir=args.install_dir,
                 home=args.home,
-                interactive=not args.non_interactive and sys.stdin.isatty(),
                 set_values=tuple(args.set_values),
             )
         )

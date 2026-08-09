@@ -53,8 +53,7 @@ Drukbox reads its own checkout's environment.
 
 Secrets are generated only when the TOML is first created. Preserve
 `[secrets]` when moving or recovering an installation. Use repeatable
-`druks setup ... --set key.path=value` arguments for explicit scripted writes;
-this is the same single-writer path used by `install.sh --apps`.
+`druks setup ... --set key.path=value` arguments for explicit scripted writes.
 
 ## Core process settings
 

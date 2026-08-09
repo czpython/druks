@@ -263,9 +263,7 @@ def test_ship_start_does_not_acknowledge_a_tracker_failure(tmp_path, druks_db, m
     assert response.json() == {"error": "INTERNAL_ERROR", "detail": "Internal server error"}
 
 
-def test_review_request_refuses_when_github_is_not_connected(
-    client: TestClient, monkeypatch
-):
+def test_review_request_refuses_when_github_is_not_connected(client: TestClient, monkeypatch):
     project = Project.create(name="Acme")
     ProjectRepo.create(project_id=project.id, full_name="acme/app")
 

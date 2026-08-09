@@ -27,26 +27,21 @@ and `linux/arm64`.
 ## 1. Install the local Druks profile
 
 ```bash
-DRUKS_PROVIDER=docker bash <(curl -fsSL https://raw.githubusercontent.com/czpython/druks/main/scripts/install.sh)
+curl -fsSL https://raw.githubusercontent.com/czpython/druks/main/scripts/install.sh | DRUKS_PROVIDER=docker bash
 ```
 
-The first run:
+The local shape needs no authored values, so the first run goes all the way:
 
 - writes `~/druks/druks.toml` with `[sandbox].provider = "docker"`
 - renders `~/druks/.env` with `DEFAULT_HOST_PROVIDER=docker`
-- generates the database, webhook, sandbox-service, and stored-secret keys
+- generates the database password and the stored-secret key
 - points Druks at Drukbox on `127.0.0.1:8000`
-- prints blank required fields and exits without booting if setup is incomplete
+- pulls images, applies Druks migrations, and starts Druks, Postgres, and
+  Redis — it does not start Drukbox in the local profile
 
-For the bundled `ship` extension, provision its GitHub Apps:
-
-```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/czpython/druks/main/scripts/install.sh) --apps
-```
-
-Then re-run the installer. A boot-ready run pulls images, applies Druks
-migrations, and starts Druks, Postgres, and Redis. It does not start Drukbox in
-the local profile.
+For the bundled `ship` extension, connect the GitHub App druks acts as from
+the dashboard after boot (**Settings → Harnesses → Connect GitHub**) — see
+[the GitHub connection](configuration.md#github).
 
 ## 2. Run Drukbox on the host
 

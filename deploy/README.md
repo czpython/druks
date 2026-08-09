@@ -36,25 +36,17 @@ Everything else — `compose.yaml`, the Caddyfile, `druks.toml`, the rendered
 ### 1. Run the installer
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/czpython/druks/main/scripts/install.sh)
+curl -fsSL https://raw.githubusercontent.com/czpython/druks/main/scripts/install.sh | bash
 ```
 
-First pass writes `~/druks/druks.toml` with random secrets pre-filled, creates
-`~/druks/secrets/`, renders `~/druks/.env`, and exits when required values are
-missing. It tells you exactly what to do next:
+First pass writes `~/druks/druks.toml` with random secrets pre-filled, renders
+`~/druks/.env`, and exits when required values are missing. It tells you exactly what to do next: edit `druks.toml` — for a
+generic remote shape, fill `[sandbox.<provider>]` from Drukbox's
+[configuration reference](https://github.com/czpython/drukbox).
 
-- Edit `druks.toml`. For a generic remote shape, fill `[sandbox.<provider>]` from
-  Drukbox's [configuration reference](https://github.com/czpython/drukbox).
-- Provision the two GitHub Apps: re-run the installer with `--apps`.
-  It registers each app via GitHub's manifest flow — it prints a link
-  per app, you open it, click Create, then paste the `?code=...` from
-  the redirect back into the SSH session. App ids, PEMs, and the
-  webhook secret are applied through `druks setup`, the single
-  `druks.toml` writer. (Manual fallback: create the
-  apps by hand per the permission tables in
-  [`docs/configuration.md`](../docs/configuration.md), enter their ids under
-  `[github]`, and upload the PEMs to
-  `~/druks/secrets/{operator,reviewer}.pem`.)
+The GitHub App druks acts as is connected from the dashboard after boot
+(**Settings → Harnesses → Connect GitHub**), per the permission table in
+[`docs/configuration.md`](../docs/configuration.md#github).
 
 The sandbox backend defaults to exe.dev + Tailscale. Pass `DRUKS_PROVIDER`
 on the first run to choose another. `docker` selects the local shape; any other
