@@ -4,7 +4,7 @@ import httpx
 
 from .base import Tracker
 from .enums import TicketStatus
-from .exceptions import JiraAPIError
+from .exceptions import JiraAPIError, UnknownTicketError
 
 _DEFAULT_TIMEOUT = httpx.Timeout(30.0, connect=5.0, write=10.0, pool=5.0)
 _DEFAULT_LIMITS = httpx.Limits(max_connections=20, max_keepalive_connections=10)
@@ -39,7 +39,10 @@ class JiraClient:
     ) -> dict[str, Any]:
         response = await self._client.request(method, f"{self.base_url}{path}", json=json)
         if not response.is_success:
-            raise JiraAPIError(f"{method} {path} -> {response.status_code}: {response.text[:300]}")
+            raise JiraAPIError(
+                f"{method} {path} -> {response.status_code}: {response.text[:300]}",
+                status_code=response.status_code,
+            )
         if response.status_code == 204 or not response.content:
             return {}
         return response.json()
@@ -47,7 +50,13 @@ class JiraClient:
     async def transition_issue(self, key: str, status_name: str) -> None:
         # Jira moves status only via transitions: find the one whose target is
         # the requested status, then execute it.
-        data = await self._request("GET", f"/rest/api/3/issue/{key}/transitions")
+        try:
+            data = await self._request("GET", f"/rest/api/3/issue/{key}/transitions")
+        except JiraAPIError as error:
+            # The transitions lookup 404s only when the issue itself is unknown.
+            if error.status_code == 404:
+                raise UnknownTicketError(key, "Jira") from error
+            raise
         transition_id = next(
             (
                 transition["id"]
@@ -66,13 +75,14 @@ class JiraClient:
 
 
 class Jira(Tracker):
-    known_exceptions = (JiraAPIError, httpx.HTTPError)
+    known_exceptions = (JiraAPIError, UnknownTicketError, httpx.HTTPError)
 
     # These status names belong to the "Internal tools" issue type used for druks-managed
     # tickets; its transitions have no validators or required fields, unlike security issues
     # whose Done gate requires a resolution and Fix versions, so native status moves work
-    # like Linear's. READY_FOR_AGENT is supplied by the caller as the resting status;
-    # "Backlog" is the operator's dispatch trigger, so druks deliberately does not land there.
+    # like Linear's. BACKLOG (the resting status) and TRIGGER (the dispatch
+    # trigger) are supplied by the caller; druks deliberately lands on the trigger
+    # only when asked to open a build.
     _STATIC_STATUS_NAMES: dict[TicketStatus, str] = {
         TicketStatus.IN_PROGRESS: "In Progress",
         TicketStatus.IN_REVIEW: "Waiting CR",  # CR = code review; PR open, awaiting review
@@ -88,16 +98,19 @@ class Jira(Tracker):
         base_url: str,
         email: str,
         api_token: str,
-        ready_for_agent_status: str = "",
+        backlog_status: str = "",
+        trigger_status: str = "",
         client: Any | None = None,
     ) -> None:
         self._client = JiraClient(
             base_url=base_url, email=email, api_token=api_token, client=client
         )
         self._status_names = dict(self._STATIC_STATUS_NAMES)
-        # Empty leaves READY_FOR_AGENT unmapped.
-        if ready_for_agent_status:
-            self._status_names[TicketStatus.READY_FOR_AGENT] = ready_for_agent_status
+        # Empty leaves the operator-named statuses unmapped.
+        if backlog_status:
+            self._status_names[TicketStatus.BACKLOG] = backlog_status
+        if trigger_status:
+            self._status_names[TicketStatus.TRIGGER] = trigger_status
 
     async def set_status(self, key: str, status: TicketStatus) -> None:
         name = self._status_names.get(status)

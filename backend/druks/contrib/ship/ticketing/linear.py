@@ -5,7 +5,7 @@ import httpx
 
 from .base import Tracker
 from .enums import TicketStatus
-from .exceptions import LinearAPIError
+from .exceptions import LinearAPIError, UnknownTicketError
 
 LINEAR_GRAPHQL_URL = "https://api.linear.app/graphql"
 
@@ -79,6 +79,9 @@ class LinearClient:
             {"issueId": issue_id},
         )
         issue = data["issue"]
+        # Linear answers an unknown identifier with a null issue, not an error.
+        if issue is None:
+            raise UnknownTicketError(issue_id, "Linear")
         current_status = issue["state"]["name"]
         if current_status == status_name:
             return {
@@ -137,9 +140,9 @@ def _status_id_by_name(states: list[dict[str, Any]], status_name: str) -> str:
 
 
 class Linear(Tracker):
-    known_exceptions = (LinearAPIError, httpx.HTTPError)
+    known_exceptions = (LinearAPIError, UnknownTicketError, httpx.HTTPError)
 
-    # READY_FOR_AGENT is operator-named; the rest are fixed.
+    # TRIGGER and BACKLOG are operator-named; the rest are fixed.
     _STATIC_STATUS_NAMES: dict[TicketStatus, str] = {
         TicketStatus.IN_PROGRESS: "In Progress",
         TicketStatus.IN_REVIEW: "In Review",
@@ -151,14 +154,17 @@ class Linear(Tracker):
         self,
         *,
         api_key: str,
-        ready_for_agent_status: str = "",
+        backlog_status: str = "",
+        trigger_status: str = "",
         client: Any | None = None,
     ) -> None:
         self._client = LinearClient(api_key=api_key, client=client)
         self._status_names = dict(self._STATIC_STATUS_NAMES)
-        # Empty leaves READY_FOR_AGENT unmapped.
-        if ready_for_agent_status:
-            self._status_names[TicketStatus.READY_FOR_AGENT] = ready_for_agent_status
+        # Empty leaves the operator-named statuses unmapped.
+        if backlog_status:
+            self._status_names[TicketStatus.BACKLOG] = backlog_status
+        if trigger_status:
+            self._status_names[TicketStatus.TRIGGER] = trigger_status
 
     async def set_status(self, key: str, status: TicketStatus) -> None:
         name = self._status_names.get(status)

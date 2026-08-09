@@ -5,7 +5,10 @@ import pytest
 from druks.accounts.models import Account, PersonalAccessToken
 from druks.api.app import app
 from druks.contrib.review.workflows import PullRequestReview
+from druks.contrib.ship.extension import Ship
 from druks.contrib.ship.models import Project, ProjectRepo, WorkItem
+from druks.contrib.ship.ticketing.enums import TicketStatus
+from druks.contrib.ship.ticketing.exceptions import LinearAPIError, UnknownTicketError
 from druks.contrib.ship.workflows import Build
 from druks.durable.dbos_state import workflow_status
 from druks.durable.models import AgentCall, Run
@@ -142,12 +145,36 @@ def test_review_request_returns_the_run_id_start_hands_back(
     assert {call["account_id"] for call in starts} == {account.id}
 
 
-def test_ship_start_returns_the_live_run_and_attributes_the_pat_account(
+class _FakeTracker:
+    """Records the status moves the route delegates to — no HTTP."""
+
+    def __init__(self, error: Exception | None = None) -> None:
+        self.error = error
+        self.calls: list = []
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        await self.aclose()
+
+    async def set_status(self, key, status):
+        self.calls.append((key, status))
+        if self.error:
+            raise self.error
+
+    async def aclose(self):
+        self.calls.append("aclose")
+
+
+def test_ship_start_stamps_the_trigger_status_for_known_and_unknown_tickets(
     client: TestClient, account: Account, monkeypatch
 ):
+    # ENG-831 has a local work item, ENG-777 has never been seen — both take
+    # the same tracker path; webhook intake, not the route, opens builds.
     project = Project.create(name="Acme")
     ProjectRepo.create(project_id=project.id, full_name="acme/app")
-    item = WorkItem.create(
+    WorkItem.create(
         project_id=project.id,
         source="linear",
         title="Build the agent route",
@@ -155,60 +182,74 @@ def test_ship_start_returns_the_live_run_and_attributes_the_pat_account(
         repo="acme/app",
     )
     _, pat_token = PersonalAccessToken.create(account_id=account.id, name="agent")
-    live_run_id = "build-run-id"
+    fake = _FakeTracker()
+    monkeypatch.setattr(Ship, "get_tracker", classmethod(lambda cls, source=None: fake))
     starts = []
 
     async def start(cls, **kwargs):
-        # The subject detaches with the request's session; keep its identity.
-        starts.append({**kwargs, "subject": kwargs["subject"].id})
-        return live_run_id
+        starts.append(kwargs)
 
     monkeypatch.setattr(Build, "start", classmethod(start))
 
     responses = [
         client.post(
-            f"/api/ship/work-items/{item.ticket_key}/start",
+            f"/api/ship/work-items/{ticket}/start",
             headers={"Authorization": f"Bearer {pat_token}"},
         )
-        for _ in range(2)
+        for ticket in ("ENG-831", "ENG-777", "ENG-831")
     ]
 
-    assert [response.status_code for response in responses] == [202, 202]
-    assert [response.json() for response in responses] == [live_run_id, live_run_id]
-    assert [call["subject"] for call in starts] == [item.id, item.id]
-    assert {call["account_id"] for call in starts} == {account.id}
-    assert all("repo" not in call for call in starts)
-    assert all("task_owner_email" not in call for call in starts)
-    assert all("task_owner_name" not in call for call in starts)
+    assert [response.status_code for response in responses] == [202, 202, 202]
+    # Accepted-and-pending: no run id, no invented acknowledgement fields.
+    assert [response.json() for response in responses] == [None, None, None]
+    assert fake.calls == [
+        ("ENG-831", TicketStatus.TRIGGER),
+        "aclose",
+        ("ENG-777", TicketStatus.TRIGGER),
+        "aclose",
+        ("ENG-831", TicketStatus.TRIGGER),
+        "aclose",
+    ]
+    assert starts == []  # a repeat call re-stamps; it never dispatches locally
 
 
-def test_ship_start_rejects_an_unknown_ticket(client: TestClient):
-    response = client.post("/api/ship/work-items/ENG-000/start")
+def test_ship_start_translates_an_unknown_tracker_ticket(client: TestClient, monkeypatch):
+    fake = _FakeTracker(error=UnknownTicketError("ENG-9999", "Linear"))
+    monkeypatch.setattr(Ship, "get_tracker", classmethod(lambda cls, source=None: fake))
+
+    response = client.post("/api/ship/work-items/ENG-9999/start")
 
     assert response.status_code == 404
     assert response.json() == {
-        "error": "HTTP_404",
-        "detail": "no work item for ticket ENG-000",
+        "code": "TICKET_NOT_FOUND",
+        "message": "ENG-9999 doesn't exist in Linear",
+        "retryable": False,
     }
+    assert "aclose" in fake.calls  # the tracker closes even on failure
 
 
-def test_ship_start_rejects_a_work_item_without_a_registered_repo(client: TestClient):
-    project = Project.create(name="Acme")
-    item = WorkItem.create(
-        project_id=project.id,
-        source="linear",
-        title="Unroutable work",
-        ticket_key="ENG-832",
-        repo="acme/missing",
-    )
+def test_ship_start_reports_a_missing_tracker_configuration(client: TestClient):
+    # Default settings select Linear but carry no API key, so no tracker
+    # resolves — the operator-configuration error, not a 404 or a 500.
+    response = client.post("/api/ship/work-items/ENG-1/start")
 
-    response = client.post(f"/api/ship/work-items/{item.ticket_key}/start")
+    assert response.status_code == 503
+    body = response.json()
+    assert body["code"] == "TRACKER_NOT_CONFIGURED"
+    assert body["retryable"] is False
 
-    assert response.status_code == 409
-    assert response.json() == {
-        "error": "HTTP_409",
-        "detail": "acme/missing is not a registered project repo — add it to a project first",
-    }
+
+def test_ship_start_does_not_acknowledge_a_tracker_failure(tmp_path, druks_db, monkeypatch):
+    monkeypatch.setenv("DRUKS_DATA_DIR", str(tmp_path))
+    app = configure_app_for_test(settings=make_settings(tmp_path))
+    fake = _FakeTracker(error=LinearAPIError("linear fell over"))
+    monkeypatch.setattr(Ship, "get_tracker", classmethod(lambda cls, source=None: fake))
+
+    with TestClient(app, raise_server_exceptions=False) as failing:
+        response = failing.post("/api/ship/work-items/ENG-831/start")
+
+    assert response.status_code == 500
+    assert response.json() == {"error": "INTERNAL_ERROR", "detail": "Internal server error"}
 
 
 def test_agent_routes_sit_behind_the_gate(tmp_path, druks_db):
@@ -224,6 +265,7 @@ def test_agent_routes_sit_behind_the_gate(tmp_path, druks_db):
         assert anonymous.get("/api/gates/x").status_code == 401
         assert anonymous.get("/api/open-subjects").status_code == 401
         assert anonymous.get("/api/usage/summary").status_code == 401
+        assert anonymous.post("/api/ship/work-items/ENG-831/start").status_code == 401
 
 
 def test_agent_errors_share_one_shape(client: TestClient, druks_db):

@@ -334,7 +334,7 @@ class WorkItem(StoredSubject):
                 await get_github_client(load_settings()).delete_branch(self.repo, self.branch)
         except Exception:  # noqa: BLE001 — cleanup only
             logger.warning("Skipped branch cleanup for %s.", self.repo, exc_info=True)
-        await self.set_ticket_status(TicketStatus.READY_FOR_AGENT)
+        await self.set_ticket_status(TicketStatus.BACKLOG)
 
     @classmethod
     def get_for_ticket_key(
@@ -367,8 +367,9 @@ class WorkItem(StoredSubject):
         # Lazy: the Ship extension imports this module, so it can't be imported at top.
         import druks.contrib.ship.extension as ship_extension
 
-        tracker = ship_extension.Ship.tracker(self.source)
-        # No tracker means nothing to sync (github, or credentials not set yet).
+        tracker = ship_extension.Ship.get_tracker(self.source)
+        # No tracker means nothing to sync: a github item, a source the operator
+        # has switched away from, or credentials not set yet.
         if not tracker:
             return
 

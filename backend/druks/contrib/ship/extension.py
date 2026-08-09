@@ -127,18 +127,22 @@ class Ship(Extension):
             return problems
 
     @classmethod
-    def tracker(cls, source: str) -> Tracker | None:
-        """The chosen tracker behind ``source``, once its credentials are set."""
+    def get_tracker(cls, source: str | None = None) -> Tracker | None:
+        """The configured tracker, once its credentials are set; None when the
+        installation runs trackerless or the credentials are missing. Pass a
+        ``source`` to get it only when that source is the configured one — a
+        work item syncs only to the tracker that owns it."""
         settings = cls.settings()
-        if source != settings.tracker:
+        if source is not None and source != settings.tracker:
             return
-        if source == "linear" and settings.linear_api_key:
+        if settings.tracker == "linear" and settings.linear_api_key:
             return Linear(
                 api_key=settings.linear_api_key.get_secret_value(),
-                ready_for_agent_status=settings.linear_resting_status,
+                backlog_status=settings.linear_resting_status,
+                trigger_status=settings.trigger_status,
             )
         if (
-            source == "jira"
+            settings.tracker == "jira"
             and settings.jira_base_url
             and settings.jira_email
             and settings.jira_api_token
@@ -147,7 +151,8 @@ class Ship(Extension):
                 base_url=settings.jira_base_url,
                 email=settings.jira_email,
                 api_token=settings.jira_api_token.get_secret_value(),
-                ready_for_agent_status=settings.jira_resting_status,
+                backlog_status=settings.jira_resting_status,
+                trigger_status=settings.trigger_status,
             )
         return
 
