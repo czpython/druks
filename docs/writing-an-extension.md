@@ -611,7 +611,7 @@ segments — `<subject_type>` and `transcripts` — are matched before your rout
 so nothing you declare can take a read druks serves, not even a catch-all. Name a
 router for its own resource and the question never comes up.
 
-## Declare a service identity
+## Declare a service
 
 A service identity is the appliance's own registered app at an external
 provider — one per deployment, keyed by a service string; the platform's
@@ -662,6 +662,12 @@ async def verify(cls, settings: Settings) -> dict:
 
 Set `required = False` on the class when the appliance is healthy without the
 service connected; doctor then notes it instead of reporting pending setup.
+
+Key the service for the integration your extension consumes (`"gmail"`), not
+the provider (`"google"`). A second integration on the same provider declares
+its own service, and the operator decides per card whether the underlying
+registration is shared or a narrower one — that choice is their scope and
+blast-radius control.
 
 ## Extension settings and checks
 
