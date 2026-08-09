@@ -1,7 +1,7 @@
 import logging
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query, Response, status
-from sqlalchemy import func, select, update
+from sqlalchemy import delete, func, select, update
 
 from druks.accounts.dependencies import current_account
 from druks.accounts.models import Account
@@ -15,6 +15,7 @@ from druks.contrib.ship.schemas import (
     DashboardItem,
     GitHubReposResponse,
     GitHubRepoSummary,
+    ProjectListItem,
     ProjectRepoSummary,
     ProjectsResponse,
     ProjectSummary,
@@ -37,8 +38,24 @@ projects_router = APIRouter(prefix="/projects", tags=["projects"])
 
 @projects_router.get("", response_model=ProjectsResponse, response_model_by_alias=True)
 async def list_projects() -> ProjectsResponse:
-    rows = list(db_session().scalars(select(Project).order_by(Project.name)))
-    return ProjectsResponse(projects=[ProjectSummary.model_validate(p) for p in rows])
+    # Each project's total work-item count — every child, resolved or not — so the
+    # dashboard states a delete's full destructive scope, including closed items.
+    work_item_count = (
+        select(func.count())
+        .select_from(WorkItem)
+        .where(WorkItem.project_id == Project.id)
+        .scalar_subquery()
+    )
+    rows = (
+        db_session()
+        .execute(select(Project, work_item_count.label("work_item_count")).order_by(Project.name))
+        .all()
+    )
+    projects = []
+    for project, count in rows:
+        project.work_item_count = count
+        projects.append(ProjectListItem.model_validate(project))
+    return ProjectsResponse(projects=projects)
 
 
 @projects_router.post(
@@ -131,21 +148,15 @@ async def update_project(
 
 @projects_router.delete("/{project_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_project(project_id: int) -> None:
-    """Delete a project. Refuses when any WorkItem still points at it —
-    ``work_items.project_id`` is NOT NULL, so the operator must move
-    or delete the children first."""
+    """Delete a project and everything it owns. A project's work items are its own
+    children, so they go with it — ``work_items.project_id`` is a plain FK, so the
+    cascade is an explicit child delete in the same session before the project (and
+    its repo ``delete-orphan`` cascade) is deleted."""
     session = db_session()
     project = Project.get(project_id)
     if not project:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "project not found")
-    referencing = session.scalar(
-        select(func.count()).select_from(WorkItem).where(WorkItem.project_id == project_id)
-    )
-    if referencing:
-        raise HTTPException(
-            status.HTTP_409_CONFLICT,
-            f"{referencing} work item(s) still reference this project; move or delete them first.",
-        )
+    session.execute(delete(WorkItem).where(WorkItem.project_id == project_id))
     session.delete(project)
     session.flush()
 

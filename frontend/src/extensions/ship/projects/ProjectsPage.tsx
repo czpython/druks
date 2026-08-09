@@ -3,9 +3,10 @@ import { useState } from 'react'
 
 import { EmptyState } from '../../../components/EmptyState'
 import { Page } from '../../../components/Page'
+import { useFlashNote } from '../../../lib/useFlashNote'
 import { projectsApi } from './api'
 import { repoProfiling, useRepoRuns, type RepoProfiling } from './profiling'
-import type { Project, ProjectRepo } from './types'
+import type { ProjectListItem, ProjectRepo } from './types'
 
 function splitRepo(full: string): { org: string; short: string } {
   const i = full.indexOf('/')
@@ -26,6 +27,9 @@ export function ProjectsPage() {
   })
 
   const [draft, setDraft] = useState('')
+  // A project delete can still fail (a race, a server error); surface it here at
+  // page level as a transient error toast so it's never a silent no-op.
+  const [deleteError, setDeleteError] = useFlashNote<string>()
   const createMutation = useMutation({
     mutationFn: projectsApi.create,
     onSuccess: () => {
@@ -56,6 +60,11 @@ export function ProjectsPage() {
   return (
     <Page className="page-projects">
       <div className="pj-col">
+        {deleteError && (
+          <div className="pj-toast pj-toast-error mono" role="alert">
+            {deleteError}
+          </div>
+        )}
         <div className="pj-head">
           <span className="pj-head-title">Projects</span>
           <span className="pj-head-count mono">({data.projects.length})</span>
@@ -92,7 +101,7 @@ export function ProjectsPage() {
               <span className="pj-err mono">{String(createMutation.error)}</span>
             )}
             {data.projects.map((p) => (
-              <ProjectCard key={p.id} project={p} />
+              <ProjectCard key={p.id} project={p} onDeleteError={setDeleteError} />
             ))}
           </div>
         )}
@@ -138,7 +147,13 @@ function CreateRow({
   )
 }
 
-function ProjectCard({ project }: { project: Project }) {
+function ProjectCard({
+  project,
+  onDeleteError,
+}: {
+  project: ProjectListItem
+  onDeleteError: (message: string) => void
+}) {
   const queryClient = useQueryClient()
   const invalidate = () => void queryClient.invalidateQueries({ queryKey: ['projects'] })
 
@@ -157,9 +172,13 @@ function ProjectCard({ project }: { project: Project }) {
   const remove = useMutation({
     mutationFn: () => projectsApi.delete(project.id),
     onSuccess: invalidate,
+    // Leave the card in place and surface the reason at page level — never a
+    // silent no-op, which is the failure ENG-846 set out to fix.
+    onError: (error) => onDeleteError(String(error)),
   })
 
   const repoCount = `${project.repos.length} ${project.repos.length === 1 ? 'repo' : 'repos'}`
+  const workItems = `${project.workItemCount} ${project.workItemCount === 1 ? 'work item' : 'work items'}`
 
   return (
     <section className={`pj-card ${collapsed ? 'pj-card-collapsed' : ''}`}>
@@ -213,7 +232,7 @@ function ProjectCard({ project }: { project: Project }) {
           onClick={() => {
             if (
               confirm(
-                `Delete project "${project.name}"? Move or delete its work items first — a project still referenced by work items can't be deleted.`,
+                `Delete project "${project.name}" and its ${workItems}? This permanently deletes the project and every work item it owns.`,
               )
             ) {
               remove.mutate()
