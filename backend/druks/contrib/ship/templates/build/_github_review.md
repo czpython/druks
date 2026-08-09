@@ -6,10 +6,19 @@ through it — every time, not optionally. This is in addition to the JSON you
 return: the JSON drives the build; the GitHub review is what the human sees on
 the PR.
 
+{% if build.review_mode == "approve" %}
 - Review event from your verdict: an **approving** verdict → `APPROVE`; a
   **changes-requested / failing** verdict → `REQUEST_CHANGES`; a **blocked /
   could-not-evaluate** verdict → skip the GitHub review. When you approve *with
   required changes*, post `APPROVE` and put the required changes in the body.
+{% else %}
+- Submit every review as a `COMMENT` event — you share the identity that authored
+  this PR, and GitHub refuses `APPROVE` and `REQUEST_CHANGES` from a pull
+  request's author. Open the body by stating your verdict plainly ("Verdict:
+  approve" / "Verdict: request changes"); a **blocked / could-not-evaluate**
+  verdict → skip the GitHub review. When you approve *with required changes*,
+  state the verdict and put the required changes in the body.
+{% endif %}
 - Use your review body as the GitHub review body; attach each finding that maps
   to a file and line as an inline review comment on that line.
 - Do not request reviewers on the PR — druks requests the assignee's review

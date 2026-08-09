@@ -23,7 +23,7 @@ def test_build_workspace_grants_related_root_add_dir():
         repo="o/main",
         branch="b",
         github_token="t",
-        mcp_token="ghs_reviewer",
+        mcp_token="ghs_review",
         skills=("python-house-rules",),
     )
     kwargs = workspace.get_agent_run_kwargs(model="m")
@@ -38,7 +38,7 @@ def test_build_workspace_grants_related_root_add_dir():
 
 async def test_build_workspace_declares_its_github_mcp(druks_db):
     # The github MCP is build's own declaration, credentialed with the per-repo
-    # reviewer token — never an operator catalog entry, never optional (there
+    # review-actor token — never an operator catalog entry, never optional (there
     # is no build without github). Delivery ships it whole: wire shape + token
     # in the run env.
     workspace = BuildWorkspace(
@@ -46,18 +46,18 @@ async def test_build_workspace_declares_its_github_mcp(druks_db):
         repo="o/main",
         branch="b",
         github_token="t",
-        mcp_token="ghs_reviewer",
+        mcp_token="ghs_review",
         skills=("python-house-rules",),
     )
     kwargs = await workspace.with_mcp_servers(None, **workspace.get_agent_run_kwargs())
 
-    assert kwargs["extra_env"] == {get_bearer_token_env_var(GITHUB_MCP_NAME): "ghs_reviewer"}
+    assert kwargs["extra_env"] == {get_bearer_token_env_var(GITHUB_MCP_NAME): "ghs_review"}
     github = next(s for s in kwargs["mcp_servers"] if s.name == GITHUB_MCP_NAME)
     assert github.url == GITHUB_MCP_URL
-    assert "ghs_reviewer" not in repr(github)
+    assert "ghs_review" not in repr(github)
 
 
-def _workspace_kwargs_stubs(monkeypatch: pytest.MonkeyPatch, *, reviewer):
+def _workspace_kwargs_stubs(monkeypatch: pytest.MonkeyPatch, *, review_actor):
     ensured: list[str] = []
     execs: list[list[str]] = []
 
@@ -80,7 +80,7 @@ def _workspace_kwargs_stubs(monkeypatch: pytest.MonkeyPatch, *, reviewer):
         "druks.contrib.ship.workflows.get_github_client",
         lambda _s: SimpleNamespace(token_for_repo=_token),
     )
-    monkeypatch.setattr("druks.contrib.ship.workflows.get_reviewer_github_client", reviewer)
+    monkeypatch.setattr("druks.contrib.ship.workflows.get_review_actor", review_actor)
     monkeypatch.setattr("druks.sandbox.repo.ensure", fake_ensure)
     return ensured, execs
 
@@ -90,11 +90,14 @@ async def test_get_workspace_kwargs_clones_primary_only(monkeypatch: pytest.Monk
     # Only the primary repo is provisioned; related repos are the agents' job.
     # get_related_root is mkdir'd so Claude's --add-dir target exists before the
     # first on-demand clone.
-    async def _reviewer_token(_repo: str) -> str:
-        return "ghs_reviewer"
+    async def _review_token(_repo: str) -> str:
+        return "ghs_review"
 
     ensured, execs = _workspace_kwargs_stubs(
-        monkeypatch, reviewer=lambda _s: SimpleNamespace(token_for_repo=_reviewer_token)
+        monkeypatch,
+        review_actor=lambda: SimpleNamespace(
+            client=SimpleNamespace(token_for_repo=_review_token), mode="approve"
+        ),
     )
     sandbox = host_mod.Sandbox(record=SimpleNamespace(id="h1", ssh_username="exedev"))  # type: ignore[arg-type]
 
@@ -106,21 +109,26 @@ async def test_get_workspace_kwargs_clones_primary_only(monkeypatch: pytest.Monk
 
     assert ensured == ["https://github.com/o/extension"]
     assert ["mkdir", "-p", get_related_root("exedev")] in execs
-    assert kwargs["mcp_token"] == "ghs_reviewer"
+    assert kwargs["mcp_token"] == "ghs_review"
     assert kwargs["skills"] == ("python-house-rules",)
     assert "related" not in kwargs
 
 
 @pytest.mark.asyncio
-async def test_get_workspace_kwargs_fails_loudly_without_the_reviewer_app(
+async def test_get_workspace_kwargs_fails_loudly_when_the_token_wont_mint(
     monkeypatch: pytest.MonkeyPatch,
 ):
-    # There is no build without github: a run that can't mint its reviewer
-    # token fails at workspace setup, never degrades mid-run.
-    def _no_reviewer(_s: Any) -> Any:
-        raise RuntimeError("reviewer app not configured")
+    # There is no build without github: a run that can't mint its MCP token
+    # fails at workspace setup, never degrades mid-run.
+    async def _no_token(_repo: str) -> str:
+        raise RuntimeError("app not installed on this repo")
 
-    _workspace_kwargs_stubs(monkeypatch, reviewer=_no_reviewer)
+    _workspace_kwargs_stubs(
+        monkeypatch,
+        review_actor=lambda: SimpleNamespace(
+            client=SimpleNamespace(token_for_repo=_no_token), mode="comment"
+        ),
+    )
     sandbox = host_mod.Sandbox(record=SimpleNamespace(id="h1", ssh_username="exedev"))  # type: ignore[arg-type]
 
     workflow = Build()
@@ -128,5 +136,5 @@ async def test_get_workspace_kwargs_fails_loudly_without_the_reviewer_app(
     workflow.subject = SimpleNamespace(repo="o/extension")
     workflow._profile = {"recommended_skills": ["python-house-rules"]}
 
-    with pytest.raises(FatalError, match="reviewer GitHub App"):
+    with pytest.raises(FatalError, match="github MCP server"):
         await workflow.get_workspace_kwargs(sandbox)

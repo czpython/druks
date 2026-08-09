@@ -510,16 +510,3 @@ def get_github_client(settings: Settings) -> GitHubClient:
         "Operator GitHub App credentials are required: set github.operator_app_id and "
         "GITHUB_OPERATOR_PRIVATE_KEY_PATH."
     )
-
-
-def get_reviewer_github_client(settings: Settings) -> GitHubClient:
-    if settings.github.reviewer_app_id and settings.github_reviewer_private_key_path:
-        return GitHubClient(
-            app_id=settings.github.reviewer_app_id,
-            private_key=settings.github_reviewer_private_key_path.read_text(),
-            base_url=settings.github_api_url,
-        )
-    raise GitHubAppNotConfiguredError(
-        "Reviewer GitHub App credentials are required: set github.reviewer_app_id and "
-        "GITHUB_REVIEWER_PRIVATE_KEY_PATH."
-    )

@@ -26,4 +26,8 @@ class BuildPromptContext:
     task_owner_email: str | None
     related_repos: list[ProjectRepo]
     skills: list[Skill]
+    # How the github MCP identity may post reviews: "approve" (distinct
+    # review identity) or "comment" (the operator, barred from approving its
+    # own pull requests).
+    review_mode: str
     journal: BuildJournal

@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Any
 from pydantic import BaseModel, Field
 
 from druks.accounts.models import Account
+from druks.contrib.review.github import get_review_actor
 from druks.contrib.ship.contracts import ImplementationOutput, ReviewWork
 from druks.contrib.ship.enums import (
     EvaluationVerdict,
@@ -12,7 +13,7 @@ from druks.contrib.ship.enums import (
     ReviewDecision,
 )
 from druks.contrib.ship.models import ProjectRepo, WorkItem
-from druks.core.apis.github import get_github_client, get_reviewer_github_client
+from druks.core.apis.github import get_github_client
 from druks.sandbox import repo as _repo
 from druks.sandbox.datastructures import RequiredMcpServer
 from druks.sandbox.layout import (
@@ -41,12 +42,11 @@ logger = logging.getLogger(__name__)
 @dataclass(frozen=True, kw_only=True)
 class BuildWorkspace(RepoWorkspace):
     # The base RepoWorkspace brings the cloned repo + token; a build run adds its
-    # curated skills, PR branch, and reviewer MCP token.
+    # curated skills, PR branch, and github MCP token.
     skills: tuple[str, ...]
     branch: str | None = None
-    # Reviewer-extension installation token for build's github MCP server,
-    # minted per repo from the reviewer GitHub App. Required — there is no
-    # build without github.
+    # Installation token for build's github MCP server, minted per repo from
+    # the identity reviews act as. Required — there is no build without github.
     mcp_token: str
 
     @property
@@ -177,15 +177,14 @@ class Build(Workflow):
         )
         await sandbox.exec(["mkdir", "-p", get_related_root(sandbox.ssh_username)], timeout=10.0)
         try:
-            mcp_token = await get_reviewer_github_client(load_settings()).token_for_repo(repo)
+            mcp_token = await get_review_actor().client.token_for_repo(repo)
         except Exception as error:
             # There is no build without github: agents push and review through
             # the github MCP, so a run that can't mint its token fails here,
             # loudly, instead of degrading mid-run.
             raise FatalError(
-                f"Could not mint the reviewer GitHub App token for {repo}; build "
-                "requires it for its github MCP server. Configure "
-                "github.reviewer_app_id and its private key."
+                f"Could not mint the GitHub token for {repo}; build requires it "
+                "for its github MCP server."
             ) from error
         return {
             **await super().get_workspace_kwargs(sandbox),
@@ -213,6 +212,7 @@ class Build(Workflow):
             task_owner_email=self.input.task_owner_email,
             related_repos=target_repo.siblings(),
             skills=Skill.list_delivered(self._profile.get("recommended_skills", [])),
+            review_mode=get_review_actor().mode,
             journal=self.journal,
         )
         return {

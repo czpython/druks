@@ -4,6 +4,7 @@ from types import SimpleNamespace
 import pytest
 from druks.contrib.review import subscribers  # noqa: F401 — the import registers it
 from druks.contrib.review.datastructures import PullRequest
+from druks.contrib.review.github import get_review_actor
 from druks.contrib.review.workflows import PullRequestReview
 from druks.prompts import render_prompt
 from druks.signals import publish
@@ -94,10 +95,60 @@ async def test_the_reviewer_prompt_names_the_pull_request_it_is_about():
         workflow=workflow,
         workspace=workspace,
         siblings=[],
+        review_mode="approve",
     )
 
     assert "pull request #7 on `acme/app`" in output
     assert "at dev@example.com's request" in output
+    assert "`COMMENT` event" not in output
+
+
+async def test_comment_mode_reviews_publish_as_comments():
+    # Unset review identity: the operator authors druks's own pull requests, so
+    # its reviews publish as comments — the prompt carries that rule.
+    workflow = SimpleNamespace(
+        subject=PullRequest.get("acme/app", 7),
+        input=SimpleNamespace(requested_by="dev@example.com"),
+    )
+    workspace = SimpleNamespace(
+        repo_path="/home/agent/work/repo", related_root="/home/agent/related"
+    )
+
+    output = await render_prompt(
+        "review/review_pull_request.md",
+        workflow=workflow,
+        workspace=workspace,
+        siblings=[],
+        review_mode="comment",
+    )
+
+    assert "`COMMENT` event" in output
+
+
+def test_a_configured_review_identity_approves(tmp_path: Path, monkeypatch):
+    pem = tmp_path / "review.pem"
+    pem.write_text("test-key")
+    settings = make_settings(
+        tmp_path,
+        github={"operator_app_id": "1", "reviewer_app_id": "2"},
+        github_reviewer_private_key_path=pem,
+    )
+    monkeypatch.setattr("druks.contrib.review.github.load_settings", lambda: settings)
+
+    assert get_review_actor().mode == "approve"
+
+
+def test_an_unset_review_identity_means_comment_mode(tmp_path: Path, monkeypatch):
+    pem = tmp_path / "operator.pem"
+    pem.write_text("test-key")
+    settings = make_settings(
+        tmp_path,
+        github={"operator_app_id": "1"},
+        github_operator_private_key_path=pem,
+    )
+    monkeypatch.setattr("druks.contrib.review.github.load_settings", lambda: settings)
+
+    assert get_review_actor().mode == "comment"
 
 
 async def test_a_passer_by_cannot_spend_a_review(monkeypatch):
