@@ -844,11 +844,28 @@ export function GitHubConnectCard() {
     staleTime: 60_000,
   })
   const [replacing, setReplacing] = useState(false)
+  const [org, setOrg] = useState('')
   const [appId, setAppId] = useState('')
   const [privateKey, setPrivateKey] = useState('')
   const [webhookSecret, setWebhookSecret] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  // The manifest tab lands on the callback page, which broadcasts once the
+  // created App's credentials are stored.
+  useEffect(() => {
+    const channel = new BroadcastChannel('druks-github-connect')
+    channel.onmessage = () => {
+      setReplacing(false)
+      void queryClient.invalidateQueries({ queryKey: ['githubIdentity'] })
+    }
+    return () => channel.close()
+  }, [queryClient])
+
+  const createApp = () => {
+    const query = org.trim() ? `?org=${encodeURIComponent(org.trim())}` : ''
+    window.open(`/api/service-identities/github/manifest${query}`)
+  }
 
   const identity = identityQuery.data
   const formOpen = (identity && !identity.connected) || replacing
@@ -880,7 +897,7 @@ export function GitHubConnectCard() {
         <span className="set-card-tag">service identity</span>
       </div>
       <div className="set-pane-sub">
-        The GitHub App druks acts as — it receives webhooks and writes branches, pull requests, and comments. Paste the App&apos;s credentials from the GitHub developer settings page.
+        The GitHub App druks acts as — it receives webhooks and writes branches, pull requests, and comments. Create it from here, or paste an existing App&apos;s credentials from the GitHub developer settings page.
       </div>
       <div className="hr-connect">
         <div className="hr-conn-status">
@@ -895,6 +912,16 @@ export function GitHubConnectCard() {
             <span className="hr-conn-exp">connected {new Date(identity.connectedAt).toLocaleString()}</span>
           )}
           <span className="hr-conn-actions">
+            {identity?.connected && (
+              <a
+                className="hr-conn-btn"
+                href={`https://github.com/apps/${encodeURIComponent(identity.slug ?? '')}/installations/new`}
+                target="_blank"
+                rel="noreferrer"
+              >
+                Manage installations
+              </a>
+            )}
             {identity?.connected && !replacing && (
               <button className="hr-conn-btn" onClick={() => setReplacing(true)} disabled={busy}>
                 Replace
@@ -904,6 +931,22 @@ export function GitHubConnectCard() {
         </div>
         {formOpen && (
           <div className="gh-connect-form">
+            <div className="set-field">
+              <span className="set-field-label">github org (empty for a personal account)</span>
+              <input
+                className="set-select"
+                aria-label="GitHub org"
+                value={org}
+                onChange={(e) => setOrg(e.target.value)}
+                disabled={busy}
+              />
+            </div>
+            <span className="hr-conn-actions">
+              <button className="hr-conn-btn" onClick={createApp} disabled={busy}>
+                Create GitHub App
+              </button>
+            </span>
+            <div className="set-pane-sub">…or paste an existing App&apos;s credentials:</div>
             <div className="set-field">
               <span className="set-field-label">app id</span>
               <input

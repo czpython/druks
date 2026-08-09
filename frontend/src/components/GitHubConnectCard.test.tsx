@@ -135,4 +135,43 @@ describe('GitHubConnectCard', () => {
     fireEvent.click(screen.getByText('Replace'))
     expect(screen.getByLabelText('Private key (PEM)')).toBeTruthy()
   })
+
+  it('opens the manifest page for the typed org and refreshes on the callback broadcast', async () => {
+    stubFetch([disconnected, connected])
+    const open = vi.fn()
+    vi.stubGlobal('open', open)
+    renderCard()
+
+    fireEvent.change(await screen.findByLabelText('GitHub org'), { target: { value: 'acme' } })
+    fireEvent.click(screen.getByText('Create GitHub App'))
+    expect(open).toHaveBeenCalledWith('/api/service-identities/github/manifest?org=acme')
+
+    act(() => {
+      new BroadcastChannel('druks-github-connect').postMessage('druks-operator')
+    })
+
+    expect(await screen.findByText(/connected · druks-operator/)).toBeTruthy()
+  })
+
+  it('opens the personal-account manifest page when no org is typed', async () => {
+    stubFetch([disconnected])
+    const open = vi.fn()
+    vi.stubGlobal('open', open)
+    renderCard()
+
+    fireEvent.click(await screen.findByText('Create GitHub App'))
+
+    expect(open).toHaveBeenCalledWith('/api/service-identities/github/manifest')
+  })
+
+  it('links installation management to the connected slug', async () => {
+    stubFetch([connected])
+    renderCard()
+
+    const link = await screen.findByText('Manage installations')
+
+    expect(link.getAttribute('href')).toBe(
+      'https://github.com/apps/druks-operator/installations/new',
+    )
+  })
 })
