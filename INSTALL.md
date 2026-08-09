@@ -48,11 +48,10 @@ cd ~/druks
 docker compose exec web druks doctor
 ```
 
-Verification: every check passes except the Claude, Codex, and GitHub
-connection checks — those correctly fail until the operator connects them in
-the browser, which no shell step can do. `druks doctor` exits non-zero
-whenever any check fails, so a non-zero exit here is expected; judge this step
-by which checks fail, not by the exit code.
+Verification: `druks doctor` exits 0. Every genuine-health check passes; the
+Claude, Codex, and GitHub checks show as pending (`○`) — the operator clears
+those in the browser, which no shell step can do, so they never fail the
+command. A non-zero exit means a genuine fault: stop and report it.
 
 ## 5. Hand back to the operator
 

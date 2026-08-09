@@ -36,10 +36,11 @@ def _connect_github(slug: str = "druks-operator") -> ServiceIdentity:
     )
 
 
-def test_github_identity_fails_when_absent(tmp_path: Path, doctor_db) -> None:
+def test_github_identity_pending_when_absent(tmp_path: Path, doctor_db) -> None:
     result = doctor.check_github_identity(make_settings(tmp_path))
 
     assert not result.ok
+    assert result.pending
     assert "not connected" in result.detail
 
 
@@ -53,12 +54,13 @@ def test_github_identity_reports_the_connected_row(tmp_path: Path, doctor_db) ->
     assert "slug=druks-operator" in result.detail
 
 
-def test_installations_fails_without_a_connected_identity(tmp_path: Path, doctor_db) -> None:
+def test_installations_pending_without_a_connected_identity(tmp_path: Path, doctor_db) -> None:
     # No github row → the zero-argument client can't even be built; doctor
-    # reports the failure instead of raising.
+    # reports it as pending operator setup instead of raising.
     result = doctor.check_installations(make_settings(tmp_path))
 
     assert not result.ok
+    assert result.pending
     assert "installations" in result.name
     assert "not connected" in result.detail
 
@@ -76,7 +78,7 @@ def test_installations_lists_accounts(tmp_path: Path, doctor_db, monkeypatch) ->
     assert "clawhaven" in result.detail
 
 
-def test_installations_fails_when_app_has_none(tmp_path: Path, doctor_db, monkeypatch) -> None:
+def test_installations_pending_when_app_has_none(tmp_path: Path, doctor_db, monkeypatch) -> None:
     class _FakeClient:
         async def list_installation_accounts(self):
             return ()
@@ -86,6 +88,7 @@ def test_installations_fails_when_app_has_none(tmp_path: Path, doctor_db, monkey
     result = doctor.check_installations(make_settings(tmp_path))
 
     assert not result.ok
+    assert result.pending
     assert "no installations" in result.detail
 
 
@@ -188,20 +191,23 @@ def test_run_checks_covers_all_check_names(tmp_path: Path) -> None:
     }
 
 
-def test_harness_credentials_fail_when_not_connected(tmp_path: Path) -> None:
+def test_harness_credentials_pending_when_not_connected(tmp_path: Path) -> None:
     # No credential rows committed => both harnesses read as not connected.
     settings = make_settings(tmp_path)
 
     result = _named(doctor.check_harness_credentials(settings), "codex_credentials")
 
     assert not result.ok
+    assert result.pending
     assert "not connected" in result.detail
 
 
 def test_harness_credential_check_expired() -> None:
+    # An expired token is a genuine fault (runs would fail), not pending setup.
     past = datetime.now(UTC) - timedelta(hours=1)
     result = doctor._harness_credential_check("claude", connected=True, expires_at=past)
     assert not result.ok
+    assert not result.pending
     assert "expired" in result.detail
 
 
@@ -262,6 +268,36 @@ def test_print_results_returns_zero_when_all_pass(capsys) -> None:
 
     assert exit_code == 0
     assert "all checks passed" in capsys.readouterr().out
+
+
+def test_print_results_pending_does_not_fail(capsys) -> None:
+    # A healthy fresh box: everything green except unconnected harnesses, which
+    # are pending operator setup — the command still exits 0.
+    results = [
+        doctor.CheckResult(name="database", ok=True, detail="reachable"),
+        doctor.CheckResult(name="claude_credentials", ok=False, pending=True, detail="not connected"),
+    ]
+
+    exit_code = doctor.print_results(results)
+
+    assert exit_code == 0
+    captured = capsys.readouterr()
+    assert "○" in captured.out
+    assert "1 item(s) pending operator setup" in captured.out
+
+
+def test_print_results_fails_on_a_genuine_fault_alongside_pending(capsys) -> None:
+    results = [
+        doctor.CheckResult(name="database", ok=False, detail="unreachable"),
+        doctor.CheckResult(name="claude_credentials", ok=False, pending=True, detail="not connected"),
+    ]
+
+    exit_code = doctor.print_results(results)
+
+    assert exit_code == 1
+    captured = capsys.readouterr()
+    assert "1 check(s) failed" in captured.out
+    assert "1 pending" in captured.out
 
 
 def _fake_sandbox_client(monkeypatch, *, reattach_fails=False):

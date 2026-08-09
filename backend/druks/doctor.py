@@ -36,6 +36,10 @@ class CheckResult:
     name: str
     ok: bool
     detail: str
+    # A not-ok check the operator clears in the dashboard, not the shell (an
+    # unconnected harness, an uninstalled App). Expected on a fresh box, so it
+    # prints but never drives the exit code — only a genuine fault does.
+    pending: bool = False
 
 
 def check_github_identity(settings: Settings) -> CheckResult:
@@ -50,6 +54,7 @@ def check_github_identity(settings: Settings) -> CheckResult:
         return CheckResult(
             name="github_identity",
             ok=False,
+            pending=True,
             detail="not connected — connect GitHub in Settings → Harnesses.",
         )
     except Exception as error:  # noqa: BLE001 — a DB-read failure is a fail, not a crash
@@ -77,6 +82,13 @@ def check_installations(settings: Settings) -> CheckResult:
             db_session.registry.set(session)
             client = get_github_client()
         accounts = asyncio.run(client.list_installation_accounts())
+    except ServiceNotConnectedError:
+        return CheckResult(
+            name="installations",
+            ok=False,
+            pending=True,
+            detail="github is not connected — connect it in Settings → Harnesses.",
+        )
     except Exception as exc:  # noqa: BLE001 — doctor reports, never raises
         return CheckResult(
             name="installations",
@@ -90,6 +102,7 @@ def check_installations(settings: Settings) -> CheckResult:
         return CheckResult(
             name="installations",
             ok=False,
+            pending=True,
             detail="operator App has no installations — install it on your org/user",
         )
     return CheckResult(
@@ -105,7 +118,10 @@ def _harness_credential_check(
     check_name = f"{name}_credentials"
     if not connected:
         return CheckResult(
-            check_name, ok=False, detail=f"not connected — connect {name} in Settings."
+            check_name,
+            ok=False,
+            pending=True,
+            detail=f"not connected — connect {name} in Settings.",
         )
     if expires_at and expires_at <= datetime.now(UTC):
         return CheckResult(
@@ -409,7 +425,10 @@ def _run_extension_check(extension_name: str, check) -> CheckResult:
             name=f"{extension_name}:{label}", ok=False, detail=f"check raised: {error}"
         )
     return CheckResult(
-        name=f"{extension_name}:{outcome.name}", ok=outcome.ok, detail=outcome.detail
+        name=f"{extension_name}:{outcome.name}",
+        ok=outcome.ok,
+        detail=outcome.detail,
+        pending=outcome.pending,
     )
 
 
@@ -441,15 +460,24 @@ def run_checks(settings: Settings, *, sandbox: bool = False) -> list[CheckResult
 
 def print_results(results: list[CheckResult]) -> int:
     failures = 0
+    pending = 0
     for result in results:
-        glyph = "✓" if result.ok else "✗"
+        glyph = "✓" if result.ok else "○" if result.pending else "✗"
         print(f"{glyph}  {result.name:24s}  {result.detail}")
-        if not result.ok:
+        if result.ok:
+            continue
+        if result.pending:
+            pending += 1
+        else:
             failures += 1
     print()
+    pending_note = f" ({pending} pending operator setup)" if pending else ""
     if failures:
-        print(f"doctor: {failures} check(s) failed.")
+        print(f"doctor: {failures} check(s) failed{pending_note}.")
         return 1
+    if pending:
+        print(f"doctor: healthy; {pending} item(s) pending operator setup.")
+        return 0
     print("doctor: all checks passed.")
     return 0
 
