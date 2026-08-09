@@ -5,7 +5,13 @@ import pytest
 # The documented v1 extension-author surface: each concern namespace and the
 # exact names it exports. Pattern A — no root facade; druks stays thin.
 AUTHOR_SURFACE = {
-    "druks.extensions": {"Extension", "ExtensionSettings", "Secret"},
+    "druks.extensions": {
+        "AgentApiError",
+        "Extension",
+        "ExtensionSettings",
+        "Secret",
+        "agent_error_responses",
+    },
     "druks.agents": {"Agent", "AgentOutput"},
     "druks.workflows": {
         "AgentCall",

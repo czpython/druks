@@ -413,7 +413,9 @@ async def test_ship_start_embeds_the_typed_ticket_error(app, pat_token, druks_db
         async def aclose(self):
             pass
 
-    monkeypatch.setattr(Ship, "tracker", classmethod(lambda cls, source: _UnknownTicketTracker()))
+    monkeypatch.setattr(
+        Ship, "get_tracker", classmethod(lambda cls, source=None: _UnknownTicketTracker())
+    )
 
     async with live(app), _client(app, pat_token) as client:
         error = await _call_error(client, "ship_start", {"ticket": "ENG-9999"})
