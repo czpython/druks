@@ -466,9 +466,14 @@ function RunInspector({
 }) {
   // An in-app review is the whole ask — it replaces the transcript instead of
   // stacking above it; the tabs flip between them. External asks keep their
-  // one-line banner over the transcript.
+  // one-line banner over the transcript. The ask is run-level, so it only
+  // fronts the newest call; picking an earlier call is a request for that
+  // call's transcript.
   const review = run.inputRequest?.presentation === 'in_app' ? run.inputRequest : null
-  const [tab, setTab] = useState<'review' | 'transcript'>('review')
+  const isNewestCall = call == null || call.id === run.agentCalls.at(-1)?.id
+  const [tab, setTab] = useState<'review' | 'transcript'>(
+    review && isNewestCall ? 'review' : 'transcript'
+  )
   const showReview = review && tab === 'review'
   return (
     <>
