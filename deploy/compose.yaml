@@ -1,5 +1,9 @@
-# Full Druks stack. Host networking is required: services reach Redis on
-# 127.0.0.1 and use the host's tailscaled to SSH into sandbox VMs.
+# Druks base stack: web, Postgres, Redis. The sandbox control plane (drukbox)
+# and, for remote installs, Caddy come from an overlay — compose.local.yaml or
+# compose.remote.yaml — selected by COMPOSE_FILE in .env, which install.sh
+# writes. Host networking throughout: services reach Postgres and Redis on
+# 127.0.0.1, and drukbox reaches each sandbox's sshd at the address its provider
+# returns — a host-loopback port locally, a provider-reachable address remotely.
 
 x-druks: &druks
   image: ghcr.io/czpython/druks:${DRUKS_TAG:-latest}
@@ -35,9 +39,6 @@ x-druks: &druks
     - ${DRUKS_CLAUDE_HOME:-${HOME}/.claude}:/harnesses/claude:ro
     - ${DRUKS_CODEX_HOME:-${HOME}/.codex}:/harnesses/codex:ro
     - ${DRUKS_CLAUDE_JSON:-${HOME}/.claude.json}:/harnesses/.claude.json:ro
-    # Operator-installed skills live under the /app/data mount (DRUKS_SKILLS_DIR
-    # → /app/data/skills), writable and owned by the deploy user — no separate
-    # mount needed.
     # Shared so a reattaching worker reads the key the acquirer wrote.
     - druks_sandbox_keys:/app/sandbox-keys
   depends_on:
@@ -45,29 +46,6 @@ x-druks: &druks
       condition: service_healthy
     postgres:
       condition: service_healthy
-
-# Shared config for the drukbox sandbox control-plane containers
-# (service / janitor), gated behind the ``remote`` profile — a local
-# install runs drukbox on the host instead. They use SQLite: one file on a
-# shared volume so both containers see the same DB (separate containers, so a
-# per-container relative path would be two different files). Host
-# networking for the service's HTTP API + the host tailscaled.
-x-drukbox: &druksox
-  image: ${DRUKS_SANDBOX_SERVICE_IMAGE:-ghcr.io/czpython/drukbox:latest}
-  network_mode: host
-  # Runs as the image's non-root appuser (uid 1001). The shared SQLite
-  # volume must therefore be owned by 1001 — a fresh named volume mounts
-  # root-owned, so install.sh chowns it (one-time host-side step; /data is
-  # OUR mount path, not drukbox's concern, so the image stays untouched).
-  env_file:
-    - ./.env
-  environment:
-    # Absolute path (four slashes) on the shared volume mounted at /data.
-    # Overrides any DATABASE_URL in .env so the stack can't drift back to
-    # the removed Postgres.
-    DATABASE_URL: sqlite+aiosqlite:////data/drukbox.db
-  volumes:
-    - drukbox_data:/data
 
 services:
   web:
@@ -89,50 +67,6 @@ services:
         "--port",
         "8001",
       ]
-
-  sandbox-service:
-    <<: *druksox
-    profiles: ["remote"]
-    restart: unless-stopped
-
-  # Periodic janitor — drukbox ships no scheduler, so loop with sleep; a
-  # real timer belongs in the drukbox service/image, not in compose.
-  sandbox-janitor:
-    <<: *druksox
-    profiles: ["remote"]
-    restart: unless-stopped
-    entrypoint:
-      - sh
-      - -c
-      - "while true; do .venv/bin/python -m hosts.janitor || true; sleep 60; done"
-    # The image HEALTHCHECK probes the HTTP API — on host networking the
-    # janitor would health-check the *service's* port, doubling /healthz
-    # traffic and reporting a status that isn't its own.
-    healthcheck:
-      disable: true
-
-  caddy:
-    # Stock Caddy — the identity edge + webhook TLS. A local install skips it
-    # (dashboard reached directly on 127.0.0.1:8001, identity.mode=none), so
-    # it lives in the ``remote`` profile. Caddyfile is fetched next to this
-    # compose file by install.sh.
-    image: caddy:2.10-alpine
-    profiles: ["remote"]
-    network_mode: host
-    restart: unless-stopped
-    environment:
-      DRUKS_UPSTREAM: ${DRUKS_UPSTREAM:-127.0.0.1:8001}
-      # Setup renders identity.header for Caddy; druks reads it from druks.toml.
-      # Caddy requires the edge's assertion, and druks maps it to an account.
-      # No default anywhere — the backend refuses header mode without it.
-      DRUKS_AUTH_HEADER: ${DRUKS_AUTH_HEADER:-}
-      # ``:-`` so an empty .env value still collapses to the inert loopback
-      # default — Caddy treats set-but-empty as a real (broken) site address.
-      DRUKS_WEBHOOK_HOST: ${DRUKS_WEBHOOK_HOST:-http://127.0.0.1:8081}
-    volumes:
-      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data
-      - caddy_config:/config
 
   postgres:
     image: postgres:16-alpine
@@ -173,10 +107,6 @@ services:
       retries: 5
 
 volumes:
-  caddy_data:
-  caddy_config:
   redis_data:
   postgres_data:
-  # Drukbox's SQLite DB, shared across migrate/service/janitor.
-  drukbox_data:
   druks_sandbox_keys:

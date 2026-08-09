@@ -69,12 +69,16 @@ main() {
   mkdir -p "$INSTALL_DIR"
   cd "$INSTALL_DIR"
 
-  # compose.yaml — single source of truth lives in the repo, always refresh.
-  echo "→ fetching deploy/compose.yaml from $REPO@$REF"
+  # compose files — the base plus both shape overlays live in the repo, always
+  # refresh. COMPOSE_FILE in .env (written below) selects which overlay loads;
+  # the unused one sits inert.
+  echo "→ fetching compose files from $REPO@$REF"
   fetch_from_repo deploy/compose.yaml compose.yaml
+  fetch_from_repo deploy/compose.local.yaml compose.local.yaml
+  fetch_from_repo deploy/compose.remote.yaml compose.remote.yaml
 
-  # The Caddyfile is bind-mounted by compose (stock caddy image, no baked
-  # config), so it refreshes together with compose.yaml on every re-run.
+  # The Caddyfile is bind-mounted by the remote overlay (stock caddy image, no
+  # baked config), so it refreshes on every re-run.
   echo "→ fetching deploy/caddy/Caddyfile from $REPO@$REF"
   mkdir -p caddy
   fetch_from_repo deploy/caddy/Caddyfile caddy/Caddyfile
@@ -118,13 +122,21 @@ main() {
     set_env_var DRUKS_WEB_BIND_HOST "127.0.0.1"
   fi
 
-  # Compose profile → .env, so plain `docker compose` in this dir picks it up.
-  # `remote` brings up the drukbox control-plane + Caddy; local runs neither
-  # (drukbox lives on the host, dashboard is reached directly on :8001).
+  # COMPOSE_FILE → .env, so plain `docker compose` in this dir loads the right
+  # overlay. `local` drives sandboxes on the host Docker daemon (dashboard on
+  # :8001, no Caddy); `remote` runs the cloud provider + Caddy. For local, the
+  # socket's gid rides along so drukbox's non-root appuser may use it — on
+  # macOS the host path is a user-owned symlink, but the socket Docker Desktop
+  # mounts into containers is group root, so the host gid would grant nothing.
   if [ "$PROVIDER" = "docker" ]; then
-    set_env_var COMPOSE_PROFILES ""
+    set_env_var COMPOSE_FILE "compose.yaml:compose.local.yaml"
+    if [ "$(uname -s)" = "Darwin" ]; then
+      set_env_var DRUKS_DOCKER_GID "0"
+    else
+      set_env_var DRUKS_DOCKER_GID "$(stat -c '%g' /var/run/docker.sock)"
+    fi
   else
-    set_env_var COMPOSE_PROFILES "remote"
+    set_env_var COMPOSE_FILE "compose.yaml:compose.remote.yaml"
   fi
 
   echo "→ docker compose pull"
@@ -138,24 +150,24 @@ main() {
   docker run --rm -v "$(basename "$INSTALL_DIR")_druks_sandbox_keys:/keys" alpine \
     chown -R "$(id -u):$(id -g)" /keys
 
-  # drukbox runs as its non-root appuser (uid 1001); a fresh named volume mounts
-  # root-owned, so appuser can't create the SQLite DB. Chown it once, host-side.
-  # Remote only — a local install has no drukbox container (it's on the host).
-  if [ "$PROVIDER" != "docker" ]; then
-    echo "→ chown drukbox SQLite volume to appuser (1001:999)"
-    docker run --rm -v "$(basename "$INSTALL_DIR")_drukbox_data:/data" alpine \
-      chown -R 1001:999 /data
-  fi
-
   # Migrations run out of band, once, before the app serves — never on boot.
   # `run --rm` starts the DB deps, applies the alembic schema, seeds, and exits.
   # Idempotent, so it doubles as the upgrade step.
   echo "→ druks init-db (idempotent)"
   docker compose run --rm web druks init-db
-  if [ "$PROVIDER" != "docker" ]; then
-    echo "→ drukbox alembic upgrade (idempotent)"
-    docker compose run --rm sandbox-service .venv/bin/alembic upgrade head
-  fi
+
+  # drukbox keeps its schema in its own database in the shared Postgres; alembic
+  # creates the schema but never the database, so create it here — idempotent,
+  # covering both a fresh install and an upgrade from the old SQLite volume.
+  PG_USER=$(sed -n 's/^DRUKS_POSTGRES_USER=//p' .env)
+  PG_USER=${PG_USER:-druks}
+  echo "→ ensure drukbox database exists"
+  docker compose exec -T postgres \
+    psql -U "$PG_USER" -d postgres -tc "SELECT 1 FROM pg_database WHERE datname='drukbox'" \
+    | grep -q 1 || docker compose exec -T postgres createdb -U "$PG_USER" drukbox
+
+  echo "→ drukbox alembic upgrade (idempotent)"
+  docker compose run --rm drukbox .venv/bin/alembic upgrade head
 
   echo "→ docker compose up -d"
   docker compose up -d
@@ -179,9 +191,8 @@ MSG
 
 Dashboard: http://127.0.0.1:8001
 
-Sandboxes run as local Docker containers — start drukbox on the host:
-  git clone https://github.com/czpython/drukbox
-  cd drukbox && DOCKER_SSH_USERNAME=druks make dev
+Sandboxes run as local Docker containers, driven by the drukbox
+service in this compose stack.
 ------------------------------------------------------------
 MSG
   elif [ "$PROVIDER" = "exe" ]; then

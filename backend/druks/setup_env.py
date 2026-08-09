@@ -17,7 +17,8 @@ _COMPOSE_ENV_KEYS = (
     "DRUKS_GID",
     "DRUKS_TAG",
     "DRUKS_WEB_BIND_HOST",
-    "COMPOSE_PROFILES",
+    "DRUKS_DOCKER_GID",
+    "COMPOSE_FILE",
 )
 _ENV_KEY_PATTERN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
@@ -522,7 +523,7 @@ def _shape_message(provider: str) -> str:
     if not provider:
         return "sandbox provider is not configured"
     if provider == "docker":
-        return "provider 'docker' → local shape; host-run drukbox validates its configuration"
+        return "provider 'docker' → local shape; drukbox validates its configuration"
     if provider == "exe":
         return "provider 'exe' → exe shape; check `druks doctor` after boot"
     return (

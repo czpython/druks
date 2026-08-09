@@ -1,6 +1,6 @@
 # Full local setup
 
-The local profile keeps every component on one machine:
+The local shape keeps every component on one machine:
 
 ```text
 browser -> Druks :8001 -> Drukbox :8000 -> Docker sandbox containers
@@ -8,17 +8,16 @@ browser -> Druks :8001 -> Drukbox :8000 -> Docker sandbox containers
                           -> SSH from Druks to each container
 ```
 
-Druks, Postgres, and Redis run in Compose. Drukbox runs on the host because its
-`docker` provider needs access to the host Docker daemon. Agent work still runs
-in isolated containers rather than in the Druks process.
+Everything runs in Compose: Druks, Postgres, Redis, and Drukbox — the
+Drukbox service holds the host's Docker socket, so its `docker` provider
+starts sandboxes as sibling containers on the host daemon. Agent work still
+runs in those isolated containers rather than in the Druks process.
 
 ## Prerequisites
 
 - Docker with the Compose plugin
-- Git
 - enough local Docker capacity for Postgres, Redis, Druks, Drukbox, and
   short-lived sandbox containers
-- two GitHub Apps if you intend to use the bundled `ship` extension
 
 No Tailscale account or remote VM provider is needed.
 The Druks application and sandbox images are published for both `linux/amd64`
@@ -35,38 +34,25 @@ The local shape needs no authored values, so the first run goes all the way:
 - writes `~/druks/druks.toml` with `[sandbox].provider = "docker"`
 - renders `~/druks/.env` with `DEFAULT_HOST_PROVIDER=docker`
 - generates the database password and the stored-secret key
-- points Druks at Drukbox on `127.0.0.1:8000`
-- pulls images, applies Druks migrations, and starts Druks, Postgres, and
-  Redis — it does not start Drukbox in the local profile
+- pulls images, applies migrations, and starts Druks, Postgres, Redis, and
+  Drukbox on `127.0.0.1:8000` (`COMPOSE_FILE=compose.yaml:compose.local.yaml`)
+
+Drukbox drives sandboxes through the mounted `/var/run/docker.sock`; the
+installer records the socket's group id in `.env` so the service's non-root
+user may use it. Drukbox keeps its schema in a `drukbox` database in the same
+Postgres — no separate datastore. On macOS, if sandbox SSH turns out
+unreachable, enable host networking in Docker Desktop's settings.
 
 For the bundled `ship` extension, connect the GitHub App druks acts as from
-the dashboard after boot (**Settings → Harnesses → Connect GitHub**) — see
+the dashboard after boot (**Settings → Harnesses**) — create it there or
+paste an existing App's credentials, see
 [the GitHub connection](configuration.md#github).
 
-## 2. Run Drukbox on the host
+Existing installs that still run Drukbox on the host via `make dev`: finish
+or cancel local runs, stop the host process, and re-run the installer — the
+Compose service starts with a fresh sandbox registry.
 
-In a separate checkout:
-
-```bash
-git clone https://github.com/czpython/drukbox
-cd drukbox
-DOCKER_SSH_USERNAME=druks make dev
-```
-
-`make dev` starts Drukbox on `127.0.0.1:8000` with the Docker provider,
-Tailscale disabled, and the `dev-token` expected by the local Druks setup.
-`DOCKER_SSH_USERNAME=druks` matches the non-root user in the shipped sandbox
-image.
-
-If port 8000 is already occupied, run Drukbox on another port, set its URL in
-`~/druks/druks.toml`, then re-run the installer:
-
-```toml
-[sandbox]
-service_url = "http://127.0.0.1:8100"
-```
-
-## 3. Verify the first working system
+## 2. Verify the first working system
 
 ```bash
 cd ~/druks
@@ -77,7 +63,7 @@ curl -fsS http://127.0.0.1:8001/health
 Success means the Compose services are up and the health endpoint returns
 `{"status":"ok"}`. The dashboard is at <http://127.0.0.1:8001>.
 
-## 4. Connect agent harnesses
+## 3. Connect agent harnesses
 
 Open **Settings → Harnesses** in the dashboard and connect Claude and Codex.
 Druks stores those subscription credentials in Postgres and writes a fresh
@@ -112,7 +98,7 @@ docker compose exec web druks doctor --sandbox
 
 This creates and deletes a real sandbox container.
 
-## 5. Exercise an application
+## 4. Exercise an application
 
 Druks does not invent a generic domain job: an installed extension supplies the
 workflow and its trigger. In the bundled distribution, `ship` is the reference

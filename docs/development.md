@@ -151,7 +151,9 @@ currently ship a Markdown linter or link-check command.
 ## Working with sandboxes
 
 Backend tests mock most provider boundaries. For a real local sandbox, run
-Drukbox on the host as described in [Full local setup](full-local.md) and set:
+Drukbox on the host from its own checkout
+(`DOCKER_SSH_USERNAME=druks make dev` in
+[czpython/drukbox](https://github.com/czpython/drukbox)) and set:
 
 ```toml
 [sandbox]
