@@ -1,7 +1,7 @@
 import json
 from unittest import mock
 
-from druks.durable.schemas import AgentCallFiles
+from druks.durable.reads import get_agent_call_files
 from druks.harnesses.artifacts import persist_manifest
 from druks.harnesses.base import Harness
 from druks.harnesses.claude import ClaudeHarness
@@ -229,7 +229,7 @@ def test_manifest_surfaces_in_agent_call_files(tmp_path, druks_db):
     manifest = _build()
     with mock.patch("druks.durable.models.load_settings", return_value=make_settings(tmp_path)):
         persist_manifest(call.call_dir.parent, call_id=call.call_dir.name, manifest=manifest)
-        files = AgentCallFiles.from_call(call, None)
+        files = get_agent_call_files(call.id)
 
     assert files.manifest
     assert files.manifest.name == "manifest.json"

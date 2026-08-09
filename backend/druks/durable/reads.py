@@ -2,6 +2,7 @@
 # Schemas stay pure projections; routes call in here.
 import asyncio
 from collections.abc import AsyncIterator
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
@@ -17,6 +18,8 @@ from .models import AgentCall, Artifact, Run
 from .schemas import (
     AgentCallFiles,
     AgentCallResponse,
+    ArtifactDescriptor,
+    ArtifactFile,
     RunResponse,
     SubjectActivity,
     SubjectResponse,
@@ -36,7 +39,32 @@ _TERMINAL_CALL_STATES = {"succeeded", "failed", "abandoned"}
 
 def get_agent_call_files(call_id: str) -> AgentCallFiles:
     call = AgentCall.get(call_id)
-    return AgentCallFiles.from_call(call, Artifact.get_for_call(call.id))
+    artifact = Artifact.get_for_call(call.id)
+    layout = call.artifact_layout
+
+    def named(path: Path) -> ArtifactFile | None:
+        if path.is_file():
+            stat = path.stat()
+            return ArtifactFile(
+                name=path.name,
+                size_bytes=stat.st_size,
+                updated_at=datetime.fromtimestamp(stat.st_mtime, tz=UTC),
+            )
+
+    descriptor = None
+    if artifact:
+        descriptor = ArtifactDescriptor(
+            kind=artifact.kind, title=artifact.title, name=artifact.path
+        )
+    return AgentCallFiles(
+        prompt=named(layout.prompt),
+        response=named(layout.output),
+        metadata=named(layout.metadata),
+        manifest=named(layout.manifest),
+        stdout=named(layout.transcript),
+        stderr=named(layout.stderr),
+        artifact=descriptor,
+    )
 
 
 def list_subject_timeline(subject_type: str, subject_id: str) -> list[RunResponse]:

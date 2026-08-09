@@ -558,6 +558,13 @@ button { background: none; border: none; color: inherit; cursor: pointer; font: 
   white-space: pre-wrap; word-break: break-word;
   background: var(--bg);
 }
+.run-markdown {
+  padding: 16px 20px;
+  flex: 1; overflow: auto;
+  font-size: 13px; line-height: 1.6;
+  color: var(--text);
+  background: var(--bg);
+}
 
 /* Structured rendering of Claude's --output-format stream-json
  * transcript. Each row is one event from Claude's NDJSON stream;
