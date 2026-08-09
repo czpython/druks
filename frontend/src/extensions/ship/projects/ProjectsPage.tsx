@@ -128,7 +128,7 @@ function CreateRow({
     <div className={variant === 'empty' ? 'pj-empty-create' : 'pj-create'}>
       <input
         className="pj-create-input"
-        placeholder="new project name (e.g. 'Hey Fella')"
+        placeholder="new project name (e.g. 'Acme')"
         value={value}
         onChange={(e) => onChange(e.target.value)}
         onKeyDown={(e) => {
