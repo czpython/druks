@@ -249,7 +249,7 @@ async def test_external_close_returns_ticket_to_resting_pool(druks_db, tmp_path,
         repo=repo, pr_number=pr_number, branch=branch, tmp_path=tmp_path, merged=False
     )
 
-    assert pushed == [(work_item_id, TicketStatus.READY_FOR_AGENT)]
+    assert pushed == [(work_item_id, TicketStatus.BACKLOG)]
 
 
 @pytest.mark.asyncio
@@ -365,7 +365,7 @@ async def test_external_close_survives_policy_resolution_failure(druks_db, tmp_p
     )
 
     assert deleted == []  # cleanup skipped when policy can't be resolved
-    assert pushed == [TicketStatus.READY_FOR_AGENT]  # ticket still reset
+    assert pushed == [TicketStatus.BACKLOG]  # ticket still reset
     assert WorkItem.get(work_item_id).resolution == "closed"
 
 

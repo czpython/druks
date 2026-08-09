@@ -142,7 +142,7 @@ def _status_id_by_name(states: list[dict[str, Any]], status_name: str) -> str:
 class Linear(Tracker):
     known_exceptions = (LinearAPIError, UnknownTicketError, httpx.HTTPError)
 
-    # READY_FOR_AGENT and TRIGGER are operator-named; the rest are fixed.
+    # TRIGGER and BACKLOG are operator-named; the rest are fixed.
     _STATIC_STATUS_NAMES: dict[TicketStatus, str] = {
         TicketStatus.IN_PROGRESS: "In Progress",
         TicketStatus.IN_REVIEW: "In Review",
@@ -154,15 +154,15 @@ class Linear(Tracker):
         self,
         *,
         api_key: str,
-        ready_for_agent_status: str = "",
+        backlog_status: str = "",
         trigger_status: str = "",
         client: Any | None = None,
     ) -> None:
         self._client = LinearClient(api_key=api_key, client=client)
         self._status_names = dict(self._STATIC_STATUS_NAMES)
         # Empty leaves the operator-named statuses unmapped.
-        if ready_for_agent_status:
-            self._status_names[TicketStatus.READY_FOR_AGENT] = ready_for_agent_status
+        if backlog_status:
+            self._status_names[TicketStatus.BACKLOG] = backlog_status
         if trigger_status:
             self._status_names[TicketStatus.TRIGGER] = trigger_status
 

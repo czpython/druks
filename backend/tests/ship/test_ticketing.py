@@ -39,14 +39,14 @@ def test_tracker_builds_linear_from_settings(monkeypatch):
     _pin_ship_settings(
         monkeypatch,
         linear_api_key="lin_secret",
-        linear_resting_status="Ready for Agent",
+        linear_resting_status="Backlog",
         linear_trigger_status="To Agent",
     )
 
     tracker = Ship.tracker("linear")
 
     assert isinstance(tracker, Linear)
-    assert tracker._status_names[TicketStatus.READY_FOR_AGENT] == "Ready for Agent"
+    assert tracker._status_names[TicketStatus.BACKLOG] == "Backlog"
     assert tracker._status_names[TicketStatus.TRIGGER] == "To Agent"
 
 
@@ -64,7 +64,7 @@ def test_tracker_builds_jira_from_settings(monkeypatch):
     tracker = Ship.tracker("jira")
 
     assert isinstance(tracker, Jira)
-    assert tracker._status_names[TicketStatus.READY_FOR_AGENT] == "Open"
+    assert tracker._status_names[TicketStatus.BACKLOG] == "Open"
     assert tracker._status_names[TicketStatus.TRIGGER] == "To Agent"
 
 
@@ -87,12 +87,12 @@ def test_tracker_ignores_a_nonchosen_source_with_credentials(monkeypatch):
     assert not Ship.tracker("linear")
 
 
-def test_empty_resting_status_leaves_ready_for_agent_unmapped(monkeypatch):
+def test_empty_resting_status_leaves_backlog_unmapped(monkeypatch):
     _pin_ship_settings(monkeypatch, linear_api_key="lin_secret", linear_resting_status="")
 
     tracker = Ship.tracker("linear")
 
-    assert TicketStatus.READY_FOR_AGENT not in tracker._status_names
+    assert TicketStatus.BACKLOG not in tracker._status_names
 
 
 # --- Linear provider --------------------------------------------------------
@@ -116,17 +116,17 @@ async def test_set_status_maps_the_ticket_status_to_a_provider_name():
     fake = _FakeLinearClient()
     provider = Linear(
         api_key="lin_x",
-        ready_for_agent_status="Ready for Agent",
+        backlog_status="Backlog",
         trigger_status="To Agent",
         client=object(),
     )
     provider._client = fake  # the unit seam is the API client, not HTTP
     await provider.set_status("ACME-270", TicketStatus.DONE)
-    await provider.set_status("ACME-270", TicketStatus.READY_FOR_AGENT)
+    await provider.set_status("ACME-270", TicketStatus.BACKLOG)
     await provider.set_status("ACME-270", TicketStatus.TRIGGER)
     assert fake.calls == [
         ("update_issue_status", "ACME-270", "Done"),
-        ("update_issue_status", "ACME-270", "Ready for Agent"),
+        ("update_issue_status", "ACME-270", "Backlog"),
         ("update_issue_status", "ACME-270", "To Agent"),
     ]
 
@@ -136,7 +136,7 @@ async def test_set_status_unmapped_raises():
     provider = Linear(api_key="lin_x", client=object())
     provider._client = _FakeLinearClient()
     with pytest.raises(ValueError, match="no configured status"):
-        await provider.set_status("ACME-270", TicketStatus.READY_FOR_AGENT)
+        await provider.set_status("ACME-270", TicketStatus.BACKLOG)
     with pytest.raises(ValueError, match="no configured status"):
         await provider.set_status("ACME-270", TicketStatus.TRIGGER)
 

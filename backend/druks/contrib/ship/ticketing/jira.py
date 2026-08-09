@@ -80,7 +80,7 @@ class Jira(Tracker):
     # These status names belong to the "Internal tools" issue type used for druks-managed
     # tickets; its transitions have no validators or required fields, unlike security issues
     # whose Done gate requires a resolution and Fix versions, so native status moves work
-    # like Linear's. READY_FOR_AGENT (the resting status) and TRIGGER (the dispatch
+    # like Linear's. BACKLOG (the resting status) and TRIGGER (the dispatch
     # trigger) are supplied by the caller; druks deliberately lands on the trigger
     # only when asked to open a build.
     _STATIC_STATUS_NAMES: dict[TicketStatus, str] = {
@@ -98,7 +98,7 @@ class Jira(Tracker):
         base_url: str,
         email: str,
         api_token: str,
-        ready_for_agent_status: str = "",
+        backlog_status: str = "",
         trigger_status: str = "",
         client: Any | None = None,
     ) -> None:
@@ -107,8 +107,8 @@ class Jira(Tracker):
         )
         self._status_names = dict(self._STATIC_STATUS_NAMES)
         # Empty leaves the operator-named statuses unmapped.
-        if ready_for_agent_status:
-            self._status_names[TicketStatus.READY_FOR_AGENT] = ready_for_agent_status
+        if backlog_status:
+            self._status_names[TicketStatus.BACKLOG] = backlog_status
         if trigger_status:
             self._status_names[TicketStatus.TRIGGER] = trigger_status
 

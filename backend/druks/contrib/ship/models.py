@@ -334,7 +334,7 @@ class WorkItem(StoredSubject):
                 await get_github_client(load_settings()).delete_branch(self.repo, self.branch)
         except Exception:  # noqa: BLE001 — cleanup only
             logger.warning("Skipped branch cleanup for %s.", self.repo, exc_info=True)
-        await self.set_ticket_status(TicketStatus.READY_FOR_AGENT)
+        await self.set_ticket_status(TicketStatus.BACKLOG)
 
     @classmethod
     def get_for_ticket_key(

@@ -9,7 +9,7 @@ class TicketStatus(StrEnum):
     IN_REVIEW = "in_review"
     DONE = "done"
     CANCELED = "canceled"
-    READY_FOR_AGENT = "ready_for_agent"
-    # The operator's configured trigger status — entering it opens a build.
-    # Distinct from READY_FOR_AGENT, which maps to the resting status.
+    # Two operator-named statuses. TRIGGER opens a build (entering it fires the
+    # intake webhook); BACKLOG is where a ticket rests when druks stops on it.
     TRIGGER = "trigger"
+    BACKLOG = "backlog"
