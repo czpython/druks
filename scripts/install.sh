@@ -145,10 +145,12 @@ main() {
   # The shared sandbox-keys volume: a fresh named volume mounts root-owned, but
   # the backend runs as the deploy user and must write the per-VM SSH keys here.
   # Chown it to the deploy uid:gid (a root-in-container chown, no host sudo).
-  # Idempotent; both shapes (web writes keys in either).
+  # Run it through compose so compose owns the volume — a raw `docker run -v`
+  # creates it unlabeled and every later compose call warns. Idempotent; both
+  # shapes (web mounts the volume in either).
   echo "→ chown sandbox-keys volume to $(id -u):$(id -g)"
-  docker run --rm -v "$(basename "$INSTALL_DIR")_druks_sandbox_keys:/keys" alpine \
-    chown -R "$(id -u):$(id -g)" /keys
+  docker compose run --rm --user root web \
+    chown -R "$(id -u):$(id -g)" /app/sandbox-keys
 
   # Migrations run out of band, once, before the app serves — never on boot.
   # `run --rm` starts the DB deps, applies the alembic schema, seeds, and exits.

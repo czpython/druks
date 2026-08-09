@@ -23,7 +23,7 @@ call, not yours.
 ## 2. Install
 
 ```bash
-curl -fsSL https://druks.ai/install.sh | DRUKS_PROVIDER=docker bash
+curl -fsSL https://druks.ai/install.sh | bash
 ```
 
 Verification: the command exits 0 and ends with `docker compose up -d`
@@ -50,7 +50,9 @@ docker compose exec web druks doctor
 
 Verification: every check passes except the Claude, Codex, and GitHub
 connection checks — those correctly fail until the operator connects them in
-the browser, which no shell step can do.
+the browser, which no shell step can do. `druks doctor` exits non-zero
+whenever any check fails, so a non-zero exit here is expected; judge this step
+by which checks fail, not by the exit code.
 
 ## 5. Hand back to the operator
 
