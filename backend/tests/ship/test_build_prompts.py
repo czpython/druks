@@ -49,6 +49,7 @@ def _build() -> SimpleNamespace:
                 description="Apply the Python house rules.",
             )
         ],
+        review_mode="approve",
         journal=BuildJournal(),
     )
 
@@ -163,6 +164,35 @@ async def test_reviewer_scrutiny_line_reports_each_seat():
         await scrutiny(reviewed)
         == "Scrutiny: plan critic ran (2) · evaluation rounds: 0 · line review ran"
     )
+
+
+async def test_approve_mode_posts_verdict_reviews():
+    prompt = await render_prompt(
+        "ship/build/evaluate_implementation.md",
+        build=_build(),
+        verification="VERIFICATION-BLOCK",
+        workspace=_workspace(),
+    )
+
+    assert "an **approving** verdict → `APPROVE`" in prompt
+    assert "Submit every review as a `COMMENT` event" not in prompt
+
+
+async def test_comment_mode_swaps_the_review_event_mapping():
+    # The operator authored the PR, and GitHub refuses an author's APPROVE /
+    # REQUEST_CHANGES — the prompt swaps the event mapping for comment-mode.
+    build = _build()
+    build.review_mode = "comment"
+
+    prompt = await render_prompt(
+        "ship/build/evaluate_implementation.md",
+        build=build,
+        verification="VERIFICATION-BLOCK",
+        workspace=_workspace(),
+    )
+
+    assert "Submit every review as a `COMMENT` event" in prompt
+    assert "an **approving** verdict → `APPROVE`" not in prompt
 
 
 def test_build_prompt_context_covers_template_attrs():

@@ -3,12 +3,11 @@ from typing import TYPE_CHECKING, Any
 from druks.accounts.models import Account
 from druks.contrib.review.datastructures import PullRequest
 from druks.contrib.review.extension import Review
+from druks.contrib.review.github import get_review_actor
 from druks.contrib.ship.models import ProjectRepo
 from druks.contrib.ship.workspace import RepoWorkspace
-from druks.core.apis.github import get_reviewer_github_client
 from druks.sandbox import repo as _repo
 from druks.sandbox.layout import get_github_token_remote_path, get_related_root, get_repo_root
-from druks.settings import load_settings
 from druks.workflows import Workflow
 
 if TYPE_CHECKING:
@@ -53,11 +52,11 @@ class PullRequestReview(Workflow):
 
     async def get_workspace_kwargs(self, sandbox: "Sandbox") -> dict[str, Any]:
         # Cloned at the default branch — the reviewer checks the pull request out itself.
-        # The token is the reviewer app's: it authenticates the clone and ``gh``, so the
+        # The token is the review actor's: it authenticates the clone and ``gh``, so the
         # review is authored under that identity. Siblings stay uncloned — the reviewer
         # clones the ones it opens, into a directory that must exist for the grant to hold.
         repo = self.subject.repo
-        github_token = await get_reviewer_github_client(load_settings()).token_for_repo(repo)
+        github_token = await get_review_actor().client.token_for_repo(repo)
         await sandbox.write_secret(
             secret=github_token, remote=get_github_token_remote_path(sandbox.ssh_username)
         )
@@ -78,5 +77,6 @@ class PullRequestReview(Workflow):
         target = ProjectRepo.get_for_repo(self.subject.repo, raise_on_missing=True)
         return {
             "siblings": target.siblings(),
+            "review_mode": get_review_actor().mode,
             **await super().get_prompt_context(**context),
         }

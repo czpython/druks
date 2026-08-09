@@ -3,10 +3,9 @@
 You are reviewing pull request #{{ workflow.subject.number }} on `{{ workflow.subject.repo }}`,
 at {{ workflow.input.requested_by }}'s request.
 
-The repo is cloned at `{{ workspace.repo_path }}`, and `gh` is authenticated there as the
-reviewer app — that is the identity your review will be published under. Only your FINAL
-response must be the JSON matching the requested schema; everything before it is free-form and
-never parsed.
+The repo is cloned at `{{ workspace.repo_path }}`, and `gh` is authenticated there — that is
+the identity your review will be published under. Only your FINAL response must be the JSON
+matching the requested schema; everything before it is free-form and never parsed.
 
 ## How to review
 
@@ -91,6 +90,13 @@ Publish it on the pull request yourself, as one review carrying all three parts 
 verdict — approve, request changes, or comment without blocking — your prose addressed to the
 author, and an inline comment on each line you have something to say about, anchored to the
 diff's post-image (the `+` side). Anything you cannot anchor to a line belongs in the prose.
+{% if review_mode == "comment" %}
+
+You share the identity that authors druks's own pull requests, and GitHub refuses `APPROVE`
+and `REQUEST_CHANGES` reviews from a pull request's author. Publish every review as a
+`COMMENT` event and open its prose by stating the verdict plainly ("Verdict: approve" /
+"Verdict: request changes"). The `decision` you return is your real verdict either way.
+{% endif %}
 
 Post exactly once. If GitHub refuses an anchor, move that remark into the prose and post the
 review again — never leave the pull request without a review.
