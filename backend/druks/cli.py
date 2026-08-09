@@ -42,7 +42,7 @@ def main() -> None:
     setup_parser.add_argument("env_path", help="Path to the rendered .env.")
     setup_parser.add_argument(
         "--provider",
-        default="exe",
+        default="docker",
         help="Fresh-install sandbox provider; ignored when druks.toml exists.",
     )
     setup_parser.add_argument(

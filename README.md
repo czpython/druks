@@ -28,37 +28,23 @@ explains the exact boundary.
 The installer supports three deployment shapes backed by
 [Drukbox](https://github.com/czpython/drukbox):
 
-- `exe` (default): exe.dev sandbox VMs over a tailnet
-- any provider name other than `exe` or `docker`: the generic remote shape
-- `docker`: local sandbox containers, with Drukbox running on the host
+- `docker` (default): local sandbox containers on the host Docker daemon — the
+  zero-config laptop shape
+- `exe`: exe.dev sandbox VMs over a tailnet
+- any other provider name: the generic remote shape
 
-For a remote install:
+The default is the local shape, so the bare command boots a stack with no
+authored values:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/czpython/druks/main/scripts/install.sh | bash
+curl -fsSL https://druks.ai/install.sh | bash
 ```
 
 That command follows the edge channel while Druks has no stable release. Once
 versioned releases exist, install the script and image from the same tag as
 described in [the release process](https://github.com/czpython/druks/blob/main/docs/releasing.md#install-an-immutable-version).
-
-The installer is non-interactive. The first run creates `~/druks/druks.toml`
-with generated secrets and, when the shape still needs values only you know
-(remote provider credentials, identity edge), prints that checklist and exits;
-set them in `druks.toml` and re-run the same command. A boot-ready run renders
-`.env`, pulls images, runs migrations, and starts the stack. Re-running is also
-the upgrade path.
-See the [deployment runbook](https://github.com/czpython/druks/blob/main/deploy/README.md) for prerequisites, access
-control, verification, and rollback.
-
-For a laptop-only stack:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/czpython/druks/main/scripts/install.sh | DRUKS_PROVIDER=docker bash
-```
-
-The local shape needs no authored values — the first run boots the stack.
-Then follow [full local setup](https://github.com/czpython/druks/blob/main/docs/full-local.md) to finish in
+Re-running is also the upgrade path. Then follow
+[full local setup](https://github.com/czpython/druks/blob/main/docs/full-local.md) to finish in
 the dashboard: connect the agent harnesses and the GitHub App the bundled
 `ship` extension acts through; a standalone extension may have different
 integration requirements.
@@ -70,6 +56,20 @@ or any agent with shell access on the target machine:
 > <https://raw.githubusercontent.com/czpython/druks/main/INSTALL.md>
 > exactly: run every step's verification, and if one fails, stop and show me
 > the failing step and its output instead of improvising.
+
+For a remote install, name the provider — `exe` for exe.dev VMs, any other
+Drukbox provider name for the generic remote shape:
+
+```bash
+curl -fsSL https://druks.ai/install.sh | DRUKS_PROVIDER=exe bash
+```
+
+The installer is non-interactive: the first run writes `~/druks/druks.toml`
+with generated secrets, and when a remote shape still needs values only you
+know (provider credentials, identity edge) it prints that checklist and exits;
+set them in `druks.toml` and re-run the same command. See the
+[deployment runbook](https://github.com/czpython/druks/blob/main/deploy/README.md)
+for prerequisites, access control, verification, and rollback.
 
 ```text
 trigger ──> extension workflow ──> durable step ──> agent ──> sandbox

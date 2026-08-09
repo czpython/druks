@@ -23,7 +23,7 @@ call, not yours.
 ## 2. Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/czpython/druks/main/scripts/install.sh | DRUKS_PROVIDER=docker bash
+curl -fsSL https://druks.ai/install.sh | DRUKS_PROVIDER=docker bash
 ```
 
 Verification: the command exits 0 and ends with `docker compose up -d`

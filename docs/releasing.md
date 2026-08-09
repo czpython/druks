@@ -51,8 +51,8 @@ files it downloads. When `DRUKS_TAG` is omitted, a `v*` ref selects the matching
 image tag and a full commit SHA selects `sha-<full-git-sha>`.
 
 ```bash
-DRUKS_REF=v0.1.0 \
-  bash <(curl -fsSL https://raw.githubusercontent.com/czpython/druks/v0.1.0/scripts/install.sh)
+curl -fsSL https://raw.githubusercontent.com/czpython/druks/v0.1.0/scripts/install.sh \
+  | DRUKS_REF=v0.1.0 bash
 ```
 
 For rollback, prefer the immutable full-SHA tag recorded during release. Check
