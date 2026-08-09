@@ -1,4 +1,4 @@
-from druks.extensions import AgentApiError
+from druks.api.exceptions import AgentApiError
 
 
 class TicketNotFound(AgentApiError):

@@ -5,6 +5,7 @@ from sqlalchemy import func, select, update
 
 from druks.accounts.dependencies import current_account
 from druks.accounts.models import Account
+from druks.api.exceptions import agent_error_responses
 from druks.contrib.ship.exceptions import TicketNotFound, TrackerNotConfigured
 from druks.contrib.ship.extension import Ship
 from druks.contrib.ship.models import Project, ProjectRepo, WorkItem
@@ -24,7 +25,6 @@ from druks.contrib.ship.ticketing.exceptions import UnknownTicketError
 from druks.contrib.ship.workflows import Profile
 from druks.core.apis.github import get_github_client
 from druks.db import db_session
-from druks.extensions import agent_error_responses
 from druks.settings import load_settings
 
 logger = logging.getLogger(__name__)
