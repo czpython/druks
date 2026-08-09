@@ -25,8 +25,6 @@ _ENV_KEY_PATTERN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 # value from druks.toml directly. [env] and provider tables may not carry them.
 _OWNED_ENV_KEYS = frozenset(
     {
-        "GITHUB_OPERATOR_PEM",
-        "GITHUB_REVIEWER_PEM",
         "DRUKS_POSTGRES_PASSWORD",
         "DRUKS_DATA_DIR",
         "DRUKS_UPSTREAM",
@@ -45,12 +43,7 @@ _OWNED_ENV_KEYS = frozenset(
         "DRUKS_AUTH_JWT_AUDIENCE",
         "DRUKS_AUTH_JWT_IDENTITY_CLAIM",
         "DRUKS_ENDPOINT",
-        "DRUKS_WEBHOOK_SECRET",
         "DRUKS_SECRETS_KEY",
-        "GITHUB_OPERATOR_APP_ID",
-        "GITHUB_OPERATOR_PRIVATE_KEY_PATH",
-        "GITHUB_REVIEWER_APP_ID",
-        "GITHUB_REVIEWER_PRIVATE_KEY_PATH",
         "DRUKS_SANDBOX_SERVICE_URL",
         "DRUKS_SANDBOX_SERVICE_TOKEN",
         "DRUKS_SANDBOX_IMAGE",
@@ -65,11 +58,9 @@ _KNOWN_TOML_KEYS = {
         "jwt_audience",
         "jwt_identity_claim",
     ),
-    "github": ("operator_app_id", "reviewer_app_id", "operator_pem", "reviewer_pem"),
     "urls": ("endpoint", "webhook_host"),
     "secrets": (
         "postgres_password",
-        "webhook_secret",
         "secrets_key",
     ),
     "paths": ("data_dir", "claude_home", "codex_home", "claude_json"),
@@ -101,11 +92,8 @@ def run_setup(
     env_path: Path,
     *,
     provider: str,
-    install_dir: str,
     home: str,
-    interactive: bool,
     set_values: tuple[str, ...] = (),
-    input_fn: Callable[[str], str] = input,
     print_fn: Callable[[str], None] = print,
 ) -> int:
     toml_path = env_path.parent / "druks.toml"
@@ -113,9 +101,6 @@ def run_setup(
     is_changed = is_fresh
     if is_fresh:
         provider = provider.strip()
-        if interactive:
-            answer = input_fn(f"Sandbox provider [{provider}]: ").strip()
-            provider = answer or provider
         if not provider:
             raise ValueError("sandbox provider cannot be blank")
         document = tomlkit.parse(_TOML_TEMPLATE)
@@ -132,32 +117,21 @@ def run_setup(
     provider = _get_string(document, ("sandbox", "provider"))
     print_fn(_shape_message(provider))
 
-    if interactive:
-        is_changed = (
-            _prompt_values(
-                document,
-                is_fresh=is_fresh,
-                input_fn=input_fn,
-            )
-            or is_changed
-        )
-
     if is_changed:
         _write_toml(toml_path, document)
     config = _read_toml(toml_path)
     if is_fresh:
         _write_gitignore(env_path.parent / ".gitignore")
-        (env_path.parent / "secrets").mkdir(mode=0o700, exist_ok=True)
 
     existing_env = env_path.read_text() if env_path.exists() else ""
     extras = {key: value for key, value in read_env(env_path).items() if key in _COMPOSE_ENV_KEYS}
-    env_text = _render_env(config, install_dir=install_dir, extras=extras)
+    env_text = _render_env(config, extras=extras)
     _write_secure_text(env_path, env_text)
 
     if existing_env and existing_env != env_text:
         print_fn("Rendered .env changed. Apply it with: docker compose up -d")
 
-    gaps = _collect_gaps(config, env_path=env_path, install_dir=install_dir)
+    gaps = _collect_gaps(config)
     _print_outcome(print_fn, env_path=env_path, provider=provider, gaps=gaps)
     return GAPS_EXIT_CODE if gaps else 0
 
@@ -176,13 +150,6 @@ jwt_issuer = ""
 jwt_audience = ""
 jwt_identity_claim = "email"
 
-# GitHub Apps may also be provisioned with install.sh --apps.
-[github]
-operator_app_id = ""
-reviewer_app_id = ""
-operator_pem = "secrets/operator.pem"
-reviewer_pem = "secrets/reviewer.pem"
-
 # Public dashboard and webhook ingress addresses.
 [urls]
 endpoint = ""
@@ -191,10 +158,9 @@ webhook_host = ""
 # Generated on first write. Do not regenerate a deployed secret.
 [secrets]
 postgres_password = ""
-webhook_secret = ""
 secrets_key = ""
 
-# Host paths. Relative PEM paths are resolved against the install directory.
+# Host paths.
 [paths]
 data_dir = ""
 claude_home = ""
@@ -223,7 +189,10 @@ def _fresh_values(*, provider: str, home: str) -> tuple[tuple[tuple[str, ...], s
     if provider == "docker":
         shape = (
             (("identity", "mode"), "none"),
-            (("urls", "endpoint"), "http://localhost:8001"),
+            # The same origin every local doc and the installer banner print —
+            # browser flows built from the endpoint (the GitHub manifest
+            # callback's BroadcastChannel) are origin-scoped.
+            (("urls", "endpoint"), "http://127.0.0.1:8001"),
             (("sandbox", "service_url"), "http://127.0.0.1:8000"),
             (("sandbox", "service_token"), "dev-token"),
             (("sandbox", "image"), "ghcr.io/czpython/druks-sandbox:latest"),
@@ -254,7 +223,6 @@ def _fresh_values(*, provider: str, home: str) -> tuple[tuple[tuple[str, ...], s
     return (
         (("sandbox", "provider"), provider),
         (("secrets", "postgres_password"), _hex_secret()),
-        (("secrets", "webhook_secret"), _hex_secret()),
         (("secrets", "secrets_key"), _secrets_key()),
         (("paths", "data_dir"), f"{home.rstrip('/')}/druks-data"),
         (("paths", "claude_home"), f"{home.rstrip('/')}/.claude"),
@@ -354,81 +322,6 @@ def _parse_assignment(assignment: str) -> tuple[tuple[str, ...], str]:
     return path, value
 
 
-def _prompt_values(
-    document: tomlkit.TOMLDocument,
-    *,
-    is_fresh: bool,
-    input_fn: Callable[[str], str],
-) -> bool:
-    prompts = [
-        (
-            ("github", "operator_app_id"),
-            "Operator GitHub App id (or run install.sh --apps later)",
-            True,
-        ),
-        (
-            ("github", "reviewer_app_id"),
-            "Reviewer GitHub App id (or run install.sh --apps later)",
-            True,
-        ),
-        (
-            ("urls", "endpoint"),
-            "Base URL the operator's browser reaches druks at (enter to skip)",
-            False,
-        ),
-    ]
-    identity_mode = _get_string(document, ("identity", "mode"))
-    if identity_mode in {"header", "jwt"}:
-        prompts.append(
-            (
-                ("identity", "header"),
-                "Identity header your edge injects (e.g. X-Forwarded-Email)",
-                True,
-            )
-        )
-    if identity_mode == "jwt":
-        prompts.extend(
-            (
-                (("identity", "jwks_url"), "Identity edge JWKS URL", True),
-                (("identity", "jwt_issuer"), "Identity token issuer", True),
-                (("identity", "jwt_audience"), "Identity token audience", True),
-                (("identity", "jwt_identity_claim"), "Identity claim containing the email", True),
-            )
-        )
-
-    if _get_string(document, ("sandbox", "provider")) == "exe":
-        prompts.extend(
-            (
-                (("sandbox", "exe", "EXE_API_TOKEN"), "exe.dev API token", True),
-                (
-                    ("sandbox", "exe", "TAILSCALE_TAILNET"),
-                    'Tailscale magic-DNS suffix (e.g. "yourtail.ts.net")',
-                    True,
-                ),
-                (
-                    ("sandbox", "exe", "TAILSCALE_OAUTH_CLIENT_ID"),
-                    "Tailscale OAuth client id",
-                    False,
-                ),
-                (
-                    ("sandbox", "exe", "TAILSCALE_OAUTH_CLIENT_SECRET"),
-                    "Tailscale OAuth client secret",
-                    False,
-                ),
-            )
-        )
-
-    is_changed = False
-    for path, prompt, is_required in prompts:
-        if _get_string(document, path) or (not is_required and not is_fresh):
-            continue
-        answer = input_fn(f"{prompt}: ").strip()
-        if answer:
-            _set_value(document, path, answer)
-            is_changed = True
-    return is_changed
-
-
 def _write_toml(path: Path, document: tomlkit.TOMLDocument) -> None:
     text = tomlkit.dumps(document)
     _canonical_config(tomllib.loads(text))
@@ -438,27 +331,15 @@ def _write_toml(path: Path, document: tomlkit.TOMLDocument) -> None:
 def _render_env(
     config: dict[str, Any],
     *,
-    install_dir: str,
     extras: dict[str, str],
 ) -> str:
     provider = _get_string(config, ("sandbox", "provider"))
-
-    def pem(key: str) -> str:
-        configured = _get_string(config, ("github", key))
-        return _resolve_install_path(configured, install_dir) if configured else ""
 
     service_tokens = ""
     if provider != "docker":
         service_tokens = _get_string(config, ("sandbox", "service_token"))
 
     sections = (
-        (
-            "GITHUB",
-            (
-                ("GITHUB_OPERATOR_PEM", pem("operator_pem")),
-                ("GITHUB_REVIEWER_PEM", pem("reviewer_pem")),
-            ),
-        ),
         (
             "GENERATED SECRETS",
             (("DRUKS_POSTGRES_PASSWORD", _get_string(config, ("secrets", "postgres_password"))),),
@@ -556,30 +437,15 @@ def _env_line(key: str, value: str) -> str:
     return f"{key}={value}"
 
 
-def _resolve_install_path(value: str, install_dir: str) -> str:
-    path = Path(value)
-    if path.is_absolute():
-        return str(path)
-    return str(Path(install_dir.rstrip("/")) / path)
-
-
 def _is_reserved_env_key(key: str) -> bool:
     return key.startswith("DRUKS_") or key in _OWNED_ENV_KEYS
 
 
-def _collect_gaps(
-    config: dict[str, Any],
-    *,
-    env_path: Path,
-    install_dir: str,
-) -> list[str]:
+def _collect_gaps(config: dict[str, Any]) -> list[str]:
     gaps = [
         f"{'.'.join(path)} is empty"
         for path in (
-            ("github", "operator_app_id"),
-            ("github", "reviewer_app_id"),
             ("secrets", "postgres_password"),
-            ("secrets", "webhook_secret"),
             ("secrets", "secrets_key"),
             ("identity", "mode"),
             ("sandbox", "provider"),
@@ -629,22 +495,6 @@ def _collect_gaps(
         gaps.append(
             f"[sandbox.{provider}] has no configured values for remote provider {provider!r}"
         )
-
-    for key in ("operator_pem", "reviewer_pem"):
-        configured = _get_string(config, ("github", key))
-        if not configured:
-            gaps.append(f"github.{key} is empty")
-            continue
-        host_path = Path(_resolve_install_path(configured, install_dir))
-        install_path = Path(install_dir.rstrip("/"))
-        if host_path.is_relative_to(install_path):
-            local_path = env_path.parent / host_path.relative_to(install_path)
-        elif Path(configured).is_absolute():
-            continue
-        else:
-            local_path = env_path.parent / configured
-        if not local_path.is_file():
-            gaps.append(f"{host_path} is missing (upload the PEM, or run install.sh --apps)")
     return gaps
 
 
@@ -662,7 +512,7 @@ def _write_secure_text(path: Path, text: str) -> None:
 
 def _write_gitignore(path: Path) -> None:
     existing = path.read_text().splitlines() if path.exists() else []
-    missing = [entry for entry in ("druks.toml", ".env", "secrets/") if entry not in existing]
+    missing = [entry for entry in ("druks.toml", ".env") if entry not in existing]
     if missing:
         body = "\n".join((*existing, *missing)).lstrip("\n") + "\n"
         path.write_text(body)
@@ -693,9 +543,6 @@ def _print_outcome(
         for gap in gaps:
             print_fn(f"  - {gap}")
         print_fn("")
-        if provider == "docker":
-            print_fn("Start host-run drukbox, then re-run the installer.")
-        else:
-            print_fn("Complete the remote shape values, then re-run the installer.")
+        print_fn("Set the values in druks.toml, then re-run the installer.")
     else:
         print_fn(f"✓ {env_path} is complete (provider: {provider}).")

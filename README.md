@@ -35,30 +35,33 @@ The installer supports three deployment shapes backed by
 For a remote install:
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/czpython/druks/main/scripts/install.sh)
+curl -fsSL https://raw.githubusercontent.com/czpython/druks/main/scripts/install.sh | bash
 ```
 
 That command follows the edge channel while Druks has no stable release. Once
 versioned releases exist, install the script and image from the same tag as
 described in [the release process](https://github.com/czpython/druks/blob/main/docs/releasing.md#install-an-immutable-version).
 
-The first run creates `~/druks/druks.toml`, generates secrets, renders `.env`,
-and prints any values still required. Edit `druks.toml`, then re-run the same
-command; it renders the complete `.env` artifact, pulls images, runs migrations,
-and starts the stack. Re-running is also the upgrade path.
+The installer is non-interactive. The first run creates `~/druks/druks.toml`
+with generated secrets and, when the shape still needs values only you know
+(remote provider credentials, identity edge), prints that checklist and exits;
+set them in `druks.toml` and re-run the same command. A boot-ready run renders
+`.env`, pulls images, runs migrations, and starts the stack. Re-running is also
+the upgrade path.
 See the [deployment runbook](https://github.com/czpython/druks/blob/main/deploy/README.md) for prerequisites, access
 control, verification, and rollback.
 
 For a laptop-only stack:
 
 ```bash
-DRUKS_PROVIDER=docker bash <(curl -fsSL https://raw.githubusercontent.com/czpython/druks/main/scripts/install.sh)
+curl -fsSL https://raw.githubusercontent.com/czpython/druks/main/scripts/install.sh | DRUKS_PROVIDER=docker bash
 ```
 
-Then follow [full local setup](https://github.com/czpython/druks/blob/main/docs/full-local.md) to start Drukbox and connect
-the agent harnesses. A complete installation needs GitHub Apps because the
-bundled `ship` extension is installed; a standalone extension may have
-different integration requirements.
+The local shape needs no authored values — the first run boots the stack.
+Then follow [full local setup](https://github.com/czpython/druks/blob/main/docs/full-local.md) to start Drukbox and finish in
+the dashboard: connect the agent harnesses and the GitHub App the bundled
+`ship` extension acts through; a standalone extension may have different
+integration requirements.
 
 ```text
 trigger ──> extension workflow ──> durable step ──> agent ──> sandbox
