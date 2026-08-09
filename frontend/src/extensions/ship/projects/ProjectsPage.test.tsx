@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { projectsApi } from './api'
 import { ProjectsPage } from './ProjectsPage'
-import type { ProjectListItem, ProjectsResponse } from './types'
+import type { Project, ProjectsResponse } from './types'
 
 // The page reads the projects list and the repo board through projectsApi and
 // deletes through it — stub the module so the test drives those directly.
@@ -20,19 +20,18 @@ const listMock = vi.mocked(projectsApi.list)
 const repoBoardMock = vi.mocked(projectsApi.repoBoard)
 const deleteMock = vi.mocked(projectsApi.delete)
 
-function project(overrides: Partial<ProjectListItem> = {}): ProjectListItem {
+function project(overrides: Partial<Project> = {}): Project {
   return {
     id: 7,
     name: 'Target',
     createdAt: '2026-01-01T00:00:00Z',
     updatedAt: '2026-01-01T00:00:00Z',
     repos: [],
-    workItemCount: 2,
     ...overrides,
   }
 }
 
-function renderPage(projects: ProjectListItem[]) {
+function renderPage(projects: Project[]) {
   listMock.mockResolvedValue({ projects } satisfies ProjectsResponse)
   repoBoardMock.mockResolvedValue({ rows: [] })
   const queryClient = new QueryClient({
@@ -52,16 +51,16 @@ afterEach(() => {
 })
 
 describe('ProjectsPage delete', () => {
-  it('confirms with the project name and work-item count, and sends no DELETE on cancel', async () => {
+  it('confirms with the project name and destructive scope, and sends no DELETE on cancel', async () => {
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
-    renderPage([project({ name: 'Target', workItemCount: 2 })])
+    renderPage([project({ name: 'Target' })])
 
     fireEvent.click(await screen.findByText('delete'))
 
     expect(confirmSpy).toHaveBeenCalledTimes(1)
     const prompt = confirmSpy.mock.calls[0]![0] as string
     expect(prompt).toContain('Target')
-    expect(prompt).toContain('2 work items')
+    expect(prompt).toContain('every work item it owns')
     expect(deleteMock).not.toHaveBeenCalled()
   })
 

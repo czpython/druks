@@ -15,7 +15,6 @@ from druks.contrib.ship.schemas import (
     DashboardItem,
     GitHubReposResponse,
     GitHubRepoSummary,
-    ProjectListItem,
     ProjectRepoSummary,
     ProjectsResponse,
     ProjectSummary,
@@ -38,24 +37,8 @@ projects_router = APIRouter(prefix="/projects", tags=["projects"])
 
 @projects_router.get("", response_model=ProjectsResponse, response_model_by_alias=True)
 async def list_projects() -> ProjectsResponse:
-    # Each project's total work-item count — every child, resolved or not — so the
-    # dashboard states a delete's full destructive scope, including closed items.
-    work_item_count = (
-        select(func.count())
-        .select_from(WorkItem)
-        .where(WorkItem.project_id == Project.id)
-        .scalar_subquery()
-    )
-    rows = (
-        db_session()
-        .execute(select(Project, work_item_count.label("work_item_count")).order_by(Project.name))
-        .all()
-    )
-    projects = []
-    for project, count in rows:
-        project.work_item_count = count
-        projects.append(ProjectListItem.model_validate(project))
-    return ProjectsResponse(projects=projects)
+    rows = list(db_session().scalars(select(Project).order_by(Project.name)))
+    return ProjectsResponse(projects=[ProjectSummary.model_validate(p) for p in rows])
 
 
 @projects_router.post(

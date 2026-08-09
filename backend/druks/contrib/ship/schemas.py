@@ -31,16 +31,8 @@ class ProjectSummary(BaseResponse):
     repos: list[ProjectRepoSummary] = Field(default_factory=list)
 
 
-class ProjectListItem(ProjectSummary):
-    # The projects list adds each project's total work-item count — every child,
-    # resolved or not — so the dashboard can state a delete's full destructive
-    # scope. Kept off the plain ``ProjectSummary`` so the detail and mutation
-    # responses aren't widened with a field they don't populate.
-    work_item_count: int
-
-
 class ProjectsResponse(BaseResponse):
-    projects: list[ProjectListItem]
+    projects: list[ProjectSummary]
 
 
 class CreateProjectRequest(BaseModel):

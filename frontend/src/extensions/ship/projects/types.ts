@@ -34,15 +34,8 @@ export interface Project {
   repos: ProjectRepo[]
 }
 
-// The projects list carries each project's total work-item count — resolved items
-// included — so the delete confirmation can state a project's full destructive
-// scope. Only the list projection populates it; the detail/mutation shapes don't.
-export interface ProjectListItem extends Project {
-  workItemCount: number
-}
-
 export interface ProjectsResponse {
-  projects: ProjectListItem[]
+  projects: Project[]
 }
 
 export interface CreateProjectRequest {

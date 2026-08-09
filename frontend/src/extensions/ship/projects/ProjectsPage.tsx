@@ -6,7 +6,7 @@ import { Page } from '../../../components/Page'
 import { useFlashNote } from '../../../lib/useFlashNote'
 import { projectsApi } from './api'
 import { repoProfiling, useRepoRuns, type RepoProfiling } from './profiling'
-import type { ProjectListItem, ProjectRepo } from './types'
+import type { Project, ProjectRepo } from './types'
 
 function splitRepo(full: string): { org: string; short: string } {
   const i = full.indexOf('/')
@@ -151,7 +151,7 @@ function ProjectCard({
   project,
   onDeleteError,
 }: {
-  project: ProjectListItem
+  project: Project
   onDeleteError: (message: string) => void
 }) {
   const queryClient = useQueryClient()
@@ -178,7 +178,6 @@ function ProjectCard({
   })
 
   const repoCount = `${project.repos.length} ${project.repos.length === 1 ? 'repo' : 'repos'}`
-  const workItems = `${project.workItemCount} ${project.workItemCount === 1 ? 'work item' : 'work items'}`
 
   return (
     <section className={`pj-card ${collapsed ? 'pj-card-collapsed' : ''}`}>
@@ -232,7 +231,7 @@ function ProjectCard({
           onClick={() => {
             if (
               confirm(
-                `Delete project "${project.name}" and its ${workItems}? This permanently deletes the project and every work item it owns.`,
+                `Delete project "${project.name}"? This permanently deletes the project and every work item it owns.`,
               )
             ) {
               remove.mutate()

@@ -124,26 +124,6 @@ def _make_work_item(project_id: int, ticket_key: str, *, resolved: bool = False)
     return item
 
 
-def test_projects_list_reports_total_work_item_count_including_resolved(
-    client: TestClient, druks_db
-):
-    """The projects list carries each project's full child count — resolved items
-    included — so the dashboard states a delete's real scope (the closed-item case
-    that caused ENG-846), and one project's items never leak into another's count."""
-    from druks.contrib.ship.models import Project
-
-    target = Project.create(name="Target")
-    control = Project.create(name="Control")
-    _make_work_item(target.id, "ENG-1")
-    _make_work_item(target.id, "ENG-2", resolved=True)
-    _make_work_item(control.id, "ENG-3")
-
-    projects = {p["name"]: p for p in client.get("/api/ship/projects").json()["projects"]}
-
-    assert projects["Target"]["workItemCount"] == 2
-    assert projects["Control"]["workItemCount"] == 1
-
-
 def test_deleting_a_project_cascades_its_work_items_and_spares_others(client: TestClient, druks_db):
     """DELETE cascades: the project and every work item it owns go, with no 409
     reference guard — while another project's graph is left fully intact."""
