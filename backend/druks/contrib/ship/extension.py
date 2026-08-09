@@ -134,7 +134,7 @@ class Ship(Extension):
         work item syncs only to the tracker that owns it."""
         settings = cls.settings()
         if source is not None and source != settings.tracker:
-            return None
+            return
         if settings.tracker == "linear" and settings.linear_api_key:
             return Linear(
                 api_key=settings.linear_api_key.get_secret_value(),
@@ -154,7 +154,7 @@ class Ship(Extension):
                 backlog_status=settings.jira_resting_status,
                 trigger_status=settings.trigger_status,
             )
-        return None
+        return
 
     # The build pipeline's agents — the extension owns them; any of its workflows run
     # them. The attribute name is each agent's id (its durable settings/timeline key).
