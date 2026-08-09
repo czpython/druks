@@ -161,16 +161,25 @@ second. Agents consume the API through the MCP endpoint; see
 Druks acts at GitHub as one **operator App** — its service identity. The App
 receives webhooks and performs application-owned writes such as branches,
 pull requests, comments, labels, and merges. Its credentials live encrypted
-in Postgres, pasted in from **Settings → Harnesses → Connect GitHub**: the
-App ID, the PEM private key exactly as GitHub issued it, and the webhook
-secret. Connecting validates the pasted credentials against GitHub and stores
-the App's slug; from then on every operator client resolves from that row and
-webhook deliveries verify against its stored secret. There is no TOML,
-environment, or PEM-file source — until GitHub is connected, agent runs
-refuse with a pointed message and `druks doctor` reports the identity as not
-connected.
+in Postgres; there is no TOML, environment, or PEM-file source — until GitHub
+is connected, agent runs refuse with a pointed message and `druks doctor`
+reports the identity as not connected.
 
-Registering the App by hand:
+Connect it from **Settings → Harnesses**. **Create GitHub App** registers the
+App through GitHub's manifest flow: name a GitHub org (or leave it empty for
+a personal account), confirm on GitHub, and druks stores the created App's
+credentials and sends you on to install it on your repositories. Creating the
+App needs `urls.endpoint` set to the base URL the operator's browser reaches
+druks at, and the webhook lands on `urls.webhook_host` when configured, the
+endpoint host otherwise.
+
+Alternatively paste an existing App's credentials into the same card: the App
+ID, the PEM private key exactly as GitHub issued it, and the webhook secret.
+Connecting validates the pasted credentials against GitHub and stores the
+App's slug; from then on every operator client resolves from that row and
+webhook deliveries verify against its stored secret.
+
+Registering the App by hand instead:
 
 Webhook URL:
 `https://<webhook-host>/_external/github/events/`
