@@ -32,7 +32,7 @@ def test_settings_require_jira_webhook_secret_once_the_api_token_is_set():
     assert settings.clean() == {"jira_webhook_secret": "Required once the Jira API token is set."}
 
 
-# --- Ship.tracker: source → configured tracker ------------------------------
+# --- Ship.get_tracker: the configured tracker -------------------------------
 
 
 def test_tracker_builds_linear_from_settings(monkeypatch):
@@ -43,7 +43,7 @@ def test_tracker_builds_linear_from_settings(monkeypatch):
         linear_trigger_status="To Agent",
     )
 
-    tracker = Ship.tracker("linear")
+    tracker = Ship.get_tracker("linear")
 
     assert isinstance(tracker, Linear)
     assert tracker._status_names[TicketStatus.BACKLOG] == "Backlog"
@@ -61,7 +61,7 @@ def test_tracker_builds_jira_from_settings(monkeypatch):
         jira_trigger_status="To Agent",
     )
 
-    tracker = Ship.tracker("jira")
+    tracker = Ship.get_tracker("jira")
 
     assert isinstance(tracker, Jira)
     assert tracker._status_names[TicketStatus.BACKLOG] == "Open"
@@ -71,26 +71,26 @@ def test_tracker_builds_jira_from_settings(monkeypatch):
 def test_tracker_is_none_for_github_and_missing_credentials(monkeypatch):
     _pin_ship_settings(monkeypatch, linear_api_key="lin_secret")
 
-    assert not Ship.tracker("github")
-    assert not Ship.tracker("jira")
+    assert not Ship.get_tracker("github")
+    assert not Ship.get_tracker("jira")
 
     _pin_ship_settings(
         monkeypatch, tracker="jira", jira_base_url="https://jira.test", jira_email="a@b.com"
     )
-    assert not Ship.tracker("jira")
-    assert not Ship.tracker("linear")
+    assert not Ship.get_tracker("jira")
+    assert not Ship.get_tracker("linear")
 
 
 def test_tracker_ignores_a_nonchosen_source_with_credentials(monkeypatch):
     _pin_ship_settings(monkeypatch, tracker="jira", linear_api_key="lin_secret")
 
-    assert not Ship.tracker("linear")
+    assert not Ship.get_tracker("linear")
 
 
 def test_empty_resting_status_leaves_backlog_unmapped(monkeypatch):
     _pin_ship_settings(monkeypatch, linear_api_key="lin_secret", linear_resting_status="")
 
-    tracker = Ship.tracker("linear")
+    tracker = Ship.get_tracker("linear")
 
     assert TicketStatus.BACKLOG not in tracker._status_names
 
@@ -260,7 +260,7 @@ class _FakeTracker:
 async def test_ticket_state_pushes_status(druks_db, monkeypatch):
     item = make_test_work_item(repo="acme/widget", source="linear", ticket_key="ACME-1", title="t")
     fake = _FakeTracker()
-    monkeypatch.setattr(Ship, "tracker", classmethod(lambda cls, source: fake))
+    monkeypatch.setattr(Ship, "get_tracker", classmethod(lambda cls, source=None: fake))
 
     await item.set_ticket_status(TicketStatus.DONE)
 
@@ -285,7 +285,7 @@ async def test_ticket_state_closes_on_failure(druks_db, monkeypatch):
             raise LinearAPIError("boom")
 
     boom = _Boom()
-    monkeypatch.setattr(Ship, "tracker", classmethod(lambda cls, source: boom))
+    monkeypatch.setattr(Ship, "get_tracker", classmethod(lambda cls, source=None: boom))
 
     await item.set_ticket_status(TicketStatus.DONE)
 

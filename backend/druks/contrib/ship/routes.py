@@ -5,7 +5,6 @@ from sqlalchemy import func, select, update
 
 from druks.accounts.dependencies import current_account
 from druks.accounts.models import Account
-from druks.api.exceptions import agent_error_responses
 from druks.contrib.ship.exceptions import TicketNotFound, TrackerNotConfigured
 from druks.contrib.ship.extension import Ship
 from druks.contrib.ship.models import Project, ProjectRepo, WorkItem
@@ -25,6 +24,7 @@ from druks.contrib.ship.ticketing.exceptions import UnknownTicketError
 from druks.contrib.ship.workflows import Profile
 from druks.core.apis.github import get_github_client
 from druks.db import db_session
+from druks.extensions import agent_error_responses
 from druks.settings import load_settings
 
 logger = logging.getLogger(__name__)
@@ -279,7 +279,7 @@ async def start_work_item(
     """Move the tracker ticket to the configured trigger status; webhook intake
     then opens the build. No run exists yet when this returns — poll
     list_open_subjects while waiting for it."""
-    tracker = Ship.tracker(Ship.settings().tracker)
+    tracker = Ship.get_tracker()
     if not tracker:
         raise TrackerNotConfigured()
     async with tracker:

@@ -367,8 +367,9 @@ class WorkItem(StoredSubject):
         # Lazy: the Ship extension imports this module, so it can't be imported at top.
         import druks.contrib.ship.extension as ship_extension
 
-        tracker = ship_extension.Ship.tracker(self.source)
-        # No tracker means nothing to sync (github, or credentials not set yet).
+        tracker = ship_extension.Ship.get_tracker(self.source)
+        # No tracker means nothing to sync: a github item, a source the operator
+        # has switched away from, or credentials not set yet.
         if not tracker:
             return
 

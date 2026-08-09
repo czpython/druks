@@ -183,7 +183,7 @@ def test_ship_start_stamps_the_trigger_status_for_known_and_unknown_tickets(
     )
     _, pat_token = PersonalAccessToken.create(account_id=account.id, name="agent")
     fake = _FakeTracker()
-    monkeypatch.setattr(Ship, "tracker", classmethod(lambda cls, source: fake))
+    monkeypatch.setattr(Ship, "get_tracker", classmethod(lambda cls, source=None: fake))
     starts = []
 
     async def start(cls, **kwargs):
@@ -215,7 +215,7 @@ def test_ship_start_stamps_the_trigger_status_for_known_and_unknown_tickets(
 
 def test_ship_start_translates_an_unknown_tracker_ticket(client: TestClient, monkeypatch):
     fake = _FakeTracker(error=UnknownTicketError("ENG-9999", "Linear"))
-    monkeypatch.setattr(Ship, "tracker", classmethod(lambda cls, source: fake))
+    monkeypatch.setattr(Ship, "get_tracker", classmethod(lambda cls, source=None: fake))
 
     response = client.post("/api/ship/work-items/ENG-9999/start")
 
@@ -243,7 +243,7 @@ def test_ship_start_does_not_acknowledge_a_tracker_failure(tmp_path, druks_db, m
     monkeypatch.setenv("DRUKS_DATA_DIR", str(tmp_path))
     app = configure_app_for_test(settings=make_settings(tmp_path))
     fake = _FakeTracker(error=LinearAPIError("linear fell over"))
-    monkeypatch.setattr(Ship, "tracker", classmethod(lambda cls, source: fake))
+    monkeypatch.setattr(Ship, "get_tracker", classmethod(lambda cls, source=None: fake))
 
     with TestClient(app, raise_server_exceptions=False) as failing:
         response = failing.post("/api/ship/work-items/ENG-831/start")
