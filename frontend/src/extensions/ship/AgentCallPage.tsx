@@ -6,6 +6,7 @@ import { buildApi } from './api'
 import type { WorkItemSummary } from './api'
 import type { AgentCallFiles, AgentCallSummary } from '../../api/types'
 import { Cost, Kebab, SectionHead, TokenBreakdown, Tokens } from '../../components/Common'
+import { Markdown } from '../../components/Markdown'
 import { Page } from '../../components/Page'
 import { queryGate } from '../../components/QueryGate'
 import { RunTranscript } from '../../components/RunTranscript'
@@ -80,11 +81,18 @@ function RunView({
           : 'running'
   }`
 
-  type LeftTab = 'prompt' | 'response'
+  type LeftTab = 'artifact' | 'prompt' | 'response'
 
-  const initialLeft: LeftTab = files.prompt ? 'prompt' : 'response'
+  // The artifact is the call's headline output (a plan's markdown) — front it
+  // when the call produced one.
+  const initialLeft: LeftTab = files.artifact ? 'artifact' : files.prompt ? 'prompt' : 'response'
   const [leftTab, setLeftTab] = useState<LeftTab>(initialLeft)
-  const activeFile = leftTab === 'prompt' ? files.prompt : files.response
+  const activeName =
+    leftTab === 'artifact'
+      ? files.artifact?.name
+      : leftTab === 'prompt'
+        ? files.prompt?.name
+        : files.response?.name
 
   return (
     <Page scroll="internal" className="page-run">
@@ -127,6 +135,15 @@ function RunView({
       <div className="run-body">
         <section className="run-col run-col-left">
           <div className="run-col-tabs">
+            {files.artifact && (
+              <button
+                className={`run-tab mono ${leftTab === 'artifact' ? 'active' : ''}`}
+                onClick={() => setLeftTab('artifact')}
+                type="button"
+              >
+                artifact
+              </button>
+            )}
             <button
               className={`run-tab mono ${leftTab === 'prompt' ? 'active' : ''}`}
               onClick={() => setLeftTab('prompt')}
@@ -144,7 +161,10 @@ function RunView({
               response
             </button>
           </div>
-          <FilePane url={activeFile ? buildApi.transcriptFile(call.id, activeFile.name) : null} />
+          <FilePane
+            url={activeName ? buildApi.transcriptFile(call.id, activeName) : null}
+            markdown={leftTab === 'artifact' && files.artifact?.kind === 'markdown'}
+          />
         </section>
 
         <section className="run-col run-col-right">
@@ -202,7 +222,7 @@ function TokensStat({ call }: { call: AgentCallSummary }) {
   )
 }
 
-function FilePane({ url }: { url: string | null }) {
+function FilePane({ url, markdown = false }: { url: string | null; markdown?: boolean }) {
   const { data, isLoading, isError } = useQuery({
     queryKey: ['file', url],
     queryFn: async () => {
@@ -216,5 +236,12 @@ function FilePane({ url }: { url: string | null }) {
   if (!url) return <pre className="run-pre mono dim">no file</pre>
   if (isLoading) return <pre className="run-pre mono dim">loading…</pre>
   if (isError) return <pre className="run-pre mono dim">could not load file</pre>
+  if (markdown) {
+    return (
+      <div className="run-markdown">
+        <Markdown source={data ?? ''} />
+      </div>
+    )
+  }
   return <pre className="run-pre mono">{data}</pre>
 }

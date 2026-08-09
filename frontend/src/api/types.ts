@@ -152,6 +152,15 @@ export interface ArtifactFile {
   updatedAt: string
 }
 
+// A call's renderable output (a plan's markdown), rendered by kind — distinct
+// from the raw files. name is its file in the call dir, downloadable from the
+// transcript files route like any other.
+export interface ArtifactDescriptor {
+  kind: string
+  title: string
+  name: string
+}
+
 // A call's on-disk artifacts by role. Each carries its file name; the client
 // composes the download URL from the transcript route it fetched this listing
 // from (subjectApi.transcriptFile).
@@ -161,6 +170,7 @@ export interface AgentCallFiles {
   stderr?: ArtifactFile | null
   response?: ArtifactFile | null
   metadata?: ArtifactFile | null
+  artifact?: ArtifactDescriptor | null
 }
 
 export interface TranscriptChunk {
