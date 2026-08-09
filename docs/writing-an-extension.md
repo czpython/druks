@@ -63,11 +63,12 @@ application modules:
 | `routes.py` | FastAPI routers |
 | `subscribers.py` | signal reactions |
 | `webhooks.py` | authenticated provider deliveries; add when needed |
+| `services.py` | `Service` declarations — the appliance's own credentials at external providers; add when needed |
 | `migrations/versions/` | this distribution's Alembic history |
 | `dist/` | optional standalone frontend served at `/app/<name>` |
 
 Druks recursively discovers leaf modules named `workflows`, `routes`,
-`subscribers`, and `webhooks`. A capability hidden in `workflow.py` is not
+`subscribers`, `webhooks`, and `services`. A capability hidden in `workflow.py` is not
 discovered. Ordinary names such as `policy.py` and `workspace.py` have no import
 side effect unless a discovered module imports them.
 
@@ -610,6 +611,58 @@ segments — `<subject_type>` and `transcripts` — are matched before your rout
 so nothing you declare can take a read druks serves, not even a catch-all. Name a
 router for its own resource and the question never comes up.
 
+## Declare a service identity
+
+A service identity is the appliance's own registered app at an external
+provider — one per deployment, keyed by a service string; the platform's
+GitHub App is the first one. Per-user OAuth grants are not service identities
+(keep those on your own rows), and a credential only your extension posts with
+belongs in your extension settings instead.
+
+Declare one class in `services.py` and the platform does the rest: it renders
+the connect card in Settings, verifies and stores the paste (`SecretStr`
+fields land encrypted, plain fields become identity facts), and reports
+`druks doctor` state:
+
+```python
+from pydantic import BaseModel, Field, SecretStr
+
+from druks.services import Service, ServiceConnectError
+
+
+class Gmail(Service):
+    name = "gmail"
+    title = "Google OAuth client"
+    description = "The appliance's own OAuth client — every mailbox authenticates against it."
+
+    class Settings(BaseModel):
+        client_id: str = Field(title="Client ID")
+        client_secret: SecretStr = Field(title="Client secret")
+```
+
+Read it back through the same class:
+
+```python
+Gmail.get().secrets["client_secret"]   # raises ServiceNotConnectedError when unset
+Gmail.is_connected()
+```
+
+An optional `verify` classmethod proves the paste against the live provider
+before anything replaces a working identity. It returns extra identity facts
+to store, and raises `ServiceConnectError` with a message safe to show — the
+platform never echoes what the operator pasted:
+
+```python
+@classmethod
+async def verify(cls, settings: Settings) -> dict:
+    if not await probe(settings):
+        raise ServiceConnectError("The provider did not accept these credentials.")
+    return {}
+```
+
+Set `required = False` on the class when the appliance is healthy without the
+service connected; doctor then notes it instead of reporting pending setup.
+
 ## Extension settings and checks
 
 An inner `ExtensionSettings` class defines dashboard-editable knobs and owns their
@@ -751,6 +804,7 @@ Import from concern namespaces, not from `druks.durable` or internal modules:
 | Namespace | Public names |
 | --- | --- |
 | `druks.extensions` | `Extension`, `ExtensionSettings`, `Secret` |
+| `druks.services` | `Service`, `ServiceConnectError`, `ServiceNotConnectedError` |
 | `druks.agents` | `Agent`, `AgentOutput` |
 | `druks.workflows` | `Workflow`, `Gate`, `step`, run/agent response types, lifecycle enums and workflow errors |
 | `druks.db` | `Base`, `StoredSubject`, `db_session` |
