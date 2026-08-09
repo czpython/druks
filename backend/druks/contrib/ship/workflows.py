@@ -22,8 +22,8 @@ from druks.sandbox.layout import (
     get_repo_root,
     get_work_root,
 )
-from druks.service_identities.exceptions import ServiceNotConnectedError
-from druks.service_identities.models import ServiceIdentity
+from druks.services.exceptions import ServiceNotConnectedError
+from druks.services.models import ServiceIdentity
 from druks.settings import load_settings
 from druks.skills.models import Skill
 from druks.workflows import FatalError, Workflow, step

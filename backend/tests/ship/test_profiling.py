@@ -4,8 +4,8 @@ from druks.contrib.ship.models import Project, ProjectRepo
 from druks.contrib.ship.policy import RepoPolicy, VerificationProfile
 from druks.contrib.ship.workflows import Profile
 from druks.durable.engine import configure_engine
-from druks.service_identities.exceptions import ServiceNotConnectedError
-from druks.service_identities.models import ServiceIdentity
+from druks.services.exceptions import ServiceNotConnectedError
+from druks.services.models import ServiceIdentity
 from druks.skills.datastructures import InstalledSkill
 from druks.skills.models import SkillCollection
 

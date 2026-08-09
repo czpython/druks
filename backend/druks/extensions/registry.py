@@ -8,7 +8,7 @@ from typing import Any
 # imports exactly these (``routes`` defines routers the loader mounts; the rest
 # fire registration as an import side effect). The set is the single source of
 # truth for what "a capability module" is named.
-_ROLES = frozenset({"webhooks", "subscribers", "workflows", "routes"})
+_ROLES = frozenset({"webhooks", "subscribers", "workflows", "routes", "services"})
 
 
 class Registry:
@@ -62,6 +62,7 @@ def autodiscover(package: str) -> list[ModuleType]:
 
 
 webhooks = Registry("webhooks", key=lambda cls: f"{cls.__module__}.{cls.__qualname__}")
+services = Registry("services", key=lambda cls: cls.name)
 workflows = Registry("workflows", key=lambda cls: cls.kind)
 agents = Registry("agents", key=lambda agent: agent.id)
 # MCP server definitions from the deployment's catalog, mounted by an explicit

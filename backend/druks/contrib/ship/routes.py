@@ -25,7 +25,7 @@ from druks.contrib.ship.ticketing.exceptions import UnknownTicketError
 from druks.contrib.ship.workflows import Profile
 from druks.core.apis.github import get_github_client
 from druks.db import db_session
-from druks.service_identities.exceptions import ServiceNotConnectedError
+from druks.services.exceptions import ServiceNotConnectedError
 
 logger = logging.getLogger(__name__)
 

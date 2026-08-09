@@ -3,11 +3,9 @@ import type {
   AgentCallFiles,
   ArtifactContent,
   ConnectChallenge,
-  ConnectGitHubRequest,
   DashboardHealth,
   FeedResponse,
   ExtensionsSettingsResponse,
-  GitHubServiceIdentity,
   Harness,
   Identity,
   Pat,
@@ -21,6 +19,7 @@ import type {
   UsageTodayResponse,
   McpRegistryCandidate,
   McpServer,
+  ServiceIdentity,
   Skill,
   SkillCollection,
   UserSettings,
@@ -216,11 +215,12 @@ export const api = {
     }),
   disconnectHarness: (name: string) =>
     deleteJSON<Harness>(`/api/harnesses/${encodeURIComponent(name)}/connection`),
-  // The appliance's own GitHub App identity — connect validates the pasted
-  // credentials against GitHub before anything replaces a working identity.
-  githubIdentity: () => getJSON<GitHubServiceIdentity>('/api/service-identities/github'),
-  connectGithubIdentity: (body: ConnectGitHubRequest) =>
-    postJSON<GitHubServiceIdentity>('/api/service-identities/github', body),
+  // The appliance's own identities at external services — connect verifies the
+  // pasted credentials against the provider before anything replaces a working
+  // identity. Field names come from each entry's spec.
+  serviceIdentities: () => getJSON<ServiceIdentity[]>('/api/service-identities'),
+  connectServiceIdentity: (service: string, fields: Record<string, string>) =>
+    postJSON<ServiceIdentity>(`/api/service-identities/${encodeURIComponent(service)}`, fields),
   getExtensionSettings: () => getJSON<ExtensionsSettingsResponse>('/api/settings/extensions'),
   updateExtensionSettings: (body: UpdateExtensionsSettingsRequest) =>
     patchJSON<ExtensionsSettingsResponse>('/api/settings/extensions', body),

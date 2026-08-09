@@ -1,0 +1,10 @@
+<html>
+<body>
+<p>Created GitHub App <b>{{ slug }}</b>.
+  Next, <a href="{{ install_url }}">install it on your repositories</a>.</p>
+<script>
+  new BroadcastChannel('druks-service-connect').postMessage({{ service | tojson }});
+  window.location.replace({{ install_url | tojson }});
+</script>
+</body>
+</html>

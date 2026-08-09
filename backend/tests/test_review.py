@@ -9,8 +9,8 @@ from druks.contrib.review.github import get_review_actor
 from druks.contrib.review.workflows import PullRequestReview
 from druks.extensions.settings import field_kind, field_multiline
 from druks.prompts import render_prompt
-from druks.service_identities.exceptions import ServiceNotConnectedError
-from druks.service_identities.models import ServiceIdentity
+from druks.services.exceptions import ServiceNotConnectedError
+from druks.services.models import ServiceIdentity
 from druks.signals import publish
 from druks.testing import configure_app_for_test, make_settings, seed_run
 from druks.user_settings.models import SettingsOverride

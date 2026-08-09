@@ -5,3 +5,8 @@ class ServiceNotConnectedError(Exception):
     def __init__(self, service: str) -> None:
         self.service = service
         super().__init__(f"{service} is not connected — connect it in Settings → Harnesses.")
+
+
+class ServiceConnectError(Exception):
+    """A rejected connect. The message is authored by the service's ``verify``
+    and safe to show; it never quotes anything the operator pasted."""

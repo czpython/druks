@@ -16,15 +16,15 @@ from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from .agents import Agent
-from .core.apis.github import GITHUB, get_github_client
+from .core.apis.github import get_github_client
 from .database import create_engine_from_url, db_session
 from .extensions.loader import iter_extensions
-from .extensions.registry import _ROLES, agents, autodiscover, webhooks, workflows
+from .extensions.registry import _ROLES, agents, autodiscover, services, webhooks, workflows
 from .harnesses.models import HarnessConnection
 from .harnesses.registry import get_harnesses
 from .sandbox.client import sandbox_client
-from .service_identities.exceptions import ServiceNotConnectedError
-from .service_identities.models import ServiceIdentity
+from .services import Service, ServiceNotConnectedError
+from .services.models import ServiceIdentity
 from .settings import Settings, load_settings
 from .user_settings.models import UserSettings
 from .webhooks.base import Webhook
@@ -42,33 +42,45 @@ class CheckResult:
     pending: bool = False
 
 
-def check_github_identity(settings: Settings) -> CheckResult:
-    """The GitHub service identity is database-backed like a harness
-    connection: this reports the row's presence, not a file or setting."""
+def check_service_identities(settings: Settings) -> list[CheckResult]:
+    """One result per declared service, so a newly-declared one is covered
+    without editing doctor. Declarations self-register through the same
+    discovery walk the loader runs. Identities are database-backed like harness
+    connections — this reports each row's presence, not a file or setting."""
+    for extension in iter_extensions():
+        extension.discover()
     engine = create_engine_from_url(settings.database_url)
     try:
         with Session(engine) as session:
             db_session.registry.set(session)
-            row = ServiceIdentity.get(GITHUB)
-    except ServiceNotConnectedError:
-        return CheckResult(
-            name="github_identity",
-            ok=False,
-            pending=True,
-            detail="not connected — connect GitHub in Settings → Harnesses.",
-        )
+            results: list[CheckResult] = []
+            for service in services.all():
+                name = f"{service.name}_identity"
+                try:
+                    row = ServiceIdentity.get(service.name)
+                except ServiceNotConnectedError:
+                    results.append(
+                        CheckResult(
+                            name=name,
+                            ok=not service.required,
+                            pending=service.required,
+                            detail=f"not connected — connect {service.title} in "
+                            "Settings → Harnesses.",
+                        )
+                    )
+                    continue
+                facts = " ".join(f"{key}={value}" for key, value in row.identity.items())
+                results.append(CheckResult(name=name, ok=True, detail=f"connected; {facts}"))
+            return results
     except Exception as error:  # noqa: BLE001 — a DB-read failure is a fail, not a crash
-        return CheckResult(
-            name="github_identity", ok=False, detail=f"cannot read the identity: {error}"
-        )
+        return [
+            CheckResult(
+                name="service_identities", ok=False, detail=f"cannot read the identities: {error}"
+            )
+        ]
     finally:
         db_session.remove()
         engine.dispose()
-    return CheckResult(
-        name="github_identity",
-        ok=True,
-        detail=f"connected; app_id={row.identity['app_id']} slug={row.identity['slug']}",
-    )
 
 
 def check_installations(settings: Settings) -> CheckResult:
@@ -325,9 +337,11 @@ def _defined_capability(module: ModuleType) -> tuple[str, str] | None:
             and value.__module__ == name
         ):
             return "webhooks", f"{value.__module__}.{value.__qualname__}"
+        if isinstance(value, type) and issubclass(value, Service) and value.__module__ == name:
+            return "services", value.name
         if isinstance(value, Agent) and value.module == name:
             return "agents", value.name
-    return None
+    return
 
 
 def check_capability_modules(settings: Settings) -> CheckResult:
@@ -336,7 +350,12 @@ def check_capability_modules(settings: Settings) -> CheckResult:
     filename (the natural singular ``webhook.py``, say) silently never registers —
     catch that by running the real discovery, then importing each off-canon leaf and
     flagging any whose capability the discovery walk didn't already register."""
-    by_role = {"workflows": workflows, "webhooks": webhooks, "agents": agents}
+    by_role = {
+        "workflows": workflows,
+        "webhooks": webhooks,
+        "agents": agents,
+        "services": services,
+    }
     packages = [extension.package for extension in iter_extensions()]
     strays: list[str] = []
     for package in packages:
@@ -434,7 +453,7 @@ def _run_extension_check(extension_name: str, check) -> CheckResult:
 
 CHECKS = (
     check_webhook_ingress,
-    check_github_identity,
+    check_service_identities,
     check_installations,
     check_harness_credentials,
     check_data_dir,

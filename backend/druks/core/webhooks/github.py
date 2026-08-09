@@ -5,8 +5,8 @@ from fastapi import HTTPException, status
 from fastapi.responses import JSONResponse, Response
 
 from druks.core.apis.github import GITHUB
-from druks.service_identities.exceptions import ServiceNotConnectedError
-from druks.service_identities.models import ServiceIdentity
+from druks.services.exceptions import ServiceNotConnectedError
+from druks.services.models import ServiceIdentity
 from druks.signals import publish
 from druks.webhooks import Webhook, verify_hmac_sha256
 

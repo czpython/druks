@@ -10,7 +10,7 @@ from githubkit import AppAuthStrategy, AppInstallationAuthStrategy, GitHub
 from githubkit.exception import GraphQLFailed, RequestFailed
 
 from druks.core.apis.exceptions import GitHubAppNotInstalledError
-from druks.service_identities.models import ServiceIdentity
+from druks.services.models import ServiceIdentity
 from druks.settings import load_settings
 
 logger = logging.getLogger(__name__)
@@ -479,10 +479,10 @@ class GitHubClient:
                 ref=ref or "",
             )
         except GitHubAppNotInstalledError:
-            return None
+            return
         except RequestFailed as exc:
             if exc.response.status_code == 404:
-                return None
+                return
             raise
         data = response.parsed_data
         content = getattr(data, "content", None) or ""

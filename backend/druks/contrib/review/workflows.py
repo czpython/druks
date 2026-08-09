@@ -9,7 +9,7 @@ from druks.contrib.ship.workspace import RepoWorkspace
 from druks.core.apis.github import GITHUB
 from druks.sandbox import repo as _repo
 from druks.sandbox.layout import get_github_token_remote_path, get_related_root, get_repo_root
-from druks.service_identities.models import ServiceIdentity
+from druks.services.models import ServiceIdentity
 from druks.workflows import Workflow
 
 if TYPE_CHECKING:
