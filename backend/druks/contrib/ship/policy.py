@@ -7,7 +7,7 @@ from druks.prompts import render_prompt
 from druks.sandbox.datastructures import Profile
 
 GateValue = Literal["human", "none"]
-PlanGate = Literal["human", "machine", "machine_then_human"]
+PlanGate = Literal["human", "machine", "machine_then_human", "adaptive"]
 
 
 class Gates(BaseModel):

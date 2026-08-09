@@ -227,15 +227,16 @@ def test_extensions_surface_build_agents_and_workflow_defaults(tmp_path: Path):
         "label": "Plan gate",
         "help": (
             "human — Operator reviews every plan; the machine reviewer never runs. "
-            "machine — The machine reviewer approves for implementation; the operator is the "
-            "fallback after the draft bound. machine_then_human — The machine reviewer "
-            "critiques first, then the operator approves; the operator also receives the "
-            "standing critique after the draft bound."
+            "machine — The machine reviewer critiques once; the plan implements without "
+            "operator review. machine_then_human — The machine reviewer critiques once, "
+            "then the operator approves every plan. adaptive — The machine reviewer "
+            "critiques once; a high-confidence plan it approved implements directly, "
+            "anything less parks for the operator."
         ),
         "type": "enum",
         "value": "human",
         "default": "human",
-        "choices": ["human", "machine", "machine_then_human"],
+        "choices": ["human", "machine", "machine_then_human", "adaptive"],
         "section": "",
         "visibleWhenField": "",
         "visibleWhenValue": None,
