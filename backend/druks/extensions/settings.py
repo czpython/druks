@@ -61,6 +61,17 @@ def field_section(field: FieldInfo) -> str:
     return ""
 
 
+def field_multiline(field: FieldInfo) -> bool:
+    # A field whose pasted value carries meaningful newlines (a PEM private
+    # key); the UI renders a textarea instead of a one-line input. Declared as
+    # ``json_schema_extra={"multiline": True}``; presentation only — storage,
+    # redaction, and write-only semantics are unchanged.
+    metadata = field.json_schema_extra
+    if isinstance(metadata, dict):
+        return bool(metadata.get("multiline", False))
+    return False
+
+
 def field_visibility(field: FieldInfo) -> tuple[str, Any]:
     # The sibling field this one is shown for and the value that field must hold. The
     # name is empty when the field is always shown.

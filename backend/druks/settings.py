@@ -25,12 +25,6 @@ PACKAGED_MCP_CATALOG = Path(__file__).with_name("mcp") / "catalog.json"
 PACKAGED_MCP_TRUSTED = Path(__file__).with_name("mcp") / "trusted.json"
 
 
-def _empty_str_to_none(value: Any) -> Any:
-    if value == "":
-        return None
-    return value
-
-
 def _expand_path(value: Any) -> Any:
     if isinstance(value, str):
         return Path(value).expanduser()
@@ -64,7 +58,6 @@ def _secrets_key(value: Any) -> Any:
     return ",".join(segments)
 
 
-EmptyToNone = Annotated[str | None, BeforeValidator(_empty_str_to_none)]
 SecretsKey = Annotated[str, BeforeValidator(_secrets_key)]
 ExpandedPath = Annotated[Path, BeforeValidator(_expand_path)]
 OptionalExpandedPath = Annotated[Path | None, BeforeValidator(_expand_optional_path)]
@@ -131,14 +124,6 @@ class Identity(BaseModel):
         return self
 
 
-class GitHub(BaseModel):
-    # Where druks may act is the operator Extension's installation set — GitHub's
-    # own state: webhooks only arrive from installations, tokens only mint
-    # for them. See GitHubClient.list_installation_accounts.
-    operator_app_id: EmptyToNone = None
-    reviewer_app_id: EmptyToNone = None
-
-
 class Urls(BaseModel):
     # The base URL the operator's browser reaches druks at (the dashboard host,
     # not the webhook ingress). The OAuth connect flow builds its callback
@@ -151,9 +136,9 @@ class Urls(BaseModel):
 
 
 class Secrets(BaseModel):
-    webhook_secret: str = ""
-    # Encrypts stored secrets (MCP tokens, OAuth grants) at rest. Required —
-    # a missing or malformed key refuses boot; `druks setup` generates one.
+    # Encrypts stored secrets (MCP tokens, OAuth grants, the GitHub service
+    # identity) at rest. Required — a missing or malformed key refuses boot;
+    # `druks setup` generates one.
     secrets_key: SecretsKey
 
 
@@ -189,7 +174,6 @@ class Settings(BaseSettings):
     )
 
     identity: Identity = Identity()
-    github: GitHub = GitHub()
     urls: Urls = Urls()
     secrets: Secrets
     sandbox: Sandbox = Sandbox()
@@ -204,15 +188,9 @@ class Settings(BaseSettings):
         alias="DRUKS_DATABASE_URL",
     )
 
+    # Transport only — GitHub credentials live on the service-identity row,
+    # not in Settings; this points every client at a compatible API endpoint.
     github_api_url: str = Field(default="https://api.github.com", alias="GITHUB_API_URL")
-    github_operator_private_key_path: OptionalExpandedPath = Field(  # type: ignore[assignment]
-        default=None,
-        alias="GITHUB_OPERATOR_PRIVATE_KEY_PATH",
-    )
-    github_reviewer_private_key_path: OptionalExpandedPath = Field(  # type: ignore[assignment]
-        default=None,
-        alias="GITHUB_REVIEWER_PRIVATE_KEY_PATH",
-    )
 
     # The Slack app's signing secret, gating inbound interactivity callbacks —
     # distinct from the per-destination outbound webhook URLs.
@@ -318,11 +296,6 @@ def setup_logging(settings: Settings) -> None:
     # drops) stay audible.
     asyncssh.set_log_level(logging.WARNING)
     asyncssh.set_sftp_log_level(logging.WARNING)
-
-    if not settings.secrets.webhook_secret:
-        logging.getLogger(__name__).warning(
-            "secrets.webhook_secret is not set — all webhooks will be rejected.",
-        )
 
 
 def ensure_data_dirs(settings: Settings) -> None:

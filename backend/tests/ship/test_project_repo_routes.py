@@ -47,6 +47,19 @@ def test_adding_a_repo_dispatches_a_profile_run(client: TestClient, monkeypatch)
     assert repo["profile"] == {}
 
 
+def test_adding_a_repo_survives_when_github_is_not_connected(client: TestClient):
+    # Registering a repo is metadata; a missing GitHub identity defers profiling
+    # but must not discard the repo — a rollback would 500 and lose it.
+    project = client.post("/api/ship/projects", json={"name": "Acme"}).json()
+    response = client.post(
+        f"/api/ship/projects/{project['id']}/repos",
+        json={"fullName": "acme/widget"},
+    )
+
+    assert response.status_code == 201
+    assert response.json()["fullName"] == "acme/widget"
+
+
 def test_profile_endpoint_dispatches(client: TestClient, monkeypatch):
     # Concurrency is the Profile workflow's subject-unique lock, not the route's
     # job — the route always dispatches and start() dedups against a live run.

@@ -13,7 +13,7 @@ from druks.contrib.ship.enums import (
     ReviewDecision,
 )
 from druks.contrib.ship.models import ProjectRepo, WorkItem
-from druks.core.apis.github import get_github_client
+from druks.core.apis.github import GITHUB, get_github_client
 from druks.sandbox import repo as _repo
 from druks.sandbox.datastructures import RequiredMcpServer
 from druks.sandbox.layout import (
@@ -22,6 +22,8 @@ from druks.sandbox.layout import (
     get_repo_root,
     get_work_root,
 )
+from druks.service_identities.exceptions import ServiceNotConnectedError
+from druks.service_identities.models import ServiceIdentity
 from druks.settings import load_settings
 from druks.skills.models import Skill
 from druks.workflows import FatalError, Workflow, step
@@ -126,6 +128,14 @@ class Build(Workflow):
             else:
                 logger.info("Ticket %s has no routable repo; skipping.", ticket["identifier"])
                 return
+        try:
+            ServiceIdentity.get(GITHUB)
+        except ServiceNotConnectedError as error:
+            # A raise would 5xx the tracker's webhook and put the delivery into
+            # provider redelivery; the delivery itself succeeded. Log the
+            # Connect GitHub direction and stand down without starting.
+            logger.info("Ticket %s cannot start a build: %s", ticket["identifier"], error)
+            return
         email = ticket["assignee_email"]
         assignee = Account.get_for_username(email.strip()) if email else None
         return await cls.start(
@@ -166,7 +176,7 @@ class Build(Workflow):
         # Planning agents run before the first implement provisions the branch — their
         # VMs clone the default branch; every agent after delivery gets the PR branch.
         branch = self.branch
-        github_token = await get_github_client(load_settings()).token_for_repo(repo)
+        github_token = await get_github_client().token_for_repo(repo)
         await sandbox.write_secret(
             secret=github_token, remote=get_github_token_remote_path(sandbox.ssh_username)
         )
@@ -352,7 +362,7 @@ class Build(Workflow):
     @step
     async def declare_merge_intent(self) -> bool:
         """Whether GitHub accepted ownership of the merge."""
-        github = get_github_client(load_settings())
+        github = get_github_client()
         return await github.merge_when_ready(self.subject.repo, self.pr_number)
 
     # The provisioned branch + PR, pinned to the FIRST delivery — None until then
@@ -378,7 +388,7 @@ class Build(Workflow):
         repo = self.subject.repo
         if login and self.pr_number:
             try:
-                await get_github_client(load_settings()).request_pull_request_reviewers(
+                await get_github_client().request_pull_request_reviewers(
                     repo, self.pr_number, [login]
                 )
             except Exception:  # noqa: BLE001 — a missed ping must not fail the park
@@ -393,7 +403,7 @@ class Build(Workflow):
         repo = self.subject.repo
         if self.pr_number:
             try:
-                await get_github_client(load_settings()).set_pull_request_draft_state(
+                await get_github_client().set_pull_request_draft_state(
                     repo, self.pr_number, draft=draft
                 )
             except Exception:  # noqa: BLE001 — a draft merge fails loudly anyway
@@ -412,6 +422,10 @@ class Profile(Workflow):
 
     @classmethod
     async def dispatch(cls, repo: ProjectRepo, *, refresh_only: bool = False) -> str:
+        # The profiler clones with an operator-App token, so resolve the
+        # identity before the start spends a run and provisions a VM — the
+        # raising lookup surfaces the actionable not-connected error.
+        ServiceIdentity.get(GITHUB)
         return await cls.start(
             subject=repo,
             repo_id=repo.id,
@@ -444,7 +458,7 @@ class Profile(Workflow):
 
     async def get_workspace_kwargs(self, sandbox: "Sandbox") -> dict[str, Any]:
         repo = ProjectRepo.get(self.input.repo_id).full_name
-        github_token = await get_github_client(load_settings()).token_for_repo(repo)
+        github_token = await get_github_client().token_for_repo(repo)
         await sandbox.write_secret(
             secret=github_token, remote=get_github_token_remote_path(sandbox.ssh_username)
         )

@@ -20,6 +20,7 @@ import druks.harnesses.models  # noqa: F401
 import druks.mcp.models  # noqa: F401
 import druks.notifications.models  # noqa: F401
 import druks.redis
+import druks.service_identities.models  # noqa: F401
 import druks.skills.models  # noqa: F401
 import druks.user_settings.models  # noqa: F401
 from druks.bootstrap import seed
@@ -158,12 +159,9 @@ def make_settings(tmp_path: Path, **overrides: object) -> Settings:
         "data_dir": tmp_path,
         "database_url": TEST_DATABASE_URL,
         "secrets": {
-            "webhook_secret": "test-secret",
             "secrets_key": "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=",
         },
         "github_api_url": "https://api.github.com",
-        "github_operator_private_key_path": None,
-        "github_reviewer_private_key_path": None,
         "redis_url": TEST_REDIS_URL,
         "log_level": "WARNING",
     }

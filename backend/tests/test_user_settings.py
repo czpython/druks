@@ -62,6 +62,7 @@ class _Declared(BaseModel):
     # Optional so an unset secret resolves to None — a plain SecretStr with a length
     # floor and an empty default couldn't satisfy its own constraint.
     secret: SecretStr | None = Field(default=None, min_length=8)
+    pasted_key: SecretStr | None = Field(default=None, json_schema_extra={"multiline": True})
 
     @field_validator("secret")
     @classmethod
@@ -117,6 +118,19 @@ def test_secret_field_redacts_value_and_default_and_reports_set():
     assert setted["value"] is None
     assert setted["secretSet"] is True
     assert "sk-raw" not in str(setted)
+
+
+def test_multiline_projects_only_where_declared():
+    # A pasted-PEM secret opts into the textarea; everything else stays a
+    # one-line control. Redaction is unchanged by the presentation flag.
+    projected = _field("pasted_key", value="-----BEGIN KEY-----\nbody\n-----END KEY-----")
+    assert projected["type"] == "secret"
+    assert projected["multiline"] is True
+    assert projected["value"] is None
+    assert projected["secretSet"] is True
+
+    assert _field("secret", value="")["multiline"] is False
+    assert _field("label", value="hi")["multiline"] is False
 
 
 def test_optional_secret_is_still_treated_as_a_secret():

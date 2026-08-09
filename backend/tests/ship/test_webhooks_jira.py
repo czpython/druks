@@ -7,6 +7,7 @@ from druks.contrib.ship import webhooks as webhook_module
 from druks.contrib.ship.extension import Ship
 from druks.contrib.ship.webhooks import JiraEvents
 from druks.contrib.ship.workflows import Build
+from druks.service_identities.models import ServiceIdentity
 from druks.testing import make_settings, seed_run
 from druks.webhooks.router import router as webhooks_router
 from fastapi import HTTPException
@@ -183,6 +184,11 @@ async def test_trigger_status_does_not_redispatch_a_merged_item(druks_db, monkey
 
 
 async def test_trigger_status_redispatches_a_closed_item(druks_db, monkeypatch):
+    ServiceIdentity.connect(
+        "github",
+        identity={"app_id": "1", "slug": "druks-operator"},
+        secrets={"private_key": "operator-pem", "webhook_secret": "hook-secret"},
+    )
     item = make_test_work_item(
         repo="octo/alfred",
         source="jira",

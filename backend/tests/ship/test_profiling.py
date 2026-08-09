@@ -4,6 +4,8 @@ from druks.contrib.ship.models import Project, ProjectRepo
 from druks.contrib.ship.policy import RepoPolicy, VerificationProfile
 from druks.contrib.ship.workflows import Profile
 from druks.durable.engine import configure_engine
+from druks.service_identities.exceptions import ServiceNotConnectedError
+from druks.service_identities.models import ServiceIdentity
 from druks.skills.datastructures import InstalledSkill
 from druks.skills.models import SkillCollection
 
@@ -64,6 +66,11 @@ async def _no_policy(repo):
 
 @pytest.mark.parametrize("refresh_only", [False, True])
 async def test_dispatch_shapes_the_profile_start(druks_db, monkeypatch, refresh_only):
+    ServiceIdentity.connect(
+        "github",
+        identity={"app_id": "1", "slug": "druks-operator"},
+        secrets={"private_key": "operator-pem", "webhook_secret": "hook-secret"},
+    )
     repo = _seed_repo()
     calls: list[dict] = []
 
@@ -77,6 +84,18 @@ async def test_dispatch_shapes_the_profile_start(druks_db, monkeypatch, refresh_
 
     assert run_id == "profile-run"
     assert calls == [{"subject": repo, "repo_id": repo.id, "refresh_only": refresh_only}]
+
+
+async def test_dispatch_refuses_before_start_without_github(druks_db, monkeypatch):
+    repo = _seed_repo()
+
+    async def _start(cls, **kwargs):
+        raise AssertionError("start must not be reached without a GitHub identity")
+
+    monkeypatch.setattr(Profile, "start", classmethod(_start))
+
+    with pytest.raises(ServiceNotConnectedError, match="github is not connected"):
+        await Profile.dispatch(repo)
 
 
 class TestProfileRun:

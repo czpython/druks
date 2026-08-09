@@ -78,7 +78,7 @@ def _workspace_kwargs_stubs(monkeypatch: pytest.MonkeyPatch, *, review_actor):
     monkeypatch.setattr(host_mod.Sandbox, "exec", fake_exec)
     monkeypatch.setattr(
         "druks.contrib.ship.workflows.get_github_client",
-        lambda _s: SimpleNamespace(token_for_repo=_token),
+        lambda: SimpleNamespace(token_for_repo=_token),
     )
     monkeypatch.setattr("druks.contrib.ship.workflows.get_review_actor", review_actor)
     monkeypatch.setattr("druks.sandbox.repo.ensure", fake_ensure)

@@ -52,6 +52,18 @@ class FieldNotes(Extension):
         # SecretStr, so its value is redacted everywhere it surfaces; empty means
         # unset, and a malformed key is rejected server-side (with its raw value
         # kept out of the error).
+        # A multiline secret: a pasted PEM-shaped credential whose newlines
+        # matter. ``multiline`` is presentation only — the settings UI renders
+        # a textarea; storage and redaction are the ordinary secret plane.
+        sync_signing_key: Secret = Field(
+            title="Sync signing key",
+            description="PEM key used to sign notes synced to the external service.",
+            json_schema_extra={
+                "section": "Sharing",
+                "visible_when": {"visibility": "public"},
+                "multiline": True,
+            },
+        )
         sync_token: Secret = Field(
             title="Sync token",
             description="API key for syncing notes to an external service.",

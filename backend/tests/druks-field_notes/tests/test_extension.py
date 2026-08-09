@@ -31,3 +31,18 @@ def test_settings_require_a_sync_token_for_public_visibility():
         "sync_token": "Required when visibility is public."
     }
     assert FieldNotes.Settings(visibility="public", sync_token="sk-sync-token").clean() == {}
+
+
+def test_the_signing_key_declares_the_multiline_secret_presentation():
+    # An author marks a pasted PEM-shaped secret multiline; the platform keeps
+    # newlines intact end to end, so the stored value is exactly the paste.
+    from druks.extensions.settings import field_kind, field_multiline
+
+    field = FieldNotes.Settings.model_fields["sync_signing_key"]
+    assert field_kind(field) == "secret"
+    assert field_multiline(field)
+    assert not field_multiline(FieldNotes.Settings.model_fields["sync_token"])
+
+    pem = "-----BEGIN KEY-----\nline-one\nline-two\n-----END KEY-----"
+    settings = FieldNotes.Settings(sync_signing_key=pem)
+    assert settings.sync_signing_key.get_secret_value() == pem

@@ -14,6 +14,7 @@ from druks.durable.dbos_state import workflow_status
 from druks.durable.models import AgentCall, Run
 from druks.durable.reads import read_transcript_chunk
 from druks.mcp.gateway import services
+from druks.service_identities.models import ServiceIdentity
 from druks.testing import configure_app_for_test, make_settings, seed_call, seed_run
 from druks_field_notes.models import Note
 from druks_field_notes.workflows import Summarize
@@ -48,6 +49,15 @@ def client(tmp_path: Path, druks_db, monkeypatch):
 def account(druks_db):
     # The account configure_app_for_test signs requests in as.
     return Account.get_or_create("op@example.com")
+
+
+def _connect_github() -> None:
+    # Start routes guard on the GitHub service identity before spending a run.
+    ServiceIdentity.connect(
+        "github",
+        identity={"app_id": "1", "slug": "druks-operator"},
+        secrets={"private_key": "operator-pem", "webhook_secret": "hook-secret"},
+    )
 
 
 @pytest.fixture
@@ -117,6 +127,7 @@ def test_openapi_pins_platform_and_extension_agent_routes(client: TestClient):
 def test_review_request_returns_the_run_id_start_hands_back(
     client: TestClient, account: Account, monkeypatch
 ):
+    _connect_github()
     project = Project.create(name="Acme")
     ProjectRepo.create(project_id=project.id, full_name="acme/app")
     live_run_id = "review-run-id"
@@ -250,6 +261,23 @@ def test_ship_start_does_not_acknowledge_a_tracker_failure(tmp_path, druks_db, m
 
     assert response.status_code == 500
     assert response.json() == {"error": "INTERNAL_ERROR", "detail": "Internal server error"}
+
+
+def test_review_request_refuses_when_github_is_not_connected(
+    client: TestClient, monkeypatch
+):
+    project = Project.create(name="Acme")
+    ProjectRepo.create(project_id=project.id, full_name="acme/app")
+
+    async def start(cls, **kwargs):
+        raise AssertionError("start must not be reached without a GitHub identity")
+
+    monkeypatch.setattr(PullRequestReview, "start", classmethod(start))
+
+    response = client.post("/api/review/reviews", json={"repo": "acme/app", "prNumber": 7})
+
+    assert response.status_code == 409
+    assert "not connected" in response.json()["detail"]
 
 
 def test_agent_routes_sit_behind_the_gate(tmp_path, druks_db):
