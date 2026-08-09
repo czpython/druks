@@ -275,7 +275,9 @@ def test_print_results_pending_does_not_fail(capsys) -> None:
     # are pending operator setup — the command still exits 0.
     results = [
         doctor.CheckResult(name="database", ok=True, detail="reachable"),
-        doctor.CheckResult(name="claude_credentials", ok=False, pending=True, detail="not connected"),
+        doctor.CheckResult(
+            name="claude_credentials", ok=False, pending=True, detail="not connected"
+        ),
     ]
 
     exit_code = doctor.print_results(results)
@@ -289,7 +291,9 @@ def test_print_results_pending_does_not_fail(capsys) -> None:
 def test_print_results_fails_on_a_genuine_fault_alongside_pending(capsys) -> None:
     results = [
         doctor.CheckResult(name="database", ok=False, detail="unreachable"),
-        doctor.CheckResult(name="claude_credentials", ok=False, pending=True, detail="not connected"),
+        doctor.CheckResult(
+            name="claude_credentials", ok=False, pending=True, detail="not connected"
+        ),
     ]
 
     exit_code = doctor.print_results(results)
