@@ -1,5 +1,4 @@
-from datetime import UTC, datetime
-from pathlib import Path
+from datetime import datetime
 from typing import TYPE_CHECKING, Annotated, Any, Literal
 
 from pydantic import AliasPath, BeforeValidator, ConfigDict, Field, SerializeAsAny, computed_field
@@ -9,7 +8,7 @@ from druks.schemas import BaseResponse
 from .enums import AgentCallStatus, RunState
 
 if TYPE_CHECKING:
-    from .models import AgentCall, Artifact, Run
+    from .models import AgentCall, Run
 
 
 class TokenUsage(BaseResponse):
@@ -78,34 +77,6 @@ class AgentCallFiles(BaseResponse):
     manifest: ArtifactFile | None = None
     # The call's renderable output, rendered by kind; None unless it produced one.
     artifact: ArtifactDescriptor | None = None
-
-    @classmethod
-    def from_call(cls, call: "AgentCall", artifact: "Artifact | None") -> "AgentCallFiles":
-        layout = call.artifact_layout
-
-        def named(path: Path) -> ArtifactFile | None:
-            if path.is_file():
-                stat = path.stat()
-                return ArtifactFile(
-                    name=path.name,
-                    size_bytes=stat.st_size,
-                    updated_at=datetime.fromtimestamp(stat.st_mtime, tz=UTC),
-                )
-
-        descriptor = None
-        if artifact:
-            descriptor = ArtifactDescriptor(
-                kind=artifact.kind, title=artifact.title, name=artifact.path
-            )
-        return cls(
-            prompt=named(layout.prompt),
-            response=named(layout.output),
-            metadata=named(layout.metadata),
-            manifest=named(layout.manifest),
-            stdout=named(layout.transcript),
-            stderr=named(layout.stderr),
-            artifact=descriptor,
-        )
 
 
 class RunResponse(BaseResponse):
