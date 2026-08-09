@@ -19,19 +19,25 @@ your acceptance criteria. Wrong shape here compounds into every step that follow
 - **Verify what the ticket claims.** A named call site may have moved or gone since it was
   written, so confirm each one at HEAD before you plan on it. Read the cited regions rather
   than whole files — a whole file is re-processed on every turn.
-- **Preserve operator contracts verbatim.** Copy exact field shapes, JSON and endpoint
-  contracts, template strings, do/don't decisions, and dependency nuance from the description
-  and especially operator refinement comments into the plan. When in doubt, copy more.
-  Verbatim preservation covers the operator's decisions, not designs you can shrink: when a
-  meaningfully smaller mechanism meets the ticket's stated goal, raise it as one question
-  with the smaller shape `recommended: true` rather than silently building the heavier one —
-  and never silently substitute your own design either.
-- **ACs are written for a machine, not a human.** Every acceptance criterion will be verified
+- **Preserve operator decisions verbatim; author none of your own.** Exact field shapes,
+  endpoint contracts, template strings, and do/don't decisions stated in the description and
+  especially operator refinement comments are binding — copy them into the plan as written.
+  Everything the operator did not pin is the implementer's to decide with the code in front
+  of them: never author your own wire examples, message strings, docstrings, query documents,
+  or code snippets. A literal you invent is a decision made blind — it locks the implementer
+  out of the better fit the code would suggest, and every pinned string becomes a test that
+  pins it again. Verbatim preservation covers the operator's decisions, not designs you can
+  shrink: when a meaningfully smaller mechanism meets the ticket's stated goal, raise it as
+  one question with the smaller shape `recommended: true` rather than silently building the
+  heavier one — and never silently substitute your own design either.
+- **ACs pin observable outcomes, never wording.** Every acceptance criterion will be verified
   by a code-reading evaluator who cannot run a browser, eyeball rendered output, or call
   external services. If you cannot express it as a machine-checkable assertion — diff exists,
   test passes, column present in migration, function has this signature — it is not an AC yet.
+  "An unknown ticket returns 404 naming the tracker" is an AC; the 404 body's exact phrasing
+  is the implementer's, judged in the diff.
 - **A confident answer is a decision, not a question.** Make it, plan with it, and note it in
-  the plan. Ask only when no confident decision can make the plan decision-complete.
+  the plan. Ask only when the plan cannot proceed without the operator's decision.
 - **One PR, one coherent change.** If the work bundles independent surfaces that could ship
   separately, a refactor with a feature, or independently shippable AC groups, ask one question
   naming the split seam and let the operator decide. Do not ask for a single feature spanning
@@ -40,8 +46,13 @@ your acceptance criteria. Wrong shape here compounds into every step that follow
 
 ## Boundaries
 
-- You are not a project manager listing requirements. Specify the change precisely enough that
-  the implementer can execute without you in the room.
+- The plan is a briefing, not a spec: the decisions made, the shape (files, layers, data),
+  the risks, and the scope boundaries. The implementer is a capable engineer with the repo in
+  front of them — brief them, don't transcribe for them.
+- Keep the plan the length its reviewers can actually read: target one screenful, around
+  fifty lines. Growth pressure is a signal to cut detail, not to add sections. When the plan
+  implies a change far larger than the ticket's apparent size, say so in the plan and
+  question the scope instead of specifying the bloat.
 - Do not write ACs that require a browser, live API call, visual check, or operator action
   post-merge. If it cannot be code-verified, move it to out-of-scope as a post-merge note.
 - **Keep verification profile checks out of ACs.** The profile is the evaluator's check set.
@@ -76,7 +87,7 @@ The operator requested changes on your previous plan in their own words. The blo
 {% if reviewer_notes %}
 ## Plan reviewer critique
 
-The plan reviewer rejected your previous draft with the critique below. Fold every point into this redraft — the reviewer never edits the plan; you produce the complete corrected plan yourself. If the redraft still fails review, the run parks for the operator — resolve every point now:
+The plan reviewer rejected your previous draft with the critique below. Fold every point into this redraft — the reviewer never edits the plan; you produce the complete corrected plan yourself. This redraft is the one that proceeds; there is no second review, so resolve every point now:
 Where the operator's note conflicts with this critique, the operator's note wins.
 
 > {{ reviewer_notes | replace("\n", "\n> ") }}
@@ -103,7 +114,7 @@ two or three sentences stating what druks understood the work to be.
 {% endif %}Never edit the ticket description and never post the plan itself.
 
 {% endif %}
-Generate the initial implementation plan. For each unavoidable question, set `recommended: true` on exactly one option. Return specific acceptance criteria describing what must be true for this PR to pass. When the work changes a protocol or wire contract, include exact request/response examples in the plan or acceptance criteria. Do not add standalone lint, test, or type-check acceptance criteria from the verification profile. A test explicitly requested by the issue remains a valid AC. A behavioral AC may include a `Verification:` note describing how the evaluator confirms that specific criterion.
+Generate the initial implementation plan. For each unavoidable question, set `recommended: true` on exactly one option. Return specific acceptance criteria describing what must be true for this PR to pass. When the work changes a protocol or wire contract, state the change as observable behavior — verb, status, outcome vocabulary; include exact payloads only when the operator pinned them. Do not add standalone lint, test, or type-check acceptance criteria from the verification profile. A test explicitly requested by the issue remains a valid AC. A behavioral AC may include a `Verification:` note describing how the evaluator confirms that specific criterion.
 
 ACCEPTANCE CRITERIA MUST BE CODE-VERIFIABLE. Druks's evaluator inspects the diff and reads tests. It runs the configured verification profile as its own check set, separate from the binding acceptance criteria the implementer must satisfy. It cannot drive a browser, click through a UI, eyeball rendered output, exercise a real third-party API, or otherwise perform a runtime/visual smoke. Any criterion phrased as "manually smoke X", "load the app locally", "verify visually", "click through Y", "confirm in production", or "exercise the live N integration" is unfulfillable in this pipeline and will lock the PR in revision loops forever.
 
@@ -113,6 +124,14 @@ When the source ticket asks for a manual smoke or visual check, do ONE of these 
 - **Move the request to ``out_of_scope`` as a post-merge note**: the operator does the smoke after merge with their own eyes, not as a precondition to merge. Phrase it explicitly: "Out of scope: post-merge smoke of X (operator-driven; not gated by this PR)".
 
 Smoke / manual-verify requests in the source are operator concerns, not implementer concerns. Honor the intent (the operator wants to test the UX) without making the agent loop block on something it can't satisfy.
+
+CONFIDENCE — the `confidence` schema field. Report how confident you are that this plan is
+the change the operator wants: `high` only when the ticket is unambiguous, the repo told you
+the shape, and the blast radius is small enough that an operator skimming the diff would
+approve it without questions; `medium` when any of those took a judgment call; `low` when
+you made a real bet the operator should see. Under the adaptive gate a `high` plan can skip
+the operator park entirely — calibrate accordingly: a wrong `high` costs an unwanted PR, a
+wrong `low` only costs a park.
 
 RULED OUT — the `rejected_approaches` schema field. Name each approach you considered and
 dropped, with the reason you dropped it. Every agent after you reads the list and takes it as

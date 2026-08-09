@@ -26,7 +26,7 @@ from druks.settings import load_settings
 from druks.skills.models import Skill
 from druks.workflows import FatalError, Workflow, step
 
-from .constants import GITHUB_MCP_NAME, GITHUB_MCP_URL, PLAN_DRAFTS_PER_ROUND
+from .constants import GITHUB_MCP_NAME, GITHUB_MCP_URL
 from .extension import Ship
 from .journal import BuildJournal
 from .policy import PlanGate, RepoPolicy
@@ -80,10 +80,11 @@ class Build(Workflow):
             title="Plan gate",
             description=(
                 "human — Operator reviews every plan; the machine reviewer never runs. "
-                "machine — The machine reviewer approves for implementation; the operator is the "
-                "fallback after the draft bound. machine_then_human — The machine reviewer "
-                "critiques first, then the operator approves; the operator also receives the "
-                "standing critique after the draft bound."
+                "machine — The machine reviewer critiques once; the plan implements without "
+                "operator review. machine_then_human — The machine reviewer critiques once, "
+                "then the operator approves every plan. adaptive — The machine reviewer "
+                "critiques once; a high-confidence plan it approved implements directly, "
+                "anything less parks for the operator."
             ),
         )
         max_implementation_revisions: int = Field(
@@ -244,28 +245,35 @@ class Build(Workflow):
         plan_gate = self._policy.plan_approval_gate(self._settings.plan_gate)
         answered_questions: list[dict[str, str]] = []
         operator_note = ""
-        unresolved_critique = ""
+        critique = ""
+        reviewed = False
         while True:
-            for _ in range(PLAN_DRAFTS_PER_ROUND):
-                draft_guidance = unresolved_critique
-                unresolved_critique = ""
-                plan = await Ship.generate_plan(
-                    answered_questions=answered_questions,
-                    operator_note=operator_note,
-                    reviewer_notes=draft_guidance,
-                )
-                if plan_gate == "human" or plan.questions:
-                    break
-                machine_review = await Ship.review_plan()
-                if machine_review.decision == ReviewDecision.APPROVE:
+            plan = await Ship.generate_plan(
+                answered_questions=answered_questions,
+                operator_note=operator_note,
+                reviewer_notes=critique,
+            )
+            critique = ""
+            if not plan.questions:
+                if plan_gate != "human" and not reviewed:
+                    # The machine reviewer gets one pass per run; a critique is
+                    # folded into one redraft that proceeds without re-review.
+                    reviewed = True
+                    machine_review = await Ship.review_plan()
+                    if machine_review.decision == ReviewDecision.REQUEST_CHANGES:
+                        critique = machine_review.body
+                        continue
                     if plan_gate == "machine":
                         return True
-                    break
-                unresolved_critique = machine_review.body
-            operator_reply = await self.review(
-                questions=plan.questions,
-                context=unresolved_critique,
-            )
+                    if (
+                        plan_gate == "adaptive"
+                        and plan.confidence == "high"
+                        and plan.acceptance_criteria
+                    ):
+                        return True
+                elif plan_gate == "machine":
+                    return True
+            operator_reply = await self.review(questions=plan.questions)
             if plan.is_confirmed_by(operator_reply):
                 return True
             answered_questions = plan.get_answered_questions(operator_reply.answers)

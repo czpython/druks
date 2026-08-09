@@ -108,6 +108,9 @@ class PlanData(BaseModel):
     # Approaches the planner dropped — the judgment that otherwise dies at the
     # plan-review park and gets re-proposed downstream.
     rejected_approaches: list[str] = Field(default_factory=list)
+    # The planner's self-reported calibration; "medium" for producers that
+    # don't assert one (a contract revision), which never skips a park.
+    confidence: Literal["high", "medium", "low"] = "medium"
     # Resolved by the planner; a revision carries None.
     assignee_github_login: str | None = None
 
@@ -143,6 +146,7 @@ class PlanOutput(AgentOutput):
     acceptance_criteria: list[AcceptanceCriterionOutput]
     questions: list[QuestionOutput] = Field(max_length=8)
     rejected_approaches: list[str]
+    confidence: Literal["high", "medium", "low"]
     # Required but nullable: the planner always reports the field, null when it
     # resolved no assignee login convincingly.
     assignee_github_login: str | None
@@ -156,6 +160,7 @@ class PlanOutput(AgentOutput):
             acceptance_criteria=self.acceptance_criteria,
             questions=self.questions,
             rejected_approaches=self.rejected_approaches,
+            confidence=self.confidence,
             assignee_github_login=self.assignee_github_login,
         )
 
@@ -179,10 +184,17 @@ class ContractRevisionOutput(AgentOutput):
 
 
 class ReviewOutput(AgentOutput):
-    # No get_artifact: the plan must stay the parked ask's resolved document;
-    # the fallback park sends the critique as ask context instead.
+    # No get_artifact: the plan must stay the parked ask's resolved document.
     decision: Literal[ReviewDecision.APPROVE, ReviewDecision.REQUEST_CHANGES]
     body: str
+
+    @model_validator(mode="after")
+    def _request_changes_carries_the_critique(self) -> "ReviewOutput":
+        # An empty critique would redraft blind — the planner regenerates with
+        # no guidance and the result proceeds unreviewed.
+        if self.decision == ReviewDecision.REQUEST_CHANGES and not self.body.strip():
+            raise ValueError("REQUEST_CHANGES needs the critique in body")
+        return self
 
 
 class TriageOutput(AgentOutput):

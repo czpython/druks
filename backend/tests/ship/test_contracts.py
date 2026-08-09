@@ -211,3 +211,11 @@ def test_review_output_records_no_artifact():
     # An artifact would displace the plan as the parked ask's document.
     grade = O.ReviewOutput(decision=ReviewDecision.REQUEST_CHANGES, body="name the wire schema")
     assert grade.get_artifact() == {}
+
+
+@pytest.mark.parametrize("body", ["", "   \n"])
+def test_request_changes_requires_a_critique_body(body):
+    # The critique is the redraft's only guidance; empty would redraft blind.
+    with pytest.raises(ValidationError, match="critique"):
+        O.ReviewOutput(decision=ReviewDecision.REQUEST_CHANGES, body=body)
+    assert O.ReviewOutput(decision=ReviewDecision.APPROVE, body=body).body == body

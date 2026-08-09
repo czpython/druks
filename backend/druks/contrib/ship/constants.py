@@ -4,5 +4,3 @@
 # act as (druks.contrib.review.github).
 GITHUB_MCP_NAME = "github"
 GITHUB_MCP_URL = "https://api.githubcopilot.com/mcp/"
-
-PLAN_DRAFTS_PER_ROUND = 2
