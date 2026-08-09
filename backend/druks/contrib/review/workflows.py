@@ -1,3 +1,4 @@
+from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
 from druks.accounts.models import Account
@@ -23,6 +24,12 @@ class ReviewWorkspace(RepoWorkspace):
     @property
     def related_root(self) -> str:
         return get_related_root(self.sandbox.ssh_username)
+
+    @property
+    def prompt_view(self) -> SimpleNamespace:
+        view = super().prompt_view
+        view.related_root = self.related_root
+        return view
 
     def get_agent_run_kwargs(self, **kwargs: Any) -> dict[str, Any]:
         kwargs = super().get_agent_run_kwargs(**kwargs)

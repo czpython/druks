@@ -36,6 +36,27 @@ def test_build_workspace_grants_related_root_add_dir():
     assert "extra_env" not in kwargs
 
 
+def test_prompt_view_exposes_paths_not_secrets():
+    # render_prompt gets this view, never the live workspace — prompt overrides are
+    # attacker-authored, so a token/SSH-key reachable off ``workspace`` would leak
+    # into the transcript. The view carries only the path facts templates read.
+    workspace = BuildWorkspace(
+        sandbox=_FakeSandbox(),  # type: ignore[arg-type]
+        repo="o/main",
+        branch="b",
+        github_token="ghs_secret",
+        mcp_token="ghs_reviewer",
+        skills=(),
+    )
+    view = workspace.prompt_view
+
+    assert view.repo_path == workspace.repo_path
+    assert view.workspace_root == workspace.workspace_root
+    assert not hasattr(view, "github_token")
+    assert not hasattr(view, "mcp_token")
+    assert not hasattr(view, "sandbox")
+
+
 async def test_build_workspace_declares_its_github_mcp(druks_db):
     # The github MCP is build's own declaration, credentialed with the per-repo
     # reviewer token — never an operator catalog entry, never optional (there

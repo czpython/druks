@@ -1,5 +1,6 @@
 import logging
 from dataclasses import dataclass
+from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field
@@ -52,6 +53,12 @@ class BuildWorkspace(RepoWorkspace):
     @property
     def workspace_root(self) -> str:
         return get_work_root(self.sandbox.ssh_username)
+
+    @property
+    def prompt_view(self) -> SimpleNamespace:
+        view = super().prompt_view
+        view.workspace_root = self.workspace_root
+        return view
 
     def get_required_mcp_servers(self) -> tuple[RequiredMcpServer, ...]:
         return (RequiredMcpServer(name=GITHUB_MCP_NAME, url=GITHUB_MCP_URL, token=self.mcp_token),)

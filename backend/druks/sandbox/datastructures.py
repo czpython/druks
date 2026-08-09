@@ -2,6 +2,7 @@ import os
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
+from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field
@@ -136,6 +137,15 @@ class Workspace:
     @property
     def host_id(self) -> str:
         return self.sandbox.id
+
+    @property
+    def prompt_view(self) -> SimpleNamespace:
+        # What a template may read off ``workspace`` — path facts only. The live
+        # Workspace is NOT passed to render_prompt: it carries short-lived tokens
+        # (github_token, mcp_token) and the Sandbox record (per-VM SSH key) as
+        # public attributes, and prompt overrides are authored by anyone with push
+        # access to a monitored repo. Subclasses extend via super().
+        return SimpleNamespace()
 
     def get_agent_run_kwargs(self, **kwargs: Any) -> dict[str, Any]:
         # Override to add what the agent's run needs on this workspace (github_token,

@@ -282,11 +282,12 @@ class Agent:
             # starting. A provisioning failure happens before this and records
             # no call.
             async with _runner(workflow, host_id, workflow_id, self.id) as runner:
-                # Templates read the live workflow + the workspace the agent runs in,
-                # alongside whatever the workflow's get_prompt_context composes.
+                # Templates read the live workflow + a redacted view of the workspace
+                # (paths only, never its tokens/SSH key), alongside whatever the
+                # workflow's get_prompt_context composes.
                 prompt_context = await workflow.get_prompt_context(**context)
                 prompt_context.setdefault("workflow", workflow)
-                prompt_context.setdefault("workspace", runner)
+                prompt_context.setdefault("workspace", runner.prompt_view)
                 prompt = await render_prompt(self.prompt, **prompt_context)
                 await set_run_phase("agent_running")
                 AgentCall.start(

@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from types import SimpleNamespace
 from typing import Any
 
 from druks.sandbox.datastructures import Workspace
@@ -16,6 +17,12 @@ class RepoWorkspace(Workspace):
     @property
     def repo_path(self) -> str:
         return get_repo_root(self.sandbox.ssh_username)
+
+    @property
+    def prompt_view(self) -> SimpleNamespace:
+        view = super().prompt_view
+        view.repo_path = self.repo_path
+        return view
 
     def get_agent_run_kwargs(self, **kwargs: Any) -> dict[str, Any]:
         kwargs["github_token"] = self.github_token
