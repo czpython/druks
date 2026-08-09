@@ -58,10 +58,18 @@ curl -fsSL https://raw.githubusercontent.com/czpython/druks/main/scripts/install
 ```
 
 The local shape needs no authored values — the first run boots the stack.
-Then follow [full local setup](https://github.com/czpython/druks/blob/main/docs/full-local.md) to start Drukbox and finish in
+Then follow [full local setup](https://github.com/czpython/druks/blob/main/docs/full-local.md) to finish in
 the dashboard: connect the agent harnesses and the GitHub App the bundled
 `ship` extension acts through; a standalone extension may have different
 integration requirements.
+
+Or hand the install to a coding agent — paste this into Claude Code, Codex,
+or any agent with shell access on the target machine:
+
+> Install druks on this machine by following
+> <https://raw.githubusercontent.com/czpython/druks/main/INSTALL.md>
+> exactly: run every step's verification, and if one fails, stop and show me
+> the failing step and its output instead of improvising.
 
 ```text
 trigger ──> extension workflow ──> durable step ──> agent ──> sandbox
