@@ -8,8 +8,8 @@ import httpx
 import pytest
 from druks.core.apis.github import GitHubClient, get_github_client
 from druks.core.webhooks.github import GitHubEvents
-from druks.service_identities.exceptions import ServiceNotConnectedError
-from druks.service_identities.models import ServiceIdentity
+from druks.services.exceptions import ServiceNotConnectedError
+from druks.services.models import ServiceIdentity
 from druks.testing import make_settings
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
@@ -29,7 +29,12 @@ def _connect(
     )
 
 
-# --- The row (AC1) ----------------------------------------------------------
+def _github_entry(client: TestClient) -> dict:
+    entries = client.get("/api/service-identities").json()
+    return next(entry for entry in entries if entry["service"] == "github")
+
+
+# --- The row ----------------------------------------------------------------
 
 
 def test_secrets_round_trip_and_rest_is_ciphertext(druks_db):
@@ -67,7 +72,7 @@ def test_get_raises_when_the_service_is_not_connected(druks_db):
         ServiceIdentity.get("github")
 
 
-# --- The zero-argument client factory (AC3) ---------------------------------
+# --- The zero-argument client factory ---------------------------------------
 
 
 def test_client_factory_resolves_only_the_row(druks_db):
@@ -92,7 +97,7 @@ def test_client_factory_raises_the_typed_error_when_absent(druks_db):
         get_github_client()
 
 
-# --- Webhook verification (AC4) ---------------------------------------------
+# --- Webhook verification ----------------------------------------------------
 
 
 def _events(body: bytes, signature: str | None, tmp_path) -> GitHubEvents:
@@ -133,7 +138,7 @@ def test_webhook_rejects_a_missing_identity_before_dispatch(druks_db, tmp_path):
     assert "not connected" in raised.value.detail
 
 
-# --- The identity-gated API (AC2) -------------------------------------------
+# --- The identity-gated API ---------------------------------------------------
 
 
 def _mock_authenticated_app(monkeypatch, slug: str = "druks-operator") -> None:
@@ -143,10 +148,25 @@ def _mock_authenticated_app(monkeypatch, slug: str = "druks-operator") -> None:
     monkeypatch.setattr(GitHubClient, "get_authenticated_app_slug", _slug)
 
 
-def test_get_reports_disconnected_state(druks_client: TestClient):
-    body = druks_client.get("/api/service-identities/github").json()
+def test_list_reports_each_declared_service(druks_client: TestClient):
+    entry = _github_entry(druks_client)
 
-    assert body == {"connected": False, "appId": None, "slug": None, "connectedAt": None}
+    assert entry["connected"] is False
+    assert entry["required"] is True
+    assert entry["facts"] == {}
+    assert entry["connectedAt"] is None
+    assert [field["name"] for field in entry["fields"]] == [
+        "app_id",
+        "private_key",
+        "webhook_secret",
+    ]
+    assert [field["type"] for field in entry["fields"]] == ["str", "secret", "secret"]
+    assert [field["label"] for field in entry["fields"]] == [
+        "App ID",
+        "Private key (PEM)",
+        "Webhook secret",
+    ]
+    assert [field["multiline"] for field in entry["fields"]] == [False, True, False]
 
 
 def test_post_authenticates_then_creates_the_row(druks_client: TestClient, druks_db, monkeypatch):
@@ -154,21 +174,20 @@ def test_post_authenticates_then_creates_the_row(druks_client: TestClient, druks
 
     response = druks_client.post(
         "/api/service-identities/github",
-        json={"appId": "12345", "privateKey": _PEM, "webhookSecret": _SECRET},
+        json={"app_id": "12345", "private_key": _PEM, "webhook_secret": _SECRET},
     )
 
     assert response.status_code == 200
     body = response.json()
     assert body["connected"] is True
-    assert body["appId"] == "12345"
-    assert body["slug"] == "druks-operator"
+    assert body["facts"] == {"app_id": "12345", "slug": "druks-operator"}
     # No response carries either pasted secret.
     assert _PEM not in response.text
     assert _SECRET not in response.text
 
-    connected = druks_client.get("/api/service-identities/github").json()
+    connected = _github_entry(druks_client)
     assert connected["connected"] is True
-    assert connected["slug"] == "druks-operator"
+    assert connected["facts"]["slug"] == "druks-operator"
 
 
 def test_post_replaces_an_existing_row(druks_client: TestClient, druks_db, monkeypatch):
@@ -177,12 +196,17 @@ def test_post_replaces_an_existing_row(druks_client: TestClient, druks_db, monke
 
     response = druks_client.post(
         "/api/service-identities/github",
-        json={"appId": "777", "privateKey": "new-pem", "webhookSecret": "new-secret"},
+        json={"app_id": "777", "private_key": "new-pem", "webhook_secret": "new-secret"},
     )
 
     assert response.status_code == 200
-    assert response.json()["appId"] == "777"
-    assert response.json()["slug"] == "replacement-app"
+    assert response.json()["facts"] == {"app_id": "777", "slug": "replacement-app"}
+
+
+def test_post_rejects_an_unknown_service(druks_client: TestClient):
+    response = druks_client.post("/api/service-identities/nope", json={"anything": "x"})
+
+    assert response.status_code == 404
 
 
 def test_invalid_credentials_preserve_the_previous_row(
@@ -197,7 +221,7 @@ def test_invalid_credentials_preserve_the_previous_row(
 
     response = druks_client.post(
         "/api/service-identities/github",
-        json={"appId": "999", "privateKey": "bad-pem", "webhookSecret": "bad-secret"},
+        json={"app_id": "999", "private_key": "bad-pem", "webhook_secret": "bad-secret"},
     )
 
     assert response.status_code == 422
@@ -222,7 +246,7 @@ def test_blank_fields_are_rejected_without_touching_github(
 
     response = druks_client.post(
         "/api/service-identities/github",
-        json={"appId": " ", "privateKey": "", "webhookSecret": ""},
+        json={"app_id": " ", "private_key": "", "webhook_secret": ""},
     )
 
     assert response.status_code == 422
@@ -243,17 +267,14 @@ def test_manifest_page_submits_the_documented_app_to_github(druks_client: TestCl
         tmp_path, urls={"endpoint": "https://druks.example/"}
     )
 
-    response = druks_client.get("/api/service-identities/github/manifest")
+    response = druks_client.get("/api/core/github/manifest")
 
     assert response.status_code == 200
     assert 'action="https://github.com/settings/apps/new"' in response.text
     manifest = _manifest_from(response.text)
     assert manifest["name"] == "druks"
     assert manifest["url"] == "https://druks.example"
-    assert (
-        manifest["redirect_url"]
-        == "https://druks.example/api/service-identities/github/manifest/callback"
-    )
+    assert manifest["redirect_url"] == "https://druks.example/api/core/github/manifest/callback"
     assert manifest["hook_attributes"] == {
         "url": "https://druks.example/_external/github/events/",
         "active": True,
@@ -269,25 +290,29 @@ def test_manifest_page_prefers_the_webhook_host_for_deliveries(druks_client: Tes
         urls={"endpoint": "https://druks.example", "webhook_host": "hooks.druks.example"},
     )
 
-    manifest = _manifest_from(druks_client.get("/api/service-identities/github/manifest").text)
+    manifest = _manifest_from(druks_client.get("/api/core/github/manifest").text)
 
     assert (
         manifest["hook_attributes"]["url"] == "https://hooks.druks.example/_external/github/events/"
     )
 
 
-def test_manifest_page_targets_the_org_form(druks_client: TestClient, tmp_path):
+def test_manifest_page_lets_the_operator_target_an_org(druks_client: TestClient, tmp_path):
+    # The org lives on the page, not in the card: naming one reroutes the
+    # form to that org's create URL, and the input itself never reaches GitHub.
     druks_client.app.state.settings = make_settings(
         tmp_path, urls={"endpoint": "https://druks.example"}
     )
 
-    response = druks_client.get("/api/service-identities/github/manifest", params={"org": "acme"})
+    response = druks_client.get("/api/core/github/manifest")
 
-    assert 'action="https://github.com/organizations/acme/settings/apps/new"' in response.text
+    assert '<input name="org">' in response.text
+    assert "https://github.com/organizations/" in response.text
+    assert "this.elements.org.disabled = true" in response.text
 
 
 def test_manifest_page_refuses_without_an_endpoint(druks_client: TestClient):
-    response = druks_client.get("/api/service-identities/github/manifest")
+    response = druks_client.get("/api/core/github/manifest")
 
     assert response.status_code == 409
     assert "urls.endpoint" in response.json()["detail"]
@@ -313,13 +338,14 @@ def test_manifest_callback_exchanges_the_code_and_connects(
 
     monkeypatch.setattr(httpx.AsyncClient, "post", fake_post)
 
-    response = druks_client.get(
-        "/api/service-identities/github/manifest/callback", params={"code": "fresh-code"}
-    )
+    response = druks_client.get("/api/core/github/manifest/callback", params={"code": "fresh-code"})
 
     assert response.status_code == 200
     assert exchanged == ["https://api.github.com/app-manifests/fresh-code/conversions"]
     assert "https://github.com/apps/druks/installations/new" in response.text
+    # The connect card listens per service on the shared channel.
+    assert "BroadcastChannel('druks-service-connect')" in response.text
+    assert 'postMessage("github")' in response.text
     # The page never carries the stored secrets.
     assert "line-one" not in response.text
     assert _SECRET not in response.text
@@ -335,9 +361,7 @@ def test_manifest_callback_rejects_a_dead_code(druks_client: TestClient, druks_d
 
     monkeypatch.setattr(httpx.AsyncClient, "post", fake_post)
 
-    response = druks_client.get(
-        "/api/service-identities/github/manifest/callback", params={"code": "stale"}
-    )
+    response = druks_client.get("/api/core/github/manifest/callback", params={"code": "stale"})
 
     assert response.status_code == 400
     assert "restart" in response.json()["detail"]

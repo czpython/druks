@@ -7,7 +7,7 @@ from druks.contrib.ship import webhooks as webhook_module
 from druks.contrib.ship.extension import Ship
 from druks.contrib.ship.webhooks import JiraEvents
 from druks.contrib.ship.workflows import Build
-from druks.service_identities.models import ServiceIdentity
+from druks.services.models import ServiceIdentity
 from druks.testing import make_settings, seed_run
 from druks.webhooks.router import router as webhooks_router
 from fastapi import HTTPException

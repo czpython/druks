@@ -77,6 +77,19 @@ _FILES = {
             async def run(self, widget: str) -> None:
                 ...
     """,
+    "services.py": """
+        from druks.services import Service
+        from pydantic import BaseModel, Field, SecretStr
+
+
+        class Probemail(Service):
+            name = "probemail"
+            title = "Probemail"
+
+            class Settings(BaseModel):
+                account: str = Field(title="Account")
+                api_key: SecretStr = Field(title="API key")
+    """,
 }
 
 
@@ -99,7 +112,7 @@ def external_extension(tmp_path_factory):
     metadata, signal receivers) so the suite stays clean."""
     from blinker import signal
     from druks.extensions import loader as extensions_loader
-    from druks.extensions.registry import agents, webhooks, workflows
+    from druks.extensions.registry import agents, services, webhooks, workflows
     from druks.models import Base
 
     root = tmp_path_factory.mktemp("external")
@@ -107,7 +120,7 @@ def external_extension(tmp_path_factory):
     sys.path.insert(0, str(root))
 
     tables = set(Base.metadata.tables)
-    registries = {r: dict(r._items) for r in (agents, webhooks, workflows)}
+    registries = {r: dict(r._items) for r in (agents, services, webhooks, workflows)}
     packages = dict(extensions_loader._workflow_packages)
     finished = signal("workflow.finished")
     receivers = dict(finished.receivers)
@@ -173,6 +186,15 @@ def test_surfaces_are_enumerable_from_the_loaded_extension(installed):
     package_dir = extension.package_dir()
     assert package_dir is not None
     assert extension.migrations_dir() == package_dir / "migrations"
+
+
+def test_load_registers_the_extensions_services(installed):
+    """The ``services`` module is a discovered role: its declarations register on load."""
+    from druks.extensions.registry import services
+
+    load_extension("probe")
+
+    assert services.get("probemail").title == "Probemail"
 
 
 def test_missing_package_raises_extension_not_found(installed):

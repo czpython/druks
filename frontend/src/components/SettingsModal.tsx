@@ -11,6 +11,7 @@ import {
   type McpRegistryCandidate,
   type McpServer,
   type Pat,
+  type ServiceIdentity,
   type SkillCollection,
   type UpdateHarnessRequest,
   type UpdateExtensionsSettingsRequest,
@@ -824,105 +825,106 @@ function HarnessesPane({
               </div>
             )
           })}
-          <GitHubConnectCard />
+          <ServiceIdentityCards />
         </div>
       </div>
     </div>
   )
 }
 
-// The appliance's own GitHub App — one hand-placed card beside the
-// registry-driven harness cards. Connection persists immediately, outside the
-// modal's Save, so it owns its query, submit, busy, and error state. The
-// pasted PEM and webhook secret are write-only: a success drops them from
-// state, and the connected rendering shows identity facts only.
-export function GitHubConnectCard() {
-  const queryClient = useQueryClient()
-  const identityQuery = useQuery({
-    queryKey: ['githubIdentity'],
-    queryFn: () => api.githubIdentity(),
+// The appliance's own identities at external services, one card per declared
+// service, fields rendered from each entry's spec. Connection persists
+// immediately, outside the modal's Save, so each card owns its query, submit,
+// busy, and error state. Pasted secrets are write-only: a success drops them
+// from state, and the connected rendering shows identity facts only.
+export function ServiceIdentityCards() {
+  const query = useQuery({
+    queryKey: ['serviceIdentities'],
+    queryFn: () => api.serviceIdentities(),
     staleTime: 60_000,
   })
+  return (
+    <>
+      {(query.data ?? []).map((identity) => (
+        <ServiceIdentityCard key={identity.service} identity={identity} />
+      ))}
+    </>
+  )
+}
+
+export function ServiceIdentityCard({ identity }: { identity: ServiceIdentity }) {
+  const queryClient = useQueryClient()
   const [replacing, setReplacing] = useState(false)
-  const [org, setOrg] = useState('')
-  const [appId, setAppId] = useState('')
-  const [privateKey, setPrivateKey] = useState('')
-  const [webhookSecret, setWebhookSecret] = useState('')
+  const [values, setValues] = useState<Record<string, string>>({})
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // The manifest tab lands on the callback page, which broadcasts once the
-  // created App's credentials are stored.
+  // A guided create flow (the GitHub App manifest tab) lands on a callback
+  // page, which broadcasts the service name once the credentials are stored.
   useEffect(() => {
-    const channel = new BroadcastChannel('druks-github-connect')
-    channel.onmessage = () => {
-      setReplacing(false)
-      void queryClient.invalidateQueries({ queryKey: ['githubIdentity'] })
+    const channel = new BroadcastChannel('druks-service-connect')
+    channel.onmessage = (event) => {
+      if (event.data === identity.service) {
+        setReplacing(false)
+        void queryClient.invalidateQueries({ queryKey: ['serviceIdentities'] })
+      }
     }
     return () => channel.close()
-  }, [queryClient])
+  }, [queryClient, identity.service])
 
-  const createApp = () => {
-    const query = org.trim() ? `?org=${encodeURIComponent(org.trim())}` : ''
-    window.open(`/api/service-identities/github/manifest${query}`)
-  }
-
-  const identity = identityQuery.data
-  const formOpen = (identity && !identity.connected) || replacing
-  const complete = appId.trim() !== '' && privateKey.trim() !== '' && webhookSecret !== ''
+  const formOpen = !identity.connected || replacing
+  const complete = identity.fields.every((field) => (values[field.name] ?? '').trim() !== '')
 
   const submit = () => {
     setBusy(true)
     setError(null)
     void api
-      .connectGithubIdentity({ appId: appId.trim(), privateKey, webhookSecret })
+      .connectServiceIdentity(identity.service, values)
       .then(async () => {
-        setAppId('')
-        setPrivateKey('')
-        setWebhookSecret('')
+        setValues({})
         setReplacing(false)
-        await queryClient.invalidateQueries({ queryKey: ['githubIdentity'] })
+        await queryClient.invalidateQueries({ queryKey: ['serviceIdentities'] })
       })
       .catch((e) => setError(e instanceof Error ? e.message : String(e)))
       .finally(() => setBusy(false))
   }
+
+  const facts = Object.entries(identity.facts)
 
   return (
     <div className="set-card harness-row" style={{ '--fam': 'var(--accent-violet)' } as CSSProperties}>
       <div className="hr-head">
         <span className="set-card-name">
           <span className="dot" />
-          github
+          {identity.service}
         </span>
         <span className="set-card-tag">service identity</span>
       </div>
-      <div className="set-pane-sub">
-        The GitHub App druks acts as — it receives webhooks and writes branches, pull requests, and comments. Create it from here, or paste an existing App&apos;s credentials from the GitHub developer settings page.
-      </div>
+      <div className="set-pane-sub">{identity.description}</div>
       <div className="hr-connect">
         <div className="hr-conn-status">
-          {identity?.connected ? (
+          {identity.connected ? (
             <span className="hr-chip hr-chip-on">
-              connected · {identity.slug} (app {identity.appId})
+              connected{facts.map(([key, value]) => ` · ${key} ${value}`).join('')}
             </span>
           ) : (
             <span className="hr-chip hr-chip-off">not connected</span>
           )}
-          {identity?.connected && identity.connectedAt && (
+          {identity.connected && identity.connectedAt && (
             <span className="hr-conn-exp">connected {new Date(identity.connectedAt).toLocaleString()}</span>
           )}
           <span className="hr-conn-actions">
-            {identity?.connected && (
+            {identity.service === 'github' && identity.connected && (
               <a
                 className="hr-conn-btn"
-                href={`https://github.com/apps/${encodeURIComponent(identity.slug ?? '')}/installations/new`}
+                href={`https://github.com/apps/${encodeURIComponent(identity.facts.slug ?? '')}/installations/new`}
                 target="_blank"
                 rel="noreferrer"
               >
                 Manage installations
               </a>
             )}
-            {identity?.connected && !replacing && (
+            {identity.connected && !replacing && (
               <button className="hr-conn-btn" onClick={() => setReplacing(true)} disabled={busy}>
                 Replace
               </button>
@@ -930,55 +932,47 @@ export function GitHubConnectCard() {
           </span>
         </div>
         {formOpen && (
-          <div className="gh-connect-form">
-            <div className="set-field">
-              <span className="set-field-label">github org (empty for a personal account)</span>
-              <input
-                className="set-select"
-                aria-label="GitHub org"
-                value={org}
-                onChange={(e) => setOrg(e.target.value)}
-                disabled={busy}
-              />
-            </div>
-            <span className="hr-conn-actions">
-              <button className="hr-conn-btn" onClick={createApp} disabled={busy}>
-                Create GitHub App
-              </button>
-            </span>
-            <div className="set-pane-sub">…or paste an existing App&apos;s credentials:</div>
-            <div className="set-field">
-              <span className="set-field-label">app id</span>
-              <input
-                className="set-select"
-                aria-label="App ID"
-                value={appId}
-                onChange={(e) => setAppId(e.target.value)}
-                disabled={busy}
-              />
-            </div>
-            <div className="set-field">
-              <span className="set-field-label">private key (PEM)</span>
-              <textarea
-                className="set-select set-textarea"
-                aria-label="Private key (PEM)"
-                value={privateKey}
-                placeholder="-----BEGIN RSA PRIVATE KEY-----"
-                onChange={(e) => setPrivateKey(e.target.value)}
-                disabled={busy}
-              />
-            </div>
-            <div className="set-field">
-              <span className="set-field-label">webhook secret</span>
-              <input
-                className="set-select"
-                type="password"
-                aria-label="Webhook secret"
-                value={webhookSecret}
-                onChange={(e) => setWebhookSecret(e.target.value)}
-                disabled={busy}
-              />
-            </div>
+          <div className="si-connect-form">
+            {identity.service === 'github' && (
+              <>
+                <span className="hr-conn-actions">
+                  <button
+                    className="hr-conn-btn"
+                    onClick={() => window.open('/api/core/github/manifest')}
+                    disabled={busy}
+                  >
+                    Create GitHub App
+                  </button>
+                </span>
+                <div className="set-pane-sub">…or paste an existing App&apos;s credentials:</div>
+              </>
+            )}
+            {identity.fields.map((field) =>
+              field.multiline ? (
+                <div className="set-field" key={field.name}>
+                  <span className="set-field-label">{field.label}</span>
+                  <textarea
+                    className="set-select set-textarea"
+                    aria-label={field.label}
+                    value={values[field.name] ?? ''}
+                    onChange={(e) => setValues({ ...values, [field.name]: e.target.value })}
+                    disabled={busy}
+                  />
+                </div>
+              ) : (
+                <div className="set-field" key={field.name}>
+                  <span className="set-field-label">{field.label}</span>
+                  <input
+                    className="set-select"
+                    type={field.type === 'secret' ? 'password' : 'text'}
+                    aria-label={field.label}
+                    value={values[field.name] ?? ''}
+                    onChange={(e) => setValues({ ...values, [field.name]: e.target.value })}
+                    disabled={busy}
+                  />
+                </div>
+              ),
+            )}
             <span className="hr-conn-actions">
               {replacing && (
                 <button className="hr-conn-btn hr-conn-ghost" onClick={() => setReplacing(false)} disabled={busy}>
@@ -986,7 +980,7 @@ export function GitHubConnectCard() {
                 </button>
               )}
               <button className="hr-conn-btn" onClick={submit} disabled={busy || !complete}>
-                {identity?.connected ? 'Replace connection' : 'Connect GitHub'}
+                {identity.connected ? 'Replace connection' : `Connect ${identity.title}`}
               </button>
             </span>
           </div>

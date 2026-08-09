@@ -20,7 +20,7 @@ import druks.harnesses.models  # noqa: F401
 import druks.mcp.models  # noqa: F401
 import druks.notifications.models  # noqa: F401
 import druks.redis
-import druks.service_identities.models  # noqa: F401
+import druks.services.models  # noqa: F401
 import druks.skills.models  # noqa: F401
 import druks.user_settings.models  # noqa: F401
 from druks.bootstrap import seed

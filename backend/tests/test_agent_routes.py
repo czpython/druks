@@ -14,7 +14,7 @@ from druks.durable.dbos_state import workflow_status
 from druks.durable.models import AgentCall, Run
 from druks.durable.reads import read_transcript_chunk
 from druks.mcp.gateway import services
-from druks.service_identities.models import ServiceIdentity
+from druks.services.models import ServiceIdentity
 from druks.testing import configure_app_for_test, make_settings, seed_call, seed_run
 from druks_field_notes.models import Note
 from druks_field_notes.workflows import Summarize

@@ -1,7 +1,7 @@
 from datetime import UTC, datetime
 
 from druks.contrib.ship.workflows import Build
-from druks.service_identities.models import ServiceIdentity
+from druks.services.models import ServiceIdentity
 from druks.signals import publish
 from druks.testing import seed_run
 

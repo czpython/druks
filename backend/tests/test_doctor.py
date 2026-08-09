@@ -5,7 +5,7 @@ import httpx
 import pytest
 from druks import doctor
 from druks.database import db_session
-from druks.service_identities.models import ServiceIdentity
+from druks.services.models import ServiceIdentity
 from druks.testing import make_settings
 
 _SECRETS_KEY = "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA="
@@ -36,18 +36,24 @@ def _connect_github(slug: str = "druks-operator") -> ServiceIdentity:
     )
 
 
-def test_github_identity_pending_when_absent(tmp_path: Path, doctor_db) -> None:
-    result = doctor.check_github_identity(make_settings(tmp_path))
+def _github_identity_result(results: list[doctor.CheckResult]) -> doctor.CheckResult:
+    return next(result for result in results if result.name == "github_identity")
+
+
+def test_service_identities_pending_when_a_required_service_is_absent(
+    tmp_path: Path, doctor_db
+) -> None:
+    result = _github_identity_result(doctor.check_service_identities(make_settings(tmp_path)))
 
     assert not result.ok
     assert result.pending
     assert "not connected" in result.detail
 
 
-def test_github_identity_reports_the_connected_row(tmp_path: Path, doctor_db) -> None:
+def test_service_identities_report_the_connected_row(tmp_path: Path, doctor_db) -> None:
     _connect_github()
 
-    result = doctor.check_github_identity(make_settings(tmp_path))
+    result = _github_identity_result(doctor.check_service_identities(make_settings(tmp_path)))
 
     assert result.ok
     assert "app_id=12345" in result.detail

@@ -258,20 +258,25 @@ export interface UpdateHarnessRequest {
   timeout?: number
 }
 
-/** The appliance's own GitHub App connection state — identity facts only;
- * the stored PEM and webhook secret never leave the backend. */
-export interface GitHubServiceIdentity {
-  connected: boolean
-  appId: string | null
-  slug: string | null
-  connectedAt: string | null
+export interface ServiceIdentityField {
+  name: string
+  label: string
+  help: string
+  type: string
+  multiline: boolean
 }
 
-export interface ConnectGitHubRequest {
-  appId: string
-  /** Pasted PEM private key — newlines are meaningful and preserved. */
-  privateKey: string
-  webhookSecret: string
+/** One declared service: the appliance's own registered app at an external
+ * provider. Facts are identity only — stored secrets never leave the backend. */
+export interface ServiceIdentity {
+  service: string
+  title: string
+  description: string
+  required: boolean
+  connected: boolean
+  facts: Record<string, string>
+  connectedAt: string | null
+  fields: ServiceIdentityField[]
 }
 
 // --- Settings --------------------------------------------------------------

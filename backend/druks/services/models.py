@@ -7,7 +7,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from druks.database import db_session
 from druks.models import Base
 from druks.secrets.fields import EncryptedJsonField
-from druks.service_identities.exceptions import ServiceNotConnectedError
+from druks.services.exceptions import ServiceNotConnectedError
 
 
 class ServiceIdentity(Base):
