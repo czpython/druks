@@ -12,16 +12,16 @@
 #
 # Usage:
 #
-#   curl -fsSL https://raw.githubusercontent.com/czpython/druks/main/scripts/install.sh | bash
+#   curl -fsSL https://druks.ai/install.sh | bash
 #
 # Env knobs:
 #   DRUKS_INSTALL_DIR     default ~/druks
 #   DRUKS_REF             default main — tag or full SHA to fetch deploy files from
 #   DRUKS_TAG             image tag to pull/run; defaults to the v* DRUKS_REF,
 #                         sha-<DRUKS_REF> for a full SHA, or latest for main
-#   DRUKS_PROVIDER        default exe — sandbox provider on the first run, which
-#                         picks the install shape: `docker` local, `exe` exe.dev
-#                         + tailnet, any other name generic remote. Drukbox
+#   DRUKS_PROVIDER        default docker — sandbox provider on the first run,
+#                         which picks the install shape: `docker` local, `exe`
+#                         exe.dev + tailnet, any other name generic remote. Drukbox
 #                         validates it. Ignored after druks.toml exists.
 
 set -euo pipefail
@@ -50,7 +50,7 @@ main() {
   REPO="czpython/druks"
   REF="${DRUKS_REF:-main}"
   # Validated by ``druks setup`` (the single authority on provider names).
-  PROVIDER="${DRUKS_PROVIDER:-exe}"
+  PROVIDER="${DRUKS_PROVIDER:-docker}"
 
   if [ -n "${DRUKS_TAG:-}" ]; then
     IMAGE_TAG="$DRUKS_TAG"

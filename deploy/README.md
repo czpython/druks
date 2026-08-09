@@ -21,12 +21,12 @@ there is no second datastore to run or back up separately.
 
 The Druks services use the **host network** so they can reach Postgres, Redis,
 Drukbox, and provider-specific sandbox addresses from the host network
-namespace. The default exe.dev shape reaches VMs over the host's tailnet;
+namespace. The exe.dev shape reaches VMs over the host's tailnet;
 other providers may return directly reachable SSH addresses.
 
 ## First-time setup on a fresh box
 
-Prerequisites: Docker with the Compose plugin. The default exe.dev shape also
+Prerequisites: Docker with the Compose plugin. The exe.dev shape also
 needs `tailscaled` joined to the intended tailnet (`tailscale status` shows
 peers). Other remote providers have their own network and credential
 requirements; the local Docker shape is covered in
@@ -41,23 +41,26 @@ Everything else — `compose.yaml`, the Caddyfile, `druks.toml`, the rendered
 ### 1. Run the installer
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/czpython/druks/main/scripts/install.sh | bash
+curl -fsSL https://druks.ai/install.sh | DRUKS_PROVIDER=exe bash
 ```
 
-First pass writes `~/druks/druks.toml` with random secrets pre-filled, renders
-`~/druks/.env`, and exits when required values are missing. It tells you exactly what to do next: edit `druks.toml` — for a
-generic remote shape, fill `[sandbox.<provider>]` from Drukbox's
+`docker` is the default provider (the local shape); a remote deploy names its
+provider — `exe` for exe.dev, any other Drukbox provider name for the generic
+remote shape. First pass writes `~/druks/druks.toml` with random secrets
+pre-filled, renders `~/druks/.env`, and exits when required values are missing.
+It tells you exactly what to do next: edit `druks.toml` — for a generic remote
+shape, fill `[sandbox.<provider>]` from Drukbox's
 [configuration reference](https://github.com/czpython/drukbox).
 
 The GitHub App druks acts as is connected from the dashboard after boot
 (**Settings → Harnesses → Connect GitHub**), per the permission table in
 [`docs/configuration.md`](../docs/configuration.md#github).
 
-The sandbox backend defaults to exe.dev + Tailscale. Pass `DRUKS_PROVIDER`
-on the first run to choose another. `docker` selects the local shape; any other
-Drukbox provider name selects the generic remote shape and is passed through
-without a Druks provider registry. Re-runs read `[sandbox].provider` from
-`druks.toml`, so the environment flag is only a fresh-install seed.
+The sandbox backend defaults to the local `docker` shape. Pass `DRUKS_PROVIDER`
+on the first run to choose another: `exe` for exe.dev + Tailscale, any other
+Drukbox provider name for the generic remote shape (passed through without a
+Druks provider registry). Re-runs read `[sandbox].provider` from `druks.toml`,
+so the environment flag is only a fresh-install seed.
 
 Override the install dir with `DRUKS_INSTALL_DIR=/srv/druks` if you
 want it elsewhere.
@@ -65,11 +68,11 @@ want it elsewhere.
 ### 2. Re-run the installer
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/czpython/druks/main/scripts/install.sh)
+curl -fsSL https://druks.ai/install.sh | bash
 ```
 
-Second pass renders `.env` from `druks.toml`, validates the required values and
-PEMs, then: `docker compose pull` → migrate the databases out of band
+Second pass renders `.env` from `druks.toml`, validates the required values,
+then: `docker compose pull` → migrate the databases out of band
 (`docker compose run --rm web druks init-db`, plus drukbox's schema on a
 remote install) → `docker compose up -d`. Nothing migrates on boot.
 

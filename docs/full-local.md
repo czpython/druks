@@ -26,8 +26,11 @@ and `linux/arm64`.
 ## 1. Install the local Druks profile
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/czpython/druks/main/scripts/install.sh | DRUKS_PROVIDER=docker bash
+curl -fsSL https://druks.ai/install.sh | bash
 ```
+
+`docker` is the default provider, so the bare command selects the local shape;
+`DRUKS_PROVIDER=docker` is equivalent and explicit.
 
 The local shape needs no authored values, so the first run goes all the way:
 
