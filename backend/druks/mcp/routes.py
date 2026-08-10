@@ -5,6 +5,7 @@ from fastapi import APIRouter, Body, HTTPException, Request
 from fastapi.responses import HTMLResponse
 
 from druks.accounts.context import current_account_id
+from druks.core.templates import render_page
 from druks.extensions.registry import mcp_servers
 from druks.mcp import oauth, registry
 from druks.mcp.enums import IdentityMode, TokenSource
@@ -225,12 +226,7 @@ async def oauth_callback(state: str = "", code: str = "", error: str = "") -> HT
     # druks opened this tab via window.open, so the page may close itself; the
     # broadcast tells the settings modal to refetch before the tab goes. The
     # text stays for browsers that refuse the close.
-    return HTMLResponse(
-        f"<html><body><p>Connected MCP server <b>{name}</b>. "
-        "You can close this tab and return to druks.</p>"
-        f"<script>new BroadcastChannel('druks-mcp-connect').postMessage({name!r});"
-        "window.close()</script></body></html>"
-    )
+    return render_page("mcp_oauth_callback.html", name=name)
 
 
 @router.delete("/{name}/grant", status_code=204)
