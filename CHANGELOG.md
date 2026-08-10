@@ -3,6 +3,63 @@
 All notable changes to Druks. Versions follow [semantic versioning](https://semver.org);
 while Druks is pre-1.0, a minor bump may break compatibility.
 
+## [0.2.0] — 2026-08-10
+
+### Added
+
+- **One-command install.** `curl -fsSL https://druks.ai/install.sh | bash` boots
+  the local shape: Docker sandboxes by default, no prompts, no TTY. The local
+  drukbox runs in compose on the same Postgres, so there is no second datastore.
+- **Agent-runbook install.** `INSTALL.md` walks the install as a deterministic
+  sequence a coding agent can follow; the README carries the prompt to paste in.
+- **GitHub App creation from the dashboard.** The connect card creates the App
+  through GitHub's manifest flow and stores its credentials. Installing the App
+  is the only step left on GitHub.
+- **Service identities.** Connections to outside services live in encrypted
+  rows an extension can declare. GitHub and the trackers ride them, and a
+  Services settings pane shows each connection as a card.
+- **Agents find and start work.** `list_open_subjects` shows an agent what is
+  in flight, `ship_start` triggers a ticket, and the surface teaches its own
+  contract.
+- **Adaptive plan gate.** The planner reports its confidence. A confident plan
+  the critic approved implements without parking; anything less waits for the
+  operator.
+- **Reviews without a review identity.** When no review account is connected,
+  reviews post as operator comments instead of failing the run.
+- **Sandbox commits carry identity.** Commits are authored by the connected
+  App's bot, with the dispatching account as co-author.
+
+### Changed
+
+- **Plans are briefings.** One critic pass, one redraft, outcome-level
+  acceptance criteria, one screenful. A parked critique survives an operator
+  redraft.
+- **One review per revision.** The code-review pass folds into the
+  implementation review as a second lens, and one GitHub review carries the
+  verdict and the notes.
+- **The PR body is written once** and republished on every revision, and it
+  states the acceptance criteria.
+- **`ship_start` stamps the tracker.** It moves the ticket to the trigger
+  status and lets webhook intake open the build. A ticket Druks has never seen
+  is a typed 404.
+- **Settings panes share one design.** Services, Harnesses, and Skills use one
+  type scale, one card surface, one status indicator, one chevron.
+- **The agent call page shows the call's artifact.** A plan renders on the call
+  page, not only while its run sits parked.
+- **Project delete confirms, then cascades.** Deleting a project removes its
+  work items after a confirmation that names the scope, instead of a silent 409.
+- **`druks doctor` exits non-zero only on a genuine fault.** Pending operator
+  setup — connect GitHub, connect a harness — reports as pending and exits 0.
+
+### Fixed
+
+- **Live transcripts parse incrementally** instead of re-parsing the whole
+  buffer twice a second.
+- **Ticket intake is idempotent.** A re-delivered "Ready for Agent" webhook no
+  longer re-builds a merged item.
+- **Cancelled builds settle their work items.**
+- **Pinned verification commands keep the CI check that proves them.**
+
 ## [0.1.0] — 2026-08-02
 
 ### Added
