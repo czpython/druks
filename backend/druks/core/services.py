@@ -5,12 +5,11 @@ import httpx
 from pydantic import BaseModel, Field, SecretStr
 
 from druks.core.apis.github import GITHUB, GitHubClient
+from druks.core.apis.linear import LINEAR_GRAPHQL_URL
 from druks.services import Service, ServiceConnectError
 from druks.settings import load_settings
 
 logger = logging.getLogger(__name__)
-
-LINEAR_GRAPHQL_URL = "https://api.linear.app/graphql"
 
 _VERIFY_TIMEOUT = 10.0
 

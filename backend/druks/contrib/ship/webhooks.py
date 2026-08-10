@@ -5,8 +5,8 @@ import logging
 from fastapi import HTTPException, status
 from fastapi.responses import JSONResponse, Response
 
-from druks.contrib.ship.ticketing.linear import compute_delivery_key
 from druks.core import services
+from druks.core.apis.linear import compute_delivery_key
 from druks.services import ServiceNotConnectedError
 from druks.signals import publish
 from druks.webhooks import Webhook, verify_hmac_sha256
