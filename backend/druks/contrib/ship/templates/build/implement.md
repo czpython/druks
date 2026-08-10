@@ -62,17 +62,21 @@ git push
 
 Stage only the paths your implementation changed; explicit staging is what keeps stray artifacts (caches, downloaded toolchains, editor files) out of the PR. The commit subject must describe what THIS commit's diff actually contains — not work that landed in earlier commits — and must not include the ticket or issue prefix.
 
+The PR body — the plan document reviewers review the diff against — carries exactly these sections, in order, whether you are opening the PR or refreshing it on a later revision:
+
+- `**Linear ticket:** [<ticket ref>](<url>)` when the ticket has a URL.
+- `## Plan` — the approved plan markdown (the **Current plan** section above), verbatim. Copy only that section: it stops at the end of `## Current plan` and does NOT include the prompt's rendered `## Acceptance criteria`.
+- `## Acceptance Criteria` — `- <id>: <description>` bullets, an indented `- Verification: <how>` when one is specified. This bullet section is the one place the acceptance criteria appear; do not also fold them into `## Plan`.
+- End with: `<!-- Plan authored by Druks. Reviews, evaluations, and the full audit trail live in the Druks dashboard, not here. -->`
+
 {% if build.pr_number %}
 After a successful push, dismiss the PR's existing reviews (`gh` is authenticated) — but only a review whose requests your new commits actually addressed. A review asking for changes your diff did not touch still describes the code as it stands: leave it standing and name it in known_risks instead. A dismissal failure must never block your delivery — note it in known_risks and move on.
+
+Then, on every implementation revision, regenerate the PR body above from the current plan and acceptance criteria and republish it so a later plan revision can never leave the body stale — write it to a file and run `gh api -X PATCH repos/{{ build.repo }}/pulls/{{ build.pr_number }} -F body=@<file>`. Like the review dismissal, a body-republish failure must never block your delivery — record it in known_risks and move on, because the successful push is the deliverable.
 {% else %}
-After a successful push, open the draft PR against the default branch (`gh pr create --draft`; `gh` is authenticated):
+After a successful push, open the draft PR against the default branch with the body above (`gh pr create --draft`; `gh` is authenticated):
 
 - Title: `<ticket ref> - <ticket title>` for a Linear/Jira ticket (just the ref when the title is empty); the GitHub issue title verbatim for an issue.
-- Body — the plan document reviewers will review the diff against:
-  - `**Linear ticket:** [<ticket ref>](<url>)` when the ticket has a URL.
-  - `## Plan` — the approved plan markdown (the **Current plan** section above), verbatim.
-  - `## Acceptance Criteria` — `- <id>: <description>` bullets, an indented `- Verification: <how>` when one is specified.
-  - End with: `<!-- Plan authored by Druks. Reviews, evaluations, and the full audit trail live in the Druks dashboard, not here. -->`
 {% endif %}
 
 Authentication is already configured (a git credential helper supplies the token), so the push needs no further setup. After a successful push, report the resulting commit SHA in `head_sha` and `commit_sha`, and set `base_sha` to the commit you started from (the `git rev-parse HEAD` before your first commit). Report the branch you delivered on in `branch` and its PR number in `pr_number`. If the push is rejected because the remote branch moved, fetch and retry once (`git fetch origin <branch> && git rebase origin/<branch>`, resolve trivially, push again); if it still fails, return `status="needs_clarification"` explaining the conflict. `workspace_path` should be the repo root you worked in.

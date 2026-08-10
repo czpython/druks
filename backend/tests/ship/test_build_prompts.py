@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 from druks.contrib import ship
+from druks.contrib.ship.contracts import AcceptanceCriterionOutput, PlanData
 from druks.contrib.ship.journal import BuildJournal
 from druks.contrib.ship.models import Project, ProjectRepo
 from druks.contrib.ship.policy import RepoPolicy
@@ -180,6 +181,98 @@ async def test_comment_mode_swaps_the_review_event_mapping():
 
     assert "Submit every review as a `COMMENT` event" in prompt
     assert "an **approving** verdict → `APPROVE`" not in prompt
+
+
+def _build_with_plan() -> SimpleNamespace:
+    """A build whose journal carries a populated plan — the plan markdown and
+    acceptance criteria the PR-body prompts render against."""
+    build = _build()
+    build.journal.add(
+        PlanData(
+            plan_markdown="## Approach\n\nRewire the widget as specified.",
+            acceptance_criteria=[
+                AcceptanceCriterionOutput(
+                    id="AC1",
+                    description="The widget rewires.",
+                    verification="A test asserts the rewire.",
+                )
+            ],
+        )
+    )
+    return build
+
+
+async def _implement_prompt(build) -> str:
+    return await render_prompt(
+        "ship/build/implement.md",
+        build=build,
+        verification="VERIFICATION-BLOCK",
+        workspace=_workspace(),
+    )
+
+
+async def test_implement_prompt_new_pr_body_contract_and_publish():
+    # No PR yet: the shared body contract names the plan/criteria boundary and the
+    # new-PR publish path creates a draft — no republish PATCH on this branch.
+    build = _build_with_plan()
+    build.pr_number = None
+
+    prompt = await _implement_prompt(build)
+
+    # The approved plan is rendered once, under ## Current plan.
+    assert "Rewire the widget as specified." in prompt
+    assert prompt.count("Rewire the widget as specified.") == 1
+    # The copy boundary is named: the plan block stops before the rendered criteria.
+    assert "it stops at the end of `## Current plan`" in prompt
+    assert "does NOT include the prompt's rendered `## Acceptance criteria`" in prompt
+    # Acceptance criteria live once in their own bullet section.
+    assert "## Acceptance Criteria" in prompt
+    assert "This bullet section is the one place the acceptance criteria appear" in prompt
+    # New-PR publish behavior: draft creation and the title rule.
+    assert "gh pr create --draft" in prompt
+    assert "- Title: `<ticket ref> - <ticket title>`" in prompt
+    # The existing-PR republish PATCH is not on the creation path.
+    assert "gh api -X PATCH" not in prompt
+
+
+async def test_implement_prompt_existing_pr_republishes_current_body():
+    # An existing PR (#7): same body contract, republished after every push via the
+    # concrete REST route, with review dismissal and a non-blocking failure posture.
+    build = _build_with_plan()
+
+    prompt = await _implement_prompt(build)
+
+    # Same shared contract as the new-PR path.
+    assert "it stops at the end of `## Current plan`" in prompt
+    assert "## Acceptance Criteria" in prompt
+    # Republish from the current plan on every revision, via the resolved REST route.
+    assert "gh api -X PATCH repos/acme/widget/pulls/7 -F body=@<file>" in prompt
+    assert "regenerate the PR body above from the current plan and acceptance criteria" in prompt
+    # Conditional review dismissal stays intact.
+    assert "dismiss the PR's existing reviews" in prompt
+    # A republish failure is reported, not blocking, because the push is the deliverable.
+    assert "a body-republish failure must never block your delivery" in prompt
+    # The creation path is not taken for an existing PR.
+    assert "gh pr create --draft" not in prompt
+
+
+async def test_revise_contract_prompt_publishes_body_via_rest_patch():
+    # The revision publishes the newly authored plan through the REST PATCH route,
+    # keeping its body sections and dropping the failing gh pr edit direction.
+    build = _build_with_plan()
+
+    prompt = await render_prompt(
+        "ship/build/revise_contract.md",
+        build=build,
+        verification="VERIFICATION-BLOCK",
+        workspace=_workspace(),
+    )
+
+    assert "gh api -X PATCH repos/acme/widget/pulls/7 -F body=@<file>" in prompt
+    assert "gh pr edit" not in prompt
+    # The revised-contract body composition is preserved.
+    assert "`## Plan` — your revised plan markdown." in prompt
+    assert "## Acceptance Criteria" in prompt
 
 
 def test_build_prompt_context_covers_template_attrs():
