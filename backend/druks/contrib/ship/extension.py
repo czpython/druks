@@ -4,7 +4,6 @@ from pydantic import Field
 
 from druks.agents import Agent
 from druks.contrib.ship.contracts import (
-    CodeReviewOutput,
     ContractRevisionOutput,
     EvaluationOutput,
     ImplementationOutput,
@@ -165,17 +164,11 @@ class Ship(Extension):
         model="claude",
     )
     evaluate_implementation = Agent(
-        description="adversarial review of the diff",
+        description="verification + code review of the diff, one verdict",
         prompt="ship/build/evaluate_implementation.md",
         contract=EvaluationOutput,
         model="codex",
         effort="medium",
-    )
-    review_code = Agent(
-        description="line-level code review on the PR",
-        prompt="ship/build/review_code.md",
-        contract=CodeReviewOutput,
-        model="claude",
     )
     triage_human_feedback = Agent(
         description="routes a human's PR feedback back into the workflow",

@@ -283,10 +283,7 @@ class AcceptanceResultOutput(AgentOutput):
 class EvaluationOutput(AgentOutput):
     verdict: EvaluationVerdict
     body: str
+    review_notes: str
     findings: list[FindingOutput]
     checks: list[EvalCheckOutput]
     acceptance_results: list[AcceptanceResultOutput]
-
-
-class CodeReviewOutput(AgentOutput):
-    summary: str

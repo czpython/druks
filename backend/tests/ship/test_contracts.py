@@ -15,7 +15,6 @@ MODELS = [
     O.TriageOutput,
     O.ImplementationOutput,
     O.EvaluationOutput,
-    O.CodeReviewOutput,
     O.ContractRevisionOutput,
 ]
 

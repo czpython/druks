@@ -98,8 +98,8 @@ class Build(Workflow):
         )
         review_code: bool = Field(
             default=True,
-            title="Review code",
-            description="Run the line-level reviewer after a passing evaluation.",
+            title="Code review",
+            description="Include the advisory code-review lens in the implementation review.",
         )
 
     @classmethod
@@ -223,6 +223,7 @@ class Build(Workflow):
             task_owner_email=self.input.task_owner_email,
             related_repos=target_repo.siblings(),
             skills=Skill.list_delivered(self._profile.get("recommended_skills", [])),
+            review_code=self._settings.review_code,
             review_mode=get_review_actor().mode,
             journal=self.journal,
         )
@@ -294,8 +295,6 @@ class Build(Workflow):
             await self.implement()
             evaluation = await Ship.evaluate_implementation()
             if evaluation.verdict == EvaluationVerdict.PASS:
-                if self._settings.review_code:
-                    await Ship.review_code()
                 if await self._work_gate():
                     return
                 continue

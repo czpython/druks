@@ -116,7 +116,6 @@ def _stub(
     import druks.contrib.ship.workflows as m
     from druks.contrib.ship.contracts import (
         AcceptanceCriterionOutput,
-        CodeReviewOutput,
         EvaluationOutput,
         ImplementationOutput,
         PlanData,
@@ -190,9 +189,13 @@ def _stub(
             }
         ),
         "evaluate_implementation": EvaluationOutput(
-            verdict=EvaluationVerdict.PASS, body="", findings=[], checks=[], acceptance_results=[]
+            verdict=EvaluationVerdict.PASS,
+            body="",
+            review_notes="",
+            findings=[],
+            checks=[],
+            acceptance_results=[],
         ),
-        "review_code": CodeReviewOutput(summary="ok"),
     }
     invoked: list[str] = []
 
