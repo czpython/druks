@@ -47,7 +47,7 @@ Postgres — no separate datastore. On macOS, if sandbox SSH turns out
 unreachable, enable host networking in Docker Desktop's settings.
 
 For the bundled `ship` extension, connect the GitHub App druks acts as from
-the dashboard after boot (**Settings → Harnesses**) — create it there or
+the dashboard after boot (**Settings → Services**) — create it there or
 paste an existing App's credentials, see
 [the GitHub connection](configuration.md#github).
 
@@ -139,7 +139,7 @@ value.
 
 GitHub, Linear, and Jira cannot reach a loopback listener. Dashboard-initiated
 actions work locally, but provider-driven flows need an HTTPS tunnel forwarding
-to `127.0.0.1:8001`. Connect tracker credentials under **Settings → Harnesses** and
+to `127.0.0.1:8001`. Connect tracker credentials under **Settings → Services** and
 keep the exact public paths:
 
 ```text

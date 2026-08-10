@@ -165,7 +165,7 @@ in Postgres; there is no TOML, environment, or PEM-file source — until GitHub
 is connected, agent runs refuse with a pointed message and `druks doctor`
 reports the identity as not connected.
 
-Connect it from **Settings → Harnesses**. **Create GitHub App** registers the
+Connect it from **Settings → Services**. **Create GitHub App** registers the
 App through GitHub's manifest flow: name a GitHub org (or leave it empty for
 a personal account), confirm on GitHub, and druks stores the created App's
 credentials and sends you on to install it on your repositories. Creating the
@@ -200,7 +200,7 @@ set is where `ship` may act. Personal access tokens are not a supported
 substitute.
 
 **Upgrading an existing installation** is a one-time paste on each live box
-after rollout: open Settings → Harnesses and connect GitHub with the existing
+after rollout: open Settings → Services and connect GitHub with the existing
 operator App's ID, private key, and webhook secret. Do not create a
 replacement App — the current App's webhook and installations keep working
 under the pasted credentials.
@@ -222,7 +222,7 @@ client at another compatible GitHub API endpoint.
 
 Tracker credentials are service identities: connect Linear (API key + webhook
 secret) or Jira Cloud (base URL, email, API token, webhook secret) from
-**Settings → Harnesses**, on the same cards as the GitHub App. Connecting
+**Settings → Services**, on the same cards as the GitHub App. Connecting
 verifies the credentials against the tracker before anything is stored. Which
 tracker drives `ship` work — and the statuses that trigger or move it — stays a
 ship extension setting in **Settings → Ship**.
