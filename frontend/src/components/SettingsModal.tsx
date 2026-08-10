@@ -839,68 +839,105 @@ function HarnessesPane({
   )
 }
 
-// Services — the appliance's own identities at external providers, one card
-// per declared service.
-function ServicesPane() {
-  return (
-    <div className="set-pane">
-      <div className="set-pane-head">
-        <div className="set-pane-sub">
-          The identities druks itself holds at external services — connected once per installation, verified before anything replaces a working one.
-        </div>
-      </div>
-      <div className="set-group">
-        <div className="set-group-label">services</div>
-        <div className="set-cards">
-          <ServiceCards />
-        </div>
-      </div>
-    </div>
-  )
-}
-
-// The appliance's own identities at external services, one card per declared
-// service, fields rendered from each entry's spec. Connection persists
-// immediately, outside the modal's Save, so each card owns its query, submit,
-// busy, and error state. Pasted secrets are write-only: a success drops them
-// from state, and the connected rendering shows identity facts only.
-export function ServiceCards() {
+// Services — the appliance's own identities at external providers. The
+// overview is a grid of compact cards; clicking one swaps in a focused detail
+// view in the same pane. Connection persists immediately, outside the modal's
+// Save, so the detail view owns its own submit, busy, and error state.
+export function ServicesPane() {
+  const queryClient = useQueryClient()
   const query = useQuery({
     queryKey: ['services'],
     queryFn: () => api.services(),
     staleTime: 60_000,
   })
-  return (
-    <>
-      {(query.data ?? []).map((service) => (
-        <ServiceCard key={service.name} service={service} />
-      ))}
-    </>
-  )
-}
-
-export function ServiceCard({ service }: { service: Service }) {
-  const queryClient = useQueryClient()
-  const [replacing, setReplacing] = useState(false)
-  const [values, setValues] = useState<Record<string, string>>({})
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [selectedName, setSelectedName] = useState<string | null>(null)
 
   // A guided create flow (the GitHub App manifest tab) lands on a callback
   // page, which broadcasts the service name once the credentials are stored.
   useEffect(() => {
     const channel = new BroadcastChannel('druks-service-connect')
-    channel.onmessage = (event) => {
-      if (event.data === service.name) {
-        setReplacing(false)
-        void queryClient.invalidateQueries({ queryKey: ['services'] })
-      }
-    }
+    channel.onmessage = () => void queryClient.invalidateQueries({ queryKey: ['services'] })
     return () => channel.close()
-  }, [queryClient, service.name])
+  }, [queryClient])
 
-  const formOpen = !service.connected || replacing
+  const services = query.data ?? []
+  const selected = services.find((service) => service.name === selectedName)
+
+  return (
+    <div className="set-pane mcp-pane svc-pane">
+      {selected ? (
+        <ServiceDetail service={selected} onBack={() => setSelectedName(null)} />
+      ) : (
+        <>
+          <header className="mcp-pane-head">
+            <h2 className="mcp-pane-title">Services</h2>
+            <p className="mcp-pane-sub">
+              Connect the accounts druks uses to work with external services.
+            </p>
+          </header>
+          <div className="svc-grid">
+            {services.map((service) => {
+              const identity = service.connected
+                ? (service.facts.slug ?? Object.values(service.facts)[0])
+                : undefined
+              return (
+                <button
+                  key={service.name}
+                  type="button"
+                  className="svc-card"
+                  onClick={() => setSelectedName(service.name)}
+                >
+                  <span className="svc-card-top">
+                    <span className="svc-card-name">{service.title}</span>
+                    <ServiceStatus connected={service.connected} />
+                  </span>
+                  <span className="svc-card-desc">{service.description}</span>
+                  <span className="svc-card-foot">
+                    {identity ? (
+                      <span className="svc-card-id">{identity}</span>
+                    ) : (
+                      <span className="svc-card-cue">Configure</span>
+                    )}
+                    <span className="svc-card-chevron" aria-hidden="true">
+                      ›
+                    </span>
+                  </span>
+                </button>
+              )
+            })}
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
+function ServiceStatus({ connected }: { connected: boolean }) {
+  return (
+    <span className={'svc-status' + (connected ? ' is-on' : '')}>
+      <span className="svc-status-dot" />
+      {connected ? 'Connected' : 'Not connected'}
+    </span>
+  )
+}
+
+// Credential fields stay hidden until the user explicitly chooses to connect
+// or replace. Pasted secrets are write-only: a success drops them from state,
+// and the connected rendering shows identity facts only.
+function ServiceDetail({ service, onBack }: { service: Service; onBack: () => void }) {
+  const queryClient = useQueryClient()
+  const [formOpen, setFormOpen] = useState(false)
+  const [values, setValues] = useState<Record<string, string>>({})
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
   const complete = service.fields.every((field) => (values[field.name] ?? '').trim() !== '')
+
+  const closeForm = () => {
+    setFormOpen(false)
+    setValues({})
+    setError(null)
+  }
 
   const submit = () => {
     setBusy(true)
@@ -909,112 +946,134 @@ export function ServiceCard({ service }: { service: Service }) {
       .connectService(service.name, values)
       .then(async () => {
         setValues({})
-        setReplacing(false)
+        setFormOpen(false)
         await queryClient.invalidateQueries({ queryKey: ['services'] })
       })
       .catch((e) => setError(e instanceof Error ? e.message : String(e)))
       .finally(() => setBusy(false))
   }
 
-  const facts = Object.entries(service.facts)
+  const createGithubApp = (
+    <button
+      className="set-btn primary"
+      onClick={() => window.open('/api/core/github/manifest')}
+      disabled={busy}
+    >
+      Create GitHub App
+    </button>
+  )
 
   return (
-    <div className="set-card harness-row" style={{ '--fam': 'var(--accent-violet)' } as CSSProperties}>
-      <div className="hr-head">
-        <span className="set-card-name">
-          <span className="dot" />
-          {service.name}
-        </span>
-        <span className="set-card-tag">service identity</span>
+    <>
+      <div>
+        <button type="button" className="svc-back" onClick={onBack}>
+          ← Services
+        </button>
       </div>
-      <div className="set-pane-sub">{service.description}</div>
-      <div className="hr-connect">
-        <div className="hr-conn-status">
-          {service.connected ? (
-            <span className="hr-chip hr-chip-on">
-              connected{facts.map(([key, value]) => ` · ${key} ${value}`).join('')}
-            </span>
-          ) : (
-            <span className="hr-chip hr-chip-off">not connected</span>
-          )}
-          {service.connected && service.connectedAt && (
-            <span className="hr-conn-exp">connected {new Date(service.connectedAt).toLocaleString()}</span>
-          )}
-          <span className="hr-conn-actions">
-            {service.name === 'github' && service.connected && (
-              <a
-                className="hr-conn-btn"
-                href={`https://github.com/apps/${encodeURIComponent(service.facts.slug ?? '')}/installations/new`}
-                target="_blank"
-                rel="noreferrer"
-              >
-                Manage installations
-              </a>
-            )}
-            {service.connected && !replacing && (
-              <button className="hr-conn-btn" onClick={() => setReplacing(true)} disabled={busy}>
-                Replace
-              </button>
-            )}
-          </span>
+      <header className="mcp-pane-head">
+        <div className="svc-detail-head">
+          <h2 className="mcp-pane-title">{service.title}</h2>
+          <ServiceStatus connected={service.connected} />
         </div>
-        {formOpen && (
-          <div className="si-connect-form">
-            {service.name === 'github' && (
-              <>
-                <span className="hr-conn-actions">
-                  <button
-                    className="hr-conn-btn"
-                    onClick={() => window.open('/api/core/github/manifest')}
-                    disabled={busy}
-                  >
-                    Create GitHub App
-                  </button>
-                </span>
-                <div className="set-pane-sub">…or paste an existing App&apos;s credentials:</div>
-              </>
-            )}
-            {service.fields.map((field) =>
-              field.multiline ? (
-                <div className="set-field" key={field.name}>
-                  <span className="set-field-label">{field.label}</span>
-                  <textarea
-                    className="set-select set-textarea"
-                    aria-label={field.label}
-                    value={values[field.name] ?? ''}
-                    onChange={(e) => setValues({ ...values, [field.name]: e.target.value })}
-                    disabled={busy}
-                  />
-                </div>
-              ) : (
-                <div className="set-field" key={field.name}>
-                  <span className="set-field-label">{field.label}</span>
-                  <input
-                    className="set-select"
-                    type={field.type === 'secret' ? 'password' : 'text'}
-                    aria-label={field.label}
-                    value={values[field.name] ?? ''}
-                    onChange={(e) => setValues({ ...values, [field.name]: e.target.value })}
-                    disabled={busy}
-                  />
-                </div>
-              ),
-            )}
-            <span className="hr-conn-actions">
-              {replacing && (
-                <button className="hr-conn-btn hr-conn-ghost" onClick={() => setReplacing(false)} disabled={busy}>
-                  Cancel
-                </button>
-              )}
-              <button className="hr-conn-btn" onClick={submit} disabled={busy || !complete}>
-                {service.connected ? 'Replace connection' : `Connect ${service.title}`}
-              </button>
-            </span>
+        <p className="mcp-pane-sub">{service.description}</p>
+      </header>
+      {error && (
+        <div className="mcp-error" role="alert">
+          {error}
+        </div>
+      )}
+      {service.connected && (
+        <section className="mcp-section">
+          <div className="svc-facts">
+            {Object.entries(service.facts).map(([key, value]) => (
+              <div className="svc-fact" key={key}>
+                <span className="svc-fact-key">{key}</span>
+                <span className="svc-fact-val">{value}</span>
+              </div>
+            ))}
           </div>
-        )}
-        {error && <div className="hr-conn-error">{error}</div>}
-      </div>
-    </div>
+          {service.connectedAt && (
+            <p className="svc-meta">Connected {new Date(service.connectedAt).toLocaleString()}</p>
+          )}
+          {!formOpen && (
+            <div className="svc-actions">
+              {service.name === 'github' && (
+                <a
+                  className="set-btn ghost"
+                  href={`https://github.com/apps/${encodeURIComponent(service.facts.slug ?? '')}/installations/new`}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Manage installations
+                </a>
+              )}
+              <button className="set-btn ghost" onClick={() => setFormOpen(true)} disabled={busy}>
+                Replace connection
+              </button>
+            </div>
+          )}
+        </section>
+      )}
+      {!service.connected && !formOpen && (
+        <section className="mcp-section">
+          {service.name === 'github' ? (
+            <>
+              <div>{createGithubApp}</div>
+              <button type="button" className="svc-alt" onClick={() => setFormOpen(true)}>
+                Connect an existing GitHub App
+              </button>
+            </>
+          ) : (
+            <div>
+              <button className="set-btn primary" onClick={() => setFormOpen(true)}>
+                Connect {service.title}
+              </button>
+            </div>
+          )}
+        </section>
+      )}
+      {formOpen && (
+        <section className="mcp-section">
+          {service.name === 'github' && service.connected && (
+            <>
+              <div>{createGithubApp}</div>
+              <p className="mcp-help">…or paste an existing App&apos;s credentials:</p>
+            </>
+          )}
+          {service.fields.map((field) => (
+            <div className="mcp-field" key={field.name}>
+              <span className="mcp-label">{field.label}</span>
+              {field.multiline ? (
+                <textarea
+                  className="skill-add-input svc-textarea"
+                  aria-label={field.label}
+                  value={values[field.name] ?? ''}
+                  onChange={(e) => setValues({ ...values, [field.name]: e.target.value })}
+                  disabled={busy}
+                />
+              ) : (
+                <input
+                  className="skill-add-input"
+                  type={field.type === 'secret' ? 'password' : 'text'}
+                  aria-label={field.label}
+                  value={values[field.name] ?? ''}
+                  onChange={(e) => setValues({ ...values, [field.name]: e.target.value })}
+                  disabled={busy}
+                />
+              )}
+            </div>
+          ))}
+          <div className="svc-actions">
+            <button className="set-btn ghost" onClick={closeForm} disabled={busy}>
+              Cancel
+            </button>
+            <button className="set-btn primary" onClick={submit} disabled={busy || !complete}>
+              {service.connected ? 'Replace connection' : `Connect ${service.title}`}
+            </button>
+          </div>
+        </section>
+      )}
+    </>
   )
 }
 
