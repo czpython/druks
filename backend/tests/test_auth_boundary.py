@@ -24,6 +24,14 @@ SESSION_ONLY_API_ROUTES = {
     ("DELETE", "/api/auth/personal-tokens/{pat_id}"),
     ("DELETE", "/api/harnesses/{name}/connection"),
     ("PATCH", "/api/settings/extensions"),
+    ("POST", "/api/service-identities/{name}"),
+}
+
+# Session-gated routes that also sit behind their router's identity gate —
+# the route-level session dependency is the stricter of the two.
+DUAL_GATED_API_PATHS = {
+    "/api/settings/extensions",
+    "/api/service-identities/{name}",
 }
 
 # The connection flow must answer during none/zero setup, before any account
@@ -116,7 +124,7 @@ def test_capability_management_is_session_only(api_routes):
     } == SESSION_ONLY_API_ROUTES
     for route in listed:
         assert _gated_by(route, current_session_account), route.path
-        if route.path != "/api/settings/extensions":
+        if route.path not in DUAL_GATED_API_PATHS:
             assert not _gated_by(route, current_account), route.path
     # And nothing else carries the session-only gate.
     for route in api_routes:
