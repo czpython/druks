@@ -785,7 +785,7 @@ function HarnessesPane({
             : [...TIMEOUTS, h.timeout].sort((a, b) => a - b)
           const id = (field: string) => `${fieldId}-${harness.name}-${field}`
           return (
-            <div key={harness.name} className="hr-card" style={{ '--fam': harnessColor[harness.name] } as CSSProperties}>
+            <div key={harness.name} className="set-card hr-card" style={{ '--fam': harnessColor[harness.name] } as CSSProperties}>
               <div className="hr-ident">
                 <span className="hr-ident-dot" />
                 <span className="hr-name">{harness.name}</span>
@@ -900,7 +900,7 @@ export function ServicesPane() {
                 <button
                   key={service.name}
                   type="button"
-                  className="svc-card"
+                  className="set-card svc-card"
                   onClick={() => setSelectedName(service.name)}
                 >
                   <span className="svc-card-top">
@@ -914,9 +914,7 @@ export function ServicesPane() {
                     ) : (
                       <span className="svc-card-cue">Configure</span>
                     )}
-                    <span className="svc-card-chevron" aria-hidden="true">
-                      ›
-                    </span>
+                    <span className="chev" aria-hidden="true" />
                   </span>
                 </button>
               )
@@ -930,8 +928,8 @@ export function ServicesPane() {
 
 function ServiceStatus({ connected }: { connected: boolean }) {
   return (
-    <span className={'svc-status' + (connected ? ' is-on' : '')}>
-      <span className="svc-status-dot" />
+    <span className={'mcp-conn' + (connected ? ' is-live' : '')}>
+      <span className="mcp-conn-dot" />
       {connected ? 'Connected' : 'Not connected'}
     </span>
   )
@@ -1000,7 +998,7 @@ function ServiceDetail({ service, onBack }: { service: Service; onBack: () => vo
       )}
       {service.connected && (
         <section className="mcp-section">
-          <div className="svc-facts">
+          <div className="set-card svc-facts">
             {Object.entries(service.facts).map(([key, value]) => (
               <div className="svc-fact" key={key}>
                 <span className="svc-fact-key">{key}</span>
@@ -1330,7 +1328,7 @@ function CollectionCard({
   }
 
   return (
-    <div className="skill-col">
+    <div className="set-card skill-col">
       <div className="skill-col-head">
         <button
           type="button"
@@ -1338,7 +1336,7 @@ function CollectionCard({
           aria-expanded={open}
           onClick={() => setOpen((v) => !v)}
         >
-          <span className="sc-chevron" aria-hidden="true" />
+          <span className="chev" aria-hidden="true" />
           <span className="sc-id">
             <span className="sc-repo">{collection.name}</span>
             <span className="sc-meta">
@@ -1611,7 +1609,7 @@ function McpServersPane() {
               <div key={candidate.registryName}>
                 <button
                   className={
-                    'mcp-reg-row' +
+                    'set-card mcp-reg-row' +
                     (selected?.registryName === candidate.registryName ? ' is-selected' : '')
                   }
                   aria-expanded={selected?.registryName === candidate.registryName}
@@ -1681,7 +1679,7 @@ function McpServersPane() {
         )}
       </section>
 
-      <details className="mcp-custom">
+      <details className="set-card mcp-custom">
         <summary className="mcp-custom-summary">Add a custom server</summary>
         <div className="mcp-custom-body">
           <p className="mcp-help">
@@ -1814,7 +1812,7 @@ function McpServerRow({
   // A header-auth'd (or auth-free) server holds no credential to connect.
   const isLive = server.hasToken || !server.tokenSource
   return (
-    <div className={'mcp-row' + (server.isEnabled ? '' : ' is-off')}>
+    <div className={'set-card mcp-row' + (server.isEnabled ? '' : ' is-off')}>
       <div className="mcp-id">
         <span className="mcp-name" title={server.name}>
           {server.name}
@@ -2050,7 +2048,7 @@ function PatRow({
 }) {
   const active = pat.status === 'active'
   return (
-    <div className={'mcp-row' + (active ? '' : ' is-off')}>
+    <div className={'set-card mcp-row' + (active ? '' : ' is-off')}>
       <div className="mcp-id">
         <span className="mcp-name">{pat.name}</span>
         <span className="mcp-url">
