@@ -21,8 +21,8 @@ from druks.contrib.ship.schemas import (
     WorkItemsHistoryResponse,
 )
 from druks.contrib.ship.ticketing.enums import TicketStatus
-from druks.contrib.ship.ticketing.exceptions import UnknownTicketError
 from druks.contrib.ship.workflows import Profile
+from druks.core.apis.exceptions import UnknownTicketError
 from druks.core.apis.github import get_github_client
 from druks.db import db_session
 from druks.services.exceptions import ServiceNotConnectedError

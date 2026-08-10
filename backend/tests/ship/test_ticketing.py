@@ -2,16 +2,14 @@ import json
 
 import httpx
 import pytest
-from druks.contrib.ship import services
 from druks.contrib.ship.extension import Ship, check_tracker_identity
 from druks.contrib.ship.ticketing.enums import TicketStatus
-from druks.contrib.ship.ticketing.exceptions import (
-    JiraAPIError,
-    LinearAPIError,
-    UnknownTicketError,
-)
-from druks.contrib.ship.ticketing.jira import Jira, JiraClient
-from druks.contrib.ship.ticketing.linear import Linear, LinearClient
+from druks.contrib.ship.ticketing.jira import Jira
+from druks.contrib.ship.ticketing.linear import Linear
+from druks.core import services
+from druks.core.apis.exceptions import JiraAPIError, LinearAPIError, UnknownTicketError
+from druks.core.apis.jira import JiraClient
+from druks.core.apis.linear import LinearClient
 from druks.services import ServiceConnectError
 from druks.services.models import ServiceIdentity
 

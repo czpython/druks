@@ -8,8 +8,8 @@ from druks.contrib.review.workflows import PullRequestReview
 from druks.contrib.ship.extension import Ship
 from druks.contrib.ship.models import Project, ProjectRepo, WorkItem
 from druks.contrib.ship.ticketing.enums import TicketStatus
-from druks.contrib.ship.ticketing.exceptions import LinearAPIError, UnknownTicketError
 from druks.contrib.ship.workflows import Build
+from druks.core.apis.exceptions import LinearAPIError, UnknownTicketError
 from druks.durable.dbos_state import workflow_status
 from druks.durable.models import AgentCall, Run
 from druks.durable.reads import read_transcript_chunk

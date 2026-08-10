@@ -9,7 +9,7 @@ from conftest import finish_agent_run, make_test_note, seed_note_agent_run, seed
 from druks.accounts.models import Account, PersonalAccessToken
 from druks.api.app import mcp_app
 from druks.contrib.ship.extension import Ship
-from druks.contrib.ship.ticketing.exceptions import UnknownTicketError
+from druks.core.apis.exceptions import UnknownTicketError
 from druks.durable.models import Artifact, Run
 from druks.mcp.app import create_mcp_app
 from druks.mcp.exceptions import InvalidAgentToolError
