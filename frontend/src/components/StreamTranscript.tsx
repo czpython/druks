@@ -100,6 +100,9 @@ type Row =
   | { kind: 'unknown'; label: string; detail: string }
   | { kind: 'raw'; line: string }
 
+// Caller contract: each `text` passed to `appendStreamText` must extend the
+// previously passed `text` as a prefix. That invariant is what makes slicing
+// the suffix by `receivedLength` sound.
 interface IncrementalParseState {
   rows: Row[]
   receivedLength: number
@@ -144,19 +147,7 @@ function appendStreamText(
 // Exported for unit tests; not a component (HMR fast-refresh warning is moot).
 // eslint-disable-next-line react-refresh/only-export-components
 export function parseStream(text: string, complete: boolean): Row[] {
-  // Live streams can end with a partial JSON line. Keep that hidden until
-  // the next chunk arrives; completed/static transcripts should render it.
-  const lines = text.split('\n')
-  const completeLines = lines.slice(0, lines.length - 1)
-  if (complete && lines[lines.length - 1] !== '') {
-    completeLines.push(lines[lines.length - 1] ?? '')
-  }
-  if (lines[lines.length - 1] === '') {
-    // Trailing newline means the last "incomplete" slot was empty; the
-    // complete list is already correct.
-  }
-
-  return rowsForLines(completeLines)
+  return appendStreamText(emptyParseState, text, complete).rows
 }
 
 function rowsForLines(lines: string[]): Row[] {
