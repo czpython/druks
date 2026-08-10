@@ -5,8 +5,8 @@ from typing import Any, cast
 
 import pytest
 from druks.contrib.ship import webhooks as webhook_module
-from druks.contrib.ship.extension import Ship
 from druks.contrib.ship.webhooks import LinearEvents
+from druks.services.models import ServiceIdentity
 from druks.testing import make_settings
 from druks.webhooks.router import router as webhooks_router
 from fastapi import HTTPException
@@ -52,11 +52,15 @@ def test_route_is_unchanged():
     assert f"{webhooks_router.prefix}/{LinearEvents.path}" == "/_external/linear/events/"
 
 
-def test_authentication_reads_the_ship_secret(tmp_path, druks_db):
+def test_authentication_reads_the_service_row(tmp_path, druks_db):
     secret = "linear-secret"
     raw_body = b"{}"
     signature = hmac.new(secret.encode(), raw_body, hashlib.sha256).hexdigest()
-    Ship.override_setting("linear_webhook_secret", secret)
+    ServiceIdentity.connect(
+        "linear",
+        identity={"actor": "druks", "workspace": "Acme"},
+        secrets={"api_key": "lin_secret", "webhook_secret": secret},
+    )
     events = _provider(
         tmp_path,
         payload={},
@@ -67,7 +71,7 @@ def test_authentication_reads_the_ship_secret(tmp_path, druks_db):
     assert events.request_is_authentic()
 
 
-def test_unconfigured_secret_keeps_signature_failure(tmp_path, druks_db):
+def test_rejects_when_not_connected(tmp_path, druks_db):
     events = _provider(
         tmp_path,
         payload={},
@@ -78,7 +82,8 @@ def test_unconfigured_secret_keeps_signature_failure(tmp_path, druks_db):
     with pytest.raises(HTTPException) as error:
         events.request_is_authentic()
 
-    assert error.value.status_code == 500
+    assert error.value.status_code == 401
+    assert "not connected" in error.value.detail
 
 
 async def test_terminal_state_types_mark_the_transition_terminal(tmp_path, monkeypatch):

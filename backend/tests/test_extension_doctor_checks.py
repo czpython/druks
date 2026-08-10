@@ -64,19 +64,20 @@ def test_unreachable_settings_database_is_an_extension_check_failure(
     assert "check raised" in result.detail
 
 
-def test_stored_incoherent_settings_fail_with_declared_field_titles(
+def test_selected_unconnected_tracker_pends_through_ships_own_check(
     installed, tmp_path: Path, druks_db, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    SettingsOverride.set_extension_setting("ship", "linear_api_key", "lin-secret", is_secret=True)
+    # The default selector names linear; no identity is connected in this db.
     monkeypatch.setattr(doctor, "create_engine_from_url", lambda _: druks_db.get_bind())
 
     try:
-        result = _named(doctor.check_extensions(make_settings(tmp_path)), "ship:settings")
+        result = _named(doctor.check_extensions(make_settings(tmp_path)), "ship:tracker")
     finally:
         db_session.registry.set(druks_db)
 
     assert not result.ok
-    assert result.detail == ("Linear webhook secret: Required once the Linear API key is set.")
+    assert result.pending
+    assert "linear" in result.detail
 
 
 def test_half_configured_review_identity_fails_through_review_settings(
@@ -104,9 +105,8 @@ def test_half_configured_review_identity_fails_through_review_settings(
 def test_coherent_stored_settings_pass(
     installed, tmp_path: Path, druks_db, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    SettingsOverride.set_extension_setting("ship", "linear_api_key", "lin-secret", is_secret=True)
     SettingsOverride.set_extension_setting(
-        "ship", "linear_webhook_secret", "webhook-secret", is_secret=True
+        "ship", "linear_trigger_status", "Agent Queue", is_secret=False
     )
     monkeypatch.setattr(doctor, "create_engine_from_url", lambda _: druks_db.get_bind())
 

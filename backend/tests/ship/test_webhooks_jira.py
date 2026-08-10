@@ -4,7 +4,6 @@ from unittest.mock import AsyncMock
 import druks.contrib.ship.subscribers as subs
 import pytest
 from druks.contrib.ship import webhooks as webhook_module
-from druks.contrib.ship.extension import Ship
 from druks.contrib.ship.webhooks import JiraEvents
 from druks.contrib.ship.workflows import Build
 from druks.services.models import ServiceIdentity
@@ -59,7 +58,15 @@ def test_route_is_unchanged():
     assert f"{webhooks_router.prefix}/{JiraEvents.path}" == "/_external/jira/events/"
 
 
-def test_rejects_when_no_secret_configured(tmp_path, druks_db):
+def _connect_jira(*, base_url="https://jira.test/", webhook_secret="s3cret"):
+    return ServiceIdentity.connect(
+        "jira",
+        identity={"base_url": base_url, "email": "a@b.com", "display_name": "druks"},
+        secrets={"api_token": "tok", "webhook_secret": webhook_secret},
+    )
+
+
+def test_rejects_when_not_connected(tmp_path, druks_db):
     events = _provider(tmp_path, payload=_issue())
     with pytest.raises(HTTPException) as exc:
         events.request_is_authentic()
@@ -67,7 +74,7 @@ def test_rejects_when_no_secret_configured(tmp_path, druks_db):
 
 
 def test_authentic_when_token_header_matches(tmp_path, druks_db):
-    Ship.override_setting("jira_webhook_secret", "s3cret")
+    _connect_jira()
     events = _provider(
         tmp_path,
         payload=_issue(),
@@ -77,7 +84,7 @@ def test_authentic_when_token_header_matches(tmp_path, druks_db):
 
 
 def test_rejects_when_token_missing_or_wrong(tmp_path, druks_db):
-    Ship.override_setting("jira_webhook_secret", "s3cret")
+    _connect_jira()
     events = _provider(
         tmp_path,
         payload=_issue(),
@@ -100,7 +107,7 @@ async def test_emits_normalized_ticket_transition(tmp_path, druks_db, monkeypatc
     async def _emit(event_type, **kwargs):
         captured.update({"event": event_type, **kwargs})
 
-    Ship.override_setting("jira_base_url", "https://jira.test/")
+    _connect_jira()
     monkeypatch.setattr(webhook_module, "publish", _emit)
     await _provider(tmp_path, payload=_issue(key="IT-9", status="Ready")).on_issue_event()
 
@@ -113,13 +120,14 @@ async def test_emits_normalized_ticket_transition(tmp_path, druks_db, monkeypatc
     assert payload["url"] == "https://jira.test/browse/IT-9"
 
 
-async def test_done_category_marks_the_transition_terminal(tmp_path, monkeypatch):
+async def test_done_category_marks_the_transition_terminal(tmp_path, druks_db, monkeypatch):
     """The "done" statusCategory is Jira's terminal marker."""
     events = []
 
     async def _emit(event_type, **kwargs):
         events.append((event_type, kwargs["payload"]))
 
+    _connect_jira()
     monkeypatch.setattr(webhook_module, "publish", _emit)
     payload = _issue(key="IT-9", status="Done", status_category="done")
     await _provider(tmp_path, payload=payload).on_issue_event()
@@ -128,13 +136,14 @@ async def test_done_category_marks_the_transition_terminal(tmp_path, monkeypatch
     assert events[0][1]["terminal"] is True
 
 
-async def test_open_category_is_not_terminal(tmp_path, monkeypatch):
+async def test_open_category_is_not_terminal(tmp_path, druks_db, monkeypatch):
     """An in-flight status (any non-"done" category) transitions but isn't terminal."""
     events = []
 
     async def _emit(event_type, **kwargs):
         events.append((event_type, kwargs["payload"]))
 
+    _connect_jira()
     monkeypatch.setattr(webhook_module, "publish", _emit)
     provider = _provider(
         tmp_path, payload=_issue(status="In Progress", status_category="indeterminate")

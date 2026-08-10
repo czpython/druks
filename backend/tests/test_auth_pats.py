@@ -193,7 +193,7 @@ def test_a_pat_reads_but_cannot_write_extension_settings(tmp_path, druks_db):
         read = client.get("/api/settings/extensions", headers=headers)
         write = client.patch(
             "/api/settings/extensions",
-            json={"extensionSettings": {"ship": {"linear_api_key": "lin_secret"}}},
+            json={"extensionSettings": {"ship": {"linear_trigger_status": "Agent Queue"}}},
             headers=headers,
         )
 

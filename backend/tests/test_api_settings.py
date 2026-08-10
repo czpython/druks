@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from druks.contrib.review.extension import Review
 from druks.contrib.ship.extension import Ship
 from druks.database import db_session
 from druks.testing import configure_app_for_test, make_settings
@@ -183,6 +184,15 @@ def _ship_settings_fields(client: TestClient) -> dict:
     return {field["name"]: field for field in _ship_extension(client)["settings"]}
 
 
+def _review_extension(client: TestClient) -> dict:
+    body = client.get("/api/settings/extensions").json()
+    return next(m for m in body["extensions"] if m["name"] == "review")
+
+
+def _review_settings_fields(client: TestClient) -> dict:
+    return {field["name"]: field for field in _review_extension(client)["settings"]}
+
+
 def test_extensions_surface_build_agents(tmp_path: Path):
     """The build pipeline's agents all tune under the Ship extension."""
     with _build_client(tmp_path) as client:
@@ -299,20 +309,20 @@ def test_extension_secret_round_trip_encrypts_at_rest(tmp_path: Path):
 
 def test_extension_secret_plaintext_row_is_unset_until_resaved(tmp_path: Path):
     secret = "legacy-plaintext-secret"
-    key = "extension:ship:linear_api_key"
+    key = "extension:review:private_key"
     db_session().add(SettingsOverride(key=key, value=secret))
     db_session().flush()
 
     with _build_client(tmp_path) as client:
-        initial = _ship_extension(client)
-        resolved_initial = Ship.settings().linear_api_key
+        initial = _review_extension(client)
+        resolved_initial = Review.settings().private_key
         saved = client.patch(
             "/api/settings/extensions",
             json={
                 "extensionSettings": {
-                    "ship": {
-                        "linear_api_key": secret,
-                        "linear_webhook_secret": "webhook-secret",
+                    "review": {
+                        "app_id": "42",
+                        "private_key": secret,
                     }
                 }
             },
@@ -330,7 +340,7 @@ def test_extension_secret_plaintext_row_is_unset_until_resaved(tmp_path: Path):
         )
 
     initial_field = next(
-        setting for setting in initial["settings"] if setting["name"] == "linear_api_key"
+        setting for setting in initial["settings"] if setting["name"] == "private_key"
     )
     assert initial_field["secretSet"] is False
     assert not resolved_initial
@@ -342,13 +352,13 @@ def test_extension_secret_plaintext_row_is_unset_until_resaved(tmp_path: Path):
 
 
 def test_extension_non_secret_setting_stays_in_value(tmp_path: Path):
-    url = "https://example.atlassian.net"
-    key = "extension:ship:jira_base_url"
+    status = "Agent Queue"
+    key = "extension:ship:linear_trigger_status"
 
     with _build_client(tmp_path) as client:
         written = client.patch(
             "/api/settings/extensions",
-            json={"extensionSettings": {"ship": {"jira_base_url": url}}},
+            json={"extensionSettings": {"ship": {"linear_trigger_status": status}}},
         )
         stored = (
             db_session()
@@ -360,12 +370,14 @@ def test_extension_non_secret_setting_stays_in_value(tmp_path: Path):
         )
         ship = _ship_extension(client)
 
-    field = next(setting for setting in ship["settings"] if setting["name"] == "jira_base_url")
+    field = next(
+        setting for setting in ship["settings"] if setting["name"] == "linear_trigger_status"
+    )
     assert written.status_code == 200
-    assert stored.value == url
+    assert stored.value == status
     assert stored.secret_value == b""
-    assert Ship.settings().jira_base_url == url
-    assert field["value"] == url
+    assert Ship.settings().linear_trigger_status == status
+    assert field["value"] == status
     assert field["overridden"] is True
 
 
@@ -382,39 +394,39 @@ def test_incoherent_extension_save_is_rejected_and_rolled_back_before_schedules(
             json={
                 "agentModels": {"generate_plan": "claude-opus-4-7"},
                 "workflowSettings": {"core.refresh_tokens": {"schedule": "0 9 * * *"}},
-                "extensionSettings": {"ship": {"linear_api_key": "lin-secret"}},
+                "extensionSettings": {"review": {"app_id": "42"}},
             },
         )
 
         assert response.status_code == 422
         assert response.json()["detail"] == {
-            "ship": {"linear_webhook_secret": "Required once the Linear API key is set."}
+            "review": {"private_key": "Required once the review App ID is set."}
         }
         assert not reconciled
-        assert _ship_settings_fields(client)["linear_api_key"]["secretSet"] is False
+        assert _review_settings_fields(client)["app_id"]["secretSet"] is False
         agents = {agent["name"]: agent for agent in _ship_extension(client)["agents"]}
         assert agents["generate_plan"]["model"] == "gpt-5.5"
         assert _refresh_tokens_fields(client)["schedule"]["value"] == "*/15 * * * *"
 
 
-def test_clearing_the_api_key_deletes_its_override_and_stays_coherent(tmp_path: Path):
-    key = "extension:ship:linear_api_key"
+def test_clearing_the_identity_deletes_its_overrides_and_stays_coherent(tmp_path: Path):
+    key = "extension:review:app_id"
 
     with _build_client(tmp_path) as client:
         configured = client.patch(
             "/api/settings/extensions",
             json={
                 "extensionSettings": {
-                    "ship": {
-                        "linear_api_key": "lin-secret",
-                        "linear_webhook_secret": "webhook-secret",
+                    "review": {
+                        "app_id": "42",
+                        "private_key": "review-pem",
                     }
                 }
             },
         )
         cleared = client.patch(
             "/api/settings/extensions",
-            json={"extensionSettings": {"ship": {"linear_api_key": None}}},
+            json={"extensionSettings": {"review": {"app_id": None, "private_key": None}}},
         )
         stored = (
             db_session()
@@ -424,14 +436,14 @@ def test_clearing_the_api_key_deletes_its_override_and_stays_coherent(tmp_path: 
             )
             .one_or_none()
         )
-        fields = _ship_settings_fields(client)
+        fields = _review_settings_fields(client)
 
     assert configured.status_code == 200
     assert cleared.status_code == 200
     assert stored is None
-    assert not Ship.settings().linear_api_key
-    assert fields["linear_api_key"]["secretSet"] is False
-    assert fields["linear_webhook_secret"]["secretSet"] is True
+    assert not Review.settings().app_id
+    assert fields["app_id"]["secretSet"] is False
+    assert fields["private_key"]["secretSet"] is False
 
 
 def test_extensions_override_agent_model_persists(tmp_path: Path):

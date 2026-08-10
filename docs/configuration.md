@@ -220,17 +220,20 @@ client at another compatible GitHub API endpoint.
 
 ## Ticketing integrations
 
-Configure one tracker in **Settings → Ship**. Linear needs an API key and webhook
-secret; Jira Cloud needs its base URL, email, API token, and webhook secret.
-Tracker credentials and the statuses that trigger or move `ship` work are stored
-as ship extension settings.
+Tracker credentials are service identities: connect Linear (API key + webhook
+secret) or Jira Cloud (base URL, email, API token, webhook secret) from
+**Settings → Harnesses**, on the same cards as the GitHub App. Connecting
+verifies the credentials against the tracker before anything is stored. Which
+tracker drives `ship` work — and the statuses that trigger or move it — stays a
+ship extension setting in **Settings → Ship**.
 
 Webhook URLs remain `/_external/linear/events/` and
 `/_external/jira/events/`. The Jira webhook is a Jira Automation "Send web
 request" action with **Issue data (Jira format)** as its body — the REST issue
 JSON under `issue` is the one accepted shape — and the shared token in the
-`x-druks-webhook-token` header. `druks doctor` treats an unconfigured tracker as
-optional and requires its webhook secret once its credentials are complete.
+`x-druks-webhook-token` header. `druks doctor` treats a disconnected tracker as
+optional, and reports pending setup when the selected tracker's identity is not
+connected.
 
 ## Harnesses
 
@@ -345,8 +348,8 @@ Keep the old key until no stored row depends on it. Losing every key used for a
 row makes that secret unrecoverable; reconnect OAuth grants and re-enter static
 tokens. Validation and API errors intentionally omit submitted secret values.
 
-The encryption envelope does **not** currently cover tracker extension settings,
-harness subscription payloads, or notification webhook URLs. They are stored as
+The encryption envelope does **not** currently cover harness subscription
+payloads or notification webhook URLs. They are stored as
 ordinary Postgres fields, although APIs withhold or mask their values. Treat
 access to Postgres and its backups as access to those credentials. GitHub App
 private keys — the operator identity's and the review extension's — are

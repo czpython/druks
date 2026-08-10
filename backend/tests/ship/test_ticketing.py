@@ -2,7 +2,8 @@ import json
 
 import httpx
 import pytest
-from druks.contrib.ship.extension import Ship
+from druks.contrib.ship import services
+from druks.contrib.ship.extension import Ship, check_tracker_identity
 from druks.contrib.ship.ticketing.enums import TicketStatus
 from druks.contrib.ship.ticketing.exceptions import (
     JiraAPIError,
@@ -11,6 +12,8 @@ from druks.contrib.ship.ticketing.exceptions import (
 )
 from druks.contrib.ship.ticketing.jira import Jira, JiraClient
 from druks.contrib.ship.ticketing.linear import Linear, LinearClient
+from druks.services import ServiceConnectError
+from druks.services.models import ServiceIdentity
 
 from ship.factories import make_test_work_item
 
@@ -20,25 +23,29 @@ def _pin_ship_settings(monkeypatch, **values):
     monkeypatch.setattr(Ship, "settings", classmethod(lambda cls: settings))
 
 
-def test_settings_require_linear_webhook_secret_once_the_api_key_is_set():
-    settings = Ship.Settings(linear_api_key="x")
-
-    assert settings.clean() == {"linear_webhook_secret": "Required once the Linear API key is set."}
-
-
-def test_settings_require_jira_webhook_secret_once_the_api_token_is_set():
-    settings = Ship.Settings(jira_api_token="x")
-
-    assert settings.clean() == {"jira_webhook_secret": "Required once the Jira API token is set."}
+def _connect_linear():
+    return ServiceIdentity.connect(
+        "linear",
+        identity={"actor": "druks", "workspace": "Acme"},
+        secrets={"api_key": "lin_secret", "webhook_secret": "lin-hook"},
+    )
 
 
-# --- Ship.get_tracker: the configured tracker -------------------------------
+def _connect_jira():
+    return ServiceIdentity.connect(
+        "jira",
+        identity={"base_url": "https://jira.test", "email": "a@b.com", "display_name": "druks"},
+        secrets={"api_token": "jira_secret", "webhook_secret": "jira-hook"},
+    )
 
 
-def test_tracker_builds_linear_from_settings(monkeypatch):
+# --- Ship.get_tracker: the selected tracker ----------------------------------
+
+
+def test_tracker_builds_linear_from_the_service_row(druks_db, monkeypatch):
+    _connect_linear()
     _pin_ship_settings(
         monkeypatch,
-        linear_api_key="lin_secret",
         linear_resting_status="Backlog",
         linear_trigger_status="To Agent",
     )
@@ -46,17 +53,16 @@ def test_tracker_builds_linear_from_settings(monkeypatch):
     tracker = Ship.get_tracker("linear")
 
     assert isinstance(tracker, Linear)
+    assert tracker._client.api_key == "lin_secret"
     assert tracker._status_names[TicketStatus.BACKLOG] == "Backlog"
     assert tracker._status_names[TicketStatus.TRIGGER] == "To Agent"
 
 
-def test_tracker_builds_jira_from_settings(monkeypatch):
+def test_tracker_builds_jira_from_the_service_row(druks_db, monkeypatch):
+    _connect_jira()
     _pin_ship_settings(
         monkeypatch,
         tracker="jira",
-        jira_base_url="https://jira.test",
-        jira_email="a@b.com",
-        jira_api_token="jira_secret",
         jira_resting_status="Open",
         jira_trigger_status="To Agent",
     )
@@ -64,35 +70,132 @@ def test_tracker_builds_jira_from_settings(monkeypatch):
     tracker = Ship.get_tracker("jira")
 
     assert isinstance(tracker, Jira)
+    assert tracker._client.base_url == "https://jira.test"
     assert tracker._status_names[TicketStatus.BACKLOG] == "Open"
     assert tracker._status_names[TicketStatus.TRIGGER] == "To Agent"
 
 
-def test_tracker_is_none_for_github_and_missing_credentials(monkeypatch):
-    _pin_ship_settings(monkeypatch, linear_api_key="lin_secret")
+def test_tracker_is_none_for_github_and_a_disconnected_identity(druks_db, monkeypatch):
+    _connect_linear()
+    _pin_ship_settings(monkeypatch)
 
     assert not Ship.get_tracker("github")
     assert not Ship.get_tracker("jira")
 
-    _pin_ship_settings(
-        monkeypatch, tracker="jira", jira_base_url="https://jira.test", jira_email="a@b.com"
-    )
+    _pin_ship_settings(monkeypatch, tracker="jira")
     assert not Ship.get_tracker("jira")
     assert not Ship.get_tracker("linear")
 
 
-def test_tracker_ignores_a_nonchosen_source_with_credentials(monkeypatch):
-    _pin_ship_settings(monkeypatch, tracker="jira", linear_api_key="lin_secret")
+def test_tracker_ignores_a_nonchosen_source_with_a_connected_identity(druks_db, monkeypatch):
+    _connect_linear()
+    _pin_ship_settings(monkeypatch, tracker="jira")
 
     assert not Ship.get_tracker("linear")
 
 
-def test_empty_resting_status_leaves_backlog_unmapped(monkeypatch):
-    _pin_ship_settings(monkeypatch, linear_api_key="lin_secret", linear_resting_status="")
+def test_empty_resting_status_leaves_backlog_unmapped(druks_db, monkeypatch):
+    _connect_linear()
+    _pin_ship_settings(monkeypatch, linear_resting_status="")
 
     tracker = Ship.get_tracker("linear")
 
     assert TicketStatus.BACKLOG not in tracker._status_names
+
+
+# --- The tracker service identities ------------------------------------------
+
+
+async def test_linear_verify_stores_the_actor_and_workspace(monkeypatch):
+    async def fake_post(self, url, **kwargs):
+        return httpx.Response(
+            200,
+            json={"data": {"viewer": {"name": "druks"}, "organization": {"name": "Acme"}}},
+        )
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", fake_post)
+
+    facts = await services.Linear.verify(services.Linear.Settings(api_key="k", webhook_secret="s"))
+
+    assert facts == {"actor": "druks", "workspace": "Acme"}
+
+
+async def test_linear_verify_rejects_a_bad_key_without_echoing(monkeypatch):
+    async def fake_post(self, url, **kwargs):
+        return httpx.Response(400, json={"errors": [{"message": "auth boom-marker"}]})
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", fake_post)
+
+    with pytest.raises(ServiceConnectError) as raised:
+        await services.Linear.verify(services.Linear.Settings(api_key="bad", webhook_secret="s"))
+
+    assert "boom-marker" not in str(raised.value)
+    assert "bad" not in str(raised.value)
+
+
+async def test_jira_verify_stores_the_display_name(monkeypatch):
+    seen = []
+
+    async def fake_get(self, url, **kwargs):
+        seen.append(url)
+        return httpx.Response(200, json={"displayName": "Druks Bot"})
+
+    monkeypatch.setattr(httpx.AsyncClient, "get", fake_get)
+
+    facts = await services.Jira.verify(
+        services.Jira.Settings(
+            base_url="https://jira.test/", email="a@b.com", api_token="t", webhook_secret="s"
+        )
+    )
+
+    assert facts == {"display_name": "Druks Bot"}
+    assert seen == ["https://jira.test/rest/api/3/myself"]
+
+
+async def test_jira_verify_rejects_bad_credentials(monkeypatch):
+    async def fake_get(self, url, **kwargs):
+        return httpx.Response(401, text="nope")
+
+    monkeypatch.setattr(httpx.AsyncClient, "get", fake_get)
+
+    with pytest.raises(ServiceConnectError, match="did not accept"):
+        await services.Jira.verify(
+            services.Jira.Settings(
+                base_url="https://jira.test", email="a@b.com", api_token="bad", webhook_secret="s"
+            )
+        )
+
+
+# --- The tracker doctor check -------------------------------------------------
+
+
+def test_tracker_check_accepts_trackerless_by_choice(monkeypatch):
+    _pin_ship_settings(monkeypatch, tracker="none")
+
+    result = check_tracker_identity()
+
+    assert result.ok
+    assert "choice" in result.detail
+
+
+def test_tracker_check_reports_a_selected_connected_tracker(druks_db, monkeypatch):
+    _connect_linear()
+    _pin_ship_settings(monkeypatch)
+
+    result = check_tracker_identity()
+
+    assert result.ok
+    assert "linear" in result.detail
+
+
+def test_tracker_check_pends_a_selected_unconnected_tracker(druks_db, monkeypatch):
+    _pin_ship_settings(monkeypatch, tracker="jira")
+
+    result = check_tracker_identity()
+
+    assert not result.ok
+    assert result.pending
+    assert "jira" in result.detail
 
 
 # --- Linear provider --------------------------------------------------------

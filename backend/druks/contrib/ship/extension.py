@@ -3,6 +3,7 @@ from typing import Literal
 from pydantic import Field
 
 from druks.agents import Agent
+from druks.contrib.ship import services
 from druks.contrib.ship.contracts import (
     CodeReviewOutput,
     ContractRevisionOutput,
@@ -17,7 +18,9 @@ from druks.contrib.ship.ticketing.base import Tracker
 from druks.contrib.ship.ticketing.jira import Jira
 from druks.contrib.ship.ticketing.linear import Linear
 from druks.db import StoredSubject
-from druks.extensions import Extension, ExtensionSettings, Secret
+from druks.doctor import CheckResult
+from druks.extensions import Extension, ExtensionSettings
+from druks.services import ServiceNotConnectedError
 from druks.workflows import SubjectActivity
 
 # Only what the timeline can't already show. A running agent has an agent call
@@ -25,6 +28,24 @@ from druks.workflows import SubjectActivity
 _PHASE_META: dict[str, SubjectActivity] = {
     "provisioning_vm": SubjectActivity(label="Building sandbox VM…", kind="infra"),
 }
+
+
+def check_tracker_identity() -> CheckResult:
+    """Whether the selected tracker's identity is connected. Trackerless is a
+    choice, not a fault; a selected-but-unconnected tracker is pending setup."""
+    settings = Ship.settings()
+    if settings.tracker == "none":
+        return CheckResult(name="tracker", ok=True, detail="trackerless by choice")
+    service = {"linear": services.Linear, "jira": services.Jira}[settings.tracker]
+    if service.is_connected():
+        return CheckResult(name="tracker", ok=True, detail=f"{settings.tracker} connected")
+    return CheckResult(
+        name="tracker",
+        ok=False,
+        pending=True,
+        detail=f"tracker is {settings.tracker} but it is not connected — "
+        "connect it in Settings → Harnesses.",
+    )
 
 
 class Ship(Extension):
@@ -45,16 +66,6 @@ class Ship(Extension):
             title="Tracker",
             description="Which ticket tracker this installation uses.",
         )
-        linear_api_key: Secret = Field(
-            title="Linear API key",
-            description="API key used to read and update Linear tickets.",
-            json_schema_extra={"section": "Linear", "visible_when": {"tracker": "linear"}},
-        )
-        linear_webhook_secret: Secret = Field(
-            title="Linear webhook secret",
-            description="Secret used to authenticate Linear webhook deliveries.",
-            json_schema_extra={"section": "Linear", "visible_when": {"tracker": "linear"}},
-        )
         # The tracker status names that drive build's funnel. They're operator
         # knobs — the names an operator's Linear/Jira workflow actually uses — so
         # they live here, not on core Settings.
@@ -71,28 +82,6 @@ class Ship(Extension):
                 "Status druks returns a ticket to when it stops working on it; empty leaves it put."
             ),
             json_schema_extra={"section": "Linear", "visible_when": {"tracker": "linear"}},
-        )
-        jira_base_url: str = Field(
-            default="",
-            title="Jira base URL",
-            description="Base URL of the Jira Cloud site.",
-            json_schema_extra={"section": "Jira", "visible_when": {"tracker": "jira"}},
-        )
-        jira_email: str = Field(
-            default="",
-            title="Jira email",
-            description="Email address used to authenticate with Jira Cloud.",
-            json_schema_extra={"section": "Jira", "visible_when": {"tracker": "jira"}},
-        )
-        jira_api_token: Secret = Field(
-            title="Jira API token",
-            description="API token used to read and update Jira tickets.",
-            json_schema_extra={"section": "Jira", "visible_when": {"tracker": "jira"}},
-        )
-        jira_webhook_secret: Secret = Field(
-            title="Jira webhook secret",
-            description="Secret used to authenticate Jira webhook deliveries.",
-            json_schema_extra={"section": "Jira", "visible_when": {"tracker": "jira"}},
         )
         jira_trigger_status: str = Field(
             default="Ready for Agent",
@@ -118,43 +107,36 @@ class Ship(Extension):
                 return self.jira_trigger_status
             return ""
 
-        def clean(self) -> dict[str, str]:
-            problems: dict[str, str] = {}
-            if self.linear_api_key and not self.linear_webhook_secret:
-                problems["linear_webhook_secret"] = "Required once the Linear API key is set."
-            if self.jira_api_token and not self.jira_webhook_secret:
-                problems["jira_webhook_secret"] = "Required once the Jira API token is set."
-            return problems
+    checks = [check_tracker_identity]
 
     @classmethod
     def get_tracker(cls, source: str | None = None) -> Tracker | None:
-        """The configured tracker, once its credentials are set; None when the
-        installation runs trackerless or the credentials are missing. Pass a
-        ``source`` to get it only when that source is the configured one — a
+        """The selected tracker, once its service identity is connected; None when
+        the installation runs trackerless or the identity is missing. Pass a
+        ``source`` to get it only when that source is the selected one — a
         work item syncs only to the tracker that owns it."""
         settings = cls.settings()
         if source is not None and source != settings.tracker:
             return
-        if settings.tracker == "linear" and settings.linear_api_key:
-            return Linear(
-                api_key=settings.linear_api_key.get_secret_value(),
-                backlog_status=settings.linear_resting_status,
-                trigger_status=settings.trigger_status,
-            )
-        if (
-            settings.tracker == "jira"
-            and settings.jira_base_url
-            and settings.jira_email
-            and settings.jira_api_token
-        ):
-            return Jira(
-                base_url=settings.jira_base_url,
-                email=settings.jira_email,
-                api_token=settings.jira_api_token.get_secret_value(),
-                backlog_status=settings.jira_resting_status,
-                trigger_status=settings.trigger_status,
-            )
-        return
+        try:
+            if settings.tracker == "linear":
+                row = services.Linear.get()
+                return Linear(
+                    api_key=row.secrets["api_key"],
+                    backlog_status=settings.linear_resting_status,
+                    trigger_status=settings.trigger_status,
+                )
+            if settings.tracker == "jira":
+                row = services.Jira.get()
+                return Jira(
+                    base_url=row.identity["base_url"],
+                    email=row.identity["email"],
+                    api_token=row.secrets["api_token"],
+                    backlog_status=settings.jira_resting_status,
+                    trigger_status=settings.trigger_status,
+                )
+        except ServiceNotConnectedError:
+            return
 
     # The build pipeline's agents — the extension owns them; any of its workflows run
     # them. The attribute name is each agent's id (its durable settings/timeline key).
