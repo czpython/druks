@@ -30,8 +30,8 @@ def _connect(
 
 
 def _github_entry(client: TestClient) -> dict:
-    entries = client.get("/api/service-identities").json()
-    return next(entry for entry in entries if entry["service"] == "github")
+    entries = client.get("/api/services").json()
+    return next(entry for entry in entries if entry["name"] == "github")
 
 
 # --- The row ----------------------------------------------------------------
@@ -173,7 +173,7 @@ def test_post_authenticates_then_creates_the_row(druks_client: TestClient, druks
     _mock_authenticated_app(monkeypatch)
 
     response = druks_client.post(
-        "/api/service-identities/github",
+        "/api/services/github",
         json={"app_id": "12345", "private_key": _PEM, "webhook_secret": _SECRET},
     )
 
@@ -195,7 +195,7 @@ def test_post_replaces_an_existing_row(druks_client: TestClient, druks_db, monke
     _mock_authenticated_app(monkeypatch, slug="replacement-app")
 
     response = druks_client.post(
-        "/api/service-identities/github",
+        "/api/services/github",
         json={"app_id": "777", "private_key": "new-pem", "webhook_secret": "new-secret"},
     )
 
@@ -204,7 +204,7 @@ def test_post_replaces_an_existing_row(druks_client: TestClient, druks_db, monke
 
 
 def test_post_rejects_an_unknown_service(druks_client: TestClient):
-    response = druks_client.post("/api/service-identities/nope", json={"anything": "x"})
+    response = druks_client.post("/api/services/nope", json={"anything": "x"})
 
     assert response.status_code == 404
 
@@ -220,7 +220,7 @@ def test_invalid_credentials_preserve_the_previous_row(
     monkeypatch.setattr(GitHubClient, "get_authenticated_app_slug", _rejected)
 
     response = druks_client.post(
-        "/api/service-identities/github",
+        "/api/services/github",
         json={"app_id": "999", "private_key": "bad-pem", "webhook_secret": "bad-secret"},
     )
 
@@ -245,7 +245,7 @@ def test_blank_fields_are_rejected_without_touching_github(
     monkeypatch.setattr(GitHubClient, "get_authenticated_app_slug", _never)
 
     response = druks_client.post(
-        "/api/service-identities/github",
+        "/api/services/github",
         json={"app_id": " ", "private_key": "", "webhook_secret": ""},
     )
 

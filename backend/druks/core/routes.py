@@ -12,7 +12,7 @@ from druks.core.services import GitHubApp
 from druks.services.models import ServiceIdentity
 
 # Mounted by the loader under /api/core, like any extension's routes.
-router = APIRouter(prefix="/github", tags=["service-identities"])
+router = APIRouter(prefix="/github", tags=["services"])
 
 _templates = Environment(
     loader=FileSystemLoader(Path(__file__).parent / "templates"),

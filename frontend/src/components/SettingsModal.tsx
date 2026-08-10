@@ -11,7 +11,7 @@ import {
   type McpRegistryCandidate,
   type McpServer,
   type Pat,
-  type ServiceIdentity,
+  type Service,
   type SkillCollection,
   type UpdateHarnessRequest,
   type UpdateExtensionsSettingsRequest,
@@ -852,7 +852,7 @@ function ServicesPane() {
       <div className="set-group">
         <div className="set-group-label">services</div>
         <div className="set-cards">
-          <ServiceIdentityCards />
+          <ServiceCards />
         </div>
       </div>
     </div>
@@ -864,22 +864,22 @@ function ServicesPane() {
 // immediately, outside the modal's Save, so each card owns its query, submit,
 // busy, and error state. Pasted secrets are write-only: a success drops them
 // from state, and the connected rendering shows identity facts only.
-export function ServiceIdentityCards() {
+export function ServiceCards() {
   const query = useQuery({
-    queryKey: ['serviceIdentities'],
-    queryFn: () => api.serviceIdentities(),
+    queryKey: ['services'],
+    queryFn: () => api.services(),
     staleTime: 60_000,
   })
   return (
     <>
-      {(query.data ?? []).map((identity) => (
-        <ServiceIdentityCard key={identity.service} identity={identity} />
+      {(query.data ?? []).map((service) => (
+        <ServiceCard key={service.name} service={service} />
       ))}
     </>
   )
 }
 
-export function ServiceIdentityCard({ identity }: { identity: ServiceIdentity }) {
+export function ServiceCard({ service }: { service: Service }) {
   const queryClient = useQueryClient()
   const [replacing, setReplacing] = useState(false)
   const [values, setValues] = useState<Record<string, string>>({})
@@ -891,67 +891,67 @@ export function ServiceIdentityCard({ identity }: { identity: ServiceIdentity })
   useEffect(() => {
     const channel = new BroadcastChannel('druks-service-connect')
     channel.onmessage = (event) => {
-      if (event.data === identity.service) {
+      if (event.data === service.name) {
         setReplacing(false)
-        void queryClient.invalidateQueries({ queryKey: ['serviceIdentities'] })
+        void queryClient.invalidateQueries({ queryKey: ['services'] })
       }
     }
     return () => channel.close()
-  }, [queryClient, identity.service])
+  }, [queryClient, service.name])
 
-  const formOpen = !identity.connected || replacing
-  const complete = identity.fields.every((field) => (values[field.name] ?? '').trim() !== '')
+  const formOpen = !service.connected || replacing
+  const complete = service.fields.every((field) => (values[field.name] ?? '').trim() !== '')
 
   const submit = () => {
     setBusy(true)
     setError(null)
     void api
-      .connectServiceIdentity(identity.service, values)
+      .connectService(service.name, values)
       .then(async () => {
         setValues({})
         setReplacing(false)
-        await queryClient.invalidateQueries({ queryKey: ['serviceIdentities'] })
+        await queryClient.invalidateQueries({ queryKey: ['services'] })
       })
       .catch((e) => setError(e instanceof Error ? e.message : String(e)))
       .finally(() => setBusy(false))
   }
 
-  const facts = Object.entries(identity.facts)
+  const facts = Object.entries(service.facts)
 
   return (
     <div className="set-card harness-row" style={{ '--fam': 'var(--accent-violet)' } as CSSProperties}>
       <div className="hr-head">
         <span className="set-card-name">
           <span className="dot" />
-          {identity.service}
+          {service.name}
         </span>
         <span className="set-card-tag">service identity</span>
       </div>
-      <div className="set-pane-sub">{identity.description}</div>
+      <div className="set-pane-sub">{service.description}</div>
       <div className="hr-connect">
         <div className="hr-conn-status">
-          {identity.connected ? (
+          {service.connected ? (
             <span className="hr-chip hr-chip-on">
               connected{facts.map(([key, value]) => ` · ${key} ${value}`).join('')}
             </span>
           ) : (
             <span className="hr-chip hr-chip-off">not connected</span>
           )}
-          {identity.connected && identity.connectedAt && (
-            <span className="hr-conn-exp">connected {new Date(identity.connectedAt).toLocaleString()}</span>
+          {service.connected && service.connectedAt && (
+            <span className="hr-conn-exp">connected {new Date(service.connectedAt).toLocaleString()}</span>
           )}
           <span className="hr-conn-actions">
-            {identity.service === 'github' && identity.connected && (
+            {service.name === 'github' && service.connected && (
               <a
                 className="hr-conn-btn"
-                href={`https://github.com/apps/${encodeURIComponent(identity.facts.slug ?? '')}/installations/new`}
+                href={`https://github.com/apps/${encodeURIComponent(service.facts.slug ?? '')}/installations/new`}
                 target="_blank"
                 rel="noreferrer"
               >
                 Manage installations
               </a>
             )}
-            {identity.connected && !replacing && (
+            {service.connected && !replacing && (
               <button className="hr-conn-btn" onClick={() => setReplacing(true)} disabled={busy}>
                 Replace
               </button>
@@ -960,7 +960,7 @@ export function ServiceIdentityCard({ identity }: { identity: ServiceIdentity })
         </div>
         {formOpen && (
           <div className="si-connect-form">
-            {identity.service === 'github' && (
+            {service.name === 'github' && (
               <>
                 <span className="hr-conn-actions">
                   <button
@@ -974,7 +974,7 @@ export function ServiceIdentityCard({ identity }: { identity: ServiceIdentity })
                 <div className="set-pane-sub">…or paste an existing App&apos;s credentials:</div>
               </>
             )}
-            {identity.fields.map((field) =>
+            {service.fields.map((field) =>
               field.multiline ? (
                 <div className="set-field" key={field.name}>
                   <span className="set-field-label">{field.label}</span>
@@ -1007,7 +1007,7 @@ export function ServiceIdentityCard({ identity }: { identity: ServiceIdentity })
                 </button>
               )}
               <button className="hr-conn-btn" onClick={submit} disabled={busy || !complete}>
-                {identity.connected ? 'Replace connection' : `Connect ${identity.title}`}
+                {service.connected ? 'Replace connection' : `Connect ${service.title}`}
               </button>
             </span>
           </div>

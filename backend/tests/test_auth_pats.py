@@ -206,9 +206,9 @@ def test_a_pat_reads_but_cannot_write_service_identities(tmp_path, druks_db):
         _, token = _mint("op@example.com")
         headers = _bearer(token)
 
-        read = client.get("/api/service-identities", headers=headers)
+        read = client.get("/api/services", headers=headers)
         write = client.post(
-            "/api/service-identities/github",
+            "/api/services/github",
             json={"app_id": "1", "private_key": "p", "webhook_secret": "s"},
             headers=headers,
         )
