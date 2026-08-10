@@ -1,0 +1,9 @@
+{% extends "page.html" %}
+{% block content %}
+<p>Connected MCP server <b>{{ name }}</b>.
+  You can close this tab and return to druks.</p>
+<script>
+  new BroadcastChannel('druks-mcp-connect').postMessage({{ name | tojson }});
+  window.close();
+</script>
+{% endblock %}

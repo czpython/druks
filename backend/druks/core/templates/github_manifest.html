@@ -1,5 +1,5 @@
-<html>
-<body>
+{% extends "page.html" %}
+{% block content %}
 <form method="post" action="https://github.com/settings/apps/new">
   <input type="hidden" name="manifest" value="{{ manifest_json }}">
   <p>Continue to GitHub to create the App druks acts as. GitHub creates it on
@@ -14,5 +14,4 @@
     this.elements.org.disabled = true;
   };
 </script>
-</body>
-</html>
+{% endblock %}
