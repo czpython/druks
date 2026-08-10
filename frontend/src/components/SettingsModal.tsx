@@ -344,6 +344,7 @@ export function SettingsModal({ open, onClose }: Props) {
           <nav className="set-rail">
             <RailItem icon="general" label="General" active={section === 'general'} onClick={() => setSection('general')} />
             <RailItem icon="harnesses" label="Harnesses" active={section === 'harnesses'} onClick={() => setSection('harnesses')} />
+            <RailItem icon="services" label="Services" active={section === 'services'} onClick={() => setSection('services')} />
             <RailItem icon="skills" label="Skills" active={section === 'skills'} onClick={() => setSection('skills')} />
             <RailItem icon="mcp" label="MCP" active={section === 'mcp'} onClick={() => setSection('mcp')} />
             <RailItem icon="agent-access" label="Tokens" active={section === 'agent-access'} onClick={() => setSection('agent-access')} />
@@ -388,6 +389,7 @@ export function SettingsModal({ open, onClose }: Props) {
                   <div className="set-pane-sub">loading…</div>
                 </div>
               ))}
+            {section === 'services' && <ServicesPane />}
             {section === 'skills' && <SkillsPane />}
             {section === 'mcp' && <McpServersPane />}
             {section === 'agent-access' && <AgentAccessPane />}
@@ -466,6 +468,12 @@ function RailGlyph({ name }: { name: string }) {
       <>
         <rect x="2" y="3" width="12" height="10" rx="1.5" />
         <path d="M4.5 6.5 6.7 8 4.5 9.5M8 10h3.2" />
+      </>
+    ),
+    services: (
+      <>
+        <circle cx="5.5" cy="10.5" r="2.5" />
+        <path d="M7.5 8.5 13 3M10.5 5.5l2 2" />
       </>
     ),
     skills: (
@@ -825,6 +833,25 @@ function HarnessesPane({
               </div>
             )
           })}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// Services — the appliance's own identities at external providers, one card
+// per declared service.
+function ServicesPane() {
+  return (
+    <div className="set-pane">
+      <div className="set-pane-head">
+        <div className="set-pane-sub">
+          The identities druks itself holds at external services — connected once per installation, verified before anything replaces a working one.
+        </div>
+      </div>
+      <div className="set-group">
+        <div className="set-group-label">services</div>
+        <div className="set-cards">
           <ServiceIdentityCards />
         </div>
       </div>

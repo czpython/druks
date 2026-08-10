@@ -65,7 +65,7 @@ def check_service_identities(settings: Settings) -> list[CheckResult]:
                             ok=not service.required,
                             pending=service.required,
                             detail=f"not connected — connect {service.title} in "
-                            "Settings → Harnesses.",
+                            "Settings → Services.",
                         )
                     )
                     continue
@@ -99,7 +99,7 @@ def check_installations(settings: Settings) -> CheckResult:
             name="installations",
             ok=False,
             pending=True,
-            detail="github is not connected — connect it in Settings → Harnesses.",
+            detail="github is not connected — connect it in Settings → Services.",
         )
     except Exception as exc:  # noqa: BLE001 — doctor reports, never raises
         return CheckResult(

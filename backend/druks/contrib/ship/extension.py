@@ -44,7 +44,7 @@ def check_tracker_identity() -> CheckResult:
         ok=False,
         pending=True,
         detail=f"tracker is {settings.tracker} but it is not connected — "
-        "connect it in Settings → Harnesses.",
+        "connect it in Settings → Services.",
     )
 
 

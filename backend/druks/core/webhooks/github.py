@@ -37,7 +37,7 @@ class GitHubEvents(Webhook):
         except ServiceNotConnectedError as error:
             raise HTTPException(
                 status.HTTP_401_UNAUTHORIZED,
-                "GitHub is not connected — connect it in Settings → Harnesses.",
+                "GitHub is not connected — connect it in Settings → Services.",
             ) from error
         verify_hmac_sha256(
             self.raw_body,

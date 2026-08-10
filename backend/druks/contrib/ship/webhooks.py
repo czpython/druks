@@ -24,7 +24,7 @@ class LinearEvents(Webhook):
         except ServiceNotConnectedError as error:
             raise HTTPException(
                 status.HTTP_401_UNAUTHORIZED,
-                "Linear is not connected — connect it in Settings → Harnesses.",
+                "Linear is not connected — connect it in Settings → Services.",
             ) from error
         verify_hmac_sha256(
             self.raw_body,
@@ -100,7 +100,7 @@ class JiraEvents(Webhook):
         except ServiceNotConnectedError as error:
             raise HTTPException(
                 status.HTTP_401_UNAUTHORIZED,
-                "Jira is not connected — connect it in Settings → Harnesses.",
+                "Jira is not connected — connect it in Settings → Services.",
             ) from error
         provided = self.request.headers.get("x-druks-webhook-token") or ""
         if not hmac.compare_digest(provided, webhook_secret):
