@@ -1224,37 +1224,67 @@ export function SkillsPane() {
     }
   }
 
+  const fieldId = useId()
+
   return (
-    <div className="set-pane">
-      <div className="set-pane-head">
-        <div className="set-pane-sub">
-          Add a <b>collection</b> — a GitHub repo druks scans to extract <b>skills</b> your agents can use, projected onto every sandbox VM. Removing a collection removes its skills.
+    <div className="set-pane mcp-pane skills-pane">
+      <header className="mcp-pane-head">
+        <h2 className="mcp-pane-title">Skills</h2>
+        <p className="mcp-pane-sub">
+          Import skill collections from GitHub. Enabled skills are available to agents in every
+          sandbox.
+        </p>
+      </header>
+
+      {error && (
+        <div className="mcp-error" role="alert">
+          {error}
         </div>
-      </div>
-      <div className="set-group">
-        <div className="set-group-label">add collection</div>
-        <div className="skill-add">
-          <input
-            className="skill-add-input"
-            placeholder="Paste a repository URL…  e.g. github.com/org/repo"
-            value={repo}
-            onChange={(e) => setRepo(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') void install()
-            }}
-            disabled={busy}
-          />
-          <button className="set-btn primary" disabled={busy || !repo.trim()} onClick={() => void install()}>
-            {busy ? 'importing…' : 'import'}
-          </button>
-        </div>
-        {error && <div className="set-skill-error">{error}</div>}
-      </div>
-      {cols.length > 0 && (
-        <div className="set-group">
-          <div className="set-group-label">
-            collections<span className="gl-count">{cols.length}</span>
+      )}
+
+      <section className="mcp-section">
+        <h3 className="mcp-h">Add a collection</h3>
+        <p className="mcp-help">
+          A GitHub repository druks scans for skills. Removing a collection removes its skills.
+        </p>
+        <div className="mcp-field">
+          <label className="mcp-label" htmlFor={`${fieldId}-repo`}>
+            Repository URL
+          </label>
+          <div className="skill-add">
+            <input
+              id={`${fieldId}-repo`}
+              className="skill-add-input"
+              type="url"
+              placeholder="github.com/org/repo"
+              value={repo}
+              onChange={(e) => setRepo(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') void install()
+              }}
+              autoComplete="off"
+              data-1p-ignore=""
+              data-lpignore="true"
+              disabled={busy}
+            />
+            <button
+              className="set-btn primary"
+              disabled={busy || !repo.trim()}
+              aria-busy={busy}
+              onClick={() => void install()}
+            >
+              {busy ? 'Importing…' : 'Import collection'}
+            </button>
           </div>
+        </div>
+      </section>
+
+      <section className="mcp-section">
+        <h3 className="mcp-h">
+          Collections <span className="gl-count">{cols.length}</span>
+        </h3>
+        {cols.length === 0 && <p className="mcp-help">No collections yet — import one above.</p>}
+        {cols.length > 0 && (
           <div className="skill-cols">
             {cols.map((c: SkillCollection) => (
               <CollectionCard
@@ -1267,14 +1297,15 @@ export function SkillsPane() {
               />
             ))}
           </div>
-        </div>
-      )}
+        )}
+      </section>
     </div>
   )
 }
 
-// Collapsed by default: the head is the summary (name, count, source); the
-// per-skill rows only matter when curating, so they render on demand.
+// Collapsed by default: the summary button carries name, count, source, and
+// last sync; the per-skill rows only matter when curating, so they render on
+// demand. Sync and Remove sit beside the summary, never inside it.
 function CollectionCard({
   collection,
   busy,
@@ -1289,51 +1320,75 @@ function CollectionCard({
   onToggle: (collectionId: string, name: string, enabled: boolean) => Promise<void>
 }) {
   const [open, setOpen] = useState(false)
+  const switchId = useId()
+  const count = collection.skills.length
+
+  const remove = () => {
+    const skills = `${count} skill${count === 1 ? '' : 's'}`
+    if (!window.confirm(`Remove ${collection.name} and its ${skills}?`)) return
+    void onRemove(collection.id)
+  }
+
   return (
     <div className="skill-col">
-      <div className="skill-col-head skill-col-toggle" onClick={() => setOpen((v) => !v)}>
-        <span className="sc-glyph">{open ? '▾' : '▸'}</span>
-        <div className="sc-id">
-          <span className="sc-repo">{collection.name}</span>
-          <span className="sc-meta">
-            {collection.skills.length} skill{collection.skills.length === 1 ? '' : 's'} ·{' '}
-            {collection.source} · synced {relTimeFromIso(collection.updatedAt)}
+      <div className="skill-col-head">
+        <button
+          type="button"
+          className="sc-toggle"
+          aria-expanded={open}
+          onClick={() => setOpen((v) => !v)}
+        >
+          <span className="sc-chevron" aria-hidden="true" />
+          <span className="sc-id">
+            <span className="sc-repo">{collection.name}</span>
+            <span className="sc-meta">
+              {count} skill{count === 1 ? '' : 's'} · {collection.source} · synced{' '}
+              {relTimeFromIso(collection.updatedAt)}
+            </span>
           </span>
-        </div>
-        <button
-          className="sc-sync"
-          onClick={(e) => {
-            e.stopPropagation()
-            void onSync(collection.id)
-          }}
-          disabled={busy}
-          title="sync collection from source"
-        >
-          sync
         </button>
-        <button
-          className="sc-remove"
-          onClick={(e) => {
-            e.stopPropagation()
-            void onRemove(collection.id)
-          }}
-          disabled={busy}
-          title="remove collection and its skills"
-        >
-          ✕ remove
-        </button>
+        <span className="sc-actions">
+          <button
+            className="set-btn ghost"
+            onClick={() => void onSync(collection.id)}
+            disabled={busy}
+            title="Sync the collection from its repository"
+          >
+            Sync now
+          </button>
+          <button
+            className="set-btn danger quiet"
+            onClick={remove}
+            disabled={busy}
+            title="Remove the collection and its skills"
+          >
+            Remove
+          </button>
+        </span>
       </div>
       {open && (
         <div className="sc-skills">
+          {collection.skills.length === 0 && (
+            <p className="mcp-help sc-empty">No skills in this collection.</p>
+          )}
           {collection.skills.map((s) => (
             <div key={s.name} className={'skill-row' + (s.enabled ? '' : ' is-off')}>
-              <span className="sk-name">{s.name}</span>
-              <span className="sk-desc">{s.description}</span>
-              <Switch
-                on={s.enabled}
-                onClick={() => void onToggle(collection.id, s.name, !s.enabled)}
-                disabled={busy}
-              />
+              <span className="sk-name" title={s.name}>
+                {s.name}
+              </span>
+              <span className="sk-desc" title={s.description}>
+                {s.description}
+              </span>
+              <span className="sk-enable">
+                <Switch
+                  id={`${switchId}-${s.name}`}
+                  on={s.enabled}
+                  onClick={() => void onToggle(collection.id, s.name, !s.enabled)}
+                  disabled={busy}
+                  label={`Enable ${s.name} skill`}
+                />
+                <label htmlFor={`${switchId}-${s.name}`}>Enabled</label>
+              </span>
             </div>
           ))}
         </div>
