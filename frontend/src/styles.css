@@ -983,11 +983,16 @@ input.set-select { background-image: none; padding-right: 12px; }
 /* Multiline secrets (a pasted PEM): the same frame, grown into a textarea. */
 textarea.set-textarea { background-image: none; height: auto; min-height: 96px; padding: 8px 12px; line-height: 1.45; resize: vertical; white-space: pre; }
 
+/* Shared settings primitives — every pane's card rides .set-card and adds its
+   own layout; .chev is the one disclosure/drill-in glyph. */
+.set-card { border: 1px solid var(--border); border-radius: 7px; background: var(--surface-2); }
+.chev::before, .mcp-custom-summary::before { content: '›'; display: inline-block; font-family: var(--font-mono); font-size: 13px; color: var(--text-faint); transition: transform 120ms; }
+
 /* Harnesses — the MCP pane's measure and scale; each card separates identity,
    defaults, and connection into three bands. Provider color survives only as
    the identity dot and the guided connect-flow accent. */
 .hrs-list { display: flex; flex-direction: column; gap: 12px; }
-.hr-card { display: flex; flex-direction: column; gap: 13px; padding: 14px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface-2); }
+.hr-card { display: flex; flex-direction: column; gap: 13px; padding: 14px; }
 .hr-ident { display: flex; align-items: center; gap: 9px; }
 .hr-ident-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--fam, var(--border-loud)); flex-shrink: 0; }
 .hr-name { font-family: var(--font-mono); font-size: 13px; color: var(--text); }
@@ -1099,15 +1104,14 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
 .skill-add-input::placeholder { color: var(--text-faint); }
 .skill-add .set-btn { height: 36px; flex-shrink: 0; }
 .skill-cols { display: flex; flex-direction: column; gap: 8px; }
-.skill-col { border: 1px solid var(--border); border-radius: 7px; background: var(--surface-2); overflow: hidden; }
+.skill-col { overflow: hidden; }
 .skill-col-head { display: flex; align-items: center; gap: 10px; padding-right: 14px; border-bottom: 1px solid var(--border-soft); }
 .skill-col-head:last-child { border-bottom: none; }
 /* The summary is one expand/collapse button; Sync and Remove sit beside it. */
 .sc-toggle { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; padding: 11px 14px; background: none; border: none; font: inherit; color: inherit; text-align: left; cursor: pointer; }
 .sc-toggle:hover { background: var(--surface-3); }
-.sc-chevron::before { content: '›'; display: inline-block; font-family: var(--font-mono); font-size: 13px; color: var(--text-dim); transition: transform 120ms; }
-.sc-toggle:hover .sc-chevron::before { color: var(--text); }
-.sc-toggle[aria-expanded='true'] .sc-chevron::before { transform: rotate(90deg); }
+.sc-toggle:hover .chev::before { color: var(--text); }
+.sc-toggle[aria-expanded='true'] .chev::before { transform: rotate(90deg); }
 .sc-id { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
 .sc-repo { font-family: var(--font-mono); font-size: 13px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sc-meta { font-family: var(--font-mono); font-size: 10.5px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -1131,7 +1135,7 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
    .mcp-tok) for its token list, so everything the MCP pane redefines is
    scoped under .mcp-pane. */
 .mcp-servers { display: flex; flex-direction: column; gap: 8px; }
-.mcp-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto auto; gap: 14px; align-items: center; padding: 10px 14px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface-2); }
+.mcp-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto auto; gap: 14px; align-items: center; padding: 10px 14px; }
 .mcp-row.is-off { opacity: 0.6; }
 .mcp-id { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .mcp-name { font-family: var(--font-mono); font-size: 12.5px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -1168,7 +1172,7 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
 .mcp-reg-search { display: flex; gap: 10px; }
 .mcp-pane :is(.mcp-reg-search, .skill-add) .skill-add-input { flex: 1; min-width: 0; }
 .mcp-reg-results { display: flex; flex-direction: column; gap: 8px; }
-.mcp-reg-row { display: flex; flex-direction: column; gap: 3px; width: 100%; padding: 10px 13px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface-2); cursor: pointer; text-align: left; font: inherit; }
+.mcp-reg-row { display: flex; flex-direction: column; gap: 3px; width: 100%; padding: 10px 13px; cursor: pointer; text-align: left; font: inherit; }
 .mcp-reg-row:hover { border-color: var(--border-loud); background: var(--surface-3); }
 .mcp-reg-row.is-selected { border-color: color-mix(in oklch, var(--accent) 50%, transparent); border-radius: 7px 7px 0 0; background: var(--surface-3); }
 .mcp-reg-top { display: flex; align-items: center; gap: 8px; min-width: 0; }
@@ -1178,10 +1182,8 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
 .mcp-reg-form { display: flex; flex-direction: column; gap: 13px; padding: 14px; border: 1px solid color-mix(in oklch, var(--accent) 50%, transparent); border-top: none; border-radius: 0 0 7px 7px; background: var(--surface); }
 
 /* Secondary by weight, not by hiding: one quiet control until it is wanted. */
-.mcp-custom { border: 1px solid var(--border); border-radius: 7px; background: var(--surface-2); }
 .mcp-custom-summary { display: flex; align-items: center; gap: 8px; padding: 11px 14px; border-radius: 7px; font-size: 13px; color: var(--text-mid); cursor: pointer; list-style: none; }
 .mcp-custom-summary::-webkit-details-marker { display: none; }
-.mcp-custom-summary::before { content: '›'; font-family: var(--font-mono); color: var(--text-faint); transition: transform 120ms; }
 .mcp-custom-summary:hover { color: var(--text); }
 .mcp-custom[open] .mcp-custom-summary { border-bottom: 1px solid var(--border); border-radius: 7px 7px 0 0; color: var(--text); }
 .mcp-custom[open] .mcp-custom-summary::before { transform: rotate(90deg); }
@@ -1195,7 +1197,12 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
 .mcp-pane .mcp-row:hover { border-color: var(--border-loud); }
 .mcp-pane .mcp-row.is-off { opacity: 1; background: var(--surface); }
 .mcp-pane .mcp-row.is-off :is(.mcp-id, .mcp-conn) { opacity: 0.5; }
-.mcp-conn { display: inline-flex; align-items: center; gap: 7px; justify-self: end; padding-top: 2px; font-size: 12px; font-weight: 500; color: var(--decision-request-revision); white-space: nowrap; }
+/* The one connection-status indicator: neutral when off, green when live.
+   Inside an MCP server row the off state stays attention-colored — a listed
+   server that isn't connected wants action. */
+.mcp-conn { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; font-weight: 500; color: var(--text-dim); white-space: nowrap; }
+.mcp-row .mcp-conn { justify-self: end; padding-top: 2px; }
+.mcp-row .mcp-conn:not(.is-live) { color: var(--decision-request-revision); }
 .mcp-conn-dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; flex-shrink: 0; }
 .mcp-conn.is-live { color: var(--outcome-merged); }
 .mcp-conn.is-live .mcp-conn-dot { box-shadow: 0 0 8px color-mix(in oklch, var(--outcome-merged) 60%, transparent); }
@@ -1208,7 +1215,7 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
    detail view in the same pane. Shares the MCP pane's measure and type
    scale; monospace is reserved for identity values. */
 .svc-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
-.svc-card { display: flex; flex-direction: column; gap: 8px; min-width: 0; padding: 13px 14px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface-2); cursor: pointer; text-align: left; font: inherit; color: inherit; transition: border-color 120ms, background 120ms; }
+.svc-card { display: flex; flex-direction: column; gap: 8px; min-width: 0; padding: 13px 14px; cursor: pointer; text-align: left; font: inherit; color: inherit; transition: border-color 120ms, background 120ms; }
 .svc-card:hover { border-color: var(--border-loud); background: var(--surface-3); }
 .svc-card:active { background: var(--surface); }
 .svc-card-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
@@ -1217,17 +1224,12 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
 .svc-card-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: auto; }
 .svc-card-id { font-family: var(--font-mono); font-size: 11.5px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .svc-card-cue { font-size: 12px; color: var(--text-dim); }
-.svc-card-chevron { font-family: var(--font-mono); font-size: 14px; color: var(--text-faint); flex-shrink: 0; }
-
-.svc-status { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; font-weight: 500; color: var(--text-dim); white-space: nowrap; }
-.svc-status-dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; flex-shrink: 0; }
-.svc-status.is-on { color: var(--outcome-merged); }
-.svc-status.is-on .svc-status-dot { box-shadow: 0 0 8px color-mix(in oklch, var(--outcome-merged) 60%, transparent); }
+.svc-card .chev { flex-shrink: 0; }
 
 .svc-back { padding: 0; border: none; background: none; font: inherit; font-size: 12.5px; color: var(--text-mid); cursor: pointer; }
 .svc-back:hover { color: var(--text); }
 .svc-detail-head { display: flex; align-items: center; gap: 12px; }
-.svc-facts { display: flex; flex-direction: column; gap: 6px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface-2); }
+.svc-facts { display: flex; flex-direction: column; gap: 6px; padding: 12px 14px; }
 .svc-fact { display: flex; gap: 12px; min-width: 0; font-family: var(--font-mono); font-size: 12px; }
 .svc-fact-key { color: var(--text-dim); flex-shrink: 0; }
 .svc-fact-val { color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
