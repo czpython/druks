@@ -14,10 +14,10 @@
 {% for ac in build.journal.plan.acceptance_criteria %}
 ### {{ ac.id }}
 
-**Description:** {{ ac.description.strip() }}
+**Description:** {{ ac.description }}
 
 {% if ac.verification %}
-**Verification:** {{ ac.verification.strip() }}
+**Verification:** {{ ac.verification }}
 
 {% endif %}
 {% endfor %}
@@ -26,7 +26,7 @@
 ## Ruled out
 
 {% for approach in build.journal.plan.rejected_approaches %}
-- {{ approach.strip() }}
+- {{ approach }}
 {% endfor %}
 
 {% endif %}
@@ -37,7 +37,13 @@
 ### Round {{ loop.index }} — verdict: {{ review.verdict.value if review.verdict.value is defined else review.verdict }}
 
 {% if review.body %}
-{{ review.body.strip() }}
+{{ review.body }}
+
+{% endif %}
+{% if review.review_notes %}
+#### Review notes
+
+{{ review.review_notes }}
 
 {% endif %}
 {% endfor %}
@@ -49,15 +55,15 @@
 ### {{ fb.reviewer }}
 
 {% if fb.body %}
-**Body:** {{ fb.body.strip() }}
+**Body:** {{ fb.body }}
 
 {% endif %}
 {% if fb.question %}
-**Question:** {{ fb.question.strip() }}
+**Question:** {{ fb.question }}
 
 {% endif %}
 {% if fb.implementation_instructions %}
-**Implementation instructions:** {{ fb.implementation_instructions.strip() }}
+**Implementation instructions:** {{ fb.implementation_instructions }}
 
 {% endif %}
 {% endfor %}

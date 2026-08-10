@@ -4,8 +4,6 @@ from types import SimpleNamespace
 
 import pytest
 from druks.contrib import ship
-from druks.contrib.ship.contracts import ReviewOutput
-from druks.contrib.ship.enums import ReviewDecision
 from druks.contrib.ship.journal import BuildJournal
 from druks.contrib.ship.models import Project, ProjectRepo
 from druks.contrib.ship.policy import RepoPolicy
@@ -19,7 +17,6 @@ _OP_TEMPLATES = [
     "revise_contract.md",
     "implement.md",
     "evaluate_implementation.md",
-    "review_code.md",
     "triage_human_feedback.md",
 ]
 
@@ -29,7 +26,7 @@ _CALL_KWARGS = {
 }
 
 
-def _build() -> SimpleNamespace:
+def _build(*, review_code: bool = True) -> SimpleNamespace:
     """A stand-in BuildPromptContext exposing the fields the templates read —
     identity facts faked, the journal real and empty."""
     return SimpleNamespace(
@@ -49,6 +46,7 @@ def _build() -> SimpleNamespace:
                 description="Apply the Python house rules.",
             )
         ],
+        review_code=review_code,
         review_mode="approve",
         journal=BuildJournal(),
     )
@@ -140,30 +138,19 @@ async def test_verification_profile_renders_ci_provenance_per_command():
     ]
 
 
-async def test_reviewer_scrutiny_line_reports_each_seat():
-    async def scrutiny(build) -> str:
+async def test_evaluation_prompt_renders_code_review_lens_only_when_enabled():
+    headings = {}
+    for review_code in (True, False):
         prompt = await render_prompt(
-            "ship/build/review_code.md",
-            build=build,
+            "ship/build/evaluate_implementation.md",
+            build=_build(review_code=review_code),
             verification="VERIFICATION-BLOCK",
             workspace=_workspace(),
         )
-        lines = (line.strip() for line in prompt.splitlines())
-        return next(line for line in lines if line.startswith("Scrutiny:"))
+        headings[review_code] = {line for line in prompt.splitlines() if line.startswith("## ")}
 
-    unreviewed = _build()
-    assert (
-        await scrutiny(unreviewed)
-        == "Scrutiny: plan critic skipped · evaluation rounds: 0 · line review ran"
-    )
-
-    reviewed = _build()
-    reviewed.journal.add(ReviewOutput(decision=ReviewDecision.REQUEST_CHANGES, body="split it"))
-    reviewed.journal.add(ReviewOutput(decision=ReviewDecision.APPROVE, body="clean"))
-    assert (
-        await scrutiny(reviewed)
-        == "Scrutiny: plan critic ran (2) · evaluation rounds: 0 · line review ran"
-    )
+    assert headings[False] < headings[True]
+    assert len(headings[True] - headings[False]) == 1
 
 
 async def test_approve_mode_posts_verdict_reviews():
