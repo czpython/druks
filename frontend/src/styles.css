@@ -1093,34 +1093,39 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
 .set-btn.danger.quiet { color: var(--text-dim); border-color: var(--border); background: none; }
 .set-btn.danger.quiet:hover { color: var(--bucket-dead); }
 
-.skill-add { display: flex; align-items: center; gap: 10px; max-width: 620px; }
+.skill-add { display: flex; align-items: center; gap: 10px; }
 .skill-add-input { flex: 1; height: 36px; border: 1px solid var(--border); border-radius: 5px; background: var(--bg); outline: none; color: var(--text); font-family: var(--font-mono); font-size: 13px; padding: 0 12px; }
 .skill-add-input:focus { border-color: var(--accent); }
 .skill-add-input::placeholder { color: var(--text-faint); }
-.skill-add .set-btn { height: 36px; }
-.skill-cols { display: flex; flex-direction: column; gap: 12px; }
+.skill-add .set-btn { height: 36px; flex-shrink: 0; }
+.skill-cols { display: flex; flex-direction: column; gap: 8px; }
 .skill-col { border: 1px solid var(--border); border-radius: 7px; background: var(--surface-2); overflow: hidden; }
-.skill-col-head { display: flex; align-items: center; gap: 11px; padding: 11px 14px; border-bottom: 1px solid var(--border-soft); }
+.skill-col-head { display: flex; align-items: center; gap: 10px; padding-right: 14px; border-bottom: 1px solid var(--border-soft); }
 .skill-col-head:last-child { border-bottom: none; }
-.skill-col-toggle { cursor: pointer; }
-.skill-col-toggle:hover .sc-glyph { color: var(--text); }
-.sc-glyph { color: var(--text-dim); font-size: 13px; font-family: var(--font-mono); }
+/* The summary is one expand/collapse button; Sync and Remove sit beside it. */
+.sc-toggle { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; padding: 11px 14px; background: none; border: none; font: inherit; color: inherit; text-align: left; cursor: pointer; }
+.sc-toggle:hover { background: var(--surface-3); }
+.sc-chevron::before { content: '›'; display: inline-block; font-family: var(--font-mono); font-size: 13px; color: var(--text-dim); transition: transform 120ms; }
+.sc-toggle:hover .sc-chevron::before { color: var(--text); }
+.sc-toggle[aria-expanded='true'] .sc-chevron::before { transform: rotate(90deg); }
 .sc-id { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
 .sc-repo { font-family: var(--font-mono); font-size: 13px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.sc-meta { font-family: var(--font-mono); font-size: 10.5px; color: var(--text-dim); }
-.sc-sync, .sc-remove { display: inline-flex; align-items: center; gap: 6px; font-family: var(--font-mono); font-size: 11px; color: var(--text-dim); border: 1px solid var(--border); border-radius: 4px; padding: 5px 10px; flex-shrink: 0; cursor: pointer; background: none; }
-.sc-sync:hover { color: var(--text); background: var(--surface); border-color: var(--border-loud); }
-.sc-remove:hover { color: var(--bucket-dead); border-color: color-mix(in oklch, var(--bucket-dead) 45%, transparent); background: color-mix(in oklch, var(--bucket-dead) 10%, var(--surface)); }
+.sc-meta { font-family: var(--font-mono); font-size: 10.5px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sc-actions { display: flex; gap: 8px; flex-shrink: 0; }
+.skills-pane .sc-actions .set-btn { height: 30px; padding: 0 11px; font-size: 12px; }
 .sc-skills { display: flex; flex-direction: column; }
-.skill-row { display: grid; grid-template-columns: minmax(130px, 0.8fr) minmax(0, 1.5fr) auto; gap: 14px; align-items: center; padding: 10px 14px 10px 30px; border-bottom: 1px solid var(--border-soft); position: relative; }
+.sc-empty { padding: 10px 14px 12px 33px; }
+.skill-row { display: grid; grid-template-columns: minmax(130px, 0.8fr) minmax(0, 1.5fr) auto; gap: 14px; align-items: center; padding: 10px 14px 10px 33px; border-bottom: 1px solid var(--border-soft); }
 .skill-row:last-child { border-bottom: none; }
-.skill-row::before { content: ''; position: absolute; left: 18px; top: 50%; width: 7px; height: 1px; background: var(--border-loud); }
-.skill-row::after { content: ''; position: absolute; left: 18px; top: 0; bottom: 0; width: 1px; background: var(--border); }
-.skill-row:last-child::after { bottom: 50%; }
 .sk-name { font-family: var(--font-mono); font-size: 12.5px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sk-desc { font-size: 12px; color: var(--text-mid); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.skill-row.is-off .sk-name { color: var(--text-dim); }
-.skill-row.is-off .sk-desc { color: var(--text-faint); }
+.skill-row.is-off :is(.sk-name, .sk-desc) { color: var(--text-dim); }
+.sk-enable { display: inline-flex; align-items: center; gap: 8px; }
+.sk-enable label { font-size: 12px; color: var(--text-mid); cursor: pointer; }
+
+/* Tokens — the revoke affordance on a PAT row. */
+.sc-remove { display: inline-flex; align-items: center; gap: 6px; font-family: var(--font-mono); font-size: 11px; color: var(--text-dim); border: 1px solid var(--border); border-radius: 4px; padding: 5px 10px; flex-shrink: 0; cursor: pointer; background: none; }
+.sc-remove:hover { color: var(--bucket-dead); border-color: color-mix(in oklch, var(--bucket-dead) 45%, transparent); background: color-mix(in oklch, var(--bucket-dead) 10%, var(--surface)); }
 
 /* The agent-access pane reuses the row primitives (.mcp-row / .mcp-id /
    .mcp-tok) for its token list, so everything the MCP pane redefines is
@@ -1161,7 +1166,7 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
 .mcp-pane input:disabled { opacity: 0.6; cursor: default; }
 
 .mcp-reg-search { display: flex; gap: 10px; }
-.mcp-pane .mcp-reg-search .skill-add-input { flex: 1; min-width: 0; }
+.mcp-pane :is(.mcp-reg-search, .skill-add) .skill-add-input { flex: 1; min-width: 0; }
 .mcp-reg-results { display: flex; flex-direction: column; gap: 8px; }
 .mcp-reg-row { display: flex; flex-direction: column; gap: 3px; width: 100%; padding: 10px 13px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface-2); cursor: pointer; text-align: left; font: inherit; }
 .mcp-reg-row:hover { border-color: var(--border-loud); background: var(--surface-3); }
@@ -1238,7 +1243,11 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
   .svc-grid { grid-template-columns: 1fr; }
   .set-thead { display: none; }
   .set-trow { grid-template-columns: 1fr 1fr; gap: 8px; padding: 12px 14px; }
-  .skill-row { grid-template-columns: 1fr; }
+  .skill-add { flex-direction: column; align-items: stretch; }
+  .skill-col-head { flex-wrap: wrap; }
+  .skill-col-head .sc-toggle { flex-basis: 100%; }
+  .skill-col-head .sc-actions { padding: 0 0 10px 33px; }
+  .skill-row { grid-template-columns: 1fr auto; }
   .skill-row .sk-desc { display: none; }
   .mcp-row { grid-template-columns: 1fr auto; row-gap: 8px; }
   .mcp-pane .mcp-row { grid-template-columns: minmax(0, 1fr); }
