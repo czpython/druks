@@ -558,3 +558,47 @@ async def test_get_file_content_returns_none_when_app_not_installed() -> None:
 
     client = _UninstalledClient()
     assert await client.get_file_content("clawhaven/.druks", "prompts/x.md") is None
+
+
+async def test_get_bot_git_author_composes_the_public_bot_identity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The author is the App's bot user with GitHub's <id>+<login> noreply
+    # address; the id comes from one unauthenticated lookup, cached for the
+    # life of the process.
+    requested: list[str] = []
+
+    class _Users:
+        async def async_get_by_username(self, username: str) -> SimpleNamespace:
+            requested.append(username)
+            return SimpleNamespace(parsed_data=SimpleNamespace(id=123456789))
+
+    class _PublicGitHub:
+        def __init__(self, *, base_url: str) -> None:
+            assert base_url == "https://github.example/api/v3"
+            self.rest = SimpleNamespace(users=_Users())
+
+        async def __aenter__(self) -> "_PublicGitHub":
+            return self
+
+        async def __aexit__(self, *_args: Any) -> None:
+            pass
+
+    monkeypatch.setattr(github_api, "GitHub", _PublicGitHub)
+    monkeypatch.setattr(github_api, "_BOT_USER_ID_CACHE", {})
+
+    class _SluggedClient(GitHubClient):
+        def __init__(self) -> None:  # skip real auth
+            self._app_id = "12345"
+            self._slug = "example-app"
+            self._base_url = "https://github.example/api/v3"
+
+    client = _SluggedClient()
+    author = await client.get_bot_git_author()
+
+    assert author == (
+        "example-app[bot]",
+        "123456789+example-app[bot]@users.noreply.github.com",
+    )
+    assert await client.get_bot_git_author() == author
+    assert requested == ["example-app[bot]"]

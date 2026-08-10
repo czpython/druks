@@ -38,7 +38,9 @@ class Account(Base, Uuid7Pk):
     created_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
 
     @classmethod
-    def get(cls, account_id: str) -> "Account | None":
+    def get(cls, account_id: str, *, exclude_system: bool = False) -> "Account | None":
+        if exclude_system and account_id == SYSTEM_ACCOUNT_ID:
+            return
         return db_session().get(cls, account_id)
 
     @classmethod

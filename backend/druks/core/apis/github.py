@@ -32,8 +32,9 @@ class ReviewComment:
 _INSTALLATION_ACCOUNTS_TTL_SECONDS = 600.0
 _INSTALLATION_ACCOUNTS_CACHE: dict[str, tuple[float, tuple[str, ...]]] = {}
 
-# An App's slug is fixed for the life of the App, so this needs no expiry.
+# An App's slug and bot user id are fixed for its life, so these need no expiry.
 _MENTION_HANDLE_CACHE: dict[str, str] = {}
+_BOT_USER_ID_CACHE: dict[str, int] = {}
 
 
 F = TypeVar("F", bound=Callable[..., Awaitable[Any]])
@@ -182,6 +183,20 @@ class GitHubClient:
         handle = getattr(response.parsed_data, "slug", None) or ""
         _MENTION_HANDLE_CACHE[self._app_id] = handle
         return handle
+
+    async def get_bot_git_author(self) -> tuple[str, str]:
+        """Name and email for commits made as the App's bot user — the
+        ``<id>+<slug>[bot]@users.noreply.github.com`` convention, the same
+        identity a squash-merge advertises. The id comes from the public users
+        endpoint, no auth needed."""
+        bot_name = f"{await self.get_mention_handle()}[bot]"
+        user_id = _BOT_USER_ID_CACHE.get(self._app_id)
+        if not user_id:
+            async with GitHub(base_url=self._base_url) as github:
+                response = await github.rest.users.async_get_by_username(bot_name)
+            user_id = response.parsed_data.id
+            _BOT_USER_ID_CACHE[self._app_id] = user_id
+        return bot_name, f"{user_id}+{bot_name}@users.noreply.github.com"
 
     async def get_authenticated_app_slug(self) -> str:
         """The slug GitHub reports for these credentials — a live App-JWT call,

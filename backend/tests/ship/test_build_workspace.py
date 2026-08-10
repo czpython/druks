@@ -1,12 +1,17 @@
+import shlex
+import subprocess
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from druks.contrib.ship import workspace as workspace_mod
 from druks.contrib.ship.constants import GITHUB_MCP_NAME, GITHUB_MCP_URL
 from druks.contrib.ship.workflows import Build, BuildWorkspace
+from druks.contrib.ship.workspace import RepoWorkspace
 from druks.mcp.helpers import get_bearer_token_env_var
 from druks.sandbox import host as host_mod
-from druks.sandbox.layout import get_related_root
+from druks.sandbox.layout import get_related_root, get_repo_root
 from druks.workflows import FatalError
 
 
@@ -138,3 +143,72 @@ async def test_get_workspace_kwargs_fails_loudly_when_the_token_wont_mint(
 
     with pytest.raises(FatalError, match="github MCP server"):
         await workflow.get_workspace_kwargs(sandbox)
+
+
+class _IdentitySandbox:
+    ssh_username = "exedev"
+
+    def __init__(self, repo_path: Path) -> None:
+        self.repo_path = repo_path
+
+    async def exec(self, command: list[str], *, timeout: float = 30.0) -> Any:
+        del timeout
+        local = command[2].replace(
+            get_repo_root(self.ssh_username), shlex.quote(str(self.repo_path))
+        )
+        result = subprocess.run(["sh", "-c", local], check=False, capture_output=True, text=True)
+        return SimpleNamespace(ok=result.returncode == 0, exit_code=result.returncode, stderr="")
+
+
+def _dispatched_by(monkeypatch: pytest.MonkeyPatch, username: str | None) -> None:
+    async def _bot_git_author() -> tuple[str, str]:
+        return "app[bot]", "1+app[bot]@users.noreply.github.com"
+
+    monkeypatch.setattr(
+        workspace_mod,
+        "get_github_client",
+        lambda: SimpleNamespace(get_bot_git_author=_bot_git_author),
+    )
+    account = SimpleNamespace(username=username) if username else None
+    monkeypatch.setattr(
+        workspace_mod,
+        "Account",
+        SimpleNamespace(get=lambda _id, *, exclude_system: account),
+    )
+
+
+async def test_set_git_identity_stamps_the_workspace_repo(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo_path = tmp_path / "repo"
+    subprocess.run(["git", "init", "-q", str(repo_path)], check=True)
+    workspace = RepoWorkspace(sandbox=_IdentitySandbox(repo_path), repo="o/main", github_token="t")  # type: ignore[arg-type]
+    hook = repo_path / ".git" / "hooks" / "prepare-commit-msg"
+    message = repo_path / "COMMIT_EDITMSG"
+
+    _dispatched_by(monkeypatch, "dev@example.com")
+    await workspace.set_git_identity("account-1")
+    message.write_text("Change\n")
+    subprocess.run([str(hook), str(message), "squash"], check=True)
+    subprocess.run([str(hook), str(message)], check=True)
+    email = subprocess.run(
+        ["git", "-C", str(repo_path), "config", "user.email"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert email.stdout.strip() == "1+app[bot]@users.noreply.github.com"
+    assert message.read_text().count("Co-Authored-By: dev@example.com <dev@example.com>") == 1
+
+    # A reused warm host follows the next run's dispatcher.
+    _dispatched_by(monkeypatch, "second@example.com")
+    await workspace.set_git_identity("account-2")
+    message.write_text("Change\n")
+    subprocess.run([str(hook), str(message)], check=True)
+    assert "dev@example.com" not in message.read_text()
+    assert "Co-Authored-By: second@example.com" in message.read_text()
+
+    # A system dispatch keeps the author but credits nobody.
+    _dispatched_by(monkeypatch, None)
+    await workspace.set_git_identity(None)
+    assert not hook.exists()
