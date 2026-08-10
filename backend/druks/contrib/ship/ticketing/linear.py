@@ -3,11 +3,11 @@ from typing import Any
 
 import httpx
 
+from druks.core.services import LINEAR_GRAPHQL_URL
+
 from .base import Tracker
 from .enums import TicketStatus
 from .exceptions import LinearAPIError, UnknownTicketError
-
-LINEAR_GRAPHQL_URL = "https://api.linear.app/graphql"
 
 
 def compute_delivery_key(

@@ -3,7 +3,6 @@ from typing import Literal
 from pydantic import Field
 
 from druks.agents import Agent
-from druks.contrib.ship import services
 from druks.contrib.ship.contracts import (
     CodeReviewOutput,
     ContractRevisionOutput,
@@ -17,6 +16,7 @@ from druks.contrib.ship.contracts import (
 from druks.contrib.ship.ticketing.base import Tracker
 from druks.contrib.ship.ticketing.jira import Jira
 from druks.contrib.ship.ticketing.linear import Linear
+from druks.core import services
 from druks.db import StoredSubject
 from druks.doctor import CheckResult
 from druks.extensions import Extension, ExtensionSettings
