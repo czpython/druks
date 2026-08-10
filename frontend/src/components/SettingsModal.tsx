@@ -518,15 +518,18 @@ function Switch({
   onClick,
   disabled,
   label,
+  id,
 }: {
   on: boolean
   onClick: () => void
   disabled?: boolean
   label?: string
+  id?: string
 }) {
   return (
     <button
       type="button"
+      id={id}
       className={'set-switch' + (on ? ' on' : '')}
       onClick={onClick}
       disabled={disabled}
@@ -754,6 +757,7 @@ function HarnessesPane({
   harnessColor: Record<string, string>
   busy: boolean
 }) {
+  const fieldId = useId()
   // Agents whose effective harness is this one — the same resolution the agent
   // rows' harness chip shows, so the card count and the chips agree even when an
   // agent's model is overridden across harnesses.
@@ -764,76 +768,88 @@ function HarnessesPane({
     )
 
   return (
-    <div className="set-pane">
-      <div className="set-pane-head">
-        <div className="set-pane-sub">
-          Each harness pairs a coding agent with a default model, effort and timeout — every agent <i>follows its harness</i> unless overridden on its row.
-        </div>
-      </div>
-      <div className="set-group">
-        <div className="set-group-label">harnesses</div>
-        <div className="set-cards">
-          {harnesses.map((harness) => {
-            // Effective values: saved harness overlaid with this session's pending edits.
-            const h = { ...harness, ...edits[harness.name] }
-            const timeouts = TIMEOUTS.includes(h.timeout)
-              ? TIMEOUTS
-              : [...TIMEOUTS, h.timeout].sort((a, b) => a - b)
-            return (
-              <div key={harness.name} className="set-card harness-row" style={{ '--fam': harnessColor[harness.name] } as CSSProperties}>
-                <div className="hr-head">
-                  <span className="set-card-name">
-                    <span className="dot" />
-                    {harness.name}
-                  </span>
-                  <span className="set-card-tag">{harness.provider}</span>
-                  <span className="hr-count">
-                    <b>{agentCount(harness.name)}</b> agents
-                  </span>
-                </div>
-                <div className="hr-controls">
-                  <div className="set-field">
-                    <span className="set-field-label">default model</span>
-                    <select className="set-select" value={h.model} onChange={(e) => onField(harness.name, { model: e.target.value })} disabled={busy}>
-                      {harness.allowedModels.map((m) => (
-                        <option key={m.id} value={m.id}>
-                          {m.label}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="set-field">
-                    <span className="set-field-label">effort</span>
-                    <select className="set-select" value={h.effort} onChange={(e) => onField(harness.name, { effort: e.target.value })} disabled={busy}>
-                      {allowedEfforts.map((e) => (
-                        <option key={e} value={e}>
-                          {e}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="set-field">
-                    <span className="set-field-label">timeout</span>
-                    <select className="set-select" value={String(h.timeout)} onChange={(e) => onField(harness.name, { timeout: Number(e.target.value) })} disabled={busy}>
-                      {timeouts.map((t) => (
-                        <option key={t} value={t}>
-                          {t}s
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="set-field hr-fast">
-                    <span className="set-field-label">fast extension</span>
-                    <span className="hf-switch">
-                      <Switch on={h.fastMode} onClick={() => onField(harness.name, { fastMode: !h.fastMode })} disabled={busy} />
-                    </span>
-                  </div>
-                </div>
-                <HarnessConnect harness={harness} />
+    <div className="set-pane mcp-pane hrs-pane">
+      <header className="mcp-pane-head">
+        <h2 className="mcp-pane-title">Harnesses</h2>
+        <p className="mcp-pane-sub">
+          The default model, effort, and timeout for each coding agent. Agents follow their
+          harness unless overridden on their own row.
+        </p>
+      </header>
+      <div className="hrs-list">
+        {harnesses.map((harness) => {
+          // Effective values: saved harness overlaid with this session's pending edits.
+          const h = { ...harness, ...edits[harness.name] }
+          const timeouts = TIMEOUTS.includes(h.timeout)
+            ? TIMEOUTS
+            : [...TIMEOUTS, h.timeout].sort((a, b) => a - b)
+          const id = (field: string) => `${fieldId}-${harness.name}-${field}`
+          return (
+            <div key={harness.name} className="hr-card" style={{ '--fam': harnessColor[harness.name] } as CSSProperties}>
+              <div className="hr-ident">
+                <span className="hr-ident-dot" />
+                <span className="hr-name">{harness.name}</span>
+                <span className="hr-provider">{harness.provider}</span>
+                <span className="hr-count">
+                  <b>{agentCount(harness.name)}</b> agents
+                </span>
               </div>
-            )
-          })}
-        </div>
+              <div className="hr-controls">
+                <div className="mcp-field">
+                  <label className="mcp-label" htmlFor={id('model')}>
+                    Default model
+                  </label>
+                  <select id={id('model')} className="set-select" value={h.model} onChange={(e) => onField(harness.name, { model: e.target.value })} disabled={busy}>
+                    {harness.allowedModels.map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="mcp-field">
+                  <label className="mcp-label" htmlFor={id('effort')}>
+                    Effort
+                  </label>
+                  <select id={id('effort')} className="set-select" value={h.effort} onChange={(e) => onField(harness.name, { effort: e.target.value })} disabled={busy}>
+                    {allowedEfforts.map((e) => (
+                      <option key={e} value={e}>
+                        {e}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="mcp-field">
+                  <label className="mcp-label" htmlFor={id('timeout')}>
+                    Timeout
+                  </label>
+                  <select id={id('timeout')} className="set-select" value={String(h.timeout)} onChange={(e) => onField(harness.name, { timeout: Number(e.target.value) })} disabled={busy}>
+                    {timeouts.map((t) => (
+                      <option key={t} value={t}>
+                        {t}s
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="mcp-field">
+                  <label className="mcp-label" htmlFor={id('fast')}>
+                    Fast extension
+                  </label>
+                  <span className="hr-fast">
+                    <Switch
+                      id={id('fast')}
+                      on={h.fastMode}
+                      onClick={() => onField(harness.name, { fastMode: !h.fastMode })}
+                      disabled={busy}
+                      label={`Fast extension (${harness.name})`}
+                    />
+                  </span>
+                </div>
+              </div>
+              <HarnessConnect harness={harness} />
+            </div>
+          )
+        })}
       </div>
     </div>
   )
@@ -1104,31 +1120,36 @@ export function HarnessConnect({ harness }: { harness: Harness }) {
   return (
     <div className="hr-connect">
       <div className="hr-conn-status">
-        {harness.connected ? (
-          <span className="hr-chip hr-chip-on">
-            connected · {harness.providerEmail}
-          </span>
-        ) : (
-          <span className="hr-chip hr-chip-off">not connected</span>
+        <ServiceStatus connected={harness.connected} />
+        {harness.connected && harness.providerEmail && (
+          <span className="hr-conn-id">{harness.providerEmail}</span>
         )}
         {harness.connected && harness.expiresAt && (
           <span className="hr-conn-exp">token expires {new Date(harness.expiresAt).toLocaleString()}</span>
         )}
         <span className="hr-conn-actions">
           {harness.connected && (
-            <button className="hr-conn-btn hr-conn-ghost" onClick={disconnect} disabled={busy || flow.busy}>
+            <button className="set-btn danger quiet" onClick={disconnect} disabled={busy || flow.busy}>
               Disconnect
             </button>
           )}
           {!flow.challenge && (
-            <button className="hr-conn-btn" onClick={() => void flow.start()} disabled={busy || flow.busy}>
+            <button
+              className={'set-btn ' + (harness.connected ? 'ghost' : 'primary')}
+              onClick={() => void flow.start()}
+              disabled={busy || flow.busy}
+            >
               {harness.connected ? 'Reconnect' : 'Connect'}
             </button>
           )}
         </span>
       </div>
       <ConnectSteps flow={flow} />
-      {(error ?? flow.error) && <div className="hr-conn-error">{error ?? flow.error}</div>}
+      {(error ?? flow.error) && (
+        <div className="hr-conn-error" role="alert">
+          {error ?? flow.error}
+        </div>
+      )}
     </div>
   )
 }

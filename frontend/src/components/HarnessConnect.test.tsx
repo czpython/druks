@@ -63,9 +63,10 @@ describe('HarnessConnect', () => {
       }),
     )
 
-    expect(screen.getByText('connected · claude-seat@corp.com')).toBeTruthy()
-    expect(screen.getByText('connected · codex-seat@corp.com')).toBeTruthy()
-    expect(screen.queryByText('connected · ops@corp.com')).toBeNull()
+    expect(screen.getAllByText('Connected')).toHaveLength(2)
+    expect(screen.getByText('claude-seat@corp.com')).toBeTruthy()
+    expect(screen.getByText('codex-seat@corp.com')).toBeTruthy()
+    expect(screen.queryByText('ops@corp.com')).toBeNull()
   })
 
   it('drives the connection flow end to end and refreshes only the harness query', async () => {
