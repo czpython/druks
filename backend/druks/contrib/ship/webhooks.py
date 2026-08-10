@@ -5,8 +5,9 @@ import logging
 from fastapi import HTTPException, status
 from fastapi.responses import JSONResponse, Response
 
-from druks.contrib.ship.extension import Ship
+from druks.contrib.ship import services
 from druks.contrib.ship.ticketing.linear import compute_delivery_key
+from druks.services import ServiceNotConnectedError
 from druks.signals import publish
 from druks.webhooks import Webhook, verify_hmac_sha256
 
@@ -18,11 +19,17 @@ class LinearEvents(Webhook):
     category = "events"
 
     def request_is_authentic(self) -> bool:
-        settings = Ship.settings()
+        try:
+            row = services.Linear.get()
+        except ServiceNotConnectedError as error:
+            raise HTTPException(
+                status.HTTP_401_UNAUTHORIZED,
+                "Linear is not connected — connect it in Settings → Harnesses.",
+            ) from error
         verify_hmac_sha256(
             self.raw_body,
             self.request.headers.get("linear-signature"),
-            settings.linear_webhook_secret.get_secret_value(),
+            row.secrets["webhook_secret"],
             prefix="",
         )
         return True
@@ -88,10 +95,13 @@ class JiraEvents(Webhook):
     category = "events"
 
     def request_is_authentic(self) -> bool:
-        settings = Ship.settings()
-        webhook_secret = settings.jira_webhook_secret.get_secret_value()
-        if not webhook_secret:
-            raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Jira webhook secret not configured.")
+        try:
+            webhook_secret = services.Jira.get().secrets["webhook_secret"]
+        except ServiceNotConnectedError as error:
+            raise HTTPException(
+                status.HTTP_401_UNAUTHORIZED,
+                "Jira is not connected — connect it in Settings → Harnesses.",
+            ) from error
         provided = self.request.headers.get("x-druks-webhook-token") or ""
         if not hmac.compare_digest(provided, webhook_secret):
             raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid Jira webhook token.")
@@ -141,6 +151,7 @@ class JiraEvents(Webhook):
         )
         return JSONResponse({"accepted": True})
 
-    def _issue_url(self, key: str) -> str | None:
-        base_url = Ship.settings().jira_base_url
-        return f"{base_url.rstrip('/')}/browse/{key}" if base_url else None
+    def _issue_url(self, key: str) -> str:
+        # Dispatch runs after request_is_authentic, so the row is connected here.
+        base_url = services.Jira.get().identity["base_url"]
+        return f"{base_url.rstrip('/')}/browse/{key}"

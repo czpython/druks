@@ -193,7 +193,23 @@ def test_a_pat_reads_but_cannot_write_extension_settings(tmp_path, druks_db):
         read = client.get("/api/settings/extensions", headers=headers)
         write = client.patch(
             "/api/settings/extensions",
-            json={"extensionSettings": {"ship": {"linear_api_key": "lin_secret"}}},
+            json={"extensionSettings": {"ship": {"linear_trigger_status": "Agent Queue"}}},
+            headers=headers,
+        )
+
+    assert read.status_code == 200
+    assert write.status_code == 401
+
+
+def test_a_pat_reads_but_cannot_write_service_identities(tmp_path, druks_db):
+    with _client(tmp_path) as client:
+        _, token = _mint("op@example.com")
+        headers = _bearer(token)
+
+        read = client.get("/api/service-identities", headers=headers)
+        write = client.post(
+            "/api/service-identities/github",
+            json={"app_id": "1", "private_key": "p", "webhook_secret": "s"},
             headers=headers,
         )
 

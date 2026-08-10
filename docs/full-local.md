@@ -139,7 +139,7 @@ value.
 
 GitHub, Linear, and Jira cannot reach a loopback listener. Dashboard-initiated
 actions work locally, but provider-driven flows need an HTTPS tunnel forwarding
-to `127.0.0.1:8001`. Configure tracker credentials under **Settings → Ship** and
+to `127.0.0.1:8001`. Connect tracker credentials under **Settings → Harnesses** and
 keep the exact public paths:
 
 ```text

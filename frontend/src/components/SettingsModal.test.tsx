@@ -30,45 +30,31 @@ const extensionSettings = {
           overridden: false,
         },
         {
-          name: 'linear_api_key',
-          label: 'Linear API key',
+          name: 'linear_trigger_status',
+          label: 'Linear trigger status',
           help: '',
-          type: 'secret',
-          value: null,
-          default: null,
+          type: 'str',
+          value: 'Ready for Agent',
+          default: 'Ready for Agent',
           choices: null,
           section: 'Linear',
           visibleWhenField: 'tracker',
           visibleWhenValue: 'linear',
-          secretSet: false,
+          secretSet: null,
           overridden: false,
         },
         {
-          name: 'linear_webhook_secret',
-          label: 'Linear webhook secret',
+          name: 'jira_trigger_status',
+          label: 'Jira trigger status',
           help: '',
-          type: 'secret',
-          value: null,
-          default: null,
-          choices: null,
-          section: 'Linear',
-          visibleWhenField: 'tracker',
-          visibleWhenValue: 'linear',
-          secretSet: false,
-          overridden: false,
-        },
-        {
-          name: 'jira_webhook_secret',
-          label: 'Jira webhook secret',
-          help: '',
-          type: 'secret',
-          value: null,
-          default: null,
+          type: 'str',
+          value: 'Ready for Agent',
+          default: 'Ready for Agent',
           choices: null,
           section: 'Jira',
           visibleWhenField: 'tracker',
           visibleWhenValue: 'jira',
-          secretSet: false,
+          secretSet: null,
           overridden: false,
         },
       ],
@@ -116,24 +102,25 @@ const extensionSettings = {
   ],
 }
 
-function stubFetch(shouldRejectPatch = true) {
+function stubFetch(
+  shouldRejectPatch = true,
+  detail: Record<string, Record<string, string>> = {
+    review: {
+      app_id: 'The review App ID is invalid.',
+      private_key: 'Required once the review App ID is set.',
+    },
+  },
+) {
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
       const path = String(input)
       if (path === '/api/settings/extensions' && init?.method === 'PATCH') {
         if (!shouldRejectPatch) return new Response('{}', { status: 200 })
-        return new Response(
-          JSON.stringify({
-            detail: {
-              ship: {
-                linear_api_key: 'The Linear API key is invalid.',
-                linear_webhook_secret: 'Required once the Linear API key is set.',
-              },
-            },
-          }),
-          { status: 422, statusText: 'Unprocessable Entity' },
-        )
+        return new Response(JSON.stringify({ detail }), {
+          status: 422,
+          statusText: 'Unprocessable Entity',
+        })
       }
       if (path === '/api/settings/extensions') {
         return new Response(JSON.stringify(extensionSettings), { status: 200 })
@@ -171,17 +158,17 @@ describe('SettingsModal extension fields', () => {
     stubFetch()
     const onClose = renderModal()
 
-    fireEvent.click(await screen.findByRole('button', { name: 'ship' }))
-    const apiKeyField = screen.getByText('Linear API key').closest('.set-field')
-    const apiKeyInput = apiKeyField?.querySelector('input')
-    expect(apiKeyInput).toBeTruthy()
-    fireEvent.change(apiKeyInput as HTMLInputElement, { target: { value: 'lin-secret' } })
+    fireEvent.click(await screen.findByRole('button', { name: 'review' }))
+    const appIdField = screen.getByText('Review App ID').closest('.set-field')
+    const appIdInput = appIdField?.querySelector('input')
+    expect(appIdInput).toBeTruthy()
+    fireEvent.change(appIdInput as HTMLInputElement, { target: { value: '42' } })
     fireEvent.click(screen.getByRole('button', { name: 'save' }))
 
-    const linearError = await screen.findByText('Required once the Linear API key is set.')
-    const apiKeyError = await screen.findByText('The Linear API key is invalid.')
-    expect(linearError.closest('.set-field')?.textContent).toContain('Linear webhook secret')
-    expect(apiKeyError.closest('.set-field')?.textContent).toContain('Linear API key')
+    const pairError = await screen.findByText('Required once the review App ID is set.')
+    const appIdError = await screen.findByText('The review App ID is invalid.')
+    expect(pairError.closest('.set-field')?.textContent).toContain('Review App private key')
+    expect(appIdError.closest('.set-field')?.textContent).toContain('Review App ID')
     expect(onClose).not.toHaveBeenCalled()
   })
 
@@ -194,17 +181,17 @@ describe('SettingsModal extension fields', () => {
     expect(options?.textContent?.indexOf('Tracker')).toBeLessThan(
       options?.textContent?.indexOf('Linear') ?? -1,
     )
-    const apiKeyField = screen.getByText('Linear API key').closest('.set-field')
-    fireEvent.change(apiKeyField?.querySelector('input') as HTMLInputElement, {
-      target: { value: 'lin-secret' },
+    const statusField = screen.getByText('Linear trigger status').closest('.set-field')
+    fireEvent.change(statusField?.querySelector('input') as HTMLInputElement, {
+      target: { value: 'Agent Queue' },
     })
     const trackerField = screen.getByText('Tracker').closest('.set-field')
     fireEvent.change(trackerField?.querySelector('select') as HTMLSelectElement, {
       target: { value: 'jira' },
     })
 
-    expect(screen.queryByText('Linear API key')).toBeNull()
-    expect(screen.getByText('Jira webhook secret')).toBeTruthy()
+    expect(screen.queryByText('Linear trigger status')).toBeNull()
+    expect(screen.getByText('Jira trigger status')).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: 'save' }))
 
     await waitFor(() => expect(onClose).toHaveBeenCalled())
@@ -251,7 +238,7 @@ describe('SettingsModal extension fields', () => {
   })
 
   it('renders a 422 message for a field hidden by the tracker selection', async () => {
-    stubFetch()
+    stubFetch(true, { ship: { linear_trigger_status: 'Not a Linear status name.' } })
     renderModal()
 
     fireEvent.click(await screen.findByRole('button', { name: 'ship' }))
@@ -262,9 +249,7 @@ describe('SettingsModal extension fields', () => {
     fireEvent.click(screen.getByRole('button', { name: 'save' }))
 
     expect(
-      await screen.findByText(
-        'Linear webhook secret: Required once the Linear API key is set.',
-      ),
+      await screen.findByText('Linear trigger status: Not a Linear status name.'),
     ).toBeTruthy()
   })
 })
