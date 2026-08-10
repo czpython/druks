@@ -1,5 +1,6 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
+from druks.accounts.dependencies import current_session_account
 from druks.extensions.registry import services
 from druks.services.exceptions import ServiceConnectError, ServiceNotConnectedError
 from druks.services.models import ServiceIdentity
@@ -20,7 +21,14 @@ async def list_service_identities() -> list[ServiceIdentityResponse]:
     return entries
 
 
-@router.post("/{name}", response_model=ServiceIdentityResponse, response_model_by_alias=True)
+# Session identity only, like the settings PATCH: the appliance's own
+# credentials are never writable with an agent PAT.
+@router.post(
+    "/{name}",
+    response_model=ServiceIdentityResponse,
+    response_model_by_alias=True,
+    dependencies=[Depends(current_session_account)],
+)
 async def connect_service_identity(name: str, payload: dict[str, str]) -> ServiceIdentityResponse:
     service = services.get(name)
     if not service:

@@ -17,6 +17,6 @@ class TrackerNotConfigured(AgentApiError):
 
     def __init__(self) -> None:
         super().__init__(
-            "No ticket tracker is configured — select Linear or Jira and set its "
-            "credentials in the ship settings."
+            "No ticket tracker is configured — select Linear or Jira in the ship "
+            "settings and connect its identity in Settings → Harnesses."
         )

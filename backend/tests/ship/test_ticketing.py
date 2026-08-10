@@ -111,6 +111,7 @@ async def test_linear_verify_stores_the_actor_and_workspace(monkeypatch):
         return httpx.Response(
             200,
             json={"data": {"viewer": {"name": "druks"}, "organization": {"name": "Acme"}}},
+            request=httpx.Request("POST", url),
         )
 
     monkeypatch.setattr(httpx.AsyncClient, "post", fake_post)
@@ -122,7 +123,11 @@ async def test_linear_verify_stores_the_actor_and_workspace(monkeypatch):
 
 async def test_linear_verify_rejects_a_bad_key_without_echoing(monkeypatch):
     async def fake_post(self, url, **kwargs):
-        return httpx.Response(400, json={"errors": [{"message": "auth boom-marker"}]})
+        return httpx.Response(
+            400,
+            json={"errors": [{"message": "auth boom-marker"}]},
+            request=httpx.Request("POST", url),
+        )
 
     monkeypatch.setattr(httpx.AsyncClient, "post", fake_post)
 
@@ -138,7 +143,9 @@ async def test_jira_verify_stores_the_display_name(monkeypatch):
 
     async def fake_get(self, url, **kwargs):
         seen.append(url)
-        return httpx.Response(200, json={"displayName": "Druks Bot"})
+        return httpx.Response(
+            200, json={"displayName": "Druks Bot"}, request=httpx.Request("GET", url)
+        )
 
     monkeypatch.setattr(httpx.AsyncClient, "get", fake_get)
 
@@ -154,7 +161,7 @@ async def test_jira_verify_stores_the_display_name(monkeypatch):
 
 async def test_jira_verify_rejects_bad_credentials(monkeypatch):
     async def fake_get(self, url, **kwargs):
-        return httpx.Response(401, text="nope")
+        return httpx.Response(401, text="nope", request=httpx.Request("GET", url))
 
     monkeypatch.setattr(httpx.AsyncClient, "get", fake_get)
 

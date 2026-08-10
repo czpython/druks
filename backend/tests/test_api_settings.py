@@ -257,17 +257,17 @@ def test_extensions_surface_build_agents_and_workflow_defaults(tmp_path: Path):
 
 
 def test_extension_secret_round_trip_encrypts_at_rest(tmp_path: Path):
-    secret = "linear-secret-value"
-    webhook_secret = "linear-webhook-secret"
-    key = "extension:ship:linear_api_key"
+    secret = "review-pem-value"
+    app_id = "42424242"
+    key = "extension:review:private_key"
     with _build_client(tmp_path) as client:
         written = client.patch(
             "/api/settings/extensions",
             json={
                 "extensionSettings": {
-                    "ship": {
-                        "linear_api_key": secret,
-                        "linear_webhook_secret": webhook_secret,
+                    "review": {
+                        "app_id": app_id,
+                        "private_key": secret,
                     }
                 }
             },
@@ -284,7 +284,7 @@ def test_extension_secret_round_trip_encrypts_at_rest(tmp_path: Path):
             .one()
         )
         read = client.get("/api/settings/extensions")
-        resolved = Ship.settings().linear_api_key
+        resolved = Review.settings().private_key
 
     assert written.status_code == 200
     assert read.status_code == 200
@@ -294,17 +294,19 @@ def test_extension_secret_round_trip_encrypts_at_rest(tmp_path: Path):
     assert secret.encode() not in stored.secret_value
     assert secret not in written.text
     assert secret not in read.text
-    assert webhook_secret not in written.text
-    assert webhook_secret not in read.text
+    assert app_id not in written.text
+    assert app_id not in read.text
     assert resolved and resolved.get_secret_value() == secret
-    ship = next(extension for extension in read.json()["extensions"] if extension["name"] == "ship")
-    fields = {field["name"]: field for field in ship["settings"]}
-    assert fields["linear_api_key"]["type"] == "secret"
-    assert fields["linear_api_key"]["value"] is None
-    assert fields["linear_api_key"]["default"] is None
-    assert fields["linear_api_key"]["secretSet"] is True
-    assert fields["linear_api_key"]["overridden"] is True
-    assert fields["linear_webhook_secret"]["secretSet"] is True
+    review = next(
+        extension for extension in read.json()["extensions"] if extension["name"] == "review"
+    )
+    fields = {field["name"]: field for field in review["settings"]}
+    assert fields["private_key"]["type"] == "secret"
+    assert fields["private_key"]["value"] is None
+    assert fields["private_key"]["default"] is None
+    assert fields["private_key"]["secretSet"] is True
+    assert fields["private_key"]["overridden"] is True
+    assert fields["app_id"]["secretSet"] is True
 
 
 def test_extension_secret_plaintext_row_is_unset_until_resaved(tmp_path: Path):
