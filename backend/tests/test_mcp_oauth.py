@@ -47,6 +47,7 @@ class FakeAuthServer:
     # token endpoint that records every request it answers.
     def __init__(self) -> None:
         self.discovery_supported = True
+        self.resource_metadata_supported = True
         self.registration_supported = True
         self.resource = _SERVER_URL
         self.issuer = _AUTH_BASE
@@ -64,7 +65,7 @@ class FakeAuthServer:
     def handler(self, request: httpx.Request) -> httpx.Response:
         path = request.url.path
         if path.startswith("/.well-known/oauth-protected-resource"):
-            if not self.discovery_supported:
+            if not (self.discovery_supported and self.resource_metadata_supported):
                 return httpx.Response(404)
             return httpx.Response(
                 200, json={"resource": self.resource, "authorization_servers": [_AUTH_BASE]}
@@ -240,6 +241,28 @@ async def test_begin_connect_skips_metadata_claiming_another_issuer(auth_server)
             account_id=SYSTEM_ACCOUNT_ID,
             identity_mode=IdentityMode.SHARED,
         )
+
+
+async def test_begin_connect_follows_the_origin_referral_to_an_alias_issuer(auth_server):
+    # Atlassian's shape: no protected-resource metadata, and the AS document the
+    # resource origin serves claims a CDN-alias issuer. The origin's claim is the
+    # same assertion RFC 9728 makes with authorization_servers, so it is followed
+    # once — and the referred document must claim itself, which here it does (the
+    # fake serves the same metadata on every host). The mix-up defense holds:
+    # with protected-resource metadata present, the foreign claim stays rejected
+    # (see the test above).
+    auth_server.resource_metadata_supported = False
+    auth_server.issuer = "https://alias.test"
+
+    url = await oauth.begin_connect(
+        _NAME,
+        _SERVER_URL,
+        _ENDPOINT,
+        account_id=SYSTEM_ACCOUNT_ID,
+        identity_mode=IdentityMode.SHARED,
+    )
+
+    assert url.startswith(f"{_AUTH_BASE}/authorize")
 
 
 async def test_begin_connect_requires_s256_when_methods_are_advertised(auth_server):

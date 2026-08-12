@@ -77,8 +77,26 @@ async def _discover(client: httpx.AsyncClient, name: str, server_url: str) -> di
                 )
             issuer = resource_metadata["authorization_servers"][0]
             break
-    if not issuer:
-        issuer = origin
+    if issuer:
+        candidate_issuers = [issuer]
+    else:
+        # No protected-resource metadata: the server is its own issuer, or its
+        # origin document names another — Atlassian serves its CDN alias this
+        # way — a claim with the same trust RFC 9728 gives authorization_servers.
+        document = await _get_json(client, f"{origin}/.well-known/oauth-authorization-server")
+        alias = document.get("issuer") if document else None
+        candidate_issuers = [origin, alias] if alias and alias != origin else [origin]
+    for issuer in candidate_issuers:
+        if metadata := await _self_claimed_metadata(client, issuer):
+            return metadata
+    raise OauthConnectError(
+        name,
+        f"no authorization-server metadata claiming issuer {issuer} found for {server_url}",
+    )
+
+
+async def _self_claimed_metadata(client: httpx.AsyncClient, issuer: str) -> dict | None:
+    """The issuer's metadata, only if it claims that issuer (RFC 8414 §3.3)."""
     issuer_origin = _origin(issuer)
     issuer_path = urlparse(issuer).path.rstrip("/")
     # An issuer with a path publishes under RFC 8414 insertion
@@ -102,10 +120,7 @@ async def _discover(client: httpx.AsyncClient, name: str, server_url: str) -> di
             and metadata.get("issuer", "").rstrip("/") == issuer.rstrip("/")
         ):
             return metadata
-    raise OauthConnectError(
-        name,
-        f"no authorization-server metadata claiming issuer {issuer} found for {server_url}",
-    )
+    return
 
 
 async def _register_client(
