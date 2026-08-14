@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# First-boot entrypoint. Seeds the non-root ``druks`` user like the sandbox
+# entrypoint, then the display stack: Xvfb for the browser to render into,
+# loopback-only VNC for the login window's bridge. SSH stays the only ingress.
+set -euo pipefail
+
+: "${DRUKBOX_AUTHORIZED_KEY:?DRUKBOX_AUTHORIZED_KEY is required}"
+
+install -d -m 700 -o druks -g druks /home/druks/.ssh
+printf '%s\n' "$DRUKBOX_AUTHORIZED_KEY" > /home/druks/.ssh/authorized_keys
+chmod 600 /home/druks/.ssh/authorized_keys
+chown druks:druks /home/druks/.ssh/authorized_keys
+
+# Persist caller-supplied env for SSH sessions: pam_env reads /etc/environment.
+for name in ${DRUKBOX_ENV_KEYS:-}; do
+  printf '%s=%s\n' "$name" "${!name-}" >> /etc/environment
+done
+
+install -d -m 0700 -o druks -g druks /run/druks
+install -m 0600 -o druks -g druks /dev/null /run/druks/x11vnc.password
+head -c 6 /dev/urandom | base64 > /run/druks/x11vnc.password
+
+Xvfb :99 -screen 0 1920x1080x24 -nolisten tcp -ac &
+# -loop retries until Xvfb's display exists; a broken display surfaces as a
+# loud connect error at the bridge, not a hung boot.
+x11vnc -display :99 -loop -forever -listen 127.0.0.1 -rfbport 5900 \
+  -passwdfile /run/druks/x11vnc.password -noxdamage -shared &
+
+ssh-keygen -A
+
+exec /usr/sbin/sshd -D -e

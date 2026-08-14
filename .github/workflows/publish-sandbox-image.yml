@@ -1,7 +1,7 @@
 name: Publish Sandbox Image
 
-# The sandbox image is independent of the application code — it only
-# rebuilds when its own build context (or this workflow) changes.
+# The sandbox and browser images are independent of the application code —
+# they only rebuild when their own build contexts (or this workflow) change.
 on:
   workflow_dispatch:
   push:
@@ -9,6 +9,7 @@ on:
     tags: ["v*"]
     paths:
       - "deploy/sandbox/**"
+      - "deploy/browser/**"
       - ".github/workflows/publish-sandbox-image.yml"
 
 concurrency:
@@ -53,3 +54,39 @@ jobs:
           labels: ${{ steps.metadata.outputs.labels }}
           cache-from: type=gha,scope=sandbox
           cache-to: type=gha,scope=sandbox,mode=max
+
+  browser:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # arm64 too: the browser image's home is the druks box, which is a
+      # developer laptop in the local shape.
+      - uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0
+      - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: metadata
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/druks-browser
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha,prefix=sha-,format=long
+            type=ref,event=tag
+      - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: deploy/browser
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.metadata.outputs.tags }}
+          labels: ${{ steps.metadata.outputs.labels }}
+          cache-from: type=gha,scope=browser
+          cache-to: type=gha,scope=browser,mode=max

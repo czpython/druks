@@ -49,3 +49,8 @@ updates:
     directory: /deploy/sandbox
     schedule:
       interval: weekly
+
+  - package-ecosystem: docker
+    directory: /deploy/browser
+    schedule:
+      interval: weekly
