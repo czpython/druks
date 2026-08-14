@@ -15,6 +15,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 from uuid_utils import uuid7
 
+import druks.browser.models  # noqa: F401
 import druks.durable.models  # noqa: F401
 import druks.harnesses.models  # noqa: F401
 import druks.mcp.models  # noqa: F401

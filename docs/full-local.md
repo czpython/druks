@@ -101,7 +101,33 @@ docker compose exec web druks doctor --sandbox
 
 This creates and deletes a real sandbox container.
 
-## 4. Exercise an application
+## 4. Bootstrap a browser session
+
+Until the dashboard login window is available, the repository script opens a
+headed local Chromium, waits while you log in, and uploads Playwright
+`storage_state` to the encrypted vault:
+
+```bash
+pip install playwright
+playwright install chromium
+python scripts/import_browser_session.py \
+  --name x-main \
+  --site-url https://x.com/i/flow/login \
+  --druks-url http://127.0.0.1:8001
+```
+
+The local `identity.mode = "none"` profile needs no auth header. Behind an
+authentication edge, copy the dashboard request's session cookie from browser
+developer tools and add `--header 'Cookie=<cookie header value>'`. Repeat
+`--header NAME=VALUE` if the edge needs more than one session header. The
+import route deliberately rejects personal access tokens: the request must
+authenticate as the signed-in operator, like capability management.
+
+The session appears under **Settings → Browser sessions**. Re-running the
+script with the same name replaces its active payload with a new immutable
+version and returns it to `ready`.
+
+## 5. Exercise an application
 
 Druks does not invent a generic domain job: an installed extension supplies the
 workflow and its trigger. In the bundled distribution, `ship` is the reference

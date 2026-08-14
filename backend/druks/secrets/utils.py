@@ -17,9 +17,9 @@ from druks.settings import load_settings
 # The salt derives this envelope's AES key (HKDF over a configured master key —
 # the master never touches a cipher directly, and a fresh key per envelope
 # makes nonce reuse a non-concern); AES-GCM returns ciphertext with the tag
-# appended. The AAD is the owning ``table.column``, so a blob can't be
-# replayed into any other encrypted column — renaming either needs a
-# decrypt/re-encrypt pass.
+# appended. The AAD names the owning scope — ``table.column`` for encrypted
+# columns, ``browser_session:<id>:<version>`` for vault envelopes — so a blob
+# can't be replayed anywhere else.
 _ENVELOPE_V1 = b"\x01"
 _SALT_LEN = 16
 _NONCE_LEN = 12

@@ -19,6 +19,10 @@ EXEMPT_API_PATHS = {
 
 # Capability management admits the session identity only — never a PAT.
 SESSION_ONLY_API_ROUTES = {
+    ("POST", "/api/browser-sessions"),
+    ("PUT", "/api/browser-sessions/{session_id}/state"),
+    ("PATCH", "/api/browser-sessions/{session_id}"),
+    ("DELETE", "/api/browser-sessions/{session_id}"),
     ("GET", "/api/auth/personal-tokens"),
     ("POST", "/api/auth/personal-tokens"),
     ("DELETE", "/api/auth/personal-tokens/{pat_id}"),

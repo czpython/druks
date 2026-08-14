@@ -128,6 +128,9 @@ function stubFetch(
       if (path === '/api/settings/harnesses') {
         return new Response('[]', { status: 200 })
       }
+      if (path === '/api/browser-sessions') {
+        return new Response('[]', { status: 200 })
+      }
       if (path === '/api/settings') {
         return new Response(JSON.stringify({ timezone: 'UTC', updatedAt: '2026-08-01T00:00:00Z' }), {
           status: 200,
@@ -154,6 +157,16 @@ afterEach(() => {
 })
 
 describe('SettingsModal extension fields', () => {
+  it('opens the browser sessions pane from the settings rail', async () => {
+    stubFetch()
+    renderModal()
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Browser sessions' }))
+
+    expect(await screen.findByRole('heading', { name: 'Browser sessions' })).toBeTruthy()
+    expect(await screen.findByText('No browser sessions yet.')).toBeTruthy()
+  })
+
   it('renders every 422 message under the field named by the backend', async () => {
     stubFetch()
     const onClose = renderModal()

@@ -2,7 +2,9 @@ import type {
   Account,
   AgentCallFiles,
   ArtifactContent,
+  BrowserSession,
   ConnectChallenge,
+  CreateBrowserSessionRequest,
   DashboardHealth,
   Extension,
   FeedResponse,
@@ -223,6 +225,13 @@ export const api = {
   services: () => getJSON<Service[]>('/api/services'),
   connectService: (name: string, fields: Record<string, string>) =>
     postJSON<Service>(`/api/services/${encodeURIComponent(name)}`, fields),
+  browserSessions: () => getJSON<BrowserSession[]>('/api/browser-sessions'),
+  createBrowserSession: (body: CreateBrowserSessionRequest) =>
+    postJSON<BrowserSession>('/api/browser-sessions', body),
+  renameBrowserSession: (id: string, name: string) =>
+    patchJSON<BrowserSession>(`/api/browser-sessions/${encodeURIComponent(id)}`, { name }),
+  deleteBrowserSession: (id: string) =>
+    deleteRequest(`/api/browser-sessions/${encodeURIComponent(id)}`),
   getExtensionSettings: () => getJSON<ExtensionsSettingsResponse>('/api/settings/extensions'),
   updateExtensionSettings: (body: UpdateExtensionsSettingsRequest) =>
     patchJSON<ExtensionsSettingsResponse>('/api/settings/extensions', body),

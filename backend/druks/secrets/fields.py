@@ -67,6 +67,46 @@ class EncryptedText(_EncryptedColumn):
         return Secret(bytes(value), self._aad)
 
 
+class SecretBytes:
+    # The live value of an EncryptedBytesField column: plaintext exists only
+    # where decrypt() is called, presence checks read the stored bytes alone,
+    # and repr can't leak. The bytes twin of Secret.
+
+    def __init__(self, envelope: bytes, aad: str) -> None:
+        self._envelope = envelope
+        self._aad = aad
+
+    def decrypt(self) -> bytes:
+        if not self._envelope:
+            return b""
+        return utils.decrypt(self._envelope, self._aad)
+
+    def __bool__(self) -> bool:
+        return bool(self._envelope)
+
+    def __repr__(self) -> str:
+        return "SecretBytes(<redacted>)"
+
+    __str__ = __repr__
+
+
+class EncryptedBytes(_EncryptedColumn):
+    def process_bind_param(self, value: Any, dialect: Any) -> bytes:
+        # Assignment takes plain bytes; a SecretBytes carried over from
+        # another column re-encrypts under this column's AAD via its
+        # plaintext. An empty value stores as empty bytes — no envelope.
+        if isinstance(value, SecretBytes):
+            value = value.decrypt()
+        if not isinstance(value, bytes):
+            raise ValueError(f"an encrypted bytes column takes bytes, not {type(value).__name__}")
+        if not value:
+            return b""
+        return utils.encrypt(value, self._aad)
+
+    def process_result_value(self, value: Any, dialect: Any) -> SecretBytes:
+        return SecretBytes(bytes(value), self._aad)
+
+
 class SecretsMapping(Mutable, MutableMapping):
     # The live value of an EncryptedJsonField column: dict-shaped, decrypting
     # lazily on first read and redacted in repr. In-place writes mark the
@@ -137,6 +177,14 @@ def EncryptedTextField(**kwargs: Any) -> Mapped[Secret]:
     # annotation to infer from and would default the column to NULL.
     kwargs.setdefault("nullable", False)
     return mapped_column(EncryptedText(), **kwargs)
+
+
+def EncryptedBytesField(**kwargs: Any) -> Mapped[SecretBytes]:
+    # Declared on a model as ``payload = EncryptedBytesField(default=b"")``:
+    # a NOT NULL column taking bytes in, handing a SecretBytes back,
+    # ciphertext at rest. Reassignment is the write path.
+    kwargs.setdefault("nullable", False)
+    return mapped_column(EncryptedBytes(), **kwargs)
 
 
 def EncryptedJsonField() -> Mapped[SecretsMapping]:

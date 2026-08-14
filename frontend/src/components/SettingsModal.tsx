@@ -2,6 +2,7 @@ import { Fragment, useEffect, useId, useLayoutEffect, useMemo, useRef, useState,
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { ApiError, api } from '../api/client'
+import { BrowserSessionsPane } from './BrowserSessionsPane'
 import { ExtensionGlyph } from './ExtensionGlyph'
 import { ConnectSteps, useHarnessConnect } from './HarnessConnectFlow'
 import {
@@ -129,7 +130,8 @@ export function SettingsModal({ open, onClose }: Props) {
   // Pending per-harness edits (name -> sparse UpdateHarnessRequest), flushed by
   // submit() — same dirty/save flow as the extension and general settings.
   const [harnessEdits, setHarnessEdits] = useState<Record<string, UpdateHarnessRequest>>({})
-  // 'general' | 'harnesses' | 'skills' | 'mcp' | 'agent-access' | <extension name>
+  // 'general' | 'harnesses' | 'browser-sessions' | 'skills' | 'mcp' |
+  // 'agent-access' | <extension name>
   const [section, setSection] = useState<string>('general')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -345,6 +347,7 @@ export function SettingsModal({ open, onClose }: Props) {
             <RailItem icon="general" label="General" active={section === 'general'} onClick={() => setSection('general')} />
             <RailItem icon="harnesses" label="Harnesses" active={section === 'harnesses'} onClick={() => setSection('harnesses')} />
             <RailItem icon="services" label="Services" active={section === 'services'} onClick={() => setSection('services')} />
+            <RailItem icon="browser-sessions" label="Browser sessions" active={section === 'browser-sessions'} onClick={() => setSection('browser-sessions')} />
             <RailItem icon="skills" label="Skills" active={section === 'skills'} onClick={() => setSection('skills')} />
             <RailItem icon="mcp" label="MCP" active={section === 'mcp'} onClick={() => setSection('mcp')} />
             <RailItem icon="agent-access" label="Tokens" active={section === 'agent-access'} onClick={() => setSection('agent-access')} />
@@ -390,6 +393,7 @@ export function SettingsModal({ open, onClose }: Props) {
                 </div>
               ))}
             {section === 'services' && <ServicesPane />}
+            {section === 'browser-sessions' && <BrowserSessionsPane />}
             {section === 'skills' && <SkillsPane />}
             {section === 'mcp' && <McpServersPane />}
             {section === 'agent-access' && <AgentAccessPane />}
@@ -474,6 +478,12 @@ function RailGlyph({ name }: { name: string }) {
       <>
         <circle cx="5.5" cy="10.5" r="2.5" />
         <path d="M7.5 8.5 13 3M10.5 5.5l2 2" />
+      </>
+    ),
+    'browser-sessions': (
+      <>
+        <rect x="2" y="3" width="12" height="9" rx="1.5" />
+        <path d="M2 6h12M5 14h6M8 12v2" />
       </>
     ),
     skills: (
