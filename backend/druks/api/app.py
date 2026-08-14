@@ -23,6 +23,7 @@ from druks.durable.engine import init_dbos, launch, shutdown
 from druks.durable.exceptions import AgentCallNotFound
 from druks.events.routes import router as events_router
 from druks.extensions.loader import iter_extensions, load
+from druks.extensions.routes import router as extensions_router
 from druks.harnesses.routes import router as harness_connection_router
 from druks.mcp.catalog import load_mcp_catalog
 from druks.mcp.gateway import exceptions as gate_errors
@@ -242,6 +243,7 @@ app.include_router(webhooks_router)
 app.include_router(auth_router)
 app.include_router(harness_connection_router)
 app.include_router(settings_router, dependencies=_identity_gate)
+app.include_router(extensions_router, dependencies=_identity_gate)
 app.include_router(service_identities_router, dependencies=_identity_gate)
 app.include_router(skills_router, dependencies=_identity_gate)
 app.include_router(mcp_router, dependencies=_identity_gate)

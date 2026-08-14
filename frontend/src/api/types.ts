@@ -182,6 +182,18 @@ export interface TranscriptChunk {
   text: string
 }
 
+// One installed extension, from the backend registry — what the shell derives
+// nav and generic pages from. ``hasFrontend`` means the package ships its own
+// built UI, served at /app/<name>.
+export interface Extension {
+  name: string
+  icon: string
+  description: string
+  builtin: boolean
+  subjectTypes: string[]
+  hasFrontend: boolean
+}
+
 // --- System health ---------------------------------------------------------
 
 export interface WebhookSource {

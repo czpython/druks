@@ -37,6 +37,9 @@ export interface ExtensionUI {
   // extension's list and detail surfaces. Opt-in — an extension that doesn't track
   // code hosts leaves it off and the band never renders.
   systemStrip?: boolean
+  // The extension's home is its own page outside this SPA (a shipped dist under
+  // /app/<name>) — reaching it is a full document load, not a wouter navigation.
+  external?: boolean
 }
 
 const REGISTRY = new Map<string, ExtensionUI>()

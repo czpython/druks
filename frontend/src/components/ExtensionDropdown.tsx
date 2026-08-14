@@ -18,21 +18,21 @@ export function ExtensionDropdown({ extensions, extension, accent, onChange }: P
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
 
-  // Icon + description come from the extension registry the backend already serves
-  // (same query key as the shell, so this reads the cache — no extra request).
-  const settingsQuery = useQuery({
-    queryKey: ['extensionSettings'],
-    queryFn: api.getExtensionSettings,
+  // Icon + description come from the roster the shell already fetched (same query
+  // key, so this reads the cache — no extra request).
+  const rosterQuery = useQuery({
+    queryKey: ['extensions'],
+    queryFn: api.listExtensions,
     staleTime: 60_000,
   })
   const meta = useMemo(() => {
-    const byName = new Map((settingsQuery.data?.extensions ?? []).map((e) => [e.name, e]))
+    const byName = new Map((rosterQuery.data ?? []).map((e) => [e.name, e]))
     return extensions.map((name) => ({
       name,
       icon: byName.get(name)?.icon ?? 'box',
       desc: byName.get(name)?.description ?? '',
     }))
-  }, [settingsQuery.data, extensions])
+  }, [rosterQuery.data, extensions])
 
   useEffect(() => {
     if (!open) return undefined
