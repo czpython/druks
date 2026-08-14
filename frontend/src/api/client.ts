@@ -4,6 +4,7 @@ import type {
   ArtifactContent,
   ConnectChallenge,
   DashboardHealth,
+  Extension,
   FeedResponse,
   ExtensionsSettingsResponse,
   Harness,
@@ -180,6 +181,7 @@ export const subjectApi = {
 
 export const api = {
   systemHealth: () => getJSON<DashboardHealth>('/api/system/health'),
+  listExtensions: () => getJSON<Extension[]>('/api/extensions'),
   artifact: (id: string) => getJSON<ArtifactContent>(`/api/artifacts/${id}`),
   resumeRun: (
     runId: string,

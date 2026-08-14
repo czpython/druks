@@ -794,9 +794,17 @@ runs `FLUSHDB` on the test index.
 
 ## Frontends
 
-The scaffold ships a minimal `druks_night_watch/dist/index.html`. Replace that
-directory with a static frontend build to serve a standalone extension app at
-`/app/night_watch`; history fallback and cache headers are handled by FastAPI.
+An installed extension is visible in the dashboard without shipping any UI. The
+shell reads the installed roster from `/api/extensions` and gives every
+extension an entry in the app switcher plus generic pages: a board per subject
+type, and a subject page with the run timeline, transcripts, and gate controls.
+There is nothing to declare — the subject summary's fields are the board row.
+
+To go beyond the generic pages, ship a frontend. The scaffold ships a minimal
+`druks_night_watch/dist/index.html`. Replace that directory with a static
+frontend build to serve a standalone extension app at `/app/night_watch`; the
+app switcher links it, and history fallback and cache headers are handled by
+FastAPI.
 
 The bundled Druks SPA also has a shared React extension registry. Joining that
 shell requires compiling the extension's UI module into the dashboard image;

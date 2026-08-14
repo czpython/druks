@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link, Route, Router, Switch, useLocation } from 'wouter'
 
@@ -14,6 +14,7 @@ import { SystemStrip } from './components/SystemStrip'
 import { UsagePage } from './pages/UsagePage'
 import { extensionAccent } from './lib/extensionColors'
 import './extensions'
+import { registerInstalledExtensions } from './extensions/installed'
 import { extensionHome, extensionOwning, getExtensionUI, registeredExtensions } from './extensions/registry'
 import type { ExtensionNavEntry } from './extensions/registry'
 
@@ -33,12 +34,20 @@ export function App() {
 function AppShell() {
   const [location, navigate] = useLocation()
 
-  // Every UI-contributing extension, in registration order — read synchronously from
-  // the local registry, which is the source of truth for what UI ships in this bundle
-  // (an extension can't register UI without being installed). Routes, accent, nav, the
-  // dropdown, and the default landing all derive from it, so they resolve on a cold
-  // load without waiting on any fetch. No extension name is hardcoded.
-  const registered = useMemo(() => registeredExtensions().map((e) => e.name), [])
+  // Every extension with a place in the shell, in registration order: the bundled
+  // ones synchronously (routes, accent, and landing resolve on a cold load without
+  // any fetch), then the installed roster — each backend-only extension gets the
+  // generic pages, a dist-shipping one gets its external home. Bundled first, roster
+  // extras A→Z. No extension name is hardcoded.
+  const rosterQuery = useQuery({
+    queryKey: ['extensions'],
+    queryFn: api.listExtensions,
+    staleTime: 60_000,
+  })
+  const registered = useMemo(() => {
+    registerInstalledExtensions(rosterQuery.data)
+    return registeredExtensions().map((e) => e.name)
+  }, [rosterQuery.data])
   // Accent per extension, handed out by registration order (the harness-colour
   // pattern) — no per-name CSS, and stable from first paint.
   const accent = useMemo(() => extensionAccent(registered), [registered])
@@ -79,6 +88,20 @@ function AppShell() {
   useEffect(() => {
     navCount.current += 1
   }, [location])
+
+  // An extension whose home is its own shipped dist lives outside this SPA —
+  // reaching it is a document load, not a wouter navigation.
+  const go = useCallback(
+    (name: string) => {
+      const home = extensionHome(name)
+      if (getExtensionUI(name)?.external) {
+        window.location.assign(home)
+      } else {
+        navigate(home)
+      }
+    },
+    [navigate],
+  )
 
   // Root URL deeplinks to the default extension so the in-extension nav and the URL
   // bar agree. Waits for the registry so it lands on a real home, not a guess.
@@ -158,7 +181,7 @@ function AppShell() {
             extensions={registered}
             extension={extension}
             accent={accent}
-            onChange={(next) => navigate(extensionHome(next))}
+            onChange={go}
           />
 
           <ExtensionSubNav location={location} nav={ui?.nav} accent={accentColor} />

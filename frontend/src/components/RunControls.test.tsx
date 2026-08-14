@@ -2,8 +2,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import type { InputRequest } from '../../api/types'
-import { InAppReview } from './WorkItemPage'
+import type { InputRequest } from '../api/types'
+import { InAppReview } from './RunControls'
 
 function stubFetch() {
   const fetchMock = vi.fn<(url: string, init?: RequestInit) => Promise<Response>>(

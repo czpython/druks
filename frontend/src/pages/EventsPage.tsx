@@ -161,18 +161,18 @@ function ExtensionFilter({
   filter: string | null
   onPick: (extension: string | null) => void
 }) {
-  // The local registry paints the pills on a cold load; the installed list adds
-  // the extensions that ship no UI — the platform's own chores and webhooks emit
-  // events too. Same query key as the extension dropdown, so this reads its cache
-  // rather than issuing a request of its own.
+  // The local registry paints the pills on a cold load; the roster adds the
+  // extensions that ship no UI — builtins included, the platform's own chores
+  // and webhooks emit events too. Same query key as the shell, so this reads
+  // its cache rather than issuing a request of its own.
   const installed = useQuery({
-    queryKey: ['extensionSettings'],
-    queryFn: api.getExtensionSettings,
+    queryKey: ['extensions'],
+    queryFn: api.listExtensions,
     staleTime: 60_000,
   })
   const options = useMemo(() => {
     const names = new Set(registeredExtensions().map((e) => e.name))
-    for (const entry of installed.data?.extensions ?? []) names.add(entry.name)
+    for (const entry of installed.data ?? []) names.add(entry.name)
     // Leading null is the unfiltered view the bare URL lands on.
     return [null, ...names]
   }, [installed.data])
