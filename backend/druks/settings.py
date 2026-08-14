@@ -154,6 +154,9 @@ class Sandbox(BaseModel):
     service_token: str = ""
     # Empty → drukbox decides.
     image: str = ""
+    # The browser home: browser containers boot on this provider with this image.
+    browser_sandbox_provider: str = "docker"
+    browser_sandbox_image: str = "ghcr.io/czpython/druks-browser:latest"
     # Sized for the slowest provisioner.
     timeout: float = 180.0
 

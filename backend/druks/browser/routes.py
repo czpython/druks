@@ -12,7 +12,7 @@ from druks.browser.constants import (
     MAX_PAYLOAD_BYTES,
     PAYLOAD_WARNING_BYTES,
 )
-from druks.browser.models import BrowserSession
+from druks.browser.models import StoredBrowserSession
 from druks.browser.schemas import BrowserSessionResponse, CreateBrowserSessionRequest
 from druks.database import db_session
 
@@ -24,17 +24,17 @@ router = APIRouter(prefix="/api/browser-sessions", tags=["browser-sessions"])
 @router.get("", response_model=list[BrowserSessionResponse])
 async def list_browser_sessions(
     account: Account = Depends(current_account),
-) -> list[BrowserSession]:
-    return BrowserSession.list_all()
+) -> list[StoredBrowserSession]:
+    return StoredBrowserSession.list_all()
 
 
 @router.post("", response_model=BrowserSessionResponse)
 async def create_browser_session(
     body: CreateBrowserSessionRequest,
     account: Account = Depends(current_session_account),
-) -> BrowserSession:
+) -> StoredBrowserSession:
     try:
-        return BrowserSession.create(
+        return StoredBrowserSession.create(
             name=body.name,
             payload_format=body.payload_format,
             site=body.site,
@@ -51,8 +51,8 @@ async def create_browser_session(
 async def get_browser_session(
     session_id: str,
     account: Account = Depends(current_account),
-) -> BrowserSession:
-    browser_session = BrowserSession.get_for_id(session_id)
+) -> StoredBrowserSession:
+    browser_session = StoredBrowserSession.get_for_id(session_id)
     if browser_session:
         return browser_session
     raise HTTPException(status_code=404, detail="Browser session not found.")
@@ -63,8 +63,8 @@ async def upload_state(
     session_id: str,
     request: Request,
     account: Account = Depends(current_session_account),
-) -> BrowserSession:
-    browser_session = BrowserSession.get_for_id(session_id)
+) -> StoredBrowserSession:
+    browser_session = StoredBrowserSession.get_for_id(session_id)
     if not browser_session:
         raise HTTPException(status_code=404, detail="Browser session not found.")
     payload = bytearray()
@@ -98,8 +98,8 @@ async def rename_browser_session(
         ),
     ],
     account: Account = Depends(current_session_account),
-) -> BrowserSession:
-    browser_session = BrowserSession.get_for_id(session_id)
+) -> StoredBrowserSession:
+    browser_session = StoredBrowserSession.get_for_id(session_id)
     if not browser_session:
         raise HTTPException(status_code=404, detail="Browser session not found.")
     try:
@@ -118,7 +118,7 @@ async def delete_browser_session(
     session_id: str,
     account: Account = Depends(current_session_account),
 ) -> None:
-    browser_session = BrowserSession.get_for_id(session_id)
+    browser_session = StoredBrowserSession.get_for_id(session_id)
     if not browser_session:
         raise HTTPException(status_code=404, detail="Browser session not found.")
     browser_session.delete()
