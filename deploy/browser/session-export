@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+session_root=/work/session
+pid_path="$session_root/.runtime/launcher.pid"
+closed_path="$session_root/.runtime/closed"
+output_path="$session_root/out"
+
+# Never tar a live Chrome: ask the launcher to close and wait for its
+# closed sentinel.
+kill -TERM "$(<"$pid_path")"
+for _ in {1..600}; do
+  if [[ -f "$closed_path" ]]; then
+    break
+  fi
+  sleep 0.1
+done
+if [[ ! -f "$closed_path" ]]; then
+  printf 'session-launch did not close the browser cleanly\n' >&2
+  exit 1
+fi
+
+rm -rf "$output_path"
+install -d -m 0700 "$output_path"
+
+tar \
+  --exclude='*/Cache' \
+  --exclude='*/Code Cache' \
+  --exclude='*/GPUCache' \
+  --exclude='*/Service Worker/CacheStorage' \
+  -czf "$output_path/state.tar.gz" \
+  -C "$session_root/profile" \
+  .
+tar -tzf "$output_path/state.tar.gz" > /dev/null
+
+version="$(node -p 'JSON.parse(require("fs").readFileSync("/work/session/state.meta.json", "utf8")).version')"
+printf '{"format":"profile_dir","version":%s}\n' "$version" > "$output_path/state.meta.json"
+chmod 0600 "$output_path/state.tar.gz" "$output_path/state.meta.json"

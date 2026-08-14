@@ -1,0 +1,123 @@
+#!/usr/bin/env node
+process.env.DISPLAY ||= ":99";
+process.env.PLAYWRIGHT_BROWSERS_PATH ||= "/ms-playwright";
+
+const fs = require("node:fs");
+const path = require("node:path");
+const { spawnSync } = require("node:child_process");
+
+const { chromium } = require("/opt/druks-browser/node_modules/playwright");
+
+const SESSION_ROOT = "/work/session";
+const META_PATH = path.join(SESSION_ROOT, "state.meta.json");
+const PROFILE_ARCHIVE_PATH = path.join(SESSION_ROOT, "state.tar.gz");
+const STORAGE_STATE_PATH = path.join(SESSION_ROOT, "state.json");
+const PROFILE_PATH = path.join(SESSION_ROOT, "profile");
+const RUNTIME_PATH = path.join(SESSION_ROOT, ".runtime");
+const PID_PATH = path.join(RUNTIME_PATH, "launcher.pid");
+const READY_PATH = path.join(RUNTIME_PATH, "ready.json");
+const CLOSED_PATH = path.join(RUNTIME_PATH, "closed");
+
+const [mode] = process.argv.slice(2);
+if (!mode || process.argv.length !== 3 || !["--headed", "--headless"].includes(mode)) {
+  console.error("usage: session-launch --headed|--headless");
+  process.exit(2);
+}
+const headless = mode === "--headless";
+
+let requestShutdown;
+const shutdownRequested = new Promise((resolve) => {
+  requestShutdown = resolve;
+});
+
+process.on("SIGINT", requestShutdown);
+process.on("SIGHUP", requestShutdown);
+process.on("SIGTERM", requestShutdown);
+
+function readSessionMeta() {
+  const meta = JSON.parse(fs.readFileSync(META_PATH, "utf8"));
+  if (!["profile_dir", "storage_state"].includes(meta.format)) {
+    throw new Error(`unsupported session format: ${meta.format}`);
+  }
+  if (!("version" in meta)) {
+    throw new Error("session metadata is missing version");
+  }
+  return meta;
+}
+
+function unpackProfileArchive() {
+  const unpacked = spawnSync(
+    "tar",
+    [
+      "-xzf",
+      PROFILE_ARCHIVE_PATH,
+      "--no-same-owner",
+      "--no-same-permissions",
+      "-C",
+      PROFILE_PATH,
+    ],
+    { encoding: "utf8" },
+  );
+  if (unpacked.status !== 0) {
+    throw new Error(`failed to unpack profile archive: ${unpacked.stderr.trim()}`);
+  }
+}
+
+async function main() {
+  const meta = readSessionMeta();
+
+  fs.rmSync(PROFILE_PATH, { force: true, recursive: true });
+  fs.rmSync(RUNTIME_PATH, { force: true, recursive: true });
+  fs.mkdirSync(PROFILE_PATH, { mode: 0o700, recursive: true });
+  fs.mkdirSync(RUNTIME_PATH, { mode: 0o700, recursive: true });
+  fs.writeFileSync(PID_PATH, `${process.pid}\n`, { mode: 0o600 });
+
+  if (meta.format === "profile_dir") {
+    unpackProfileArchive();
+  }
+
+  let context;
+  let isReady = false;
+  try {
+    context = await chromium.launchPersistentContext(PROFILE_PATH, {
+      args: [
+        "--remote-debugging-address=127.0.0.1",
+        "--remote-debugging-port=9222",
+        "--window-size=1920,1080",
+      ],
+      handleSIGHUP: false,
+      handleSIGINT: false,
+      handleSIGTERM: false,
+      headless,
+      viewport: null,
+    });
+    context.on("close", requestShutdown);
+
+    if (meta.format === "storage_state") {
+      await context.setStorageState(STORAGE_STATE_PATH);
+    }
+
+    fs.writeFileSync(
+      READY_PATH,
+      `${JSON.stringify({ cdp: "http://127.0.0.1:9222", headless })}\n`,
+      { mode: 0o600 },
+    );
+    isReady = true;
+
+    await shutdownRequested;
+  } finally {
+    if (context) {
+      await context.close();
+    }
+    if (isReady) {
+      fs.writeFileSync(CLOSED_PATH, "\n", { mode: 0o600 });
+    }
+    fs.rmSync(PID_PATH, { force: true });
+  }
+}
+
+main().catch((error) => {
+  fs.rmSync(PID_PATH, { force: true });
+  console.error(error.stack || error.message);
+  process.exitCode = 1;
+});
