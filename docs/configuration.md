@@ -326,8 +326,9 @@ per-agent capability manifest records the delivered set.
 
 ## Credential custody and secrets at rest
 
-`secrets.secrets_key` encrypts MCP tokens, OAuth grants, and the GitHub
-service identity's private key and webhook secret with AES-256-GCM.
+`secrets.secrets_key` encrypts MCP tokens, OAuth grants, browser-session
+payloads, and the GitHub service identity's private key and webhook secret
+with AES-256-GCM.
 Each database column supplies authenticated associated data, and each value
 gets a derived encryption key. The setting is one or more comma-separated,
 base64-encoded 32-byte master keys:
@@ -345,8 +346,8 @@ secrets_key = "<new>,<old>"
 ```
 
 Keep the old key until no stored row depends on it. Losing every key used for a
-row makes that secret unrecoverable; reconnect OAuth grants and re-enter static
-tokens. Validation and API errors intentionally omit submitted secret values.
+row makes that secret unrecoverable; reconnect OAuth grants, re-enter static
+tokens, and log in to affected browser sessions again. Validation and API errors intentionally omit submitted secret values.
 
 The encryption envelope does **not** currently cover harness subscription
 payloads or notification webhook URLs. They are stored as

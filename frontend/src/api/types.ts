@@ -302,6 +302,26 @@ export interface UpdateUserSettingsRequest {
   timezone?: string
 }
 
+export type BrowserSessionStatus = 'needs_login' | 'ready' | 'stale'
+export type BrowserSessionPayloadFormat = 'storage_state' | 'profile_dir'
+
+export interface BrowserSession {
+  id: string
+  name: string
+  status: BrowserSessionStatus
+  payloadFormat: BrowserSessionPayloadFormat
+  site: string
+  createdAt: string
+  lastRefreshedAt: string | null
+  lastUsedAt: string | null
+}
+
+export interface CreateBrowserSessionRequest {
+  name: string
+  payloadFormat: BrowserSessionPayloadFormat
+  site: string
+}
+
 /** Where an agent's resolved model came from: its own override, or the
  * family-token default. */
 export type ModelSource = 'agent' | 'default'

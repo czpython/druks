@@ -18,6 +18,7 @@ from druks.api.artifacts import router as artifacts_router
 from druks.api.exceptions import AgentApiError
 from druks.api.runs import router as runs_router
 from druks.api.subjects import router as subjects_router
+from druks.browser.routes import router as browser_sessions_router
 from druks.database import configure_session, create_engine_from_url, db_session, session_scope
 from druks.durable.engine import init_dbos, launch, shutdown
 from druks.durable.exceptions import AgentCallNotFound
@@ -242,6 +243,7 @@ app.include_router(notifications_external_router)
 app.include_router(webhooks_router)
 app.include_router(auth_router)
 app.include_router(harness_connection_router)
+app.include_router(browser_sessions_router)
 app.include_router(settings_router, dependencies=_identity_gate)
 app.include_router(extensions_router, dependencies=_identity_gate)
 app.include_router(service_identities_router, dependencies=_identity_gate)
