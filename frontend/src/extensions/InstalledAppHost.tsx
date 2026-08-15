@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useLocation } from 'wouter'
 
 import { EmptyState } from '../components/EmptyState'
+import { Markdown } from '../components/Markdown'
 import { Page } from '../components/Page'
 import { extensionAccent } from '../lib/extensionColors'
 import { registeredExtensions } from './registry'
@@ -25,6 +26,10 @@ export interface ShellContext {
   // theme is ambient: the app renders in the shell's document, so the shell's
   // CSS variables cascade into it.
   theme: { accent: string }
+  // The shell's own markdown renderer (GFM, raw HTML stripped, links open in
+  // a new tab) — platform surfaces show LLM-emitted markdown everywhere, so
+  // apps borrow the renderer instead of each bundling one.
+  markdown: (source: string) => ReactNode
 }
 
 interface EntryModule {
@@ -68,6 +73,7 @@ export function InstalledAppHost({ name }: { name: string }) {
       apiBase: `/api/${name}`,
       navigate: (path) => navigateRef.current(path),
       theme: { accent: extensionAccent(names)[name] ?? '' },
+      markdown: (source) => <Markdown source={source} />,
     }
 
     import(/* @vite-ignore */ `/app/${name}/entry.js`)
