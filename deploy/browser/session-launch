@@ -45,7 +45,14 @@ function readSessionMeta() {
   return meta;
 }
 
-function unpackProfileArchive() {
+function unpackProfileArchive(meta) {
+  if (!fs.existsSync(PROFILE_ARCHIVE_PATH)) {
+    if (meta.version === 0) {
+      // Version zero names a session that has never been logged in, so its profile starts blank.
+      return;
+    }
+    throw new Error("profile archive is missing");
+  }
   const unpacked = spawnSync(
     "tar",
     [
@@ -73,7 +80,7 @@ async function main() {
   fs.writeFileSync(PID_PATH, `${process.pid}\n`, { mode: 0o600 });
 
   if (meta.format === "profile_dir") {
-    unpackProfileArchive();
+    unpackProfileArchive(meta);
   }
 
   let context;

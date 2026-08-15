@@ -16,15 +16,13 @@ for name in ${DRUKBOX_ENV_KEYS:-}; do
   printf '%s=%s\n' "$name" "${!name-}" >> /etc/environment
 done
 
-install -d -m 0700 -o druks -g druks /run/druks
-install -m 0600 -o druks -g druks /dev/null /run/druks/x11vnc.password
-head -c 6 /dev/urandom | base64 > /run/druks/x11vnc.password
-
 Xvfb :99 -screen 0 1920x1080x24 -nolisten tcp -ac &
+# The VNC port binds loopback only and is reached solely over the authenticated
+# SSH channel, so SSH is the gate and x11vnc runs without its own password.
 # -loop retries until Xvfb's display exists; a broken display surfaces as a
 # loud connect error at the bridge, not a hung boot.
 x11vnc -display :99 -loop -forever -listen 127.0.0.1 -rfbport 5900 \
-  -passwdfile /run/druks/x11vnc.password -noxdamage -shared &
+  -nopw -noxdamage -shared &
 
 ssh-keygen -A
 

@@ -101,31 +101,24 @@ docker compose exec web druks doctor --sandbox
 
 This creates and deletes a real sandbox container.
 
-## 4. Bootstrap a browser session
+## 4. Log in a browser session
 
-Until the dashboard login window is available, the repository script opens a
-headed local Chromium, waits while you log in, and uploads Playwright
-`storage_state` to the encrypted vault:
+Open **Settings → Browser sessions**, create a stable session name, and choose
+**Log in**. Druks opens a headed browser in a disposable browser sandbox and
+shows it in the dashboard. Authenticate on the site as you normally would,
+then choose **Save**. Druks closes the browser, stores its encrypted profile,
+and marks the session ready.
 
-```bash
-pip install playwright
-playwright install chromium
-python scripts/import_browser_session.py \
-  --name x-main \
-  --site-url https://x.com/i/flow/login \
-  --druks-url http://127.0.0.1:8001
-```
+When a site expires the login, the session becomes stale. Choose **Reconnect**
+to seed a fresh login window from the saved state, authenticate again, and
+save the replacement profile. Cancel destroys the disposable sandbox without
+changing the saved state. A web-process restart also destroys open login
+windows; reopen the window after Druks returns.
 
-The local `identity.mode = "none"` profile needs no auth header. Behind an
-authentication edge, copy the dashboard request's session cookie from browser
-developer tools and add `--header 'Cookie=<cookie header value>'`. Repeat
-`--header NAME=VALUE` if the edge needs more than one session header. The
-import route deliberately rejects personal access tokens: the request must
-authenticate as the signed-in operator, like capability management.
-
-The session appears under **Settings → Browser sessions**. Re-running the
-script with the same name replaces its active payload with a new immutable
-version and returns it to `ready`.
+To verify the complete path, run an application workflow that borrows the
+session after saving and confirm its browser opens the authenticated site.
+Saving a login window always stores `profile_dir`, including when the session
+was originally imported as Playwright `storage_state`.
 
 ## 5. Exercise an application
 

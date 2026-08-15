@@ -13,6 +13,7 @@
     "types:openapi": "openapi-typescript http://127.0.0.1:8000/openapi.json -o src/api/openapi.ts"
   },
   "dependencies": {
+    "@novnc/novnc": "1.5.0",
     "@tanstack/react-query": "^5.101.4",
     "lucide-react": "^1.27.0",
     "react": "^19.2.8",

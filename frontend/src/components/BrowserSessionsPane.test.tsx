@@ -70,10 +70,12 @@ function renderPane() {
 afterEach(() => {
   cleanup()
   vi.unstubAllGlobals()
+  vi.unstubAllEnvs()
 })
 
 describe('BrowserSessionsPane', () => {
-  it('lists status and vault timestamps using frontend-owned copy', async () => {
+  it('lists status, base-aware login actions, and refresh timestamps', async () => {
+    vi.stubEnv('BASE_URL', '/druks/')
     stubFetch([
       browserSession(),
       browserSession({
@@ -90,6 +92,13 @@ describe('BrowserSessionsPane', () => {
     expect(await screen.findByText('x-main')).toBeTruthy()
     expect(screen.getByText('Ready')).toBeTruthy()
     expect(screen.getByText('Stale')).toBeTruthy()
+    expect(screen.getByRole('link', { name: 'Reconnect' }).getAttribute('href')).toBe(
+      '/druks/browser-sessions/session-2/login',
+    )
+    expect(screen.getByRole('link', { name: 'Open window' }).getAttribute('href')).toBe(
+      '/druks/browser-sessions/session-1/login',
+    )
+    expect(screen.queryByRole('link', { name: 'Log in' })).toBeNull()
     expect(screen.getAllByText('Storage state')).toHaveLength(2)
     expect(screen.getAllByText('Profile directory')).toHaveLength(2)
     expect(screen.getAllByText(/5m ago/)).toHaveLength(2)
@@ -111,6 +120,9 @@ describe('BrowserSessionsPane', () => {
     fireEvent.click(screen.getByText('Create session'))
 
     await screen.findByText('github-main')
+    expect(screen.getByRole('link', { name: 'Log in' }).getAttribute('href')).toBe(
+      '/browser-sessions/session-2/login',
+    )
     const createCall = fetchMock.mock.calls.find(
       ([url, init]) => url === '/api/browser-sessions' && init?.method === 'POST',
     )
