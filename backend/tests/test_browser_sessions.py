@@ -5,7 +5,7 @@ from druks.accounts.dependencies import current_account, current_session_account
 from druks.accounts.models import Account, PersonalAccessToken
 from druks.browser import routes
 from druks.browser.enums import BrowserSessionPayloadFormat, BrowserSessionStatus
-from druks.browser.models import BrowserSession
+from druks.browser.models import StoredBrowserSession
 from druks.database import db_session
 from druks.secrets import utils as secret_utils
 from druks.secrets.exceptions import SecretDecryptError
@@ -27,8 +27,8 @@ def client(tmp_path, druks_db, monkeypatch):
             app.dependency_overrides.pop(dependency, None)
 
 
-def create_session(name: str = "x-main") -> BrowserSession:
-    return BrowserSession.create(
+def create_session(name: str = "x-main") -> StoredBrowserSession:
+    return StoredBrowserSession.create(
         name=name,
         payload_format=BrowserSessionPayloadFormat.STORAGE_STATE,
         site="x.com",
@@ -66,7 +66,7 @@ def test_import_survives_restart_and_delete_removes_the_row(client, tmp_path, mo
     with pytest.raises(SecretDecryptError):
         secret_utils.decrypt(bytes(stored), "another_table.payload")
 
-    browser_session = BrowserSession.get_for_id(session_id)
+    browser_session = StoredBrowserSession.get_for_id(session_id)
     assert browser_session.payload.decrypt() == payload
 
     wrong_key = base64.b64encode(b"1" * 32).decode()
@@ -77,12 +77,12 @@ def test_import_survives_restart_and_delete_removes_the_row(client, tmp_path, mo
             browser_session.payload.decrypt()
 
     db_session().expire_all()
-    restarted = BrowserSession.get_for_id(session_id)
+    restarted = StoredBrowserSession.get_for_id(session_id)
     assert restarted.payload.decrypt() == payload
 
     deleted = client.delete(f"/api/browser-sessions/{session_id}")
     assert deleted.status_code == 204
-    assert not BrowserSession.list_all()
+    assert not StoredBrowserSession.list_all()
 
 
 def test_create_list_get_and_rename(client):
@@ -130,7 +130,7 @@ def test_upload_rejects_payloads_above_the_cap(client, monkeypatch):
 
     assert response.status_code == 413
     assert "256 MB" in response.json()["detail"]
-    browser_session = BrowserSession.get_for_id(created["id"])
+    browser_session = StoredBrowserSession.get_for_id(created["id"])
     assert browser_session.status == BrowserSessionStatus.NEEDS_LOGIN
 
 

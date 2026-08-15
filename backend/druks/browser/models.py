@@ -11,10 +11,10 @@ from druks.browser.enums import BrowserSessionPayloadFormat, BrowserSessionStatu
 from druks.core.models import Uuid7Pk
 from druks.database import db_session
 from druks.models import Base
-from druks.secrets.fields import EncryptedBytesField
+from druks.secrets.fields import EncryptedBytesField, SecretBytes
 
 
-class BrowserSession(Base, Uuid7Pk):
+class StoredBrowserSession(Base, Uuid7Pk):
     __tablename__ = "browser_sessions"
     __table_args__ = (
         CheckConstraint(
@@ -30,7 +30,7 @@ class BrowserSession(Base, Uuid7Pk):
     name: Mapped[str] = mapped_column(String(BROWSER_SESSION_NAME_MAX_LENGTH), unique=True)
     status: Mapped[str] = mapped_column(String(16), default=BrowserSessionStatus.NEEDS_LOGIN.value)
     payload_format: Mapped[str] = mapped_column(String(16))
-    payload = EncryptedBytesField(default=b"")
+    payload: Mapped[SecretBytes] = EncryptedBytesField(default=b"")
     site: Mapped[str] = mapped_column(String(SITE_MAX_LENGTH))
     created_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
     last_refreshed_at: Mapped[datetime | None] = mapped_column(default=None)
@@ -61,15 +61,30 @@ class BrowserSession(Base, Uuid7Pk):
     def list_all(cls):
         return list(db_session().scalars(select(cls).order_by(cls.name)))
 
+    @classmethod
+    def get_for_name(cls, name: str):
+        return db_session().scalar(select(cls).where(cls.name == name))
+
     def rename(self, name: str) -> None:
         self.name = name
         db_session().flush()
 
+    def mark_stale(self) -> None:
+        self.status = BrowserSessionStatus.STALE.value
+        db_session().flush()
+
+    def mark_used(self) -> None:
+        self.last_used_at = Base.utc_now()
+        db_session().flush()
+
     def store_payload(self, payload: bytes) -> None:
-        self.payload = payload
+        self.payload = payload  # type: ignore[assignment] — the column takes plaintext in, hands SecretBytes back
         self.status = BrowserSessionStatus.READY.value
         self.last_refreshed_at = Base.utc_now()
         db_session().flush()
+        # Assignment holds the plaintext; a read must always hand back the
+        # encrypted column's SecretBytes, so the next access reloads.
+        db_session().expire(self, ["payload"])
 
     def delete(self) -> None:
         db_session().delete(self)

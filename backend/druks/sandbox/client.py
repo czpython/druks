@@ -39,6 +39,7 @@ class Client:
         *,
         idempotency_key: str | None = None,
         image_override: str | None = None,
+        provider: str | None = None,
         sandbox_env: dict[str, str] | None = None,
     ) -> AsyncIterator[Sandbox]:
         """One-shot lifecycle: acquire → yield → release. For callers
@@ -49,6 +50,7 @@ class Client:
             async with self.acquire(
                 idempotency_key=idempotency_key,
                 image_override=image_override,
+                provider=provider,
                 sandbox_env=sandbox_env,
             ) as sandbox:
                 host_id = sandbox.id
@@ -63,6 +65,7 @@ class Client:
         *,
         idempotency_key: str | None = None,
         image_override: str | None = None,
+        provider: str | None = None,
         sandbox_env: dict[str, str] | None = None,
     ) -> AsyncIterator[Sandbox]:
         """Create a new host (or reuse one matching ``idempotency_key``)
@@ -82,6 +85,7 @@ class Client:
                 env=sandbox_env,
                 idempotency_key=key,
                 image=image or None,
+                provider=provider,
             )
             logger.info("sandbox host created id=%s", record.id)
             key_path = settings.sandbox_keys_dir / record.id
@@ -148,6 +152,7 @@ class Client:
         *,
         idempotency_key: str | None = None,
         image_override: str | None = None,
+        provider: str | None = None,
         sandbox_env: dict[str, str] | None = None,
     ) -> Sandbox:
         """Create a host and return its handle without holding an SSH connection —
@@ -156,6 +161,7 @@ class Client:
         async with self.acquire(
             idempotency_key=idempotency_key,
             image_override=image_override,
+            provider=provider,
             sandbox_env=sandbox_env,
         ) as sandbox:
             return sandbox

@@ -579,6 +579,13 @@ class Sandbox:
     async def ssh_connection(self) -> asyncssh.SSHClientConnection:
         return await self._ensure_conn()
 
+    async def forward_local_port(self, remote_port: int) -> asyncssh.SSHListener:
+        """A local loopback listener tunneling to the host's loopback
+        ``remote_port`` — how druks reaches a service the host binds only to
+        itself (a browser's CDP). Caller closes the listener."""
+        connection = await self._ensure_conn()
+        return await connection.forward_local_port("127.0.0.1", 0, "127.0.0.1", remote_port)
+
     async def aclose(self) -> None:
         if self._conn:
             self._conn.close()

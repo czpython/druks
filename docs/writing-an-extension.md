@@ -289,6 +289,45 @@ Keep durable application state outside the VM. A workflow may opt into
 `steps_reuse_sandbox = True` to retain one host across a segment, but Druks
 releases it at a gate and at workflow exit and rotates it near lease expiry.
 
+### Borrow a browser session
+
+Declare the logins your extension needs on the Extension class; the attribute
+name and the extension's name become the session's identity, and the sessions
+pane asks the operator to sign in:
+
+```python
+from druks.browser import BrowserSession
+from druks.extensions import Extension
+
+
+class XMe(Extension):
+    name = "x_me"
+    x = BrowserSession(site="x.com", persist=True)
+```
+
+A workflow borrows the logged-in browser as a playwright handle — the
+extension declares playwright as its own dependency, and druks owns
+everything else (the browser boots in its own container on the druks box and
+dies with the block; a ``persist`` session is exported and stored back
+first):
+
+```python
+async with XMe.x.playwright() as browser:
+    page = await browser.new_page()  # opened on the logged-in context
+    await page.goto("https://x.com/home")
+```
+
+``playwright()`` yields the logged-in browser context; pages you open on
+it carry the session. ``XMe.x.cdp()`` is the same borrow yielding the raw CDP
+url, for any other client — an existing test suite, raw CDP, your own
+wrapper.
+
+``persist=True`` writes rotated state back after each borrow — for sites that
+expire an unused login. ``headless=True`` is an opt-in optimization for sites
+that don't fingerprint headless browsers. When a site logs the session out,
+call ``XMe.x.mark_stale()`` and decide in the workflow whether to park on a
+gate for the operator.
+
 Provider selection is an operator concern. Extension workspace code targets the
 Druks sandbox contract, not `exe`, AWS, or Docker directly.
 
