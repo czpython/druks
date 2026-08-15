@@ -1,12 +1,19 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 
+import { Button, Field, Select, TextInput } from '../../../components/Control'
 import { EmptyState } from '../../../components/EmptyState'
 import { Page } from '../../../components/Page'
 import { useFlashNote } from '../../../lib/useFlashNote'
 import { projectsApi } from './api'
 import { repoProfiling, useRepoRuns, type RepoProfiling } from './profiling'
 import type { Project, ProjectRepo } from './types'
+
+function pickPlaceholder(loading: boolean, available: number): string {
+  if (loading) return 'loading repos…'
+  if (available === 0) return 'no more repos to add'
+  return '— pick a repo —'
+}
 
 function splitRepo(full: string): { org: string; short: string } {
   const i = full.indexOf('/')
@@ -71,24 +78,22 @@ export function ProjectsPage() {
         </div>
 
         {data.projects.length === 0 ? (
-          <div className="pj-empty">
-            <div className="pj-empty-glyph">⊞</div>
-            <div className="pj-empty-msg">No projects yet</div>
-            <div className="pj-empty-sub">
-              A project groups the GitHub repos a build operates on — a primary extension plus the
-              sibling repos that give agents cross-repo context. Name your first one to get started.
-            </div>
-            <CreateRow
-              value={draft}
-              onChange={setDraft}
-              onCreate={onCreate}
-              pending={createMutation.isPending}
-              variant="empty"
-            />
-            {createMutation.error && (
-              <span className="pj-err mono">{String(createMutation.error)}</span>
-            )}
-          </div>
+          <EmptyState
+            glyph="⊞"
+            msg="No projects yet"
+            sub="A project groups the GitHub repos a build operates on — a primary extension plus the sibling repos that give agents cross-repo context. Name your first one to get started."
+            action={
+              <div className="pj-empty-create">
+                <CreateRow
+                  value={draft}
+                  onChange={setDraft}
+                  onCreate={onCreate}
+                  pending={createMutation.isPending}
+                />
+                <Field error={createMutation.error && String(createMutation.error)} />
+              </div>
+            }
+          />
         ) : (
           <div className="pj-list">
             <CreateRow
@@ -97,9 +102,7 @@ export function ProjectsPage() {
               onCreate={onCreate}
               pending={createMutation.isPending}
             />
-            {createMutation.error && (
-              <span className="pj-err mono">{String(createMutation.error)}</span>
-            )}
+            <Field error={createMutation.error && String(createMutation.error)} />
             {data.projects.map((p) => (
               <ProjectCard key={p.id} project={p} onDeleteError={setDeleteError} />
             ))}
@@ -115,19 +118,16 @@ function CreateRow({
   onChange,
   onCreate,
   pending,
-  variant,
 }: {
   value: string
   onChange: (v: string) => void
   onCreate: () => void
   pending: boolean
-  variant?: 'empty'
 }) {
   const enabled = value.trim().length > 0 && !pending
   return (
-    <div className={variant === 'empty' ? 'pj-empty-create' : 'pj-create'}>
-      <input
-        className="pj-create-input"
+    <div className="pj-create">
+      <TextInput
         placeholder="new project name (e.g. 'Acme')"
         value={value}
         onChange={(e) => onChange(e.target.value)}
@@ -135,14 +135,9 @@ function CreateRow({
           if (e.key === 'Enter' && enabled) onCreate()
         }}
       />
-      <button
-        type="button"
-        className={`pj-btn ${enabled ? 'enabled' : ''}`}
-        disabled={!enabled}
-        onClick={() => enabled && onCreate()}
-      >
-        <span className="pj-btn-plus">+</span> create
-      </button>
+      <Button variant="primary" disabled={!enabled} onClick={onCreate}>
+        + create
+      </Button>
     </div>
   )
 }
@@ -322,8 +317,7 @@ function RepoRow({
           <span className="pj-repo-short">{short}</span>
         </span>
         {editing ? (
-          <input
-            className="pj-purpose-input"
+          <TextInput
             autoFocus
             value={purpose}
             placeholder="what this repo gives the agent as context…"
@@ -380,7 +374,7 @@ function RepoRow({
           onProfile={() => profile.mutate()}
         />
       )}
-      {profile.error && <span className="pj-err mono">{String(profile.error)}</span>}
+      <Field error={profile.error && String(profile.error)} />
     </>
   )
 }
@@ -523,59 +517,34 @@ function AddRepoForm({
   return (
     <div className="pj-addform">
       <div className="pj-addform-fields">
-        <div className="pj-addform-field">
-          <label className="pj-addform-label">repository</label>
-          <div className="pj-select-wrap">
-            <select
-              className="pj-select"
-              value={pick}
-              onChange={(e) => setPick(e.target.value)}
-            >
-              <option value="">
-                {ghRepos.isLoading
-                  ? 'loading repos…'
-                  : available.length === 0
-                    ? 'no more repos to add'
-                    : '— pick a repo —'}
+        <Field label="repository">
+          <Select value={pick} onChange={(e) => setPick(e.target.value)}>
+            <option value="">{pickPlaceholder(ghRepos.isLoading, available.length)}</option>
+            {available.map((r) => (
+              <option key={r.fullName} value={r.fullName}>
+                {r.fullName}
               </option>
-              {available.map((r) => (
-                <option key={r.fullName} value={r.fullName}>
-                  {r.fullName}
-                </option>
-              ))}
-            </select>
-            <span className="pj-select-caret">▼</span>
-          </div>
-        </div>
-        <div className="pj-addform-field">
-          <label className="pj-addform-label">
-            purpose <span className="pj-addform-optional">optional</span>
-          </label>
-          <input
-            className="pj-purpose-input"
+            ))}
+          </Select>
+        </Field>
+        <Field label="purpose" help="optional">
+          <TextInput
             placeholder="what this repo gives the agent as context…"
             value={purpose}
             onChange={(e) => setPurpose(e.target.value)}
           />
-        </div>
+        </Field>
         <div />
       </div>
       <div className="pj-addform-foot">
-        <button
-          type="button"
-          className={`pj-add-confirm ${pick ? 'enabled' : ''}`}
-          disabled={!pick || add.isPending}
-          onClick={() => pick && add.mutate()}
-        >
+        <Button variant="primary" disabled={!pick || add.isPending} onClick={() => add.mutate()}>
           add repo
-        </button>
-        <button type="button" className="pj-add-cancel" onClick={onCancel}>
-          cancel
-        </button>
-        {ghRepos.isError && (
-          <span className="pj-err mono">could not load repos — {String(ghRepos.error)}</span>
-        )}
-        {add.error && <span className="pj-err mono">{String(add.error)}</span>}
+        </Button>
+        <Button onClick={onCancel}>cancel</Button>
+        <Field
+          error={ghRepos.isError && `could not load repos — ${String(ghRepos.error)}`}
+        />
+        <Field error={add.error && String(add.error)} />
       </div>
     </div>
   )

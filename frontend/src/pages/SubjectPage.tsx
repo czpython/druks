@@ -107,7 +107,7 @@ function RunBlock({
   return (
     <div className="subject-run mono">
       <div className="subject-run-head">
-        <StatusGlyph state={run.state} pulse={isActiveRun(run)} />
+        <StatusGlyph state={run.state} />
         <span>{run.label}</span>
         <span className="dim">{run.state}</span>
         <span className="dim">{relTimeFromIso(run.updatedAt)}</span>

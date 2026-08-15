@@ -44,7 +44,7 @@ function WorkItemRowView({
   const when = relTime(secondsSince(wi.updatedAt))
   return (
     <div className={`row row-work-item${failed ? ' row-failed' : ''}`} onClick={() => onOpen(row)}>
-      <StatusGlyph state={status.state} pulse={parked || live} />
+      <StatusGlyph state={status.state} />
       <TicketCell ticketKey={wi.ticketKey} ticketUrl={wi.links.ticket} />
       <span className="row-title" title={wi.title}>
         {wi.title}

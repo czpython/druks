@@ -108,6 +108,11 @@ body[data-palette="mono"] {
   --accent-violet: var(--text);
 }
 
+/* The interactive accent every control reads. Declared on ``body``, not
+   ``:root``: the palettes retint --bucket-run on body[data-palette], and a
+   :root declaration would resolve against the base hue and skip them. */
+body { --accent: var(--bucket-run); }
+
 * { box-sizing: border-box; }
 html, body, #root {
   height: 100%; margin: 0; background: var(--bg); color: var(--text);
@@ -932,7 +937,6 @@ a.row-repo:hover { color: var(--bucket-run); text-decoration: underline; }
   display: flex; align-items: center; justify-content: center; padding: 32px;
 }
 .set-modal {
-  --accent: var(--bucket-run);
   width: min(1060px, 96vw); height: min(700px, 92vh);
   display: flex; flex-direction: column; overflow: hidden;
   background: var(--surface); border: 1px solid var(--border-loud); border-radius: 8px;
@@ -1095,7 +1099,7 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
 .set-status.dirty .sd { background: var(--decision-request-revision); box-shadow: 0 0 8px color-mix(in oklch, var(--decision-request-revision) 70%, transparent); }
 .set-status.dirty { color: var(--decision-request-revision); }
 .set-foot-actions { display: inline-flex; align-items: center; gap: 10px; }
-.set-btn { padding: 8px 16px; border-radius: 4px; font-family: var(--font-mono); font-size: 12.5px; letter-spacing: 0.02em; transition: all 120ms; cursor: pointer; background: none; }
+.set-btn { white-space: nowrap; padding: 8px 16px; border-radius: 4px; font-family: var(--font-mono); font-size: 12.5px; letter-spacing: 0.02em; transition: all 120ms; cursor: pointer; background: none; }
 .set-btn.ghost { color: var(--text-mid); border: 1px solid var(--border); }
 .set-btn.ghost:hover { color: var(--text); background: var(--surface); border-color: var(--border-loud); }
 .set-btn.primary { background: color-mix(in oklch, var(--accent) 18%, var(--surface)); color: var(--accent); border: 1px solid color-mix(in oklch, var(--accent) 50%, transparent); }
@@ -2147,8 +2151,6 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
 .pj-head-title { font-family: var(--font-mono); font-size: 13px; font-weight: 500; letter-spacing: 0.28em; text-transform: uppercase; color: var(--text-mid); }
 .pj-head-count { font-family: var(--font-mono); font-size: 13px; color: var(--bucket-run); letter-spacing: 0.08em; }
 
-.pj-err { display: block; margin-top: 8px; font-size: 11px; color: var(--bucket-dead); }
-
 /* page-level transient toast — e.g. a project delete that failed */
 .pj-toast {
   margin-bottom: 16px; padding: 10px 14px; border-radius: 4px; font-size: 12px;
@@ -2160,23 +2162,9 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
 }
 
 /* create-project row */
-.pj-create { display: flex; gap: 10px; margin-bottom: 26px; }
-.pj-create-input {
-  flex: 1; background: var(--surface); color: var(--text);
-  border: 1px solid var(--border); border-radius: 3px; padding: 11px 15px;
-  font-family: var(--font-mono); font-size: 13.5px; transition: border-color 90ms, background-color 90ms;
-}
-.pj-create-input::placeholder { color: var(--text-faint); }
-.pj-create-input:focus { outline: none; border-color: color-mix(in oklch, var(--bucket-run) 55%, transparent); background: var(--surface-2); }
-.pj-btn {
-  display: inline-flex; align-items: center; gap: 6px; padding: 0 22px;
-  font-family: var(--font-mono); font-size: 12.5px; letter-spacing: 0.02em;
-  background: var(--surface-3); color: var(--text-dim);
-  border: 1px solid var(--border); border-radius: 3px; cursor: not-allowed; transition: all 110ms; white-space: nowrap;
-}
-.pj-btn-plus { font-size: 13px; line-height: 1; opacity: 0.85; }
-.pj-btn.enabled { background: color-mix(in oklch, var(--bucket-run) 13%, var(--surface)); color: var(--bucket-run); border-color: color-mix(in oklch, var(--bucket-run) 45%, transparent); cursor: pointer; }
-.pj-btn.enabled:hover { background: color-mix(in oklch, var(--bucket-run) 20%, var(--surface)); border-color: var(--bucket-run); box-shadow: 0 0 12px -3px color-mix(in oklch, var(--bucket-run) 40%, transparent); }
+.pj-create { display: flex; gap: 10px; }
+.pj-create input { flex: 1; }
+.pj-list > .pj-create { margin-bottom: 26px; }
 
 /* project card */
 .pj-card { border: 1px solid var(--border); border-radius: 4px; background: var(--surface); overflow: hidden; }
@@ -2275,47 +2263,13 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
 
 .pj-addform { border-top: 1px solid var(--border-soft); padding: 14px 22px 16px 23px; display: grid; gap: 12px; }
 .pj-addform-fields { display: grid; align-items: end; grid-template-columns: minmax(260px, 420px) 1fr 24px; gap: 28px; }
-.pj-addform-field { display: grid; gap: 6px; min-width: 0; }
-.pj-addform-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-dim); display: flex; align-items: center; gap: 7px; }
-.pj-addform-optional { font-size: 9px; text-transform: lowercase; letter-spacing: 0; color: var(--text-faint); padding: 0 4px; border: 1px solid var(--border); border-radius: 2px; }
-.pj-select-wrap { position: relative; display: flex; }
-.pj-select {
-  appearance: none; -webkit-appearance: none; flex: 1; background: var(--bg); color: var(--text);
-  border: 1px solid var(--border); border-radius: 3px; padding: 8px 28px 8px 11px;
-  font-family: var(--font-mono); font-size: 12px; cursor: pointer; transition: border-color 90ms, background-color 90ms;
-}
-.pj-select:hover { border-color: var(--border-loud); }
-.pj-select:focus { outline: none; border-color: color-mix(in oklch, var(--bucket-run) 55%, transparent); }
-.pj-select-caret { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); pointer-events: none; color: var(--text-dim); font-size: 9px; }
-.pj-purpose-input {
-  background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 3px; padding: 8px 11px;
-  font-family: var(--font-mono); font-size: 12px; width: 100%; transition: border-color 90ms, background-color 90ms;
-}
-.pj-purpose-input::placeholder { color: var(--text-faint); }
-.pj-purpose-input:focus { outline: none; border-color: color-mix(in oklch, var(--bucket-run) 55%, transparent); }
 /* inline purpose-edit on a repo row: the row is baseline-aligned for text,
    so center the input box in its cell instead of riding the text baseline */
-.pj-repo .pj-purpose-input { align-self: center; }
 .pj-addform-foot { display: flex; align-items: center; gap: 8px; margin-top: 2px; }
-.pj-add-confirm {
-  padding: 7px 16px; font-family: var(--font-mono); font-size: 12px; letter-spacing: 0.02em; white-space: nowrap;
-  background: var(--surface-3); color: var(--text-dim); border: 1px solid var(--border); border-radius: 3px; cursor: not-allowed; transition: all 110ms;
-}
-.pj-add-confirm.enabled { background: color-mix(in oklch, var(--bucket-run) 13%, var(--surface)); color: var(--bucket-run); border-color: color-mix(in oklch, var(--bucket-run) 45%, transparent); cursor: pointer; }
-.pj-add-confirm.enabled:hover { background: color-mix(in oklch, var(--bucket-run) 20%, var(--surface)); border-color: var(--bucket-run); }
-.pj-add-cancel { padding: 7px 14px; font-family: var(--font-mono); font-size: 12px; color: var(--text-dim); border-radius: 3px; white-space: nowrap; }
-.pj-add-cancel:hover { color: var(--text-mid); }
 
 /* empty state */
-.pj-empty {
-  display: flex; flex-direction: column; align-items: center; text-align: center; padding: 64px 24px 72px;
-  border: 1px dashed var(--border-loud); border-radius: 4px; background: color-mix(in oklch, var(--surface) 55%, transparent);
-}
-.pj-empty-glyph { font-size: 30px; line-height: 1; color: var(--text-faint); margin-bottom: 16px; }
-.pj-empty-msg { font-size: 15px; color: var(--text-mid); margin-bottom: 7px; }
-.pj-empty-sub { font-size: 12.5px; line-height: 1.55; color: var(--text-dim); max-width: 46ch; margin-bottom: 22px; }
-.pj-empty-create { display: flex; gap: 8px; width: 100%; max-width: 440px; }
-.pj-empty-create .pj-create-input { text-align: left; }
+/* The create row as the empty state's action: stacked over its error line. */
+.pj-empty-create { display: grid; gap: 8px; width: 100%; max-width: 440px; text-align: left; }
 
 /* ============================================================
    Work item INSPECTOR (wi-inspector.css) — slim breadcrumb,
