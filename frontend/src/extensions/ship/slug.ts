@@ -63,7 +63,7 @@ export function itemSlug(
 
 // ---------------------------------------------------------------------------
 // Per-type path builders. Use these everywhere instead of
-// hand-templating ``/work-items/${id}`` so the canonical URL stays in
+// hand-templating ``/ship/work-items/${id}`` so the canonical URL stays in
 // one place.
 // ---------------------------------------------------------------------------
 
@@ -72,7 +72,7 @@ export function workItemPath(
   ticketKey?: string | null,
   title?: string | null,
 ): string {
-  return `/work-items/${itemSlug(id, ticketKey, title)}`
+  return `/ship/work-items/${itemSlug(id, ticketKey, title)}`
 }
 
 export function workItemPathFromSummary(item: WorkItemSummary): string {

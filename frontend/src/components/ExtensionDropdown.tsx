@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { useQuery } from '@tanstack/react-query'
 
 import { api } from '../api/client'
+import { extensionLabel } from '../extensions/registry'
 import { ExtensionGlyph } from './ExtensionGlyph'
 
 interface Props {
@@ -67,7 +68,7 @@ export function ExtensionDropdown({ extensions, extension, accent, onChange }: P
         <span className="extension-dd-glyph">
           <ExtensionGlyph name={current.icon} size={14} />
         </span>
-        <span className="extension-dd-label">{current.name}</span>
+        <span className="extension-dd-label">{extensionLabel(current.name)}</span>
         <span className="extension-dd-caret mono">▾</span>
       </button>
       {open && (
@@ -92,7 +93,7 @@ export function ExtensionDropdown({ extensions, extension, accent, onChange }: P
                   <ExtensionGlyph name={m.icon} size={14} />
                 </span>
                 <div className="extension-dd-item-text">
-                  <span className="extension-dd-item-label mono">{m.name}</span>
+                  <span className="extension-dd-item-label mono">{extensionLabel(m.name)}</span>
                   <span className="extension-dd-item-desc mono dim">{m.desc}</span>
                 </div>
               </button>

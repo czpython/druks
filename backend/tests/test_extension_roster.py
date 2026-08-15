@@ -12,6 +12,12 @@ def test_roster_lists_installed_extensions_with_subject_types(tmp_path: Path):
     assert ship["builtin"] is False
     assert "work_item" in ship["subjectTypes"]
     assert ship["hasFrontend"] is False
+    assert ship["navigation"] == [
+        ["/ship", "active"],
+        ["/ship/history", "history"],
+        ["/ship/projects", "projects"],
+    ]
     assert ship["icon"]
     field_notes = roster["field_notes"]
     assert field_notes["subjectTypes"] == ["note"]
+    assert field_notes["navigation"] == [["/field_notes", "notes"]]

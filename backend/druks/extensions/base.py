@@ -84,6 +84,10 @@ class Extension:
     icon: ClassVar[str] = "box"
     # One-line blurb shown in the settings pane when the extension is selected.
     description: ClassVar[str] = ""
+    # The extension's appbar subnav tabs, as (url, name) pairs. The switcher
+    # label itself is derived from ``name`` (underscores become spaces), so an
+    # extension only declares destinations, never a title.
+    navigation: ClassVar[list[tuple[str, str]]] = []
     # The extension's top-level package, walked by ``discover``. Defaults to the
     # package the subclass is defined in — the ``<package>/extension.py`` convention
     # means that's always the extension's root — so it's only set explicitly when the
@@ -247,13 +251,14 @@ class Extension:
     @classmethod
     def frontend_dist(cls) -> Path | None:
         """The extension's built frontend (``<package>/dist``), if it ships one.
-        Inside the package, not the project root, so the same path resolves for a
-        wheel and an editable install alike."""
+        A dist is an ESM module the shell mounts, not a document — ``entry.js``
+        is its marker. Inside the package, not the project root, so the same
+        path resolves for a wheel and an editable install alike."""
         package_dir = cls.package_dir()
         if not package_dir:
             return None
         dist = package_dir / "dist"
-        return dist if (dist / "index.html").is_file() else None
+        return dist if (dist / "entry.js").is_file() else None
 
     @classmethod
     def load(cls, app: "FastAPI") -> None:

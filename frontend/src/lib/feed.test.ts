@@ -50,7 +50,7 @@ describe('eventLine', () => {
     )
 
     expect(line.subject).toBe('ENG-767')
-    expect(line.path).toBe('/work-items/42')
+    expect(line.path).toBe('/ship/work-items/42')
   })
 
   it("leaves a row about a subject with no page of its own unclickable", () => {

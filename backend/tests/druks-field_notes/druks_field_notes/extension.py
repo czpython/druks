@@ -31,6 +31,7 @@ class FieldNotes(Extension):
     name = "field_notes"
     icon = "notebook"
     description = "Turns a jotted observation into a one-line gist with an agent."
+    navigation = [("/field_notes", "notes")]
 
     class Settings(ExtensionSettings):
         # How many recent notes the board shows — an operator knob, so it lives here.

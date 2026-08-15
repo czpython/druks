@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link, Route, Router, Switch, useLocation } from 'wouter'
 
@@ -16,7 +16,6 @@ import { extensionAccent } from './lib/extensionColors'
 import './extensions'
 import { registerInstalledExtensions } from './extensions/installed'
 import { extensionHome, extensionOwning, getExtensionUI, registeredExtensions } from './extensions/registry'
-import type { ExtensionNavEntry } from './extensions/registry'
 
 // Vite's BASE_URL is normally '/'; wouter expects an empty base for the root.
 // Kept in sync with the Caddy SPA fallback so future relocations only need
@@ -37,8 +36,9 @@ function AppShell() {
   // Every extension with a place in the shell, in registration order: the bundled
   // ones synchronously (routes, accent, and landing resolve on a cold load without
   // any fetch), then the installed roster — each backend-only extension gets the
-  // generic pages, a dist-shipping one gets its external home. Bundled first, roster
-  // extras A→Z. No extension name is hardcoded.
+  // generic pages, a dist-shipping one is mounted inside the shell by
+  // InstalledAppHost. Bundled first, roster extras A→Z. No extension name is
+  // hardcoded.
   const rosterQuery = useQuery({
     queryKey: ['extensions'],
     queryFn: api.listExtensions,
@@ -89,20 +89,6 @@ function AppShell() {
     navCount.current += 1
   }, [location])
 
-  // An extension whose home is its own shipped dist lives outside this SPA —
-  // reaching it is a document load, not a wouter navigation.
-  const go = useCallback(
-    (name: string) => {
-      const home = extensionHome(name)
-      if (getExtensionUI(name)?.external) {
-        window.location.assign(home)
-      } else {
-        navigate(home)
-      }
-    },
-    [navigate],
-  )
-
   // Root URL deeplinks to the default extension so the in-extension nav and the URL
   // bar agree. Waits for the registry so it lands on a real home, not a guess.
   useEffect(() => {
@@ -125,11 +111,11 @@ function AppShell() {
         return
       }
       if (event.key === 'Escape') {
-        if (location.startsWith('/work-items/') && location.includes('/agent-calls/')) {
+        if (location.startsWith('/ship/work-items/') && location.includes('/agent-calls/')) {
           // Capture the whole work-item segment (id + slug) so Esc from a call page
-          // lands on the canonical /work-items/<id>-<slug>, not a bare
-          // /work-items/<id> that the page would then redirect.
-          const match = /^(\/work-items\/[^/]+)\/agent-calls\//.exec(location)
+          // lands on the canonical /ship/work-items/<id>-<slug>, not a bare
+          // /ship/work-items/<id> that the page would then redirect.
+          const match = /^(\/ship\/work-items\/[^/]+)\/agent-calls\//.exec(location)
           const workItemPath = match?.[1]
           if (workItemPath) {
             navigate(workItemPath)
@@ -137,7 +123,7 @@ function AppShell() {
           }
         }
         if (
-          location.startsWith('/work-items/') ||
+          location.startsWith('/ship/work-items/') ||
           // The extension-independent detail pages (Usage panel, Events feed) are
           // reached from appbar pills; Esc returns to the current extension's home
           // rather than leaving the operator stuck without a visible back affordance.
@@ -165,6 +151,9 @@ function AppShell() {
 
   const home = extension ? extensionHome(extension) : '/'
   const accentColor = extension ? accent[extension] : undefined
+  // The subnav tabs the extension declared on its backend class, off the roster —
+  // the one nav channel, for bundled and installed extensions alike.
+  const navigation = rosterQuery.data?.find((entry) => entry.name === extension)?.navigation
 
   return (
     <>
@@ -181,10 +170,10 @@ function AppShell() {
             extensions={registered}
             extension={extension}
             accent={accent}
-            onChange={go}
+            onChange={(next) => navigate(extensionHome(next))}
           />
 
-          <ExtensionSubNav location={location} nav={ui?.nav} accent={accentColor} />
+          <ExtensionSubNav location={location} entries={navigation} accent={accentColor} />
         </div>
         <div className="appbar-right">
           <Link
@@ -238,33 +227,35 @@ function AppShell() {
 
 // The extension's primary navigation — shared across every page of the extension,
 // list and detail alike (hiding it on detail pages stranded the operator). The tabs
-// come from the extension's registry entry; the extension's landing page is reached
-// via the brand + dropdown, so the subnav lists the *other* destinations.
+// are the (url, name) pairs the extension declared on its backend class. The active
+// tab is the one whose url is the longest prefix of the location, so a detail page
+// lights its own section, not every ancestor.
 function ExtensionSubNav({
   location,
-  nav,
+  entries,
   accent,
 }: {
   location: string
-  nav?: ExtensionNavEntry[]
+  entries?: [string, string][]
   accent?: string
 }) {
-  if (!nav || nav.length === 0) return null
+  if (!entries || entries.length === 0) return null
+  const active = entries
+    .map(([url]) => url)
+    .filter((url) => location === url || location.startsWith(`${url}/`))
+    .reduce<string | null>((best, url) => (best && best.length >= url.length ? best : url), null)
   return (
     <nav className="appbar-subnav">
-      {nav.map((entry) => {
-        const active = entry.match ? entry.match(location) : location === entry.href
-        return (
-          <Link
-            key={entry.href}
-            href={entry.href}
-            className={`subnav-tab mono ${active ? 'active' : ''}`}
-            style={active && accent ? { borderBottomColor: accent, color: 'var(--text)' } : undefined}
-          >
-            {entry.label}
-          </Link>
-        )
-      })}
+      {entries.map(([url, name]) => (
+        <Link
+          key={url}
+          href={url}
+          className={`subnav-tab mono ${url === active ? 'active' : ''}`}
+          style={url === active && accent ? { borderBottomColor: accent, color: 'var(--text)' } : undefined}
+        >
+          {name}
+        </Link>
+      ))}
     </nav>
   )
 }
