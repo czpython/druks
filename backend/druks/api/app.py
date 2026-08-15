@@ -338,9 +338,13 @@ class SpaCacheControl:
         async def send_with_cache_policy(message: Any) -> None:
             if message["type"] == "http.response.start" and message["status"] == 200:
                 headers = MutableHeaders(scope=message)
+                html = headers.get("content-type", "").startswith("text/html")
                 if fingerprinted:
                     headers.setdefault("Cache-Control", "public, max-age=31536000, immutable")
-                elif headers.get("content-type", "").startswith("text/html"):
+                elif html or path.startswith("/app/"):
+                    # Like index.html, an app dist's entry.js and style.css keep
+                    # their names across upgrades — the name is the shell's import
+                    # contract — while their content changes: always revalidate.
                     headers.setdefault("Cache-Control", "no-cache")
             await send(message)
 

@@ -279,6 +279,15 @@ button { background: none; border: none; color: inherit; cursor: pointer; font: 
   overflow: hidden;
 }
 
+/* .installed-app — the container InstalledAppHost hands a mounted dist app.
+   The app owns everything inside; the shell only gives it the scrollable
+   band below the chrome. */
+.installed-app {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
 /* .page-shell — emitted by <Page> (components/Page.tsx) */
 .page-shell {
   display: flex;

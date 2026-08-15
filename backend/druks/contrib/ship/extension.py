@@ -58,6 +58,7 @@ class Ship(Extension):
         "model, or inherits its harness default — the backend dispatches the harness "
         "from the model you pick."
     )
+    navigation = [("/ship", "active"), ("/ship/history", "history"), ("/ship/projects", "projects")]
 
     class Settings(ExtensionSettings):
         tracker: Literal["none", "linear", "jira"] = Field(

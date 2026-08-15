@@ -184,7 +184,8 @@ export interface TranscriptChunk {
 
 // One installed extension, from the backend registry — what the shell derives
 // nav and generic pages from. ``hasFrontend`` means the package ships its own
-// built UI, served at /app/<name>.
+// built UI (an ESM module the shell mounts, served under /app/<name>);
+// ``navigation`` is the subnav tabs the extension declares, as (url, name) pairs.
 export interface Extension {
   name: string
   icon: string
@@ -192,6 +193,7 @@ export interface Extension {
   builtin: boolean
   subjectTypes: string[]
   hasFrontend: boolean
+  navigation: [string, string][]
 }
 
 // --- System health ---------------------------------------------------------

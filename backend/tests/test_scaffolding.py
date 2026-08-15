@@ -67,9 +67,10 @@ def test_create_extension_scaffolds_a_loadable_package(tmp_path):
         app.dependency_overrides[current_account] = lambda: None
         client = TestClient(app)
         assert client.get("/api/night_watch/status").json() == {"extension": "night_watch"}
-        page = client.get("/app/night_watch/")
-        assert page.status_code == 200
-        assert "night_watch" in page.text
+        entry = client.get("/app/night_watch/entry.js")
+        assert entry.status_code == 200
+        assert "shellApi" in entry.text
+        assert "night_watch" in entry.text
     finally:
         sys.path.remove(str(target))
         _workflow_packages.pop("druks_night_watch", None)

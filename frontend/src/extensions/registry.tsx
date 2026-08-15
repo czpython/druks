@@ -2,25 +2,18 @@ import type { ReactNode } from 'react'
 
 // The client-side extension-UI registry: how an extension contributes frontend.
 // An extension calls ``registerExtensionUI`` once at import time with the routes
-// (and optional subnav) its pages live at; the shell mounts them and derives the
-// subnav from them. An extension that registers nothing still gets feed, settings,
-// and usage from the shell for free — those are platform surfaces, not per-extension
-// contributions.
+// its pages live at; the shell mounts them. Subnav tabs are not part of this —
+// every extension declares those on its backend class, and the shell renders them
+// from the roster. An extension that registers nothing still gets feed, settings,
+// and usage from the shell for free — those are platform surfaces, not
+// per-extension contributions.
 
 // One route an extension mounts. ``path`` is a wouter pattern under the router base
-// (e.g. ``/ship`` or ``/work-items/:slug``); ``render`` receives the matched params.
+// (e.g. ``/ship`` or ``/ship/work-items/:slug``); ``render`` receives the matched
+// params.
 export interface ExtensionRoute {
   path: string
   render: (params: Record<string, string>) => ReactNode
-}
-
-// One subnav tab in the appbar for this extension. ``match`` decides "active" from
-// the current location when a bare prefix test isn't enough (a detail page lighting
-// its parent tab).
-export interface ExtensionNavEntry {
-  href: string
-  label: string
-  match?: (location: string) => boolean
 }
 
 export interface ExtensionUI {
@@ -29,7 +22,6 @@ export interface ExtensionUI {
   // The path the brand + dropdown land on (defaults to ``/<name>``).
   home?: string
   routes: ExtensionRoute[]
-  nav?: ExtensionNavEntry[]
   // Where a feed row about one of this extension's subjects navigates. The shell knows
   // an extension has subjects, never where its pages put them.
   subjectPath?: (subject: { type: string; id: string }) => string | undefined
@@ -37,9 +29,12 @@ export interface ExtensionUI {
   // extension's list and detail surfaces. Opt-in — an extension that doesn't track
   // code hosts leaves it off and the band never renders.
   systemStrip?: boolean
-  // The extension's home is its own page outside this SPA (a shipped dist under
-  // /app/<name>) — reaching it is a full document load, not a wouter navigation.
-  external?: boolean
+}
+
+// The switcher/display label for an extension — derived from its name, never
+// declared: underscores become spaces, the lowercase house style stays.
+export function extensionLabel(name: string): string {
+  return name.replace(/_/g, ' ')
 }
 
 const REGISTRY = new Map<string, ExtensionUI>()
@@ -66,8 +61,9 @@ export function extensionHome(name: string): string {
   return REGISTRY.get(name)?.home ?? `/${name}`
 }
 
-// A wouter-style pattern (``/work-items/:slug``) as a regex anchored to the whole
-// path — for deciding which extension owns the current URL (its dropdown + accent).
+// A wouter-style pattern (``/ship/work-items/:slug``) as a regex anchored to the
+// whole path — for deciding which extension owns the current URL (its dropdown +
+// accent).
 function patternRegex(pattern: string): RegExp {
   const source = pattern.replace(/:[^/]+/g, '[^/]+')
   return new RegExp(`^${source}$`)

@@ -8,3 +8,5 @@ class ExtensionResponse(BaseResponse):
     builtin: bool
     subject_types: list[str]
     has_frontend: bool
+    # (url, name) pairs, straight from the extension's declaration.
+    navigation: list[tuple[str, str]]

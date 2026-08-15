@@ -30,7 +30,8 @@ runs lint, tests, and build.
 - shared routing and fallback behavior
 
 Bundled extension UI lives under `src/extensions/<name>/`. Its module calls
-`registerExtensionUI()` with routes, navigation, and an optional home path.
+`registerExtensionUI()` with routes and an optional home path; subnav tabs are
+declared on the extension's backend class and rendered from the roster.
 Import that module once from `src/extensions/index.ts`; the shell discovers the
 registration and does not hardcode the extension name.
 
@@ -44,9 +45,10 @@ dashboard. A backend-only extension can still use the platform API, settings,
 events, and generic subject read-side; custom pages require a dashboard build
 that includes its UI module.
 
-An independently packaged extension has another option: ship static assets in
-`<package>/dist/`. Druks serves that standalone frontend at `/app/<name>`
-without changing the shared SPA. See the extension-author guide.
+An independently packaged extension has another option: ship a built ES module
+in `<package>/dist/` exposing `mount(el, ctx)`. Druks serves it under
+`/app/<name>` and the shell imports and mounts it below the chrome, sharing
+one React via an import map (`src/runtime/`). See the extension-author guide.
 
 ## API and live data
 

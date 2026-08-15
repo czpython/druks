@@ -65,7 +65,7 @@ application modules:
 | `webhooks.py` | authenticated provider deliveries; add when needed |
 | `services.py` | `Service` declarations — the appliance's own credentials at external providers; add when needed |
 | `migrations/versions/` | this distribution's Alembic history |
-| `dist/` | optional standalone frontend served at `/app/<name>` |
+| `dist/` | optional built frontend module, mounted inside the shell (served under `/app/<name>`) |
 
 Druks recursively discovers leaf modules named `workflows`, `routes`,
 `subscribers`, `webhooks`, and `services`. A capability hidden in `workflow.py` is not
@@ -86,8 +86,8 @@ class NightWatch(Extension):
 
 The class is a stateless install singleton; do not instantiate it. Druks mounts
 every router found in its `routes` modules under `/api/night_watch`, supplies
-transcript routes, and serves `druks_night_watch/dist/` at
-`/app/night_watch` when it contains `index.html`.
+transcript routes, and serves `druks_night_watch/dist/` under
+`/app/night_watch` when it contains `entry.js`.
 
 ## Choose the right workflow shape
 
@@ -799,12 +799,37 @@ shell reads the installed roster from `/api/extensions` and gives every
 extension an entry in the app switcher plus generic pages: a board per subject
 type, and a subject page with the run timeline, transcripts, and gate controls.
 There is nothing to declare — the subject summary's fields are the board row.
+The switcher label is derived from `name` (underscores become spaces).
 
-To go beyond the generic pages, ship a frontend. The scaffold ships a minimal
-`druks_night_watch/dist/index.html`. Replace that directory with a static
-frontend build to serve a standalone extension app at `/app/night_watch`; the
-app switcher links it, and history fallback and cache headers are handled by
-FastAPI.
+Chrome contributions are declared data. `navigation` on the extension class
+adds appbar subnav tabs as `(url, name)` pairs, rendered by the shell for
+generic pages and shipped frontends alike; the active tab is the one whose
+url is the longest prefix of the current location:
+
+```python
+class NightWatch(Extension):
+    name = "night_watch"
+    navigation = [("/night_watch", "reports")]
+```
+
+To go beyond the generic pages, ship a frontend: an ES module the shell mounts
+inside its own document, below the chrome. The scaffold ships a placeholder
+`druks_night_watch/dist/entry.js`; point your frontend build's output at that
+`dist/` directory to replace it. The contract (`shellApi: 1`):
+
+- `entry.js` exports `shellApi = 1` and `mount(el, ctx)`, which renders into
+  `el` and returns a dispose function. A missing `mount` or a version mismatch
+  renders a visible error panel in the shell.
+- `ctx` carries `apiBase` (`/api/<name>`), `navigate(path)` for shell-side
+  navigation, and `theme.accent`. The app renders in the shell's document, so
+  the shell's CSS variables cascade into it. The shell re-broadcasts every
+  location change as a `popstate` event while the app is mounted; route by
+  reading `location.pathname` under `/<name>/`.
+- `dist/style.css`, when present, is loaded while the app is mounted.
+- Build the bundle with `react`, `react-dom`, `react-dom/client`, and
+  `react/jsx-runtime` externalized (Vite library mode); the shell's import map
+  resolves them to its own copy, so one React instance serves the whole
+  document. Other dependencies are bundled as usual.
 
 The bundled Druks SPA also has a shared React extension registry. Joining that
 shell requires compiling the extension's UI module into the dashboard image;

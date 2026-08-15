@@ -210,7 +210,7 @@ class Build(Workflow):
         work_item = self.subject
         target_repo = ProjectRepo.get_for_repo(work_item.repo, raise_on_missing=True)
         endpoint = load_settings().urls.endpoint.rstrip("/")
-        work_item_url = f"{endpoint}/work-items/{work_item.id}" if endpoint else ""
+        work_item_url = f"{endpoint}/ship/work-items/{work_item.id}" if endpoint else ""
         prompt_context = BuildPromptContext(
             repo=work_item.repo,
             work_item_url=work_item_url,
