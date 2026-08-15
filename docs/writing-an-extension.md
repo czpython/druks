@@ -821,10 +821,11 @@ inside its own document, below the chrome. The scaffold ships a placeholder
   `el` and returns a dispose function. A missing `mount` or a version mismatch
   renders a visible error panel in the shell.
 - `ctx` carries `apiBase` (`/api/<name>`), `navigate(path)` for shell-side
-  navigation, and `theme.accent`. The app renders in the shell's document, so
-  the shell's CSS variables cascade into it. The shell re-broadcasts every
-  location change as a `popstate` event while the app is mounted; route by
-  reading `location.pathname` under `/<name>/`.
+  navigation, `theme.accent`, and `markdown(source)` — the shell's own
+  markdown renderer, so an app doesn't bundle one. The app renders in the
+  shell's document, so the shell's CSS variables cascade into it. The shell
+  re-broadcasts every location change as a `popstate` event while the app is
+  mounted; route by reading `location.pathname` under `/<name>/`.
 - `dist/style.css`, when present, is loaded while the app is mounted.
 - Build the bundle with `react`, `react-dom`, `react-dom/client`, and
   `react/jsx-runtime` externalized (Vite library mode); the shell's import map
