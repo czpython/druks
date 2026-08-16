@@ -1073,9 +1073,12 @@ function ServiceDetail({ service, onBack }: { service: Service; onBack: () => vo
               help={field.help}
               type={field.type}
               multiline={field.multiline}
-              // A connect form is write-only: it takes the credential to store,
-              // never one already stored, so nothing is ever pre-set.
-              secretSet={false}
+              // The box itself is always blank — a connect form is write-only —
+              // but "Replace connection" opens on an already-connected service,
+              // whose fields the server does hold. secretSet drives only the
+              // placeholder, so it must say what the server has, not what this
+              // box holds.
+              secretSet={service.connected}
               value={values[field.name] ?? ''}
               onChange={(next) => setValues({ ...values, [field.name]: next })}
               disabled={busy}

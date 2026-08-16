@@ -64,23 +64,17 @@ function FieldControl({
   }
 
   // The stored secret never reaches the client, so the box shows only whether
-  // one is set. A multiline secret (a pasted PEM) needs its newlines kept.
-  if (type === 'secret') {
-    const placeholder = secretSet ? '•••••••• (set)' : 'not set'
-    if (multiline) {
-      return (
-        <Textarea
-          value={value}
-          placeholder={placeholder}
-          onChange={(e) => onChange(e.target.value)}
-          disabled={disabled}
-          aria-label={label}
-        />
-      )
-    }
+  // one is set — every other kind shows the resolved value itself.
+  const secret = type === 'secret'
+  const placeholder = secret ? (secretSet ? '•••••••• (set)' : 'not set') : undefined
+
+  // multiline is declared independent of type (field_multiline in the backend
+  // reads a separate json_schema_extra key), so it governs textarea-vs-input
+  // for any kind, not only secrets — a pasted PEM and a pasted long
+  // description both need their newlines kept.
+  if (multiline) {
     return (
-      <TextInput
-        type="password"
+      <Textarea
         value={value}
         placeholder={placeholder}
         onChange={(e) => onChange(e.target.value)}
@@ -92,8 +86,9 @@ function FieldControl({
 
   return (
     <TextInput
-      type={type === 'int' ? 'number' : 'text'}
+      type={secret ? 'password' : type === 'int' ? 'number' : 'text'}
       value={value}
+      placeholder={placeholder}
       onChange={(e) => onChange(e.target.value)}
       disabled={disabled}
       aria-label={label}
