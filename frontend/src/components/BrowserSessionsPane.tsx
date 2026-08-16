@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { api } from '../api/client'
+import { TextInput } from './Control'
 import type {
   BrowserSession,
   BrowserSessionPayloadFormat,
@@ -115,9 +116,8 @@ export function BrowserSessionsPane() {
             <label className="mcp-label" htmlFor="browser-session-name">
               Name
             </label>
-            <input
+            <TextInput
               id="browser-session-name"
-              className="skill-add-input"
               placeholder="x-main"
               value={name}
               onChange={(event) => setName(event.target.value)}
@@ -128,9 +128,8 @@ export function BrowserSessionsPane() {
             <label className="mcp-label" htmlFor="browser-session-site">
               Site
             </label>
-            <input
+            <TextInput
               id="browser-session-site"
-              className="skill-add-input"
               placeholder="x.com"
               value={site}
               onChange={(event) => setSite(event.target.value)}
@@ -195,8 +194,7 @@ export function BrowserSessionsPane() {
                 </dl>
                 {renamingId === session.id ? (
                   <div className="browser-session-rename">
-                    <input
-                      className="skill-add-input"
+                    <TextInput
                       aria-label={`New name for ${session.name}`}
                       value={renamedName}
                       onChange={(event) => setRenamedName(event.target.value)}
