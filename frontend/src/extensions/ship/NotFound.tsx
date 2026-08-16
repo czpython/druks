@@ -1,5 +1,4 @@
-import { EmptyState } from '../../components/EmptyState'
-import { Page } from '../../components/Page'
+import { EmptyState, Page } from '@druks/ui'
 
 export function NotFound() {
   return (

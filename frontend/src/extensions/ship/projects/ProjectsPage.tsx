@@ -1,9 +1,7 @@
+import { Button, EmptyState, Field, Page, Select, TextInput } from '@druks/ui'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 
-import { Button, Field, Select, TextInput } from '../../../components/Control'
-import { EmptyState } from '../../../components/EmptyState'
-import { Page } from '../../../components/Page'
 import { useFlashNote } from '../../../lib/useFlashNote'
 import { projectsApi } from './api'
 import { repoProfiling, useRepoRuns, type RepoProfiling } from './profiling'

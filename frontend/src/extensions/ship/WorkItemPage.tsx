@@ -1,3 +1,4 @@
+import { Page } from '@druks/ui'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useCallback, useMemo, useState } from 'react'
 import { Link, useLocation } from 'wouter'
@@ -13,7 +14,6 @@ import type {
   SubjectStatus,
 } from '../../api/types'
 import { DetailLayout } from '../../components/DetailLayout'
-import { Page } from '../../components/Page'
 import { queryGate } from '../../components/QueryGate'
 import { CancelRun, InAppReview, RetryRun } from '../../components/RunControls'
 import { RunTranscript } from '../../components/RunTranscript'

@@ -1,3 +1,4 @@
+import { EmptyState, Page, PageHeader, RelTime, StatusGlyph } from '@druks/ui'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useMemo } from 'react'
 
@@ -5,14 +6,9 @@ import { REVIEW, reviewApi } from './api'
 import type { ReviewRow } from './api'
 import { reviewLine } from './reviewLine'
 import { useSSE } from '../../api/sse'
-import { EmptyState } from '../../components/EmptyState'
-import { Page } from '../../components/Page'
-import { PageHeader } from '../../components/PageHeader'
 import { PRCell } from '../../components/PRCell'
 import { queryGate } from '../../components/QueryGate'
-import { RelTime } from '../../components/RelTime'
 import { RepoCell } from '../../components/RepoCell'
-import { StatusGlyph } from '../../components/StatusGlyph'
 
 // A finished review lives on its pull request; this page covers the window where
 // GitHub shows nothing — a review still working, or one that stopped on a failure.
