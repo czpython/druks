@@ -9,7 +9,6 @@ from druks.browser.exceptions import (
     BrowserClientMissingError,
     BrowserLaunchError,
     BrowserSessionNotReadyError,
-    BrowserSessionUnknownError,
     BrowserSessionWriterLockedError,
 )
 from druks.browser.models import StoredBrowserSession
@@ -178,19 +177,24 @@ async def test_persisting_borrow_refuses_a_second_writer(borrow):
     assert browser.commands == []
 
 
-async def test_borrow_requires_a_ready_session(borrow, druks_db):
-    with pytest.raises(BrowserSessionUnknownError):
-        async with XMe.docs.cdp():
-            pass
+async def test_first_borrow_writes_the_declared_session_and_asks_for_a_login(borrow, druks_db):
+    """Nothing is stored until a run reaches for the login: the first borrow
+    writes the row so the pane can ask the operator to sign in, and says so."""
+    assert not StoredBrowserSession.get_for_name(XMe.docs.name)
 
-    StoredBrowserSession.create(
-        name=XMe.docs.name,
-        payload_format=BrowserSessionPayloadFormat.STORAGE_STATE,
-        site=XMe.docs.site,
-    )
     with pytest.raises(BrowserSessionNotReadyError):
         async with XMe.docs.cdp():
             pass
+
+    row = StoredBrowserSession.get_for_name(XMe.docs.name)
+    assert row.status == BrowserSessionStatus.NEEDS_LOGIN.value
+    assert row.site == XMe.docs.site
+
+    with pytest.raises(BrowserSessionNotReadyError):
+        async with XMe.docs.cdp():
+            pass
+
+    assert StoredBrowserSession.list_all() == [row]
 
 
 async def test_launch_failure_raises_and_releases_the_lock(borrow):
