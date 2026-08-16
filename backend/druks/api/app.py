@@ -18,6 +18,7 @@ from druks.api.artifacts import router as artifacts_router
 from druks.api.exceptions import AgentApiError
 from druks.api.runs import router as runs_router
 from druks.api.subjects import router as subjects_router
+from druks.browser.exceptions import BrowserApiError
 from druks.browser.routes import router as browser_sessions_router
 from druks.database import configure_session, create_engine_from_url, db_session, session_scope
 from druks.durable.engine import init_dbos, launch, shutdown
@@ -186,6 +187,16 @@ async def _service_not_connected_handler(
     request: Request, exc: ServiceNotConnectedError
 ) -> JSONResponse:
     return JSONResponse(status_code=409, content={"error": "HTTP_409", "detail": str(exc)})
+
+
+# Browser routes raise their typed error and let this name the status, so no
+# route hand-maps one.
+@app.exception_handler(BrowserApiError)
+async def _browser_api_error_handler(request: Request, exc: BrowserApiError) -> JSONResponse:
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"error": f"HTTP_{exc.status_code}", "detail": str(exc)},
+    )
 
 
 @app.exception_handler(RequestValidationError)

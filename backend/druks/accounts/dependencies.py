@@ -1,7 +1,8 @@
 from collections.abc import AsyncIterator
 
-from fastapi import Depends, HTTPException, Request
+from fastapi import Depends, HTTPException, Request, WebSocket
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from starlette.requests import HTTPConnection
 
 from druks.accounts.context import current_account_id
 from druks.accounts.exceptions import (
@@ -49,13 +50,14 @@ def resolve_single_operator() -> Account | None:
     return operators[0] if operators else None
 
 
-async def _resolve_operator(request: Request) -> Account | None:
+async def _resolve_operator(connection: HTTPConnection) -> Account | None:
     """None only during none/zero setup. header maps the asserted email; jwt
-    maps its verified identity claim; none ignores the header entirely."""
-    settings = request.app.state.settings
+    maps its verified identity claim; none ignores the header entirely. Takes a
+    connection, not a request, so a WebSocket upgrade resolves the same way."""
+    settings = connection.app.state.settings
     if settings.identity.mode == "none":
         return resolve_single_operator()
-    values = request.headers.getlist(settings.identity.header)
+    values = connection.headers.getlist(settings.identity.header)
     if len(values) == 1 and (asserted := values[0].strip()):
         if settings.identity.mode == "header":
             return Account.get_or_create(asserted)
@@ -70,13 +72,27 @@ async def _resolve_operator(request: Request) -> Account | None:
     )
 
 
-def _require_no_bearer(request: Request) -> None:
-    if "Authorization" in request.headers:
+def _require_no_bearer(connection: HTTPConnection) -> None:
+    if "Authorization" in connection.headers:
         raise HTTPException(
             status_code=401,
             detail="This API accepts your edge or local operator identity only, "
             "never a bearer token.",
         )
+
+
+async def require_operator(websocket: WebSocket) -> Account:
+    """The operator behind a WebSocket upgrade, resolved from the same edge
+    identity HTTP uses — druks re-asserts it here rather than trusting the edge,
+    as every /api route does."""
+    _require_no_bearer(websocket)
+    account = await _resolve_operator(websocket)
+    if not account:
+        raise HTTPException(
+            status_code=409,
+            detail="No operator account exists yet — connect a harness to finish setup.",
+        )
+    return account
 
 
 async def current_account(

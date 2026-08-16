@@ -1,20 +1,26 @@
 import logging
 from typing import Annotated
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Request
+from fastapi import APIRouter, Body, Depends, HTTPException, Request, WebSocket
 from sqlalchemy.exc import IntegrityError
 
-from druks.accounts.dependencies import current_account, current_session_account
+from druks.accounts.dependencies import (
+    current_account,
+    current_session_account,
+    require_operator,
+)
 from druks.accounts.models import Account
+from druks.browser import exceptions
 from druks.browser.constants import (
     BROWSER_SESSION_NAME_MAX_LENGTH,
     BROWSER_SESSION_NAME_PATTERN,
     MAX_PAYLOAD_BYTES,
     PAYLOAD_WARNING_BYTES,
 )
+from druks.browser.login import LoginWindow, is_same_origin
 from druks.browser.models import StoredBrowserSession
 from druks.browser.schemas import BrowserSessionResponse, CreateBrowserSessionRequest
-from druks.database import db_session
+from druks.database import db_session, session_scope
 
 logger = logging.getLogger(__name__)
 
@@ -83,6 +89,53 @@ async def upload_state(
         )
     browser_session.store_payload(bytes(payload))
     return browser_session
+
+
+@router.post("/{session_id}/login-window", status_code=204)
+async def open_login_window(
+    session_id: str,
+    account: Account = Depends(current_session_account),
+) -> None:
+    session = StoredBrowserSession.get_for_id(session_id)
+    if not session:
+        raise exceptions.BrowserSessionUnknownError(session_id)
+    await LoginWindow.open(session)
+
+
+@router.websocket("/{session_id}/login-window/ws")
+async def login_window_socket(websocket: WebSocket, session_id: str) -> None:
+    if not is_same_origin(websocket):
+        await websocket.close(code=1008)
+        return
+    try:
+        with session_scope(websocket.app.state.engine):
+            await require_operator(websocket)
+        window = await LoginWindow.get_for_session(session_id)
+    except (HTTPException, exceptions.BrowserApiError):
+        await websocket.close(code=1008)
+        return
+    try:
+        await window.stream(websocket)
+    except Exception:
+        await websocket.close(code=1011)
+
+
+@router.post("/{session_id}/login-window/save", response_model=BrowserSessionResponse)
+async def save_login_window(
+    session_id: str,
+    account: Account = Depends(current_session_account),
+) -> StoredBrowserSession:
+    window = await LoginWindow.get_for_session(session_id)
+    return await window.save()
+
+
+@router.post("/{session_id}/login-window/cancel", status_code=204)
+async def cancel_login_window(
+    session_id: str,
+    account: Account = Depends(current_session_account),
+) -> None:
+    window = await LoginWindow.get_for_session(session_id)
+    await window.cancel()
 
 
 @router.patch("/{session_id}", response_model=BrowserSessionResponse)

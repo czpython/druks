@@ -21,6 +21,9 @@ EXEMPT_API_PATHS = {
 SESSION_ONLY_API_ROUTES = {
     ("POST", "/api/browser-sessions"),
     ("PUT", "/api/browser-sessions/{session_id}/state"),
+    ("POST", "/api/browser-sessions/{session_id}/login-window"),
+    ("POST", "/api/browser-sessions/{session_id}/login-window/save"),
+    ("POST", "/api/browser-sessions/{session_id}/login-window/cancel"),
     ("PATCH", "/api/browser-sessions/{session_id}"),
     ("DELETE", "/api/browser-sessions/{session_id}"),
     ("GET", "/api/auth/personal-tokens"),

@@ -10,6 +10,7 @@ import { Page } from './components/Page'
 import { SettingsModal } from './components/SettingsModal'
 import { UsagePill } from './components/UsagePill'
 import { EventsPage } from './pages/EventsPage'
+import { LoginWindowPage } from './pages/LoginWindowPage'
 import { SystemStrip } from './components/SystemStrip'
 import { UsagePage } from './pages/UsagePage'
 import { extensionAccent } from './lib/extensionColors'
@@ -215,6 +216,9 @@ function AppShell() {
           </Route>
           <Route path="/events">
             <EventsPage />
+          </Route>
+          <Route path="/browser-sessions/:sessionId/login">
+            {(params) => <LoginWindowPage sessionId={params.sessionId} />}
           </Route>
           <Route>
             <NotFound />

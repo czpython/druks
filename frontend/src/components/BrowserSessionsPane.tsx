@@ -21,6 +21,12 @@ const FORMAT_LABELS: Record<BrowserSessionPayloadFormat, string> = {
   profile_dir: 'Profile directory',
 }
 
+const LOGIN_ACTION_LABELS: Record<BrowserSessionStatus, string> = {
+  needs_login: 'Log in',
+  ready: 'Open window',
+  stale: 'Reconnect',
+}
+
 export function BrowserSessionsPane() {
   const queryClient = useQueryClient()
   const query = useQuery({
@@ -108,8 +114,7 @@ export function BrowserSessionsPane() {
       <section className="mcp-section">
         <h3 className="mcp-h">Create a session</h3>
         <p className="mcp-help">
-          Give the sign-in a stable slug. Import state with the local bootstrap script until the
-          login window is available.
+          Give the sign-in a stable slug, then open its login window to authenticate.
         </p>
         <div className="browser-session-create">
           <div className="mcp-field">
@@ -217,6 +222,13 @@ export function BrowserSessionsPane() {
                   </div>
                 ) : (
                   <div className="browser-session-actions">
+                    {/* A full load dismisses Settings before the login window mounts. */}
+                    <a
+                      className="set-btn primary"
+                      href={`${import.meta.env.BASE_URL}browser-sessions/${encodeURIComponent(session.id)}/login`}
+                    >
+                      {LOGIN_ACTION_LABELS[session.status]}
+                    </a>
                     <button
                       className="set-btn ghost"
                       onClick={() => {

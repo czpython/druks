@@ -1263,6 +1263,20 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
 .browser-session-actions { display: flex; justify-content: flex-end; gap: 8px; }
 .browser-session-rename { grid-column: 1 / -1; display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 8px; }
 
+.page-login-window .page-shell-body { flex: 1; min-height: 0; background: #080a0c; }
+.login-window-head { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 16px 20px; border-bottom: 1px solid var(--border); background: var(--surface); }
+.login-window-head h1 { margin: 3px 0 2px; font-family: var(--font-mono); font-size: 16px; font-weight: 500; }
+.login-window-kicker { color: var(--text-faint); font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; }
+.login-window-connection { margin: 0; color: var(--text-mid); font-size: 12px; }
+.login-window-connection.is-connected { color: var(--outcome-merged); }
+.login-window-connection.is-error { color: var(--bucket-dead); }
+.login-window-actions { display: flex; gap: 8px; }
+.login-window-actions .set-btn { min-width: 86px; }
+.login-window-actions .set-btn:disabled { opacity: 0.45; cursor: default; }
+.login-window-error { padding: 10px 20px; border-bottom: 1px solid color-mix(in oklch, var(--bucket-dead) 45%, transparent); color: var(--bucket-dead); background: color-mix(in oklch, var(--bucket-dead) 8%, #080a0c); font-size: 12px; }
+.login-window-canvas { display: flex; flex: 1; min-height: 0; align-items: center; justify-content: center; overflow: hidden; }
+.login-window-canvas canvas { max-width: 100%; max-height: 100%; object-fit: contain; }
+
 @media (max-width: 720px) {
   .set-extension-toggles { grid-template-columns: 1fr; }
   .svc-grid { grid-template-columns: 1fr; }

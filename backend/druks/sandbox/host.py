@@ -586,6 +586,15 @@ class Sandbox:
         connection = await self._ensure_conn()
         return await connection.forward_local_port("127.0.0.1", 0, "127.0.0.1", remote_port)
 
+    async def open_tcp_connection(
+        self, host: str, port: int
+    ) -> tuple[asyncssh.SSHReader[bytes], asyncssh.SSHWriter[bytes]]:
+        """A raw byte channel to ``host:port`` on the far side — for splicing a
+        loopback service (the browser's VNC) straight onto a WebSocket, where a
+        listener would only add a hop."""
+        connection = await self._ensure_conn()
+        return await connection.open_connection(host, port, encoding=None)
+
     async def aclose(self) -> None:
         if self._conn:
             self._conn.close()
