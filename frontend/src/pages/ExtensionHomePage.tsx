@@ -66,7 +66,7 @@ function SubjectBoard({ extension, subjectType }: { extension: string; subjectTy
           onClick={() => navigate(`/${extension}/${subjectType}/${row.summary.id}`)}
         >
           <StatusGlyph state={row.status.state} />
-          <span className="row-title">{row.summary.id}</span>
+          <span className="row-title">{row.summary.label}</span>
           <span className="subject-row-meta mono dim">
             {summaryEntries(row.summary)
               .map(([key, value]) => `${key} ${value}`)

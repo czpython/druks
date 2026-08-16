@@ -132,6 +132,11 @@ class SubjectSummary(BaseResponse):
     model_config = ConfigDict(from_attributes=True)
 
     id: SubjectId
+    # The one line the board row and the detail page show this subject as. Free
+    # from the subject's own ``label`` when the summary is built with
+    # ``model_validate(self)``; required, so a hand-built summary that forgets it
+    # fails on its board route rather than titling every row with a primary key.
+    label: str
 
 
 class SubjectStatus(BaseResponse):
