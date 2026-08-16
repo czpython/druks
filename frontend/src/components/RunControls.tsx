@@ -1,8 +1,7 @@
-import { useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useEffect, useState } from 'react'
 
 import { api } from '../api/client'
-import type { InputRequest } from '../api/types'
+import type { ArtifactContent, InputRequest } from '../api/types'
 import { Markdown } from './Markdown'
 
 // Cancel is a run-level action: end any active run, parked or running. A destructive
@@ -102,11 +101,27 @@ export function InAppReview({ runId, ask }: { runId: string; ask: InputRequest }
   const [error, setError] = useState<string | null>(null)
   const critique = ask.context?.trim() ?? ''
 
-  const artifact = useQuery({
-    queryKey: ['artifact', ask.artifact_id],
-    queryFn: () => api.artifact(ask.artifact_id as string),
-    enabled: Boolean(ask.artifact_id),
-  })
+  // Fetched here rather than through react-query: an installed app borrows this
+  // component through the import map and mounts it outside the shell's tree,
+  // where there is no QueryClientProvider. One artifact, read once per ask.
+  // Held with the id it belongs to, so a new ask stops showing the old plan on
+  // the render that changes it rather than after its fetch lands.
+  const [fetched, setFetched] = useState<{ id: string; content: ArtifactContent } | null>(null)
+  const artifact = fetched && fetched.id === ask.artifact_id ? fetched.content : null
+  useEffect(() => {
+    const artifactId = ask.artifact_id
+    if (!artifactId) return
+    let live = true
+    // A missing artifact leaves the panel without it: the ask's own questions
+    // and controls are what the operator answers.
+    api
+      .artifact(artifactId)
+      .then((content) => live && setFetched({ id: artifactId, content }))
+      .catch(() => {})
+    return () => {
+      live = false
+    }
+  }, [ask.artifact_id])
 
   async function choose(control: string) {
     setPending(control)
@@ -129,10 +144,10 @@ export function InAppReview({ runId, ask }: { runId: string; ask: InputRequest }
           <Markdown source={critique} />
         </div>
       )}
-      {artifact.data && (
+      {artifact && (
         <div className="review-artifact">
-          <div className="review-artifact-title">{artifact.data.title}</div>
-          <Markdown source={artifact.data.content} />
+          <div className="review-artifact-title">{artifact.title}</div>
+          <Markdown source={artifact.content} />
         </div>
       )}
       {ask.questions?.map((question) => {
