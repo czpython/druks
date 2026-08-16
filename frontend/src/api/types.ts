@@ -34,6 +34,7 @@ export type RunState =
 // timeline, and detail URL.
 export interface SubjectSummary {
   id: string
+  label: string
 }
 
 export interface SubjectStatus {

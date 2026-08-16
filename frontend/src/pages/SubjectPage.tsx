@@ -74,7 +74,7 @@ export function SubjectPage({ extension, subjectType, subjectId }: Props) {
   return (
     <Page scroll="internal" className="ins page-subject" header={crumb}>
       <Facts className="subject-facts">
-        <Fact k="id">{data.summary.id}</Fact>
+        <Fact k={label}>{data.summary.label}</Fact>
         {summaryEntries(data.summary).map(([key, value]) => (
           <Fact key={key} k={key}>
             {value}
