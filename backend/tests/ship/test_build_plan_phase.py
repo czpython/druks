@@ -603,3 +603,24 @@ async def test_needs_clarification_delivery_stops_the_run(monkeypatch):
     monkeypatch.setattr(Ship, "implement", bailed)
     with pytest.raises(FatalError, match="pure function"):
         await flow.implement()
+
+
+async def test_a_rejected_merge_intent_reparks_the_work_gate(monkeypatch):
+    """GitHub declining the merge sends the operator back to the work gate,
+    rather than finishing a run whose PR never merged."""
+    flow = Build()
+    flow._policy = RepoPolicy()
+    reparked = []
+
+    async def declined():
+        return False
+
+    async def fake_work_gate():
+        reparked.append(True)
+        return True
+
+    monkeypatch.setattr(flow, "declare_merge_intent", declined)
+    monkeypatch.setattr(flow, "_work_gate", fake_work_gate)
+
+    assert await flow._approved_work() is True
+    assert reparked == [True]
