@@ -74,7 +74,7 @@ function ReviewRowView({ row }: { row: ReviewRow }) {
   const live = status.state === 'running' || status.state === 'scheduled'
   return (
     <div className={`row row-review${failed ? ' row-failed' : ''}`}>
-      <StatusGlyph state={status.state} pulse={live} />
+      <StatusGlyph state={status.state} />
       <RepoCell repo={summary.repo} />
       <PRCell prNumber={summary.prNumber} prUrl={summary.pullRequestUrl} />
       <span className="review-line mono dim">

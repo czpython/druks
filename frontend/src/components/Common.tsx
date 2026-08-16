@@ -1,8 +1,7 @@
 import type { ReactNode } from 'react'
 
 import type { TokenUsage } from '../api/types'
-import { money, relTime, secondsSince, formatTokenCount } from '../lib/format'
-import { useFormatters } from '../lib/preferences'
+import { money, formatTokenCount } from '../lib/format'
 
 interface SectionHeadProps {
   children: ReactNode
@@ -20,21 +19,6 @@ export function SectionHead({ children, right, count }: SectionHeadProps) {
       </div>
       {right && <div className="section-head-right">{right}</div>}
     </div>
-  )
-}
-
-interface RelTimeProps {
-  iso: string | null | undefined
-}
-
-export function RelTime({ iso }: RelTimeProps) {
-  const { absTime } = useFormatters()
-  if (!iso) return <span className="mono dim">—</span>
-  const seconds = secondsSince(iso)
-  return (
-    <span className="mono dim" title={absTime(iso)}>
-      {relTime(seconds)}
-    </span>
   )
 }
 

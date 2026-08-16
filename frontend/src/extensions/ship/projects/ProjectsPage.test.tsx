@@ -13,12 +13,14 @@ vi.mock('./api', () => ({
     list: vi.fn(),
     repoBoard: vi.fn(),
     delete: vi.fn(),
+    create: vi.fn(),
   },
 }))
 
 const listMock = vi.mocked(projectsApi.list)
 const repoBoardMock = vi.mocked(projectsApi.repoBoard)
 const deleteMock = vi.mocked(projectsApi.delete)
+const createMock = vi.mocked(projectsApi.create)
 
 function project(overrides: Partial<Project> = {}): Project {
   return {
@@ -48,6 +50,41 @@ afterEach(() => {
   cleanup()
   vi.clearAllMocks()
   vi.restoreAllMocks()
+})
+
+describe('ProjectsPage create row', () => {
+  // The shared Button gates on ``disabled`` alone — the old markup also wrapped
+  // the handler in an ``enabled &&`` guard. Pin that the gate still holds.
+  it('does not create until the name is non-blank', async () => {
+    renderPage([project()])
+    const create = await screen.findByText('+ create')
+
+    fireEvent.click(create)
+    expect(createMock).not.toHaveBeenCalled()
+
+    fireEvent.change(screen.getByPlaceholderText(/new project name/), {
+      target: { value: '   ' },
+    })
+    fireEvent.click(create)
+    expect(createMock).not.toHaveBeenCalled()
+  })
+
+  it('creates once the name is typed', async () => {
+    createMock.mockResolvedValue(project({ name: 'Acme' }))
+    renderPage([project()])
+
+    fireEvent.change(await screen.findByPlaceholderText(/new project name/), {
+      target: { value: 'Acme' },
+    })
+    const create = screen.getByText('+ create').closest('button')!
+    await waitFor(() => expect(create.disabled).toBe(false))
+    fireEvent.click(create)
+
+    // react-query hands the mutationFn a context argument too; the payload is
+    // the first one.
+    await waitFor(() => expect(createMock).toHaveBeenCalled())
+    expect(createMock.mock.calls[0]![0]).toEqual({ name: 'Acme' })
+  })
 })
 
 describe('ProjectsPage delete', () => {
