@@ -6,9 +6,7 @@ interface Props {
   size?: number
 }
 
-// A run that is still going anywhere pulses: it is moving, or it is waiting on
-// you. The rule lives here rather than on a ``pulse`` prop, so every board
-// reads the same state the same way.
+// Here rather than on a prop, so every board reads the same state the same way.
 const PULSING: RunState[] = ['scheduled', 'running', 'parked']
 
 export function StatusGlyph({ state, size = 10 }: Props) {

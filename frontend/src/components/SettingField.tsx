@@ -1,20 +1,17 @@
 import { CronField } from './CronField'
 import { Field, Select, Textarea, TextInput } from './Control'
 
-// One declared field, rendered from its kind. Both places that draw a declared
-// field go through here: the settings panes and a service's connect form, which
-// speak the same field vocabulary on the wire.
+// One declared field, rendered from its kind — the settings panes and a
+// service's connect form both draw through here.
 interface SettingFieldProps {
   label: string
   help?: string
-  // The wire's field kind: str | int | bool | enum | secret | cron. ``bool`` is
-  // not drawn here — a toggle is a row, not a labelled control, so the panes
-  // pull those out and render them as switches.
+  // str | int | bool | enum | secret | cron. ``bool`` is not drawn here: a
+  // toggle is a row, not a labelled control, so the panes pull those out.
   type: string
   choices?: string[] | null
   multiline?: boolean
-  // For a secret: whether one is already stored. The value itself never leaves
-  // the backend, so the box shows set-ness and takes a replacement.
+  // Whether a secret is already stored; the value itself never leaves the server.
   secretSet?: boolean | null
   value: string
   onChange: (next: string) => void
@@ -43,8 +40,7 @@ function FieldControl({
   disabled,
 }: ControlProps) {
   if (type === 'enum') {
-    // An enum without its choice set is a broken declaration, not a text field —
-    // say so rather than drawing a box that silently accepts anything.
+    // A broken declaration, not a text field: say so rather than accept anything.
     if (!choices?.length) {
       return <span className="set-field-error">{label} declares no choices</span>
     }

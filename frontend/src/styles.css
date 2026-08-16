@@ -108,9 +108,8 @@ body[data-palette="mono"] {
   --accent-violet: var(--text);
 }
 
-/* The interactive accent every control reads. Declared on ``body``, not
-   ``:root``: the palettes retint --bucket-run on body[data-palette], and a
-   :root declaration would resolve against the base hue and skip them. */
+/* On ``body``, not ``:root``: the palettes retint --bucket-run on
+   body[data-palette], which a :root declaration would resolve past. */
 body { --accent: var(--bucket-run); }
 
 * { box-sizing: border-box; }
