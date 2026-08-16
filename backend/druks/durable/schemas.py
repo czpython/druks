@@ -132,9 +132,8 @@ class RunResponse(BaseResponse):
 # takes either and is always a string.
 SubjectId = Annotated[str, BeforeValidator(str)]
 
-# The one line a board row and a detail page show a subject as. Blank is rejected
-# rather than rendered: a title nobody can read is the thing this field exists to
-# prevent.
+# The one line a board row and a detail page show a subject as; blank is
+# rejected rather than rendered.
 SubjectLabel = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 
 

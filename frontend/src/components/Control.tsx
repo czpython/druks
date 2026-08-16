@@ -6,10 +6,8 @@ import type {
   TextareaHTMLAttributes,
 } from 'react'
 
-// The control frames the shell draws, as components. Omitting ``className`` is
-// the point: the class name stops being a contract typed by hand, so it can be
-// renamed without breaking a caller. Layout stays the page's — position a
-// control from the parent's own rules, not by passing it a class.
+// Dropping ``className`` is the point: the class name stops being a contract
+// callers type by hand. Position a control from the parent's own rules.
 type Bare<P> = Omit<P, 'className'>
 
 export function TextInput(props: Bare<InputHTMLAttributes<HTMLInputElement>>) {
@@ -29,7 +27,6 @@ interface ButtonProps extends Bare<ButtonHTMLAttributes<HTMLButtonElement>> {
 }
 
 export function Button({ variant = 'ghost', ...props }: ButtonProps) {
-  // ``type`` ahead of the spread so a form's submit button can override it.
   return <button type="button" {...props} className={`set-btn ${variant}`} />
 }
 
@@ -40,8 +37,7 @@ interface FieldProps {
   children?: ReactNode
 }
 
-// A labelled control with its help and error lines. Every slot is optional, so
-// a bare <Field error={…} /> is the error line on its own.
+// Every slot is optional: a bare <Field error={…} /> is the error line alone.
 export function Field({ label, help, error, children }: FieldProps) {
   return (
     <div className="set-field">

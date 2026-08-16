@@ -14,10 +14,8 @@ const repoDist = fileURLToPath(
 // document. In a build the shims are extra entries — hashed like any asset,
 // with their shared code in the common chunks — and the import map (regenerated
 // into index.html per build) carries the hashed names. In dev the Vite server
-// serves the shim sources directly.
-//
-// Values carry their extension: the React shims are hand-written .js, while
-// @druks/ui is .ts because it re-exports the shell's .tsx components.
+// serves the shim sources directly. Values carry their extension: the React
+// shims are .js, @druks/ui is .ts because it re-exports .tsx.
 const SHARED_MODULES: Record<string, string> = {
   react: 'react.js',
   'react-dom': 'react-dom.js',
@@ -30,10 +28,8 @@ const shimUrl = (file: string) => new URL(`./src/runtime/${file}`, import.meta.u
 // The rollup entry name for a shim, and what transformIndexHtml matches on.
 const shimEntry = (file: string) => `runtime-${file.replace(/\.[jt]s$/, '')}`
 
-// Bundled extensions import '@druks/ui' exactly as an installed app does, so a
-// breaking change to the lent surface reddens the shell's own build, typecheck
-// and tests before it can reach an app. Exported because vitest.config.ts needs
-// the same alias and this is where it is decided.
+// Bundled extensions import '@druks/ui' as an installed app does, so breaking
+// the lent surface reddens the shell's own build first. Exported for vitest.
 export const shellAlias = {
   '@druks/ui': fileURLToPath(shimUrl(SHARED_MODULES['@druks/ui']!)),
 }
