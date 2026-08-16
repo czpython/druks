@@ -3,6 +3,8 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { ApiError, api } from '../api/client'
 import { BrowserSessionsPane } from './BrowserSessionsPane'
+import { TextInput } from './Control'
+import { SettingField } from './SettingField'
 import { ExtensionGlyph } from './ExtensionGlyph'
 import { ConnectSteps, useHarnessConnect } from './HarnessConnectFlow'
 import {
@@ -1065,27 +1067,22 @@ function ServiceDetail({ service, onBack }: { service: Service; onBack: () => vo
             </>
           )}
           {service.fields.map((field) => (
-            <div className="mcp-field" key={field.name}>
-              <span className="mcp-label">{field.label}</span>
-              {field.multiline ? (
-                <textarea
-                  className="skill-add-input svc-textarea"
-                  aria-label={field.label}
-                  value={values[field.name] ?? ''}
-                  onChange={(e) => setValues({ ...values, [field.name]: e.target.value })}
-                  disabled={busy}
-                />
-              ) : (
-                <input
-                  className="skill-add-input"
-                  type={field.type === 'secret' ? 'password' : 'text'}
-                  aria-label={field.label}
-                  value={values[field.name] ?? ''}
-                  onChange={(e) => setValues({ ...values, [field.name]: e.target.value })}
-                  disabled={busy}
-                />
-              )}
-            </div>
+            <SettingField
+              key={field.name}
+              label={field.label}
+              help={field.help}
+              type={field.type}
+              multiline={field.multiline}
+              // The box itself is always blank — a connect form is write-only —
+              // but "Replace connection" opens on an already-connected service,
+              // whose fields the server does hold. secretSet drives only the
+              // placeholder, so it must say what the server has, not what this
+              // box holds.
+              secretSet={service.connected}
+              value={values[field.name] ?? ''}
+              onChange={(next) => setValues({ ...values, [field.name]: next })}
+              disabled={busy}
+            />
           ))}
           <div className="svc-actions">
             <button className="set-btn ghost" onClick={closeForm} disabled={busy}>
@@ -1260,9 +1257,8 @@ export function SkillsPane() {
             Repository URL
           </label>
           <div className="skill-add">
-            <input
+            <TextInput
               id={`${fieldId}-repo`}
-              className="skill-add-input"
               type="url"
               placeholder="github.com/org/repo"
               value={repo}
@@ -1585,9 +1581,8 @@ function McpServersPane() {
           <label className="mcp-sr-only" htmlFor={`${fieldId}-search`}>
             Search the MCP registry
           </label>
-          <input
+          <TextInput
             id={`${fieldId}-search`}
-            className="skill-add-input"
             placeholder="grafana, sentry, …"
             value={registryQuery}
             onChange={(e) => setRegistryQuery(e.target.value)}
@@ -1645,9 +1640,8 @@ function McpServersPane() {
                           {header.name}
                           {header.isRequired && <span className="mcp-req"> (required)</span>}
                         </label>
-                        <input
+                        <TextInput
                           id={`${fieldId}-${header.name}`}
-                          className="skill-add-input"
                           type={header.isSecret ? 'password' : 'text'}
                           placeholder={header.placeholder}
                           required={header.isRequired}
@@ -1700,9 +1694,8 @@ function McpServersPane() {
               <label className="mcp-label" htmlFor={`${fieldId}-name`}>
                 Name <span className="mcp-req">(required)</span>
               </label>
-              <input
+              <TextInput
                 id={`${fieldId}-name`}
-                className="skill-add-input"
                 placeholder="linear"
                 required
                 value={name}
@@ -1717,9 +1710,8 @@ function McpServersPane() {
               <label className="mcp-label" htmlFor={`${fieldId}-url`}>
                 URL <span className="mcp-req">(required)</span>
               </label>
-              <input
+              <TextInput
                 id={`${fieldId}-url`}
-                className="skill-add-input"
                 placeholder="https://mcp.linear.app/mcp"
                 required
                 value={url}
@@ -1734,9 +1726,8 @@ function McpServersPane() {
               <label className="mcp-label" htmlFor={`${fieldId}-token`}>
                 Bearer token <span className="mcp-req">(required)</span>
               </label>
-              <input
+              <TextInput
                 id={`${fieldId}-token`}
-                className="skill-add-input"
                 type="password"
                 required
                 value={token}
@@ -1982,8 +1973,7 @@ export function AgentAccessPane() {
       <div className="set-group">
         <div className="set-group-label">mint token</div>
         <div className="skill-add">
-          <input
-            className="skill-add-input"
+          <TextInput
             placeholder="What will hold it?  e.g. claude on my laptop"
             value={name}
             onChange={(e) => setName(e.target.value)}
@@ -2009,8 +1999,7 @@ export function AgentAccessPane() {
         <div className="set-group">
           <div className="set-group-label">{minted.name} — copy it now</div>
           <div className="skill-add">
-            <input
-              className="skill-add-input"
+            <TextInput
               readOnly
               value={minted.token}
               onFocus={(e) => e.currentTarget.select()}
@@ -2087,65 +2076,6 @@ function PatRow({
 // Extension pane — blurb, workflow toggles, agent table
 // ---------------------------------------------------------------------------
 
-// The cadences an operator actually picks from; anything else is "custom".
-const CRON_PRESETS: [cron: string, label: string][] = [
-  ['*/5 * * * *', 'Every 5 minutes'],
-  ['*/15 * * * *', 'Every 15 minutes'],
-  ['*/30 * * * *', 'Every 30 minutes'],
-  ['0 * * * *', 'Every hour'],
-  ['0 */6 * * *', 'Every 6 hours'],
-  ['0 0 * * *', 'Daily at midnight'],
-]
-
-export function CronField({
-  value,
-  onChange,
-  disabled,
-}: {
-  value: string
-  onChange: (v: string) => void
-  disabled: boolean
-}) {
-  // A value outside the presets opens in the raw-cron input, so nothing an
-  // operator (or the API) stored is ever hidden or clobbered. The select
-  // stays visible as the mode switcher, so custom is never a one-way door.
-  const [custom, setCustom] = useState(() => !CRON_PRESETS.some(([cron]) => cron === value))
-  return (
-    <>
-      <select
-        className="set-select"
-        value={custom ? 'custom' : value}
-        onChange={(e) => {
-          if (e.target.value === 'custom') {
-            setCustom(true)
-          } else {
-            setCustom(false)
-            onChange(e.target.value)
-          }
-        }}
-        disabled={disabled}
-      >
-        {CRON_PRESETS.map(([cron, label]) => (
-          <option key={cron} value={cron}>
-            {label}
-          </option>
-        ))}
-        <option value="custom">Custom cron…</option>
-      </select>
-      {custom && (
-        <input
-          className="set-select"
-          type="text"
-          value={value}
-          placeholder="cron, e.g. */15 * * * *"
-          onChange={(e) => onChange(e.target.value)}
-          disabled={disabled}
-        />
-      )}
-    </>
-  )
-}
-
 function ExtensionPane({
   extension,
   edits,
@@ -2212,6 +2142,16 @@ function ExtensionPane({
   )
   const setOption = (o: (typeof optionFields)[number], value: unknown) =>
     o.scope === 'workflow' ? onWorkflowField(o.kind, o.f.name, value) : onExtensionSetting(o.kind, o.f.name, value)
+  // The control speaks strings; the override store keeps the declared type.
+  // Clearing a secret's box records no edit, so the stored secret stays. An int
+  // mid-edit that does not parse records nothing, so the box can be emptied and
+  // retyped without writing a bad value.
+  const setTypedOption = (o: (typeof optionFields)[number], next: string) => {
+    if (o.f.type === 'secret') return setOption(o, next || undefined)
+    if (o.f.type !== 'int') return setOption(o, next)
+    const parsed = Number.parseInt(next, 10)
+    if (Number.isFinite(parsed)) setOption(o, parsed)
+  }
   return (
     <div className="set-pane">
       <div className="set-pane-head">
@@ -2266,70 +2206,24 @@ function ExtensionPane({
                         const cur = optionValue(o)
                         const fieldError =
                           o.scope === 'extension' ? fieldErrors[o.f.name] : undefined
+                        const secret = o.f.type === 'secret'
                         return (
-                          <div key={o.scope + '.' + o.kind + '.' + o.f.name} className="set-field">
-                            <span className="set-field-label">{o.f.label}</span>
-                            {o.f.help && <span className="set-field-help">{o.f.help}</span>}
-                            {o.f.type === 'enum' ? (
-                              <select
-                                className="set-select"
-                                value={String(cur ?? '')}
-                                onChange={(e) => setOption(o, e.target.value)}
-                                disabled={busy}
-                              >
-                                {(o.f.choices ?? []).map((choice) => (
-                                  <option key={choice} value={choice}>
-                                    {choice}
-                                  </option>
-                                ))}
-                              </select>
-                            ) : o.f.type === 'cron' ? (
-                              <CronField
-                                value={String(cur ?? '')}
-                                onChange={(v) => setOption(o, v)}
-                                disabled={busy}
-                              />
-                            ) : o.f.type === 'secret' && o.f.multiline ? (
-                              // A pasted multiline secret (a PEM): same write-only
-                              // semantics as the secret input, but a textarea so the
-                              // paste keeps its newlines.
-                              <textarea
-                                className="set-select set-textarea"
-                                value={override !== undefined ? String(override ?? '') : ''}
-                                placeholder={o.f.secretSet ? '•••••••• (set)' : 'not set'}
-                                onChange={(e) => setOption(o, e.target.value || undefined)}
-                                disabled={busy}
-                              />
-                            ) : o.f.type === 'secret' ? (
-                              // The stored secret never reaches the client — the field shows
-                              // only whether one is set. Clearing the box records no edit (the
-                              // previous secret stays); typing a non-empty value replaces it.
-                              <input
-                                className="set-select"
-                                type="password"
-                                value={override !== undefined ? String(override ?? '') : ''}
-                                placeholder={o.f.secretSet ? '•••••••• (set)' : 'not set'}
-                                onChange={(e) => setOption(o, e.target.value || undefined)}
-                                disabled={busy}
-                              />
-                            ) : (
-                              <input
-                                className="set-select"
-                                type={o.f.type === 'int' ? 'number' : 'text'}
-                                value={String(cur ?? '')}
-                                onChange={(e) => {
-                                  if (o.f.type === 'int') {
-                                    const parsed = Number.parseInt(e.target.value, 10)
-                                    if (Number.isFinite(parsed)) setOption(o, parsed)
-                                  } else {
-                                    setOption(o, e.target.value)
-                                  }
-                                }}
-                                disabled={busy}
-                              />
-                            )}
-                            {fieldError && <span className="set-field-error">{fieldError}</span>}
-                          </div>
+                          <SettingField
+                            key={o.scope + '.' + o.kind + '.' + o.f.name}
+                            label={o.f.label}
+                            help={o.f.help}
+                            type={o.f.type}
+                            choices={o.f.choices}
+                            multiline={o.f.multiline}
+                            secretSet={o.f.secretSet}
+                            // A secret's stored value never reaches the client, so its
+                            // box shows the pending edit only; every other kind shows
+                            // the resolved value.
+                            value={secret ? String(override ?? '') : String(cur ?? '')}
+                            onChange={(next) => setTypedOption(o, next)}
+                            error={fieldError}
+                            disabled={busy}
+                          />
                         )
                       })}
                     </div>

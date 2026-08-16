@@ -1112,10 +1112,7 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
 .set-btn.danger.quiet:hover { color: var(--bucket-dead); }
 
 .skill-add { display: flex; align-items: center; gap: 10px; }
-.skill-add-input { flex: 1; height: 36px; border: 1px solid var(--border); border-radius: 5px; background: var(--bg); outline: none; color: var(--text); font-family: var(--font-mono); font-size: 13px; padding: 0 12px; }
-.skill-add-input:focus { border-color: var(--accent); }
-.skill-add-input::placeholder { color: var(--text-faint); }
-.skill-add .set-btn { height: 36px; flex-shrink: 0; }
+.skill-add input { flex: 1; min-width: 0; }
 .skill-cols { display: flex; flex-direction: column; gap: 8px; }
 .skill-col { overflow: hidden; }
 .skill-col-head { display: flex; align-items: center; gap: 10px; padding-right: 14px; border-bottom: 1px solid var(--border-soft); }
@@ -1129,7 +1126,6 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
 .sc-repo { font-family: var(--font-mono); font-size: 13px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sc-meta { font-family: var(--font-mono); font-size: 10.5px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sc-actions { display: flex; gap: 8px; flex-shrink: 0; }
-.skills-pane .sc-actions .set-btn { height: 30px; padding: 0 11px; font-size: 12px; }
 .sc-skills { display: flex; flex-direction: column; }
 .sc-empty { padding: 10px 14px 12px 33px; }
 .skill-row { display: grid; grid-template-columns: minmax(130px, 0.8fr) minmax(0, 1.5fr) auto; gap: 14px; align-items: center; padding: 10px 14px 10px 33px; border-bottom: 1px solid var(--border-soft); }
@@ -1173,17 +1169,12 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
 .mcp-label.tech { font-family: var(--font-mono); font-size: 11.5px; }
 .mcp-req { font-weight: 400; color: var(--text-faint); }
 .mcp-sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-/* skill-add-input's flex: 1 means "grow wide" in the skills row; inside a
-   column-flex field the axis flips and its basis: 0 collapses the fixed
-   height. Neutralize it so height: 36px holds. */
-.mcp-pane .skill-add-input { flex: none; width: 100%; }
-.mcp-pane .set-btn { display: inline-flex; align-items: center; height: 36px; padding: 0 14px; font-family: var(--font-sans); font-size: 12.5px; letter-spacing: 0; }
 .mcp-pane :is(button, input, summary):focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .mcp-pane button:disabled { opacity: 0.45; cursor: default; }
 .mcp-pane input:disabled { opacity: 0.6; cursor: default; }
 
 .mcp-reg-search { display: flex; gap: 10px; }
-.mcp-pane :is(.mcp-reg-search, .skill-add) .skill-add-input { flex: 1; min-width: 0; }
+.mcp-reg-search input { flex: 1; min-width: 0; }
 .mcp-reg-results { display: flex; flex-direction: column; gap: 8px; }
 .mcp-reg-row { display: flex; flex-direction: column; gap: 3px; width: 100%; padding: 10px 13px; cursor: pointer; text-align: left; font: inherit; }
 .mcp-reg-row:hover { border-color: var(--border-loud); background: var(--surface-3); }
@@ -1250,7 +1241,6 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
 .svc-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .svc-alt { align-self: flex-start; padding: 0; border: none; background: none; font: inherit; font-size: 12.5px; color: var(--text-mid); cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
 .svc-alt:hover { color: var(--text); }
-.svc-textarea { height: auto; min-height: 96px; padding: 8px 12px; line-height: 1.45; resize: vertical; white-space: pre; font-size: 12px; }
 .svc-pane a.set-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 .browser-session-create { display: grid; grid-template-columns: minmax(150px, 0.8fr) minmax(180px, 1fr) minmax(150px, 0.8fr) auto; gap: 12px; align-items: end; }
@@ -1272,7 +1262,6 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
 .browser-session-times dd { margin: 0; font-family: var(--font-mono); font-size: 11.5px; color: var(--text-mid); }
 .browser-session-actions { display: flex; justify-content: flex-end; gap: 8px; }
 .browser-session-rename { grid-column: 1 / -1; display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 8px; }
-.browser-session-rename .skill-add-input { width: 100%; }
 
 @media (max-width: 720px) {
   .set-extension-toggles { grid-template-columns: 1fr; }

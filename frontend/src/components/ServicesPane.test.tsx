@@ -134,6 +134,9 @@ describe('ServicesPane', () => {
     expect(screen.getByLabelText('App ID')).toBeTruthy()
     expect(screen.getByLabelText('Private key (PEM)')).toBeTruthy()
     expect(screen.getByLabelText('Webhook secret')).toBeTruthy()
+    // Nothing is connected yet, so the server genuinely holds no secret —
+    // unlike the Replace-connection case, "not set" is the true placeholder.
+    expect(screen.getAllByPlaceholderText('not set')).toHaveLength(2)
   })
 
   it('submits the spec-named values, keeps PEM newlines, and refreshes to the connected facts', async () => {
@@ -202,7 +205,14 @@ describe('ServicesPane', () => {
     expect(screen.queryByLabelText('Private key (PEM)')).toBeNull()
 
     fireEvent.click(screen.getByText('Replace connection'))
+    // The box is blank — the paste form is write-only — but its placeholder
+    // must say what the server already has, since this is a connected
+    // service the operator is replacing, not connecting fresh.
     expect(screen.getByLabelText('Private key (PEM)')).toBeTruthy()
+    // Both private_key and webhook_secret are secret fields; a connected
+    // service has both stored, so both show the set-ness placeholder.
+    expect(screen.getAllByPlaceholderText('•••••••• (set)')).toHaveLength(2)
+    expect(screen.queryByPlaceholderText('not set')).toBeNull()
   })
 
   it('opens the manifest page and refreshes on the callback broadcast', async () => {
