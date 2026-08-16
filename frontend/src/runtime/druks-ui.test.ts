@@ -10,11 +10,14 @@ import * as ui from './druks-ui'
 // Red means stop and ask. Never edit the list to match the code.
 const LENT = [
   'Button',
+  'CancelRun',
   'EmptyState',
   'Field',
+  'InAppReview',
   'Page',
   'PageHeader',
   'RelTime',
+  'RetryRun',
   'SectionHead',
   'Select',
   'StatusGlyph',

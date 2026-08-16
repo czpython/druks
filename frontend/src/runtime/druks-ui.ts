@@ -14,5 +14,9 @@ export { EmptyState } from '../components/EmptyState'
 export { StatusGlyph } from '../components/StatusGlyph'
 export { RelTime } from '../components/RelTime'
 export { Button, Field, Select, TextInput } from '../components/Control'
+// A run's operator actions. Gates are a platform pillar, so an app that ships a
+// frontend has to be able to draw one — it loses the generic subject page that
+// would otherwise carry it.
+export { CancelRun, InAppReview, RetryRun } from '../components/RunControls'
 
-export type { RunState } from '../api/types'
+export type { InputRequest, RunState } from '../api/types'
