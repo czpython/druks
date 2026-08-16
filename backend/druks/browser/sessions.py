@@ -14,7 +14,6 @@ from druks.browser.exceptions import (
     BrowserExportError,
     BrowserLaunchError,
     BrowserSessionNotReadyError,
-    BrowserSessionUnknownError,
 )
 from druks.browser.locks import acquire_writer_lock, release_writer_lock
 from druks.browser.models import StoredBrowserSession
@@ -100,15 +99,24 @@ class BrowserSession:
     def mark_stale(self) -> None:
         """Report the login bounced — the site wants the operator back. The
         pane shows the session as stale; the workflow decides whether to park."""
+        self._get_or_create_row().mark_stale()
+
+    def _get_or_create_row(self) -> StoredBrowserSession:
+        """The declaration's stored half, written the first time a run reaches
+        for the login. Until then the declaration is the only thing that exists —
+        the row appears in the sessions pane wanting a login, which is how the
+        operator learns the extension needs one."""
         row = StoredBrowserSession.get_for_name(self.name)
-        if not row:
-            raise BrowserSessionUnknownError(self.name)
-        row.mark_stale()
+        if row:
+            return row
+        return StoredBrowserSession.create(
+            name=self.name,
+            payload_format=BrowserSessionPayloadFormat.PROFILE_DIR,
+            site=self.site,
+        )
 
     def _ready_row(self) -> StoredBrowserSession:
-        row = StoredBrowserSession.get_for_name(self.name)
-        if not row:
-            raise BrowserSessionUnknownError(self.name)
+        row = self._get_or_create_row()
         if row.status != BrowserSessionStatus.READY.value:
             raise BrowserSessionNotReadyError(self.name, row.status)
         return row
