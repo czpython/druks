@@ -1,7 +1,15 @@
 from datetime import datetime
 from typing import TYPE_CHECKING, Annotated, Any, Literal
 
-from pydantic import AliasPath, BeforeValidator, ConfigDict, Field, SerializeAsAny, computed_field
+from pydantic import (
+    AliasPath,
+    BeforeValidator,
+    ConfigDict,
+    Field,
+    SerializeAsAny,
+    StringConstraints,
+    computed_field,
+)
 
 from druks.schemas import BaseResponse
 
@@ -124,6 +132,11 @@ class RunResponse(BaseResponse):
 # takes either and is always a string.
 SubjectId = Annotated[str, BeforeValidator(str)]
 
+# The one line a board row and a detail page show a subject as. Blank is rejected
+# rather than rendered: a title nobody can read is the thing this field exists to
+# prevent.
+SubjectLabel = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
+
 
 class SubjectSummary(BaseResponse):
     # The base an extension's subject header subclasses; ``id`` keys the subject's
@@ -132,11 +145,7 @@ class SubjectSummary(BaseResponse):
     model_config = ConfigDict(from_attributes=True)
 
     id: SubjectId
-    # The one line the board row and the detail page show this subject as. Free
-    # from the subject's own ``label`` when the summary is built with
-    # ``model_validate(self)``; required, so a hand-built summary that forgets it
-    # fails on its board route rather than titling every row with a primary key.
-    label: str
+    label: SubjectLabel
 
 
 class SubjectStatus(BaseResponse):

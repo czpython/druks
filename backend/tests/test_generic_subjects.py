@@ -132,15 +132,15 @@ def test_a_subject_id_is_a_string_whatever_the_row_is_keyed_by(druks_db):
 
 
 def test_a_summary_carries_the_subjects_own_label(druks_db):
-    # Built off the subject, the label comes free from its ``label`` — both subject
-    # bases have one, so neither board titles its rows with a primary key.
     assert SubjectSummary.model_validate(Thing(id=7)).label == "thing 7"
     assert SubjectSummary.model_validate(Ticket(id="owner/repo#7")).label == "owner/repo#7"
 
-    # Required, not defaulted: a hand-built summary that forgets it fails here,
-    # rather than rendering a blank title on every row of its board.
+    # A title nobody can read is what this field exists to prevent, so a missing
+    # one and a blank one fail the same way.
     with pytest.raises(ValidationError):
         _ThingSummary(id=1, title="First")
+    with pytest.raises(ValidationError):
+        _ThingSummary(id=1, label="   ", title="First")
 
 
 def test_status_aggregates_across_runs_and_timeline_spans_them(client: TestClient, druks_db):

@@ -34,8 +34,6 @@ export type RunState =
 // timeline, and detail URL.
 export interface SubjectSummary {
   id: string
-  // The one line this subject shows itself as; the row title and the detail
-  // page's first fact.
   label: string
 }
 
