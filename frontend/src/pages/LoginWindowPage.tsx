@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import RFB from '@novnc/novnc/lib/rfb'
+import RFB from '@novnc/novnc'
 
 import { api } from '../api/client'
 import { Page } from '../components/Page'

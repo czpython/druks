@@ -8,7 +8,7 @@ const rfbState = vi.hoisted(() => ({
   instances: [] as Array<EventTarget & { url: string; disconnect: ReturnType<typeof vi.fn> }>,
 }))
 
-vi.mock('@novnc/novnc/lib/rfb', () => {
+vi.mock('@novnc/novnc', () => {
   class FakeRFB extends EventTarget {
     url: string
     scaleViewport = false
