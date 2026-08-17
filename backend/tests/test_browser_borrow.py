@@ -9,6 +9,7 @@ from druks.browser.exceptions import (
     BrowserClientMissingError,
     BrowserLaunchError,
     BrowserSessionNotReadyError,
+    BrowserSessionSignedOutError,
     BrowserSessionWriterLockedError,
 )
 from druks.browser.models import StoredBrowserSession
@@ -215,14 +216,21 @@ async def test_launch_failure_raises_and_releases_the_lock(borrow, x_me):
     assert not redis.values
 
 
-def test_mark_stale_flags_the_row(borrow, x_me):
-    stored_session(x_me.docs)
+async def test_signed_out_borrow_stamps_the_session_and_stores_nothing(borrow, x_me):
+    """The extension raises through the borrow when the site bounced the login:
+    the door stamps which session bounced, and the dead state is never stored."""
+    browser, redis = borrow
+    stored_session(x_me.x, payload=b"live-state")
 
-    x_me.docs.mark_stale()
+    with pytest.raises(BrowserSessionSignedOutError) as caught:
+        async with x_me.x.cdp():
+            raise BrowserSessionSignedOutError("the site bounced the login")
 
-    assert (
-        StoredBrowserSession.get_for_name(x_me.docs.name).status == BrowserSessionStatus.STALE.value
-    )
+    assert caught.value.session_name == "x_me.x"
+    db_session().expire_all()
+    assert StoredBrowserSession.get_for_name(x_me.x.name).payload.decrypt() == b"live-state"
+    assert ["session-export"] not in browser.commands
+    assert not redis.values  # the writer lock released on the way out
 
 
 async def test_playwright_yields_the_logged_in_context(borrow, x_me, monkeypatch):

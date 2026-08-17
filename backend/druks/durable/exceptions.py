@@ -1,4 +1,4 @@
-from typing import ClassVar
+from typing import Any, ClassVar
 
 
 class FatalError(Exception):
@@ -9,6 +9,15 @@ class FatalError(Exception):
     # Stamped onto the failed run beside the free-text reason, so read-sides can
     # recognize the domain stop without parsing its message. Empty for a crash.
     code: ClassVar[str] = ""
+
+    # A subclass names a signal to announce itself on when the run fails, so a
+    # subscriber can settle state the rolled-back body couldn't. Empty is silent.
+    broadcast_topic: ClassVar[str] = ""
+
+    @property
+    def broadcast_facts(self) -> dict[str, Any]:
+        # What rides that signal for the subscriber to react to.
+        return {}
 
 
 class WorkflowError(Exception):

@@ -482,6 +482,50 @@ async def test_fail_branch(rt):
     assert status == "ERROR"
 
 
+async def test_signed_out_run_fails_and_marks_the_session_stale(rt):
+    # The platform owns the whole bounce reaction: the run fails under the code
+    # and the stamped session row goes stale — committed apart from the failing
+    # body's rolled-back transaction.
+    from druks.browser.enums import BrowserSessionPayloadFormat, BrowserSessionStatus
+    from druks.browser.exceptions import BrowserSessionSignedOutError
+    from druks.browser.models import StoredBrowserSession
+
+    session = get_session(rt.engine)
+    try:
+        session.add(
+            StoredBrowserSession(
+                name="x_me.x",
+                payload_format=BrowserSessionPayloadFormat.STORAGE_STATE.value,
+                site="x.com",
+            )
+        )
+        session.commit()
+    finally:
+        session.close()
+
+    class BounceFlow(Workflow):
+        async def run(self) -> None:
+            error = BrowserSessionSignedOutError("the site bounced the login")
+            error.session_name = "x_me.x"
+            raise error
+
+    try:
+        wfid = await BounceFlow.start(subject=None)
+        failed = await _wait_for(rt.engine, wfid, lambda r: r.state == RunState.FAILED)
+        assert failed.failure == "the site bounced the login"
+        assert failed.failure_code == "browser_session_signed_out"
+        session = get_session(rt.engine)
+        try:
+            stored = session.execute(
+                select(StoredBrowserSession).where(StoredBrowserSession.name == "x_me.x")
+            ).scalar_one()
+            assert stored.status == BrowserSessionStatus.STALE.value
+        finally:
+            session.close()
+    finally:
+        workflows._items.pop("bounce_flow", None)
+
+
 async def test_subjectless_gate_fails_loudly(rt):
     """A gate with no on_wait override fails a subjectless run now, instead of
     parking it unseen for the whole gate TTL."""

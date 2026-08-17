@@ -1,5 +1,8 @@
 from typing import ClassVar
 
+from druks.browser.constants import SESSION_SIGNED_OUT_SIGNAL
+from druks.durable.exceptions import FatalError
+
 
 class BrowserApiError(Exception):
     # Raised from a browser route; the app maps it to this status with its
@@ -17,6 +20,19 @@ class BrowserSessionUnknownError(BrowserApiError):
 class BrowserSessionNotReadyError(Exception):
     def __init__(self, name: str, status: str) -> None:
         super().__init__(f"Browser session {name!r} is {status}; log in before borrowing it.")
+
+
+class BrowserSessionSignedOutError(FatalError):
+    # Raised by extension code inside a borrow when the site bounced the login.
+    # The door stamps which session; the run fails under this code and announces
+    # the bounce, and a subscriber marks the session stale. Nothing to catch.
+    code = "browser_session_signed_out"
+    broadcast_topic = SESSION_SIGNED_OUT_SIGNAL
+    session_name: str = ""
+
+    @property
+    def broadcast_facts(self) -> dict[str, str]:
+        return {"session_name": self.session_name}
 
 
 class BrowserLaunchError(BrowserApiError):
