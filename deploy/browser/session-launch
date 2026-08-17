@@ -91,6 +91,10 @@ async function main() {
         "--remote-debugging-address=127.0.0.1",
         "--remote-debugging-port=9222",
         "--window-size=1920,1080",
+        // Clears navigator.webdriver, the automation flag a logged-in site
+        // reads to challenge the session. The operator drives a real login
+        // here, so the browser must not announce itself as driven.
+        "--disable-blink-features=AutomationControlled",
       ],
       handleSIGHUP: false,
       handleSIGINT: false,
