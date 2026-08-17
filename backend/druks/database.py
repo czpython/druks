@@ -81,8 +81,16 @@ def create_engine_from_url(database_url: str):
     # at the lifecycle boundary (the API session dependency, the worker session
     # wrapper) so a failed unit of work rolls back instead of leaving partial
     # writes. Model methods ``flush()``; the boundary commits. Low pool_timeout
-    # because a checkout wait blocks the event loop.
-    return create_engine(database_url, pool_pre_ping=True, pool_timeout=5)
+    # because a checkout wait blocks the event loop. The pool serves every
+    # concurrent run's steps plus request handling at once, so it is sized for
+    # the run queue running wide, not for a lone request.
+    return create_engine(
+        database_url,
+        pool_pre_ping=True,
+        pool_timeout=5,
+        pool_size=20,
+        max_overflow=10,
+    )
 
 
 def get_session(engine) -> Session:
