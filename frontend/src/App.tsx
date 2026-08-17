@@ -204,13 +204,8 @@ function AppShell() {
       <main className="extension-main" data-extension={extension ?? undefined}>
         {wantsStrip && health && <SystemStrip health={health} />}
         <Switch>
-          {registered.flatMap((name) =>
-            (getExtensionUI(name)?.routes ?? []).map((route) => (
-              <Route key={`${name}:${route.path}`} path={route.path}>
-                {(params) => route.render(params as Record<string, string>)}
-              </Route>
-            )),
-          )}
+          {/* Shell-owned paths first, so an extension named after one of them can't
+              shadow the platform surface. */}
           <Route path="/usage">
             <UsagePage />
           </Route>
@@ -220,6 +215,13 @@ function AppShell() {
           <Route path="/browser-sessions/:sessionId/login">
             {(params) => <LoginWindowPage sessionId={params.sessionId} />}
           </Route>
+          {registered.flatMap((name) =>
+            (getExtensionUI(name)?.routes ?? []).map((route) => (
+              <Route key={`${name}:${route.path}`} path={route.path}>
+                {(params) => route.render(params as Record<string, string>)}
+              </Route>
+            )),
+          )}
           <Route>
             <NotFound />
           </Route>
