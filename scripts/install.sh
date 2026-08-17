@@ -144,6 +144,12 @@ main() {
   echo "→ docker compose pull"
   docker compose pull
 
+  # The browser image is provisioned on demand by drukbox's docker provider, so
+  # it is not a compose service and `docker compose pull` misses it — pull it
+  # here so a redeploy refreshes it rather than leaving the box on a cached tag.
+  echo "→ pulling browser image"
+  docker pull -q ghcr.io/czpython/druks-browser:latest >/dev/null
+
   # The shared sandbox-keys volume: a fresh named volume mounts root-owned, but
   # the backend runs as the deploy user and must write the per-VM SSH keys here.
   # Chown it to the deploy uid:gid (a root-in-container chown, no host sudo).
