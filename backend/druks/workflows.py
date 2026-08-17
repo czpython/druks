@@ -503,8 +503,9 @@ class Workflow:
     # What this workflow's runs are about, written ``subject = WorkItem`` on the
     # subclass. None for a workflow about nothing, which says so by silence.
     subject = _DeclaredSubject(None)
-    # When set to a cron string, the workflow also registers a schedule that
-    # fires its run() on that cadence (no subject — a framework cron).
+    # When set to a cron string, the workflow also registers a schedule. It fires
+    # dispatch() on that cadence if the class declares one (the policy starts the
+    # real subject-backed run), else run() with no subject (a framework cron).
     every: ClassVar[str | None] = None
     # True holds one warm VM across the run's agent calls (released at gate parks);
     # False gives each call a throwaway VM.
@@ -560,6 +561,19 @@ class Workflow:
                     f"{cls.__name__}.{cls._body_method}() declares reserved start() "
                     f"parameter(s) {sorted(claimed)} — attribution is platform "
                     "routing, not workflow input; name the parameter differently"
+                )
+        if cls.every and getattr(cls, "dispatch", None):
+            required = [
+                name
+                for name, p in inspect.signature(cls.dispatch).parameters.items()
+                if p.default is inspect.Parameter.empty
+                and p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD, p.KEYWORD_ONLY)
+            ]
+            if required:
+                raise WorkflowError(
+                    f"{cls.__name__}.dispatch() requires {required}, but a scheduled "
+                    "dispatch fires with no arguments — a schedule's dispatch must be "
+                    "nullary"
                 )
         _wrap_steps(cls)
         _register_entry(cls)
@@ -881,6 +895,15 @@ async def _run_instance(
         await instance._reap_run()
 
 
+async def _dispatch_instance(cls: type[Workflow], _context: dict[str, Any] | None = None) -> Any:
+    # The cron tick runs no workflow of its own kind — no Run row — it just calls
+    # dispatch(), which start()s the real subject-backed run. Body level, not a
+    # step: DBOS only allows the child-start inside start() from a workflow body.
+    # The session gives dispatch()'s reads a transaction, committed on exit.
+    async with step_session():
+        return await cls.dispatch()
+
+
 def _register_entry(cls: type[Workflow]) -> None:
     # The closure binds cls outside the durable arguments: the DBOS workflow
     # NAME (the kind) is what says which class this is, so recovery rebinds by
@@ -892,4 +915,5 @@ def _register_entry(cls: type[Workflow]) -> None:
     cls._entry = staticmethod(_entry)  # type: ignore[assignment]
 
     if cls.every:
-        register_schedule(cls, partial(_run_instance, cls))
+        fire = _dispatch_instance if getattr(cls, "dispatch", None) else _run_instance
+        register_schedule(cls, partial(fire, cls))

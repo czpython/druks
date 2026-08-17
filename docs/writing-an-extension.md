@@ -217,10 +217,28 @@ class Sweep(Workflow):
     every = "0 6 * * *"
 ```
 
-Every parameter of a scheduled workflow needs a default because the scheduler
-supplies no input. Druks evaluates cron expressions in the operator timezone.
-The dashboard can retune or disable a declared schedule but cannot invent a new
-workflow schedule.
+The tick fires the workflow's body with no subject and no input, so every body
+parameter needs a default. A workflow whose runs are *about* something (it
+declares a `subject`) shouldn't fire that way. Give it a `dispatch()` classmethod
+and the schedule fires that instead — it resolves the subject and starts the
+real run:
+
+```python
+class Engage(Workflow):
+    subject = Account
+    every = "0 */4 * * *"
+
+    @classmethod
+    async def dispatch(cls) -> str:
+        return await cls.start(subject=Account.get())
+
+    async def run(self) -> None:
+        ...
+```
+
+A scheduled `dispatch()` fires with no arguments, so it must be nullary. Druks
+evaluates cron expressions in the operator timezone. The dashboard can retune or
+disable a declared schedule but cannot invent a new workflow schedule.
 
 A workflow may declare its own operator settings:
 
