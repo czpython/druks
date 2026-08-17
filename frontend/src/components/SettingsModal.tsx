@@ -21,6 +21,7 @@ import {
   type UpdateUserSettingsRequest,
   type WorkflowSettingField,
 } from '../api/types'
+import { extensionLabel } from '../extensions/registry'
 import { absTime, relTimeFromIso } from '../lib/format'
 import { harnessColors } from '../lib/harnessColors'
 
@@ -363,7 +364,7 @@ export function SettingsModal({ open, onClose }: Props) {
                 <span className="ni-glyph">
                   <ExtensionGlyph name={extension.icon} />
                 </span>
-                <span className="ni-label">{extension.name}</span>
+                <span className="ni-label">{extensionLabel(extension.name)}</span>
               </button>
             ))}
           </nav>
@@ -2162,7 +2163,7 @@ function ExtensionPane({
 
       {optionFields.length > 0 && (
         <div className="set-group">
-          <div className="set-group-label">{extension.name} options</div>
+          <div className="set-group-label">{extensionLabel(extension.name)} options</div>
           {sectionLabels
             .map((sectionLabel) => ({
               sectionLabel,

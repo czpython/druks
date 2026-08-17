@@ -99,6 +99,30 @@ const extensionSettings = {
         },
       ],
     },
+    {
+      name: 'field_notes',
+      description: 'Field notes settings',
+      icon: 'box',
+      builtin: false,
+      agents: [],
+      workflows: [],
+      settings: [
+        {
+          name: 'notebook',
+          label: 'Notebook',
+          help: '',
+          type: 'str',
+          value: 'default',
+          default: 'default',
+          choices: null,
+          section: '',
+          visibleWhenField: '',
+          visibleWhenValue: null,
+          secretSet: null,
+          overridden: false,
+        },
+      ],
+    },
   ],
 }
 
@@ -165,6 +189,15 @@ describe('SettingsModal extension fields', () => {
 
     expect(await screen.findByRole('heading', { name: 'Browser sessions' })).toBeTruthy()
     expect(await screen.findByText('No browser sessions yet.')).toBeTruthy()
+  })
+
+  it('spells an underscored app name out in the rail and its options group', async () => {
+    stubFetch()
+    renderModal()
+
+    fireEvent.click(await screen.findByRole('button', { name: 'field notes' }))
+
+    expect(screen.getByText('field notes options')).toBeTruthy()
   })
 
   it('renders every 422 message under the field named by the backend', async () => {
