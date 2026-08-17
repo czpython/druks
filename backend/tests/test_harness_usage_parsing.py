@@ -1,4 +1,5 @@
 import json
+from datetime import UTC, datetime
 
 from druks.harnesses.claude import ClaudeHarness
 from druks.harnesses.codex import CodexHarness
@@ -123,6 +124,40 @@ def test_codex_parse_treats_unlimited_credits_as_full_buckets() -> None:
     assert parsed.five_hour is not None and parsed.five_hour.percent_left == 100
     assert len(parsed.weeks) == 1 and parsed.weeks[0].percent_left == 100
     assert parsed.unlimited is True
+
+
+def test_codex_parse_reads_a_group_spend_control_as_a_weekly_window() -> None:
+    """Under group-based spend controls a business account carries no windows —
+    the spend quota is the metered limit, on a cycle that runs weeks."""
+    parsed = CodexHarness._parse_usage(
+        json.dumps(
+            {
+                "plan_type": "business",
+                "rate_limit": None,
+                "credits": {"has_credits": True, "unlimited": False, "balance": None},
+                "spend_control": {
+                    "reached": False,
+                    "individual_limit": {
+                        "source": "group_based_spend_controls",
+                        "limit": "100",
+                        "used": "1.23",
+                        "used_percent": 1,
+                        "remaining_percent": 99,
+                        "reset_after_seconds": 1681405,
+                        "reset_at": 1788220800,
+                    },
+                },
+            }
+        )
+    )
+
+    assert parsed.ok
+    assert parsed.plan_tier == "business"
+    assert parsed.five_hour is None
+    assert len(parsed.weeks) == 1
+    assert parsed.weeks[0].percent_left == 99
+    assert parsed.weeks[0].resets_at == datetime(2026, 9, 1, tzinfo=UTC)
+    assert parsed.unlimited is False
 
 
 def test_codex_parse_places_a_weekly_only_plan_in_the_week_window() -> None:

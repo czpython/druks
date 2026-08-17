@@ -431,6 +431,16 @@ class CodexHarness(Harness):
         plan = data.get("plan_type") if isinstance(data.get("plan_type"), str) else None
         try:
             five_hour, weeks = _codex_windows(data)
+            spend = (data.get("spend_control") or {}).get("individual_limit")
+            if not five_hour and not weeks and spend:
+                # Group-based spend controls replace the rate-limit windows;
+                # their weeks-long quota cycle makes it a weekly window.
+                weeks = (
+                    ParsedMetric(
+                        percent_left=max(0, min(100, round(100 - spend["used_percent"]))),
+                        resets_at=datetime.fromtimestamp(spend["reset_at"], tz=UTC),
+                    ),
+                )
         except (AttributeError, KeyError, TypeError, ValueError):
             return ParsedUsage(ok=False, error="unexpected_payload", plan_tier=plan, raw=raw)
         if not five_hour and not weeks:
