@@ -56,7 +56,7 @@ export function BrowserSessionsPane() {
   return (
     <div className="set-pane mcp-pane browser-sessions-pane">
       <header className="mcp-pane-head">
-        <h2 className="mcp-pane-title">Browser sessions</h2>
+        <h2 className="mcp-pane-title">Browser</h2>
         <p className="mcp-pane-sub">
           Sign-ins your extensions declare, kept as encrypted browser state.
         </p>

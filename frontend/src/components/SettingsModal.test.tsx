@@ -185,9 +185,9 @@ describe('SettingsModal extension fields', () => {
     stubFetch()
     renderModal()
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Browser sessions' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Browser' }))
 
-    expect(await screen.findByRole('heading', { name: 'Browser sessions' })).toBeTruthy()
+    expect(await screen.findByRole('heading', { name: 'Browser' })).toBeTruthy()
     expect(
       await screen.findByText('No installed extension declares a browser session.'),
     ).toBeTruthy()

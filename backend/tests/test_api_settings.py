@@ -78,6 +78,24 @@ def test_harness_card_reports_identity(tmp_path: Path, druks_db):
     assert claude["providerEmail"] == "seat@corp.com"
 
 
+def test_harness_card_reads_expired_token_as_not_connected(tmp_path: Path, druks_db):
+    from datetime import UTC, datetime, timedelta
+
+    from druks.accounts.models import Account
+    from druks.harnesses.models import HarnessConnection
+
+    HarnessConnection.connect(
+        harness="claude",
+        account=Account.get_or_create("op@example.com"),
+        payload={"claudeAiOauth": {"accessToken": "x"}},
+        expires_at=datetime.now(UTC) - timedelta(hours=1),
+        provider_email="seat@corp.com",
+    )
+    with _build_client(tmp_path) as client:
+        claude = {h["name"]: h for h in client.get("/api/settings/harnesses").json()}["claude"]
+    assert claude["connected"] is False
+
+
 def test_disconnect_removes_only_the_requesting_accounts_connection(tmp_path: Path, druks_db):
     from conftest import connect_harness
     from druks.harnesses.claude import ClaudeHarness

@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -47,6 +47,9 @@ class HarnessResponse(BaseResponse):
         connection: "HarnessConnection | None",
         account: "Account",
     ) -> "HarnessResponse":
+        connected = bool(connection) and (
+            not connection.expires_at or connection.expires_at > datetime.now(UTC)
+        )
         return cls(
             name=settings.name,
             provider=settings.provider,
@@ -55,7 +58,7 @@ class HarnessResponse(BaseResponse):
             timeout=settings.timeout,
             fast_mode=settings.fast_mode,
             allowed_models=settings.allowed_models,
-            connected=bool(connection),
+            connected=connected,
             kind=connection.kind if connection else None,
             account=account.username if connection else None,
             provider_email=connection.provider_email if connection else None,
