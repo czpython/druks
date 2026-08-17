@@ -17,3 +17,6 @@ LOGIN_WINDOW_KEY_PREFIX = "browser_login_window:"
 
 VNC_PORT = 5900
 SCREEN_CHUNK_BYTES = 64 * 1024
+
+# The fatal a bounced borrow announces; a subscriber marks the named session stale.
+SESSION_SIGNED_OUT_SIGNAL = "browser.session_signed_out"

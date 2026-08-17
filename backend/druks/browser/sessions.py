@@ -14,6 +14,7 @@ from druks.browser.exceptions import (
     BrowserExportError,
     BrowserLaunchError,
     BrowserSessionNotReadyError,
+    BrowserSessionSignedOutError,
 )
 from druks.browser.locks import acquire_writer_lock, release_writer_lock
 from druks.browser.models import StoredBrowserSession
@@ -71,6 +72,11 @@ class BrowserSession:
                 listener = await browser.forward_local_port(CDP_PORT)
                 try:
                     yield f"http://127.0.0.1:{listener.get_port()}"
+                except BrowserSessionSignedOutError as error:
+                    # The extension says the login bounced; only the door knows
+                    # which session that was. The run machinery does the rest.
+                    error.session_name = self.name
+                    raise
                 finally:
                     listener.close()
                 if self.persist:
@@ -97,11 +103,6 @@ class BrowserSession:
                 yield connection.contexts[0]
             finally:
                 await connection.close()
-
-    def mark_stale(self) -> None:
-        """Report the login bounced — the site wants the operator back. The
-        pane shows the session as stale; the workflow decides whether to park."""
-        self.get_or_create_row().mark_stale()
 
     def get_or_create_row(self) -> StoredBrowserSession:
         """The declaration's stored half, written by the first action that

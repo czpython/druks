@@ -342,9 +342,12 @@ wrapper.
 
 ``persist=True`` writes rotated state back after each borrow — for sites that
 expire an unused login. ``headless=True`` is an opt-in optimization for sites
-that don't fingerprint headless browsers. When a site logs the session out,
-call ``XMe.x.mark_stale()`` and decide in the workflow whether to park on a
-gate for the operator.
+that don't fingerprint headless browsers. When your code inside the borrow
+sees the site bounce the login, raise ``BrowserSessionSignedOutError`` (from
+``druks.browser``) and druks does the rest: the session goes stale — the pane
+shows it and refuses further borrows until the operator signs in again — and
+the run fails under that reason. There is nothing to catch; the next
+scheduled run proceeds once the login is back.
 
 Provider selection is an operator concern. Extension workspace code targets the
 Druks sandbox contract, not `exe`, AWS, or Docker directly.

@@ -456,6 +456,20 @@ def _log_run_event(
     return payload
 
 
+async def _broadcast_fatal(exc: FatalError) -> None:
+    # A fatal that names a topic announces itself once the run is recorded
+    # failed, so a subscriber can settle state the rolled-back body couldn't.
+    # Its own retrying checkpoint, like the run-lifecycle publishes.
+    if not exc.broadcast_topic:
+        return
+
+    async def _fan_out() -> None:
+        async with step_session():
+            await publish(exc.broadcast_topic, **exc.broadcast_facts)
+
+    await DBOS.run_step_async(StepOptions(name=exc.broadcast_topic, **_IO_RETRIES), _fan_out)
+
+
 # Park sets the gate pair together; resume and a failure clear it together, so
 # a terminal or resumed run never keeps a stale ask.
 _GATE_CLEARED: dict[str, Any] = {"input_gate": None, "input_request": None}
@@ -484,7 +498,11 @@ async def _execute_run(
         result = await body()
     except (DBOSAwaitedWorkflowCancelledError, DBOSWorkflowCancelledError):
         raise
-    except (FatalError, HarnessError) as exc:
+    except FatalError as exc:
+        await record_failed(exc, exc.code)
+        await _broadcast_fatal(exc)
+        raise
+    except HarnessError as exc:
         await record_failed(exc, exc.code)
         raise
     except Exception as exc:
