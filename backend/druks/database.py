@@ -82,14 +82,17 @@ def create_engine_from_url(database_url: str):
     # wrapper) so a failed unit of work rolls back instead of leaving partial
     # writes. Model methods ``flush()``; the boundary commits. Low pool_timeout
     # because a checkout wait blocks the event loop. The pool serves every
-    # concurrent run's steps plus request handling at once, so it is sized for
-    # the run queue running wide, not for a lone request.
+    # concurrent run's steps plus request handling at once: a modest steady
+    # pool, with overflow doing the burst work — overflow connections open on
+    # demand and close on return, so the ceiling is high while idle cost is
+    # not. Ceiling 50 keeps the appliance (with DBOS's two engines at 20 each)
+    # inside Postgres's default 100 connections.
     return create_engine(
         database_url,
         pool_pre_ping=True,
         pool_timeout=5,
         pool_size=20,
-        max_overflow=10,
+        max_overflow=30,
     )
 
 
