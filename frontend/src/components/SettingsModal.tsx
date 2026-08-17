@@ -350,7 +350,7 @@ export function SettingsModal({ open, onClose }: Props) {
             <RailItem icon="general" label="General" active={section === 'general'} onClick={() => setSection('general')} />
             <RailItem icon="harnesses" label="Harnesses" active={section === 'harnesses'} onClick={() => setSection('harnesses')} />
             <RailItem icon="services" label="Services" active={section === 'services'} onClick={() => setSection('services')} />
-            <RailItem icon="browser-sessions" label="Browser sessions" active={section === 'browser-sessions'} onClick={() => setSection('browser-sessions')} />
+            <RailItem icon="browser-sessions" label="Browser" active={section === 'browser-sessions'} onClick={() => setSection('browser-sessions')} />
             <RailItem icon="skills" label="Skills" active={section === 'skills'} onClick={() => setSection('skills')} />
             <RailItem icon="mcp" label="MCP" active={section === 'mcp'} onClick={() => setSection('mcp')} />
             <RailItem icon="agent-access" label="Tokens" active={section === 'agent-access'} onClick={() => setSection('agent-access')} />
