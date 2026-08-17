@@ -26,6 +26,12 @@ def test_iter_extensions_discovers_the_bundled_extensions():
     assert {extension.name for extension in iter_extensions()} >= {"core", "ship", "usage"}
 
 
+def test_platform_extensions_are_builtin():
+    """``builtin`` is what keeps a platform surface out of the shell's app switcher."""
+    builtin = {extension.name for extension in iter_extensions() if extension.builtin}
+    assert builtin >= {"core", "usage"}
+
+
 def test_ship_app_derives_its_package_from_the_defining_module():
     ship = next(extension for extension in iter_extensions() if extension.name == "ship")
     assert ship.package == "druks.contrib.ship"
