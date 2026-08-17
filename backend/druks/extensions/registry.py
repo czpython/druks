@@ -65,6 +65,7 @@ webhooks = Registry("webhooks", key=lambda cls: f"{cls.__module__}.{cls.__qualna
 services = Registry("services", key=lambda cls: cls.name)
 workflows = Registry("workflows", key=lambda cls: cls.kind)
 agents = Registry("agents", key=lambda agent: agent.id)
+browser_sessions = Registry("browser_sessions", key=lambda session: session.name)
 # MCP server definitions from the deployment's catalog, mounted by an explicit
 # startup load (druks/mcp/catalog.py); an operator's DB overlay enables and
 # tokens them. Dict items, not self-registering classes like the registries above.

@@ -32,15 +32,15 @@ class LoginWindow:
     home) between them, and frees itself on the record's TTL if the operator
     walks away."""
 
-    def __init__(self, session_id: str, host_id: str) -> None:
-        self.session_id = session_id
+    def __init__(self, session_name: str, host_id: str) -> None:
+        self.session_name = session_name
         self.host_id = host_id
 
     @classmethod
     async def open(cls, session: StoredBrowserSession) -> "LoginWindow":
-        stale = await get_client().get(_key(session.id))
+        stale = await get_client().get(_key(session.name))
         if stale:
-            await cls(session.id, json.loads(stale)["host_id"])._close()
+            await cls(session.name, json.loads(stale)["host_id"])._close()
         settings = load_settings()
         try:
             browser = await sandbox_client.provision(
@@ -58,20 +58,20 @@ class LoginWindow:
         finally:
             await browser.aclose()
         await get_client().set(
-            _key(session.id),
+            _key(session.name),
             json.dumps({"host_id": browser.id}),
             ex=LOGIN_WINDOW_TTL_SECONDS,
         )
-        return cls(session.id, browser.id)
+        return cls(session.name, browser.id)
 
     @classmethod
-    async def get_for_session(cls, session_id: str) -> "LoginWindow":
+    async def get_for_session(cls, session_name: str) -> "LoginWindow":
         """The window the operator has open for this session; raises once it is
         saved, cancelled, or aged out, which is every caller's cue to stop."""
-        record = await get_client().get(_key(session_id))
+        record = await get_client().get(_key(session_name))
         if record:
-            return cls(session_id, json.loads(record)["host_id"])
-        raise exceptions.BrowserLoginWindowGoneError(session_id)
+            return cls(session_name, json.loads(record)["host_id"])
+        raise exceptions.BrowserLoginWindowGoneError
 
     async def stream(self, websocket: WebSocket) -> None:
         """Put the operator's canvas in front of the container's screen until
@@ -98,28 +98,28 @@ class LoginWindow:
         """Store what the operator logged into as the session's payload, then
         tear the window down. A login always captures a profile, so a session
         imported as storage_state becomes a profile here."""
-        session = StoredBrowserSession.get_for_id(self.session_id)
-        if not session:
-            raise exceptions.BrowserSessionUnknownError(self.session_id)
-        try:
-            async with sandbox_client.attach(host_id=self.host_id) as browser:
-                payload = await _export(browser, session.name)
-            session.payload_format = BrowserSessionPayloadFormat.PROFILE_DIR.value
-            session.store_payload(payload)
-            return session
-        finally:
-            await self._close()
+        session = StoredBrowserSession.get_for_name(self.session_name)
+        if session:
+            try:
+                async with sandbox_client.attach(host_id=self.host_id) as browser:
+                    payload = await _export(browser, session.name)
+                session.payload_format = BrowserSessionPayloadFormat.PROFILE_DIR.value
+                session.store_payload(payload)
+                return session
+            finally:
+                await self._close()
+        raise exceptions.BrowserSessionUnknownError(self.session_name)
 
     async def cancel(self) -> None:
         await self._close()
 
     async def _close(self) -> None:
         await sandbox_client.release(host_id=self.host_id)
-        await get_client().delete(_key(self.session_id))
+        await get_client().delete(_key(self.session_name))
 
 
-def _key(session_id: str) -> str:
-    return f"{LOGIN_WINDOW_KEY_PREFIX}{session_id}"
+def _key(session_name: str) -> str:
+    return f"{LOGIN_WINDOW_KEY_PREFIX}{session_name}"
 
 
 def is_same_origin(websocket: WebSocket) -> bool:

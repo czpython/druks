@@ -7,11 +7,11 @@ import { BrowserSessionsPane } from './BrowserSessionsPane'
 
 function browserSession(overrides: Partial<BrowserSession> = {}): BrowserSession {
   return {
-    id: 'session-1',
-    name: 'x-main',
+    name: 'x_me.x',
     status: 'ready',
     payloadFormat: 'storage_state',
     site: 'x.com',
+    isDeclared: true,
     createdAt: new Date().toISOString(),
     lastRefreshedAt: new Date(Date.now() - 5 * 60 * 1000).toISOString(),
     lastUsedAt: null,
@@ -27,28 +27,8 @@ function stubFetch(initial: BrowserSession[]) {
       if (url === '/api/browser-sessions' && method === 'GET') {
         return new Response(JSON.stringify(sessions), { status: 200 })
       }
-      if (url === '/api/browser-sessions' && method === 'POST') {
-        const body = JSON.parse(String(init?.body))
-        const created = browserSession({
-          id: 'session-2',
-          name: body.name,
-          status: 'needs_login',
-          payloadFormat: body.payloadFormat,
-          site: body.site,
-          lastRefreshedAt: null,
-        })
-        sessions = [...sessions, created]
-        return new Response(JSON.stringify(created), { status: 200 })
-      }
-      if (url === '/api/browser-sessions/session-1' && method === 'PATCH') {
-        const body = JSON.parse(String(init?.body))
-        sessions = sessions.map((session) =>
-          session.id === 'session-1' ? { ...session, name: body.name } : session,
-        )
-        return new Response(JSON.stringify(sessions[0]), { status: 200 })
-      }
-      if (url === '/api/browser-sessions/session-1' && method === 'DELETE') {
-        sessions = sessions.filter((session) => session.id !== 'session-1')
+      if (url === '/api/browser-sessions/x_me.x' && method === 'DELETE') {
+        sessions = sessions.filter((session) => session.name !== 'x_me.x')
         return new Response(null, { status: 204 })
       }
       return new Response('{}', { status: 404 })
@@ -79,8 +59,7 @@ describe('BrowserSessionsPane', () => {
     stubFetch([
       browserSession(),
       browserSession({
-        id: 'session-2',
-        name: 'linkedin',
+        name: 'linked_in.jobs',
         status: 'stale',
         payloadFormat: 'profile_dir',
         site: 'linkedin.com',
@@ -89,64 +68,59 @@ describe('BrowserSessionsPane', () => {
     ])
     renderPane()
 
-    expect(await screen.findByText('x-main')).toBeTruthy()
+    expect(await screen.findByText('x_me.x')).toBeTruthy()
     expect(screen.getByText('Ready')).toBeTruthy()
     expect(screen.getByText('Stale')).toBeTruthy()
     expect(screen.getByRole('link', { name: 'Reconnect' }).getAttribute('href')).toBe(
-      '/druks/browser-sessions/session-2/login',
+      '/druks/browser-sessions/linked_in.jobs/login',
     )
     expect(screen.getByRole('link', { name: 'Open window' }).getAttribute('href')).toBe(
-      '/druks/browser-sessions/session-1/login',
+      '/druks/browser-sessions/x_me.x/login',
     )
     expect(screen.queryByRole('link', { name: 'Log in' })).toBeNull()
-    expect(screen.getAllByText('Storage state')).toHaveLength(2)
-    expect(screen.getAllByText('Profile directory')).toHaveLength(2)
+    expect(screen.getByText('Storage state')).toBeTruthy()
+    expect(screen.getByText('Profile directory')).toBeTruthy()
     expect(screen.getAllByText(/5m ago/)).toHaveLength(2)
     expect(screen.getByText(/1h ago/)).toBeTruthy()
   })
 
-  it('creates, renames, and deletes sessions through the session-only routes', async () => {
-    const fetchMock = stubFetch([browserSession()])
+  it('shows a declared session with no row as awaiting its first login', async () => {
+    stubFetch([
+      browserSession({
+        status: 'needs_login',
+        payloadFormat: null,
+        createdAt: null,
+        lastRefreshedAt: null,
+      }),
+    ])
+    renderPane()
+
+    expect(await screen.findByText('x_me.x')).toBeTruthy()
+    expect(screen.getByText('Needs login')).toBeTruthy()
+    expect(screen.getByRole('link', { name: 'Log in' }).getAttribute('href')).toBe(
+      '/browser-sessions/x_me.x/login',
+    )
+    expect(screen.queryByText('Delete')).toBeNull()
+  })
+
+  it('flags an undeclared leftover row and deletes it by name', async () => {
+    const fetchMock = stubFetch([browserSession({ isDeclared: false })])
     const confirm = vi.fn(() => true)
     vi.stubGlobal('confirm', confirm)
     renderPane()
-    await screen.findByText('x-main')
+    await screen.findByText('x_me.x')
 
-    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'github-main' } })
-    fireEvent.change(screen.getByLabelText(/Site/), { target: { value: 'github.com' } })
-    fireEvent.change(screen.getByLabelText('Payload format'), {
-      target: { value: 'profile_dir' },
-    })
-    fireEvent.click(screen.getByText('Create session'))
+    expect(screen.getByText('No longer declared')).toBeTruthy()
+    expect(screen.queryByRole('link', { name: 'Open window' })).toBeNull()
 
-    await screen.findByText('github-main')
-    expect(screen.getByRole('link', { name: 'Log in' }).getAttribute('href')).toBe(
-      '/browser-sessions/session-2/login',
-    )
-    const createCall = fetchMock.mock.calls.find(
-      ([url, init]) => url === '/api/browser-sessions' && init?.method === 'POST',
-    )
-    expect(JSON.parse(String(createCall?.[1]?.body))).toEqual({
-      name: 'github-main',
-      site: 'github.com',
-      payloadFormat: 'profile_dir',
-    })
-
-    fireEvent.click(screen.getAllByText('Rename')[0]!)
-    fireEvent.change(screen.getByLabelText('New name for x-main'), {
-      target: { value: 'x-personal' },
-    })
-    fireEvent.click(screen.getByText('Save'))
-    expect(await screen.findByText('x-personal')).toBeTruthy()
-
-    fireEvent.click(screen.getAllByText('Delete')[0]!)
+    fireEvent.click(screen.getByText('Delete'))
     expect(confirm).toHaveBeenCalledWith(
-      'Delete x-personal? Its saved browser state will be destroyed.',
+      'Delete x_me.x? Its saved browser state will be destroyed.',
     )
-    await waitFor(() => expect(screen.queryByText('x-personal')).toBeNull())
+    await waitFor(() => expect(screen.queryByText('x_me.x')).toBeNull())
     expect(
       fetchMock.mock.calls.some(
-        ([url, init]) => url === '/api/browser-sessions/session-1' && init?.method === 'DELETE',
+        ([url, init]) => url === '/api/browser-sessions/x_me.x' && init?.method === 'DELETE',
       ),
     ).toBe(true)
   })

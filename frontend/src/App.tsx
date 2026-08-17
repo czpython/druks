@@ -212,8 +212,8 @@ function AppShell() {
           <Route path="/events">
             <EventsPage />
           </Route>
-          <Route path="/browser-sessions/:sessionId/login">
-            {(params) => <LoginWindowPage sessionId={params.sessionId} />}
+          <Route path="/browser-sessions/:name/login">
+            {(params) => <LoginWindowPage name={params.name} />}
           </Route>
           {registered.flatMap((name) =>
             (getExtensionUI(name)?.routes ?? []).map((route) => (

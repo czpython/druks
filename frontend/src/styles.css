@@ -1242,8 +1242,6 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
 .svc-alt:hover { color: var(--text); }
 .svc-pane a.set-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
-.browser-session-create { display: grid; grid-template-columns: minmax(150px, 0.8fr) minmax(180px, 1fr) minmax(150px, 0.8fr) auto; gap: 12px; align-items: end; }
-.browser-session-create-button { white-space: nowrap; }
 .browser-session-list { display: flex; flex-direction: column; gap: 8px; }
 .browser-session-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px 18px; padding: 13px 14px; }
 .browser-session-identity { display: flex; align-items: baseline; gap: 9px; min-width: 0; }
@@ -1260,7 +1258,7 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
 .browser-session-times dt { font-size: 11.5px; color: var(--text-faint); }
 .browser-session-times dd { margin: 0; font-family: var(--font-mono); font-size: 11.5px; color: var(--text-mid); }
 .browser-session-actions { display: flex; justify-content: flex-end; gap: 8px; }
-.browser-session-rename { grid-column: 1 / -1; display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 8px; }
+.browser-session-undeclared { align-self: center; font-size: 11.5px; color: var(--text-faint); }
 
 .page-login-window .page-shell-body { flex: 1; min-height: 0; background: #080a0c; }
 .login-window-head { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 16px 20px; border-bottom: 1px solid var(--border); background: var(--surface); }
@@ -1279,7 +1277,6 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
 @media (max-width: 720px) {
   .set-extension-toggles { grid-template-columns: 1fr; }
   .svc-grid { grid-template-columns: 1fr; }
-  .browser-session-create { grid-template-columns: 1fr 1fr; }
   .set-thead { display: none; }
   .set-trow { grid-template-columns: 1fr 1fr; gap: 8px; padding: 12px 14px; }
   .skill-add { flex-direction: column; align-items: stretch; }
@@ -1297,7 +1294,6 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
 }
 
 @media (max-width: 460px) {
-  .browser-session-create { grid-template-columns: 1fr; }
   .browser-session-times { flex-direction: column; gap: 5px; }
 }
 

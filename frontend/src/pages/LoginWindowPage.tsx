@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
 import RFB from '@novnc/novnc/lib/rfb'
 
 import { api } from '../api/client'
@@ -16,17 +15,13 @@ const CONNECTION_COPY: Record<ConnectionState, string> = {
 }
 
 interface Props {
-  sessionId: string
+  name: string
 }
 
-export function LoginWindowPage({ sessionId }: Props) {
-  const session = useQuery({
-    queryKey: ['browserSession', sessionId],
-    queryFn: () => api.browserSession(sessionId),
-  })
+export function LoginWindowPage({ name }: Props) {
   const canvas = useRef<HTMLDivElement>(null)
   const rfb = useRef<RFB | null>(null)
-  const openingSessionId = useRef(sessionId)
+  const openingName = useRef(name)
   const opening = useRef<ReturnType<typeof api.openBrowserSessionLoginWindow> | null>(null)
   const [connection, setConnection] = useState<ConnectionState>('opening')
   const [windowOpen, setWindowOpen] = useState(false)
@@ -38,17 +33,17 @@ export function LoginWindowPage({ sessionId }: Props) {
 
     async function connect() {
       try {
-        if (openingSessionId.current !== sessionId) {
-          openingSessionId.current = sessionId
+        if (openingName.current !== name) {
+          openingName.current = name
           opening.current = null
         }
-        opening.current ??= api.openBrowserSessionLoginWindow(sessionId)
+        opening.current ??= api.openBrowserSessionLoginWindow(name)
         await opening.current
         if (!active || !canvas.current) return
         setWindowOpen(true)
         setConnection('connecting')
         const scheme = window.location.protocol === 'https:' ? 'wss' : 'ws'
-        const path = `/api/browser-sessions/${encodeURIComponent(sessionId)}/login-window/ws`
+        const path = `/api/browser-sessions/${encodeURIComponent(name)}/login-window/ws`
         const socketUrl = `${scheme}://${window.location.host}${path}`
         const client = new RFB(canvas.current, socketUrl)
         client.scaleViewport = true
@@ -71,13 +66,13 @@ export function LoginWindowPage({ sessionId }: Props) {
       rfb.current?.disconnect()
       rfb.current = null
     }
-  }, [sessionId])
+  }, [name])
 
   async function save() {
     setAction('save')
     setError(null)
     try {
-      await api.saveBrowserSessionLoginWindow(sessionId)
+      await api.saveBrowserSessionLoginWindow(name)
       window.history.back()
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught))
@@ -89,7 +84,7 @@ export function LoginWindowPage({ sessionId }: Props) {
     setAction('cancel')
     setError(null)
     try {
-      await api.cancelBrowserSessionLoginWindow(sessionId)
+      await api.cancelBrowserSessionLoginWindow(name)
       window.history.back()
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught))
@@ -97,7 +92,6 @@ export function LoginWindowPage({ sessionId }: Props) {
     }
   }
 
-  const title = session.data?.name ?? 'Browser session'
   const busy = action !== null
 
   return (
@@ -105,7 +99,7 @@ export function LoginWindowPage({ sessionId }: Props) {
       <header className="login-window-head">
         <div>
           <span className="login-window-kicker mono">browser session</span>
-          <h1>{title}</h1>
+          <h1>{name}</h1>
           <p className={`login-window-connection is-${connection}`}>
             {CONNECTION_COPY[connection]}
           </p>

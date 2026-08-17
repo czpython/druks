@@ -2,7 +2,6 @@ import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { api } from '../api/client'
-import { TextInput } from './Control'
 import type {
   BrowserSession,
   BrowserSessionPayloadFormat,
@@ -33,50 +32,8 @@ export function BrowserSessionsPane() {
     queryKey: ['browserSessions'],
     queryFn: () => api.browserSessions(),
   })
-  const [name, setName] = useState('')
-  const [site, setSite] = useState('')
-  const [payloadFormat, setPayloadFormat] =
-    useState<BrowserSessionPayloadFormat>('storage_state')
-  const [renamingId, setRenamingId] = useState<string | null>(null)
-  const [renamedName, setRenamedName] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-
-  const refresh = () => queryClient.invalidateQueries({ queryKey: ['browserSessions'] })
-
-  async function createSession() {
-    setBusy(true)
-    setError(null)
-    try {
-      await api.createBrowserSession({
-        name: name.trim(),
-        payloadFormat,
-        site: site.trim(),
-      })
-      setName('')
-      setSite('')
-      await refresh()
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : String(caught))
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  async function renameSession(session: BrowserSession) {
-    setBusy(true)
-    setError(null)
-    try {
-      await api.renameBrowserSession(session.id, renamedName.trim())
-      setRenamingId(null)
-      setRenamedName('')
-      await refresh()
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : String(caught))
-    } finally {
-      setBusy(false)
-    }
-  }
 
   async function deleteSession(session: BrowserSession) {
     if (!window.confirm(`Delete ${session.name}? Its saved browser state will be destroyed.`)) {
@@ -85,8 +42,8 @@ export function BrowserSessionsPane() {
     setBusy(true)
     setError(null)
     try {
-      await api.deleteBrowserSession(session.id)
-      await refresh()
+      await api.deleteBrowserSession(session.name)
+      await queryClient.invalidateQueries({ queryKey: ['browserSessions'] })
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught))
     } finally {
@@ -101,7 +58,7 @@ export function BrowserSessionsPane() {
       <header className="mcp-pane-head">
         <h2 className="mcp-pane-title">Browser sessions</h2>
         <p className="mcp-pane-sub">
-          Encrypted browser state kept under stable names.
+          Sign-ins your extensions declare, kept as encrypted browser state.
         </p>
       </header>
 
@@ -112,78 +69,23 @@ export function BrowserSessionsPane() {
       )}
 
       <section className="mcp-section">
-        <h3 className="mcp-h">Create a session</h3>
-        <p className="mcp-help">
-          Give the sign-in a stable slug, then open its login window to authenticate.
-        </p>
-        <div className="browser-session-create">
-          <div className="mcp-field">
-            <label className="mcp-label" htmlFor="browser-session-name">
-              Name
-            </label>
-            <TextInput
-              id="browser-session-name"
-              placeholder="x-main"
-              value={name}
-              onChange={(event) => setName(event.target.value)}
-              disabled={busy}
-            />
-          </div>
-          <div className="mcp-field">
-            <label className="mcp-label" htmlFor="browser-session-site">
-              Site
-            </label>
-            <TextInput
-              id="browser-session-site"
-              placeholder="x.com"
-              value={site}
-              onChange={(event) => setSite(event.target.value)}
-              disabled={busy}
-            />
-          </div>
-          <div className="mcp-field">
-            <label className="mcp-label" htmlFor="browser-session-format">
-              Payload format
-            </label>
-            <select
-              id="browser-session-format"
-              className="set-select"
-              value={payloadFormat}
-              onChange={(event) =>
-                setPayloadFormat(event.target.value as BrowserSessionPayloadFormat)
-              }
-              disabled={busy}
-            >
-              <option value="storage_state">Storage state</option>
-              <option value="profile_dir">Profile directory</option>
-            </select>
-          </div>
-          <button
-            className="set-btn primary browser-session-create-button"
-            onClick={() => void createSession()}
-            disabled={busy || !name.trim() || !site.trim()}
-          >
-            {busy ? 'Creating…' : 'Create session'}
-          </button>
-        </div>
-      </section>
-
-      <section className="mcp-section">
         <h3 className="mcp-h">
           Sessions <span className="gl-count">{sessions.length}</span>
         </h3>
         {!query.isLoading && sessions.length === 0 && (
-          <p className="mcp-help">No browser sessions yet.</p>
+          <p className="mcp-help">No installed extension declares a browser session.</p>
         )}
         {sessions.length > 0 && (
           <div className="browser-session-list">
             {sessions.map((session) => (
-              <div className="set-card browser-session-row" key={session.id}>
+              <div className="set-card browser-session-row" key={session.name}>
                 <div className="browser-session-identity">
                   <span className="browser-session-name">{session.name}</span>
-                  <span className="browser-session-format">
-                    {FORMAT_LABELS[session.payloadFormat]}
-                  </span>
+                  {session.payloadFormat && (
+                    <span className="browser-session-format">
+                      {FORMAT_LABELS[session.payloadFormat]}
+                    </span>
+                  )}
                   <span className="browser-session-site">{session.site}</span>
                 </div>
                 <SessionStatus status={session.status} />
@@ -197,48 +99,19 @@ export function BrowserSessionsPane() {
                     <dd>{relTimeFromIso(session.lastUsedAt)}</dd>
                   </div>
                 </dl>
-                {renamingId === session.id ? (
-                  <div className="browser-session-rename">
-                    <TextInput
-                      aria-label={`New name for ${session.name}`}
-                      value={renamedName}
-                      onChange={(event) => setRenamedName(event.target.value)}
-                      disabled={busy}
-                    />
-                    <button
-                      className="set-btn primary"
-                      onClick={() => void renameSession(session)}
-                      disabled={busy || !renamedName.trim()}
-                    >
-                      Save
-                    </button>
-                    <button
-                      className="set-btn ghost"
-                      onClick={() => setRenamingId(null)}
-                      disabled={busy}
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                ) : (
-                  <div className="browser-session-actions">
-                    {/* A full load dismisses Settings before the login window mounts. */}
+                <div className="browser-session-actions">
+                  {session.isDeclared ? (
+                    /* A full load dismisses Settings before the login window mounts. */
                     <a
                       className="set-btn primary"
-                      href={`${import.meta.env.BASE_URL}browser-sessions/${encodeURIComponent(session.id)}/login`}
+                      href={`${import.meta.env.BASE_URL}browser-sessions/${encodeURIComponent(session.name)}/login`}
                     >
                       {LOGIN_ACTION_LABELS[session.status]}
                     </a>
-                    <button
-                      className="set-btn ghost"
-                      onClick={() => {
-                        setRenamingId(session.id)
-                        setRenamedName(session.name)
-                      }}
-                      disabled={busy}
-                    >
-                      Rename
-                    </button>
+                  ) : (
+                    <span className="browser-session-undeclared">No longer declared</span>
+                  )}
+                  {session.createdAt && (
                     <button
                       className="set-btn danger quiet"
                       onClick={() => void deleteSession(session)}
@@ -246,8 +119,8 @@ export function BrowserSessionsPane() {
                     >
                       Delete
                     </button>
-                  </div>
-                )}
+                  )}
+                </div>
               </div>
             ))}
           </div>

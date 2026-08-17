@@ -15,7 +15,9 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Capture a headed Chromium login and import it into the Druks session vault."
     )
-    parser.add_argument("--name", required=True, help="Browser-session slug, for example x-main.")
+    parser.add_argument(
+        "--name", required=True, help="Declared browser-session name, for example x_me.x."
+    )
     parser.add_argument("--site-url", required=True, help="Login page to open in Chromium.")
     parser.add_argument(
         "--druks-url",
@@ -62,13 +64,14 @@ def request_json(
     except urllib.error.URLError as error:
         raise RuntimeError(f"Could not reach Druks at {base_url}: {error.reason}") from error
     with response:
-        try:
-            return json.load(response)
-        except json.JSONDecodeError as error:
-            raise RuntimeError(
-                f"Druks returned a non-JSON response for {method} {path}; "
-                "check the dashboard URL and session headers."
-            ) from error
+        body = response.read()
+    try:
+        return json.loads(body) if body else None
+    except json.JSONDecodeError as error:
+        raise RuntimeError(
+            f"Druks returned a non-JSON response for {method} {path}; "
+            "check the dashboard URL and session headers."
+        ) from error
 
 
 def load_playwright() -> Any:
@@ -94,26 +97,10 @@ def main() -> int:
 
     sync_playwright = load_playwright()
     sessions = request_json(args.druks_url, "/api/browser-sessions", headers=headers)
-    browser_session = next((row for row in sessions if row["name"] == args.name), None)
-    if browser_session:
-        if browser_session["payloadFormat"] != "storage_state":
-            raise RuntimeError(
-                f"Browser session {args.name!r} uses {browser_session['payloadFormat']!r}; "
-                "this importer captures storage_state."
-            )
-    else:
-        browser_session = request_json(
-            args.druks_url,
-            "/api/browser-sessions",
-            headers=headers,
-            method="POST",
-            data=json.dumps(
-                {
-                    "name": args.name,
-                    "payloadFormat": "storage_state",
-                    "site": urllib.parse.urlparse(args.site_url).hostname,
-                }
-            ).encode(),
+    if args.name not in {row["name"] for row in sessions if row["isDeclared"]}:
+        raise RuntimeError(
+            f"Browser session {args.name!r} is not declared by any installed "
+            "extension; declare it on the extension class first."
         )
 
     with tempfile.TemporaryDirectory(prefix="druks-browser-session-") as temporary_directory:
@@ -127,16 +114,17 @@ def main() -> int:
             context.storage_state(path=str(storage_state_path))
             browser.close()
 
-        imported = request_json(
+        request_json(
             args.druks_url,
-            f"/api/browser-sessions/{browser_session['id']}/state",
+            f"/api/browser-sessions/{urllib.parse.quote(args.name)}/state"
+            "?payloadFormat=storage_state",
             headers=headers,
             method="PUT",
             data=storage_state_path.read_bytes(),
             content_type="application/octet-stream",
         )
 
-    print(f"Imported {imported['name']}: {imported['status']}")
+    print(f"Imported {args.name}.")
     return 0
 
 
