@@ -31,7 +31,8 @@ RUN apt-get update \
         > /etc/apt/sources.list.d/nodesource.list \
     && apt-get update \
     && apt-get install -y --no-install-recommends \
-        fonts-liberation fonts-noto-cjk fonts-noto-color-emoji nodejs x11vnc xvfb \
+        fonts-liberation fonts-noto-cjk fonts-noto-color-emoji \
+        nodejs tzdata x11vnc xvfb \
     && rm -rf /var/lib/apt/lists/* \
     && install -d -m 0755 /opt/druks-browser \
     && cd /opt/druks-browser \
@@ -51,6 +52,21 @@ RUN apt-get update \
         | sha256sum --check --strict - \
     && install -m 0755 /tmp/pinchtab /usr/local/bin/pinchtab \
     && rm -f /tmp/pinchtab /tmp/pinchtab-checksums.txt
+
+# Real Google Chrome, so the login browser presents Chrome's fingerprint rather
+# than the bundled chromium's — a login gate reads the difference. Google ships
+# no arm64 Linux build, so this is amd64-only; session-launch falls back to the
+# bundled chromium where Chrome is absent.
+# hadolint ignore=DL3008
+RUN if [ "${TARGETARCH}" = "amd64" ]; then \
+        curl -fsSL https://dl.google.com/linux/linux_signing_key.pub \
+            | gpg --dearmor -o /etc/apt/keyrings/google-chrome.gpg \
+        && echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/google-chrome.gpg] https://dl.google.com/linux/chrome/deb/ stable main" \
+            > /etc/apt/sources.list.d/google-chrome.list \
+        && apt-get update \
+        && apt-get install -y --no-install-recommends google-chrome-stable \
+        && rm -rf /var/lib/apt/lists/*; \
+    fi
 
 RUN useradd --create-home --shell /bin/bash druks
 

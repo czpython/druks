@@ -13,6 +13,11 @@ const META_PATH = path.join(SESSION_ROOT, "state.meta.json");
 const PROFILE_ARCHIVE_PATH = path.join(SESSION_ROOT, "state.tar.gz");
 const STORAGE_STATE_PATH = path.join(SESSION_ROOT, "state.json");
 const PROFILE_PATH = path.join(SESSION_ROOT, "profile");
+// Real Google Chrome when the image carries it (amd64), else the bundled
+// chromium (arm64). A login gate reads the Chromium-vs-Chrome brand split, so
+// the login browser must be real Chrome wherever it can be.
+const CHROME_PATH = "/opt/google/chrome/chrome";
+const channel = fs.existsSync(CHROME_PATH) ? "chrome" : undefined;
 const RUNTIME_PATH = path.join(SESSION_ROOT, ".runtime");
 const PID_PATH = path.join(RUNTIME_PATH, "launcher.pid");
 const READY_PATH = path.join(RUNTIME_PATH, "ready.json");
@@ -87,6 +92,7 @@ async function main() {
   let isReady = false;
   try {
     context = await chromium.launchPersistentContext(PROFILE_PATH, {
+      channel,
       args: [
         "--remote-debugging-address=127.0.0.1",
         "--remote-debugging-port=9222",
