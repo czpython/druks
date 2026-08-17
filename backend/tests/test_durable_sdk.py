@@ -127,6 +127,19 @@ def _build_units():
         async def run(self) -> None:  # pragma: no cover - not fired in tests
             SINK.append("swept")
 
+    class ScheduledDispatch(Workflow):
+        # every + a dispatch() classmethod: the tick fires dispatch(), never the
+        # subjectless run(). dispatch() start()s for real — the enqueue must work
+        # from the scheduled workflow's body (a step is forbidden the child-start).
+        subject = Widget
+        every = "0 */4 * * *"
+
+        @classmethod
+        async def dispatch(cls) -> str:
+            return await cls.start(subject=Widget.get_for_subject_id("313131"))
+
+        async def run(self) -> None: ...
+
     class SubjectFlow(Workflow):
         # Records the subject the platform threaded in, and returns a BaseModel
         # so the result rides its workflow.finished event.
@@ -185,6 +198,7 @@ def _build_units():
         SubjectlessConfirmFlow,
         ReviewFlow,
         AttributedFlow,
+        ScheduledDispatch,
     )
 
 
@@ -217,7 +231,7 @@ def rt():
         session.flush()
         session.add_all(
             Widget(id=subject_id)
-            for subject_id in (7, 4242, 636363, 424242, 515151, 878787, 909090)
+            for subject_id in (7, 4242, 636363, 424242, 515151, 878787, 909090, 313131)
         )
         session.add(
             HarnessConnection(
@@ -243,6 +257,7 @@ def rt():
         subjectless_confirm_flow,
         review_flow,
         attributed_flow,
+        scheduled_dispatch,
     ) = _build_units()
     os.environ["DRUKS_DATABASE_URL"] = URL
     init_dbos()
@@ -260,6 +275,7 @@ def rt():
             SubjectlessConfirmFlow=subjectless_confirm_flow,
             ReviewFlow=review_flow,
             AttributedFlow=attributed_flow,
+            ScheduledDispatch=scheduled_dispatch,
         )
     finally:
         shutdown()
@@ -278,6 +294,7 @@ def rt():
         workflows._items.pop("subjectless_confirm_flow", None)
         workflows._items.pop("review_flow", None)
         workflows._items.pop("attributed_flow", None)
+        workflows._items.pop("scheduled_dispatch", None)
         if db_url_snap is None:
             os.environ.pop("DRUKS_DATABASE_URL", None)
         else:
@@ -624,6 +641,53 @@ async def test_every_registers_schedule(rt):
     params = list(inspect.signature(fn).parameters.values())
     assert params[0].annotation is datetime
     assert len(params) == 2 and params[1].name == "context"
+
+
+async def test_scheduled_tick_fires_dispatch_not_run(rt):
+    # A workflow that declares dispatch() is subject-backed — its run() can't fire
+    # subjectless. The tick must reach dispatch(), and dispatch()'s start() must
+    # enqueue the real run from the scheduled workflow's body.
+    from datetime import UTC, datetime
+
+    from druks.durable.engine import _scheduled
+
+    _, fn = next(row for row in _scheduled if row[0].kind == "scheduled_dispatch")
+    await fn(datetime.now(UTC), None)
+
+    def dispatched_run():
+        session = get_session(rt.engine)
+        try:
+            return session.execute(
+                select(Run).where(Run.kind == "scheduled_dispatch")
+            ).scalar_one_or_none()
+        finally:
+            session.close()
+
+    deadline = asyncio.get_event_loop().time() + 15
+    while asyncio.get_event_loop().time() < deadline:
+        run = dispatched_run()
+        if run and run.state == RunState.FINISHED:
+            break
+        await asyncio.sleep(0.1)
+    assert run.state == RunState.FINISHED
+    assert run.subject_label == "W-313131"  # about its subject, not subjectless
+
+
+async def test_scheduled_dispatch_must_be_nullary(rt):
+    # The tick fires dispatch() with no arguments, so a required parameter is a
+    # declaration error, caught when the class is defined.
+    from druks.durable.exceptions import WorkflowError
+
+    with pytest.raises(WorkflowError, match="nullary"):
+
+        class NeedsArg(Workflow):
+            every = "0 6 * * *"
+
+            async def run(self) -> None: ...  # pragma: no cover
+
+            @classmethod
+            async def dispatch(cls, target: str) -> str:  # pragma: no cover
+                return target
 
 
 async def test_apply_schedules_drops_undeclared(rt):
