@@ -1,0 +1,49 @@
+name: PR Images
+
+# The sandbox and browser images publish only on push to main, so a change to
+# their build contexts reached main with no pre-merge check. This builds them on
+# the pull request — amd64 only and without pushing, so a broken Dockerfile
+# fails the PR instead of the deploy. arm64 stays covered by the publish build.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "deploy/sandbox/**"
+      - "deploy/browser/**"
+      - ".github/workflows/on-pull-request-images.yml"
+
+concurrency:
+  group: on-pull-request-images-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  sandbox:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+      - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: deploy/sandbox
+          platforms: linux/amd64
+          push: false
+          cache-from: type=gha,scope=sandbox
+
+  browser:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+      - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: deploy/browser
+          platforms: linux/amd64
+          push: false
+          cache-from: type=gha,scope=browser
