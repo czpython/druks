@@ -124,17 +124,19 @@ main() {
 
   # COMPOSE_FILE → .env, so plain `docker compose` in this dir loads the right
   # overlay. `local` drives sandboxes on the host Docker daemon (dashboard on
-  # :8001, no Caddy); `remote` runs the cloud provider + Caddy. For local, the
-  # socket's gid rides along so drukbox's non-root appuser may use it — on
-  # macOS the host path is a user-owned symlink, but the socket Docker Desktop
-  # mounts into containers is group root, so the host gid would grant nothing.
+  # :8001, no Caddy); `remote` runs the cloud provider + Caddy. Both shapes
+  # mount the Docker socket — sandboxes on local, browser-session containers
+  # on remote — so the socket's gid rides along and drukbox's non-root appuser
+  # may use it. On macOS the host path is a user-owned symlink, but the socket
+  # Docker Desktop mounts into containers is group root, so the host gid would
+  # grant nothing.
+  if [ "$(uname -s)" = "Darwin" ]; then
+    set_env_var DRUKS_DOCKER_GID "0"
+  else
+    set_env_var DRUKS_DOCKER_GID "$(stat -c '%g' /var/run/docker.sock)"
+  fi
   if [ "$PROVIDER" = "docker" ]; then
     set_env_var COMPOSE_FILE "compose.yaml:compose.local.yaml"
-    if [ "$(uname -s)" = "Darwin" ]; then
-      set_env_var DRUKS_DOCKER_GID "0"
-    else
-      set_env_var DRUKS_DOCKER_GID "$(stat -c '%g' /var/run/docker.sock)"
-    fi
   else
     set_env_var COMPOSE_FILE "compose.yaml:compose.remote.yaml"
   fi

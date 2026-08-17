@@ -7,10 +7,19 @@
 x-drukbox: &drukbox
   image: ${DRUKS_SANDBOX_SERVICE_IMAGE:-ghcr.io/czpython/drukbox:latest}
   network_mode: host
+  # Cloud VMs are the sandbox home; the mounted socket serves the docker
+  # provider that browser-session containers run on. install.sh records the
+  # socket's gid so drukbox's non-root appuser may use it.
+  group_add:
+    - "${DRUKS_DOCKER_GID:-0}"
+  volumes:
+    - /var/run/docker.sock:/var/run/docker.sock
   env_file:
     - ./.env
   environment:
     DATABASE_URL: postgresql+psycopg://${DRUKS_POSTGRES_USER:-druks}:${DRUKS_POSTGRES_PASSWORD}@127.0.0.1:5432/drukbox
+    # Browser containers run sshd for the druks user, not root.
+    DOCKER_SSH_USERNAME: druks
   depends_on:
     postgres:
       condition: service_healthy
