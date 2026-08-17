@@ -309,20 +309,17 @@ export type BrowserSessionStatus = 'needs_login' | 'ready' | 'stale'
 export type BrowserSessionPayloadFormat = 'storage_state' | 'profile_dir'
 
 export interface BrowserSession {
-  id: string
   name: string
   status: BrowserSessionStatus
-  payloadFormat: BrowserSessionPayloadFormat
+  /** Stored facts arrive with the row; a declared session nobody has acted
+   * on yet has none. */
+  payloadFormat: BrowserSessionPayloadFormat | null
   site: string
-  createdAt: string
+  /** False for a leftover row whose declaring extension is gone. */
+  isDeclared: boolean
+  createdAt: string | null
   lastRefreshedAt: string | null
   lastUsedAt: string | null
-}
-
-export interface CreateBrowserSessionRequest {
-  name: string
-  payloadFormat: BrowserSessionPayloadFormat
-  site: string
 }
 
 /** Where an agent's resolved model came from: its own override, or the

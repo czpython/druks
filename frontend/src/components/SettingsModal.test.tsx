@@ -188,7 +188,9 @@ describe('SettingsModal extension fields', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Browser sessions' }))
 
     expect(await screen.findByRole('heading', { name: 'Browser sessions' })).toBeTruthy()
-    expect(await screen.findByText('No browser sessions yet.')).toBeTruthy()
+    expect(
+      await screen.findByText('No installed extension declares a browser session.'),
+    ).toBeTruthy()
   })
 
   it('spells an underscored app name out in the rail and its options group', async () => {

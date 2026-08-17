@@ -17,6 +17,7 @@ from druks.browser.exceptions import (
 )
 from druks.browser.locks import acquire_writer_lock, release_writer_lock
 from druks.browser.models import StoredBrowserSession
+from druks.extensions.registry import browser_sessions
 from druks.sandbox.client import sandbox_client
 from druks.settings import load_settings
 
@@ -48,6 +49,7 @@ class BrowserSession:
 
     def __set_name__(self, owner: type, attr: str) -> None:
         self.name = f"{owner.name}.{attr}"
+        browser_sessions.register(self)
 
     @asynccontextmanager
     async def cdp(self):
@@ -99,24 +101,21 @@ class BrowserSession:
     def mark_stale(self) -> None:
         """Report the login bounced — the site wants the operator back. The
         pane shows the session as stale; the workflow decides whether to park."""
-        self._get_or_create_row().mark_stale()
+        self.get_or_create_row().mark_stale()
 
-    def _get_or_create_row(self) -> StoredBrowserSession:
-        """The declaration's stored half, written the first time a run reaches
-        for the login. Until then the declaration is the only thing that exists —
-        the row appears in the sessions pane wanting a login, which is how the
-        operator learns the extension needs one."""
-        row = StoredBrowserSession.get_for_name(self.name)
-        if row:
-            return row
-        return StoredBrowserSession.create(
+    def get_or_create_row(self) -> StoredBrowserSession:
+        """The declaration's stored half, written by the first action that
+        needs it — a borrow, a login-window open, or a state import. Until
+        then the declaration alone puts the session in the pane, wanting a
+        login."""
+        return StoredBrowserSession.get_or_create(
             name=self.name,
             payload_format=BrowserSessionPayloadFormat.PROFILE_DIR,
             site=self.site,
         )
 
     def _ready_row(self) -> StoredBrowserSession:
-        row = self._get_or_create_row()
+        row = self.get_or_create_row()
         if row.status != BrowserSessionStatus.READY.value:
             raise BrowserSessionNotReadyError(self.name, row.status)
         return row

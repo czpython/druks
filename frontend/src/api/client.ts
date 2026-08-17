@@ -4,7 +4,6 @@ import type {
   ArtifactContent,
   BrowserSession,
   ConnectChallenge,
-  CreateBrowserSessionRequest,
   DashboardHealth,
   Extension,
   FeedResponse,
@@ -226,24 +225,18 @@ export const api = {
   connectService: (name: string, fields: Record<string, string>) =>
     postJSON<Service>(`/api/services/${encodeURIComponent(name)}`, fields),
   browserSessions: () => getJSON<BrowserSession[]>('/api/browser-sessions'),
-  browserSession: (id: string) =>
-    getJSON<BrowserSession>(`/api/browser-sessions/${encodeURIComponent(id)}`),
-  createBrowserSession: (body: CreateBrowserSessionRequest) =>
-    postJSON<BrowserSession>('/api/browser-sessions', body),
-  renameBrowserSession: (id: string, name: string) =>
-    patchJSON<BrowserSession>(`/api/browser-sessions/${encodeURIComponent(id)}`, { name }),
-  deleteBrowserSession: (id: string) =>
-    deleteRequest(`/api/browser-sessions/${encodeURIComponent(id)}`),
-  openBrowserSessionLoginWindow: (id: string) =>
-    postNoContent(`/api/browser-sessions/${encodeURIComponent(id)}/login-window`, undefined),
-  saveBrowserSessionLoginWindow: (id: string) =>
-    postJSON<BrowserSession>(
-      `/api/browser-sessions/${encodeURIComponent(id)}/login-window/save`,
+  deleteBrowserSession: (name: string) =>
+    deleteRequest(`/api/browser-sessions/${encodeURIComponent(name)}`),
+  openBrowserSessionLoginWindow: (name: string) =>
+    postNoContent(`/api/browser-sessions/${encodeURIComponent(name)}/login-window`, undefined),
+  saveBrowserSessionLoginWindow: (name: string) =>
+    postNoContent(
+      `/api/browser-sessions/${encodeURIComponent(name)}/login-window/save`,
       undefined,
     ),
-  cancelBrowserSessionLoginWindow: (id: string) =>
+  cancelBrowserSessionLoginWindow: (name: string) =>
     postNoContent(
-      `/api/browser-sessions/${encodeURIComponent(id)}/login-window/cancel`,
+      `/api/browser-sessions/${encodeURIComponent(name)}/login-window/cancel`,
       undefined,
     ),
   getExtensionSettings: () => getJSON<ExtensionsSettingsResponse>('/api/settings/extensions'),

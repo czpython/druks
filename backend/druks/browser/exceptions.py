@@ -49,8 +49,8 @@ class BrowserClientMissingError(Exception):
 class BrowserLoginWindowGoneError(BrowserApiError):
     status_code = 410
 
-    def __init__(self, session_id: str) -> None:
-        super().__init__(f"Browser session {session_id!r} has no open login window.")
+    def __init__(self) -> None:
+        super().__init__("This login window is no longer open.")
 
 
 class BrowserVncError(Exception):

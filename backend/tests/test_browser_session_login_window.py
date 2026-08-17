@@ -80,7 +80,7 @@ def window_runtime(tmp_path, monkeypatch):
 
 
 def create_session(name: str = "x-main") -> StoredBrowserSession:
-    return StoredBrowserSession.create(
+    return StoredBrowserSession.get_or_create(
         name=name,
         payload_format=BrowserSessionPayloadFormat.STORAGE_STATE,
         site="x.com",
@@ -100,7 +100,7 @@ async def test_open_seeds_a_blank_profile_and_records_the_container(window_runti
     }
     assert STATE_PATH not in browser.files
     assert PROFILE_PATH not in browser.files
-    assert (await LoginWindow.get_for_session(session.id)).host_id == browser.id
+    assert (await LoginWindow.get_for_session(session.name)).host_id == browser.id
     assert client.provisions == [
         {"image_override": "ghcr.io/czpython/druks-browser:latest", "provider": "docker"}
     ]
@@ -114,7 +114,7 @@ async def test_reopening_disposes_the_previous_window(window_runtime):
     await LoginWindow.open(session)
 
     assert client.released == ["browser-1"]
-    assert (await LoginWindow.get_for_session(session.id)).host_id == "browser-2"
+    assert (await LoginWindow.get_for_session(session.name)).host_id == "browser-2"
 
 
 async def test_storage_state_reconnect_saves_a_profile(window_runtime):
@@ -131,16 +131,16 @@ async def test_storage_state_reconnect_saves_a_profile(window_runtime):
         "version": 1,
     }
 
-    saved = await (await LoginWindow.get_for_session(session.id)).save()
+    saved = await (await LoginWindow.get_for_session(session.name)).save()
 
     assert saved.payload_format == BrowserSessionPayloadFormat.PROFILE_DIR
     db_session().expire_all()
-    stored = StoredBrowserSession.get_for_id(session.id)
+    stored = StoredBrowserSession.get_for_name(session.name)
     assert stored.status == BrowserSessionStatus.READY.value
     assert stored.payload.decrypt() == b"fresh-profile"
     assert client.released == [browser.id]
     with pytest.raises(BrowserLoginWindowGoneError):
-        await LoginWindow.get_for_session(session.id)
+        await LoginWindow.get_for_session(session.name)
 
 
 async def test_failed_export_closes_the_window(window_runtime):
@@ -150,11 +150,11 @@ async def test_failed_export_closes_the_window(window_runtime):
     client.browsers[0].export_exit_code = 1
 
     with pytest.raises(BrowserExportError):
-        await (await LoginWindow.get_for_session(session.id)).save()
+        await (await LoginWindow.get_for_session(session.name)).save()
 
     assert client.released == [client.browsers[0].id]
     with pytest.raises(BrowserLoginWindowGoneError):
-        await LoginWindow.get_for_session(session.id)
+        await LoginWindow.get_for_session(session.name)
 
 
 async def test_cancel_then_cancel_again_reports_the_window_gone(window_runtime):
@@ -162,11 +162,11 @@ async def test_cancel_then_cancel_again_reports_the_window_gone(window_runtime):
     session = create_session()
     await LoginWindow.open(session)
 
-    await (await LoginWindow.get_for_session(session.id)).cancel()
+    await (await LoginWindow.get_for_session(session.name)).cancel()
 
     assert client.released == [client.browsers[0].id]
     with pytest.raises(BrowserLoginWindowGoneError):
-        await LoginWindow.get_for_session(session.id)
+        await LoginWindow.get_for_session(session.name)
 
 
 async def test_get_for_session_reports_a_missing_window():

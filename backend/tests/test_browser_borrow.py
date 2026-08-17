@@ -19,10 +19,14 @@ from druks.secrets import utils as secret_utils
 from druks.testing import make_settings
 
 
-class XMe:
-    name = "x_me"
-    x = BrowserSession(site="x.com", persist=True)
-    docs = BrowserSession(site="docs.example")
+@pytest.fixture
+def x_me(browser_session_declarations):
+    class XMe:
+        name = "x_me"
+        x = BrowserSession(site="x.com", persist=True)
+        docs = BrowserSession(site="docs.example")
+
+    return XMe
 
 
 class FakeListener:
@@ -101,7 +105,7 @@ def borrow(druks_db, tmp_path, monkeypatch):
 def stored_session(
     declaration: BrowserSession, payload: bytes = b"stored-state"
 ) -> StoredBrowserSession:
-    row = StoredBrowserSession.create(
+    row = StoredBrowserSession.get_or_create(
         name=declaration.name,
         payload_format=BrowserSessionPayloadFormat.STORAGE_STATE,
         site=declaration.site,
@@ -110,16 +114,16 @@ def stored_session(
     return row
 
 
-def test_declaration_carries_the_extension_namespace():
-    assert XMe.x.name == "x_me.x"
-    assert XMe.docs.name == "x_me.docs"
+def test_declaration_carries_the_extension_namespace(x_me):
+    assert x_me.x.name == "x_me.x"
+    assert x_me.docs.name == "x_me.docs"
 
 
-async def test_borrow_yields_a_tunneled_cdp_url(borrow):
+async def test_borrow_yields_a_tunneled_cdp_url(borrow, x_me):
     browser, redis = borrow
-    stored_session(XMe.docs)
+    stored_session(x_me.docs)
 
-    async with XMe.docs.cdp() as cdp_url:
+    async with x_me.docs.cdp() as cdp_url:
         assert cdp_url == "http://127.0.0.1:43987"
 
     assert browser.forwarded_port == 9222
@@ -133,7 +137,7 @@ async def test_borrow_yields_a_tunneled_cdp_url(borrow):
     launch_script = browser.commands[0][2]
     assert "session-launch --headed" in launch_script
     assert not redis.values
-    assert StoredBrowserSession.get_for_name(XMe.docs.name).last_used_at
+    assert StoredBrowserSession.get_for_name(x_me.docs.name).last_used_at
 
 
 async def test_headless_declaration_launches_headless(borrow):
@@ -149,83 +153,85 @@ async def test_headless_declaration_launches_headless(borrow):
     assert "session-launch --headless" in browser.commands[0][2]
 
 
-async def test_persisting_borrow_locks_exports_and_stores(borrow):
+async def test_persisting_borrow_locks_exports_and_stores(borrow, x_me):
     browser, redis = borrow
-    row = stored_session(XMe.x)
+    row = stored_session(x_me.x)
 
-    async with XMe.x.cdp():
+    async with x_me.x.cdp():
         assert redis.values
 
     assert not redis.values
     assert browser.commands[-1] == ["session-export"]
     db_session().expire_all()
-    stored = StoredBrowserSession.get_for_name(XMe.x.name)
+    stored = StoredBrowserSession.get_for_name(x_me.x.name)
     assert stored.payload.decrypt() == b"exported-profile"
     assert stored.payload_format == BrowserSessionPayloadFormat.PROFILE_DIR.value
     assert stored.id == row.id
 
 
-async def test_persisting_borrow_refuses_a_second_writer(borrow):
+async def test_persisting_borrow_refuses_a_second_writer(borrow, x_me):
     browser, redis = borrow
-    stored_session(XMe.x)
-    redis.values[f"browser_session:{StoredBrowserSession.get_for_name(XMe.x.name).id}"] = "other"
+    stored_session(x_me.x)
+    redis.values[f"browser_session:{StoredBrowserSession.get_for_name(x_me.x.name).id}"] = "other"
 
     with pytest.raises(BrowserSessionWriterLockedError):
-        async with XMe.x.cdp():
+        async with x_me.x.cdp():
             pass
 
     assert browser.commands == []
 
 
-async def test_first_borrow_writes_the_declared_session_and_asks_for_a_login(borrow, druks_db):
-    """Nothing is stored until a run reaches for the login: the first borrow
-    writes the row so the pane can ask the operator to sign in, and says so."""
-    assert not StoredBrowserSession.get_for_name(XMe.docs.name)
+async def test_first_borrow_writes_the_declared_session_and_asks_for_a_login(
+    borrow, x_me, druks_db
+):
+    """The first borrow materializes the row and refuses to open a browser:
+    the session is declared, but nobody has signed into it yet."""
+    assert not StoredBrowserSession.get_for_name(x_me.docs.name)
 
     with pytest.raises(BrowserSessionNotReadyError):
-        async with XMe.docs.cdp():
+        async with x_me.docs.cdp():
             pass
 
-    row = StoredBrowserSession.get_for_name(XMe.docs.name)
+    row = StoredBrowserSession.get_for_name(x_me.docs.name)
     assert row.status == BrowserSessionStatus.NEEDS_LOGIN.value
-    assert row.site == XMe.docs.site
+    assert row.site == x_me.docs.site
 
     with pytest.raises(BrowserSessionNotReadyError):
-        async with XMe.docs.cdp():
+        async with x_me.docs.cdp():
             pass
 
     assert StoredBrowserSession.list_all() == [row]
 
 
-async def test_launch_failure_raises_and_releases_the_lock(borrow):
+async def test_launch_failure_raises_and_releases_the_lock(borrow, x_me):
     browser, redis = borrow
-    stored_session(XMe.x)
+    stored_session(x_me.x)
     browser.launch_exit = 1
 
     with pytest.raises(BrowserLaunchError, match="launch stderr"):
-        async with XMe.x.cdp():
+        async with x_me.x.cdp():
             pass
 
     assert not redis.values
 
 
-def test_mark_stale_flags_the_row(borrow):
-    stored_session(XMe.docs)
+def test_mark_stale_flags_the_row(borrow, x_me):
+    stored_session(x_me.docs)
 
-    XMe.docs.mark_stale()
+    x_me.docs.mark_stale()
 
     assert (
-        StoredBrowserSession.get_for_name(XMe.docs.name).status == BrowserSessionStatus.STALE.value
+        StoredBrowserSession.get_for_name(x_me.docs.name).status == BrowserSessionStatus.STALE.value
     )
 
 
-async def test_playwright_yields_the_logged_in_context(borrow, monkeypatch):
+async def test_playwright_yields_the_logged_in_context(borrow, x_me, monkeypatch):
     import sys
     import types
     from contextlib import asynccontextmanager as acm
 
     browser, _ = borrow
-    stored_session(XMe.docs)
+    stored_session(x_me.docs)
     seen = {}
     logged_in_context = object()
 
@@ -249,19 +255,19 @@ async def test_playwright_yields_the_logged_in_context(borrow, monkeypatch):
     monkeypatch.setitem(sys.modules, "playwright", types.ModuleType("playwright"))
     monkeypatch.setitem(sys.modules, "playwright.async_api", playwright_module)
 
-    async with XMe.docs.playwright() as context:
+    async with x_me.docs.playwright() as context:
         assert context is logged_in_context
 
     assert seen == {"url": "http://127.0.0.1:43987", "closed": True}
 
 
-async def test_playwright_without_the_dependency_names_the_fix(borrow, monkeypatch):
+async def test_playwright_without_the_dependency_names_the_fix(borrow, x_me, monkeypatch):
     import sys
 
-    stored_session(XMe.docs)
+    stored_session(x_me.docs)
     monkeypatch.setitem(sys.modules, "playwright", None)
     monkeypatch.setitem(sys.modules, "playwright.async_api", None)
 
     with pytest.raises(BrowserClientMissingError, match="add playwright"):
-        async with XMe.docs.playwright():
+        async with x_me.docs.playwright():
             pass

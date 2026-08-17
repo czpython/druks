@@ -1,6 +1,7 @@
 from datetime import datetime
 
 from sqlalchemy import CheckConstraint, String, select
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Mapped, mapped_column
 
 from druks.browser.constants import (
@@ -37,25 +38,26 @@ class StoredBrowserSession(Base, Uuid7Pk):
     last_used_at: Mapped[datetime | None] = mapped_column(default=None)
 
     @classmethod
-    def create(
+    def get_or_create(
         cls,
         *,
         name: str,
         payload_format: BrowserSessionPayloadFormat,
         site: str,
     ):
-        browser_session = cls(
-            name=name,
-            payload_format=payload_format.value,
-            site=site,
+        """Concurrency-safe lookup-or-create: two first actions racing on the
+        same session both INSERT with ON CONFLICT DO NOTHING, then converge on
+        the one row through the name lookup."""
+        browser_session = cls.get_for_name(name)
+        if browser_session:
+            return browser_session
+        session = db_session()
+        session.execute(
+            insert(cls)
+            .values(name=name, payload_format=payload_format.value, site=site)
+            .on_conflict_do_nothing(index_elements=["name"])
         )
-        db_session().add(browser_session)
-        db_session().flush()
-        return browser_session
-
-    @classmethod
-    def get_for_id(cls, session_id: str):
-        return db_session().get(cls, session_id)
+        return session.scalars(select(cls).where(cls.name == name)).one()
 
     @classmethod
     def list_all(cls):
@@ -64,10 +66,6 @@ class StoredBrowserSession(Base, Uuid7Pk):
     @classmethod
     def get_for_name(cls, name: str):
         return db_session().scalar(select(cls).where(cls.name == name))
-
-    def rename(self, name: str) -> None:
-        self.name = name
-        db_session().flush()
 
     def mark_stale(self) -> None:
         self.status = BrowserSessionStatus.STALE.value

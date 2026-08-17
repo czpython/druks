@@ -90,6 +90,19 @@ def registry_state():
     mcp_servers._items.update(saved)
 
 
+@pytest.fixture
+def browser_session_declarations():
+    # BrowserSession declarations self-register at class definition, so what a
+    # test module defines at import time would leak into every merged-list
+    # read; tests declare inside this fixture and leave the registry as found.
+    from druks.extensions.registry import browser_sessions
+
+    saved = dict(browser_sessions._items)
+    yield browser_sessions
+    browser_sessions._items.clear()
+    browser_sessions._items.update(saved)
+
+
 # These modules manage their own engine + database and commit for real — the DBOS
 # durable tests (their own per-test database + worker connections that read across
 # the commit) and the alembic migration test (its own AUTOCOMMIT engine, DDL it
