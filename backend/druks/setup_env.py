@@ -71,6 +71,7 @@ _KNOWN_TOML_KEYS = {
         "service_token",
         "image",
         "browser_login_proxy",
+        "browser_login_tz",
         "timeout",
     ),
     "env": (),
@@ -186,6 +187,9 @@ image = ""
 # address. Authless address, e.g. http://172.17.0.1:8888. Empty => the box's own
 # IP. Only the login window uses it; borrows keep it. See configuration.md.
 browser_login_proxy = ""
+# The login browser's timezone (an IANA zone, e.g. "Europe/Madrid"), so it
+# agrees with the egress proxy's geography. Empty => the container default.
+browser_login_tz = ""
 timeout = 180
 
 # Put drukbox environment in [sandbox.<provider>]. The table is passed through

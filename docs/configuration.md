@@ -261,6 +261,7 @@ connected.
 | `sandbox.timeout` | Control-plane request timeout; default 180 seconds |
 | `sandbox.image` | Optional provider image override |
 | `sandbox.browser_login_proxy` | Login-window egress proxy; empty keeps the box IP |
+| `sandbox.browser_login_tz` | Login-window timezone (IANA zone); empty keeps the container default |
 
 `DRUKS_SANDBOX_KEYS_DIR` remains a process environment override for the
 per-host SSH private-key directory.
@@ -277,6 +278,12 @@ reachable over the tailnet, or run a local `gost` relay
 proxy you provide. Leaving it empty keeps today's behavior. A fixed proxy fails
 closed — if the exit is unreachable the login browser errors rather than falling
 back to the box IP.
+
+`[sandbox].browser_login_tz` sets the login browser's timezone to an IANA zone
+name (e.g. `Europe/Madrid`), so it agrees with where `browser_login_proxy`
+egresses — a browser reporting one region while its IP is in another is an
+inconsistency some sign-in flows check. It applies to the login window only.
+Empty leaves the container's default timezone.
 
 `[sandbox].provider` accepts any Drukbox provider name. `docker` selects the
 local install shape, `exe` selects the exe.dev + tailnet shape, and every other

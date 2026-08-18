@@ -162,6 +162,10 @@ class Sandbox(BaseModel):
     # address. Authless address; credentials, if any, are terminated deploy-side.
     # Empty → the box's own IP. Only the login window uses it; borrows keep it.
     browser_login_proxy: str = ""
+    # The login browser's timezone, so it agrees with the egress proxy's
+    # geography (e.g. "Europe/Madrid"). An IANA zone name. Empty → the container
+    # default. Only the login window uses it.
+    browser_login_tz: str = ""
     # Sized for the slowest provisioner.
     timeout: float = 180.0
 
