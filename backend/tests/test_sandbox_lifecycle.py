@@ -5,13 +5,19 @@ from typing import Any
 
 import pytest
 from drukbox_sdk import SandboxHost as SandboxHostRecord
-from drukbox_sdk.exceptions import SandboxNotFoundError
+from drukbox_sdk.exceptions import (
+    SandboxAuthError,
+    SandboxNotFoundError,
+    SandboxProvisioningError,
+    SandboxUnavailableError,
+)
+from druks.harnesses.exceptions import HarnessSandboxProvisioningError, Retry
 from druks.sandbox import credentials as creds_module
 from druks.sandbox import layout, repo
 from druks.sandbox.client import sandbox_client
 from druks.sandbox.constants import SANDBOX_HOST_LEASE_SECONDS
 from druks.sandbox.datastructures import Credentials
-from druks.sandbox.exceptions import ExecFailed, HostGone
+from druks.sandbox.exceptions import ExecFailed, HostGone, SandboxUnreachable
 from druks.sandbox.host import ExecResult
 
 
@@ -80,6 +86,7 @@ class _FakeAPI:
     deleted_ids: list[str] = field(default_factory=list)
     get_host_responses: list[SandboxHostRecord] = field(default_factory=list)
     create_record: SandboxHostRecord | None = None
+    create_raises: Exception | None = None
     delete_raises: Exception | None = None
     # When set, every get_host call raises this exception instead of
     # returning from get_host_responses. Used by the attach() tests
@@ -98,6 +105,8 @@ class _FakeAPI:
     ) -> SandboxHostRecord:
         self.created_envs.append(env)
         self.created_expires_at.append(expires_at)
+        if self.create_raises is not None:
+            raise self.create_raises
         assert self.create_record is not None, "test forgot to set create_record"
         return self.create_record
 
@@ -484,6 +493,126 @@ async def test_acquire_releases_host_when_helper_upload_fails(
         "create_host succeeded but the helper upload failed before yield; "
         "acquire must roll back the host it created"
     )
+
+
+@pytest.mark.parametrize(
+    "sdk_error",
+    [
+        pytest.param(SandboxProvisioningError("provider timed out"), id="provisioning"),
+        pytest.param(SandboxUnavailableError("exe.dev transport failed"), id="unavailable"),
+    ],
+)
+async def test_acquire_translates_transient_create_failures(
+    sdk_error: Exception,
+    patched_real_sandbox: list[_FakeSandbox],
+    patched_sandbox_api: list[_FakeAPI],
+):
+    """A transient control-plane failure from ``create_host`` (a 502
+    provisioning error or a transport/503 unavailable error) is translated at
+    the client boundary into the classified, transient-retryable harness error
+    with the SDK exception preserved as the cause."""
+    api = _FakeAPI(create_raises=sdk_error)
+    patched_sandbox_api.append(api)
+
+    with pytest.raises(HarnessSandboxProvisioningError) as excinfo:
+        async with sandbox_client.acquire():
+            pass
+
+    error = excinfo.value
+    assert error.code == "sandbox_provisioning"
+    assert error.retry is Retry.TRANSIENT
+    # The schedule is inherited from HarnessSandboxError, not re-declared.
+    assert error.retry_delays == (60, 300)
+    assert error.__cause__ is sdk_error
+
+
+async def test_acquire_passes_through_fatal_create_failure(
+    patched_real_sandbox: list[_FakeSandbox],
+    patched_sandbox_api: list[_FakeAPI],
+):
+    """A non-transient SDK failure (auth, and the other ``SandboxAPIError``
+    subclasses) is left untouched — it must not become a provisioning failure
+    and so must not enter the transient retry path."""
+    fatal = SandboxAuthError("token revoked")
+    api = _FakeAPI(create_raises=fatal)
+    patched_sandbox_api.append(api)
+
+    with pytest.raises(SandboxAuthError) as excinfo:
+        async with sandbox_client.acquire():
+            pass
+
+    assert excinfo.value is fatal
+    # No host was created, so nothing to roll back.
+    assert api.deleted_ids == []
+
+
+async def test_acquire_classifies_setup_reachability_failure_after_rollback(
+    patched_real_sandbox: list[_FakeSandbox],
+    patched_sandbox_api: list[_FakeAPI],
+):
+    """A freshly created host that never becomes reachable/usable during SSH +
+    helper setup is rolled back (host deleted, key removed) and re-raised as a
+    classified provisioning failure carrying the original reachability error as
+    its cause — so the run retries instead of dead-ending on an empty code."""
+    api = _FakeAPI(create_record=_record(status="active"))
+    patched_sandbox_api.append(api)
+    unreachable = SandboxUnreachable("failed to write /root/.gitconfig")
+
+    async def _fake_upload(sandbox: Any) -> None:
+        raise unreachable
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr("druks.sandbox.client._upload_helper_script", _fake_upload)
+        with pytest.raises(HarnessSandboxProvisioningError) as excinfo:
+            async with sandbox_client.acquire():
+                pass
+
+    assert excinfo.value.code == "sandbox_provisioning"
+    assert excinfo.value.__cause__ is unreachable
+    # Rollback still happened despite the reclassification.
+    assert api.deleted_ids == ["host-xyz"]
+
+
+async def test_acquire_setup_cancellation_propagates_unclassified(
+    patched_real_sandbox: list[_FakeSandbox],
+    patched_sandbox_api: list[_FakeAPI],
+):
+    """Cancellation during setup rolls the host back but is never reclassified
+    as a provisioning failure — the run is being torn down, not retried."""
+    import asyncio
+
+    api = _FakeAPI(create_record=_record(status="active"))
+    patched_sandbox_api.append(api)
+
+    async def _fake_upload(sandbox: Any) -> None:
+        raise asyncio.CancelledError
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr("druks.sandbox.client._upload_helper_script", _fake_upload)
+        with pytest.raises(asyncio.CancelledError):
+            async with sandbox_client.acquire():
+                pass
+
+    assert api.deleted_ids == ["host-xyz"]
+
+
+async def test_attach_translates_unavailable_lookup_failure(
+    patched_real_sandbox: list[_FakeSandbox],
+    patched_sandbox_api: list[_FakeAPI],
+):
+    """A transport/503 while looking up an existing host is classified as a
+    provisioning failure (transient retry re-attaches once the service
+    recovers), distinct from a 404 which stays ``HostGone``."""
+    unavailable = SandboxUnavailableError("exe.dev transport failed")
+    api = _FakeAPI(create_record=None, get_host_raises=unavailable)
+    patched_sandbox_api.append(api)
+
+    with pytest.raises(HarnessSandboxProvisioningError) as excinfo:
+        async with sandbox_client.attach(host_id="host-xyz"):
+            pass
+
+    assert excinfo.value.code == "sandbox_provisioning"
+    assert excinfo.value.__cause__ is unavailable
 
 
 async def test_attach_returns_sandbox(

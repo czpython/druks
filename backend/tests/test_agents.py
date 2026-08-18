@@ -580,6 +580,186 @@ async def test_in_step_quota_reraises_without_sleeping(monkeypatch, current_run)
     durable_sleep.assert_not_awaited()
 
 
+def _flaky_ephemeral(sandbox, keys, *, failures):
+    """An ephemeral() that raises each error in ``failures`` in turn (recording
+    the idempotency key each attempt presents) then yields ``sandbox``. Used to
+    simulate a transient provisioning failure at acquire time that recovers."""
+    attempts = 0
+
+    @asynccontextmanager
+    async def _fake(self, *, idempotency_key=None, **_kwargs):
+        nonlocal attempts
+        keys.append(idempotency_key)
+        index = attempts
+        attempts += 1
+        if index < len(failures):
+            raise failures[index]
+        yield sandbox
+
+    return _fake
+
+
+async def test_provisioning_failure_recovers_through_durable_retry(
+    druks_db, tmp_path, monkeypatch, current_run, _inline_agent_steps
+):
+    """A transient provisioning failure at acquire time is retried by the
+    body-level durable path with backoff; a later attempt succeeds, and every
+    attempt for the one logical acquire presents the same ephemeral key."""
+    from druks.harnesses.exceptions import HarnessSandboxProvisioningError
+
+    sandbox = _patch_runtime(monkeypatch, tmp_path, {"ok": True})
+    keys: list[str | None] = []
+    monkeypatch.setattr(
+        "druks.sandbox.client.Client.ephemeral",
+        _flaky_ephemeral(
+            sandbox, keys, failures=[HarnessSandboxProvisioningError("exe.dev create timed out")]
+        ),
+    )
+    monkeypatch.setattr(agents.random, "uniform", lambda _low, _high: 1.0)
+    current_run._reap_run = AsyncMock()
+    checkpoints, sleep = _inline_agent_steps
+
+    result = await DUMMY_AGENT()
+
+    assert result == DummyOutput(ok=True)
+    # First delay off the schedule HarnessSandboxProvisioningError inherits (60, 300).
+    assert [awaited.args[0] for awaited in sleep.await_args_list] == [60.0]
+    # Each attempt re-enters _run with the same workflow/agent identity → same key.
+    assert keys == ["wf-9:dummy", "wf-9:dummy"]
+    # A 60s wait is under the reap-before threshold, so the (never-acquired) VM
+    # isn't reaped between attempts.
+    current_run._reap_run.assert_not_awaited()
+    # Both attempts are separate durable steps under the agent's step name.
+    assert [options["name"] for options in checkpoints] == ["test.agent.dummy"] * 2
+
+
+async def test_provisioning_failure_recovers_in_step_retry(
+    druks_db, tmp_path, monkeypatch, current_run
+):
+    """An agent invoked inside an enclosing @step retries the same transient
+    provisioning failure in memory (plain asyncio.sleep, no durable sleep) and
+    recovers, holding the ephemeral key stable across attempts."""
+    from druks.harnesses.exceptions import HarnessSandboxProvisioningError
+    from druks.workflows import _in_step
+
+    sandbox = _patch_runtime(monkeypatch, tmp_path, {"ok": True})
+    keys: list[str | None] = []
+    monkeypatch.setattr(
+        "druks.sandbox.client.Client.ephemeral",
+        _flaky_ephemeral(
+            sandbox, keys, failures=[HarnessSandboxProvisioningError("exe.dev create timed out")]
+        ),
+    )
+    monkeypatch.setattr(agents.random, "uniform", lambda _low, _high: 1.0)
+    memory_sleep = AsyncMock()
+    durable_sleep = AsyncMock()
+    monkeypatch.setattr(agents.asyncio, "sleep", memory_sleep)
+    monkeypatch.setattr(agents.DBOS, "sleep_async", durable_sleep)
+
+    token = _in_step.set(True)
+    try:
+        result = await DUMMY_AGENT()
+    finally:
+        _in_step.reset(token)
+
+    assert result == DummyOutput(ok=True)
+    memory_sleep.assert_awaited_once_with(60.0)
+    durable_sleep.assert_not_awaited()
+    assert keys == ["wf-9:dummy", "wf-9:dummy"]
+
+
+async def test_reused_host_retry_presents_a_stable_idempotency_key(monkeypatch, current_run):
+    """A warm workflow that reuses its sandbox re-provisions the host on the
+    same logical acquire with an unchanged idempotency key, so an ambiguous
+    create timeout resolves to the existing host instead of leaking a duplicate."""
+    from druks.harnesses.exceptions import HarnessSandboxProvisioningError
+
+    current_run.steps_reuse_sandbox = True
+    keys: list[str | None] = []
+    host = MagicMock()
+    host.id = "warm-host"
+    host.expires_at = None
+    attempts = 0
+
+    async def fake_provision(self, *, idempotency_key=None, **_kwargs):
+        nonlocal attempts
+        keys.append(idempotency_key)
+        index = attempts
+        attempts += 1
+        if index == 0:
+            raise HarnessSandboxProvisioningError("provider slow")
+        return host
+
+    monkeypatch.setattr("druks.sandbox.client.Client.provision", fake_provision)
+
+    with pytest.raises(HarnessSandboxProvisioningError):
+        await current_run._ensure_host()
+    host_id = await current_run._ensure_host()
+
+    assert host_id == "warm-host"
+    assert keys == ["wf-9:sandbox", "wf-9:sandbox"]
+
+
+async def test_provisioning_failure_exhausts_retries_with_classified_code(
+    druks_db, tmp_path, monkeypatch, current_run, _inline_agent_steps
+):
+    """When transient provisioning retries exhaust, the propagated error still
+    carries ``code=sandbox_provisioning`` — the classification survives to the
+    run's failure record instead of falling back to an empty code."""
+    from druks.harnesses.exceptions import HarnessSandboxProvisioningError
+
+    _patch_runtime(monkeypatch, tmp_path, {"ok": True})
+    failures = [HarnessSandboxProvisioningError(f"provider down {i}") for i in range(3)]
+    monkeypatch.setattr(
+        "druks.sandbox.client.Client.ephemeral", _flaky_ephemeral(None, [], failures=failures)
+    )
+    monkeypatch.setattr(agents.random, "uniform", lambda _low, _high: 1.0)
+    current_run._reap_run = AsyncMock()
+    _, sleep = _inline_agent_steps
+
+    with pytest.raises(HarnessSandboxProvisioningError) as excinfo:
+        await DUMMY_AGENT()
+
+    assert excinfo.value is failures[-1]
+    assert excinfo.value.code == "sandbox_provisioning"
+    # One sleep per inherited delay; past the schedule the failure stands.
+    assert [awaited.args[0] for awaited in sleep.await_args_list] == [60.0, 300.0]
+    # The 300s wait is over the reap-before threshold, so the run is reaped once.
+    assert current_run._reap_run.await_count == 1
+
+
+async def test_fatal_sdk_error_does_not_trigger_agent_retry(
+    druks_db, tmp_path, monkeypatch, current_run, _inline_agent_steps
+):
+    """A non-transient SDK failure surfacing from acquire is not a HarnessError,
+    so it propagates on the first attempt with no retry sleep — auth/validation
+    failures can't recover without changed inputs."""
+    from drukbox_sdk.exceptions import SandboxValidationError
+
+    _patch_runtime(monkeypatch, tmp_path, {"ok": True})
+    fatal = SandboxValidationError("bad image")
+    attempts = 0
+
+    @asynccontextmanager
+    async def fatal_ephemeral(self, *, idempotency_key=None, **_kwargs):
+        nonlocal attempts
+        attempts += 1
+        raise fatal
+        yield  # pragma: no cover
+
+    monkeypatch.setattr("druks.sandbox.client.Client.ephemeral", fatal_ephemeral)
+    current_run._reap_run = AsyncMock()
+    _, sleep = _inline_agent_steps
+
+    with pytest.raises(SandboxValidationError) as excinfo:
+        await DUMMY_AGENT()
+
+    assert excinfo.value is fatal
+    assert attempts == 1
+    sleep.assert_not_awaited()
+    current_run._reap_run.assert_not_awaited()
+
+
 async def test_recovery_supersedes_the_orphaned_running_call(druks_db):
     """A worker crash leaves a RUNNING row; the recovered step re-runs with a
     fresh id and abandons the orphan, so the timeline shows one live step."""

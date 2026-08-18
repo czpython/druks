@@ -62,6 +62,19 @@ class HarnessSandboxError(HarnessError):
     retry_delays = (60, 300)
 
 
+class HarnessSandboxProvisioningError(HarnessSandboxError):
+    """A control-plane provisioning or transport failure while creating or
+    re-attaching a host, or reaching a freshly created one.
+
+    Transient on the same schedule as :class:`HarnessSandboxError` (it
+    inherits ``retry``/``retry_delays``), but carries its own ``code`` so an
+    exhausted retry records ``sandbox_provisioning`` rather than the generic
+    ``sandbox`` classification — the failure taxonomy can then name the most
+    transient failure class in the system instead of leaving it blank."""
+
+    code = "sandbox_provisioning"
+
+
 class OAuthTokenError(Exception):
     """No usable subscription credential is available.
 
