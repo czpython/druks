@@ -9,6 +9,7 @@ from druks.extensions.exceptions import (
     ExtensionImportError,
     ExtensionLoadError,
     ExtensionNotFound,
+    ExtensionSubjectContractError,
     MalformedExtension,
 )
 from druks.extensions.loader import load_extension
@@ -89,6 +90,41 @@ _FILES = {
             class Settings(BaseModel):
                 account: str = Field(title="Account")
                 api_key: SecretStr = Field(title="API key")
+    """,
+}
+
+
+# A second on-disk package whose declared ``StoredSubject`` omits ``list_summaries()``.
+# Its own package name and table keep it off the conforming probe's shared metadata, so
+# the broken StoredSubject case can load app-lessly without colliding with ``ProbeItem``.
+_BROKEN_STORED_FILES = {
+    "extension.py": """
+        from druks.extensions import Extension
+
+
+        class BrokenStored(Extension):
+            name = "brokenstored"
+    """,
+    "models.py": """
+        from druks.db import StoredSubject
+
+
+        class Ledger(StoredSubject):
+            __tablename__ = "brokenstored_ledgers"
+            # Intentionally omits list_summaries(): a workflow declares it, so the
+            # load-time contract must reject it.
+    """,
+    "workflows.py": """
+        from druks.workflows import Workflow
+
+        from .models import Ledger
+
+
+        class Post(Workflow):
+            subject = Ledger
+
+            async def run(self) -> None:
+                ...
     """,
 }
 
@@ -325,3 +361,52 @@ def test_import_error_in_models_raises_extension_import_error(tmp_path, monkeypa
     with pytest.raises(ExtensionImportError, match="failed to import") as caught:
         load_extension("probe")
     assert isinstance(caught.value.__cause__, RuntimeError)
+
+
+@pytest.fixture
+def broken_stored_extension(tmp_path_factory, monkeypatch):
+    """Build the broken-StoredSubject package, expose it as the sole installed entry
+    point, and restore every global its load mutates so the suite stays clean."""
+    from druks.extensions import loader as extensions_loader
+    from druks.extensions.registry import agents, services, webhooks, workflows
+    from druks.models import Base
+
+    package = "druks_broken_stored"
+    root = tmp_path_factory.mktemp("broken_stored")
+    _write_package(root, package, _BROKEN_STORED_FILES)
+    sys.path.insert(0, str(root))
+
+    tables = set(Base.metadata.tables)
+    registries = {r: dict(r._items) for r in (agents, services, webhooks, workflows)}
+    packages = dict(extensions_loader._workflow_packages)
+    entry = EntryPoint(
+        name="brokenstored", value=f"{package}.extension:BrokenStored", group="druks.extensions"
+    )
+    monkeypatch.setattr(loader, "entry_points", lambda *, group: [entry])
+    try:
+        yield
+    finally:
+        sys.path.remove(str(root))
+        for name in set(Base.metadata.tables) - tables:
+            Base.metadata.remove(Base.metadata.tables[name])
+        for registry, snapshot in registries.items():
+            registry._items = snapshot
+        extensions_loader._workflow_packages.clear()
+        extensions_loader._workflow_packages.update(packages)
+        for name in [m for m in sys.modules if m == package or m.startswith(f"{package}.")]:
+            del sys.modules[name]
+
+
+def test_appless_load_rejects_a_stored_subject_missing_list_summaries(broken_stored_extension):
+    """The StoredSubject base family is gated identically to Subject: an app-less load of
+    an extension whose declared row-backed subject omits ``list_summaries()`` raises the
+    same typed, actionable failure rather than an ``ExtensionImportError``."""
+    with pytest.raises(ExtensionSubjectContractError) as caught:
+        load_extension("brokenstored")
+    message = str(caught.value)
+    assert "brokenstored" in message  # the extension name
+    assert "Ledger" in message  # the subject class
+    assert "list_summaries()" in message  # the missing method
+    assert "Implement list_summaries()" in message  # the implementation direction
+    # The same failure is catchable through the common load-error base.
+    assert isinstance(caught.value, ExtensionLoadError)

@@ -11,7 +11,7 @@ from druks.events.models import Event
 from druks.models import StoredSubject
 from druks.user_settings.models import SettingsOverride
 
-from .exceptions import SettingsDeclarationError
+from .exceptions import ExtensionSubjectContractError, SettingsDeclarationError
 from .registry import agents as agent_registry
 from .registry import autodiscover
 from .registry import workflows as workflow_registry
@@ -187,13 +187,34 @@ class Extension:
     def subject_classes(cls) -> "list[type[Subject] | type[StoredSubject]]":
         """What this extension's runs are about, read off the workflows that declare
         them — each one gets a board and a page, ordered by subject type so the routes
-        it mounts are stable."""
+        it mounts are stable.
+
+        Validates each declared subject against the read-side contract the platform
+        will call: the reserved ``transcripts`` segment, and a ``list_summaries()``
+        the board invokes. The method's identity is inspected, never called — a
+        concrete override (declared or inherited) satisfies the contract without
+        running extension query code at load."""
+        from druks.durable.datastructures import Subject
+
+        # The platform stubs both bases raise ``NotImplementedError`` from — a subject
+        # resolving ``list_summaries`` to one of these has not implemented it.
+        stub_impls = {
+            Subject.list_summaries.__func__,
+            StoredSubject.list_summaries.__func__,
+        }
         declared = {wf.subject for wf in cls.workflows() if wf.subject}
         for subject_class in declared:
             if subject_class.subject_type == "transcripts":
-                raise TypeError(
+                raise ExtensionSubjectContractError(
                     f"{subject_class.__name__} is a 'transcripts' subject; that segment "
                     "serves every extension's agent-call reads. Name it for what it is"
+                )
+            if subject_class.list_summaries.__func__ in stub_impls:
+                raise ExtensionSubjectContractError(
+                    f"extension {cls.name!r} declares subject {subject_class.__name__}, "
+                    f"whose board calls list_summaries(), but {subject_class.__name__} "
+                    f"does not implement it. Implement list_summaries() on "
+                    f"{subject_class.__name__}."
                 )
         return sorted(declared, key=lambda subject_class: subject_class.subject_type)
 

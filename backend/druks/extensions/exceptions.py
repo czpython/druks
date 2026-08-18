@@ -19,8 +19,9 @@ class SubscriberDeclarationError(Exception):
 
 
 class ExtensionLoadError(Exception):
-    """An extension could not be loaded app-lessly. The concrete subclass names
-    which stage failed — nothing raises this base directly."""
+    """An extension could not be loaded — whether app-lessly or during full API
+    boot. The concrete subclass names which stage failed — nothing raises this
+    base directly."""
 
 
 class ExtensionNotFound(ExtensionLoadError):
@@ -38,3 +39,12 @@ class ExtensionImportError(ExtensionLoadError):
     """Importing the extension's models or capability modules raised. The
     extension is installed and well-declared, but its own code failed on
     import — carries the original exception as its cause."""
+
+
+class ExtensionSubjectContractError(ExtensionLoadError):
+    """A subject a workflow declares does not satisfy the read-side contract the
+    platform will call on it — it resolves ``list_summaries()`` to the platform
+    stub instead of a real implementation, or it names the reserved
+    ``transcripts`` segment. Raised at load (full boot and app-less alike), so a
+    subject that would 500 the board on first click stops the extension from
+    loading instead."""

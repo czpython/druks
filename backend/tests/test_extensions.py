@@ -2,6 +2,7 @@ from types import ModuleType, SimpleNamespace
 
 import pytest
 from druks.extensions import Extension, loader
+from druks.extensions.exceptions import ExtensionSubjectContractError
 from druks.extensions.loader import iter_extensions, load
 from druks.workflows import Subject
 from fastapi import APIRouter, FastAPI
@@ -193,8 +194,91 @@ def test_a_subject_cannot_take_the_transcripts_segment():
         def workflows(cls):
             return [SimpleNamespace(subject=Transcripts)]
 
-    with pytest.raises(TypeError, match="agent-call reads"):
+    # Same typed load-error family as the missing-``list_summaries()`` contract break —
+    # sibling checks in ``subject_classes()`` no longer raise a bare ``TypeError``.
+    with pytest.raises(ExtensionSubjectContractError, match="agent-call reads"):
         Colliding.subject_classes()
+
+
+def test_a_declared_subject_missing_list_summaries_is_rejected_with_an_actionable_error():
+    """The message names the extension, the subject, and ``list_summaries()``, and says
+    to implement it — actionable without reading platform source."""
+
+    class Account(Subject):
+        pass  # inherits the platform stub — never implements list_summaries()
+
+    class Broken(Extension):
+        name = "broken"
+        package = "broken"
+
+        @classmethod
+        def workflows(cls):
+            return [SimpleNamespace(subject=Account)]
+
+    with pytest.raises(ExtensionSubjectContractError) as caught:
+        Broken.subject_classes()
+    message = str(caught.value)
+    assert "broken" in message  # the extension name
+    assert "Account" in message  # the subject class
+    assert "list_summaries()" in message  # the missing method
+    assert "Implement list_summaries()" in message  # the implementation direction
+
+
+def test_full_boot_refuses_a_subject_missing_list_summaries_even_when_load_is_overridden(
+    monkeypatch,
+):
+    """The full-boot gate runs from the loader, not through ``load()``/``get_routers()`` —
+    an author override of the boot hook cannot report a booted extension whose board
+    would 500."""
+
+    class Account(Subject):
+        pass  # inherits the platform stub
+
+    class Bypasser(Extension):
+        name = "bypasser"
+        package = "bypasser"
+
+        @classmethod
+        def discover(cls) -> list[ModuleType]:
+            return []
+
+        @classmethod
+        def workflows(cls):
+            return [SimpleNamespace(subject=Account)]
+
+        @classmethod
+        def load(cls, app) -> None:
+            # An override that never reaches get_routers()/subject_classes() —
+            # under the old wiring this booted clean.
+            return
+
+    monkeypatch.setattr(loader, "iter_extensions", lambda: [Bypasser])
+    monkeypatch.setattr(loader, "import_extension_models", lambda: None)
+    with pytest.raises(ExtensionSubjectContractError, match="list_summaries"):
+        load(FastAPI())
+
+
+def test_a_concrete_inherited_list_summaries_satisfies_the_contract_without_calling_it():
+    """A concrete parent's ``list_summaries()`` satisfies the contract for a subclass that
+    doesn't re-declare it, and validation never runs the method."""
+
+    class Concrete(Subject):
+        @classmethod
+        def list_summaries(cls) -> list:
+            raise AssertionError("validation must not call list_summaries()")
+
+    class Inheritor(Concrete):
+        pass  # inherits Concrete's implementation, re-declares nothing
+
+    class Fine(Extension):
+        name = "fine"
+        package = "fine"
+
+        @classmethod
+        def workflows(cls):
+            return [SimpleNamespace(subject=Inheritor)]
+
+    assert Fine.subject_classes() == [Inheritor]
 
 
 def test_an_extension_declaring_a_subject_type_is_rejected():

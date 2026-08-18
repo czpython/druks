@@ -96,13 +96,18 @@ def load_extension(name: str) -> type[Extension]:
     Fails loudly and by name: an uninstalled package raises ``ExtensionNotFound``;
     an entry point that doesn't resolve to an ``Extension`` raises
     ``MalformedExtension``; the extension's own code raising on import raises
-    ``ExtensionImportError``."""
+    ``ExtensionImportError``; a workflow-declared subject that doesn't satisfy the
+    read-side contract raises ``ExtensionSubjectContractError``."""
     extension = _resolve(name)
     try:
         import_extension_models(extension)
         extension.discover()
     except Exception as error:
         raise ExtensionImportError(f"extension {name!r} failed to import: {error}") from error
+    # After the capability modules are imported (so the workflow registry is
+    # populated), gate the declared subjects. Its typed failure is preserved, not
+    # folded into ``ExtensionImportError`` — the contract break is not an import error.
+    extension.subject_classes()
     return extension
 
 
@@ -223,4 +228,9 @@ def load(app: "FastAPI") -> None:
     # who hand-writes migrations still can't boot with an unprefixed table.
     import_extension_models()
     for extension in iter_extensions():
+        # Discover then validate the declared subjects here, before the author-
+        # overridable ``load(app)`` — an override of ``load`` or ``get_routers``
+        # must not be able to report a booted extension whose board would 500.
+        extension.discover()
+        extension.subject_classes()
         extension.load(app)

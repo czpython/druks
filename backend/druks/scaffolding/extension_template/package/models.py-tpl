@@ -7,4 +7,7 @@ from druks.db import Base, StoredSubject
 # ticket. Subclass ``StoredSubject`` for that one and point a workflow at it with
 # ``subject = ThatModel``, and druks shows it a board and a page. Something you keep no
 # row for subclasses ``druks.workflows.Subject`` instead — same board, same page.
+# Either way, a subject a workflow declares must implement ``list_summaries()`` (the
+# board reads it): the platform checks this at load, and an extension whose declared
+# subject leaves it unimplemented fails to load rather than 500 when its board opens.
 # After adding a model: ``druks makemigrations {{ name }} -m "..." && druks init-db``.
