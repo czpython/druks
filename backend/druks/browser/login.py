@@ -52,7 +52,12 @@ class LoginWindow:
             raise exceptions.BrowserLaunchError(session.name, str(error)) from error
         try:
             await _seed(browser, session)
-            await _launch(browser, session.name, settings.sandbox.browser_login_proxy)
+            await _launch(
+                browser,
+                session.name,
+                login_proxy=settings.sandbox.browser_login_proxy,
+                login_tz=settings.sandbox.browser_login_tz,
+            )
         except BaseException:
             await sandbox_client.release(host_id=browser.id)
             raise
@@ -168,15 +173,18 @@ async def _seed(browser: Sandbox, session: StoredBrowserSession) -> None:
         await browser.upload_file(local=meta, remote=f"{SESSION_ROOT}/state.meta.json")
 
 
-async def _launch(browser: Sandbox, name: str, login_proxy: str) -> None:
-    # A login-only egress proxy: the launcher reads it from its environment.
-    # Empty leaves the browser on the box's own IP.
-    proxy_env = f"env DRUKS_BROWSER_LOGIN_PROXY={shlex.quote(login_proxy)} " if login_proxy else ""
+async def _launch(browser: Sandbox, name: str, *, login_proxy: str, login_tz: str) -> None:
+    # The launcher and its browser read these from the environment: the egress
+    # proxy keeps the login off the box's own IP, and TZ aligns the browser's
+    # timezone with the exit's geography. Either empty is simply left unset.
+    env = {"TZ": login_tz, "DRUKS_BROWSER_LOGIN_PROXY": login_proxy}
+    assignments = " ".join(f"{key}={shlex.quote(value)}" for key, value in env.items() if value)
+    env_prefix = f"env {assignments} " if assignments else ""
     ready = await browser.exec(
         [
             "sh",
             "-c",
-            f"nohup setsid {proxy_env}session-launch --headed "
+            f"nohup setsid {env_prefix}session-launch --headed "
             f">{SESSION_ROOT}/launch.log 2>&1 </dev/null & "
             'launcher=$!; attempt=0; while [ "$attempt" -lt 300 ]; do '
             f"if [ -f {SESSION_ROOT}/.runtime/ready.json ]; then exit 0; fi; "

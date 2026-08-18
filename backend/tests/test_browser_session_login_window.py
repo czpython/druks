@@ -90,16 +90,18 @@ def create_session(name: str = "x-main") -> StoredBrowserSession:
     )
 
 
-async def test_login_launch_leaves_the_box_ip_when_no_proxy_is_set(window_runtime):
+async def test_login_launch_leaves_the_box_untouched_when_nothing_is_set(window_runtime):
     client = window_runtime
 
     await LoginWindow.open(create_session())
 
-    assert "DRUKS_BROWSER_LOGIN_PROXY" not in (client.browsers[0].launch_command or "")
+    command = client.browsers[0].launch_command or ""
+    assert "DRUKS_BROWSER_LOGIN_PROXY" not in command
+    assert "TZ=" not in command
 
 
-def _runtime_with_proxy(tmp_path, monkeypatch, proxy: str) -> FakeSandboxClient:
-    settings = make_settings(tmp_path, sandbox={"browser_login_proxy": proxy})
+def _runtime_with_sandbox(tmp_path, monkeypatch, **sandbox) -> FakeSandboxClient:
+    settings = make_settings(tmp_path, sandbox=sandbox)
     client = FakeSandboxClient()
     monkeypatch.setattr(login, "sandbox_client", client)
     monkeypatch.setattr(login, "load_settings", lambda: settings)
@@ -109,17 +111,26 @@ def _runtime_with_proxy(tmp_path, monkeypatch, proxy: str) -> FakeSandboxClient:
 
 async def test_login_launch_routes_through_the_configured_proxy(tmp_path, monkeypatch):
     proxy = "http://172.17.0.1:8888"
-    client = _runtime_with_proxy(tmp_path, monkeypatch, proxy)
+    client = _runtime_with_sandbox(tmp_path, monkeypatch, browser_login_proxy=proxy)
 
     await LoginWindow.open(create_session())
 
     command = client.browsers[0].launch_command or ""
-    assert f"env DRUKS_BROWSER_LOGIN_PROXY={shlex.quote(proxy)} session-launch --headed" in command
+    assert f"DRUKS_BROWSER_LOGIN_PROXY={shlex.quote(proxy)}" in command
 
 
-async def test_login_launch_quotes_the_proxy_so_a_bad_value_cannot_inject(tmp_path, monkeypatch):
+async def test_login_launch_sets_the_configured_timezone(tmp_path, monkeypatch):
+    client = _runtime_with_sandbox(tmp_path, monkeypatch, browser_login_tz="Europe/Madrid")
+
+    await LoginWindow.open(create_session())
+
+    command = client.browsers[0].launch_command or ""
+    assert "env TZ=Europe/Madrid session-launch --headed" in command
+
+
+async def test_login_launch_quotes_values_so_a_bad_one_cannot_inject(tmp_path, monkeypatch):
     proxy = "http://h:8888; rm -rf /"
-    client = _runtime_with_proxy(tmp_path, monkeypatch, proxy)
+    client = _runtime_with_sandbox(tmp_path, monkeypatch, browser_login_proxy=proxy)
 
     await LoginWindow.open(create_session())
 
