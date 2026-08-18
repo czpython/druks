@@ -1,4 +1,5 @@
 import json
+import shlex
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
 
@@ -25,12 +26,14 @@ class FakeSandbox:
     def __init__(self, sandbox_id: str) -> None:
         self.id = sandbox_id
         self.files: dict[str, bytes] = {}
+        self.launch_command: str | None = None
         self.export_exit_code = 0
         self.export_payload = b"fresh-profile"
 
     async def exec(self, command: list[str], *, timeout: float = 30.0) -> ExecResult:
         del timeout
         if command[:2] == ["sh", "-c"] and "session-launch --headed" in command[2]:
+            self.launch_command = command[2]
             self.files["/work/session/.runtime/ready.json"] = b"{}\n"
         if command == ["session-export"]:
             if self.export_exit_code:
@@ -85,6 +88,45 @@ def create_session(name: str = "x-main") -> StoredBrowserSession:
         payload_format=BrowserSessionPayloadFormat.STORAGE_STATE,
         site="x.com",
     )
+
+
+async def test_login_launch_leaves_the_box_ip_when_no_proxy_is_set(window_runtime):
+    client = window_runtime
+
+    await LoginWindow.open(create_session())
+
+    assert "DRUKS_BROWSER_LOGIN_PROXY" not in (client.browsers[0].launch_command or "")
+
+
+def _runtime_with_proxy(tmp_path, monkeypatch, proxy: str) -> FakeSandboxClient:
+    settings = make_settings(tmp_path, sandbox={"browser_login_proxy": proxy})
+    client = FakeSandboxClient()
+    monkeypatch.setattr(login, "sandbox_client", client)
+    monkeypatch.setattr(login, "load_settings", lambda: settings)
+    monkeypatch.setattr(secret_utils, "load_settings", lambda: settings)
+    return client
+
+
+async def test_login_launch_routes_through_the_configured_proxy(tmp_path, monkeypatch):
+    proxy = "http://172.17.0.1:8888"
+    client = _runtime_with_proxy(tmp_path, monkeypatch, proxy)
+
+    await LoginWindow.open(create_session())
+
+    command = client.browsers[0].launch_command or ""
+    assert f"env DRUKS_BROWSER_LOGIN_PROXY={shlex.quote(proxy)} session-launch --headed" in command
+
+
+async def test_login_launch_quotes_the_proxy_so_a_bad_value_cannot_inject(tmp_path, monkeypatch):
+    proxy = "http://h:8888; rm -rf /"
+    client = _runtime_with_proxy(tmp_path, monkeypatch, proxy)
+
+    await LoginWindow.open(create_session())
+
+    command = client.browsers[0].launch_command or ""
+    assert shlex.quote(proxy) in command
+    # The metacharacters survive only inside the quoted word, never as live shell.
+    assert "; rm -rf /" not in command.replace(shlex.quote(proxy), "")
 
 
 async def test_open_seeds_a_blank_profile_and_records_the_container(window_runtime):

@@ -65,7 +65,14 @@ _KNOWN_TOML_KEYS = {
         "secrets_key",
     ),
     "paths": ("data_dir", "claude_home", "codex_home", "claude_json"),
-    "sandbox": ("provider", "service_url", "service_token", "image", "timeout"),
+    "sandbox": (
+        "provider",
+        "service_url",
+        "service_token",
+        "image",
+        "browser_login_proxy",
+        "timeout",
+    ),
     "env": (),
 }
 
@@ -174,6 +181,11 @@ provider = ""
 service_url = ""
 service_token = ""
 image = ""
+# An HTTP proxy the login window routes through, so the login egresses from a
+# different IP than the box — for sign-in flows that reject the box's own
+# address. Authless address, e.g. http://172.17.0.1:8888. Empty => the box's own
+# IP. Only the login window uses it; borrows keep it. See configuration.md.
+browser_login_proxy = ""
 timeout = 180
 
 # Put drukbox environment in [sandbox.<provider>]. The table is passed through
