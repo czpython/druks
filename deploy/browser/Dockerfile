@@ -70,6 +70,17 @@ RUN if [ "${TARGETARCH}" = "amd64" ]; then \
 
 RUN useradd --create-home --shell /bin/bash druks
 
+# The browser runs unsandboxed (Docker's default seccomp blocks the sandbox's
+# namespace syscalls), so Playwright passes --no-sandbox and Chrome shows the
+# operator a "stability and security will suffer" banner in the login window.
+# This managed policy suppresses only that command-line-flag warning; it changes
+# no browser behavior a page could read. Installed in both channels' policy dirs
+# so the fallback chromium (arm64) is covered too.
+COPY chrome-policy.json /tmp/chrome-policy.json
+RUN install -D -m 0644 /tmp/chrome-policy.json /etc/opt/chrome/policies/managed/druks.json \
+    && install -D -m 0644 /tmp/chrome-policy.json /etc/chromium/policies/managed/druks.json \
+    && rm /tmp/chrome-policy.json
+
 COPY session-launch session-export /usr/local/bin/
 COPY entrypoint /usr/local/bin/druks-browser-entrypoint
 RUN chmod 0755 /usr/local/bin/session-launch /usr/local/bin/session-export \
