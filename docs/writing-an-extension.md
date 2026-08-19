@@ -731,6 +731,101 @@ its own service, and the operator decides per card whether the underlying
 registration is shared or a narrower one — that choice is their scope and
 blast-radius control.
 
+## Connect provider accounts (OAuth)
+
+`OauthClient` runs the OAuth 2.0 authorization-code + PKCE flow. Use it for a
+provider with fixed endpoints and a registered client. It mints access tokens
+and keeps refresh-token rotation safe. Your extension stores each grant on its
+own rows. The platform stores no grants.
+
+Declare the endpoints on the service that holds the client credentials. The
+`Settings` model must have `client_id` and `client_secret` fields:
+
+```python
+class Acme(Service):
+    name = "acme"
+    title = "Acme OAuth app"
+    authorization_endpoint = "https://acme.example/oauth/authorize"
+    token_endpoint = "https://acme.example/oauth/token"
+    # True = HTTP Basic on the token endpoint. False = secret in the body.
+    basic_auth = True
+
+    class Settings(BaseModel):
+        client_id: str = Field(title="Client ID")
+        client_secret: SecretStr = Field(title="Client secret")
+```
+
+`Acme.get_oauth_client()` returns a configured client for the connected
+identity. Call `begin_connect` from your connect route. Call `complete_connect`
+from your callback route:
+
+```python
+url = await Acme.get_oauth_client().begin_connect(
+    redirect_uri="https://druks.example/api/acme/oauth/callback",
+    scopes=("profile.read", "posts.write"),
+    context={"account_id": account_id},
+)
+# ... the operator consents; the provider redirects back with state + code ...
+tokens, context = await Acme.get_oauth_client().complete_connect(state=state, code=code)
+AcmeGrant.store(account_id=context["account_id"], refresh_token=tokens["refresh_token"])
+```
+
+Scopes belong to one authorization, not to the service. Each `begin_connect`
+call asks for its own scopes. The provider registration sets the ceiling. The
+grant keeps the scopes the user approved.
+
+`begin_connect` stores the pending exchange in Redis and returns the consent
+URL. The state is single-use and expires after a short time. `complete_connect`
+consumes the state and exchanges the code for tokens. It rejects a token
+response without a `refresh_token`, because a grant must work offline. It
+raises `OauthExchangeError` when the flow is denied or expired. It returns your
+`context` from begin time, with the flow's client identity merged in.
+
+When a run needs the provider, call `mint_access_token`. The engine serves
+tokens from a Redis cache. It lets only one refresher run for each `key`. This
+is necessary: two refreshes at the same time can make the provider revoke the
+whole grant. The engine raises `OauthRefreshError` when the grant does not
+refresh. Then ask the operator to connect again.
+
+```python
+token = await Acme.get_oauth_client().mint_access_token(
+    key=account_id,
+    load_refresh_token=load_refresh_token,
+    save_refresh_token=save_refresh_token,
+)
+```
+
+The two callables connect the engine to your storage:
+
+```python
+def load_refresh_token() -> str:
+    # Runs under the refresh lock. Another process may have rotated and
+    # committed. Re-read the row; do not trust the identity map.
+    grant = db_session().scalars(
+        select(AcmeGrant)
+        .where(AcmeGrant.account_id == account_id)
+        .execution_options(populate_existing=True)
+    ).one()
+    return grant.secrets["refresh_token"]
+
+
+def save_refresh_token(rotated: str) -> None:
+    # The provider has already invalidated the old token. Commit on an own
+    # session, never on the enclosing step transaction. A later rollback
+    # must not lose the new token.
+    with Session(db_session().get_bind()) as session:
+        grant = session.scalars(
+            select(AcmeGrant).where(AcmeGrant.account_id == account_id)
+        ).one()
+        grant.secrets["refresh_token"] = rotated
+        session.commit()
+```
+
+`secrets` is an `EncryptedJsonField` column on your grant row (see
+[models](#models-and-migrations)). The refresh token is ciphertext at rest.
+When the operator disconnects, delete your row and evict the cached access
+token: `await Acme.get_oauth_client().evict_access_token(account_id)`.
+
 ## Extension settings and checks
 
 An inner `ExtensionSettings` class defines dashboard-editable knobs and owns their
@@ -906,7 +1001,8 @@ Import from concern namespaces, not from `druks.durable` or internal modules:
 | Namespace | Public names |
 | --- | --- |
 | `druks.extensions` | `Extension`, `ExtensionSettings`, `Secret` |
-| `druks.services` | `Service`, `ServiceConnectError`, `ServiceNotConnectedError` |
+| `druks.services` | `Service`, `ServiceConnectError`, `ServiceNotConnectedError`, `OauthClient`, `OauthExchangeError`, `OauthRefreshError` |
+| `druks.secrets.fields` | `EncryptedJsonField`, `SecretsMapping` |
 | `druks.agents` | `Agent`, `AgentOutput` |
 | `druks.workflows` | `Workflow`, `Gate`, `step`, run/agent response types, lifecycle enums and workflow errors |
 | `druks.db` | `Base`, `StoredSubject`, `db_session` |

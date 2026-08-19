@@ -1,4 +1,17 @@
 from .base import Service
-from .exceptions import ServiceConnectError, ServiceNotConnectedError
+from .exceptions import (
+    OauthExchangeError,
+    OauthRefreshError,
+    ServiceConnectError,
+    ServiceNotConnectedError,
+)
+from .oauth import OauthClient
 
-__all__ = ["Service", "ServiceConnectError", "ServiceNotConnectedError"]
+__all__ = [
+    "OauthClient",
+    "OauthExchangeError",
+    "OauthRefreshError",
+    "Service",
+    "ServiceConnectError",
+    "ServiceNotConnectedError",
+]

@@ -367,3 +367,84 @@ def test_manifest_callback_rejects_a_dead_code(druks_client: TestClient, druks_d
     assert "restart" in response.json()["detail"]
     with pytest.raises(ServiceNotConnectedError):
         ServiceIdentity.get("github")
+
+
+# --- OAuth declaration --------------------------------------------------------
+
+
+@pytest.fixture
+def declared_services():
+    # Service subclasses self-register at class definition; tests declare
+    # inside this fixture and leave the registry as found.
+    from druks.extensions.registry import services
+
+    saved = dict(services._items)
+    yield
+    services._items.clear()
+    services._items.update(saved)
+
+
+def test_get_oauth_client_reads_the_connected_identity(declared_services, druks_db):
+    from druks.services import Service
+    from pydantic import BaseModel, SecretStr
+
+    class Acme(Service):
+        name = "acme"
+        title = "Acme OAuth app"
+        authorization_endpoint = "https://acme.test/authorize"
+        token_endpoint = "https://acme.test/token"
+        basic_auth = True
+
+        class Settings(BaseModel):
+            client_id: str
+            client_secret: SecretStr
+
+    ServiceIdentity.connect(
+        "acme", identity={"client_id": "id-1"}, secrets={"client_secret": "sec-1"}
+    )
+
+    client = Acme.get_oauth_client()
+
+    assert client.provider == "acme"
+    assert client.authorization_endpoint == "https://acme.test/authorize"
+    assert client.token_endpoint == "https://acme.test/token"
+    assert client.client_id == "id-1"
+    assert client.client_secret == "sec-1"
+    assert client.basic_auth is True
+
+
+def test_oauth_service_declarations_fail_loudly(declared_services):
+    from druks.services import Service
+    from pydantic import BaseModel, SecretStr
+
+    with pytest.raises(TypeError, match="client_id and client_secret"):
+
+        class Keyless(Service):
+            name = "keyless"
+            title = "Keyless"
+            authorization_endpoint = "https://acme.test/authorize"
+            token_endpoint = "https://acme.test/token"
+
+            class Settings(BaseModel):
+                api_key: SecretStr
+
+    with pytest.raises(TypeError, match="both OAuth endpoints"):
+
+        class HalfDeclared(Service):
+            name = "half_declared"
+            title = "Half declared"
+            token_endpoint = "https://acme.test/token"
+
+            class Settings(BaseModel):
+                client_id: str
+                client_secret: SecretStr
+
+    class Plain(Service):
+        name = "plain_service"
+        title = "Plain"
+
+        class Settings(BaseModel):
+            api_key: SecretStr
+
+    with pytest.raises(TypeError, match="no OAuth endpoints"):
+        Plain.get_oauth_client()
