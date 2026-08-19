@@ -46,6 +46,34 @@ files for the tells:
 - `def _helper` used once
 - a query (`.get(` / `.all(` / `session`) inside a `schemas.py`/DTO method
 
+# Names
+
+- Public callables take the read-side verbs: `get_` (one), `list_` (many),
+  `from_` (pure projection, on the DTO), `read_` (bytes), `stream_` (tail),
+  `lookup` (no definitive key). `get_for_<key>` names only the definitive key,
+  one word.
+- Enumerations match their siblings: beside `workflows()` and `routers()`, the
+  new one is `subjects()`, not `subject_classes()`.
+- No mechanism words in names: classes, impl, wire, view, mgr, util.
+- Booleans are questions: `is_`, `has_`.
+- A variable holds a noun, not an adjective: `active_run`, never `active`.
+- Paired columns rhyme: `models_fetched` + `models_fetched_at`.
+- Legible beats pedantically correct: take the name every reader parses, put the
+  one true clarifying clause in the docstring.
+
+# Prose
+
+All prose — comments, docstrings, docs, error messages — is simplified technical
+English (ASD-STE100 register):
+
+- Short sentences, one idea each. Split instead of stacking clauses.
+- Active voice with a named actor: "Druks checks this at load", not "this is
+  checked at load".
+- Plain words: use, not utilize; missing, not unimplemented.
+- Error messages state the fact, then the fix, imperative: "extension 'x'
+  declares subject Ledger without list_summaries(); the board calls it.
+  Implement list_summaries() on Ledger."
+
 # Craft gate
 
 Write code that reads like prose. If a reader needs your explanation to follow it,
