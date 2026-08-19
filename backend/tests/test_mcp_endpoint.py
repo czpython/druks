@@ -19,6 +19,7 @@ from fastapi import APIRouter, FastAPI
 from fastapi.testclient import TestClient
 from fastmcp.client import Client
 from fastmcp.client.transports import StreamableHttpTransport
+from starlette.routing import Route
 
 _IN_APP_ASK = {
     "presentation": "in_app",
@@ -216,7 +217,6 @@ async def test_tools_list_pins_platform_and_extension_tools(app, pat_token):
     ("operation_id", "docstring", "message"),
     [
         (None, "Start a review.", "explicit operation_id"),
-        ("start_review", "Start a review.", "must start with 'review_'"),
         ("review_start", None, "docstring"),
     ],
 )
@@ -239,6 +239,90 @@ def test_invalid_extension_agent_route_stops_boot(operation_id, docstring, messa
 
     with pytest.raises(InvalidAgentToolError, match=message):
         create_mcp_app(api)
+
+
+def test_derived_operation_id_collision_stops_boot():
+    # The 'review' extension's unprefixed 'scan' derives to 'review_scan', which
+    # another route already claims explicitly — the framework must reject the
+    # clash rather than silently mint two operations sharing an id.
+    api = FastAPI()
+    router = APIRouter()
+
+    async def scan():
+        """Scan the review target."""
+
+    async def review_scan():
+        """Re-run the review scan."""
+
+    router.add_api_route("/scans", scan, methods=["POST"], operation_id="scan", tags=["agent"])
+    router.add_api_route(
+        "/rescans", review_scan, methods=["POST"], operation_id="review_scan", tags=["agent"]
+    )
+    api.include_router(router, prefix="/api/review", tags=["review"])
+
+    with pytest.raises(InvalidAgentToolError, match="collides with existing operation id"):
+        create_mcp_app(api)
+
+
+def _agent_route_app(operation_id: str) -> FastAPI:
+    # A synthetic agent route owned by the installed 'review' extension — the
+    # loader-stamped 'review' tag names the owner, exactly as a real router does.
+    # The endpoint mounts the same /mcp Route and mcp lifespan as the real app so
+    # tools/list resolves in-process.
+    held: dict[str, object] = {}
+
+    @asynccontextmanager
+    async def lifespan(scope_app):
+        async with held["mcp"].lifespan(scope_app):
+            yield
+
+    api = FastAPI(lifespan=lifespan)
+    router = APIRouter()
+
+    async def endpoint():
+        """Scan the review target."""
+
+    router.add_api_route(
+        "/scans", endpoint, methods=["POST"], operation_id=operation_id, tags=["agent"]
+    )
+    api.include_router(router, prefix="/api/review", tags=["review"])
+
+    mcp = create_mcp_app(api)
+    held["mcp"] = mcp
+    api.router.routes.append(
+        Route("/mcp", mcp, methods=["POST", "DELETE"], include_in_schema=False)
+    )
+    return api
+
+
+def _served_operation_id(schema: dict, path: str) -> str:
+    return schema["paths"][path]["post"]["operationId"]
+
+
+@pytest.mark.parametrize(
+    ("operation_id", "expected"),
+    [
+        ("scan", "review_scan"),  # an unprefixed id gains its owner's prefix
+        ("review_scan", "review_scan"),  # an already-prefixed id passes through, never doubled
+    ],
+)
+async def test_extension_agent_route_derives_the_namespaced_tool(
+    druks_db, pat_token, operation_id, expected
+):
+    api = _agent_route_app(operation_id)
+
+    # The document the provider consumed and every later regeneration carry the
+    # derived id, not the bare one the author declared.
+    assert _served_operation_id(api.openapi(), "/api/review/scans") == expected
+    api.openapi_schema = None
+    assert _served_operation_id(api.openapi(), "/api/review/scans") == expected
+
+    async with live(api), _client(api, pat_token) as client:
+        tools = {tool.name for tool in await client.list_tools()}
+
+    assert expected in tools
+    if operation_id != expected:
+        assert operation_id not in tools
 
 
 async def test_claims_resolve_the_calling_account(app, druks_db):

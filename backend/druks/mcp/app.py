@@ -77,25 +77,77 @@ def _validate_agent_tools(api: FastAPI) -> None:
     # The provider logs component-fn errors instead of raising, so derived tools
     # cannot refuse boot; validate the routes before derivation. Inclusion is
     # deferred (api.routes holds unresolved routers), so the contexts iterator
-    # is the one view with every route's merged tags — and the loader tags each
-    # extension route with its extension's name, so the tag names the owner.
-    extension_names = {extension.name for extension in iter_extensions()}
-
+    # is the one view with every route's merged tags. Validation owns only the
+    # two demands the author owns — an explicit operation_id and a non-empty
+    # docstring; the extension prefix is the framework's to derive, not the
+    # author's to repeat (see _namespace_agent_operations).
     for route in iter_route_contexts(api.routes):
         if not isinstance(route.original_route, APIRoute) or "agent" not in route.tags:
             continue
 
         where = f"{'/'.join(sorted(route.methods or ()))} {route.path}"
-        operation_id = route.operation_id
-        if not operation_id:
+        if not route.operation_id:
             raise InvalidAgentToolError(where, "an explicit operation_id is required")
         if not inspect.getdoc(route.endpoint):
             raise InvalidAgentToolError(where, "a non-empty endpoint docstring is required")
-        extension = next((tag for tag in route.tags if tag in extension_names), None)
-        if extension and not operation_id.startswith(f"{extension}_"):
-            raise InvalidAgentToolError(
-                where, f"operation_id {operation_id!r} must start with {extension + '_'!r}"
-            )
+
+
+def _namespace_agent_operations(spec: dict, extension_names: set[str]) -> None:
+    # Derive each extension-owned agent operation's id to f"{extension}_{operation_id}",
+    # so the tool name the provider reads off the spec is namespaced without the
+    # author repeating the prefix. The loader tags every extension route with its
+    # extension's name, so among an agent operation's tags the one naming an
+    # installed extension is the owner; platform agent operations carry no such
+    # tag and keep their declared ids. An already-prefixed id passes through, so
+    # stable names like ship_start never double — and the namespace is what makes
+    # the merged document's operation ids globally unique. A derived id that would
+    # collide with another route's explicit id is rejected: before this derivation
+    # the clash was visible in the author's code, so the framework must surface it
+    # now that it owns the naming.
+    existing_ids = {
+        op.get("operationId")
+        for ops in spec.get("paths", {}).values()
+        for op in ops.values()
+        if isinstance(op, dict) and op.get("operationId")
+    }
+    for path, operations in spec.get("paths", {}).items():
+        for operation in operations.values():
+            if not isinstance(operation, dict) or "agent" not in operation.get("tags", []):
+                continue
+            operation_id = operation.get("operationId")
+            if not operation_id:
+                continue
+            extension = next((tag for tag in operation["tags"] if tag in extension_names), None)
+            if extension and not operation_id.startswith(f"{extension}_"):
+                derived = f"{extension}_{operation_id}"
+                if derived in existing_ids:
+                    raise InvalidAgentToolError(
+                        path,
+                        f"derived operation id {derived!r} collides with existing "
+                        "operation id; rename the conflicting route",
+                    )
+                operation["operationId"] = derived
+
+
+def _install_agent_namespacing(api: FastAPI) -> None:
+    # The tool name comes from the spec's operation id, so the namespace must
+    # land on the document api.openapi() builds — not on FastAPI's cached, merged
+    # route contexts, which later generation silently discards. Wrap the app's
+    # own generator so the provider here and every later /openapi.json share one
+    # namespaced document: each fresh build (including after the openapi_schema
+    # reset below) re-derives the ids. generate() is the app's own api.openapi,
+    # which already returns the cached schema when it is warm, so namespaced()
+    # need not repeat that guard — and the derivation is idempotent, so running
+    # it on a warm cache leaves the already-prefixed ids untouched.
+    extension_names = {extension.name for extension in iter_extensions()}
+    generate = api.openapi
+
+    def namespaced() -> dict:
+        spec = generate()
+        _namespace_agent_operations(spec, extension_names)
+        return spec
+
+    api.openapi = namespaced
 
 
 def _annotate(route: HTTPRoute, component: object) -> None:
@@ -110,6 +162,7 @@ def _annotate(route: HTTPRoute, component: object) -> None:
 
 def create_mcp_app(api: FastAPI) -> StarletteWithLifespan:
     _validate_agent_tools(api)
+    _install_agent_namespacing(api)
     # Built directly rather than via from_fastapi, which owns the transport:
     # raise_app_exceptions=False makes an app crash reach the tool as the
     # app's sanitized 500, so no masking is needed and the taxonomy travels.

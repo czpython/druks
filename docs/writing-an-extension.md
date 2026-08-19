@@ -651,12 +651,14 @@ the prefix its own resource is called:
 router = APIRouter(prefix="/reviews")
 ```
 
-Tagging a route `agent` also derives it into an MCP tool: its explicit `operation_id`,
-prefixed with the extension name, is the tool name and its docstring is the description.
-`GET` derives read-only; a write declares `x-destructive: false` or `x-idempotent: true`
-in `openapi_extra` only when that statement is genuinely true, otherwise the safe defaults
-are destructive and non-idempotent. Boot refuses a missing or unprefixed tool name
-and a missing docstring.
+Tagging a route `agent` also derives it into an MCP tool: you give it an explicit
+`operation_id`, and Druks derives the tool name by prefixing it with your extension
+name — write `operation_id="add_peer"` in `peer_tracker` and the tool is
+`peer_tracker_add_peer`. The docstring is the description. `GET` derives read-only;
+a write declares `x-destructive: false` or `x-idempotent: true` in `openapi_extra`
+only when that statement is genuinely true, otherwise the safe defaults are
+destructive and non-idempotent. Boot refuses a missing `operation_id` or a missing
+docstring.
 
 Two spellings run through druks, and which one a segment wears says who owns it:
 
