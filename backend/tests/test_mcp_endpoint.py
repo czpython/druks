@@ -241,6 +241,29 @@ def test_invalid_extension_agent_route_stops_boot(operation_id, docstring, messa
         create_mcp_app(api)
 
 
+def test_derived_operation_id_collision_stops_boot():
+    # The 'review' extension's unprefixed 'scan' derives to 'review_scan', which
+    # another route already claims explicitly — the framework must reject the
+    # clash rather than silently mint two operations sharing an id.
+    api = FastAPI()
+    router = APIRouter()
+
+    async def scan():
+        """Scan the review target."""
+
+    async def review_scan():
+        """Re-run the review scan."""
+
+    router.add_api_route("/scans", scan, methods=["POST"], operation_id="scan", tags=["agent"])
+    router.add_api_route(
+        "/rescans", review_scan, methods=["POST"], operation_id="review_scan", tags=["agent"]
+    )
+    api.include_router(router, prefix="/api/review", tags=["review"])
+
+    with pytest.raises(InvalidAgentToolError, match="collides with existing operation id"):
+        create_mcp_app(api)
+
+
 def _agent_route_app(operation_id: str) -> FastAPI:
     # A synthetic agent route owned by the installed 'review' extension — the
     # loader-stamped 'review' tag names the owner, exactly as a real router does.

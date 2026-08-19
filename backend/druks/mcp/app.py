@@ -100,8 +100,17 @@ def _namespace_agent_operations(spec: dict, extension_names: set[str]) -> None:
     # installed extension is the owner; platform agent operations carry no such
     # tag and keep their declared ids. An already-prefixed id passes through, so
     # stable names like ship_start never double — and the namespace is what makes
-    # the merged document's operation ids globally unique.
-    for operations in spec.get("paths", {}).values():
+    # the merged document's operation ids globally unique. A derived id that would
+    # collide with another route's explicit id is rejected: before this derivation
+    # the clash was visible in the author's code, so the framework must surface it
+    # now that it owns the naming.
+    existing_ids = {
+        op.get("operationId")
+        for ops in spec.get("paths", {}).values()
+        for op in ops.values()
+        if isinstance(op, dict) and op.get("operationId")
+    }
+    for path, operations in spec.get("paths", {}).items():
         for operation in operations.values():
             if not isinstance(operation, dict) or "agent" not in operation.get("tags", []):
                 continue
@@ -110,7 +119,14 @@ def _namespace_agent_operations(spec: dict, extension_names: set[str]) -> None:
                 continue
             extension = next((tag for tag in operation["tags"] if tag in extension_names), None)
             if extension and not operation_id.startswith(f"{extension}_"):
-                operation["operationId"] = f"{extension}_{operation_id}"
+                derived = f"{extension}_{operation_id}"
+                if derived in existing_ids:
+                    raise InvalidAgentToolError(
+                        path,
+                        f"derived operation id {derived!r} collides with existing "
+                        "operation id; rename the conflicting route",
+                    )
+                operation["operationId"] = derived
 
 
 def _install_agent_namespacing(api: FastAPI) -> None:
@@ -119,14 +135,14 @@ def _install_agent_namespacing(api: FastAPI) -> None:
     # route contexts, which later generation silently discards. Wrap the app's
     # own generator so the provider here and every later /openapi.json share one
     # namespaced document: each fresh build (including after the openapi_schema
-    # reset below) re-derives the ids, and the pass-through check keeps a warm
-    # cache idempotent.
+    # reset below) re-derives the ids. generate() is the app's own api.openapi,
+    # which already returns the cached schema when it is warm, so namespaced()
+    # need not repeat that guard — and the derivation is idempotent, so running
+    # it on a warm cache leaves the already-prefixed ids untouched.
     extension_names = {extension.name for extension in iter_extensions()}
     generate = api.openapi
 
     def namespaced() -> dict:
-        if api.openapi_schema:
-            return api.openapi_schema
         spec = generate()
         _namespace_agent_operations(spec, extension_names)
         return spec
