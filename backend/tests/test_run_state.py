@@ -290,6 +290,25 @@ async def test_a_harness_failure_stamps_its_code(druks_db, _inline_steps):
 
 
 @pytest.mark.asyncio
+async def test_an_exhausted_provisioning_failure_stamps_its_code(druks_db, _inline_steps):
+    # An exhausted transient provisioning failure records the classified
+    # ``sandbox_provisioning`` code rather than the empty string a raw drukbox
+    # SDK exception used to leave behind — so the dashboard/taxonomy can name it.
+    from druks.harnesses.exceptions import HarnessSandboxProvisioningError
+
+    item, run = _item_and_run(druks_db, "running")
+
+    async def body() -> None:
+        raise HarnessSandboxProvisioningError("exe.dev VM creation timed out")
+
+    with pytest.raises(HarnessSandboxProvisioningError):
+        await _execute_run(run.id, run.kind, {"type": "work_item", "id": item.id}, None, body)
+
+    ambient_session().expire_all()
+    assert Run.get(run.id).failure_code == "sandbox_provisioning"
+
+
+@pytest.mark.asyncio
 async def test_a_foreign_code_never_becomes_the_failure_code(druks_db, _inline_steps):
     """``code`` is a common attribute name — asyncssh's is an int — so only
     the declaring families stamp the run; anything else records a crash."""

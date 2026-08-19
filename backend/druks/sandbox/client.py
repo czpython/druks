@@ -5,24 +5,36 @@ from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+import asyncssh
 from drukbox_sdk import SandboxAPI, SandboxHost
 from drukbox_sdk.exceptions import (
     SandboxAPIError,
     SandboxNotFoundError,
+    SandboxProvisioningError,
     SandboxUnavailableError,
 )
 from uuid_utils import uuid7
 
+from druks.harnesses.exceptions import HarnessSandboxProvisioningError
 from druks.settings import load_settings
 
 from .constants import SANDBOX_HOST_LEASE_SECONDS
-from .exceptions import HostGone, SandboxUnreachable
+from .exceptions import HostGone, SandboxError, SandboxUnreachable
 from .host import Sandbox
 from .layout import get_helper_script_path, get_remote_home
 
 logger = logging.getLogger(__name__)
 
 _DRUKS_SANDBOX_LOCAL_SCRIPT = Path(__file__).parent / "druks-sandbox.sh"
+
+# SSH/socket/sandbox errors that mean a fresh VM never became usable.
+# CancelledError and programming errors are excluded so they propagate unchanged.
+_ACQUIRE_SETUP_REACHABILITY_ERRORS = (
+    SandboxError,
+    asyncssh.Error,
+    OSError,
+    TimeoutError,
+)
 
 
 class Client:
@@ -80,13 +92,25 @@ class Client:
             # Fixed lease: drukbox reaps the host when this lapses, so a run whose
             # worker dies frees its VM without a druks-side reconciler.
             expires_at = datetime.now(UTC) + timedelta(seconds=SANDBOX_HOST_LEASE_SECONDS)
-            record = await api.create_host(
-                expires_at=expires_at,
-                env=sandbox_env,
-                idempotency_key=key,
-                image=image or None,
-                provider=provider,
-            )
+            try:
+                record = await api.create_host(
+                    expires_at=expires_at,
+                    env=sandbox_env,
+                    idempotency_key=key,
+                    image=image or None,
+                    provider=provider,
+                )
+            except (SandboxProvisioningError, SandboxUnavailableError) as exc:
+                # Transient control-plane failures — a 502 the service raises
+                # when the provider/Tailscale/keyscan step fails, or a
+                # transport/503 SandboxUnavailableError. Classify them into the
+                # in-run retry path so a slow provider window recovers instead
+                # of dead-ending the run. Fatal SDK errors (auth, validation,
+                # conflict, not-found, generic response) are subclasses of the
+                # untouched SandboxAPIError base and fall through unretried.
+                raise HarnessSandboxProvisioningError(
+                    f"sandbox host provisioning failed: {exc}"
+                ) from exc
             logger.info("sandbox host created id=%s", record.id)
             key_path = settings.sandbox_keys_dir / record.id
             if record.private_key:
@@ -96,8 +120,15 @@ class Client:
             sandbox = Sandbox(record=record)
             try:
                 await _upload_helper_script(sandbox)
+            except _ACQUIRE_SETUP_REACHABILITY_ERRORS as error:
+                # Fresh VM never became usable; roll back and classify as provisioning.
+                await sandbox.aclose()
+                await self._best_effort_delete(api, record.id)
+                key_path.unlink(missing_ok=True)
+                raise HarnessSandboxProvisioningError(
+                    f"sandbox host {record.id} unreachable during setup: {error}"
+                ) from error
             except BaseException:
-                # Caller never sees this host; release rather than orphan.
                 await sandbox.aclose()
                 await self._best_effort_delete(api, record.id)
                 key_path.unlink(missing_ok=True)
@@ -138,6 +169,14 @@ class Client:
             except SandboxNotFoundError as exc:
                 raise HostGone(
                     f"sandbox host {host_id} no longer exists",
+                ) from exc
+            except SandboxUnavailableError as exc:
+                # Transport/503 while looking up an existing host — transient,
+                # so classify it the same as a create-time control-plane
+                # failure and let the in-run retry re-attach once the service
+                # recovers.
+                raise HarnessSandboxProvisioningError(
+                    f"sandbox host {host_id} lookup failed: {exc}"
                 ) from exc
             sandbox = Sandbox(record=record)
             try:
