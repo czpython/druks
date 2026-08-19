@@ -182,14 +182,15 @@ provider = ""
 service_url = ""
 service_token = ""
 image = ""
-# An HTTP proxy the login window routes through, so the login egresses from a
-# different IP than the box — for sign-in flows that reject the box's own
-# address. e.g. http://172.17.0.1:8888, or http://user:pass@host:port for an
-# authenticated proxy. Empty => the box's own IP. Only the login window uses it;
-# borrows keep it. See configuration.md.
+# An HTTP proxy for the login window. The login then leaves from a different IP
+# than the box. Use it for sign-in flows that refuse the box IP. Examples:
+# http://172.17.0.1:8888, or http://user:pass@host:port for a proxy with a user
+# name and password. If it is empty, the login uses the box IP. Only the login
+# window uses it. See configuration.md.
 browser_login_proxy = ""
-# The login browser's timezone (an IANA zone, e.g. "Europe/Madrid"), so it
-# agrees with the egress proxy's geography. Empty => the container default.
+# The timezone of the login browser. Use an IANA zone, for example
+# "Europe/Madrid". Set it to the region of the login proxy. If it is empty, the
+# browser keeps the container default.
 browser_login_tz = ""
 timeout = 180
 
