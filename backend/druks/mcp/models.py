@@ -2,18 +2,22 @@ import os
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import Boolean, ForeignKey, String, UniqueConstraint, select
+from sqlalchemy import Boolean, ForeignKey, String, UniqueConstraint, select, update
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Mapped, mapped_column
 
 from druks.accounts.constants import SYSTEM_ACCOUNT_ID
 from druks.core.models import Uuid7Pk
-from druks.database import db_session
+from druks.database import db_session, get_session
 from druks.extensions.registry import mcp_servers
 from druks.mcp.constants import NAME_PATTERN
 from druks.mcp.enums import IdentityMode, TokenSource
-from druks.mcp.exceptions import InvalidServerNameError, UnresolvedGrantAccountError
+from druks.mcp.exceptions import (
+    InvalidServerNameError,
+    MissingGrantError,
+    UnresolvedGrantAccountError,
+)
 from druks.models import Base
 from druks.secrets.fields import EncryptedJsonField, EncryptedTextField, Secret
 
@@ -257,6 +261,40 @@ class McpOauthGrant(Base, Uuid7Pk):
             },
         ).returning(cls)
         return session.scalars(statement, execution_options={"populate_existing": True}).one()
+
+    def load_refresh_token(self) -> str:
+        # Under the refresh lock: another process may have rotated and
+        # committed, and this transaction may already hold the row —
+        # populate_existing re-reads it past the identity map.
+        fresh = (
+            db_session()
+            .scalars(
+                select(McpOauthGrant)
+                .where(McpOauthGrant.id == self.id)
+                .execution_options(populate_existing=True)
+            )
+            .one_or_none()
+        )
+        if not fresh:
+            raise MissingGrantError(self.server_name, self.account_id)
+        # The grant's secret halves are ciphertext at rest; the plaintext
+        # exists only in the refresh request body.
+        return fresh.refresh_token.decrypt()
+
+    def save_refresh_token(self, rotated: str) -> None:
+        # The provider invalidated the old token the moment it rotated, so
+        # the write commits on its own session, never the enclosing
+        # transaction — a step that rolls back later must not brick the grant.
+        with get_session(db_session().get_bind()) as session:
+            session.execute(
+                update(McpOauthGrant)
+                .where(McpOauthGrant.id == self.id)
+                .values(refresh_token=rotated)
+            )
+            session.commit()
+        # Keep the enclosing transaction's copy true as well.
+        self.refresh_token = rotated
+        db_session().flush()
 
     def delete(self) -> None:
         session = db_session()

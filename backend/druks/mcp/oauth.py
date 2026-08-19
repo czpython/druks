@@ -4,7 +4,7 @@ import httpx
 from sqlalchemy import select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-from druks.database import db_session, get_session
+from druks.database import db_session
 from druks.mcp.constants import OAUTH_CALLBACK_PATH, OAUTH_PROVIDER
 from druks.mcp.enums import IdentityMode
 from druks.mcp.exceptions import GrantRefreshError, MissingGrantError, OauthConnectError
@@ -244,41 +244,6 @@ async def mint_access_token(name: str, account_id: str) -> str:
     grant = McpOauthGrant.get_for_account(name, account_id)
     if not grant:
         raise MissingGrantError(name, account_id)
-
-    def load_refresh_token() -> str:
-        # Under the refresh lock: another process may have rotated and
-        # committed, and this transaction may already hold the row —
-        # populate_existing re-reads it past the identity map.
-        fresh = (
-            db_session()
-            .scalars(
-                select(McpOauthGrant)
-                .where(McpOauthGrant.id == grant.id)
-                .execution_options(populate_existing=True)
-            )
-            .one_or_none()
-        )
-        if not fresh:
-            raise MissingGrantError(name, account_id)
-        # The grant's secret halves are ciphertext at rest; the plaintext
-        # exists only in the refresh request body.
-        return fresh.refresh_token.decrypt()
-
-    def save_refresh_token(refresh_token: str) -> None:
-        # The provider invalidated the old token the moment it rotated, so
-        # the write commits on its own session, never the enclosing
-        # transaction — a step that rolls back later must not brick the grant.
-        with get_session(db_session().get_bind()) as session:
-            session.execute(
-                update(McpOauthGrant)
-                .where(McpOauthGrant.id == grant.id)
-                .values(refresh_token=refresh_token)
-            )
-            session.commit()
-        # Keep the enclosing transaction's copy true as well.
-        grant.refresh_token = refresh_token
-        db_session().flush()
-
     client = OauthClient(
         provider=OAUTH_PROVIDER,
         token_endpoint=grant.token_endpoint,
@@ -292,10 +257,6 @@ async def mint_access_token(name: str, account_id: str) -> str:
         http_factory=_http,
     )
     try:
-        return await client.mint_access_token(
-            key=f"{name}:{account_id}",
-            load_refresh_token=load_refresh_token,
-            save_refresh_token=save_refresh_token,
-        )
+        return await client.mint_access_token(key=f"{name}:{account_id}", grant=grant)
     except OauthRefreshError as error:
         raise GrantRefreshError(name, error.reason) from error

@@ -48,18 +48,34 @@ def _client(token_endpoint: FakeTokenEndpoint, **overrides) -> OauthClient:
     return OauthClient(**kwargs)
 
 
-def _fail_save(token: str) -> None:
-    pytest.fail("nothing rotated")
+class GrantStub:
+    """A grant with the two mint verbs over an in-memory refresh token."""
+
+    def __init__(self) -> None:
+        self.refresh_token = "rt-old"
+        self.saved: list[str] = []
+
+    def load_refresh_token(self) -> str:
+        return self.refresh_token
+
+    def save_refresh_token(self, rotated: str) -> None:
+        self.saved.append(rotated)
+
+
+class UntouchedGrant(GrantStub):
+    """A grant the mint under test must never read or rotate."""
+
+    def load_refresh_token(self) -> str:
+        pytest.fail("this mint reads no grant")
+
+    def save_refresh_token(self, rotated: str) -> None:
+        pytest.fail("nothing rotated")
 
 
 async def test_mint_serves_the_cache_without_a_refresh(token_endpoint):
     await get_client().set(_TOKEN_KEY, "at-cached")
 
-    token = await _client(token_endpoint).mint_access_token(
-        key="grant-1",
-        load_refresh_token=lambda: pytest.fail("cache hit reads no grant"),
-        save_refresh_token=_fail_save,
-    )
+    token = await _client(token_endpoint).mint_access_token(key="grant-1", grant=UntouchedGrant())
 
     assert token == "at-cached"
     assert not token_endpoint.requests
@@ -67,16 +83,12 @@ async def test_mint_serves_the_cache_without_a_refresh(token_endpoint):
 
 async def test_mint_refreshes_persists_rotation_and_fills_with_skewed_ttl(token_endpoint):
     token_endpoint.response = {"access_token": "at-2", "refresh_token": "rt-new", "expires_in": 300}
-    saved: list[str] = []
+    grant = GrantStub()
 
-    token = await _client(token_endpoint).mint_access_token(
-        key="grant-1",
-        load_refresh_token=lambda: "rt-old",
-        save_refresh_token=saved.append,
-    )
+    token = await _client(token_endpoint).mint_access_token(key="grant-1", grant=grant)
 
     assert token == "at-2"
-    assert saved == ["rt-new"]
+    assert grant.saved == ["rt-new"]
     refresh = token_endpoint.requests[0]
     assert refresh["grant_type"] == "refresh_token"
     assert refresh["refresh_token"] == "rt-old"
@@ -92,19 +104,28 @@ async def test_mint_refreshes_persists_rotation_and_fills_with_skewed_ttl(token_
 async def test_mint_fills_the_cache_only_after_the_rotation_is_saved(token_endpoint):
     token_endpoint.response = {"access_token": "at-2", "refresh_token": "rt-new", "expires_in": 300}
 
-    def save_refresh_token(token: str) -> None:
-        raise RuntimeError("rotation write failed")
+    class UnsavableGrant(GrantStub):
+        def save_refresh_token(self, rotated: str) -> None:
+            raise RuntimeError("rotation write failed")
 
     with pytest.raises(RuntimeError, match="rotation write failed"):
-        await _client(token_endpoint).mint_access_token(
-            key="grant-1",
-            load_refresh_token=lambda: "rt-old",
-            save_refresh_token=save_refresh_token,
-        )
+        await _client(token_endpoint).mint_access_token(key="grant-1", grant=UnsavableGrant())
 
     redis = get_client()
     assert not await redis.get(_TOKEN_KEY)
     assert not await redis.get(_LOCK_KEY)
+
+
+async def test_mint_surfaces_the_grants_own_load_error(token_endpoint):
+    class GoneGrant(GrantStub):
+        def load_refresh_token(self) -> str:
+            raise LookupError("the grant row is gone")
+
+    with pytest.raises(LookupError, match="the grant row is gone"):
+        await _client(token_endpoint).mint_access_token(key="grant-1", grant=GoneGrant())
+
+    assert not token_endpoint.requests
+    assert not await get_client().get(_LOCK_KEY)
 
 
 async def test_mint_losing_the_lock_polls_for_the_winners_token(token_endpoint):
@@ -116,11 +137,7 @@ async def test_mint_losing_the_lock_polls_for_the_winners_token(token_endpoint):
         await redis.delete(_LOCK_KEY)
 
     winner = asyncio.create_task(_winner_finishes())
-    token = await _client(token_endpoint).mint_access_token(
-        key="grant-1",
-        load_refresh_token=lambda: "rt-old",
-        save_refresh_token=_fail_save,
-    )
+    token = await _client(token_endpoint).mint_access_token(key="grant-1", grant=UntouchedGrant())
     await winner
 
     assert token == "at-winner"
@@ -132,21 +149,18 @@ async def test_mint_times_out_loudly_when_the_lock_never_frees(token_endpoint):
 
     with pytest.raises(OauthRefreshError, match="concurrent refresh"):
         await _client(token_endpoint, mint_wait_attempts=3).mint_access_token(
-            key="grant-1",
-            load_refresh_token=lambda: "rt-old",
-            save_refresh_token=_fail_save,
+            key="grant-1", grant=UntouchedGrant()
         )
 
 
 async def test_mint_refresh_rejection_evicts_and_raises(token_endpoint):
     token_endpoint.status = 400
 
+    grant = GrantStub()
     with pytest.raises(OauthRefreshError, match="HTTP 400"):
-        await _client(token_endpoint).mint_access_token(
-            key="grant-1",
-            load_refresh_token=lambda: "rt-old",
-            save_refresh_token=_fail_save,
-        )
+        await _client(token_endpoint).mint_access_token(key="grant-1", grant=grant)
+
+    assert not grant.saved
 
     redis = get_client()
     assert not await redis.get(_TOKEN_KEY)
@@ -155,9 +169,7 @@ async def test_mint_refresh_rejection_evicts_and_raises(token_endpoint):
 
 async def test_mint_refresh_uses_basic_auth(token_endpoint):
     await _client(token_endpoint, basic_auth=True).mint_access_token(
-        key="grant-1",
-        load_refresh_token=lambda: "rt-old",
-        save_refresh_token=lambda token: None,
+        key="grant-1", grant=GrantStub()
     )
 
     assert token_endpoint.authorizations[0].startswith("Basic ")
