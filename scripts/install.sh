@@ -77,6 +77,12 @@ main() {
   fetch_from_repo deploy/compose.local.yaml compose.local.yaml
   fetch_from_repo deploy/compose.remote.yaml compose.remote.yaml
 
+  # compose.override.yaml holds the operator's local services and overrides;
+  # COMPOSE_FILE lists it, so it must exist. Seed it once and never touch it
+  # again, so nothing the operator adds is lost. INSTALL.md explains it.
+  [ -f compose.override.yaml ] \
+    || printf '# Host-local Compose overrides. See INSTALL.md.\n' > compose.override.yaml
+
   # The Caddyfile is bind-mounted by the remote overlay (stock caddy image, no
   # baked config), so it refreshes on every re-run.
   echo "→ fetching deploy/caddy/Caddyfile from $REPO@$REF"
@@ -135,10 +141,12 @@ main() {
   else
     set_env_var DRUKS_DOCKER_GID "$(stat -c '%g' /var/run/docker.sock)"
   fi
+  # compose.override.yaml loads last so operator additions win over the repo
+  # files and are never overwritten by them.
   if [ "$PROVIDER" = "docker" ]; then
-    set_env_var COMPOSE_FILE "compose.yaml:compose.local.yaml"
+    set_env_var COMPOSE_FILE "compose.yaml:compose.local.yaml:compose.override.yaml"
   else
-    set_env_var COMPOSE_FILE "compose.yaml:compose.remote.yaml"
+    set_env_var COMPOSE_FILE "compose.yaml:compose.remote.yaml:compose.override.yaml"
   fi
 
   echo "→ docker compose pull"

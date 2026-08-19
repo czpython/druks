@@ -60,3 +60,25 @@ dashboard at <http://127.0.0.1:8001>: **Settings → Harnesses** connects
 Claude and Codex (agent runs refuse to start on an unconnected harness) and
 the GitHub App druks acts as. Then `docker compose exec web druks doctor
 --sandbox` proves the full sandbox path with a real container.
+
+## Local customizations
+
+Put host-local Docker Compose changes in `~/druks/compose.override.yaml`. Add
+local services, service overrides, and named volumes there. install.sh creates
+this file once and never changes it. Your changes survive every install and
+upgrade.
+
+install.sh refreshes the repo compose files on each run. So do not edit
+`compose.yaml`, `compose.local.yaml`, or `compose.remote.yaml` — those changes
+are lost on the next install.
+
+Example — bake locally-installed apps into the web image:
+
+```yaml
+services:
+  web:
+    image: druks-with-apps
+    build: ./appimage
+```
+
+Apply a change with `docker compose up -d` from `~/druks`.
