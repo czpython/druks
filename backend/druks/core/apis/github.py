@@ -141,7 +141,7 @@ class GitHubClient:
         id, serving the last-known set when GitHub hiccups."""
         cached = _INSTALLATION_ACCOUNTS_CACHE.get(self._app_id)
         now = time.monotonic()
-        if cached is not None and now - cached[0] < _INSTALLATION_ACCOUNTS_TTL_SECONDS:
+        if cached and now - cached[0] < _INSTALLATION_ACCOUNTS_TTL_SECONDS:
             return cached[1]
         try:
             accounts: list[str] = []
@@ -158,7 +158,7 @@ class GitHubClient:
                     break
                 page += 1
         except Exception:
-            if cached is not None:
+            if cached:
                 logger.warning(
                     "Could not refresh App installations; serving the last-known set.",
                     exc_info=True,
@@ -238,10 +238,8 @@ class GitHubClient:
 
     async def _invalidate_for_repo(self, repo: str) -> None:
         inst_id = self._installation_cache.pop(repo, None)
-        if inst_id is None:
-            return
-        gh = self._repo_gh_cache.pop(inst_id, None)
-        if gh is not None:
+        gh = self._repo_gh_cache.pop(inst_id, None) if inst_id else None
+        if gh:
             try:
                 await gh.__aexit__(None, None, None)
             except Exception:  # noqa: BLE001 — best-effort cleanup, log and move on
@@ -345,10 +343,15 @@ class GitHubClient:
         if pull_request["state"] == "closed":
             return True
 
-        await self.update_pull_request_branch(repo, pr_number)
-        if await self.enable_auto_merge(repo, pull_request["node_id"]):
+        # A clean pull request merges directly: GitHub refuses to arm auto-merge
+        # on one, and updating its branch first moves the head asynchronously,
+        # racing an immediate merge into a 409.
+        if await self.squash_merge_pull_request(repo, pr_number):
             return True
-        return await self.squash_merge_pull_request(repo, pr_number)
+        if await self.enable_auto_merge(repo, pull_request["node_id"]):
+            await self.update_pull_request_branch(repo, pr_number)
+            return True
+        return False
 
     @_retry_on_401
     async def update_pull_request_body(
@@ -447,7 +450,7 @@ class GitHubClient:
                 "event": event,
                 "body": body,
             }
-            if raw_comments is not None:
+            if raw_comments:
                 kwargs["comments"] = raw_comments
             response = await gh.rest.pulls.async_create_review(
                 owner,
@@ -517,7 +520,7 @@ def _build_review_comments(comments: list[ReviewComment]) -> list[dict[str, Any]
     result: list[dict[str, Any]] = []
     for c in comments:
         entry: dict[str, Any] = {"path": c.path, "line": c.line, "body": c.body}
-        if c.start_line is not None:
+        if c.start_line:
             entry["start_line"] = c.start_line
         result.append(entry)
     return result
@@ -527,7 +530,7 @@ def _fold_comments_into_body(body: str, comments: list[ReviewComment]) -> str:
     lines = [body, "", "---", ""]
     for c in comments:
         loc = f"`{c.path}:{c.line}`"
-        if c.start_line is not None:
+        if c.start_line:
             loc = f"`{c.path}:{c.start_line}-{c.line}`"
         lines.append(f"**{loc}**\n{c.body}\n")
     return "\n".join(lines)

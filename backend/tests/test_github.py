@@ -190,26 +190,25 @@ async def test_merge_when_ready_short_circuits_closed_pull_request() -> None:
     assert operations.mock_calls == [call.get_pull_request("ClawHaven/example", 7)]
 
 
-async def test_merge_when_ready_queues_after_updating_branch() -> None:
+async def test_merge_when_ready_merges_clean_pull_request_directly() -> None:
     client, operations = _merge_when_ready_client()
 
     assert await client.merge_when_ready("ClawHaven/example", 7)
     assert operations.mock_calls == [
         call.get_pull_request("ClawHaven/example", 7),
-        call.update_pull_request_branch("ClawHaven/example", 7),
-        call.enable_auto_merge("ClawHaven/example", "PR_node"),
+        call.squash_merge_pull_request("ClawHaven/example", 7),
     ]
 
 
-async def test_merge_when_ready_falls_back_to_direct_merge() -> None:
-    client, operations = _merge_when_ready_client(auto_merge_accepted=False)
+async def test_merge_when_ready_arms_auto_merge_before_updating_branch() -> None:
+    client, operations = _merge_when_ready_client(squash_merge_accepted=False)
 
     assert await client.merge_when_ready("ClawHaven/example", 7)
     assert operations.mock_calls == [
         call.get_pull_request("ClawHaven/example", 7),
-        call.update_pull_request_branch("ClawHaven/example", 7),
-        call.enable_auto_merge("ClawHaven/example", "PR_node"),
         call.squash_merge_pull_request("ClawHaven/example", 7),
+        call.enable_auto_merge("ClawHaven/example", "PR_node"),
+        call.update_pull_request_branch("ClawHaven/example", 7),
     ]
 
 
@@ -222,9 +221,8 @@ async def test_merge_when_ready_reports_unsettled_merge() -> None:
     assert not await client.merge_when_ready("ClawHaven/example", 7)
     assert operations.mock_calls == [
         call.get_pull_request("ClawHaven/example", 7),
-        call.update_pull_request_branch("ClawHaven/example", 7),
-        call.enable_auto_merge("ClawHaven/example", "PR_node"),
         call.squash_merge_pull_request("ClawHaven/example", 7),
+        call.enable_auto_merge("ClawHaven/example", "PR_node"),
     ]
 
 
