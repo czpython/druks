@@ -61,8 +61,8 @@ class OauthClient:
     ``begin_connect`` returns the consent URL to open; ``complete_connect``
     consumes the callback's single-use state and exchanges the code;
     ``mint_access_token`` serves delivery from the Redis token cache, electing
-    one refresher per grant. Grants live on the caller's own rows, reached
-    through the two callables mint takes. A ``Service`` with declared OAuth
+    one refresher per grant. Grants live on the caller's own rows — mint takes
+    the grant object that owns them. A ``Service`` with declared OAuth
     endpoints hands back a configured client via ``get_oauth_client()`` —
     construct directly only when no service holds the client credentials.
 
@@ -213,13 +213,7 @@ class OauthClient:
             )
         return tokens, pending
 
-    async def mint_access_token(
-        self,
-        *,
-        key: str,
-        load_refresh_token: Callable[[], str],
-        save_refresh_token: Callable[[str], None],
-    ) -> str:
+    async def mint_access_token(self, *, key: str, grant) -> str:
         """The delivery-side token for one grant: the cached access token
         while it lives, else one refreshed through the grant's refresh token.
         The provider may rotate the refresh token on use — two concurrent
@@ -228,16 +222,19 @@ class OauthClient:
         backstop a live refresh cannot outlive). Losers poll for the winner's
         cache fill, for about one token-endpoint round trip, then fail loudly.
 
-        ``load_refresh_token()`` runs under the refresh lock and must observe
-        rotations other processes committed — a naive re-select can return a
-        row this transaction already identity-mapped, so read with
+        ``grant`` is the caller's own object — typically the row the grant
+        lives on — carrying two verbs:
+
+        ``grant.load_refresh_token()`` runs under the refresh lock and must
+        observe rotations other processes committed — a naive re-select can
+        return a row this transaction already identity-mapped, so read with
         ``populate_existing`` or on a fresh session.
 
-        ``save_refresh_token(token)`` receives a rotated refresh token and
-        must have committed it before returning: the provider has already
-        invalidated the old token, so the write cannot ride an enclosing
-        transaction that may later roll back. The cache fills only after it
-        returns."""
+        ``grant.save_refresh_token(rotated)`` receives a rotated refresh
+        token and must have committed it before returning: the provider has
+        already invalidated the old token, so the write cannot ride an
+        enclosing transaction that may later roll back. The cache fills only
+        after it returns."""
         redis = get_client()
         token_key = f"{self.provider}:access_token:{key}"
         lock_key = f"{self.provider}:refresh_lock:{key}"
@@ -255,7 +252,7 @@ class OauthClient:
         try:
             data = {
                 "grant_type": "refresh_token",
-                "refresh_token": load_refresh_token(),
+                "refresh_token": grant.load_refresh_token(),
                 **self.extra_token_params,
             }
             async with self._http() as http:
@@ -286,7 +283,7 @@ class OauthClient:
                     self.provider, "the token endpoint returned no access token"
                 )
             if tokens.get("refresh_token"):
-                save_refresh_token(tokens["refresh_token"])
+                grant.save_refresh_token(tokens["refresh_token"])
             try:
                 ttl = int(tokens.get("expires_in", 3600)) - OAUTH_TOKEN_TTL_SKEW_SECONDS
             except (TypeError, ValueError) as error:

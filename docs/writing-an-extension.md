@@ -792,37 +792,37 @@ whole grant. The engine raises `OauthRefreshError` when the grant does not
 refresh. Then ask the operator to connect again.
 
 ```python
-token = await Acme.get_oauth_client().mint_access_token(
-    key=account_id,
-    load_refresh_token=load_refresh_token,
-    save_refresh_token=save_refresh_token,
-)
+grant = AcmeGrant.get_for_account(account_id)
+token = await Acme.get_oauth_client().mint_access_token(key=account_id, grant=grant)
 ```
 
-The two callables connect the engine to your storage:
+`grant` is your own grant row. It carries the two verbs that connect the
+engine to your storage:
 
 ```python
-def load_refresh_token() -> str:
-    # Runs under the refresh lock. Another process may have rotated and
-    # committed. Re-read the row; do not trust the identity map.
-    grant = db_session().scalars(
-        select(AcmeGrant)
-        .where(AcmeGrant.account_id == account_id)
-        .execution_options(populate_existing=True)
-    ).one()
-    return grant.secrets["refresh_token"]
+class AcmeGrant(Base):
+    ...
 
-
-def save_refresh_token(rotated: str) -> None:
-    # The provider has already invalidated the old token. Commit on an own
-    # session, never on the enclosing step transaction. A later rollback
-    # must not lose the new token.
-    with Session(db_session().get_bind()) as session:
-        grant = session.scalars(
-            select(AcmeGrant).where(AcmeGrant.account_id == account_id)
+    def load_refresh_token(self) -> str:
+        # Runs under the refresh lock. Another process may have rotated and
+        # committed. Re-read the row; do not trust the identity map.
+        fresh = db_session().scalars(
+            select(AcmeGrant)
+            .where(AcmeGrant.id == self.id)
+            .execution_options(populate_existing=True)
         ).one()
-        grant.secrets["refresh_token"] = rotated
-        session.commit()
+        return fresh.secrets["refresh_token"]
+
+    def save_refresh_token(self, rotated: str) -> None:
+        # The provider has already invalidated the old token. Commit on an own
+        # session, never on the enclosing step transaction. A later rollback
+        # must not lose the new token.
+        with Session(db_session().get_bind()) as session:
+            grant = session.scalars(
+                select(AcmeGrant).where(AcmeGrant.id == self.id)
+            ).one()
+            grant.secrets["refresh_token"] = rotated
+            session.commit()
 ```
 
 `secrets` is an `EncryptedJsonField` column on your grant row (see
