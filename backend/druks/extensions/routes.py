@@ -14,7 +14,7 @@ async def list_extensions() -> list[ExtensionResponse]:
             icon=extension.icon,
             description=extension.description,
             builtin=extension.builtin,
-            subject_types=[subject.subject_type for subject in extension.subject_classes()],
+            subject_types=[subject.subject_type for subject in extension.subjects()],
             has_frontend=bool(extension.frontend_dist()),
             navigation=extension.navigation,
         )

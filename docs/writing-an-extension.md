@@ -497,6 +497,10 @@ Any id names one of these, so a detail read always answers. Override
 `get_for_subject_id()` to return None for a shape yours could never wear —
 `owner/repo#7` is a pull request, `nonsense` is a 404.
 
+Each subject a workflow declares must implement `list_summaries()`. The board
+reads it. Druks checks this at load. If the method is missing, the extension
+does not load. The error names the extension, the subject, and the method.
+
 Druks serves the same `/api/night_watch/repository` surface either way: a board,
 a page for one, and a live stream of either, mounted for every subject your
 workflows declare. Each response pairs your summary with the run's status,
