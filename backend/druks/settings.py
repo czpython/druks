@@ -159,8 +159,9 @@ class Sandbox(BaseModel):
     browser_sandbox_image: str = "ghcr.io/czpython/druks-browser:latest"
     # An HTTP proxy the login window routes through, so the login egresses from a
     # different IP than the box — for sign-in flows that reject the box's own
-    # address. Authless address; credentials, if any, are terminated deploy-side.
-    # Empty → the box's own IP. Only the login window uses it; borrows keep it.
+    # address. May carry credentials (http://user:pass@host:port) for an
+    # authenticated proxy; the login browser authenticates it directly. Empty →
+    # the box's own IP. Only the login window uses it; borrows keep it.
     browser_login_proxy: str = ""
     # The login browser's timezone, so it agrees with the egress proxy's
     # geography (e.g. "Europe/Madrid"). An IANA zone name. Empty → the container

@@ -184,8 +184,9 @@ service_token = ""
 image = ""
 # An HTTP proxy the login window routes through, so the login egresses from a
 # different IP than the box — for sign-in flows that reject the box's own
-# address. Authless address, e.g. http://172.17.0.1:8888. Empty => the box's own
-# IP. Only the login window uses it; borrows keep it. See configuration.md.
+# address. e.g. http://172.17.0.1:8888, or http://user:pass@host:port for an
+# authenticated proxy. Empty => the box's own IP. Only the login window uses it;
+# borrows keep it. See configuration.md.
 browser_login_proxy = ""
 # The login browser's timezone (an IANA zone, e.g. "Europe/Madrid"), so it
 # agrees with the egress proxy's geography. Empty => the container default.

@@ -270,14 +270,26 @@ per-host SSH private-key directory.
 HTTP proxy, so the login egresses from a different IP than the box — for sign-in
 flows that reject a login from the box's own address. It applies to the login
 window only — borrows keep the box IP, which is enough once the session is
-minted. The value is an authless proxy address, e.g. `http://172.17.0.1:8888`;
-credentials, if any, are terminated deploy-side, so no proxy secret enters
-Druks. Two ways to stand an exit up: run a CONNECT proxy on an always-on device
-reachable over the tailnet, or run a local `gost` relay
-(`gost -L=http://172.17.0.1:8888 -F=http://USER:PASS@host:PORT`) in front of a
-proxy you provide. Leaving it empty keeps today's behavior. A fixed proxy fails
-closed — if the exit is unreachable the login browser errors rather than falling
-back to the box IP.
+minted. Leaving it empty keeps today's behavior. A set proxy fails closed — if
+the exit is unreachable the login browser errors rather than falling back to the
+box IP. The value may include credentials
+(`http://user:pass@host:port`); the login browser authenticates the proxy
+itself, so no external relay is needed.
+
+Druks does not run the exit — you point this at one you provide. Two common
+shapes:
+
+- **Your own connection.** Run Tailscale on a home device and advertise it as an
+  exit node (from the Tailscale app). Add a `tailscale/tailscale` container to
+  the deploy in userspace mode (`TS_USERSPACE=true`,
+  `TS_OUTBOUND_HTTP_PROXY_LISTEN=:8080`,
+  `TS_EXTRA_ARGS=--exit-node=<your-device>`), and set
+  `browser_login_proxy = http://172.17.0.1:8080`. The login egresses from your
+  home connection; the box's own traffic is untouched. No credentials.
+- **A rented static-residential (ISP) proxy.** Point straight at it with
+  credentials: `browser_login_proxy = http://user:pass@isp-host:port`. Verify
+  the specific IP is not already flagged as a proxy before you trust it (an ISP
+  IP passes the datacenter-ASN check but can still be attributed as a proxy).
 
 `[sandbox].browser_login_tz` sets the login browser's timezone to an IANA zone
 name (e.g. `Europe/Madrid`), so it agrees with where `browser_login_proxy`

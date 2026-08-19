@@ -26,6 +26,20 @@ const PID_PATH = path.join(RUNTIME_PATH, "launcher.pid");
 const READY_PATH = path.join(RUNTIME_PATH, "ready.json");
 const CLOSED_PATH = path.join(RUNTIME_PATH, "closed");
 
+// Chrome's --proxy-server cannot carry a password, but Playwright authenticates
+// the proxy itself when handed username/password — so credentials in the proxy
+// URL (http://user:pass@host:port) let an authenticated ISP proxy work with no
+// external relay. A bare URL yields server-only, unchanged.
+function proxyFromUrl(raw) {
+  const url = new URL(raw);
+  const option = { server: `${url.protocol}//${url.host}` };
+  if (url.username) option.username = decodeURIComponent(url.username);
+  if (url.password) option.password = decodeURIComponent(url.password);
+  return option;
+}
+
+const proxyOption = loginProxy ? proxyFromUrl(loginProxy) : undefined;
+
 const [mode] = process.argv.slice(2);
 if (!mode || process.argv.length !== 3 || !["--headed", "--headless"].includes(mode)) {
   console.error("usage: session-launch --headed|--headless");
@@ -96,7 +110,7 @@ async function main() {
   try {
     context = await chromium.launchPersistentContext(PROFILE_PATH, {
       channel,
-      proxy: loginProxy ? { server: loginProxy } : undefined,
+      proxy: proxyOption,
       args: [
         "--remote-debugging-address=127.0.0.1",
         "--remote-debugging-port=9222",
