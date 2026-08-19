@@ -27,13 +27,8 @@ logger = logging.getLogger(__name__)
 
 _DRUKS_SANDBOX_LOCAL_SCRIPT = Path(__file__).parent / "druks-sandbox.sh"
 
-# A freshly created host that we can't reach or set up over SSH is a
-# provisioning failure in the same sense as a create-time control-plane one:
-# the VM was never usable. These are the shapes such reachability/setup
-# failures take — SSH connect/auth/channel errors (asyncssh), socket-level
-# failures and connect timeouts (OSError/TimeoutError), and the sandbox
-# layer's own SandboxUnreachable/SandboxError. Cancellation and unrelated
-# local/programming bugs are deliberately excluded so they propagate untouched.
+# SSH/socket/sandbox errors that mean a fresh VM never became usable.
+# CancelledError and programming errors are excluded so they propagate unchanged.
 _ACQUIRE_SETUP_REACHABILITY_ERRORS = (
     SandboxError,
     asyncssh.Error,
@@ -125,21 +120,18 @@ class Client:
             sandbox = Sandbox(record=record)
             try:
                 await _upload_helper_script(sandbox)
-            except BaseException as error:
-                # Caller never sees this host; release rather than orphan.
+            except _ACQUIRE_SETUP_REACHABILITY_ERRORS as error:
+                # Fresh VM never became usable; roll back and classify as provisioning.
                 await sandbox.aclose()
                 await self._best_effort_delete(api, record.id)
                 key_path.unlink(missing_ok=True)
-                # A fresh VM that never became reachable/usable during SSH +
-                # helper setup is a provisioning failure just like a create-time
-                # one, so classify it into the same transient-retry path — the
-                # raw error would otherwise bypass agent retry and record an
-                # empty failure code. Cancellation and unrelated
-                # local/programming errors keep their own type and propagate.
-                if isinstance(error, _ACQUIRE_SETUP_REACHABILITY_ERRORS):
-                    raise HarnessSandboxProvisioningError(
-                        f"sandbox host {record.id} unreachable during setup: {error}"
-                    ) from error
+                raise HarnessSandboxProvisioningError(
+                    f"sandbox host {record.id} unreachable during setup: {error}"
+                ) from error
+            except BaseException:
+                await sandbox.aclose()
+                await self._best_effort_delete(api, record.id)
+                key_path.unlink(missing_ok=True)
                 raise
             try:
                 yield sandbox

@@ -63,14 +63,10 @@ class HarnessSandboxError(HarnessError):
 
 
 class HarnessSandboxProvisioningError(HarnessSandboxError):
-    """A control-plane provisioning or transport failure while creating or
-    re-attaching a host, or reaching a freshly created one.
+    """Provisioning or transport failure during host creation, attach, or SSH setup.
 
-    Transient on the same schedule as :class:`HarnessSandboxError` (it
-    inherits ``retry``/``retry_delays``), but carries its own ``code`` so an
-    exhausted retry records ``sandbox_provisioning`` rather than the generic
-    ``sandbox`` classification — the failure taxonomy can then name the most
-    transient failure class in the system instead of leaving it blank."""
+    Inherits the transient retry schedule from HarnessSandboxError; uses
+    ``sandbox_provisioning`` so exhausted retries record a named failure code."""
 
     code = "sandbox_provisioning"
 
