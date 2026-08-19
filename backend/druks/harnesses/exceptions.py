@@ -62,6 +62,15 @@ class HarnessSandboxError(HarnessError):
     retry_delays = (60, 300)
 
 
+class HarnessSandboxProvisioningError(HarnessSandboxError):
+    """Provisioning or transport failure during host creation, attach, or SSH setup.
+
+    Inherits the transient retry schedule from HarnessSandboxError; uses
+    ``sandbox_provisioning`` so exhausted retries record a named failure code."""
+
+    code = "sandbox_provisioning"
+
+
 class OAuthTokenError(Exception):
     """No usable subscription credential is available.
 
