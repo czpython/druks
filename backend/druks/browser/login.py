@@ -55,6 +55,7 @@ class LoginWindow:
             await _launch(
                 browser,
                 session.name,
+                start_url=f"https://{session.site}",
                 login_proxy=settings.sandbox.browser_login_proxy,
                 login_tz=settings.sandbox.browser_login_tz,
             )
@@ -173,11 +174,18 @@ async def _seed(browser: Sandbox, session: StoredBrowserSession) -> None:
         await browser.upload_file(local=meta, remote=f"{SESSION_ROOT}/state.meta.json")
 
 
-async def _launch(browser: Sandbox, name: str, *, login_proxy: str, login_tz: str) -> None:
-    # The launcher and its browser read these from the environment: the egress
-    # proxy keeps the login off the box's own IP, and TZ aligns the browser's
-    # timezone with the exit's geography. Either empty is simply left unset.
-    env = {"TZ": login_tz, "DRUKS_BROWSER_LOGIN_PROXY": login_proxy}
+async def _launch(
+    browser: Sandbox, name: str, *, start_url: str, login_proxy: str, login_tz: str
+) -> None:
+    # The launcher and its browser read these from the environment: the site to
+    # open on so the operator lands where they log in, the egress proxy that
+    # keeps the login off the box's own IP, and TZ to align the browser's
+    # timezone with the exit's geography. An empty value is simply left unset.
+    env = {
+        "TZ": login_tz,
+        "DRUKS_BROWSER_LOGIN_PROXY": login_proxy,
+        "DRUKS_BROWSER_URL": start_url,
+    }
     assignments = " ".join(f"{key}={shlex.quote(value)}" for key, value in env.items() if value)
     env_prefix = f"env {assignments} " if assignments else ""
     ready = await browser.exec(

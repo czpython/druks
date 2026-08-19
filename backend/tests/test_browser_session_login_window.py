@@ -100,6 +100,15 @@ async def test_login_launch_leaves_the_box_untouched_when_nothing_is_set(window_
     assert "TZ=" not in command
 
 
+async def test_login_launch_opens_on_the_session_site(window_runtime):
+    client = window_runtime
+
+    await LoginWindow.open(create_session())
+
+    command = client.browsers[0].launch_command or ""
+    assert "DRUKS_BROWSER_URL=https://x.com" in command
+
+
 def _runtime_with_sandbox(tmp_path, monkeypatch, **sandbox) -> FakeSandboxClient:
     settings = make_settings(tmp_path, sandbox=sandbox)
     client = FakeSandboxClient()
@@ -125,7 +134,7 @@ async def test_login_launch_sets_the_configured_timezone(tmp_path, monkeypatch):
     await LoginWindow.open(create_session())
 
     command = client.browsers[0].launch_command or ""
-    assert "env TZ=Europe/Madrid session-launch --headed" in command
+    assert "TZ=Europe/Madrid" in command
 
 
 async def test_login_launch_quotes_values_so_a_bad_one_cannot_inject(tmp_path, monkeypatch):
