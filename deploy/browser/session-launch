@@ -122,6 +122,17 @@ async function main() {
       await context.setStorageState(STORAGE_STATE_PATH);
     }
 
+    // Open on the session's own site so the operator lands where they log in,
+    // not on a blank tab. Best-effort: a slow or blocked site still yields a
+    // usable window the operator can steer by hand.
+    const startUrl = process.env.DRUKS_BROWSER_URL;
+    if (startUrl) {
+      const page = context.pages()[0] || (await context.newPage());
+      await page
+        .goto(startUrl, { waitUntil: "domcontentloaded", timeout: 15000 })
+        .catch(() => {});
+    }
+
     fs.writeFileSync(
       READY_PATH,
       `${JSON.stringify({ cdp: "http://127.0.0.1:9222", headless })}\n`,
