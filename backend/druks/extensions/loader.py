@@ -7,6 +7,7 @@ from .exceptions import ExtensionImportError, ExtensionNotFound, MalformedExtens
 
 if TYPE_CHECKING:
     from importlib.metadata import EntryPoint
+    from types import ModuleType
 
     from fastapi import FastAPI
 
@@ -70,8 +71,8 @@ def iter_extensions() -> list[type[Extension]]:
         if extension.name in seen:
             raise ValueError(f"duplicate extension name {extension.name!r}")
         seen.add(extension.name)
-        # Ownership registers before load(app)/discover() imports the capability
-        # modules, whose Workflow classes resolve their extension at definition.
+        # Ownership registers before discover() imports the capability modules,
+        # whose Workflow classes resolve their extension at definition.
         register_workflow_package(extension.package, extension.name)
         extensions.append(extension)
     return extensions
@@ -91,7 +92,7 @@ def load_extension(name: str) -> type[Extension]:
     class, with every surface then enumerable off it (``workflows()``,
     ``routers()``, ``capability_modules()``, ``settings_model``,
     ``migrations_dir()``). The load path used by the CLI, tests, and evals —
-    no FastAPI, no ``load(app)``.
+    no FastAPI, nothing mounted.
 
     Fails loudly and by name: an uninstalled package raises ``ExtensionNotFound``;
     an entry point that doesn't resolve to an ``Extension`` raises
@@ -220,17 +221,43 @@ def import_extension_models(only: type[Extension] | None = None) -> None:
             )
 
 
+def mount(app: "FastAPI", extension: type[Extension], modules: list["ModuleType"]) -> None:
+    """Mount one discovered extension: its routers under ``/api/<name>`` and its
+    shipped frontend (if any) under ``/app/<name>``. The loader's, not an extension
+    hook — the prefix, the identity gate, and the no-shadowing guarantee are platform
+    policy no extension can override."""
+    # Local, matching get_routers: the loader stays importable app-lessly.
+    from fastapi import Depends
+
+    from druks.accounts.dependencies import current_account
+
+    # /api/<name> wraps the author's own prefix so extensions can't shadow the
+    # platform or each other; every route sits behind the identity gate. The
+    # extension's name tags them all, so a router says only what it serves.
+    prefix = f"/api/{extension.name}"
+    for router in extension.get_routers(modules):
+        app.include_router(
+            router,
+            prefix=prefix,
+            tags=[extension.name],
+            dependencies=[Depends(current_account)],
+        )
+    dist = extension.frontend_dist()
+    if dist:
+        # /app, not /api: unknown /api/* paths must stay JSON 404s, never fall
+        # through to an index.html.
+        app.frontend(f"/app/{extension.name}", directory=dist)
+
+
 def load(app: "FastAPI") -> None:
-    """API boot entry: every extension imports its capabilities (self-registering its
-    webhooks, workflows, agents, subscribers) and mounts its routers under
-    ``/api/<name>``."""
+    """API boot entry: one pipeline per extension — discover (its webhooks, workflows,
+    agents, and subscribers self-register on import), validate the declared subjects,
+    mount. A subject that fails the read-side contract stops the boot here, before
+    anything is mounted."""
     # The table-prefix check runs here, not just in makemigrations — an author
     # who hand-writes migrations still can't boot with an unprefixed table.
     import_extension_models()
     for extension in iter_extensions():
-        # Discover then validate the declared subjects here, before the author-
-        # overridable ``load(app)`` — an override of ``load`` or ``get_routers``
-        # must not be able to report a booted extension whose board would 500.
-        extension.discover()
+        modules = extension.discover()
         extension.subject_classes()
-        extension.load(app)
+        mount(app, extension, modules)

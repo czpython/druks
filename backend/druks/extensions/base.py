@@ -23,7 +23,7 @@ from .settings import (
 )
 
 if TYPE_CHECKING:
-    from fastapi import APIRouter, FastAPI
+    from fastapi import APIRouter
 
     from druks.agents import Agent
     from druks.doctor import CheckResult
@@ -280,35 +280,6 @@ class Extension:
             return None
         dist = package_dir / "dist"
         return dist if (dist / "entry.js").is_file() else None
-
-    @classmethod
-    def load(cls, app: "FastAPI") -> None:
-        """Wire the extension into the running API: import its capabilities
-        (``discover``), mount its routers under ``/api/<name>``, and serve its
-        shipped frontend (if any) under ``/app/<name>``. The loader calls this once
-        per extension at boot."""
-        # Local, matching get_routers: the loader stays importable app-lessly.
-        from fastapi import Depends
-
-        from druks.accounts.dependencies import current_account
-
-        modules = cls.discover()
-        # /api/<name> wraps the author's own prefix so extensions can't shadow
-        # the platform or each other; every route sits behind the identity gate.
-        # The extension's name tags them all, so a router says only what it serves.
-        prefix = f"/api/{cls.name}"
-        for router in cls.get_routers(modules):
-            app.include_router(
-                router,
-                prefix=prefix,
-                tags=[cls.name],
-                dependencies=[Depends(current_account)],
-            )
-        dist = cls.frontend_dist()
-        if dist:
-            # /app, not /api: unknown /api/* paths must stay JSON 404s, never fall
-            # through to an index.html.
-            app.frontend(f"/app/{cls.name}", directory=dist)
 
     @classmethod
     def get_routers(cls, modules: list[ModuleType]) -> "list[APIRouter]":

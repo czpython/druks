@@ -120,7 +120,7 @@ def _routes_module(name: str, **routers: APIRouter) -> ModuleType:
     return module
 
 
-def _mount(extension: type[Extension], monkeypatch) -> TestClient:
+def _boot(extension: type[Extension], monkeypatch) -> TestClient:
     monkeypatch.setattr(loader, "iter_extensions", lambda: [extension])
     monkeypatch.setattr(loader, "import_extension_models", lambda: None)
     app = FastAPI()
@@ -149,7 +149,7 @@ def test_nothing_an_extension_declares_can_take_a_read_the_platform_serves(monke
         def discover(cls) -> list[ModuleType]:
             return [_routes_module("greedy", router=greedy)]
 
-    client = _mount(Greedy, monkeypatch)
+    client = _boot(Greedy, monkeypatch)
     assert client.get("/api/greedy/widget").json() == {"rows": []}
     assert client.get("/api/greedy/anything-else").json() == {"who": "extension"}
 
@@ -174,7 +174,7 @@ def test_a_composed_router_loads(monkeypatch):
         def discover(cls) -> list[ModuleType]:
             return [_routes_module("composed", router=parent)]
 
-    assert _mount(Composed, monkeypatch).get("/api/composed/parts/nested").json() == {
+    assert _boot(Composed, monkeypatch).get("/api/composed/parts/nested").json() == {
         "who": "nested"
     }
 
@@ -194,8 +194,6 @@ def test_a_subject_cannot_take_the_transcripts_segment():
         def workflows(cls):
             return [SimpleNamespace(subject=Transcripts)]
 
-    # Same typed load-error family as the missing-``list_summaries()`` contract break —
-    # sibling checks in ``subject_classes()`` no longer raise a bare ``TypeError``.
     with pytest.raises(ExtensionSubjectContractError, match="agent-call reads"):
         Colliding.subject_classes()
 
@@ -224,19 +222,16 @@ def test_a_declared_subject_missing_list_summaries_is_rejected_with_an_actionabl
     assert "Implement list_summaries()" in message  # the implementation direction
 
 
-def test_full_boot_refuses_a_subject_missing_list_summaries_even_when_load_is_overridden(
-    monkeypatch,
-):
-    """The full-boot gate runs from the loader, not through ``load()``/``get_routers()`` —
-    an author override of the boot hook cannot report a booted extension whose board
-    would 500."""
+def test_full_boot_refuses_a_subject_missing_list_summaries(monkeypatch):
+    """The gate is the loader's own pipeline stage, not a side effect of mounting —
+    an extension with nothing to mount still fails on its broken subject."""
 
     class Account(Subject):
         pass  # inherits the platform stub
 
-    class Bypasser(Extension):
-        name = "bypasser"
-        package = "bypasser"
+    class Broken(Extension):
+        name = "broken_boot"
+        package = "broken_boot"
 
         @classmethod
         def discover(cls) -> list[ModuleType]:
@@ -246,13 +241,7 @@ def test_full_boot_refuses_a_subject_missing_list_summaries_even_when_load_is_ov
         def workflows(cls):
             return [SimpleNamespace(subject=Account)]
 
-        @classmethod
-        def load(cls, app) -> None:
-            # An override that never reaches get_routers()/subject_classes() —
-            # under the old wiring this booted clean.
-            return
-
-    monkeypatch.setattr(loader, "iter_extensions", lambda: [Bypasser])
+    monkeypatch.setattr(loader, "iter_extensions", lambda: [Broken])
     monkeypatch.setattr(loader, "import_extension_models", lambda: None)
     with pytest.raises(ExtensionSubjectContractError, match="list_summaries"):
         load(FastAPI())

@@ -2,7 +2,7 @@ import importlib
 import sys
 
 import pytest
-from druks.extensions.loader import _workflow_packages, register_workflow_package
+from druks.extensions.loader import _workflow_packages, mount, register_workflow_package
 from druks.scaffolding import create_extension
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -39,7 +39,7 @@ def test_create_extension_scaffolds_a_loadable_package(tmp_path):
         assert "Subject(" not in text
 
     # The generated extension.py must survive Extension.__init_subclass__ validation,
-    # and load() must mount both the API routes and the shipped dist/ frontend.
+    # and mounting must serve both the API routes and the shipped dist/ frontend.
     sys.path.insert(0, str(target))
     try:
         module = importlib.import_module("druks_night_watch.extension")
@@ -60,7 +60,7 @@ def test_create_extension_scaffolds_a_loadable_package(tmp_path):
         assert "extension=" not in (target / "druks_night_watch" / "workflows.py").read_text()
 
         app = FastAPI()
-        extension.load(app)
+        mount(app, extension, extension.discover())
         # Scaffolding is under test, not the identity gate.
         from druks.accounts.dependencies import current_account
 
