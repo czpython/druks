@@ -18,13 +18,27 @@ const PROFILE_PATH = path.join(SESSION_ROOT, "profile");
 // the login browser must be real Chrome wherever it can be.
 const CHROME_PATH = "/opt/google/chrome/chrome";
 const channel = fs.existsSync(CHROME_PATH) ? "chrome" : undefined;
-// A login-only egress proxy, set by druks only when the operator configured
-// one. Empty leaves the browser on the box's own IP.
+// The proxy for the login only. druks sets it only when the operator gives one.
+// If it is empty, the browser uses the box IP.
 const loginProxy = process.env.DRUKS_BROWSER_LOGIN_PROXY;
 const RUNTIME_PATH = path.join(SESSION_ROOT, ".runtime");
 const PID_PATH = path.join(RUNTIME_PATH, "launcher.pid");
 const READY_PATH = path.join(RUNTIME_PATH, "ready.json");
 const CLOSED_PATH = path.join(RUNTIME_PATH, "closed");
+
+// Chrome's --proxy-server cannot carry a password. Playwright authenticates the
+// proxy when you give it a user name and password. So a proxy URL with a user
+// name and password (http://user:pass@host:port) works with no external relay.
+// A URL with no user name and password gives a server-only proxy.
+function proxyFromUrl(raw) {
+  const url = new URL(raw);
+  const option = { server: `${url.protocol}//${url.host}` };
+  if (url.username) option.username = decodeURIComponent(url.username);
+  if (url.password) option.password = decodeURIComponent(url.password);
+  return option;
+}
+
+const proxyOption = loginProxy ? proxyFromUrl(loginProxy) : undefined;
 
 const [mode] = process.argv.slice(2);
 if (!mode || process.argv.length !== 3 || !["--headed", "--headless"].includes(mode)) {
@@ -96,7 +110,7 @@ async function main() {
   try {
     context = await chromium.launchPersistentContext(PROFILE_PATH, {
       channel,
-      proxy: loginProxy ? { server: loginProxy } : undefined,
+      proxy: proxyOption,
       args: [
         "--remote-debugging-address=127.0.0.1",
         "--remote-debugging-port=9222",

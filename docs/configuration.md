@@ -266,24 +266,45 @@ connected.
 `DRUKS_SANDBOX_KEYS_DIR` remains a process environment override for the
 per-host SSH private-key directory.
 
-`[sandbox].browser_login_proxy` routes the browser **login window** through an
-HTTP proxy, so the login egresses from a different IP than the box — for sign-in
-flows that reject a login from the box's own address. It applies to the login
-window only — borrows keep the box IP, which is enough once the session is
-minted. The value is an authless proxy address, e.g. `http://172.17.0.1:8888`;
-credentials, if any, are terminated deploy-side, so no proxy secret enters
-Druks. Two ways to stand an exit up: run a CONNECT proxy on an always-on device
-reachable over the tailnet, or run a local `gost` relay
-(`gost -L=http://172.17.0.1:8888 -F=http://USER:PASS@host:PORT`) in front of a
-proxy you provide. Leaving it empty keeps today's behavior. A fixed proxy fails
-closed — if the exit is unreachable the login browser errors rather than falling
-back to the box IP.
+`[sandbox].browser_login_proxy` sends the browser **login window** through an
+HTTP proxy. The login then leaves from a different IP than the box. Use it for
+sign-in flows that refuse a login from the box IP. Only the login window uses the
+proxy. Borrows keep the box IP. This is enough after Druks makes the session.
 
-`[sandbox].browser_login_tz` sets the login browser's timezone to an IANA zone
-name (e.g. `Europe/Madrid`), so it agrees with where `browser_login_proxy`
-egresses — a browser reporting one region while its IP is in another is an
-inconsistency some sign-in flows check. It applies to the login window only.
-Empty leaves the container's default timezone.
+If you do not set the proxy, the login uses the box IP. If you set the proxy and
+the exit is not available, the login browser fails. It does not fall back to the
+box IP.
+
+The value can include a user name and password (`http://user:pass@host:port`).
+The login browser authenticates the proxy. You do not need an external relay.
+
+Druks does not run the exit. You supply the exit and set this value to it. There
+are two common types.
+
+**Your own connection.** Do these steps:
+
+1. Install Tailscale on a home device.
+2. Make the device an exit node from the Tailscale app.
+3. Add a `tailscale/tailscale` container to the deployment in userspace mode. Set
+   these variables: `TS_USERSPACE=true`, `TS_OUTBOUND_HTTP_PROXY_LISTEN=:8080`,
+   and `TS_EXTRA_ARGS=--exit-node=<your-device>`.
+4. Set `browser_login_proxy = http://172.17.0.1:8080`.
+
+The login then leaves from your home connection. The box keeps its own IP for all
+other traffic. This exit needs no user name or password.
+
+**A rented static-residential (ISP) proxy.** Set the value to the proxy with its
+user name and password: `browser_login_proxy = http://user:pass@isp-host:port`.
+First make sure that a detection service does not already know the IP as a proxy.
+An ISP IP passes the datacenter-ASN check. A detection service can still find it
+and mark it as a proxy.
+
+`[sandbox].browser_login_tz` sets the timezone of the login browser. Use an IANA
+zone name, for example `Europe/Madrid`. The browser reports a region, and the IP
+has a region. Set both to the same region. Some sign-in flows check this. If the
+two regions are different, a flow can refuse the login. Only the login window
+uses this value. If you do not set it, the browser keeps the container default
+timezone.
 
 `[sandbox].provider` accepts any Drukbox provider name. `docker` selects the
 local install shape, `exe` selects the exe.dev + tailnet shape, and every other
