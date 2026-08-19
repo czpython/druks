@@ -1,5 +1,6 @@
 import asyncio
 import json
+import shlex
 import tempfile
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -51,7 +52,13 @@ class LoginWindow:
             raise exceptions.BrowserLaunchError(session.name, str(error)) from error
         try:
             await _seed(browser, session)
-            await _launch(browser, session.name)
+            await _launch(
+                browser,
+                session.name,
+                start_url=f"https://{session.site}",
+                login_proxy=settings.sandbox.browser_login_proxy,
+                login_tz=settings.sandbox.browser_login_tz,
+            )
         except BaseException:
             await sandbox_client.release(host_id=browser.id)
             raise
@@ -167,12 +174,26 @@ async def _seed(browser: Sandbox, session: StoredBrowserSession) -> None:
         await browser.upload_file(local=meta, remote=f"{SESSION_ROOT}/state.meta.json")
 
 
-async def _launch(browser: Sandbox, name: str) -> None:
+async def _launch(
+    browser: Sandbox, name: str, *, start_url: str, login_proxy: str, login_tz: str
+) -> None:
+    # The launcher and its browser read these from the environment: the site to
+    # open on so the operator lands where they log in, the egress proxy that
+    # keeps the login off the box's own IP, and TZ to align the browser's
+    # timezone with the exit's geography. An empty value is simply left unset.
+    env = {
+        "TZ": login_tz,
+        "DRUKS_BROWSER_LOGIN_PROXY": login_proxy,
+        "DRUKS_BROWSER_URL": start_url,
+    }
+    assignments = " ".join(f"{key}={shlex.quote(value)}" for key, value in env.items() if value)
+    env_prefix = f"env {assignments} " if assignments else ""
     ready = await browser.exec(
         [
             "sh",
             "-c",
-            f"nohup setsid session-launch --headed >{SESSION_ROOT}/launch.log 2>&1 </dev/null & "
+            f"nohup setsid {env_prefix}session-launch --headed "
+            f">{SESSION_ROOT}/launch.log 2>&1 </dev/null & "
             'launcher=$!; attempt=0; while [ "$attempt" -lt 300 ]; do '
             f"if [ -f {SESSION_ROOT}/.runtime/ready.json ]; then exit 0; fi; "
             'if ! kill -0 "$launcher" 2>/dev/null; then '

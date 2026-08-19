@@ -157,6 +157,15 @@ class Sandbox(BaseModel):
     # The browser home: browser containers boot on this provider with this image.
     browser_sandbox_provider: str = "docker"
     browser_sandbox_image: str = "ghcr.io/czpython/druks-browser:latest"
+    # An HTTP proxy the login window routes through, so the login egresses from a
+    # different IP than the box — for sign-in flows that reject the box's own
+    # address. Authless address; credentials, if any, are terminated deploy-side.
+    # Empty → the box's own IP. Only the login window uses it; borrows keep it.
+    browser_login_proxy: str = ""
+    # The login browser's timezone, so it agrees with the egress proxy's
+    # geography (e.g. "Europe/Madrid"). An IANA zone name. Empty → the container
+    # default. Only the login window uses it.
+    browser_login_tz: str = ""
     # Sized for the slowest provisioner.
     timeout: float = 180.0
 

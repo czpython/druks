@@ -260,9 +260,30 @@ connected.
 | `sandbox.service_token` | Drukbox API token |
 | `sandbox.timeout` | Control-plane request timeout; default 180 seconds |
 | `sandbox.image` | Optional provider image override |
+| `sandbox.browser_login_proxy` | Login-window egress proxy; empty keeps the box IP |
+| `sandbox.browser_login_tz` | Login-window timezone (IANA zone); empty keeps the container default |
 
 `DRUKS_SANDBOX_KEYS_DIR` remains a process environment override for the
 per-host SSH private-key directory.
+
+`[sandbox].browser_login_proxy` routes the browser **login window** through an
+HTTP proxy, so the login egresses from a different IP than the box — for sign-in
+flows that reject a login from the box's own address. It applies to the login
+window only — borrows keep the box IP, which is enough once the session is
+minted. The value is an authless proxy address, e.g. `http://172.17.0.1:8888`;
+credentials, if any, are terminated deploy-side, so no proxy secret enters
+Druks. Two ways to stand an exit up: run a CONNECT proxy on an always-on device
+reachable over the tailnet, or run a local `gost` relay
+(`gost -L=http://172.17.0.1:8888 -F=http://USER:PASS@host:PORT`) in front of a
+proxy you provide. Leaving it empty keeps today's behavior. A fixed proxy fails
+closed — if the exit is unreachable the login browser errors rather than falling
+back to the box IP.
+
+`[sandbox].browser_login_tz` sets the login browser's timezone to an IANA zone
+name (e.g. `Europe/Madrid`), so it agrees with where `browser_login_proxy`
+egresses — a browser reporting one region while its IP is in another is an
+inconsistency some sign-in flows check. It applies to the login window only.
+Empty leaves the container's default timezone.
 
 `[sandbox].provider` accepts any Drukbox provider name. `docker` selects the
 local install shape, `exe` selects the exe.dev + tailnet shape, and every other

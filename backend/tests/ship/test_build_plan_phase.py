@@ -610,6 +610,8 @@ async def test_a_rejected_merge_intent_reparks_the_work_gate(monkeypatch):
     rather than finishing a run whose PR never merged."""
     flow = Build()
     flow._policy = RepoPolicy()
+    flow.subject = SimpleNamespace(repo="clawhaven/example")
+    flow.journal = SimpleNamespace(implementations=[])
     reparked = []
 
     async def declined():
