@@ -327,6 +327,11 @@ class Build(Workflow):
         if self._policy.on_approval == "merge":
             if await self.declare_merge_intent():
                 return True
+            logger.warning(
+                "GitHub did not accept the merge of %s#%s; re-parking for review.",
+                self.subject.repo,
+                self.pr_number,
+            )
             return await self._work_gate()
         await self._clear_draft()
         return True
