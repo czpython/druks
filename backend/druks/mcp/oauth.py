@@ -1,31 +1,16 @@
-import asyncio
-import base64
-import hashlib
-import json
-import secrets
-from typing import cast
-from urllib.parse import urlencode, urlparse
+from urllib.parse import urlparse
 
 import httpx
 from sqlalchemy import select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-from druks.database import db_session
-from druks.mcp.constants import (
-    OAUTH_ACCESS_TOKEN_PREFIX,
-    OAUTH_CALLBACK_PATH,
-    OAUTH_CONNECT_STATE_PREFIX,
-    OAUTH_CONNECT_STATE_TTL_SECONDS,
-    OAUTH_MINT_WAIT_ATTEMPTS,
-    OAUTH_MINT_WAIT_INTERVAL_SECONDS,
-    OAUTH_REFRESH_LOCK_PREFIX,
-    OAUTH_REFRESH_LOCK_TTL_SECONDS,
-    OAUTH_TOKEN_TTL_SKEW_SECONDS,
-)
+from druks.database import db_session, get_session
+from druks.mcp.constants import OAUTH_CALLBACK_PATH, OAUTH_PROVIDER
 from druks.mcp.enums import IdentityMode
 from druks.mcp.exceptions import GrantRefreshError, MissingGrantError, OauthConnectError
 from druks.mcp.models import McpOauthGrant, McpServer
-from druks.redis import get_client
+from druks.services import OauthClient, OauthExchangeError, OauthRefreshError
+from druks.services.constants import OAUTH_MINT_WAIT_ATTEMPTS, OAUTH_MINT_WAIT_INTERVAL_SECONDS
 
 
 def _http() -> httpx.AsyncClient:
@@ -167,10 +152,10 @@ async def begin_connect(
     identity_mode: IdentityMode,
 ) -> str:
     """Start the operator's authorization-code + PKCE flow for one server:
-    discover the authorization server, register druks as a public client, stash
-    the pending exchange (verifier + endpoints) in Redis under the state, and
-    return the consent URL to open. Nothing durable is written here — an
-    abandoned consent simply expires."""
+    discover the authorization server, register druks as a public client, and
+    hand the engine the resulting client to stash the pending exchange and
+    render the consent URL. Nothing durable is written here — an abandoned
+    consent simply expires."""
     redirect_uri = f"{endpoint.rstrip('/')}{OAUTH_CALLBACK_PATH}"
     async with _http() as client:
         metadata = await _discover(client, name, server_url)
@@ -180,81 +165,40 @@ async def begin_connect(
         if methods is not None and "S256" not in methods:
             raise OauthConnectError(name, "the authorization server does not support PKCE S256")
         registration = await _register_client(client, name, metadata, redirect_uri)
-    state = secrets.token_urlsafe(32)
-    code_verifier = secrets.token_urlsafe(64)
-    code_challenge = (
-        base64.urlsafe_b64encode(hashlib.sha256(code_verifier.encode()).digest())
-        .rstrip(b"=")
-        .decode()
+    return await OauthClient(
+        provider=OAUTH_PROVIDER,
+        authorization_endpoint=metadata["authorization_endpoint"],
+        token_endpoint=metadata["token_endpoint"],
+        client_id=registration["client_id"],
+        client_secret=registration.get("client_secret", ""),
+        # RFC 8707: bind the tokens to the MCP server they are for.
+        extra_token_params={"resource": server_url},
+    ).begin_connect(
+        redirect_uri=redirect_uri,
+        context={
+            "name": name,
+            "server_url": server_url,
+            "account_id": account_id,
+            "identity_mode": identity_mode,
+        },
+        extra_authorize_params={"resource": server_url},
     )
-    pending = {
-        "name": name,
-        "server_url": server_url,
-        "account_id": account_id,
-        "identity_mode": identity_mode,
-        "code_verifier": code_verifier,
-        "token_endpoint": metadata["token_endpoint"],
-        "client_id": registration["client_id"],
-        "client_secret": registration.get("client_secret", ""),
-        "redirect_uri": redirect_uri,
-    }
-    await get_client().set(
-        f"{OAUTH_CONNECT_STATE_PREFIX}{state}",
-        json.dumps(pending),
-        ex=OAUTH_CONNECT_STATE_TTL_SECONDS,
-    )
-    query = urlencode(
-        {
-            "response_type": "code",
-            "client_id": registration["client_id"],
-            "redirect_uri": redirect_uri,
-            "state": state,
-            "code_challenge": code_challenge,
-            "code_challenge_method": "S256",
-            # RFC 8707: bind the token to the MCP server it is for.
-            "resource": server_url,
-        }
-    )
-    return f"{metadata['authorization_endpoint']}?{query}"
 
 
 async def complete_connect(*, state: str, code: str) -> str:
-    """The callback half: consume the pending state (single-use), exchange the
-    code + verifier for tokens, and store the grant. Returns the server name.
-    The grant is the only outcome — nothing is cached here, because it becomes
-    real only when this request's transaction commits, and a cache filled
-    ahead of that would outlive its failure. The first delivery mints from the
-    committed grant."""
-    raw = await get_client().getdel(f"{OAUTH_CONNECT_STATE_PREFIX}{state}")
-    if not raw:
-        raise OauthConnectError("unknown", "unknown or expired state; start the connect flow again")
-    pending = json.loads(raw)
-    name = pending["name"]
-    data = {
-        "grant_type": "authorization_code",
-        "code": code,
-        "redirect_uri": pending["redirect_uri"],
-        "client_id": pending["client_id"],
-        "code_verifier": pending["code_verifier"],
-        "resource": pending["server_url"],
-    }
-    if pending["client_secret"]:
-        data["client_secret"] = pending["client_secret"]
-    async with _http() as client:
-        try:
-            response = await client.post(pending["token_endpoint"], data=data)
-        except httpx.HTTPError as error:
-            raise OauthConnectError(name, f"code exchange failed: {error}") from error
-    if response.status_code != 200:
-        raise OauthConnectError(name, f"code exchange failed: HTTP {response.status_code}")
+    """The callback half: the shared exchange (single-use state, code +
+    verifier), then the durable outcome — claim the server's identity mode and
+    store the grant. Returns the server name. The grant is the only outcome —
+    nothing is cached here, because it becomes real only when this request's
+    transaction commits, and a cache filled ahead of that would outlive its
+    failure. The first delivery mints from the committed grant."""
     try:
-        tokens = response.json()
-    except ValueError as error:
-        raise OauthConnectError(name, "the token endpoint returned malformed JSON") from error
-    if not isinstance(tokens, dict) or not tokens.get("refresh_token"):
-        raise OauthConnectError(
-            name, "the authorization server granted no refresh token; druks needs offline access"
-        )
+        tokens, pending = await OauthClient(
+            provider=OAUTH_PROVIDER, http_factory=_http
+        ).complete_connect(state=state, code=code)
+    except OauthExchangeError as error:
+        raise OauthConnectError(error.context.get("name", "unknown"), error.reason) from error
+    name = pending["name"]
     # The first completed connect claims the mode: insert the row if absent,
     # fill the mode if unclaimed. A concurrent claim wins the row lock; the
     # select reads whichever choice landed, and the grant goes under it.
@@ -290,80 +234,68 @@ async def complete_connect(*, state: str, code: str) -> str:
 
 
 async def evict_access_token(name: str, account_id: str) -> None:
-    await get_client().delete(f"{OAUTH_ACCESS_TOKEN_PREFIX}{name}:{account_id}")
+    await OauthClient(provider=OAUTH_PROVIDER).evict_access_token(f"{name}:{account_id}")
 
 
 async def mint_access_token(name: str, account_id: str) -> str:
-    """The delivery-side token for a connected server: the cached access token
-    while it lives, else one refreshed from the grant. The provider may rotate
-    the refresh token on use — two concurrent refreshes trip its reuse
-    detection and can revoke the whole grant — so the Redis that fronts the
-    cache also elects one refresher per grant (the run lock's SET NX idiom;
-    the TTL is a crash backstop a live refresh cannot outlive). Losers poll
-    for the winner's cache fill, for about one token-endpoint round trip, then
-    fail loudly — delivery never ships a server the agent can't authenticate
-    to."""
-    redis = get_client()
-    token_key = f"{OAUTH_ACCESS_TOKEN_PREFIX}{name}:{account_id}"
-    lock_key = f"{OAUTH_REFRESH_LOCK_PREFIX}{name}:{account_id}"
-    for _ in range(OAUTH_MINT_WAIT_ATTEMPTS):
-        cached = await redis.get(token_key)
-        if cached:
-            return cast(bytes, cached).decode()
-        if await redis.set(lock_key, "1", nx=True, ex=OAUTH_REFRESH_LOCK_TTL_SECONDS):
-            break
-        await asyncio.sleep(OAUTH_MINT_WAIT_INTERVAL_SECONDS)
-    else:
-        raise GrantRefreshError(name, "timed out waiting for a concurrent refresh to finish")
-    try:
-        grant = McpOauthGrant.get_for_account(name, account_id)
-        if not grant:
+    """The delivery-side token for a connected server, minted by the shared
+    engine from this server's grant — delivery never ships a server the agent
+    can't authenticate to."""
+    grant = McpOauthGrant.get_for_account(name, account_id)
+    if not grant:
+        raise MissingGrantError(name, account_id)
+
+    def load_refresh_token() -> str:
+        # Under the refresh lock: another process may have rotated and
+        # committed, and this transaction may already hold the row —
+        # populate_existing re-reads it past the identity map.
+        fresh = (
+            db_session()
+            .scalars(
+                select(McpOauthGrant)
+                .where(McpOauthGrant.id == grant.id)
+                .execution_options(populate_existing=True)
+            )
+            .one_or_none()
+        )
+        if not fresh:
             raise MissingGrantError(name, account_id)
         # The grant's secret halves are ciphertext at rest; the plaintext
-        # exists only in this request body.
-        data = {
-            "grant_type": "refresh_token",
-            "refresh_token": grant.refresh_token.decrypt(),
-            "client_id": grant.client_id,
-            # RFC 8707: an audience-binding server expects the refresh to carry
-            # the same resource the code exchange was bound to.
-            "resource": grant.resource,
-        }
-        if grant.client_secret:
-            data["client_secret"] = grant.client_secret.decrypt()
-        async with _http() as client:
-            try:
-                response = await client.post(grant.token_endpoint, data=data)
-            except httpx.HTTPError as error:
-                raise GrantRefreshError(name, str(error)) from error
-        if response.status_code != 200:
-            await evict_access_token(name, account_id)
-            raise GrantRefreshError(name, f"HTTP {response.status_code} from the token endpoint")
-        try:
-            tokens = response.json()
-        except ValueError as error:
-            raise GrantRefreshError(name, "the token endpoint returned malformed JSON") from error
-        if not isinstance(tokens, dict) or not tokens.get("access_token"):
-            raise GrantRefreshError(name, "the token endpoint returned no access token")
-        if tokens.get("refresh_token"):
-            # Rotation: the provider invalidated the old refresh token on use.
-            # The write rides the enclosing transaction, so until its commit a
-            # crash loses it and a concurrent minter in another session still
-            # reads the spent token (only reachable when the provider's
-            # expires_in undercuts the run's remaining duration — the cache
-            # covers the window otherwise). Either way the next mint fails
-            # loudly and re-connecting replaces the grant; that recovery path
-            # is the accepted cost of not committing mid-step.
-            grant.refresh_token = tokens["refresh_token"]
-            db_session().flush()
-        try:
-            ttl = int(tokens.get("expires_in", 3600)) - OAUTH_TOKEN_TTL_SKEW_SECONDS
-        except (TypeError, ValueError) as error:
-            raise GrantRefreshError(
-                name, "the token endpoint returned a malformed expires_in"
-            ) from error
-        if ttl > 0:
-            await redis.set(token_key, tokens["access_token"], ex=ttl)
-        return tokens["access_token"]
-    finally:
-        await redis.delete(lock_key)
+        # exists only in the refresh request body.
+        return fresh.refresh_token.decrypt()
+
+    def save_refresh_token(refresh_token: str) -> None:
+        # The provider invalidated the old token the moment it rotated, so
+        # the write commits on its own session, never the enclosing
+        # transaction — a step that rolls back later must not brick the grant.
+        with get_session(db_session().get_bind()) as session:
+            session.execute(
+                update(McpOauthGrant)
+                .where(McpOauthGrant.id == grant.id)
+                .values(refresh_token=refresh_token)
+            )
+            session.commit()
+        # Keep the enclosing transaction's copy true as well.
+        grant.refresh_token = refresh_token
+        db_session().flush()
+
+    client = OauthClient(
+        provider=OAUTH_PROVIDER,
+        token_endpoint=grant.token_endpoint,
+        client_id=grant.client_id,
+        client_secret=grant.client_secret.decrypt(),
+        # RFC 8707: an audience-binding server expects the refresh to carry
+        # the same resource the code exchange was bound to.
+        extra_token_params={"resource": grant.resource},
+        mint_wait_interval_seconds=OAUTH_MINT_WAIT_INTERVAL_SECONDS,
+        mint_wait_attempts=OAUTH_MINT_WAIT_ATTEMPTS,
+        http_factory=_http,
+    )
+    try:
+        return await client.mint_access_token(
+            key=f"{name}:{account_id}",
+            load_refresh_token=load_refresh_token,
+            save_refresh_token=save_refresh_token,
+        )
+    except OauthRefreshError as error:
+        raise GrantRefreshError(name, error.reason) from error

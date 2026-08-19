@@ -7,7 +7,14 @@ import pytest
 AUTHOR_SURFACE = {
     "druks.extensions": {"Extension", "ExtensionSettings", "Secret"},
     "druks.browser": {"BrowserSession", "BrowserSessionSignedOutError"},
-    "druks.services": {"Service", "ServiceConnectError", "ServiceNotConnectedError"},
+    "druks.services": {
+        "OauthClient",
+        "OauthExchangeError",
+        "OauthRefreshError",
+        "Service",
+        "ServiceConnectError",
+        "ServiceNotConnectedError",
+    },
     "druks.agents": {"Agent", "AgentOutput"},
     "druks.workflows": {
         "AgentCall",

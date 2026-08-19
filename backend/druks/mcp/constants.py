@@ -17,26 +17,16 @@ REGISTRY_SEARCH_URL = "https://registry.modelcontextprotocol.io/v0/servers"
 REGISTRY_SEARCH_CACHE_PREFIX = "mcp:registry:search:"
 REGISTRY_CACHE_TTL_SECONDS = 300
 
-# OAuth connect + mint plumbing. The callback path is public API surface — the
+# OAuth connect + mint plumbing rides the shared engine (druks.services'
+# OauthClient) under this provider namespace. The namespace keys the engine's
+# connect-state, token-cache, and refresh-lock Redis entries, so it is pinned:
+# a rolling deploy's old and new processes must elect one refresher per grant.
+# The prefixes spell out the derived keys; the token and lock keys append
+# {name}:{account_id}. The callback path is public API surface — the
 # authorization server redirects the operator's browser to
-# {urls.endpoint}{OAUTH_CALLBACK_PATH} after consent. Access tokens cache in
-# Redis under the token key prefix for their lifetime minus the skew (so a
-# token injected into a run never expires moments after delivery); pending
-# connect state (PKCE verifier + endpoints) lives under the connect prefix for
-# its short TTL, single-use.
+# {urls.endpoint}{OAUTH_CALLBACK_PATH} after consent.
+OAUTH_PROVIDER = "mcp:oauth"
 OAUTH_CALLBACK_PATH = "/api/mcp-servers/oauth/callback"
-OAUTH_CONNECT_STATE_PREFIX = "mcp:oauth:connect:"
-OAUTH_ACCESS_TOKEN_PREFIX = "mcp:oauth:access_token:"
-OAUTH_CONNECT_STATE_TTL_SECONDS = 600
-OAUTH_TOKEN_TTL_SKEW_SECONDS = 60
-
-# Mint's mutual exclusion, in the Redis that fronts the token cache (the run
-# lock's SET NX idiom): a rotating grant tolerates exactly one refresher per
-# grant. The server name and the grant's account are part of both keys. The lock TTL
-# is a crash backstop at three times the HTTP client's timeout — a live refresh
-# cannot outlive it. Losers poll the cache on the interval for about one
-# token-endpoint round trip, then fail loudly.
-OAUTH_REFRESH_LOCK_PREFIX = "mcp:oauth:refresh_lock:"
-OAUTH_REFRESH_LOCK_TTL_SECONDS = 90
-OAUTH_MINT_WAIT_INTERVAL_SECONDS = 0.2
-OAUTH_MINT_WAIT_ATTEMPTS = 150
+OAUTH_CONNECT_STATE_PREFIX = f"{OAUTH_PROVIDER}:connect:"
+OAUTH_ACCESS_TOKEN_PREFIX = f"{OAUTH_PROVIDER}:access_token:"
+OAUTH_REFRESH_LOCK_PREFIX = f"{OAUTH_PROVIDER}:refresh_lock:"

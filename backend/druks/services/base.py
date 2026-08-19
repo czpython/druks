@@ -8,6 +8,7 @@ from druks.extensions.settings import field_kind, field_multiline
 
 from .exceptions import ServiceConnectError, ServiceNotConnectedError
 from .models import ServiceIdentity
+from .oauth import OauthClient
 
 
 class Service:
@@ -28,6 +29,14 @@ class Service:
     # Whether doctor fails when this service is not connected.
     required: ClassVar[bool] = True
     settings_model: ClassVar[type[BaseModel]]
+    # Set both endpoints when the registered app is an OAuth client;
+    # ``get_oauth_client()`` then hands back the connected identity as a
+    # configured ``OauthClient``. Scopes are not declared here — each
+    # ``begin_connect`` asks for its own.
+    authorization_endpoint: ClassVar[str] = ""
+    token_endpoint: ClassVar[str] = ""
+    # HTTP Basic on the token endpoint; False sends the secret in the body.
+    basic_auth: ClassVar[bool] = False
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
@@ -44,6 +53,13 @@ class Service:
         declared = cls.__dict__.get("Settings")
         if not isinstance(declared, type) or not issubclass(declared, BaseModel):
             raise TypeError(f"{cls.__name__}.Settings must be a pydantic model")
+        if bool(cls.authorization_endpoint) != bool(cls.token_endpoint):
+            raise TypeError(f"{cls.__name__} must declare both OAuth endpoints or neither")
+        if cls.token_endpoint and not {"client_id", "client_secret"} <= set(declared.model_fields):
+            raise TypeError(
+                f"{cls.__name__}.Settings must declare client_id and client_secret "
+                "fields — get_oauth_client() reads the OAuth client from them"
+            )
         cls.settings_model = declared
         services.register(cls)
 
@@ -73,6 +89,23 @@ class Service:
     @classmethod
     def get(cls) -> ServiceIdentity:
         return ServiceIdentity.get(cls.name)
+
+    @classmethod
+    def get_oauth_client(cls) -> OauthClient:
+        """The connected identity as a configured ``OauthClient``, keyed by
+        the service name. Raises ``ServiceNotConnectedError`` until the
+        operator connects the service."""
+        if not cls.token_endpoint:
+            raise TypeError(f"{cls.__name__} declares no OAuth endpoints")
+        connected = cls.get()
+        return OauthClient(
+            provider=cls.name,
+            authorization_endpoint=cls.authorization_endpoint,
+            token_endpoint=cls.token_endpoint,
+            client_id=connected.identity["client_id"],
+            client_secret=connected.secrets["client_secret"],
+            basic_auth=cls.basic_auth,
+        )
 
     @classmethod
     def is_connected(cls) -> bool:
