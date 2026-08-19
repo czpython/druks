@@ -97,18 +97,16 @@ def load_extension(name: str) -> type[Extension]:
     Fails loudly and by name: an uninstalled package raises ``ExtensionNotFound``;
     an entry point that doesn't resolve to an ``Extension`` raises
     ``MalformedExtension``; the extension's own code raising on import raises
-    ``ExtensionImportError``; a workflow-declared subject that doesn't satisfy the
-    read-side contract raises ``ExtensionSubjectContractError``."""
+    ``ExtensionImportError``; a declared subject that fails the read-side contract
+    raises ``ExtensionSubjectContractError``."""
     extension = _resolve(name)
     try:
         import_extension_models(extension)
         extension.discover()
     except Exception as error:
         raise ExtensionImportError(f"extension {name!r} failed to import: {error}") from error
-    # After the capability modules are imported (so the workflow registry is
-    # populated), gate the declared subjects. Its typed failure is preserved, not
-    # folded into ``ExtensionImportError`` — the contract break is not an import error.
-    extension.subject_classes()
+    # Outside the try: a contract break is not an import error.
+    extension.subjects()
     return extension
 
 
@@ -222,18 +220,14 @@ def import_extension_models(only: type[Extension] | None = None) -> None:
 
 
 def mount(app: "FastAPI", extension: type[Extension], modules: list["ModuleType"]) -> None:
-    """Mount one discovered extension: its routers under ``/api/<name>`` and its
-    shipped frontend (if any) under ``/app/<name>``. The loader's, not an extension
-    hook — the prefix, the identity gate, and the no-shadowing guarantee are platform
-    policy no extension can override."""
+    """Mount one discovered extension under ``/api/<name>`` and ``/app/<name>``.
+    The prefix and the identity gate are the loader's — no extension hook can
+    override them."""
     # Local, matching get_routers: the loader stays importable app-lessly.
     from fastapi import Depends
 
     from druks.accounts.dependencies import current_account
 
-    # /api/<name> wraps the author's own prefix so extensions can't shadow the
-    # platform or each other; every route sits behind the identity gate. The
-    # extension's name tags them all, so a router says only what it serves.
     prefix = f"/api/{extension.name}"
     for router in extension.get_routers(modules):
         app.include_router(
@@ -244,20 +238,16 @@ def mount(app: "FastAPI", extension: type[Extension], modules: list["ModuleType"
         )
     dist = extension.frontend_dist()
     if dist:
-        # /app, not /api: unknown /api/* paths must stay JSON 404s, never fall
-        # through to an index.html.
+        # /app, not /api: unknown /api/* paths stay JSON 404s.
         app.frontend(f"/app/{extension.name}", directory=dist)
 
 
 def load(app: "FastAPI") -> None:
-    """API boot entry: one pipeline per extension — discover (its webhooks, workflows,
-    agents, and subscribers self-register on import), validate the declared subjects,
-    mount. A subject that fails the read-side contract stops the boot here, before
-    anything is mounted."""
+    """API boot: for each extension — discover, validate subjects, mount."""
     # The table-prefix check runs here, not just in makemigrations — an author
     # who hand-writes migrations still can't boot with an unprefixed table.
     import_extension_models()
     for extension in iter_extensions():
         modules = extension.discover()
-        extension.subject_classes()
+        extension.subjects()
         mount(app, extension, modules)

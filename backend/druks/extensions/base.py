@@ -57,10 +57,10 @@ class ExtensionSettings(BaseModel):
 
 class Extension:
     """A pluggable application. Subclass it, set ``name``, and register the
-    subclass under the ``druks.extensions`` entry-point group. At boot the platform
-    calls ``load`` for every extension, which imports the package's
-    conventionally-named modules — that import is where the extension's webhooks,
-    workflows, agents, and subscribers self-register.
+    subclass under the ``druks.extensions`` entry-point group. At boot the loader
+    calls ``discover``, which imports the package's conventionally-named modules —
+    that import is where the extension's webhooks, workflows, agents, and
+    subscribers self-register.
 
     Used as a class, never instantiated: an extension is a stateless install
     singleton, so an instance would only be ceremony.
@@ -181,40 +181,32 @@ class Extension:
     def workflows(cls) -> "list[type[Workflow]]":
         """The workflows living in this extension's package."""
         prefix = cls.package + "."
-        return [wf for wf in workflow_registry.all() if wf.__module__.startswith(prefix)]
+        return [
+            workflow
+            for workflow in workflow_registry.all()
+            if workflow.__module__.startswith(prefix)
+        ]
 
     @classmethod
-    def subject_classes(cls) -> "list[type[Subject] | type[StoredSubject]]":
-        """What this extension's runs are about, read off the workflows that declare
-        them — each one gets a board and a page, ordered by subject type so the routes
-        it mounts are stable.
-
-        Validates each declared subject against the read-side contract the platform
-        will call: the reserved ``transcripts`` segment, and a ``list_summaries()``
-        the board invokes. The method's identity is inspected, never called — a
-        concrete override (declared or inherited) satisfies the contract without
-        running extension query code at load."""
+    def subjects(cls) -> "list[type[Subject] | type[StoredSubject]]":
+        """The subjects this extension's workflows declare, ordered by subject type.
+        Each must implement ``list_summaries()``. The check compares method identity
+        and does not call the method."""
         from druks.durable.datastructures import Subject
 
-        # The platform stubs both bases raise ``NotImplementedError`` from — a subject
-        # resolving ``list_summaries`` to one of these has not implemented it.
-        stub_impls = {
-            Subject.list_summaries.__func__,
-            StoredSubject.list_summaries.__func__,
-        }
-        declared = {wf.subject for wf in cls.workflows() if wf.subject}
+        stubs = {Subject.list_summaries.__func__, StoredSubject.list_summaries.__func__}
+        declared = {workflow.subject for workflow in cls.workflows() if workflow.subject}
         for subject_class in declared:
             if subject_class.subject_type == "transcripts":
                 raise ExtensionSubjectContractError(
                     f"{subject_class.__name__} is a 'transcripts' subject; that segment "
                     "serves every extension's agent-call reads. Name it for what it is"
                 )
-            if subject_class.list_summaries.__func__ in stub_impls:
+            if subject_class.list_summaries.__func__ in stubs:
                 raise ExtensionSubjectContractError(
-                    f"extension {cls.name!r} declares subject {subject_class.__name__}, "
-                    f"whose board calls list_summaries(), but {subject_class.__name__} "
-                    f"does not implement it. Implement list_summaries() on "
-                    f"{subject_class.__name__}."
+                    f"extension {cls.name!r} declares subject {subject_class.__name__} "
+                    f"without list_summaries(); the board calls it. Implement "
+                    f"list_summaries() on {subject_class.__name__}."
                 )
         return sorted(declared, key=lambda subject_class: subject_class.subject_type)
 
@@ -307,7 +299,7 @@ class Extension:
         # no way to take a read the platform serves, not even with a catch-all.
         return [
             cls._get_transcript_routes(),
-            *(cls._get_subject_routes(subject) for subject in cls.subject_classes()),
+            *(cls._get_subject_routes(subject) for subject in cls.subjects()),
             *declared,
         ]
 

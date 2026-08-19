@@ -18,7 +18,7 @@ class Widget(Subject):
         return []
 
 
-def _subject_classes(cls) -> list[type[Subject]]:
+def _subjects(cls) -> list[type[Subject]]:
     return [Widget]
 
 
@@ -143,7 +143,7 @@ def test_nothing_an_extension_declares_can_take_a_read_the_platform_serves(monke
     class Greedy(Extension):
         name = "greedy"
         package = "greedy"
-        subject_classes = classmethod(_subject_classes)
+        subjects = classmethod(_subjects)
 
         @classmethod
         def discover(cls) -> list[ModuleType]:
@@ -168,7 +168,7 @@ def test_a_composed_router_loads(monkeypatch):
     class Composed(Extension):
         name = "composed"
         package = "composed"
-        subject_classes = classmethod(_subject_classes)
+        subjects = classmethod(_subjects)
 
         @classmethod
         def discover(cls) -> list[ModuleType]:
@@ -195,15 +195,12 @@ def test_a_subject_cannot_take_the_transcripts_segment():
             return [SimpleNamespace(subject=Transcripts)]
 
     with pytest.raises(ExtensionSubjectContractError, match="agent-call reads"):
-        Colliding.subject_classes()
+        Colliding.subjects()
 
 
 def test_a_declared_subject_missing_list_summaries_is_rejected_with_an_actionable_error():
-    """The message names the extension, the subject, and ``list_summaries()``, and says
-    to implement it — actionable without reading platform source."""
-
     class Account(Subject):
-        pass  # inherits the platform stub — never implements list_summaries()
+        pass  # inherits the platform stub
 
     class Broken(Extension):
         name = "broken"
@@ -214,7 +211,7 @@ def test_a_declared_subject_missing_list_summaries_is_rejected_with_an_actionabl
             return [SimpleNamespace(subject=Account)]
 
     with pytest.raises(ExtensionSubjectContractError) as caught:
-        Broken.subject_classes()
+        Broken.subjects()
     message = str(caught.value)
     assert "broken" in message  # the extension name
     assert "Account" in message  # the subject class
@@ -223,8 +220,7 @@ def test_a_declared_subject_missing_list_summaries_is_rejected_with_an_actionabl
 
 
 def test_full_boot_refuses_a_subject_missing_list_summaries(monkeypatch):
-    """The gate is the loader's own pipeline stage, not a side effect of mounting —
-    an extension with nothing to mount still fails on its broken subject."""
+    """An extension with nothing to mount still fails — the gate is a loader stage."""
 
     class Account(Subject):
         pass  # inherits the platform stub
@@ -248,16 +244,13 @@ def test_full_boot_refuses_a_subject_missing_list_summaries(monkeypatch):
 
 
 def test_a_concrete_inherited_list_summaries_satisfies_the_contract_without_calling_it():
-    """A concrete parent's ``list_summaries()`` satisfies the contract for a subclass that
-    doesn't re-declare it, and validation never runs the method."""
-
     class Concrete(Subject):
         @classmethod
         def list_summaries(cls) -> list:
             raise AssertionError("validation must not call list_summaries()")
 
     class Inheritor(Concrete):
-        pass  # inherits Concrete's implementation, re-declares nothing
+        pass
 
     class Fine(Extension):
         name = "fine"
@@ -267,7 +260,7 @@ def test_a_concrete_inherited_list_summaries_satisfies_the_contract_without_call
         def workflows(cls):
             return [SimpleNamespace(subject=Inheritor)]
 
-    assert Fine.subject_classes() == [Inheritor]
+    assert Fine.subjects() == [Inheritor]
 
 
 def test_an_extension_declaring_a_subject_type_is_rejected():
@@ -284,7 +277,7 @@ def test_an_extensions_subjects_come_from_its_workflows():
     ship = next(extension for extension in iter_extensions() if extension.name == "ship")
     ship.discover()
 
-    assert [s.subject_type for s in ship.subject_classes()] == ["project_repo", "work_item"]
+    assert [subject.subject_type for subject in ship.subjects()] == ["project_repo", "work_item"]
 
 
 def test_the_extension_name_tags_every_route(monkeypatch):

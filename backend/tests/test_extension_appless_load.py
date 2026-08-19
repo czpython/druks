@@ -94,9 +94,8 @@ _FILES = {
 }
 
 
-# A second on-disk package whose declared ``StoredSubject`` omits ``list_summaries()``.
-# Its own package name and table keep it off the conforming probe's shared metadata, so
-# the broken StoredSubject case can load app-lessly without colliding with ``ProbeItem``.
+# A package whose declared ``StoredSubject`` omits ``list_summaries()``. Its own
+# table keeps it off the conforming probe's shared metadata.
 _BROKEN_STORED_FILES = {
     "extension.py": """
         from druks.extensions import Extension
@@ -111,8 +110,7 @@ _BROKEN_STORED_FILES = {
 
         class Ledger(StoredSubject):
             __tablename__ = "brokenstored_ledgers"
-            # Intentionally omits list_summaries(): a workflow declares it, so the
-            # load-time contract must reject it.
+            # No list_summaries() — the load gate must reject it.
     """,
     "workflows.py": """
         from druks.workflows import Workflow
@@ -156,7 +154,9 @@ def external_extension(tmp_path_factory):
     sys.path.insert(0, str(root))
 
     tables = set(Base.metadata.tables)
-    registries = {r: dict(r._items) for r in (agents, services, webhooks, workflows)}
+    registries = {
+        registry: dict(registry._items) for registry in (agents, services, webhooks, workflows)
+    }
     packages = dict(extensions_loader._workflow_packages)
     finished = signal("workflow.finished")
     receivers = dict(finished.receivers)
@@ -365,8 +365,8 @@ def test_import_error_in_models_raises_extension_import_error(tmp_path, monkeypa
 
 @pytest.fixture
 def broken_stored_extension(tmp_path_factory, monkeypatch):
-    """Build the broken-StoredSubject package, expose it as the sole installed entry
-    point, and restore every global its load mutates so the suite stays clean."""
+    """The broken package as the only installed entry point; restores the globals
+    its load mutates."""
     from druks.extensions import loader as extensions_loader
     from druks.extensions.registry import agents, services, webhooks, workflows
     from druks.models import Base
@@ -377,7 +377,9 @@ def broken_stored_extension(tmp_path_factory, monkeypatch):
     sys.path.insert(0, str(root))
 
     tables = set(Base.metadata.tables)
-    registries = {r: dict(r._items) for r in (agents, services, webhooks, workflows)}
+    registries = {
+        registry: dict(registry._items) for registry in (agents, services, webhooks, workflows)
+    }
     packages = dict(extensions_loader._workflow_packages)
     entry = EntryPoint(
         name="brokenstored", value=f"{package}.extension:BrokenStored", group="druks.extensions"
@@ -398,9 +400,7 @@ def broken_stored_extension(tmp_path_factory, monkeypatch):
 
 
 def test_appless_load_rejects_a_stored_subject_missing_list_summaries(broken_stored_extension):
-    """The StoredSubject base family is gated identically to Subject: an app-less load of
-    an extension whose declared row-backed subject omits ``list_summaries()`` raises the
-    same typed, actionable failure rather than an ``ExtensionImportError``."""
+    """A row-backed subject is gated the same as ``Subject`` — typed, not an import error."""
     with pytest.raises(ExtensionSubjectContractError) as caught:
         load_extension("brokenstored")
     message = str(caught.value)
@@ -408,5 +408,4 @@ def test_appless_load_rejects_a_stored_subject_missing_list_summaries(broken_sto
     assert "Ledger" in message  # the subject class
     assert "list_summaries()" in message  # the missing method
     assert "Implement list_summaries()" in message  # the implementation direction
-    # The same failure is catchable through the common load-error base.
     assert isinstance(caught.value, ExtensionLoadError)

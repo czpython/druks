@@ -12,7 +12,7 @@ _CHECK = textwrap.dedent(
     assert "field_notes" in names, names
 
     extension = load_extension("field_notes")
-    assert [subject.__name__ for subject in extension.subject_classes()] == ["Note"]
+    assert [subject.__name__ for subject in extension.subjects()] == ["Note"]
     assert extension.settings_model is not None
     assert list(extension.settings_model.model_fields) == [
         "board_size",
