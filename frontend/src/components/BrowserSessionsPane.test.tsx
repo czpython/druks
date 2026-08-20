@@ -7,10 +7,10 @@ import { BrowserSessionsPane } from './BrowserSessionsPane'
 
 function browserSession(overrides: Partial<BrowserSession> = {}): BrowserSession {
   return {
-    name: 'x_me.x',
+    name: 'night_watch.acme',
     status: 'ready',
     payloadFormat: 'storage_state',
-    site: 'x.com',
+    site: 'acme.example',
     isDeclared: true,
     createdAt: new Date().toISOString(),
     lastRefreshedAt: new Date(Date.now() - 5 * 60 * 1000).toISOString(),
@@ -27,8 +27,8 @@ function stubFetch(initial: BrowserSession[]) {
       if (url === '/api/browser-sessions' && method === 'GET') {
         return new Response(JSON.stringify(sessions), { status: 200 })
       }
-      if (url === '/api/browser-sessions/x_me.x' && method === 'DELETE') {
-        sessions = sessions.filter((session) => session.name !== 'x_me.x')
+      if (url === '/api/browser-sessions/night_watch.acme' && method === 'DELETE') {
+        sessions = sessions.filter((session) => session.name !== 'night_watch.acme')
         return new Response(null, { status: 204 })
       }
       return new Response('{}', { status: 404 })
@@ -68,14 +68,14 @@ describe('BrowserSessionsPane', () => {
     ])
     renderPane()
 
-    expect(await screen.findByText('x_me.x')).toBeTruthy()
+    expect(await screen.findByText('night_watch.acme')).toBeTruthy()
     expect(screen.getByText('Ready')).toBeTruthy()
     expect(screen.getByText('Stale')).toBeTruthy()
     expect(screen.getByRole('link', { name: 'Reconnect' }).getAttribute('href')).toBe(
       '/druks/browser-sessions/linked_in.jobs/login',
     )
     expect(screen.getByRole('link', { name: 'Open window' }).getAttribute('href')).toBe(
-      '/druks/browser-sessions/x_me.x/login',
+      '/druks/browser-sessions/night_watch.acme/login',
     )
     expect(screen.queryByRole('link', { name: 'Log in' })).toBeNull()
     expect(screen.getByText('Storage state')).toBeTruthy()
@@ -95,10 +95,10 @@ describe('BrowserSessionsPane', () => {
     ])
     renderPane()
 
-    expect(await screen.findByText('x_me.x')).toBeTruthy()
+    expect(await screen.findByText('night_watch.acme')).toBeTruthy()
     expect(screen.getByText('Needs login')).toBeTruthy()
     expect(screen.getByRole('link', { name: 'Log in' }).getAttribute('href')).toBe(
-      '/browser-sessions/x_me.x/login',
+      '/browser-sessions/night_watch.acme/login',
     )
     expect(screen.queryByText('Delete')).toBeNull()
   })
@@ -108,19 +108,19 @@ describe('BrowserSessionsPane', () => {
     const confirm = vi.fn(() => true)
     vi.stubGlobal('confirm', confirm)
     renderPane()
-    await screen.findByText('x_me.x')
+    await screen.findByText('night_watch.acme')
 
     expect(screen.getByText('No longer declared')).toBeTruthy()
     expect(screen.queryByRole('link', { name: 'Open window' })).toBeNull()
 
     fireEvent.click(screen.getByText('Delete'))
     expect(confirm).toHaveBeenCalledWith(
-      'Delete x_me.x? Its saved browser state will be destroyed.',
+      'Delete night_watch.acme? Its saved browser state will be destroyed.',
     )
-    await waitFor(() => expect(screen.queryByText('x_me.x')).toBeNull())
+    await waitFor(() => expect(screen.queryByText('night_watch.acme')).toBeNull())
     expect(
       fetchMock.mock.calls.some(
-        ([url, init]) => url === '/api/browser-sessions/x_me.x' && init?.method === 'DELETE',
+        ([url, init]) => url === '/api/browser-sessions/night_watch.acme' && init?.method === 'DELETE',
       ),
     ).toBe(true)
   })

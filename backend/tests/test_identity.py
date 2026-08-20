@@ -101,7 +101,9 @@ def test_header_mode_requires_exactly_one_nonblank_assertion(tmp_path, druks_db)
         assert client.get("/api/auth/me").status_code == 401
         assert client.get("/api/settings").status_code == 401
         assert client.get("/api/auth/me", headers={HEADER: "   "}).status_code == 401
-        two = client.get("/api/auth/me", headers=[(HEADER, "a@x.com"), (HEADER, "b@x.com")])
+        two = client.get(
+            "/api/auth/me", headers=[(HEADER, "a@example.com"), (HEADER, "b@example.com")]
+        )
         assert two.status_code == 401
     # Rejection never enrolls anyone.
     assert {account.username for account in _all_accounts()} == {"system"}

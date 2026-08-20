@@ -30,14 +30,14 @@ CDP_PORT = 9222
 class BrowserSession:
     """A named browser login the extension's runs borrow.
 
-    Declared on the Extension class — ``x = BrowserSession(site="x.com")`` — the
-    attribute name and the extension's name become the session's identity
-    (``x_me.x``). The operator signs in once through the login window; a
-    workflow then borrows the logged-in browser::
+    Declared on the Extension class — ``acme = BrowserSession(site="acme.example")``
+    — the attribute name and the extension's name become the session's identity
+    (``night_watch.acme``). The operator signs in once through the login window;
+    a workflow then borrows the logged-in browser::
 
-        async with XMe.x.playwright() as browser:
+        async with NightWatch.acme.playwright() as browser:
             page = await browser.new_page()
-            await page.goto("https://x.com/home")
+            await page.goto("https://acme.example/home")
     """
 
     site: str

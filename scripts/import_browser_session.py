@@ -16,7 +16,7 @@ def parse_args() -> argparse.Namespace:
         description="Capture a headed Chromium login and import it into the Druks session vault."
     )
     parser.add_argument(
-        "--name", required=True, help="Declared browser-session name, for example x_me.x."
+        "--name", required=True, help="Declared browser-session name, for example night_watch.acme."
     )
     parser.add_argument("--site-url", required=True, help="Login page to open in Chromium.")
     parser.add_argument(

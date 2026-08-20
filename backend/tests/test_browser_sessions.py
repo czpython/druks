@@ -16,13 +16,13 @@ from sqlalchemy import text
 
 
 @pytest.fixture
-def x_me(browser_session_declarations):
-    class XMe:
-        name = "x_me"
-        x = BrowserSession(site="x.com")
+def night_watch(browser_session_declarations):
+    class NightWatch:
+        name = "night_watch"
+        acme = BrowserSession(site="acme.example")
         docs = BrowserSession(site="docs.example")
 
-    return XMe
+    return NightWatch
 
 
 @pytest.fixture
@@ -46,20 +46,20 @@ class FakeLoginWindow:
         cls.opened.append(session.name)
 
 
-def test_declared_sessions_list_without_a_row_and_the_pane_read_writes_nothing(client, x_me):
+def test_declared_sessions_list_without_a_row_and_the_pane_read_writes_nothing(client, night_watch):
     listed = client.get("/api/browser-sessions").json()
 
-    assert [entry["name"] for entry in listed] == ["x_me.docs", "x_me.x"]
-    entry = listed[1]
+    assert [entry["name"] for entry in listed] == ["night_watch.acme", "night_watch.docs"]
+    entry = listed[0]
     assert entry["status"] == BrowserSessionStatus.NEEDS_LOGIN
     assert entry["isDeclared"] is True
     assert entry["payloadFormat"] is None
     assert entry["createdAt"] is None
-    assert entry["site"] == "x.com"
+    assert entry["site"] == "acme.example"
     assert not StoredBrowserSession.list_all()
 
 
-def test_leftover_rows_list_as_undeclared_and_refuse_the_login_window(client, x_me):
+def test_leftover_rows_list_as_undeclared_and_refuse_the_login_window(client, night_watch):
     StoredBrowserSession.get_or_create(
         name="gone_ext.old",
         payload_format=BrowserSessionPayloadFormat.PROFILE_DIR,
@@ -68,8 +68,8 @@ def test_leftover_rows_list_as_undeclared_and_refuse_the_login_window(client, x_
 
     listed = client.get("/api/browser-sessions").json()
     assert [(entry["name"], entry["isDeclared"]) for entry in listed] == [
-        ("x_me.docs", True),
-        ("x_me.x", True),
+        ("night_watch.acme", True),
+        ("night_watch.docs", True),
         ("gone_ext.old", False),
     ]
 
@@ -78,37 +78,37 @@ def test_leftover_rows_list_as_undeclared_and_refuse_the_login_window(client, x_
     assert not StoredBrowserSession.list_all()
 
 
-def test_opening_the_login_window_materializes_the_declared_row(client, x_me, monkeypatch):
+def test_opening_the_login_window_materializes_the_declared_row(client, night_watch, monkeypatch):
     monkeypatch.setattr(routes, "LoginWindow", FakeLoginWindow)
     monkeypatch.setattr(FakeLoginWindow, "opened", [])
 
-    opened = client.post("/api/browser-sessions/x_me.x/login-window")
+    opened = client.post("/api/browser-sessions/night_watch.acme/login-window")
 
     assert opened.status_code == 204
-    assert FakeLoginWindow.opened == ["x_me.x"]
-    row = StoredBrowserSession.get_for_name("x_me.x")
+    assert FakeLoginWindow.opened == ["night_watch.acme"]
+    row = StoredBrowserSession.get_for_name("night_watch.acme")
     assert row.status == BrowserSessionStatus.NEEDS_LOGIN.value
-    assert row.site == "x.com"
+    assert row.site == "acme.example"
 
     assert client.post("/api/browser-sessions/nobody.home/login-window").status_code == 404
 
 
 def test_import_materializes_the_row_survives_restart_and_delete_removes_it(
-    client, x_me, tmp_path, monkeypatch
+    client, night_watch, tmp_path, monkeypatch
 ):
     payload = b'{"cookies":[{"name":"auth_token","value":"secret"}],"origins":[]}'
     uploaded = client.put(
-        "/api/browser-sessions/x_me.x/state?payloadFormat=storage_state",
+        "/api/browser-sessions/night_watch.acme/state?payloadFormat=storage_state",
         content=payload,
         headers={"Content-Type": "application/octet-stream"},
     )
     assert uploaded.status_code == 204
     listed = {entry["name"]: entry for entry in client.get("/api/browser-sessions").json()}
-    assert listed["x_me.x"]["status"] == BrowserSessionStatus.READY
-    assert listed["x_me.x"]["payloadFormat"] == BrowserSessionPayloadFormat.STORAGE_STATE
-    assert listed["x_me.x"]["lastRefreshedAt"]
+    assert listed["night_watch.acme"]["status"] == BrowserSessionStatus.READY
+    assert listed["night_watch.acme"]["payloadFormat"] == BrowserSessionPayloadFormat.STORAGE_STATE
+    assert listed["night_watch.acme"]["lastRefreshedAt"]
 
-    row = StoredBrowserSession.get_for_name("x_me.x")
+    row = StoredBrowserSession.get_for_name("night_watch.acme")
     stored = (
         db_session()
         .execute(
@@ -130,7 +130,7 @@ def test_import_materializes_the_row_survives_restart_and_delete_removes_it(
             row.payload.decrypt()
 
     db_session().expire_all()
-    restarted = StoredBrowserSession.get_for_name("x_me.x")
+    restarted = StoredBrowserSession.get_for_name("night_watch.acme")
     assert restarted.payload.decrypt() == payload
 
     undeclared = client.put(
@@ -138,37 +138,38 @@ def test_import_materializes_the_row_survives_restart_and_delete_removes_it(
     )
     assert undeclared.status_code == 404
 
-    deleted = client.delete("/api/browser-sessions/x_me.x")
+    deleted = client.delete("/api/browser-sessions/night_watch.acme")
     assert deleted.status_code == 204
     assert not StoredBrowserSession.list_all()
 
 
-def test_upload_rejects_payloads_above_the_cap(client, x_me, monkeypatch):
+def test_upload_rejects_payloads_above_the_cap(client, night_watch, monkeypatch):
     monkeypatch.setattr(routes, "MAX_PAYLOAD_BYTES", 3)
 
     response = client.put(
-        "/api/browser-sessions/x_me.x/state?payloadFormat=storage_state", content=b"four"
+        "/api/browser-sessions/night_watch.acme/state?payloadFormat=storage_state", content=b"four"
     )
 
     assert response.status_code == 413
     assert "256 MB" in response.json()["detail"]
     listed = {entry["name"]: entry for entry in client.get("/api/browser-sessions").json()}
-    assert listed["x_me.x"]["status"] == BrowserSessionStatus.NEEDS_LOGIN
+    assert listed["night_watch.acme"]["status"] == BrowserSessionStatus.NEEDS_LOGIN
 
 
-def test_upload_warns_at_the_product_threshold(client, x_me, monkeypatch, caplog):
+def test_upload_warns_at_the_product_threshold(client, night_watch, monkeypatch, caplog):
     monkeypatch.setattr(routes, "PAYLOAD_WARNING_BYTES", 3)
 
     with caplog.at_level("WARNING"):
         response = client.put(
-            "/api/browser-sessions/x_me.x/state?payloadFormat=storage_state", content=b"three"
+            "/api/browser-sessions/night_watch.acme/state?payloadFormat=storage_state",
+            content=b"three",
         )
 
     assert response.status_code == 204
     assert "received a 5-byte payload" in caplog.text
 
 
-def test_bearer_pat_reads_sessions_but_cannot_mutate_them(tmp_path, druks_db, x_me):
+def test_bearer_pat_reads_sessions_but_cannot_mutate_them(tmp_path, druks_db, night_watch):
     settings = make_settings(
         tmp_path,
         identity={"mode": "header", "header": "X-Edge-Email"},
@@ -182,12 +183,12 @@ def test_bearer_pat_reads_sessions_but_cannot_mutate_them(tmp_path, druks_db, x_
         assert pat_client.get("/api/browser-sessions", headers=headers).status_code == 200
         mutations = (
             pat_client.put(
-                "/api/browser-sessions/x_me.x/state?payloadFormat=storage_state",
+                "/api/browser-sessions/night_watch.acme/state?payloadFormat=storage_state",
                 content=b"blocked",
                 headers=headers,
             ),
-            pat_client.post("/api/browser-sessions/x_me.x/login-window", headers=headers),
-            pat_client.delete("/api/browser-sessions/x_me.x", headers=headers),
+            pat_client.post("/api/browser-sessions/night_watch.acme/login-window", headers=headers),
+            pat_client.delete("/api/browser-sessions/night_watch.acme", headers=headers),
         )
 
     assert [response.status_code for response in mutations] == [401, 401, 401]

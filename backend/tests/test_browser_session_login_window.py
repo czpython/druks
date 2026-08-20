@@ -82,11 +82,11 @@ def window_runtime(tmp_path, monkeypatch):
     return client
 
 
-def create_session(name: str = "x-main") -> StoredBrowserSession:
+def create_session(name: str = "acme-main") -> StoredBrowserSession:
     return StoredBrowserSession.get_or_create(
         name=name,
         payload_format=BrowserSessionPayloadFormat.STORAGE_STATE,
-        site="x.com",
+        site="acme.example",
     )
 
 
@@ -106,7 +106,7 @@ async def test_login_launch_opens_on_the_session_site(window_runtime):
     await LoginWindow.open(create_session())
 
     command = client.browsers[0].launch_command or ""
-    assert "DRUKS_BROWSER_URL=https://x.com" in command
+    assert "DRUKS_BROWSER_URL=https://acme.example" in command
 
 
 def _runtime_with_sandbox(tmp_path, monkeypatch, **sandbox) -> FakeSandboxClient:

@@ -494,9 +494,9 @@ async def test_signed_out_run_fails_and_marks_the_session_stale(rt):
     try:
         session.add(
             StoredBrowserSession(
-                name="x_me.x",
+                name="night_watch.acme",
                 payload_format=BrowserSessionPayloadFormat.STORAGE_STATE.value,
-                site="x.com",
+                site="acme.example",
             )
         )
         session.commit()
@@ -506,7 +506,7 @@ async def test_signed_out_run_fails_and_marks_the_session_stale(rt):
     class BounceFlow(Workflow):
         async def run(self) -> None:
             error = BrowserSessionSignedOutError("the site bounced the login")
-            error.session_name = "x_me.x"
+            error.session_name = "night_watch.acme"
             raise error
 
     try:
@@ -517,7 +517,7 @@ async def test_signed_out_run_fails_and_marks_the_session_stale(rt):
         session = get_session(rt.engine)
         try:
             stored = session.execute(
-                select(StoredBrowserSession).where(StoredBrowserSession.name == "x_me.x")
+                select(StoredBrowserSession).where(StoredBrowserSession.name == "night_watch.acme")
             ).scalar_one()
             assert stored.status == BrowserSessionStatus.STALE.value
         finally:
