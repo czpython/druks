@@ -21,13 +21,13 @@ from druks.testing import make_settings
 
 
 @pytest.fixture
-def x_me(browser_session_declarations):
-    class XMe:
-        name = "x_me"
-        x = BrowserSession(site="x.com", persist=True)
+def night_watch(browser_session_declarations):
+    class NightWatch:
+        name = "night_watch"
+        acme = BrowserSession(site="acme.example", persist=True)
         docs = BrowserSession(site="docs.example")
 
-    return XMe
+    return NightWatch
 
 
 class FakeListener:
@@ -115,16 +115,16 @@ def stored_session(
     return row
 
 
-def test_declaration_carries_the_extension_namespace(x_me):
-    assert x_me.x.name == "x_me.x"
-    assert x_me.docs.name == "x_me.docs"
+def test_declaration_carries_the_extension_namespace(night_watch):
+    assert night_watch.acme.name == "night_watch.acme"
+    assert night_watch.docs.name == "night_watch.docs"
 
 
-async def test_borrow_yields_a_tunneled_cdp_url(borrow, x_me):
+async def test_borrow_yields_a_tunneled_cdp_url(borrow, night_watch):
     browser, redis = borrow
-    stored_session(x_me.docs)
+    stored_session(night_watch.docs)
 
-    async with x_me.docs.cdp() as cdp_url:
+    async with night_watch.docs.cdp() as cdp_url:
         assert cdp_url == "http://127.0.0.1:43987"
 
     assert browser.forwarded_port == 9222
@@ -138,14 +138,14 @@ async def test_borrow_yields_a_tunneled_cdp_url(borrow, x_me):
     launch_script = browser.commands[0][2]
     assert "session-launch --headed" in launch_script
     assert not redis.values
-    assert StoredBrowserSession.get_for_name(x_me.docs.name).last_used_at
+    assert StoredBrowserSession.get_for_name(night_watch.docs.name).last_used_at
 
 
 async def test_headless_declaration_launches_headless(borrow):
     browser, _ = borrow
     quiet = BrowserSession(site="docs.example")
     quiet.headless = True
-    quiet.name = "x_me.quiet"
+    quiet.name = "night_watch.quiet"
     stored_session(quiet)
 
     async with quiet.cdp():
@@ -154,92 +154,96 @@ async def test_headless_declaration_launches_headless(borrow):
     assert "session-launch --headless" in browser.commands[0][2]
 
 
-async def test_persisting_borrow_locks_exports_and_stores(borrow, x_me):
+async def test_persisting_borrow_locks_exports_and_stores(borrow, night_watch):
     browser, redis = borrow
-    row = stored_session(x_me.x)
+    row = stored_session(night_watch.acme)
 
-    async with x_me.x.cdp():
+    async with night_watch.acme.cdp():
         assert redis.values
 
     assert not redis.values
     assert browser.commands[-1] == ["session-export"]
     db_session().expire_all()
-    stored = StoredBrowserSession.get_for_name(x_me.x.name)
+    stored = StoredBrowserSession.get_for_name(night_watch.acme.name)
     assert stored.payload.decrypt() == b"exported-profile"
     assert stored.payload_format == BrowserSessionPayloadFormat.PROFILE_DIR.value
     assert stored.id == row.id
 
 
-async def test_persisting_borrow_refuses_a_second_writer(borrow, x_me):
+async def test_persisting_borrow_refuses_a_second_writer(borrow, night_watch):
     browser, redis = borrow
-    stored_session(x_me.x)
-    redis.values[f"browser_session:{StoredBrowserSession.get_for_name(x_me.x.name).id}"] = "other"
+    stored_session(night_watch.acme)
+    redis.values[
+        f"browser_session:{StoredBrowserSession.get_for_name(night_watch.acme.name).id}"
+    ] = "other"
 
     with pytest.raises(BrowserSessionWriterLockedError):
-        async with x_me.x.cdp():
+        async with night_watch.acme.cdp():
             pass
 
     assert browser.commands == []
 
 
 async def test_first_borrow_writes_the_declared_session_and_asks_for_a_login(
-    borrow, x_me, druks_db
+    borrow, night_watch, druks_db
 ):
     """The first borrow materializes the row and refuses to open a browser:
     the session is declared, but nobody has signed into it yet."""
-    assert not StoredBrowserSession.get_for_name(x_me.docs.name)
+    assert not StoredBrowserSession.get_for_name(night_watch.docs.name)
 
     with pytest.raises(BrowserSessionNotReadyError):
-        async with x_me.docs.cdp():
+        async with night_watch.docs.cdp():
             pass
 
-    row = StoredBrowserSession.get_for_name(x_me.docs.name)
+    row = StoredBrowserSession.get_for_name(night_watch.docs.name)
     assert row.status == BrowserSessionStatus.NEEDS_LOGIN.value
-    assert row.site == x_me.docs.site
+    assert row.site == night_watch.docs.site
 
     with pytest.raises(BrowserSessionNotReadyError):
-        async with x_me.docs.cdp():
+        async with night_watch.docs.cdp():
             pass
 
     assert StoredBrowserSession.list_all() == [row]
 
 
-async def test_launch_failure_raises_and_releases_the_lock(borrow, x_me):
+async def test_launch_failure_raises_and_releases_the_lock(borrow, night_watch):
     browser, redis = borrow
-    stored_session(x_me.x)
+    stored_session(night_watch.acme)
     browser.launch_exit = 1
 
     with pytest.raises(BrowserLaunchError, match="launch stderr"):
-        async with x_me.x.cdp():
+        async with night_watch.acme.cdp():
             pass
 
     assert not redis.values
 
 
-async def test_signed_out_borrow_stamps_the_session_and_stores_nothing(borrow, x_me):
+async def test_signed_out_borrow_stamps_the_session_and_stores_nothing(borrow, night_watch):
     """The extension raises through the borrow when the site bounced the login:
     the door stamps which session bounced, and the dead state is never stored."""
     browser, redis = borrow
-    stored_session(x_me.x, payload=b"live-state")
+    stored_session(night_watch.acme, payload=b"live-state")
 
     with pytest.raises(BrowserSessionSignedOutError) as caught:
-        async with x_me.x.cdp():
+        async with night_watch.acme.cdp():
             raise BrowserSessionSignedOutError("the site bounced the login")
 
-    assert caught.value.session_name == "x_me.x"
+    assert caught.value.session_name == "night_watch.acme"
     db_session().expire_all()
-    assert StoredBrowserSession.get_for_name(x_me.x.name).payload.decrypt() == b"live-state"
+    assert (
+        StoredBrowserSession.get_for_name(night_watch.acme.name).payload.decrypt() == b"live-state"
+    )
     assert ["session-export"] not in browser.commands
     assert not redis.values  # the writer lock released on the way out
 
 
-async def test_playwright_yields_the_logged_in_context(borrow, x_me, monkeypatch):
+async def test_playwright_yields_the_logged_in_context(borrow, night_watch, monkeypatch):
     import sys
     import types
     from contextlib import asynccontextmanager as acm
 
     browser, _ = borrow
-    stored_session(x_me.docs)
+    stored_session(night_watch.docs)
     seen = {}
     logged_in_context = object()
 
@@ -263,19 +267,19 @@ async def test_playwright_yields_the_logged_in_context(borrow, x_me, monkeypatch
     monkeypatch.setitem(sys.modules, "playwright", types.ModuleType("playwright"))
     monkeypatch.setitem(sys.modules, "playwright.async_api", playwright_module)
 
-    async with x_me.docs.playwright() as context:
+    async with night_watch.docs.playwright() as context:
         assert context is logged_in_context
 
     assert seen == {"url": "http://127.0.0.1:43987", "closed": True}
 
 
-async def test_playwright_without_the_dependency_names_the_fix(borrow, x_me, monkeypatch):
+async def test_playwright_without_the_dependency_names_the_fix(borrow, night_watch, monkeypatch):
     import sys
 
-    stored_session(x_me.docs)
+    stored_session(night_watch.docs)
     monkeypatch.setitem(sys.modules, "playwright", None)
     monkeypatch.setitem(sys.modules, "playwright.async_api", None)
 
     with pytest.raises(BrowserClientMissingError, match="add playwright"):
-        async with x_me.docs.playwright():
+        async with night_watch.docs.playwright():
             pass

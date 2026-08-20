@@ -27,7 +27,7 @@ vi.mock('@novnc/novnc', () => {
 function renderPage() {
   render(
     <StrictMode>
-      <LoginWindowPage name="x_me.x" />
+      <LoginWindowPage name="night_watch.acme" />
     </StrictMode>,
   )
 }
@@ -43,10 +43,10 @@ describe('LoginWindowPage', () => {
   it('opens the one-use bridge and saves the browser profile', async () => {
     const fetchMock = vi.fn<(url: string, init?: RequestInit) => Promise<Response>>(
       async (url) => {
-        if (url === '/api/browser-sessions/x_me.x/login-window') {
+        if (url === '/api/browser-sessions/night_watch.acme/login-window') {
           return new Response(null, { status: 204 })
         }
-        if (url === '/api/browser-sessions/x_me.x/login-window/save') {
+        if (url === '/api/browser-sessions/night_watch.acme/login-window/save') {
           return new Response(null, { status: 204 })
         }
         return new Response('{}', { status: 404 })
@@ -57,11 +57,11 @@ describe('LoginWindowPage', () => {
 
     renderPage()
 
-    expect(await screen.findByText('x_me.x')).toBeTruthy()
+    expect(await screen.findByText('night_watch.acme')).toBeTruthy()
     await waitFor(() => expect(rfbState.instances).toHaveLength(1))
     expect(fetchMock.mock.calls.filter(([url]) => url.endsWith('/login-window'))).toHaveLength(1)
     expect(rfbState.instances[0]?.url).toBe(
-      'ws://localhost:3000/api/browser-sessions/x_me.x/login-window/ws',
+      'ws://localhost:3000/api/browser-sessions/night_watch.acme/login-window/ws',
     )
     rfbState.instances[0]?.dispatchEvent(new Event('connect'))
     expect(await screen.findByText('Connected')).toBeTruthy()
@@ -72,7 +72,7 @@ describe('LoginWindowPage', () => {
     expect(
       fetchMock.mock.calls.some(
         ([url, init]) =>
-          url === '/api/browser-sessions/x_me.x/login-window/save' && init?.method === 'POST',
+          url === '/api/browser-sessions/night_watch.acme/login-window/save' && init?.method === 'POST',
       ),
     ).toBe(true)
   })
