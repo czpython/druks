@@ -5,17 +5,30 @@ from sqlalchemy import select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from druks.database import db_session
-from druks.mcp.constants import OAUTH_CALLBACK_PATH, OAUTH_PROVIDER
+from druks.mcp.constants import OAUTH_CALLBACK_PATH
 from druks.mcp.enums import IdentityMode
 from druks.mcp.exceptions import GrantRefreshError, MissingGrantError, OauthConnectError
-from druks.mcp.models import McpOauthGrant, McpServer
+from druks.mcp.helpers import get_grant_account, grant_provider
+from druks.mcp.models import McpClientRegistration, McpServer
 from druks.services import OauthClient, OauthExchangeError, OauthRefreshError
 from druks.services.constants import OAUTH_MINT_WAIT_ATTEMPTS, OAUTH_MINT_WAIT_INTERVAL_SECONDS
+from druks.services.models import OauthConnection
+from druks.services.oauth import complete_connect as complete_oauth_exchange
 
 
 def _http() -> httpx.AsyncClient:
     # One construction point so the suite can swap in a MockTransport client.
     return httpx.AsyncClient(timeout=30.0, follow_redirects=True)
+
+
+def get_connection(name: str, account_id: str) -> OauthConnection | None:
+    # One connection per (server, account) — MCP's policy over the shared table.
+    rows = OauthConnection.list_for_account(grant_provider(name), account_id)
+    return rows[0] if rows else None
+
+
+def list_connections(name: str) -> list[OauthConnection]:
+    return OauthConnection.list_for_provider(grant_provider(name))
 
 
 def _origin(url: str) -> str:
@@ -166,7 +179,7 @@ async def begin_connect(
             raise OauthConnectError(name, "the authorization server does not support PKCE S256")
         registration = await _register_client(client, name, metadata, redirect_uri)
     return await OauthClient(
-        provider=OAUTH_PROVIDER,
+        provider=grant_provider(name),
         authorization_endpoint=metadata["authorization_endpoint"],
         token_endpoint=metadata["token_endpoint"],
         client_id=registration["client_id"],
@@ -186,16 +199,11 @@ async def begin_connect(
 
 
 async def complete_connect(*, state: str, code: str) -> str:
-    """The callback half: the shared exchange (single-use state, code +
-    verifier), then the durable outcome — claim the server's identity mode and
-    store the grant. Returns the server name. The grant is the only outcome —
-    nothing is cached here, because it becomes real only when this request's
-    transaction commits, and a cache filled ahead of that would outlive its
-    failure. The first delivery mints from the committed grant."""
+    """The callback half: the shared exchange, then the durable outcome —
+    claim the server's identity mode and store the registration and the
+    grant. Returns the server name."""
     try:
-        tokens, pending = await OauthClient(
-            provider=OAUTH_PROVIDER, http_factory=_http
-        ).complete_connect(state=state, code=code)
+        tokens, pending = await complete_oauth_exchange(state=state, code=code)
     except OauthExchangeError as error:
         raise OauthConnectError(error.context.get("name", "unknown"), error.reason) from error
     name = pending["name"]
@@ -217,46 +225,66 @@ async def complete_connect(*, state: str, code: str) -> str:
         .where(McpServer.name == name, McpServer.identity_mode.is_(None))
         .values(identity_mode=pending["identity_mode"])
     )
-    effective_identity_mode = session.scalar(
-        select(McpServer.identity_mode).where(McpServer.name == name)
-    )
-    account_id = McpOauthGrant.get_grant_account(effective_identity_mode, pending["account_id"])
-    McpOauthGrant.store(
-        server_name=name,
+    server = session.scalars(select(McpServer).where(McpServer.name == name)).one()
+    account_id = get_grant_account(server.identity_mode, pending["account_id"])
+    McpClientRegistration.store(
+        server_id=server.id,
         account_id=account_id,
-        refresh_token=tokens["refresh_token"],
         token_endpoint=pending["token_endpoint"],
-        resource=pending["server_url"],
         client_id=pending["client_id"],
         client_secret=pending["client_secret"],
     )
+    connection = get_connection(name, account_id)
+    if connection:
+        connection.reconnect(refresh_token=tokens["refresh_token"], scopes=[])
+        # A reconsent's stale cached token must not serve until its TTL runs out.
+        await evict_access_token(name, account_id)
+    else:
+        OauthConnection.create(
+            provider=grant_provider(name),
+            account_id=account_id,
+            refresh_token=tokens["refresh_token"],
+            scopes=[],
+        )
     return name
 
 
 async def evict_access_token(name: str, account_id: str) -> None:
-    await OauthClient(provider=OAUTH_PROVIDER).evict_access_token(f"{name}:{account_id}")
+    connection = get_connection(name, account_id)
+    if connection:
+        await OauthClient(provider=grant_provider(name)).evict_access_token(connection.id)
+
+
+async def disconnect(name: str, account_id: str) -> None:
+    connection = get_connection(name, account_id)
+    if connection:
+        await OauthClient(provider=grant_provider(name)).disconnect(connection)
+    registration = McpClientRegistration.get_for_account(name, account_id)
+    if registration:
+        registration.delete()
 
 
 async def mint_access_token(name: str, account_id: str) -> str:
     """The delivery-side token for a connected server, minted by the shared
     engine from this server's grant — delivery never ships a server the agent
     can't authenticate to."""
-    grant = McpOauthGrant.get_for_account(name, account_id)
-    if not grant:
+    connection = get_connection(name, account_id)
+    registration = McpClientRegistration.get_for_account(name, account_id)
+    server = McpServer.get_for_name(name)
+    if not connection or not registration or not server:
         raise MissingGrantError(name, account_id)
     client = OauthClient(
-        provider=OAUTH_PROVIDER,
-        token_endpoint=grant.token_endpoint,
-        client_id=grant.client_id,
-        client_secret=grant.client_secret.decrypt(),
+        provider=grant_provider(name),
+        token_endpoint=registration.token_endpoint,
+        client_id=registration.client_id,
+        client_secret=registration.client_secret.decrypt(),
         # RFC 8707: an audience-binding server expects the refresh to carry
         # the same resource the code exchange was bound to.
-        extra_token_params={"resource": grant.resource},
+        extra_token_params={"resource": server.url},
         mint_wait_interval_seconds=OAUTH_MINT_WAIT_INTERVAL_SECONDS,
         mint_wait_attempts=OAUTH_MINT_WAIT_ATTEMPTS,
-        http_factory=_http,
     )
     try:
-        return await client.mint_access_token(key=f"{name}:{account_id}", grant=grant)
+        return await client.mint_access_token(connection=connection)
     except OauthRefreshError as error:
         raise GrantRefreshError(name, error.reason) from error

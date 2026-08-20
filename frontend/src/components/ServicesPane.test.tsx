@@ -23,6 +23,10 @@ const disconnected: Service = {
   facts: {},
   connectedAt: null,
   fields: githubFields,
+  isOauth: false,
+  requiredScopes: [],
+  usedBy: [],
+  connections: [],
 }
 
 const connected: Service = {
@@ -44,6 +48,10 @@ const pasteOnly: Service = {
     { name: 'client_id', label: 'Client ID', help: '', type: 'str', multiline: false },
     { name: 'client_secret', label: 'Client secret', help: '', type: 'secret', multiline: false },
   ],
+  isOauth: false,
+  requiredScopes: [],
+  usedBy: [],
+  connections: [],
 }
 
 function stubFetch(states: Service[][]) {

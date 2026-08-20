@@ -318,9 +318,9 @@ from druks.browser import BrowserSession
 from druks.extensions import Extension
 
 
-class XMe(Extension):
-    name = "x_me"
-    x = BrowserSession(site="x.com", persist=True)
+class NightWatch(Extension):
+    name = "night_watch"
+    acme = BrowserSession(site="acme.example", persist=True)
 ```
 
 A workflow borrows the logged-in browser as a playwright handle — the
@@ -330,13 +330,13 @@ dies with the block; a ``persist`` session is exported and stored back
 first):
 
 ```python
-async with XMe.x.playwright() as browser:
+async with NightWatch.acme.playwright() as browser:
     page = await browser.new_page()  # opened on the logged-in context
-    await page.goto("https://x.com/home")
+    await page.goto("https://acme.example/home")
 ```
 
 ``playwright()`` yields the logged-in browser context; pages you open on
-it carry the session. ``XMe.x.cdp()`` is the same borrow yielding the raw CDP
+it carry the session. ``NightWatch.acme.cdp()`` is the same borrow yielding the raw CDP
 url, for any other client — an existing test suite, raw CDP, your own
 wrapper.
 
@@ -681,9 +681,10 @@ router for its own resource and the question never comes up.
 
 A service identity is the appliance's own registered app at an external
 provider — one per deployment, keyed by a service string; the platform's
-GitHub App is the first one. Per-user OAuth grants are not service identities
-(keep those on your own rows), and a credential only your extension posts with
-belongs in your extension settings instead.
+GitHub App is the first one. OAuth grants are not service identities — the
+platform stores those when the operator connects (see "Connect provider
+accounts") — and a credential only your extension posts with belongs in your
+extension settings instead.
 
 Declare one class in `services.py` and the platform does the rest: it renders
 the connect card in Settings, verifies and stores the paste (`SecretStr`
@@ -737,13 +738,9 @@ blast-radius control.
 
 ## Connect provider accounts (OAuth)
 
-`OauthClient` runs the OAuth 2.0 authorization-code + PKCE flow. Use it for a
-provider with fixed endpoints and a registered client. It mints access tokens
-and keeps refresh-token rotation safe. Your extension stores each grant on its
-own rows. The platform stores no grants.
-
-Declare the endpoints on the service that holds the client credentials. The
-`Settings` model must have `client_id` and `client_secret` fields:
+Declare the OAuth endpoints on the service that holds the client
+credentials. The `Settings` model must have `client_id` and `client_secret`
+fields:
 
 ```python
 class Acme(Service):
@@ -759,76 +756,45 @@ class Acme(Service):
         client_secret: SecretStr = Field(title="Client secret")
 ```
 
-`Acme.get_oauth_client()` returns a configured client for the connected
-identity. Call `begin_connect` from your connect route. Call `complete_connect`
-from your callback route:
+Declare your extension's use of the service, with the scopes your calls
+need:
 
 ```python
-url = await Acme.get_oauth_client().begin_connect(
-    redirect_uri="https://druks.example/api/acme/oauth/callback",
-    scopes=("profile.read", "posts.write"),
-    context={"account_id": account_id},
-)
-# ... the operator consents; the provider redirects back with state + code ...
-tokens, context = await Acme.get_oauth_client().complete_connect(state=state, code=code)
-AcmeGrant.store(account_id=context["account_id"], refresh_token=tokens["refresh_token"])
+class NightWatch(Extension):
+    name = "night_watch"
+    acme = Acme.with_scopes("profile.read", "posts.write")
 ```
 
-Scopes belong to one authorization, not to the service. Each `begin_connect`
-call asks for its own scopes. The provider registration sets the ceiling. The
-grant keeps the scopes the user approved.
-
-`begin_connect` stores the pending exchange in Redis and returns the consent
-URL. The state is single-use and expires after a short time. `complete_connect`
-consumes the state and exchanges the code for tokens. It rejects a token
-response without a `refresh_token`, because a grant must work offline. It
-raises `OauthExchangeError` when the flow is denied or expired. It returns your
-`context` from begin time, with the flow's client identity merged in.
-
-When a run needs the provider, call `mint_access_token`. The engine serves
-tokens from a Redis cache. It lets only one refresher run for each `key`. This
-is necessary: two refreshes at the same time can make the provider revoke the
-whole grant. The engine raises `OauthRefreshError` when the grant does not
-refresh. Then ask the operator to connect again.
+A *connection* is one signed-in provider account. A user can hold many per
+provider — one per mailbox, handle, or workspace — and the platform stores
+each one: the refresh token, the granted scopes, the owner. Your workflow
+code reads them through the declaration and mints per connection:
 
 ```python
-grant = AcmeGrant.get_for_account(account_id)
-token = await Acme.get_oauth_client().mint_access_token(key=account_id, grant=grant)
+for connection in NightWatch.acme.list_for_account(account_id):
+    token = await connection.mint_access_token()
 ```
 
-`grant` is your own grant row. It carries the two verbs that connect the
-engine to your storage:
+`NightWatch.acme.get(connection_id)` returns one connection when your own
+row stored its id.
 
-```python
-class AcmeGrant(Base):
-    ...
+Your UI starts a sign-in by opening `/api/oauth/acme/connect` — the
+platform runs the consent with the union of every installed extension's
+declared scopes and stores the connection for the signed-in user. To widen
+an existing connection's scopes, open
+`/api/oauth/acme/connect?connection=<id>`; reconsent replaces its tokens.
+Register `https://<host>/api/oauth/callback` as the redirect URI at the
+provider; it serves every service.
 
-    def load_refresh_token(self) -> str:
-        # Runs under the refresh lock. Another process may have rotated and
-        # committed. Re-read the row; do not trust the identity map.
-        fresh = db_session().scalars(
-            select(AcmeGrant)
-            .where(AcmeGrant.id == self.id)
-            .execution_options(populate_existing=True)
-        ).one()
-        return fresh.secrets["refresh_token"]
+The user sees and revokes everything in Settings — every connection they
+hold, across services. Replacing a service's client credentials deletes its
+connections: a new client can never refresh the old client's tokens.
 
-    def save_refresh_token(self, rotated: str) -> None:
-        # The provider has already invalidated the old token. Commit on an own
-        # session, never on the enclosing step transaction. A later rollback
-        # must not lose the new token.
-        with Session(db_session().get_bind()) as session:
-            grant = session.scalars(
-                select(AcmeGrant).where(AcmeGrant.id == self.id)
-            ).one()
-            grant.secrets["refresh_token"] = rotated
-            session.commit()
-```
-
-`secrets` is an `EncryptedJsonField` column on your grant row (see
-[models](#models-and-migrations)). The refresh token is ciphertext at rest.
-When the operator disconnects, delete your row and evict the cached access
-token: `await Acme.get_oauth_client().evict_access_token(account_id)`.
+`mint_access_token` serves a Redis-cached access token and lets only one
+refresher run per connection. This is necessary: two refreshes at the same
+time can make the provider revoke the whole connection. It raises
+`OauthRefreshError` when the refresh fails. Then ask the user to
+reconnect.
 
 ## Extension settings and checks
 

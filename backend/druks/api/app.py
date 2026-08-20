@@ -35,6 +35,7 @@ from druks.notifications.routes import external_router as notifications_external
 from druks.notifications.routes import router as notifications_router
 from druks.redis import close_client
 from druks.services.exceptions import ServiceNotConnectedError
+from druks.services.routes import oauth_router
 from druks.services.routes import router as service_identities_router
 from druks.settings import Settings, ensure_data_dirs, load_settings, setup_logging
 from druks.skills.routes import router as skills_router
@@ -258,6 +259,7 @@ app.include_router(browser_sessions_router)
 app.include_router(settings_router, dependencies=_identity_gate)
 app.include_router(extensions_router, dependencies=_identity_gate)
 app.include_router(service_identities_router, dependencies=_identity_gate)
+app.include_router(oauth_router, dependencies=_identity_gate)
 app.include_router(skills_router, dependencies=_identity_gate)
 app.include_router(mcp_router, dependencies=_identity_gate)
 app.include_router(notifications_router, dependencies=_identity_gate)

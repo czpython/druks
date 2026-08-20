@@ -17,16 +17,6 @@ REGISTRY_SEARCH_URL = "https://registry.modelcontextprotocol.io/v0/servers"
 REGISTRY_SEARCH_CACHE_PREFIX = "mcp:registry:search:"
 REGISTRY_CACHE_TTL_SECONDS = 300
 
-# OAuth connect + mint plumbing rides the shared engine (druks.services'
-# OauthClient) under this provider namespace. The namespace keys the engine's
-# connect-state, token-cache, and refresh-lock Redis entries, so it is pinned:
-# a rolling deploy's old and new processes must elect one refresher per grant.
-# The prefixes spell out the derived keys; the token and lock keys append
-# {name}:{account_id}. The callback path is public API surface — the
-# authorization server redirects the operator's browser to
-# {urls.endpoint}{OAUTH_CALLBACK_PATH} after consent.
-OAUTH_PROVIDER = "mcp:oauth"
+# Every dynamically-registered client pins this path as a redirect_uri, so
+# renaming it orphans existing registrations.
 OAUTH_CALLBACK_PATH = "/api/mcp-servers/oauth/callback"
-OAUTH_CONNECT_STATE_PREFIX = f"{OAUTH_PROVIDER}:connect:"
-OAUTH_ACCESS_TOKEN_PREFIX = f"{OAUTH_PROVIDER}:access_token:"
-OAUTH_REFRESH_LOCK_PREFIX = f"{OAUTH_PROVIDER}:refresh_lock:"

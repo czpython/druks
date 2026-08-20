@@ -30,6 +30,9 @@ SESSION_ONLY_API_ROUTES = {
     ("DELETE", "/api/harnesses/{name}/connection"),
     ("PATCH", "/api/settings/extensions"),
     ("POST", "/api/services/{name}"),
+    ("GET", "/api/oauth/{name}/connect"),
+    ("GET", "/api/oauth/connections"),
+    ("DELETE", "/api/oauth/connections/{connection_id}"),
 }
 
 # Session-gated routes that also sit behind their router's identity gate —
@@ -37,6 +40,9 @@ SESSION_ONLY_API_ROUTES = {
 DUAL_GATED_API_PATHS = {
     "/api/settings/extensions",
     "/api/services/{name}",
+    "/api/oauth/{name}/connect",
+    "/api/oauth/connections",
+    "/api/oauth/connections/{connection_id}",
 }
 
 # The connection flow must answer during none/zero setup, before any account

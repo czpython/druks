@@ -4,10 +4,11 @@ import os
 import pytest
 from druks.accounts.constants import SYSTEM_ACCOUNT_ID
 from druks.core.models import Uuid7Pk
-from druks.mcp.models import McpOauthGrant, McpServer
+from druks.mcp.models import McpClientRegistration, McpServer
 from druks.models import Base
 from druks.secrets.exceptions import SecretDecryptError
 from druks.secrets.fields import EncryptedJsonField
+from druks.services.models import OauthConnection
 from druks.settings import load_settings
 from pydantic import ValidationError
 from sqlalchemy import text
@@ -35,15 +36,22 @@ def _set_key(monkeypatch, tmp_path, value: str) -> None:
     monkeypatch.setenv("DRUKS_CONFIG", str(config_path))
 
 
-def _store_grant(refresh_token: str = "rt-secret", client_secret: str = "") -> McpOauthGrant:
-    return McpOauthGrant.store(
-        server_name="notion",
+def _store_grant(refresh_token: str = "rt-secret", client_secret: str = "") -> OauthConnection:
+    server = McpServer.get_for_name("notion") or McpServer.create(
+        name="notion", url="https://mcp.notion.test/sse"
+    )
+    McpClientRegistration.store(
+        server_id=server.id,
         account_id=SYSTEM_ACCOUNT_ID,
-        refresh_token=refresh_token,
         token_endpoint="https://auth.test/token",
-        resource="https://mcp.notion.test/sse",
         client_id="client-123",
         client_secret=client_secret,
+    )
+    return OauthConnection.create(
+        provider="mcp:notion",
+        account_id=SYSTEM_ACCOUNT_ID,
+        refresh_token=refresh_token,
+        scopes=[],
     )
 
 
@@ -65,9 +73,10 @@ def test_grant_secret_halves_round_trip(druks_db):
     _store_grant(refresh_token="rt-secret", client_secret="cs-secret")
 
     druks_db.expire_all()
-    grant = McpOauthGrant.get_for_account("notion", SYSTEM_ACCOUNT_ID)
+    grant = OauthConnection.list_for_account("mcp:notion", SYSTEM_ACCOUNT_ID)[0]
+    registration = McpClientRegistration.get_for_account("notion", SYSTEM_ACCOUNT_ID)
     assert grant.refresh_token.decrypt() == "rt-secret"
-    assert grant.client_secret.decrypt() == "cs-secret"
+    assert registration.client_secret.decrypt() == "cs-secret"
 
 
 def test_loaded_secrets_are_lazy_and_redacted(monkeypatch, tmp_path, druks_db):
@@ -161,16 +170,25 @@ def test_ciphertext_is_bound_to_its_column(druks_db):
     McpServer.create(name="linear", url="https://mcp.linear.app/sse", token=_TOKEN)
     _store_grant(refresh_token="rt-secret", client_secret="cs-secret")
     druks_db.execute(
-        text("UPDATE mcp_oauth_grants SET refresh_token = (SELECT token FROM mcp_servers)")
+        text(
+            "UPDATE oauth_connections SET refresh_token ="
+            " (SELECT token FROM mcp_servers WHERE name = 'linear')"
+        )
     )
-    druks_db.execute(text("UPDATE mcp_oauth_grants SET client_secret = refresh_token"))
+    druks_db.execute(
+        text(
+            "UPDATE mcp_client_registrations SET client_secret ="
+            " (SELECT refresh_token FROM oauth_connections WHERE provider = 'mcp:notion')"
+        )
+    )
     druks_db.expire_all()
 
-    grant = McpOauthGrant.get_for_account("notion", SYSTEM_ACCOUNT_ID)
+    grant = OauthConnection.list_for_account("mcp:notion", SYSTEM_ACCOUNT_ID)[0]
+    registration = McpClientRegistration.get_for_account("notion", SYSTEM_ACCOUNT_ID)
     with pytest.raises(SecretDecryptError):
         grant.refresh_token.decrypt()
     with pytest.raises(SecretDecryptError):
-        grant.client_secret.decrypt()
+        registration.client_secret.decrypt()
 
 
 def test_prepended_key_still_decrypts(monkeypatch, tmp_path, druks_db):
@@ -185,7 +203,7 @@ def test_prepended_key_still_decrypts(monkeypatch, tmp_path, druks_db):
     druks_db.expire_all()
     assert McpServer.get_for_name("linear").token.decrypt() == _TOKEN
     assert (
-        McpOauthGrant.get_for_account("notion", SYSTEM_ACCOUNT_ID).refresh_token.decrypt()
+        OauthConnection.list_for_account("mcp:notion", SYSTEM_ACCOUNT_ID)[0].refresh_token.decrypt()
         == "rt-secret"
     )
 

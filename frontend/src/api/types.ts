@@ -281,6 +281,14 @@ export interface ServiceField {
   multiline: boolean
 }
 
+/** One signed-in provider account, owned by the user who consented. */
+export interface Connection {
+  id: string
+  provider: string
+  scopes: string[]
+  connectedAt: string
+}
+
 /** One declared service: the appliance's own registered app at an external
  * provider. Facts are identity only — stored secrets never leave the backend. */
 export interface Service {
@@ -292,6 +300,10 @@ export interface Service {
   facts: Record<string, string>
   connectedAt: string | null
   fields: ServiceField[]
+  isOauth: boolean
+  requiredScopes: string[]
+  usedBy: string[]
+  connections: Connection[]
 }
 
 // --- Settings --------------------------------------------------------------

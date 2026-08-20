@@ -1,0 +1,9 @@
+{% extends "page.html" %}
+{% block content %}
+<p>Connected <b>{{ name }}</b>.
+  You can close this tab and return to druks.</p>
+<script>
+  new BroadcastChannel('druks-service-connect').postMessage({{ name | tojson }});
+  window.close();
+</script>
+{% endblock %}

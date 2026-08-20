@@ -3,12 +3,70 @@ from typing import Any, ClassVar
 from pydantic import BaseModel, ValidationError
 
 from druks.extensions.base import NAME_RE
+from druks.extensions.loader import iter_extensions
 from druks.extensions.registry import services
 from druks.extensions.settings import field_kind, field_multiline
 
 from .exceptions import ServiceConnectError, ServiceNotConnectedError
-from .models import ServiceIdentity
+from .models import OauthConnection, ServiceIdentity
 from .oauth import OauthClient
+
+
+class Connection:
+    """One signed-in provider account, reached through the extension's
+    declared handle. Mint and disconnect act on this sign-in only."""
+
+    def __init__(self, service: "type[Service]", row: OauthConnection) -> None:
+        self.service = service
+        self.row = row
+
+    @property
+    def id(self) -> str:
+        return self.row.id
+
+    @property
+    def scopes(self) -> list[str]:
+        return self.row.scopes
+
+    @property
+    def connected_at(self):
+        return self.row.connected_at
+
+    async def mint_access_token(self) -> str:
+        return await self.service.get_oauth_client().mint_access_token(connection=self.row)
+
+    async def disconnect(self) -> None:
+        await OauthClient(provider=self.service.name).disconnect(self.row)
+
+
+class ScopedService:
+    """A service seen through one extension's declared scopes
+    (``gmail = Gmail.with_scopes("gmail.readonly")``). The declaration
+    feeds the consent union; the handle reads the connections that grant
+    it."""
+
+    def __init__(self, service: "type[Service]", scopes: tuple[str, ...]) -> None:
+        self.service = service
+        self.scopes = scopes
+
+    def __set_name__(self, owner: type, name: str) -> None:
+        self.owner = owner
+        self.name = name
+
+    @property
+    def label(self) -> str:
+        return f"{self.owner.name}.{self.name}"
+
+    def list_for_account(self, account_id: str) -> list[Connection]:
+        return [
+            Connection(self.service, row)
+            for row in OauthConnection.list_for_account(self.service.name, account_id)
+        ]
+
+    def get(self, connection_id: str) -> Connection | None:
+        row = OauthConnection.get(connection_id)
+        if row and row.provider == self.service.name:
+            return Connection(self.service, row)
 
 
 class Service:
@@ -31,8 +89,9 @@ class Service:
     settings_model: ClassVar[type[BaseModel]]
     # Set both endpoints when the registered app is an OAuth client;
     # ``get_oauth_client()`` then hands back the connected identity as a
-    # configured ``OauthClient``. Scopes are not declared here — each
-    # ``begin_connect`` asks for its own.
+    # configured ``OauthClient``. Scopes are not declared here — the
+    # extensions that use the service declare them (``connection``), and
+    # the connect door asks for their union.
     authorization_endpoint: ClassVar[str] = ""
     token_endpoint: ClassVar[str] = ""
     # HTTP Basic on the token endpoint; False sends the secret in the body.
@@ -89,6 +148,29 @@ class Service:
     @classmethod
     def get(cls) -> ServiceIdentity:
         return ServiceIdentity.get(cls.name)
+
+    @classmethod
+    def with_scopes(cls, *scopes: str) -> ScopedService:
+        """Declare this extension's use of the service and the scopes its
+        calls need."""
+        if not cls.token_endpoint:
+            raise TypeError(f"{cls.__name__} declares no OAuth endpoints")
+        return ScopedService(cls, scopes)
+
+    @classmethod
+    def declarations(cls) -> "list[ScopedService]":
+        return [
+            value
+            for extension in iter_extensions()
+            for value in vars(extension).values()
+            if isinstance(value, ScopedService) and value.service is cls
+        ]
+
+    @classmethod
+    def required_scopes(cls) -> tuple[str, ...]:
+        """The union of every installed declaration's scopes — the consent ask."""
+        scopes = {scope for declaration in cls.declarations() for scope in declaration.scopes}
+        return tuple(sorted(scopes))
 
     @classmethod
     def get_oauth_client(cls) -> OauthClient:
