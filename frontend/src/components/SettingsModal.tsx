@@ -14,6 +14,7 @@ import {
   type McpRegistryCandidate,
   type McpServer,
   type Pat,
+  type Connection,
   type Service,
   type SkillCollection,
   type UpdateHarnessRequest,
@@ -350,6 +351,7 @@ export function SettingsModal({ open, onClose }: Props) {
             <RailItem icon="general" label="General" active={section === 'general'} onClick={() => setSection('general')} />
             <RailItem icon="harnesses" label="Harnesses" active={section === 'harnesses'} onClick={() => setSection('harnesses')} />
             <RailItem icon="services" label="Services" active={section === 'services'} onClick={() => setSection('services')} />
+            <RailItem icon="services" label="Connections" active={section === 'connections'} onClick={() => setSection('connections')} />
             <RailItem icon="browser-sessions" label="Browser" active={section === 'browser-sessions'} onClick={() => setSection('browser-sessions')} />
             <RailItem icon="skills" label="Skills" active={section === 'skills'} onClick={() => setSection('skills')} />
             <RailItem icon="mcp" label="MCP" active={section === 'mcp'} onClick={() => setSection('mcp')} />
@@ -396,6 +398,7 @@ export function SettingsModal({ open, onClose }: Props) {
                 </div>
               ))}
             {section === 'services' && <ServicesPane />}
+            {section === 'connections' && <ConnectionsPane />}
             {section === 'browser-sessions' && <BrowserSessionsPane />}
             {section === 'skills' && <SkillsPane />}
             {section === 'mcp' && <McpServersPane />}
@@ -1022,6 +1025,7 @@ function ServiceDetail({ service, onBack }: { service: Service; onBack: () => vo
           {service.connectedAt && (
             <p className="svc-meta">Connected {new Date(service.connectedAt).toLocaleString()}</p>
           )}
+          {service.isOauth && <ServiceAccess service={service} />}
           {!formOpen && (
             <div className="svc-actions">
               {service.name === 'github' && (
@@ -1096,6 +1100,138 @@ function ServiceDetail({ service, onBack }: { service: Service; onBack: () => vo
         </section>
       )}
     </>
+  )
+}
+
+// The signed-in accounts behind this service, on top of the pasted client
+// credentials. Connect opens the consent redirect in a new tab; the callback
+// page broadcasts on druks-service-connect and the pane refetches.
+function ServiceAccess({ service }: { service: Service }) {
+  const queryClient = useQueryClient()
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const connect = (connectionId?: string) =>
+    window.open(
+      `/api/oauth/${encodeURIComponent(service.name)}/connect` +
+        (connectionId ? `?connection=${encodeURIComponent(connectionId)}` : ''),
+    )
+  const disconnect = (connectionId: string) => {
+    setBusy(true)
+    setError(null)
+    void api
+      .disconnectConnection(connectionId)
+      .then(() => queryClient.invalidateQueries({ queryKey: ['services'] }))
+      .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+      .finally(() => setBusy(false))
+  }
+  const missingScopes = (connection: Connection) =>
+    service.requiredScopes.filter((scope) => !connection.scopes.includes(scope))
+
+  return (
+    <div className="set-card svc-facts">
+      {error && (
+        <div className="mcp-error" role="alert">
+          {error}
+        </div>
+      )}
+      {service.requiredScopes.length > 0 && (
+        <div className="svc-fact">
+          <span className="svc-fact-key">scopes</span>
+          <span className="svc-fact-val">{service.requiredScopes.join(', ')}</span>
+        </div>
+      )}
+      {service.usedBy.length > 0 && (
+        <div className="svc-fact">
+          <span className="svc-fact-key">used by</span>
+          <span className="svc-fact-val">{service.usedBy.join(', ')}</span>
+        </div>
+      )}
+      {service.connections.map((connection) => (
+        <div className="svc-fact" key={connection.id}>
+          <span className="svc-fact-key">
+            {new Date(connection.connectedAt).toLocaleDateString()}
+          </span>
+          <span className="svc-fact-val">{connection.scopes.join(', ')}</span>
+          <span className="svc-actions">
+            {missingScopes(connection).length > 0 && (
+              <button
+                className="set-btn primary"
+                onClick={() => connect(connection.id)}
+                disabled={busy}
+              >
+                Reconnect
+              </button>
+            )}
+            <button
+              className="set-btn ghost"
+              onClick={() => disconnect(connection.id)}
+              disabled={busy}
+            >
+              Disconnect
+            </button>
+          </span>
+        </div>
+      ))}
+      <div className="svc-actions">
+        <button className="set-btn primary" onClick={() => connect()} disabled={busy}>
+          {service.connections.length ? 'Connect another' : 'Connect'}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// Everything the signed-in user has authenticated to, across services — the
+// one audit and revoke surface.
+export function ConnectionsPane() {
+  const queryClient = useQueryClient()
+  const query = useQuery({
+    queryKey: ['connections'],
+    queryFn: () => api.listConnections(),
+    staleTime: 60_000,
+  })
+  const [error, setError] = useState<string | null>(null)
+
+  const revoke = (connectionId: string) => {
+    setError(null)
+    void api
+      .disconnectConnection(connectionId)
+      .then(() => queryClient.invalidateQueries({ queryKey: ['connections'] }))
+      .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+  }
+
+  const connections = query.data ?? []
+
+  return (
+    <div className="set-pane mcp-pane svc-pane">
+      <header className="mcp-pane-head">
+        <h2 className="mcp-pane-title">Connections</h2>
+        <p className="mcp-pane-sub">The accounts you have signed in to. Revoke one here.</p>
+      </header>
+      {error && (
+        <div className="mcp-error" role="alert">
+          {error}
+        </div>
+      )}
+      {connections.length === 0 && <p className="mcp-pane-sub">No connections yet.</p>}
+      {connections.length > 0 && (
+        <div className="set-card svc-facts">
+          {connections.map((connection) => (
+            <div className="svc-fact" key={connection.id}>
+              <span className="svc-fact-key">{connection.provider}</span>
+              <span className="svc-fact-val">
+                {connection.scopes.join(', ') || 'no scopes recorded'} ·{' '}
+                {new Date(connection.connectedAt).toLocaleDateString()}
+              </span>
+              <button className="set-btn ghost" onClick={() => revoke(connection.id)}>
+                Disconnect
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   )
 }
 

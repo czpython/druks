@@ -6,8 +6,9 @@ from druks.accounts.constants import SYSTEM_ACCOUNT_ID
 from druks.mcp import registry
 from druks.mcp.enums import IdentityMode
 from druks.mcp.exceptions import RegistryUnavailableError
-from druks.mcp.models import McpOauthGrant, McpServer
+from druks.mcp.models import McpServer
 from druks.mcp.registry import derive_server_name, resolve_candidates, search_registry
+from druks.services.models import OauthConnection
 from druks.settings import PACKAGED_MCP_TRUSTED
 from druks.testing import configure_app_for_test, make_settings
 from fastapi.testclient import TestClient
@@ -442,17 +443,12 @@ def test_removing_a_connected_row_drops_its_grant(tmp_path, monkeypatch, druks_d
             "/api/mcp-servers/registry",
             json={"name": "grafana", "registry": "io.github.grafana/mcp-grafana", "headers": {}},
         )
-        McpOauthGrant.store(
-            server_name="grafana",
-            account_id=SYSTEM_ACCOUNT_ID,
-            refresh_token="rt",
-            token_endpoint="https://as.example/token",
-            resource="https://mcp.grafana.com/mcp",
-            client_id="cid",
+        OauthConnection.create(
+            provider="mcp:grafana", account_id=SYSTEM_ACCOUNT_ID, refresh_token="rt", scopes=[]
         )
 
         assert client.delete("/api/mcp-servers/grafana").status_code == 204
 
     # An orphan grant would revive as this name's credential on re-add.
     assert not McpServer.get_for_name("grafana")
-    assert not McpOauthGrant.list_for_server("grafana")
+    assert not OauthConnection.list_for_provider("mcp:grafana")

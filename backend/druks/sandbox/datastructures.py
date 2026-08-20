@@ -12,7 +12,7 @@ from druks.mcp import oauth
 from druks.mcp.constants import TOKEN_ENV_PREFIX
 from druks.mcp.enums import TokenSource
 from druks.mcp.exceptions import MissingTokenError, SourceEnvVarUnsetError
-from druks.mcp.helpers import get_bearer_token_env_var
+from druks.mcp.helpers import get_bearer_token_env_var, get_grant_account
 from druks.user_settings.models import UserSettings
 
 if TYPE_CHECKING:
@@ -205,9 +205,7 @@ class Workspace:
                 if not token:
                     raise SourceEnvVarUnsetError(server["name"], server["source_env_var"])
             else:  # oauth
-                grant_account = mcp_models.McpOauthGrant.get_grant_account(
-                    server["identity_mode"], run_account
-                )
+                grant_account = get_grant_account(server["identity_mode"], run_account)
                 token = await oauth.mint_access_token(server["name"], grant_account)
             bearer_token_env_var = ""
             if token:

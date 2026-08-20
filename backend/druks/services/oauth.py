@@ -3,7 +3,6 @@ import base64
 import hashlib
 import json
 import secrets
-from collections.abc import Callable
 from typing import Any, cast
 from urllib.parse import urlencode
 
@@ -19,6 +18,7 @@ from .constants import (
     OAUTH_TOKEN_TTL_SKEW_SECONDS,
 )
 from .exceptions import OauthExchangeError, OauthRefreshError
+from .models import OauthConnection
 
 
 def _http() -> httpx.AsyncClient:
@@ -58,19 +58,20 @@ class OauthClient:
             basic_auth=True,
         )
 
-    ``begin_connect`` returns the consent URL to open; ``complete_connect``
-    consumes the callback's single-use state and exchanges the code;
-    ``mint_access_token`` serves delivery from the Redis token cache, electing
-    one refresher per grant. Grants live on the caller's own rows — mint takes
-    the grant object that owns them. A ``Service`` with declared OAuth
-    endpoints hands back a configured client via ``get_oauth_client()`` —
-    construct directly only when no service holds the client credentials.
+    ``begin_connect`` returns the consent URL to open; the module-level
+    ``complete_connect`` consumes the callback's single-use state and
+    exchanges the code; ``mint_access_token`` serves delivery from the Redis
+    token cache, electing one refresher per connection. The caller stores an
+    ``OauthConnection`` from the completed exchange and hands it back to
+    mint. A ``Service`` with declared OAuth endpoints hands back a
+    configured client via ``get_oauth_client()`` — construct directly only
+    when no service holds the client credentials.
 
-    ``provider`` keys every Redis entry — connect state, token cache, refresh
-    lock — so all clients constructed with one provider name share them, and
-    across a rolling deploy old and new processes elect the same single
-    refresher. Completion needs only ``provider``: the begun flow's endpoints
-    and client identity ride the stashed state, pinned at begin time so a
+    The Redis token cache and refresh lock key on the connection id, so all
+    clients constructed for one provider share them, and across a rolling
+    deploy old and new processes elect the same single refresher. Connect
+    state is keyed by the state value alone: the begun flow's provider,
+    endpoints, and client identity ride the stash, pinned at begin time so a
     configuration change mid-consent cannot mismatch the PKCE verifier.
 
     ``basic_auth`` picks HTTP Basic on the token endpoint, for both the code
@@ -92,7 +93,6 @@ class OauthClient:
         extra_token_params: dict[str, str] | None = None,
         mint_wait_interval_seconds: float = OAUTH_MINT_WAIT_INTERVAL_SECONDS,
         mint_wait_attempts: int = OAUTH_MINT_WAIT_ATTEMPTS,
-        http_factory: Callable[[], httpx.AsyncClient] | None = None,
     ) -> None:
         self.provider = provider
         self.authorization_endpoint = authorization_endpoint
@@ -103,7 +103,6 @@ class OauthClient:
         self.extra_token_params = dict(extra_token_params or {})
         self.mint_wait_interval_seconds = mint_wait_interval_seconds
         self.mint_wait_attempts = mint_wait_attempts
-        self._http = http_factory or _http
 
     async def begin_connect(
         self,
@@ -129,6 +128,8 @@ class OauthClient:
         )
         pending = {
             **(context or {}),
+            "provider": self.provider,
+            "scopes": list(scopes),
             "code_verifier": code_verifier,
             "redirect_uri": redirect_uri,
             "token_endpoint": self.token_endpoint,
@@ -138,7 +139,7 @@ class OauthClient:
             "extra_token_params": self.extra_token_params,
         }
         await get_client().set(
-            f"{self.provider}:connect:{state}",
+            f"oauth:connect:{state}",
             json.dumps(pending),
             ex=OAUTH_CONNECT_STATE_TTL_SECONDS,
         )
@@ -155,89 +156,19 @@ class OauthClient:
         query.update(extra_authorize_params or {})
         return f"{self.authorization_endpoint}?{urlencode(query)}"
 
-    async def complete_connect(self, *, state: str, code: str) -> tuple[dict, dict]:
-        """The callback half: consume the pending state (single-use, GETDEL)
-        and exchange the code + verifier for tokens. Returns ``(tokens,
-        context)`` — the token response and the begun flow's stash, the
-        caller's begin-time context with the flow's ``token_endpoint``,
-        ``client_id``, and ``client_secret`` merged in. A response without a
-        ``refresh_token`` is rejected: a grant must survive offline. Nothing
-        is cached here — the caller's grant becomes real only when its own
-        write commits, and the first mint refreshes from it."""
-        raw = await get_client().getdel(f"{self.provider}:connect:{state}")
-        if not raw:
-            raise OauthExchangeError(
-                self.provider,
-                "unknown or expired state; start the connect flow again",
-                context={},
-            )
-        pending = json.loads(raw)
-        data = {
-            "grant_type": "authorization_code",
-            "code": code,
-            "redirect_uri": pending["redirect_uri"],
-            "code_verifier": pending["code_verifier"],
-            **pending["extra_token_params"],
-        }
-        async with self._http() as http:
-            try:
-                response = await _post_token(
-                    http,
-                    pending["token_endpoint"],
-                    data,
-                    client_id=pending["client_id"],
-                    client_secret=pending["client_secret"],
-                    basic_auth=pending["basic_auth"],
-                )
-            except httpx.HTTPError as error:
-                raise OauthExchangeError(
-                    self.provider, f"code exchange failed: {error}", context=pending
-                ) from error
-        if response.status_code != 200:
-            raise OauthExchangeError(
-                self.provider,
-                f"code exchange failed: HTTP {response.status_code}",
-                context=pending,
-            )
-        try:
-            tokens = response.json()
-        except ValueError as error:
-            raise OauthExchangeError(
-                self.provider, "the token endpoint returned malformed JSON", context=pending
-            ) from error
-        if not isinstance(tokens, dict) or not tokens.get("refresh_token"):
-            raise OauthExchangeError(
-                self.provider,
-                "the authorization server granted no refresh token; druks needs offline access",
-                context=pending,
-            )
-        return tokens, pending
-
-    async def mint_access_token(self, *, key: str, grant) -> str:
-        """The delivery-side token for one grant: the cached access token
-        while it lives, else one refreshed through the grant's refresh token.
-        The provider may rotate the refresh token on use — two concurrent
-        refreshes trip its reuse detection and can revoke the whole grant —
-        so Redis elects one refresher per ``key`` (SET NX; the TTL is a crash
-        backstop a live refresh cannot outlive). Losers poll for the winner's
-        cache fill, for about one token-endpoint round trip, then fail loudly.
-
-        ``grant`` is the caller's own object — typically the row the grant
-        lives on — carrying two verbs:
-
-        ``grant.load_refresh_token()`` runs under the refresh lock and must
-        observe rotations other processes committed — a naive re-select can
-        return a row this transaction already identity-mapped, so read with
-        ``populate_existing`` or on a fresh session.
-
-        ``grant.save_refresh_token(rotated)`` receives a rotated refresh
-        token and must have committed it before returning: the provider has
-        already invalidated the old token, so the write cannot ride an
-        enclosing transaction that may later roll back. The cache fills only
-        after it returns."""
+    async def mint_access_token(self, *, connection: OauthConnection) -> str:
+        """The delivery-side token for one connection: the cached access
+        token while it lives, else one refreshed through the stored refresh
+        token. The provider may rotate the refresh token on use — two
+        concurrent refreshes trip its reuse detection and can revoke the
+        whole connection — so Redis elects one refresher per connection (SET
+        NX; the TTL is a crash backstop a live refresh cannot outlive).
+        Losers poll for the winner's cache fill, for about one token-endpoint
+        round trip, then fail loudly. The engine reads the connection fresh
+        under the lock and commits a rotated token before the cache fills."""
         redis = get_client()
-        token_key = f"{self.provider}:access_token:{key}"
-        lock_key = f"{self.provider}:refresh_lock:{key}"
+        token_key = f"{self.provider}:access_token:{connection.id}"
+        lock_key = f"{self.provider}:refresh_lock:{connection.id}"
         for _ in range(self.mint_wait_attempts):
             cached = await redis.get(token_key)
             if cached:
@@ -252,10 +183,10 @@ class OauthClient:
         try:
             data = {
                 "grant_type": "refresh_token",
-                "refresh_token": grant.load_refresh_token(),
+                "refresh_token": connection._load_refresh_token(),
                 **self.extra_token_params,
             }
-            async with self._http() as http:
+            async with _http() as http:
                 try:
                     response = await _post_token(
                         http,
@@ -283,7 +214,7 @@ class OauthClient:
                     self.provider, "the token endpoint returned no access token"
                 )
             if tokens.get("refresh_token"):
-                grant.save_refresh_token(tokens["refresh_token"])
+                connection._save_refresh_token(tokens["refresh_token"])
             try:
                 ttl = int(tokens.get("expires_in", 3600)) - OAUTH_TOKEN_TTL_SKEW_SECONDS
             except (TypeError, ValueError) as error:
@@ -296,5 +227,67 @@ class OauthClient:
         finally:
             await redis.delete(lock_key)
 
-    async def evict_access_token(self, key: str) -> None:
-        await get_client().delete(f"{self.provider}:access_token:{key}")
+    async def evict_access_token(self, connection_id: str) -> None:
+        await get_client().delete(f"{self.provider}:access_token:{connection_id}")
+
+    async def disconnect(self, connection: OauthConnection) -> None:
+        """Delete the connection and evict its cached access token."""
+        connection.delete()
+        await self.evict_access_token(connection.id)
+
+
+async def complete_connect(*, state: str, code: str) -> tuple[dict, dict]:
+    """Consume the pending state (single-use, GETDEL) and exchange the code
+    for tokens; a callback route knows only ``state`` and ``code``, so the
+    flow's provider and client identity ride the stash. Returns ``(tokens,
+    pending)`` — the caller stores the grant, because only it knows the
+    grant's account."""
+    raw = await get_client().getdel(f"oauth:connect:{state}")
+    if not raw:
+        raise OauthExchangeError(
+            "oauth",
+            "unknown or expired state; start the connect flow again",
+            context={},
+        )
+    pending = json.loads(raw)
+    provider = pending["provider"]
+    data = {
+        "grant_type": "authorization_code",
+        "code": code,
+        "redirect_uri": pending["redirect_uri"],
+        "code_verifier": pending["code_verifier"],
+        **pending["extra_token_params"],
+    }
+    async with _http() as http:
+        try:
+            response = await _post_token(
+                http,
+                pending["token_endpoint"],
+                data,
+                client_id=pending["client_id"],
+                client_secret=pending["client_secret"],
+                basic_auth=pending["basic_auth"],
+            )
+        except httpx.HTTPError as error:
+            raise OauthExchangeError(
+                provider, f"code exchange failed: {error}", context=pending
+            ) from error
+    if response.status_code != 200:
+        raise OauthExchangeError(
+            provider,
+            f"code exchange failed: HTTP {response.status_code}",
+            context=pending,
+        )
+    try:
+        tokens = response.json()
+    except ValueError as error:
+        raise OauthExchangeError(
+            provider, "the token endpoint returned malformed JSON", context=pending
+        ) from error
+    if not isinstance(tokens, dict) or not tokens.get("refresh_token"):
+        raise OauthExchangeError(
+            provider,
+            "the authorization server granted no refresh token; druks needs offline access",
+            context=pending,
+        )
+    return tokens, pending

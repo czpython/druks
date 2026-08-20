@@ -14,7 +14,8 @@ from druks.mcp.exceptions import (
     OauthConnectError,
     RegistryUnavailableError,
 )
-from druks.mcp.models import McpOauthGrant, McpServer
+from druks.mcp.helpers import get_grant_account
+from druks.mcp.models import McpServer
 from druks.mcp.schemas import (
     ConnectMcpServerResponse,
     CreateMcpServerRequest,
@@ -162,11 +163,11 @@ async def remove_mcp_server(name: str) -> None:
     server = McpServer.get_for_name(name)
     if not server:
         raise HTTPException(status_code=404, detail=f"MCP server {name!r} not found")
-    grants = McpOauthGrant.list_for_server(name)
+    connections = oauth.list_connections(name)
     server.delete()
-    for grant in grants:
-        grant.delete()
-        await oauth.evict_access_token(name, grant.account_id)
+    for connection in connections:
+        await oauth.evict_access_token(name, connection.account_id)
+        connection.delete()
 
 
 @router.post("/{name}/connect", response_model=ConnectMcpServerResponse)
@@ -178,7 +179,7 @@ async def connect_mcp_server(
     server = McpServer.get_resolved(current_account_id.get()).get(name)
     if not server or server["token_source"] != TokenSource.OAUTH:
         raise HTTPException(status_code=404, detail=f"MCP server {name!r} is not an OAuth server.")
-    if McpOauthGrant.list_for_server(name) and server["identity_mode"] != identity_mode:
+    if oauth.list_connections(name) and server["identity_mode"] != identity_mode:
         raise HTTPException(
             status_code=409,
             detail=f"MCP server {name!r} already uses {server['identity_mode']!r} identity.",
@@ -236,16 +237,15 @@ async def disconnect_mcp_server(name: str) -> None:
         raise HTTPException(status_code=404, detail=f"MCP server {name!r} is not an OAuth server.")
     if not server["identity_mode"]:
         raise HTTPException(status_code=404, detail=f"MCP server {name!r} has no grant.")
-    account_id = McpOauthGrant.get_grant_account(server["identity_mode"], current_account_id.get())
-    grant = McpOauthGrant.get_for_account(name, account_id)
-    if not grant:
+    account_id = get_grant_account(server["identity_mode"], current_account_id.get())
+    connection = oauth.get_connection(name, account_id)
+    if not connection:
         raise HTTPException(
             status_code=404,
             detail=f"MCP server {name!r} has no grant for account {account_id!r}.",
         )
-    await oauth.evict_access_token(name, grant.account_id)
-    grant.delete()
-    if not McpOauthGrant.list_for_server(name):
+    await oauth.disconnect(name, account_id)
+    if not oauth.list_connections(name):
         # The last grant leaving reopens the mode choice: the next connect is
         # a first connect again.
         server_row = McpServer.get_for_name(name)

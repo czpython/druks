@@ -4,6 +4,7 @@ import type {
   ArtifactContent,
   BrowserSession,
   ConnectChallenge,
+  Connection,
   DashboardHealth,
   Extension,
   FeedResponse,
@@ -224,6 +225,9 @@ export const api = {
   services: () => getJSON<Service[]>('/api/services'),
   connectService: (name: string, fields: Record<string, string>) =>
     postJSON<Service>(`/api/services/${encodeURIComponent(name)}`, fields),
+  listConnections: () => getJSON<Connection[]>('/api/oauth/connections'),
+  disconnectConnection: (connectionId: string) =>
+    deleteRequest(`/api/oauth/connections/${encodeURIComponent(connectionId)}`),
   browserSessions: () => getJSON<BrowserSession[]>('/api/browser-sessions'),
   deleteBrowserSession: (name: string) =>
     deleteRequest(`/api/browser-sessions/${encodeURIComponent(name)}`),

@@ -2,24 +2,22 @@ import os
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import Boolean, ForeignKey, String, UniqueConstraint, select, update
+from sqlalchemy import Boolean, ForeignKey, String, UniqueConstraint, select
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Mapped, mapped_column
 
 from druks.accounts.constants import SYSTEM_ACCOUNT_ID
 from druks.core.models import Uuid7Pk
-from druks.database import db_session, get_session
+from druks.database import db_session
 from druks.extensions.registry import mcp_servers
 from druks.mcp.constants import NAME_PATTERN
-from druks.mcp.enums import IdentityMode, TokenSource
-from druks.mcp.exceptions import (
-    InvalidServerNameError,
-    MissingGrantError,
-    UnresolvedGrantAccountError,
-)
+from druks.mcp.enums import TokenSource
+from druks.mcp.exceptions import InvalidServerNameError
+from druks.mcp.helpers import get_grant_account, grant_provider
 from druks.models import Base
 from druks.secrets.fields import EncryptedJsonField, EncryptedTextField, Secret
+from druks.services.models import OauthConnection
 
 
 class McpServer(Base, Uuid7Pk):
@@ -109,11 +107,11 @@ class McpServer(Base, Uuid7Pk):
             elif source == TokenSource.OAUTH:
                 server["has_token"] = False
                 if server["identity_mode"]:
-                    grant_account = McpOauthGrant.get_grant_account(
-                        server["identity_mode"], account_id
-                    )
+                    grant_account = get_grant_account(server["identity_mode"], account_id)
                     server["has_token"] = bool(
-                        McpOauthGrant.get_for_account(server["name"], grant_account)
+                        OauthConnection.list_for_account(
+                            grant_provider(server["name"]), grant_account
+                        )
                     )
             else:
                 server["has_token"] = bool(server["token"])
@@ -172,129 +170,62 @@ class McpServer(Base, Uuid7Pk):
         session.flush()
 
 
-class McpOauthGrant(Base, Uuid7Pk):
-    __tablename__ = "mcp_oauth_grants"
-    __table_args__ = (UniqueConstraint("server_name", "account_id"),)
+class McpClientRegistration(Base, Uuid7Pk):
+    __tablename__ = "mcp_client_registrations"
+    __table_args__ = (UniqueConstraint("server_id", "account_id"),)
 
-    # One grant per (server, account): the durable outcome of an OAuth
-    # connect flow — exactly what mint needs to refresh an access token.
-    # Connect-time material (authorization endpoint, PKCE verifier, state) is
-    # transient and lives in Redis, never here. The refresh token never leaves
-    # the backend; the API exposes only that a grant exists.
-    server_name: Mapped[str] = mapped_column(String)
+    # One RFC 7591 registration per grant: druks registers a fresh client on
+    # every connect, so each account's grant refreshes as the client it
+    # consented through. The refresh token lives on the platform's OauthConnection.
+    server_id: Mapped[str] = mapped_column(ForeignKey("mcp_servers.id", ondelete="CASCADE"))
     account_id: Mapped[str] = mapped_column(
         ForeignKey("accounts.id", ondelete="RESTRICT"), default=SYSTEM_ACCOUNT_ID
     )
-    # Ciphertext at rest; decrypted only into the refresh request body.
-    refresh_token = EncryptedTextField()
     token_endpoint: Mapped[str] = mapped_column(String)
-    # The MCP server url the grant is bound to (RFC 8707): an audience-binding
-    # authorization server rejects a refresh that doesn't carry the same
-    # ``resource`` the code exchange did.
-    resource: Mapped[str] = mapped_column(String)
     client_id: Mapped[str] = mapped_column(String)
     # "" for public clients (PKCE-only); some authorization servers issue one
     # even for token_endpoint_auth_method "none" and then expect it on refresh.
     client_secret = EncryptedTextField(default="")
-    # When the operator last completed consent. Stamped on every store — the
-    # row is upserted on re-connect, so row-creation time would lie.
-    connected_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
-
-    @staticmethod
-    def get_grant_account(identity_mode: str | None, run_account_id: str | None) -> str:
-        # Whose grant serves this caller: a shared server's grant lives under
-        # the system account whoever asks; a per-user server's under the asker.
-        if identity_mode == IdentityMode.PER_USER and run_account_id:
-            return run_account_id
-        if identity_mode == IdentityMode.PER_USER:
-            raise UnresolvedGrantAccountError(identity_mode, run_account_id)
-        if identity_mode == IdentityMode.SHARED:
-            return SYSTEM_ACCOUNT_ID
-        raise UnresolvedGrantAccountError(identity_mode, run_account_id)
 
     @classmethod
-    def get_for_account(cls, server_name: str, account_id: str) -> "McpOauthGrant | None":
+    def get_for_account(cls, server_name: str, account_id: str) -> "McpClientRegistration | None":
         return (
             db_session()
             .execute(
-                select(cls).where(cls.server_name == server_name, cls.account_id == account_id)
+                select(cls)
+                .join(McpServer, McpServer.id == cls.server_id)
+                .where(McpServer.name == server_name, cls.account_id == account_id)
             )
             .scalar_one_or_none()
         )
 
     @classmethod
-    def list_for_server(cls, server_name: str) -> list["McpOauthGrant"]:
-        return list(db_session().scalars(select(cls).where(cls.server_name == server_name)))
-
-    @classmethod
     def store(
         cls,
         *,
-        server_name: str,
+        server_id: str,
         account_id: str,
-        refresh_token: str,
         token_endpoint: str,
-        resource: str,
         client_id: str,
         client_secret: str = "",
-    ) -> "McpOauthGrant":
+    ) -> "McpClientRegistration":
         session = db_session()
         statement = pg_insert(cls).values(
-            server_name=server_name,
+            server_id=server_id,
             account_id=account_id,
-            refresh_token=refresh_token,
             token_endpoint=token_endpoint,
-            resource=resource,
             client_id=client_id,
             client_secret=client_secret,
-            connected_at=cls.utc_now(),
         )
         statement = statement.on_conflict_do_update(
-            index_elements=["server_name", "account_id"],
+            index_elements=["server_id", "account_id"],
             set_={
-                "refresh_token": statement.excluded.refresh_token,
                 "token_endpoint": statement.excluded.token_endpoint,
-                "resource": statement.excluded.resource,
                 "client_id": statement.excluded.client_id,
                 "client_secret": statement.excluded.client_secret,
-                "connected_at": statement.excluded.connected_at,
             },
         ).returning(cls)
         return session.scalars(statement, execution_options={"populate_existing": True}).one()
-
-    def load_refresh_token(self) -> str:
-        # Under the refresh lock: another process may have rotated and
-        # committed, and this transaction may already hold the row —
-        # populate_existing re-reads it past the identity map.
-        fresh = (
-            db_session()
-            .scalars(
-                select(McpOauthGrant)
-                .where(McpOauthGrant.id == self.id)
-                .execution_options(populate_existing=True)
-            )
-            .one_or_none()
-        )
-        if not fresh:
-            raise MissingGrantError(self.server_name, self.account_id)
-        # The grant's secret halves are ciphertext at rest; the plaintext
-        # exists only in the refresh request body.
-        return fresh.refresh_token.decrypt()
-
-    def save_refresh_token(self, rotated: str) -> None:
-        # The provider invalidated the old token the moment it rotated, so
-        # the write commits on its own session, never the enclosing
-        # transaction — a step that rolls back later must not brick the grant.
-        with get_session(db_session().get_bind()) as session:
-            session.execute(
-                update(McpOauthGrant)
-                .where(McpOauthGrant.id == self.id)
-                .values(refresh_token=rotated)
-            )
-            session.commit()
-        # Keep the enclosing transaction's copy true as well.
-        self.refresh_token = rotated
-        db_session().flush()
 
     def delete(self) -> None:
         session = db_session()

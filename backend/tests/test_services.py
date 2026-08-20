@@ -448,3 +448,269 @@ def test_oauth_service_declarations_fail_loudly(declared_services):
 
     with pytest.raises(TypeError, match="no OAuth endpoints"):
         Plain.get_oauth_client()
+
+
+def test_with_scopes_declares_the_union_and_reads_connections(declared_services, monkeypatch):
+    from druks.services import Service
+    from pydantic import BaseModel, SecretStr
+
+    class Acme(Service):
+        name = "acme"
+        title = "Acme OAuth app"
+        authorization_endpoint = "https://acme.test/authorize"
+        token_endpoint = "https://acme.test/token"
+
+        class Settings(BaseModel):
+            client_id: str
+            client_secret: SecretStr
+
+    class NightWatch:
+        name = "night_watch"
+        acme = Acme.with_scopes("profile.read", "posts.write")
+
+    class Digest:
+        name = "digest"
+        acme = Acme.with_scopes("profile.read")
+
+    monkeypatch.setattr("druks.services.base.iter_extensions", lambda: [NightWatch, Digest])
+
+    assert NightWatch.acme.scopes == ("profile.read", "posts.write")
+    assert Acme.required_scopes() == ("posts.write", "profile.read")
+    assert [declaration.label for declaration in Acme.declarations()] == [
+        "night_watch.acme",
+        "digest.acme",
+    ]
+
+    from druks.accounts.constants import SYSTEM_ACCOUNT_ID
+    from druks.services.models import OauthConnection
+
+    row = OauthConnection.create(
+        provider="acme", account_id=SYSTEM_ACCOUNT_ID, refresh_token="rt-1", scopes=["profile.read"]
+    )
+    connections = NightWatch.acme.list_for_account(SYSTEM_ACCOUNT_ID)
+    assert [connection.id for connection in connections] == [row.id]
+    assert connections[0].scopes == ["profile.read"]
+    assert NightWatch.acme.get(row.id).id == row.id
+    assert not NightWatch.acme.get("missing")
+
+
+def test_with_scopes_requires_oauth_endpoints(declared_services):
+    from druks.services import Service
+    from pydantic import BaseModel, SecretStr
+
+    class Plain(Service):
+        name = "plain_no_oauth"
+        title = "Plain"
+
+        class Settings(BaseModel):
+            api_key: SecretStr
+
+    with pytest.raises(TypeError, match="no OAuth endpoints"):
+        Plain.with_scopes("profile.read")
+
+
+# --- The connect door: /api/oauth ------------------------------------------
+
+
+@pytest.fixture
+def acme(declared_services, monkeypatch):
+    from druks.services import Service
+    from pydantic import BaseModel, SecretStr
+
+    class Acme(Service):
+        name = "acme"
+        title = "Acme OAuth app"
+        authorization_endpoint = "https://acme.test/authorize"
+        token_endpoint = "https://acme.test/token"
+
+        class Settings(BaseModel):
+            client_id: str
+            client_secret: SecretStr
+
+    class NightWatch:
+        name = "night_watch"
+        acme = Acme.with_scopes("profile.read", "posts.write")
+
+    monkeypatch.setattr("druks.services.base.iter_extensions", lambda: [NightWatch])
+    tokens = {
+        "access_token": "at-1",
+        "refresh_token": "rt-1",
+        "expires_in": 3600,
+        "scope": "profile.read posts.write",
+    }
+    monkeypatch.setattr(
+        "druks.services.oauth._http",
+        lambda: httpx.AsyncClient(
+            transport=httpx.MockTransport(lambda request: httpx.Response(200, json=tokens))
+        ),
+    )
+    return Acme
+
+
+def test_oauth_connect_redirects_to_consent_with_the_scope_union(
+    tmp_path, acme, druks_db, monkeypatch
+):
+    from urllib.parse import parse_qsl, urlparse
+
+    from druks.testing import configure_app_for_test
+
+    ServiceIdentity.connect(
+        "acme", identity={"client_id": "id-1"}, secrets={"client_secret": "sec-1"}
+    )
+    settings = make_settings(tmp_path, urls={"endpoint": "https://druks.example"})
+    with TestClient(configure_app_for_test(settings=settings)) as client:
+        response = client.get("/api/oauth/acme/connect", follow_redirects=False)
+
+    assert response.status_code == 307
+    consent = urlparse(response.headers["location"])
+    params = dict(parse_qsl(consent.query))
+    assert response.headers["location"].startswith("https://acme.test/authorize?")
+    assert params["scope"] == "posts.write profile.read"
+    assert params["redirect_uri"] == "https://druks.example/api/oauth/callback"
+
+
+def test_oauth_connect_guards(tmp_path, acme, druks_db):
+    from druks.testing import configure_app_for_test
+
+    with TestClient(configure_app_for_test(settings=make_settings(tmp_path))) as client:
+        assert client.get("/api/oauth/github/connect").status_code == 404
+        # No urls.endpoint configured.
+        assert client.get("/api/oauth/acme/connect").status_code == 409
+
+    settings = make_settings(tmp_path, urls={"endpoint": "https://druks.example"})
+    with TestClient(configure_app_for_test(settings=settings)) as client:
+        # The client credentials are not connected yet.
+        response = client.get("/api/oauth/acme/connect", follow_redirects=False)
+        assert response.status_code == 409
+        assert "not connected" in response.json()["detail"]
+
+
+async def test_oauth_callback_creates_and_reconnects_a_connection(
+    tmp_path, acme, druks_db, monkeypatch
+):
+    from urllib.parse import parse_qsl, urlparse
+
+    import druks.redis
+    from druks.redis import close_client, get_client
+    from druks.services.models import OauthConnection
+    from druks.testing import configure_app_for_test
+
+    ServiceIdentity.connect(
+        "acme", identity={"client_id": "id-1"}, secrets={"client_secret": "sec-1"}
+    )
+    await close_client()
+    settings = make_settings(tmp_path, urls={"endpoint": "https://druks.example"})
+    with TestClient(configure_app_for_test(settings=settings)) as client:
+        consent = client.get("/api/oauth/acme/connect", follow_redirects=False).headers["location"]
+        state = dict(parse_qsl(urlparse(consent).query))["state"]
+        page = client.get("/api/oauth/callback", params={"state": state, "code": "c-1"})
+        assert page.status_code == 200
+        assert "BroadcastChannel('druks-service-connect')" in page.text
+        # The state is single-use; a denied consent lands loudly.
+        assert (
+            client.get("/api/oauth/callback", params={"state": state, "code": "c-1"}).status_code
+            == 400
+        )
+        assert (
+            client.get(
+                "/api/oauth/callback", params={"state": "s", "code": "c", "error": "denied"}
+            ).status_code
+            == 400
+        )
+
+        [connection] = OauthConnection.list_for_provider("acme")
+        assert connection.refresh_token.decrypt() == "rt-1"
+        assert connection.scopes == ["profile.read", "posts.write"]
+
+        # Reconsent through the same connection replaces its tokens and
+        # evicts the stale cached access token.
+        stale_key = f"acme:access_token:{connection.id}"
+        client.get("/api/oauth/acme/connect?connection=zzz", follow_redirects=False)
+        reconnect = client.get(
+            f"/api/oauth/acme/connect?connection={connection.id}", follow_redirects=False
+        )
+        state = dict(parse_qsl(urlparse(reconnect.headers["location"]).query))["state"]
+        finish = client.get("/api/oauth/callback", params={"state": state, "code": "c-2"})
+        assert finish.status_code == 200
+        assert len(OauthConnection.list_for_provider("acme")) == 1
+
+    druks.redis._client = None
+    assert not await get_client().get(stale_key)
+
+
+def test_oauth_connect_rejects_an_unknown_reconnect_target(tmp_path, acme, druks_db):
+    from druks.testing import configure_app_for_test
+
+    ServiceIdentity.connect(
+        "acme", identity={"client_id": "id-1"}, secrets={"client_secret": "sec-1"}
+    )
+    settings = make_settings(tmp_path, urls={"endpoint": "https://druks.example"})
+    with TestClient(configure_app_for_test(settings=settings)) as client:
+        assert client.get("/api/oauth/acme/connect?connection=zzz").status_code == 404
+
+
+def test_connections_list_and_revoke(tmp_path, acme, druks_db):
+    from druks.accounts.models import Account
+    from druks.services.models import OauthConnection
+    from druks.testing import configure_app_for_test
+
+    me = Account.get_or_create("op@example.com")
+    with TestClient(configure_app_for_test(settings=make_settings(tmp_path))) as client:
+        row = OauthConnection.create(
+            provider="acme", account_id=me.id, refresh_token="rt-1", scopes=["profile.read"]
+        )
+        [listed] = client.get("/api/oauth/connections").json()
+        assert listed["id"] == row.id
+        assert listed["provider"] == "acme"
+        assert listed["scopes"] == ["profile.read"]
+
+        assert client.delete(f"/api/oauth/connections/{row.id}").status_code == 204
+        assert not OauthConnection.list_for_provider("acme")
+        assert client.delete(f"/api/oauth/connections/{row.id}").status_code == 404
+
+
+def test_replacing_the_client_credentials_deletes_its_connections(tmp_path, acme, druks_db):
+    from druks.accounts.constants import SYSTEM_ACCOUNT_ID
+    from druks.services.models import OauthConnection
+    from druks.testing import configure_app_for_test
+
+    OauthConnection.create(
+        provider="acme", account_id=SYSTEM_ACCOUNT_ID, refresh_token="rt-old", scopes=[]
+    )
+
+    with TestClient(configure_app_for_test(settings=make_settings(tmp_path))) as client:
+        response = client.post(
+            "/api/services/acme", json={"client_id": "id-2", "client_secret": "sec-2"}
+        )
+        assert response.status_code == 200
+
+    # The new client can never refresh the old client's connections.
+    assert not OauthConnection.list_for_provider("acme")
+
+
+def test_list_serves_the_connections_beside_the_declared_union(tmp_path, acme, druks_db):
+    from druks.accounts.constants import SYSTEM_ACCOUNT_ID
+    from druks.services.models import OauthConnection
+    from druks.testing import configure_app_for_test
+
+    def entry(client, name="acme"):
+        return next(e for e in client.get("/api/services").json() if e["name"] == name)
+
+    with TestClient(configure_app_for_test(settings=make_settings(tmp_path))) as client:
+        assert entry(client, "github")["isOauth"] is False
+        before = entry(client)
+        assert before["isOauth"] is True
+        assert before["connections"] == []
+        assert before["requiredScopes"] == ["posts.write", "profile.read"]
+        assert before["usedBy"] == ["night_watch.acme"]
+
+        row = OauthConnection.create(
+            provider="acme",
+            account_id=SYSTEM_ACCOUNT_ID,
+            refresh_token="rt-1",
+            scopes=["profile.read"],
+        )
+        [connection] = entry(client)["connections"]
+        assert connection["id"] == row.id
+        assert connection["scopes"] == ["profile.read"]
+        assert connection["connectedAt"]

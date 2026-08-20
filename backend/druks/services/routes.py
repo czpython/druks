@@ -1,12 +1,21 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import HTMLResponse, RedirectResponse
 
+from druks.accounts.context import current_account_id
 from druks.accounts.dependencies import current_session_account
+from druks.core.templates import render_page
 from druks.extensions.registry import services
-from druks.services.exceptions import ServiceConnectError, ServiceNotConnectedError
-from druks.services.models import ServiceIdentity
-from druks.services.schemas import ServiceResponse
+from druks.services.exceptions import (
+    OauthExchangeError,
+    ServiceConnectError,
+    ServiceNotConnectedError,
+)
+from druks.services.models import OauthConnection, ServiceIdentity
+from druks.services.oauth import OauthClient, complete_connect
+from druks.services.schemas import ConnectionResponse, ServiceResponse
 
 router = APIRouter(prefix="/api/services", tags=["services"])
+oauth_router = APIRouter(prefix="/api/oauth", tags=["oauth"])
 
 
 @router.get("", response_model=list[ServiceResponse], response_model_by_alias=True)
@@ -17,7 +26,10 @@ async def list_services() -> list[ServiceResponse]:
             row = ServiceIdentity.get(service.name)
         except ServiceNotConnectedError:
             row = None
-        entries.append(ServiceResponse.from_row(service, row))
+        connections = []
+        if service.token_endpoint:
+            connections = OauthConnection.list_for_provider(service.name)
+        entries.append(ServiceResponse.from_row(service, row, connections))
     return entries
 
 
@@ -37,4 +49,101 @@ async def connect_service(name: str, payload: dict[str, str]) -> ServiceResponse
         row = await service.connect(payload)
     except ServiceConnectError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
+    if service.token_endpoint:
+        # A replaced client can never refresh the old client's connections.
+        client = OauthClient(provider=name)
+        for connection in OauthConnection.list_for_provider(name):
+            await client.disconnect(connection)
     return ServiceResponse.from_row(service, row)
+
+
+def _get_oauth_service(name: str):
+    service = services.get(name)
+    if not service or not service.token_endpoint:
+        raise HTTPException(status_code=404, detail=f"No OAuth service {name!r}.")
+    return service
+
+
+@oauth_router.get("/{name}/connect", dependencies=[Depends(current_session_account)])
+async def connect_oauth_service(
+    name: str, request: Request, connection: str = ""
+) -> RedirectResponse:
+    service = _get_oauth_service(name)
+    account_id = current_account_id.get()
+    if connection:
+        row = OauthConnection.get(connection)
+        if not row or row.provider != name:
+            raise HTTPException(
+                status_code=404, detail=f"No connection {connection!r} on {name!r}."
+            )
+    endpoint = request.app.state.settings.urls.endpoint
+    if not endpoint:
+        raise HTTPException(
+            status_code=409,
+            detail="The provider redirects the operator's browser back to druks. "
+            "Set urls.endpoint to the address druks has in that browser.",
+        )
+    try:
+        client = service.get_oauth_client()
+    except ServiceNotConnectedError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    url = await client.begin_connect(
+        redirect_uri=f"{endpoint.rstrip('/')}/api/oauth/callback",
+        scopes=service.required_scopes(),
+        context={"account_id": account_id, "connection_id": connection},
+    )
+    return RedirectResponse(url)
+
+
+@oauth_router.get("/callback", response_class=HTMLResponse)
+async def oauth_callback(state: str = "", code: str = "", error: str = "") -> HTMLResponse:
+    if error:
+        raise HTTPException(
+            status_code=400, detail=f"The authorization server denied the request: {error}"
+        )
+    if not state or not code:
+        raise HTTPException(status_code=400, detail="Missing state or code in the callback.")
+    try:
+        tokens, pending = await complete_connect(state=state, code=code)
+    except OauthExchangeError as exchange_error:
+        raise HTTPException(status_code=400, detail=str(exchange_error)) from exchange_error
+    provider = pending["provider"]
+    if not services.get(provider):
+        # A state begun by another door (an MCP connect) finishes at its own callback.
+        raise HTTPException(status_code=400, detail=f"No OAuth service {provider!r}.")
+    granted = tokens.get("scope", "").split() or pending["scopes"]
+    if pending["connection_id"]:
+        row = OauthConnection.get(pending["connection_id"])
+        if not row:
+            raise HTTPException(
+                status_code=400, detail="The connection was removed while consent was open."
+            )
+        row.reconnect(refresh_token=tokens["refresh_token"], scopes=granted)
+        # A reconsent's narrower cached token must not serve until its TTL runs out.
+        await OauthClient(provider=provider).evict_access_token(row.id)
+    else:
+        OauthConnection.create(
+            provider=provider,
+            account_id=pending["account_id"],
+            refresh_token=tokens["refresh_token"],
+            scopes=granted,
+        )
+    return render_page("service_oauth_callback.html", name=provider)
+
+
+@oauth_router.get("/connections", dependencies=[Depends(current_session_account)])
+async def list_connections() -> list[ConnectionResponse]:
+    rows = OauthConnection.list_owned_by(current_account_id.get())
+    return [ConnectionResponse.model_validate(row) for row in rows]
+
+
+@oauth_router.delete(
+    "/connections/{connection_id}",
+    status_code=204,
+    dependencies=[Depends(current_session_account)],
+)
+async def disconnect_connection(connection_id: str) -> None:
+    row = OauthConnection.get(connection_id)
+    if not row:
+        raise HTTPException(status_code=404, detail=f"No connection {connection_id!r}.")
+    await OauthClient(provider=row.provider).disconnect(row)
