@@ -3,7 +3,7 @@
 The local shape keeps every component on one machine:
 
 ```text
-browser -> Druks :8001 -> Drukbox :8000 -> Docker sandbox containers
+browser -> Druks :8001 -> Drukbox :8780 -> Docker sandbox containers
                          \
                           -> SSH from Druks to each container
 ```
@@ -38,8 +38,8 @@ The local shape needs no authored values, so the first run goes all the way:
 - renders `~/druks/.env` with `DEFAULT_HOST_PROVIDER=docker`
 - generates the database password and the stored-secret key
 - pulls images, applies migrations, and starts Druks, Postgres, Redis, and
-  Drukbox on `127.0.0.1:8780` (`COMPOSE_FILE=compose.yaml:compose.override.yaml`,
-  no profiles — no Caddy, no janitor)
+  Drukbox on `127.0.0.1:8780` (`COMPOSE_FILE=compose.yaml:compose.override.yaml`
+  with no profiles: no Caddy and no janitor)
 
 Drukbox drives sandboxes through the mounted `/var/run/docker.sock`; the
 installer records the socket's group id in `.env` so the service's non-root

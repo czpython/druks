@@ -1,24 +1,34 @@
 # Druks Deployment
 
-`compose.yaml` holds the whole stack: Druks (`web`, which embeds the DBOS
+`compose.yaml` holds the full stack: Druks (`web`, which embeds the DBOS
 durable engine and serves the dashboard SPA), Postgres, Redis, the Drukbox
-sandbox control plane (`drukbox`), the janitor, and the Caddy edge. `install.sh`
-writes `COMPOSE_PROFILES` to `.env` to turn on the shape-specific extras, so
-plain `docker compose` commands in the install dir do the right thing.
+sandbox control plane (`drukbox`), the janitor, the SSH gateway, and the Caddy
+edge. `install.sh` writes `COMPOSE_PROFILES` to `.env`. Then plain
+`docker compose` commands in the install directory do the correct thing.
 
-A **local** install (`DRUKS_PROVIDER=docker`) runs bare — no profiles: `drukbox`
-mounts the host's Docker socket, sandboxes are sibling containers on the host
-daemon, and the dashboard is reached directly on `127.0.0.1:8001`, no Caddy. See
-[Full local](../docs/full-local.md).
+A **local** install (`DRUKS_PROVIDER=docker`) runs bare, with no profiles.
+`drukbox` mounts the Docker socket of the host. Sandboxes are sibling
+containers on the host daemon. The dashboard is on `127.0.0.1:8001`, with no
+Caddy. See [Full local](../docs/full-local.md).
 
-A **remote** install (any other `DRUKS_PROVIDER`) enables `COMPOSE_PROFILES=`
-`caddy,janitor`: the Drukbox control plane against a cloud provider, the periodic
-janitor, and stock Caddy (identity edge + proxy, Caddyfile bind-mounted).
+A **remote** install (each other `DRUKS_PROVIDER`) enables
+`COMPOSE_PROFILES=hosted`: the Drukbox control plane against a cloud provider,
+the periodic janitor, and stock Caddy (identity edge and proxy, with the
+Caddyfile bind-mounted).
 
-The **docker-sbx** provider additionally layers `compose.docker-sbx.yaml` and
-the `gateway` profile: it reshapes the Drukbox services to drive the host's
-[Docker Sandboxes](https://docs.docker.com/ai/sandboxes/) daemon (microVM
-sandboxes) and adds the SSH gateway that fronts them.
+The **docker-sbx** provider also layers `compose.docker-sbx.yaml` and enables
+the `gateway` profile. The overlay connects the Drukbox services to the
+[Docker Sandboxes](https://docs.docker.com/ai/sandboxes/) daemon of the host
+(microVM sandboxes). The gateway is the SSH path into them. Prepare the host
+first: install `docker-sbx`, put the service user in the `kvm` group, then run
+`sbx login` and `sbx daemon start -d --policy balanced`. The installer stops
+with a clear message when the daemon socket is missing.
+
+Before this layout, each shape had its own overlay file. Those files are
+retired: `compose.local.yaml` is now the base with no profiles, and
+`compose.remote.yaml` is the base with `COMPOSE_PROFILES=hosted`. Deployments
+that fetch compose files by path must update to `compose.yaml` (and
+`compose.docker-sbx.yaml` for that provider).
 
 Drukbox keeps its own schema in a `drukbox` database in the same Postgres, so
 there is no second datastore to run or back up separately.

@@ -68,9 +68,9 @@ local services, service overrides, and named volumes there. install.sh creates
 this file once and never changes it. Your changes survive every install and
 upgrade.
 
-install.sh refreshes the repo compose files on each run. So do not edit
-`compose.yaml` or `compose.docker-sbx.yaml` — those changes are lost on the
-next install.
+install.sh refreshes the repo compose files on each run. Do not edit
+`compose.yaml` or `compose.docker-sbx.yaml`. The next install overwrites
+these files.
 
 Example — bake locally-installed apps into the web image:
 

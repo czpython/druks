@@ -122,7 +122,9 @@ def test_docker_shape_matches_local_wiring_and_ignores_provider_environment(tmp_
     values = read_env(env_path)
     assert values["DEFAULT_HOST_PROVIDER"] == "docker"
     assert "DRUKS_AUTH_HEADER" not in values
-    assert "SERVICE_TOKENS" not in values
+    # Rendered on every shape. Without it, drukbox stops instead of falling
+    # back to a known token.
+    assert values["SERVICE_TOKENS"] == "dev-token"
     assert "DOCKER_HOST" not in values
 
 
@@ -157,6 +159,30 @@ def test_foreign_provider_table_is_a_named_gap(tmp_path):
     assert rc == GAPS_EXIT_CODE
     assert "sandbox.other is a stale provider table" in "\n".join(printed)
     assert "OTHER_TOKEN" not in read_env(env_path)
+
+
+def test_docker_shape_service_url_migrates_off_the_retired_port(tmp_path):
+    env_path = tmp_path / ".env"
+    _run(env_path, provider="docker")
+    toml_path = tmp_path / "druks.toml"
+    toml_path.write_text(
+        toml_path.read_text().replace("http://127.0.0.1:8780", "http://127.0.0.1:8000")
+    )
+
+    _run(env_path)
+
+    assert 'service_url = "http://127.0.0.1:8780"' in toml_path.read_text()
+
+
+def test_docker_shape_custom_service_url_is_left_alone(tmp_path):
+    env_path = tmp_path / ".env"
+    _run(env_path, provider="docker")
+    _run(env_path, set_values=("sandbox.service_url=http://127.0.0.1:9999",))
+
+    _run(env_path)
+
+    toml_path = tmp_path / "druks.toml"
+    assert 'service_url = "http://127.0.0.1:9999"' in toml_path.read_text()
 
 
 def test_docker_shape_renders_no_provider_environment(tmp_path):
@@ -311,8 +337,8 @@ def test_compose_plane_env_additions_survive_rerender(tmp_path):
     _run(env_path, provider="docker")
     env_path.write_text(
         env_path.read_text()
-        + "DRUKS_UID=1000\nDRUKS_DOCKER_GID=988\n"
-        + "COMPOSE_FILE=compose.yaml:compose.override.yaml\nCOMPOSE_PROFILES=caddy,janitor\n"
+        + "DRUKS_UID=1000\nDRUKS_DOCKER_GID=988\nDRUKS_SBX_HOME=/home/op\n"
+        + "COMPOSE_FILE=compose.yaml:compose.override.yaml\nCOMPOSE_PROFILES=hosted\n"
     )
 
     _run(env_path)
@@ -320,8 +346,9 @@ def test_compose_plane_env_additions_survive_rerender(tmp_path):
     values = read_env(env_path)
     assert values["DRUKS_UID"] == "1000"
     assert values["DRUKS_DOCKER_GID"] == "988"
+    assert values["DRUKS_SBX_HOME"] == "/home/op"
     assert values["COMPOSE_FILE"] == "compose.yaml:compose.override.yaml"
-    assert values["COMPOSE_PROFILES"] == "caddy,janitor"
+    assert values["COMPOSE_PROFILES"] == "hosted"
     assert "# OPERATOR ADDITIONS" in env_path.read_text()
 
 

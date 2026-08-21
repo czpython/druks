@@ -48,8 +48,8 @@ of overriding its canonical value. On a remote shape,
 providers. `docker` and `exe` select shape-specific first-write templates.
 Every other provider name selects the generic remote shape and is validated by
 Drukbox.
-The local `docker` shape does not render `[sandbox.<provider>]`: its Drukbox
-service takes its environment from `deploy/compose.yaml` defaults.
+The local `docker` shape does not render `[sandbox.<provider>]`. Its Drukbox
+service gets its environment from the defaults in `deploy/compose.yaml`.
 
 Secrets are generated only when the TOML is first created. Preserve
 `[secrets]` when moving or recovering an installation. Use repeatable

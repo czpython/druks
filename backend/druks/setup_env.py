@@ -20,6 +20,7 @@ _COMPOSE_ENV_KEYS = (
     "DRUKS_DOCKER_GID",
     "COMPOSE_FILE",
     "COMPOSE_PROFILES",
+    "DRUKS_SBX_HOME",
 )
 _ENV_KEY_PATTERN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
@@ -118,6 +119,16 @@ def run_setup(
             _set_value(document, value_path, value)
     else:
         document = tomlkit.parse(toml_path.read_text())
+        # Old docker-shape installs have service_url on port 8000, written by a
+        # retired compose override. The stack now uses the default port of the
+        # image. Change only the exact value the old template wrote. Keep an
+        # operator's own URL.
+        if (
+            _get_string(document, ("sandbox", "provider")) == "docker"
+            and _get_string(document, ("sandbox", "service_url")) == "http://127.0.0.1:8000"
+        ):
+            _set_value(document, ("sandbox", "service_url"), "http://127.0.0.1:8780")
+            is_changed = True
 
     for assignment in set_values:
         value_path, value = _parse_assignment(assignment)
@@ -355,9 +366,10 @@ def _render_env(
 ) -> str:
     provider = _get_string(config, ("sandbox", "provider"))
 
-    service_tokens = ""
-    if provider != "docker":
-        service_tokens = _get_string(config, ("sandbox", "service_token"))
+    # Rendered on every shape. drukbox requires SERVICE_TOKENS and does not
+    # start without it. A compose-side default would replace that safe stop
+    # with a known token.
+    service_tokens = _get_string(config, ("sandbox", "service_token"))
 
     sections = (
         (
