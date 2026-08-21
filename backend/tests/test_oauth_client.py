@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 from urllib.parse import parse_qsl, urlparse
 
 import httpx
@@ -52,17 +53,21 @@ def _client(**overrides) -> OauthClient:
     return OauthClient(**kwargs)
 
 
-def _connection(refresh_token: str = "rt-old") -> OauthConnection:
+def _connection(refresh_token: str = "rt-old", scopes: list[str] | None = None) -> OauthConnection:
     return OauthConnection.create(
         provider=_PROVIDER,
         account_id=SYSTEM_ACCOUNT_ID,
         refresh_token=refresh_token,
-        scopes=[],
+        scopes=scopes or [],
     )
 
 
 def _token_key(connection: OauthConnection) -> str:
     return f"{_PROVIDER}:access_token:{connection.id}"
+
+
+def _scoped_suffix(scopes: tuple[str, ...]) -> str:
+    return ":" + hashlib.sha256(" ".join(sorted(scopes)).encode()).hexdigest()[:16]
 
 
 def _lock_key(connection: OauthConnection) -> str:
@@ -214,3 +219,102 @@ async def test_complete_connect_requires_a_refresh_token(token_endpoint):
 
     with pytest.raises(OauthExchangeError, match="no refresh token"):
         await complete_connect(state=state, code="code-1")
+
+
+async def test_downscoped_mint_asks_and_caches_apart_from_the_full_grant(token_endpoint):
+    connection = _connection(scopes=["posts.write", "profile.read"])
+    token_endpoint.response = {
+        "access_token": "at-narrow",
+        "refresh_token": "rt-1",
+        "expires_in": 3600,
+        "scope": "profile.read",
+    }
+
+    narrow = await _client().mint_access_token(connection=connection, scopes=("profile.read",))
+
+    assert narrow == "at-narrow"
+    assert token_endpoint.requests[0]["scope"] == "profile.read"
+    redis = get_client()
+    scoped_key = _token_key(connection) + _scoped_suffix(("profile.read",))
+    assert await redis.get(scoped_key) == b"at-narrow"
+    assert not await redis.get(_token_key(connection))
+
+    token_endpoint.response = {
+        "access_token": "at-full",
+        "refresh_token": "rt-1",
+        "expires_in": 3600,
+    }
+    full = await _client().mint_access_token(connection=connection)
+
+    assert full == "at-full"
+    assert "scope" not in token_endpoint.requests[1]
+    assert await redis.get(_token_key(connection)) == b"at-full"
+    assert await redis.get(scoped_key) == b"at-narrow"
+
+    # The scoped cache serves the scoped ask without another refresh.
+    assert (
+        await _client().mint_access_token(connection=connection, scopes=("profile.read",))
+        == "at-narrow"
+    )
+    assert len(token_endpoint.requests) == 2
+
+
+async def test_downscoped_mint_rejects_scopes_outside_the_grant(token_endpoint):
+    connection = _connection(scopes=["profile.read"])
+
+    with pytest.raises(OauthRefreshError, match="does not grant scope"):
+        await _client().mint_access_token(connection=connection, scopes=("posts.write",))
+
+    assert not token_endpoint.requests
+
+
+async def test_downscoped_mint_rejects_a_provider_that_ignores_the_ask(token_endpoint):
+    connection = _connection(scopes=["posts.write", "profile.read"])
+    token_endpoint.response = {
+        "access_token": "at-broad",
+        "refresh_token": "rt-1",
+        "expires_in": 3600,
+        "scope": "posts.write profile.read",
+    }
+
+    with pytest.raises(OauthRefreshError, match="came back with"):
+        await _client().mint_access_token(connection=connection, scopes=("profile.read",))
+
+    scoped_key = _token_key(connection) + _scoped_suffix(("profile.read",))
+    assert not await get_client().get(scoped_key)
+
+
+async def test_uncached_mint_refreshes_past_a_live_cache_and_refills_it(token_endpoint):
+    connection = _connection()
+    redis = get_client()
+    await redis.set(_token_key(connection), "at-tail")
+
+    token = await _client().mint_access_token(connection=connection, cached=False)
+
+    assert token == "at-1"
+    assert len(token_endpoint.requests) == 1
+    assert await redis.get(_token_key(connection)) == b"at-1"
+    assert not await redis.get(_lock_key(connection))
+
+
+async def test_refresher_election_is_per_scope_set(token_endpoint):
+    connection = _connection(scopes=["profile.read"])
+    redis = get_client()
+    await redis.set(_lock_key(connection) + _scoped_suffix(("profile.read",)), "1")
+
+    # The scoped variant's lock never blocks the full-grant mint.
+    assert await _client().mint_access_token(connection=connection) == "at-1"
+    assert len(token_endpoint.requests) == 1
+
+
+async def test_disconnect_evicts_the_scope_variant_keys(token_endpoint):
+    connection = _connection(scopes=["profile.read"])
+    redis = get_client()
+    scoped_key = _token_key(connection) + _scoped_suffix(("profile.read",))
+    await redis.set(_token_key(connection), "at-full")
+    await redis.set(scoped_key, "at-narrow")
+
+    await _client().disconnect(connection)
+
+    assert not await redis.get(_token_key(connection))
+    assert not await redis.get(scoped_key)

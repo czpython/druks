@@ -156,23 +156,49 @@ class OauthClient:
         query.update(extra_authorize_params or {})
         return f"{self.authorization_endpoint}?{urlencode(query)}"
 
-    async def mint_access_token(self, *, connection: OauthConnection) -> str:
+    async def mint_access_token(
+        self,
+        *,
+        connection: OauthConnection,
+        scopes: tuple[str, ...] = (),
+        cached: bool = True,
+    ) -> str:
         """The delivery-side token for one connection: the cached access
         token while it lives, else one refreshed through the stored refresh
         token. The provider may rotate the refresh token on use — two
         concurrent refreshes trip its reuse detection and can revoke the
-        whole connection — so Redis elects one refresher per connection (SET
-        NX; the TTL is a crash backstop a live refresh cannot outlive).
-        Losers poll for the winner's cache fill, for about one token-endpoint
-        round trip, then fail loudly. The engine reads the connection fresh
-        under the lock and commits a rotated token before the cache fills."""
+        whole connection — so Redis elects one refresher per (connection,
+        scope set) (SET NX; the TTL is a crash backstop a live refresh cannot
+        outlive). Losers poll for the winner's cache fill, for about one
+        token-endpoint round trip, then fail loudly. The engine reads the
+        connection fresh under the lock and commits a rotated token before
+        the cache fills.
+
+        ``scopes`` asks the provider for a token narrower than the grant
+        (RFC 6749 §6) — a server-side ceiling for a token handed to
+        untrusted compute; it must be a subset of the connection's granted
+        scopes. ``cached=False`` skips the cache read for a full-lifetime
+        token, still electing one refresher and filling the cache for later
+        callers."""
+        requested = tuple(sorted(scopes))
+        if requested and not set(requested) <= set(connection.scopes):
+            missing = ", ".join(sorted(set(requested) - set(connection.scopes)))
+            raise OauthRefreshError(
+                self.provider, f"the connection does not grant scope(s) {missing}"
+            )
         redis = get_client()
-        token_key = f"{self.provider}:access_token:{connection.id}"
-        lock_key = f"{self.provider}:refresh_lock:{connection.id}"
+        # A down-scoped token must never serve a full-scope caller, or the
+        # reverse — the cache and the refresher election key on the scope set.
+        suffix = ""
+        if requested:
+            suffix = ":" + hashlib.sha256(" ".join(requested).encode()).hexdigest()[:16]
+        token_key = f"{self.provider}:access_token:{connection.id}{suffix}"
+        lock_key = f"{self.provider}:refresh_lock:{connection.id}{suffix}"
         for _ in range(self.mint_wait_attempts):
-            cached = await redis.get(token_key)
             if cached:
-                return cast(bytes, cached).decode()
+                cached_token = await redis.get(token_key)
+                if cached_token:
+                    return cast(bytes, cached_token).decode()
             if await redis.set(lock_key, "1", nx=True, ex=OAUTH_REFRESH_LOCK_TTL_SECONDS):
                 break
             await asyncio.sleep(self.mint_wait_interval_seconds)
@@ -186,6 +212,8 @@ class OauthClient:
                 "refresh_token": connection._load_refresh_token(),
                 **self.extra_token_params,
             }
+            if requested:
+                data["scope"] = " ".join(requested)
             async with _http() as http:
                 try:
                     response = await _post_token(
@@ -215,6 +243,14 @@ class OauthClient:
                 )
             if tokens.get("refresh_token"):
                 connection._save_refresh_token(tokens["refresh_token"])
+            if requested and tokens.get("scope") and set(tokens["scope"].split()) != set(requested):
+                # A provider that ignores the narrowing hands back a token the
+                # sandbox must never hold — fail rather than cache it.
+                raise OauthRefreshError(
+                    self.provider,
+                    f"asked for scope(s) {' '.join(requested)}; "
+                    f"the token came back with {tokens['scope']!r}",
+                )
             try:
                 ttl = int(tokens.get("expires_in", 3600)) - OAUTH_TOKEN_TTL_SKEW_SECONDS
             except (TypeError, ValueError) as error:
@@ -228,7 +264,10 @@ class OauthClient:
             await redis.delete(lock_key)
 
     async def evict_access_token(self, connection_id: str) -> None:
-        await get_client().delete(f"{self.provider}:access_token:{connection_id}")
+        # Down-scoped variants ride the same prefix; one sweep drops them all.
+        redis = get_client()
+        async for key in redis.scan_iter(match=f"{self.provider}:access_token:{connection_id}*"):
+            await redis.delete(key)
 
     async def disconnect(self, connection: OauthConnection) -> None:
         """Delete the connection and evict its cached access token."""

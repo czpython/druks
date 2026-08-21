@@ -32,8 +32,10 @@ class Connection:
     def connected_at(self):
         return self.row.connected_at
 
-    async def mint_access_token(self) -> str:
-        return await self.service.get_oauth_client().mint_access_token(connection=self.row)
+    async def mint_access_token(self, scopes: tuple[str, ...] = (), cached: bool = True) -> str:
+        return await self.service.get_oauth_client().mint_access_token(
+            connection=self.row, scopes=scopes, cached=cached
+        )
 
     async def disconnect(self) -> None:
         await OauthClient(provider=self.service.name).disconnect(self.row)
