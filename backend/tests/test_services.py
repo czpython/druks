@@ -598,6 +598,12 @@ async def test_oauth_callback_creates_and_reconnects_a_connection(
     ServiceIdentity.connect(
         "acme", identity={"client_id": "id-1"}, secrets={"client_secret": "sec-1"}
     )
+    published = []
+
+    async def record(name, **kwargs):
+        published.append((name, kwargs))
+
+    monkeypatch.setattr("druks.services.routes.publish", record)
     await close_client()
     settings = make_settings(tmp_path, urls={"endpoint": "https://druks.example"})
     with TestClient(configure_app_for_test(settings=settings)) as client:
@@ -634,6 +640,16 @@ async def test_oauth_callback_creates_and_reconnects_a_connection(
         assert finish.status_code == 200
         assert len(OauthConnection.list_for_provider("acme")) == 1
 
+    assert [name for name, _ in published] == ["oauth.connected", "oauth.connected"]
+    fresh, reconsent = (kwargs for _, kwargs in published)
+    assert fresh == {
+        "provider": "acme",
+        "connection_id": connection.id,
+        "account_id": connection.account_id,
+        "reconsent": False,
+    }
+    assert reconsent["reconsent"] is True
+    assert reconsent["connection_id"] == connection.id
     druks.redis._client = None
     assert not await get_client().get(stale_key)
 
@@ -649,11 +665,17 @@ def test_oauth_connect_rejects_an_unknown_reconnect_target(tmp_path, acme, druks
         assert client.get("/api/oauth/acme/connect?connection=zzz").status_code == 404
 
 
-def test_connections_list_and_revoke(tmp_path, acme, druks_db):
+def test_connections_list_and_revoke(tmp_path, acme, druks_db, monkeypatch):
     from druks.accounts.models import Account
     from druks.services.models import OauthConnection
     from druks.testing import configure_app_for_test
 
+    published = []
+
+    async def record(name, **kwargs):
+        published.append((name, kwargs))
+
+    monkeypatch.setattr("druks.services.routes.publish", record)
     me = Account.get_or_create("op@example.com")
     with TestClient(configure_app_for_test(settings=make_settings(tmp_path))) as client:
         row = OauthConnection.create(
@@ -668,13 +690,28 @@ def test_connections_list_and_revoke(tmp_path, acme, druks_db):
         assert not OauthConnection.list_for_provider("acme")
         assert client.delete(f"/api/oauth/connections/{row.id}").status_code == 404
 
+    assert published == [
+        (
+            "oauth.disconnected",
+            {"provider": "acme", "connection_id": row.id, "account_id": me.id},
+        )
+    ]
 
-def test_replacing_the_client_credentials_deletes_its_connections(tmp_path, acme, druks_db):
+
+def test_replacing_the_client_credentials_deletes_its_connections(
+    tmp_path, acme, druks_db, monkeypatch
+):
     from druks.accounts.constants import SYSTEM_ACCOUNT_ID
     from druks.services.models import OauthConnection
     from druks.testing import configure_app_for_test
 
-    OauthConnection.create(
+    published = []
+
+    async def record(name, **kwargs):
+        published.append((name, kwargs))
+
+    monkeypatch.setattr("druks.services.routes.publish", record)
+    row = OauthConnection.create(
         provider="acme", account_id=SYSTEM_ACCOUNT_ID, refresh_token="rt-old", scopes=[]
     )
 
@@ -686,6 +723,12 @@ def test_replacing_the_client_credentials_deletes_its_connections(tmp_path, acme
 
     # The new client can never refresh the old client's connections.
     assert not OauthConnection.list_for_provider("acme")
+    assert published == [
+        (
+            "oauth.disconnected",
+            {"provider": "acme", "connection_id": row.id, "account_id": SYSTEM_ACCOUNT_ID},
+        )
+    ]
 
 
 def test_list_serves_the_connections_beside_the_declared_union(tmp_path, acme, druks_db):
@@ -714,3 +757,42 @@ def test_list_serves_the_connections_beside_the_declared_union(tmp_path, acme, d
         assert connection["id"] == row.id
         assert connection["scopes"] == ["profile.read"]
         assert connection["connectedAt"]
+
+
+def test_next_lands_the_user_back_on_the_extension_page(tmp_path, acme, druks_db):
+    from urllib.parse import parse_qsl, urlparse
+
+    from druks.testing import configure_app_for_test
+
+    ServiceIdentity.connect(
+        "acme", identity={"client_id": "id-1"}, secrets={"client_secret": "sec-1"}
+    )
+    settings = make_settings(tmp_path, urls={"endpoint": "https://druks.example"})
+    with TestClient(configure_app_for_test(settings=settings)) as client:
+        consent = client.get(
+            "/api/oauth/acme/connect?next=/app/night_watch/accounts",
+            follow_redirects=False,
+        ).headers["location"]
+        state = dict(parse_qsl(urlparse(consent).query))["state"]
+
+        finish = client.get(
+            "/api/oauth/callback", params={"state": state, "code": "c-1"}, follow_redirects=False
+        )
+
+        assert finish.status_code == 307
+        assert finish.headers["location"] == "/app/night_watch/accounts"
+
+
+def test_next_rejects_anything_but_a_bare_path(tmp_path, acme, druks_db):
+    from druks.testing import configure_app_for_test
+
+    ServiceIdentity.connect(
+        "acme", identity={"client_id": "id-1"}, secrets={"client_secret": "sec-1"}
+    )
+    settings = make_settings(tmp_path, urls={"endpoint": "https://druks.example"})
+    with TestClient(configure_app_for_test(settings=settings)) as client:
+        for hostile in ("https://evil.test/x", "//evil.test/x", "/\\evil.test", "app/page"):
+            response = client.get(
+                "/api/oauth/acme/connect", params={"next": hostile}, follow_redirects=False
+            )
+            assert response.status_code == 422, hostile
