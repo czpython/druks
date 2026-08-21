@@ -69,13 +69,12 @@ main() {
   mkdir -p "$INSTALL_DIR"
   cd "$INSTALL_DIR"
 
-  # compose files — the base plus both shape overlays live in the repo, always
-  # refresh. COMPOSE_FILE in .env (written below) selects which overlay loads;
-  # the unused one sits inert.
+  # Compose files. The base holds every service. Always refresh both files.
+  # COMPOSE_PROFILES in .env (written below) turns on the hosted services. The
+  # docker-sbx overlay loads only for that provider and is inert otherwise.
   echo "→ fetching compose files from $REPO@$REF"
   fetch_from_repo deploy/compose.yaml compose.yaml
-  fetch_from_repo deploy/compose.local.yaml compose.local.yaml
-  fetch_from_repo deploy/compose.remote.yaml compose.remote.yaml
+  fetch_from_repo deploy/compose.docker-sbx.yaml compose.docker-sbx.yaml
 
   # compose.override.yaml holds the operator's local services and overrides;
   # COMPOSE_FILE lists it, so it must exist. Seed it once and never touch it
@@ -83,8 +82,8 @@ main() {
   [ -f compose.override.yaml ] \
     || printf '# Host-local Compose overrides. See INSTALL.md.\n' > compose.override.yaml
 
-  # The Caddyfile is bind-mounted by the remote overlay (stock caddy image, no
-  # baked config), so it refreshes on every re-run.
+  # The Caddyfile is bind-mounted by the caddy service (stock image, no baked
+  # config), so it refreshes on every re-run.
   echo "→ fetching deploy/caddy/Caddyfile from $REPO@$REF"
   mkdir -p caddy
   fetch_from_repo deploy/caddy/Caddyfile caddy/Caddyfile
@@ -93,19 +92,22 @@ main() {
   echo "→ pulling $BACKEND_IMAGE"
   docker pull -q "$BACKEND_IMAGE" >/dev/null
 
-  # TOML setup + .env render — the required-values brain is ``druks setup``
-  # (exit 0 = boot-ready, 3 = gaps).
+  # TOML setup and .env render. ``druks setup`` decides the required values:
+  # exit 0 is boot-ready, exit 3 is gaps. A gaps exit still renders .env. The
+  # compose-plane keys below are thus written before each exit path. The
+  # fetched compose.yaml and the shape selection in .env always change
+  # together. An interrupted upgrade cannot pair the new base with the old
+  # selection.
   set +e
   docker run --rm --user "$(id -u):$(id -g)" \
     -v "$INSTALL_DIR:/bootstrap" "$BACKEND_IMAGE" \
     druks setup /bootstrap/.env --provider "$PROVIDER" --home "$HOME"
   setup_rc=$?
   set -e
-  case "$setup_rc" in
-    0) ;;        # boot-ready — fall through to pull + boot
-    3) exit 0 ;; # gaps remain — setup printed the checklist; re-run when done
-    *) echo "druks setup failed (exit $setup_rc)" >&2; exit "$setup_rc" ;;
-  esac
+  if [ "$setup_rc" != 0 ] && [ "$setup_rc" != 3 ]; then
+    echo "druks setup failed (exit $setup_rc)" >&2
+    exit "$setup_rc"
+  fi
 
   # setup rendered the provider from druks.toml — read the artifact so the
   # shape branches below follow the authored configuration.
@@ -128,25 +130,62 @@ main() {
     set_env_var DRUKS_WEB_BIND_HOST "127.0.0.1"
   fi
 
-  # COMPOSE_FILE → .env, so plain `docker compose` in this dir loads the right
-  # overlay. `local` drives sandboxes on the host Docker daemon (dashboard on
-  # :8001, no Caddy); `remote` runs the cloud provider + Caddy. Both shapes
-  # mount the Docker socket — sandboxes on local, browser-session containers
-  # on remote — so the socket's gid rides along and drukbox's non-root appuser
-  # may use it. On macOS the host path is a user-owned symlink, but the socket
-  # Docker Desktop mounts into containers is group root, so the host gid would
-  # grant nothing.
+  # drukbox mounts the Docker socket on every provider: for sandboxes on the
+  # docker provider, and for browser-login containers on all providers. The
+  # gid of the socket lets the non-root appuser use it. On macOS the host path
+  # is a user-owned symlink, but the socket that Docker Desktop mounts into
+  # containers has group root. The host gid would give nothing there.
   if [ "$(uname -s)" = "Darwin" ]; then
     set_env_var DRUKS_DOCKER_GID "0"
   else
     set_env_var DRUKS_DOCKER_GID "$(stat -c '%g' /var/run/docker.sock)"
   fi
-  # compose.override.yaml loads last so operator additions win over the repo
-  # files and are never overwritten by them.
-  if [ "$PROVIDER" = "docker" ]; then
-    set_env_var COMPOSE_FILE "compose.yaml:compose.local.yaml:compose.override.yaml"
-  else
-    set_env_var COMPOSE_FILE "compose.yaml:compose.remote.yaml:compose.override.yaml"
+
+  # Shape selection, written to .env. Then a plain `docker compose` command in
+  # this directory does the correct thing. The `hosted` profile turns on the
+  # Caddy edge and the janitor. A `docker` box runs bare, with the dashboard
+  # directly on :8001. docker-sbx also layers the overlay (drukbox connected to
+  # the host sandboxd) and enables the SSH gateway. compose.override.yaml loads
+  # last. Operator additions thus win over the repo files, and the installer
+  # never overwrites them.
+  set_env_var COMPOSE_FILE "compose.yaml:compose.override.yaml"
+  case "$PROVIDER" in
+    docker)
+      set_env_var COMPOSE_PROFILES ""
+      ;;
+    docker-sbx)
+      set_env_var COMPOSE_FILE "compose.yaml:compose.docker-sbx.yaml:compose.override.yaml"
+      set_env_var COMPOSE_PROFILES "hosted,gateway"
+      # The sbx mounts live in the home directory of the daemon owner. Write
+      # the path to .env, and each compose command renders the same mounts,
+      # also from sudo or systemd. Create the writable bind source now. The
+      # engine would make it root-owned, and the deploy-uid services could
+      # not write the workspaces or the gateway host key.
+      set_env_var DRUKS_SBX_HOME "$HOME"
+      mkdir -p "$HOME/.drukbox/sbx-workspaces"
+      # sandboxd must run before the first compose command. A bind of a
+      # missing socket path makes a root-owned directory there, and that
+      # blocks the daemon itself.
+      SBX_SOCKET="$HOME/.local/state/sandboxes/sandboxes/sandboxd/sandboxd.sock"
+      if [ ! -S "$SBX_SOCKET" ]; then
+        echo "docker-sbx: no sandboxd socket at $SBX_SOCKET" >&2
+        echo "install docker-sbx, then: sbx login && sbx daemon start -d --policy balanced" >&2
+        exit 1
+      fi
+      ;;
+    *)
+      set_env_var COMPOSE_PROFILES "hosted"
+      ;;
+  esac
+
+  # Retired shape overlays. The installer does not fetch them, and nothing
+  # references them after the selection above. Remove stale copies, and an old
+  # project directory cannot mix them into the merged configuration.
+  rm -f compose.local.yaml compose.remote.yaml
+
+  if [ "$setup_rc" = 3 ]; then
+    # Gaps remain. Setup printed the checklist. Re-run when done.
+    exit 0
   fi
 
   echo "→ docker compose pull"

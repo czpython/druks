@@ -1,0 +1,49 @@
+# The Docker Sandboxes overlay. It connects the drukbox services, and the
+# gateway that compose.yaml declares behind the "gateway" profile, to the
+# sandboxd daemon on the host. sandboxd runs as one user. The overlay mounts
+# four things: the daemon socket, the sbx CLI of the host, the CLI auth store,
+# and the workspace root. The mount of the host CLI keeps the CLI version and
+# the daemon version equal. The auth store and the workspace root keep the
+# same path inside and outside the container, because the daemon resolves
+# paths on its own filesystem. The services run with the uid of the daemon
+# owner (the deploy user). DRUKS_SBX_HOME is the home directory of that user.
+# install.sh writes it to .env, and each compose command renders the same
+# mounts, also from sudo or systemd. The docker.sock mount from the base
+# stays: browser-login containers use the docker provider.
+
+x-sbx-rig: &sbx-rig
+  user: "${DRUKS_UID:?set DRUKS_UID in .env — run install.sh}:${DRUKS_GID:?set DRUKS_GID in .env — run install.sh}"
+  volumes:
+    - ${DRUKS_SBX_HOME:?set DRUKS_SBX_HOME in .env — run install.sh}/.local/state/sandboxes/sandboxes/sandboxd/sandboxd.sock:/run/sandboxd.sock
+    - /usr/bin/sbx:/usr/local/bin/sbx:ro
+    - ${DRUKS_SBX_HOME:?}/.config/com.docker.sandboxes:${DRUKS_SBX_HOME:?}/.config/com.docker.sandboxes:ro
+    - ${DRUKS_SBX_HOME:?}/.drukbox:${DRUKS_SBX_HOME:?}/.drukbox
+
+# The image has no user with the deploy uid, and defaults that come from the
+# home directory resolve nowhere. XDG_CONFIG_HOME points the sbx CLI to the
+# mounted auth store. The workspace root is set here, and it cannot disagree
+# with the mount above.
+x-sbx-env: &sbx-env
+  XDG_CONFIG_HOME: ${DRUKS_SBX_HOME:?}/.config
+  DOCKER_SANDBOXES_API: unix:///run/sandboxd.sock
+  DOCKER_SBX_WORKSPACE_ROOT: ${DRUKS_SBX_HOME:?}/.drukbox/sbx-workspaces
+
+services:
+  drukbox:
+    <<: *sbx-rig
+    environment:
+      <<: *sbx-env
+
+  drukbox-janitor:
+    <<: *sbx-rig
+    environment:
+      <<: *sbx-env
+
+  # GATEWAY_SSH_HOST is the address the provider gives to callers. It comes
+  # from .env through the [sandbox.docker-sbx] table. Provisioning refuses to
+  # start without it.
+  drukbox-gateway:
+    <<: *sbx-rig
+    environment:
+      <<: *sbx-env
+      GATEWAY_HOST_KEY_PATH: ${DRUKS_SBX_HOME:?}/.drukbox/gateway_host_key

@@ -19,6 +19,8 @@ _COMPOSE_ENV_KEYS = (
     "DRUKS_WEB_BIND_HOST",
     "DRUKS_DOCKER_GID",
     "COMPOSE_FILE",
+    "COMPOSE_PROFILES",
+    "DRUKS_SBX_HOME",
 )
 _ENV_KEY_PATTERN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
@@ -212,7 +214,7 @@ def _fresh_values(*, provider: str, home: str) -> tuple[tuple[tuple[str, ...], s
             # browser flows built from the endpoint (the GitHub manifest
             # callback's BroadcastChannel) are origin-scoped.
             (("urls", "endpoint"), "http://127.0.0.1:8001"),
-            (("sandbox", "service_url"), "http://127.0.0.1:8000"),
+            (("sandbox", "service_url"), "http://127.0.0.1:8780"),
             (("sandbox", "service_token"), "dev-token"),
             (("sandbox", "image"), "ghcr.io/czpython/druks-sandbox:latest"),
         )
@@ -354,9 +356,10 @@ def _render_env(
 ) -> str:
     provider = _get_string(config, ("sandbox", "provider"))
 
-    service_tokens = ""
-    if provider != "docker":
-        service_tokens = _get_string(config, ("sandbox", "service_token"))
+    # Rendered on every shape. drukbox requires SERVICE_TOKENS and does not
+    # start without it. A compose-side default would replace that safe stop
+    # with a known token.
+    service_tokens = _get_string(config, ("sandbox", "service_token"))
 
     sections = (
         (

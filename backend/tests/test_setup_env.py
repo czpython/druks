@@ -122,7 +122,9 @@ def test_docker_shape_matches_local_wiring_and_ignores_provider_environment(tmp_
     values = read_env(env_path)
     assert values["DEFAULT_HOST_PROVIDER"] == "docker"
     assert "DRUKS_AUTH_HEADER" not in values
-    assert "SERVICE_TOKENS" not in values
+    # Rendered on every shape. Without it, drukbox stops instead of falling
+    # back to a known token.
+    assert values["SERVICE_TOKENS"] == "dev-token"
     assert "DOCKER_HOST" not in values
 
 
@@ -311,7 +313,8 @@ def test_compose_plane_env_additions_survive_rerender(tmp_path):
     _run(env_path, provider="docker")
     env_path.write_text(
         env_path.read_text()
-        + "DRUKS_UID=1000\nDRUKS_DOCKER_GID=988\nCOMPOSE_FILE=compose.yaml:compose.local.yaml\n"
+        + "DRUKS_UID=1000\nDRUKS_DOCKER_GID=988\nDRUKS_SBX_HOME=/home/op\n"
+        + "COMPOSE_FILE=compose.yaml:compose.override.yaml\nCOMPOSE_PROFILES=hosted\n"
     )
 
     _run(env_path)
@@ -319,7 +322,9 @@ def test_compose_plane_env_additions_survive_rerender(tmp_path):
     values = read_env(env_path)
     assert values["DRUKS_UID"] == "1000"
     assert values["DRUKS_DOCKER_GID"] == "988"
-    assert values["COMPOSE_FILE"] == "compose.yaml:compose.local.yaml"
+    assert values["DRUKS_SBX_HOME"] == "/home/op"
+    assert values["COMPOSE_FILE"] == "compose.yaml:compose.override.yaml"
+    assert values["COMPOSE_PROFILES"] == "hosted"
     assert "# OPERATOR ADDITIONS" in env_path.read_text()
 
 
