@@ -783,8 +783,35 @@ platform runs the consent with the union of every installed extension's
 declared scopes and stores the connection for the signed-in user. To widen
 an existing connection's scopes, open
 `/api/oauth/acme/connect?connection=<id>`; reconsent replaces its tokens.
-Register `https://<host>/api/oauth/callback` as the redirect URI at the
-provider; it serves every service.
+Add `?next=/app/night_watch/accounts` to land the user back on your
+page after consent instead of the generic "connected" page. `next`
+must be a bare path starting with `/` — a URL with a scheme or host is
+rejected, so the door can never redirect off the box. Register
+`https://<host>/api/oauth/callback` as the redirect URI at the provider; it
+serves every service.
+
+React to sign-ins with the signal machinery. The platform publishes
+`oauth.connected` when a consent completes — `reconsent` is true when it
+replaced an existing connection's tokens — and `oauth.disconnected` when a
+connection dies, whether the user revoked it or the service's client
+credentials were replaced. Subscribe in `subscribers.py`:
+
+```python
+from druks.signals import subscribe
+
+
+@subscribe("oauth.connected", provider="acme")
+async def adopt_sign_in(
+    provider: str, connection_id: str, account_id: str, reconsent: bool
+) -> None:
+    if not reconsent:
+        WatchedAccount.adopt(connection_id, account_id)
+
+
+@subscribe("oauth.disconnected", provider="acme")
+async def drop_sign_in(provider: str, connection_id: str, account_id: str) -> None:
+    WatchedAccount.drop(connection_id)
+```
 
 The user sees and revokes everything in Settings — every connection they
 hold, across services. Replacing a service's client credentials deletes its

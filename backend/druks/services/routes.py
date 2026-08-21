@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 
 from druks.accounts.context import current_account_id
 from druks.accounts.dependencies import current_session_account
@@ -13,6 +13,7 @@ from druks.services.exceptions import (
 from druks.services.models import OauthConnection, ServiceIdentity
 from druks.services.oauth import OauthClient, complete_connect
 from druks.services.schemas import ConnectionResponse, ServiceResponse
+from druks.signals import publish
 
 router = APIRouter(prefix="/api/services", tags=["services"])
 oauth_router = APIRouter(prefix="/api/oauth", tags=["oauth"])
@@ -53,7 +54,14 @@ async def connect_service(name: str, payload: dict[str, str]) -> ServiceResponse
         # A replaced client can never refresh the old client's connections.
         client = OauthClient(provider=name)
         for connection in OauthConnection.list_for_provider(name):
+            connection_id, account_id = connection.id, connection.account_id
             await client.disconnect(connection)
+            await publish(
+                "oauth.disconnected",
+                provider=name,
+                connection_id=connection_id,
+                account_id=account_id,
+            )
     return ServiceResponse.from_row(service, row)
 
 
@@ -66,7 +74,7 @@ def _get_oauth_service(name: str):
 
 @oauth_router.get("/{name}/connect", dependencies=[Depends(current_session_account)])
 async def connect_oauth_service(
-    name: str, request: Request, connection: str = ""
+    name: str, request: Request, connection: str = "", next: str = ""
 ) -> RedirectResponse:
     service = _get_oauth_service(name)
     account_id = current_account_id.get()
@@ -76,6 +84,9 @@ async def connect_oauth_service(
             raise HTTPException(
                 status_code=404, detail=f"No connection {connection!r} on {name!r}."
             )
+    if next and (not next.startswith("/") or next.startswith(("//", "/\\"))):
+        # A bare same-origin path only — anything host-shaped is an open redirect.
+        raise HTTPException(status_code=422, detail="next must be a path starting with '/'.")
     endpoint = request.app.state.settings.urls.endpoint
     if not endpoint:
         raise HTTPException(
@@ -90,13 +101,13 @@ async def connect_oauth_service(
     url = await client.begin_connect(
         redirect_uri=f"{endpoint.rstrip('/')}/api/oauth/callback",
         scopes=service.required_scopes(),
-        context={"account_id": account_id, "connection_id": connection},
+        context={"account_id": account_id, "connection_id": connection, "next": next},
     )
     return RedirectResponse(url)
 
 
 @oauth_router.get("/callback", response_class=HTMLResponse)
-async def oauth_callback(state: str = "", code: str = "", error: str = "") -> HTMLResponse:
+async def oauth_callback(state: str = "", code: str = "", error: str = "") -> Response:
     if error:
         raise HTTPException(
             status_code=400, detail=f"The authorization server denied the request: {error}"
@@ -112,7 +123,8 @@ async def oauth_callback(state: str = "", code: str = "", error: str = "") -> HT
         # A state begun by another door (an MCP connect) finishes at its own callback.
         raise HTTPException(status_code=400, detail=f"No OAuth service {provider!r}.")
     granted = tokens.get("scope", "").split() or pending["scopes"]
-    if pending["connection_id"]:
+    reconsent = bool(pending["connection_id"])
+    if reconsent:
         row = OauthConnection.get(pending["connection_id"])
         if not row:
             raise HTTPException(
@@ -122,12 +134,21 @@ async def oauth_callback(state: str = "", code: str = "", error: str = "") -> HT
         # A reconsent's narrower cached token must not serve until its TTL runs out.
         await OauthClient(provider=provider).evict_access_token(row.id)
     else:
-        OauthConnection.create(
+        row = OauthConnection.create(
             provider=provider,
             account_id=pending["account_id"],
             refresh_token=tokens["refresh_token"],
             scopes=granted,
         )
+    await publish(
+        "oauth.connected",
+        provider=provider,
+        connection_id=row.id,
+        account_id=row.account_id,
+        reconsent=reconsent,
+    )
+    if pending["next"]:
+        return RedirectResponse(pending["next"])
     return render_page("service_oauth_callback.html", name=provider)
 
 
@@ -146,4 +167,11 @@ async def disconnect_connection(connection_id: str) -> None:
     row = OauthConnection.get(connection_id)
     if not row:
         raise HTTPException(status_code=404, detail=f"No connection {connection_id!r}.")
-    await OauthClient(provider=row.provider).disconnect(row)
+    provider, account_id = row.provider, row.account_id
+    await OauthClient(provider=provider).disconnect(row)
+    await publish(
+        "oauth.disconnected",
+        provider=provider,
+        connection_id=connection_id,
+        account_id=account_id,
+    )
