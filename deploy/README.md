@@ -1,20 +1,24 @@
 # Druks Deployment
 
-The base `compose.yaml` is Druks (`web`, which embeds the DBOS durable engine
-and serves the dashboard SPA), Postgres, and Redis. A shape overlay adds the
-Drukbox sandbox control plane on top: `install.sh` writes `COMPOSE_FILE` to
-`.env` (e.g. `compose.yaml:compose.remote.yaml`), so plain `docker compose`
-commands in the install dir load the right pair.
+`compose.yaml` holds the whole stack: Druks (`web`, which embeds the DBOS
+durable engine and serves the dashboard SPA), Postgres, Redis, the Drukbox
+sandbox control plane (`drukbox`), the janitor, and the Caddy edge. `install.sh`
+writes `COMPOSE_PROFILES` to `.env` to turn on the shape-specific extras, so
+plain `docker compose` commands in the install dir do the right thing.
 
-A **remote** install (any `DRUKS_PROVIDER` except `docker`) uses
-`compose.remote.yaml`: the Drukbox control plane (`drukbox`, `drukbox-janitor`)
-against a cloud provider, plus stock Caddy (identity edge + proxy, Caddyfile
-bind-mounted).
+A **local** install (`DRUKS_PROVIDER=docker`) runs bare — no profiles: `drukbox`
+mounts the host's Docker socket, sandboxes are sibling containers on the host
+daemon, and the dashboard is reached directly on `127.0.0.1:8001`, no Caddy. See
+[Full local](../docs/full-local.md).
 
-A **local** install (`DRUKS_PROVIDER=docker`) uses `compose.local.yaml`: one
-`drukbox` with the host's Docker socket mounted, so sandboxes are sibling
-containers on the host daemon, and no Caddy — the dashboard is reached directly
-on `127.0.0.1:8001`. See [Full local](../docs/full-local.md).
+A **remote** install (any other `DRUKS_PROVIDER`) enables `COMPOSE_PROFILES=`
+`caddy,janitor`: the Drukbox control plane against a cloud provider, the periodic
+janitor, and stock Caddy (identity edge + proxy, Caddyfile bind-mounted).
+
+The **docker-sbx** provider additionally layers `compose.docker-sbx.yaml` and
+the `gateway` profile: it reshapes the Drukbox services to drive the host's
+[Docker Sandboxes](https://docs.docker.com/ai/sandboxes/) daemon (microVM
+sandboxes) and adds the SSH gateway that fronts them.
 
 Drukbox keeps its own schema in a `drukbox` database in the same Postgres, so
 there is no second datastore to run or back up separately.

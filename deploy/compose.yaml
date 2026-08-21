@@ -1,9 +1,10 @@
-# Druks base stack: web, Postgres, Redis. The sandbox control plane (drukbox)
-# and, for remote installs, Caddy come from an overlay — compose.local.yaml or
-# compose.remote.yaml — selected by COMPOSE_FILE in .env, which install.sh
-# writes. Host networking throughout: services reach Postgres and Redis on
-# 127.0.0.1, and drukbox reaches each sandbox's sshd at the address its provider
-# returns — a host-loopback port locally, a provider-reachable address remotely.
+# Druks stack: web, Postgres, Redis, and the sandbox control plane (drukbox).
+# One file for every install shape — install.sh writes COMPOSE_PROFILES in .env
+# to turn on the hosted extras (Caddy identity edge, the janitor), and a provider
+# whose drukbox needs a different shape (docker-sbx) layers a thin overlay.
+# Host networking throughout: services reach Postgres and Redis on 127.0.0.1, and
+# drukbox reaches each sandbox's sshd at the address its provider returns — a
+# host-loopback port locally, a provider-reachable address remotely.
 
 x-druks: &druks
   image: ghcr.io/czpython/druks:${DRUKS_TAG:-latest}
@@ -47,6 +48,40 @@ x-druks: &druks
     postgres:
       condition: service_healthy
 
+# The sandbox control plane. Present in every install; only its provider-facing
+# configuration varies, and that rides in .env (DEFAULT_HOST_PROVIDER and the
+# [sandbox.<provider>] passthrough that druks setup renders).
+x-drukbox: &drukbox
+  image: ${DRUKS_SANDBOX_SERVICE_IMAGE:-ghcr.io/czpython/drukbox:latest}
+  restart: unless-stopped
+  network_mode: host
+  # The mounted socket serves the docker provider (sandboxes locally, browser-
+  # login containers on every provider). install.sh records the socket's gid so
+  # drukbox's non-root appuser may use it — on macOS the mounted socket is group
+  # root, so setup writes 0.
+  group_add:
+    - "${DRUKS_DOCKER_GID:-0}"
+  env_file:
+    - ./.env
+  environment:
+    DATABASE_URL: postgresql+psycopg://${DRUKS_POSTGRES_USER:-druks}:${DRUKS_POSTGRES_PASSWORD}@127.0.0.1:5432/drukbox
+    # Bind loopback on a real host, 0.0.0.0 only where Docker Desktop needs it —
+    # the same per-OS value web uses. Only web calls drukbox, over loopback.
+    UVICORN_HOST: ${DRUKS_WEB_BIND_HOST:-0.0.0.0}
+    # Off unless a provider turns it on via its [sandbox.<provider>] passthrough
+    # (exe sets TAILSCALE_ENABLED=true).
+    TAILSCALE_ENABLED: ${TAILSCALE_ENABLED:-false}
+    # Browser-login containers run sshd for the druks user, not root.
+    DOCKER_SSH_USERNAME: druks
+    # The token web presents: dev-token on a local box, the generated one on a
+    # hosted box (druks setup writes it to .env for every non-docker provider).
+    SERVICE_TOKENS: ${SERVICE_TOKENS:-dev-token}
+  volumes:
+    - /var/run/docker.sock:/var/run/docker.sock
+  depends_on:
+    postgres:
+      condition: service_healthy
+
 services:
   web:
     <<: *druks
@@ -67,6 +102,48 @@ services:
         "--port",
         "8001",
       ]
+
+  drukbox:
+    <<: *drukbox
+
+  # Periodic janitor — drukbox ships no scheduler, so loop with sleep; a real
+  # timer belongs in the drukbox service/image, not in compose. Hosted installs
+  # only (COMPOSE_PROFILES=...,janitor); a local box reaps on the next request.
+  drukbox-janitor:
+    <<: *drukbox
+    profiles: ["janitor"]
+    entrypoint:
+      - sh
+      - -c
+      - "while true; do .venv/bin/python -m hosts.janitor || true; sleep 60; done"
+    # The image HEALTHCHECK probes the HTTP API — on host networking the janitor
+    # would health-check the *service's* port, doubling /healthz traffic and
+    # reporting a status that isn't its own.
+    healthcheck:
+      disable: true
+
+  # The identity edge + webhook TLS. Hosted installs only
+  # (COMPOSE_PROFILES=caddy); a local box reaches the dashboard directly on
+  # 127.0.0.1:8001. Stock image, no baked config — install.sh fetches the
+  # Caddyfile next to this file.
+  caddy:
+    profiles: ["caddy"]
+    image: caddy:2.10-alpine
+    network_mode: host
+    restart: unless-stopped
+    environment:
+      DRUKS_UPSTREAM: ${DRUKS_UPSTREAM:-127.0.0.1:8001}
+      # Setup renders identity.header for Caddy; druks reads it from druks.toml.
+      # Caddy requires the edge's assertion, and druks maps it to an account.
+      # No default anywhere — the backend refuses header mode without it.
+      DRUKS_AUTH_HEADER: ${DRUKS_AUTH_HEADER:-}
+      # ``:-`` so an empty .env value still collapses to the inert loopback
+      # default — Caddy treats set-but-empty as a real (broken) site address.
+      DRUKS_WEBHOOK_HOST: ${DRUKS_WEBHOOK_HOST:-http://127.0.0.1:8081}
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
 
   postgres:
     image: postgres:16-alpine
@@ -110,3 +187,5 @@ volumes:
   redis_data:
   postgres_data:
   druks_sandbox_keys:
+  caddy_data:
+  caddy_config:

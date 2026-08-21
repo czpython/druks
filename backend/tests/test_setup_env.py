@@ -311,7 +311,8 @@ def test_compose_plane_env_additions_survive_rerender(tmp_path):
     _run(env_path, provider="docker")
     env_path.write_text(
         env_path.read_text()
-        + "DRUKS_UID=1000\nDRUKS_DOCKER_GID=988\nCOMPOSE_FILE=compose.yaml:compose.local.yaml\n"
+        + "DRUKS_UID=1000\nDRUKS_DOCKER_GID=988\n"
+        + "COMPOSE_FILE=compose.yaml:compose.override.yaml\nCOMPOSE_PROFILES=caddy,janitor\n"
     )
 
     _run(env_path)
@@ -319,7 +320,8 @@ def test_compose_plane_env_additions_survive_rerender(tmp_path):
     values = read_env(env_path)
     assert values["DRUKS_UID"] == "1000"
     assert values["DRUKS_DOCKER_GID"] == "988"
-    assert values["COMPOSE_FILE"] == "compose.yaml:compose.local.yaml"
+    assert values["COMPOSE_FILE"] == "compose.yaml:compose.override.yaml"
+    assert values["COMPOSE_PROFILES"] == "caddy,janitor"
     assert "# OPERATOR ADDITIONS" in env_path.read_text()
 
 

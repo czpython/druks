@@ -69,13 +69,12 @@ main() {
   mkdir -p "$INSTALL_DIR"
   cd "$INSTALL_DIR"
 
-  # compose files — the base plus both shape overlays live in the repo, always
-  # refresh. COMPOSE_FILE in .env (written below) selects which overlay loads;
-  # the unused one sits inert.
+  # compose files — the base holds every service, always refresh. COMPOSE_PROFILES
+  # in .env (written below) turns on the hosted extras; the docker-sbx overlay is
+  # fetched too and loads only for that provider. Both sit inert otherwise.
   echo "→ fetching compose files from $REPO@$REF"
   fetch_from_repo deploy/compose.yaml compose.yaml
-  fetch_from_repo deploy/compose.local.yaml compose.local.yaml
-  fetch_from_repo deploy/compose.remote.yaml compose.remote.yaml
+  fetch_from_repo deploy/compose.docker-sbx.yaml compose.docker-sbx.yaml
 
   # compose.override.yaml holds the operator's local services and overrides;
   # COMPOSE_FILE lists it, so it must exist. Seed it once and never touch it
@@ -128,26 +127,38 @@ main() {
     set_env_var DRUKS_WEB_BIND_HOST "127.0.0.1"
   fi
 
-  # COMPOSE_FILE → .env, so plain `docker compose` in this dir loads the right
-  # overlay. `local` drives sandboxes on the host Docker daemon (dashboard on
-  # :8001, no Caddy); `remote` runs the cloud provider + Caddy. Both shapes
-  # mount the Docker socket — sandboxes on local, browser-session containers
-  # on remote — so the socket's gid rides along and drukbox's non-root appuser
-  # may use it. On macOS the host path is a user-owned symlink, but the socket
-  # Docker Desktop mounts into containers is group root, so the host gid would
-  # grant nothing.
+  # drukbox mounts the Docker socket on every provider — sandboxes on the docker
+  # provider, browser-login containers everywhere — so its gid rides along and
+  # drukbox's non-root appuser may use it. On macOS the host path is a user-owned
+  # symlink, but the socket Docker Desktop mounts into containers is group root,
+  # so the host gid would grant nothing.
   if [ "$(uname -s)" = "Darwin" ]; then
     set_env_var DRUKS_DOCKER_GID "0"
   else
     set_env_var DRUKS_DOCKER_GID "$(stat -c '%g' /var/run/docker.sock)"
   fi
+
+  # Shape selection, written to .env so plain `docker compose` in this dir does
+  # the right thing. COMPOSE_PROFILES turns on the hosted extras: a `docker`
+  # box runs bare (dashboard direct on :8001, no edge, no janitor); any other
+  # provider adds the Caddy edge + the janitor. docker-sbx additionally layers
+  # the overlay (drukbox reshaped for the host sandboxd) and the SSH gateway.
   # compose.override.yaml loads last so operator additions win over the repo
   # files and are never overwritten by them.
-  if [ "$PROVIDER" = "docker" ]; then
-    set_env_var COMPOSE_FILE "compose.yaml:compose.local.yaml:compose.override.yaml"
-  else
-    set_env_var COMPOSE_FILE "compose.yaml:compose.remote.yaml:compose.override.yaml"
-  fi
+  case "$PROVIDER" in
+    docker)
+      set_env_var COMPOSE_FILE "compose.yaml:compose.override.yaml"
+      set_env_var COMPOSE_PROFILES ""
+      ;;
+    docker-sbx)
+      set_env_var COMPOSE_FILE "compose.yaml:compose.docker-sbx.yaml:compose.override.yaml"
+      set_env_var COMPOSE_PROFILES "caddy,janitor,gateway"
+      ;;
+    *)
+      set_env_var COMPOSE_FILE "compose.yaml:compose.override.yaml"
+      set_env_var COMPOSE_PROFILES "caddy,janitor"
+      ;;
+  esac
 
   echo "→ docker compose pull"
   docker compose pull

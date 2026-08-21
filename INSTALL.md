@@ -69,8 +69,8 @@ this file once and never changes it. Your changes survive every install and
 upgrade.
 
 install.sh refreshes the repo compose files on each run. So do not edit
-`compose.yaml`, `compose.local.yaml`, or `compose.remote.yaml` — those changes
-are lost on the next install.
+`compose.yaml` or `compose.docker-sbx.yaml` — those changes are lost on the
+next install.
 
 Example — bake locally-installed apps into the web image:
 

@@ -19,6 +19,7 @@ _COMPOSE_ENV_KEYS = (
     "DRUKS_WEB_BIND_HOST",
     "DRUKS_DOCKER_GID",
     "COMPOSE_FILE",
+    "COMPOSE_PROFILES",
 )
 _ENV_KEY_PATTERN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
@@ -212,7 +213,7 @@ def _fresh_values(*, provider: str, home: str) -> tuple[tuple[tuple[str, ...], s
             # browser flows built from the endpoint (the GitHub manifest
             # callback's BroadcastChannel) are origin-scoped.
             (("urls", "endpoint"), "http://127.0.0.1:8001"),
-            (("sandbox", "service_url"), "http://127.0.0.1:8000"),
+            (("sandbox", "service_url"), "http://127.0.0.1:8780"),
             (("sandbox", "service_token"), "dev-token"),
             (("sandbox", "image"), "ghcr.io/czpython/druks-sandbox:latest"),
         )
