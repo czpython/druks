@@ -119,16 +119,6 @@ def run_setup(
             _set_value(document, value_path, value)
     else:
         document = tomlkit.parse(toml_path.read_text())
-        # Old docker-shape installs have service_url on port 8000, written by a
-        # retired compose override. The stack now uses the default port of the
-        # image. Change only the exact value the old template wrote. Keep an
-        # operator's own URL.
-        if (
-            _get_string(document, ("sandbox", "provider")) == "docker"
-            and _get_string(document, ("sandbox", "service_url")) == "http://127.0.0.1:8000"
-        ):
-            _set_value(document, ("sandbox", "service_url"), "http://127.0.0.1:8780")
-            is_changed = True
 
     for assignment in set_values:
         value_path, value = _parse_assignment(assignment)

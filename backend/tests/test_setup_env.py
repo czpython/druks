@@ -161,30 +161,6 @@ def test_foreign_provider_table_is_a_named_gap(tmp_path):
     assert "OTHER_TOKEN" not in read_env(env_path)
 
 
-def test_docker_shape_service_url_migrates_off_the_retired_port(tmp_path):
-    env_path = tmp_path / ".env"
-    _run(env_path, provider="docker")
-    toml_path = tmp_path / "druks.toml"
-    toml_path.write_text(
-        toml_path.read_text().replace("http://127.0.0.1:8780", "http://127.0.0.1:8000")
-    )
-
-    _run(env_path)
-
-    assert 'service_url = "http://127.0.0.1:8780"' in toml_path.read_text()
-
-
-def test_docker_shape_custom_service_url_is_left_alone(tmp_path):
-    env_path = tmp_path / ".env"
-    _run(env_path, provider="docker")
-    _run(env_path, set_values=("sandbox.service_url=http://127.0.0.1:9999",))
-
-    _run(env_path)
-
-    toml_path = tmp_path / "druks.toml"
-    assert 'service_url = "http://127.0.0.1:9999"' in toml_path.read_text()
-
-
 def test_docker_shape_renders_no_provider_environment(tmp_path):
     env_path = tmp_path / ".env"
 
