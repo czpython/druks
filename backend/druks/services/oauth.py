@@ -330,3 +330,16 @@ async def complete_connect(*, state: str, code: str) -> tuple[dict, dict]:
             context=pending,
         )
     return tokens, pending
+
+
+async def fetch_identity(endpoint: str, access_token: str) -> dict:
+    """The provider's facts for a fresh token. Any failure returns {} —
+    a missing label must not fail the consent."""
+    async with _http() as http:
+        try:
+            response = await http.get(endpoint, headers={"Authorization": f"Bearer {access_token}"})
+            response.raise_for_status()
+            payload = response.json()
+        except (httpx.HTTPError, ValueError):
+            return {}
+    return payload if isinstance(payload, dict) else {}

@@ -286,6 +286,7 @@ export interface Connection {
   id: string
   provider: string
   scopes: string[]
+  identity: Record<string, string>
   connectedAt: string
 }
 

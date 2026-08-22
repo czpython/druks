@@ -9,7 +9,7 @@ from druks.extensions.settings import field_kind, field_multiline
 
 from .exceptions import ServiceConnectError, ServiceNotConnectedError
 from .models import OauthConnection, ServiceIdentity
-from .oauth import OauthClient
+from .oauth import OauthClient, fetch_identity
 
 
 class Connection:
@@ -93,12 +93,16 @@ class Service:
     # Set both endpoints when the registered app is an OAuth client;
     # ``get_oauth_client()`` then hands back the connected identity as a
     # configured ``OauthClient``. Scopes are not declared here — the
-    # extensions that use the service declare them (``connection``), and
+    # extensions that use the service declare them (``with_scopes``), and
     # the connect door asks for their union.
     authorization_endpoint: ClassVar[str] = ""
     token_endpoint: ClassVar[str] = ""
     # HTTP Basic on the token endpoint; False sends the secret in the body.
     basic_auth: ClassVar[bool] = False
+    # The endpoint that returns the signed-in account's facts;
+    # identity_scopes join the consent ask.
+    identity_endpoint: ClassVar[str] = ""
+    identity_scopes: ClassVar[tuple[str, ...]] = ()
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
@@ -173,7 +177,16 @@ class Service:
     def required_scopes(cls) -> tuple[str, ...]:
         """The union of every installed declaration's scopes — the consent ask."""
         scopes = {scope for declaration in cls.declarations() for scope in declaration.scopes}
+        scopes.update(cls.identity_scopes)
         return tuple(sorted(scopes))
+
+    @classmethod
+    async def get_identity(cls, access_token: str) -> dict[str, Any]:
+        """The signed-in account's facts, read from ``identity_endpoint``.
+        Override when the provider needs a different call."""
+        if cls.identity_endpoint:
+            return await fetch_identity(cls.identity_endpoint, access_token)
+        return {}
 
     @classmethod
     def get_oauth_client(cls) -> OauthClient:

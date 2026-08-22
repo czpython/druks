@@ -48,6 +48,7 @@ class FakeAuthServer:
         self.resource = _SERVER_URL
         self.issuer = _AUTH_BASE
         self.code_challenge_methods = ["S256"]
+        self.userinfo_endpoint = f"{_AUTH_BASE}/userinfo"
         self.token_status = 200
         self.token_malformed = False
         self.token_response = {
@@ -75,11 +76,14 @@ class FakeAuthServer:
                 "issuer": self.issuer,
                 "authorization_endpoint": f"{_AUTH_BASE}/authorize",
                 "token_endpoint": f"{_AUTH_BASE}/token",
+                "userinfo_endpoint": self.userinfo_endpoint,
                 "code_challenge_methods_supported": self.code_challenge_methods,
             }
             if self.registration_supported:
                 metadata["registration_endpoint"] = f"{_AUTH_BASE}/register"
             return httpx.Response(200, json=metadata)
+        if path == "/userinfo":
+            return httpx.Response(200, json={"email": "op@linear.test"})
         if path == "/register":
             return httpx.Response(201, json={"client_id": "client-123"})
         if path == "/token":
@@ -308,6 +312,7 @@ async def test_complete_connect_exchanges_code_and_stores_the_grant(auth_server,
     assert name == _NAME
     grant = oauth.get_connection(_NAME, SYSTEM_ACCOUNT_ID)
     assert grant.refresh_token.decrypt() == "rt-1"
+    assert grant.identity == {"email": "op@linear.test"}
     registration = McpClientRegistration.get_for_account(_NAME, SYSTEM_ACCOUNT_ID)
     assert registration.client_id == "client-123"
     assert registration.token_endpoint == f"{_AUTH_BASE}/token"
@@ -328,6 +333,24 @@ async def test_complete_connect_exchanges_code_and_stores_the_grant(auth_server,
     # The state is single-use.
     with pytest.raises(OauthConnectError, match="expired state"):
         await oauth.complete_connect(state=state, code="code-1")
+
+
+async def test_off_issuer_userinfo_is_dropped_and_logged(auth_server, druks_db, caplog):
+    auth_server.userinfo_endpoint = "https://evil.test/collect"
+    url = await oauth.begin_connect(
+        _NAME,
+        _SERVER_URL,
+        _ENDPOINT,
+        account_id=SYSTEM_ACCOUNT_ID,
+        identity_mode=IdentityMode.SHARED,
+    )
+    state = dict(parse_qsl(urlparse(url).query))["state"]
+
+    with caplog.at_level("WARNING"):
+        await oauth.complete_connect(state=state, code="code-1")
+
+    assert oauth.get_connection(_NAME, SYSTEM_ACCOUNT_ID).identity == {}
+    assert "evil.test" in caplog.text
 
 
 async def test_complete_connect_without_refresh_token_stores_nothing(auth_server, druks_db):

@@ -1,3 +1,4 @@
+import logging
 from urllib.parse import urlparse
 
 import httpx
@@ -14,6 +15,9 @@ from druks.services import OauthClient, OauthExchangeError, OauthRefreshError
 from druks.services.constants import OAUTH_MINT_WAIT_ATTEMPTS, OAUTH_MINT_WAIT_INTERVAL_SECONDS
 from druks.services.models import OauthConnection
 from druks.services.oauth import complete_connect as complete_oauth_exchange
+from druks.services.oauth import fetch_identity
+
+logger = logging.getLogger(__name__)
 
 
 def _http() -> httpx.AsyncClient:
@@ -34,6 +38,18 @@ def list_connections(name: str) -> list[OauthConnection]:
 def _origin(url: str) -> str:
     parts = urlparse(url)
     return f"{parts.scheme}://{parts.netloc}"
+
+
+def _same_origin_userinfo(metadata: dict) -> str:
+    # The token goes here as a bearer at consent, so only trust a userinfo
+    # endpoint on the issuer's own origin — off-issuer would exfiltrate it.
+    endpoint = metadata.get("userinfo_endpoint", "")
+    if not endpoint or _origin(endpoint) == _origin(metadata["issuer"]):
+        return endpoint
+    logger.warning(
+        "ignoring userinfo_endpoint %s off the issuer origin %s", endpoint, metadata["issuer"]
+    )
+    return ""
 
 
 async def _get_json(client: httpx.AsyncClient, url: str) -> dict | None:
@@ -193,6 +209,7 @@ async def begin_connect(
             "server_url": server_url,
             "account_id": account_id,
             "identity_mode": identity_mode,
+            "userinfo_endpoint": _same_origin_userinfo(metadata),
         },
         extra_authorize_params={"resource": server_url},
     )
@@ -234,9 +251,12 @@ async def complete_connect(*, state: str, code: str) -> str:
         client_id=pending["client_id"],
         client_secret=pending["client_secret"],
     )
+    identity = {}
+    if pending["userinfo_endpoint"]:
+        identity = await fetch_identity(pending["userinfo_endpoint"], tokens["access_token"])
     connection = get_connection(name, account_id)
     if connection:
-        connection.reconnect(refresh_token=tokens["refresh_token"], scopes=[])
+        connection.reconnect(refresh_token=tokens["refresh_token"], scopes=[], identity=identity)
         # A reconsent's stale cached token must not serve until its TTL runs out.
         await evict_access_token(name, account_id)
     else:
@@ -245,6 +265,7 @@ async def complete_connect(*, state: str, code: str) -> str:
             account_id=account_id,
             refresh_token=tokens["refresh_token"],
             scopes=[],
+            identity=identity,
         )
     return name
 
