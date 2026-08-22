@@ -29,7 +29,8 @@ async def list_services() -> list[ServiceResponse]:
             row = None
         connections = []
         if service.token_endpoint:
-            connections = OauthConnection.list_for_provider(service.name)
+            # The detail shows revoked connections as history beside the live.
+            connections = OauthConnection.list_for_provider(service.name, include_revoked=True)
         entries.append(ServiceResponse.from_row(service, row, connections))
     return entries
 
@@ -51,16 +52,16 @@ async def connect_service(name: str, payload: dict[str, str]) -> ServiceResponse
     except ServiceConnectError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
     if service.token_endpoint:
-        # A replaced client can never refresh the old client's connections.
+        # A replaced client can never refresh the old client's connections —
+        # revoke every live one; the consents stay on record.
         client = OauthClient(provider=name)
         for connection in OauthConnection.list_for_provider(name):
-            connection_id, account_id = connection.id, connection.account_id
-            await client.disconnect(connection)
+            await client.disconnect(connection, reason="client_replaced")
             await publish(
                 "oauth.disconnected",
                 provider=name,
-                connection_id=connection_id,
-                account_id=account_id,
+                connection_id=connection.id,
+                account_id=connection.account_id,
             )
     return ServiceResponse.from_row(service, row)
 
@@ -132,8 +133,10 @@ async def oauth_callback(state: str = "", code: str = "", error: str = "") -> Re
             raise HTTPException(
                 status_code=400, detail="The connection was removed while consent was open."
             )
+        # Reconsent names the row, so it also returns a revoked one to life.
+        # A fresh sign-in never does — it always creates a new connection.
         row.reconnect(refresh_token=tokens["refresh_token"], scopes=granted, identity=identity)
-        # A reconsent's narrower cached token must not serve until its TTL runs out.
+        # A token cached before this consent must not serve the new one.
         await OauthClient(provider=provider).evict_access_token(row.id)
     else:
         row = OauthConnection.create(
@@ -170,11 +173,13 @@ async def disconnect_connection(connection_id: str) -> None:
     row = OauthConnection.get(connection_id)
     if not row:
         raise HTTPException(status_code=404, detail=f"No connection {connection_id!r}.")
-    provider, account_id = row.provider, row.account_id
-    await OauthClient(provider=provider).disconnect(row)
+    if row.revoked_at:
+        # Revoking is idempotent — the second delete finds the state true.
+        return
+    await OauthClient(provider=row.provider).disconnect(row, reason="user")
     await publish(
         "oauth.disconnected",
-        provider=provider,
-        connection_id=connection_id,
-        account_id=account_id,
+        provider=row.provider,
+        connection_id=row.id,
+        account_id=row.account_id,
     )

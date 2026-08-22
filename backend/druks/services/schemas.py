@@ -28,6 +28,8 @@ class ConnectionResponse(BaseResponse):
     scopes: list[str]
     identity: dict[str, Any]
     connected_at: datetime
+    revoked_at: datetime | None
+    revoked_reason: str
 
 
 class ServiceResponse(BaseResponse):

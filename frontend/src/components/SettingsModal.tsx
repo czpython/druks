@@ -1108,6 +1108,18 @@ function connectionIdentity(connection: Connection): string | null {
   return identity.email ?? identity.username ?? identity.login ?? identity.name ?? null
 }
 
+const revokeReasonCopy: Record<string, string> = {
+  user: 'by you',
+  client_replaced: 'client credentials replaced',
+  server_removed: 'server removed',
+}
+
+function revokedCopy(connection: Connection): string {
+  const reason = revokeReasonCopy[connection.revokedReason]
+  const when = new Date(connection.revokedAt ?? '').toLocaleDateString()
+  return `revoked ${when}` + (reason ? ` · ${reason}` : '')
+}
+
 // The signed-in accounts behind this service, on top of the pasted client
 // credentials. Connect opens the consent redirect in a new tab; the callback
 // page broadcasts on druks-service-connect and the pane refetches.
@@ -1132,6 +1144,8 @@ function ServiceAccess({ service }: { service: Service }) {
   }
   const missingScopes = (connection: Connection) =>
     service.requiredScopes.filter((scope) => !connection.scopes.includes(scope))
+  const live = service.connections.filter((connection) => !connection.revokedAt)
+  const revoked = service.connections.filter((connection) => connection.revokedAt)
 
   return (
     <div className="set-card svc-facts">
@@ -1152,7 +1166,7 @@ function ServiceAccess({ service }: { service: Service }) {
           <span className="svc-fact-val">{service.usedBy.join(', ')}</span>
         </div>
       )}
-      {service.connections.map((connection) => (
+      {live.map((connection) => (
         <div className="svc-fact" key={connection.id}>
           <span className="svc-fact-key">
             {connectionIdentity(connection) ??
@@ -1179,9 +1193,27 @@ function ServiceAccess({ service }: { service: Service }) {
           </span>
         </div>
       ))}
+      {revoked.map((connection) => (
+        <div className="svc-fact svc-revoked" key={connection.id}>
+          <span className="svc-fact-key">
+            {connectionIdentity(connection) ??
+              new Date(connection.connectedAt).toLocaleDateString()}
+          </span>
+          <span className="svc-fact-val">{revokedCopy(connection)}</span>
+          <span className="svc-actions">
+            <button
+              className="set-btn ghost"
+              onClick={() => connect(connection.id)}
+              disabled={busy}
+            >
+              Reconnect
+            </button>
+          </span>
+        </div>
+      ))}
       <div className="svc-actions">
         <button className="set-btn primary" onClick={() => connect()} disabled={busy}>
-          {service.connections.length ? 'Connect another' : 'Connect'}
+          {live.length ? 'Connect another' : 'Connect'}
         </button>
       </div>
     </div>
@@ -1208,12 +1240,16 @@ export function ConnectionsPane() {
   }
 
   const connections = query.data ?? []
+  const live = connections.filter((connection) => !connection.revokedAt)
+  const revoked = connections.filter((connection) => connection.revokedAt)
 
   return (
     <div className="set-pane mcp-pane svc-pane">
       <header className="mcp-pane-head">
         <h2 className="mcp-pane-title">Connections</h2>
-        <p className="mcp-pane-sub">The accounts you have signed in to. Revoke one here.</p>
+        <p className="mcp-pane-sub">
+          The accounts you have signed in to. Revoke one here; revoked ones stay as history.
+        </p>
       </header>
       {error && (
         <div className="mcp-error" role="alert">
@@ -1223,7 +1259,7 @@ export function ConnectionsPane() {
       {connections.length === 0 && <p className="mcp-pane-sub">No connections yet.</p>}
       {connections.length > 0 && (
         <div className="set-card svc-facts">
-          {connections.map((connection) => (
+          {live.map((connection) => (
             <div className="svc-fact" key={connection.id}>
               <span className="svc-fact-key">{connection.provider}</span>
               <span className="svc-fact-val">
@@ -1233,6 +1269,16 @@ export function ConnectionsPane() {
               <button className="set-btn ghost" onClick={() => revoke(connection.id)}>
                 Disconnect
               </button>
+            </div>
+          ))}
+          {revoked.map((connection) => (
+            <div className="svc-fact svc-revoked" key={connection.id}>
+              <span className="svc-fact-key">{connection.provider}</span>
+              <span className="svc-fact-val">
+                {connectionIdentity(connection) ?? (connection.scopes.join(', ') || 'unlabeled')} ·{' '}
+                connected {new Date(connection.connectedAt).toLocaleDateString()} ·{' '}
+                {revokedCopy(connection)}
+              </span>
             </div>
           ))}
         </div>

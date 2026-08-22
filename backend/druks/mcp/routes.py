@@ -163,11 +163,10 @@ async def remove_mcp_server(name: str) -> None:
     server = McpServer.get_for_name(name)
     if not server:
         raise HTTPException(status_code=404, detail=f"MCP server {name!r} not found")
-    connections = oauth.list_connections(name)
+    # Revoke before the server row goes — the registration lookup needs it.
+    for connection in oauth.list_connections(name):
+        await oauth.disconnect(name, connection.account_id, reason="server_removed")
     server.delete()
-    for connection in connections:
-        await oauth.evict_access_token(name, connection.account_id)
-        connection.delete()
 
 
 @router.post("/{name}/connect", response_model=ConnectMcpServerResponse)

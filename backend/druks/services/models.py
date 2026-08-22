@@ -51,7 +51,11 @@ class OauthConnection(Base, Uuid7Pk):
     """One signed-in provider account: the durable outcome of an OAuth
     consent, owned by the druks account that completed it. An account can
     hold many per provider — one per mailbox, handle, or workspace. The
-    engine rotates the refresh token on mint; nothing else writes here."""
+    engine rotates the refresh token on mint; nothing else writes here.
+
+    Revoking is a state, never a deletion: the consent happened, and the row
+    keeps its owner, identity, scopes, and dates forever. Only the refresh
+    token is cleared. ``reconnect`` returns a revoked row to life."""
 
     __tablename__ = "oauth_connections"
 
@@ -67,6 +71,10 @@ class OauthConnection(Base, Uuid7Pk):
     # consent; {} when the provider gave none.
     identity: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
     connected_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
+    # NULL = live. Stamped with what revoked it: "user", "client_replaced",
+    # or "server_removed".
+    revoked_at: Mapped[datetime | None] = mapped_column(default=None)
+    revoked_reason: Mapped[str] = mapped_column(default="")
 
     @classmethod
     def get(cls, connection_id: str) -> "OauthConnection | None":
@@ -98,17 +106,28 @@ class OauthConnection(Base, Uuid7Pk):
         return list(
             db_session().scalars(
                 select(cls)
-                .where(cls.provider == provider, cls.account_id == account_id)
+                .where(
+                    cls.provider == provider,
+                    cls.account_id == account_id,
+                    cls.revoked_at.is_(None),
+                )
                 .order_by(cls.connected_at)
             )
         )
 
     @classmethod
-    def list_for_provider(cls, provider: str) -> "list[OauthConnection]":
-        return list(db_session().scalars(select(cls).where(cls.provider == provider)))
+    def list_for_provider(
+        cls, provider: str, *, include_revoked: bool = False
+    ) -> "list[OauthConnection]":
+        query = select(cls).where(cls.provider == provider)
+        if not include_revoked:
+            query = query.where(cls.revoked_at.is_(None))
+        return list(db_session().scalars(query))
 
     @classmethod
     def list_owned_by(cls, account_id: str | None) -> "list[OauthConnection]":
+        # The audit read: everything this account ever authorized, revoked
+        # rows included.
         return list(
             db_session().scalars(
                 select(cls).where(cls.account_id == account_id).order_by(cls.connected_at)
@@ -123,12 +142,17 @@ class OauthConnection(Base, Uuid7Pk):
         if identity:
             self.identity = identity
         self.connected_at = Base.utc_now()
+        self.revoked_at = None
+        self.revoked_reason = ""
         db_session().flush()
 
-    def delete(self) -> None:
-        session = db_session()
-        session.delete(self)
-        session.flush()
+    def revoke(self, reason: str) -> None:
+        # The consent's facts survive; only the secret is cleared. A second
+        # revoke keeps the first stamp.
+        self.revoked_at = self.revoked_at or Base.utc_now()
+        self.revoked_reason = self.revoked_reason or reason
+        self.refresh_token = ""
+        db_session().flush()
 
     def _load_refresh_token(self) -> str:
         # Under the refresh lock: another process may have rotated and
@@ -141,11 +165,11 @@ class OauthConnection(Base, Uuid7Pk):
                 .where(OauthConnection.id == self.id)
                 .execution_options(populate_existing=True)
             )
-            .one_or_none()
+            .one()
         )
-        if fresh:
-            return fresh.refresh_token.decrypt()
-        raise OauthRefreshError(self.provider, "the connection was removed mid-refresh")
+        if fresh.revoked_at:
+            raise OauthRefreshError(self.provider, "the connection was revoked mid-refresh")
+        return fresh.refresh_token.decrypt()
 
     def _save_refresh_token(self, rotated: str) -> None:
         # The provider invalidated the old token the moment it rotated, so
@@ -153,12 +177,18 @@ class OauthConnection(Base, Uuid7Pk):
         # transaction — a step that rolls back later must not brick the
         # connection.
         with get_session(db_session().get_bind()) as session:
-            session.execute(
+            stored = session.execute(
                 update(OauthConnection)
-                .where(OauthConnection.id == self.id)
+                .where(OauthConnection.id == self.id, OauthConnection.revoked_at.is_(None))
                 .values(refresh_token=rotated)
             )
             session.commit()
-        # Keep the enclosing transaction's copy true as well.
-        self.refresh_token = rotated
-        db_session().flush()
+        if not stored.rowcount:
+            # A revoke landed mid-refresh. Nothing secret outlives the
+            # consent at rest, so the rotated token is not stored.
+            raise OauthRefreshError(self.provider, "the connection was revoked mid-refresh")
+        # Expire the stale copy instead of assigning it. The next read loads
+        # the rotated value, and the enclosing transaction never writes this
+        # column at commit — a revoke that lands between the two commits
+        # must keep its cleared token.
+        db_session().expire(self, ["refresh_token"])

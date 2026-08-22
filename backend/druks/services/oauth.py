@@ -184,6 +184,10 @@ class OauthClient:
         scopes. ``cached=False`` skips the cache read for a full-lifetime
         token, still electing one refresher and filling the cache for later
         callers."""
+        if connection.revoked_at:
+            raise OauthRefreshError(
+                self.provider, "the connection is revoked; sign in again to restore it"
+            )
         requested = tuple(sorted(scopes))
         if requested and not set(requested) <= set(connection.scopes):
             missing = ", ".join(sorted(set(requested) - set(connection.scopes)))
@@ -273,9 +277,10 @@ class OauthClient:
         async for key in redis.scan_iter(match=f"{self.provider}:access_token:{connection_id}*"):
             await redis.delete(key)
 
-    async def disconnect(self, connection: OauthConnection) -> None:
-        """Delete the connection and evict its cached access token."""
-        connection.delete()
+    async def disconnect(self, connection: OauthConnection, *, reason: str) -> None:
+        """Revoke the connection and evict its cached access token. The row
+        and its facts survive; the refresh token dies with the consent."""
+        connection.revoke(reason)
         await self.evict_access_token(connection.id)
 
 

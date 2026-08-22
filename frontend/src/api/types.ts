@@ -288,6 +288,8 @@ export interface Connection {
   scopes: string[]
   identity: Record<string, string>
   connectedAt: string
+  revokedAt: string | null
+  revokedReason: string
 }
 
 /** One declared service: the appliance's own registered app at an external

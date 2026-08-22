@@ -389,6 +389,33 @@ async def test_reconsent_replaces_the_grant_and_evicts_the_stale_token(auth_serv
     assert not await get_client().get(_token_key(SYSTEM_ACCOUNT_ID))
 
 
+async def test_reconnect_after_disconnect_creates_a_new_grant(auth_server, druks_db):
+    _store_grant(refresh_token="rt-stale")
+    revoked = oauth.get_connection(_NAME, SYSTEM_ACCOUNT_ID)
+    await oauth.disconnect(_NAME, SYSTEM_ACCOUNT_ID)
+    assert not oauth.get_connection(_NAME, SYSTEM_ACCOUNT_ID)
+
+    url = await oauth.begin_connect(
+        _NAME,
+        _SERVER_URL,
+        _ENDPOINT,
+        account_id=SYSTEM_ACCOUNT_ID,
+        identity_mode=IdentityMode.SHARED,
+    )
+    state = dict(parse_qsl(urlparse(url).query))["state"]
+    await oauth.complete_connect(state=state, code="code-1")
+
+    from druks.database import db_session
+
+    db_session().expire_all()
+    # A re-connect creates a new grant. The revoked row stays as history,
+    # so at most one live connection holds the (server, account) slot.
+    grant = oauth.get_connection(_NAME, SYSTEM_ACCOUNT_ID)
+    assert grant.id != revoked.id
+    assert grant.refresh_token.decrypt() == "rt-1"
+    assert revoked.revoked_at
+
+
 async def test_two_shared_connects_converge_on_one_grant(auth_server, druks_db):
     first = Account.get_or_create("first@example.com")
     second = Account.get_or_create("second@example.com")

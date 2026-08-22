@@ -170,14 +170,53 @@ async def test_get_refresh_uses_basic_auth(token_endpoint):
     assert "client_secret" not in token_endpoint.requests[0]
 
 
-async def test_disconnect_drops_the_connection_and_the_cached_token(token_endpoint):
+async def test_disconnect_revokes_the_connection_and_drops_the_cached_token(token_endpoint):
     connection = _connection()
     await get_client().set(_token_key(connection), "at-cached")
 
-    await _client().disconnect(connection)
+    await _client().disconnect(connection, reason="user")
 
-    assert not OauthConnection.get(connection.id)
+    revoked = OauthConnection.get(connection.id)
+    assert revoked.revoked_at
+    assert revoked.revoked_reason == "user"
+    # Nothing secret outlives the consent at rest.
+    assert not revoked.refresh_token
+    assert revoked.account_id == SYSTEM_ACCOUNT_ID
     assert not await get_client().get(_token_key(connection))
+
+    # A second revoke keeps the first stamp.
+    first_stamp = revoked.revoked_at
+    revoked.revoke("client_replaced")
+    assert revoked.revoked_at == first_stamp
+    assert revoked.revoked_reason == "user"
+
+
+async def test_a_revoke_landing_mid_refresh_is_not_overwritten(token_endpoint):
+    connection = _connection()
+    exchange = token_endpoint.handler
+
+    def revoke_then_rotate(request: httpx.Request) -> httpx.Response:
+        connection.revoke("user")
+        return exchange(request)
+
+    token_endpoint.handler = revoke_then_rotate
+
+    with pytest.raises(OauthRefreshError, match="revoked mid-refresh"):
+        await _client().get_access_token(connection=connection)
+
+    # The rotated token is not stored and no access token is cached.
+    assert not OauthConnection.get(connection.id).refresh_token
+    assert not await get_client().get(_token_key(connection))
+
+
+async def test_get_refuses_a_revoked_connection(token_endpoint):
+    connection = _connection()
+    connection.revoke("user")
+
+    with pytest.raises(OauthRefreshError, match="revoked"):
+        await _client().get_access_token(connection=connection)
+
+    assert not token_endpoint.requests
 
 
 async def test_connect_roundtrip_exchanges_with_basic_auth(token_endpoint):
@@ -326,7 +365,7 @@ async def test_disconnect_evicts_the_scope_variant_keys(token_endpoint):
     await redis.set(_token_key(connection), "at-full")
     await redis.set(scoped_key, "at-narrow")
 
-    await _client().disconnect(connection)
+    await _client().disconnect(connection, reason="user")
 
     assert not await redis.get(_token_key(connection))
     assert not await redis.get(scoped_key)
