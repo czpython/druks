@@ -1,3 +1,4 @@
+import re
 from typing import Any, ClassVar
 
 from pydantic import BaseModel, ValidationError
@@ -10,6 +11,9 @@ from druks.extensions.settings import field_kind, field_multiline
 from .exceptions import ServiceConnectError, ServiceNotConnectedError
 from .models import OauthConnection, ServiceIdentity
 from .oauth import OauthClient, fetch_identity
+
+# GoogleCalendar -> google_calendar, HTTPServer -> http_server.
+_CAMEL_BOUNDARY = re.compile(r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])")
 
 
 class Connection:
@@ -47,7 +51,7 @@ class Connection:
         )
 
     async def disconnect(self) -> None:
-        await OauthClient(provider=self.service.name).disconnect(self.row, reason="user")
+        await OauthClient(provider=self.service.slug).disconnect(self.row, reason="user")
 
 
 class ScopedService:
@@ -71,35 +75,36 @@ class ScopedService:
     def list_for_account(self, account_id: str) -> list[Connection]:
         return [
             Connection(self.service, row)
-            for row in OauthConnection.list_for_account(self.service.name, account_id)
+            for row in OauthConnection.list_for_account(self.service.slug, account_id)
         ]
 
     def get(self, connection_id: str) -> Connection | None:
         row = OauthConnection.get(connection_id)
-        if row and row.provider == self.service.name and not row.revoked_at:
+        if row and row.provider == self.service.slug and not row.revoked_at:
             return Connection(self.service, row)
 
 
 class Service:
     """The appliance's own identity at an external provider — one per service,
-    declared by the code that consumes it. Subclass in a ``services`` module,
-    set ``name`` and an inner ``Settings`` model; the platform renders the
-    connect card, verifies and stores the paste, and reports doctor state, all
-    from the declaration. Read back through the same class:
+    declared by the code that consumes it. Subclass in a ``services`` module
+    with an inner ``Settings`` model; the platform renders the connect card,
+    verifies and stores the paste, and reports doctor state, all from the
+    declaration. Read back through the same class:
     ``Gmail.get().secrets["client_secret"]``.
 
     Used as a class, never instantiated — the same install-singleton shape as
     ``Extension``.
     """
 
-    name: ClassVar[str]
-    # The connect card's heading — the platform derives it from ``name``.
+    # Keys the service_identities row and the connect wire. Druks derives it
+    # from the class name. Set it only to keep the key after a class rename.
+    slug: ClassVar[str]
+    # The connect card's heading. Druks derives it from the slug.
     title: ClassVar[str]
     description: ClassVar[str] = ""
     # Whether doctor fails when this service is not connected.
     required: ClassVar[bool] = True
-    # True marks a shared provider base — subclasses inherit its declarations
-    # and register; the base itself never does.
+    # True marks a shared provider base. It never registers; its subclasses do.
     abstract: ClassVar[bool] = False
     settings_model: ClassVar[type[BaseModel]]
     # Set both endpoints when the registered app is an OAuth client;
@@ -126,25 +131,31 @@ class Service:
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
+        if "name" in cls.__dict__:
+            raise TypeError(
+                f"{cls.__name__} declares a `name`. A service keys by `slug`, "
+                "derived from the class name. Drop `name` or set `slug`."
+            )
+        if "title" in cls.__dict__:
+            raise TypeError(
+                f"{cls.__name__} declares a `title`. Druks derives the card "
+                "heading from the slug. Drop `title`."
+            )
         if cls.__dict__.get("abstract"):
-            if "name" in cls.__dict__:
+            if "slug" in cls.__dict__:
                 raise TypeError(
-                    f"{cls.__name__} sets both `abstract` and `name` — an abstract "
+                    f"{cls.__name__} sets both `abstract` and `slug`. An abstract "
                     "base never registers. Drop one."
                 )
             return
-        name = getattr(cls, "name", None)
-        if not name:
-            raise TypeError(f"{cls.__name__} must set a `name`")
-        if "title" in cls.__dict__:
+        if "slug" in cls.__dict__:
+            slug = cls.__dict__["slug"]
+        else:
+            slug = _CAMEL_BOUNDARY.sub("_", cls.__name__).lower()
+        if not NAME_RE.match(slug):
             raise TypeError(
-                f"{cls.__name__} declares a `title` — the card heading derives "
-                "from `name`. Drop it."
-            )
-        if not NAME_RE.match(name):
-            raise TypeError(
-                f"service name {name!r} must match {NAME_RE.pattern!r} — it keys the "
-                "service_identities row and the connect wire"
+                f"service slug {slug!r} must match {NAME_RE.pattern!r}. It keys the "
+                "service_identities row and the connect wire."
             )
         declared = getattr(cls, "Settings", None)
         if not isinstance(declared, type) or not issubclass(declared, BaseModel):
@@ -156,7 +167,10 @@ class Service:
                 f"{cls.__name__}.Settings must declare client_id and client_secret "
                 "fields — get_oauth_client() reads the OAuth client from them"
             )
-        cls.title = name.replace("_", " ").title()
+        # A registered service is concrete even under an abstract base.
+        cls.abstract = False
+        cls.slug = slug
+        cls.title = slug.replace("_", " ").title()
         cls.settings_model = declared
         services.register(cls)
 
@@ -185,7 +199,7 @@ class Service:
 
     @classmethod
     def get(cls) -> ServiceIdentity:
-        return ServiceIdentity.get(cls.name)
+        return ServiceIdentity.get(cls.slug)
 
     @classmethod
     def with_scopes(cls, *scopes: str) -> ScopedService:
@@ -222,13 +236,13 @@ class Service:
     @classmethod
     def get_oauth_client(cls) -> OauthClient:
         """The connected identity as a configured ``OauthClient``, keyed by
-        the service name. Raises ``ServiceNotConnectedError`` until the
+        the service slug. Raises ``ServiceNotConnectedError`` until the
         operator connects the service."""
         if not cls.token_endpoint:
             raise TypeError(f"{cls.__name__} declares no OAuth endpoints")
         connected = cls.get()
         return OauthClient(
-            provider=cls.name,
+            provider=cls.slug,
             authorization_endpoint=cls.authorization_endpoint,
             token_endpoint=cls.token_endpoint,
             client_id=connected.identity["client_id"],
@@ -240,7 +254,7 @@ class Service:
     @classmethod
     def is_connected(cls) -> bool:
         try:
-            ServiceIdentity.get(cls.name)
+            ServiceIdentity.get(cls.slug)
         except ServiceNotConnectedError:
             return False
         return True
@@ -275,6 +289,6 @@ class Service:
         if all(str(value).strip() for value in (*identity.values(), *secrets.values())):
             proven = await cls.verify(settings)
             return ServiceIdentity.connect(
-                cls.name, identity={**identity, **proven}, secrets=secrets
+                cls.slug, identity={**identity, **proven}, secrets=secrets
             )
         raise ServiceConnectError("Every field is required.")

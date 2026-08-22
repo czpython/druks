@@ -35,7 +35,7 @@ def _connect(
 
 def _github_entry(client: TestClient) -> dict:
     entries = client.get("/api/services").json()
-    return next(entry for entry in entries if entry["name"] == "github")
+    return next(entry for entry in entries if entry["slug"] == "github")
 
 
 # --- The row ----------------------------------------------------------------
@@ -393,7 +393,6 @@ def test_get_oauth_client_reads_the_connected_identity(declared_services, druks_
     from pydantic import BaseModel, SecretStr
 
     class Acme(Service):
-        name = "acme"
         authorization_endpoint = "https://acme.test/authorize"
         token_endpoint = "https://acme.test/token"
         basic_auth = True
@@ -425,7 +424,6 @@ def test_oauth_service_declarations_fail_loudly(declared_services):
     with pytest.raises(TypeError, match="client_id and client_secret"):
 
         class Keyless(Service):
-            name = "keyless"
             authorization_endpoint = "https://acme.test/authorize"
             token_endpoint = "https://acme.test/token"
 
@@ -435,16 +433,21 @@ def test_oauth_service_declarations_fail_loudly(declared_services):
     with pytest.raises(TypeError, match="both OAuth endpoints"):
 
         class HalfDeclared(Service):
-            name = "half_declared"
             token_endpoint = "https://acme.test/token"
 
             class Settings(BaseModel):
                 client_id: str
                 client_secret: SecretStr
 
-    class Plain(Service):
-        name = "plain_service"
+    with pytest.raises(TypeError, match="keys by"):
 
+        class Named(Service):
+            name = "named"
+
+            class Settings(BaseModel):
+                api_key: SecretStr
+
+    class Plain(Service):
         class Settings(BaseModel):
             api_key: SecretStr
 
@@ -467,16 +470,17 @@ def test_abstract_base_shares_declarations_without_registering(declared_services
             client_secret: SecretStr
 
     class Mail(AcmeBase):
-        name = "acme_mail"
+        slug = "acme_mail"
 
     assert services.get("acme_mail") is Mail
+    assert Mail.abstract is False
     assert Mail.settings_model is AcmeBase.Settings
 
     with pytest.raises(TypeError, match="abstract"):
 
-        class Named(Service):
+        class Pinned(Service):
             abstract = True
-            name = "named_base"
+            slug = "pinned"
 
 
 def test_with_scopes_declares_the_union_and_reads_connections(declared_services, monkeypatch):
@@ -484,7 +488,6 @@ def test_with_scopes_declares_the_union_and_reads_connections(declared_services,
     from pydantic import BaseModel, SecretStr
 
     class Acme(Service):
-        name = "acme"
         authorization_endpoint = "https://acme.test/authorize"
         token_endpoint = "https://acme.test/token"
 
@@ -539,7 +542,6 @@ async def test_get_identity_without_a_declared_endpoint_is_empty(declared_servic
     from pydantic import BaseModel, SecretStr
 
     class Quiet(Service):
-        name = "quiet_provider"
         authorization_endpoint = "https://quiet.test/authorize"
         token_endpoint = "https://quiet.test/token"
 
@@ -555,8 +557,6 @@ def test_with_scopes_requires_oauth_endpoints(declared_services):
     from pydantic import BaseModel, SecretStr
 
     class Plain(Service):
-        name = "plain_no_oauth"
-
         class Settings(BaseModel):
             api_key: SecretStr
 
@@ -573,7 +573,6 @@ def acme(declared_services, monkeypatch):
     from pydantic import BaseModel, SecretStr
 
     class Acme(Service):
-        name = "acme"
         authorization_endpoint = "https://acme.test/authorize"
         token_endpoint = "https://acme.test/token"
         identity_endpoint = "https://acme.test/whoami"
@@ -763,11 +762,11 @@ def test_fresh_sign_in_with_matching_identity_resurrects_revoked_connection(
     from druks.testing import configure_app_for_test
 
     ServiceIdentity.connect(
-        keyed_acme.name, identity={"client_id": "id-1"}, secrets={"client_secret": "sec-1"}
+        keyed_acme.slug, identity={"client_id": "id-1"}, secrets={"client_secret": "sec-1"}
     )
     account = Account.get_or_create("op@example.com")
     connection = OauthConnection.create(
-        provider=keyed_acme.name,
+        provider=keyed_acme.slug,
         account_id=account.id,
         refresh_token="rt-old",
         scopes=["profile.read"],
@@ -778,7 +777,7 @@ def test_fresh_sign_in_with_matching_identity_resurrects_revoked_connection(
     settings = make_settings(tmp_path, urls={"endpoint": "https://druks.example"})
 
     with TestClient(configure_app_for_test(settings=settings)) as client:
-        _complete_oauth_sign_in(client, keyed_acme.name)
+        _complete_oauth_sign_in(client, keyed_acme.slug)
 
     db_session().expire_all()
     resurrected = OauthConnection.get(connection_id)
@@ -786,13 +785,13 @@ def test_fresh_sign_in_with_matching_identity_resurrects_revoked_connection(
     assert not resurrected.revoked_at
     assert not resurrected.revoked_reason
     assert resurrected.refresh_token.decrypt() == "rt-1"
-    assert [row.id for row in OauthConnection.list_for_provider(keyed_acme.name)] == [connection_id]
-    assert len(OauthConnection.list_for_provider(keyed_acme.name, include_revoked=True)) == 1
+    assert [row.id for row in OauthConnection.list_for_provider(keyed_acme.slug)] == [connection_id]
+    assert len(OauthConnection.list_for_provider(keyed_acme.slug, include_revoked=True)) == 1
     assert oauth_events == [
         (
             "oauth.connected",
             {
-                "provider": keyed_acme.name,
+                "provider": keyed_acme.slug,
                 "connection_id": connection_id,
                 "account_id": account.id,
                 "reconsent": True,
@@ -807,11 +806,11 @@ def test_matching_fresh_sign_in_lands_on_live_connection_and_evicts_cached_token
     from druks.testing import configure_app_for_test
 
     ServiceIdentity.connect(
-        keyed_acme.name, identity={"client_id": "id-1"}, secrets={"client_secret": "sec-1"}
+        keyed_acme.slug, identity={"client_id": "id-1"}, secrets={"client_secret": "sec-1"}
     )
     account = Account.get_or_create("op@example.com")
     connection = OauthConnection.create(
-        provider=keyed_acme.name,
+        provider=keyed_acme.slug,
         account_id=account.id,
         refresh_token="rt-old",
         scopes=["profile.read"],
@@ -821,20 +820,20 @@ def test_matching_fresh_sign_in_lands_on_live_connection_and_evicts_cached_token
     evicted_connection_ids = []
 
     async def record_eviction(oauth_client, evicted_connection_id):
-        assert oauth_client.provider == keyed_acme.name
+        assert oauth_client.provider == keyed_acme.slug
         evicted_connection_ids.append(evicted_connection_id)
 
     monkeypatch.setattr(OauthClient, "evict_access_token", record_eviction)
     settings = make_settings(tmp_path, urls={"endpoint": "https://druks.example"})
 
     with TestClient(configure_app_for_test(settings=settings)) as client:
-        _complete_oauth_sign_in(client, keyed_acme.name)
+        _complete_oauth_sign_in(client, keyed_acme.slug)
 
     db_session().expire_all()
     reconnected = OauthConnection.get(connection_id)
     assert reconnected
     assert reconnected.refresh_token.decrypt() == "rt-1"
-    assert len(OauthConnection.list_for_provider(keyed_acme.name, include_revoked=True)) == 1
+    assert len(OauthConnection.list_for_provider(keyed_acme.slug, include_revoked=True)) == 1
     assert evicted_connection_ids == [connection_id]
     assert oauth_events[-1][1]["connection_id"] == connection_id
     assert oauth_events[-1][1]["reconsent"] is True
@@ -846,11 +845,11 @@ def test_fresh_sign_in_with_live_and_revoked_identity_matches_lands_on_live_conn
     from druks.testing import configure_app_for_test
 
     ServiceIdentity.connect(
-        keyed_acme.name, identity={"client_id": "id-1"}, secrets={"client_secret": "sec-1"}
+        keyed_acme.slug, identity={"client_id": "id-1"}, secrets={"client_secret": "sec-1"}
     )
     account = Account.get_or_create("op@example.com")
     live = OauthConnection.create(
-        provider=keyed_acme.name,
+        provider=keyed_acme.slug,
         account_id=account.id,
         refresh_token="rt-live-old",
         scopes=["profile.read"],
@@ -858,7 +857,7 @@ def test_fresh_sign_in_with_live_and_revoked_identity_matches_lands_on_live_conn
     )
     live_id = live.id
     revoked = OauthConnection.create(
-        provider=keyed_acme.name,
+        provider=keyed_acme.slug,
         account_id=account.id,
         refresh_token="rt-revoked-old",
         scopes=["profile.read"],
@@ -869,7 +868,7 @@ def test_fresh_sign_in_with_live_and_revoked_identity_matches_lands_on_live_conn
     settings = make_settings(tmp_path, urls={"endpoint": "https://druks.example"})
 
     with TestClient(configure_app_for_test(settings=settings)) as client:
-        _complete_oauth_sign_in(client, keyed_acme.name)
+        _complete_oauth_sign_in(client, keyed_acme.slug)
 
     db_session().expire_all()
     reconnected = OauthConnection.get(live_id)
@@ -879,7 +878,7 @@ def test_fresh_sign_in_with_live_and_revoked_identity_matches_lands_on_live_conn
     assert reconnected.refresh_token.decrypt() == "rt-1"
     assert still_revoked.revoked_at
     assert not still_revoked.refresh_token
-    assert len(OauthConnection.list_for_provider(keyed_acme.name, include_revoked=True)) == 2
+    assert len(OauthConnection.list_for_provider(keyed_acme.slug, include_revoked=True)) == 2
     assert oauth_events[-1][1]["connection_id"] == live_id
     assert oauth_events[-1][1]["reconsent"] is True
 
@@ -890,11 +889,11 @@ def test_fresh_sign_in_without_the_declared_identity_fact_creates_a_new_connecti
     from druks.testing import configure_app_for_test
 
     ServiceIdentity.connect(
-        acme.name, identity={"client_id": "id-1"}, secrets={"client_secret": "sec-1"}
+        acme.slug, identity={"client_id": "id-1"}, secrets={"client_secret": "sec-1"}
     )
     account = Account.get_or_create("op@example.com")
     revoked = OauthConnection.create(
-        provider=acme.name,
+        provider=acme.slug,
         account_id=account.id,
         refresh_token="rt-old",
         scopes=["profile.read"],
@@ -905,12 +904,12 @@ def test_fresh_sign_in_without_the_declared_identity_fact_creates_a_new_connecti
     settings = make_settings(tmp_path, urls={"endpoint": "https://druks.example"})
 
     with TestClient(configure_app_for_test(settings=settings)) as client:
-        _complete_oauth_sign_in(client, acme.name)
+        _complete_oauth_sign_in(client, acme.slug)
 
     db_session().expire_all()
-    [created] = OauthConnection.list_for_provider(acme.name)
+    [created] = OauthConnection.list_for_provider(acme.slug)
     assert created.id != revoked_id
-    assert len(OauthConnection.list_for_provider(acme.name, include_revoked=True)) == 2
+    assert len(OauthConnection.list_for_provider(acme.slug, include_revoked=True)) == 2
     assert OauthConnection.get(revoked_id).revoked_at
     assert oauth_events[-1][1]["connection_id"] == created.id
     assert oauth_events[-1][1]["reconsent"] is False
@@ -1102,8 +1101,8 @@ def test_list_serves_the_connections_beside_the_declared_union(tmp_path, acme, d
     from druks.services.models import OauthConnection
     from druks.testing import configure_app_for_test
 
-    def entry(client, name="acme"):
-        return next(e for e in client.get("/api/services").json() if e["name"] == name)
+    def entry(client, slug="acme"):
+        return next(e for e in client.get("/api/services").json() if e["slug"] == slug)
 
     with TestClient(configure_app_for_test(settings=make_settings(tmp_path))) as client:
         assert entry(client, "github")["isOauth"] is False

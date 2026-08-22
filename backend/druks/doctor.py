@@ -55,9 +55,9 @@ def check_service_identities(settings: Settings) -> list[CheckResult]:
             db_session.registry.set(session)
             results: list[CheckResult] = []
             for service in services.all():
-                name = f"{service.name}_identity"
+                name = f"{service.slug}_identity"
                 try:
-                    row = ServiceIdentity.get(service.name)
+                    row = ServiceIdentity.get(service.slug)
                 except ServiceNotConnectedError:
                     results.append(
                         CheckResult(
@@ -337,8 +337,13 @@ def _defined_capability(module: ModuleType) -> tuple[str, str] | None:
             and value.__module__ == name
         ):
             return "webhooks", f"{value.__module__}.{value.__qualname__}"
-        if isinstance(value, type) and issubclass(value, Service) and value.__module__ == name:
-            return "services", value.name
+        if (
+            isinstance(value, type)
+            and issubclass(value, Service)
+            and not value.abstract
+            and value.__module__ == name
+        ):
+            return "services", value.slug
         if isinstance(value, Agent) and value.module == name:
             return "agents", value.name
     return

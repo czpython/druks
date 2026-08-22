@@ -24,13 +24,13 @@ async def list_services() -> list[ServiceResponse]:
     entries = []
     for service in services.all():
         try:
-            row = ServiceIdentity.get(service.name)
+            row = ServiceIdentity.get(service.slug)
         except ServiceNotConnectedError:
             row = None
         connections = []
         if service.token_endpoint:
             # The detail shows revoked connections as history beside the live.
-            connections = OauthConnection.list_for_provider(service.name, include_revoked=True)
+            connections = OauthConnection.list_for_provider(service.slug, include_revoked=True)
         entries.append(ServiceResponse.from_row(service, row, connections))
     return entries
 
@@ -38,15 +38,15 @@ async def list_services() -> list[ServiceResponse]:
 # Session identity only, like the settings PATCH: the appliance's own
 # credentials are never writable with an agent PAT.
 @router.post(
-    "/{name}",
+    "/{slug}",
     response_model=ServiceResponse,
     response_model_by_alias=True,
     dependencies=[Depends(current_session_account)],
 )
-async def connect_service(name: str, payload: dict[str, str]) -> ServiceResponse:
-    service = services.get(name)
+async def connect_service(slug: str, payload: dict[str, str]) -> ServiceResponse:
+    service = services.get(slug)
     if not service:
-        raise HTTPException(status_code=404, detail=f"No service {name!r}.")
+        raise HTTPException(status_code=404, detail=f"No service {slug!r}.")
     try:
         row = await service.connect(payload)
     except ServiceConnectError as error:
@@ -54,36 +54,36 @@ async def connect_service(name: str, payload: dict[str, str]) -> ServiceResponse
     if service.token_endpoint:
         # A replaced client can never refresh the old client's connections —
         # revoke every live one; the consents stay on record.
-        client = OauthClient(provider=name)
-        for connection in OauthConnection.list_for_provider(name):
+        client = OauthClient(provider=slug)
+        for connection in OauthConnection.list_for_provider(slug):
             await client.disconnect(connection, reason="client_replaced")
             await publish(
                 "oauth.disconnected",
-                provider=name,
+                provider=slug,
                 connection_id=connection.id,
                 account_id=connection.account_id,
             )
     return ServiceResponse.from_row(service, row)
 
 
-def _get_oauth_service(name: str):
-    service = services.get(name)
+def _get_oauth_service(slug: str):
+    service = services.get(slug)
     if not service or not service.token_endpoint:
-        raise HTTPException(status_code=404, detail=f"No OAuth service {name!r}.")
+        raise HTTPException(status_code=404, detail=f"No OAuth service {slug!r}.")
     return service
 
 
-@oauth_router.get("/{name}/connect", dependencies=[Depends(current_session_account)])
+@oauth_router.get("/{slug}/connect", dependencies=[Depends(current_session_account)])
 async def connect_oauth_service(
-    name: str, request: Request, connection: str = "", next: str = ""
+    slug: str, request: Request, connection: str = "", next: str = ""
 ) -> RedirectResponse:
-    service = _get_oauth_service(name)
+    service = _get_oauth_service(slug)
     account_id = current_account_id.get()
     if connection:
         row = OauthConnection.get(connection)
-        if not row or row.provider != name:
+        if not row or row.provider != slug:
             raise HTTPException(
-                status_code=404, detail=f"No connection {connection!r} on {name!r}."
+                status_code=404, detail=f"No connection {connection!r} on {slug!r}."
             )
     if next and (not next.startswith("/") or next.startswith(("//", "/\\"))):
         # A bare same-origin path only — anything host-shaped is an open redirect.
@@ -162,7 +162,7 @@ async def oauth_callback(state: str = "", code: str = "", error: str = "") -> Re
     )
     if pending["next"]:
         return RedirectResponse(pending["next"])
-    return render_page("service_oauth_callback.html", name=provider)
+    return render_page("service_oauth_callback.html", slug=provider)
 
 
 @oauth_router.get("/connections", dependencies=[Depends(current_session_account)])

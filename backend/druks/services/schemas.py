@@ -34,7 +34,7 @@ class ConnectionResponse(BaseResponse):
 
 class ServiceResponse(BaseResponse):
     # Connection state and identity facts only — never a stored secret.
-    name: str
+    slug: str
     title: str
     description: str
     required: bool
@@ -55,7 +55,7 @@ class ServiceResponse(BaseResponse):
         connections: "list[OauthConnection] | None" = None,
     ) -> "ServiceResponse":
         return cls(
-            name=service.name,
+            slug=service.slug,
             title=service.title,
             description=service.description,
             required=service.required,

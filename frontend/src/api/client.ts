@@ -223,8 +223,8 @@ export const api = {
   // pasted credentials against the provider before anything replaces a working
   // identity. Field names come from each entry's spec.
   services: () => getJSON<Service[]>('/api/services'),
-  connectService: (name: string, fields: Record<string, string>) =>
-    postJSON<Service>(`/api/services/${encodeURIComponent(name)}`, fields),
+  connectService: (slug: string, fields: Record<string, string>) =>
+    postJSON<Service>(`/api/services/${encodeURIComponent(slug)}`, fields),
   listConnections: () => getJSON<Connection[]>('/api/oauth/connections'),
   disconnectConnection: (connectionId: string) =>
     deleteRequest(`/api/oauth/connections/${encodeURIComponent(connectionId)}`),
