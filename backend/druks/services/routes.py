@@ -127,9 +127,8 @@ async def oauth_callback(state: str = "", code: str = "", error: str = "") -> Re
     granted = tokens.get("scope", "").split() or pending["scopes"]
     identity = await service.get_identity(tokens["access_token"])
     connection_id = pending["connection_id"]
-    # Two doors land on an existing row: reconsent names it by id, and a
-    # declared identity key matches a fresh sign-in to it. Either returns a
-    # revoked row to life.
+    # Reconsent names an existing row by id; a declared identity key
+    # matches a fresh sign-in to one. Both make a revoked row live again.
     row = None
     if connection_id:
         row = OauthConnection.get(connection_id)

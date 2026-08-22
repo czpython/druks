@@ -948,8 +948,8 @@ def test_fresh_sign_in_after_revoke_creates_a_new_connection(tmp_path, acme, dru
         [first] = OauthConnection.list_for_provider("acme")
         assert client.delete(f"/api/oauth/connections/{first.id}").status_code == 204
 
-        # The provider supplied no declared key fact, so it cannot identify
-        # the existing account. The revoked row stays behind as history.
+        # The identity facts do not include "sub", so the sign-in cannot
+        # match the existing row. The revoked row stays as history.
         sign_in()
         [live] = OauthConnection.list_for_provider("acme")
         assert live.id != first.id
@@ -988,7 +988,7 @@ def test_reconsent_returns_a_revoked_connection_to_life(tmp_path, acme, druks_db
         [connection] = OauthConnection.list_for_provider("acme")
         assert client.delete(f"/api/oauth/connections/{connection.id}").status_code == 204
 
-        # Reconsent names the row, so it returns this revoked consent to life.
+        # Reconsent names the row and makes the revoked consent live again.
         reconnect = client.get(
             f"/api/oauth/acme/connect?connection={connection.id}", follow_redirects=False
         )

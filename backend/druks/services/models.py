@@ -119,8 +119,7 @@ class OauthConnection(Base, Uuid7Pk):
     def get_for_identity(
         cls, provider: str, account_id: str, key: str, value: Any
     ) -> "OauthConnection | None":
-        # A live grant outranks revoked history; among revoked, the latest
-        # consent.
+        # A live match wins; among revoked matches, the latest consent wins.
         return (
             db_session()
             .scalars(
