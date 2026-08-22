@@ -16,7 +16,6 @@ _VERIFY_TIMEOUT = 10.0
 
 class GitHubApp(Service):
     name = GITHUB
-    title = "GitHub"
     description = (
         "The GitHub App druks acts as — it receives webhooks and writes branches, "
         "pull requests, and comments. Create it from here, or paste an existing "
@@ -66,7 +65,6 @@ class GitHubApp(Service):
 
 class Linear(Service):
     name = "linear"
-    title = "Linear"
     description = (
         "The Linear identity druks reads and updates tickets as; its webhook "
         "secret verifies inbound deliveries."
@@ -97,7 +95,6 @@ class Linear(Service):
 
 class Jira(Service):
     name = "jira"
-    title = "Jira"
     description = (
         "The Jira Cloud identity druks reads and updates tickets as; its webhook "
         "secret authenticates Automation deliveries."

@@ -89,10 +89,14 @@ class Service:
     """
 
     name: ClassVar[str]
+    # The connect card's heading — the platform derives it from ``name``.
     title: ClassVar[str]
     description: ClassVar[str] = ""
     # Whether doctor fails when this service is not connected.
     required: ClassVar[bool] = True
+    # True marks a shared provider base — subclasses inherit its declarations
+    # and register; the base itself never does.
+    abstract: ClassVar[bool] = False
     settings_model: ClassVar[type[BaseModel]]
     # Set both endpoints when the registered app is an OAuth client;
     # ``get_oauth_client()`` then hands back the connected identity as a
@@ -113,17 +117,27 @@ class Service:
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
+        if cls.__dict__.get("abstract"):
+            if "name" in cls.__dict__:
+                raise TypeError(
+                    f"{cls.__name__} sets both `abstract` and `name` — an abstract "
+                    "base never registers. Drop one."
+                )
+            return
         name = getattr(cls, "name", None)
         if not name:
             raise TypeError(f"{cls.__name__} must set a `name`")
-        if not getattr(cls, "title", None):
-            raise TypeError(f"{cls.__name__} must set a `title` — the connect card's heading")
+        if "title" in cls.__dict__:
+            raise TypeError(
+                f"{cls.__name__} declares a `title` — the card heading derives "
+                "from `name`. Drop it."
+            )
         if not NAME_RE.match(name):
             raise TypeError(
                 f"service name {name!r} must match {NAME_RE.pattern!r} — it keys the "
                 "service_identities row and the connect wire"
             )
-        declared = cls.__dict__.get("Settings")
+        declared = getattr(cls, "Settings", None)
         if not isinstance(declared, type) or not issubclass(declared, BaseModel):
             raise TypeError(f"{cls.__name__}.Settings must be a pydantic model")
         if bool(cls.authorization_endpoint) != bool(cls.token_endpoint):
@@ -133,6 +147,7 @@ class Service:
                 f"{cls.__name__}.Settings must declare client_id and client_secret "
                 "fields — get_oauth_client() reads the OAuth client from them"
             )
+        cls.title = name.replace("_", " ").title()
         cls.settings_model = declared
         services.register(cls)
 
