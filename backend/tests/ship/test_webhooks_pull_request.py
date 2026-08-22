@@ -202,7 +202,7 @@ async def test_a_merge_after_a_failed_build_still_settles_the_item(druks_db, tmp
 
     item = WorkItem.get(work_item_id)
     assert item.resolution == "merged"
-    assert item.id not in {summary.id for summary in WorkItem.list_summaries()}
+    assert item.id not in {summary.id for summary in WorkItem.list_summaries(None)}
     assert [row.id for row in WorkItem.list_handoff()] == [item.id]
 
 

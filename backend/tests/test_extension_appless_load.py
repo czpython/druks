@@ -43,7 +43,7 @@ _FILES = {
             __tablename__ = "probe_items"
 
             @classmethod
-            def list_summaries(cls) -> list[SubjectSummary]:
+            def list_summaries(cls, account_id: str | None) -> list[SubjectSummary]:
                 return []
     """,
     "routes.py": """
@@ -215,11 +215,11 @@ def test_surfaces_are_enumerable_from_the_loaded_extension(installed):
     assert f"{_PACKAGE}.subscribers" in capability_modules
 
     settings_model = extension.settings_model
-    assert settings_model is not None
+    assert settings_model
     assert list(settings_model.model_fields) == ["budget"]
 
     package_dir = extension.package_dir()
-    assert package_dir is not None
+    assert package_dir
     assert extension.migrations_dir() == package_dir / "migrations"
 
 

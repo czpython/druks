@@ -459,7 +459,7 @@ class Repository(StoredSubject):
         return self.full_name
 
     @classmethod
-    def list_summaries(cls) -> list[SubjectSummary]:
+    def list_summaries(cls, account_id: str | None) -> list[SubjectSummary]:
         return [repository.get_summary() for repository in cls.list_open()]
 ```
 
@@ -489,7 +489,7 @@ from druks.workflows import Subject
 
 class PullRequest(Subject):
     @classmethod
-    def list_summaries(cls) -> list[SubjectSummary]:
+    def list_summaries(cls, account_id: str | None) -> list[SubjectSummary]:
         return [pull_request.get_summary() for pull_request in cls.list_open()]
 ```
 
@@ -498,8 +498,12 @@ Any id names one of these, so a detail read always answers. Override
 `owner/repo#7` is a pull request, `nonsense` is a 404.
 
 Each subject a workflow declares must implement `list_summaries()`. The board
-reads it. Druks checks this at load. If the method is missing, the extension
-does not load. The error names the extension, the subject, and the method.
+reads it and passes the caller. `account_id` is the signed-in account, or None
+outside a request. Use it to scope the rows when each operator has their own
+board. Ignore it when every operator shares one board. A model method never
+reads request context. Druks checks the method at load. If it is missing, the
+extension does not load. The error names the extension, the subject, and the
+method.
 
 Druks serves the same `/api/night_watch/repository` surface either way: a board,
 a page for one, and a live stream of either, mounted for every subject your
@@ -848,7 +852,7 @@ for connection in NightWatch.acme.list_for_account(account_id):
 
 `account_id` is the caller: `self.account_id` in a run body,
 `current_account_id.get()` in a route, the handler's argument in a
-subscriber. `NightWatch.acme.get(connection_id)` returns one connection
+subscriber, the platform's argument in `list_summaries`. `NightWatch.acme.get(connection_id)` returns one connection
 when your own row stored its id. Each connection carries `id`, `scopes`, `identity` — the
 provider's facts for the sign-in — `account_id` — the druks account that
 signed it in — and `connected_at`. The handle serves

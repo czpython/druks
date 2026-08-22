@@ -45,7 +45,7 @@ class PullRequest(Subject):
         )
 
     @classmethod
-    def list_summaries(cls) -> list[ReviewSummary]:
+    def list_summaries(cls, account_id: str | None) -> list[ReviewSummary]:
         """The reviews still going or stopped on a failure. A finished one lives on its
         pull request, so it leaves the board as soon as it has something to show there."""
         return [pull_request.get_summary() for pull_request in cls.list_open()]

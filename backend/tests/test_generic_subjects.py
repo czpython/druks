@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import pytest
+from druks.accounts.context import current_account_id
 from druks.database import db_session
 from druks.durable import AgentCall, Run
 from druks.durable.datastructures import Subject
@@ -29,7 +30,7 @@ class Thing(StoredSubject):
         return _ThingSummary(id=self.id, label=self.label, title=TITLES[self.id])
 
     @classmethod
-    def list_summaries(cls) -> list[_ThingSummary]:
+    def list_summaries(cls, account_id: str | None) -> list[_ThingSummary]:
         return [thing.get_summary() for thing in db_session().scalars(select(cls))]
 
 
@@ -47,8 +48,20 @@ class Ticket(Subject):
         return _ThingSummary(id=self.id, label=self.label, title=self.id.rpartition("#")[2])
 
     @classmethod
-    def list_summaries(cls) -> list[_ThingSummary]:
+    def list_summaries(cls, account_id: str | None) -> list[_ThingSummary]:
         return [ticket.get_summary() for ticket in cls.list_open()]
+
+
+CALLERS: list[str | None] = []
+
+
+class Inbox(Subject):
+    """A board scoped by who is asking."""
+
+    @classmethod
+    def list_summaries(cls, account_id: str | None) -> list[_ThingSummary]:
+        CALLERS.append(account_id)
+        return []
 
 
 class _ThingExtension(Extension):
@@ -66,7 +79,7 @@ def _seed_run(
     input_gate=None,
     failure=None,
 ):
-    if state == "parked" and input_gate is None:
+    if state == "parked" and not input_gate:
         input_gate = "review"
     run = Run(
         id=str(uuid7()),
@@ -227,6 +240,27 @@ def test_list_returns_every_subject_with_status(client: TestClient, druks_db):
     assert rows["1"]["status"]["state"] == "running"
     # "2" has no runs yet — it still lists, defaulting to scheduled.
     assert rows["2"]["status"]["state"] == "scheduled"
+
+
+async def test_the_board_and_its_stream_hand_the_caller_to_list_summaries(druks_db):
+    # The route reads the caller at handler entry and passes it down as data.
+    # The stream keeps that caller after the request context ends.
+    endpoints = {
+        route.path: route.endpoint for route in _ThingExtension._get_subject_routes(Inbox).routes
+    }
+
+    CALLERS.clear()
+    token = current_account_id.set("acct-7")
+    try:
+        await endpoints["/inbox"]()
+        response = await endpoints["/inbox/stream"](engine=druks_db.get_bind())
+    finally:
+        current_account_id.reset(token)
+    assert CALLERS == ["acct-7"]
+
+    await anext(response.body_iterator)
+    await response.body_iterator.aclose()
+    assert CALLERS == ["acct-7", "acct-7"]
 
 
 def test_unknown_subject_is_404(client: TestClient, druks_db):
