@@ -264,8 +264,8 @@ async def disconnect(name: str, account_id: str) -> None:
         registration.delete()
 
 
-async def mint_access_token(name: str, account_id: str) -> str:
-    """The delivery-side token for a connected server, minted by the shared
+async def get_access_token(name: str, account_id: str) -> str:
+    """The delivery-side token for a connected server, served by the shared
     engine from this server's grant — delivery never ships a server the agent
     can't authenticate to."""
     connection = get_connection(name, account_id)
@@ -285,6 +285,6 @@ async def mint_access_token(name: str, account_id: str) -> str:
         mint_wait_attempts=OAUTH_MINT_WAIT_ATTEMPTS,
     )
     try:
-        return await client.mint_access_token(connection=connection)
+        return await client.get_access_token(connection=connection)
     except OauthRefreshError as error:
         raise GrantRefreshError(name, error.reason) from error

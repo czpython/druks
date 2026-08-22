@@ -768,11 +768,11 @@ class NightWatch(Extension):
 A *connection* is one signed-in provider account. A user can hold many per
 provider — one per mailbox, handle, or workspace — and the platform stores
 each one: the refresh token, the granted scopes, the owner. Your workflow
-code reads them through the declaration and mints per connection:
+code reads them through the declaration and gets a token per connection:
 
 ```python
 for connection in NightWatch.acme.list_for_account(account_id):
-    token = await connection.mint_access_token()
+    token = await connection.get_access_token()
 ```
 
 `NightWatch.acme.get(connection_id)` returns one connection when your own
@@ -817,13 +817,13 @@ The user sees and revokes everything in Settings — every connection they
 hold, across services. Replacing a service's client credentials deletes its
 connections: a new client can never refresh the old client's tokens.
 
-`mint_access_token` serves a Redis-cached access token and lets only one
+`get_access_token` serves a Redis-cached access token and lets only one
 refresher run per connection and scope set. This is necessary: two
 refreshes at the same time can make the provider revoke the whole
 connection. It raises `OauthRefreshError` when the refresh fails. Then ask
 the user to reconnect.
 
-`mint_access_token(scopes=("profile.read",))` asks the provider for a token
+`get_access_token(scopes=("profile.read",))` asks the provider for a token
 narrower than the grant — pass it when the token goes to untrusted compute,
 with a subset of the connection's scopes. `cached=False` refreshes past the
 cache for a full-lifetime token.
