@@ -6,7 +6,7 @@ from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastmcp.utilities.lifespan import combine_lifespans
 from starlette.datastructures import MutableHeaders
 from starlette.routing import Route
@@ -20,6 +20,7 @@ from druks.api.runs import router as runs_router
 from druks.api.subjects import router as subjects_router
 from druks.browser.exceptions import BrowserApiError
 from druks.browser.routes import router as browser_sessions_router
+from druks.core.templates import render_page
 from druks.database import configure_session, create_engine_from_url, db_session, session_scope
 from druks.durable.engine import init_dbos, launch, shutdown
 from druks.durable.exceptions import AgentCallNotFound
@@ -34,7 +35,7 @@ from druks.mcp.routes import router as mcp_router
 from druks.notifications.routes import external_router as notifications_external_router
 from druks.notifications.routes import router as notifications_router
 from druks.redis import close_client
-from druks.services.exceptions import ServiceNotConnectedError
+from druks.services.exceptions import OauthPageError, ServiceNotConnectedError
 from druks.services.routes import oauth_router
 from druks.services.routes import router as service_identities_router
 from druks.settings import Settings, ensure_data_dirs, load_settings, setup_logging
@@ -188,6 +189,13 @@ async def _service_not_connected_handler(
     request: Request, exc: ServiceNotConnectedError
 ) -> JSONResponse:
     return JSONResponse(status_code=409, content={"error": "HTTP_409", "detail": str(exc)})
+
+
+# The connect and callback doors are reached by full-page browser navigation,
+# so a failure renders an operator page, not the JSON envelope every fetch gets.
+@app.exception_handler(OauthPageError)
+async def _oauth_page_error_handler(request: Request, exc: OauthPageError) -> HTMLResponse:
+    return render_page("service_oauth_error.html", message=str(exc), status_code=exc.status_code)
 
 
 # Browser routes raise their typed error and let this name the status, so no

@@ -12,6 +12,15 @@ class ServiceConnectError(Exception):
     and safe to show; it never quotes anything the operator pasted."""
 
 
+class OauthPageError(Exception):
+    """A failure on a browser-navigated OAuth door — the connect and callback
+    routes, whose failures render an operator page instead of the JSON envelope."""
+
+    def __init__(self, message: str, *, status_code: int) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+
+
 class OauthExchangeError(Exception):
     """Completing an OAuth connect flow failed — an unknown or expired state,
     or a rejected code exchange. Nothing is stored on failure, so re-running

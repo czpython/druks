@@ -672,7 +672,28 @@ def test_oauth_connect_guards(tmp_path, acme, druks_db):
         # The client credentials are not connected yet.
         response = client.get("/api/oauth/acme/connect", follow_redirects=False)
         assert response.status_code == 409
-        assert "not connected" in response.json()["detail"]
+        assert "not connected" in response.text
+
+
+def test_a_failed_connect_renders_an_operator_page(tmp_path, acme, druks_db):
+    from druks.testing import configure_app_for_test
+
+    with TestClient(configure_app_for_test(settings=make_settings(tmp_path))) as client:
+        # The connect door is reached full-page, so a failure is a page that
+        # names the fix — the dashboard chrome, not the JSON envelope.
+        page = client.get("/api/oauth/acme/connect", follow_redirects=False)
+        assert page.status_code == 409
+        assert page.headers["content-type"].startswith("text/html")
+        assert "urls.endpoint" in page.text
+        assert '<div class="wordmark">druks</div>' in page.text
+
+        # The callback is a browser stop too — a denied consent renders a page.
+        denied = client.get(
+            "/api/oauth/callback", params={"state": "s", "code": "c", "error": "denied"}
+        )
+        assert denied.status_code == 400
+        assert denied.headers["content-type"].startswith("text/html")
+        assert "denied" in denied.text
 
 
 async def test_oauth_callback_creates_and_reconnects_a_connection(

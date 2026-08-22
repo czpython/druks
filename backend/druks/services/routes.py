@@ -7,6 +7,7 @@ from druks.core.templates import render_page
 from druks.extensions.registry import services
 from druks.services.exceptions import (
     OauthExchangeError,
+    OauthPageError,
     ServiceConnectError,
     ServiceNotConnectedError,
 )
@@ -69,7 +70,7 @@ async def connect_service(slug: str, payload: dict[str, str]) -> ServiceResponse
 def _get_oauth_service(slug: str):
     service = services.get(slug)
     if not service or not service.token_endpoint:
-        raise HTTPException(status_code=404, detail=f"No OAuth service {slug!r}.")
+        raise OauthPageError(f"No OAuth service {slug!r}.", status_code=404)
     return service
 
 
@@ -82,23 +83,21 @@ async def connect_oauth_service(
     if connection:
         row = OauthConnection.get(connection)
         if not row or row.provider != slug:
-            raise HTTPException(
-                status_code=404, detail=f"No connection {connection!r} on {slug!r}."
-            )
+            raise OauthPageError(f"No connection {connection!r} on {slug!r}.", status_code=404)
     if next and (not next.startswith("/") or next.startswith(("//", "/\\"))):
         # A bare same-origin path only — anything host-shaped is an open redirect.
-        raise HTTPException(status_code=422, detail="next must be a path starting with '/'.")
+        raise OauthPageError("next must be a path starting with '/'.", status_code=422)
     endpoint = request.app.state.settings.urls.endpoint
     if not endpoint:
-        raise HTTPException(
-            status_code=409,
-            detail="The provider redirects the operator's browser back to druks. "
+        raise OauthPageError(
+            "The provider redirects the operator's browser back to druks. "
             "Set urls.endpoint to the address druks has in that browser.",
+            status_code=409,
         )
     try:
         client = service.get_oauth_client()
     except ServiceNotConnectedError as error:
-        raise HTTPException(status_code=409, detail=str(error)) from error
+        raise OauthPageError(str(error), status_code=409) from error
     url = await client.begin_connect(
         redirect_uri=f"{endpoint.rstrip('/')}/api/oauth/callback",
         scopes=service.required_scopes(),
@@ -110,20 +109,20 @@ async def connect_oauth_service(
 @oauth_router.get("/callback", response_class=HTMLResponse)
 async def oauth_callback(state: str = "", code: str = "", error: str = "") -> Response:
     if error:
-        raise HTTPException(
-            status_code=400, detail=f"The authorization server denied the request: {error}"
+        raise OauthPageError(
+            f"The authorization server denied the request: {error}", status_code=400
         )
     if not state or not code:
-        raise HTTPException(status_code=400, detail="Missing state or code in the callback.")
+        raise OauthPageError("Missing state or code in the callback.", status_code=400)
     try:
         tokens, pending = await complete_connect(state=state, code=code)
     except OauthExchangeError as exchange_error:
-        raise HTTPException(status_code=400, detail=str(exchange_error)) from exchange_error
+        raise OauthPageError(str(exchange_error), status_code=400) from exchange_error
     provider = pending["provider"]
     service = services.get(provider)
     if not service:
         # A state begun by another door (an MCP connect) finishes at its own callback.
-        raise HTTPException(status_code=400, detail=f"No OAuth service {provider!r}.")
+        raise OauthPageError(f"No OAuth service {provider!r}.", status_code=400)
     granted = tokens.get("scope", "").split() or pending["scopes"]
     identity = await service.get_identity(tokens["access_token"])
     connection_id = pending["connection_id"]
@@ -133,8 +132,8 @@ async def oauth_callback(state: str = "", code: str = "", error: str = "") -> Re
     if connection_id:
         row = OauthConnection.get(connection_id)
         if not row:
-            raise HTTPException(
-                status_code=400, detail="The connection was removed while consent was open."
+            raise OauthPageError(
+                "The connection was removed while consent was open.", status_code=400
             )
     elif service.identity_key and (value := identity.get(service.identity_key)):
         row = OauthConnection.get_for_identity(

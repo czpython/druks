@@ -11,8 +11,7 @@ _templates = Environment(
 )
 
 
-def render_page(template: str, **context: Any) -> HTMLResponse:
-    """One of the operator-facing pages in ``core/templates`` — server-rendered
-    browser stops (connect callbacks, the GitHub App manifest form) that share
-    the dashboard's chrome."""
-    return HTMLResponse(_templates.get_template(template).render(context))
+def render_page(template: str, *, status_code: int = 200, **context: Any) -> HTMLResponse:
+    """An operator-facing page from ``core/templates`` — a server-rendered
+    browser stop that shares the dashboard's chrome."""
+    return HTMLResponse(_templates.get_template(template).render(context), status_code=status_code)
