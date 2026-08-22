@@ -77,7 +77,9 @@ class OauthClient:
     ``basic_auth`` picks HTTP Basic on the token endpoint, for both the code
     exchange and refresh; without it the client credentials travel in the form
     body. ``extra_token_params`` land in both bodies (RFC 8707's ``resource``
-    audience binding). Scopes are per authorization, not per client — each
+    audience binding); ``extra_authorize_params`` land in every consent query
+    (Google grants a refresh token only with ``access_type=offline`` and
+    ``prompt=consent``). Scopes are per authorization, not per client — each
     ``begin_connect`` asks for its own, and the grant keeps what was approved.
     """
 
@@ -91,6 +93,7 @@ class OauthClient:
         client_secret: str = "",
         basic_auth: bool = False,
         extra_token_params: dict[str, str] | None = None,
+        extra_authorize_params: dict[str, str] | None = None,
         mint_wait_interval_seconds: float = OAUTH_MINT_WAIT_INTERVAL_SECONDS,
         mint_wait_attempts: int = OAUTH_MINT_WAIT_ATTEMPTS,
     ) -> None:
@@ -101,6 +104,7 @@ class OauthClient:
         self.client_secret = client_secret
         self.basic_auth = basic_auth
         self.extra_token_params = dict(extra_token_params or {})
+        self.extra_authorize_params = dict(extra_authorize_params or {})
         self.mint_wait_interval_seconds = mint_wait_interval_seconds
         self.mint_wait_attempts = mint_wait_attempts
 
@@ -117,8 +121,8 @@ class OauthClient:
         query — this authorization's ask, within whatever ceiling the provider
         registration allows. ``context`` rides the stash and comes back from
         ``complete_connect``; ``extra_authorize_params`` land in the consent
-        query. Nothing durable is written here — an abandoned consent simply
-        expires."""
+        query, over the client's declared ones on a shared key. Nothing durable
+        is written here — an abandoned consent simply expires."""
         state = secrets.token_urlsafe(32)
         code_verifier = secrets.token_urlsafe(64)
         code_challenge = (
@@ -153,7 +157,7 @@ class OauthClient:
         }
         if scopes:
             query["scope"] = " ".join(scopes)
-        query.update(extra_authorize_params or {})
+        query.update({**self.extra_authorize_params, **(extra_authorize_params or {})})
         return f"{self.authorization_endpoint}?{urlencode(query)}"
 
     async def get_access_token(

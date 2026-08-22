@@ -212,6 +212,18 @@ async def test_connect_roundtrip_exchanges_with_basic_auth(token_endpoint):
     assert token_endpoint.authorizations[0].startswith("Basic ")
 
 
+async def test_begin_connect_call_params_override_the_declared_ones():
+    client = _client(extra_authorize_params={"access_type": "offline", "prompt": "consent"})
+
+    url = await client.begin_connect(
+        redirect_uri=_REDIRECT_URI, extra_authorize_params={"prompt": "select_account"}
+    )
+
+    params = dict(parse_qsl(urlparse(url).query))
+    assert params["access_type"] == "offline"
+    assert params["prompt"] == "select_account"
+
+
 async def test_complete_connect_requires_a_refresh_token(token_endpoint):
     token_endpoint.response = {"access_token": "at-1", "expires_in": 3600}
     url = await _client().begin_connect(redirect_uri=_REDIRECT_URI)

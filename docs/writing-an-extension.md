@@ -752,11 +752,18 @@ class Acme(Service):
     basic_auth = True
     identity_endpoint = "https://acme.example/oauth/userinfo"
     identity_scopes = ("openid", "email")
+    # Query parameters the provider's consent URL must carry.
+    extra_authorize_params = {"access_type": "offline", "prompt": "consent"}
 
     class Settings(BaseModel):
         client_id: str = Field(title="Client ID")
         client_secret: SecretStr = Field(title="Client secret")
 ```
+
+`extra_authorize_params` declares the provider's consent-query quirks; the
+platform adds them to every sign-in it starts for the service. The example
+shows Google's: it grants a refresh token only when the consent asks for
+`access_type=offline` with `prompt=consent`.
 
 `identity_endpoint` names the provider endpoint that returns the signed-in
 account's facts (email, username, name). Druks calls it once at consent and
@@ -793,7 +800,8 @@ for connection in NightWatch.acme.list_for_account(account_id):
 ```
 
 `NightWatch.acme.get(connection_id)` returns one connection when your own
-row stored its id.
+row stored its id. Each connection carries `id`, `scopes`, `identity` — the
+provider's facts for the sign-in — and `connected_at`.
 
 Your UI starts a sign-in by opening `/api/oauth/acme/connect` — the
 platform runs the consent with the union of every installed extension's

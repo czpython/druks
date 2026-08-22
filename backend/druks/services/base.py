@@ -30,6 +30,10 @@ class Connection:
         return self.row.scopes
 
     @property
+    def identity(self) -> dict[str, Any]:
+        return self.row.identity
+
+    @property
     def connected_at(self):
         return self.row.connected_at
 
@@ -99,6 +103,9 @@ class Service:
     token_endpoint: ClassVar[str] = ""
     # HTTP Basic on the token endpoint; False sends the secret in the body.
     basic_auth: ClassVar[bool] = False
+    # The provider's consent-query quirks — Google grants a refresh token
+    # only with access_type=offline and prompt=consent.
+    extra_authorize_params: ClassVar[dict[str, str]] = {}
     # The endpoint that returns the signed-in account's facts;
     # identity_scopes join the consent ask.
     identity_endpoint: ClassVar[str] = ""
@@ -203,6 +210,7 @@ class Service:
             client_id=connected.identity["client_id"],
             client_secret=connected.secrets["client_secret"],
             basic_auth=cls.basic_auth,
+            extra_authorize_params=cls.extra_authorize_params,
         )
 
     @classmethod

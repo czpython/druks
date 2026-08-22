@@ -394,6 +394,7 @@ def test_get_oauth_client_reads_the_connected_identity(declared_services, druks_
         authorization_endpoint = "https://acme.test/authorize"
         token_endpoint = "https://acme.test/token"
         basic_auth = True
+        extra_authorize_params = {"access_type": "offline"}
 
         class Settings(BaseModel):
             client_id: str
@@ -411,6 +412,7 @@ def test_get_oauth_client_reads_the_connected_identity(declared_services, druks_
     assert client.client_id == "id-1"
     assert client.client_secret == "sec-1"
     assert client.basic_auth is True
+    assert client.extra_authorize_params == {"access_type": "offline"}
 
 
 def test_oauth_service_declarations_fail_loudly(declared_services):
@@ -485,11 +487,16 @@ def test_with_scopes_declares_the_union_and_reads_connections(declared_services,
     from druks.services.models import OauthConnection
 
     row = OauthConnection.create(
-        provider="acme", account_id=SYSTEM_ACCOUNT_ID, refresh_token="rt-1", scopes=["profile.read"]
+        provider="acme",
+        account_id=SYSTEM_ACCOUNT_ID,
+        refresh_token="rt-1",
+        scopes=["profile.read"],
+        identity={"email": "night@acme.test"},
     )
     connections = NightWatch.acme.list_for_account(SYSTEM_ACCOUNT_ID)
     assert [connection.id for connection in connections] == [row.id]
     assert connections[0].scopes == ["profile.read"]
+    assert connections[0].identity == {"email": "night@acme.test"}
     assert NightWatch.acme.get(row.id).id == row.id
     assert not NightWatch.acme.get("missing")
 
