@@ -295,7 +295,7 @@ export interface Connection {
 /** One declared service: the appliance's own registered app at an external
  * provider. Facts are identity only — stored secrets never leave the backend. */
 export interface Service {
-  name: string
+  slug: string
   title: string
   description: string
   required: boolean

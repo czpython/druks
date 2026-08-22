@@ -882,7 +882,7 @@ export function ServicesPane() {
     queryFn: () => api.services(),
     staleTime: 60_000,
   })
-  const [selectedName, setSelectedName] = useState<string | null>(null)
+  const [selectedSlug, setSelectedName] = useState<string | null>(null)
 
   // A guided create flow (the GitHub App manifest tab) lands on a callback
   // page, which broadcasts the service name once the credentials are stored.
@@ -893,7 +893,7 @@ export function ServicesPane() {
   }, [queryClient])
 
   const services = query.data ?? []
-  const selected = services.find((service) => service.name === selectedName)
+  const selected = services.find((service) => service.slug === selectedSlug)
 
   return (
     <div className="set-pane mcp-pane svc-pane">
@@ -914,10 +914,10 @@ export function ServicesPane() {
                 : undefined
               return (
                 <button
-                  key={service.name}
+                  key={service.slug}
                   type="button"
                   className="set-card svc-card"
-                  onClick={() => setSelectedName(service.name)}
+                  onClick={() => setSelectedName(service.slug)}
                 >
                   <span className="svc-card-top">
                     <span className="svc-card-name">{service.title}</span>
@@ -973,7 +973,7 @@ function ServiceDetail({ service, onBack }: { service: Service; onBack: () => vo
     setBusy(true)
     setError(null)
     void api
-      .connectService(service.name, values)
+      .connectService(service.slug, values)
       .then(async () => {
         setValues({})
         setFormOpen(false)
@@ -1028,7 +1028,7 @@ function ServiceDetail({ service, onBack }: { service: Service; onBack: () => vo
           {service.isOauth && <ServiceAccess service={service} />}
           {!formOpen && (
             <div className="svc-actions">
-              {service.name === 'github' && (
+              {service.slug === 'github' && (
                 <a
                   className="set-btn ghost"
                   href={`https://github.com/apps/${encodeURIComponent(service.facts.slug ?? '')}/installations/new`}
@@ -1047,7 +1047,7 @@ function ServiceDetail({ service, onBack }: { service: Service; onBack: () => vo
       )}
       {!service.connected && !formOpen && (
         <section className="mcp-section">
-          {service.name === 'github' ? (
+          {service.slug === 'github' ? (
             <>
               <div>{createGithubApp}</div>
               <button type="button" className="svc-alt" onClick={() => setFormOpen(true)}>
@@ -1065,7 +1065,7 @@ function ServiceDetail({ service, onBack }: { service: Service; onBack: () => vo
       )}
       {formOpen && (
         <section className="mcp-section">
-          {service.name === 'github' && service.connected && (
+          {service.slug === 'github' && service.connected && (
             <>
               <div>{createGithubApp}</div>
               <p className="mcp-help">…or paste an existing App&apos;s credentials:</p>
@@ -1130,7 +1130,7 @@ function ServiceAccess({ service }: { service: Service }) {
 
   const connect = (connectionId?: string) =>
     window.open(
-      `/api/oauth/${encodeURIComponent(service.name)}/connect` +
+      `/api/oauth/${encodeURIComponent(service.slug)}/connect` +
         (connectionId ? `?connection=${encodeURIComponent(connectionId)}` : ''),
     )
   const disconnect = (connectionId: string) => {

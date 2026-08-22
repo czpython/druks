@@ -6,7 +6,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse
 
 from druks.core.apis.github import GITHUB
-from druks.core.services import GitHubApp
+from druks.core.services import Github
 from druks.core.templates import render_page
 from druks.services.models import ServiceIdentity
 
@@ -33,7 +33,7 @@ async def create_github_app(request: Request) -> HTMLResponse:
         f"https://{settings.urls.webhook_host}" if settings.urls.webhook_host else endpoint
     )
     manifest = {
-        **GitHubApp.manifest,
+        **Github.manifest,
         "url": endpoint,
         "redirect_url": f"{endpoint}/api/core/github/manifest/callback",
         "hook_attributes": {"url": f"{webhook_base}/_external/github/events/", "active": True},

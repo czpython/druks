@@ -62,7 +62,7 @@ def autodiscover(package: str) -> list[ModuleType]:
 
 
 webhooks = Registry("webhooks", key=lambda cls: f"{cls.__module__}.{cls.__qualname__}")
-services = Registry("services", key=lambda cls: cls.name)
+services = Registry("services", key=lambda cls: cls.slug)
 workflows = Registry("workflows", key=lambda cls: cls.kind)
 agents = Registry("agents", key=lambda agent: agent.id)
 browser_sessions = Registry("browser_sessions", key=lambda session: session.name)

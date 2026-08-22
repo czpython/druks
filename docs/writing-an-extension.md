@@ -704,9 +704,11 @@ accounts") — and a credential only your extension posts with belongs in your
 extension settings instead.
 
 Declare one class in `services.py` and the platform does the rest: it renders
-the connect card in Settings (the heading derives from `name`), verifies and
-stores the paste (`SecretStr` fields land encrypted, plain fields become
-identity facts), and reports `druks doctor` state:
+the connect card in Settings, verifies and stores the paste (`SecretStr`
+fields land encrypted, plain fields become identity facts), and reports
+`druks doctor` state. The class name is the identity. Druks derives the slug
+from it (`Gmail` → `gmail`, `GoogleCalendar` → `google_calendar`) and derives
+the card heading from the slug:
 
 ```python
 from pydantic import BaseModel, Field, SecretStr
@@ -715,13 +717,16 @@ from druks.services import Service, ServiceConnectError
 
 
 class Gmail(Service):
-    name = "gmail"
     description = "The appliance's own OAuth client — every mailbox authenticates against it."
 
     class Settings(BaseModel):
         client_id: str = Field(title="Client ID")
         client_secret: SecretStr = Field(title="Client secret")
 ```
+
+The slug keys the `service_identities` row and the connect wire. A class
+rename changes the slug, rekeys the card, and orphans the connected identity.
+Set `slug = "gmail"` on the class to keep the old key.
 
 Read it back through the same class:
 
@@ -746,8 +751,8 @@ async def verify(cls, settings: Settings) -> dict:
 Set `required = False` on the class when the appliance is healthy without the
 service connected; doctor then notes it instead of reporting pending setup.
 
-Key the service for the integration your extension consumes (`"gmail"`), not
-the provider (`"google"`). A second integration on the same provider declares
+Key the service for the integration your extension consumes (`Gmail`), not
+the provider (`Google`). A second integration on the same provider declares
 its own service, and the operator decides per card whether the underlying
 registration is shared or a narrower one — that choice is their scope and
 blast-radius control.
@@ -760,7 +765,6 @@ fields:
 
 ```python
 class Acme(Service):
-    name = "acme"
     authorization_endpoint = "https://acme.example/oauth/authorize"
     token_endpoint = "https://acme.example/oauth/token"
     # True = HTTP Basic on the token endpoint. False = secret in the body.
@@ -804,9 +808,9 @@ shape. Override `get_identity` for them:
 
 One provider can back several services — Google backs both Gmail and Google
 Calendar, and each keeps its own card and its own key. Share the provider's
-declarations through an abstract base. Set `abstract = True`: the base never
-registers, and each subclass inherits everything it declares, `Settings`
-included:
+declarations through an abstract base. Set `abstract = True`. The base never
+registers. Each subclass inherits everything it declares, `Settings`
+included, and needs nothing beyond its class name:
 
 ```python
 class GoogleOauth(Service):
@@ -824,11 +828,11 @@ class GoogleOauth(Service):
 
 
 class Gmail(GoogleOauth):
-    name = "gmail"
+    pass
 
 
-class Calendar(GoogleOauth):
-    name = "google_calendar"
+class GoogleCalendar(GoogleOauth):
+    pass
 ```
 
 Declare your extension's use of the service, with the scopes your calls

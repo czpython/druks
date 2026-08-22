@@ -15,7 +15,7 @@ const githubFields = [
 ]
 
 const disconnected: Service = {
-  name: 'github',
+  slug: 'github',
   title: 'GitHub',
   description: 'The GitHub App druks acts as.',
   required: true,
@@ -37,7 +37,7 @@ const connected: Service = {
 }
 
 const pasteOnly: Service = {
-  name: 'gmail',
+  slug: 'gmail',
   title: 'Google OAuth client',
   description: 'The OAuth client every mailbox authenticates against.',
   required: true,

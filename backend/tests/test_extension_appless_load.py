@@ -84,7 +84,6 @@ _FILES = {
 
 
         class Probemail(Service):
-            name = "probemail"
 
             class Settings(BaseModel):
                 account: str = Field(title="Account")
