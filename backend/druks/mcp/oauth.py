@@ -26,7 +26,8 @@ def _http() -> httpx.AsyncClient:
 
 
 def get_connection(name: str, account_id: str) -> OauthConnection | None:
-    # One connection per (server, account) — MCP's policy over the shared table.
+    # One live connection per (server, account) — MCP's policy over the
+    # shared table. Revoked rows stay behind as history.
     rows = OauthConnection.list_for_account(grant_provider(name), account_id)
     return rows[0] if rows else None
 
@@ -276,10 +277,10 @@ async def evict_access_token(name: str, account_id: str) -> None:
         await OauthClient(provider=grant_provider(name)).evict_access_token(connection.id)
 
 
-async def disconnect(name: str, account_id: str) -> None:
+async def disconnect(name: str, account_id: str, *, reason: str = "user") -> None:
     connection = get_connection(name, account_id)
     if connection:
-        await OauthClient(provider=grant_provider(name)).disconnect(connection)
+        await OauthClient(provider=grant_provider(name)).disconnect(connection, reason=reason)
     registration = McpClientRegistration.get_for_account(name, account_id)
     if registration:
         registration.delete()

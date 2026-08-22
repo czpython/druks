@@ -8,6 +8,7 @@ import httpx
 import pytest
 from druks.core.apis.github import GitHubClient, get_github_client
 from druks.core.webhooks.github import GitHubEvents
+from druks.database import db_session
 from druks.services.exceptions import ServiceNotConnectedError
 from druks.services.models import ServiceIdentity
 from druks.testing import make_settings
@@ -522,6 +523,12 @@ def test_with_scopes_declares_the_union_and_reads_connections(declared_services,
     assert NightWatch.acme.get(row.id).id == row.id
     assert not NightWatch.acme.get("missing")
 
+    # The handle serves live connections only; the revoked row survives.
+    row.revoke("user")
+    assert not NightWatch.acme.list_for_account(SYSTEM_ACCOUNT_ID)
+    assert not NightWatch.acme.get(row.id)
+    assert OauthConnection.get(row.id).identity == {"email": "night@acme.test"}
+
 
 async def test_get_identity_without_a_declared_endpoint_is_empty(declared_services):
     from druks.services import Service
@@ -715,6 +722,104 @@ def test_oauth_connect_rejects_an_unknown_reconnect_target(tmp_path, acme, druks
         assert client.get("/api/oauth/acme/connect?connection=zzz").status_code == 404
 
 
+def test_fresh_sign_in_after_revoke_creates_a_new_connection(tmp_path, acme, druks_db, monkeypatch):
+    from urllib.parse import parse_qsl, urlparse
+
+    from druks.services.models import OauthConnection
+    from druks.testing import configure_app_for_test
+
+    ServiceIdentity.connect(
+        "acme", identity={"client_id": "id-1"}, secrets={"client_secret": "sec-1"}
+    )
+    published = []
+
+    async def record(name, **kwargs):
+        published.append((name, kwargs))
+
+    monkeypatch.setattr("druks.services.routes.publish", record)
+    settings = make_settings(tmp_path, urls={"endpoint": "https://druks.example"})
+    with TestClient(configure_app_for_test(settings=settings)) as client:
+
+        def sign_in():
+            consent = client.get("/api/oauth/acme/connect", follow_redirects=False)
+            state = dict(parse_qsl(urlparse(consent.headers["location"]).query))["state"]
+            assert (
+                client.get(
+                    "/api/oauth/callback", params={"state": state, "code": "c-1"}
+                ).status_code
+                == 200
+            )
+
+        sign_in()
+        [first] = OauthConnection.list_for_provider("acme")
+        assert client.delete(f"/api/oauth/connections/{first.id}").status_code == 204
+
+        # A fresh sign-in never reuses a row, even for the same provider
+        # account. The revoked row stays behind as history.
+        sign_in()
+        [live] = OauthConnection.list_for_provider("acme")
+        assert live.id != first.id
+        assert len(OauthConnection.list_for_provider("acme", include_revoked=True)) == 2
+
+    events = [name for name, _ in published]
+    assert events == ["oauth.connected", "oauth.disconnected", "oauth.connected"]
+    assert published[-1][1] == {
+        "provider": "acme",
+        "connection_id": live.id,
+        "account_id": live.account_id,
+        "reconsent": False,
+    }
+
+
+def test_reconsent_returns_a_revoked_connection_to_life(tmp_path, acme, druks_db, monkeypatch):
+    from urllib.parse import parse_qsl, urlparse
+
+    from druks.services.models import OauthConnection
+    from druks.testing import configure_app_for_test
+
+    ServiceIdentity.connect(
+        "acme", identity={"client_id": "id-1"}, secrets={"client_secret": "sec-1"}
+    )
+    published = []
+
+    async def record(name, **kwargs):
+        published.append((name, kwargs))
+
+    monkeypatch.setattr("druks.services.routes.publish", record)
+    settings = make_settings(tmp_path, urls={"endpoint": "https://druks.example"})
+    with TestClient(configure_app_for_test(settings=settings)) as client:
+        consent = client.get("/api/oauth/acme/connect", follow_redirects=False)
+        state = dict(parse_qsl(urlparse(consent.headers["location"]).query))["state"]
+        client.get("/api/oauth/callback", params={"state": state, "code": "c-1"})
+        [connection] = OauthConnection.list_for_provider("acme")
+        assert client.delete(f"/api/oauth/connections/{connection.id}").status_code == 204
+
+        # Reconsent names the row, so it is the one way back to life.
+        reconnect = client.get(
+            f"/api/oauth/acme/connect?connection={connection.id}", follow_redirects=False
+        )
+        state = dict(parse_qsl(urlparse(reconnect.headers["location"]).query))["state"]
+        assert (
+            client.get("/api/oauth/callback", params={"state": state, "code": "c-2"}).status_code
+            == 200
+        )
+
+        # The routes wrote in their own transactions; drop stale instances.
+        db_session().expire_all()
+        [live] = OauthConnection.list_for_provider("acme")
+        assert live.id == connection.id
+        assert not live.revoked_at
+        assert not live.revoked_reason
+        assert live.refresh_token.decrypt() == "rt-1"
+
+    assert published[-1][1] == {
+        "provider": "acme",
+        "connection_id": live.id,
+        "account_id": live.account_id,
+        "reconsent": True,
+    }
+
+
 def test_connections_list_and_revoke(tmp_path, acme, druks_db, monkeypatch):
     from druks.accounts.models import Account
     from druks.services.models import OauthConnection
@@ -735,10 +840,22 @@ def test_connections_list_and_revoke(tmp_path, acme, druks_db, monkeypatch):
         assert listed["id"] == row.id
         assert listed["provider"] == "acme"
         assert listed["scopes"] == ["profile.read"]
+        assert listed["revokedAt"] is None
 
         assert client.delete(f"/api/oauth/connections/{row.id}").status_code == 204
         assert not OauthConnection.list_for_provider("acme")
-        assert client.delete(f"/api/oauth/connections/{row.id}").status_code == 404
+        # The route revoked in its own transaction; drop the stale instance.
+        db_session().expire_all()
+        revoked = OauthConnection.get(row.id)
+        assert revoked.revoked_at
+        assert revoked.revoked_reason == "user"
+        assert not revoked.refresh_token
+        # The audit read keeps serving the revoked row as history.
+        [listed] = client.get("/api/oauth/connections").json()
+        assert listed["revokedAt"]
+        assert listed["revokedReason"] == "user"
+        # Revoking is idempotent: the second delete finds the state true.
+        assert client.delete(f"/api/oauth/connections/{row.id}").status_code == 204
 
     assert published == [
         (
@@ -748,7 +865,7 @@ def test_connections_list_and_revoke(tmp_path, acme, druks_db, monkeypatch):
     ]
 
 
-def test_replacing_the_client_credentials_deletes_its_connections(
+def test_replacing_the_client_credentials_revokes_its_connections(
     tmp_path, acme, druks_db, monkeypatch
 ):
     from druks.accounts.constants import SYSTEM_ACCOUNT_ID
@@ -772,7 +889,12 @@ def test_replacing_the_client_credentials_deletes_its_connections(
         assert response.status_code == 200
 
     # The new client can never refresh the old client's connections.
+    db_session().expire_all()
     assert not OauthConnection.list_for_provider("acme")
+    [revoked] = OauthConnection.list_for_provider("acme", include_revoked=True)
+    assert revoked.id == row.id
+    assert revoked.revoked_reason == "client_replaced"
+    assert not revoked.refresh_token
     assert published == [
         (
             "oauth.disconnected",

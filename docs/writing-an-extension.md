@@ -842,13 +842,19 @@ for connection in NightWatch.acme.list_for_account(account_id):
 `current_account_id.get()` in a route, the handler's argument in a
 subscriber. `NightWatch.acme.get(connection_id)` returns one connection
 when your own row stored its id. Each connection carries `id`, `scopes`, `identity` — the
-provider's facts for the sign-in — and `connected_at`.
+provider's facts for the sign-in — and `connected_at`. The handle serves
+live connections only. A revoked connection drops out of `get` and
+`list_for_account`, but its platform row survives with its owner and
+identity. Your rows never need tombstone copies of either.
 
 Your UI starts a sign-in by opening `/api/oauth/acme/connect` — the
 platform runs the consent with the union of every installed extension's
-declared scopes and stores the connection for the signed-in user. To widen
-an existing connection's scopes, open
+declared scopes and stores the connection for the signed-in user. A fresh
+sign-in always creates a new connection, even for a provider account that
+was connected before. To widen an existing connection's scopes, open
 `/api/oauth/acme/connect?connection=<id>`; reconsent replaces its tokens.
+Reconsent names the row, so it also returns a revoked connection to life
+under its old id — the only way a row comes back.
 Add `?next=/app/night_watch/accounts` to land the user back on your
 page after consent instead of the generic "connected" page. `next`
 must be a bare path starting with `/` — a URL with a scheme or host is
@@ -857,10 +863,12 @@ rejected, so the door can never redirect off the box. Register
 serves every service.
 
 React to sign-ins with the signal machinery. The platform publishes
-`oauth.connected` when a consent completes — `reconsent` is true when it
-replaced an existing connection's tokens — and `oauth.disconnected` when a
-connection dies, whether the user revoked it or the service's client
-credentials were replaced. Subscribe in `subscribers.py`:
+`oauth.connected` when a consent completes. `reconsent` is true when it
+replaced an existing connection's tokens, including a revoked row that
+returned to life. It publishes `oauth.disconnected` when a connection is
+revoked — by the user, or because the service's client credentials were
+replaced. Revocation is a state, not a deletion: your subscriber can still
+read the connection it is told about. Subscribe in `subscribers.py`:
 
 ```python
 from druks.signals import subscribe
@@ -880,8 +888,9 @@ async def drop_sign_in(provider: str, connection_id: str, account_id: str) -> No
 ```
 
 The user sees and revokes everything in Settings — every connection they
-hold, across services. Replacing a service's client credentials deletes its
-connections: a new client can never refresh the old client's tokens.
+hold, across services, revoked ones shown as history. Replacing a service's
+client credentials revokes its connections: a new client can never refresh
+the old client's tokens, but the consents stay on record.
 
 `get_access_token` serves a Redis-cached access token and lets only one
 refresher run per connection and scope set. This is necessary: two

@@ -43,7 +43,7 @@ class Connection:
         )
 
     async def disconnect(self) -> None:
-        await OauthClient(provider=self.service.name).disconnect(self.row)
+        await OauthClient(provider=self.service.name).disconnect(self.row, reason="user")
 
 
 class ScopedService:
@@ -72,7 +72,7 @@ class ScopedService:
 
     def get(self, connection_id: str) -> Connection | None:
         row = OauthConnection.get(connection_id)
-        if row and row.provider == self.service.name:
+        if row and row.provider == self.service.name and not row.revoked_at:
             return Connection(self.service, row)
 
 
