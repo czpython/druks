@@ -63,6 +63,9 @@ class OauthConnection(Base, Uuid7Pk):
     # The token response's ``scope`` when the provider echoes one, else the
     # scopes the consent asked for.
     scopes: Mapped[list[str]] = mapped_column(JSONB, default=list)
+    # The provider's facts for the sign-in (email, username, name), set at
+    # consent; {} when the provider gave none.
+    identity: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
     connected_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
 
     @classmethod
@@ -71,10 +74,20 @@ class OauthConnection(Base, Uuid7Pk):
 
     @classmethod
     def create(
-        cls, *, provider: str, account_id: str, refresh_token: str, scopes: list[str]
+        cls,
+        *,
+        provider: str,
+        account_id: str,
+        refresh_token: str,
+        scopes: list[str],
+        identity: dict[str, Any] | None = None,
     ) -> "OauthConnection":
         connection = cls(
-            provider=provider, account_id=account_id, refresh_token=refresh_token, scopes=scopes
+            provider=provider,
+            account_id=account_id,
+            refresh_token=refresh_token,
+            scopes=scopes,
+            identity=identity or {},
         )
         db_session().add(connection)
         db_session().flush()
@@ -102,9 +115,13 @@ class OauthConnection(Base, Uuid7Pk):
             )
         )
 
-    def reconnect(self, *, refresh_token: str, scopes: list[str]) -> None:
+    def reconnect(
+        self, *, refresh_token: str, scopes: list[str], identity: dict[str, Any] | None = None
+    ) -> None:
         self.refresh_token = refresh_token
         self.scopes = scopes
+        if identity:
+            self.identity = identity
         self.connected_at = Base.utc_now()
         db_session().flush()
 

@@ -494,6 +494,23 @@ def test_with_scopes_declares_the_union_and_reads_connections(declared_services,
     assert not NightWatch.acme.get("missing")
 
 
+async def test_get_identity_without_a_declared_endpoint_is_empty(declared_services):
+    from druks.services import Service
+    from pydantic import BaseModel, SecretStr
+
+    class Quiet(Service):
+        name = "quiet_provider"
+        title = "Quiet"
+        authorization_endpoint = "https://quiet.test/authorize"
+        token_endpoint = "https://quiet.test/token"
+
+        class Settings(BaseModel):
+            client_id: str
+            client_secret: SecretStr
+
+    assert await Quiet.get_identity("at-1") == {}
+
+
 def test_with_scopes_requires_oauth_endpoints(declared_services):
     from druks.services import Service
     from pydantic import BaseModel, SecretStr
@@ -522,6 +539,8 @@ def acme(declared_services, monkeypatch):
         title = "Acme OAuth app"
         authorization_endpoint = "https://acme.test/authorize"
         token_endpoint = "https://acme.test/token"
+        identity_endpoint = "https://acme.test/whoami"
+        identity_scopes = ("openid",)
 
         class Settings(BaseModel):
             client_id: str
@@ -538,11 +557,15 @@ def acme(declared_services, monkeypatch):
         "expires_in": 3600,
         "scope": "profile.read posts.write",
     }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/whoami":
+            return httpx.Response(200, json={"email": "op@acme.test"})
+        return httpx.Response(200, json=tokens)
+
     monkeypatch.setattr(
         "druks.services.oauth._http",
-        lambda: httpx.AsyncClient(
-            transport=httpx.MockTransport(lambda request: httpx.Response(200, json=tokens))
-        ),
+        lambda: httpx.AsyncClient(transport=httpx.MockTransport(handler)),
     )
     return Acme
 
@@ -565,7 +588,7 @@ def test_oauth_connect_redirects_to_consent_with_the_scope_union(
     consent = urlparse(response.headers["location"])
     params = dict(parse_qsl(consent.query))
     assert response.headers["location"].startswith("https://acme.test/authorize?")
-    assert params["scope"] == "posts.write profile.read"
+    assert params["scope"] == "openid posts.write profile.read"
     assert params["redirect_uri"] == "https://druks.example/api/oauth/callback"
 
 
@@ -626,6 +649,7 @@ async def test_oauth_callback_creates_and_reconnects_a_connection(
 
         [connection] = OauthConnection.list_for_provider("acme")
         assert connection.refresh_token.decrypt() == "rt-1"
+        assert connection.identity == {"email": "op@acme.test"}
         assert connection.scopes == ["profile.read", "posts.write"]
 
         # Reconsent through the same connection replaces its tokens and
@@ -744,7 +768,7 @@ def test_list_serves_the_connections_beside_the_declared_union(tmp_path, acme, d
         before = entry(client)
         assert before["isOauth"] is True
         assert before["connections"] == []
-        assert before["requiredScopes"] == ["posts.write", "profile.read"]
+        assert before["requiredScopes"] == ["openid", "posts.write", "profile.read"]
         assert before["usedBy"] == ["night_watch.acme"]
 
         row = OauthConnection.create(
@@ -756,6 +780,7 @@ def test_list_serves_the_connections_beside_the_declared_union(tmp_path, acme, d
         [connection] = entry(client)["connections"]
         assert connection["id"] == row.id
         assert connection["scopes"] == ["profile.read"]
+        assert connection["identity"] == {}
         assert connection["connectedAt"]
 
 

@@ -750,10 +750,27 @@ class Acme(Service):
     token_endpoint = "https://acme.example/oauth/token"
     # True = HTTP Basic on the token endpoint. False = secret in the body.
     basic_auth = True
+    identity_endpoint = "https://acme.example/oauth/userinfo"
+    identity_scopes = ("openid", "email")
 
     class Settings(BaseModel):
         client_id: str = Field(title="Client ID")
         client_secret: SecretStr = Field(title="Client secret")
+```
+
+`identity_endpoint` names the provider endpoint that returns the signed-in
+account's facts (email, username, name). Druks calls it once at consent and
+shows the facts as the connection's label in Settings. `identity_scopes`
+are the scopes that call needs; they join the consent ask.
+
+Some providers have no such endpoint, or return the facts in a different
+shape. Override `get_identity` for them:
+
+```python
+    @classmethod
+    async def get_identity(cls, access_token: str) -> dict:
+        payload = await fetch_profile(access_token)
+        return payload["data"]
 ```
 
 Declare your extension's use of the service, with the scopes your calls

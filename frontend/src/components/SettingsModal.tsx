@@ -1103,6 +1103,11 @@ function ServiceDetail({ service, onBack }: { service: Service; onBack: () => vo
   )
 }
 
+function connectionIdentity(connection: Connection): string | null {
+  const identity = connection.identity
+  return identity.email ?? identity.username ?? identity.login ?? identity.name ?? null
+}
+
 // The signed-in accounts behind this service, on top of the pasted client
 // credentials. Connect opens the consent redirect in a new tab; the callback
 // page broadcasts on druks-service-connect and the pane refetches.
@@ -1150,7 +1155,8 @@ function ServiceAccess({ service }: { service: Service }) {
       {service.connections.map((connection) => (
         <div className="svc-fact" key={connection.id}>
           <span className="svc-fact-key">
-            {new Date(connection.connectedAt).toLocaleDateString()}
+            {connectionIdentity(connection) ??
+              new Date(connection.connectedAt).toLocaleDateString()}
           </span>
           <span className="svc-fact-val">{connection.scopes.join(', ')}</span>
           <span className="svc-actions">
@@ -1221,7 +1227,7 @@ export function ConnectionsPane() {
             <div className="svc-fact" key={connection.id}>
               <span className="svc-fact-key">{connection.provider}</span>
               <span className="svc-fact-val">
-                {connection.scopes.join(', ') || 'no scopes recorded'} ·{' '}
+                {connectionIdentity(connection) ?? (connection.scopes.join(', ') || 'unlabeled')} ·{' '}
                 {new Date(connection.connectedAt).toLocaleDateString()}
               </span>
               <button className="set-btn ghost" onClick={() => revoke(connection.id)}>

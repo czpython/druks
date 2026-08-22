@@ -26,6 +26,7 @@ class ConnectionResponse(BaseResponse):
     id: str
     provider: str
     scopes: list[str]
+    identity: dict[str, Any]
     connected_at: datetime
 
 

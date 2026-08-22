@@ -119,10 +119,12 @@ async def oauth_callback(state: str = "", code: str = "", error: str = "") -> Re
     except OauthExchangeError as exchange_error:
         raise HTTPException(status_code=400, detail=str(exchange_error)) from exchange_error
     provider = pending["provider"]
-    if not services.get(provider):
+    service = services.get(provider)
+    if not service:
         # A state begun by another door (an MCP connect) finishes at its own callback.
         raise HTTPException(status_code=400, detail=f"No OAuth service {provider!r}.")
     granted = tokens.get("scope", "").split() or pending["scopes"]
+    identity = await service.get_identity(tokens["access_token"])
     reconsent = bool(pending["connection_id"])
     if reconsent:
         row = OauthConnection.get(pending["connection_id"])
@@ -130,7 +132,7 @@ async def oauth_callback(state: str = "", code: str = "", error: str = "") -> Re
             raise HTTPException(
                 status_code=400, detail="The connection was removed while consent was open."
             )
-        row.reconnect(refresh_token=tokens["refresh_token"], scopes=granted)
+        row.reconnect(refresh_token=tokens["refresh_token"], scopes=granted, identity=identity)
         # A reconsent's narrower cached token must not serve until its TTL runs out.
         await OauthClient(provider=provider).evict_access_token(row.id)
     else:
@@ -139,6 +141,7 @@ async def oauth_callback(state: str = "", code: str = "", error: str = "") -> Re
             account_id=pending["account_id"],
             refresh_token=tokens["refresh_token"],
             scopes=granted,
+            identity=identity,
         )
     await publish(
         "oauth.connected",
