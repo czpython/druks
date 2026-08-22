@@ -655,6 +655,19 @@ the prefix its own resource is called:
 router = APIRouter(prefix="/reviews")
 ```
 
+Your routes run authenticated: the loader mounts every router behind the
+platform's identity gate — a Bearer PAT or the signed-in session — so nothing
+anonymous reaches your code, and you never write auth yourself. Read the
+caller when a route scopes by who is asking:
+
+```python
+from druks.accounts import current_account_id
+
+@router.get("/reviews")
+def list_reviews() -> list[ReviewResponse]:
+    return Review.list_for_account(current_account_id.get())
+```
+
 Tagging a route `agent` also derives it into an MCP tool: you give it an explicit
 `operation_id`, and Druks derives the tool name by prefixing it with your extension
 name — write `operation_id="add_peer"` in `peer_tracker` and the tool is
@@ -825,8 +838,10 @@ for connection in NightWatch.acme.list_for_account(account_id):
     token = await connection.get_access_token()
 ```
 
-`NightWatch.acme.get(connection_id)` returns one connection when your own
-row stored its id. Each connection carries `id`, `scopes`, `identity` — the
+`account_id` is the caller: `self.account_id` in a run body,
+`current_account_id.get()` in a route, the handler's argument in a
+subscriber. `NightWatch.acme.get(connection_id)` returns one connection
+when your own row stored its id. Each connection carries `id`, `scopes`, `identity` — the
 provider's facts for the sign-in — and `connected_at`.
 
 Your UI starts a sign-in by opening `/api/oauth/acme/connect` — the
@@ -1053,6 +1068,7 @@ Import from concern namespaces, not from `druks.durable` or internal modules:
 
 | Namespace | Public names |
 | --- | --- |
+| `druks.accounts` | `current_account_id` |
 | `druks.extensions` | `Extension`, `ExtensionSettings`, `Secret` |
 | `druks.services` | `Service`, `ServiceConnectError`, `ServiceNotConnectedError`, `OauthClient`, `OauthExchangeError`, `OauthRefreshError` |
 | `druks.secrets.fields` | `EncryptedJsonField`, `SecretsMapping` |
