@@ -116,6 +116,26 @@ class OauthConnection(Base, Uuid7Pk):
         )
 
     @classmethod
+    def get_for_identity(
+        cls, provider: str, account_id: str, key: str, value: Any
+    ) -> "OauthConnection | None":
+        # A live match wins; among revoked matches, the latest consent wins.
+        return (
+            db_session()
+            .scalars(
+                select(cls)
+                .where(
+                    cls.provider == provider,
+                    cls.account_id == account_id,
+                    cls.identity[key].astext == str(value),
+                )
+                .order_by(cls.revoked_at.is_(None).desc(), cls.connected_at.desc())
+                .limit(1)
+            )
+            .first()
+        )
+
+    @classmethod
     def list_for_provider(
         cls, provider: str, *, include_revoked: bool = False
     ) -> "list[OauthConnection]":
