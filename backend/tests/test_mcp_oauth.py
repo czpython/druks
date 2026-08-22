@@ -320,7 +320,7 @@ async def test_complete_connect_exchanges_code_and_stores_the_grant(auth_server,
     # Nothing is cached at connect (the grant is real only once this commits);
     # the first delivery mints from it, carrying the grant's resource binding.
     assert not await get_client().get(_token_key(SYSTEM_ACCOUNT_ID))
-    assert await oauth.mint_access_token(_NAME, SYSTEM_ACCOUNT_ID) == "at-1"
+    assert await oauth.get_access_token(_NAME, SYSTEM_ACCOUNT_ID) == "at-1"
     refresh = auth_server.token_requests[1]
     assert refresh["grant_type"] == "refresh_token"
     assert refresh["resource"] == _SERVER_URL
@@ -434,10 +434,10 @@ async def test_a_later_connect_stores_under_the_claimed_mode(auth_server, druks_
     assert grant_accounts == {SYSTEM_ACCOUNT_ID}
 
 
-# --- mint: cache, refresh, rotation, eviction -------------------------------
+# --- get_access_token: cache, refresh, rotation, eviction -------------------
 
 
-async def test_mint_refreshes_on_cache_miss_and_persists_rotation(auth_server, druks_db):
+async def test_get_refreshes_on_cache_miss_and_persists_rotation(auth_server, druks_db):
     _store_grant(refresh_token="rt-old")
     auth_server.token_response = {
         "access_token": "at-2",
@@ -445,7 +445,7 @@ async def test_mint_refreshes_on_cache_miss_and_persists_rotation(auth_server, d
         "expires_in": 300,
     }
 
-    token = await oauth.mint_access_token(_NAME, SYSTEM_ACCOUNT_ID)
+    token = await oauth.get_access_token(_NAME, SYSTEM_ACCOUNT_ID)
 
     assert token == "at-2"
     refresh = auth_server.token_requests[0]
@@ -457,45 +457,45 @@ async def test_mint_refreshes_on_cache_miss_and_persists_rotation(auth_server, d
     stored = oauth.get_connection(_NAME, SYSTEM_ACCOUNT_ID)
     assert stored.refresh_token.decrypt() == "rt-new"
 
-    # A second mint within the TTL reuses the cache — no second refresh.
-    assert await oauth.mint_access_token(_NAME, SYSTEM_ACCOUNT_ID) == "at-2"
+    # A second call within the TTL reuses the cache — no second refresh.
+    assert await oauth.get_access_token(_NAME, SYSTEM_ACCOUNT_ID) == "at-2"
     assert len(auth_server.token_requests) == 1
 
 
-async def test_mint_without_grant_fails_loudly(druks_db):
+async def test_get_without_grant_fails_loudly(druks_db):
     with pytest.raises(MissingGrantError, match=_NAME):
-        await oauth.mint_access_token(_NAME, SYSTEM_ACCOUNT_ID)
+        await oauth.get_access_token(_NAME, SYSTEM_ACCOUNT_ID)
 
 
-async def test_mint_refresh_rejection_fails_loudly_and_evicts_the_cache(auth_server, druks_db):
+async def test_get_refresh_rejection_fails_loudly_and_evicts_the_cache(auth_server, druks_db):
     _store_grant()
     auth_server.token_status = 400
 
     with pytest.raises(GrantRefreshError, match=_NAME):
-        await oauth.mint_access_token(_NAME, SYSTEM_ACCOUNT_ID)
+        await oauth.get_access_token(_NAME, SYSTEM_ACCOUNT_ID)
     assert not await get_client().get(_token_key(SYSTEM_ACCOUNT_ID))
 
 
-async def test_mint_rejects_a_malformed_token_response(auth_server, druks_db):
+async def test_get_rejects_a_malformed_token_response(auth_server, druks_db):
     _store_grant()
     auth_server.token_malformed = True
 
     with pytest.raises(GrantRefreshError, match="malformed JSON"):
-        await oauth.mint_access_token(_NAME, SYSTEM_ACCOUNT_ID)
+        await oauth.get_access_token(_NAME, SYSTEM_ACCOUNT_ID)
 
 
-async def test_mint_rejects_a_token_response_without_an_access_token(auth_server, druks_db):
+async def test_get_rejects_a_token_response_without_an_access_token(auth_server, druks_db):
     _store_grant()
     auth_server.token_response = {"refresh_token": "rt-2", "expires_in": 3600}
 
     with pytest.raises(GrantRefreshError, match="no access token"):
-        await oauth.mint_access_token(_NAME, SYSTEM_ACCOUNT_ID)
+        await oauth.get_access_token(_NAME, SYSTEM_ACCOUNT_ID)
 
 
-async def test_mint_losing_the_refresh_lock_polls_for_the_winners_token(
+async def test_get_losing_the_refresh_lock_polls_for_the_winners_token(
     auth_server, druks_db, monkeypatch
 ):
-    # A second minter never refreshes (one rotation spender per server) and
+    # A second caller never refreshes (one rotation spender per server) and
     # never blocks the event loop: it polls until the winner's token appears
     # in the cache. The winner here is a concurrent task holding the lock.
     _store_grant()
@@ -508,22 +508,22 @@ async def test_mint_losing_the_refresh_lock_polls_for_the_winners_token(
         await redis.delete(_lock_key(SYSTEM_ACCOUNT_ID))
 
     winner = asyncio.create_task(_winner_finishes())
-    assert await oauth.mint_access_token(_NAME, SYSTEM_ACCOUNT_ID) == "at-winner"
+    assert await oauth.get_access_token(_NAME, SYSTEM_ACCOUNT_ID) == "at-winner"
     await winner
     assert not auth_server.token_requests
 
 
-async def test_mint_times_out_loudly_when_the_refresh_lock_never_frees(druks_db, monkeypatch):
+async def test_get_times_out_loudly_when_the_refresh_lock_never_frees(druks_db, monkeypatch):
     _store_grant()
     monkeypatch.setattr(oauth, "OAUTH_MINT_WAIT_INTERVAL_SECONDS", 0)
     monkeypatch.setattr(oauth, "OAUTH_MINT_WAIT_ATTEMPTS", 3)
     await get_client().set(_lock_key(SYSTEM_ACCOUNT_ID), "1")
 
     with pytest.raises(GrantRefreshError, match="concurrent refresh"):
-        await oauth.mint_access_token(_NAME, SYSTEM_ACCOUNT_ID)
+        await oauth.get_access_token(_NAME, SYSTEM_ACCOUNT_ID)
 
 
-async def test_mint_cache_and_refresh_lock_are_per_account(auth_server, druks_db):
+async def test_get_cache_and_refresh_lock_are_per_account(auth_server, druks_db):
     first = Account.get_or_create("first@example.com")
     second = Account.get_or_create("second@example.com")
     _store_grant(account_id=first.id, identity_mode=IdentityMode.PER_USER)
@@ -531,7 +531,7 @@ async def test_mint_cache_and_refresh_lock_are_per_account(auth_server, druks_db
     redis = get_client()
     await redis.set(_lock_key(first.id), "1")
 
-    assert await oauth.mint_access_token(_NAME, second.id) == "at-1"
+    assert await oauth.get_access_token(_NAME, second.id) == "at-1"
     assert not await redis.get(_token_key(first.id))
     assert await redis.get(_token_key(second.id)) == b"at-1"
 
@@ -688,9 +688,9 @@ async def test_disconnect_route_drops_grant_and_cache(
 ):
     _register_oauth_server()
     _store_grant()
-    await oauth.mint_access_token(_NAME, SYSTEM_ACCOUNT_ID)
+    await oauth.get_access_token(_NAME, SYSTEM_ACCOUNT_ID)
     token_key = _token_key(SYSTEM_ACCOUNT_ID)
-    # The mint's Redis client is bound to this test's loop; close it so the
+    # The oauth engine's Redis client is bound to this test's loop; close it so the
     # route dials its own — the cached token lives in Redis either way.
     await close_client()
 

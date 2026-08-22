@@ -60,10 +60,10 @@ class OauthClient:
 
     ``begin_connect`` returns the consent URL to open; the module-level
     ``complete_connect`` consumes the callback's single-use state and
-    exchanges the code; ``mint_access_token`` serves delivery from the Redis
+    exchanges the code; ``get_access_token`` serves delivery from the Redis
     token cache, electing one refresher per connection. The caller stores an
     ``OauthConnection`` from the completed exchange and hands it back to
-    mint. A ``Service`` with declared OAuth endpoints hands back a
+    ``get_access_token``. A ``Service`` with declared OAuth endpoints hands back a
     configured client via ``get_oauth_client()`` — construct directly only
     when no service holds the client credentials.
 
@@ -156,7 +156,7 @@ class OauthClient:
         query.update(extra_authorize_params or {})
         return f"{self.authorization_endpoint}?{urlencode(query)}"
 
-    async def mint_access_token(
+    async def get_access_token(
         self,
         *,
         connection: OauthConnection,

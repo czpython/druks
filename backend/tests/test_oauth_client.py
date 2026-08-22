@@ -74,21 +74,21 @@ def _lock_key(connection: OauthConnection) -> str:
     return f"{_PROVIDER}:refresh_lock:{connection.id}"
 
 
-async def test_mint_serves_the_cache_without_a_refresh(token_endpoint):
+async def test_get_serves_the_cache_without_a_refresh(token_endpoint):
     connection = _connection()
     await get_client().set(_token_key(connection), "at-cached")
 
-    token = await _client().mint_access_token(connection=connection)
+    token = await _client().get_access_token(connection=connection)
 
     assert token == "at-cached"
     assert not token_endpoint.requests
 
 
-async def test_mint_refreshes_persists_rotation_and_fills_with_skewed_ttl(token_endpoint):
+async def test_get_refreshes_persists_rotation_and_fills_with_skewed_ttl(token_endpoint):
     token_endpoint.response = {"access_token": "at-2", "refresh_token": "rt-new", "expires_in": 300}
     connection = _connection()
 
-    token = await _client().mint_access_token(connection=connection)
+    token = await _client().get_access_token(connection=connection)
 
     assert token == "at-2"
     db_session().expire_all()
@@ -105,7 +105,7 @@ async def test_mint_refreshes_persists_rotation_and_fills_with_skewed_ttl(token_
     assert not await redis.get(_lock_key(connection))
 
 
-async def test_mint_fills_the_cache_only_after_the_rotation_is_saved(token_endpoint, monkeypatch):
+async def test_get_fills_the_cache_only_after_the_rotation_is_saved(token_endpoint, monkeypatch):
     token_endpoint.response = {"access_token": "at-2", "refresh_token": "rt-new", "expires_in": 300}
     connection = _connection()
 
@@ -114,14 +114,14 @@ async def test_mint_fills_the_cache_only_after_the_rotation_is_saved(token_endpo
 
     monkeypatch.setattr(OauthConnection, "_save_refresh_token", _unsavable)
     with pytest.raises(RuntimeError, match="rotation write failed"):
-        await _client().mint_access_token(connection=connection)
+        await _client().get_access_token(connection=connection)
 
     redis = get_client()
     assert not await redis.get(_token_key(connection))
     assert not await redis.get(_lock_key(connection))
 
 
-async def test_mint_losing_the_lock_polls_for_the_winners_token(token_endpoint):
+async def test_get_losing_the_lock_polls_for_the_winners_token(token_endpoint):
     connection = _connection()
     redis = get_client()
     await redis.set(_lock_key(connection), "1")
@@ -131,27 +131,27 @@ async def test_mint_losing_the_lock_polls_for_the_winners_token(token_endpoint):
         await redis.delete(_lock_key(connection))
 
     winner = asyncio.create_task(_winner_finishes())
-    token = await _client().mint_access_token(connection=connection)
+    token = await _client().get_access_token(connection=connection)
     await winner
 
     assert token == "at-winner"
     assert not token_endpoint.requests
 
 
-async def test_mint_times_out_loudly_when_the_lock_never_frees(token_endpoint):
+async def test_get_times_out_loudly_when_the_lock_never_frees(token_endpoint):
     connection = _connection()
     await get_client().set(_lock_key(connection), "1")
 
     with pytest.raises(OauthRefreshError, match="concurrent refresh"):
-        await _client(mint_wait_attempts=3).mint_access_token(connection=connection)
+        await _client(mint_wait_attempts=3).get_access_token(connection=connection)
 
 
-async def test_mint_refresh_rejection_evicts_and_raises(token_endpoint):
+async def test_get_refresh_rejection_evicts_and_raises(token_endpoint):
     token_endpoint.status = 400
     connection = _connection()
 
     with pytest.raises(OauthRefreshError, match="HTTP 400"):
-        await _client().mint_access_token(connection=connection)
+        await _client().get_access_token(connection=connection)
 
     assert OauthConnection.get(connection.id).refresh_token.decrypt() == "rt-old"
     redis = get_client()
@@ -159,10 +159,10 @@ async def test_mint_refresh_rejection_evicts_and_raises(token_endpoint):
     assert not await redis.get(_lock_key(connection))
 
 
-async def test_mint_refresh_uses_basic_auth(token_endpoint):
+async def test_get_refresh_uses_basic_auth(token_endpoint):
     connection = _connection()
 
-    await _client(basic_auth=True).mint_access_token(connection=connection)
+    await _client(basic_auth=True).get_access_token(connection=connection)
 
     assert token_endpoint.authorizations[0].startswith("Basic ")
     # Basic auth keeps the client credentials out of the form body.
@@ -221,7 +221,7 @@ async def test_complete_connect_requires_a_refresh_token(token_endpoint):
         await complete_connect(state=state, code="code-1")
 
 
-async def test_downscoped_mint_asks_and_caches_apart_from_the_full_grant(token_endpoint):
+async def test_downscoped_get_asks_and_caches_apart_from_the_full_grant(token_endpoint):
     connection = _connection(scopes=["posts.write", "profile.read"])
     token_endpoint.response = {
         "access_token": "at-narrow",
@@ -230,7 +230,7 @@ async def test_downscoped_mint_asks_and_caches_apart_from_the_full_grant(token_e
         "scope": "profile.read",
     }
 
-    narrow = await _client().mint_access_token(connection=connection, scopes=("profile.read",))
+    narrow = await _client().get_access_token(connection=connection, scopes=("profile.read",))
 
     assert narrow == "at-narrow"
     assert token_endpoint.requests[0]["scope"] == "profile.read"
@@ -244,7 +244,7 @@ async def test_downscoped_mint_asks_and_caches_apart_from_the_full_grant(token_e
         "refresh_token": "rt-1",
         "expires_in": 3600,
     }
-    full = await _client().mint_access_token(connection=connection)
+    full = await _client().get_access_token(connection=connection)
 
     assert full == "at-full"
     assert "scope" not in token_endpoint.requests[1]
@@ -253,22 +253,22 @@ async def test_downscoped_mint_asks_and_caches_apart_from_the_full_grant(token_e
 
     # The scoped cache serves the scoped ask without another refresh.
     assert (
-        await _client().mint_access_token(connection=connection, scopes=("profile.read",))
+        await _client().get_access_token(connection=connection, scopes=("profile.read",))
         == "at-narrow"
     )
     assert len(token_endpoint.requests) == 2
 
 
-async def test_downscoped_mint_rejects_scopes_outside_the_grant(token_endpoint):
+async def test_downscoped_get_rejects_scopes_outside_the_grant(token_endpoint):
     connection = _connection(scopes=["profile.read"])
 
     with pytest.raises(OauthRefreshError, match="does not grant scope"):
-        await _client().mint_access_token(connection=connection, scopes=("posts.write",))
+        await _client().get_access_token(connection=connection, scopes=("posts.write",))
 
     assert not token_endpoint.requests
 
 
-async def test_downscoped_mint_rejects_a_provider_that_ignores_the_ask(token_endpoint):
+async def test_downscoped_get_rejects_a_provider_that_ignores_the_ask(token_endpoint):
     connection = _connection(scopes=["posts.write", "profile.read"])
     token_endpoint.response = {
         "access_token": "at-broad",
@@ -278,18 +278,18 @@ async def test_downscoped_mint_rejects_a_provider_that_ignores_the_ask(token_end
     }
 
     with pytest.raises(OauthRefreshError, match="came back with"):
-        await _client().mint_access_token(connection=connection, scopes=("profile.read",))
+        await _client().get_access_token(connection=connection, scopes=("profile.read",))
 
     scoped_key = _token_key(connection) + _scoped_suffix(("profile.read",))
     assert not await get_client().get(scoped_key)
 
 
-async def test_uncached_mint_refreshes_past_a_live_cache_and_refills_it(token_endpoint):
+async def test_uncached_get_refreshes_past_a_live_cache_and_refills_it(token_endpoint):
     connection = _connection()
     redis = get_client()
     await redis.set(_token_key(connection), "at-tail")
 
-    token = await _client().mint_access_token(connection=connection, cached=False)
+    token = await _client().get_access_token(connection=connection, cached=False)
 
     assert token == "at-1"
     assert len(token_endpoint.requests) == 1
@@ -303,7 +303,7 @@ async def test_refresher_election_is_per_scope_set(token_endpoint):
     await redis.set(_lock_key(connection) + _scoped_suffix(("profile.read",)), "1")
 
     # The scoped variant's lock never blocks the full-grant mint.
-    assert await _client().mint_access_token(connection=connection) == "at-1"
+    assert await _client().get_access_token(connection=connection) == "at-1"
     assert len(token_endpoint.requests) == 1
 
 

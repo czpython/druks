@@ -14,7 +14,8 @@ from .oauth import OauthClient
 
 class Connection:
     """One signed-in provider account, reached through the extension's
-    declared handle. Mint and disconnect act on this sign-in only."""
+    declared handle. ``get_access_token`` and ``disconnect`` act on this
+    sign-in only."""
 
     def __init__(self, service: "type[Service]", row: OauthConnection) -> None:
         self.service = service
@@ -32,8 +33,8 @@ class Connection:
     def connected_at(self):
         return self.row.connected_at
 
-    async def mint_access_token(self, scopes: tuple[str, ...] = (), cached: bool = True) -> str:
-        return await self.service.get_oauth_client().mint_access_token(
+    async def get_access_token(self, scopes: tuple[str, ...] = (), cached: bool = True) -> str:
+        return await self.service.get_oauth_client().get_access_token(
             connection=self.row, scopes=scopes, cached=cached
         )
 

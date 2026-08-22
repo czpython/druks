@@ -206,7 +206,7 @@ class Workspace:
                     raise SourceEnvVarUnsetError(server["name"], server["source_env_var"])
             else:  # oauth
                 grant_account = get_grant_account(server["identity_mode"], run_account)
-                token = await oauth.mint_access_token(server["name"], grant_account)
+                token = await oauth.get_access_token(server["name"], grant_account)
             bearer_token_env_var = ""
             if token:
                 bearer_token_env_var = get_bearer_token_env_var(server["name"])
