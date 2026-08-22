@@ -52,10 +52,12 @@ class Subject:
         )
 
     @classmethod
-    def list_summaries(cls) -> "Sequence[SubjectSummary]":
+    def list_summaries(cls, account_id: str | None) -> "Sequence[SubjectSummary]":
         """The subjects on this class's board, newest-movement first, each as its domain
-        summary. Returns a covariant ``Sequence`` so an extension can return a ``list``
-        of its own ``SubjectSummary`` subclass. Required once a workflow declares it."""
+        summary. ``account_id`` is the caller, or None outside a request. A shared
+        board ignores it. Returns a covariant ``Sequence`` so an extension can return
+        a ``list`` of its own ``SubjectSummary`` subclass. Required once a workflow
+        declares it."""
         raise NotImplementedError(
             f"a workflow declares {cls.__name__}, so it needs a list_summaries()"
         )

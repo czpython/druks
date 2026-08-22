@@ -9,7 +9,7 @@ from ship.factories import make_test_work_item, seed_build_run
 
 def _board_ids(druks_db):
     druks_db.expire_all()
-    return {row.id for row in WorkItem.list_summaries()}
+    return {row.id for row in WorkItem.list_summaries(None)}
 
 
 def _resolve(item, *, merged=True, at=None):

@@ -398,10 +398,12 @@ class Extension:
         point-in-time read and a ``/stream`` that pushes the whole snapshot on change.
         Mounted at ``/api/<name>/<subject_type>`` for every subject the extension's
         workflows declare. Every read here is keyed by identity, so an extension that
-        keeps no row for its subject gets the same surface as one that does."""
+        keeps no row for its subject gets the same surface as one that does. The board
+        reads pass the caller to ``list_summaries``."""
         from fastapi import APIRouter, HTTPException, status
         from fastapi.responses import StreamingResponse
 
+        from druks.accounts.context import current_account_id
         from druks.api.dependencies import EngineDep
         from druks.database import session_scope
         from druks.durable import reads
@@ -411,14 +413,14 @@ class Extension:
         subject_type = subject_class.subject_type
         router = APIRouter(prefix=f"/{subject_type}", tags=[f"{cls.name}:{subject_type}"])
 
-        def board() -> SubjectList:
+        def board(account_id: str | None) -> SubjectList:
             return SubjectList(
                 rows=[
                     SubjectRow(
                         summary=summary,
                         status=reads.get_subject_status(subject_type, summary.id),
                     )
-                    for summary in subject_class.list_summaries()
+                    for summary in subject_class.list_summaries(account_id)
                 ]
             )
 
@@ -435,14 +437,17 @@ class Extension:
 
         @router.get("", response_model=SubjectList, response_model_by_alias=True)
         async def list_subjects() -> SubjectList:
-            return board()
+            return board(current_account_id.get())
 
         # ``/stream`` before ``/{subject_id}`` so the literal path wins over the id matcher.
         @router.get("/stream", response_class=StreamingResponse)
         async def stream_board(engine: EngineDep) -> StreamingResponse:
+            # The generator polls after the request context ends. Capture the caller here.
+            account_id = current_account_id.get()
+
             async def snapshot() -> SubjectList:
                 with session_scope(engine):
-                    return board()
+                    return board(account_id)
 
             return StreamingResponse(
                 stream(snapshot), media_type="text/event-stream", headers=SSE_HEADERS

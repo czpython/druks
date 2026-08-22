@@ -42,7 +42,7 @@ class Note(StoredSubject):
         return NoteSummary.model_validate(self)
 
     @classmethod
-    def list_summaries(cls) -> list[NoteSummary]:
+    def list_summaries(cls, account_id: str | None) -> list[NoteSummary]:
         # How many the board shows is an operator knob, so it lives on the extension.
         from druks_field_notes.extension import FieldNotes
 

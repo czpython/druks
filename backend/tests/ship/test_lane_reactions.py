@@ -45,7 +45,7 @@ async def test_cancelled_build_settles_the_item(druks_db):
     assert refreshed.resolution == "closed"
     assert refreshed.resolved_at
     druks_db.expire_all()
-    assert str(item.id) not in {summary.id for summary in WorkItem.list_summaries()}
+    assert str(item.id) not in {summary.id for summary in WorkItem.list_summaries(None)}
 
 
 @pytest.mark.parametrize(("merged", "resolution"), [(True, "merged"), (False, "closed")])
@@ -79,7 +79,7 @@ async def test_failed_build_remains_unresolved_on_the_board(druks_db):
     refreshed = WorkItem.get(item.id)
     assert (refreshed.resolution, refreshed.resolved_at) == (None, None)
     druks_db.expire_all()
-    assert str(item.id) in {summary.id for summary in WorkItem.list_summaries()}
+    assert str(item.id) in {summary.id for summary in WorkItem.list_summaries(None)}
 
 
 async def test_build_lifecycle_reaches_the_tracker(druks_db, monkeypatch):

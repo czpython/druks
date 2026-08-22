@@ -110,7 +110,7 @@ class ProjectRepo(StoredSubject):
         return ProjectRepoSummary.model_validate(self)
 
     @classmethod
-    def list_summaries(cls) -> list["ProjectRepoSummary"]:
+    def list_summaries(cls, account_id: str | None) -> list["ProjectRepoSummary"]:
         # A repo is registered, not transient, so the board is all of them by name.
         stmt = select(cls).order_by(cls.full_name)
         return [repo.get_summary() for repo in db_session().scalars(stmt)]
@@ -228,7 +228,7 @@ class WorkItem(StoredSubject):
         return WorkItemSummary.model_validate(self)
 
     @classmethod
-    def list_summaries(cls) -> list[WorkItemSummary]:
+    def list_summaries(cls, account_id: str | None) -> list[WorkItemSummary]:
         # Where a run stands colours the row; it never decides whether the row is
         # here. The 500 most-recent cover it; paginate if a board outgrows it.
         stmt = (

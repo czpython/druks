@@ -14,7 +14,7 @@ class Widget(Subject):
     in a real extension; these stand in for that."""
 
     @classmethod
-    def list_summaries(cls) -> list:
+    def list_summaries(cls, account_id: str | None) -> list:
         return []
 
 
@@ -246,7 +246,7 @@ def test_full_boot_refuses_a_subject_missing_list_summaries(monkeypatch):
 def test_a_concrete_inherited_list_summaries_satisfies_the_contract_without_calling_it():
     class Concrete(Subject):
         @classmethod
-        def list_summaries(cls) -> list:
+        def list_summaries(cls, account_id: str | None) -> list:
             raise AssertionError("validation must not call list_summaries()")
 
     class Inheritor(Concrete):
