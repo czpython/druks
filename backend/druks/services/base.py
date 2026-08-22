@@ -34,6 +34,10 @@ class Connection:
         return self.row.identity
 
     @property
+    def account_id(self) -> str:
+        return self.row.account_id
+
+    @property
     def connected_at(self):
         return self.row.connected_at
 

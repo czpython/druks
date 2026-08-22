@@ -842,7 +842,8 @@ for connection in NightWatch.acme.list_for_account(account_id):
 `current_account_id.get()` in a route, the handler's argument in a
 subscriber. `NightWatch.acme.get(connection_id)` returns one connection
 when your own row stored its id. Each connection carries `id`, `scopes`, `identity` — the
-provider's facts for the sign-in — and `connected_at`. The handle serves
+provider's facts for the sign-in — `account_id` — the druks account that
+signed it in — and `connected_at`. The handle serves
 live connections only. A revoked connection drops out of `get` and
 `list_for_account`, but its platform row survives with its owner and
 identity. Your rows never need tombstone copies of either.
