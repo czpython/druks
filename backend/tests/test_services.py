@@ -520,6 +520,7 @@ def test_with_scopes_declares_the_union_and_reads_connections(declared_services,
     assert [connection.id for connection in connections] == [row.id]
     assert connections[0].scopes == ["profile.read"]
     assert connections[0].identity == {"email": "night@acme.test"}
+    assert connections[0].account_id == SYSTEM_ACCOUNT_ID
     assert NightWatch.acme.get(row.id).id == row.id
     assert not NightWatch.acme.get("missing")
 
