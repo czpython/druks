@@ -390,7 +390,6 @@ def test_get_oauth_client_reads_the_connected_identity(declared_services, druks_
 
     class Acme(Service):
         name = "acme"
-        title = "Acme OAuth app"
         authorization_endpoint = "https://acme.test/authorize"
         token_endpoint = "https://acme.test/token"
         basic_auth = True
@@ -423,7 +422,6 @@ def test_oauth_service_declarations_fail_loudly(declared_services):
 
         class Keyless(Service):
             name = "keyless"
-            title = "Keyless"
             authorization_endpoint = "https://acme.test/authorize"
             token_endpoint = "https://acme.test/token"
 
@@ -434,7 +432,6 @@ def test_oauth_service_declarations_fail_loudly(declared_services):
 
         class HalfDeclared(Service):
             name = "half_declared"
-            title = "Half declared"
             token_endpoint = "https://acme.test/token"
 
             class Settings(BaseModel):
@@ -443,7 +440,6 @@ def test_oauth_service_declarations_fail_loudly(declared_services):
 
     class Plain(Service):
         name = "plain_service"
-        title = "Plain"
 
         class Settings(BaseModel):
             api_key: SecretStr
@@ -452,13 +448,39 @@ def test_oauth_service_declarations_fail_loudly(declared_services):
         Plain.get_oauth_client()
 
 
+def test_abstract_base_shares_declarations_without_registering(declared_services):
+    from druks.extensions.registry import services
+    from druks.services import Service
+    from pydantic import BaseModel, SecretStr
+
+    class AcmeBase(Service):
+        abstract = True
+        authorization_endpoint = "https://acme.test/authorize"
+        token_endpoint = "https://acme.test/token"
+
+        class Settings(BaseModel):
+            client_id: str
+            client_secret: SecretStr
+
+    class Mail(AcmeBase):
+        name = "acme_mail"
+
+    assert services.get("acme_mail") is Mail
+    assert Mail.settings_model is AcmeBase.Settings
+
+    with pytest.raises(TypeError, match="abstract"):
+
+        class Named(Service):
+            abstract = True
+            name = "named_base"
+
+
 def test_with_scopes_declares_the_union_and_reads_connections(declared_services, monkeypatch):
     from druks.services import Service
     from pydantic import BaseModel, SecretStr
 
     class Acme(Service):
         name = "acme"
-        title = "Acme OAuth app"
         authorization_endpoint = "https://acme.test/authorize"
         token_endpoint = "https://acme.test/token"
 
@@ -507,7 +529,6 @@ async def test_get_identity_without_a_declared_endpoint_is_empty(declared_servic
 
     class Quiet(Service):
         name = "quiet_provider"
-        title = "Quiet"
         authorization_endpoint = "https://quiet.test/authorize"
         token_endpoint = "https://quiet.test/token"
 
@@ -524,7 +545,6 @@ def test_with_scopes_requires_oauth_endpoints(declared_services):
 
     class Plain(Service):
         name = "plain_no_oauth"
-        title = "Plain"
 
         class Settings(BaseModel):
             api_key: SecretStr
@@ -543,7 +563,6 @@ def acme(declared_services, monkeypatch):
 
     class Acme(Service):
         name = "acme"
-        title = "Acme OAuth app"
         authorization_endpoint = "https://acme.test/authorize"
         token_endpoint = "https://acme.test/token"
         identity_endpoint = "https://acme.test/whoami"

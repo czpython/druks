@@ -687,9 +687,9 @@ accounts") — and a credential only your extension posts with belongs in your
 extension settings instead.
 
 Declare one class in `services.py` and the platform does the rest: it renders
-the connect card in Settings, verifies and stores the paste (`SecretStr`
-fields land encrypted, plain fields become identity facts), and reports
-`druks doctor` state:
+the connect card in Settings (the heading derives from `name`), verifies and
+stores the paste (`SecretStr` fields land encrypted, plain fields become
+identity facts), and reports `druks doctor` state:
 
 ```python
 from pydantic import BaseModel, Field, SecretStr
@@ -699,7 +699,6 @@ from druks.services import Service, ServiceConnectError
 
 class Gmail(Service):
     name = "gmail"
-    title = "Google OAuth client"
     description = "The appliance's own OAuth client — every mailbox authenticates against it."
 
     class Settings(BaseModel):
@@ -745,7 +744,6 @@ fields:
 ```python
 class Acme(Service):
     name = "acme"
-    title = "Acme OAuth app"
     authorization_endpoint = "https://acme.example/oauth/authorize"
     token_endpoint = "https://acme.example/oauth/token"
     # True = HTTP Basic on the token endpoint. False = secret in the body.
@@ -778,6 +776,34 @@ shape. Override `get_identity` for them:
     async def get_identity(cls, access_token: str) -> dict:
         payload = await fetch_profile(access_token)
         return payload["data"]
+```
+
+One provider can back several services — Google backs both Gmail and Google
+Calendar, and each keeps its own card and its own key. Share the provider's
+declarations through an abstract base. Set `abstract = True`: the base never
+registers, and each subclass inherits everything it declares, `Settings`
+included:
+
+```python
+class GoogleOauth(Service):
+    abstract = True
+    authorization_endpoint = "https://accounts.google.com/o/oauth2/v2/auth"
+    token_endpoint = "https://oauth2.googleapis.com/token"
+    extra_authorize_params = {"access_type": "offline", "prompt": "consent"}
+    identity_endpoint = "https://openidconnect.googleapis.com/v1/userinfo"
+    identity_scopes = ("openid", "email")
+
+    class Settings(BaseModel):
+        client_id: str = Field(title="Client ID")
+        client_secret: SecretStr = Field(title="Client secret")
+
+
+class Gmail(GoogleOauth):
+    name = "gmail"
+
+
+class Calendar(GoogleOauth):
+    name = "google_calendar"
 ```
 
 Declare your extension's use of the service, with the scopes your calls
