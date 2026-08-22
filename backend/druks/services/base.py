@@ -118,6 +118,12 @@ class Service:
     # identity_scopes join the consent ask.
     identity_endpoint: ClassVar[str] = ""
     identity_scopes: ClassVar[tuple[str, ...]] = ()
+    # The identity fact that names the provider account (Google's "sub",
+    # GitHub's "id"). Declared, a fresh sign-in whose identity matches an
+    # existing connection for the same owner lands on that row — live or
+    # revoked — instead of creating a sibling. Undeclared, every fresh
+    # sign-in is a new connection.
+    identity_key: ClassVar[str] = ""
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)

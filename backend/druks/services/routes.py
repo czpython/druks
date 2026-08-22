@@ -126,15 +126,23 @@ async def oauth_callback(state: str = "", code: str = "", error: str = "") -> Re
         raise HTTPException(status_code=400, detail=f"No OAuth service {provider!r}.")
     granted = tokens.get("scope", "").split() or pending["scopes"]
     identity = await service.get_identity(tokens["access_token"])
-    reconsent = bool(pending["connection_id"])
-    if reconsent:
-        row = OauthConnection.get(pending["connection_id"])
+    connection_id = pending["connection_id"]
+    # Two doors land on an existing row: reconsent names it by id, and a
+    # declared identity key matches a fresh sign-in to it. Either returns a
+    # revoked row to life.
+    row = None
+    if connection_id:
+        row = OauthConnection.get(connection_id)
         if not row:
             raise HTTPException(
                 status_code=400, detail="The connection was removed while consent was open."
             )
-        # Reconsent names the row, so it also returns a revoked one to life.
-        # A fresh sign-in never does — it always creates a new connection.
+    elif service.identity_key and (value := identity.get(service.identity_key)):
+        row = OauthConnection.get_for_identity(
+            provider, pending["account_id"], service.identity_key, value
+        )
+    reconsent = bool(row)
+    if row:
         row.reconnect(refresh_token=tokens["refresh_token"], scopes=granted, identity=identity)
         # A token cached before this consent must not serve the new one.
         await OauthClient(provider=provider).evict_access_token(row.id)

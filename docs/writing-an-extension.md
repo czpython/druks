@@ -781,6 +781,12 @@ account's facts (email, username, name). Druks calls it once at consent and
 shows the facts as the connection's label in Settings. `identity_scopes`
 are the scopes that call needs; they join the consent ask.
 
+Declare `identity_key` when one identity fact names the provider account:
+`"sub"` for Google, or `"id"` for GitHub. A fresh sign-in that matches an
+existing connection for the same owner lands on that row instead of
+creating a sibling — a revoked row comes back to life under its old id.
+Without this declaration, every fresh sign-in creates a new connection.
+
 Some providers have no such endpoint, or return the facts in a different
 shape. Override `get_identity` for them:
 
@@ -805,6 +811,7 @@ class GoogleOauth(Service):
     extra_authorize_params = {"access_type": "offline", "prompt": "consent"}
     identity_endpoint = "https://openidconnect.googleapis.com/v1/userinfo"
     identity_scopes = ("openid", "email")
+    identity_key = "sub"
 
     class Settings(BaseModel):
         client_id: str = Field(title="Client ID")
@@ -851,11 +858,12 @@ identity. Your rows never need tombstone copies of either.
 Your UI starts a sign-in by opening `/api/oauth/acme/connect` — the
 platform runs the consent with the union of every installed extension's
 declared scopes and stores the connection for the signed-in user. A fresh
-sign-in always creates a new connection, even for a provider account that
-was connected before. To widen an existing connection's scopes, open
-`/api/oauth/acme/connect?connection=<id>`; reconsent replaces its tokens.
-Reconsent names the row, so it also returns a revoked connection to life
-under its old id — the only way a row comes back.
+sign-in creates a new connection unless the service's `identity_key`
+matches an existing connection for the same owner. To widen an existing
+connection's scopes, open `/api/oauth/acme/connect?connection=<id>`;
+reconsent replaces its tokens. Reconsent names the row, so it returns a
+revoked connection to life under its old id; a fresh sign-in that matches
+the service's `identity_key` does the same.
 Add `?next=/app/night_watch/accounts` to land the user back on your
 page after consent instead of the generic "connected" page. `next`
 must be a bare path starting with `/` — a URL with a scheme or host is
@@ -864,12 +872,13 @@ rejected, so the door can never redirect off the box. Register
 serves every service.
 
 React to sign-ins with the signal machinery. The platform publishes
-`oauth.connected` when a consent completes. `reconsent` is true when it
-replaced an existing connection's tokens, including a revoked row that
-returned to life. It publishes `oauth.disconnected` when a connection is
-revoked — by the user, or because the service's client credentials were
-replaced. Revocation is a state, not a deletion: your subscriber can still
-read the connection it is told about. Subscribe in `subscribers.py`:
+`oauth.connected` when a consent completes. `reconsent` is true when the
+consent replaced an existing connection's tokens. This includes explicit
+reconsent by id and a keyed fresh sign-in, whether the row was live or
+revoked. It publishes `oauth.disconnected` when a connection is revoked —
+by the user, or because the service's client credentials were replaced.
+Revocation is a state, not a deletion: your subscriber can still read the
+connection it is told about. Subscribe in `subscribers.py`:
 
 ```python
 from druks.signals import subscribe
