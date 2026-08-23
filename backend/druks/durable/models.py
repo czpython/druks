@@ -7,7 +7,7 @@ from dbos import DBOS
 from sqlalchemy import ForeignKey, Index, Select, String, func, select, update
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import insert as pg_insert
-from sqlalchemy.orm import Mapped, column_property, mapped_column, relationship
+from sqlalchemy.orm import Mapped, column_property, mapped_column, relationship, selectinload
 
 from druks.accounts.constants import SYSTEM_ACCOUNT_ID
 from druks.accounts.models import Account
@@ -77,6 +77,11 @@ class Run(Base):
     account: Mapped[Account] = relationship(
         lazy="joined", innerjoin=True, foreign_keys=[account_id]
     )
+    # The run's agent calls in execution order — lazy, so a parked board row that
+    # never reads them costs no query; the timeline read eager-loads them.
+    agent_calls: Mapped[list["AgentCall"]] = relationship(
+        back_populates="run", order_by="AgentCall.created_at, AgentCall.id"
+    )
 
     # When the run last changed — the newest of creation, the parked ask, and
     # DBOS's status write.
@@ -95,6 +100,14 @@ class Run(Base):
     @property
     def is_running(self) -> bool:
         return self.state == RunState.RUNNING.value
+
+    def failure_message(self) -> str | None:
+        # A crash leaves failure None by design; the terminal call's captured
+        # error is then the run's real reason.
+        if self.failure:
+            return self.failure
+        if self.state == RunState.FAILED.value and self.agent_calls:
+            return self.agent_calls[-1].last_error
 
     @classmethod
     def create_row(cls, engine, *, workflow_id: str, kind: str, account_id: str | None) -> None:
@@ -116,7 +129,12 @@ class Run(Base):
 
     @classmethod
     def list_for_subject(
-        cls, subject_type: str, subject_id: str, kind: str | None = None
+        cls,
+        subject_type: str,
+        subject_id: str,
+        kind: str | None = None,
+        *,
+        include_calls: bool = False,
     ) -> list["Run"]:
         # Every run about this subject (stamped at start), newest first — a
         # subject's lifecycle spans many runs, so its status is theirs
@@ -132,6 +150,8 @@ class Run(Base):
         )
         if kind:
             stmt = stmt.where(cls.kind == kind)
+        if include_calls:
+            stmt = stmt.options(selectinload(cls.agent_calls))
         return list(db_session().scalars(stmt))
 
     @classmethod
@@ -399,7 +419,7 @@ class AgentCall(Base, Uuid7Pk):
     model: Mapped[str] = mapped_column(String)
     # The run this LLM call ran in. ON DELETE CASCADE, so a call never outlives it.
     run_id: Mapped[str] = mapped_column(ForeignKey("durable_runs.id", ondelete="CASCADE"))
-    run: Mapped["Run"] = relationship()
+    run: Mapped["Run"] = relationship(back_populates="agent_calls")
     # Which agent (registry id: "scope", "implement", …) made this call — the
     # timeline's grouping label. An agent is what makes a call, so there is no
     # unattributed one: the row is written from the registered agent's own id.
@@ -546,18 +566,9 @@ class AgentCall(Base, Uuid7Pk):
 
     @classmethod
     def list_for_run(cls, run_id: str) -> list["AgentCall"]:
-        # Execution order, so the read side zips calls onto their runs.
+        # Execution order — the same order Run.agent_calls loads.
         stmt = select(cls).where(cls.run_id == run_id).order_by(cls.created_at, cls.id)
         return list(db_session().scalars(stmt))
-
-    @classmethod
-    def get_by_run(cls, run_ids: list[str]) -> dict[str, list["AgentCall"]]:
-        # The calls under each run, in execution order — one query for a timeline.
-        stmt = select(cls).where(cls.run_id.in_(run_ids)).order_by(cls.created_at, cls.id)
-        grouped: dict[str, list[AgentCall]] = {run_id: [] for run_id in run_ids}
-        for call in db_session().scalars(stmt):
-            grouped[call.run_id].append(call)
-        return grouped
 
     @classmethod
     def list_for_subject(cls, subject_type: str, subject_id: str) -> list["AgentCall"]:

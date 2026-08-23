@@ -2471,3 +2471,4 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
 .subject-facts { margin-bottom: 14px; }
 .subject-run { border: 1px solid var(--border-soft); border-radius: 6px; padding: 12px 14px; margin-bottom: 12px; }
 .subject-run-head { display: flex; align-items: center; gap: 10px; font-size: 12.5px; margin-bottom: 8px; }
+.subject-run-more { margin: 6px 0; }

@@ -100,7 +100,7 @@ def test_get_ask_resolves_the_review_artifact(druks_db, tmp_path):
     druks_db.flush()
     Artifact.record(call_dir=tmp_path, call_id="call-1", kind="markdown", title="Plan", content="x")
 
-    ask = RunResponse.from_run(run, [], input_request=run.get_ask()).input_request
+    ask = RunResponse.from_run(run, input_request=run.get_ask()).input_request
     assert ask == {
         "presentation": "in_app",
         "controls": ["approve"],
@@ -116,7 +116,7 @@ def test_get_ask_resolves_the_review_artifact(druks_db, tmp_path):
     )
     druks_db.add(external)
     druks_db.flush()
-    response = RunResponse.from_run(external, [], input_request=external.get_ask())
+    response = RunResponse.from_run(external, input_request=external.get_ask())
     assert response.input_request == {
         "presentation": "external",
         "label": "Review implementation",
@@ -126,7 +126,7 @@ def test_get_ask_resolves_the_review_artifact(druks_db, tmp_path):
 def test_run_response_projects_the_parked_gate(druks_db):
     run = seed_run(druks_db, kind=Summarize.kind, run_id="run-gate", input_gate="review")
 
-    response = RunResponse.from_run(run, [], input_request=None)
+    response = RunResponse.from_run(run, input_request=None)
     assert response.gate == "review"
 
 

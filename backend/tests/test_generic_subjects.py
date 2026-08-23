@@ -12,7 +12,7 @@ from druks.testing import seed_dbos_status
 from fastapi import APIRouter
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
-from sqlalchemy import select
+from sqlalchemy import event, select
 from uuid_utils import uuid7
 
 
@@ -203,9 +203,9 @@ def test_status_carries_the_latest_run_failure(client: TestClient, druks_db):
     assert running["failure"] is None
 
 
-def test_parked_board_row_skips_the_agent_call_query(client: TestClient, druks_db, monkeypatch):
+def test_parked_board_row_skips_the_agent_call_query(client: TestClient, druks_db):
     # A parked row's status carries its gate ask, never its latest agent call, so
-    # the per-subject status read must not query agent_calls — the board runs it
+    # the per-subject status read must not load agent_calls — the board runs it
     # for every subject.
     run = _seed_run(
         druks_db,
@@ -216,16 +216,22 @@ def test_parked_board_row_skips_the_agent_call_query(client: TestClient, druks_d
     )
     _seed_call(druks_db, run, agent="generate_plan")
 
-    queried: list[str] = []
-    monkeypatch.setattr(
-        AgentCall,
-        "list_for_run",
-        classmethod(lambda cls, run_id: queried.append(run_id) or []),
-    )
+    call_reads: list[str] = []
 
-    rows = {row["summary"]["id"]: row for row in client.get("/api/faketest/thing").json()["rows"]}
+    def record(conn, cursor, statement, parameters, context, executemany):
+        if "agent_calls" in statement and statement.lstrip().upper().startswith("SELECT"):
+            call_reads.append(statement)
+
+    engine = druks_db.get_bind()
+    event.listen(engine, "before_cursor_execute", record)
+    try:
+        body = client.get("/api/faketest/thing").json()
+    finally:
+        event.remove(engine, "before_cursor_execute", record)
+
+    rows = {row["summary"]["id"]: row for row in body["rows"]}
     assert rows["1"]["status"]["gate"] == "approve_plan"
-    assert queried == []
+    assert call_reads == []
 
 
 def test_list_returns_every_subject_with_status(client: TestClient, druks_db):

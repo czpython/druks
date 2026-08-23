@@ -13,6 +13,7 @@ def _run(
     input_gate: str | None = None,
     failure: str | None = None,
     failure_code: str | None = None,
+    agent_calls: list[AgentCall] | None = None,
 ) -> Run:
     return Run(
         id=id,
@@ -22,12 +23,13 @@ def _run(
         failure=failure,
         failure_code=failure_code,
         account=Account(username="op@example.com"),
+        agent_calls=agent_calls or [],
     )
 
 
-def _status_of(runs, calls=None):
+def _status_of(runs):
     # runs arrives newest-first, mirroring Run.list_for_subject.
-    return _status(runs[0], calls or [])
+    return _status(runs[0])
 
 
 def test_subject_state_takes_the_newest_run():
@@ -74,19 +76,30 @@ def test_status_carries_the_running_runs_kind_and_no_stale_gate():
 
 
 def test_status_carries_the_latest_agent_call_agent():
-    runs = [_run("new", "ship.build", RunState.RUNNING)]
-    calls = [AgentCall(agent="generate_plan"), AgentCall(agent="implement")]
-    assert _status_of(runs, calls).agent == "implement"
-
-
-def test_parked_status_carries_no_agent_even_when_calls_are_handed_in():
-    # The detail read passes the parked run's calls; the fact stays consistent
-    # with the board, where a parked row never queries them.
     runs = [
-        _run("new", "ship.build", RunState.PARKED, "review"),
+        _run(
+            "new",
+            "ship.build",
+            RunState.RUNNING,
+            agent_calls=[AgentCall(agent="generate_plan"), AgentCall(agent="implement")],
+        )
     ]
-    calls = [AgentCall(agent="implement")]
-    status = _status_of(runs, calls)
+    assert _status_of(runs).agent == "implement"
+
+
+def test_parked_status_carries_no_agent_even_when_the_run_has_calls():
+    # A parked run keeps its calls, but the status never reads them — the fact
+    # stays consistent with the board, where a parked row never queries them.
+    runs = [
+        _run(
+            "new",
+            "ship.build",
+            RunState.PARKED,
+            "review",
+            agent_calls=[AgentCall(agent="implement")],
+        )
+    ]
+    status = _status_of(runs)
     assert not status.agent
     assert status.gate == "review"
 
@@ -109,3 +122,17 @@ def test_status_carries_failure_but_no_reason_when_the_run_crashed():
     status = _status_of(runs)
     assert not status.reason
     assert status.failure == "boom"
+
+
+def test_status_falls_back_to_the_terminal_call_error_when_failure_is_null():
+    # A crash leaves run.failure null; the terminal call's captured error becomes
+    # the status reason so the board never shows a bare "failed".
+    runs = [
+        _run(
+            "new",
+            Summarize.kind,
+            RunState.FAILED,
+            agent_calls=[AgentCall(agent="implement", last_error="crashed in implement")],
+        )
+    ]
+    assert _status_of(runs).failure == "crashed in implement"
