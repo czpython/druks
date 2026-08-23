@@ -17,13 +17,13 @@ from fastapi.testclient import TestClient
 
 
 @pytest.fixture
-def extension_settings(tmp_path: Path) -> Settings:
+def app_settings(tmp_path: Path) -> Settings:
     return make_settings(tmp_path)
 
 
 @pytest.fixture
-def client(extension_settings: Settings):
-    with TestClient(configure_app_for_test(settings=extension_settings)) as c:
+def client(app_settings: Settings):
+    with TestClient(configure_app_for_test(settings=app_settings)) as c:
         yield c
 
 
@@ -81,7 +81,7 @@ def test_get_usage_empty_returns_available_false(client) -> None:
     assert all(entry["available"] is False for entry in body["harnesses"])
 
 
-def test_get_usage_serializes_latest_per_harness(client, extension_settings) -> None:
+def test_get_usage_serializes_latest_per_harness(client, app_settings) -> None:
     # Plant a snapshot for claude only — codex should still report
     # ``available=false`` rather than missing-key/404.
     _seed(
@@ -120,7 +120,7 @@ def test_get_usage_serializes_latest_per_harness(client, extension_settings) -> 
     assert _harness(body, "codex")["available"] is False
 
 
-def test_get_usage_flags_stale_after_24h(client, extension_settings) -> None:
+def test_get_usage_flags_stale_after_24h(client, app_settings) -> None:
     _seed(
         [
             UsageScrape(
@@ -136,7 +136,7 @@ def test_get_usage_flags_stale_after_24h(client, extension_settings) -> None:
     assert _harness(body, "claude")["stale"] is True
 
 
-def test_get_usage_exposes_unlimited_flag(client, extension_settings) -> None:
+def test_get_usage_exposes_unlimited_flag(client, app_settings) -> None:
     # Codex business plan: scraper synthesizes permanently-full buckets
     # and marks the row unmetered so the UI can render "unmetered"
     # instead of a quota bar that never moves.
@@ -159,7 +159,7 @@ def test_get_usage_exposes_unlimited_flag(client, extension_settings) -> None:
     assert _harness(body, "claude")["unlimited"] is False
 
 
-def test_usage_history_serializes_series_oldest_first(client, extension_settings) -> None:
+def test_usage_history_serializes_series_oldest_first(client, app_settings) -> None:
     now = datetime.now(UTC)
     snaps = [
         UsageScrape(
@@ -214,7 +214,7 @@ def test_usage_history_serializes_series_oldest_first(client, extension_settings
 
 
 def test_usage_today_aggregates_spend_and_tokens_by_provider(
-    client, extension_settings, druks_db
+    client, app_settings, druks_db
 ) -> None:
     codex_run = _seed_agent_call(druks_db, model="gpt-5.5")
     codex_run.account_id = _account_id()

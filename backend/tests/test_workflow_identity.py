@@ -1,14 +1,14 @@
 import pytest
+from druks.apps import loader as apps_loader
+from druks.apps.exceptions import MalformedApp
+from druks.apps.loader import register_workflow_package, resolve_workflow_app
+from druks.apps.registry import workflows
 from druks.core.workflows import RefreshTokens
 from druks.durable.enums import RunState
 from druks.durable.exceptions import WorkflowError
 from druks.durable.models import Run
 from druks.durable.schemas import get_display_label
 from druks.events.models import Event
-from druks.extensions import loader as extensions_loader
-from druks.extensions.exceptions import MalformedExtension
-from druks.extensions.loader import register_workflow_package, resolve_workflow_extension
-from druks.extensions.registry import workflows
 from druks.workflows import Gate, Workflow, _log_run_event, step
 from druks_field_notes.models import Note
 
@@ -16,12 +16,12 @@ from druks_field_notes.models import Note
 @pytest.fixture(autouse=True)
 def _isolated_registrations():
     # Every test here mutates the package-owner map and the workflows registry;
-    # restore both so the suite keeps seeing only the installed extensions.
-    packages = dict(extensions_loader._workflow_packages)
+    # restore both so the suite keeps seeing only the installed apps.
+    packages = dict(apps_loader._workflow_packages)
     items = dict(workflows._items)
     yield
-    extensions_loader._workflow_packages.clear()
-    extensions_loader._workflow_packages.update(packages)
+    apps_loader._workflow_packages.clear()
+    apps_loader._workflow_packages.update(packages)
     workflows._items = items
 
 
@@ -43,39 +43,39 @@ def test_a_gate_without_a_pinned_name_raises():
 def test_registration_is_idempotent_and_conflicts_loudly():
     register_workflow_package("alpha_pkg", "alpha")
     register_workflow_package("alpha_pkg", "alpha")
-    with pytest.raises(MalformedExtension, match="already belongs"):
+    with pytest.raises(MalformedApp, match="already belongs"):
         register_workflow_package("alpha_pkg", "beta")
 
 
 def test_overlapping_ownership_across_owners_is_rejected():
     register_workflow_package("alpha_pkg", "alpha")
-    with pytest.raises(MalformedExtension, match="overlaps"):
+    with pytest.raises(MalformedApp, match="overlaps"):
         register_workflow_package("alpha_pkg.nested", "beta")
 
 
 def test_resolution_matches_package_boundaries():
     register_workflow_package("alpha_pkg", "alpha")
-    assert resolve_workflow_extension("alpha_pkg.workflows") == "alpha"
+    assert resolve_workflow_app("alpha_pkg.workflows") == "alpha"
     with pytest.raises(LookupError):
-        resolve_workflow_extension("alpha_pkg_sibling.workflows")
+        resolve_workflow_app("alpha_pkg_sibling.workflows")
 
 
 def test_unregistered_module_fails_at_class_definition():
     # The error carries the invariant: load through the loader, or register first.
-    with pytest.raises(WorkflowError, match="druks.extensions.loader"):
+    with pytest.raises(WorkflowError, match="druks.apps.loader"):
         _workflow("Orphan", "nowhere.workflows")
 
 
-def test_declaring_extension_namespaces_the_kind():
+def test_declaring_app_namespaces_the_kind():
     register_workflow_package("alpha_pkg", "alpha")
     register_workflow_package("beta_pkg", "beta")
 
     alpha = _workflow("Summarize", "alpha_pkg.workflows")
     beta = _workflow("Summarize", "beta_pkg.workflows")
 
-    # Two extensions can share a local workflow name without colliding on kind.
-    assert (alpha.extension, alpha.kind) == ("alpha", "alpha.summarize")
-    assert (beta.extension, beta.kind) == ("beta", "beta.summarize")
+    # Two apps can share a local workflow name without colliding on kind.
+    assert (alpha.app, alpha.kind) == ("alpha", "alpha.summarize")
+    assert (beta.app, beta.kind) == ("beta", "beta.summarize")
 
 
 def test_explicit_kind_is_a_local_suffix():
@@ -93,7 +93,7 @@ def test_dotted_explicit_kind_is_rejected():
 def test_none_owned_package_keeps_bare_kinds():
     register_workflow_package("plain_pkg", None)
     flow = _workflow("Sweep", "plain_pkg.workflows")
-    assert flow.extension is None
+    assert flow.app is None
     assert flow.kind == "sweep"
 
 
@@ -103,7 +103,7 @@ def test_in_tree_identities_are_stable():
     assert workflows.get("ship.build") is not None
     assert workflows.get("ship.profile") is not None
     assert RefreshTokens.kind == "core.refresh_tokens"
-    assert (workflows.get("ship.build").extension, RefreshTokens.extension) == ("ship", "core")
+    assert (workflows.get("ship.build").app, RefreshTokens.app) == ("ship", "core")
 
 
 def test_steps_capture_the_namespaced_kind():
@@ -127,8 +127,8 @@ def test_steps_capture_the_namespaced_kind():
     assert "alpha.pinger" in captured
 
 
-def test_lifecycle_event_stamps_the_declaring_extension(druks_db):
-    # The event's extension derives from the run's kind through the registry —
+def test_lifecycle_event_stamps_the_declaring_app(druks_db):
+    # The event's app derives from the run's kind through the registry —
     # never an argument, never a stored copy on the run.
     register_workflow_package("alpha_pkg", "alpha")
     flow = _workflow("Beacon", "alpha_pkg.workflows")
@@ -140,7 +140,7 @@ def test_lifecycle_event_stamps_the_declaring_extension(druks_db):
 
     event = druks_db.query(Event).filter_by(type="workflow.finished").one()
     assert payload["run"] == run.id
-    assert event.extension == "alpha"
+    assert event.app == "alpha"
 
 
 def test_display_label_reads_the_local_kind():

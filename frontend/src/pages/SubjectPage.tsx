@@ -15,12 +15,12 @@ import { StatusGlyph } from '../components/StatusGlyph'
 import { relTimeFromIso } from '../lib/format'
 import { summaryEntries } from '../lib/summary'
 
-// The generic subject page any installed extension gets without shipping UI: the
+// The generic subject page any installed app gets without shipping UI: the
 // summary as facts, the run timeline, the newest run's transcript, and the gate
 // controls when a run parks on the operator.
 
 interface Props {
-  extension: string
+  app: string
   subjectType: string
   subjectId: string
 }
@@ -28,15 +28,15 @@ interface Props {
 const isActiveRun = (run: RunSummary) =>
   run.state === 'running' || run.state === 'parked' || run.state === 'scheduled'
 
-export function SubjectPage({ extension, subjectType, subjectId }: Props) {
+export function SubjectPage({ app, subjectType, subjectId }: Props) {
   const queryClient = useQueryClient()
   const queryKey = useMemo(
-    () => ['subject', extension, subjectType, subjectId] as const,
-    [extension, subjectType, subjectId],
+    () => ['subject', app, subjectType, subjectId] as const,
+    [app, subjectType, subjectId],
   )
   const query = useQuery({
     queryKey,
-    queryFn: () => subjectApi.read(extension, subjectType, subjectId),
+    queryFn: () => subjectApi.read(app, subjectType, subjectId),
   })
 
   // Push-driven cache, same as every detail page: the stream re-emits the whole
@@ -47,7 +47,7 @@ export function SubjectPage({ extension, subjectType, subjectId }: Props) {
     },
     [queryClient, queryKey],
   )
-  useSSE(subjectApi.stream(extension, subjectType, subjectId), {
+  useSSE(subjectApi.stream(app, subjectType, subjectId), {
     handlers: useMemo(() => ({ snapshot: patchSnapshot }), [patchSnapshot]),
     onError: () => {
       queryClient.invalidateQueries({ queryKey }).catch(() => {})
@@ -65,7 +65,7 @@ export function SubjectPage({ extension, subjectType, subjectId }: Props) {
   const runs = [...data.timeline].reverse()
   const crumb = (
     <div className="ins-crumb">
-      <Link href={`/${extension}`} className="ins-crumb-back">
+      <Link href={`/${app}`} className="ins-crumb-back">
         ← {label}
       </Link>
     </div>
@@ -86,7 +86,7 @@ export function SubjectPage({ extension, subjectType, subjectId }: Props) {
         <EmptyState glyph="∅" msg="no runs yet" />
       ) : (
         runs.map((run, index) => (
-          <RunBlock key={run.id} extension={extension} run={run} withTranscript={index === 0} />
+          <RunBlock key={run.id} app={app} run={run} withTranscript={index === 0} />
         ))
       )}
     </Page>
@@ -94,11 +94,11 @@ export function SubjectPage({ extension, subjectType, subjectId }: Props) {
 }
 
 function RunBlock({
-  extension,
+  app,
   run,
   withTranscript,
 }: {
-  extension: string
+  app: string
   run: RunSummary
   withTranscript: boolean
 }) {
@@ -135,7 +135,7 @@ function RunBlock({
       )}
       {withTranscript && call && (
         <RunTranscript
-          basePath={subjectApi.transcriptBase(extension, call.id)}
+          basePath={subjectApi.transcriptBase(app, call.id)}
           isLive={call.status === 'running'}
         />
       )}

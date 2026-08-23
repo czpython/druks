@@ -380,7 +380,7 @@ def test_manifest_callback_rejects_a_dead_code(druks_client: TestClient, druks_d
 def declared_services():
     # Service subclasses self-register at class definition; tests declare
     # inside this fixture and leave the registry as found.
-    from druks.extensions.registry import services
+    from druks.apps.registry import services
 
     saved = dict(services._items)
     yield
@@ -456,7 +456,7 @@ def test_oauth_service_declarations_fail_loudly(declared_services):
 
 
 def test_abstract_base_shares_declarations_without_registering(declared_services):
-    from druks.extensions.registry import services
+    from druks.apps.registry import services
     from druks.services import Service
     from pydantic import BaseModel, SecretStr
 
@@ -503,7 +503,7 @@ def test_with_scopes_declares_the_union_and_reads_connections(declared_services,
         name = "digest"
         acme = Acme.with_scopes("profile.read")
 
-    monkeypatch.setattr("druks.services.base.iter_extensions", lambda: [NightWatch, Digest])
+    monkeypatch.setattr("druks.services.base.iter_apps", lambda: [NightWatch, Digest])
 
     assert NightWatch.acme.scopes == ("profile.read", "posts.write")
     assert Acme.required_scopes() == ("posts.write", "profile.read")
@@ -587,7 +587,7 @@ def acme(declared_services, monkeypatch):
         name = "night_watch"
         acme = Acme.with_scopes("profile.read", "posts.write")
 
-    monkeypatch.setattr("druks.services.base.iter_extensions", lambda: [NightWatch])
+    monkeypatch.setattr("druks.services.base.iter_apps", lambda: [NightWatch])
     tokens = {
         "access_token": "at-1",
         "refresh_token": "rt-1",
@@ -1146,7 +1146,7 @@ def test_list_serves_the_connections_beside_the_declared_union(tmp_path, acme, d
         assert connection["connectedAt"]
 
 
-def test_next_lands_the_user_back_on_the_extension_page(tmp_path, acme, druks_db):
+def test_next_lands_the_user_back_on_the_app_page(tmp_path, acme, druks_db):
     from urllib.parse import parse_qsl, urlparse
 
     from druks.testing import configure_app_for_test

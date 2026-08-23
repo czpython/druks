@@ -68,7 +68,7 @@ class _FakeSFTP:
             raise _FakeSFTPNoSuchFile()
         return _FakeAttrs(size=len(self.vm.files[path]))
 
-    def open(self, path: str, extension: str = "rb") -> _FakeFileHandle:
+    def open(self, path: str, app: str = "rb") -> _FakeFileHandle:
         # asyncssh returns an awaitable that resolves to a file handle
         # supporting async context manager + async read. We collapse
         # that to a directly-returned object because the runner uses

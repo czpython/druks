@@ -28,7 +28,7 @@ class RetryRunResponse(BaseResponse):
 
 
 class OpenWorkflowResponse(BaseResponse):
-    extension: str
+    app: str
     state: RunState
     run: str = Field(description="What get_gate, cancel_run, and retry_run take.")
     latest_agent_call: str | None = Field(

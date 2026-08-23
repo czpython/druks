@@ -18,7 +18,7 @@ requires-python = ">=3.11"
 dependencies = [
     "asyncssh>=2.22",
     "drukbox-python-sdk>=0.0.6",
-    # 0.138 adds app.frontend(), which serves an extension's shipped dist/.
+    # 0.138 adds app.frontend(), which serves an app's shipped dist/.
     "fastapi>=0.138.0",
     "githubkit[auth-app]>=0.15.5",
     "httpx>=0.28.0",
@@ -62,15 +62,15 @@ druks = "druks.cli:main"
 [project.entry-points.pytest11]
 druks = "druks.testing"
 
-# Extensions are discovered here. An extension (in-tree today, a separate package
-# tomorrow) registers one Extension subclass; the platform loads them at startup and
-# walks each one's package for capabilities. Adding an extension is one entry, not
+# Apps are discovered here. An app (in-tree today, a separate package
+# tomorrow) registers one App subclass; the platform loads them at startup and
+# walks each one's package for capabilities. Adding an app is one entry, not
 # edits across the platform wiring.
-[project.entry-points."druks.extensions"]
-core = "druks.core.extension:Core"
-review = "druks.contrib.review.extension:Review"
-ship = "druks.contrib.ship.extension:Ship"
-usage = "druks.usage.extension:Usage"
+[project.entry-points."druks.apps"]
+core = "druks.core.app:Core"
+review = "druks.contrib.review.app:Review"
+ship = "druks.contrib.ship.app:Ship"
+usage = "druks.usage.app:Usage"
 
 [build-system]
 requires = ["hatchling"]
@@ -123,7 +123,7 @@ include = ["backend"]
 # its loose mocks (call_args, SimpleNamespace-as-Request) are false-positive noise
 # that drowns the real signal in backend/druks.
 exclude = ["backend/tests"]
-# The proof extension (backend/tests/druks-field_notes) is a standalone package; its
+# The proof app (backend/tests/druks-field_notes) is a standalone package; its
 # root is on the path so its intra-package imports and the tests that load it resolve.
 extraPaths = ["backend", "backend/tests", "backend/tests/druks-field_notes"]
 typeCheckingMode = "standard"

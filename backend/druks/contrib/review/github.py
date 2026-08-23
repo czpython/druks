@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from typing import Literal
 
-from druks.contrib.review.extension import Review
+from druks.contrib.review.app import Review
 from druks.core.apis.github import GitHubClient, get_github_client
 from druks.settings import load_settings
 

@@ -108,11 +108,11 @@ async def test_get_workspace_kwargs_clones_primary_only(monkeypatch: pytest.Monk
 
     workflow = Build()
     workflow.input = Build._run_input_model()
-    workflow.subject = SimpleNamespace(repo="o/extension")
+    workflow.subject = SimpleNamespace(repo="o/app")
     workflow._profile = {"recommended_skills": ["python-house-rules"]}
     kwargs = await workflow.get_workspace_kwargs(sandbox)
 
-    assert ensured == ["https://github.com/o/extension"]
+    assert ensured == ["https://github.com/o/app"]
     assert ["mkdir", "-p", get_related_root("exedev")] in execs
     assert kwargs["mcp_token"] == "ghs_review"
     assert kwargs["skills"] == ("python-house-rules",)
@@ -138,7 +138,7 @@ async def test_get_workspace_kwargs_fails_loudly_when_the_token_wont_mint(
 
     workflow = Build()
     workflow.input = Build._run_input_model()
-    workflow.subject = SimpleNamespace(repo="o/extension")
+    workflow.subject = SimpleNamespace(repo="o/app")
     workflow._profile = {"recommended_skills": ["python-house-rules"]}
 
     with pytest.raises(FatalError, match="github MCP server"):

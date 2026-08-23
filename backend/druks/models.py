@@ -41,7 +41,7 @@ class Base(DeclarativeBase):
 
 
 class StoredSubject(Base):
-    """A row an extension's runs are about — a work item, a repo, a document.
+    """A row an app's runs are about — a work item, a repo, a document.
     Subclass it instead of ``Base``: the class name is the subject type, so
     ``WorkItem`` is ``work_item``."""
 
@@ -87,7 +87,7 @@ class StoredSubject(Base):
         return db_session().get(cls, key)
 
     def get_summary(self) -> "SubjectSummary":
-        """The header its board and page show it under — the extension's own fields;
+        """The header its board and page show it under — the app's own fields;
         the read side composes it with the platform's status and timeline."""
         raise NotImplementedError(
             f"a workflow declares {type(self).__name__}, so it needs a get_summary()"
@@ -97,7 +97,7 @@ class StoredSubject(Base):
     def list_summaries(cls, account_id: str | None) -> "Sequence[SubjectSummary]":
         """The rows on this class's board, newest-movement first, each as its domain
         summary. ``account_id`` is the caller, or None outside a request. A shared
-        board ignores it. Returns a covariant ``Sequence`` so an extension can return
+        board ignores it. Returns a covariant ``Sequence`` so an app can return
         a ``list`` of its own ``SubjectSummary`` subclass. Required once a workflow
         declares it."""
         raise NotImplementedError(
@@ -122,7 +122,7 @@ class StoredSubject(Base):
     @classmethod
     def list_open(cls, *, limit: int = 50) -> list[Self]:
         """The rows whose newest run hasn't handed off — still going, or failed
-        and wanting the operator. What an extension's active view lists."""
+        and wanting the operator. What an app's active view lists."""
         # Cycle: the durable read side is built on this module's Base.
         from druks.database import db_session
         from druks.durable.models import Run

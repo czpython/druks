@@ -131,7 +131,7 @@ def _running_calls(run: Run | None) -> list[AgentCall]:
 
 
 def _status(driving_run: Run | None, calls: list[AgentCall]) -> SubjectStatus:
-    # Facts only: the extension's UI renders its copy from them.
+    # Facts only: the app's UI renders its copy from them.
     if not driving_run:
         return SubjectStatus(state=RunState.SCHEDULED)
     # A parked run is always the active one (ACTIVE_STATES), so the
@@ -215,7 +215,7 @@ async def stream_transcript(
 ) -> AsyncIterator[str]:
     # Tail an agent call's log from ``offset``, emitting each new slice as a
     # ``transcript.chunk`` and closing with ``agent_call.finished`` once the call reaches
-    # a terminal state. The platform owns the call's log, so an extension supplies only the
+    # a terminal state. The platform owns the call's log, so an app supplies only the
     # call id — no resolver, no poll loop. Keepalive comments cover idle ticks. Each poll
     # re-derives the call's status off its run, so a call left unfinished when its run
     # went terminal reads "abandoned" and closes the stream on the next tick.

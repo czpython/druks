@@ -1,0 +1,13 @@
+from druks.apps import App
+
+
+class {{ Name }}(App):
+    name = "{{ name }}"
+    # Any Lucide glyph name the frontend bundles ("telescope", "hammer", ...).
+    icon = "box"
+    description = "TODO: one-line blurb shown in the settings pane."
+
+    # Operator-tunable knobs go on an inner ``class Settings(AppSettings)``
+    # after importing AppSettings from druks.apps —
+    # the platform picks up an inner class named ``Settings`` and turns its fields
+    # (default + type + constraints + title/description) into overridable settings.

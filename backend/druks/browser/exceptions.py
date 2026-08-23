@@ -23,7 +23,7 @@ class BrowserSessionNotReadyError(Exception):
 
 
 class BrowserSessionSignedOutError(FatalError):
-    # Raised by extension code inside a borrow when the site bounced the login.
+    # Raised by app code inside a borrow when the site bounced the login.
     # The door stamps which session; the run fails under this code and announces
     # the bounce, and a subscriber marks the session stale. Nothing to catch.
     code = "browser_session_signed_out"
@@ -57,7 +57,7 @@ class BrowserSessionWriterLockedError(Exception):
 class BrowserClientMissingError(Exception):
     def __init__(self, name: str) -> None:
         super().__init__(
-            f"{name}.browser() drives the session with playwright, which the extension "
+            f"{name}.browser() drives the session with playwright, which the app "
             "supplies — add playwright to its dependencies, or use .cdp() with another client."
         )
 

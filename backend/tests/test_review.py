@@ -2,12 +2,12 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from druks.apps.settings import field_kind, field_multiline
 from druks.contrib.review import subscribers  # noqa: F401 — the import registers it
+from druks.contrib.review.app import Review, check_review_identity
 from druks.contrib.review.datastructures import PullRequest
-from druks.contrib.review.extension import Review, check_review_identity
 from druks.contrib.review.github import get_review_actor
 from druks.contrib.review.workflows import PullRequestReview
-from druks.extensions.settings import field_kind, field_multiline
 from druks.prompts import render_prompt
 from druks.services.exceptions import ServiceNotConnectedError
 from druks.services.models import ServiceIdentity
@@ -51,7 +51,7 @@ def test_a_pull_request_heads_its_own_page():
 
 
 def test_the_pull_request_board_and_page_mount(client: TestClient, druks_db):
-    # PullRequestReview declares PullRequest, so the extension mounts its board and
+    # PullRequestReview declares PullRequest, so the app mounts its board and
     # page — keyed by a handle that carries both a path separator and a `#`.
     pull_request = PullRequest.get("acme/app", 7)
     seed_run(druks_db, kind=PullRequestReview.kind, subject=pull_request, state="running")
@@ -139,7 +139,7 @@ def _connect_operator() -> None:
 
 
 def _set_review_setting(field: str, value: str) -> None:
-    SettingsOverride.set_extension_setting("review", field, value, is_secret=True)
+    SettingsOverride.set_app_setting("review", field, value, is_secret=True)
 
 
 def test_a_configured_review_identity_approves(druks_db):

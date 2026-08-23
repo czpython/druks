@@ -5,15 +5,15 @@ from pathlib import Path
 from jinja2 import Environment, FileSystemLoader, PrefixLoader, StrictUndefined
 from jinja2.sandbox import ImmutableSandboxedEnvironment
 
-from druks.extensions.fetcher import fetch_file
-from druks.extensions.loader import iter_extensions
+from druks.apps.fetcher import fetch_file
+from druks.apps.loader import iter_apps
 
 
 @functools.cache
 def _environment() -> Environment:
-    # One Jinja environment over every installed extension's own ``templates`` root,
-    # each mounted under the extension's name: ``ship/build/implement.md`` is
-    # ``build/implement.md`` inside ship's package, so nothing repeats the extension in
+    # One Jinja environment over every installed app's own ``templates`` root,
+    # each mounted under the app's name: ``ship/build/implement.md`` is
+    # ``build/implement.md`` inside ship's package, so nothing repeats the app in
     # its own tree. Overrides resolved as strings via ``from_string`` still see the
     # loader for ``{% include %}`` against partials.
     #
@@ -23,7 +23,7 @@ def _environment() -> Environment:
     # ``workspace`` objects in context. Bundled templates only read public attributes,
     # so the sandbox is invisible to them.
     return ImmutableSandboxedEnvironment(
-        loader=PrefixLoader(_extension_template_roots()),
+        loader=PrefixLoader(_app_template_roots()),
         autoescape=False,
         undefined=StrictUndefined,
         keep_trailing_newline=True,
@@ -32,15 +32,15 @@ def _environment() -> Environment:
     )
 
 
-def _extension_template_roots() -> dict[str, FileSystemLoader]:
+def _app_template_roots() -> dict[str, FileSystemLoader]:
     roots: dict[str, FileSystemLoader] = {}
-    for extension in iter_extensions():
-        spec = importlib.util.find_spec(extension.package)
+    for app in iter_apps():
+        spec = importlib.util.find_spec(app.package)
         if not spec or not spec.submodule_search_locations:
             continue
         root = Path(spec.submodule_search_locations[0]) / "templates"
         if root.is_dir():
-            roots[extension.name] = FileSystemLoader(root)
+            roots[app.name] = FileSystemLoader(root)
     return roots
 
 
@@ -55,9 +55,9 @@ async def render_prompt(
 
     Resolution order (first found wins), always against default branches:
 
-    1. ``<repo>/.druks/<extension>/prompts/<rest>``           — repo-specific tuning
-    2. ``<owner>/.druks`` repo ``<extension>/prompts/<rest>`` — org-wide tuning
-    3. ``<rest>`` under the extension's own ``<package>/templates`` root — built-in baseline
+    1. ``<repo>/.druks/<app>/prompts/<rest>``           — repo-specific tuning
+    2. ``<owner>/.druks`` repo ``<app>/prompts/<rest>`` — org-wide tuning
+    3. ``<rest>`` under the app's own ``<package>/templates`` root — built-in baseline
 
     A 404 at a tier silently falls through to the next. Auth or network
     failures propagate — those are real misconfigurations and the
@@ -75,7 +75,7 @@ async def render_prompt(
 
 
 async def _resolve_override(name: str, *, repo: str | None) -> str | None:
-    namespaced = _extension_prompt_path(name)
+    namespaced = _app_prompt_path(name)
     if not repo or not namespaced:
         return None
     owner = repo.partition("/")[0]
@@ -85,12 +85,12 @@ async def _resolve_override(name: str, *, repo: str | None) -> str | None:
     return await fetch_file(repo=f"{owner}/.druks", path=namespaced)
 
 
-def _extension_prompt_path(name: str) -> str | None:
+def _app_prompt_path(name: str) -> str | None:
     """Where a bundled template's repo override lives. Bundled prompts are
-    namespaced by extension (``<extension>/<rest>``), and an extension owns ``.druks/<extension>/``,
-    so the override is ``<extension>/prompts/<rest>`` — derived from the name, no table
-    to keep in sync. A name with no extension segment (no ``/``) isn't overridable."""
-    extension, _, rest = name.partition("/")
+    namespaced by app (``<app>/<rest>``), and an app owns ``.druks/<app>/``,
+    so the override is ``<app>/prompts/<rest>`` — derived from the name, no table
+    to keep in sync. A name with no app segment (no ``/``) isn't overridable."""
+    app, _, rest = name.partition("/")
     if not rest:
         return None
-    return f"{extension}/prompts/{rest}"
+    return f"{app}/prompts/{rest}"

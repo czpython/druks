@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from druks.apps.registry import browser_sessions
 from druks.browser.constants import (
     SESSION_EXPORT_TIMEOUT_SECONDS,
     SESSION_LAUNCH_TIMEOUT_SECONDS,
@@ -18,7 +19,6 @@ from druks.browser.exceptions import (
 )
 from druks.browser.locks import acquire_writer_lock, release_writer_lock
 from druks.browser.models import StoredBrowserSession
-from druks.extensions.registry import browser_sessions
 from druks.sandbox.client import sandbox_client
 from druks.settings import load_settings
 
@@ -28,10 +28,10 @@ CDP_PORT = 9222
 
 @dataclass
 class BrowserSession:
-    """A named browser login the extension's runs borrow.
+    """A named browser login the app's runs borrow.
 
-    Declared on the Extension class — ``acme = BrowserSession(site="acme.example")``
-    — the attribute name and the extension's name become the session's identity
+    Declared on the App class — ``acme = BrowserSession(site="acme.example")``
+    — the attribute name and the app's name become the session's identity
     (``night_watch.acme``). The operator signs in once through the login window;
     a workflow then borrows the logged-in browser::
 
@@ -73,7 +73,7 @@ class BrowserSession:
                 try:
                     yield f"http://127.0.0.1:{listener.get_port()}"
                 except BrowserSessionSignedOutError as error:
-                    # The extension says the login bounced; only the door knows
+                    # The app says the login bounced; only the door knows
                     # which session that was. The run machinery does the rest.
                     error.session_name = self.name
                     raise
@@ -91,7 +91,7 @@ class BrowserSession:
         """The logged-in browser context, driven with playwright — the usual
         door. The login lives in this context, so pages opened on it
         (``await browser.new_page()``) are signed in. Playwright comes from
-        the extension's own dependencies; ``cdp()`` yields the raw url for any
+        the app's own dependencies; ``cdp()`` yields the raw url for any
         other client."""
         try:
             import playwright.async_api as playwright_api  # pyright: ignore[reportMissingImports]

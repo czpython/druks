@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 
 import pytest
-from druks.extensions.registry import mcp_servers
+from druks.apps.registry import mcp_servers
 from druks.harnesses.claude import ClaudeHarness
 from druks.harnesses.codex import CodexHarness
 from druks.harnesses.datastructures import SandboxSettings

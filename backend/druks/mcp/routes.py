@@ -5,8 +5,8 @@ from fastapi import APIRouter, Body, HTTPException, Request
 from fastapi.responses import HTMLResponse
 
 from druks.accounts.context import current_account_id
+from druks.apps.registry import mcp_servers
 from druks.core.templates import render_page
-from druks.extensions.registry import mcp_servers
 from druks.mcp import oauth, registry
 from druks.mcp.enums import IdentityMode, TokenSource
 from druks.mcp.exceptions import (

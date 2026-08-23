@@ -3,10 +3,10 @@ from typing import Any, ClassVar
 
 from pydantic import BaseModel, ValidationError
 
-from druks.extensions.base import NAME_RE
-from druks.extensions.loader import iter_extensions
-from druks.extensions.registry import services
-from druks.extensions.settings import field_kind, field_multiline
+from druks.apps.base import NAME_RE
+from druks.apps.loader import iter_apps
+from druks.apps.registry import services
+from druks.apps.settings import field_kind, field_multiline
 
 from .exceptions import ServiceConnectError, ServiceNotConnectedError
 from .models import OauthConnection, ServiceIdentity
@@ -17,7 +17,7 @@ _CAMEL_BOUNDARY = re.compile(r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])")
 
 
 class Connection:
-    """One signed-in provider account, reached through the extension's
+    """One signed-in provider account, reached through the app's
     declared handle. ``get_access_token`` and ``disconnect`` act on this
     sign-in only."""
 
@@ -55,7 +55,7 @@ class Connection:
 
 
 class ScopedService:
-    """A service seen through one extension's declared scopes
+    """A service seen through one app's declared scopes
     (``gmail = Gmail.with_scopes("gmail.readonly")``). The declaration
     feeds the consent union; the handle reads the connections that grant
     it."""
@@ -93,7 +93,7 @@ class Service:
     ``Gmail.get().secrets["client_secret"]``.
 
     Used as a class, never instantiated — the same install-singleton shape as
-    ``Extension``.
+    ``App``.
     """
 
     # Keys the service_identities row and the connect wire. Druks derives it
@@ -110,7 +110,7 @@ class Service:
     # Set both endpoints when the registered app is an OAuth client;
     # ``get_oauth_client()`` then hands back the connected identity as a
     # configured ``OauthClient``. Scopes are not declared here — the
-    # extensions that use the service declare them (``with_scopes``), and
+    # apps that use the service declare them (``with_scopes``), and
     # the connect door asks for their union.
     authorization_endpoint: ClassVar[str] = ""
     token_endpoint: ClassVar[str] = ""
@@ -203,7 +203,7 @@ class Service:
 
     @classmethod
     def with_scopes(cls, *scopes: str) -> ScopedService:
-        """Declare this extension's use of the service and the scopes its
+        """Declare this app's use of the service and the scopes its
         calls need."""
         if not cls.token_endpoint:
             raise TypeError(f"{cls.__name__} declares no OAuth endpoints")
@@ -213,8 +213,8 @@ class Service:
     def declarations(cls) -> "list[ScopedService]":
         return [
             value
-            for extension in iter_extensions()
-            for value in vars(extension).values()
+            for app in iter_apps()
+            for value in vars(app).values()
             if isinstance(value, ScopedService) and value.service is cls
         ]
 

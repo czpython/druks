@@ -10,7 +10,7 @@
     /* Bundler mode */
     "moduleResolution": "bundler",
     "allowImportingTsExtensions": true,
-    /* Mirrors vite.config.ts's resolve.alias, so a bundled extension importing
+    /* Mirrors vite.config.ts's resolve.alias, so a bundled app importing
        '@druks/ui' typechecks against the same shim the import map serves. */
     "paths": { "@druks/ui": ["./src/runtime/druks-ui.ts"] },
     "verbatimModuleSyntax": true,

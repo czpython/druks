@@ -2,7 +2,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-from druks.extensions.config import resolve_extension_config
+from druks.apps.config import resolve_app_config
 from druks.prompts import render_prompt
 from druks.sandbox.datastructures import Profile
 
@@ -59,7 +59,7 @@ class RepoPolicy(BaseModel):
 
     @classmethod
     async def resolve(cls, repo: str | None) -> "RepoPolicy":
-        return await resolve_extension_config("ship", repo=repo, model=cls)
+        return await resolve_app_config("ship", repo=repo, model=cls)
 
     def plan_approval_gate(self, workflow_setting: PlanGate) -> PlanGate:
         return self.gates.plan_approval or workflow_setting

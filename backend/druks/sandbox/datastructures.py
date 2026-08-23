@@ -23,7 +23,7 @@ if TYPE_CHECKING:
 
 
 class Profile(BaseModel):
-    """A repo's VM image + env, from ``.druks/<extension>/config.yml``."""
+    """A repo's VM image + env, from ``.druks/<app>/config.yml``."""
 
     model_config = {"frozen": True, "extra": "forbid"}
 
@@ -128,7 +128,7 @@ class RequiredMcpServer:
 
 @dataclass(frozen=True)
 class Workspace:
-    # What an agent runs in: the VM it abstracts. An extension subclasses this and
+    # What an agent runs in: the VM it abstracts. An app subclasses this and
     # overrides get_agent_run_kwargs for its project scaffolding (repo token, dirs)
     # and get_required_mcp_servers for MCP servers it credentials itself.
     sandbox: "Sandbox"

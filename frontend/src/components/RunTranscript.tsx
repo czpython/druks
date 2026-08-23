@@ -7,7 +7,7 @@ const TRANSCRIPT_CHUNK_LIMIT = 256 * 1024
 
 interface RunTranscriptProps {
   // Full URL of an agent call's transcript resource, e.g.
-  // ``/api/<extension>/transcripts/<callId>``. It serves the paginated chunk
+  // ``/api/<app>/transcripts/<callId>``. It serves the paginated chunk
   // directly and the live SSE at ``/stream``. Live tailing works the same way: the
   // SSE generator tails the on-disk log the worker tees to.
   basePath: string

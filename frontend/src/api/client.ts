@@ -6,16 +6,16 @@ import type {
   ConnectChallenge,
   Connection,
   DashboardHealth,
-  Extension,
+  App,
   FeedResponse,
-  ExtensionsSettingsResponse,
+  AppsSettingsResponse,
   Harness,
   Identity,
   Pat,
   SubjectResponse,
   SubjectSummary,
   UpdateHarnessRequest,
-  UpdateExtensionsSettingsRequest,
+  UpdateAppsSettingsRequest,
   UpdateUserSettingsRequest,
   UsageHistoryResponse,
   UsageResponse,
@@ -160,30 +160,30 @@ export const identityApi = {
   },
 }
 
-// The generic subject read-side every extension gets for free at
-// ``/api/<extension>/<subjectType>/...`` (the platform serves status + timeline;
-// the extension supplies only its domain summary). Generic over the summary shape,
-// so an extension keys these on its own subject type.
+// The generic subject read-side every app gets for free at
+// ``/api/<app>/<subjectType>/...`` (the platform serves status + timeline;
+// the app supplies only its domain summary). Generic over the summary shape,
+// so an app keys these on its own subject type.
 export const subjectApi = {
-  base: (extension: string, subjectType: string, id: string | number) =>
-    `/api/${extension}/${subjectType}/${id}`,
-  read: <S extends SubjectSummary>(extension: string, subjectType: string, id: string | number) =>
-    getJSON<SubjectResponse<S>>(subjectApi.base(extension, subjectType, id)),
-  boardStream: (extension: string, subjectType: string) =>
-    `/api/${extension}/${subjectType}/stream`,
-  stream: (extension: string, subjectType: string, id: string | number) =>
-    `${subjectApi.base(extension, subjectType, id)}/stream`,
-  transcriptBase: (extension: string, callId: string) =>
-    `/api/${extension}/transcripts/${callId}`,
-  transcriptFiles: (extension: string, callId: string) =>
-    getJSON<AgentCallFiles>(`/api/${extension}/transcripts/${callId}/files`),
-  transcriptFile: (extension: string, callId: string, name: string) =>
-    `/api/${extension}/transcripts/${callId}/files/${encodeURIComponent(name)}`,
+  base: (app: string, subjectType: string, id: string | number) =>
+    `/api/${app}/${subjectType}/${id}`,
+  read: <S extends SubjectSummary>(app: string, subjectType: string, id: string | number) =>
+    getJSON<SubjectResponse<S>>(subjectApi.base(app, subjectType, id)),
+  boardStream: (app: string, subjectType: string) =>
+    `/api/${app}/${subjectType}/stream`,
+  stream: (app: string, subjectType: string, id: string | number) =>
+    `${subjectApi.base(app, subjectType, id)}/stream`,
+  transcriptBase: (app: string, callId: string) =>
+    `/api/${app}/transcripts/${callId}`,
+  transcriptFiles: (app: string, callId: string) =>
+    getJSON<AgentCallFiles>(`/api/${app}/transcripts/${callId}/files`),
+  transcriptFile: (app: string, callId: string, name: string) =>
+    `/api/${app}/transcripts/${callId}/files/${encodeURIComponent(name)}`,
 }
 
 export const api = {
   systemHealth: () => getJSON<DashboardHealth>('/api/system/health'),
-  listExtensions: () => getJSON<Extension[]>('/api/extensions'),
+  listApps: () => getJSON<App[]>('/api/apps'),
   artifact: (id: string) => getJSON<ArtifactContent>(`/api/artifacts/${id}`),
   resumeRun: (
     runId: string,
@@ -194,11 +194,11 @@ export const api = {
     postJSON<{ run: string; result: string }>(`/api/runs/${runId}/cancel`, { reason }),
   retryRun: (runId: string) =>
     postJSON<{ run: string }>(`/api/runs/${runId}/retry`, undefined),
-  listEvents: (params: { limit?: number; before?: string; extension?: string } = {}) => {
+  listEvents: (params: { limit?: number; before?: string; app?: string } = {}) => {
     const query = new URLSearchParams()
     if (params.limit !== undefined) query.set('limit', String(params.limit))
     if (params.before !== undefined) query.set('before', params.before)
-    if (params.extension !== undefined) query.set('extension', params.extension)
+    if (params.app !== undefined) query.set('app', params.app)
     const qs = query.toString()
     return getJSON<FeedResponse>(`/api/events${qs ? `?${qs}` : ''}`)
   },
@@ -243,9 +243,9 @@ export const api = {
       `/api/browser-sessions/${encodeURIComponent(name)}/login-window/cancel`,
       undefined,
     ),
-  getExtensionSettings: () => getJSON<ExtensionsSettingsResponse>('/api/settings/extensions'),
-  updateExtensionSettings: (body: UpdateExtensionsSettingsRequest) =>
-    patchJSON<ExtensionsSettingsResponse>('/api/settings/extensions', body),
+  getAppSettings: () => getJSON<AppsSettingsResponse>('/api/settings/apps'),
+  updateAppSettings: (body: UpdateAppsSettingsRequest) =>
+    patchJSON<AppsSettingsResponse>('/api/settings/apps', body),
   usage: () => getJSON<UsageResponse>('/api/usage'),
   refreshUsage: () => postJSON<void>('/api/usage/refresh', {}),
   usageHistory: () => getJSON<UsageHistoryResponse>('/api/usage/history'),

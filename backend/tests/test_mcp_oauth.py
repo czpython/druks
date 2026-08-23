@@ -9,7 +9,7 @@ import httpx
 import pytest
 from druks.accounts.constants import SYSTEM_ACCOUNT_ID
 from druks.accounts.models import Account
-from druks.extensions.registry import mcp_servers
+from druks.apps.registry import mcp_servers
 from druks.mcp import oauth
 from druks.mcp.enums import IdentityMode, TokenSource
 from druks.mcp.exceptions import (

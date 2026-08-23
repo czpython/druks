@@ -2,10 +2,10 @@ import importlib
 
 import pytest
 
-# The documented v1 extension-author surface: each concern namespace and the
+# The documented v1 app-author surface: each concern namespace and the
 # exact names it exports. Pattern A — no root facade; druks stays thin.
 AUTHOR_SURFACE = {
-    "druks.extensions": {"Extension", "ExtensionSettings", "Secret"},
+    "druks.apps": {"App", "AppSettings", "Secret"},
     "druks.browser": {"BrowserSession", "BrowserSessionSignedOutError"},
     "druks.services": {
         "OauthClient",

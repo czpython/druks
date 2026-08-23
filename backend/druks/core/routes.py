@@ -10,7 +10,7 @@ from druks.core.services import Github
 from druks.core.templates import render_page
 from druks.services.models import ServiceIdentity
 
-# Mounted by the loader under /api/core, like any extension's routes.
+# Mounted by the loader under /api/core, like any app's routes.
 router = APIRouter(prefix="/github", tags=["services"])
 
 

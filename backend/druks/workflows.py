@@ -18,6 +18,13 @@ from pydantic import BaseModel, Field, create_model
 from uuid_utils import uuid7
 
 from druks.accounts.context import current_account_id
+from druks.apps.loader import resolve_workflow_app
+from druks.apps.registry import workflows
+from druks.apps.settings import (
+    coerce_setting_value,
+    validate_setting_override,
+    validate_settings_declaration,
+)
 from druks.durable.activity import set_run_phase
 from druks.durable.datastructures import Subject
 from druks.durable.engine import _step_engine, register_schedule, run_queue, step_session
@@ -32,13 +39,6 @@ from druks.durable.schemas import (
     SubjectSummary,
 )
 from druks.events.models import Event
-from druks.extensions.loader import resolve_workflow_extension
-from druks.extensions.registry import workflows
-from druks.extensions.settings import (
-    coerce_setting_value,
-    validate_setting_override,
-    validate_settings_declaration,
-)
 from druks.harnesses.exceptions import HarnessError
 from druks.models import StoredSubject, snake_name
 from druks.notifications.outbox import notifications_queue, send_notification
@@ -77,7 +77,7 @@ if TYPE_CHECKING:
 # A human gate can park for days; a long recv TTL still caps zombie parks.
 GATE_TTL_SECONDS = 14 * 24 * 60 * 60
 
-# The decision verbs an in-app review offers. Framework-owned: an extension's
+# The decision verbs an in-app review offers. Framework-owned: an app's
 # agent supplies the plan and questions (content), but the verbs are ours — so a
 # resume can only carry an action we defined, the line the resume endpoint checks.
 _ReviewAction = Literal["approve", "request_changes"]
@@ -85,7 +85,7 @@ _REVIEW_CONTROLS = get_args(_ReviewAction)
 
 T = TypeVar("T")
 
-# The running workflow instance, so a Gate's on_wait() can reach its extension's
+# The running workflow instance, so a Gate's on_wait() can reach its app's
 # side-effects (set draft, request review, …) when the gate parks. No default:
 # Gate.wait() only runs inside a workflow, so it's always set there.
 current_workflow: ContextVar["Workflow"] = ContextVar("current_workflow")
@@ -272,7 +272,7 @@ class Gate(BaseModel):
         # run-level state — the read surfaces "needs you" straight off the parked run.
         # ``input_request`` is the plain-dict ask (at least a ``label`` and
         # ``presentation``), stored on the run beside ``input_gate`` and cleared on
-        # resume — so an extension declares the ask here, beside on_wait, not at read time.
+        # resume — so an app declares the ask here, beside on_wait, not at read time.
         workflow = current_workflow.get()
         if not workflow._subject and cls.on_wait.__func__ is Gate.on_wait.__func__:
             # No subject means no feed surface; if on_wait wasn't overridden
@@ -451,7 +451,7 @@ def _log_run_event(
         subject=subject,
         label=run.subject_label,
         payload=payload,
-        extension=workflows.get(run.kind).extension,
+        app=workflows.get(run.kind).app,
     )
     return payload
 
@@ -514,10 +514,10 @@ async def _execute_run(
 
 class Workflow:
     kind: ClassVar[str] = ""
-    # The extension that declares this workflow — class identity, resolved from
+    # The app that declares this workflow — class identity, resolved from
     # the loader's package registrations at definition time and namespacing
     # ``kind``. Never supplied or stored per run.
-    extension: ClassVar[str | None] = None
+    app: ClassVar[str | None] = None
     # What this workflow's runs are about, written ``subject = WorkItem`` on the
     # subclass. None for a workflow about nothing, which says so by silence.
     subject = _DeclaredSubject(None)
@@ -528,9 +528,9 @@ class Workflow:
     # True holds one warm VM across the run's agent calls (released at gate parks);
     # False gives each call a throwaway VM.
     steps_reuse_sandbox: ClassVar[bool] = False
-    # The Workspace subclass agents run in; an extension sets it (default: the bare VM).
+    # The Workspace subclass agents run in; an app sets it (default: the bare VM).
     workspace_class: ClassVar[type[Workspace]] = Workspace
-    # The Journal subclass the run keeps; an extension sets it for named projections.
+    # The Journal subclass the run keeps; an app sets it for named projections.
     journal_class: ClassVar[type[Journal]] = Journal
     # Exactly one: run() is a single operation, auto-stepped, no ceremony.
     # run_multistep() orchestrates explicit @step calls and/or gates.
@@ -552,21 +552,21 @@ class Workflow:
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
         try:
-            cls.extension = resolve_workflow_extension(cls.__module__)
+            cls.app = resolve_workflow_app(cls.__module__)
         except LookupError:
             raise WorkflowError(
                 f"{cls.__module__} declares workflow {cls.__name__} outside every "
-                "registered extension package — workflow modules load through "
-                "druks.extensions.loader; a module the loader doesn't own must "
+                "registered app package — workflow modules load through "
+                "druks.apps.loader; a module the loader doesn't own must "
                 "register_workflow_package() before importing"
             ) from None
         local_kind = cls.__dict__.get("kind") or snake_name(cls.__name__)
         if "." in local_kind:
             raise WorkflowError(
                 f"{cls.__name__}.kind {local_kind!r} must be a local name — "
-                "the declaring extension supplies the namespace"
+                "the declaring app supplies the namespace"
             )
-        cls.kind = f"{cls.extension}.{local_kind}" if cls.extension else local_kind
+        cls.kind = f"{cls.app}.{local_kind}" if cls.app else local_kind
         _declare_subject(cls)
         validate_settings_declaration(cls.Settings)
         cls._body_method = _resolve_body_method(cls)
@@ -614,7 +614,7 @@ class Workflow:
         self._host: Sandbox | None = None
 
     async def announce(self, topic: str, **facts: Any) -> None:
-        # The workflow announcing a domain event in its extension's vocabulary
+        # The workflow announcing a domain event in its app's vocabulary
         # ("pr.opened", pr_number=12, branch="agent/eng-8"). The platform injects
         # the routing subscribers filter on, and the publish runs as its own
         # retrying checkpoint so a recovery replay doesn't re-fire it. Body-only,
@@ -656,18 +656,18 @@ class Workflow:
 
     async def get_prompt_context(self, **context: Any) -> dict[str, Any]:
         # Everything an agent's template renders with, beyond the workflow and
-        # workspace it always gets. Extend via super() to add an extension's standing
+        # workspace it always gets. Extend via super() to add an app's standing
         # values (expensive derived prose); the call's own kwargs win on collision.
         return dict(context)
 
     async def get_workspace_kwargs(self, sandbox: "Sandbox") -> dict[str, Any]:
-        # Extend via super() to add the fields workspace_class needs (an extension clones + mints
+        # Extend via super() to add the fields workspace_class needs (an app clones + mints
         # here). Base: just the VM.
         return {"sandbox": sandbox}
 
     async def get_workspace(self, sandbox: "Sandbox") -> Workspace:
         # What an agent runs in on this run's VM, built per agent call from workspace_class
-        # + the extension's kwargs — so short-lived tokens (git) mint fresh each call.
+        # + the app's kwargs — so short-lived tokens (git) mint fresh each call.
         return self.workspace_class(**await self.get_workspace_kwargs(sandbox))
 
     async def _ensure_host(self) -> str | None:
@@ -715,7 +715,7 @@ class Workflow:
     @classmethod
     def settings(cls) -> BaseModel:
         """The workflow's ``Settings``, resolved through the override store — the read
-        twin of ``override_setting``, like ``Extension.settings()`` for an extension."""
+        twin of ``override_setting``, like ``App.settings()`` for an app."""
         values = {
             name: SettingsOverride.workflow_setting(cls.kind, name, field.default)
             for name, field in cls.Settings.model_fields.items()

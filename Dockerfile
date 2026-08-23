@@ -53,4 +53,4 @@ ENV USER=druks LOGNAME=druks
 
 EXPOSE 8001
 ENTRYPOINT ["tini", "--"]
-CMD ["uvicorn", "druks.api.app:app", "--host", "127.0.0.1", "--port", "8001"]
+CMD ["uvicorn", "druks.api.server:app", "--host", "127.0.0.1", "--port", "8001"]

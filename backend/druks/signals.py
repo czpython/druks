@@ -4,7 +4,7 @@ from typing import Any
 
 from blinker import signal
 
-from druks.extensions.exceptions import SubscriberDeclarationError
+from druks.apps.exceptions import SubscriberDeclarationError
 
 __all__ = ["subscribe"]
 

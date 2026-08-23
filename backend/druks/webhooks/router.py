@@ -4,7 +4,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import Response
 
 from druks.api.dependencies import SettingsDep
-from druks.extensions.registry import webhooks
+from druks.apps.registry import webhooks
 
 from .exceptions import InvalidWebhookError
 

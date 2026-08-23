@@ -4,21 +4,21 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic.fields import FieldInfo
 
+from druks.apps.settings import field_kind
 from druks.database import db_session
-from druks.extensions.settings import field_kind
 from druks.harnesses.registry import get_harness_for_model
 
 from .models import SettingsOverride
 from .schemas import (
     AgentSettingResponse,
-    ExtensionSettingsResponse,
+    AppSettingsResponse,
     SettingsFieldResponse,
     WorkflowSettingsResponse,
 )
 
 if TYPE_CHECKING:
     from druks.agents import Agent
-    from druks.extensions import Extension
+    from druks.apps import App
     from druks.workflows import Workflow
 
 
@@ -60,7 +60,7 @@ def get_workflow_settings(workflow: "type[Workflow]") -> WorkflowSettingsRespons
     ]
     if workflow.every:
         # The schedule pair renders like any declared field. The label carries
-        # the workflow's name since an extension's fields show as one flat list.
+        # the workflow's name since an app's fields show as one flat list.
         label = kind.rsplit(".", 1)[-1].replace("_", " ")
         fields += [
             SettingsFieldResponse(
@@ -97,32 +97,32 @@ def get_workflow_settings(workflow: "type[Workflow]") -> WorkflowSettingsRespons
     return WorkflowSettingsResponse(kind=kind, fields=fields)
 
 
-def get_extension_settings(extension: "type[Extension]") -> ExtensionSettingsResponse:
-    model = extension.settings_model
-    return ExtensionSettingsResponse(
-        name=extension.name,
-        description=extension.description,
-        icon=extension.icon,
-        builtin=extension.builtin,
-        agents=[get_agent_setting(agent) for agent in extension.agents()],
+def get_app_settings(app: "type[App]") -> AppSettingsResponse:
+    model = app.settings_model
+    return AppSettingsResponse(
+        name=app.name,
+        description=app.description,
+        icon=app.icon,
+        builtin=app.builtin,
+        agents=[get_agent_setting(agent) for agent in app.agents()],
         # Surface only the workflows with operator knobs: tunable settings or a
         # schedule to retune.
         workflows=[
             get_workflow_settings(workflow)
-            for workflow in extension.workflows()
+            for workflow in app.workflows()
             if workflow.Settings.model_fields or workflow.every
         ],
         settings=[
             get_settings_field(
                 name,
                 field,
-                value=SettingsOverride.extension_setting(
-                    extension.name,
+                value=SettingsOverride.app_setting(
+                    app.name,
                     name,
                     field.default,
                     is_secret=field_kind(field) == "secret",
                 ),
-                override_key=f"extension:{extension.name}:{name}",
+                override_key=f"app:{app.name}:{name}",
             )
             for name, field in (model.model_fields if model else {}).items()
         ],

@@ -502,7 +502,7 @@ async def test_github_client_aclose_drops_cache_without_raising() -> None:
 
 
 async def test_get_file_content_returns_none_when_repo_missing() -> None:
-    """A 404 at the installation lookup (the repo doesn't exist / the Extension
+    """A 404 at the installation lookup (the repo doesn't exist / the App
     isn't installed) means the file doesn't exist either — so get_file_content
     returns None rather than raising. This is the prompt-override hierarchy
     probing a missing ``<owner>/.druks`` repo: it must fall through to the

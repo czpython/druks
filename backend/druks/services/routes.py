@@ -3,8 +3,8 @@ from fastapi.responses import HTMLResponse, RedirectResponse, Response
 
 from druks.accounts.context import current_account_id
 from druks.accounts.dependencies import current_session_account
+from druks.apps.registry import services
 from druks.core.templates import render_page
-from druks.extensions.registry import services
 from druks.services.exceptions import (
     OauthExchangeError,
     OauthPageError,

@@ -223,17 +223,15 @@ class SettingsOverride(Base):
         cls.write(f"workflow:{kind}:{field}", value)
 
     @classmethod
-    def extension_setting(cls, extension: str, field: str, default: Any, *, is_secret: bool) -> Any:
-        row = db_session().get(cls, f"extension:{extension}:{field}")
+    def app_setting(cls, app: str, field: str, default: Any, *, is_secret: bool) -> Any:
+        row = db_session().get(cls, f"app:{app}:{field}")
         if is_secret:
             return row.secret_value.decrypt() if row and row.secret_value else default
         return row.value if row else default
 
     @classmethod
-    def set_extension_setting(
-        cls, extension: str, field: str, value: Any, *, is_secret: bool
-    ) -> None:
-        key = f"extension:{extension}:{field}"
+    def set_app_setting(cls, app: str, field: str, value: Any, *, is_secret: bool) -> None:
+        key = f"app:{app}:{field}"
         if value is None or not is_secret:
             cls.write(key, value)
             return

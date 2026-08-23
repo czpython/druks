@@ -244,7 +244,7 @@ def test_timeline_shows_every_build_attempt(druks_db):
 async def test_subject_activity_surfaces_running_phase(druks_db, monkeypatch):
     # A running build run pushes a transient phase; the detail view's live activity
     # surfaces it ("Building sandbox VM…") — finer than the lifecycle status.
-    from druks.contrib.ship import extension as ship_extension
+    from druks.contrib.ship import app as ship_app
 
     item = make_test_work_item(repo="ClawHaven/acme-app", title="x")
     seed_build_run(druks_db, work_item_id=item.id, state="running")
@@ -253,7 +253,7 @@ async def test_subject_activity_surfaces_running_phase(druks_db, monkeypatch):
         return "provisioning_vm"
 
     monkeypatch.setattr("druks.durable.reads.get_run_phase", phase)
-    activity = await ship_extension.Ship.get_subject_activity(item)
+    activity = await ship_app.Ship.get_subject_activity(item)
     assert activity is not None
     assert activity.label == "Building sandbox VM…"
     assert activity.kind == "infra"
@@ -261,9 +261,9 @@ async def test_subject_activity_surfaces_running_phase(druks_db, monkeypatch):
 
 async def test_subject_activity_none_when_not_running(druks_db):
     # A run parked on a gate isn't working — no live sub-phase.
-    from druks.contrib.ship import extension as ship_extension
+    from druks.contrib.ship import app as ship_app
 
     item = make_test_work_item(repo="ClawHaven/acme-app", title="x")
     seed_build_run(druks_db, work_item_id=item.id, state="parked", input_gate="review_plan")
 
-    assert await ship_extension.Ship.get_subject_activity(item) is None
+    assert await ship_app.Ship.get_subject_activity(item) is None

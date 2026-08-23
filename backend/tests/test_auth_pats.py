@@ -185,15 +185,15 @@ def test_a_pat_cannot_disconnect_a_harness(tmp_path, druks_db):
         assert beside.status_code == 401
 
 
-def test_a_pat_reads_but_cannot_write_extension_settings(tmp_path, druks_db):
+def test_a_pat_reads_but_cannot_write_app_settings(tmp_path, druks_db):
     with _client(tmp_path) as client:
         _, token = _mint("op@example.com")
         headers = _bearer(token)
 
-        read = client.get("/api/settings/extensions", headers=headers)
+        read = client.get("/api/settings/apps", headers=headers)
         write = client.patch(
-            "/api/settings/extensions",
-            json={"extensionSettings": {"ship": {"linear_trigger_status": "Agent Queue"}}},
+            "/api/settings/apps",
+            json={"appSettings": {"ship": {"linear_trigger_status": "Agent Queue"}}},
             headers=headers,
         )
 
