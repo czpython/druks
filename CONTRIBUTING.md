@@ -1,14 +1,14 @@
 # Contributing to Druks
 
 Druks is alpha software. Discussion before a large change is useful because the
-public extension surface and deployment model are still moving.
+public app surface and deployment model are still moving.
 
 ## Before opening a pull request
 
 1. Search existing issues and open one for behavior changes or substantial work.
 2. Read [the development guide](docs/development.md) and the relevant concept,
-   operator, or extension-author guide.
-3. Keep platform behavior separate from application-specific extension policy.
+   operator, or app-author guide.
+3. Keep platform behavior separate from app-specific policy.
 4. Add focused tests for behavior changes and update the canonical public guide
    when a contract changes.
 

@@ -11,8 +11,8 @@ docker compose logs --tail=200 web
 
 `druks doctor` checks settings, secrets, GitHub App credentials and
 installations, optional ticketing integrations, data-directory writes,
-Postgres, Redis, Drukbox, harness connections, extension imports, capability
-module names, and extension-owned checks. A failed check exits nonzero.
+Postgres, Redis, Drukbox, harness connections, app imports, capability
+module names, and app-owned checks. A failed check exits nonzero.
 
 Use the opt-in sandbox check only when the normal Drukbox check passes but real
 execution fails:
@@ -119,7 +119,7 @@ expects HTTP 401 from Druks. A different response means the request did not
 reach the webhook verifier.
 
 Webhook delivery is deduplicated in Redis. A handler failure releases the claim
-and returns an error so the provider can redeliver. Extension subscribers must
+and returns an error so the provider can redeliver. App subscribers must
 be idempotent.
 
 ## An agent cannot reach `/mcp`
@@ -191,7 +191,7 @@ code. Cancelling a parked run clears the ask and frees its subject slot.
 
 - `failed`: the workflow raised; inspect its failure text, last agent call, and
   transcript/stderr.
-- `cancelled`: an operator or application reaction asked DBOS to stop it.
+- `cancelled`: an operator or app reaction asked DBOS to stop it.
 - `orphaned`: the Druks run row exists, but its DBOS workflow row has been
   missing for more than five minutes. It cannot resume.
 
@@ -213,20 +213,20 @@ If two starts for the same subject return the same run id, deduplication is
 working: only one active run per workflow kind and subject is allowed. Cancel
 or finish the active run before expecting a new id.
 
-## An extension does not load
+## An app does not load
 
 Run `druks doctor` and inspect the boot error. Typical causes:
 
-- entry-point key does not equal `Extension.name`
+- entry-point key does not equal `App.name`
 - duplicate installed distributions register the same name
-- the entry point does not resolve to an `Extension` subclass
-- an extension table lacks its `<name>_` prefix
+- the entry point does not resolve to an `App` subclass
+- an app table lacks its `<name>_` prefix
 - a capability lives in `workflow.py` or `webhook.py` instead of a discoverable
   `workflows.py` or `webhooks.py` leaf
-- the extension's import raised
+- the app's import raised
 
-The loader fails loudly because the extension name owns API, settings, and
-migration namespaces. See [writing an extension](writing-an-extension.md).
+The loader fails loudly because the app name owns API, settings, and
+migration namespaces. See [writing an app](writing-an-app.md).
 
 ## Collecting a useful incident report
 

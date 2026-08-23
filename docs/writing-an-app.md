@@ -1,28 +1,28 @@
-# Writing an extension
+# Writing an app
 
-An extension is an application installed into Druks as its own Python
-distribution. It owns domain behavior; Druks supplies durable execution and
-shared operating services. Read [the extension boundary](concepts.md#the-extension-boundary)
+An app is a Python distribution installed into Druks. It owns domain behavior;
+Druks supplies durable execution and shared operating services. Read
+[the app boundary](concepts.md#the-app-boundary)
 before choosing which side should own a capability.
 
 ## Scaffold and prove the package
 
 ```bash
-uvx --from druks druks create extension night_watch
+uvx --from druks druks create app night_watch
 cd druks-night_watch
 uv sync
 uv run pytest
 ```
 
-From a Druks checkout, `uv run druks create extension night_watch` scaffolds with
+From a Druks checkout, `uv run druks create app night_watch` scaffolds with
 that checkout's CLI instead.
 
 The command writes a standalone `druks-night_watch` project in the current
 directory. Its `pyproject.toml` contains:
 
 ```toml
-[project.entry-points."druks.extensions"]
-night_watch = "druks_night_watch.extension:NightWatch"
+[project.entry-points."druks.apps"]
+night_watch = "druks_night_watch.app:NightWatch"
 ```
 
 The name must match `[a-z][a-z0-9_]*`. It becomes the API namespace, table
@@ -40,7 +40,7 @@ unprefixed table.
 The project root also carries an `AGENTS.md` holding the contracts a coding agent
 cannot infer from the stubs, and a link back to this guide.
 
-The scaffold depends on the published `druks`. To develop an extension against a
+The scaffold depends on the published `druks`. To develop an app against a
 local checkout instead, pin it:
 
 ```toml
@@ -51,11 +51,11 @@ druks = { path = "../druks", editable = true }
 ## Package layout
 
 The scaffold separates self-registering capability modules from ordinary
-application modules:
+package modules:
 
 | Path | Contract |
 | --- | --- |
-| `extension.py` | `Extension` subclass, agents, extension settings |
+| `app.py` | `App` subclass, agents, app settings |
 | `workflows.py` | durable `Workflow` and `Gate` subclasses |
 | `models.py` | SQLAlchemy models with `<name>_` table names, `StoredSubject` among them |
 | `contracts.py` | `AgentOutput` contracts |
@@ -72,13 +72,13 @@ Druks recursively discovers leaf modules named `workflows`, `routes`,
 discovered. Ordinary names such as `policy.py` and `workspace.py` have no import
 side effect unless a discovered module imports them.
 
-## Declare the extension
+## Declare the app
 
 ```python
-from druks.extensions import Extension
+from druks.apps import App
 
 
-class NightWatch(Extension):
+class NightWatch(App):
     name = "night_watch"
     icon = "telescope"
     description = "Checks repositories after hours."
@@ -146,7 +146,7 @@ run_id = await Sweep.start(
 A workflow that declares none passes `subject=None`. A subject has at most one
 active run of a workflow kind; a duplicate start returns the active run id —
 attribution never changes that (two accounts starting the same subject share
-the one run). Wrap `start()` in a domain `dispatch()` method when the extension
+the one run). Wrap `start()` in a domain `dispatch()` method when the app
 needs lookup, snapshot, or routing policy before launch.
 
 A browser-origin start attributes itself: the request identity gate stamps
@@ -260,7 +260,7 @@ from replayed orchestration allows later edits to change an in-flight run.
 
 ## Add an agent
 
-An agent belongs to the extension class. Its family default (`claude` or
+An agent belongs to the app class. Its family default (`claude` or
 `codex`) resolves through the corresponding operator harness setting; a full
 model name pins the default.
 
@@ -273,7 +273,7 @@ class ReportOutput(AgentOutput):
     body: str
 
 
-class NightWatch(Extension):
+class NightWatch(App):
     report = Agent(
         model="claude",
         prompt="night_watch/report.md",
@@ -294,37 +294,37 @@ CLI, validates the structured output, and records the call. Override
 `AgentOutput.to_result()` to map the strict agent contract to a domain value;
 override `get_artifact()` to publish a reviewable artifact.
 
-Do not ask the framework to infer application side effects from agent prose.
+Do not ask the framework to infer domain side effects from agent prose.
 The prompt or a subsequent explicit step owns those actions.
 
 ## Customize the workspace
 
 Every agent runs through a `Workspace` around a Drukbox sandbox. Override
-`Workflow.workspace_class` and `get_workspace_kwargs()` when the application
+`Workflow.workspace_class` and `get_workspace_kwargs()` when the app
 needs to clone a repository, mint a short-lived token, or require an MCP server.
 
-Keep durable application state outside the VM. A workflow may opt into
+Keep durable state outside the VM. A workflow may opt into
 `steps_reuse_sandbox = True` to retain one host across a segment, but Druks
 releases it at a gate and at workflow exit and rotates it near lease expiry.
 
 ### Borrow a browser session
 
-Declare the logins your extension needs on the Extension class; the attribute
-name and the extension's name become the session's identity, and the sessions
+Declare the logins your app needs on the App class; the attribute
+name and the app's name become the session's identity, and the sessions
 pane asks the operator to sign in:
 
 ```python
 from druks.browser import BrowserSession
-from druks.extensions import Extension
+from druks.apps import App
 
 
-class NightWatch(Extension):
+class NightWatch(App):
     name = "night_watch"
     acme = BrowserSession(site="acme.example", persist=True)
 ```
 
 A workflow borrows the logged-in browser as a playwright handle — the
-extension declares playwright as its own dependency, and druks owns
+app declares playwright as its own dependency, and druks owns
 everything else (the browser boots in its own container on the druks box and
 dies with the block; a ``persist`` session is exported and stored back
 first):
@@ -349,7 +349,7 @@ shows it and refuses further borrows until the operator signs in again — and
 the run fails under that reason. There is nothing to catch; the next
 scheduled run proceeds once the login is back.
 
-Provider selection is an operator concern. Extension workspace code targets the
+Provider selection is an operator concern. App workspace code targets the
 Druks sandbox contract, not `exe`, AWS, or Docker directly.
 
 ## Wait for input
@@ -502,14 +502,14 @@ reads it and passes the caller. `account_id` is the signed-in account, or None
 outside a request. Use it to scope the rows when each operator has their own
 board. Ignore it when every operator shares one board. A model method never
 reads request context. Druks checks the method at load. If it is missing, the
-extension does not load. The error names the extension, the subject, and the
+app does not load. The error names the app, the subject, and the
 method.
 
 Druks serves the same `/api/night_watch/repository` surface either way: a board,
 a page for one, and a live stream of either, mounted for every subject your
 workflows declare. Each response pairs your summary with the run's status,
 timeline, agent calls, artifacts, and the question it is waiting on. Override
-`get_subject_activity()` on the extension only to add a passing detail of your
+`get_subject_activity()` on the app only to add a passing detail of your
 own, like "Building sandbox VM…".
 
 Hand the subject itself to anything that asks for one — starting a run,
@@ -539,7 +539,7 @@ returns the step it is on.
 
 ## Record events and react to signals
 
-Record an extension event through the extension so ownership is stamped:
+Record an event through the app so ownership is stamped:
 
 ```python
 NightWatch.record_event(
@@ -588,7 +588,7 @@ providers or DBOS retry the publication; make reactions idempotent.
 ## Receive webhooks
 
 A webhook authenticates and normalizes provider input. It should publish a
-domain-neutral signal rather than contain application workflow policy:
+domain-neutral signal rather than contain workflow policy:
 
 ```python
 from fastapi.responses import JSONResponse
@@ -623,7 +623,7 @@ claim so the provider can retry.
 
 ## Models and migrations
 
-Models subclass `druks.db.Base` and every normal extension table starts with
+Models subclass `druks.db.Base` and every normal app table starts with
 `<name>_`:
 
 ```python
@@ -638,7 +638,7 @@ class Report(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
 ```
 
-Generate the extension's revision after the model is importable:
+Generate the app's revision after the model is importable:
 
 ```bash
 uv run druks makemigrations night_watch -m "add reports"
@@ -652,7 +652,7 @@ HTTP request, durable step, or other platform-bound session.
 HTTP response models subclass `druks.schemas.BaseResponse`, whose snake_case
 fields serialize as camelCase. Request models are ordinary Pydantic models.
 Every router declared in a discovered `routes.py` is mounted below the
-extension namespace, tagged with the extension's name — a router declares only
+app namespace, tagged with the app's name — a router declares only
 the prefix its own resource is called:
 
 ```python
@@ -673,7 +673,7 @@ def list_reviews() -> list[ReviewResponse]:
 ```
 
 Tagging a route `agent` also derives it into an MCP tool: you give it an explicit
-`operation_id`, and Druks derives the tool name by prefixing it with your extension
+`operation_id`, and Druks derives the tool name by prefixing it with your app
 name — write `operation_id="add_peer"` in `peer_tracker` and the tool is
 `peer_tracker_add_peer`. The docstring is the description. `GET` derives read-only;
 a write declares `x-destructive: false` or `x-idempotent: true` in `openapi_extra`
@@ -685,7 +685,7 @@ Two spellings run through druks, and which one a segment wears says who owns it:
 
 | | |
 | --- | --- |
-| `snake_case` | an identity the platform serves — your extension name, a subject type |
+| `snake_case` | an identity the platform serves — your app name, a subject type |
 | `kebab-case` | a resource you named — your route prefixes, your frontend paths |
 
 So `/api/review/pull_request` is the board of review runs, keyed by subject, and
@@ -700,8 +700,8 @@ A service identity is the appliance's own registered app at an external
 provider — one per deployment, keyed by a service string; the platform's
 GitHub App is the first one. OAuth grants are not service identities — the
 platform stores those when the operator connects (see "Connect provider
-accounts") — and a credential only your extension posts with belongs in your
-extension settings instead.
+accounts") — and a credential only your app posts with belongs in your
+app settings instead.
 
 Declare one class in `services.py` and the platform does the rest: it renders
 the connect card in Settings, verifies and stores the paste (`SecretStr`
@@ -751,7 +751,7 @@ async def verify(cls, settings: Settings) -> dict:
 Set `required = False` on the class when the appliance is healthy without the
 service connected; doctor then notes it instead of reporting pending setup.
 
-Key the service for the integration your extension consumes (`Gmail`), not
+Key the service for the integration your app consumes (`Gmail`), not
 the provider (`Google`). A second integration on the same provider declares
 its own service, and the operator decides per card whether the underlying
 registration is shared or a narrower one — that choice is their scope and
@@ -835,11 +835,11 @@ class GoogleCalendar(GoogleOauth):
     pass
 ```
 
-Declare your extension's use of the service, with the scopes your calls
+Declare your app's use of the service, with the scopes your calls
 need:
 
 ```python
-class NightWatch(Extension):
+class NightWatch(App):
     name = "night_watch"
     acme = Acme.with_scopes("profile.read", "posts.write")
 ```
@@ -865,7 +865,7 @@ live connections only. A revoked connection drops out of `get` and
 identity. Your rows never need tombstone copies of either.
 
 Your UI starts a sign-in by opening `/api/oauth/acme/connect` — the
-platform runs the consent with the union of every installed extension's
+platform runs the consent with the union of every installed app's
 declared scopes and stores the connection for the signed-in user. A fresh
 sign-in creates a new connection, unless the service's `identity_key`
 matches it to an existing connection for the same owner. To widen an
@@ -923,9 +923,9 @@ narrower than the grant — pass it when the token goes to untrusted compute,
 with a subset of the connection's scopes. `cached=False` refreshes past the
 cache for a full-lifetime token.
 
-## Extension settings and checks
+## App settings and checks
 
-An inner `ExtensionSettings` class defines dashboard-editable knobs and owns their
+An inner `AppSettings` class defines dashboard-editable knobs and owns their
 cross-field coherence:
 
 ```python
@@ -933,13 +933,13 @@ from typing import Literal
 
 from pydantic import Field
 
-from druks.extensions import Extension, ExtensionSettings, Secret
+from druks.apps import App, AppSettings, Secret
 
 
-class NightWatch(Extension):
+class NightWatch(App):
     name = "night_watch"
 
-    class Settings(ExtensionSettings):
+    class Settings(AppSettings):
         provider: Literal["none", "acme"] = "none"
         service_token: Secret = Field(
             json_schema_extra={"section": "Acme", "visible_when": {"provider": "acme"}},
@@ -974,19 +974,19 @@ resolved settings after the proposed edits and rejects an incoherent save. `druk
 runs the same method over stored settings so rows from older releases or manual database
 edits remain visible. Workflow settings stay plain Pydantic `BaseModel` declarations.
 
-An extension may contribute precondition checks beyond settings coherence through
+An app may contribute precondition checks beyond settings coherence through
 `checks`. Return `druks.doctor.CheckResult`; Druks namespaces the result and converts
 a raising or malformed check into a failure without hiding later checks.
 
-## Test an extension
+## Test an app
 
-Installing Druks registers its pytest plugin. An extension can request the
+Installing Druks registers its pytest plugin. An app can request the
 fixtures directly without a `conftest.py` or `pytest_plugins` declaration:
 
 | Fixture | Contract |
 | --- | --- |
 | `druks_db` | A SQLAlchemy `Session` bound to a per-test transaction. Commits become savepoints, and teardown rolls the outer transaction back. |
-| `druks_client` | An authenticated `TestClient` with installed extensions mounted, sharing `druks_db`'s connection. |
+| `druks_client` | An authenticated `TestClient` with installed apps mounted, sharing `druks_db`'s connection. |
 | `druks_redis` | The test Redis database, flushed before the test. |
 | `druks_without_dispatch` | Workflow starts and run-phase writes become no-ops, for tests that stand up no durable engine. |
 | `druks_without_remote_config` | Every `.druks` namespace lookup misses, so prompts resolve to bundled templates and config to its declared defaults. |
@@ -1028,19 +1028,19 @@ call = seed_call(
 `Run.state` is derived. Its `kind` is required. Pass `input_gate` when seeding
 `state="pending_input"`. `seed_call` accepts an `Agent` or its string id.
 
-`make_settings(tmp_path, **overrides)` builds isolated application settings.
+`make_settings(tmp_path, **overrides)` builds isolated Druks settings.
 `configure_app_for_test(settings=..., authenticated=False)` returns the mounted
 app when a test needs its own client or an unauthenticated request path;
 `druks_client` covers the normal authenticated case.
 
-The fixtures never read the application's settings. They read
+The fixtures never read the runtime's settings. They read
 `DRUKS_TEST_DATABASE_URL` and `DRUKS_TEST_REDIS_URL`, defaulting to a local
 `druks_test` database and Redis index 15, and they point the code under test at
 the same pair — so a run cannot reach whatever `DRUKS_DATABASE_URL` and
 `DRUKS_REDIS_URL` name. Create the database once (`createdb druks_test`); the dev
 Compose project already does.
 
-On that database the plugin creates `citext`, imports installed extension models,
+On that database the plugin creates `citext`, imports installed app models,
 runs SQLAlchemy `create_all`, seeds platform reference rows, and builds the DBOS
 system tables through DBOS's database migrations. It never resets or drops a
 schema; per-test writes made through `druks_db` are rolled back. `druks_redis`
@@ -1048,20 +1048,20 @@ runs `FLUSHDB` on the test index.
 
 ## Frontends
 
-An installed extension is visible in the dashboard without shipping any UI. The
-shell reads the installed roster from `/api/extensions` and gives every
-extension an entry in the app switcher plus generic pages: a board per subject
+An installed app is visible in the dashboard without shipping any UI. The
+shell reads the installed roster from `/api/apps` and gives every
+app an entry in the app switcher plus generic pages: a board per subject
 type, and a subject page with the run timeline, transcripts, and gate controls.
 There is nothing to declare — the subject summary's fields are the board row.
 The switcher label is derived from `name` (underscores become spaces).
 
-Chrome contributions are declared data. `navigation` on the extension class
+Chrome contributions are declared data. `navigation` on the app class
 adds appbar subnav tabs as `(url, name)` pairs, rendered by the shell for
 generic pages and shipped frontends alike; the active tab is the one whose
 url is the longest prefix of the current location:
 
 ```python
-class NightWatch(Extension):
+class NightWatch(App):
     name = "night_watch"
     navigation = [("/night_watch", "reports")]
 ```
@@ -1086,8 +1086,8 @@ inside its own document, below the chrome. The scaffold ships a placeholder
   resolves them to its own copy, so one React instance serves the whole
   document. Other dependencies are bundled as usual.
 
-The bundled Druks SPA also has a shared React extension registry. Joining that
-shell requires compiling the extension's UI module into the dashboard image;
+The bundled Druks SPA also has a shared React app registry. Joining that
+shell requires compiling the app's UI module into the dashboard image;
 installing a Python wheel cannot mutate an existing JavaScript bundle. See the
 [frontend guide](../frontend/README.md) for that in-repository path.
 
@@ -1098,7 +1098,7 @@ Import from concern namespaces, not from `druks.durable` or internal modules:
 | Namespace | Public names |
 | --- | --- |
 | `druks.accounts` | `current_account_id` |
-| `druks.extensions` | `Extension`, `ExtensionSettings`, `Secret` |
+| `druks.apps` | `App`, `AppSettings`, `Secret` |
 | `druks.services` | `Service`, `ServiceConnectError`, `ServiceNotConnectedError`, `OauthClient`, `OauthExchangeError`, `OauthRefreshError` |
 | `druks.secrets.fields` | `EncryptedJsonField`, `SecretsMapping` |
 | `druks.agents` | `Agent`, `AgentOutput` |

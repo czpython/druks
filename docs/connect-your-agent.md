@@ -3,7 +3,7 @@
 Druks serves an MCP endpoint at `/mcp` (streamable HTTP, stateless). Its
 tools are derived from the agent-tagged API routes. The platform contributes
 seven — `list_open_subjects`, `get_gate`, `answer_gate`, `get_agent_call`,
-`cancel_run`, `retry_run`, `get_usage` — and each installed extension
+`cancel_run`, `retry_run`, `get_usage` — and each installed app
 contributes its own verbs beside them; `tools/list` is the live catalog.
 Every request authenticates with a personal access token sent as
 `Authorization: Bearer <token>`.
@@ -42,7 +42,7 @@ bearer_token_env_var = "DRUKS_PAT"
 - **Discovery first.** There is no push channel. Call `list_open_subjects`
   first and poll it about every 30 seconds while waiting. Each workflow's `run` feeds
   the gate and run tools, and `latestAgentCall` feeds `get_agent_call`;
-  An extension's verbs open work whose run enters the same flow.
+  an app's verbs open work whose run enters the same flow.
   Call `get_gate` before `answer_gate` and echo its `parkedAt`
   value unchanged; it names the exact question being answered, and a repeat
   answer to the same `parkedAt` reports `already_answered` instead of
@@ -53,6 +53,6 @@ bearer_token_env_var = "DRUKS_PAT"
 - **Stable error shapes.** Gateway and run tool failures embed the agent
   routes' `{"code", "message", "retryable"}` body in their error text — the
   codes (`GATE_ROUND_STALE`, `RUN_NOT_ACTIVE`, …) are stable and safe to match
-  on. Extension verbs use the API's `{"error", "detail"}` shape for their
+  on. App verbs use the API's `{"error", "detail"}` shape for their
   refusals. Requests that fail shape validation carry
   `VALIDATION_ERROR` detail instead.

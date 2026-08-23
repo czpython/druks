@@ -46,7 +46,7 @@ described in [the release process](https://github.com/czpython/druks/blob/main/d
 Re-running is also the upgrade path. Then follow
 [full local setup](https://github.com/czpython/druks/blob/main/docs/full-local.md) to finish in
 the dashboard: connect the agent harnesses and the GitHub App the bundled
-`ship` extension acts through; a standalone extension may have different
+`ship` app acts through; a standalone app may have different
 integration requirements.
 
 Or hand the install to a coding agent — paste this into Claude Code, Codex,
@@ -72,15 +72,15 @@ set them in `druks.toml` and re-run the same command. See the
 for prerequisites, access control, verification, and rollback.
 
 ```text
-trigger ──> extension workflow ──> durable step ──> agent ──> sandbox
+trigger ──> app workflow ──> durable step ──> agent ──> sandbox
                  │                     │              │
                  │                     │              └─ Claude or Codex harness
                  │                     └─ result checkpointed in Postgres
-                 ├─ event ──> feed / extension reaction
+                 ├─ event ──> feed / app reaction
                  └─ gate  ──> wait for human or external system ──> resume
 ```
 
-**Platform and applications stay separate**
+**Platform and apps stay separate**
 
 Druks owns the execution and operating substrate:
 
@@ -89,24 +89,23 @@ Druks owns the execution and operating substrate:
 - Claude and Codex harness dispatch through isolated Drukbox sandboxes
 - append-only events, live feeds, webhooks, notifications, MCP servers, and skills
 - validated operator settings, encrypted MCP/OAuth secrets, and the dashboard shell
-- extension discovery, API namespaces, and independent migration histories
+- app discovery, API namespaces, and independent migration histories
 
-An **extension** owns the application: its workflows, agents, domain models,
-routes, events, provider reactions, and optional dashboard pages. It is a normal
-Python distribution registered through the `druks.extensions` entry-point
-group. Installing the distribution registers it; Druks does not need an
-extension-specific plugin list.
+An **app** owns its workflows, agents, domain models, routes, events, provider
+reactions, and optional dashboard pages. It is a normal Python distribution
+registered through the `druks.apps` entry-point group. Installing the
+distribution registers it; Druks does not need an app-specific plugin list.
 
 Scaffold one with the published CLI, no checkout required:
 
 ```bash
-uvx --from druks druks create extension night_watch
+uvx --from druks druks create app night_watch
 ```
 
 The generated project root carries an `AGENTS.md` with the contracts and a link
 to the authoring guide.
 
-The bundled `ship` extension is a concrete example. It coordinates coding
+The bundled `ship` app is a concrete example. It coordinates coding
 agents through tickets and GitHub pull requests, but GitHub PR orchestration is
 `ship` behavior—not the definition of Druks.
 
@@ -116,7 +115,7 @@ agents through tickets and GitHub pull requests, but GitHub PR orchestration is
 - **Installing locally:** [Full local setup](https://github.com/czpython/druks/blob/main/docs/full-local.md)
 - **Operating a remote stack:** [Deployment runbook](https://github.com/czpython/druks/blob/main/deploy/README.md)
 - **Configuring integrations and secrets:** [Configuration](https://github.com/czpython/druks/blob/main/docs/configuration.md)
-- **Building an application:** [Writing an extension](https://github.com/czpython/druks/blob/main/docs/writing-an-extension.md)
+- **Building an app:** [Writing an app](https://github.com/czpython/druks/blob/main/docs/writing-an-app.md)
 - **Diagnosing a run or service:** [Troubleshooting](https://github.com/czpython/druks/blob/main/docs/troubleshooting.md)
 - **Contributing to Druks:** [Contribution guide](https://github.com/czpython/druks/blob/main/CONTRIBUTING.md)
 - **Reporting a vulnerability:** [Security policy](https://github.com/czpython/druks/blob/main/SECURITY.md)
