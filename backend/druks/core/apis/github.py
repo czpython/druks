@@ -87,6 +87,20 @@ class GitHubClient:
         # would require entering the client context and closing it here.
         self._repo_gh_cache.clear()
 
+    async def _owner_installation_id(self, owner: str) -> int:
+        try:
+            response = await self._app.rest.apps.async_get_org_installation(owner)
+        except RequestFailed as error:
+            if error.response.status_code != 404:
+                raise
+            try:
+                response = await self._app.rest.apps.async_get_user_installation(owner)
+            except RequestFailed as error:
+                if error.response.status_code == 404:
+                    raise GitHubAppNotInstalledError(owner) from error
+                raise
+        return response.parsed_data.id
+
     async def list_repos_for_owner(self, owner: str) -> list[dict[str, Any]]:
         """Repos the GitHub App can see under ``owner``.
 
@@ -96,17 +110,9 @@ class GitHubClient:
         "add repo" affordance.
         """
         try:
-            installation_response = await self._app.rest.apps.async_get_org_installation(owner)
-        except RequestFailed as error:
-            if error.response.status_code != 404:
-                raise
-            try:
-                installation_response = await self._app.rest.apps.async_get_user_installation(owner)
-            except RequestFailed as error:
-                if error.response.status_code == 404:
-                    return []
-                raise
-        installation_id = installation_response.parsed_data.id
+            installation_id = await self._owner_installation_id(owner)
+        except GitHubAppNotInstalledError:
+            return []
 
         async with GitHub(
             AppInstallationAuthStrategy(self._app_id, self._private_key, installation_id),
@@ -133,6 +139,32 @@ class GitHubClient:
                     break
                 page += 1
             return repos
+
+    async def create_repo_from_template(self, owner: str, template_repo: str, name: str) -> str:
+        """A new private repo ``name`` under ``owner``, generated from the
+        ``owner/name`` template ``template_repo``; returns its ``full_name``.
+        Safe to retry: a name already taken reads as already created."""
+        installation_id = await self._owner_installation_id(owner)
+        template_owner, template_name = template_repo.split("/", 1)
+        full_name = f"{owner}/{name}"
+        async with GitHub(
+            AppInstallationAuthStrategy(self._app_id, self._private_key, installation_id),
+            base_url=self._base_url,
+        ) as gh:
+            try:
+                await gh.rest.repos.async_create_using_template(
+                    template_owner,
+                    template_name,
+                    name=name,
+                    owner=owner,
+                    private=True,
+                )
+            except RequestFailed as error:
+                # On a valid name GitHub's 422 is "already taken" — a retried create.
+                if error.response.status_code == 422:
+                    return full_name
+                raise
+        return full_name
 
     async def list_installation_accounts(self) -> tuple[str, ...]:
         """Account logins (orgs/users) this App is installed on — the
