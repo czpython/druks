@@ -81,15 +81,11 @@ describe('InAppReview', () => {
     expect(requestChanges.disabled).toBe(false)
   })
 
-  it('explains approval with a note', () => {
+  it('explains what a note does', () => {
     stubFetch()
     renderReview({ presentation: 'in_app', controls: ['approve'], questions: [] })
 
-    expect(
-      screen.getByText(
-        'Approving with a note starts another plan pass instead of confirming the plan.',
-      ),
-    ).toBeTruthy()
+    expect(screen.getByText('A note is sent to the agent as feedback.')).toBeTruthy()
   })
 })
 

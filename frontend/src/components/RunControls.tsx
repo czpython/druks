@@ -90,10 +90,10 @@ const CONTROL_LABEL: Record<string, string> = {
   revise_contract: 'Revise contract',
 }
 
-// The in-app review: the artifact (the plan), structured question options, one
+// The in-app review: the reviewed artifact, structured question options, one
 // note, and the workflow's controls. A click resumes the run with
-// {control, answers, note}; free text is content for the next plan pass, never a
-// control.
+// {control, answers, note}; free text is content for the next agent prompt,
+// never a control.
 export function InAppReview({ runId, ask }: { runId: string; ask: InputRequest }) {
   const [answers, setAnswers] = useState<Record<string, string>>({})
   const [note, setNote] = useState('')
@@ -140,7 +140,7 @@ export function InAppReview({ runId, ask }: { runId: string; ask: InputRequest }
     <div className="ins-needs">
       {critique && (
         <div className="review-artifact">
-          <div className="review-artifact-title">Plan reviewer critique</div>
+          <div className="review-artifact-title">Critique</div>
           <Markdown source={critique} />
         </div>
       )}
@@ -176,12 +176,12 @@ export function InAppReview({ runId, ask }: { runId: string; ask: InputRequest }
       })}
       <textarea
         className="review-note"
-        placeholder="optional note — what should the next pass change?"
+        placeholder="optional note — what should change?"
         value={note}
         onChange={(e) => setNote(e.target.value)}
       />
       <div className="review-helper">
-        Approving with a note starts another plan pass instead of confirming the plan.
+        A note is sent to the agent as feedback.
       </div>
       <div className="review-controls">
         {ask.controls?.map((control) => {
