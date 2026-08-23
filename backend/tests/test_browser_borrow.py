@@ -115,7 +115,7 @@ def stored_session(
     return row
 
 
-def test_declaration_carries_the_extension_namespace(night_watch):
+def test_declaration_carries_the_app_namespace(night_watch):
     assert night_watch.acme.name == "night_watch.acme"
     assert night_watch.docs.name == "night_watch.docs"
 
@@ -219,7 +219,7 @@ async def test_launch_failure_raises_and_releases_the_lock(borrow, night_watch):
 
 
 async def test_signed_out_borrow_stamps_the_session_and_stores_nothing(borrow, night_watch):
-    """The extension raises through the borrow when the site bounced the login:
+    """The app raises through the borrow when the site bounced the login:
     the door stamps which session bounced, and the dead state is never stored."""
     browser, redis = borrow
     stored_session(night_watch.acme, payload=b"live-state")

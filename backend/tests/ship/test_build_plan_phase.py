@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 
 import pytest
+from druks.contrib.ship.app import Ship
 from druks.contrib.ship.contracts import (
     AcceptanceCriterionOutput,
     PlanData,
@@ -10,7 +11,6 @@ from druks.contrib.ship.contracts import (
     ReviewWork,
 )
 from druks.contrib.ship.enums import ReviewDecision
-from druks.contrib.ship.extension import Ship
 from druks.contrib.ship.policy import PlanGate, RepoPolicy
 from druks.contrib.ship.workflows import Build
 from druks.workflows import FatalError, OperatorReply, Run

@@ -11,8 +11,8 @@ _ALEMBIC_INI = Path(__file__).resolve().parent.parent / "alembic.ini"
 
 def run_migrations(database_url: str) -> None:
     """Bring the schema to head — the migrate container's job (``druks
-    init-db``). Core first, then each installed extension's own migrations: an
-    external extension owns an independent history, so this order is the contract,
+    init-db``). Core first, then each installed app's own migrations: an
+    external app owns an independent history, so this order is the contract,
     not a cross-repo revision link. Production schema is owned by Alembic."""
     from alembic import command
     from alembic.config import Config
@@ -20,59 +20,59 @@ def run_migrations(database_url: str) -> None:
     core = Config(str(_ALEMBIC_INI))
     core.set_main_option("sqlalchemy.url", database_url)
     command.upgrade(core, "head")
-    for name, migrations_dir in _extension_migration_dirs():
-        # The extension runs through the platform env (the shared ``alembic.ini``
+    for name, migrations_dir in _app_migration_dirs():
+        # The app runs through the platform env (the shared ``alembic.ini``
         # script_location); only its own revisions (version_locations) and version
-        # table belong to the extension.
-        extension_config = Config(str(_ALEMBIC_INI))
-        extension_config.set_main_option("version_locations", str(migrations_dir / "versions"))
-        extension_config.set_main_option("sqlalchemy.url", database_url)
-        # Own version table per history, else the extension reads core's head from the
+        # table belong to the app.
+        app_config = Config(str(_ALEMBIC_INI))
+        app_config.set_main_option("version_locations", str(migrations_dir / "versions"))
+        app_config.set_main_option("sqlalchemy.url", database_url)
+        # Own version table per history, else the app reads core's head from the
         # shared default ``alembic_version`` and can't locate it in its own scripts.
-        extension_config.attributes["version_table"] = f"alembic_version_{name}"
-        command.upgrade(extension_config, "head")
+        app_config.attributes["version_table"] = f"alembic_version_{name}"
+        command.upgrade(app_config, "head")
 
 
-def make_extension_migration(extension_name: str, message: str, database_url: str) -> None:
-    """Autogenerate a revision for one installed extension into its own ``versions/``,
-    diffing the extension's prefix-scoped tables against the live DB. The dev DB must be
-    at the extension's head first (``druks init-db``) — Alembic diffs models against the
+def make_app_migration(app_name: str, message: str, database_url: str) -> None:
+    """Autogenerate a revision for one installed app into its own ``versions/``,
+    diffing the app's prefix-scoped tables against the live DB. The dev DB must be
+    at the app's head first (``druks init-db``) — Alembic diffs models against the
     database, not migration state."""
     from alembic import command
     from alembic.config import Config
     from sqlalchemy import MetaData
 
-    from druks.extensions.loader import get_extension, import_extension_models
+    from druks.apps.loader import get_app, import_app_models
     from druks.models import Base
 
-    import_extension_models()
-    extension = get_extension(extension_name)
-    package_dir = extension.package_dir()
+    import_app_models()
+    app = get_app(app_name)
+    package_dir = app.package_dir()
     if not package_dir:
-        raise ValueError(f"extension {extension_name!r} ships no package to write migrations into")
+        raise ValueError(f"app {app_name!r} ships no package to write migrations into")
     migrations_dir = package_dir / "migrations"
 
     scoped = MetaData()
     for table in Base.metadata.tables.values():
-        if table.name.startswith(extension.table_prefix):
+        if table.name.startswith(app.table_prefix):
             table.to_metadata(scoped)
 
     config = Config(str(_ALEMBIC_INI))
     config.set_main_option("version_locations", str(migrations_dir / "versions"))
     config.set_main_option("sqlalchemy.url", database_url)
-    config.attributes["version_table"] = f"alembic_version_{extension.name}"
+    config.attributes["version_table"] = f"alembic_version_{app.name}"
     config.attributes["target_metadata"] = scoped
     command.revision(config, message=message, autogenerate=True)
 
 
-def _extension_migration_dirs() -> list[tuple[str, Path]]:
-    from druks.extensions.loader import iter_extensions
+def _app_migration_dirs() -> list[tuple[str, Path]]:
+    from druks.apps.loader import iter_apps
 
     found: list[tuple[str, Path]] = []
-    for extension in iter_extensions():
-        package_dir = extension.package_dir()
+    for app in iter_apps():
+        package_dir = app.package_dir()
         if package_dir and (package_dir / "migrations" / "versions").is_dir():
-            found.append((extension.name, package_dir / "migrations"))
+            found.append((app.name, package_dir / "migrations"))
     return found
 
 

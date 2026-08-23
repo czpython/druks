@@ -1,6 +1,6 @@
 /* ============================================================
    druks dashboard — NOC-style operator UI
-   Dark extension mandatory. Dense. Monospace where data matters.
+   Dark app mandatory. Dense. Monospace where data matters.
    ============================================================ */
 
 :root {
@@ -16,7 +16,7 @@
   /* Text */
   --text:         #f0f2f7;
   /* The whole secondary tier is lifted: labels (dim) and their values
-     (mid) were the dominant chrome of the extension yet sat at barely-readable
+     (mid) were the dominant chrome of the app yet sat at barely-readable
      contrast. Hierarchy preserved: text > mid > dim > faint — but the
      floor (faint) now sits where dim used to. */
   --text-mid:     #b4bccd;
@@ -27,7 +27,7 @@
   --bucket-run:    #4dd4f4;   /* cyan  — in-progress */
   --bucket-human:  #f4ad63;   /* warm orange — waiting on human (loud) */
   --bucket-dead:   #ef4f5b;   /* red   — blocked / dead */
-  --bucket-plan:   #5eead4;   /* teal  — plan extension accent */
+  --bucket-plan:   #5eead4;   /* teal  — plan app accent */
 
   /* Decorative accent hues for non-status chrome (thinking rows, event
      kinds, target/queue chips, tab & settings accents). Their own tokens,
@@ -62,7 +62,7 @@
   --row-grid-item-prefix: 60px 110px 130px 60px;
 
   /* Density (overridden via data-density). The default sits at a
-   * "compact but readable" 40px — every list across the extension uses
+   * "compact but readable" 40px — every list across the app uses
    * ``var(--row-h)`` for ``min-height`` so all pages render at the
    * same vertical rhythm. Earlier the default was 28px and most
    * row rules hardcoded their own 30-44px, which drifted apart
@@ -180,11 +180,11 @@ button { background: none; border: none; color: inherit; cursor: pointer; font: 
   -webkit-mask-position: center;
 }
 
-/* ---- Extension dropdown --------------------------------- */
+/* ---- App dropdown --------------------------------- */
 .appbar-sep { font-size: 14px; color: var(--text-faint); padding: 0 2px; align-self: center; }
 
-.extension-dd { position: relative; align-self: center; }
-.extension-dd-trigger {
+.app-dd { position: relative; align-self: center; }
+.app-dd-trigger {
   display: inline-flex; align-items: center; gap: 8px;
   height: 28px; padding: 0 10px;
   font-size: 13px;
@@ -195,14 +195,14 @@ button { background: none; border: none; color: inherit; cursor: pointer; font: 
   transition: all 100ms;
   letter-spacing: 0.01em;
 }
-.extension-dd-trigger:hover { border-color: var(--border-loud); background: var(--surface-2); }
+.app-dd-trigger:hover { border-color: var(--border-loud); background: var(--surface-2); }
 /* The trigger's accent left rule is set inline from the registry-order
-   palette (see lib/extensionColors) — no per-extension-name rule. */
-.extension-dd-glyph { font-size: 14px; opacity: 0.9; display: inline-flex; align-items: center; }
-.extension-dd-label { font-weight: 500; }
-.extension-dd-caret { font-size: 9px; opacity: 0.6; padding-left: 4px; }
+   palette (see lib/appColors) — no per-app-name rule. */
+.app-dd-glyph { font-size: 14px; opacity: 0.9; display: inline-flex; align-items: center; }
+.app-dd-label { font-weight: 500; }
+.app-dd-caret { font-size: 9px; opacity: 0.6; padding-left: 4px; }
 
-.extension-dd-menu {
+.app-dd-menu {
   position: absolute; top: 100%; left: 0;
   margin-top: 6px;
   min-width: 280px;
@@ -218,7 +218,7 @@ button { background: none; border: none; color: inherit; cursor: pointer; font: 
   from { opacity: 0; transform: translateY(-3px); }
   to   { opacity: 1; transform: translateY(0); }
 }
-.extension-dd-item {
+.app-dd-item {
   display: grid; align-items: center;
   grid-template-columns: 22px 1fr auto;
   gap: 10px;
@@ -229,14 +229,14 @@ button { background: none; border: none; color: inherit; cursor: pointer; font: 
   background: transparent;
   transition: background 80ms;
 }
-.extension-dd-item:hover { background: var(--surface-2); }
-.extension-dd-item.active { background: var(--surface-3); }
-.extension-dd-item-glyph { font-size: 14px; opacity: 0.85; text-align: center; display: inline-flex; align-items: center; justify-content: center; }
+.app-dd-item:hover { background: var(--surface-2); }
+.app-dd-item.active { background: var(--surface-3); }
+.app-dd-item-glyph { font-size: 14px; opacity: 0.85; text-align: center; display: inline-flex; align-items: center; justify-content: center; }
 /* The active item's accent is set inline from the registry-order palette. */
-.extension-dd-item-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.extension-dd-item-label { font-size: 13px; color: var(--text); letter-spacing: 0.01em; }
-.extension-dd-item-desc  { font-size: 10.5px; line-height: 1.35; }
-.extension-dd-item-kbd   { font-size: 10px; opacity: 0.6; }
+.app-dd-item-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.app-dd-item-label { font-size: 13px; color: var(--text); letter-spacing: 0.01em; }
+.app-dd-item-desc  { font-size: 10.5px; line-height: 1.35; }
+.app-dd-item-kbd   { font-size: 10px; opacity: 0.6; }
 
 /* ---- Drill-down subnav ----------------------------------- */
 .appbar-subnav {
@@ -254,7 +254,7 @@ button { background: none; border: none; color: inherit; cursor: pointer; font: 
   transition: color 80ms, border-color 80ms;
 }
 .subnav-tab:hover  { color: var(--text-mid); }
-/* The active underline colour is set inline from the extension's registry-order
+/* The active underline colour is set inline from the app's registry-order
    accent; this is the fallback before it resolves. */
 .subnav-tab.active { color: var(--text); border-bottom-color: var(--text); }
 
@@ -276,7 +276,7 @@ button { background: none; border: none; color: inherit; cursor: pointer; font: 
 }
 
 
-.extension-main {
+.app-main {
   height: calc(100vh - 44px);
   display: flex;
   flex-direction: column;
@@ -926,7 +926,7 @@ a.row-repo:hover { color: var(--bucket-run); text-decoration: underline; }
 
 
 /* ============================================================
-   Settings redesign — rail + per-extension agent tables + inheritance
+   Settings redesign — rail + per-app agent tables + inheritance
    ============================================================ */
 .set-skill-error { color: var(--bucket-dead); font-size: 12px; font-family: var(--font-mono); }
 
@@ -960,12 +960,12 @@ a.row-repo:hover { color: var(--bucket-run); text-decoration: underline; }
 .set-navitem { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 4px; color: var(--text-mid); font-size: 13px; text-align: left; width: 100%; border: 1px solid transparent; transition: background 100ms, color 100ms; cursor: pointer; background: none; }
 .set-navitem .ni-glyph { width: 16px; display: inline-flex; align-items: center; justify-content: center; color: var(--text-dim); }
 .set-navitem .ni-label { flex: 1; letter-spacing: 0.01em; }
-.set-navitem.is-extension .ni-label { text-transform: capitalize; }
+.set-navitem.is-app .ni-label { text-transform: capitalize; }
 .set-navitem:hover { background: var(--surface-2); color: var(--text); }
 .set-navitem.active { background: var(--surface-3); color: var(--text); border-color: var(--border); }
 .set-navitem.active .ni-glyph { color: var(--accent); }
-.set-navitem.is-extension.active { border-left: 2px solid var(--accent); }
-.set-navitem.is-extension.active .ni-glyph { color: var(--accent); }
+.set-navitem.is-app.active { border-left: 2px solid var(--accent); }
+.set-navitem.is-app.active .ni-glyph { color: var(--accent); }
 
 .set-content { display: flex; flex-direction: column; min-height: 0; overflow: auto; }
 .set-pane { padding: 22px 26px 30px; display: flex; flex-direction: column; gap: 22px; }
@@ -1046,11 +1046,11 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
 .set-switch.on::after { transform: translateX(16px); background: var(--accent); }
 .set-switch:disabled { opacity: 0.5; cursor: default; }
 
-.set-extension-toggles { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-.set-extension-toggle { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface-2); }
-.set-extension-toggle .mt-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
-.set-extension-toggle .mt-name { font-family: var(--font-mono); font-size: 12.5px; color: var(--text); }
-.set-extension-toggle .mt-desc { font-size: 11.5px; color: var(--text-dim); line-height: 1.4; }
+.set-app-toggles { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.set-app-toggle { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface-2); }
+.set-app-toggle .mt-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.set-app-toggle .mt-name { font-family: var(--font-mono); font-size: 12.5px; color: var(--text); }
+.set-app-toggle .mt-desc { font-size: 11.5px; color: var(--text-dim); line-height: 1.4; }
 
 .set-table { border: 1px solid var(--border); border-radius: 7px; overflow: hidden; }
 .set-thead, .set-trow { display: grid; align-items: center; grid-template-columns: minmax(132px, 1.4fr) minmax(120px, 1.2fr) 86px 86px 72px; gap: 8px; padding: 0 12px; }
@@ -1276,7 +1276,7 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
 .login-window-canvas canvas { max-width: 100%; max-height: 100%; object-fit: contain; }
 
 @media (max-width: 720px) {
-  .set-extension-toggles { grid-template-columns: 1fr; }
+  .set-app-toggles { grid-template-columns: 1fr; }
   .svc-grid { grid-template-columns: 1fr; }
   .set-thead { display: none; }
   .set-trow { grid-template-columns: 1fr 1fr; gap: 8px; padding: 12px 14px; }
@@ -1335,12 +1335,12 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
  *
  * Confidence palette and review-decision palette are dedicated colors;
  * see :root above. The bucket/outcome palettes are not reused here so a
- * green chip can't accidentally mean two things across the extension.
+ * green chip can't accidentally mean two things across the app.
  * --------------------------------------------------------------------- */
 
 /* Markdown content rendered by react-markdown — for finding bodies,
  * review bodies, and result summaries. Scoped via .markdown-content so
- * we don't accidentally restyle the rest of the extension. Generous prose
+ * we don't accidentally restyle the rest of the app. Generous prose
  * typography (line-height 1.65, ~72ch measure) because operators
  * spend minutes reading these, not seconds scanning rows. */
 .markdown-content {
@@ -1921,7 +1921,7 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
   text-transform: none;
 }
 
-/* Extension filter — one global log, so the pills narrow the view rather than
+/* App filter — one global log, so the pills narrow the view rather than
    switch between feeds. Options come from the registry; no name lands here. */
 .events-filter {
   display: flex; flex-wrap: wrap; gap: 6px;
@@ -2017,9 +2017,9 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
 }
 
 /* ============================================================
-   Back-to-extension link — extension-independent detail pages (/usage, /events)
+   Back-to-app link — app-independent detail pages (/usage, /events)
    ============================================================ */
-.back-to-extension {
+.back-to-app {
   display: inline-flex; align-items: center; gap: 4px;
   font-size: 11px;
   letter-spacing: 0.04em;
@@ -2030,7 +2030,7 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
   background: var(--surface);
   transition: color 80ms, border-color 80ms, background 80ms;
 }
-.back-to-extension:hover {
+.back-to-app:hover {
   color: var(--text-mid);
   border-color: var(--border-loud);
   background: var(--surface-2);
@@ -2136,8 +2136,8 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
 
 /* ============================================================
    Projects config surface (projects.css) — full-width column of
-   project cards: a primary extension + sibling repos a build operates
-   on. Calm, dense, deliberate. (Appbar/strip chrome is the extension's.)
+   project cards: a primary app + sibling repos a build operates
+   on. Calm, dense, deliberate. (Appbar/strip chrome is the app's.)
    ============================================================ */
 /* Full-width content inside the shared <Page> shell, matching the data pages'
    ~20px inset — no bespoke max-width cap. */
@@ -2463,7 +2463,7 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
 @keyframes landing-shake { 0%, 100% { transform: translateX(0); } 20% { transform: translateX(-4px); } 40% { transform: translateX(4px); } 60% { transform: translateX(-2px); } 80% { transform: translateX(2px); } }
 
 /* ============================================================
-   GENERIC SUBJECT PAGES — the floor an installed extension gets
+   GENERIC SUBJECT PAGES — the floor an installed app gets
    ============================================================ */
 .subject-row { grid-template-columns: 14px minmax(60px, auto) 1fr auto; }
 .subject-row-meta { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11.5px; }

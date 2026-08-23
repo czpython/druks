@@ -22,16 +22,16 @@ def test_feed_carries_what_a_row_is_worded_from(druks_db):
         type="workflow.running",
         subject=note.identity,
         label=note.label,
-        extension="field_notes",
+        app="field_notes",
         payload={"kind": Summarize.kind, "run": "wf1"},
     )
-    Event.emit(type="summarized", subject=note.identity, label=note.label, extension="field_notes")
+    Event.emit(type="summarized", subject=note.identity, label=note.label, app="field_notes")
     druks_db.flush()
 
     by_kind = {row.kind: row for row in build_feed()[0]}
 
     started = by_kind["workflow.running"]
-    assert (started.extension, started.workflow) == ("field_notes", Summarize.kind)
+    assert (started.app, started.workflow) == ("field_notes", Summarize.kind)
     assert (started.subject_type, started.subject_id) == ("note", str(note.id))
     # A note declares no label of its own, so it shows itself by identity.
     assert started.subject_label == f"note {note.id}"
@@ -48,13 +48,11 @@ def test_every_subject_shows_itself(druks_db):
     druks_db.flush()
     assert crate.identity == {"type": "crate", "id": 7}
     for subject in (crate, pallet):
-        Event.emit(
-            type="stocked", subject=subject.identity, label=subject.label, extension="faketest"
-        )
+        Event.emit(type="stocked", subject=subject.identity, label=subject.label, app="faketest")
     druks_db.delete(crate)
     druks_db.flush()
 
-    by_type = {row.subject_type: row for row in build_feed()[0] if row.extension == "faketest"}
+    by_type = {row.subject_type: row for row in build_feed()[0] if row.app == "faketest"}
 
     assert by_type["crate"].subject_label == "CRATE-7"
     assert by_type["pallet"].subject_label == "pallet 7"

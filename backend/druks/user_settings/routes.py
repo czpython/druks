@@ -4,9 +4,9 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from druks.accounts.dependencies import current_account, current_session_account
 from druks.accounts.models import Account
+from druks.apps.loader import get_app, iter_apps
+from druks.apps.registry import workflows
 from druks.durable.engine import apply_schedules
-from druks.extensions.loader import get_extension, iter_extensions
-from druks.extensions.registry import workflows
 from druks.harnesses.exceptions import HarnessError
 from druks.harnesses.models import HarnessConnection
 from druks.harnesses.registry import get_harness_for_model, get_harnesses
@@ -16,8 +16,8 @@ from . import reads
 from .datastructures import ALLOWED_EFFORTS
 from .models import HarnessSettings, SettingsOverride, UserSettings
 from .schemas import (
-    ExtensionsSettingsResponse,
-    ExtensionsSettingsUpdate,
+    AppsSettingsResponse,
+    AppsSettingsUpdate,
     HarnessResponse,
     HarnessUpdate,
     UpdateUserSettingsRequest,
@@ -110,12 +110,12 @@ async def update_user_settings(
     return row
 
 
-@router.get("/extensions", response_model=ExtensionsSettingsResponse, response_model_by_alias=True)
-async def get_extension_settings() -> ExtensionsSettingsResponse:
-    projected = (reads.get_extension_settings(m) for m in iter_extensions())
-    return ExtensionsSettingsResponse(
+@router.get("/apps", response_model=AppsSettingsResponse, response_model_by_alias=True)
+async def get_app_settings() -> AppsSettingsResponse:
+    projected = (reads.get_app_settings(m) for m in iter_apps())
+    return AppsSettingsResponse(
         allowed_efforts=list(ALLOWED_EFFORTS),
-        extensions=[out for out in projected if out.agents or out.workflows or out.settings],
+        apps=[out for out in projected if out.agents or out.workflows or out.settings],
     )
 
 
@@ -150,12 +150,12 @@ def _validate_timeout(value: int | None) -> None:
 
 
 @router.patch(
-    "/extensions",
-    response_model=ExtensionsSettingsResponse,
+    "/apps",
+    response_model=AppsSettingsResponse,
     response_model_by_alias=True,
     dependencies=[Depends(current_session_account)],
 )
-async def update_extension_settings(body: ExtensionsSettingsUpdate) -> ExtensionsSettingsResponse:
+async def update_app_settings(body: AppsSettingsUpdate) -> AppsSettingsResponse:
     for name, model in body.agent_models.items():
         _validate_model(model)
         SettingsOverride.set_agent_model(name, model)
@@ -168,7 +168,7 @@ async def update_extension_settings(body: ExtensionsSettingsUpdate) -> Extension
         _validate_timeout(timeout)
         SettingsOverride.set_agent_timeout(name, timeout)
 
-    changed_extensions = []
+    changed_apps = []
     try:
         for kind, changes in body.workflow_settings.items():
             workflow = workflows.get(kind)
@@ -176,16 +176,14 @@ async def update_extension_settings(body: ExtensionsSettingsUpdate) -> Extension
                 raise HTTPException(status_code=422, detail=f"Unknown workflow {kind!r}")
             for field, value in changes.items():
                 workflow.override_setting(field, value)
-        for extension_name, changes in body.extension_settings.items():
+        for app_name, changes in body.app_settings.items():
             try:
-                extension = get_extension(extension_name)
+                app = get_app(app_name)
             except KeyError as exc:
-                raise HTTPException(
-                    status_code=422, detail=f"Unknown extension {extension_name!r}"
-                ) from exc
+                raise HTTPException(status_code=422, detail=f"Unknown app {app_name!r}") from exc
             for field, value in changes.items():
-                extension.override_setting(field, value)
-            changed_extensions.append(extension)
+                app.override_setting(field, value)
+            changed_apps.append(app)
     except ValueError as exc:
         # Domain rejections (unknown field, bad cron, failed constraint) → 422.
         # override_setting has already redacted any submitted value out of the
@@ -193,9 +191,9 @@ async def update_extension_settings(body: ExtensionsSettingsUpdate) -> Extension
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     settings_problems = {}
-    for extension in changed_extensions:
-        if problems := extension.settings().clean():
-            settings_problems[extension.name] = problems
+    for app in changed_apps:
+        if problems := app.settings().clean():
+            settings_problems[app.name] = problems
     if settings_problems:
         raise HTTPException(status_code=422, detail=settings_problems)
 
@@ -208,4 +206,4 @@ async def update_extension_settings(body: ExtensionsSettingsUpdate) -> Extension
         # the just-written overrides off this request's session.
         apply_schedules()
 
-    return await get_extension_settings()
+    return await get_app_settings()

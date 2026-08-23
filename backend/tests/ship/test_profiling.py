@@ -1,5 +1,5 @@
 import pytest
-from druks.contrib.ship.extension import Ship
+from druks.contrib.ship.app import Ship
 from druks.contrib.ship.models import Project, ProjectRepo
 from druks.contrib.ship.policy import RepoPolicy, VerificationProfile
 from druks.contrib.ship.workflows import Profile

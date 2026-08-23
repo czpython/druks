@@ -16,10 +16,10 @@ from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from .agents import Agent
+from .apps.loader import iter_apps
+from .apps.registry import _ROLES, agents, autodiscover, services, webhooks, workflows
 from .core.apis.github import get_github_client
 from .database import create_engine_from_url, db_session
-from .extensions.loader import iter_extensions
-from .extensions.registry import _ROLES, agents, autodiscover, services, webhooks, workflows
 from .harnesses.models import HarnessConnection
 from .harnesses.registry import get_harnesses
 from .sandbox.client import sandbox_client
@@ -47,8 +47,8 @@ def check_service_identities(settings: Settings) -> list[CheckResult]:
     without editing doctor. Declarations self-register through the same
     discovery walk the loader runs. Identities are database-backed like harness
     connections — this reports each row's presence, not a file or setting."""
-    for extension in iter_extensions():
-        extension.discover()
+    for app in iter_apps():
+        app.discover()
     engine = create_engine_from_url(settings.database_url)
     try:
         with Session(engine) as session:
@@ -361,7 +361,7 @@ def check_capability_modules(settings: Settings) -> CheckResult:
         "agents": agents,
         "services": services,
     }
-    packages = [extension.package for extension in iter_extensions()]
+    packages = [app.package for app in iter_apps()]
     strays: list[str] = []
     for package in packages:
         # The canonical walk first, then snapshot what it registered — so a
@@ -393,20 +393,20 @@ def check_capability_modules(settings: Settings) -> CheckResult:
     )
 
 
-def check_extensions(settings: Settings) -> list[CheckResult]:
-    """Each installed extension's resolved settings and own checks, namespaced under it.
-    Read off the class app-lessly through the loader, so doctor never imports an
-    extension's private modules. A check or settings clean that raises is contained
-    under the extension's name, and core checks remain separate ``CHECKS`` entries."""
+def check_apps(settings: Settings) -> list[CheckResult]:
+    """Each installed app's resolved settings and own checks, namespaced under it.
+    Read off the class headlessly through the loader, so doctor never imports an
+    app's private modules. A check or settings clean that raises is contained
+    under the app's name, and core checks remain separate ``CHECKS`` entries."""
     engine = create_engine_from_url(settings.database_url)
     try:
         with Session(engine) as session:
             db_session.registry.set(session)
             results: list[CheckResult] = []
-            for extension in iter_extensions():
-                if settings_model := extension.settings_model:
+            for app in iter_apps():
+                if settings_model := app.settings_model:
                     try:
-                        problems = extension.settings().clean()
+                        problems = app.settings().clean()
                         detail = "; ".join(
                             f"{settings_model.model_fields[field].title or field}: {message}"
                             for field, message in problems.items()
@@ -414,7 +414,7 @@ def check_extensions(settings: Settings) -> list[CheckResult]:
                     except Exception as error:  # noqa: BLE001 — settings fail, doctor continues
                         results.append(
                             CheckResult(
-                                name=f"{extension.name}:settings",
+                                name=f"{app.name}:settings",
                                 ok=False,
                                 detail=f"check raised: {error}",
                             )
@@ -422,21 +422,21 @@ def check_extensions(settings: Settings) -> list[CheckResult]:
                     else:
                         results.append(
                             CheckResult(
-                                name=f"{extension.name}:settings",
+                                name=f"{app.name}:settings",
                                 ok=not problems,
                                 detail=detail or "coherent",
                             )
                         )
-                for check in extension.checks or ():
-                    results.append(_run_extension_check(extension.name, check))
+                for check in app.checks or ():
+                    results.append(_run_app_check(app.name, check))
             return results
     finally:
         db_session.remove()
         engine.dispose()
 
 
-def _run_extension_check(extension_name: str, check) -> CheckResult:
-    """One extension check, its result namespaced under the extension. A check that
+def _run_app_check(app_name: str, check) -> CheckResult:
+    """One app check, its result namespaced under the app. A check that
     raises, or returns anything but a ``CheckResult`` (a missing ``return`` yields
     ``None``), becomes a failing result rather than escaping and hiding later checks."""
     label = getattr(check, "__name__", repr(check))
@@ -445,11 +445,9 @@ def _run_extension_check(extension_name: str, check) -> CheckResult:
         if not isinstance(outcome, CheckResult):
             raise TypeError(f"check returned {type(outcome).__name__}, expected CheckResult")
     except Exception as error:  # noqa: BLE001 — the check fails, never aborts
-        return CheckResult(
-            name=f"{extension_name}:{label}", ok=False, detail=f"check raised: {error}"
-        )
+        return CheckResult(name=f"{app_name}:{label}", ok=False, detail=f"check raised: {error}")
     return CheckResult(
-        name=f"{extension_name}:{outcome.name}",
+        name=f"{app_name}:{outcome.name}",
         ok=outcome.ok,
         detail=outcome.detail,
         pending=outcome.pending,
@@ -466,7 +464,7 @@ CHECKS = (
     check_redis,
     check_drukbox,
     check_capability_modules,
-    check_extensions,
+    check_apps,
 )
 
 

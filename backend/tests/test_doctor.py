@@ -180,7 +180,7 @@ def test_run_checks_covers_all_check_names(tmp_path: Path) -> None:
 
     results = doctor.run_checks(settings)
 
-    # Installed extensions contribute their own checks alongside the platform's.
+    # Installed apps contribute their own checks alongside the platform's.
     assert {result.name for result in results} >= {
         "webhook_ingress",
         "github_identity",

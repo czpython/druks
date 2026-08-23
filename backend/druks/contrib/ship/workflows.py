@@ -28,8 +28,8 @@ from druks.settings import load_settings
 from druks.skills.models import Skill
 from druks.workflows import FatalError, Workflow, step
 
+from .app import Ship
 from .constants import GITHUB_MCP_NAME, GITHUB_MCP_URL
-from .extension import Ship
 from .journal import BuildJournal
 from .policy import PlanGate, RepoPolicy
 from .prompt_context import BuildPromptContext

@@ -5,10 +5,10 @@ from types import SimpleNamespace
 import psycopg
 import pytest
 from dbos import DBOS
+from druks.apps.registry import workflows
 from druks.database import configure_session, db_session, get_session
 from druks.durable.engine import configure_engine, init_dbos, launch, shutdown
 from druks.durable.enums import RunState
-from druks.extensions.registry import workflows
 from druks.models import StoredSubject
 from druks.notifications import outbox
 from druks.notifications.exceptions import DeliveryError, NotificationError

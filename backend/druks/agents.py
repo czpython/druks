@@ -10,12 +10,12 @@ from typing import TYPE_CHECKING, Any
 from dbos import DBOS, StepOptions
 from pydantic import BaseModel, ConfigDict
 
+from druks.apps.registry import agents
 from druks.database import db_session
 from druks.durable.activity import set_run_phase
 from druks.durable.engine import _step_engine, step_session
 from druks.durable.exceptions import WorkflowError
 from druks.durable.models import AgentCall, Artifact
-from druks.extensions.registry import agents
 from druks.harnesses.exceptions import HarnessError, Retry
 from druks.harnesses.models import HarnessConnection
 from druks.harnesses.registry import get_harness_for_model
@@ -102,10 +102,10 @@ class Agent:
     include_plugins: bool = True
     # ``id`` is the agent's durable key (settings, timeline, registry): the attribute
     # name it's declared as, or an explicit ``id=`` for a standalone agent (a test, a
-    # one-off). ``extension`` is the owning Extension's name, read from the class in
+    # one-off). ``app`` is the owning App's name, read from the class in
     # __set_name__ to group the settings UI — blank for a standalone agent (no owner).
     id: str = field(default="", compare=False)
-    extension: str = field(init=False, compare=False, default="")
+    app: str = field(init=False, compare=False, default="")
 
     def __post_init__(self) -> None:
         if self.id:  # an explicit id means a standalone agent — it registers itself now
@@ -115,7 +115,7 @@ class Agent:
         if self.id:  # explicit id: already registered in __post_init__
             return
         object.__setattr__(self, "id", attr)
-        object.__setattr__(self, "extension", owner.name)
+        object.__setattr__(self, "app", owner.name)
         agents.register(self)
 
     # The effective settings, resolved through the override store: per-agent
@@ -142,11 +142,11 @@ class Agent:
         workflow_id comes from the workflow context, not the caller; everything
         else (repo, …) is prompt context."""
         if not self.id:
-            # Built loose — never assigned to an Extension, never given an explicit
+            # Built loose — never assigned to an App, never given an explicit
             # id — so its settings, its registry entry and the call it would record
             # all key on nothing.
             raise WorkflowError(
-                "an agent runs under its own id — declare it on an Extension, or "
+                "an agent runs under its own id — declare it on an App, or "
                 "pass id= for a standalone one"
             )
         workflow = current_workflow.get(None)

@@ -43,8 +43,8 @@ class Note(StoredSubject):
 
     @classmethod
     def list_summaries(cls, account_id: str | None) -> list[NoteSummary]:
-        # How many the board shows is an operator knob, so it lives on the extension.
-        from druks_field_notes.extension import FieldNotes
+        # How many the board shows is an operator knob, so it lives on the app.
+        from druks_field_notes.app import FieldNotes
 
         notes = cls.list_recent(limit=FieldNotes.settings().board_size)
         return [note.get_summary() for note in notes]

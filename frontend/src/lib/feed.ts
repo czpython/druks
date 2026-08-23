@@ -1,8 +1,8 @@
 import type { FeedItem } from '../api/types'
-import { getExtensionUI } from '../extensions/registry'
+import { getAppUI } from '../apps/registry'
 
 // What a workflow doing something is called. The platform owns these words because it
-// owns the lifecycle; an extension's own milestones are already named by their type.
+// owns the lifecycle; an app's own milestones are already named by their type.
 const LIFECYCLE_VERBS: Record<string, string> = {
   'workflow.running': 'started',
   'workflow.parked': 'waiting on you',
@@ -17,9 +17,9 @@ export interface EventLine {
   // Who it happened to, as it showed itself. Empty for a row about nothing in
   // particular.
   subject: string
-  // The feed's source column — the workflow that ran, else the extension.
+  // The feed's source column — the workflow that ran, else the app.
   source: string
-  // Where the row navigates, when the extension has a page for its subject.
+  // Where the row navigates, when the app has a page for its subject.
   path?: string
   // Pill class, so the operator can scan a column of kinds by colour.
   bucket: string
@@ -29,7 +29,7 @@ export function eventLine(event: FeedItem): EventLine {
   return {
     label: label(event),
     subject: event.subjectLabel ?? '',
-    source: localName(event.workflow) || event.extension || 'druks',
+    source: localName(event.workflow) || event.app || 'druks',
     path: subjectPath(event),
     bucket: isLifecycle(event) ? 'event-kind-agent' : 'event-kind-audit',
   }
@@ -41,14 +41,14 @@ function label(event: FeedItem): string {
     const workflow = localName(event.workflow)
     return workflow ? `${workflow} ${verb}` : verb
   }
-  // An extension's milestone type is its own word ("merged", "needs_answers"), and an
+  // An app's milestone type is its own word ("merged", "needs_answers"), and an
   // unrecognised kind reads as itself rather than disappearing.
   return words(event.kind)
 }
 
 function subjectPath(event: FeedItem): string | undefined {
-  if (event.extension && event.subjectType && event.subjectId) {
-    const ui = getExtensionUI(event.extension)
+  if (event.app && event.subjectType && event.subjectId) {
+    const ui = getAppUI(event.app)
     return ui?.subjectPath?.({ type: event.subjectType, id: event.subjectId })
   }
   return undefined

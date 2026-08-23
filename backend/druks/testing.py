@@ -24,18 +24,18 @@ import druks.redis
 import druks.services.models  # noqa: F401
 import druks.skills.models  # noqa: F401
 import druks.user_settings.models  # noqa: F401
+from druks.apps.loader import import_app_models, iter_apps
 from druks.bootstrap import seed
 from druks.database import _session_factory, configure_session, create_engine_from_url, db_session
 from druks.durable import AgentCall, Run
 from druks.durable.datastructures import Subject
 from druks.durable.dbos_state import DBOS_SYSTEM_SCHEMA, workflow_status
 from druks.durable.engine import _dbos_database_url, configure_engine
-from druks.extensions.loader import import_extension_models, iter_extensions
 from druks.models import Base, StoredSubject
 from druks.settings import Settings
 from druks.workflows import Workflow, WorkflowError, _bind_instance, current_workflow
 
-# druks.testing is the author door for testing an extension: these four, plus the
+# druks.testing is the author door for testing an app: these four, plus the
 # fixtures the pytest11 entry point registers. Everything else here is the
 # repository suite's own harness.
 __all__ = [
@@ -54,9 +54,9 @@ TEST_DATABASE_URL = os.environ.get(
 )
 TEST_REDIS_URL = os.environ.get("DRUKS_TEST_REDIS_URL", "redis://127.0.0.1:6379/15")
 
-# Discovery runs once for the session, and a broken extension is an ordinary state to
+# Discovery runs once for the session, and a broken app is an ordinary state to
 # be in mid-edit. Holding the failure here lets a suite that never asks for a druks
-# fixture finish, and gives one that does an error naming the extension.
+# fixture finish, and gives one that does an error naming the app.
 _discovery_error: Exception | None = None
 
 
@@ -82,10 +82,10 @@ def pytest_configure(config) -> None:
     # App commits become savepoints inside the fixture's outer transaction, which
     # remains available for rollback at test teardown.
     _session_factory.configure(join_transaction_mode="create_savepoint")
-    # A Workflow class resolves its declaring extension at definition time, so
+    # A Workflow class resolves its declaring app at definition time, so
     # ownership must be claimed before collection imports a module that defines one.
     try:
-        iter_extensions()
+        iter_apps()
     except Exception as error:  # noqa: BLE001 — re-raised from the fixtures below
         _discovery_error = error
 
@@ -100,9 +100,9 @@ def _druks_engine() -> Iterator[Engine]:
 
 
 def init_db(engine: Engine) -> None:
-    """Create every installed extension's tables and the first-start seed rows.
+    """Create every installed app's tables and the first-start seed rows.
     Idempotent; production owns its schema through Alembic instead."""
-    import_extension_models()
+    import_app_models()
     # citext backs the case-insensitive email columns and must exist before create_all.
     with engine.begin() as connection:
         connection.execute(text("CREATE EXTENSION IF NOT EXISTS citext"))
@@ -177,7 +177,7 @@ def configure_app_for_test(
     authenticated: bool = True,
 ):
     from druks.accounts.dependencies import current_account, current_session_account
-    from druks.api.app import app
+    from druks.api.server import app
 
     if not engine:
         engine = db_session().get_bind()
@@ -257,13 +257,13 @@ def druks_without_dispatch() -> Iterator[None]:
 @pytest.fixture
 def druks_without_remote_config(monkeypatch) -> None:
     """Every ``.druks`` namespace lookup misses, so prompts resolve to their bundled
-    templates and extension config to its declared defaults — no repo credentials."""
+    templates and app config to its declared defaults — no repo credentials."""
 
     async def _missing(**_kwargs):
         return None
 
     monkeypatch.setattr("druks.prompts.resolver.fetch_file", _missing)
-    monkeypatch.setattr("druks.extensions.config.fetch_file", _missing)
+    monkeypatch.setattr("druks.apps.config.fetch_file", _missing)
 
 
 async def run_workflow(

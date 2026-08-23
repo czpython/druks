@@ -97,7 +97,7 @@ services:
     command:
       [
         "uvicorn",
-        "druks.api.app:app",
+        "druks.api.server:app",
         "--host",
         "${DRUKS_WEB_BIND_HOST:-127.0.0.1}",
         "--port",

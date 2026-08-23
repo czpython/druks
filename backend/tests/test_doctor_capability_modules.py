@@ -39,10 +39,10 @@ def _temp_capability_package(tmp_path: Path, monkeypatch, *, module_name: str) -
     for name in list(sys.modules):
         if name == package or name.startswith(f"{package}."):
             del sys.modules[name]
-    # The check reads packages off iter_extensions at call time; the walk only
+    # The check reads packages off iter_apps at call time; the walk only
     # needs an object with a ``package``.
     monkeypatch.setattr(
-        "druks.doctor.iter_extensions",
+        "druks.doctor.iter_apps",
         lambda: [SimpleNamespace(package=package)],
     )
     return package
@@ -89,7 +89,7 @@ def test_capability_re_exported_by_a_role_module_is_not_flagged(
         if name == package or name.startswith(f"{package}."):
             del sys.modules[name]
     monkeypatch.setattr(
-        "druks.doctor.iter_extensions",
+        "druks.doctor.iter_apps",
         lambda: [SimpleNamespace(package=package)],
     )
     settings = make_settings(tmp_path)

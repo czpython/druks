@@ -6,11 +6,11 @@ from types import SimpleNamespace
 import psycopg
 import pytest
 from druks.agents import Agent, AgentOutput
+from druks.apps.registry import agents, workflows
 from druks.database import configure_session, get_session
 from druks.durable import FatalError, Run, RunState
 from druks.durable.dbos_state import workflow_status
 from druks.durable.engine import configure_engine, init_dbos, launch, shutdown
-from druks.extensions.registry import agents, workflows
 from druks.models import StoredSubject
 from druks.testing import init_db
 from druks.workflows import Gate, Subject, Workflow, step
@@ -978,7 +978,7 @@ async def test_subject_reaches_body_and_result_rides_finished_event(rt):
 async def test_registry_rejects_duplicate_key(rt):
     # Re-registering the same item is idempotent, but a different capability on an
     # existing key is a collision (raises) — two can't share a durable identity.
-    from druks.extensions.registry import Registry
+    from druks.apps.registry import Registry
 
     registry = Registry("test", key=lambda entry: entry["kind"])
     capability = {"kind": "k"}

@@ -45,7 +45,7 @@ _TOKEN_COUNT_MARKERS = ('"type":"token_count"', '"type": "token_count"')
 
 # Codex (ChatGPT subscription) usage endpoint — the standalone fetch the
 # `codex` CLI's account/rateLimits/read RPC uses for the `chatgpt` auth
-# extension. Returns the same numbers /status shows without a completion.
+# app. Returns the same numbers /status shows without a completion.
 _CODEX_USAGE_URL = "https://chatgpt.com/backend-api/wham/usage"
 _CODEX_USER_AGENT = "codex-cli"
 

@@ -1,5 +1,0 @@
-from druks.schemas import BaseResponse
-
-# HTTP request/response models for this extension's routes. Response models subclass
-# ``BaseResponse`` (snake_case fields serialize to camelCase for the frontend);
-# request bodies are plain ``pydantic.BaseModel``.

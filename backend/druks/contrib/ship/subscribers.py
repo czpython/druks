@@ -1,5 +1,5 @@
+from druks.contrib.ship.app import Ship
 from druks.contrib.ship.contracts import ReviewWork
-from druks.contrib.ship.extension import Ship
 from druks.contrib.ship.models import ProjectRepo, WorkItem
 from druks.contrib.ship.ticketing.enums import TicketStatus
 from druks.contrib.ship.workflows import Build, Profile

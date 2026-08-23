@@ -5,12 +5,12 @@ import { ApiError, api } from '../api/client'
 import { BrowserSessionsPane } from './BrowserSessionsPane'
 import { TextInput } from './Control'
 import { SettingField } from './SettingField'
-import { ExtensionGlyph } from './ExtensionGlyph'
+import { AppGlyph } from './AppGlyph'
 import { ConnectSteps, useHarnessConnect } from './HarnessConnectFlow'
 import {
   type Harness,
-  type ExtensionSettings,
-  type ExtensionSettingsProblems,
+  type AppSettings,
+  type AppSettingsProblems,
   type McpRegistryCandidate,
   type McpServer,
   type Pat,
@@ -18,11 +18,11 @@ import {
   type Service,
   type SkillCollection,
   type UpdateHarnessRequest,
-  type UpdateExtensionsSettingsRequest,
+  type UpdateAppsSettingsRequest,
   type UpdateUserSettingsRequest,
   type WorkflowSettingField,
 } from '../api/types'
-import { extensionLabel } from '../extensions/registry'
+import { appLabel } from '../apps/registry'
 import { absTime, relTimeFromIso } from '../lib/format'
 import { harnessColors } from '../lib/harnessColors'
 
@@ -56,13 +56,13 @@ function _withField(
   return next
 }
 
-function _areExtensionEditsDirty(edits: UpdateExtensionsSettingsRequest): boolean {
+function _areAppEditsDirty(edits: UpdateAppsSettingsRequest): boolean {
   if (Object.keys(edits.agentModels ?? {}).length > 0) return true
   if (Object.keys(edits.agentEfforts ?? {}).length > 0) return true
   if (Object.keys(edits.agentTimeouts ?? {}).length > 0) return true
   if (Object.values(edits.workflowSettings ?? {}).some((fields) => Object.keys(fields).length > 0))
     return true
-  return Object.values(edits.extensionSettings ?? {}).some(
+  return Object.values(edits.appSettings ?? {}).some(
     (fields) => Object.keys(fields).length > 0,
   )
 }
@@ -111,9 +111,9 @@ export function SettingsModal({ open, onClose }: Props) {
     enabled: open,
     staleTime: 60_000,
   })
-  const extensionSettingsQuery = useQuery({
-    queryKey: ['extensionSettings'],
-    queryFn: () => api.getExtensionSettings(),
+  const appSettingsQuery = useQuery({
+    queryKey: ['appSettings'],
+    queryFn: () => api.getAppSettings(),
     enabled: open,
     staleTime: 60_000,
   })
@@ -126,26 +126,26 @@ export function SettingsModal({ open, onClose }: Props) {
     staleTime: 60_000,
   })
   const [timezone, setTimezone] = useState<string>('UTC')
-  // Pending per-extension setting overrides — a sparse UpdateExtensionsSettingsRequest the
-  // extension tabs (and the Druks tab's built-in agents) edit and submit() flushes.
-  // Distinct from ``knobs`` (the column-backed settings) because extension settings
+  // Pending per-app setting overrides — a sparse UpdateAppsSettingsRequest the
+  // app tabs (and the Druks tab's built-in agents) edit and submit() flushes.
+  // Distinct from ``knobs`` (the column-backed settings) because app settings
   // hit a different endpoint.
-  const [extensionEdits, setExtensionEdits] = useState<UpdateExtensionsSettingsRequest>({})
+  const [appEdits, setAppEdits] = useState<UpdateAppsSettingsRequest>({})
   // Pending per-harness edits (name -> sparse UpdateHarnessRequest), flushed by
-  // submit() — same dirty/save flow as the extension and general settings.
+  // submit() — same dirty/save flow as the app and general settings.
   const [harnessEdits, setHarnessEdits] = useState<Record<string, UpdateHarnessRequest>>({})
   // 'general' | 'harnesses' | 'browser-sessions' | 'skills' | 'mcp' |
-  // 'agent-access' | <extension name>
+  // 'agent-access' | <app name>
   const [section, setSection] = useState<string>('general')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [extensionProblems, setExtensionProblems] = useState<ExtensionSettingsProblems>({})
+  const [appProblems, setAppProblems] = useState<AppSettingsProblems>({})
   const [tick, setTick] = useState(0)
   const initialised = useRef(false)
 
   // Seed the form from the saved value the first time the modal opens
   // with data. Subsequent re-opens keep whatever the operator last picked
-  // unless they cancel — matches the rest of the extension's modal feel.
+  // unless they cancel — matches the rest of the app's modal feel.
   useEffect(() => {
     if (!open) {
       initialised.current = false
@@ -153,8 +153,8 @@ export function SettingsModal({ open, onClose }: Props) {
     }
     if (!initialised.current && settingsQuery.data) {
       setTimezone(settingsQuery.data.timezone)
-      setExtensionEdits({})
-      setExtensionProblems({})
+      setAppEdits({})
+      setAppProblems({})
       setHarnessEdits({})
       initialised.current = true
     }
@@ -181,7 +181,7 @@ export function SettingsModal({ open, onClose }: Props) {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, busy, timezone, extensionEdits, harnessEdits, onClose])
+  }, [open, busy, timezone, appEdits, harnessEdits, onClose])
 
   const timezones = useMemo(() => _listTimezones(), [])
   const preview = useMemo(() => {
@@ -194,22 +194,22 @@ export function SettingsModal({ open, onClose }: Props) {
   async function submit() {
     setBusy(true)
     setError(null)
-    setExtensionProblems({})
-    const workflows = allExtensions.flatMap((extension) => extension.workflows)
-    const submittedExtensionEdits: UpdateExtensionsSettingsRequest = {
-      ...extensionEdits,
-      extensionSettings: Object.fromEntries(
-        Object.entries(extensionEdits.extensionSettings ?? {}).map(([extensionName, changes]) => {
-          const fields = allExtensions.find(({ name }) => name === extensionName)?.settings ?? []
+    setAppProblems({})
+    const workflows = allApps.flatMap((app) => app.workflows)
+    const submittedAppEdits: UpdateAppsSettingsRequest = {
+      ...appEdits,
+      appSettings: Object.fromEntries(
+        Object.entries(appEdits.appSettings ?? {}).map(([appName, changes]) => {
+          const fields = allApps.find(({ name }) => name === appName)?.settings ?? []
           const visibleChanges = Object.entries(changes).filter(([fieldName]) => {
             const field = fields.find(({ name }) => name === fieldName)
             return field ? isFieldVisible(field, fields, changes) : true
           })
-          return [extensionName, Object.fromEntries(visibleChanges)]
+          return [appName, Object.fromEntries(visibleChanges)]
         }),
       ),
       workflowSettings: Object.fromEntries(
-        Object.entries(extensionEdits.workflowSettings ?? {}).map(([kind, changes]) => {
+        Object.entries(appEdits.workflowSettings ?? {}).map(([kind, changes]) => {
           const fields = workflows.find((workflow) => workflow.kind === kind)?.fields ?? []
           const visibleChanges = Object.entries(changes).filter(([fieldName]) => {
             const field = fields.find(({ name }) => name === fieldName)
@@ -228,9 +228,9 @@ export function SettingsModal({ open, onClose }: Props) {
         await api.updateSettings(body)
         await queryClient.invalidateQueries({ queryKey: ['settings'] })
       }
-      if (_areExtensionEditsDirty(submittedExtensionEdits)) {
-        await api.updateExtensionSettings(submittedExtensionEdits)
-        await queryClient.invalidateQueries({ queryKey: ['extensionSettings'] })
+      if (_areAppEditsDirty(submittedAppEdits)) {
+        await api.updateAppSettings(submittedAppEdits)
+        await queryClient.invalidateQueries({ queryKey: ['appSettings'] })
       }
       const harnessChanges = Object.entries(harnessEdits).filter(([, patch]) => Object.keys(patch).length > 0)
       if (harnessChanges.length > 0) {
@@ -246,7 +246,7 @@ export function SettingsModal({ open, onClose }: Props) {
         typeof caught.detail === 'object' &&
         !Array.isArray(caught.detail)
       ) {
-        setExtensionProblems(caught.detail as ExtensionSettingsProblems)
+        setAppProblems(caught.detail as AppSettingsProblems)
       } else {
         setError((caught as Error).message)
       }
@@ -257,53 +257,53 @@ export function SettingsModal({ open, onClose }: Props) {
 
   const savedTz = settingsQuery.data?.timezone
   const tzDirty = savedTz !== undefined && savedTz !== timezone
-  const extensionsDirty = _areExtensionEditsDirty(extensionEdits)
+  const appsDirty = _areAppEditsDirty(appEdits)
   const harnessesDirty = Object.values(harnessEdits).some((patch) => Object.keys(patch).length > 0)
-  const dirty = tzDirty || extensionsDirty || harnessesDirty
+  const dirty = tzDirty || appsDirty || harnessesDirty
 
-  const data = extensionSettingsQuery.data
-  const allExtensions = data?.extensions ?? []
+  const data = appSettingsQuery.data
+  const allApps = data?.apps ?? []
   const allowedEfforts = data?.allowedEfforts ?? []
   const harnesses = harnessesQuery.data ?? []
   const harnessByName: Record<string, Harness> = Object.fromEntries(
     harnesses.map((h) => [h.name, h]),
   )
   const harnessColor = harnessColors(harnesses.map((h) => h.name))
-  const extensionSection = allExtensions.find((extension) => extension.name === section)
+  const appSection = allApps.find((app) => app.name === section)
 
   function setAgentModel(name: string, model: string | null) {
-    setExtensionEdits((prev) => ({
+    setAppEdits((prev) => ({
       ...prev,
       agentModels: { ...prev.agentModels, [name]: model },
     }))
   }
 
   function setAgentEffort(name: string, effort: string | null) {
-    setExtensionEdits((prev) => ({
+    setAppEdits((prev) => ({
       ...prev,
       agentEfforts: { ...prev.agentEfforts, [name]: effort },
     }))
   }
 
   function setAgentTimeout(name: string, timeout: number | null) {
-    setExtensionEdits((prev) => ({
+    setAppEdits((prev) => ({
       ...prev,
       agentTimeouts: { ...prev.agentTimeouts, [name]: timeout },
     }))
   }
 
-  function setExtensionSetting(extension: string, field: string, value: unknown) {
-    setExtensionEdits((prev) => ({
+  function setAppSetting(app: string, field: string, value: unknown) {
+    setAppEdits((prev) => ({
       ...prev,
-      extensionSettings: {
-        ...prev.extensionSettings,
-        [extension]: _withField(prev.extensionSettings?.[extension], field, value),
+      appSettings: {
+        ...prev.appSettings,
+        [app]: _withField(prev.appSettings?.[app], field, value),
       },
     }))
-    setExtensionProblems((prev) => {
-      const remaining = { ...prev[extension] }
+    setAppProblems((prev) => {
+      const remaining = { ...prev[app] }
       delete remaining[field]
-      return { ...prev, [extension]: remaining }
+      return { ...prev, [app]: remaining }
     })
   }
 
@@ -312,7 +312,7 @@ export function SettingsModal({ open, onClose }: Props) {
   }
 
   function setWorkflowField(kind: string, field: string, value: unknown) {
-    setExtensionEdits((prev) => ({
+    setAppEdits((prev) => ({
       ...prev,
       workflowSettings: {
         ...prev.workflowSettings,
@@ -357,16 +357,16 @@ export function SettingsModal({ open, onClose }: Props) {
             <RailItem icon="mcp" label="MCP" active={section === 'mcp'} onClick={() => setSection('mcp')} />
             <RailItem icon="agent-access" label="Tokens" active={section === 'agent-access'} onClick={() => setSection('agent-access')} />
             <div className="set-rail-label">apps</div>
-            {allExtensions.map((extension) => (
+            {allApps.map((app) => (
               <button
-                key={extension.name}
-                className={'set-navitem is-extension' + (section === extension.name ? ' active' : '')}
-                onClick={() => setSection(extension.name)}
+                key={app.name}
+                className={'set-navitem is-app' + (section === app.name ? ' active' : '')}
+                onClick={() => setSection(app.name)}
               >
                 <span className="ni-glyph">
-                  <ExtensionGlyph name={extension.icon} />
+                  <AppGlyph name={app.icon} />
                 </span>
-                <span className="ni-label">{extensionLabel(extension.name)}</span>
+                <span className="ni-label">{appLabel(app.name)}</span>
               </button>
             ))}
           </nav>
@@ -385,7 +385,7 @@ export function SettingsModal({ open, onClose }: Props) {
               (harnesses.length > 0 ? (
                 <HarnessesPane
                   harnesses={harnesses}
-                  apps={allExtensions}
+                  apps={allApps}
                   allowedEfforts={allowedEfforts}
                   edits={harnessEdits}
                   onField={setHarnessField}
@@ -403,11 +403,11 @@ export function SettingsModal({ open, onClose }: Props) {
             {section === 'skills' && <SkillsPane />}
             {section === 'mcp' && <McpServersPane />}
             {section === 'agent-access' && <AgentAccessPane />}
-            {extensionSection && (
-              <ExtensionPane
-                extension={extensionSection}
-                edits={extensionEdits}
-                fieldErrors={extensionProblems[extensionSection.name] ?? {}}
+            {appSection && (
+              <AppPane
+                app={appSection}
+                edits={appEdits}
+                fieldErrors={appProblems[appSection.name] ?? {}}
                 harnessColor={harnessColor}
                 harnessByName={harnessByName}
                 allowedEfforts={allowedEfforts}
@@ -415,7 +415,7 @@ export function SettingsModal({ open, onClose }: Props) {
                 onAgentEffort={setAgentEffort}
                 onAgentTimeout={setAgentTimeout}
                 onWorkflowField={setWorkflowField}
-                onExtensionSetting={setExtensionSetting}
+                onAppSetting={setAppSetting}
                 busy={busy}
               />
             )}
@@ -511,7 +511,7 @@ function RailGlyph({ name }: { name: string }) {
         <path d="M7.1 7.1 13.5 13.5M10.7 10.7l2-2" />
       </>
     ),
-    extension: (
+    app: (
       <>
         <path d="M8 1.8 13.7 5v6L8 14.2 2.3 11V5z" />
         <path d="M2.5 5 8 8.1 13.5 5M8 8.1V14" />
@@ -520,7 +520,7 @@ function RailGlyph({ name }: { name: string }) {
   }
   return (
     <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" strokeWidth={1.3} strokeLinecap="round" strokeLinejoin="round">
-      {paths[name] ?? paths.extension}
+      {paths[name] ?? paths.app}
     </svg>
   )
 }
@@ -766,7 +766,7 @@ function HarnessesPane({
   busy,
 }: {
   harnesses: Harness[]
-  apps: ExtensionSettings[]
+  apps: AppSettings[]
   allowedEfforts: string[]
   edits: Record<string, UpdateHarnessRequest>
   onField: (name: string, patch: UpdateHarnessRequest) => void
@@ -779,7 +779,7 @@ function HarnessesPane({
   // agent's model is overridden across harnesses.
   const agentCount = (name: string) =>
     apps.reduce(
-      (count, extension) => count + extension.agents.filter((a) => harnessOfModel(a.model, harnesses) === name).length,
+      (count, app) => count + app.agents.filter((a) => harnessOfModel(a.model, harnesses) === name).length,
       0,
     )
 
@@ -849,7 +849,7 @@ function HarnessesPane({
                 </div>
                 <div className="mcp-field">
                   <label className="mcp-label" htmlFor={id('fast')}>
-                    Fast extension
+                    Fast app
                   </label>
                   <span className="hr-fast">
                     <Switch
@@ -857,7 +857,7 @@ function HarnessesPane({
                       on={h.fastMode}
                       onClick={() => onField(harness.name, { fastMode: !h.fastMode })}
                       disabled={busy}
-                      label={`Fast extension (${harness.name})`}
+                      label={`Fast app (${harness.name})`}
                     />
                   </span>
                 </div>
@@ -2262,11 +2262,11 @@ function PatRow({
 }
 
 // ---------------------------------------------------------------------------
-// Extension pane — blurb, workflow toggles, agent table
+// App pane — blurb, workflow toggles, agent table
 // ---------------------------------------------------------------------------
 
-function ExtensionPane({
-  extension,
+function AppPane({
+  app,
   edits,
   fieldErrors,
   harnessByName,
@@ -2276,11 +2276,11 @@ function ExtensionPane({
   onAgentEffort,
   onAgentTimeout,
   onWorkflowField,
-  onExtensionSetting,
+  onAppSetting,
   busy,
 }: {
-  extension: ExtensionSettings
-  edits: UpdateExtensionsSettingsRequest
+  app: AppSettings
+  edits: UpdateAppsSettingsRequest
   fieldErrors: Record<string, string>
   harnessByName: Record<string, Harness>
   harnessColor: Record<string, string>
@@ -2289,20 +2289,20 @@ function ExtensionPane({
   onAgentEffort: (name: string, effort: string | null) => void
   onAgentTimeout: (name: string, timeout: number | null) => void
   onWorkflowField: (kind: string, field: string, value: unknown) => void
-  onExtensionSetting: (extension: string, field: string, value: unknown) => void
+  onAppSetting: (app: string, field: string, value: unknown) => void
   busy: boolean
 }) {
-  // Options come from the extension's workflows AND the extension's own settings —
+  // Options come from the app's workflows AND the app's own settings —
   // both are operator knobs, rendered and edited the same way; the scope only
   // decides which edit map + setter a change routes to.
   const optionFields = [
-    ...extension.workflows.flatMap((workflow) =>
+    ...app.workflows.flatMap((workflow) =>
       workflow.fields.map((f) => ({ scope: 'workflow' as const, kind: workflow.kind, f })),
     ),
-    ...extension.settings.map((f) => ({ scope: 'extension' as const, kind: extension.name, f })),
+    ...app.settings.map((f) => ({ scope: 'app' as const, kind: app.name, f })),
   ]
   const optionEdit = (o: (typeof optionFields)[number]) =>
-    (o.scope === 'workflow' ? edits.workflowSettings : edits.extensionSettings)?.[o.kind]?.[o.f.name]
+    (o.scope === 'workflow' ? edits.workflowSettings : edits.appSettings)?.[o.kind]?.[o.f.name]
   const optionValue = (o: (typeof optionFields)[number]) => {
     const edit = optionEdit(o)
     return edit !== undefined ? edit : o.f.value
@@ -2311,7 +2311,7 @@ function ExtensionPane({
     const fields = optionFields
       .filter(({ scope, kind }) => scope === o.scope && kind === o.kind)
       .map(({ f }) => f)
-    const changes = (o.scope === 'workflow' ? edits.workflowSettings : edits.extensionSettings)?.[
+    const changes = (o.scope === 'workflow' ? edits.workflowSettings : edits.appSettings)?.[
       o.kind
     ]
     return isFieldVisible(o.f, fields, changes)
@@ -2322,15 +2322,15 @@ function ExtensionPane({
     '',
     ...new Set(visibleOptions.map(({ f }) => f.section).filter((label) => label !== '')),
   ]
-  const visibleExtensionFields = new Set(
-    visibleOptions.filter(({ scope }) => scope === 'extension').map(({ f }) => f.name),
+  const visibleAppFields = new Set(
+    visibleOptions.filter(({ scope }) => scope === 'app').map(({ f }) => f.name),
   )
   const hiddenFieldErrors = optionFields.filter(
     ({ scope, f }) =>
-      scope === 'extension' && fieldErrors[f.name] && !visibleExtensionFields.has(f.name),
+      scope === 'app' && fieldErrors[f.name] && !visibleAppFields.has(f.name),
   )
   const setOption = (o: (typeof optionFields)[number], value: unknown) =>
-    o.scope === 'workflow' ? onWorkflowField(o.kind, o.f.name, value) : onExtensionSetting(o.kind, o.f.name, value)
+    o.scope === 'workflow' ? onWorkflowField(o.kind, o.f.name, value) : onAppSetting(o.kind, o.f.name, value)
   // The control speaks strings; the override store keeps the declared type.
   // Clearing a secret's box records no edit, so the stored secret stays. An int
   // mid-edit that does not parse records nothing, so the box can be emptied and
@@ -2345,13 +2345,13 @@ function ExtensionPane({
     <div className="set-pane">
       <div className="set-pane-head">
         <div className="set-pane-sub">
-          {extension.description || 'Each stage runs as its own agent — set a default once per harness, override only where it matters.'}
+          {app.description || 'Each stage runs as its own agent — set a default once per harness, override only where it matters.'}
         </div>
       </div>
 
       {optionFields.length > 0 && (
         <div className="set-group">
-          <div className="set-group-label">{extensionLabel(extension.name)} options</div>
+          <div className="set-group-label">{appLabel(app.name)} options</div>
           {sectionLabels
             .map((sectionLabel) => ({
               sectionLabel,
@@ -2365,15 +2365,15 @@ function ExtensionPane({
                 <Fragment key={sectionLabel}>
                   {sectionLabel && <div className="set-group-label">{sectionLabel}</div>}
                   {boolFields.length > 0 && (
-                    <div className="set-extension-toggles">
+                    <div className="set-app-toggles">
                       {boolFields.map((o) => {
                         const on = Boolean(optionValue(o))
                         const fieldError =
-                          o.scope === 'extension' ? fieldErrors[o.f.name] : undefined
+                          o.scope === 'app' ? fieldErrors[o.f.name] : undefined
                         return (
                           <div
                             key={o.scope + '.' + o.kind + '.' + o.f.name}
-                            className="set-extension-toggle"
+                            className="set-app-toggle"
                           >
                             <div className="mt-text">
                               <span className="mt-name">{o.f.label}</span>
@@ -2394,7 +2394,7 @@ function ExtensionPane({
                         const override = optionEdit(o)
                         const cur = optionValue(o)
                         const fieldError =
-                          o.scope === 'extension' ? fieldErrors[o.f.name] : undefined
+                          o.scope === 'app' ? fieldErrors[o.f.name] : undefined
                         const secret = o.f.type === 'secret'
                         return (
                           <SettingField
@@ -2428,11 +2428,11 @@ function ExtensionPane({
         </div>
       )}
 
-      {extension.agents.length > 0 && (
+      {app.agents.length > 0 && (
         <div className="set-group">
           <div className="set-group-label">agents</div>
           <AgentTable
-            extension={extension}
+            app={app}
             edits={edits}
             harnessByName={harnessByName}
             harnessColor={harnessColor}
@@ -2449,7 +2449,7 @@ function ExtensionPane({
 }
 
 function AgentTable({
-  extension,
+  app,
   edits,
   harnessByName,
   harnessColor,
@@ -2459,8 +2459,8 @@ function AgentTable({
   onAgentTimeout,
   busy,
 }: {
-  extension: ExtensionSettings
-  edits: UpdateExtensionsSettingsRequest
+  app: AppSettings
+  edits: UpdateAppsSettingsRequest
   harnessByName: Record<string, Harness>
   harnessColor: Record<string, string>
   allowedEfforts: string[]
@@ -2479,7 +2479,7 @@ function AgentTable({
         <div>timeout</div>
         <div>harness</div>
       </div>
-      {extension.agents.map((a) => {
+      {app.agents.map((a) => {
         // The agent's declared harness supplies its inherited model.
         const famModel = harnessByName[a.default]?.model ?? a.model
         const modelOver: string | null =

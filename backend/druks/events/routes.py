@@ -35,10 +35,10 @@ def _parse_cursor(raw: str | None) -> int | None:
 async def list_feed(
     limit: int = Query(default=200, ge=1, le=500),
     before: str | None = Query(default=None),
-    extension: str | None = Query(default=None),
+    app: str | None = Query(default=None),
 ) -> FeedResponse:
     cursor = _parse_cursor(before)
-    items, next_cursor = build_feed(extension=extension, before=cursor, limit=limit)
+    items, next_cursor = build_feed(app=app, before=cursor, limit=limit)
     return FeedResponse(items=items, next_cursor=next_cursor)
 
 
@@ -46,7 +46,7 @@ async def list_feed(
 async def stream_feed(
     request: Request,
     engine: EngineDep,
-    extension: str | None = Query(default=None),
+    app: str | None = Query(default=None),
 ) -> StreamingResponse:
     async def feed_stream():
         last_seq: int | None = None
@@ -58,7 +58,7 @@ async def stream_feed(
             # sleep; the open/close cost is irrelevant against the poll cadence.
             with session_scope(engine):
                 items, _next_cursor = build_feed(
-                    extension=extension,
+                    app=app,
                     before=None,
                     limit=100 if first else 50,
                 )

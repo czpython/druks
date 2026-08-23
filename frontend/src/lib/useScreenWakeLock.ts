@@ -12,7 +12,7 @@ import { useEffect, useState } from 'react'
  * Returns the current state for surfaces that want to show an
  * indicator ("awake" pill in the system strip). Errors (API
  * unsupported, request refused) are stored on ``error`` instead of
- * thrown — the rest of the extension keeps working, just without sleep
+ * thrown — the rest of the app keeps working, just without sleep
  * suppression.
  */
 export function useScreenWakeLock(enabled: boolean = true): {

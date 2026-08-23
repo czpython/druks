@@ -15,7 +15,7 @@ class Subject:
     Subclass it: the class name is the subject type, so ``PullRequest`` is
     ``pull_request``, and the id is the whole record — ``owner/repo#7`` is what a
     run, an event, or a read is keyed by, and what the subject shows itself as.
-    An extension that also keeps a row of its own subclasses ``StoredSubject``
+    An app that also keeps a row of its own subclasses ``StoredSubject``
     instead."""
 
     subject_type: ClassVar[str]
@@ -45,7 +45,7 @@ class Subject:
         return cls(id=subject_id)
 
     def get_summary(self) -> "SubjectSummary":
-        """The header its board and page show it under — the extension's own fields;
+        """The header its board and page show it under — the app's own fields;
         the read side composes it with the platform's status and timeline."""
         raise NotImplementedError(
             f"a workflow declares {type(self).__name__}, so it needs a get_summary()"
@@ -55,7 +55,7 @@ class Subject:
     def list_summaries(cls, account_id: str | None) -> "Sequence[SubjectSummary]":
         """The subjects on this class's board, newest-movement first, each as its domain
         summary. ``account_id`` is the caller, or None outside a request. A shared
-        board ignores it. Returns a covariant ``Sequence`` so an extension can return
+        board ignores it. Returns a covariant ``Sequence`` so an app can return
         a ``list`` of its own ``SubjectSummary`` subclass. Required once a workflow
         declares it."""
         raise NotImplementedError(
@@ -84,7 +84,7 @@ class Subject:
     @classmethod
     def list_open(cls, *, limit: int = 50) -> list[Self]:
         """The subjects of this class whose newest run hasn't handed off — still going,
-        or failed and wanting the operator. What an extension's active view lists when
+        or failed and wanting the operator. What an app's active view lists when
         the subject is identity alone; a subject with rows of its own lists them with
         ``StoredSubject.list_open``."""
         # Cycle: the durable read side is built on this package's models.

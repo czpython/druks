@@ -4,7 +4,7 @@ const ISO_DATE = /^\d{4}-\d{2}-\d{2}T/
 
 // A subject summary's scalar fields as label/text pairs — what the generic board
 // row and subject facts render. ``id`` and ``label`` are the row key and the title,
-// not fields. Typed on the wire's base shape; the extension's extra fields are
+// not fields. Typed on the wire's base shape; the app's extra fields are
 // what this walks.
 export function summaryEntries(summary: object): [string, string][] {
   const entries: [string, string][] = []

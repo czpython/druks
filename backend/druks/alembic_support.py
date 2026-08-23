@@ -8,7 +8,7 @@ from druks.settings import load_settings
 
 def _render_item(type_, obj, autogen_context):
     # Render app TypeDecorators as their plain DDL type so migrations never
-    # import extension code. _UtcDateTime only changes read-side tz coercion
+    # import app code. _UtcDateTime only changes read-side tz coercion
     # (DDL is TIMESTAMPTZ); the encrypted columns store as LargeBinary (bytea).
     if type_ == "type" and obj.__class__.__name__ == "_UtcDateTime":
         return "sa.DateTime(timezone=True)"
@@ -19,7 +19,7 @@ def _render_item(type_, obj, autogen_context):
 
 def run_alembic_env(target_metadata=None) -> None:
     """Run the platform Alembic env against the target metadata. Core and every
-    installed extension share one ``env.py``; the runner selects the scope by setting
+    installed app share one ``env.py``; the runner selects the scope by setting
     ``target_metadata`` and ``version_table`` in ``config.attributes``. Metadata
     falls back to the full ``Base.metadata`` (core's own scope, e.g. core's raw
     autogenerate). ``include_object`` keeps autogenerate within the scope: a table
@@ -41,7 +41,7 @@ def run_alembic_env(target_metadata=None) -> None:
         "render_item": _render_item,
         "include_object": include_object,
         # Each migration history tracks its head in its own version table, so an
-        # installed extension's independent history never reads (and chokes on) core's
+        # installed app's independent history never reads (and chokes on) core's
         # revision in the shared default ``alembic_version``.
         "version_table": config.attributes.get("version_table", "alembic_version"),
     }

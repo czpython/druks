@@ -2,7 +2,7 @@ import json
 
 import httpx
 import pytest
-from druks.contrib.ship.extension import Ship, check_tracker_identity
+from druks.contrib.ship.app import Ship, check_tracker_identity
 from druks.contrib.ship.ticketing.enums import TicketStatus
 from druks.contrib.ship.ticketing.jira import Jira
 from druks.contrib.ship.ticketing.linear import Linear

@@ -6,7 +6,7 @@ from fastapi import HTTPException, Request, status
 from fastapi.responses import Response
 from starlette.routing import compile_path
 
-from druks.extensions.registry import webhooks
+from druks.apps.registry import webhooks
 from druks.settings import Settings
 
 from .deliveries import mark_delivery, release_delivery

@@ -58,7 +58,7 @@ export function BrowserSessionsPane() {
       <header className="mcp-pane-head">
         <h2 className="mcp-pane-title">Browser</h2>
         <p className="mcp-pane-sub">
-          Sign-ins your extensions declare, kept as encrypted browser state.
+          Sign-ins your apps declare, kept as encrypted browser state.
         </p>
       </header>
 
@@ -73,7 +73,7 @@ export function BrowserSessionsPane() {
           Sessions <span className="gl-count">{sessions.length}</span>
         </h3>
         {!query.isLoading && sessions.length === 0 && (
-          <p className="mcp-help">No installed extension declares a browser session.</p>
+          <p className="mcp-help">No installed app declares a browser session.</p>
         )}
         {sessions.length > 0 && (
           <div className="browser-session-list">

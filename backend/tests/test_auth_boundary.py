@@ -5,7 +5,7 @@ from druks.accounts.dependencies import (
     current_session_account,
     current_session_or_setup,
 )
-from druks.api.app import app
+from druks.api.server import app
 from fastapi.routing import APIRoute, _IncludedRouter
 
 # Every /api path allowed to skip the identity gate; additions are deliberate.
@@ -28,7 +28,7 @@ SESSION_ONLY_API_ROUTES = {
     ("POST", "/api/auth/personal-tokens"),
     ("DELETE", "/api/auth/personal-tokens/{pat_id}"),
     ("DELETE", "/api/harnesses/{name}/connection"),
-    ("PATCH", "/api/settings/extensions"),
+    ("PATCH", "/api/settings/apps"),
     ("POST", "/api/services/{slug}"),
     ("GET", "/api/oauth/{slug}/connect"),
     ("GET", "/api/oauth/connections"),
@@ -38,7 +38,7 @@ SESSION_ONLY_API_ROUTES = {
 # Session-gated routes that also sit behind their router's identity gate —
 # the route-level session dependency is the stricter of the two.
 DUAL_GATED_API_PATHS = {
-    "/api/settings/extensions",
+    "/api/settings/apps",
     "/api/services/{slug}",
     "/api/oauth/{slug}/connect",
     "/api/oauth/connections",

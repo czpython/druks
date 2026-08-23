@@ -2,14 +2,14 @@ import importlib
 import sys
 
 import pytest
-from druks.extensions.loader import _workflow_packages, mount, register_workflow_package
-from druks.scaffolding import create_extension
+from druks.apps.loader import _workflow_packages, mount, register_workflow_package
+from druks.scaffolding import create_app
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 
-def test_create_extension_scaffolds_a_loadable_package(tmp_path):
-    target = create_extension("night_watch", tmp_path)
+def test_create_app_scaffolds_a_loadable_package(tmp_path):
+    target = create_app("night_watch", tmp_path)
 
     assert target == tmp_path / "druks-night_watch"
     package = target / "druks_night_watch"
@@ -17,12 +17,12 @@ def test_create_extension_scaffolds_a_loadable_package(tmp_path):
     rendered = [path for path in target.rglob("*") if path.is_file()]
     assert rendered
     # The generated suite is what an author runs first; the scaffold is useless without it.
-    assert (target / "tests" / "test_extension.py").is_file()
+    assert (target / "tests" / "test_app.py").is_file()
     for path in rendered:
         assert "-tpl" not in path.name
         assert "{{" not in path.read_text()
     assert (
-        'night_watch = "druks_night_watch.extension:NightWatch"'
+        'night_watch = "druks_night_watch.app:NightWatch"'
         in (target / "pyproject.toml").read_text()
     )
 
@@ -38,35 +38,35 @@ def test_create_extension_scaffolds_a_loadable_package(tmp_path):
         assert "subject_type" not in text
         assert "Subject(" not in text
 
-    # The generated extension.py must survive Extension.__init_subclass__ validation,
+    # The generated app.py must survive App.__init_subclass__ validation,
     # and mounting must serve both the API routes and the shipped dist/ frontend.
     sys.path.insert(0, str(target))
     try:
-        module = importlib.import_module("druks_night_watch.extension")
-        extension = module.NightWatch
-        assert extension.name == "night_watch"
-        assert extension.table_prefix == "night_watch_"
-        assert extension.package == "druks_night_watch"
+        module = importlib.import_module("druks_night_watch.app")
+        night_watch = module.NightWatch
+        assert night_watch.name == "night_watch"
+        assert night_watch.table_prefix == "night_watch_"
+        assert night_watch.package == "druks_night_watch"
 
-        # An installed extension has its package claimed by the loader before any
+        # An installed app has its package claimed by the loader before any
         # module imports; the generated workflow resolves its identity from that.
-        register_workflow_package(extension.package, extension.name)
+        register_workflow_package(night_watch.package, night_watch.name)
 
         for role in ("models", "schemas", "contracts", "workflows", "routes", "subscribers"):
             importlib.import_module(f"druks_night_watch.{role}")
 
-        # The workflow guidance must not teach a per-run extension= argument —
-        # a workflow's identity comes from its declaring extension.
-        assert "extension=" not in (target / "druks_night_watch" / "workflows.py").read_text()
+        # The workflow guidance must not teach a per-run app= argument —
+        # a workflow's identity comes from its declaring app.
+        assert "app=" not in (target / "druks_night_watch" / "workflows.py").read_text()
 
-        app = FastAPI()
-        mount(app, extension, extension.discover())
+        api = FastAPI()
+        mount(api, night_watch, night_watch.discover())
         # Scaffolding is under test, not the identity gate.
         from druks.accounts.dependencies import current_account
 
-        app.dependency_overrides[current_account] = lambda: None
-        client = TestClient(app)
-        assert client.get("/api/night_watch/status").json() == {"extension": "night_watch"}
+        api.dependency_overrides[current_account] = lambda: None
+        client = TestClient(api)
+        assert client.get("/api/night_watch/status").json() == {"app": "night_watch"}
         entry = client.get("/app/night_watch/entry.js")
         assert entry.status_code == 200
         assert "shellApi" in entry.text
@@ -78,11 +78,11 @@ def test_create_extension_scaffolds_a_loadable_package(tmp_path):
             del sys.modules[name]
 
 
-def test_create_extension_rejects_bad_and_taken_names(tmp_path):
+def test_create_app_rejects_bad_and_taken_names(tmp_path):
     with pytest.raises(ValueError, match="must match"):
-        create_extension("Night-Watch", tmp_path)
+        create_app("Night-Watch", tmp_path)
     with pytest.raises(ValueError, match="already installed"):
-        create_extension("ship", tmp_path)
-    create_extension("night_watch", tmp_path)
+        create_app("ship", tmp_path)
+    create_app("night_watch", tmp_path)
     with pytest.raises(ValueError, match="already exists"):
-        create_extension("night_watch", tmp_path)
+        create_app("night_watch", tmp_path)

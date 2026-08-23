@@ -3,7 +3,7 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
-from druks.extensions.registry import mcp_servers
+from druks.apps.registry import mcp_servers
 from druks.mcp.constants import NAME_PATTERN
 from druks.mcp.exceptions import InvalidCatalogError
 from druks.mcp.schemas import CatalogEntry

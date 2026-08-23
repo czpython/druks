@@ -1,9 +1,9 @@
 from typing import Literal
 
 import pytest
-from druks.extensions import Extension, ExtensionSettings
-from druks.extensions.exceptions import SettingsDeclarationError
-from druks.extensions.settings import (
+from druks.apps import App, AppSettings
+from druks.apps.exceptions import SettingsDeclarationError
+from druks.apps.settings import (
     coerce_setting_value,
     validate_setting_override,
     validate_settings_declaration,
@@ -228,10 +228,10 @@ def test_visible_when_rejects_a_controller_with_its_own_condition():
         validate_settings_declaration(_Settings)
 
 
-def test_extension_settings_must_subclass_extension_settings():
-    with pytest.raises(SettingsDeclarationError, match="must subclass ExtensionSettings"):
+def test_app_settings_must_subclass_app_settings():
+    with pytest.raises(SettingsDeclarationError, match="must subclass AppSettings"):
 
-        class InvalidSettingsExtension(Extension):
+        class InvalidSettingsApp(App):
             name = "invalid_settings"
 
             class Settings(BaseModel):
@@ -239,7 +239,7 @@ def test_extension_settings_must_subclass_extension_settings():
 
 
 def test_workflow_settings_remain_plain_base_models():
-    assert not issubclass(Workflow.Settings, ExtensionSettings)
+    assert not issubclass(Workflow.Settings, AppSettings)
     validate_settings_declaration(Workflow.Settings)
 
 

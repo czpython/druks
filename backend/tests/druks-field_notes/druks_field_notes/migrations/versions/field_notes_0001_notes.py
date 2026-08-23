@@ -9,7 +9,7 @@ Create Date: 2026-07-07 00:00:00.000000
 import sqlalchemy as sa
 from alembic import op
 
-# The history root for this extension's own alembic_version_field_notes table —
+# The history root for this app's own alembic_version_field_notes table —
 # down_revision is None, and it never links to core's revisions.
 revision = "field_notes_0001"
 down_revision = None

@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from druks.api.app import SpaCacheControl, _release_db_session, serve_spa
+from druks.api.server import SpaCacheControl, _release_db_session, serve_spa
 from druks.database import db_session
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.testclient import TestClient

@@ -5,10 +5,10 @@ import { useLocation, useSearch } from 'wouter'
 import { api } from '../api/client'
 import { useSSE } from '../api/sse'
 import type { FeedItem } from '../api/types'
-import { BackToExtension } from '../components/BackToExtension'
+import { BackToApp } from '../components/BackToApp'
 import { EmptyState } from '../components/EmptyState'
 import { Page } from '../components/Page'
-import { registeredExtensions } from '../extensions/registry'
+import { registeredApps } from '../apps/registry'
 import { eventLine } from '../lib/feed'
 import { relTimeFromIso } from '../lib/format'
 import { useFormatters } from '../lib/preferences'
@@ -26,8 +26,8 @@ const INITIAL_FETCH = 200
  * fresh via the SSE stream. Inserts dedupe by ``id`` so the boundary
  * between the initial fetch and the SSE backfill doesn't double-render.
  *
- * The feed spans every extension by default. The extension filter lives
- * in the URL query (``/events?extension=ship``, absent = all) so the view
+ * The feed spans every app by default. The app filter lives
+ * in the URL query (``/events?app=ship``, absent = all) so the view
  * is shareable, survives a refresh, and moves with back/forward.
  */
 export function EventsPage() {
@@ -35,16 +35,16 @@ export function EventsPage() {
   const search = useSearch()
   const { absTimeCompact } = useFormatters()
 
-  // Null = every extension plus anything unscoped. Both the page fetch and the
+  // Null = every app plus anything unscoped. Both the page fetch and the
   // stream take the same filter, so a narrowed view stays narrow as it streams.
-  const filter = new URLSearchParams(search).get('extension')
+  const filter = new URLSearchParams(search).get('app')
 
   // Initial backfill. The SSE stream's first tick will also send a
   // window; the dedupe in ``mergeEvents`` covers the overlap so the
   // operator never sees a row twice.
   const initial = useQuery({
     queryKey: ['events', 'initial', filter],
-    queryFn: () => api.listEvents({ limit: INITIAL_FETCH, extension: filter ?? undefined }),
+    queryFn: () => api.listEvents({ limit: INITIAL_FETCH, app: filter ?? undefined }),
     // The SSE feed owns freshness — don't refetch this on focus.
     staleTime: Infinity,
   })
@@ -71,7 +71,7 @@ export function EventsPage() {
   }, [])
 
   const sseHandlers = useMemo(() => ({ message: handleMessage }), [handleMessage])
-  useSSE(`/api/events/stream${filter ? `?extension=${encodeURIComponent(filter)}` : ''}`, {
+  useSSE(`/api/events/stream${filter ? `?app=${encodeURIComponent(filter)}` : ''}`, {
     handlers: sseHandlers,
   })
 
@@ -84,7 +84,7 @@ export function EventsPage() {
     <EventsHeader
       count={count}
       filter={filter}
-      onPick={(name) => navigate(name ? `/events?extension=${encodeURIComponent(name)}` : '/events')}
+      onPick={(name) => navigate(name ? `/events?app=${encodeURIComponent(name)}` : '/events')}
     />
   )
 
@@ -130,7 +130,7 @@ function EventsHeader({
 }: {
   count: number | null
   filter: string | null
-  onPick: (extension: string | null) => void
+  onPick: (app: string | null) => void
 }) {
   return (
     <div className="active-page-head">
@@ -147,31 +147,31 @@ function EventsHeader({
           <span>·</span>
           <span>capped at {FEED_CAP}</span>
         </div>
-        <ExtensionFilter filter={filter} onPick={onPick} />
+        <AppFilter filter={filter} onPick={onPick} />
       </div>
-      <BackToExtension />
+      <BackToApp />
     </div>
   )
 }
 
-function ExtensionFilter({
+function AppFilter({
   filter,
   onPick,
 }: {
   filter: string | null
-  onPick: (extension: string | null) => void
+  onPick: (app: string | null) => void
 }) {
   // The local registry paints the pills on a cold load; the roster adds the
-  // extensions that ship no UI — builtins included, the platform's own chores
+  // apps that ship no UI — builtins included, the platform's own chores
   // and webhooks emit events too. Same query key as the shell, so this reads
   // its cache rather than issuing a request of its own.
   const installed = useQuery({
-    queryKey: ['extensions'],
-    queryFn: api.listExtensions,
+    queryKey: ['apps'],
+    queryFn: api.listApps,
     staleTime: 60_000,
   })
   const options = useMemo(() => {
-    const names = new Set(registeredExtensions().map((e) => e.name))
+    const names = new Set(registeredApps().map((e) => e.name))
     for (const entry of installed.data ?? []) names.add(entry.name)
     // Leading null is the unfiltered view the bare URL lands on.
     return [null, ...names]

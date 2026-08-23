@@ -5,15 +5,15 @@ from druks.user_settings.models import SettingsOverride
 # primitives with no API-level twin.
 
 
-def test_extension_setting_override_then_default(druks_db):
+def test_app_setting_override_then_default(druks_db):
     # No override → the declared default passed by the caller.
-    assert SettingsOverride.extension_setting("ship", "auto_merge", True, is_secret=False) is True
+    assert SettingsOverride.app_setting("ship", "auto_merge", True, is_secret=False) is True
     # An override wins — including turning it off.
-    SettingsOverride.set_extension_setting("ship", "auto_merge", False, is_secret=False)
-    assert SettingsOverride.extension_setting("ship", "auto_merge", True, is_secret=False) is False
+    SettingsOverride.set_app_setting("ship", "auto_merge", False, is_secret=False)
+    assert SettingsOverride.app_setting("ship", "auto_merge", True, is_secret=False) is False
     # Clearing reverts to the caller's default.
-    SettingsOverride.set_extension_setting("ship", "auto_merge", None, is_secret=False)
-    assert SettingsOverride.extension_setting("ship", "auto_merge", True, is_secret=False) is True
+    SettingsOverride.set_app_setting("ship", "auto_merge", None, is_secret=False)
+    assert SettingsOverride.app_setting("ship", "auto_merge", True, is_secret=False) is True
 
 
 def test_workflow_setting_namespaced_by_kind(druks_db):

@@ -23,7 +23,7 @@ def _stub_config_fetch(monkeypatch):
     async def _fetch(*, repo, path):
         return None
 
-    monkeypatch.setattr("druks.extensions.config.fetch_file", _fetch)
+    monkeypatch.setattr("druks.apps.config.fetch_file", _fetch)
 
 
 def _milestone_count(work_item_id, milestone):
@@ -284,7 +284,7 @@ async def test_external_close_honors_delete_branch_policy(druks_db, tmp_path, mo
     async def _fetch(*, repo, path):
         return "delete_branch: false\n"
 
-    monkeypatch.setattr("druks.extensions.config.fetch_file", _fetch)
+    monkeypatch.setattr("druks.apps.config.fetch_file", _fetch)
 
     deleted = []
 

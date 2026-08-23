@@ -1,8 +1,8 @@
 from typing import TYPE_CHECKING, Any
 
 from druks.accounts.models import Account
+from druks.contrib.review.app import Review
 from druks.contrib.review.datastructures import PullRequest
-from druks.contrib.review.extension import Review
 from druks.contrib.review.github import get_review_actor
 from druks.contrib.ship.models import ProjectRepo
 from druks.contrib.ship.workspace import RepoWorkspace

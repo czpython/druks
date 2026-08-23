@@ -2,11 +2,11 @@ from pathlib import Path
 
 import pytest
 from druks.accounts.context import current_account_id
+from druks.apps.base import App
 from druks.database import db_session
 from druks.durable import AgentCall, Run
 from druks.durable.datastructures import Subject
 from druks.durable.schemas import SubjectSummary
-from druks.extensions.base import Extension
 from druks.models import StoredSubject
 from druks.testing import seed_dbos_status
 from fastapi import APIRouter
@@ -64,7 +64,7 @@ class Inbox(Subject):
         return []
 
 
-class _ThingExtension(Extension):
+class _ThingApp(App):
     name = "faketest"
 
 
@@ -103,8 +103,8 @@ def _seed_call(session, run, *, agent, status="succeeded"):
 
 @pytest.fixture
 def client(tmp_path: Path, druks_db, monkeypatch):
-    # The real app mounts every extension's routers before its catch-all 404, so the
-    # fake extension's router has to slot in there too — appending lands after the
+    # The real app mounts every app's routers before its catch-all 404, so the
+    # fake app's router has to slot in there too — appending lands after the
     # catch-all and gets shadowed. Pulled back out on teardown; the app is a singleton.
     from druks.testing import configure_app_for_test, make_settings
 
@@ -116,9 +116,7 @@ def client(tmp_path: Path, druks_db, monkeypatch):
 
     holder = APIRouter()
     for subject_class in (Thing, Ticket):
-        holder.include_router(
-            _ThingExtension._get_subject_routes(subject_class), prefix="/api/faketest"
-        )
+        holder.include_router(_ThingApp._get_subject_routes(subject_class), prefix="/api/faketest")
     catchall = next(
         i for i, r in enumerate(app.routes) if getattr(r, "path", "") == "/api/{path:path}"
     )
@@ -246,7 +244,7 @@ async def test_the_board_and_its_stream_hand_the_caller_to_list_summaries(druks_
     # The route reads the caller at handler entry and passes it down as data.
     # The stream keeps that caller after the request context ends.
     endpoints = {
-        route.path: route.endpoint for route in _ThingExtension._get_subject_routes(Inbox).routes
+        route.path: route.endpoint for route in _ThingApp._get_subject_routes(Inbox).routes
     }
 
     CALLERS.clear()
@@ -298,7 +296,7 @@ def test_a_subjects_stream_wins_over_the_greedy_id_matcher(client: TestClient, d
 def test_the_literal_routes_are_declared_ahead_of_the_id_matcher(subject_class):
     # FastAPI matches in declaration order; both boards would be unreachable if the
     # id matcher came first.
-    router = _ThingExtension._get_subject_routes(subject_class)
+    router = _ThingApp._get_subject_routes(subject_class)
     prefix = f"/{subject_class.subject_type}"
 
     assert [route.path for route in router.routes] == [

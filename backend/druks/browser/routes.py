@@ -9,6 +9,7 @@ from druks.accounts.dependencies import (
     require_operator,
 )
 from druks.accounts.models import Account
+from druks.apps.registry import browser_sessions
 from druks.browser import exceptions
 from druks.browser.constants import MAX_PAYLOAD_BYTES, PAYLOAD_WARNING_BYTES
 from druks.browser.enums import BrowserSessionPayloadFormat, BrowserSessionStatus
@@ -16,7 +17,6 @@ from druks.browser.login import LoginWindow, is_same_origin
 from druks.browser.models import StoredBrowserSession
 from druks.browser.schemas import BrowserSessionResponse
 from druks.database import session_scope
-from druks.extensions.registry import browser_sessions
 
 logger = logging.getLogger(__name__)
 

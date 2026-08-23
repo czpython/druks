@@ -48,7 +48,7 @@ class Run(Base):
     # The parked gate's recv topic — which gate, e.g. "review_plan"; presence ⇒
     # PARKED. The DBOS routing key, set automatically from the Gate class.
     input_gate: Mapped[str | None] = mapped_column(default=None)
-    # The structured ask the gate declared at Gate.wait(input_request=…) — the extension's
+    # The structured ask the gate declared at Gate.wait(input_request=…) — the app's
     # opaque payload, surfaced by the read-side and cleared on resume beside input_gate.
     input_request: Mapped[dict[str, Any] | None] = mapped_column(JSONB, default=None)
     # When the run last asked for input — a historical fact (input_gate says
@@ -185,7 +185,7 @@ class Run(Base):
     @classmethod
     def get_open_subjects(cls) -> Select:
         """Every open workflow — the newest run of each kind on each subject, still
-        going or failed — newest first across every installed extension."""
+        going or failed — newest first across every installed app."""
         state = state_expression(cls.id, cls.input_gate, cls.created_at).label("state")
         attributes = workflow_status.c.attributes
         subject_type = attributes["subject_type"].as_string().label("subject_type")

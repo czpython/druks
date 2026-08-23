@@ -3,9 +3,9 @@ from pathlib import Path
 
 import pytest
 from druks.accounts.models import Account, PersonalAccessToken
-from druks.api.app import app
+from druks.api.server import app
 from druks.contrib.review.workflows import PullRequestReview
-from druks.contrib.ship.extension import Ship
+from druks.contrib.ship.app import Ship
 from druks.contrib.ship.models import Project, ProjectRepo, WorkItem
 from druks.contrib.ship.ticketing.enums import TicketStatus
 from druks.contrib.ship.workflows import Build
@@ -88,7 +88,7 @@ def _park(druks_db, note, *, context: str = ""):
     return run
 
 
-def test_openapi_pins_platform_and_extension_agent_routes(client: TestClient):
+def test_openapi_pins_platform_and_app_agent_routes(client: TestClient):
     schema = app.openapi()
     found = {
         (method, path): operation
@@ -100,11 +100,11 @@ def test_openapi_pins_platform_and_extension_agent_routes(client: TestClient):
     assert found[("post", "/api/review/reviews")]["operationId"] == "review_request"
     assert found[("post", "/api/ship/work-items/{ticket}/start")]["operationId"] == "ship_start"
 
-    extensions = {
+    apps = {
         key: {name: value for name, value in found[key].items() if name.startswith("x-")}
         for key in _MCP_ROUTES
     }
-    assert extensions == {
+    assert apps == {
         ("get", "/api/gates/{run}"): {},
         ("post", "/api/gates/{run}/answer"): {
             "x-destructive": False,
@@ -374,7 +374,7 @@ def test_list_open_subjects_returns_newest_open_work_and_latest_calls(client: Te
         "subjectLabel": subject_label,
         "workflows": [
             {
-                "extension": "field_notes",
+                "app": "field_notes",
                 "state": "failed",
                 "run": newest.id,
                 "latestAgentCall": latest_call.id,

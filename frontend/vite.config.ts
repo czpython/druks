@@ -28,7 +28,7 @@ const shimUrl = (file: string) => new URL(`./src/runtime/${file}`, import.meta.u
 // The rollup entry name for a shim, and what transformIndexHtml matches on.
 const shimEntry = (file: string) => `runtime-${file.replace(/\.[jt]s$/, '')}`
 
-// Bundled extensions import '@druks/ui' as an installed app does, so breaking
+// Bundled apps import '@druks/ui' as an installed app does, so breaking
 // the lent surface reddens the shell's own build first. Exported for vitest.
 export const shellAlias = {
   '@druks/ui': fileURLToPath(shimUrl(SHARED_MODULES['@druks/ui']!)),
@@ -68,7 +68,7 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      // FastAPI serves the API (and installed extension dists under /app);
+      // FastAPI serves the API (and installed app dists under /app);
       // Vite proxies during dev so the SPA can hit both same-origin.
       '/api': {
         target: 'http://127.0.0.1:8001',

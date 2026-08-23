@@ -1,6 +1,6 @@
 import argparse
 
-from .database import create_engine_from_url, make_extension_migration, run_migrations
+from .database import create_engine_from_url, make_app_migration, run_migrations
 from .settings import ensure_data_dirs, load_settings, setup_logging
 
 
@@ -10,9 +10,9 @@ def main() -> None:
     subparsers.add_parser("init-db")
     makemigrations = subparsers.add_parser(
         "makemigrations",
-        help="Autogenerate a migration for an installed extension into its own versions/.",
+        help="Autogenerate a migration for an installed app into its own versions/.",
     )
-    makemigrations.add_argument("extension", help="The installed extension's name.")
+    makemigrations.add_argument("app", help="The installed app's name.")
     makemigrations.add_argument("-m", "--message", default="", help="Revision message (slug).")
     doctor_parser = subparsers.add_parser(
         "doctor",
@@ -60,15 +60,15 @@ def main() -> None:
     )
     create_parser = subparsers.add_parser("create", help="Scaffold a new druks artifact.")
     create_subparsers = create_parser.add_subparsers(dest="artifact", required=True)
-    create_extension_parser = create_subparsers.add_parser(
-        "extension",
+    create_app_parser = create_subparsers.add_parser(
+        "app",
         help=(
-            "Scaffold a standalone extension package at ./druks-<name>: a "
-            "registered Extension subclass, an /api/<name> router, and its own "
+            "Scaffold a standalone app package at ./druks-<name>: a "
+            "registered App subclass, an /api/<name> router, and its own "
             "Alembic history — bootable once installed."
         ),
     )
-    create_extension_parser.add_argument(
+    create_app_parser.add_argument(
         "name", help="Lowercase identifier ([a-z][a-z0-9_]*) — keys /api/<name> and more."
     )
     args = parser.parse_args()
@@ -104,10 +104,10 @@ def main() -> None:
     if args.command == "create":
         from pathlib import Path
 
-        from .scaffolding import create_extension
+        from .scaffolding import create_app
 
         try:
-            target = create_extension(args.name, Path.cwd())
+            target = create_app(args.name, Path.cwd())
         except ValueError as error:
             raise SystemExit(f"druks create: {error}") from error
         print(f"Created {target}")
@@ -131,7 +131,7 @@ def main() -> None:
         return
 
     if args.command == "makemigrations":
-        make_extension_migration(args.extension, args.message, settings.database_url)
+        make_app_migration(args.app, args.message, settings.database_url)
         return
 
     raise AssertionError(f"Unhandled command: {args.command}")

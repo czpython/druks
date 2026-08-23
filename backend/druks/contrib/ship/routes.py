@@ -6,8 +6,8 @@ from sqlalchemy import delete, func, select, update
 from druks.accounts.dependencies import current_account
 from druks.accounts.models import Account
 from druks.api.exceptions import agent_error_responses
+from druks.contrib.ship.app import Ship
 from druks.contrib.ship.exceptions import TicketNotFound, TrackerNotConfigured
-from druks.contrib.ship.extension import Ship
 from druks.contrib.ship.models import Project, ProjectRepo, WorkItem
 from druks.contrib.ship.schemas import (
     AddProjectRepoRequest,

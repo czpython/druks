@@ -138,7 +138,7 @@ SubjectLabel = Annotated[str, StringConstraints(strip_whitespace=True, min_lengt
 
 
 class SubjectSummary(BaseResponse):
-    # The base an extension's subject header subclasses; ``id`` keys the subject's
+    # The base an app's subject header subclasses; ``id`` keys the subject's
     # status, timeline and detail URL, and ``from_attributes`` builds the header
     # straight off the subject.
     model_config = ConfigDict(from_attributes=True)
@@ -150,13 +150,13 @@ class SubjectSummary(BaseResponse):
 class SubjectStatus(BaseResponse):
     # The subject's lifecycle status for the dashboard lane — derived by the read
     # side, never stored; ``state`` is the canonical RunState aggregated across
-    # the subject's runs. Everything else is a fact the extension's UI renders
+    # the subject's runs. Everything else is a fact the app's UI renders
     # its own copy from; the platform ships no prose.
     state: RunState
     # The driving run's kind and, while running, its latest agent call's agent.
     kind: str | None = None
     agent: str | None = None
-    # A parked run's gate identity — the extension's UI maps it to its own
+    # A parked run's gate identity — the app's UI maps it to its own
     # words; the ask's content rides the timeline's ``input_request``.
     gate: str | None = None
     # The stop reason of the run driving ``state`` — set only when that run is
@@ -196,7 +196,7 @@ class SubjectList(BaseResponse):
 
 class SubjectActivity(BaseResponse):
     # The running sub-phase the timeline can't show ("Building sandbox VM…"), supplied
-    # by the extension; ``kind`` groups it for display ("infra" | "agent").
+    # by the app; ``kind`` groups it for display ("infra" | "agent").
     label: str
     kind: str
 

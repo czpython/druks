@@ -100,7 +100,7 @@ def main() -> int:
     if args.name not in {row["name"] for row in sessions if row["isDeclared"]}:
         raise RuntimeError(
             f"Browser session {args.name!r} is not declared by any installed "
-            "extension; declare it on the extension class first."
+            "app; declare it on the App class first."
         )
 
     with tempfile.TemporaryDirectory(prefix="druks-browser-session-") as temporary_directory:

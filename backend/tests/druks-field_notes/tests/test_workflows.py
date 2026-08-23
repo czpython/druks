@@ -1,8 +1,8 @@
 from unittest import mock
 
 from druks.testing import run_workflow
+from druks_field_notes.app import FieldNotes
 from druks_field_notes.contracts import GistOutput
-from druks_field_notes.extension import FieldNotes
 from druks_field_notes.models import Note
 from druks_field_notes.workflows import Summarize
 

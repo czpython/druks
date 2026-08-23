@@ -2,7 +2,7 @@ import hashlib
 import hmac
 
 import pytest
-from druks.extensions.registry import webhooks
+from druks.apps.registry import webhooks
 from druks.settings import Settings
 from druks.webhooks import InvalidWebhookError, Webhook, verify_hmac_sha256
 from druks.webhooks.router import match_webhook

@@ -1,20 +1,20 @@
 from unittest import mock
 
 import pytest
-from druks.database import create_engine_from_url
-from druks.durable.dbos_state import DBOS_SYSTEM_SCHEMA
-from druks.extensions.loader import (
-    iter_extensions,
+from druks.apps.loader import (
+    iter_apps,
     register_workflow_package,
 )
+from druks.database import create_engine_from_url
+from druks.durable.dbos_state import DBOS_SYSTEM_SCHEMA
 from druks.models import Base
 from druks.testing import TEST_DATABASE_URL
 
-# A Workflow class resolves its declaring extension at definition time, from
+# A Workflow class resolves its declaring app at definition time, from
 # packages the loader registers before importing. Tests import workflow modules
 # directly and some declare their own workflows, so both register here — before
 # collection imports any test module.
-iter_extensions()
+iter_apps()
 for test_module in ("test_durable_sdk", "test_notifications_durable"):
     register_workflow_package(test_module, None)
 
@@ -82,7 +82,7 @@ def registry_state():
     # Catalog loads and test registrations mutate the process-global MCP
     # registry; snapshot and restore so a test's entries don't leak into the
     # rest of the suite.
-    from druks.extensions.registry import mcp_servers
+    from druks.apps.registry import mcp_servers
 
     saved = dict(mcp_servers._items)
     yield
@@ -95,7 +95,7 @@ def browser_session_declarations():
     # BrowserSession declarations self-register at class definition, so what a
     # test module defines at import time would leak into every merged-list
     # read; tests declare inside this fixture and leave the registry as found.
-    from druks.extensions.registry import browser_sessions
+    from druks.apps.registry import browser_sessions
 
     saved = dict(browser_sessions._items)
     yield browser_sessions
@@ -114,9 +114,9 @@ _OWN_DATABASE_MODULES = {
     "test_durable_sdk",
     "test_notifications_durable",
     "test_harness_login_persistence",
-    "test_extension_migrations",
+    "test_app_migrations",
     "test_plan_gate_migration",
-    "test_proof_extension_migration",
+    "test_proof_app_migration",
 }
 
 
@@ -134,7 +134,7 @@ def _platform_database(request):
 def _reset_app_overrides():
 
     yield
-    from druks.api.app import app
+    from druks.api.server import app
 
     app.dependency_overrides.clear()
 
@@ -142,8 +142,8 @@ def _reset_app_overrides():
 @pytest.fixture(autouse=True)
 def _no_druks_namespace_fetches(monkeypatch):
     """Default every ``.druks`` namespace fetch to 404. ``render_prompt``
-    with a ``repo`` (and extension-config resolution) would otherwise hit
-    GitHub, which needs Extension creds tests don't have — prompts fall back to
+    with a ``repo`` (and app-config resolution) would otherwise hit
+    GitHub, which needs App creds tests don't have — prompts fall back to
     bundled templates, configs to their model defaults. Tests that
     exercise the override/config path patch ``fetch_file`` themselves."""
 
@@ -151,7 +151,7 @@ def _no_druks_namespace_fetches(monkeypatch):
         return None
 
     monkeypatch.setattr("druks.prompts.resolver.fetch_file", _none)
-    monkeypatch.setattr("druks.extensions.config.fetch_file", _none)
+    monkeypatch.setattr("druks.apps.config.fetch_file", _none)
 
 
 def bind_ambient_session(session) -> None:
@@ -215,8 +215,8 @@ def finish_agent_run(call, *, status=None, last_error=None):
 
 
 def make_test_note(body: str = "a note"):
-    """The platform suite's subject. It belongs to the proof extension, not to ship —
-    platform behavior must hold for any extension's rows."""
+    """The platform suite's subject. It belongs to the proof app, not to ship —
+    platform behavior must hold for any app's rows."""
     from druks_field_notes.models import Note
 
     return Note.create(body=body)

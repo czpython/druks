@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import { eventLine } from './feed'
 // Ship's own registration, not a stand-in: its subjectPath is what makes a row navigate.
-import '../extensions/ship/ui'
+import '../apps/ship/ui'
 import type { FeedItem } from '../api/types'
 
 function event(fields: Partial<FeedItem>): FeedItem {
@@ -29,20 +29,20 @@ describe('eventLine', () => {
     )
   })
 
-  it("reads an extension's own milestone as its own word", () => {
-    const line = eventLine(event({ kind: 'merged', extension: 'ship' }))
+  it("reads an app's own milestone as its own word", () => {
+    const line = eventLine(event({ kind: 'merged', app: 'ship' }))
 
     expect(line.label).toBe('merged')
     expect(line.source).toBe('ship')
     expect(line.bucket).toBe('event-kind-audit')
   })
 
-  it('names the subject as it showed itself, and links where the extension says', () => {
+  it('names the subject as it showed itself, and links where the app says', () => {
     const line = eventLine(
       event({
         kind: 'workflow.finished',
         workflow: 'ship.build',
-        extension: 'ship',
+        app: 'ship',
         subjectType: 'work_item',
         subjectId: '42',
         subjectLabel: 'ENG-767',
@@ -58,7 +58,7 @@ describe('eventLine', () => {
       event({
         kind: 'workflow.running',
         workflow: 'ship.profile',
-        extension: 'ship',
+        app: 'ship',
         subjectType: 'project_repo',
         subjectId: '3',
         subjectLabel: 'acme/widget',
@@ -70,11 +70,11 @@ describe('eventLine', () => {
     expect(line.path).toBeUndefined()
   })
 
-  it('reads an unregistered extension without words or a page', () => {
+  it('reads an unregistered app without words or a page', () => {
     const line = eventLine(
       event({
         kind: 'summarized',
-        extension: 'field_notes',
+        app: 'field_notes',
         subjectType: 'note',
         subjectId: '7',
         subjectLabel: 'note 7',

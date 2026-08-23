@@ -1,0 +1,12 @@
+from druks.db import Base, StoredSubject
+
+# SQLAlchemy models for this app — subclass ``Base``. Every table name must
+# start with "{{ name }}_": the platform scopes this app's migrations to that
+# prefix (its own history in ``alembic_version_{{ name }}``) and enforces it at boot.
+# One of these models is usually the thing your runs work on — a note, a repo, a
+# ticket. Subclass ``StoredSubject`` for that one and point a workflow at it with
+# ``subject = ThatModel``, and druks shows it a board and a page. Something you keep no
+# row for subclasses ``druks.workflows.Subject`` instead — same board, same page.
+# A declared subject must implement ``list_summaries()`` — the board reads it.
+# Druks checks this at load and refuses the app if it is missing.
+# After adding a model: ``druks makemigrations {{ name }} -m "..." && druks init-db``.

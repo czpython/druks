@@ -71,7 +71,7 @@ class ProjectRepo(StoredSubject):
     )
     full_name: Mapped[str] = mapped_column(unique=True)
     # Optional free-form role for the dashboard: "design", "infra",
-    # "extension". None when the operator hasn't labelled it.
+    # "app". None when the operator hasn't labelled it.
     purpose: Mapped[str | None]
     profile: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
     created_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
@@ -301,13 +301,13 @@ class WorkItem(StoredSubject):
         db_session().flush()
 
     def resolve(self, *, merged: bool, at: datetime) -> None:
-        # cycle: the extension imports this module at file scope.
-        import druks.contrib.ship.extension as ship_extension
+        # cycle: the app imports this module at file scope.
+        import druks.contrib.ship.app as ship_app
 
         self.resolution = "merged" if merged else "closed"
         self.resolved_at = at
         self.updated_at = Base.utc_now()
-        ship_extension.Ship.record_event(type=self.resolution, subject=self)
+        ship_app.Ship.record_event(type=self.resolution, subject=self)
         db_session().flush()
 
     async def ship(self) -> None:
@@ -363,10 +363,10 @@ class WorkItem(StoredSubject):
         return list(db_session().scalars(stmt))
 
     async def set_ticket_status(self, status: TicketStatus) -> None:
-        # Lazy: the Ship extension imports this module, so it can't be imported at top.
-        import druks.contrib.ship.extension as ship_extension
+        # Lazy: the Ship app imports this module, so it can't be imported at top.
+        import druks.contrib.ship.app as ship_app
 
-        tracker = ship_extension.Ship.get_tracker(self.source)
+        tracker = ship_app.Ship.get_tracker(self.source)
         # No tracker means nothing to sync: a github item, a source the operator
         # has switched away from, or credentials not set yet.
         if not tracker:

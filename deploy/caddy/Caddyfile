@@ -51,8 +51,8 @@ http://:8000 {
 	# Access: Cf-Access-Authenticated-User-Email, …); swapping the identity
 	# edge is a config change, never a code change.
 	# The backend serves everything behind the gate — the API, the SPA at /,
-	# extension frontends at /app/<name>. Cache policy for the served
-	# frontends lives with their server (api/app.py), not at the edge.
+	# app frontends at /app/<name>. Cache policy for the served
+	# frontends lives with their server (api/server.py), not at the edge.
 	@dashboard_user header {$DRUKS_AUTH_HEADER} *
 	handle @dashboard_user {
 		reverse_proxy {$DRUKS_UPSTREAM}

@@ -1,9 +1,9 @@
 from importlib import metadata
 from pathlib import Path
 
-from druks.extensions.base import NAME_RE
+from druks.apps.base import NAME_RE
 
-_TEMPLATE = Path(__file__).parent / "extension_template"
+_TEMPLATE = Path(__file__).parent / "app_template"
 # Django's ``startapp`` trick: template files carry a suffix so nothing in the
 # template tree is importable or lintable as real code until it's rendered.
 _TPL_SUFFIX = "-tpl"
@@ -11,21 +11,21 @@ _TPL_SUFFIX = "-tpl"
 _PACKAGE_DIR = "package"
 
 
-def create_extension(name: str, parent: Path) -> Path:
-    """Copy the extension template to ``parent/druks-<name>`` and render its
+def create_app(name: str, parent: Path) -> Path:
+    """Copy the app template to ``parent/druks-<name>`` and render its
     placeholders — a standalone package whose entry point self-registers with the
     platform on install. Raises ``ValueError`` on a bad name, a collision with an
-    installed extension, or an existing target directory."""
+    installed app, or an existing target directory."""
     if not NAME_RE.match(name):
         raise ValueError(
-            f"extension name {name!r} must match {NAME_RE.pattern!r} — it keys the "
+            f"app name {name!r} must match {NAME_RE.pattern!r} — it keys the "
             "/api/<name> namespace, the version table, and settings keys"
         )
-    # Names only, no entry.load(): colliding with an installed extension would break
+    # Names only, no entry.load(): colliding with an installed app would break
     # boot, and listing entry points doesn't import anything.
-    installed = {entry.name for entry in metadata.entry_points(group="druks.extensions")}
+    installed = {entry.name for entry in metadata.entry_points(group="druks.apps")}
     if name in installed:
-        raise ValueError(f"extension {name!r} is already installed")
+        raise ValueError(f"app {name!r} is already installed")
     target = parent / f"druks-{name}"
     if target.exists():
         raise ValueError(f"{target} already exists")

@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.fields import FieldInfo
 
-from druks.extensions.settings import (
+from druks.apps.settings import (
     field_choices,
     field_kind,
     field_multiline,
@@ -158,27 +158,27 @@ class WorkflowSettingsResponse(BaseResponse):
     fields: list[SettingsFieldResponse]
 
 
-class ExtensionSettingsResponse(BaseResponse):
+class AppSettingsResponse(BaseResponse):
     name: str
     description: str
     # A Lucide icon name the frontend renders (falls back to a default if unknown).
     icon: str
-    # Built-in (platform-core) extensions' agents are shown under the Druks tab, not
+    # Built-in (platform-core) apps' agents are shown under the Druks tab, not
     # a tab of their own.
     builtin: bool
     agents: list[AgentSettingResponse]
     workflows: list[WorkflowSettingsResponse]
-    # The extension's own declared settings (not tied to a workflow). Rendered
+    # The app's own declared settings (not tied to a workflow). Rendered
     # in the same options section as workflow ones.
     settings: list[SettingsFieldResponse]
 
 
-class ExtensionsSettingsResponse(BaseResponse):
+class AppsSettingsResponse(BaseResponse):
     allowed_efforts: list[str]
-    extensions: list[ExtensionSettingsResponse]
+    apps: list[AppSettingsResponse]
 
 
-class ExtensionsSettingsUpdate(BaseModel):
+class AppsSettingsUpdate(BaseModel):
     # agent name -> model (null clears, i.e. inherit the family default).
     agent_models: dict[str, str | None] = Field(
         default_factory=dict,
@@ -199,8 +199,8 @@ class ExtensionsSettingsUpdate(BaseModel):
         default_factory=dict,
         validation_alias="workflowSettings",
     )
-    # extension name -> {field -> value} (null clears).
-    extension_settings: dict[str, dict[str, Any]] = Field(
+    # app name -> {field -> value} (null clears).
+    app_settings: dict[str, dict[str, Any]] = Field(
         default_factory=dict,
-        validation_alias="extensionSettings",
+        validation_alias="appSettings",
     )

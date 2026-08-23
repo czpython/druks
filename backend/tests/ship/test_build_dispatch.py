@@ -82,7 +82,7 @@ async def test_the_tracker_funnel_swallows_the_missing_identity(druks_db, monkey
     ticket transition into an escaping exception (which the webhook layer
     would 5xx into indefinite redelivery)."""
     from druks.contrib.ship import subscribers  # noqa: F401 — the import registers it
-    from druks.contrib.ship.extension import Ship
+    from druks.contrib.ship.app import Ship
 
     settings = Ship.settings()
     item = make_test_work_item(repo="o/r", title="t", ticket_key="ACME-9", source=settings.tracker)

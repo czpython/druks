@@ -15,8 +15,8 @@
 
 // --- Platform: subjects, runs, agent calls ---------------------------------
 
-// Served by the platform layer (durable/schemas.py) for every extension. An
-// extension keys its board/detail on its own subject summary; SubjectRow and
+// Served by the platform layer (durable/schemas.py) for every app. An
+// app keys its board/detail on its own subject summary; SubjectRow and
 // SubjectResponse are generic over that summary (a WorkItemSummary for build).
 
 // The platform's canonical lifecycle states, aggregated across a subject's runs.
@@ -30,7 +30,7 @@ export type RunState =
   // The run's DBOS workflow row is gone; it will never start.
   | 'orphaned'
 
-// The base every extension's subject summary satisfies; ``id`` keys its status,
+// The base every app's subject summary satisfies; ``id`` keys its status,
 // timeline, and detail URL.
 export interface SubjectSummary {
   id: string
@@ -39,11 +39,11 @@ export interface SubjectSummary {
 
 export interface SubjectStatus {
   state: RunState
-  // Facts the extension renders its lane copy from; the backend ships no prose.
+  // Facts the app renders its lane copy from; the backend ships no prose.
   // The driving run's kind and, while running, its latest agent call's agent.
   kind: string | null
   agent: string | null
-  // A parked run's gate identity; the extension maps it to its own words.
+  // A parked run's gate identity; the app maps it to its own words.
   gate: string | null
   // The failed driving run's stop reason, and its machine classification
   // ("gate_timeout" = unanswered gate, not a crash).
@@ -139,7 +139,7 @@ export interface SubjectRow<S extends SubjectSummary = SubjectSummary> {
 
 // A subject's full read view: domain summary, status, the platform timeline
 // (the subject's runs, oldest first, each with its agent calls), and the
-// extension's optional live activity (the running sub-phase).
+// app's optional live activity (the running sub-phase).
 export interface SubjectResponse<S extends SubjectSummary = SubjectSummary> {
   summary: S
   status: SubjectStatus
@@ -183,11 +183,11 @@ export interface TranscriptChunk {
   text: string
 }
 
-// One installed extension, from the backend registry — what the shell derives
+// One installed app, from the backend registry — what the shell derives
 // nav and generic pages from. ``hasFrontend`` means the package ships its own
 // built UI (an ESM module the shell mounts, served under /app/<name>);
-// ``navigation`` is the subnav tabs the extension declares, as (url, name) pairs.
-export interface Extension {
+// ``navigation`` is the subnav tabs the app declares, as (url, name) pairs.
+export interface App {
   name: string
   icon: string
   description: string
@@ -330,7 +330,7 @@ export interface BrowserSession {
    * on yet has none. */
   payloadFormat: BrowserSessionPayloadFormat | null
   site: string
-  /** False for a leftover row whose declaring extension is gone. */
+  /** False for a leftover row whose declaring app is gone. */
   isDeclared: boolean
   createdAt: string | null
   lastRefreshedAt: string | null
@@ -357,7 +357,7 @@ export interface AgentSetting {
   timeoutSource: EffortSource
 }
 
-// --- Per-extension settings (declaration-driven) --------------------------------
+// --- Per-app settings (declaration-driven) --------------------------------
 
 export interface WorkflowSettingField {
   name: string
@@ -388,34 +388,34 @@ export interface WorkflowSettings {
   fields: WorkflowSettingField[]
 }
 
-export interface ExtensionSettings {
+export interface AppSettings {
   name: string
   description: string
-  /** Lucide icon name for the rail glyph (see EXTENSION_ICONS); falls back if unknown. */
+  /** Lucide icon name for the rail glyph (see APP_ICONS); falls back if unknown. */
   icon: string
   /** Built-in (platform-core) apps render under the Druks tab, not their own. */
   builtin: boolean
   agents: AgentSetting[]
   workflows: WorkflowSettings[]
-  /** The extension's own settings (not tied to a workflow). */
+  /** The app's own settings (not tied to a workflow). */
   settings: WorkflowSettingField[]
 }
 
-export interface ExtensionsSettingsResponse {
+export interface AppsSettingsResponse {
   allowedEfforts: string[]
-  extensions: ExtensionSettings[]
+  apps: AppSettings[]
 }
 
-export type ExtensionSettingsProblems = Record<string, Record<string, string>>
+export type AppSettingsProblems = Record<string, Record<string, string>>
 
-export interface UpdateExtensionsSettingsRequest {
+export interface UpdateAppsSettingsRequest {
   agentModels?: Record<string, string | null>
   agentEfforts?: Record<string, string | null>
   agentTimeouts?: Record<string, number | null>
   /** Keyed by workflow kind. */
   workflowSettings?: Record<string, Record<string, unknown>>
-  /** Keyed by extension name. */
-  extensionSettings?: Record<string, Record<string, unknown>>
+  /** Keyed by app name. */
+  appSettings?: Record<string, Record<string, unknown>>
 }
 
 // --- Activity feed ---------------------------------------------------------
@@ -424,10 +424,10 @@ export interface FeedItem {
   id: string
   seq: number
   at: string
-  // A lifecycle topic ("workflow.finished") or the milestone an extension recorded
+  // A lifecycle topic ("workflow.finished") or the milestone an app recorded
   // ("merged"). The words are this client's — see lib/feed.
   kind: string
-  extension?: string | null
+  app?: string | null
   // The durable kind of the workflow a lifecycle row is about ("ship.build").
   workflow?: string | null
   subjectType?: string | null

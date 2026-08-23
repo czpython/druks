@@ -1,6 +1,6 @@
 from druks.workflows import Workflow
 
-from druks_field_notes.extension import FieldNotes
+from druks_field_notes.app import FieldNotes
 from druks_field_notes.models import Note
 
 
@@ -13,7 +13,7 @@ class Summarize(Workflow):
     async def run(self) -> None:
         note = self.subject
         # The note body is the agent's prompt context; the gist it returns is the
-        # extension's own domain result, saved onto the note.
+        # app's own domain result, saved onto the note.
         result = await FieldNotes.summarize(note_body=note.body)
         note.save_gist(result.gist)
 

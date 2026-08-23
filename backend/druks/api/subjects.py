@@ -35,7 +35,7 @@ async def list_open_subjects() -> OpenSubjectsResponse:
                     failure = failure.encode()[-_FAILURE_TAIL_BYTES:].decode(errors="ignore")
                 workflows.append(
                     OpenWorkflowResponse(
-                        extension=row.kind.partition(".")[0],
+                        app=row.kind.partition(".")[0],
                         state=RunState(row.state),
                         run=row.run_id,
                         latest_agent_call=row.latest_call_id,

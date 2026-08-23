@@ -4,9 +4,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { SettingsModal } from './SettingsModal'
 
-const extensionSettings = {
+const appSettings = {
   allowedEfforts: [],
-  extensions: [
+  apps: [
     {
       name: 'ship',
       description: 'Ship settings',
@@ -139,15 +139,15 @@ function stubFetch(
     'fetch',
     vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
       const path = String(input)
-      if (path === '/api/settings/extensions' && init?.method === 'PATCH') {
+      if (path === '/api/settings/apps' && init?.method === 'PATCH') {
         if (!shouldRejectPatch) return new Response('{}', { status: 200 })
         return new Response(JSON.stringify({ detail }), {
           status: 422,
           statusText: 'Unprocessable Entity',
         })
       }
-      if (path === '/api/settings/extensions') {
-        return new Response(JSON.stringify(extensionSettings), { status: 200 })
+      if (path === '/api/settings/apps') {
+        return new Response(JSON.stringify(appSettings), { status: 200 })
       }
       if (path === '/api/settings/harnesses') {
         return new Response('[]', { status: 200 })
@@ -180,7 +180,7 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-describe('SettingsModal extension fields', () => {
+describe('SettingsModal app fields', () => {
   it('opens the browser sessions pane from the settings rail', async () => {
     stubFetch()
     renderModal()
@@ -189,7 +189,7 @@ describe('SettingsModal extension fields', () => {
 
     expect(await screen.findByRole('heading', { name: 'Browser' })).toBeTruthy()
     expect(
-      await screen.findByText('No installed extension declares a browser session.'),
+      await screen.findByText('No installed app declares a browser session.'),
     ).toBeTruthy()
   })
 
@@ -247,10 +247,10 @@ describe('SettingsModal extension fields', () => {
       .mocked(fetch)
       .mock.calls.find(
         ([input, init]) =>
-          String(input) === '/api/settings/extensions' && init?.method === 'PATCH',
+          String(input) === '/api/settings/apps' && init?.method === 'PATCH',
       )
     const body = JSON.parse(String(patchCall?.[1]?.body))
-    expect(body.extensionSettings.ship).toEqual({ tracker: 'jira' })
+    expect(body.appSettings.ship).toEqual({ tracker: 'jira' })
   })
 
   it('renders a multiline secret as a textarea and PATCHes the paste with newlines intact', async () => {
@@ -279,10 +279,10 @@ describe('SettingsModal extension fields', () => {
       .mocked(fetch)
       .mock.calls.find(
         ([input, init]) =>
-          String(input) === '/api/settings/extensions' && init?.method === 'PATCH',
+          String(input) === '/api/settings/apps' && init?.method === 'PATCH',
       )
     const body = JSON.parse(String(patchCall?.[1]?.body))
-    expect(body.extensionSettings.review).toEqual({ private_key: pem })
+    expect(body.appSettings.review).toEqual({ private_key: pem })
   })
 
   it('renders a 422 message for a field hidden by the tracker selection', async () => {

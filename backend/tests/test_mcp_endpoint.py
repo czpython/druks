@@ -7,12 +7,12 @@ import httpx
 import pytest
 from conftest import finish_agent_run, make_test_note, seed_note_agent_run, seed_note_run
 from druks.accounts.models import Account, PersonalAccessToken
-from druks.api.app import mcp_app
-from druks.contrib.ship.extension import Ship
+from druks.api.server import mcp_app
+from druks.contrib.ship.app import Ship
 from druks.core.apis.exceptions import UnknownTicketError
 from druks.durable.models import Artifact, Run
-from druks.mcp.app import create_mcp_app
 from druks.mcp.exceptions import InvalidAgentToolError
+from druks.mcp.server import create_mcp_app
 from druks.testing import configure_app_for_test, make_settings
 from druks.usage.models import UsageScrape
 from fastapi import APIRouter, FastAPI
@@ -158,7 +158,7 @@ async def test_mcp_subpaths_never_reach_the_spa(app):
             assert stray.headers["content-type"].startswith("application/json")
 
 
-async def test_tools_list_pins_platform_and_extension_tools(app, pat_token):
+async def test_tools_list_pins_platform_and_app_tools(app, pat_token):
     async with live(app), _client(app, pat_token) as client:
         assert "list_open_subjects" in (client.initialize_result.instructions or "")
         assert "parkedAt" in (client.initialize_result.instructions or "")
@@ -186,13 +186,13 @@ async def test_tools_list_pins_platform_and_extension_tools(app, pat_token):
         assert tools[name].description
 
     for name in ("review_request", "ship_start"):
-        extension_tool = tools[name]
+        app_tool = tools[name]
         assert (
-            extension_tool.annotations.readOnlyHint,
-            extension_tool.annotations.destructiveHint,
-            extension_tool.annotations.idempotentHint,
+            app_tool.annotations.readOnlyHint,
+            app_tool.annotations.destructiveHint,
+            app_tool.annotations.idempotentHint,
         ) == (False, True, False)
-        assert extension_tool.description
+        assert app_tool.description
 
     # Derived schemas keep the routes' own shapes and constraints.
     assert tools["answer_gate"].inputSchema["required"] == ["run", "parkedAt", "control"]
@@ -220,7 +220,7 @@ async def test_tools_list_pins_platform_and_extension_tools(app, pat_token):
         ("review_start", None, "docstring"),
     ],
 )
-def test_invalid_extension_agent_route_stops_boot(operation_id, docstring, message):
+def test_invalid_app_agent_route_stops_boot(operation_id, docstring, message):
     api = FastAPI()
     router = APIRouter()
 
@@ -242,7 +242,7 @@ def test_invalid_extension_agent_route_stops_boot(operation_id, docstring, messa
 
 
 def test_derived_operation_id_collision_stops_boot():
-    # The 'review' extension's unprefixed 'scan' derives to 'review_scan', which
+    # The 'review' app's unprefixed 'scan' derives to 'review_scan', which
     # another route already claims explicitly — the framework must reject the
     # clash rather than silently mint two operations sharing an id.
     api = FastAPI()
@@ -265,7 +265,7 @@ def test_derived_operation_id_collision_stops_boot():
 
 
 def _agent_route_app(operation_id: str) -> FastAPI:
-    # A synthetic agent route owned by the installed 'review' extension — the
+    # A synthetic agent route owned by the installed 'review' app — the
     # loader-stamped 'review' tag names the owner, exactly as a real router does.
     # The endpoint mounts the same /mcp Route and mcp lifespan as the real app so
     # tools/list resolves in-process.
@@ -306,7 +306,7 @@ def _served_operation_id(schema: dict, path: str) -> str:
         ("review_scan", "review_scan"),  # an already-prefixed id passes through, never doubled
     ],
 )
-async def test_extension_agent_route_derives_the_namespaced_tool(
+async def test_app_agent_route_derives_the_namespaced_tool(
     druks_db, pat_token, operation_id, expected
 ):
     api = _agent_route_app(operation_id)
