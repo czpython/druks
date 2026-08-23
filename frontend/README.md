@@ -23,32 +23,32 @@ runs lint, tests, and build.
 
 `src/App.tsx` is the platform shell. It owns:
 
-- the app bar and extension picker
+- the app bar and app picker
 - Settings
 - Events and Usage pages
 - the optional system-health strip
 - shared routing and fallback behavior
 
-Bundled extension UI lives under `src/extensions/<name>/`. Its module calls
-`registerExtensionUI()` with routes and an optional home path; subnav tabs are
-declared on the extension's backend class and rendered from the roster.
-Import that module once from `src/extensions/index.ts`; the shell discovers the
-registration and does not hardcode the extension name.
+Bundled app UI lives under `src/apps/<name>/`. Its module calls
+`registerAppUI()` with routes and an optional home path; subnav tabs are
+declared on the app's backend class and rendered from the roster.
+Import that module once from `src/apps/index.ts`; the shell discovers the
+registration and does not hardcode the app name.
 
-Backend and frontend extension discovery are intentionally separate:
+Backend and frontend app discovery are intentionally separate:
 
-- Python entry points load an installed backend extension at runtime.
-- React extension modules are compiled into the SPA at build time.
+- Python entry points load an installed backend app at runtime.
+- React app modules are compiled into the SPA at build time.
 
 Installing a Python distribution cannot inject JavaScript into an already-built
-dashboard. A backend-only extension can still use the platform API, settings,
+dashboard. A backend-only app can still use the platform API, settings,
 events, and generic subject read-side; custom pages require a dashboard build
 that includes its UI module.
 
-An independently packaged extension has another option: ship a built ES module
+An independently packaged app has another option: ship a built ES module
 in `<package>/dist/` exposing `mount(el, ctx)`. Druks serves it under
 `/app/<name>` and the shell imports and mounts it below the chrome, sharing
-one React via an import map (`src/runtime/`). See the extension-author guide.
+one React via an import map (`src/runtime/`). See the app-author guide.
 
 ## API and live data
 
@@ -67,4 +67,4 @@ OpenAPI types are not currently checked into the repository.
 Start Postgres, Redis, the backend, and Vite using
 [the development guide](../docs/development.md). For a production-like static
 asset check, run `npm --prefix frontend run build` and then start the backend;
-the application serves the repository-root `dist/` when it exists.
+the server serves the repository-root `dist/` when it exists.

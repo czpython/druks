@@ -46,7 +46,7 @@ peers). Other remote providers have their own network and credential
 requirements; the local Docker shape is covered in
 [Full local](../docs/full-local.md).
 
-The Druks application and sandbox images are published for both `linux/amd64`
+The Druks service and sandbox images are published for both `linux/amd64`
 and `linux/arm64`.
 
 Everything else — `compose.yaml`, the Caddyfile, `druks.toml`, the rendered
@@ -225,12 +225,12 @@ Caddyfile fetched by the installer) enforces path-level access:
 
 - `POST /_external/*` — public, authenticated by the matching webhook class in
   Druks. Per-provider paths land under
-  `/_external/<provider>/<category>/`; extension role-module discovery
+  `/_external/<provider>/<category>/`; app role-module discovery
   registers them at import time.
 - `/mcp` — public, authenticated per request by personal access token inside
-  the app; proxied unbuffered so its SSE frames stream.
+  Druks; proxied unbuffered so its SSE frames stream.
 - Everything else — a nonempty trusted identity header (exe.dev login
   provides one) required, then proxied to `web` (`127.0.0.1:8001`), which
-  serves the API, the SPA, and extension frontends alike; the app maps that
+  serves the API, the SPA, and app frontends alike; Druks maps that
   asserted email to your account per request
   ([access control](../docs/configuration.md#public-urls-and-access-control)).

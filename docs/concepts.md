@@ -2,35 +2,35 @@
 
 ## The problem Druks solves
 
-Agent applications routinely cross boundaries a request handler should not:
+Agent apps routinely cross boundaries a request handler should not:
 they call slow models, provision machines, wait for people, react to webhooks,
 and run for longer than a process or deploy. Retrying the whole script is
 expensive and can repeat side effects; keeping one process alive indefinitely
 is not a recovery strategy.
 
-Druks separates the durable control flow from the application. DBOS records
-workflow progress in Postgres. Druks layers application-facing workflows,
-agents, gates, subjects, events, settings, and extension loading on top, then
-exposes their state through an API and dashboard.
+Druks separates durable control flow from app code. DBOS records workflow
+progress in Postgres. Druks layers workflows, agents, gates, subjects, events,
+settings, and app loading on top, then exposes their state through an API and
+dashboard.
 
-## The extension boundary
+## The app boundary
 
-An extension is an independently packaged application installed into the same
-Python environment as Druks. Its package registers an `Extension` subclass:
+An app is an independently packaged Python distribution installed into the same
+environment as Druks. Its package registers an `App` subclass:
 
 ```toml
-[project.entry-points."druks.extensions"]
-night_watch = "druks_night_watch.extension:NightWatch"
+[project.entry-points."druks.apps"]
+night_watch = "druks_night_watch.app:NightWatch"
 ```
 
-At boot Druks resolves installed entry points, imports each extension's models
+At boot Druks resolves installed entry points, imports each app's models
 and role modules, and mounts its routes under `/api/<name>`. The entry-point
-name must match `Extension.name`. The same name scopes:
+name must match `App.name`. The same name scopes:
 
 - the API namespace
 - the default `<name>_` table prefix
-- the extension's Alembic version table
-- extension setting keys
+- the app's Alembic version table
+- app setting keys
 
 ### Druks owns
 
@@ -38,18 +38,18 @@ name must match `Extension.name`. The same name scopes:
 - agent descriptors, Claude/Codex harness dispatch, and sandbox access
 - subject timelines, the event feed, signals, webhook dispatch, and notifications
 - MCP and skill delivery, settings, MCP secret encryption, and diagnostics
-- the FastAPI application, shared dashboard shell, and extension loading
+- the FastAPI server, shared dashboard shell, and app loading
 
-### An extension owns
+### An app owns
 
 - domain workflows, what each one is about, and the policy for starting them
 - agents, prompts, and structured output contracts
 - domain models, migrations, HTTP routes, and subject summaries
 - normalized reactions to events and provider-specific webhook behavior
-- any provider credentials or prerequisites specific to that application
-- optional static frontend assets shipped in the extension package
+- any provider credentials or prerequisites specific to its domain
+- optional static frontend assets shipped in the app package
 
-The bundled `ship` extension owns projects, work items, ticket intake, GitHub
+The bundled `ship` app owns projects, work items, ticket intake, GitHub
 branches and pull requests, coding-agent policy, and its dashboard pages. Those
 are useful examples, not platform guarantees.
 
@@ -80,23 +80,23 @@ sandbox; recovery follows the operation boundary above.
 
 ## When Druks fits
 
-Druks is for applications whose work crosses process lifetimes: several
+Druks is for apps whose work crosses process lifetimes: several
 durable operations, agent calls in isolated hosts, external triggers, or waits
 for people and systems. It is especially useful when several independently
-packaged applications should share one execution and operating substrate.
+packaged apps should share one execution and operating substrate.
 
 It is not an agent model SDK, a sandbox provider, or a reason to wrap a
 single short model call in a workflow. Drukbox owns host provisioning, and an
-extension still owns domain policy and side-effect idempotency.
+app still owns domain policy and side-effect idempotency.
 
 ### State has one lifecycle owner
 
 The `durable_runs` row stores the Druks-owned facts DBOS has no slot for: the
 current gate ask, the failure text, and timestamps. The run's subject lives on
 the DBOS workflow itself as custom attributes, so "runs for this subject" is
-answered by `workflow_status` alone. The run's extension is not stored at all —
+answered by `workflow_status` alone. The run's app is not stored at all —
 it is workflow-class metadata, derivable from the run's `kind` through the
-extension registry. The row's lifecycle state is read-only and derived from
+app registry. The row's lifecycle state is read-only and derived from
 DBOS's workflow status:
 
 ```text
@@ -138,9 +138,9 @@ These terms describe different ownership layers:
 
 | Layer | Responsibility |
 | --- | --- |
-| Agent | Extension-owned prompt, output contract, and default model/settings |
+| Agent | App-owned prompt, output contract, and default model/settings |
 | Harness | Platform adapter that invokes the Claude or Codex CLI for a model |
-| Workspace | Extension customization of what a call receives, such as a cloned repository |
+| Workspace | App customization of what a call receives, such as a cloned repository |
 | Sandbox | Drukbox-provisioned isolated host where the harness process runs |
 | Provider | Any Drukbox backend name that supplies the host; `docker` and `exe` select install shapes |
 
@@ -153,27 +153,27 @@ provider-specific execution code.
 By default, each agent call uses an ephemeral sandbox. A workflow can retain one
 warm sandbox across a segment, but Druks releases it before a gate and at
 workflow exit and rotates it before its lease is too short for another call.
-Application state should live in a durable external system such as Git rather
+Durable state should live in an external system such as Git rather
 than only on the VM.
 
 ## Events, signals, webhooks, and subjects
 
-A subject is what a run is about, and it is always a class — a row the extension
+A subject is what a run is about, and it is always a class — a row the app
 keeps, or identity alone. The workflow declares which, so druks knows the kind of
 thing before any run about it exists; only the subject's type and id travel
 further, because a run outlives what it points at. Everything that happens to a
-run lands in an append-only event log. Extensions add their own events and give
+run lands in an append-only event log. Apps add their own events and give
 their subject class a summary; druks supplies pagination, activity composition,
 and a live feed of facts — a subject's words are the client's.
 
-Signals connect producers to extension reactions. They are awaited and
+Signals connect producers to app reactions. They are awaited and
 delivered at least once: webhook failures return an error so the provider can
 redeliver, while durable lifecycle publishers retry. Subscribers must therefore
 be idempotent.
 
 Webhook classes authenticate and normalize provider deliveries before
 publishing signals. The framework supplies routing and deduplication; an
-extension or integration owns the provider payload and domain reaction.
+app or integration owns the provider payload and domain reaction.
 
 ## Settings and capabilities delivered to agents
 
@@ -181,7 +181,7 @@ Configuration has two planes:
 
 - `druks.toml` configures the deployment and renders the process environment
 - Postgres-backed settings configure operator profile, harness defaults,
-  extension/workflow knobs, per-agent overrides, notifications, MCP servers,
+  app/workflow knobs, per-agent overrides, notifications, MCP servers,
   and skills
 
 Stored MCP tokens and OAuth grants are encrypted at rest. They are decrypted
@@ -195,14 +195,14 @@ treated as credential access.
 
 Enabled MCP servers are injected through both harnesses. A call receives the
 enabled skills it requests, or every enabled skill when it requests none. A
-workspace may also require and credential an MCP server for its own application.
+workspace may also require and credential an MCP server for the app.
 Each agent call records what was declared and delivered so later evaluation can
 distinguish capability sets without storing the tokens.
 
 ## Process and access topology
 
 The shipped `web` process serves FastAPI, the SPA, DBOS workflows, and schedules.
-Postgres stores application and DBOS state. Redis stores short-lived
+Postgres stores app and DBOS state. Redis stores short-lived
 coordination such as webhook deduplication, OAuth state/token caches, and the
 sandbox provisioning gate. Drukbox provisions sandbox hosts; Druks then reaches
 them over SSH.

@@ -1,12 +1,12 @@
 # Druks documentation
 
-Druks has three distinct audiences: operators run the platform, extension
-authors build applications on it, and contributors change Druks itself. Start
+Druks has three distinct audiences: operators run the platform, app
+authors build apps on it, and contributors change Druks itself. Start
 with the route that matches what you are doing.
 
 ## Understand the platform
 
-- [Concepts and guarantees](concepts.md) — platform versus extension ownership,
+- [Concepts and guarantees](concepts.md) — platform versus app ownership,
   durable execution, recovery, gates, events, harnesses, sandboxes, and the
   access boundary.
 - [README](../README.md) — short project overview and installation entry point.
@@ -25,12 +25,12 @@ with the route that matches what you are doing.
 - [Troubleshooting](troubleshooting.md) — symptom-driven diagnosis for boot,
   webhooks, harnesses, sandboxes, gates, and recovery.
 
-## Build an extension
+## Build an app
 
-- [Writing an extension](writing-an-extension.md) — scaffold a separately
-  packaged application and use workflows, agents, gates, events, webhooks,
+- [Writing an app](writing-an-app.md) — scaffold a separately
+  packaged app and use workflows, agents, gates, events, webhooks,
   settings, routes, and migrations.
-- [Concepts and guarantees](concepts.md#the-extension-boundary) — the ownership
+- [Concepts and guarantees](concepts.md#the-app-boundary) — the ownership
   contract behind the author API.
 
 ## Contribute
@@ -45,7 +45,7 @@ with the route that matches what you are doing.
 - [Open-source cut](open-source-cut.md) — one-time clean-history publication and
   public repository settings.
 - [Frontend guide](../frontend/README.md) — dashboard shell, compile-time
-  extension UI registry, and frontend commands.
+  app UI registry, and frontend commands.
 
 The repository intentionally uses plain Markdown rather than a documentation
 framework. The pages above are the navigation; internal research and temporary

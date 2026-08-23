@@ -59,8 +59,8 @@ Secrets are generated only when the TOML is first created. Preserve
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `DRUKS_DATABASE_URL` | local `druks` Postgres | Application and DBOS database |
-| `DRUKS_TEST_DATABASE_URL` | local `druks_test` Postgres | What the shipped pytest fixtures use — never the application's |
+| `DRUKS_DATABASE_URL` | local `druks` Postgres | Runtime and DBOS database |
+| `DRUKS_TEST_DATABASE_URL` | local `druks_test` Postgres | What the shipped pytest fixtures use — never the runtime's |
 | `DRUKS_TEST_REDIS_URL` | `redis://127.0.0.1:6379/15` | What the shipped pytest fixtures flush |
 | `DRUKS_REDIS_URL` | `redis://127.0.0.1:6379/0` | Short-lived coordination and caches |
 | `DRUKS_DATA_DIR` | `/var/lib/druks` | Logs, artifacts, installed skills |
@@ -158,28 +158,28 @@ second. Agents consume the API through the MCP endpoint; see
 
 ## GitHub
 
-Druks acts at GitHub as one **operator App** — its service identity. The App
-receives webhooks and performs application-owned writes such as branches,
+Druks acts at GitHub as one **operator GitHub App** — its service identity. The
+GitHub App receives webhooks and performs domain writes such as branches,
 pull requests, comments, labels, and merges. Its credentials live encrypted
 in Postgres; there is no TOML, environment, or PEM-file source — until GitHub
 is connected, agent runs refuse with a pointed message and `druks doctor`
 reports the identity as not connected.
 
 Connect it from **Settings → Services**. **Create GitHub App** registers the
-App through GitHub's manifest flow: name a GitHub org (or leave it empty for
-a personal account), confirm on GitHub, and druks stores the created App's
-credentials and sends you on to install it on your repositories. Creating the
-App needs `urls.endpoint` set to the base URL the operator's browser reaches
-druks at, and the webhook lands on `urls.webhook_host` when configured, the
-endpoint host otherwise.
+GitHub App through GitHub's manifest flow: name a GitHub org (or leave it empty
+for a personal account), confirm on GitHub, and druks stores the created
+GitHub App's credentials and sends you on to install it on your repositories.
+Creating the GitHub App needs `urls.endpoint` set to the base URL the operator's browser
+reaches druks at, and the webhook lands on `urls.webhook_host` when configured,
+the endpoint host otherwise.
 
-Alternatively paste an existing App's credentials into the same card: the App
-ID, the PEM private key exactly as GitHub issued it, and the webhook secret.
+Alternatively paste an existing GitHub App's credentials into the same card: the
+GitHub App ID, the PEM private key exactly as GitHub issued it, and the webhook secret.
 Connecting validates the pasted credentials against GitHub and stores the
-App's slug; from then on every operator client resolves from that row and
+GitHub App's slug; from then on every operator client resolves from that row and
 webhook deliveries verify against its stored secret.
 
-Registering the App by hand instead:
+Registering the GitHub App by hand instead:
 
 Webhook URL:
 `https://<webhook-host>/_external/github/events/`
@@ -195,25 +195,25 @@ Subscribe to issue comment, pull request, pull request review, and push events.
 | Checks | Read |
 | Commit statuses | Read |
 
-Install the App on the repositories Druks should work in; that installation
+Install the GitHub App on the repositories Druks should work in; that installation
 set is where `ship` may act. Personal access tokens are not a supported
 substitute.
 
 **Upgrading an existing installation** is a one-time paste on each live box
 after rollout: open Settings → Services and connect GitHub with the existing
-operator App's ID, private key, and webhook secret. Do not create a
-replacement App — the current App's webhook and installations keep working
-under the pasted credentials.
+operator GitHub App's ID, private key, and webhook secret. Do not create a
+replacement GitHub App — the current GitHub App's webhook and installations
+keep working under the pasted credentials.
 
 ### Review identity (optional)
 
-The bundled `review` extension can post its verdict reviews as a second
+The bundled `review` app can post its verdict reviews as a second
 GitHub App, so GitHub accepts approvals on Druks-authored pull requests.
-Configure it in **Settings → Review**: the review App ID and its PEM private
-key, both stored encrypted and empty-as-unset. Leave the pair empty and
+Configure it in **Settings → Review**: the review GitHub App ID and its PEM
+private key, both stored encrypted and empty-as-unset. Leave the pair empty and
 reviews publish as operator comments; setting both flips reviews to distinct
-approving reviews. The review App needs read access to metadata and contents,
-read/write access to pull requests, and no webhook.
+approving reviews. The review GitHub App needs read access to metadata and
+contents, read/write access to pull requests, and no webhook.
 
 `GITHUB_API_URL` defaults to `https://api.github.com` and can point every
 client at another compatible GitHub API endpoint.
@@ -225,7 +225,7 @@ secret) or Jira Cloud (base URL, email, API token, webhook secret) from
 **Settings → Services**, on the same cards as the GitHub App. Connecting
 verifies the credentials against the tracker before anything is stored. Which
 tracker drives `ship` work — and the statuses that trigger or move it — stays a
-ship extension setting in **Settings → Ship**.
+ship app setting in **Settings → Ship**.
 
 Webhook URLs remain `/_external/linear/events/` and
 `/_external/jira/events/`. The Jira webhook is a Jira Automation "Send web
@@ -353,7 +353,7 @@ is one of:
 - token read from a named process environment variable
 - OAuth connection, which requires `urls.endpoint`
 
-Enabled servers are delivered to both harnesses unless an extension workspace
+Enabled servers are delivered to both harnesses unless an app workspace
 owns a required server with the same name. Tokens enter the agent environment
 under a derived variable and are never returned by the API.
 
@@ -395,5 +395,5 @@ The encryption envelope does **not** currently cover harness subscription
 payloads or notification webhook URLs. They are stored as
 ordinary Postgres fields, although APIs withhold or mask their values. Treat
 access to Postgres and its backups as access to those credentials. GitHub App
-private keys — the operator identity's and the review extension's — are
+private keys — the operator identity's and the review app's — are
 database values under the envelope, no longer files mounted into the process.

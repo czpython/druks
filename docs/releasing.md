@@ -9,7 +9,7 @@ publishes the matching version tag and the immutable SHA tag; it does not move
 ## Prepare a release
 
 1. Start from a clean checkout of the commit to release.
-2. Run the complete backend, proof-extension, frontend, package, secret, and
+2. Run the complete backend, proof-app, frontend, package, secret, and
    workflow checks from [Development](development.md#verification).
 3. Review migrations and workflow replay compatibility. A container rollback
    does not downgrade Postgres or DBOS state.
