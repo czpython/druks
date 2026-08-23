@@ -16,7 +16,7 @@ from druks.schemas import BaseResponse
 from .enums import AgentCallStatus, RunState
 
 if TYPE_CHECKING:
-    from .models import AgentCall, Run
+    from .models import Run
 
 
 class TokenUsage(BaseResponse):
@@ -108,7 +108,6 @@ class RunResponse(BaseResponse):
     def from_run(
         cls,
         run: "Run",
-        calls: list["AgentCall"],
         *,
         input_request: dict[str, Any] | None,
     ) -> "RunResponse":
@@ -117,13 +116,13 @@ class RunResponse(BaseResponse):
             kind=run.kind,
             label=get_display_label(run.kind),
             state=run.state,  # type: ignore[arg-type]
-            failure=run.failure,
+            failure=run.failure_message(),
             gate=run.input_gate,
             input_request=input_request,
             created_at=run.created_at,
             updated_at=run.updated_at,
             account_username=run.account.username,
-            agent_calls=[AgentCallResponse.model_validate(call) for call in calls],
+            agent_calls=[AgentCallResponse.model_validate(call) for call in run.agent_calls],
         )
 
 

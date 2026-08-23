@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { useCallback, useMemo } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import { Link } from 'wouter'
 
 import { subjectApi } from '../api/client'
@@ -86,7 +86,7 @@ export function SubjectPage({ app, subjectType, subjectId }: Props) {
         <EmptyState glyph="∅" msg="no runs yet" />
       ) : (
         runs.map((run, index) => (
-          <RunBlock key={run.id} app={app} run={run} withTranscript={index === 0} />
+          <RunBlock key={run.id} app={app} run={run} defaultOpen={index === 0} />
         ))
       )}
     </Page>
@@ -96,14 +96,15 @@ export function SubjectPage({ app, subjectType, subjectId }: Props) {
 function RunBlock({
   app,
   run,
-  withTranscript,
+  defaultOpen,
 }: {
   app: string
   run: RunSummary
-  withTranscript: boolean
+  defaultOpen: boolean
 }) {
   const ask = run.state === 'parked' ? run.inputRequest : null
   const call = run.agentCalls.at(-1)
+  const [open, setOpen] = useState(defaultOpen)
   return (
     <div className="subject-run mono">
       <div className="subject-run-head">
@@ -133,11 +134,24 @@ function RunBlock({
           <div className="ins-fail-body">{run.failure}</div>
         </div>
       )}
-      {withTranscript && call && (
+      {call && (
+        <button
+          type="button"
+          className="ins-run-link subject-run-more"
+          aria-expanded={open}
+          onClick={() => setOpen((v) => !v)}
+        >
+          {open ? '▾' : '▸'} transcript
+        </button>
+      )}
+      {open && call && (
         <RunTranscript
           basePath={subjectApi.transcriptBase(app, call.id)}
           isLive={call.status === 'running'}
         />
+      )}
+      {run.state === 'failed' && !call && !run.failure && (
+        <div className="ins-fail-body dim">failed before any agent step</div>
       )}
     </div>
   )

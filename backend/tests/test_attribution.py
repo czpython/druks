@@ -12,7 +12,7 @@ def test_run_projects_its_account(druks_db):
 
     run = druks_db.get(Run, "run-attr-1")
     assert run.account_id == account.id
-    response = RunResponse.from_run(run, [], input_request=None)
+    response = RunResponse.from_run(run, input_request=None)
     assert response.account_username == "dev@example.com"
 
 
@@ -22,5 +22,5 @@ def test_an_unowned_run_belongs_to_system(druks_db):
 
     run = druks_db.get(Run, "run-attr-2")
     assert run.account_id == "system"
-    response = RunResponse.from_run(run, [], input_request=None)
+    response = RunResponse.from_run(run, input_request=None)
     assert response.account_username == "system"

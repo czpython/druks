@@ -70,8 +70,8 @@ def get_agent_call_files(call_id: str) -> AgentCallFiles:
 def list_subject_timeline(subject_type: str, subject_id: str) -> list[RunResponse]:
     # The subject's whole timeline: every run about it, oldest first, each
     # with its agent calls.
-    runs = Run.list_for_subject(subject_type, subject_id)
-    return _timeline(runs, AgentCall.get_by_run([run.id for run in runs]))
+    runs = Run.list_for_subject(subject_type, subject_id, include_calls=True)
+    return _timeline(runs)
 
 
 def get_subject_status(
@@ -79,7 +79,7 @@ def get_subject_status(
 ) -> SubjectStatus:
     kind = workflow.kind if workflow else None
     latest = Run.get_latest_for_subject(subject_type, subject_id, kind=kind)
-    return _status(latest, _running_calls(latest))
+    return _status(latest)
 
 
 async def get_subject_phase(subject_type: str, subject_id: str) -> str | None:
@@ -97,40 +97,31 @@ def get_subject_response(
     summary: SubjectSummary,
     activity: SubjectActivity | None = None,
 ) -> SubjectResponse:
-    runs = Run.list_for_subject(subject_type, subject_id)
-    calls_by_run = AgentCall.get_by_run([run.id for run in runs])
-    latest = Run.get_latest_for_subject(subject_type, subject_id)
+    # list_for_subject is newest-first, so runs[0] is the driving run the status
+    # reads — the same row get_latest_for_subject would return, its calls already
+    # eager-loaded here.
+    runs = Run.list_for_subject(subject_type, subject_id, include_calls=True)
+    latest = runs[0] if runs else None
     return SubjectResponse(
         summary=summary,
-        status=_status(latest, calls_by_run.get(latest.id, []) if latest else []),
-        timeline=_timeline(runs, calls_by_run),
+        status=_status(latest),
+        timeline=_timeline(runs),
         activity=activity,
     )
 
 
-def _timeline(runs: list[Run], calls_by_run: dict[str, list[AgentCall]]) -> list[RunResponse]:
-    # get_by_run keys every run id, so the lookup is total.
+def _timeline(runs: list[Run]) -> list[RunResponse]:
     ordered = sorted(runs, key=lambda run: (run.created_at, run.id))
     return [
         RunResponse.from_run(
             run,
-            calls_by_run[run.id],
             input_request=run.get_ask() if run.input_request else None,
         )
         for run in ordered
     ]
 
 
-def _running_calls(run: Run | None) -> list[AgentCall]:
-    # A parked run's status carries its gate ask; only a running run surfaces its
-    # latest agent call. So a parked board row never queries agent_calls — the
-    # board runs this per subject.
-    if run and not run.is_parked:
-        return AgentCall.list_for_run(run.id)
-    return []
-
-
-def _status(driving_run: Run | None, calls: list[AgentCall]) -> SubjectStatus:
+def _status(driving_run: Run | None) -> SubjectStatus:
     # Facts only: the app's UI renders its copy from them.
     if not driving_run:
         return SubjectStatus(state=RunState.SCHEDULED)
@@ -138,18 +129,19 @@ def _status(driving_run: Run | None, calls: list[AgentCall]) -> SubjectStatus:
     # driving run alone decides parked-ness.
     parked = driving_run.state == RunState.PARKED.value
     # ``agent`` is the *running* run's latest agent — a parked run's calls are
-    # history, not the current step, whichever caller handed them in. ``gate``
-    # is the inverse: only a parked run's input_gate is a live ask (a timed-out
-    # run keeps the stale column).
+    # history, not the current step. Reading agent_calls only when not parked
+    # keeps a parked board row off the agent_calls query. ``gate`` is the
+    # inverse: only a parked run's input_gate is a live ask (a timed-out run
+    # keeps the stale column).
     agent = None
-    if calls and not parked:
-        agent = calls[-1].agent
+    if not parked and driving_run.agent_calls:
+        agent = driving_run.agent_calls[-1].agent
     return SubjectStatus(
         state=RunState(driving_run.state),
         kind=driving_run.kind,
         agent=agent,
         gate=driving_run.input_gate if parked else None,
-        failure=driving_run.failure,
+        failure=driving_run.failure_message(),
         reason=driving_run.failure_code,
         triggered_at=driving_run.created_at,
         account_username=driving_run.account.username,
