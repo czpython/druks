@@ -1,13 +1,23 @@
 import inspect
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from contextlib import nullcontext, suppress
 from contextvars import ContextVar
 from datetime import UTC, datetime
 from functools import partial
-from typing import TYPE_CHECKING, Any, ClassVar, Literal, Self, TypeVar, get_args, get_type_hints
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    ClassVar,
+    Literal,
+    Self,
+    TypeVar,
+    get_args,
+    get_type_hints,
+    overload,
+)
 
 from croniter import croniter
-from dbos import DBOS, SetEnqueueOptions, SetWorkflowAttributes, SetWorkflowID, StepOptions
+from dbos import DBOS, Queue, SetEnqueueOptions, SetWorkflowAttributes, SetWorkflowID, StepOptions
 from dbos._dbos import _get_dbos_instance
 from dbos._error import (
     DBOSAwaitedWorkflowCancelledError,
@@ -48,8 +58,8 @@ from druks.signals import publish
 from druks.user_settings.models import SettingsOverride, UserSettings
 from druks.workspaces import Workspace
 
-# druks.workflows is the author door for workflow authoring: the bases (Workflow,
-# Gate, step) defined below plus the author-facing read contracts. The engine
+# druks.workflows is the author door for workflow authoring: Workflow, Gate,
+# step, task, and the author-facing read contracts. The engine
 # itself (druks.durable) stays internal.
 __all__ = [
     "AgentCall",
@@ -69,6 +79,7 @@ __all__ = [
     "WorkflowEvent",
     "set_run_phase",
     "step",
+    "task",
 ]
 
 if TYPE_CHECKING:
@@ -92,6 +103,8 @@ current_workflow: ContextVar["Workflow"] = ContextVar("current_workflow")
 # True while a @step body runs. An agent run inside one is already memoized by that
 # step, so it skips wrapping itself; outside, it wraps itself in its own step.
 _in_step: ContextVar[bool] = ContextVar("_in_step", default=False)
+
+task_queue = Queue("druks_tasks")
 
 # Reserved so _entry's arity and old checkpoints stay untouched; a body
 # parameter may not claim it.
@@ -117,6 +130,7 @@ def _resolve_body_method(cls: type["Workflow"]) -> str:
             )
         method._durable_step = True
         method._step_name = None
+        method._step_retries = 0
         return "run"
     if has_multistep:
         method = cls.__dict__["run_multistep"]
@@ -358,18 +372,129 @@ async def _notify_designated_destination(workflow_id: str, subject: dict[str, An
     await notifications_queue.enqueue_async(send_notification, notification_id)
 
 
-def step(method: Callable | None = None, *, name: str | None = None) -> Callable:
+def step(method: Callable | None = None, *, name: str | None = None, retries: int = 0) -> Callable:
     """Mark a ``run_multistep()`` helper method as a durable, replay-safe step —
     its body runs once and its return is memoized for recovery. `name=` pins the
-    durable step name independent of the method name. A leading `_` carries no
-    semantics — it's just Python privacy."""
+    durable step name independent of the method name. `retries=` sets retries
+    after the first attempt. A leading `_` is only Python privacy."""
 
     def stamp(m: Callable) -> Callable:
         m._durable_step = True  # type: ignore[attr-defined]
         m._step_name = name  # type: ignore[attr-defined]
+        m._step_retries = retries  # type: ignore[attr-defined]
         return m
 
     return stamp(method) if method else stamp
+
+
+class _Task:
+    def __init__(
+        self,
+        function: Callable[..., Awaitable[Any]],
+        *,
+        every: str | None,
+        retries: int,
+    ) -> None:
+        self._function = function
+        self._signature = inspect.signature(function)
+        try:
+            app = resolve_workflow_app(function.__module__)
+        except LookupError:
+            raise WorkflowError(
+                f"{function.__module__} declares task {function.__name__} outside every "
+                "registered app package — task modules load through "
+                "druks.apps.loader; a module the loader doesn't own must "
+                "register_workflow_package() before importing"
+            ) from None
+        self.name = f"{app}.{function.__name__}" if app else function.__name__
+        self._retries = retries
+        self._scheduled_entry: Callable[..., Any] | None = None
+
+        if every:
+            required = [
+                name
+                for name, parameter in self._signature.parameters.items()
+                if parameter.default is inspect.Parameter.empty
+                and parameter.kind
+                in (
+                    parameter.POSITIONAL_ONLY,
+                    parameter.POSITIONAL_OR_KEYWORD,
+                    parameter.KEYWORD_ONLY,
+                )
+            ]
+            if required:
+                raise WorkflowError(
+                    f"task {self.name} requires {required}, but a scheduled task fires "
+                    "with no arguments — a scheduled task must be nullary"
+                )
+
+        @DBOS.workflow(name=self.name)
+        async def _entry(**kwargs: Any) -> None:
+            await self._run(**kwargs)
+
+        self._entry = _entry
+
+        if every:
+
+            @DBOS.scheduled(every)
+            @DBOS.workflow(name=f"{self.name}.scheduled")
+            async def _scheduled_entry(scheduled_at: datetime, started_at: datetime | None) -> None:
+                await self._run()
+
+            self._scheduled_entry = _scheduled_entry
+
+    async def enqueue(self, **kwargs: Any) -> None:
+        # ponytail: This checks argument names and arity, not types. A typed
+        # consumer can add Pydantic coercion when tasks need wire validation.
+        self._signature.bind(**kwargs)
+        await task_queue.enqueue_async(self._entry, **kwargs)
+
+    async def _run(self, **kwargs: Any) -> None:
+        async def _do() -> None:
+            async with step_session():
+                await self._function(**kwargs)
+
+        await DBOS.run_step_async(
+            StepOptions(
+                name=self.name,
+                retries_allowed=self._retries > 0,
+                max_attempts=self._retries + 1,
+            ),
+            _do,
+        )
+
+
+@overload
+def task(
+    function: Callable[..., Awaitable[Any]],
+    *,
+    every: str | None = None,
+    retries: int = 0,
+) -> _Task: ...
+
+
+@overload
+def task(
+    function: None = None,
+    *,
+    every: str | None = None,
+    retries: int = 0,
+) -> Callable[[Callable[..., Awaitable[Any]]], _Task]: ...
+
+
+def task(
+    function: Callable[..., Awaitable[Any]] | None = None,
+    *,
+    every: str | None = None,
+    retries: int = 0,
+) -> _Task | Callable[[Callable[..., Awaitable[Any]]], _Task]:
+    """Make an async function a durable background task. ``every=`` adds a UTC
+    cron, and ``retries=`` sets retries after the first attempt."""
+
+    def decorate(declared: Callable[..., Awaitable[Any]]) -> _Task:
+        return _Task(declared, every=every, retries=retries)
+
+    return decorate(function) if function else decorate
 
 
 # Lifecycle steps do real IO (DB, Redis, event subscribers), so a
@@ -846,10 +971,11 @@ def _wrap_steps(cls: type[Workflow]) -> None:
     for method_name, method in list(vars(cls).items()):
         if getattr(method, "_durable_step", False):
             name = getattr(method, "_step_name", None) or method_name
-            setattr(cls, method_name, _make_step(cls.kind, name, method))
+            retries = getattr(method, "_step_retries", 0)
+            setattr(cls, method_name, _make_step(cls.kind, name, method, retries))
 
 
-def _make_step(kind: str, name: str, method: Callable) -> Callable:
+def _make_step(kind: str, name: str, method: Callable, retries: int) -> Callable:
     # Run the method inside its own session via a zero-arg closure, so `self` is
     # never serialized into the DBOS checkpoint.
     async def _step(self: Workflow, *args: Any, **kwargs: Any) -> Any:
@@ -861,7 +987,11 @@ def _make_step(kind: str, name: str, method: Callable) -> Callable:
             finally:
                 _in_step.reset(token)
 
-        return await DBOS.run_step_async(StepOptions(name=f"{kind}.{name}"), _do)
+        options = StepOptions(name=f"{kind}.{name}")
+        if retries > 0:
+            options["retries_allowed"] = True
+            options["max_attempts"] = retries + 1
+        return await DBOS.run_step_async(options, _do)
 
     _step.__name__ = name
     _step.__wrapped__ = method  # lets a test call run() without DBOS

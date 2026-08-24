@@ -34,6 +34,7 @@ AUTHOR_SURFACE = {
         "WorkflowEvent",
         "set_run_phase",
         "step",
+        "task",
     },
     "druks.db": {"Base", "StoredSubject", "db_session"},
     "druks.schemas": {"BaseResponse"},

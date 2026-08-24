@@ -3,7 +3,7 @@ from druks.apps import loader as apps_loader
 from druks.apps.exceptions import MalformedApp
 from druks.apps.loader import register_workflow_package, resolve_workflow_app
 from druks.apps.registry import workflows
-from druks.core.workflows import RefreshTokens
+from druks.core.tasks import refresh_tokens
 from druks.durable.enums import RunState
 from druks.durable.exceptions import WorkflowError
 from druks.durable.models import Run
@@ -98,12 +98,10 @@ def test_none_owned_package_keeps_bare_kinds():
 
 
 def test_in_tree_identities_are_stable():
-    # These kinds are durable identities (DBOS workflow names, settings keys,
-    # dedup prefixes, step-name prefixes) — byte-for-byte pins.
+    # These are durable DBOS names — byte-for-byte pins.
     assert workflows.get("ship.build") is not None
     assert workflows.get("ship.profile") is not None
-    assert RefreshTokens.kind == "core.refresh_tokens"
-    assert (workflows.get("ship.build").app, RefreshTokens.app) == ("ship", "core")
+    assert refresh_tokens.name == "core.refresh_tokens"
 
 
 def test_steps_capture_the_namespaced_kind():

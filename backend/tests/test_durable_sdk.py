@@ -13,7 +13,7 @@ from druks.durable.dbos_state import workflow_status
 from druks.durable.engine import configure_engine, init_dbos, launch, shutdown
 from druks.models import StoredSubject
 from druks.testing import init_db
-from druks.workflows import Gate, Subject, Workflow, step
+from druks.workflows import Gate, Subject, Workflow, step, task
 from pydantic import BaseModel
 from sqlalchemy import create_engine, select
 
@@ -49,6 +49,8 @@ class RepoCfg(BaseModel):
 
 
 SINK: list[str] = []
+TASK_RETRY_ATTEMPTS = 0
+STEP_RETRY_ATTEMPTS = 0
 
 
 class Widget(StoredSubject):
@@ -65,6 +67,22 @@ class Gadget(Subject):
 
 # run_multistep() below for fixtures using @step/a gate; run() for the rest.
 def _build_units():
+    @task
+    async def record_task(repo: str) -> None:
+        SINK.append(f"task:{repo}")
+
+    @task(retries=1)
+    async def retry_task() -> None:
+        global TASK_RETRY_ATTEMPTS
+        TASK_RETRY_ATTEMPTS += 1
+        if TASK_RETRY_ATTEMPTS == 1:
+            raise RuntimeError("retry task")
+        SINK.append("task:retried")
+
+    @task(every="0 6 * * *")
+    async def scheduled_task() -> None:
+        SINK.append("task:scheduled")
+
     class Approve(Gate):
         # The on_wait override is what lets the subjectless flows below park
         # here at all — without it every wait() would fail as SubjectlessGate.
@@ -119,6 +137,18 @@ def _build_units():
 
         async def run_multistep(self, repo: str) -> None:
             await self.note_repo(repo)
+
+    class RetryingStepFlow(Workflow):
+        @step(retries=1)
+        async def unreliable(self) -> None:
+            global STEP_RETRY_ATTEMPTS
+            STEP_RETRY_ATTEMPTS += 1
+            if STEP_RETRY_ATTEMPTS == 1:
+                raise RuntimeError("retry step")
+            SINK.append("step:retried")
+
+        async def run_multistep(self) -> None:
+            await self.unreliable()
 
     # every= so launch()'s apply_schedules has a schedule to create (smoke).
     class DailySweep(Workflow):
@@ -199,6 +229,10 @@ def _build_units():
         ReviewFlow,
         AttributedFlow,
         ScheduledDispatch,
+        RetryingStepFlow,
+        record_task,
+        retry_task,
+        scheduled_task,
     )
 
 
@@ -258,6 +292,10 @@ def rt():
         review_flow,
         attributed_flow,
         scheduled_dispatch,
+        retrying_step_flow,
+        record_task,
+        retry_task,
+        scheduled_task,
     ) = _build_units()
     os.environ["DRUKS_DATABASE_URL"] = URL
     init_dbos()
@@ -276,6 +314,10 @@ def rt():
             ReviewFlow=review_flow,
             AttributedFlow=attributed_flow,
             ScheduledDispatch=scheduled_dispatch,
+            RetryingStepFlow=retrying_step_flow,
+            record_task=record_task,
+            retry_task=retry_task,
+            scheduled_task=scheduled_task,
         )
     finally:
         shutdown()
@@ -295,6 +337,7 @@ def rt():
         workflows._items.pop("review_flow", None)
         workflows._items.pop("attributed_flow", None)
         workflows._items.pop("scheduled_dispatch", None)
+        workflows._items.pop("retrying_step_flow", None)
         if db_url_snap is None:
             os.environ.pop("DRUKS_DATABASE_URL", None)
         else:
@@ -666,6 +709,74 @@ async def test_task_enqueue(rt):
     while "owner/queued" not in SINK and asyncio.get_event_loop().time() < deadline:
         await asyncio.sleep(0.1)
     assert "owner/queued" in SINK
+
+
+async def test_durable_task_enqueue(rt):
+    SINK.clear()
+    await rt.record_task.enqueue(repo="owner/queued")
+    deadline = asyncio.get_event_loop().time() + 15
+    while "task:owner/queued" not in SINK and asyncio.get_event_loop().time() < deadline:
+        await asyncio.sleep(0.1)
+    assert "task:owner/queued" in SINK
+
+
+async def test_durable_task_retries(rt):
+    global TASK_RETRY_ATTEMPTS
+    TASK_RETRY_ATTEMPTS = 0
+    SINK.clear()
+    await rt.retry_task.enqueue()
+    deadline = asyncio.get_event_loop().time() + 15
+    while "task:retried" not in SINK and asyncio.get_event_loop().time() < deadline:
+        await asyncio.sleep(0.1)
+    assert "task:retried" in SINK
+    assert TASK_RETRY_ATTEMPTS > 1
+
+
+async def test_step_retries(rt):
+    global STEP_RETRY_ATTEMPTS
+    STEP_RETRY_ATTEMPTS = 0
+    SINK.clear()
+    workflow_id = await rt.RetryingStepFlow.start(subject=None)
+    await _wait_for(rt.engine, workflow_id, lambda run: run.state == RunState.FINISHED)
+    assert "step:retried" in SINK
+    assert STEP_RETRY_ATTEMPTS > 1
+
+
+async def test_scheduled_task_runs_nullary_body(rt):
+    from datetime import UTC, datetime
+
+    SINK.clear()
+    await rt.scheduled_task._scheduled_entry(datetime.now(UTC), None)
+    assert "task:scheduled" in SINK
+
+
+async def test_scheduled_task_must_be_nullary(rt):
+    from druks.durable.exceptions import WorkflowError
+
+    with pytest.raises(WorkflowError, match="nullary"):
+
+        @task(every="0 6 * * *")
+        async def needs_argument(target: str) -> None: ...
+
+
+async def test_task_name_uses_declaring_app(rt):
+    from druks.apps.loader import register_workflow_package
+
+    register_workflow_package("plain_task_package", None)
+    register_workflow_package("app_task_package", "alpha")
+
+    async def bare_task() -> None: ...
+
+    bare_task.__module__ = "plain_task_package.tasks"
+    bare = task(bare_task)
+
+    async def summarize() -> None: ...
+
+    summarize.__module__ = "app_task_package.tasks"
+    namespaced = task(summarize)
+
+    assert bare.name == "bare_task"
+    assert namespaced.name == "alpha.summarize"
 
 
 async def test_every_registers_schedule(rt):

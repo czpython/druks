@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 
 import druks.redis
 import pytest
-from druks.core import workflows as harness_workflows
+from druks.core import tasks as harness_workflows
 from druks.harnesses.datastructures import RotationResult
 from druks.sandbox import gate
 
