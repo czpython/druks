@@ -18,10 +18,9 @@ from typing import (
 
 from croniter import croniter
 from dbos import DBOS, Queue, SetEnqueueOptions, SetWorkflowAttributes, SetWorkflowID, StepOptions
-from dbos._dbos import _get_dbos_instance, _get_or_create_dbos_registry
+from dbos._dbos import _get_or_create_dbos_registry
 from dbos._error import (
     DBOSAwaitedWorkflowCancelledError,
-    DBOSQueueDeduplicatedError,
     DBOSWorkflowCancelledError,
 )
 from pydantic import BaseModel, Field, create_model
@@ -941,10 +940,13 @@ class Workflow:
         # DBOS queue deduplication: the slot is claimed atomically at enqueue,
         # held while the workflow is enqueued or pending (a parked run keeps
         # it), and freed by DBOS itself at the terminal outcome — including
-        # when DBOS gives up on a dead workflow. A duplicate start() hands back
-        # the live run's id. Subjectless runs are unbounded.
+        # when DBOS gives up on a dead workflow. On a held slot, return-existing
+        # hands back the holder's handle. Subjectless runs are unbounded.
         enqueue_options = (
-            SetEnqueueOptions(deduplication_id=f"{cls.kind}:{subject.subject_type}:{subject.id}")
+            SetEnqueueOptions(
+                deduplication_id=f"{cls.kind}:{subject.subject_type}:{subject.id}",
+                duplication_policy="return-existing",
+            )
             if subject
             else nullcontext()
         )
@@ -959,30 +961,23 @@ class Workflow:
                 "subject_label": subject.label,
             }
         subject_record = subject.identity if subject else None
-        try:
-            with (
-                SetWorkflowID(workflow_id),
-                SetWorkflowAttributes(attributes),
-                enqueue_options,
-            ):
-                await run_queue.enqueue_async(cls._entry, subject_record, wire)
-        except DBOSQueueDeduplicatedError as duplicate:
-            holder = _get_dbos_instance()._sys_db.get_deduplicated_workflow(
-                run_queue.name, duplicate.deduplication_id
+        with (
+            SetWorkflowID(workflow_id),
+            SetWorkflowAttributes(attributes),
+            enqueue_options,
+        ):
+            handle = await run_queue.enqueue_async(cls._entry, subject_record, wire)
+        if handle.workflow_id == workflow_id:
+            # The body also creates its row (idempotently) — this one just makes it
+            # visible before an executor picks the workflow up.
+            Run.create_row(
+                _step_engine(), workflow_id=workflow_id, kind=cls.kind, account_id=account_id
             )
-            if holder:
-                return holder
-            # The holder reached terminal between the rejection and the lookup —
-            # the slot is free now, so this start goes through.
-            return await cls.start(subject=subject, account_id=account_id, **input)
-        # The body also creates its row (idempotently) — this one just makes it
-        # visible before an executor picks the workflow up.
-        Run.create_row(
-            _step_engine(), workflow_id=workflow_id, kind=cls.kind, account_id=account_id
-        )
-        if subject:
-            await publish(WorkflowEvent.SCHEDULED, subject=subject.identity, kind=cls.kind)
-        return workflow_id
+            if subject:
+                await publish(WorkflowEvent.SCHEDULED, subject=subject.identity, kind=cls.kind)
+            return workflow_id
+        # The slot was held — the handle is the subject's live run.
+        return handle.workflow_id
 
 
 def _wrap_steps(cls: type[Workflow]) -> None:
