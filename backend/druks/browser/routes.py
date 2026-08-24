@@ -12,7 +12,7 @@ from druks.accounts.models import Account
 from druks.apps.registry import browser_sessions
 from druks.browser import exceptions
 from druks.browser.constants import MAX_PAYLOAD_BYTES, PAYLOAD_WARNING_BYTES
-from druks.browser.enums import BrowserSessionPayloadFormat, BrowserSessionStatus
+from druks.browser.enums import BrowserSessionPayloadFormat
 from druks.browser.login import LoginWindow, is_same_origin
 from druks.browser.models import StoredBrowserSession
 from druks.browser.schemas import BrowserSessionResponse
@@ -36,7 +36,7 @@ async def list_browser_sessions(account: Account = Depends(current_account)):
                     "name": declaration.name,
                     "site": declaration.site,
                     "is_declared": True,
-                    "status": BrowserSessionStatus.NEEDS_LOGIN,
+                    "status": declaration.initial_status,
                 }
             )
         else:
@@ -64,6 +64,8 @@ async def upload_state(
     account: Account = Depends(current_session_account),
 ) -> None:
     if declaration := browser_sessions.get(name):
+        if declaration.anonymous:
+            raise exceptions.BrowserSessionAnonymousError(name)
         row = declaration.get_or_create_row()
         payload = bytearray()
         async for chunk in request.stream():
@@ -87,6 +89,8 @@ async def open_login_window(
     account: Account = Depends(current_session_account),
 ) -> None:
     if declaration := browser_sessions.get(name):
+        if declaration.anonymous:
+            raise exceptions.BrowserSessionAnonymousError(name)
         await LoginWindow.open(declaration.get_or_create_row())
         return
     raise exceptions.BrowserSessionUnknownError(name)

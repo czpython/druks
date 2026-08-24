@@ -78,6 +78,27 @@ def test_leftover_rows_list_as_undeclared_and_refuse_the_login_window(client, ni
     assert not StoredBrowserSession.list_all()
 
 
+def test_anonymous_sessions_list_as_anonymous_and_refuse_login_and_state(
+    client, browser_session_declarations
+):
+    class Critic:
+        name = "critic"
+        target = BrowserSession(site="druks.local", anonymous=True)
+
+    listed = {entry["name"]: entry for entry in client.get("/api/browser-sessions").json()}
+    assert listed["critic.target"]["status"] == BrowserSessionStatus.ANONYMOUS
+
+    refused = client.post("/api/browser-sessions/critic.target/login-window")
+    assert refused.status_code == 409
+    assert "anonymous" in refused.json()["detail"]
+
+    uploaded = client.put(
+        "/api/browser-sessions/critic.target/state?payloadFormat=storage_state", content=b"x"
+    )
+    assert uploaded.status_code == 409
+    assert not StoredBrowserSession.list_all()
+
+
 def test_opening_the_login_window_materializes_the_declared_row(client, night_watch, monkeypatch):
     monkeypatch.setattr(routes, "LoginWindow", FakeLoginWindow)
     monkeypatch.setattr(FakeLoginWindow, "opened", [])

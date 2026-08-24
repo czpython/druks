@@ -46,19 +46,38 @@ class BrowserSession:
     persist: bool = False
     # Opt-in optimization for sites that don't fingerprint headless chromium.
     headless: bool = False
+    # The session needs no login: every borrow opens a blank profile and the
+    # operator is never asked to sign in.
+    anonymous: bool = False
     name: str = field(init=False, default="")
+
+    def __post_init__(self) -> None:
+        if self.anonymous and self.persist:
+            raise ValueError(
+                "BrowserSession(anonymous=True, persist=True): an anonymous "
+                "session has no state to write back. Drop persist=True."
+            )
 
     def __set_name__(self, owner: type, attr: str) -> None:
         self.name = f"{owner.name}.{attr}"
         browser_sessions.register(self)
 
+    @property
+    def initial_status(self) -> BrowserSessionStatus:
+        """The status a session holds before anyone acts on it: anonymous
+        sessions never want a login."""
+        if self.anonymous:
+            return BrowserSessionStatus.ANONYMOUS
+        return BrowserSessionStatus.NEEDS_LOGIN
+
     @asynccontextmanager
     async def cdp(self):
-        """A logged-in browser, reachable at the yielded CDP url for the
-        length of the block. The browser lives in its own container on the
-        druks box and dies with the block; a persisting session is exported
-        and stored back first."""
-        row = self._ready_row()
+        """A browser carrying the session's login (blank for an anonymous
+        session), reachable at the yielded CDP url for the length of the
+        block. The browser lives in its own container on the druks box and
+        dies with the block; a persisting session is exported and stored
+        back first."""
+        row = self.get_or_create_row() if self.anonymous else self._ready_row()
         writer_token = await acquire_writer_lock(row.id) if self.persist else ""
         try:
             settings = load_settings()
@@ -66,7 +85,7 @@ class BrowserSession:
                 image_override=settings.sandbox.browser_sandbox_image,
                 provider=settings.sandbox.browser_sandbox_provider,
             ) as browser:
-                await self._materialize(browser, row)
+                await seed_state(browser, row)
                 await self._launch(browser)
                 row.mark_used()
                 listener = await browser.forward_local_port(CDP_PORT)
@@ -113,6 +132,7 @@ class BrowserSession:
             name=self.name,
             payload_format=BrowserSessionPayloadFormat.PROFILE_DIR,
             site=self.site,
+            status=self.initial_status,
         )
 
     def _ready_row(self) -> StoredBrowserSession:
@@ -120,21 +140,6 @@ class BrowserSession:
         if row.status != BrowserSessionStatus.READY.value:
             raise BrowserSessionNotReadyError(self.name, row.status)
         return row
-
-    async def _materialize(self, browser, row: StoredBrowserSession) -> None:
-        state_filename = (
-            "state.json"
-            if row.payload_format == BrowserSessionPayloadFormat.STORAGE_STATE.value
-            else "state.tar.gz"
-        )
-        metadata = json.dumps({"format": row.payload_format, "version": 1})
-        with tempfile.TemporaryDirectory(prefix="druks-browser-") as staging:
-            state_path = Path(staging) / state_filename
-            state_path.write_bytes(row.payload.decrypt())
-            metadata_path = Path(staging) / "state.meta.json"
-            metadata_path.write_text(metadata)
-            await browser.upload_file(local=state_path, remote=f"{SESSION_ROOT}/{state_filename}")
-            await browser.upload_file(local=metadata_path, remote=f"{SESSION_ROOT}/state.meta.json")
 
     async def _launch(self, browser) -> None:
         mode = "--headless" if self.headless else "--headed"
@@ -164,3 +169,26 @@ class BrowserSession:
             exported_path = Path(staging) / "state.tar.gz"
             await browser.download(remote=f"{SESSION_ROOT}/out/state.tar.gz", local=exported_path)
             return exported_path.read_bytes()
+
+
+async def seed_state(browser, row: StoredBrowserSession) -> None:
+    """Put the row's stored browser state in the container before launch."""
+    with tempfile.TemporaryDirectory(prefix="druks-browser-") as staging:
+        if row.payload:
+            state_filename = (
+                "state.json"
+                if row.payload_format == BrowserSessionPayloadFormat.STORAGE_STATE.value
+                else "state.tar.gz"
+            )
+            state_path = Path(staging) / state_filename
+            state_path.write_bytes(row.payload.decrypt())
+            await browser.upload_file(local=state_path, remote=f"{SESSION_ROOT}/{state_filename}")
+            metadata = {"format": row.payload_format, "version": 1}
+        else:
+            # Nothing stored — an anonymous session, or a login window opened
+            # before the first sign-in. Version zero tells the launcher to
+            # open a blank profile.
+            metadata = {"format": BrowserSessionPayloadFormat.PROFILE_DIR.value, "version": 0}
+        metadata_path = Path(staging) / "state.meta.json"
+        metadata_path.write_text(json.dumps(metadata))
+        await browser.upload_file(local=metadata_path, remote=f"{SESSION_ROOT}/state.meta.json")

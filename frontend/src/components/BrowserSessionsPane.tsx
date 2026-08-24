@@ -13,6 +13,7 @@ const STATUS_LABELS: Record<BrowserSessionStatus, string> = {
   needs_login: 'Needs login',
   ready: 'Ready',
   stale: 'Stale',
+  anonymous: 'Anonymous — no login needed',
 }
 
 const FORMAT_LABELS: Record<BrowserSessionPayloadFormat, string> = {
@@ -20,7 +21,8 @@ const FORMAT_LABELS: Record<BrowserSessionPayloadFormat, string> = {
   profile_dir: 'Profile directory',
 }
 
-const LOGIN_ACTION_LABELS: Record<BrowserSessionStatus, string> = {
+/* An anonymous session has no login action at all. */
+const LOGIN_ACTION_LABELS: Record<Exclude<BrowserSessionStatus, 'anonymous'>, string> = {
   needs_login: 'Log in',
   ready: 'Open window',
   stale: 'Reconnect',
@@ -101,13 +103,15 @@ export function BrowserSessionsPane() {
                 </dl>
                 <div className="browser-session-actions">
                   {session.isDeclared ? (
-                    /* A full load dismisses Settings before the login window mounts. */
-                    <a
-                      className="set-btn primary"
-                      href={`${import.meta.env.BASE_URL}browser-sessions/${encodeURIComponent(session.name)}/login`}
-                    >
-                      {LOGIN_ACTION_LABELS[session.status]}
-                    </a>
+                    session.status !== 'anonymous' && (
+                      /* A full load dismisses Settings before the login window mounts. */
+                      <a
+                        className="set-btn primary"
+                        href={`${import.meta.env.BASE_URL}browser-sessions/${encodeURIComponent(session.name)}/login`}
+                      >
+                        {LOGIN_ACTION_LABELS[session.status]}
+                      </a>
+                    )
                   ) : (
                     <span className="browser-session-undeclared">No longer declared</span>
                   )}
