@@ -25,7 +25,7 @@ router = APIRouter(prefix="/api/browser-sessions", tags=["browser-sessions"])
 
 @router.get("", response_model=list[BrowserSessionResponse])
 async def list_browser_sessions(account: Account = Depends(current_account)):
-    rows = {row.name: row for row in StoredBrowserSession.list_all()}
+    rows = {row.name: row for row in await StoredBrowserSession.list_all()}
     sessions = []
     for declaration in browser_sessions.all():
         try:
@@ -66,7 +66,7 @@ async def upload_state(
     if declaration := browser_sessions.get(name):
         if declaration.anonymous:
             raise exceptions.BrowserSessionAnonymousError(name)
-        row = declaration.get_or_create_row()
+        row = await declaration.get_or_create_row()
         payload = bytearray()
         async for chunk in request.stream():
             payload.extend(chunk)
@@ -78,7 +78,7 @@ async def upload_state(
         if len(payload) >= PAYLOAD_WARNING_BYTES:
             logger.warning("Browser session %s received a %d-byte payload.", name, len(payload))
         row.payload_format = payload_format.value
-        row.store_payload(bytes(payload))
+        await row.store_payload(bytes(payload))
         return
     raise exceptions.BrowserSessionUnknownError(name)
 
@@ -91,7 +91,7 @@ async def open_login_window(
     if declaration := browser_sessions.get(name):
         if declaration.anonymous:
             raise exceptions.BrowserSessionAnonymousError(name)
-        await LoginWindow.open(declaration.get_or_create_row())
+        await LoginWindow.open(await declaration.get_or_create_row())
         return
     raise exceptions.BrowserSessionUnknownError(name)
 
@@ -102,7 +102,7 @@ async def login_window_socket(websocket: WebSocket, name: str) -> None:
         await websocket.close(code=1008)
         return
     try:
-        with session_scope(websocket.app.state.engine):
+        async with session_scope(websocket.app.state.engine):
             await require_operator(websocket)
         window = await LoginWindow.get_for_session(name)
     except (HTTPException, exceptions.BrowserApiError):
@@ -137,7 +137,7 @@ async def delete_browser_session(
     name: str,
     account: Account = Depends(current_session_account),
 ) -> None:
-    if row := StoredBrowserSession.get_for_name(name):
-        row.delete()
+    if row := await StoredBrowserSession.get_for_name(name):
+        await row.delete()
         return
     raise exceptions.BrowserSessionUnknownError(name)

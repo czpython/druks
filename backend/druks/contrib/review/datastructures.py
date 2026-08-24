@@ -14,7 +14,7 @@ class PullRequest(Subject):
         return cls(id=f"{repo}#{number}")
 
     @classmethod
-    def get_for_subject_id(cls, subject_id: str) -> Self | None:
+    async def get_for_subject_id(cls, subject_id: str) -> Self | None:
         # Ids reach the read side as free text off a URL, so a shape that names no
         # pull request is a miss rather than a crashed read.
         repo, _, number = subject_id.partition("#")
@@ -45,7 +45,7 @@ class PullRequest(Subject):
         )
 
     @classmethod
-    def list_summaries(cls, account_id: str | None) -> list[ReviewSummary]:
+    async def list_summaries(cls, account_id: str | None) -> list[ReviewSummary]:
         """The reviews still going or stopped on a failure. A finished one lives on its
         pull request, so it leaves the board as soon as it has something to show there."""
-        return [pull_request.get_summary() for pull_request in cls.list_open()]
+        return [pull_request.get_summary() for pull_request in await cls.list_open()]

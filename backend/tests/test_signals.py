@@ -1,13 +1,13 @@
 import pytest
 from druks.apps.exceptions import SubscriberDeclarationError
+from druks.database import db_session
 from druks.signals import publish, subscribe
 from druks_field_notes.models import Note
 from druks_field_notes.workflows import Summarize
-from sqlalchemy.orm import object_session
 
 
-def _note(body: str = "probe") -> Note:
-    return Note.create(body=body)
+async def _note(body: str = "probe") -> Note:
+    return await Note.create(body=body)
 
 
 @pytest.mark.asyncio
@@ -25,7 +25,7 @@ async def test_subscriber_failure_propagates_to_the_publisher():
 
 @pytest.mark.asyncio
 async def test_subject_subscriber_receives_the_row(druks_db):
-    item = _note()
+    item = await _note()
     received = []
 
     @subscribe("test.subject_row", subject=Note)
@@ -39,7 +39,7 @@ async def test_subject_subscriber_receives_the_row(druks_db):
 
 @pytest.mark.asyncio
 async def test_deleted_subject_skips_the_subscriber(druks_db):
-    item = _note()
+    item = await _note()
     identity = item.identity
     received = []
 
@@ -47,8 +47,8 @@ async def test_deleted_subject_skips_the_subscriber(druks_db):
     async def receive(*, subject: Note) -> None:
         received.append(subject)
 
-    object_session(item).delete(item)
-    object_session(item).flush()
+    await db_session().delete(item)
+    await db_session().flush()
     await publish("test.deleted_subject", subject=identity)
 
     assert received == []
@@ -56,7 +56,7 @@ async def test_deleted_subject_skips_the_subscriber(druks_db):
 
 @pytest.mark.asyncio
 async def test_another_subjects_event_skips_the_subscriber(druks_db):
-    item = _note()
+    item = await _note()
     received = []
 
     @subscribe("test.other_subject", subject=Note)
@@ -74,7 +74,7 @@ async def test_workflow_filter_narrows_to_that_workflow(druks_db):
     # The body names the fact it came for; the kind it was matched on is routing,
     # so it never reaches the signature. Summarize declares its subject, so the
     # filter narrows to notes too and the body is handed the row.
-    item = _note()
+    item = await _note()
     received = []
 
     @subscribe("test.workflow_filter", workflow=Summarize)
@@ -113,9 +113,9 @@ def test_a_subscriber_asking_for_routing_fails_at_declaration():
         async def receive(*, run: str, kind: str, **_: object) -> None: ...
 
 
-def test_a_run_resolves_its_subject_through_the_declaration(druks_db):
-    item = _note()
+async def test_a_run_resolves_its_subject_through_the_declaration(druks_db):
+    item = await _note()
     workflow = Summarize()
     workflow._subject = item.identity
 
-    assert workflow.subject is item
+    assert await workflow.subject is item

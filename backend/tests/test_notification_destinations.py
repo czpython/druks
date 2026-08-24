@@ -11,8 +11,7 @@ from druks.notifications.exceptions import (
     UnknownDestinationKindError,
 )
 from druks.notifications.models import Destination, DestinationKind
-from druks.testing import configure_app_for_test, make_settings
-from fastapi.testclient import TestClient
+from druks.testing import asgi_client, configure_app_for_test, make_settings
 
 _WEBHOOK_URL = "https://hooks.slack.com/services/T000/B000/secretpart"
 
@@ -91,29 +90,29 @@ def fake_slack(monkeypatch):
 # --- registry: CRUD round-trip + kind gate --------------------------------
 
 
-def test_create_get_list_delete_round_trip(druks_db):
-    beta = Destination.create(name="beta", kind="slack_webhook", url=_WEBHOOK_URL)
-    alpha = Destination.create(name="alpha", kind="slack_webhook", url=_WEBHOOK_URL)
+async def test_create_get_list_delete_round_trip(druks_db):
+    beta = await Destination.create(name="beta", kind="slack_webhook", url=_WEBHOOK_URL)
+    alpha = await Destination.create(name="alpha", kind="slack_webhook", url=_WEBHOOK_URL)
 
-    assert Destination.get(beta.id).id == beta.id
-    assert Destination.get_for_name("alpha").id == alpha.id
-    assert Destination.get("no-such-id") is None
-    assert Destination.get_for_name("no-such-name") is None
-    assert [destination.name for destination in Destination.list_all()] == ["alpha", "beta"]
+    assert (await Destination.get(beta.id)).id == beta.id
+    assert (await Destination.get_for_name("alpha")).id == alpha.id
+    assert await Destination.get("no-such-id") is None
+    assert await Destination.get_for_name("no-such-name") is None
+    assert [destination.name for destination in await Destination.list_all()] == ["alpha", "beta"]
     assert beta.is_enabled is True
 
-    beta.delete()
-    assert Destination.get_for_name("beta") is None
-    assert [destination.name for destination in Destination.list_all()] == ["alpha"]
+    await beta.delete()
+    assert await Destination.get_for_name("beta") is None
+    assert [destination.name for destination in await Destination.list_all()] == ["alpha"]
 
 
-def test_create_rejects_unknown_kind_without_echoing_the_url(druks_db):
+async def test_create_rejects_unknown_kind_without_echoing_the_url(druks_db):
     with pytest.raises(UnknownDestinationKindError) as excinfo:
-        Destination.create(name="pager", kind="pagerduty", url=_WEBHOOK_URL)
+        await Destination.create(name="pager", kind="pagerduty", url=_WEBHOOK_URL)
 
     assert "pagerduty" in str(excinfo.value)
     assert _WEBHOOK_URL not in str(excinfo.value)
-    assert Destination.get_for_name("pager") is None
+    assert await Destination.get_for_name("pager") is None
 
 
 # --- routes: CRUD + redaction ---------------------------------------------
@@ -125,9 +124,9 @@ def _create_body(**overrides) -> dict:
     return body
 
 
-def test_routes_create_masks_url(tmp_path, druks_db):
-    with TestClient(configure_app_for_test(settings=make_settings(tmp_path))) as client:
-        created = client.post("/api/notifications/destinations", json=_create_body())
+async def test_routes_create_masks_url(tmp_path, druks_db):
+    async with asgi_client(configure_app_for_test(settings=make_settings(tmp_path))) as client:
+        created = await client.post("/api/notifications/destinations", json=_create_body())
 
         assert created.status_code == 200
         body = created.json()
@@ -140,81 +139,89 @@ def test_routes_create_masks_url(tmp_path, druks_db):
         assert "secretpart" not in created.text
 
 
-def test_routes_reject_duplicate_name(tmp_path, druks_db):
-    with TestClient(configure_app_for_test(settings=make_settings(tmp_path))) as client:
-        first = client.post("/api/notifications/destinations", json=_create_body())
+async def test_routes_reject_duplicate_name(tmp_path, druks_db):
+    async with asgi_client(configure_app_for_test(settings=make_settings(tmp_path))) as client:
+        first = await client.post("/api/notifications/destinations", json=_create_body())
         assert first.status_code == 200
 
-        duplicate = client.post("/api/notifications/destinations", json=_create_body())
+        duplicate = await client.post("/api/notifications/destinations", json=_create_body())
         assert duplicate.status_code == 409
         assert "secretpart" not in duplicate.text
 
 
-def test_routes_reject_unknown_kind(tmp_path, druks_db):
-    with TestClient(configure_app_for_test(settings=make_settings(tmp_path))) as client:
-        created = client.post(
+async def test_routes_reject_unknown_kind(tmp_path, druks_db):
+    async with asgi_client(configure_app_for_test(settings=make_settings(tmp_path))) as client:
+        created = await client.post(
             "/api/notifications/destinations", json=_create_body(kind="pagerduty")
         )
         assert created.status_code == 422
         assert "secretpart" not in created.text
-        assert not client.get("/api/notifications/destinations").json()
+        assert not (await client.get("/api/notifications/destinations")).json()
 
 
-def test_routes_reject_undeliverable_url(tmp_path, druks_db):
+async def test_routes_reject_undeliverable_url(tmp_path, druks_db):
     # Save-time deliverability: the same offline apprise parse the send path
     # uses, so a typo fails while the operator is present — not at first park.
-    with TestClient(configure_app_for_test(settings=make_settings(tmp_path))) as client:
+    async with asgi_client(configure_app_for_test(settings=make_settings(tmp_path))) as client:
         for bad_url in ("https://example.com/hook", "not-a-url"):
-            created = client.post("/api/notifications/destinations", json=_create_body(url=bad_url))
+            created = await client.post(
+                "/api/notifications/destinations", json=_create_body(url=bad_url)
+            )
             assert created.status_code == 422
             assert bad_url not in created.text
-        assert not client.get("/api/notifications/destinations").json()
+        assert not (await client.get("/api/notifications/destinations")).json()
 
 
-def test_routes_reject_blank_name(tmp_path, druks_db):
-    with TestClient(configure_app_for_test(settings=make_settings(tmp_path))) as client:
+async def test_routes_reject_blank_name(tmp_path, druks_db):
+    async with asgi_client(configure_app_for_test(settings=make_settings(tmp_path))) as client:
         for blank in ("", "   "):
-            created = client.post("/api/notifications/destinations", json=_create_body(name=blank))
+            created = await client.post(
+                "/api/notifications/destinations", json=_create_body(name=blank)
+            )
             assert created.status_code == 422
             assert "secretpart" not in created.text
-        assert not client.get("/api/notifications/destinations").json()
+        assert not (await client.get("/api/notifications/destinations")).json()
 
 
-def test_routes_toggle_enabled(tmp_path, druks_db):
-    with TestClient(configure_app_for_test(settings=make_settings(tmp_path))) as client:
-        destination_id = client.post("/api/notifications/destinations", json=_create_body()).json()[
-            "id"
-        ]
+async def test_routes_toggle_enabled(tmp_path, druks_db):
+    async with asgi_client(configure_app_for_test(settings=make_settings(tmp_path))) as client:
+        destination_id = (
+            await client.post("/api/notifications/destinations", json=_create_body())
+        ).json()["id"]
 
-        toggled = client.patch(
+        toggled = await client.patch(
             f"/api/notifications/destinations/{destination_id}", json={"is_enabled": False}
         )
         assert toggled.status_code == 200
         assert toggled.json()["isEnabled"] is False
 
-        listed = client.get("/api/notifications/destinations").json()
+        listed = (await client.get("/api/notifications/destinations")).json()
         assert listed[0]["isEnabled"] is False
 
-        back_on = client.patch(
+        back_on = await client.patch(
             f"/api/notifications/destinations/{destination_id}", json={"is_enabled": True}
         )
         assert back_on.json()["isEnabled"] is True
 
-        missing = client.patch(
+        missing = await client.patch(
             "/api/notifications/destinations/no-such-id", json={"is_enabled": False}
         )
         assert missing.status_code == 404
 
 
-def test_routes_delete(tmp_path, druks_db):
-    with TestClient(configure_app_for_test(settings=make_settings(tmp_path))) as client:
-        destination_id = client.post("/api/notifications/destinations", json=_create_body()).json()[
-            "id"
-        ]
+async def test_routes_delete(tmp_path, druks_db):
+    async with asgi_client(configure_app_for_test(settings=make_settings(tmp_path))) as client:
+        destination_id = (
+            await client.post("/api/notifications/destinations", json=_create_body())
+        ).json()["id"]
 
-        assert client.delete(f"/api/notifications/destinations/{destination_id}").status_code == 204
-        assert not client.get("/api/notifications/destinations").json()
-        assert client.delete(f"/api/notifications/destinations/{destination_id}").status_code == 404
+        assert (
+            await client.delete(f"/api/notifications/destinations/{destination_id}")
+        ).status_code == 204
+        assert not (await client.get("/api/notifications/destinations")).json()
+        assert (
+            await client.delete(f"/api/notifications/destinations/{destination_id}")
+        ).status_code == 404
 
 
 # --- informational delivery (Apprise) --------------------------------------

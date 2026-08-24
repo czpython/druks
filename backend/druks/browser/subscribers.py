@@ -10,6 +10,6 @@ async def signed_out_session_goes_stale(*, session_name: str, **_: object) -> No
     # session goes stale — the pane shows it and refuses borrows until a re-login.
     # An anonymous session has no login to go stale: the run still fails, the
     # row stays anonymous.
-    row = StoredBrowserSession.get_for_name(session_name)
+    row = await StoredBrowserSession.get_for_name(session_name)
     if row.status != BrowserSessionStatus.ANONYMOUS.value:
-        row.mark_stale()
+        await row.mark_stale()

@@ -72,7 +72,7 @@ class ClaudeHarness(Harness):
         "api error: 5": exceptions.HarnessOverloadedError,
     }
 
-    def build_invocation(
+    async def build_invocation(
         self,
         *,
         prompt: str,
@@ -140,7 +140,7 @@ class ClaudeHarness(Harness):
             name="claude",
             args=("sh", "-c", wrapper),
             stdin=prompt.encode("utf-8"),
-            credentials=_claude_credentials(
+            credentials=await _claude_credentials(
                 self.sandbox,
                 github_token=github_token,
                 include_plugins=include_plugins,
@@ -404,7 +404,7 @@ def _parse_iso(value: object) -> datetime | None:
     return ensure_utc(parsed)
 
 
-def _claude_credentials(
+async def _claude_credentials(
     sandbox: SandboxSettings,
     *,
     github_token: str | None,
@@ -455,11 +455,11 @@ def _claude_credentials(
     if skills_src:
         dirs += ((skills_src, ".claude/skills"),)
     return Credentials(
-        claude_credentials=ClaudeHarness.render_credentials_file(connection_id),
+        claude_credentials=await ClaudeHarness.render_credentials_file(connection_id),
         github_token=github_token,
         extra_config_files=files,
         extra_config_dirs=dirs,
-        extra_dir_excludes={".claude/skills": Skill.delivery_excludes(skills)},
+        extra_dir_excludes={".claude/skills": await Skill.delivery_excludes(skills)},
     )
 
 

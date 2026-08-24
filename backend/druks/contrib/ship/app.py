@@ -29,14 +29,14 @@ _PHASE_META: dict[str, SubjectActivity] = {
 }
 
 
-def check_tracker_identity() -> CheckResult:
+async def check_tracker_identity() -> CheckResult:
     """Whether the selected tracker's identity is connected. Trackerless is a
     choice, not a fault; a selected-but-unconnected tracker is pending setup."""
-    settings = Ship.settings()
+    settings = await Ship.settings()
     if settings.tracker == "none":
         return CheckResult(name="tracker", ok=True, detail="trackerless by choice")
     service = {"linear": services.Linear, "jira": services.Jira}[settings.tracker]
-    if service.is_connected():
+    if await service.is_connected():
         return CheckResult(name="tracker", ok=True, detail=f"{settings.tracker} connected")
     return CheckResult(
         name="tracker",
@@ -110,24 +110,24 @@ class Ship(App):
     checks = [check_tracker_identity]
 
     @classmethod
-    def get_tracker(cls, source: str | None = None) -> Tracker | None:
+    async def get_tracker(cls, source: str | None = None) -> Tracker | None:
         """The selected tracker, once its service identity is connected; None when
         the installation runs trackerless or the identity is missing. Pass a
         ``source`` to get it only when that source is the selected one — a
         work item syncs only to the tracker that owns it."""
-        settings = cls.settings()
+        settings = await cls.settings()
         if source is not None and source != settings.tracker:
             return
         try:
             if settings.tracker == "linear":
-                row = services.Linear.get()
+                row = await services.Linear.get()
                 return Linear(
                     api_key=row.secrets["api_key"],
                     backlog_status=settings.linear_resting_status,
                     trigger_status=settings.trigger_status,
                 )
             if settings.tracker == "jira":
-                row = services.Jira.get()
+                row = await services.Jira.get()
                 return Jira(
                     base_url=row.identity["base_url"],
                     email=row.identity["email"],

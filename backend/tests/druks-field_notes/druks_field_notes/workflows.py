@@ -11,11 +11,11 @@ class Summarize(Workflow):
     subject = Note
 
     async def run(self) -> None:
-        note = self.subject
+        note = await self.subject
         # The note body is the agent's prompt context; the gist it returns is the
         # app's own domain result, saved onto the note.
         result = await FieldNotes.summarize(note_body=note.body)
-        note.save_gist(result.gist)
+        await note.save_gist(result.gist)
 
     @classmethod
     async def dispatch(cls, *, note: Note) -> str:

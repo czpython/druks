@@ -14,7 +14,7 @@ class Widget(Subject):
     in a real app; these stand in for that."""
 
     @classmethod
-    def list_summaries(cls, account_id: str | None) -> list:
+    async def list_summaries(cls, account_id: str | None) -> list:
         return []
 
 

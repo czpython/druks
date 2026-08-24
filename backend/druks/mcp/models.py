@@ -46,21 +46,23 @@ class McpServer(Base, Uuid7Pk):
     created_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
 
     @classmethod
-    def list_all(cls) -> list["McpServer"]:
+    async def list_all(cls) -> list["McpServer"]:
         # The raw overlay rows — not the merged registry view (_merged).
-        return list(db_session().execute(select(cls).order_by(cls.name)).scalars())
+        return list((await db_session().execute(select(cls).order_by(cls.name))).scalars())
 
     @classmethod
-    def get_for_name(cls, name: str) -> "McpServer | None":
-        return db_session().execute(select(cls).where(cls.name == name)).scalar_one_or_none()
+    async def get_for_name(cls, name: str) -> "McpServer | None":
+        return (
+            await db_session().execute(select(cls).where(cls.name == name))
+        ).scalar_one_or_none()
 
     @classmethod
-    def _merged(cls) -> dict[str, dict]:
+    async def _merged(cls) -> dict[str, dict]:
         # The full view the API and delivery build from, keyed by
         # name: each built-in definition (url + auth from the registry)
         # overlaid with its operator row's enable choice and secrets, then any
         # fully custom rows.
-        rows = {server.name: server for server in cls.list_all()}
+        rows = {server.name: server for server in await cls.list_all()}
         servers: dict[str, dict] = {}
         for definition in mcp_servers.all():
             row = rows.pop(definition["name"], None)
@@ -92,8 +94,8 @@ class McpServer(Base, Uuid7Pk):
         return servers
 
     @classmethod
-    def get_resolved(cls, account_id: str | None) -> dict[str, dict]:
-        servers = cls._merged()
+    async def get_resolved(cls, account_id: str | None) -> dict[str, dict]:
+        servers = await cls._merged()
         # has_token = nothing blocks this server's auth at delivery, read from
         # wherever its source keeps the secret: druks' env for an env-sourced
         # server, a stored grant for a connected one, the stored token for a
@@ -109,7 +111,7 @@ class McpServer(Base, Uuid7Pk):
                 if server["identity_mode"]:
                     grant_account = get_grant_account(server["identity_mode"], account_id)
                     server["has_token"] = bool(
-                        OauthConnection.list_for_account(
+                        await OauthConnection.list_for_account(
                             grant_provider(server["name"]), grant_account
                         )
                     )
@@ -118,26 +120,26 @@ class McpServer(Base, Uuid7Pk):
         return servers
 
     @classmethod
-    def list_enabled(cls) -> list[dict]:
+    async def list_enabled(cls) -> list[dict]:
         # The enabled subset — what a run delivers and the settings UI shows active.
-        return [server for server in cls._merged().values() if server["is_enabled"]]
+        return [server for server in (await cls._merged()).values() if server["is_enabled"]]
 
     @classmethod
-    def set_enabled(cls, name: str, is_enabled: bool) -> bool:
+    async def set_enabled(cls, name: str, is_enabled: bool) -> bool:
         # A built-in has no row until an operator changes its state; the enable
         # choice creates one, carrying the built-in's url. False means the name
         # is neither a row nor a catalog entry.
-        server = cls.get_for_name(name)
+        server = await cls.get_for_name(name)
         if server:
             server.is_enabled = is_enabled
             return True
         if name in mcp_servers:
-            cls.create(name=name, url=mcp_servers.get(name)["url"], is_enabled=is_enabled)
+            await cls.create(name=name, url=mcp_servers.get(name)["url"], is_enabled=is_enabled)
             return True
         return False
 
     @classmethod
-    def create(
+    async def create(
         cls,
         *,
         name: str,
@@ -161,13 +163,13 @@ class McpServer(Base, Uuid7Pk):
             is_enabled=is_enabled,
         )
         session.add(server)
-        session.flush()
+        await session.flush()
         return server
 
-    def delete(self) -> None:
+    async def delete(self) -> None:
         session = db_session()
-        session.delete(self)
-        session.flush()
+        await session.delete(self)
+        await session.flush()
 
 
 class McpClientRegistration(Base, Uuid7Pk):
@@ -188,19 +190,19 @@ class McpClientRegistration(Base, Uuid7Pk):
     client_secret = EncryptedTextField(default="")
 
     @classmethod
-    def get_for_account(cls, server_name: str, account_id: str) -> "McpClientRegistration | None":
+    async def get_for_account(
+        cls, server_name: str, account_id: str
+    ) -> "McpClientRegistration | None":
         return (
-            db_session()
-            .execute(
+            await db_session().execute(
                 select(cls)
                 .join(McpServer, McpServer.id == cls.server_id)
                 .where(McpServer.name == server_name, cls.account_id == account_id)
             )
-            .scalar_one_or_none()
-        )
+        ).scalar_one_or_none()
 
     @classmethod
-    def store(
+    async def store(
         cls,
         *,
         server_id: str,
@@ -225,9 +227,11 @@ class McpClientRegistration(Base, Uuid7Pk):
                 "client_secret": statement.excluded.client_secret,
             },
         ).returning(cls)
-        return session.scalars(statement, execution_options={"populate_existing": True}).one()
+        return (
+            await session.scalars(statement, execution_options={"populate_existing": True})
+        ).one()
 
-    def delete(self) -> None:
+    async def delete(self) -> None:
         session = db_session()
-        session.delete(self)
-        session.flush()
+        await session.delete(self)
+        await session.flush()

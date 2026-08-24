@@ -84,7 +84,7 @@ class _FakeConnection:
 
 class _FakeConnections:
     @staticmethod
-    def list_all():
+    async def list_all():
         return [_FakeConnection("login-1"), _FakeConnection("login-2")]
 
 

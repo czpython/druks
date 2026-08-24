@@ -1,3 +1,4 @@
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -7,6 +8,14 @@ from druks import doctor
 from druks.database import db_session
 from druks.services.models import ServiceIdentity
 from druks.testing import make_settings
+
+
+@asynccontextmanager
+async def _fixture_check_engine(_settings):
+    from druks.database import db_session
+
+    yield db_session().bind
+
 
 _SECRETS_KEY = "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA="
 
@@ -20,13 +29,13 @@ def doctor_db(druks_db, monkeypatch: pytest.MonkeyPatch):
     """Point doctor's one-off engines at the test transaction. Doctor's checks
     remove their session from the ambient registry, so rebind the fixture's
     afterwards for the teardown that still needs it."""
-    monkeypatch.setattr(doctor, "create_engine_from_url", lambda _url: druks_db.get_bind())
+    monkeypatch.setattr(doctor, "_check_engine", _fixture_check_engine)
     yield druks_db
     db_session.registry.set(druks_db)
 
 
-def _connect_github(slug: str = "druks-operator") -> ServiceIdentity:
-    return ServiceIdentity.connect(
+async def _connect_github(slug: str = "druks-operator") -> ServiceIdentity:
+    return await ServiceIdentity.connect(
         "github",
         identity={"app_id": "12345", "slug": slug},
         secrets={
@@ -40,30 +49,32 @@ def _github_identity_result(results: list[doctor.CheckResult]) -> doctor.CheckRe
     return next(result for result in results if result.name == "github_identity")
 
 
-def test_service_identities_pending_when_a_required_service_is_absent(
+async def test_service_identities_pending_when_a_required_service_is_absent(
     tmp_path: Path, doctor_db
 ) -> None:
-    result = _github_identity_result(doctor.check_service_identities(make_settings(tmp_path)))
+    result = _github_identity_result(await doctor.check_service_identities(make_settings(tmp_path)))
 
     assert not result.ok
     assert result.pending
     assert "not connected" in result.detail
 
 
-def test_service_identities_report_the_connected_row(tmp_path: Path, doctor_db) -> None:
-    _connect_github()
+async def test_service_identities_report_the_connected_row(tmp_path: Path, doctor_db) -> None:
+    await _connect_github()
 
-    result = _github_identity_result(doctor.check_service_identities(make_settings(tmp_path)))
+    result = _github_identity_result(await doctor.check_service_identities(make_settings(tmp_path)))
 
     assert result.ok
     assert "app_id=12345" in result.detail
     assert "slug=druks-operator" in result.detail
 
 
-def test_installations_pending_without_a_connected_identity(tmp_path: Path, doctor_db) -> None:
+async def test_installations_pending_without_a_connected_identity(
+    tmp_path: Path, doctor_db
+) -> None:
     # No github row → the zero-argument client can't even be built; doctor
     # reports it as pending operator setup instead of raising.
-    result = doctor.check_installations(make_settings(tmp_path))
+    result = await doctor.check_installations(make_settings(tmp_path))
 
     assert not result.ok
     assert result.pending
@@ -71,39 +82,47 @@ def test_installations_pending_without_a_connected_identity(tmp_path: Path, doct
     assert "not connected" in result.detail
 
 
-def test_installations_lists_accounts(tmp_path: Path, doctor_db, monkeypatch) -> None:
+async def test_installations_lists_accounts(tmp_path: Path, doctor_db, monkeypatch) -> None:
     class _FakeClient:
         async def list_installation_accounts(self):
             return ("clawhaven",)
 
-    monkeypatch.setattr("druks.doctor.get_github_client", lambda: _FakeClient())
+    async def _fake_client():
+        return _FakeClient()
 
-    result = doctor.check_installations(make_settings(tmp_path))
+    monkeypatch.setattr("druks.doctor.get_github_client", _fake_client)
+
+    result = await doctor.check_installations(make_settings(tmp_path))
 
     assert result.ok
     assert "clawhaven" in result.detail
 
 
-def test_installations_pending_when_app_has_none(tmp_path: Path, doctor_db, monkeypatch) -> None:
+async def test_installations_pending_when_app_has_none(
+    tmp_path: Path, doctor_db, monkeypatch
+) -> None:
     class _FakeClient:
         async def list_installation_accounts(self):
             return ()
 
-    monkeypatch.setattr("druks.doctor.get_github_client", lambda: _FakeClient())
+    async def _fake_client():
+        return _FakeClient()
 
-    result = doctor.check_installations(make_settings(tmp_path))
+    monkeypatch.setattr("druks.doctor.get_github_client", _fake_client)
+
+    result = await doctor.check_installations(make_settings(tmp_path))
 
     assert not result.ok
     assert result.pending
     assert "no installations" in result.detail
 
 
-def test_installations_builds_the_client_from_the_row(
+async def test_installations_builds_the_client_from_the_row(
     tmp_path: Path, doctor_db, monkeypatch
 ) -> None:
     # The real zero-argument factory resolves the row inside doctor's own
     # bound session; the fake transport keeps GitHub out of it.
-    _connect_github()
+    await _connect_github()
 
     class _FakeClient:
         async def list_installation_accounts(self):
@@ -112,14 +131,14 @@ def test_installations_builds_the_client_from_the_row(
     real_factory = doctor.get_github_client
     built: list[str] = []
 
-    def _tracking_factory():
-        client = real_factory()
+    async def _tracking_factory():
+        client = await real_factory()
         built.append(client._app_id)
         return _FakeClient()
 
     monkeypatch.setattr(doctor, "get_github_client", _tracking_factory)
 
-    result = doctor.check_installations(make_settings(tmp_path))
+    result = await doctor.check_installations(make_settings(tmp_path))
 
     assert result.ok
     assert built == ["12345"]
@@ -164,21 +183,21 @@ def test_redis_fails_on_unreachable_host(tmp_path: Path) -> None:
     assert "127.0.0.1:1" in result.detail
 
 
-def test_drukbox_passes_when_unconfigured(tmp_path: Path) -> None:
+async def test_drukbox_passes_when_unconfigured(tmp_path: Path) -> None:
     """Sandbox URL empty → no drukbox to talk to."""
     settings = make_settings(tmp_path)
     assert settings.sandbox.service_url == ""
 
-    result = doctor.check_drukbox(settings)
+    result = await doctor.check_drukbox(settings)
 
     assert result.ok
     assert "not configured" in result.detail
 
 
-def test_run_checks_covers_all_check_names(tmp_path: Path) -> None:
+async def test_run_checks_covers_all_check_names(tmp_path: Path) -> None:
     settings = make_settings(tmp_path)
 
-    results = doctor.run_checks(settings)
+    results = await doctor.run_checks(settings)
 
     # Installed apps contribute their own checks alongside the platform's.
     assert {result.name for result in results} >= {
@@ -346,44 +365,46 @@ def _fake_sandbox_client(monkeypatch, *, reattach_fails=False):
     return calls
 
 
-def test_sandbox_e2e_not_configured_is_ok(tmp_path: Path) -> None:
+async def test_sandbox_e2e_not_configured_is_ok(tmp_path: Path) -> None:
     settings = make_settings(tmp_path, sandbox={"service_url": ""})
 
-    result = doctor.check_sandbox_e2e(settings)
+    result = await doctor.check_sandbox_e2e(settings)
 
     assert result.ok
     assert result.detail == "not configured"
 
 
-def test_sandbox_e2e_exercises_dial_and_reattach(tmp_path: Path, monkeypatch) -> None:
+async def test_sandbox_e2e_exercises_dial_and_reattach(tmp_path: Path, monkeypatch) -> None:
     calls = _fake_sandbox_client(monkeypatch)
     settings = make_settings(tmp_path, sandbox={"service_url": "http://127.0.0.1:8780"})
 
-    result = doctor.check_sandbox_e2e(settings)
+    result = await doctor.check_sandbox_e2e(settings)
 
     assert result.ok
     assert "reattach" in result.detail
     assert calls == ["acquire", "attach:host-doc", "release:host-doc"]
 
 
-def test_sandbox_e2e_failure_names_the_phase_and_releases(tmp_path: Path, monkeypatch) -> None:
+async def test_sandbox_e2e_failure_names_the_phase_and_releases(
+    tmp_path: Path, monkeypatch
+) -> None:
     """A reattach failure is the bug class worth this check — the error
     surfaces in the detail, and the VM must still be released."""
     calls = _fake_sandbox_client(monkeypatch, reattach_fails=True)
     settings = make_settings(tmp_path, sandbox={"service_url": "http://127.0.0.1:8780"})
 
-    result = doctor.check_sandbox_e2e(settings)
+    result = await doctor.check_sandbox_e2e(settings)
 
     assert not result.ok
     assert "dial timed out" in result.detail
     assert "release:host-doc" in calls
 
 
-def test_run_checks_includes_sandbox_e2e_only_when_flagged(tmp_path: Path) -> None:
+async def test_run_checks_includes_sandbox_e2e_only_when_flagged(tmp_path: Path) -> None:
     settings = make_settings(tmp_path, sandbox={"service_url": ""})
 
-    default = {r.name for r in doctor.run_checks(settings)}
-    flagged = {r.name for r in doctor.run_checks(settings, sandbox=True)}
+    default = {r.name for r in await doctor.run_checks(settings)}
+    flagged = {r.name for r in await doctor.run_checks(settings, sandbox=True)}
 
     assert "sandbox_e2e" not in default
     assert "sandbox_e2e" in flagged

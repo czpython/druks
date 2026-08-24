@@ -20,19 +20,19 @@ async def refresh_tokens() -> None:
 
 @task(every="0 6 * * *")
 async def refresh_models() -> None:
-    fallback_id = UserSettings.get().fallback_account_id
+    fallback_id = (await UserSettings.get()).fallback_account_id
     for harness in get_harnesses():
-        connections = HarnessConnection.list_for_harness(harness.name)
+        connections = await HarnessConnection.list_for_harness(harness.name)
         if not connections:
             continue
         preferred = [c for c in connections if c.account_id == fallback_id]
-        settings = HarnessSettings.require(harness.name)
+        settings = await HarnessSettings.require(harness.name)
         await settings.refresh_models((preferred or connections)[0])
 
 
 async def _refresh() -> dict[str, object]:
     by_name = {harness.name: harness for harness in get_harnesses()}
-    connections = [c for c in HarnessConnection.list_all() if c.harness in by_name]
+    connections = [c for c in await HarnessConnection.list_all() if c.harness in by_name]
 
     # A refresh 401s a VM mid-call holding the old token, so a due rotation
     # runs only while its connection is idle — busy defers to the next tick;

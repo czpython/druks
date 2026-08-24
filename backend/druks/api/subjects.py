@@ -21,7 +21,7 @@ async def list_open_subjects() -> OpenSubjectsResponse:
     """Every subject with open work — each nesting its open workflows, the
     newest run of one kind that is scheduled, running, parked, or failed.
     At most 50 workflows."""
-    rows = db_session().execute(Run.get_open_subjects().limit(_WORKFLOW_ROWS)).all()
+    rows = (await db_session().execute(Run.get_open_subjects().limit(_WORKFLOW_ROWS))).all()
     grouped = {}
     for row in rows:
         grouped.setdefault(row.subject_type, {}).setdefault(row.subject_id, []).append(row)

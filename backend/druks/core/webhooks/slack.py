@@ -70,7 +70,7 @@ class SlackInteractivity(Webhook):
     provider = "slack"
     category = "interactivity"
 
-    def request_is_authentic(self) -> bool:
+    async def request_is_authentic(self) -> bool:
         verify_slack_signature(
             self.raw_body,
             self.request.headers.get("x-slack-signature"),

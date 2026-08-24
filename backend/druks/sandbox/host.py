@@ -220,8 +220,8 @@ class Sandbox:
 
         settings = load_settings()
         # Effort/timeout fall back to the model's harness defaults.
-        harness_class = get_harness_for_model(model)
-        harness_settings = HarnessSettings.require(harness_class.name)
+        harness_class = await get_harness_for_model(model)
+        harness_settings = await HarnessSettings.require(harness_class.name)
         effort = effort or harness_settings.effort
         timeout = timeout if timeout is not None else harness_settings.timeout
         harness = harness_class(
@@ -303,14 +303,14 @@ class Sandbox:
         persist_manifest(
             artifact_dir,
             call_id=run_id,
-            manifest=harness.get_manifest(
+            manifest=await harness.get_manifest(
                 mcp_servers=mcp_servers,
                 skills=skills,
                 extra_env=extra_env,
             ),
         )
 
-        invocation = harness.build_invocation(
+        invocation = await harness.build_invocation(
             prompt=prompt,
             schema=schema,
             run_id=run_id,

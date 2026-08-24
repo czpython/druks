@@ -19,7 +19,7 @@ _LINEAR_ENV = get_bearer_token_env_var("linear")
 _TOKEN = "lin_secret_value"
 
 
-def _build(
+async def _build(
     *,
     harness: Harness | None = None,
     mcp_servers: tuple[McpServer, ...] = (),
@@ -29,11 +29,11 @@ def _build(
     # get_manifest never touches the live sandbox, so the harness builds
     # without sandbox settings — the same shape argv unit tests use.
     harness = harness or ClaudeHarness(model="claude-opus-4-8", fast_mode=False, effort=None)
-    return harness.get_manifest(mcp_servers=mcp_servers, skills=skills, extra_env=extra_env)
+    return await harness.get_manifest(mcp_servers=mcp_servers, skills=skills, extra_env=extra_env)
 
 
-def _seed_skills(*names: str, disabled: tuple[str, ...] = ()) -> None:
-    collection = SkillCollection.create(
+async def _seed_skills(*names: str, disabled: tuple[str, ...] = ()) -> None:
+    collection = await SkillCollection.create(
         source="test",
         name="test skills",
         skills=[
@@ -46,11 +46,11 @@ def _seed_skills(*names: str, disabled: tuple[str, ...] = ()) -> None:
             skill.enabled = False
 
 
-def test_manifest_records_the_delivered_capability_set(druks_db):
+async def test_manifest_records_the_delivered_capability_set(druks_db):
     """Records model, harness, each MCP server's declared/delivered/token
     presence, and the delivered skills."""
-    models.McpServer.create(name="linear", url=_LINEAR_URL, token=_TOKEN)
-    _seed_skills("alpha", "beta")
+    await models.McpServer.create(name="linear", url=_LINEAR_URL, token=_TOKEN)
+    await _seed_skills("alpha", "beta")
 
     linear = McpServer(name="linear", url=_LINEAR_URL, bearer_token_env_var=_LINEAR_ENV)
     github = McpServer(
@@ -60,7 +60,7 @@ def test_manifest_records_the_delivered_capability_set(druks_db):
     )
     # Both servers delivered with their token — github is Ship's own
     # requirement (get_required_mcp_servers), so it reads delivered but not declared.
-    manifest = _build(
+    manifest = await _build(
         mcp_servers=(linear, github),
         skills=("alpha",),
         extra_env={
@@ -85,12 +85,12 @@ def test_manifest_records_the_delivered_capability_set(druks_db):
     assert github_entry["token_present"] is True
 
 
-def test_missing_mcp_token_records_absence(druks_db):
+async def test_missing_mcp_token_records_absence(druks_db):
     """A delivered server whose bearer var is absent from the run env reads
     token_present False — recorded, not failed."""
-    models.McpServer.create(name="linear", url=_LINEAR_URL, token=_TOKEN)
+    await models.McpServer.create(name="linear", url=_LINEAR_URL, token=_TOKEN)
 
-    manifest = _build(
+    manifest = await _build(
         mcp_servers=(McpServer(name="linear", url=_LINEAR_URL, bearer_token_env_var=_LINEAR_ENV),),
         extra_env={},
     )
@@ -100,13 +100,13 @@ def test_missing_mcp_token_records_absence(druks_db):
     assert linear_entry["token_present"] is False
 
 
-def test_declared_but_undelivered_server_still_reads_declared(druks_db):
+async def test_declared_but_undelivered_server_still_reads_declared(druks_db):
     """An enabled registry server is declared even on a call that didn't
     deliver it — declared True, delivered False, so the manifest shows exactly
     what this call ran without."""
-    models.McpServer.create(name="linear", url=_LINEAR_URL, token=_TOKEN)
+    await models.McpServer.create(name="linear", url=_LINEAR_URL, token=_TOKEN)
 
-    manifest = _build()
+    manifest = await _build()
 
     linear_entry = next(s for s in manifest["mcp_servers"] if s["name"] == "linear")
     assert linear_entry["declared"] is True
@@ -114,18 +114,18 @@ def test_declared_but_undelivered_server_still_reads_declared(druks_db):
     assert linear_entry["token_present"] is False
 
 
-def test_records_the_delivered_server_not_the_registry_duplicate(druks_db):
+async def test_records_the_delivered_server_not_the_registry_duplicate(druks_db):
     """When a workspace requires a server under an enabled entry's name, the
     workspace's wins delivery — the manifest records what the harness actually
     ran (the delivered url/env var), not the registry's values."""
-    models.McpServer.create(name="linear", url=_LINEAR_URL, token=_TOKEN)
+    await models.McpServer.create(name="linear", url=_LINEAR_URL, token=_TOKEN)
     required = McpServer(
         name="linear",
         url="https://required.internal/linear",
         bearer_token_env_var="REQUIRED_LINEAR_TOKEN",
     )
 
-    manifest = _build(mcp_servers=(required,), extra_env={"REQUIRED_LINEAR_TOKEN": "s"})
+    manifest = await _build(mcp_servers=(required,), extra_env={"REQUIRED_LINEAR_TOKEN": "s"})
 
     linear_entry = next(s for s in manifest["mcp_servers"] if s["name"] == "linear")
     assert linear_entry["url"] == "https://required.internal/linear"
@@ -135,55 +135,55 @@ def test_records_the_delivered_server_not_the_registry_duplicate(druks_db):
     assert linear_entry["token_present"] is True
 
 
-def test_hash_is_stable_for_identical_capabilities(druks_db):
+async def test_hash_is_stable_for_identical_capabilities(druks_db):
     """Identical capability sets hash the same; changing the model, MCP token
     availability, or the delivered skill set moves the hash."""
-    models.McpServer.create(name="linear", url=_LINEAR_URL, token=_TOKEN)
+    await models.McpServer.create(name="linear", url=_LINEAR_URL, token=_TOKEN)
     linear = McpServer(name="linear", url=_LINEAR_URL, bearer_token_env_var=_LINEAR_ENV)
     with_token = {"mcp_servers": (linear,), "extra_env": {_LINEAR_ENV: _TOKEN}}
 
-    baseline = _build(**with_token)
-    assert _build(**with_token)["manifest_hash"] == baseline["manifest_hash"]
+    baseline = await _build(**with_token)
+    assert (await _build(**with_token))["manifest_hash"] == baseline["manifest_hash"]
 
-    different_model = _build(
+    different_model = await _build(
         harness=ClaudeHarness(model="claude-sonnet-5", fast_mode=False, effort=None),
         **with_token,
     )
     assert different_model["manifest_hash"] != baseline["manifest_hash"]
 
-    without_token = _build(mcp_servers=(linear,), extra_env={})
+    without_token = await _build(mcp_servers=(linear,), extra_env={})
     assert without_token["manifest_hash"] != baseline["manifest_hash"]
 
 
-def test_curated_skills_change_the_recorded_set_and_the_hash(druks_db):
+async def test_curated_skills_change_the_recorded_set_and_the_hash(druks_db):
     """Curated manifests omit disabled skills and hash each delivered set."""
-    _seed_skills("alpha", "beta", disabled=("beta",))
-    with_enabled = _build(skills=("alpha", "beta"))
-    disabled_only = _build(skills=("beta",))
+    await _seed_skills("alpha", "beta", disabled=("beta",))
+    with_enabled = await _build(skills=("alpha", "beta"))
+    disabled_only = await _build(skills=("beta",))
 
     assert with_enabled["skills_delivered"] == ["alpha"]
     assert disabled_only["skills_delivered"] == []
     assert with_enabled["manifest_hash"] != disabled_only["manifest_hash"]
 
 
-def test_manifest_records_token_presence_never_the_value(druks_db):
+async def test_manifest_records_token_presence_never_the_value(druks_db):
     """The secret token never lands in the manifest — only its env-var name and
     a presence boolean."""
-    models.McpServer.create(name="linear", url=_LINEAR_URL, token=_TOKEN)
+    await models.McpServer.create(name="linear", url=_LINEAR_URL, token=_TOKEN)
     linear = McpServer(name="linear", url=_LINEAR_URL, bearer_token_env_var=_LINEAR_ENV)
 
-    manifest = _build(mcp_servers=(linear,), extra_env={_LINEAR_ENV: _TOKEN})
+    manifest = await _build(mcp_servers=(linear,), extra_env={_LINEAR_ENV: _TOKEN})
 
     serialized = json.dumps(manifest)
     assert _TOKEN not in serialized
     assert _LINEAR_ENV in serialized  # the var name is safe to record
 
 
-def test_manifest_stays_presence_only_for_a_declared_header_server(druks_db):
+async def test_manifest_stays_presence_only_for_a_declared_header_server(druks_db):
     """A server delivered with declared headers records the same presence-only
     entry: no header value — plain or secret — lands in the manifest, and a
     bearer-less server simply reads token_present False."""
-    models.McpServer.create(
+    await models.McpServer.create(
         name="grafana",
         url="https://mcp.grafana.com/mcp",
         token_source="",
@@ -197,7 +197,7 @@ def test_manifest_stays_presence_only_for_a_declared_header_server(druks_db):
         env_headers={"X-Api-Key": "MCP_GRAFANA_HEADER_X_API_KEY"},
     )
 
-    manifest = _build(
+    manifest = await _build(
         mcp_servers=(delivered,),
         extra_env={"MCP_GRAFANA_HEADER_X_API_KEY": "grafana-api-secret"},
     )
@@ -211,8 +211,8 @@ def test_manifest_stays_presence_only_for_a_declared_header_server(druks_db):
     assert grafana_entry["token_present"] is False
 
 
-def test_persist_writes_manifest_into_the_call_dir(tmp_path, druks_db):
-    manifest = _build()
+async def test_persist_writes_manifest_into_the_call_dir(tmp_path, druks_db):
+    manifest = await _build()
 
     path = persist_manifest(tmp_path, call_id="call-1", manifest=manifest)
 
@@ -220,16 +220,16 @@ def test_persist_writes_manifest_into_the_call_dir(tmp_path, druks_db):
     assert json.loads(path.read_text())["manifest_hash"] == manifest["manifest_hash"]
 
 
-def test_manifest_surfaces_in_agent_call_files(tmp_path, druks_db):
+async def test_manifest_surfaces_in_agent_call_files(tmp_path, druks_db):
     """A written manifest.json is inventoried on the call's transcript files, in
     the manifest slot under its downloadable file name."""
-    note = Note.create(body="manifest")
-    run = seed_run(druks_db, kind=Summarize.kind, subject=note)
-    call = seed_call(druks_db, run, "summarize", status="running")
-    manifest = _build()
+    note = await Note.create(body="manifest")
+    run = await seed_run(druks_db, kind=Summarize.kind, subject=note)
+    call = await seed_call(druks_db, run, "summarize", status="running")
+    manifest = await _build()
     with mock.patch("druks.durable.models.load_settings", return_value=make_settings(tmp_path)):
         persist_manifest(call.call_dir.parent, call_id=call.call_dir.name, manifest=manifest)
-        files = get_agent_call_files(call.id)
+        files = await get_agent_call_files(call.id)
 
     assert files.manifest
     assert files.manifest.name == "manifest.json"

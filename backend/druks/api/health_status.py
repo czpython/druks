@@ -7,9 +7,9 @@ from druks.user_settings.models import UserSettings
 from druks.webhooks.deliveries import last_delivery_at
 
 
-def _spend_for_local_today(*, timezone_name: str, now: datetime) -> tuple[float, int]:
+async def _spend_for_local_today(*, timezone_name: str, now: datetime) -> tuple[float, int]:
     _, local_start = operator_local_day(timezone_name, now)
-    return AgentCall.total_run_spend_between(
+    return await AgentCall.total_run_spend_between(
         start=local_start.astimezone(UTC),
         end=(local_start + timedelta(days=1)).astimezone(UTC),
     )
@@ -17,7 +17,9 @@ def _spend_for_local_today(*, timezone_name: str, now: datetime) -> tuple[float,
 
 async def build_health() -> api_schemas.DashboardHealth:
     now = datetime.now(UTC)
-    spend, tokens = _spend_for_local_today(timezone_name=UserSettings.get().timezone, now=now)
+    spend, tokens = await _spend_for_local_today(
+        timezone_name=(await UserSettings.get()).timezone, now=now
+    )
     # GitHub is the code host and is always present.
     sources = ["github"]
     return api_schemas.DashboardHealth(

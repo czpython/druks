@@ -21,7 +21,7 @@ DUMMY_AGENT = agents.Agent(
 )
 
 
-def test_get_timeout_caps_at_the_sandbox_lease_max(druks_db):
+async def test_get_timeout_caps_at_the_sandbox_lease_max(druks_db):
     """A resolved timeout over the sandbox-lease max is clamped; a shorter one passes through."""
     from druks.sandbox.constants import MAX_AGENT_TIMEOUT_SECONDS
 
@@ -40,27 +40,27 @@ def test_get_timeout_caps_at_the_sandbox_lease_max(druks_db):
         timeout=600,
     )
 
-    assert over.get_timeout() == MAX_AGENT_TIMEOUT_SECONDS
-    assert under.get_timeout() == 600
+    assert await over.get_timeout() == MAX_AGENT_TIMEOUT_SECONDS
+    assert await under.get_timeout() == 600
 
 
 @pytest.fixture(autouse=True)
-def _seed_run_for_record(druks_db):
+async def _seed_run_for_record(druks_db):
     # An agent call records an AgentCall, which FKs to its run.
     from druks.testing import seed_run
     from druks_field_notes.workflows import Summarize
 
-    seed_run(druks_db, kind=Summarize.kind, run_id="wf-9")
+    await seed_run(druks_db, kind=Summarize.kind, run_id="wf-9")
 
 
 @pytest.fixture(autouse=True)
-def _connected_claude(druks_db):
+async def _connected_claude(druks_db):
     # A run refuses to dispatch on an unconnected harness; the runtime tests
     # here resolve to claude models, so connect it once.
     from conftest import connect_harness
     from druks.harnesses.claude import ClaudeHarness
 
-    connect_harness(ClaudeHarness, {"claudeAiOauth": {"accessToken": "test-token"}})
+    await connect_harness(ClaudeHarness, {"claudeAiOauth": {"accessToken": "test-token"}})
 
 
 def _patch_runtime(monkeypatch, tmp_path, payload):
@@ -140,8 +140,10 @@ async def test_run_refuses_unconnected_harness(druks_db, tmp_path, monkeypatch, 
     from druks.harnesses.exceptions import HarnessNotConnectedError
     from druks.harnesses.models import HarnessConnection
 
-    HarnessConnection.get_for_account(
-        "claude", Account.get_for_username("op@example.com").id
+    await (
+        await HarnessConnection.get_for_account(
+            "claude", (await Account.get_for_username("op@example.com")).id
+        )
     ).delete()
     sandbox = _patch_runtime(monkeypatch, tmp_path, {"ok": True})
     _patch_ephemeral(monkeypatch, sandbox)
@@ -244,7 +246,7 @@ async def test_running_call_visible_then_finished(druks_db, tmp_path, monkeypatc
     during: dict[str, object] = {}
 
     async def _run_agent(*, call_id, **_kwargs):
-        row = AgentCall.get(call_id)
+        row = await AgentCall.get(call_id)
         during["status"] = row.status
         during["host"] = row.sandbox_host_id
         return make_agent_result({"ok": True}, agent="dummy")
@@ -255,7 +257,7 @@ async def test_running_call_visible_then_finished(druks_db, tmp_path, monkeypatc
     await DUMMY_AGENT._run(workflow_id="wf-9")
 
     assert during == {"status": "running", "host": "host-test"}
-    [call] = AgentCall.list_for_run("wf-9")
+    [call] = await AgentCall.list_for_run("wf-9")
     assert call.status == "succeeded"
     assert call.sandbox_host_id == "host-test"
     assert call.finished_at is not None
@@ -276,7 +278,7 @@ async def test_provisioning_failure_records_no_call(druks_db, tmp_path, monkeypa
     with pytest.raises(RuntimeError, match="no capacity"):
         await DUMMY_AGENT._run(workflow_id="wf-9")
 
-    assert AgentCall.list_for_run("wf-9") == []
+    assert await AgentCall.list_for_run("wf-9") == []
 
 
 async def test_crash_after_start_fails_the_call(druks_db, tmp_path, monkeypatch, current_run):
@@ -293,7 +295,7 @@ async def test_crash_after_start_fails_the_call(druks_db, tmp_path, monkeypatch,
     with pytest.raises(RuntimeError, match="kaboom"):
         await DUMMY_AGENT._run(workflow_id="wf-9")
 
-    [call] = AgentCall.list_for_run("wf-9")
+    [call] = await AgentCall.list_for_run("wf-9")
     assert call.status == "failed"
     assert "kaboom" in call.last_error
 
@@ -319,7 +321,7 @@ async def test_a_carried_failure_is_raised_with_its_code(
         await DUMMY_AGENT._run(workflow_id="wf-9")
 
     assert excinfo.value is overloaded
-    [call] = AgentCall.list_for_run("wf-9")
+    [call] = await AgentCall.list_for_run("wf-9")
     assert call.status == "failed"
     assert call.failure_code == "overloaded"
     assert call.last_error == (
@@ -355,7 +357,7 @@ async def test_body_level_overload_retries_as_separate_durable_attempts(
     assert [awaited.args[0] for awaited in sleep.await_args_list] == [285.0, 945.0]
     assert [options["name"] for options in checkpoints] == ["test.agent.dummy"] * 3
     assert current_run._reap_run.await_count == 2
-    calls = AgentCall.list_for_run("wf-9")
+    calls = await AgentCall.list_for_run("wf-9")
     assert len(calls) == 3
     assert sum(call.status == "failed" for call in calls) == 2
     assert sum(call.status == "succeeded" for call in calls) == 1
@@ -385,9 +387,16 @@ async def test_body_level_first_byte_retries_immediately_then_reraises(
     assert excinfo.value.code == "first_byte"
     assert [awaited.args[0] for awaited in sleep.await_args_list] == [0.0, 0.0]
     current_run._reap_run.assert_not_awaited()
-    calls = AgentCall.list_for_run("wf-9")
+    calls = await AgentCall.list_for_run("wf-9")
     assert len(calls) == 3
     assert all(call.status == "failed" for call in calls)
+
+
+def _async_scrape(make):
+    async def latest_for(_cls, _harness, _account_id):
+        return make()
+
+    return latest_for
 
 
 async def test_body_level_quota_waits_for_the_reset_once(
@@ -409,20 +418,22 @@ async def test_body_level_quota_waits_for_the_reset_once(
         agents.UsageScrape,
         "latest_for",
         classmethod(
-            lambda _cls, _harness, _account_id: UsageScrape(
-                five_hour_resets_at=now + timedelta(hours=2),
-                weeks=[
-                    {
-                        "percent_left": 0,
-                        "resets_at": (now + timedelta(hours=1)).isoformat(),
-                        "model": "Fable",
-                    },
-                    {
-                        "percent_left": 20,
-                        "resets_at": (now + timedelta(days=1)).isoformat(),
-                        "model": None,
-                    },
-                ],
+            _async_scrape(
+                lambda: UsageScrape(
+                    five_hour_resets_at=now + timedelta(hours=2),
+                    weeks=[
+                        {
+                            "percent_left": 0,
+                            "resets_at": (now + timedelta(hours=1)).isoformat(),
+                            "model": "Fable",
+                        },
+                        {
+                            "percent_left": 20,
+                            "resets_at": (now + timedelta(days=1)).isoformat(),
+                            "model": None,
+                        },
+                    ],
+                )
             )
         ),
     )
@@ -443,7 +454,7 @@ async def test_body_level_quota_waits_for_the_reset_once(
         "test.agent.dummy.retry_wait",
         "test.agent.dummy",
     ]
-    calls = AgentCall.list_for_run("wf-9")
+    calls = await AgentCall.list_for_run("wf-9")
     assert len(calls) == 2
     assert all(call.failure_code == "rate_limited" for call in calls)
 
@@ -467,15 +478,17 @@ async def test_body_level_quota_reset_over_six_hours_reraises_without_sleeping(
         agents.UsageScrape,
         "latest_for",
         classmethod(
-            lambda _cls, _harness, _account_id: UsageScrape(
-                five_hour_resets_at=now + timedelta(hours=7),
-                weeks=[
-                    {
-                        "percent_left": 0,
-                        "resets_at": (now + timedelta(days=1)).isoformat(),
-                        "model": None,
-                    }
-                ],
+            _async_scrape(
+                lambda: UsageScrape(
+                    five_hour_resets_at=now + timedelta(hours=7),
+                    weeks=[
+                        {
+                            "percent_left": 0,
+                            "resets_at": (now + timedelta(days=1)).isoformat(),
+                            "model": None,
+                        }
+                    ],
+                )
             )
         ),
     )
@@ -491,7 +504,7 @@ async def test_body_level_quota_reset_over_six_hours_reraises_without_sleeping(
     sleep.assert_not_awaited()
     jitter.assert_not_called()
     current_run._reap_run.assert_not_awaited()
-    [call] = AgentCall.list_for_run("wf-9")
+    [call] = await AgentCall.list_for_run("wf-9")
     assert call.failure_code == "usage_limit"
 
 
@@ -520,7 +533,7 @@ async def test_body_level_never_retry_errors_run_once(
     sleep.assert_not_awaited()
     current_run._reap_run.assert_not_awaited()
     sandbox.run_agent.assert_awaited_once()
-    assert len(AgentCall.list_for_run("wf-9")) == 1
+    assert len(await AgentCall.list_for_run("wf-9")) == 1
 
 
 async def test_in_step_transient_retry_uses_asyncio_sleep(monkeypatch, current_run):
@@ -766,7 +779,7 @@ async def test_recovery_supersedes_the_orphaned_running_call(druks_db):
     from druks.durable.engine import _step_engine
 
     engine = _step_engine()
-    AgentCall.start(
+    await AgentCall.start(
         engine,
         call_id="a",
         run_id="wf-9",
@@ -775,7 +788,7 @@ async def test_recovery_supersedes_the_orphaned_running_call(druks_db):
         host_id="h",
         account_id="system",
     )
-    AgentCall.start(
+    await AgentCall.start(
         engine,
         call_id="b",
         run_id="wf-9",
@@ -785,7 +798,7 @@ async def test_recovery_supersedes_the_orphaned_running_call(druks_db):
         account_id="system",
     )
 
-    by_id = {call.id: call for call in AgentCall.list_for_run("wf-9")}
+    by_id = {call.id: call for call in await AgentCall.list_for_run("wf-9")}
     assert by_id["a"].status == "abandoned"
     assert by_id["a"].finished_at is not None
     assert by_id["b"].status == "running"

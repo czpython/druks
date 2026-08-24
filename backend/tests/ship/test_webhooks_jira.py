@@ -58,40 +58,40 @@ def test_route_is_unchanged():
     assert f"{webhooks_router.prefix}/{JiraEvents.path}" == "/_external/jira/events/"
 
 
-def _connect_jira(*, base_url="https://jira.test/", webhook_secret="s3cret"):
-    return ServiceIdentity.connect(
+async def _connect_jira(*, base_url="https://jira.test/", webhook_secret="s3cret"):
+    return await ServiceIdentity.connect(
         "jira",
         identity={"base_url": base_url, "email": "a@b.com", "display_name": "druks"},
         secrets={"api_token": "tok", "webhook_secret": webhook_secret},
     )
 
 
-def test_rejects_when_not_connected(tmp_path, druks_db):
+async def test_rejects_when_not_connected(tmp_path, druks_db):
     events = _provider(tmp_path, payload=_issue())
     with pytest.raises(HTTPException) as exc:
-        events.request_is_authentic()
+        await events.request_is_authentic()
     assert exc.value.status_code == 401
 
 
-def test_authentic_when_token_header_matches(tmp_path, druks_db):
-    _connect_jira()
+async def test_authentic_when_token_header_matches(tmp_path, druks_db):
+    await _connect_jira()
     events = _provider(
         tmp_path,
         payload=_issue(),
         headers={"x-druks-webhook-token": "s3cret"},
     )
-    assert events.request_is_authentic()
+    assert await events.request_is_authentic()
 
 
-def test_rejects_when_token_missing_or_wrong(tmp_path, druks_db):
-    _connect_jira()
+async def test_rejects_when_token_missing_or_wrong(tmp_path, druks_db):
+    await _connect_jira()
     events = _provider(
         tmp_path,
         payload=_issue(),
         headers={"x-druks-webhook-token": "nope"},
     )
     with pytest.raises(HTTPException) as exc:
-        events.request_is_authentic()
+        await events.request_is_authentic()
     assert exc.value.status_code == 401
 
 
@@ -107,7 +107,7 @@ async def test_emits_normalized_ticket_transition(tmp_path, druks_db, monkeypatc
     async def _emit(event_type, **kwargs):
         captured.update({"event": event_type, **kwargs})
 
-    _connect_jira()
+    await _connect_jira()
     monkeypatch.setattr(webhook_module, "publish", _emit)
     await _provider(tmp_path, payload=_issue(key="IT-9", status="Ready")).on_issue_event()
 
@@ -127,7 +127,7 @@ async def test_done_category_marks_the_transition_terminal(tmp_path, druks_db, m
     async def _emit(event_type, **kwargs):
         events.append((event_type, kwargs["payload"]))
 
-    _connect_jira()
+    await _connect_jira()
     monkeypatch.setattr(webhook_module, "publish", _emit)
     payload = _issue(key="IT-9", status="Done", status_category="done")
     await _provider(tmp_path, payload=payload).on_issue_event()
@@ -143,7 +143,7 @@ async def test_open_category_is_not_terminal(tmp_path, druks_db, monkeypatch):
     async def _emit(event_type, **kwargs):
         events.append((event_type, kwargs["payload"]))
 
-    _connect_jira()
+    await _connect_jira()
     monkeypatch.setattr(webhook_module, "publish", _emit)
     provider = _provider(
         tmp_path, payload=_issue(status="In Progress", status_category="indeterminate")
@@ -159,7 +159,11 @@ async def test_open_category_is_not_terminal(tmp_path, druks_db, monkeypatch):
 
 def _pin_settings(monkeypatch, **over):
     settings = subs.Ship.Settings(**{"tracker": "jira", **over})
-    monkeypatch.setattr(subs.Ship, "settings", classmethod(lambda cls: settings))
+
+    async def _settings(cls):
+        return settings
+
+    monkeypatch.setattr(subs.Ship, "settings", classmethod(_settings))
 
 
 async def test_trigger_status_dispatches_build_with_the_webhook_payload(tmp_path, monkeypatch):
@@ -175,14 +179,14 @@ async def test_trigger_status_dispatches_build_with_the_webhook_payload(tmp_path
 
 
 async def test_trigger_status_does_not_redispatch_a_merged_item(druks_db, monkeypatch):
-    item = make_test_work_item(
+    item = await make_test_work_item(
         repo="octo/alfred",
         source="jira",
         ticket_key="IT-12",
         title="Add an endpoint",
     )
     item.resolution = "merged"
-    druks_db.flush()
+    await druks_db.flush()
     _pin_settings(monkeypatch, jira_trigger_status="Ready")
     start = AsyncMock()
     monkeypatch.setattr(subs.Build, "start", start)
@@ -193,19 +197,19 @@ async def test_trigger_status_does_not_redispatch_a_merged_item(druks_db, monkey
 
 
 async def test_trigger_status_redispatches_a_closed_item(druks_db, monkeypatch):
-    ServiceIdentity.connect(
+    await ServiceIdentity.connect(
         "github",
         identity={"app_id": "1", "slug": "druks-operator"},
         secrets={"private_key": "operator-pem", "webhook_secret": "hook-secret"},
     )
-    item = make_test_work_item(
+    item = await make_test_work_item(
         repo="octo/alfred",
         source="jira",
         ticket_key="IT-12",
         title="Add an endpoint",
     )
     item.resolution = "closed"
-    druks_db.flush()
+    await druks_db.flush()
     _pin_settings(monkeypatch, jira_trigger_status="Ready")
     start = AsyncMock()
     monkeypatch.setattr(subs.Build, "start", start)
@@ -219,11 +223,11 @@ async def test_trigger_status_routes_a_new_ticket_by_label(tmp_path, druks_db, m
     """No work item yet: the label names the repo, the registry routes it."""
     from druks.contrib.ship.models import Project, ProjectRepo, WorkItem
 
-    project = Project.create(name="octo/alfred")
-    ProjectRepo.create(project_id=project.id, full_name="octo/alfred")
-    druks_db.flush()
+    project = await Project.create(name="octo/alfred")
+    await ProjectRepo.create(project_id=project.id, full_name="octo/alfred")
+    await druks_db.flush()
     _pin_settings(monkeypatch, jira_trigger_status="Ready")
-    seed_run(druks_db, kind=Build.kind, run_id="run-new")
+    await seed_run(druks_db, kind=Build.kind, run_id="run-new")
 
     async def fake_start(cls, **kwargs):
         return "run-new"
@@ -234,7 +238,7 @@ async def test_trigger_status_routes_a_new_ticket_by_label(tmp_path, druks_db, m
         payload=_jira_payload(key="SHRP-1", status="Ready", project="Octo", labels=["Alfred"]),
     )
 
-    item = WorkItem.get_for_ticket_key(source="jira", ticket_key="SHRP-1")
+    item = await WorkItem.get_for_ticket_key(source="jira", ticket_key="SHRP-1")
     assert item.repo == "octo/alfred"
     assert item.project_id == project.id
 

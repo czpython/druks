@@ -11,10 +11,10 @@ from druks.skills.models import SkillCollection
 
 
 @pytest.fixture(autouse=True)
-def _passthrough_step(monkeypatch, druks_db):
+async def _passthrough_step(monkeypatch, druks_db):
     # run() is itself a durable step (single-operation workflow) — route it
     # straight through so the test needs no live DBOS runtime.
-    configure_engine(druks_db.connection())
+    configure_engine(await druks_db.connection())
 
     async def _run_step(_options, fn):
         return await fn()
@@ -24,13 +24,13 @@ def _passthrough_step(monkeypatch, druks_db):
     configure_engine(None)
 
 
-def _seed_repo() -> ProjectRepo:
-    project = Project.create(name="Acme")
-    return ProjectRepo.create(project_id=project.id, full_name="acme/widget")
+async def _seed_repo() -> ProjectRepo:
+    project = await Project.create(name="Acme")
+    return await ProjectRepo.create(project_id=project.id, full_name="acme/widget")
 
 
-def _seed_skills(*names: str, disabled: tuple[str, ...] = ()) -> None:
-    collection = SkillCollection.create(
+async def _seed_skills(*names: str, disabled: tuple[str, ...] = ()) -> None:
+    collection = await SkillCollection.create(
         source="test",
         name="test skills",
         skills=[
@@ -66,12 +66,12 @@ async def _no_policy(repo):
 
 @pytest.mark.parametrize("refresh_only", [False, True])
 async def test_dispatch_shapes_the_profile_start(druks_db, monkeypatch, refresh_only):
-    ServiceIdentity.connect(
+    await ServiceIdentity.connect(
         "github",
         identity={"app_id": "1", "slug": "druks-operator"},
         secrets={"private_key": "operator-pem", "webhook_secret": "hook-secret"},
     )
-    repo = _seed_repo()
+    repo = await _seed_repo()
     calls: list[dict] = []
 
     async def _start(cls, **kwargs):
@@ -87,7 +87,7 @@ async def test_dispatch_shapes_the_profile_start(druks_db, monkeypatch, refresh_
 
 
 async def test_dispatch_refuses_before_start_without_github(druks_db, monkeypatch):
-    repo = _seed_repo()
+    repo = await _seed_repo()
 
     async def _start(cls, **kwargs):
         raise AssertionError("start must not be reached without a GitHub identity")
@@ -100,8 +100,8 @@ async def test_dispatch_refuses_before_start_without_github(druks_db, monkeypatc
 
 class TestProfileRun:
     async def test_persists_baseline_and_effective(self, druks_db, monkeypatch):
-        _seed_skills("django-patterns")
-        repo = _seed_repo()
+        await _seed_skills("django-patterns")
+        repo = await _seed_repo()
 
         async def _profiler(*, repo: str):
             return _profiled()
@@ -112,7 +112,7 @@ class TestProfileRun:
         await Profile().run(repo_id=repo.id)
         # The step commits on its own Session; re-fetch instead of trusting
         # the identity-mapped `repo` object across that boundary.
-        repo = ProjectRepo.get(repo.id)
+        repo = await ProjectRepo.get(repo.id)
 
         assert repo.profile["baseline"]["languages"] == ["python"]
         assert repo.effective_profile["verification"]["lint_commands"] == [
@@ -120,8 +120,8 @@ class TestProfileRun:
         ]
 
     async def test_drops_skills_that_are_not_enabled(self, druks_db, monkeypatch):
-        _seed_skills("django-patterns", "retired-skill", disabled=("retired-skill",))
-        repo = _seed_repo()
+        await _seed_skills("django-patterns", "retired-skill", disabled=("retired-skill",))
+        repo = await _seed_repo()
 
         async def _profiler(*, repo: str):
             # The agent picked a disabled skill and one that was never real.
@@ -133,12 +133,12 @@ class TestProfileRun:
         monkeypatch.setattr(RepoPolicy, "resolve", staticmethod(_no_policy))
 
         await Profile().run(repo_id=repo.id)
-        repo = ProjectRepo.get(repo.id)
+        repo = await ProjectRepo.get(repo.id)
 
         assert repo.profile["baseline"]["recommended_skills"] == ["django-patterns"]
 
     async def test_pinned_verification_replaces_the_detected_one(self, druks_db, monkeypatch):
-        repo = _seed_repo()
+        repo = await _seed_repo()
 
         async def _profiler(*, repo: str):
             return _profiled()
@@ -150,7 +150,7 @@ class TestProfileRun:
         monkeypatch.setattr(RepoPolicy, "resolve", staticmethod(_pinning_policy))
 
         await Profile().run(repo_id=repo.id)
-        repo = ProjectRepo.get(repo.id)
+        repo = await ProjectRepo.get(repo.id)
 
         # The pin replaces the whole verification section on the effective profile...
         assert repo.effective_profile["verification"]["test_commands"] == [
@@ -163,7 +163,7 @@ class TestProfileRun:
         ]
 
     async def test_pinned_command_keeps_the_check_detected_for_it(self, druks_db, monkeypatch):
-        repo = _seed_repo()
+        repo = await _seed_repo()
 
         async def _profiler(*, repo: str):
             return _profiled()
@@ -177,7 +177,7 @@ class TestProfileRun:
         monkeypatch.setattr(RepoPolicy, "resolve", staticmethod(_pinning_policy))
 
         await Profile().run(repo_id=repo.id)
-        repo = ProjectRepo.get(repo.id)
+        repo = await ProjectRepo.get(repo.id)
 
         assert repo.effective_profile["verification"]["test_commands"] == [
             {"command": "pytest", "ci_check": "Backend / tests"},
@@ -187,9 +187,9 @@ class TestProfileRun:
 
 class TestRefreshOnly:
     async def test_skips_the_agent_and_reapplies_the_pin(self, druks_db, monkeypatch):
-        repo = _seed_repo()
+        repo = await _seed_repo()
         baseline = _profiled()
-        repo.set_profile(baseline=baseline, effective=baseline)
+        await repo.set_profile(baseline=baseline, effective=baseline)
 
         async def _boom(*, repo: str):
             raise AssertionError("refresh_only must not call the repo profiler")
@@ -201,7 +201,7 @@ class TestRefreshOnly:
         monkeypatch.setattr(RepoPolicy, "resolve", staticmethod(_pinning_policy))
 
         await Profile().run(repo_id=repo.id, refresh_only=True)
-        repo = ProjectRepo.get(repo.id)
+        repo = await ProjectRepo.get(repo.id)
 
         # Baseline untouched — only the pin re-applies.
         assert repo.profile["baseline"]["verification"]["test_commands"] == [

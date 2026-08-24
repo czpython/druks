@@ -30,16 +30,17 @@ def _sanitized(error: Exception) -> str:
 async def send_notification(notification_id: str) -> None:
     async def _send() -> None:
         async with step_session() as session:
-            notification = Notification.get(notification_id)
+            notification = await Notification.get(notification_id)
             # A duplicate enqueue or the replay of a completed send finds the
             # row delivered and stops. At-least-once: a crash after the send but
             # before this step checkpoints re-posts once on recovery — the click
             # side is idempotent, so a duplicate message is the accepted cost.
             if notification.state == NotificationState.DELIVERED:
                 return
-            destination = Destination.get(notification.destination_id)
-            # deliver() runs after this session commits; expunge keeps the
-            # loaded destination readable past the commit's attribute expiry.
+            destination = await Destination.get(notification.destination_id)
+            # deliver() runs after this session closes; expunge keeps the
+            # loaded destination readable as a detached row — an attribute
+            # touched past the close can't lazy-load under the async session.
             session.expunge(destination)
             body = notification.body
             actions = notification.actions
@@ -53,7 +54,7 @@ async def send_notification(notification_id: str) -> None:
             idempotency_key=notification_id,
         )
         async with step_session():
-            Notification.get(notification_id).mark_delivered()
+            await (await Notification.get(notification_id)).mark_delivered()
 
     try:
         await DBOS.run_step_async(
@@ -64,7 +65,7 @@ async def send_notification(notification_id: str) -> None:
 
         async def _mark_failed() -> None:
             async with step_session():
-                Notification.get(notification_id).mark_failed(reason)
+                await (await Notification.get(notification_id)).mark_failed(reason)
 
         # Terminal: record the failure and return normally — re-raising would
         # put the workflow into perpetual DBOS recovery for a dead endpoint.

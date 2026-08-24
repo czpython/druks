@@ -46,9 +46,8 @@ class Connection:
         return self.row.connected_at
 
     async def get_access_token(self, scopes: tuple[str, ...] = (), cached: bool = True) -> str:
-        return await self.service.get_oauth_client().get_access_token(
-            connection=self.row, scopes=scopes, cached=cached
-        )
+        client = await self.service.get_oauth_client()
+        return await client.get_access_token(connection=self.row, scopes=scopes, cached=cached)
 
     async def disconnect(self) -> None:
         await OauthClient(provider=self.service.slug).disconnect(self.row, reason="user")
@@ -72,14 +71,14 @@ class ScopedService:
     def label(self) -> str:
         return f"{self.owner.name}.{self.name}"
 
-    def list_for_account(self, account_id: str) -> list[Connection]:
+    async def list_for_account(self, account_id: str) -> list[Connection]:
         return [
             Connection(self.service, row)
-            for row in OauthConnection.list_for_account(self.service.slug, account_id)
+            for row in await OauthConnection.list_for_account(self.service.slug, account_id)
         ]
 
-    def get(self, connection_id: str) -> Connection | None:
-        row = OauthConnection.get(connection_id)
+    async def get(self, connection_id: str) -> Connection | None:
+        row = await OauthConnection.get(connection_id)
         if row and row.provider == self.service.slug and not row.revoked_at:
             return Connection(self.service, row)
 
@@ -198,8 +197,8 @@ class Service:
         ]
 
     @classmethod
-    def get(cls) -> ServiceIdentity:
-        return ServiceIdentity.get(cls.slug)
+    async def get(cls) -> ServiceIdentity:
+        return await ServiceIdentity.get(cls.slug)
 
     @classmethod
     def with_scopes(cls, *scopes: str) -> ScopedService:
@@ -234,13 +233,13 @@ class Service:
         return {}
 
     @classmethod
-    def get_oauth_client(cls) -> OauthClient:
+    async def get_oauth_client(cls) -> OauthClient:
         """The connected identity as a configured ``OauthClient``, keyed by
         the service slug. Raises ``ServiceNotConnectedError`` until the
         operator connects the service."""
         if not cls.token_endpoint:
             raise TypeError(f"{cls.__name__} declares no OAuth endpoints")
-        connected = cls.get()
+        connected = await cls.get()
         return OauthClient(
             provider=cls.slug,
             authorization_endpoint=cls.authorization_endpoint,
@@ -252,9 +251,9 @@ class Service:
         )
 
     @classmethod
-    def is_connected(cls) -> bool:
+    async def is_connected(cls) -> bool:
         try:
-            ServiceIdentity.get(cls.slug)
+            await ServiceIdentity.get(cls.slug)
         except ServiceNotConnectedError:
             return False
         return True
@@ -288,7 +287,7 @@ class Service:
         }
         if all(str(value).strip() for value in (*identity.values(), *secrets.values())):
             proven = await cls.verify(settings)
-            return ServiceIdentity.connect(
+            return await ServiceIdentity.connect(
                 cls.slug, identity={**identity, **proven}, secrets=secrets
             )
         raise ServiceConnectError("Every field is required.")

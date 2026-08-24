@@ -29,7 +29,7 @@ async def get_gate(
 ) -> schemas.GateResponse:
     """A parked run's open gate: the ask, a bounded artifact chunk, and
     parkedAt — echo parkedAt unchanged to answer_gate."""
-    return services.get_gate(run)
+    return await services.get_gate(run)
 
 
 @router.post(
@@ -75,7 +75,7 @@ async def get_agent_call(
 ) -> schemas.AgentCallDetailResponse:
     """One agent call's metadata with bounded transcript and stderr tails and
     an artifact chunk."""
-    return services.get_agent_call(call)
+    return await services.get_agent_call(call)
 
 
 @router.get(
@@ -87,4 +87,4 @@ async def get_agent_call(
 async def get_usage(account: Account = Depends(current_account)) -> schemas.AgentUsageResponse:
     """The caller's harness quota snapshot and today's spend. Pure read — it
     never triggers a scrape."""
-    return services.get_usage(account)
+    return await services.get_usage(account)

@@ -196,16 +196,16 @@ def test_build_prompt_context_covers_template_attrs():
     assert not missing, f"BuildPromptContext missing template attrs: {missing}"
 
 
-def test_get_for_repo_returns_the_repo(druks_db):
-    project = Project.create(name="acme/widget")
-    ProjectRepo.create(project_id=project.id, full_name="acme/widget")
-    assert ProjectRepo.get_for_repo("acme/widget").full_name == "acme/widget"
+async def test_get_for_repo_returns_the_repo(druks_db):
+    project = await Project.create(name="acme/widget")
+    await ProjectRepo.create(project_id=project.id, full_name="acme/widget")
+    assert (await ProjectRepo.get_for_repo("acme/widget")).full_name == "acme/widget"
 
 
-def test_get_for_repo_raises_when_the_repo_was_transferred(druks_db):
+async def test_get_for_repo_raises_when_the_repo_was_transferred(druks_db):
     # Registered under the new name; a run still holding the old name must fail
     # with the reason, not an opaque NoneType crash.
-    project = Project.create(name="czpython/druks")
-    ProjectRepo.create(project_id=project.id, full_name="czpython/druks")
+    project = await Project.create(name="czpython/druks")
+    await ProjectRepo.create(project_id=project.id, full_name="czpython/druks")
     with pytest.raises(FatalError, match="renamed or transferred"):
-        ProjectRepo.get_for_repo("clawhaven/druks", raise_on_missing=True)
+        await ProjectRepo.get_for_repo("clawhaven/druks", raise_on_missing=True)

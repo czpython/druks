@@ -105,13 +105,13 @@ class LoginWindow:
         """Store what the operator logged into as the session's payload, then
         tear the window down. A login always captures a profile, so a session
         imported as storage_state becomes a profile here."""
-        session = StoredBrowserSession.get_for_name(self.session_name)
+        session = await StoredBrowserSession.get_for_name(self.session_name)
         if session:
             try:
                 async with sandbox_client.attach(host_id=self.host_id) as browser:
                     payload = await _export(browser, session.name)
                 session.payload_format = BrowserSessionPayloadFormat.PROFILE_DIR.value
-                session.store_payload(payload)
+                await session.store_payload(payload)
                 return session
             finally:
                 await self._close()

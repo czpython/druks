@@ -25,13 +25,15 @@ async def list_services() -> list[ServiceResponse]:
     entries = []
     for service in services.all():
         try:
-            row = ServiceIdentity.get(service.slug)
+            row = await ServiceIdentity.get(service.slug)
         except ServiceNotConnectedError:
             row = None
         connections = []
         if service.token_endpoint:
             # The detail shows revoked connections as history beside the live.
-            connections = OauthConnection.list_for_provider(service.slug, include_revoked=True)
+            connections = await OauthConnection.list_for_provider(
+                service.slug, include_revoked=True
+            )
         entries.append(ServiceResponse.from_row(service, row, connections))
     return entries
 
@@ -56,7 +58,7 @@ async def connect_service(slug: str, payload: dict[str, str]) -> ServiceResponse
         # A replaced client can never refresh the old client's connections —
         # revoke every live one; the consents stay on record.
         client = OauthClient(provider=slug)
-        for connection in OauthConnection.list_for_provider(slug):
+        for connection in await OauthConnection.list_for_provider(slug):
             await client.disconnect(connection, reason="client_replaced")
             await publish(
                 "oauth.disconnected",
@@ -81,7 +83,7 @@ async def connect_oauth_service(
     service = _get_oauth_service(slug)
     account_id = current_account_id.get()
     if connection:
-        row = OauthConnection.get(connection)
+        row = await OauthConnection.get(connection)
         if not row or row.provider != slug:
             raise OauthPageError(f"No connection {connection!r} on {slug!r}.", status_code=404)
     if next and (not next.startswith("/") or next.startswith(("//", "/\\"))):
@@ -95,7 +97,7 @@ async def connect_oauth_service(
             status_code=409,
         )
     try:
-        client = service.get_oauth_client()
+        client = await service.get_oauth_client()
     except ServiceNotConnectedError as error:
         raise OauthPageError(str(error), status_code=409) from error
     url = await client.begin_connect(
@@ -130,22 +132,24 @@ async def oauth_callback(state: str = "", code: str = "", error: str = "") -> Re
     # matches a fresh sign-in to one. Both make a revoked row live again.
     row = None
     if connection_id:
-        row = OauthConnection.get(connection_id)
+        row = await OauthConnection.get(connection_id)
         if not row:
             raise OauthPageError(
                 "The connection was removed while consent was open.", status_code=400
             )
     elif service.identity_key and (value := identity.get(service.identity_key)):
-        row = OauthConnection.get_for_identity(
+        row = await OauthConnection.get_for_identity(
             provider, pending["account_id"], service.identity_key, value
         )
     reconsent = bool(row)
     if row:
-        row.reconnect(refresh_token=tokens["refresh_token"], scopes=granted, identity=identity)
+        await row.reconnect(
+            refresh_token=tokens["refresh_token"], scopes=granted, identity=identity
+        )
         # A token cached before this consent must not serve the new one.
         await OauthClient(provider=provider).evict_access_token(row.id)
     else:
-        row = OauthConnection.create(
+        row = await OauthConnection.create(
             provider=provider,
             account_id=pending["account_id"],
             refresh_token=tokens["refresh_token"],
@@ -166,7 +170,7 @@ async def oauth_callback(state: str = "", code: str = "", error: str = "") -> Re
 
 @oauth_router.get("/connections", dependencies=[Depends(current_session_account)])
 async def list_connections() -> list[ConnectionResponse]:
-    rows = OauthConnection.list_owned_by(current_account_id.get())
+    rows = await OauthConnection.list_owned_by(current_account_id.get())
     return [ConnectionResponse.model_validate(row) for row in rows]
 
 
@@ -176,7 +180,7 @@ async def list_connections() -> list[ConnectionResponse]:
     dependencies=[Depends(current_session_account)],
 )
 async def disconnect_connection(connection_id: str) -> None:
-    row = OauthConnection.get(connection_id)
+    row = await OauthConnection.get(connection_id)
     if not row:
         raise HTTPException(status_code=404, detail=f"No connection {connection_id!r}.")
     if row.revoked_at:

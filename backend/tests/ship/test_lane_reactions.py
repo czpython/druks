@@ -20,19 +20,23 @@ pytestmark = pytest.mark.asyncio
 async def test_new_build_claims_the_item(druks_db):
     # A resume replays the body without passing through start(), so this topic —
     # not RUNNING — is the one that fires once per attempt.
-    item = make_test_work_item(repo="acme/widget", title="t", source="linear", ticket_key="ACME-1")
-    item.update(pr_number=7, branch="agent/old")
-    item.resolve(merged=False, at=datetime.now(UTC))
+    item = await make_test_work_item(
+        repo="acme/widget", title="t", source="linear", ticket_key="ACME-1"
+    )
+    await item.update(pr_number=7, branch="agent/old")
+    await item.resolve(merged=False, at=datetime.now(UTC))
 
     await publish(WorkflowEvent.SCHEDULED, subject=item.identity, kind=Build.kind)
 
-    refreshed = WorkItem.get(item.id)
+    refreshed = await WorkItem.get(item.id)
     assert (refreshed.branch, refreshed.pr_number) == (None, None)
     assert (refreshed.resolution, refreshed.resolved_at) == (None, None)
 
 
 async def test_cancelled_build_settles_the_item(druks_db):
-    item = make_test_work_item(repo="acme/widget", title="t", source="linear", ticket_key="ACME-2")
+    item = await make_test_work_item(
+        repo="acme/widget", title="t", source="linear", ticket_key="ACME-2"
+    )
 
     await publish(
         WorkflowEvent.CANCELLED,
@@ -41,18 +45,20 @@ async def test_cancelled_build_settles_the_item(druks_db):
         failure="operator cancelled",
     )
 
-    refreshed = WorkItem.get(item.id)
+    refreshed = await WorkItem.get(item.id)
     assert refreshed.resolution == "closed"
     assert refreshed.resolved_at
-    druks_db.expire_all()
-    assert str(item.id) not in {summary.id for summary in WorkItem.list_summaries(None)}
+    druks_db.expunge_all()
+    assert str(item.id) not in {summary.id for summary in await WorkItem.list_summaries(None)}
 
 
 @pytest.mark.parametrize(("merged", "resolution"), [(True, "merged"), (False, "closed")])
 async def test_cancelled_build_preserves_an_existing_resolution(druks_db, merged, resolution):
-    item = make_test_work_item(repo="acme/widget", title="t", source="linear", ticket_key="ACME-3")
+    item = await make_test_work_item(
+        repo="acme/widget", title="t", source="linear", ticket_key="ACME-3"
+    )
     resolved_at = datetime(2026, 8, 8, 12, tzinfo=UTC)
-    item.resolve(merged=merged, at=resolved_at)
+    await item.resolve(merged=merged, at=resolved_at)
 
     await publish(
         WorkflowEvent.CANCELLED,
@@ -61,13 +67,15 @@ async def test_cancelled_build_preserves_an_existing_resolution(druks_db, merged
         failure="operator cancelled",
     )
 
-    refreshed = WorkItem.get(item.id)
+    refreshed = await WorkItem.get(item.id)
     assert refreshed.resolution == resolution
     assert refreshed.resolved_at == resolved_at
 
 
 async def test_failed_build_remains_unresolved_on_the_board(druks_db):
-    item = make_test_work_item(repo="acme/widget", title="t", source="linear", ticket_key="ACME-4")
+    item = await make_test_work_item(
+        repo="acme/widget", title="t", source="linear", ticket_key="ACME-4"
+    )
 
     await publish(
         WorkflowEvent.FAILED,
@@ -76,10 +84,10 @@ async def test_failed_build_remains_unresolved_on_the_board(druks_db):
         failure="build failed",
     )
 
-    refreshed = WorkItem.get(item.id)
+    refreshed = await WorkItem.get(item.id)
     assert (refreshed.resolution, refreshed.resolved_at) == (None, None)
-    druks_db.expire_all()
-    assert str(item.id) in {summary.id for summary in WorkItem.list_summaries(None)}
+    druks_db.expunge_all()
+    assert str(item.id) in {summary.id for summary in await WorkItem.list_summaries(None)}
 
 
 async def test_build_lifecycle_reaches_the_tracker(druks_db, monkeypatch):
@@ -89,7 +97,9 @@ async def test_build_lifecycle_reaches_the_tracker(druks_db, monkeypatch):
         pushed.append(status)
 
     monkeypatch.setattr(WorkItem, "set_ticket_status", _push)
-    item = make_test_work_item(repo="acme/widget", title="t", source="linear", ticket_key="ACME-7")
+    item = await make_test_work_item(
+        repo="acme/widget", title="t", source="linear", ticket_key="ACME-7"
+    )
     subject = item.identity
 
     await publish(WorkflowEvent.RUNNING, subject=subject, kind=Build.kind)
@@ -102,8 +112,10 @@ async def test_build_lifecycle_reaches_the_tracker(druks_db, monkeypatch):
 
 
 async def test_pr_review_answers_through_the_review_gate(druks_db, monkeypatch):
-    item = make_test_work_item(repo="acme/widget", title="t", source="linear", ticket_key="ACME-9")
-    item.update(pr_number=12, branch="agent/acme-9")
+    item = await make_test_work_item(
+        repo="acme/widget", title="t", source="linear", ticket_key="ACME-9"
+    )
+    await item.update(pr_number=12, branch="agent/acme-9")
     run = Run(
         id=str(uuid7()),
         kind=Build.kind,
@@ -111,8 +123,8 @@ async def test_pr_review_answers_through_the_review_gate(druks_db, monkeypatch):
         input_request={"presentation": "external", "label": "Review implementation"},
     )
     druks_db.add(run)
-    druks_db.flush()
-    seed_dbos_status(
+    await druks_db.flush()
+    await seed_dbos_status(
         druks_db,
         run.id,
         "parked",
@@ -150,7 +162,9 @@ async def test_pr_review_answers_through_the_review_gate(druks_db, monkeypatch):
 
 
 async def test_pr_open_reaches_the_work_item(druks_db):
-    item = make_test_work_item(repo="acme/widget", title="t", source="linear", ticket_key="ACME-8")
+    item = await make_test_work_item(
+        repo="acme/widget", title="t", source="linear", ticket_key="ACME-8"
+    )
 
     await publish(
         "pr.opened",
@@ -160,5 +174,5 @@ async def test_pr_open_reaches_the_work_item(druks_db):
         branch="agent/eng-8",
     )
 
-    refreshed = WorkItem.get(item.id)
+    refreshed = await WorkItem.get(item.id)
     assert refreshed.pr_number == 12 and refreshed.branch == "agent/eng-8"

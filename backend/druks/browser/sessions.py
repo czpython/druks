@@ -77,7 +77,7 @@ class BrowserSession:
         block. The browser lives in its own container on the druks box and
         dies with the block; a persisting session is exported and stored
         back first."""
-        row = self.get_or_create_row() if self.anonymous else self._ready_row()
+        row = await (self.get_or_create_row() if self.anonymous else self._ready_row())
         writer_token = await acquire_writer_lock(row.id) if self.persist else ""
         try:
             settings = load_settings()
@@ -87,7 +87,7 @@ class BrowserSession:
             ) as browser:
                 await seed_state(browser, row)
                 await self._launch(browser)
-                row.mark_used()
+                await row.mark_used()
                 listener = await browser.forward_local_port(CDP_PORT)
                 try:
                     yield f"http://127.0.0.1:{listener.get_port()}"
@@ -100,7 +100,7 @@ class BrowserSession:
                     listener.close()
                 if self.persist:
                     row.payload_format = BrowserSessionPayloadFormat.PROFILE_DIR.value
-                    row.store_payload(await self._export(browser))
+                    await row.store_payload(await self._export(browser))
         finally:
             if writer_token:
                 await release_writer_lock(row.id, writer_token)
@@ -123,20 +123,20 @@ class BrowserSession:
             finally:
                 await connection.close()
 
-    def get_or_create_row(self) -> StoredBrowserSession:
+    async def get_or_create_row(self) -> StoredBrowserSession:
         """The declaration's stored half, written by the first action that
         needs it — a borrow, a login-window open, or a state import. Until
         then the declaration alone puts the session in the pane, wanting a
         login."""
-        return StoredBrowserSession.get_or_create(
+        return await StoredBrowserSession.get_or_create(
             name=self.name,
             payload_format=BrowserSessionPayloadFormat.PROFILE_DIR,
             site=self.site,
             status=self.initial_status,
         )
 
-    def _ready_row(self) -> StoredBrowserSession:
-        row = self.get_or_create_row()
+    async def _ready_row(self) -> StoredBrowserSession:
+        row = await self.get_or_create_row()
         if row.status != BrowserSessionStatus.READY.value:
             raise BrowserSessionNotReadyError(self.name, row.status)
         return row

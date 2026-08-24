@@ -45,30 +45,32 @@ class UserSettings(Base):
     SINGLETON_ID = 1
 
     @classmethod
-    def get(cls) -> "UserSettings":
+    async def get(cls) -> "UserSettings":
         session = db_session()
-        row = session.get(cls, cls.SINGLETON_ID)
+        row = await session.get(cls, cls.SINGLETON_ID)
         if not row:
-            session.execute(pg_insert(cls).values(id=cls.SINGLETON_ID).on_conflict_do_nothing())
-            row = session.get_one(cls, cls.SINGLETON_ID)
+            await session.execute(
+                pg_insert(cls).values(id=cls.SINGLETON_ID).on_conflict_do_nothing()
+            )
+            row = await session.get_one(cls, cls.SINGLETON_ID)
         return row
 
-    def update_profile(self, *, timezone: str | None = None) -> None:
+    async def update_profile(self, *, timezone: str | None = None) -> None:
         if timezone:
             self.timezone = timezone
         self.updated_at = Base.utc_now()
-        db_session().flush()
+        await db_session().flush()
 
-    def set_fallback_account(self, account_id: str) -> None:
+    async def set_fallback_account(self, account_id: str) -> None:
         self.fallback_account_id = account_id
         self.updated_at = Base.utc_now()
-        db_session().flush()
+        await db_session().flush()
 
-    def set_gate_park_destination(self, destination_id: str | None) -> None:
+    async def set_gate_park_destination(self, destination_id: str | None) -> None:
         # None is the off-switch, so this is a set-or-clear, not a skip-on-None.
         self.gate_park_destination_id = destination_id
         self.updated_at = Base.utc_now()
-        db_session().flush()
+        await db_session().flush()
 
 
 class HarnessSettings(Base):
@@ -90,21 +92,21 @@ class HarnessSettings(Base):
     models_fetched_at: Mapped[datetime | None] = mapped_column(default=None)
 
     @classmethod
-    def get(cls, name: str) -> "HarnessSettings | None":
-        return db_session().get(cls, name)
+    async def get(cls, name: str) -> "HarnessSettings | None":
+        return await db_session().get(cls, name)
 
     @classmethod
-    def require(cls, name: str) -> "HarnessSettings":
+    async def require(cls, name: str) -> "HarnessSettings":
         # The resolution paths (effort/timeout, the harness factory) only pass a
         # ``get_harness_for_model`` name, which is always registered and so always
         # seeded — a miss means ``seed_harnesses`` didn't run before serving.
-        if not (config := cls.get(name)):
+        if not (config := await cls.get(name)):
             raise KeyError(f"no harness settings for {name!r}; seed_harnesses missed it")
         return config
 
     @classmethod
-    def all(cls) -> list["HarnessSettings"]:
-        return list(db_session().execute(select(cls).order_by(cls.name)).scalars())
+    async def all(cls) -> list["HarnessSettings"]:
+        return list((await db_session().execute(select(cls).order_by(cls.name))).scalars())
 
     @property
     def harness(self) -> "type[Harness]":
@@ -136,16 +138,16 @@ class HarnessSettings(Base):
         if parsed.ok:
             self.models_fetched = list(parsed.models)
             self.models_fetched_at = Base.utc_now()
-            db_session().flush()
+            await db_session().flush()
         return {"harness": self.name, "ok": parsed.ok, "error": parsed.error}
 
-    def update(self, **fields: object) -> None:
+    async def update(self, **fields: object) -> None:
         # Callers pass column names only — the route's ``HarnessUpdate`` schema is
         # the trust boundary, so no field-name validation here.
         for field, value in fields.items():
             setattr(self, field, value)
         self.updated_at = Base.utc_now()
-        db_session().flush()
+        await db_session().flush()
 
 
 class SettingsOverride(Base):
@@ -156,94 +158,95 @@ class SettingsOverride(Base):
     secret_value = EncryptedTextField(default="")
 
     @classmethod
-    def read(cls, key: str) -> Any | None:
-        row = db_session().get(cls, key)
+    async def read(cls, key: str) -> Any | None:
+        row = await db_session().get(cls, key)
         return row.value if row else None
 
     @classmethod
-    def write(cls, key: str, value: Any) -> None:
+    async def write(cls, key: str, value: Any) -> None:
         session = db_session()
-        row = session.get(cls, key)
+        row = await session.get(cls, key)
         if value is None:
             if row:
-                session.delete(row)
+                await session.delete(row)
         elif row:
             row.value = value
         else:
             session.add(cls(key=key, value=value))
-        session.flush()
+        await session.flush()
 
     @classmethod
-    def agent_model(cls, name: str, default: str) -> ResolvedModel:
-        override = cls.read(f"agent_model:{name}")
+    async def agent_model(cls, name: str, default: str) -> ResolvedModel:
+        override = await cls.read(f"agent_model:{name}")
         if override is not None:
             return ResolvedModel(override, "agent")
         # ``default`` is a harness name (claude/codex) → that harness's model,
         # or a pinned model string when it names no harness.
-        harness = HarnessSettings.get(default)
+        harness = await HarnessSettings.get(default)
         return ResolvedModel(harness.model if harness else default, "default")
 
     @classmethod
-    def set_agent_model(cls, name: str, model: str | None) -> None:
-        cls.write(f"agent_model:{name}", model)
+    async def set_agent_model(cls, name: str, model: str | None) -> None:
+        await cls.write(f"agent_model:{name}", model)
 
     @classmethod
-    def agent_effort(cls, name: str, declared: str | None, harness: str) -> ResolvedEffort:
-        override = cls.read(f"agent_effort:{name}")
+    async def agent_effort(cls, name: str, declared: str | None, harness: str) -> ResolvedEffort:
+        override = await cls.read(f"agent_effort:{name}")
         if override is not None:
             return ResolvedEffort(override, "agent")
         if declared is not None:
             return ResolvedEffort(declared, "declared")
-        return ResolvedEffort(HarnessSettings.require(harness).effort, "harness")
+        return ResolvedEffort((await HarnessSettings.require(harness)).effort, "harness")
 
     @classmethod
-    def set_agent_effort(cls, name: str, value: str | None) -> None:
-        cls.write(f"agent_effort:{name}", value)
+    async def set_agent_effort(cls, name: str, value: str | None) -> None:
+        await cls.write(f"agent_effort:{name}", value)
 
     @classmethod
-    def agent_timeout(cls, name: str, declared: int | None, harness: str) -> ResolvedTimeout:
-        override = cls.read(f"agent_timeout:{name}")
+    async def agent_timeout(cls, name: str, declared: int | None, harness: str) -> ResolvedTimeout:
+        override = await cls.read(f"agent_timeout:{name}")
         if override is not None:
             return ResolvedTimeout(override, "agent")
         if declared is not None:
             return ResolvedTimeout(declared, "declared")
-        return ResolvedTimeout(HarnessSettings.require(harness).timeout, "harness")
+        return ResolvedTimeout((await HarnessSettings.require(harness)).timeout, "harness")
 
     @classmethod
-    def set_agent_timeout(cls, name: str, value: int | None) -> None:
-        cls.write(f"agent_timeout:{name}", value)
+    async def set_agent_timeout(cls, name: str, value: int | None) -> None:
+        await cls.write(f"agent_timeout:{name}", value)
 
     @classmethod
-    def workflow_setting(cls, kind: str, field: str, default: Any) -> Any:
-        value = cls.read(f"workflow:{kind}:{field}")
+    async def workflow_setting(cls, kind: str, field: str, default: Any) -> Any:
+        value = await cls.read(f"workflow:{kind}:{field}")
         return default if value is None else value
 
     @classmethod
-    def set_workflow_setting(cls, kind: str, field: str, value: Any) -> None:
-        cls.write(f"workflow:{kind}:{field}", value)
+    async def set_workflow_setting(cls, kind: str, field: str, value: Any) -> None:
+        await cls.write(f"workflow:{kind}:{field}", value)
 
     @classmethod
-    def app_setting(cls, app: str, field: str, default: Any, *, is_secret: bool) -> Any:
-        row = db_session().get(cls, f"app:{app}:{field}")
+    async def app_setting(cls, app: str, field: str, default: Any, *, is_secret: bool) -> Any:
+        row = await db_session().get(cls, f"app:{app}:{field}")
         if is_secret:
             return row.secret_value.decrypt() if row and row.secret_value else default
         return row.value if row else default
 
     @classmethod
-    def set_app_setting(cls, app: str, field: str, value: Any, *, is_secret: bool) -> None:
+    async def set_app_setting(cls, app: str, field: str, value: Any, *, is_secret: bool) -> None:
         key = f"app:{app}:{field}"
         if value is None or not is_secret:
-            cls.write(key, value)
+            await cls.write(key, value)
             return
         session = db_session()
-        row = session.get(cls, key)
+        row = await session.get(cls, key)
         if row:
             row.value = None
             row.secret_value = value
         else:
             row = cls(key=key, value=None, secret_value=value)
             session.add(row)
-        session.flush()
-        # Assignment leaves the plaintext str on the instance; expire it so the
-        # next read loads the envelope.
-        session.expire(row)
+        await session.flush()
+        # Assignment leaves the plaintext str on the instance; reload it now so
+        # the next read sees the envelope — an expired attribute can't
+        # lazy-load under the async session.
+        await session.refresh(row)

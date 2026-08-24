@@ -52,11 +52,11 @@ def test_route_is_unchanged():
     assert f"{webhooks_router.prefix}/{LinearEvents.path}" == "/_external/linear/events/"
 
 
-def test_authentication_reads_the_service_row(tmp_path, druks_db):
+async def test_authentication_reads_the_service_row(tmp_path, druks_db):
     secret = "linear-secret"
     raw_body = b"{}"
     signature = hmac.new(secret.encode(), raw_body, hashlib.sha256).hexdigest()
-    ServiceIdentity.connect(
+    await ServiceIdentity.connect(
         "linear",
         identity={"actor": "druks", "workspace": "Acme"},
         secrets={"api_key": "lin_secret", "webhook_secret": secret},
@@ -68,10 +68,10 @@ def test_authentication_reads_the_service_row(tmp_path, druks_db):
     )
     events.raw_body = raw_body
 
-    assert events.request_is_authentic()
+    assert await events.request_is_authentic()
 
 
-def test_rejects_when_not_connected(tmp_path, druks_db):
+async def test_rejects_when_not_connected(tmp_path, druks_db):
     events = _provider(
         tmp_path,
         payload={},
@@ -80,7 +80,7 @@ def test_rejects_when_not_connected(tmp_path, druks_db):
     events.raw_body = b"{}"
 
     with pytest.raises(HTTPException) as error:
-        events.request_is_authentic()
+        await events.request_is_authentic()
 
     assert error.value.status_code == 401
     assert "not connected" in error.value.detail

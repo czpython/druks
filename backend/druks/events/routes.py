@@ -38,7 +38,7 @@ async def list_feed(
     app: str | None = Query(default=None),
 ) -> FeedResponse:
     cursor = _parse_cursor(before)
-    items, next_cursor = build_feed(app=app, before=cursor, limit=limit)
+    items, next_cursor = await build_feed(app=app, before=cursor, limit=limit)
     return FeedResponse(items=items, next_cursor=next_cursor)
 
 
@@ -56,8 +56,8 @@ async def stream_feed(
                 return
             # New Session per tick so we don't hold a transaction open across the
             # sleep; the open/close cost is irrelevant against the poll cadence.
-            with session_scope(engine):
-                items, _next_cursor = build_feed(
+            async with session_scope(engine):
+                items, _next_cursor = await build_feed(
                     app=app,
                     before=None,
                     limit=100 if first else 50,

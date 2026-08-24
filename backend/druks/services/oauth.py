@@ -217,7 +217,7 @@ class OauthClient:
         try:
             data = {
                 "grant_type": "refresh_token",
-                "refresh_token": connection._load_refresh_token(),
+                "refresh_token": await connection._load_refresh_token(),
                 **self.extra_token_params,
             }
             if requested:
@@ -250,7 +250,7 @@ class OauthClient:
                     self.provider, "the token endpoint returned no access token"
                 )
             if tokens.get("refresh_token"):
-                connection._save_refresh_token(tokens["refresh_token"])
+                await connection._save_refresh_token(tokens["refresh_token"])
             if requested and tokens.get("scope") and set(tokens["scope"].split()) != set(requested):
                 # A provider that ignores the narrowing hands back a token the
                 # sandbox must never hold — fail rather than cache it.
@@ -280,7 +280,7 @@ class OauthClient:
     async def disconnect(self, connection: OauthConnection, *, reason: str) -> None:
         """Revoke the connection and evict its cached access token. The row
         and its facts survive; the refresh token dies with the consent."""
-        connection.revoke(reason)
+        await connection.revoke(reason)
         await self.evict_access_token(connection.id)
 
 

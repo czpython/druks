@@ -45,7 +45,7 @@ def test_concrete_subclass_registers_automatically():
         provider = "acme"
         category = "events"
 
-        def request_is_authentic(self):
+        async def request_is_authentic(self):
             return True
 
         def get_action(self):
@@ -70,7 +70,7 @@ def test_grandchild_of_abstract_does_register():
         provider = "acme"
         category = "alerts"
 
-        def request_is_authentic(self):
+        async def request_is_authentic(self):
             return True
 
         def get_action(self):
@@ -84,7 +84,7 @@ def test_concrete_without_provider_and_category_raises():
     with pytest.raises(TypeError, match="provider"):
 
         class Hook(Webhook):
-            def request_is_authentic(self):
+            async def request_is_authentic(self):
                 return True
 
             def get_action(self):
@@ -97,7 +97,7 @@ def test_explicit_path_overrides_provider_category_default():
         provider = "ignored"
         category = "ignored"
 
-        def request_is_authentic(self):
+        async def request_is_authentic(self):
             return True
 
         def get_action(self):
@@ -114,7 +114,7 @@ def test_registry_lookup_returns_class_and_empty_kwargs():
         provider = "alpha"
         category = "events"
 
-        def request_is_authentic(self):
+        async def request_is_authentic(self):
             return True
 
         def get_action(self):
@@ -131,7 +131,7 @@ def test_registry_lookup_extracts_url_params():
         provider = "tenant"
         category = "events"
 
-        def request_is_authentic(self):
+        async def request_is_authentic(self):
             return True
 
         def get_action(self):
@@ -155,7 +155,7 @@ def test_lookup_picks_up_a_late_registration():
         provider = "late"
         category = "events"
 
-        def request_is_authentic(self):
+        async def request_is_authentic(self):
             return True
 
         def get_action(self):
@@ -187,7 +187,7 @@ def test_dispatch_calls_matching_on_action_method(settings):
         provider = "dispatch"
         category = "events"
 
-        def request_is_authentic(self):
+        async def request_is_authentic(self):
             return True
 
         def get_action(self):
@@ -209,7 +209,7 @@ def test_dispatch_unhandled_action_falls_through_to_on_unhandled(settings):
         provider = "fallback"
         category = "events"
 
-        def request_is_authentic(self):
+        async def request_is_authentic(self):
             return True
 
         def get_action(self):
@@ -231,7 +231,7 @@ def test_dispatch_request_is_authentic_false_raises_401(settings):
         provider = "auth"
         category = "events"
 
-        def request_is_authentic(self):
+        async def request_is_authentic(self):
             return False
 
         def get_action(self):
@@ -247,7 +247,7 @@ def test_dispatch_request_is_authentic_may_raise_http_exception(settings):
         provider = "rich"
         category = "events"
 
-        def request_is_authentic(self):
+        async def request_is_authentic(self):
             raise HTTPException(status_code=403, detail="Forbidden by policy.")
 
         def get_action(self):
@@ -269,7 +269,7 @@ def test_trailing_slash_is_optional_on_request_url(settings):
         provider = "loose"
         category = "events"
 
-        def request_is_authentic(self):
+        async def request_is_authentic(self):
             return True
 
         def get_action(self):
@@ -293,7 +293,7 @@ def test_dedup_first_call_dispatches_second_call_short_circuits(settings):
         provider = "dedup"
         category = "events"
 
-        def request_is_authentic(self):
+        async def request_is_authentic(self):
             return True
 
         def get_action(self):
@@ -327,7 +327,7 @@ def test_failed_handler_releases_claim_so_retry_reprocesses(settings):
         provider = "flaky"
         category = "events"
 
-        def request_is_authentic(self):
+        async def request_is_authentic(self):
             return True
 
         def delivery_key(self):

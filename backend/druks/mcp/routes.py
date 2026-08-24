@@ -27,15 +27,16 @@ from druks.mcp.schemas import (
 router = APIRouter(prefix="/api/mcp-servers", tags=["mcp-servers"])
 
 
-def _response(name: str) -> McpServerResponse:
-    return McpServerResponse.model_validate(McpServer.get_resolved(current_account_id.get())[name])
+async def _response(name: str) -> McpServerResponse:
+    resolved = await McpServer.get_resolved(current_account_id.get())
+    return McpServerResponse.model_validate(resolved[name])
 
 
 @router.get("", response_model=list[McpServerResponse])
 async def list_mcp_servers() -> list[McpServerResponse]:
     return [
         McpServerResponse.model_validate(server)
-        for server in McpServer.get_resolved(current_account_id.get()).values()
+        for server in (await McpServer.get_resolved(current_account_id.get())).values()
     ]
 
 
@@ -59,7 +60,7 @@ async def add_mcp_server(body: CreateMcpServerRequest) -> McpServerResponse:
             status_code=409,
             detail=f"MCP server {body.name!r} is built-in; configure it instead of adding it.",
         )
-    if McpServer.get_for_name(body.name):
+    if await McpServer.get_for_name(body.name):
         raise HTTPException(
             status_code=409, detail=f"MCP server {body.name!r} already exists; remove it first."
         )
@@ -73,10 +74,10 @@ async def add_mcp_server(body: CreateMcpServerRequest) -> McpServerResponse:
             status_code=422, detail=f"MCP server {body.name!r} needs a bearer token."
         )
     try:
-        McpServer.create(name=body.name, url=body.url, token=body.token)
+        await McpServer.create(name=body.name, url=body.url, token=body.token)
     except InvalidServerNameError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
-    return _response(body.name)
+    return await _response(body.name)
 
 
 @router.post("/registry", response_model=McpServerResponse)
@@ -86,7 +87,7 @@ async def install_mcp_server(body: InstallMcpServerRequest, request: Request) ->
             status_code=409,
             detail=f"MCP server {body.name!r} is built-in; configure it instead of adding it.",
         )
-    if McpServer.get_for_name(body.name):
+    if await McpServer.get_for_name(body.name):
         raise HTTPException(
             status_code=409, detail=f"MCP server {body.name!r} already exists; remove it first."
         )
@@ -130,7 +131,7 @@ async def install_mcp_server(body: InstallMcpServerRequest, request: Request) ->
         token_source = TokenSource.OAUTH
         is_enabled = False
     try:
-        McpServer.create(
+        await McpServer.create(
             name=body.name,
             url=candidate["url"],
             token_source=token_source,
@@ -140,16 +141,16 @@ async def install_mcp_server(body: InstallMcpServerRequest, request: Request) ->
         )
     except InvalidServerNameError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
-    return _response(body.name)
+    return await _response(body.name)
 
 
 @router.patch("/{name}", response_model=McpServerResponse)
 async def set_mcp_server_enabled(
     name: str, is_enabled: bool = Body(embed=True)
 ) -> McpServerResponse:
-    if not McpServer.set_enabled(name, is_enabled):
+    if not await McpServer.set_enabled(name, is_enabled):
         raise HTTPException(status_code=404, detail=f"MCP server {name!r} not found")
-    return _response(name)
+    return await _response(name)
 
 
 @router.delete("/{name}", status_code=204)
@@ -160,13 +161,13 @@ async def remove_mcp_server(name: str) -> None:
         raise HTTPException(
             status_code=409, detail=f"MCP server {name!r} is managed by druks; disable it instead."
         )
-    server = McpServer.get_for_name(name)
+    server = await McpServer.get_for_name(name)
     if not server:
         raise HTTPException(status_code=404, detail=f"MCP server {name!r} not found")
     # Revoke before the server row goes — the registration lookup needs it.
-    for connection in oauth.list_connections(name):
+    for connection in await oauth.list_connections(name):
         await oauth.disconnect(name, connection.account_id, reason="server_removed")
-    server.delete()
+    await server.delete()
 
 
 @router.post("/{name}/connect", response_model=ConnectMcpServerResponse)
@@ -175,10 +176,10 @@ async def connect_mcp_server(
     request: Request,
     identity_mode: Annotated[IdentityMode, Body(embed=True)],
 ) -> ConnectMcpServerResponse:
-    server = McpServer.get_resolved(current_account_id.get()).get(name)
+    server = (await McpServer.get_resolved(current_account_id.get())).get(name)
     if not server or server["token_source"] != TokenSource.OAUTH:
         raise HTTPException(status_code=404, detail=f"MCP server {name!r} is not an OAuth server.")
-    if oauth.list_connections(name) and server["identity_mode"] != identity_mode:
+    if await oauth.list_connections(name) and server["identity_mode"] != identity_mode:
         raise HTTPException(
             status_code=409,
             detail=f"MCP server {name!r} already uses {server['identity_mode']!r} identity.",
@@ -222,7 +223,7 @@ async def oauth_callback(state: str = "", code: str = "", error: str = "") -> HT
         raise HTTPException(status_code=400, detail=str(exchange_error)) from exchange_error
     # Connecting is the operator's explicit "use this server" — a
     # connected-but-disabled server is a dead end nobody asks for.
-    McpServer.set_enabled(name, is_enabled=True)
+    await McpServer.set_enabled(name, is_enabled=True)
     # druks opened this tab via window.open, so the page may close itself; the
     # broadcast tells the settings modal to refetch before the tab goes. The
     # text stays for browsers that refuse the close.
@@ -231,24 +232,24 @@ async def oauth_callback(state: str = "", code: str = "", error: str = "") -> HT
 
 @router.delete("/{name}/grant", status_code=204)
 async def disconnect_mcp_server(name: str) -> None:
-    server = McpServer.get_resolved(current_account_id.get()).get(name)
+    server = (await McpServer.get_resolved(current_account_id.get())).get(name)
     if not server or server["token_source"] != TokenSource.OAUTH:
         raise HTTPException(status_code=404, detail=f"MCP server {name!r} is not an OAuth server.")
     if not server["identity_mode"]:
         raise HTTPException(status_code=404, detail=f"MCP server {name!r} has no grant.")
     account_id = get_grant_account(server["identity_mode"], current_account_id.get())
-    connection = oauth.get_connection(name, account_id)
+    connection = await oauth.get_connection(name, account_id)
     if not connection:
         raise HTTPException(
             status_code=404,
             detail=f"MCP server {name!r} has no grant for account {account_id!r}.",
         )
     await oauth.disconnect(name, account_id)
-    if not oauth.list_connections(name):
+    if not await oauth.list_connections(name):
         # The last grant leaving reopens the mode choice: the next connect is
         # a first connect again.
-        server_row = McpServer.get_for_name(name)
+        server_row = await McpServer.get_for_name(name)
         if server_row:
             server_row.identity_mode = None
     if server["identity_mode"] == IdentityMode.SHARED:
-        McpServer.set_enabled(name, is_enabled=False)
+        await McpServer.set_enabled(name, is_enabled=False)

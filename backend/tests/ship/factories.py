@@ -4,18 +4,18 @@ from druks.testing import seed_run
 from uuid_utils import uuid7
 
 
-def make_test_work_item(*, repo: str, **kwargs):
+async def make_test_work_item(*, repo: str, **kwargs):
     """A WorkItem with the Project / ProjectRepo binding it requires. Every item
     carries a ticket key, unique per source — tests that don't care get one."""
-    project = Project.get_for_repo(repo)
+    project = await Project.get_for_repo(repo)
     if not project:
-        project = Project.create(name=repo)
-        ProjectRepo.create(project_id=project.id, full_name=repo)
+        project = await Project.create(name=repo)
+        await ProjectRepo.create(project_id=project.id, full_name=repo)
     kwargs.setdefault("ticket_key", f"TEST-{uuid7()}")
-    return WorkItem.create(project_id=project.id, repo=repo, **kwargs)
+    return await WorkItem.create(project_id=project.id, repo=repo, **kwargs)
 
 
-def seed_build_run(
+async def seed_build_run(
     session,
     *,
     work_item_id: int,
@@ -29,8 +29,8 @@ def seed_build_run(
     timeline; it finds the item through the subject it was started for."""
     if state == "parked" and not input_gate:
         input_gate = "review"  # a parked run always has a gate; derivation needs it
-    item = WorkItem.get(work_item_id)
-    run = seed_run(
+    item = await WorkItem.get(work_item_id)
+    run = await seed_run(
         session,
         kind=Build.kind,
         subject=item,
@@ -40,5 +40,5 @@ def seed_build_run(
         failure=failure,
         account_id=account_id or "system",
     )
-    session.flush()
+    await session.flush()
     return run

@@ -26,10 +26,10 @@ def _stub_config_fetch(monkeypatch):
     monkeypatch.setattr("druks.apps.config.fetch_file", _fetch)
 
 
-def _milestone_count(work_item_id, milestone):
+async def _milestone_count(work_item_id, milestone):
     from druks.database import db_session
 
-    return db_session().scalar(
+    return await db_session().scalar(
         select(func.count())
         .select_from(Event)
         .where(
@@ -60,14 +60,14 @@ async def _fire_closed(*, repo, pr_number, branch, tmp_path, merged=True, at=_RE
     await events.on_pull_request_closed()
 
 
-def _park_work_item(*, repo, pr_number, branch, state="parked", input_gate="review_work"):
+async def _park_work_item(*, repo, pr_number, branch, state="parked", input_gate="review_work"):
     """A work item with a build run paused on the operator (review_work) — the
     haunting case. Returns (work_item_id, run_id)."""
     from druks.database import db_session
 
-    item = make_test_work_item(repo=repo, title="Externally merged")
-    item.update(pr_number=pr_number, branch=branch)
-    run = seed_build_run(
+    item = await make_test_work_item(repo=repo, title="Externally merged")
+    await item.update(pr_number=pr_number, branch=branch)
+    run = await seed_build_run(
         db_session(),
         work_item_id=item.id,
         state=state,
@@ -76,29 +76,29 @@ def _park_work_item(*, repo, pr_number, branch, state="parked", input_gate="revi
     return item.id, run.id
 
 
-def _fresh_run(run_id):
+async def _fresh_run(run_id):
     # Workflow.cancel() never writes state — re-select before reading the derived one.
     from druks.database import db_session
 
-    db_session().expire_all()
-    return Run.get(run_id)
+    db_session().expunge_all()
+    return await Run.get(run_id)
 
 
 @pytest.mark.asyncio
 async def test_external_merge_stores_githubs_verdict_and_ends_involvement(druks_db, tmp_path):
     repo, pr_number, branch = "ClawHaven/acme-app", 42, "agent/eng-1"
-    work_item_id, run_id = _park_work_item(repo=repo, pr_number=pr_number, branch=branch)
+    work_item_id, run_id = await _park_work_item(repo=repo, pr_number=pr_number, branch=branch)
 
     await _fire_closed(repo=repo, pr_number=pr_number, branch=branch, tmp_path=tmp_path)
 
     # The verdict is stored with GitHub's own stamp, not druks's receipt time...
-    item = WorkItem.get(work_item_id)
+    item = await WorkItem.get(work_item_id)
     assert item.resolution == "merged"
     assert item.resolved_at == datetime(2026, 7, 25, 21, 59, 9, tzinfo=UTC)
     # ...announced as the milestone...
-    assert _milestone_count(work_item_id, "merged") == 1
+    assert await _milestone_count(work_item_id, "merged") == 1
     # ...and involvement ended: the parked build run is cancelled.
-    assert not _fresh_run(run_id).is_active
+    assert not (await _fresh_run(run_id)).is_active
 
 
 @pytest.mark.asyncio
@@ -107,7 +107,7 @@ async def test_merge_ships_but_leaves_a_running_build_to_converge(druks_db, tmp_
     druks's own merges too. A RUNNING run is left alone: it converges on its
     own (its merge step sees the closed PR)."""
     repo, pr_number, branch = "ClawHaven/acme-app", 43, "agent/eng-2"
-    work_item_id, run_id = _park_work_item(
+    work_item_id, run_id = await _park_work_item(
         repo=repo,
         pr_number=pr_number,
         branch=branch,
@@ -116,8 +116,8 @@ async def test_merge_ships_but_leaves_a_running_build_to_converge(druks_db, tmp_
 
     await _fire_closed(repo=repo, pr_number=pr_number, branch=branch, tmp_path=tmp_path)
 
-    assert Run.get(run_id).state == "running"  # not cancelled from under druks
-    assert _milestone_count(work_item_id, "merged") == 1
+    assert (await Run.get(run_id)).state == "running"  # not cancelled from under druks
+    assert await _milestone_count(work_item_id, "merged") == 1
 
 
 @pytest.mark.asyncio
@@ -126,7 +126,7 @@ async def test_a_redelivered_webhook_does_not_rewrite_the_verdict(druks_db, tmp_
     same path. The stored verdict is the first one; a contradicting redelivery
     neither overwrites it nor records a second milestone."""
     repo, pr_number, branch = "ClawHaven/acme-app", 44, "agent/eng-3"
-    work_item_id, _ = _park_work_item(repo=repo, pr_number=pr_number, branch=branch)
+    work_item_id, _ = await _park_work_item(repo=repo, pr_number=pr_number, branch=branch)
     await _fire_closed(repo=repo, pr_number=pr_number, branch=branch, tmp_path=tmp_path)
 
     await _fire_closed(
@@ -138,11 +138,11 @@ async def test_a_redelivered_webhook_does_not_rewrite_the_verdict(druks_db, tmp_
         at="2026-07-26T13:30:30Z",
     )
 
-    item = WorkItem.get(work_item_id)
+    item = await WorkItem.get(work_item_id)
     assert item.resolution == "merged"
     assert item.resolved_at == datetime(2026, 7, 25, 21, 59, 9, tzinfo=UTC)
-    assert _milestone_count(work_item_id, "merged") == 1
-    assert _milestone_count(work_item_id, "closed") == 0
+    assert await _milestone_count(work_item_id, "merged") == 1
+    assert await _milestone_count(work_item_id, "closed") == 0
 
 
 @pytest.mark.asyncio
@@ -151,7 +151,7 @@ async def test_closed_unmerged_stores_closed_and_ends_involvement(druks_db, tmp_
     the branch). Store GitHub's 'closed' and un-park, so the item leaves the
     active board for History rather than being ignored."""
     repo, pr_number, branch = "ClawHaven/acme-app", 45, "agent/eng-4"
-    work_item_id, run_id = _park_work_item(repo=repo, pr_number=pr_number, branch=branch)
+    work_item_id, run_id = await _park_work_item(repo=repo, pr_number=pr_number, branch=branch)
 
     await _fire_closed(
         repo=repo,
@@ -161,16 +161,16 @@ async def test_closed_unmerged_stores_closed_and_ends_involvement(druks_db, tmp_
         merged=False,
     )
 
-    assert WorkItem.get(work_item_id).resolution == "closed"
-    assert _milestone_count(work_item_id, "closed") == 1
-    assert _milestone_count(work_item_id, "merged") == 0
-    assert not _fresh_run(run_id).is_active
+    assert (await WorkItem.get(work_item_id)).resolution == "closed"
+    assert await _milestone_count(work_item_id, "closed") == 1
+    assert await _milestone_count(work_item_id, "merged") == 0
+    assert not (await _fresh_run(run_id)).is_active
 
 
 @pytest.mark.asyncio
 async def test_closed_unmerged_cancels_in_flight_run(druks_db, tmp_path):
     repo, pr_number, branch = "ClawHaven/acme-app", 46, "agent/eng-5"
-    work_item_id, run_id = _park_work_item(
+    work_item_id, run_id = await _park_work_item(
         repo=repo,
         pr_number=pr_number,
         branch=branch,
@@ -181,8 +181,8 @@ async def test_closed_unmerged_cancels_in_flight_run(druks_db, tmp_path):
         repo=repo, pr_number=pr_number, branch=branch, tmp_path=tmp_path, merged=False
     )
 
-    assert _fresh_run(run_id).state == "cancelled"
-    assert _milestone_count(work_item_id, "closed") == 1
+    assert (await _fresh_run(run_id)).state == "cancelled"
+    assert await _milestone_count(work_item_id, "closed") == 1
 
 
 @pytest.mark.asyncio
@@ -191,7 +191,7 @@ async def test_a_merge_after_a_failed_build_still_settles_the_item(druks_db, tmp
     nothing in the run lifecycle can announce the operator's later manual merge.
     GitHub's does, and the stored verdict takes the item to History."""
     repo, pr_number, branch = "ClawHaven/acme-app", 126, "agent/eng-760"
-    work_item_id, _ = _park_work_item(
+    work_item_id, _ = await _park_work_item(
         repo=repo,
         pr_number=pr_number,
         branch=branch,
@@ -200,10 +200,10 @@ async def test_a_merge_after_a_failed_build_still_settles_the_item(druks_db, tmp
 
     await _fire_closed(repo=repo, pr_number=pr_number, branch=branch, tmp_path=tmp_path)
 
-    item = WorkItem.get(work_item_id)
+    item = await WorkItem.get(work_item_id)
     assert item.resolution == "merged"
-    assert item.id not in {summary.id for summary in WorkItem.list_summaries(None)}
-    assert [row.id for row in WorkItem.list_handoff()] == [item.id]
+    assert item.id not in {summary.id for summary in await WorkItem.list_summaries(None)}
+    assert [row.id for row in await WorkItem.list_handoff()] == [item.id]
 
 
 @pytest.mark.asyncio
@@ -214,17 +214,17 @@ async def test_a_remerge_after_redispatch_records_a_fresh_verdict(druks_db, tmp_
     from druks.database import db_session as ds
 
     repo, pr_number, branch = "ClawHaven/acme-app", 77, "agent/eng-9"
-    work_item_id, _ = _park_work_item(repo=repo, pr_number=pr_number, branch=branch)
+    work_item_id, _ = await _park_work_item(repo=repo, pr_number=pr_number, branch=branch)
     await _fire_closed(repo=repo, pr_number=pr_number, branch=branch, tmp_path=tmp_path)
     # Redispatched: a newer build run owns the item, and its PR is a fresh one.
-    seed_build_run(ds(), work_item_id=work_item_id, state="running")
-    WorkItem.get(work_item_id).start_attempt()
-    WorkItem.get(work_item_id).update(pr_number=pr_number, branch=branch)
+    await seed_build_run(ds(), work_item_id=work_item_id, state="running")
+    await (await WorkItem.get(work_item_id)).start_attempt()
+    await (await WorkItem.get(work_item_id)).update(pr_number=pr_number, branch=branch)
 
     await _fire_closed(repo=repo, pr_number=pr_number, branch=branch, tmp_path=tmp_path)
 
-    assert WorkItem.get(work_item_id).resolution == "merged"
-    assert _milestone_count(work_item_id, "merged") == 2
+    assert (await WorkItem.get(work_item_id)).resolution == "merged"
+    assert await _milestone_count(work_item_id, "merged") == 2
 
 
 @pytest.mark.asyncio
@@ -243,7 +243,7 @@ async def test_external_close_returns_ticket_to_resting_pool(druks_db, tmp_path,
     monkeypatch.setattr(WorkItem, "set_ticket_status", _record)
 
     repo, pr_number, branch = "ClawHaven/acme-app", 91, "agent/eng-20"
-    work_item_id, _ = _park_work_item(repo=repo, pr_number=pr_number, branch=branch)
+    work_item_id, _ = await _park_work_item(repo=repo, pr_number=pr_number, branch=branch)
 
     await _fire_closed(
         repo=repo, pr_number=pr_number, branch=branch, tmp_path=tmp_path, merged=False
@@ -266,7 +266,7 @@ async def test_external_merge_pushes_done(druks_db, tmp_path, monkeypatch):
     monkeypatch.setattr(WorkItem, "set_ticket_status", _record)
 
     repo, pr_number, branch = "ClawHaven/acme-app", 92, "agent/eng-21"
-    work_item_id, _ = _park_work_item(repo=repo, pr_number=pr_number, branch=branch)
+    work_item_id, _ = await _park_work_item(repo=repo, pr_number=pr_number, branch=branch)
 
     await _fire_closed(
         repo=repo, pr_number=pr_number, branch=branch, tmp_path=tmp_path, merged=True
@@ -292,17 +292,24 @@ async def test_external_close_honors_delete_branch_policy(druks_db, tmp_path, mo
         deleted.append((repo, branch))
 
     monkeypatch.setattr(
-        build_models, "get_github_client", lambda: SimpleNamespace(delete_branch=_record)
+        build_models, "get_github_client", _async_value(SimpleNamespace(delete_branch=_record))
     )
 
     repo, pr_number, branch = "ClawHaven/acme-app", 93, "agent/eng-22"
-    _park_work_item(repo=repo, pr_number=pr_number, branch=branch)
+    await _park_work_item(repo=repo, pr_number=pr_number, branch=branch)
 
     await _fire_closed(
         repo=repo, pr_number=pr_number, branch=branch, tmp_path=tmp_path, merged=False
     )
 
     assert deleted == []
+
+
+def _async_value(value):
+    async def get():
+        return value
+
+    return get
 
 
 @pytest.mark.asyncio
@@ -315,11 +322,11 @@ async def test_external_close_deletes_branch_by_default(druks_db, tmp_path, monk
         deleted.append((repo, branch))
 
     monkeypatch.setattr(
-        build_models, "get_github_client", lambda: SimpleNamespace(delete_branch=_record)
+        build_models, "get_github_client", _async_value(SimpleNamespace(delete_branch=_record))
     )
 
     repo, pr_number, branch = "ClawHaven/acme-app", 94, "agent/eng-23"
-    _park_work_item(repo=repo, pr_number=pr_number, branch=branch)
+    await _park_work_item(repo=repo, pr_number=pr_number, branch=branch)
 
     await _fire_closed(
         repo=repo, pr_number=pr_number, branch=branch, tmp_path=tmp_path, merged=False
@@ -358,7 +365,7 @@ async def test_external_close_survives_policy_resolution_failure(druks_db, tmp_p
     monkeypatch.setattr(WorkItem, "set_ticket_status", _record)
 
     repo, pr_number, branch = "ClawHaven/acme-app", 95, "agent/eng-24"
-    work_item_id, _ = _park_work_item(repo=repo, pr_number=pr_number, branch=branch)
+    work_item_id, _ = await _park_work_item(repo=repo, pr_number=pr_number, branch=branch)
 
     await _fire_closed(
         repo=repo, pr_number=pr_number, branch=branch, tmp_path=tmp_path, merged=False
@@ -366,7 +373,7 @@ async def test_external_close_survives_policy_resolution_failure(druks_db, tmp_p
 
     assert deleted == []  # cleanup skipped when policy can't be resolved
     assert pushed == [TicketStatus.BACKLOG]  # ticket still reset
-    assert WorkItem.get(work_item_id).resolution == "closed"
+    assert (await WorkItem.get(work_item_id)).resolution == "closed"
 
 
 @pytest.mark.asyncio
@@ -377,13 +384,13 @@ async def test_stale_close_after_redispatch_spares_the_new_run(druks_db, tmp_pat
     from druks.database import db_session as ds
 
     repo, pr_a, branch_a = "ClawHaven/acme-app", 61, "agent/eng-old"
-    item = make_test_work_item(repo=repo, title="Re-dispatched")
-    item.update(pr_number=pr_a, branch=branch_a)
+    item = await make_test_work_item(repo=repo, title="Re-dispatched")
+    await item.update(pr_number=pr_a, branch=branch_a)
     # Re-dispatch: a new run takes over and claims the item.
-    new_run = seed_build_run(ds(), work_item_id=item.id, state="running")
-    item.start_attempt()
+    new_run = await seed_build_run(ds(), work_item_id=item.id, state="running")
+    await item.start_attempt()
 
     await _fire_closed(repo=repo, pr_number=pr_a, branch=branch_a, tmp_path=tmp_path, merged=False)
 
-    assert _fresh_run(new_run.id).state == "running"  # the live attempt is untouched
+    assert (await _fresh_run(new_run.id)).state == "running"  # the live attempt is untouched
     assert item.resolution is None

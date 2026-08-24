@@ -81,11 +81,15 @@ def _workspace_kwargs_stubs(monkeypatch: pytest.MonkeyPatch, *, review_actor):
 
     monkeypatch.setattr(host_mod.Sandbox, "write_secret", _noop)
     monkeypatch.setattr(host_mod.Sandbox, "exec", fake_exec)
-    monkeypatch.setattr(
-        "druks.contrib.ship.workflows.get_github_client",
-        lambda: SimpleNamespace(token_for_repo=_token),
-    )
-    monkeypatch.setattr("druks.contrib.ship.workflows.get_review_actor", review_actor)
+
+    async def _github_client():
+        return SimpleNamespace(token_for_repo=_token)
+
+    async def _review_actor():
+        return review_actor()
+
+    monkeypatch.setattr("druks.contrib.ship.workflows.get_github_client", _github_client)
+    monkeypatch.setattr("druks.contrib.ship.workflows.get_review_actor", _review_actor)
     monkeypatch.setattr("druks.sandbox.repo.ensure", fake_ensure)
     return ensured, execs
 
@@ -164,17 +168,16 @@ def _dispatched_by(monkeypatch: pytest.MonkeyPatch, username: str | None) -> Non
     async def _bot_git_author() -> tuple[str, str]:
         return "app[bot]", "1+app[bot]@users.noreply.github.com"
 
-    monkeypatch.setattr(
-        workspace_mod,
-        "get_github_client",
-        lambda: SimpleNamespace(get_bot_git_author=_bot_git_author),
-    )
+    async def _client():
+        return SimpleNamespace(get_bot_git_author=_bot_git_author)
+
+    monkeypatch.setattr(workspace_mod, "get_github_client", _client)
     account = SimpleNamespace(username=username) if username else None
-    monkeypatch.setattr(
-        workspace_mod,
-        "Account",
-        SimpleNamespace(get=lambda _id, *, exclude_system: account),
-    )
+
+    async def _get_account(_id, *, exclude_system):
+        return account
+
+    monkeypatch.setattr(workspace_mod, "Account", SimpleNamespace(get=_get_account))
 
 
 async def test_set_git_identity_stamps_the_workspace_repo(

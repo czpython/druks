@@ -67,13 +67,13 @@ async def complete_connection(
         # provider-verified email; get_or_create is atomic, so concurrent
         # completions of the same email converge, and a true different-email
         # race surfaces as the none-mode multi-operator refusal.
-        resolved = account or Account.get_or_create(completed.provider_email)
+        resolved = account or await Account.get_or_create(completed.provider_email)
     # Runs with no actor execute as the fallback account; claim the slot when
     # none is set yet.
-    settings = UserSettings.get()
+    settings = await UserSettings.get()
     if not settings.fallback_account_id:
-        settings.set_fallback_account(resolved.id)
-    connection = HarnessConnection.connect(
+        await settings.set_fallback_account(resolved.id)
+    connection = await HarnessConnection.connect(
         harness=harness.name,
         account=resolved,
         payload=completed.payload,
@@ -85,16 +85,16 @@ async def complete_connection(
     # writer on this event loop, and nothing past the point of durability may
     # depend on another database read.
     response = AccountResponse.model_validate(resolved)
-    db_session().commit()
+    await db_session().commit()
     try:
         # Fresh picker right after connect; fetch failures are tagged inside.
         # The single-use flow is already spent, so trouble here — including a
         # database that vanished under the refresh — only logs.
-        await HarnessSettings.require(harness.name).refresh_models(connection)
+        await (await HarnessSettings.require(harness.name)).refresh_models(connection)
     except Exception:
         logging.getLogger(__name__).exception("Model refresh after connect failed")
         with suppress(Exception):
-            db_session().rollback()
+            await db_session().rollback()
     return response
 
 
@@ -103,8 +103,8 @@ async def disconnect_harness(
     name: str, account: Account = Depends(current_session_account)
 ) -> HarnessResponse:
     harness = _resolve_harness(name)
-    connection = HarnessConnection.get_for_account(harness.name, account.id)
+    connection = await HarnessConnection.get_for_account(harness.name, account.id)
     if connection:
         # Only the requesting account's own connection — never another's.
-        connection.delete()
-    return HarnessResponse.from_row(HarnessSettings.require(harness.name), None, account)
+        await connection.delete()
+    return HarnessResponse.from_row(await HarnessSettings.require(harness.name), None, account)

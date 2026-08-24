@@ -60,7 +60,7 @@ async def github_manifest_callback(request: Request, code: str = "") -> HTMLResp
         )
     app = converted.json()
     slug = app["slug"]
-    ServiceIdentity.connect(
+    await ServiceIdentity.connect(
         GITHUB,
         identity={"app_id": str(app["id"]), "slug": slug},
         secrets={"private_key": app["pem"], "webhook_secret": app["webhook_secret"]},

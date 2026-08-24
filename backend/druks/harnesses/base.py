@@ -102,7 +102,7 @@ class Harness(ABC):
         self.sandbox = sandbox
 
     @abstractmethod
-    def build_invocation(self, **kwargs: object) -> AgentInvocation:
+    async def build_invocation(self, **kwargs: object) -> AgentInvocation:
         """Assemble this CLI's full invocation (argv, stdin, credentials,
         env) for one prompt. Pure — never touches the live sandbox; the
         sandbox executes the returned invocation."""
@@ -123,7 +123,7 @@ class Harness(ABC):
                     raise error(message)
             raise exceptions.HarnessError(message)
 
-    def get_manifest(
+    async def get_manifest(
         self,
         *,
         mcp_servers: tuple["McpServer", ...],
@@ -150,7 +150,7 @@ class Harness(ABC):
         # token_present reads the delivered env: a server's bearer env var is
         # set iff its token was found at delivery, for a static or an
         # app-minted token alike.
-        declared = {server["name"]: server for server in mcp_models.McpServer.list_enabled()}
+        declared = {server["name"]: server for server in await mcp_models.McpServer.list_enabled()}
         delivered_by_name = {server.name: server for server in mcp_servers}
         mcp = []
         for name in sorted(declared.keys() | delivered_by_name.keys()):
@@ -173,7 +173,7 @@ class Harness(ABC):
             "model": self.model or "",
             "harness": self.name,
             "mcp_servers": mcp,
-            "skills_delivered": sorted(skill.name for skill in Skill.list_delivered(skills)),
+            "skills_delivered": sorted(skill.name for skill in await Skill.list_delivered(skills)),
         }
         canonical = json.dumps(capability, sort_keys=True, separators=(",", ":"))
         return {
@@ -196,10 +196,10 @@ class Harness(ABC):
         return call_id or str(uuid.uuid4())
 
     @classmethod
-    def get_credentials(cls) -> dict:
+    async def get_credentials(cls) -> dict:
         """The fallback account's credential dict — for callers with no
         selection."""
-        row = HarnessConnection.get_for_account(cls.name, fallback=True)
+        row = await HarnessConnection.get_for_account(cls.name, fallback=True)
         data = dict(row.payload) if row else None
         if data:
             return data
@@ -208,12 +208,12 @@ class Harness(ABC):
         )
 
     @classmethod
-    def render_credentials_file(cls, connection_id: str | None = None) -> str:
+    async def render_credentials_file(cls, connection_id: str | None = None) -> str:
         """The selected connection's payload, read fresh at push time; a
         vanished row fails the call rather than render another account's."""
         if not connection_id:
-            return json.dumps(cls.get_credentials())
-        row = HarnessConnection.get(connection_id)
+            return json.dumps(await cls.get_credentials())
+        row = await HarnessConnection.get(connection_id)
         if row:
             return json.dumps(dict(row.payload))
         raise exceptions.HarnessNotConnectedError(
@@ -319,7 +319,7 @@ class Harness(ABC):
         reports ``locked`` without touching the provider — two concurrent
         grants on one refresh lineage trip the provider's reuse detection."""
         moment = now or _utc_now()
-        row = HarnessConnection.reload(connection_id)
+        row = await HarnessConnection.reload(connection_id)
         if not row:
             return RotationResult(
                 cls.name, "failed", error="no_credentials", connection_id=connection_id
@@ -342,7 +342,7 @@ class Harness(ABC):
         try:
             # Re-read after winning the lock: the previous holder may have
             # advanced this lineage (or deleted the row) after our first read.
-            row = HarnessConnection.reload(connection_id)
+            row = await HarnessConnection.reload(connection_id)
             if not row:
                 return RotationResult(
                     cls.name, "failed", error="no_credentials", connection_id=connection_id
@@ -365,8 +365,8 @@ class Harness(ABC):
                     # presenting it again can never succeed. Drop only this
                     # credential so the connection reads as disconnected — the
                     # UI shows Reconnect and the next tick has no row to hammer.
-                    row.delete()
-                    db_session().commit()
+                    await row.delete()
+                    await db_session().commit()
                     logger.warning(
                         "%s connection %s auto-disconnected after invalid_grant; "
                         "reconnect to restore",
@@ -379,13 +379,13 @@ class Harness(ABC):
                     cls.name, "failed", error="bad_response", connection_id=row.id
                 )
 
-            row.update_payload(data, expires_at=new_expiry)
+            await row.update_payload(data, expires_at=new_expiry)
             # The grant is externally anchored — the provider may have killed
             # the old refresh token the moment it issued this one — so the new
             # lineage must be committed before the lock releases; deferring to
             # the step's own commit would let a concurrent refresher take the
             # freed lock and re-present the superseded token.
-            db_session().commit()
+            await db_session().commit()
             return RotationResult(
                 cls.name, "refreshed", expires_at=new_expiry, connection_id=row.id
             )
@@ -474,7 +474,7 @@ class Harness(ABC):
             parsed = await cls.fetch_usage(connection)
         except Exception:  # noqa: BLE001 — a crashed scrape records an error row, not a failed refresh
             logger.warning("usage fetch crashed for %s", cls.name, exc_info=True)
-            UsageScrape(
+            await UsageScrape(
                 harness=cls.name,
                 account_id=account_id,
                 parse_ok=False,
@@ -502,7 +502,7 @@ class Harness(ABC):
             snapshot.five_hour_percent_left = parsed.five_hour.percent_left
             snapshot.five_hour_resets_at = parsed.five_hour.resets_at
         snapshot.weeks = _WEEKLY_WINDOWS.dump_python(parsed.weeks, mode="json")
-        snapshot.save()
+        await snapshot.save()
         return {
             "harness": cls.name,
             "account_id": account_id,

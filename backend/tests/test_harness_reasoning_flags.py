@@ -7,11 +7,11 @@ _CODEX_MODEL = CodexHarness.models[0]
 
 
 @pytest.fixture(autouse=True)
-def _connected_harnesses(druks_db):
+async def _connected_harnesses(druks_db):
     # build_invocation renders each credential bundle from the DB row and
     # raises when that harness isn't connected.
-    connect_harness(ClaudeHarness, {"claudeAiOauth": {"accessToken": "t"}})
-    connect_harness(CodexHarness, {"tokens": {"access_token": "t"}})
+    await connect_harness(ClaudeHarness, {"claudeAiOauth": {"accessToken": "t"}})
+    await connect_harness(CodexHarness, {"tokens": {"access_token": "t"}})
 
 
 def _sandbox_config():
@@ -29,7 +29,7 @@ def _sandbox_config():
     )
 
 
-def test_claude_build_invocation_carries_every_flag():
+async def test_claude_build_invocation_carries_every_flag():
     """Flag-drop guard: moving argv construction is exactly how
     CLI flags got silently lost before — assert the full surface."""
     import shlex
@@ -38,7 +38,7 @@ def test_claude_build_invocation_carries_every_flag():
 
     schema = {"type": "object"}
     server = McpServer(name="github", url="https://api.example/mcp/", bearer_token_env_var="TOK")
-    inv = ClaudeHarness(
+    inv = await ClaudeHarness(
         model="claude-x",
         fast_mode=True,
         effort="high",
@@ -90,12 +90,12 @@ def test_claude_build_invocation_carries_every_flag():
     assert inv.extra_artifact_filenames == ("debug.log", "session.jsonl")
 
 
-def test_codex_build_invocation_carries_every_flag():
+async def test_codex_build_invocation_carries_every_flag():
     """Flag-drop guard, codex side."""
     from druks.sandbox.datastructures import McpServer
 
     server = McpServer(name="github", url="https://api.example/mcp/", bearer_token_env_var="TOK")
-    inv = CodexHarness(
+    inv = await CodexHarness(
         model=_CODEX_MODEL,
         fast_mode=True,
         effort="high",

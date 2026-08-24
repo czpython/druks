@@ -18,8 +18,8 @@ class ReviewActor:
     mode: Literal["approve", "comment"]
 
 
-def get_review_actor() -> ReviewActor:
-    settings = Review.settings()
+async def get_review_actor() -> ReviewActor:
+    settings = await Review.settings()
     if settings.app_id and settings.private_key:
         # Only a complete pair selects the distinct identity — a half-configured
         # one (flagged by clean()) still borrows the operator client below.
@@ -31,4 +31,4 @@ def get_review_actor() -> ReviewActor:
             ),
             mode="approve",
         )
-    return ReviewActor(client=get_github_client(), mode="comment")
+    return ReviewActor(client=await get_github_client(), mode="comment")

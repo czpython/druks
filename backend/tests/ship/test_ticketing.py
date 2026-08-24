@@ -18,19 +18,23 @@ from ship.factories import make_test_work_item
 
 def _pin_ship_settings(monkeypatch, **values):
     settings = Ship.Settings(**values)
-    monkeypatch.setattr(Ship, "settings", classmethod(lambda cls: settings))
+
+    async def _settings(cls):
+        return settings
+
+    monkeypatch.setattr(Ship, "settings", classmethod(_settings))
 
 
-def _connect_linear():
-    return ServiceIdentity.connect(
+async def _connect_linear():
+    return await ServiceIdentity.connect(
         "linear",
         identity={"actor": "druks", "workspace": "Acme"},
         secrets={"api_key": "lin_secret", "webhook_secret": "lin-hook"},
     )
 
 
-def _connect_jira():
-    return ServiceIdentity.connect(
+async def _connect_jira():
+    return await ServiceIdentity.connect(
         "jira",
         identity={"base_url": "https://jira.test", "email": "a@b.com", "display_name": "druks"},
         secrets={"api_token": "jira_secret", "webhook_secret": "jira-hook"},
@@ -40,15 +44,15 @@ def _connect_jira():
 # --- Ship.get_tracker: the selected tracker ----------------------------------
 
 
-def test_tracker_builds_linear_from_the_service_row(druks_db, monkeypatch):
-    _connect_linear()
+async def test_tracker_builds_linear_from_the_service_row(druks_db, monkeypatch):
+    await _connect_linear()
     _pin_ship_settings(
         monkeypatch,
         linear_resting_status="Backlog",
         linear_trigger_status="To Agent",
     )
 
-    tracker = Ship.get_tracker("linear")
+    tracker = await Ship.get_tracker("linear")
 
     assert isinstance(tracker, Linear)
     assert tracker._client.api_key == "lin_secret"
@@ -56,8 +60,8 @@ def test_tracker_builds_linear_from_the_service_row(druks_db, monkeypatch):
     assert tracker._status_names[TicketStatus.TRIGGER] == "To Agent"
 
 
-def test_tracker_builds_jira_from_the_service_row(druks_db, monkeypatch):
-    _connect_jira()
+async def test_tracker_builds_jira_from_the_service_row(druks_db, monkeypatch):
+    await _connect_jira()
     _pin_ship_settings(
         monkeypatch,
         tracker="jira",
@@ -65,7 +69,7 @@ def test_tracker_builds_jira_from_the_service_row(druks_db, monkeypatch):
         jira_trigger_status="To Agent",
     )
 
-    tracker = Ship.get_tracker("jira")
+    tracker = await Ship.get_tracker("jira")
 
     assert isinstance(tracker, Jira)
     assert tracker._client.base_url == "https://jira.test"
@@ -73,30 +77,30 @@ def test_tracker_builds_jira_from_the_service_row(druks_db, monkeypatch):
     assert tracker._status_names[TicketStatus.TRIGGER] == "To Agent"
 
 
-def test_tracker_is_none_for_github_and_a_disconnected_identity(druks_db, monkeypatch):
-    _connect_linear()
+async def test_tracker_is_none_for_github_and_a_disconnected_identity(druks_db, monkeypatch):
+    await _connect_linear()
     _pin_ship_settings(monkeypatch)
 
-    assert not Ship.get_tracker("github")
-    assert not Ship.get_tracker("jira")
+    assert not await Ship.get_tracker("github")
+    assert not await Ship.get_tracker("jira")
 
     _pin_ship_settings(monkeypatch, tracker="jira")
-    assert not Ship.get_tracker("jira")
-    assert not Ship.get_tracker("linear")
+    assert not await Ship.get_tracker("jira")
+    assert not await Ship.get_tracker("linear")
 
 
-def test_tracker_ignores_a_nonchosen_source_with_a_connected_identity(druks_db, monkeypatch):
-    _connect_linear()
+async def test_tracker_ignores_a_nonchosen_source_with_a_connected_identity(druks_db, monkeypatch):
+    await _connect_linear()
     _pin_ship_settings(monkeypatch, tracker="jira")
 
-    assert not Ship.get_tracker("linear")
+    assert not await Ship.get_tracker("linear")
 
 
-def test_empty_resting_status_leaves_backlog_unmapped(druks_db, monkeypatch):
-    _connect_linear()
+async def test_empty_resting_status_leaves_backlog_unmapped(druks_db, monkeypatch):
+    await _connect_linear()
     _pin_ship_settings(monkeypatch, linear_resting_status="")
 
-    tracker = Ship.get_tracker("linear")
+    tracker = await Ship.get_tracker("linear")
 
     assert TicketStatus.BACKLOG not in tracker._status_names
 
@@ -174,29 +178,29 @@ async def test_jira_verify_rejects_bad_credentials(monkeypatch):
 # --- The tracker doctor check -------------------------------------------------
 
 
-def test_tracker_check_accepts_trackerless_by_choice(monkeypatch):
+async def test_tracker_check_accepts_trackerless_by_choice(monkeypatch):
     _pin_ship_settings(monkeypatch, tracker="none")
 
-    result = check_tracker_identity()
+    result = await check_tracker_identity()
 
     assert result.ok
     assert "choice" in result.detail
 
 
-def test_tracker_check_reports_a_selected_connected_tracker(druks_db, monkeypatch):
-    _connect_linear()
+async def test_tracker_check_reports_a_selected_connected_tracker(druks_db, monkeypatch):
+    await _connect_linear()
     _pin_ship_settings(monkeypatch)
 
-    result = check_tracker_identity()
+    result = await check_tracker_identity()
 
     assert result.ok
     assert "linear" in result.detail
 
 
-def test_tracker_check_pends_a_selected_unconnected_tracker(druks_db, monkeypatch):
+async def test_tracker_check_pends_a_selected_unconnected_tracker(druks_db, monkeypatch):
     _pin_ship_settings(monkeypatch, tracker="jira")
 
-    result = check_tracker_identity()
+    result = await check_tracker_identity()
 
     assert not result.ok
     assert result.pending
@@ -345,6 +349,13 @@ async def test_linear_client_translates_a_null_issue_to_unknown_ticket():
 # --- WorkItem.set_ticket_status: the status-push consumer -------------------
 
 
+def _tracker_stub(fake):
+    async def get_tracker(cls, source=None):
+        return fake
+
+    return classmethod(get_tracker)
+
+
 class _FakeTracker:
     known_exceptions: tuple = ()
 
@@ -366,9 +377,11 @@ class _FakeTracker:
 
 @pytest.mark.asyncio
 async def test_ticket_state_pushes_status(druks_db, monkeypatch):
-    item = make_test_work_item(repo="acme/widget", source="linear", ticket_key="ACME-1", title="t")
+    item = await make_test_work_item(
+        repo="acme/widget", source="linear", ticket_key="ACME-1", title="t"
+    )
     fake = _FakeTracker()
-    monkeypatch.setattr(Ship, "get_tracker", classmethod(lambda cls, source=None: fake))
+    monkeypatch.setattr(Ship, "get_tracker", _tracker_stub(fake))
 
     await item.set_ticket_status(TicketStatus.DONE)
 
@@ -377,14 +390,18 @@ async def test_ticket_state_pushes_status(druks_db, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_ticket_state_skips_non_tracker_source(druks_db):
-    item = make_test_work_item(repo="acme/widget", source="github", ticket_key="#5", title="t")
+    item = await make_test_work_item(
+        repo="acme/widget", source="github", ticket_key="#5", title="t"
+    )
     # github has no tracker — a no-op that must not raise.
     await item.set_ticket_status(TicketStatus.DONE)
 
 
 @pytest.mark.asyncio
 async def test_ticket_state_closes_on_failure(druks_db, monkeypatch):
-    item = make_test_work_item(repo="acme/widget", source="linear", ticket_key="ACME-2", title="t")
+    item = await make_test_work_item(
+        repo="acme/widget", source="linear", ticket_key="ACME-2", title="t"
+    )
 
     class _Boom(_FakeTracker):
         known_exceptions = (LinearAPIError,)
@@ -393,7 +410,7 @@ async def test_ticket_state_closes_on_failure(druks_db, monkeypatch):
             raise LinearAPIError("boom")
 
     boom = _Boom()
-    monkeypatch.setattr(Ship, "get_tracker", classmethod(lambda cls, source=None: boom))
+    monkeypatch.setattr(Ship, "get_tracker", _tracker_stub(boom))
 
     await item.set_ticket_status(TicketStatus.DONE)
 

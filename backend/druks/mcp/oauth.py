@@ -25,15 +25,15 @@ def _http() -> httpx.AsyncClient:
     return httpx.AsyncClient(timeout=30.0, follow_redirects=True)
 
 
-def get_connection(name: str, account_id: str) -> OauthConnection | None:
+async def get_connection(name: str, account_id: str) -> OauthConnection | None:
     # One live connection per (server, account) — MCP's policy over the
     # shared table. Revoked rows stay behind as history.
-    rows = OauthConnection.list_for_account(grant_provider(name), account_id)
+    rows = await OauthConnection.list_for_account(grant_provider(name), account_id)
     return rows[0] if rows else None
 
 
-def list_connections(name: str) -> list[OauthConnection]:
-    return OauthConnection.list_for_provider(grant_provider(name))
+async def list_connections(name: str) -> list[OauthConnection]:
+    return await OauthConnection.list_for_provider(grant_provider(name))
 
 
 def _origin(url: str) -> str:
@@ -229,7 +229,7 @@ async def complete_connect(*, state: str, code: str) -> str:
     # fill the mode if unclaimed. A concurrent claim wins the row lock; the
     # select reads whichever choice landed, and the grant goes under it.
     session = db_session()
-    session.execute(
+    await session.execute(
         pg_insert(McpServer)
         .values(
             name=name,
@@ -238,14 +238,14 @@ async def complete_connect(*, state: str, code: str) -> str:
         )
         .on_conflict_do_nothing(index_elements=["name"])
     )
-    session.execute(
+    await session.execute(
         update(McpServer)
         .where(McpServer.name == name, McpServer.identity_mode.is_(None))
         .values(identity_mode=pending["identity_mode"])
     )
-    server = session.scalars(select(McpServer).where(McpServer.name == name)).one()
+    server = (await session.scalars(select(McpServer).where(McpServer.name == name))).one()
     account_id = get_grant_account(server.identity_mode, pending["account_id"])
-    McpClientRegistration.store(
+    await McpClientRegistration.store(
         server_id=server.id,
         account_id=account_id,
         token_endpoint=pending["token_endpoint"],
@@ -255,13 +255,15 @@ async def complete_connect(*, state: str, code: str) -> str:
     identity = {}
     if pending["userinfo_endpoint"]:
         identity = await fetch_identity(pending["userinfo_endpoint"], tokens["access_token"])
-    connection = get_connection(name, account_id)
+    connection = await get_connection(name, account_id)
     if connection:
-        connection.reconnect(refresh_token=tokens["refresh_token"], scopes=[], identity=identity)
+        await connection.reconnect(
+            refresh_token=tokens["refresh_token"], scopes=[], identity=identity
+        )
         # A reconsent's stale cached token must not serve until its TTL runs out.
         await evict_access_token(name, account_id)
     else:
-        OauthConnection.create(
+        await OauthConnection.create(
             provider=grant_provider(name),
             account_id=account_id,
             refresh_token=tokens["refresh_token"],
@@ -272,27 +274,27 @@ async def complete_connect(*, state: str, code: str) -> str:
 
 
 async def evict_access_token(name: str, account_id: str) -> None:
-    connection = get_connection(name, account_id)
+    connection = await get_connection(name, account_id)
     if connection:
         await OauthClient(provider=grant_provider(name)).evict_access_token(connection.id)
 
 
 async def disconnect(name: str, account_id: str, *, reason: str = "user") -> None:
-    connection = get_connection(name, account_id)
+    connection = await get_connection(name, account_id)
     if connection:
         await OauthClient(provider=grant_provider(name)).disconnect(connection, reason=reason)
-    registration = McpClientRegistration.get_for_account(name, account_id)
+    registration = await McpClientRegistration.get_for_account(name, account_id)
     if registration:
-        registration.delete()
+        await registration.delete()
 
 
 async def get_access_token(name: str, account_id: str) -> str:
     """The delivery-side token for a connected server, served by the shared
     engine from this server's grant — delivery never ships a server the agent
     can't authenticate to."""
-    connection = get_connection(name, account_id)
-    registration = McpClientRegistration.get_for_account(name, account_id)
-    server = McpServer.get_for_name(name)
+    connection = await get_connection(name, account_id)
+    registration = await McpClientRegistration.get_for_account(name, account_id)
+    server = await McpServer.get_for_name(name)
     if not connection or not registration or not server:
         raise MissingGrantError(name, account_id)
     client = OauthClient(

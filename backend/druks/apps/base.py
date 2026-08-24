@@ -1,6 +1,6 @@
 import importlib.util
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Coroutine
 from pathlib import Path
 from types import ModuleType
 from typing import TYPE_CHECKING, Annotated, Any, ClassVar
@@ -32,8 +32,8 @@ if TYPE_CHECKING:
     from druks.workflows import Workflow
 
     # A check the app owns returns a verdict on one of its own preconditions
-    # using the same ``CheckResult`` shape as a core check.
-    Check = Callable[[], CheckResult]
+    # using the same ``CheckResult`` shape as a core check; sync or async.
+    Check = Callable[[], "CheckResult | Coroutine[Any, Any, CheckResult]"]
 
 # An app name keys the ``/api/<name>`` namespace, the ``alembic_version_<name>``
 # table, the ``<name>_`` table prefix, and ``app:<name>:`` settings — so it must
@@ -135,14 +135,14 @@ class App:
             cls.settings_model = declared
 
     @classmethod
-    def settings(cls) -> AppSettings:
+    async def settings(cls) -> AppSettings:
         """The app's settings, resolved through the override store keyed by app
         name. Raises if the app declares no ``Settings``."""
         model = cls.settings_model
         if not model:
             raise TypeError(f"app {cls.name!r} declares no Settings")
         values = {
-            name: SettingsOverride.app_setting(
+            name: await SettingsOverride.app_setting(
                 cls.name,
                 name,
                 field.default,
@@ -153,7 +153,7 @@ class App:
         return model.model_validate(values)
 
     @classmethod
-    def override_setting(cls, field: str, value: Any) -> None:
+    async def override_setting(cls, field: str, value: Any) -> None:
         """An operator's override for one declared setting; ``None`` clears it back
         to the declared default. Raises ``ValueError`` so the API layer can 422 it."""
         model = cls.settings_model
@@ -161,8 +161,8 @@ class App:
             raise ValueError(f"Unknown {cls.name} setting {field!r}")
         if value is not None:
             value = coerce_setting_value(model, field, value)
-            validate_setting_override(model, cls.settings().model_dump(), field, value)
-        SettingsOverride.set_app_setting(
+            validate_setting_override(model, (await cls.settings()).model_dump(), field, value)
+        await SettingsOverride.set_app_setting(
             cls.name,
             field,
             value,
@@ -345,7 +345,7 @@ class App:
                 raise HTTPException(
                     status.HTTP_400_BAD_REQUEST, f"limit must be in 1..{max_limit}."
                 )
-            call = AgentCall.get(call_id)
+            call = await AgentCall.get(call_id)
             if call.live_status == AgentCallStatus.RUNNING:
                 response.headers["Cache-Control"] = "no-store"
             else:
@@ -367,7 +367,7 @@ class App:
 
         @router.get("/files", response_model=AgentCallFiles, response_model_by_alias=True)
         async def list_files(call_id: str) -> AgentCallFiles:
-            return reads.get_agent_call_files(call_id)
+            return await reads.get_agent_call_files(call_id)
 
         @router.get("/files/{file_name:path}")
         async def get_file(
@@ -375,7 +375,7 @@ class App:
             file_name: str,
             disposition: Literal["inline", "attachment"] = "inline",
         ) -> FileResponse:
-            call = AgentCall.get(call_id)
+            call = await AgentCall.get(call_id)
             resolved = call.get_file_path(file_name)
             if not resolved:
                 raise HTTPException(status.HTTP_404_NOT_FOUND, "File not found for this call.")
@@ -411,22 +411,22 @@ class App:
         subject_type = subject_class.subject_type
         router = APIRouter(prefix=f"/{subject_type}", tags=[f"{cls.name}:{subject_type}"])
 
-        def board(account_id: str | None) -> SubjectList:
+        async def board(account_id: str | None) -> SubjectList:
             return SubjectList(
                 rows=[
                     SubjectRow(
                         summary=summary,
-                        status=reads.get_subject_status(subject_type, summary.id),
+                        status=await reads.get_subject_status(subject_type, summary.id),
                     )
-                    for summary in subject_class.list_summaries(account_id)
+                    for summary in await subject_class.list_summaries(account_id)
                 ]
             )
 
         async def subject_response(subject_id: str) -> SubjectResponse | None:
-            subject = subject_class.get_for_subject_id(subject_id)
+            subject = await subject_class.get_for_subject_id(subject_id)
             if subject is None:
                 return
-            return reads.get_subject_response(
+            return await reads.get_subject_response(
                 subject_type,
                 subject_id,
                 summary=subject.get_summary(),
@@ -435,7 +435,7 @@ class App:
 
         @router.get("", response_model=SubjectList, response_model_by_alias=True)
         async def list_subjects() -> SubjectList:
-            return board(current_account_id.get())
+            return await board(current_account_id.get())
 
         # ``/stream`` before ``/{subject_id}`` so the literal path wins over the id matcher.
         @router.get("/stream", response_class=StreamingResponse)
@@ -444,8 +444,8 @@ class App:
             account_id = current_account_id.get()
 
             async def snapshot() -> SubjectList:
-                with session_scope(engine):
-                    return board(account_id)
+                async with session_scope(engine):
+                    return await board(account_id)
 
             return StreamingResponse(
                 stream(snapshot), media_type="text/event-stream", headers=SSE_HEADERS
@@ -457,7 +457,7 @@ class App:
         @router.get("/{subject_id:path}/stream", response_class=StreamingResponse)
         async def stream_subject(subject_id: str, engine: EngineDep) -> StreamingResponse:
             async def snapshot() -> SubjectResponse | None:
-                with session_scope(engine):
+                async with session_scope(engine):
                     return await subject_response(subject_id)
 
             return StreamingResponse(
@@ -483,7 +483,7 @@ class App:
         boot."""
 
     @classmethod
-    def record_event(
+    async def record_event(
         cls,
         *,
         type: str,
@@ -494,7 +494,7 @@ class App:
         app automatically. Apps record through here so the ``Event`` model
         stays a platform internal. ``type`` is the milestone's own word ("merged") —
         the feed reads it as one, so an app writes no rendering."""
-        Event.emit(
+        await Event.emit(
             type=type,
             subject=subject.identity if subject else None,
             label=subject.label if subject else None,

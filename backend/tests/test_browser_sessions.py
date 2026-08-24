@@ -46,7 +46,9 @@ class FakeLoginWindow:
         cls.opened.append(session.name)
 
 
-def test_declared_sessions_list_without_a_row_and_the_pane_read_writes_nothing(client, night_watch):
+async def test_declared_sessions_list_without_a_row_and_the_pane_read_writes_nothing(
+    client, night_watch
+):
     listed = client.get("/api/browser-sessions").json()
 
     assert [entry["name"] for entry in listed] == ["night_watch.acme", "night_watch.docs"]
@@ -56,11 +58,11 @@ def test_declared_sessions_list_without_a_row_and_the_pane_read_writes_nothing(c
     assert entry["payloadFormat"] is None
     assert entry["createdAt"] is None
     assert entry["site"] == "acme.example"
-    assert not StoredBrowserSession.list_all()
+    assert not await StoredBrowserSession.list_all()
 
 
-def test_leftover_rows_list_as_undeclared_and_refuse_the_login_window(client, night_watch):
-    StoredBrowserSession.get_or_create(
+async def test_leftover_rows_list_as_undeclared_and_refuse_the_login_window(client, night_watch):
+    await StoredBrowserSession.get_or_create(
         name="gone_ext.old",
         payload_format=BrowserSessionPayloadFormat.PROFILE_DIR,
         site="gone.example",
@@ -75,10 +77,10 @@ def test_leftover_rows_list_as_undeclared_and_refuse_the_login_window(client, ni
 
     assert client.post("/api/browser-sessions/gone_ext.old/login-window").status_code == 404
     assert client.delete("/api/browser-sessions/gone_ext.old").status_code == 204
-    assert not StoredBrowserSession.list_all()
+    assert not await StoredBrowserSession.list_all()
 
 
-def test_anonymous_sessions_list_as_anonymous_and_refuse_login_and_state(
+async def test_anonymous_sessions_list_as_anonymous_and_refuse_login_and_state(
     client, browser_session_declarations
 ):
     class Critic:
@@ -96,10 +98,12 @@ def test_anonymous_sessions_list_as_anonymous_and_refuse_login_and_state(
         "/api/browser-sessions/critic.target/state?payloadFormat=storage_state", content=b"x"
     )
     assert uploaded.status_code == 409
-    assert not StoredBrowserSession.list_all()
+    assert not await StoredBrowserSession.list_all()
 
 
-def test_opening_the_login_window_materializes_the_declared_row(client, night_watch, monkeypatch):
+async def test_opening_the_login_window_materializes_the_declared_row(
+    client, night_watch, monkeypatch
+):
     monkeypatch.setattr(routes, "LoginWindow", FakeLoginWindow)
     monkeypatch.setattr(FakeLoginWindow, "opened", [])
 
@@ -107,14 +111,14 @@ def test_opening_the_login_window_materializes_the_declared_row(client, night_wa
 
     assert opened.status_code == 204
     assert FakeLoginWindow.opened == ["night_watch.acme"]
-    row = StoredBrowserSession.get_for_name("night_watch.acme")
+    row = await StoredBrowserSession.get_for_name("night_watch.acme")
     assert row.status == BrowserSessionStatus.NEEDS_LOGIN.value
     assert row.site == "acme.example"
 
     assert client.post("/api/browser-sessions/nobody.home/login-window").status_code == 404
 
 
-def test_import_materializes_the_row_survives_restart_and_delete_removes_it(
+async def test_import_materializes_the_row_survives_restart_and_delete_removes_it(
     client, night_watch, tmp_path, monkeypatch
 ):
     payload = b'{"cookies":[{"name":"auth_token","value":"secret"}],"origins":[]}'
@@ -129,15 +133,13 @@ def test_import_materializes_the_row_survives_restart_and_delete_removes_it(
     assert listed["night_watch.acme"]["payloadFormat"] == BrowserSessionPayloadFormat.STORAGE_STATE
     assert listed["night_watch.acme"]["lastRefreshedAt"]
 
-    row = StoredBrowserSession.get_for_name("night_watch.acme")
+    row = await StoredBrowserSession.get_for_name("night_watch.acme")
     stored = (
-        db_session()
-        .execute(
+        await db_session().execute(
             text("SELECT payload FROM browser_sessions WHERE id = :id"),
             {"id": row.id},
         )
-        .scalar_one()
-    )
+    ).scalar_one()
     assert payload not in bytes(stored)
     with pytest.raises(SecretDecryptError):
         secret_utils.decrypt(bytes(stored), "another_table.payload")
@@ -150,8 +152,8 @@ def test_import_materializes_the_row_survives_restart_and_delete_removes_it(
         with pytest.raises(SecretDecryptError):
             row.payload.decrypt()
 
-    db_session().expire_all()
-    restarted = StoredBrowserSession.get_for_name("night_watch.acme")
+    db_session().expunge_all()
+    restarted = await StoredBrowserSession.get_for_name("night_watch.acme")
     assert restarted.payload.decrypt() == payload
 
     undeclared = client.put(
@@ -161,7 +163,7 @@ def test_import_materializes_the_row_survives_restart_and_delete_removes_it(
 
     deleted = client.delete("/api/browser-sessions/night_watch.acme")
     assert deleted.status_code == 204
-    assert not StoredBrowserSession.list_all()
+    assert not await StoredBrowserSession.list_all()
 
 
 def test_upload_rejects_payloads_above_the_cap(client, night_watch, monkeypatch):
@@ -190,14 +192,14 @@ def test_upload_warns_at_the_product_threshold(client, night_watch, monkeypatch,
     assert "received a 5-byte payload" in caplog.text
 
 
-def test_bearer_pat_reads_sessions_but_cannot_mutate_them(tmp_path, druks_db, night_watch):
+async def test_bearer_pat_reads_sessions_but_cannot_mutate_them(tmp_path, druks_db, night_watch):
     settings = make_settings(
         tmp_path,
         identity={"mode": "header", "header": "X-Edge-Email"},
     )
-    account = Account.get_or_create("op@example.com")
-    _, token = PersonalAccessToken.create(account_id=account.id, name="agent")
-    db_session().commit()
+    account = await Account.get_or_create("op@example.com")
+    _, token = await PersonalAccessToken.create(account_id=account.id, name="agent")
+    await db_session().commit()
     headers = {"Authorization": f"Bearer {token}"}
 
     with TestClient(configure_app_for_test(settings=settings, authenticated=False)) as pat_client:

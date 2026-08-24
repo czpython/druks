@@ -27,8 +27,8 @@ def _data_dir(tmp_path, monkeypatch):
 
 
 @pytest.fixture
-def account(druks_db):
-    return Account.get_or_create("op@example.com")
+async def account(druks_db):
+    return await Account.get_or_create("op@example.com")
 
 
 @pytest.fixture
@@ -50,8 +50,8 @@ def _in_app_ask(questions=()):
     }
 
 
-def _park(druks_db, note, *, ask=None):
-    run = seed_note_run(
+async def _park(druks_db, note, *, ask=None):
+    run = await seed_note_run(
         druks_db,
         note=note,
         state="parked",
@@ -59,7 +59,7 @@ def _park(druks_db, note, *, ask=None):
         input_request=ask if ask is not None else _in_app_ask(),
     )
     run.input_requested_at = datetime.now(UTC)
-    druks_db.flush()
+    await druks_db.flush()
     return run
 
 
@@ -102,12 +102,12 @@ def test_read_slice_missing_file_is_an_empty_eof(tmp_path: Path):
 # ---- gates ----------------------------------------------------------------
 
 
-def test_get_gate_returns_the_ask_and_parked_at(druks_db):
-    item = make_test_note()
+async def test_get_gate_returns_the_ask_and_parked_at(druks_db):
+    item = await make_test_note()
     question = {"id": "q1", "prompt": "Which db?", "options": [{"id": "pg", "label": "Postgres"}]}
-    run = _park(druks_db, item, ask=_in_app_ask([question]))
+    run = await _park(druks_db, item, ask=_in_app_ask([question]))
 
-    view = services.get_gate(run.id)
+    view = await services.get_gate(run.id)
 
     assert view.run == run.id
     assert view.gate == "review"
@@ -116,15 +116,15 @@ def test_get_gate_returns_the_ask_and_parked_at(druks_db):
     assert view.ask["questions"][0]["prompt"] == "Which db?"
 
 
-def test_get_gate_serves_the_artifact(druks_db):
-    item = make_test_note()
-    run = _park(druks_db, item)
-    call = seed_call(druks_db, run, "generate_plan")
-    Artifact.record(
+async def test_get_gate_serves_the_artifact(druks_db):
+    item = await make_test_note()
+    run = await _park(druks_db, item)
+    call = await seed_call(druks_db, run, "generate_plan")
+    await Artifact.record(
         call_dir=call.call_dir, call_id=call.id, kind="markdown", title="Plan", content="x" * 10240
     )
 
-    view = services.get_gate(run.id)
+    view = await services.get_gate(run.id)
 
     assert view.artifact is not None
     assert view.artifact.call_id == call.id
@@ -132,23 +132,23 @@ def test_get_gate_serves_the_artifact(druks_db):
     assert len(view.artifact.content.encode()) <= 4096
 
 
-def test_get_gate_refuses_when_not_parked_or_external(druks_db):
+async def test_get_gate_refuses_when_not_parked_or_external(druks_db):
     with pytest.raises(RunNotFound):
-        services.get_gate("no-such-run")
+        await services.get_gate("no-such-run")
 
-    item = make_test_note()
-    running = seed_note_run(druks_db, note=item, state="running")
+    item = await make_test_note()
+    running = await seed_note_run(druks_db, note=item, state="running")
     with pytest.raises(exceptions.GateNotOpen):
-        services.get_gate(running.id)
+        await services.get_gate(running.id)
 
-    external_item = make_test_note()
-    external = _park(
+    external_item = await make_test_note()
+    external = await _park(
         druks_db,
         external_item,
         ask={"presentation": "external", "label": "Answer on the ticket"},
     )
     with pytest.raises(exceptions.GateNotAnswerable):
-        services.get_gate(external.id)
+        await services.get_gate(external.id)
 
 
 # The answered and already-answered happy paths are pinned at both doors —
@@ -162,15 +162,15 @@ async def test_answer_gate_error_taxonomy(druks_db, resume_spy):
             "no-such-run", parked_at=datetime.now(UTC), control="approve", answers={}, note=""
         )
 
-    item = make_test_note()
-    finished = seed_note_run(druks_db, note=item, state="finished")
+    item = await make_test_note()
+    finished = await seed_note_run(druks_db, note=item, state="finished")
     with pytest.raises(exceptions.GateNotOpen):
         await services.answer_gate(
             finished.id, parked_at=datetime.now(UTC), control="approve", answers={}, note=""
         )
 
-    parked_item = make_test_note()
-    run = _park(druks_db, parked_item)
+    parked_item = await make_test_note()
+    run = await _park(druks_db, parked_item)
     with pytest.raises(exceptions.GateRoundStale):
         await services.answer_gate(
             run.id,
@@ -184,8 +184,8 @@ async def test_answer_gate_error_taxonomy(druks_db, resume_spy):
             run.id, parked_at=run.input_requested_at, control="merge", answers={}, note=""
         )
 
-    external_item = make_test_note()
-    external = _park(
+    external_item = await make_test_note()
+    external = await _park(
         druks_db,
         external_item,
         ask={"presentation": "external", "label": "Answer on the ticket"},
@@ -204,30 +204,30 @@ async def test_answer_gate_error_taxonomy(druks_db, resume_spy):
 # ---- agent calls ----------------------------------------------------------
 
 
-def test_agent_call_get_returns_the_call_or_raises(druks_db):
-    run = seed_note_run(druks_db)
-    call = seed_call(druks_db, run, "summarize")
+async def test_agent_call_get_returns_the_call_or_raises(druks_db):
+    run = await seed_note_run(druks_db)
+    call = await seed_call(druks_db, run, "summarize")
 
-    assert AgentCall.get(call.id) == call
+    assert (await AgentCall.get(call.id)).id == call.id
     with pytest.raises(AgentCallNotFound) as error:
-        AgentCall.get("missing")
+        await AgentCall.get("missing")
     assert str(error.value) == "No agent call missing."
 
 
-def test_get_agent_call_serves_bounded_tails(druks_db):
+async def test_get_agent_call_serves_bounded_tails(druks_db):
     from conftest import finish_agent_run, seed_note_agent_run
 
-    call = seed_note_agent_run()
+    call = await seed_note_agent_run()
     call_dir = call.call_dir
     call_dir.mkdir(parents=True, exist_ok=True)
     (call_dir / "stdout.jsonl").write_bytes(b"s" * 20480)
     (call_dir / "stderr.log").write_bytes(b"e" * 10240)
-    finish_agent_run(call, last_error="boom " * 100)
-    Artifact.record(
+    await finish_agent_run(call, last_error="boom " * 100)
+    await Artifact.record(
         call_dir=call_dir, call_id=call.id, kind="markdown", title="Out", content="a" * 10240
     )
 
-    detail = services.get_agent_call(call.id)
+    detail = await services.get_agent_call(call.id)
 
     assert detail.run == call.run_id
     assert detail.call.id == call.id
@@ -238,22 +238,22 @@ def test_get_agent_call_serves_bounded_tails(druks_db):
     assert detail.artifact.content == "a" * 4096
 
     with pytest.raises(AgentCallNotFound):
-        services.get_agent_call("no-such-call")
+        await services.get_agent_call("no-such-call")
 
 
-def test_get_agent_call_without_files_reads_empty(druks_db):
+async def test_get_agent_call_without_files_reads_empty(druks_db):
     from conftest import seed_note_agent_run
 
-    call = seed_note_agent_run()
+    call = await seed_note_agent_run()
 
-    detail = services.get_agent_call(call.id)
+    detail = await services.get_agent_call(call.id)
 
     assert detail.transcript == ""
     assert detail.stderr == ""
     assert detail.artifact is None
 
 
-def test_artifact_content_omits_an_unknown_call(druks_db):
+async def test_artifact_content_omits_an_unknown_call(druks_db):
     artifact = Artifact(
         agent_call_id="missing",
         kind="markdown",
@@ -261,27 +261,27 @@ def test_artifact_content_omits_an_unknown_call(druks_db):
         path="artifact.md",
     )
 
-    assert services._artifact_content(artifact) is None
+    assert await services._artifact_content(artifact) is None
 
 
 # ---- cancel ---------------------------------------------------------------
 
 
 async def test_cancel_run_paths(druks_db):
-    item = make_test_note()
-    run = seed_note_run(druks_db, note=item, state="running")
+    item = await make_test_note()
+    run = await seed_note_run(druks_db, note=item, state="running")
 
     result = await runs.cancel_run(run.id, reason="stuck")
     assert result.result == "cancelled"
-    druks_db.expire_all()
-    assert Run.get(run.id).state == "cancelled"
-    assert Run.get(run.id).failure == "stuck"
+    druks_db.expunge_all()
+    assert (await Run.get(run.id)).state == "cancelled"
+    assert (await Run.get(run.id)).failure == "stuck"
 
     again = await runs.cancel_run(run.id, reason="stuck")
     assert again.result == "already_cancelled"
 
-    finished_item = make_test_note()
-    finished = seed_note_run(druks_db, note=finished_item, state="finished")
+    finished_item = await make_test_note()
+    finished = await seed_note_run(druks_db, note=finished_item, state="finished")
     with pytest.raises(RunNotActive):
         await runs.cancel_run(finished.id, reason="late")
 
@@ -290,8 +290,8 @@ async def test_cancel_run_paths(druks_db):
 
 
 async def test_run_retry_forks_from_the_failed_step(druks_db, monkeypatch):
-    item = make_test_note()
-    run = seed_note_run(druks_db, note=item, state="failed")
+    item = await make_test_note()
+    run = await seed_note_run(druks_db, note=item, state="failed")
     retried_run_id = "retried-run"
     steps = [
         {"function_id": 2, "error": None},
@@ -302,7 +302,7 @@ async def test_run_retry_forks_from_the_failed_step(druks_db, monkeypatch):
     events = []
 
     async def _fork(workflow_id, start_step, *, queue_name):
-        seed_dbos_status(
+        await seed_dbos_status(
             druks_db,
             retried_run_id,
             "scheduled",
@@ -323,8 +323,8 @@ async def test_run_retry_forks_from_the_failed_step(druks_db, monkeypatch):
     assert result == retried_run_id
     list_steps.assert_awaited_once_with(run.id)
     fork.assert_awaited_once_with(run.id, 8, queue_name=run_queue.name)
-    druks_db.expire_all()
-    retried = Run.get(retried_run_id)
+    druks_db.expunge_all()
+    retried = await Run.get(retried_run_id)
     assert retried.kind == run.kind
     assert retried.account_id == run.account_id
     assert retried.state == "scheduled"
@@ -343,7 +343,7 @@ async def test_run_retry_forks_from_the_failed_step(druks_db, monkeypatch):
 
 
 async def test_run_retry_restarts_at_step_one_without_a_failed_checkpoint(druks_db, monkeypatch):
-    run = seed_note_run(druks_db, state="failed")
+    run = await seed_note_run(druks_db, state="failed")
     list_steps = mock.AsyncMock(return_value=[{"function_id": 2, "error": None}])
     fork = mock.AsyncMock(return_value=SimpleNamespace(workflow_id="clean-retry"))
     monkeypatch.setattr("dbos.DBOS.list_workflow_steps_async", list_steps)
@@ -356,7 +356,7 @@ async def test_run_retry_restarts_at_step_one_without_a_failed_checkpoint(druks_
 
 
 async def test_retry_run_refuses_a_non_failed_run(druks_db, monkeypatch):
-    run = seed_note_run(druks_db, state="finished")
+    run = await seed_note_run(druks_db, state="finished")
     retry = mock.AsyncMock()
     monkeypatch.setattr(Run, "retry", retry)
 
@@ -369,9 +369,9 @@ async def test_retry_run_refuses_a_non_failed_run(druks_db, monkeypatch):
 
 
 async def test_retry_run_refuses_a_busy_subject(druks_db, monkeypatch):
-    item = make_test_note()
-    failed = seed_note_run(druks_db, note=item, state="failed")
-    active = seed_note_run(druks_db, note=item, state="running")
+    item = await make_test_note()
+    failed = await seed_note_run(druks_db, note=item, state="failed")
+    active = await seed_note_run(druks_db, note=item, state="running")
     retry = mock.AsyncMock()
     monkeypatch.setattr(Run, "retry", retry)
 
@@ -384,7 +384,7 @@ async def test_retry_run_refuses_a_busy_subject(druks_db, monkeypatch):
 
 
 async def test_retry_run_retries_a_failed_run(druks_db, monkeypatch):
-    run = seed_note_run(druks_db, state="failed")
+    run = await seed_note_run(druks_db, state="failed")
     retry = mock.AsyncMock(return_value="retried-run")
     monkeypatch.setattr(Run, "retry", retry)
 
@@ -405,13 +405,13 @@ async def test_retry_run_refuses_a_missing_run(druks_db):
 # ---- usage ----------------------------------------------------------------
 
 
-def test_get_usage_is_a_bounded_pure_read(druks_db, account):
+async def test_get_usage_is_a_bounded_pure_read(druks_db, account):
     from druks.durable.models import AgentCall
     from druks.testing import seed_run
     from druks_field_notes.workflows import Summarize
 
     now = datetime.now(UTC)
-    run = seed_run(druks_db, kind=Summarize.kind, run_id="run-usage")
+    run = await seed_run(druks_db, kind=Summarize.kind, run_id="run-usage")
     for index in range(30):
         druks_db.add(
             AgentCall(
@@ -427,7 +427,7 @@ def test_get_usage_is_a_bounded_pure_read(druks_db, account):
             )
         )
     for tick in range(40):
-        UsageScrape(
+        await UsageScrape(
             harness="claude",
             account_id=account.id,
             scraped_at=now - timedelta(minutes=5 * tick),
@@ -448,7 +448,8 @@ def test_get_usage_is_a_bounded_pure_read(druks_db, account):
             ],
         ).save()
 
-    usage = services.get_usage(account)
+    await druks_db.flush()
+    usage = await services.get_usage(account)
 
     assert usage.runs_today == 30
     assert usage.spend_today_usd == pytest.approx(15.0)
@@ -465,13 +466,13 @@ def test_get_usage_is_a_bounded_pure_read(druks_db, account):
     assert len(usage.model_dump_json(by_alias=True).encode()) <= 4 * 1024
 
 
-def test_get_usage_only_counts_the_callers_spend(druks_db, account):
+async def test_get_usage_only_counts_the_callers_spend(druks_db, account):
     from druks.durable.models import AgentCall
     from druks.testing import seed_run
     from druks_field_notes.workflows import Summarize
 
-    other = Account.get_or_create("other@example.com")
-    run = seed_run(druks_db, kind=Summarize.kind, run_id="run-usage-other")
+    other = await Account.get_or_create("other@example.com")
+    run = await seed_run(druks_db, kind=Summarize.kind, run_id="run-usage-other")
     druks_db.add(
         AgentCall(
             run_id=run.id,
@@ -484,9 +485,9 @@ def test_get_usage_only_counts_the_callers_spend(druks_db, account):
             cost_usd=9.0,
         )
     )
-    druks_db.flush()
+    await druks_db.flush()
 
-    usage = services.get_usage(account)
+    usage = await services.get_usage(account)
 
     assert usage.runs_today == 0
     assert usage.spend_today_usd == 0.0

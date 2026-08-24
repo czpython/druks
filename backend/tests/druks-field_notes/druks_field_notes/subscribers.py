@@ -10,4 +10,4 @@ from druks_field_notes.workflows import Summarize
 async def note_summarized(*, subject: Note, **_: object) -> None:
     # A finished summarize is a milestone worth its own feed row. The workflow
     # lifecycle is the trigger; the app only reacts.
-    FieldNotes.record_event(type="summarized", subject=subject)
+    await FieldNotes.record_event(type="summarized", subject=subject)

@@ -27,14 +27,14 @@ external_router = APIRouter(prefix="/_external/notifications", tags=["notificati
 
 @router.get("/destinations", response_model=list[DestinationResponse])
 async def list_destinations() -> list[Destination]:
-    return Destination.list_all()
+    return await Destination.list_all()
 
 
 @router.post("/destinations", response_model=DestinationResponse)
 async def create_destination(body: CreateDestinationRequest) -> Destination:
     if not body.name.strip():
         raise HTTPException(status_code=422, detail="Destination needs a name.")
-    if Destination.get_for_name(body.name):
+    if await Destination.get_for_name(body.name):
         raise HTTPException(
             status_code=409, detail=f"Destination {body.name!r} already exists; remove it first."
         )
@@ -45,39 +45,39 @@ async def create_destination(body: CreateDestinationRequest) -> Destination:
         raise HTTPException(
             status_code=422, detail="URL is not a recognized notification destination."
         )
-    return Destination.create(name=body.name, kind=body.kind.value, url=url)
+    return await Destination.create(name=body.name, kind=body.kind.value, url=url)
 
 
 @router.patch("/destinations/{destination_id}", response_model=DestinationResponse)
 async def set_destination_enabled(
     destination_id: str, is_enabled: Annotated[bool, Body(embed=True)]
 ) -> Destination:
-    destination = Destination.get(destination_id)
+    destination = await Destination.get(destination_id)
     if not destination:
         raise HTTPException(status_code=404, detail=f"Destination {destination_id!r} not found")
     destination.is_enabled = is_enabled
-    db_session().flush()
+    await db_session().flush()
     return destination
 
 
 @router.delete("/destinations/{destination_id}", status_code=204)
 async def delete_destination(destination_id: str) -> None:
-    destination = Destination.get(destination_id)
+    destination = await Destination.get(destination_id)
     if not destination:
         raise HTTPException(status_code=404, detail=f"Destination {destination_id!r} not found")
-    destination.delete()
+    await destination.delete()
 
 
 @router.get("", response_model=list[NotificationResponse])
 async def list_notifications(limit: int = Query(50, ge=1, le=500)) -> list[Notification]:
-    return Notification.list_recent(limit)
+    return await Notification.list_recent(limit)
 
 
 # Declared after the /destinations routes: declaration order is match order,
 # so the id match can't swallow them.
 @router.get("/{notification_id}", response_model=NotificationResponse)
 async def get_notification(notification_id: str) -> Notification:
-    notification = Notification.get(notification_id)
+    notification = await Notification.get(notification_id)
     if not notification:
         raise HTTPException(status_code=404, detail=f"Notification {notification_id!r} not found")
     return notification

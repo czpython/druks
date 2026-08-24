@@ -25,25 +25,25 @@ class ServiceIdentity(Base):
     connected_at: Mapped[datetime]
 
     @classmethod
-    def get(cls, service: str) -> "ServiceIdentity":
-        if identity := db_session().get(cls, service):
+    async def get(cls, service: str) -> "ServiceIdentity":
+        if identity := await db_session().get(cls, service):
             return identity
         raise ServiceNotConnectedError(service)
 
     @classmethod
-    def connect(
+    async def connect(
         cls, service: str, *, identity: dict[str, Any], secrets: dict[str, str]
     ) -> "ServiceIdentity":
         # The caller verifies the credentials against the service first; this
         # trusts what it is given and overwrites whatever was connected.
-        row = db_session().get(cls, service)
+        row = await db_session().get(cls, service)
         if not row:
             row = cls(service=service)
             db_session().add(row)
         row.identity = identity
         row.secrets = secrets
         row.connected_at = Base.utc_now()
-        db_session().flush()
+        await db_session().flush()
         return row
 
 
@@ -77,11 +77,11 @@ class OauthConnection(Base, Uuid7Pk):
     revoked_reason: Mapped[str] = mapped_column(default="")
 
     @classmethod
-    def get(cls, connection_id: str) -> "OauthConnection | None":
-        return db_session().get(cls, connection_id)
+    async def get(cls, connection_id: str) -> "OauthConnection | None":
+        return await db_session().get(cls, connection_id)
 
     @classmethod
-    def create(
+    async def create(
         cls,
         *,
         provider: str,
@@ -98,13 +98,13 @@ class OauthConnection(Base, Uuid7Pk):
             identity=identity or {},
         )
         db_session().add(connection)
-        db_session().flush()
+        await db_session().flush()
         return connection
 
     @classmethod
-    def list_for_account(cls, provider: str, account_id: str) -> "list[OauthConnection]":
+    async def list_for_account(cls, provider: str, account_id: str) -> "list[OauthConnection]":
         return list(
-            db_session().scalars(
+            await db_session().scalars(
                 select(cls)
                 .where(
                     cls.provider == provider,
@@ -116,13 +116,12 @@ class OauthConnection(Base, Uuid7Pk):
         )
 
     @classmethod
-    def get_for_identity(
+    async def get_for_identity(
         cls, provider: str, account_id: str, key: str, value: Any
     ) -> "OauthConnection | None":
         # A live match wins; among revoked matches, the latest consent wins.
         return (
-            db_session()
-            .scalars(
+            await db_session().scalars(
                 select(cls)
                 .where(
                     cls.provider == provider,
@@ -132,29 +131,28 @@ class OauthConnection(Base, Uuid7Pk):
                 .order_by(cls.revoked_at.is_(None).desc(), cls.connected_at.desc())
                 .limit(1)
             )
-            .first()
-        )
+        ).first()
 
     @classmethod
-    def list_for_provider(
+    async def list_for_provider(
         cls, provider: str, *, include_revoked: bool = False
     ) -> "list[OauthConnection]":
         query = select(cls).where(cls.provider == provider)
         if not include_revoked:
             query = query.where(cls.revoked_at.is_(None))
-        return list(db_session().scalars(query))
+        return list(await db_session().scalars(query))
 
     @classmethod
-    def list_owned_by(cls, account_id: str | None) -> "list[OauthConnection]":
+    async def list_owned_by(cls, account_id: str | None) -> "list[OauthConnection]":
         # The audit read: everything this account ever authorized, revoked
         # rows included.
         return list(
-            db_session().scalars(
+            await db_session().scalars(
                 select(cls).where(cls.account_id == account_id).order_by(cls.connected_at)
             )
         )
 
-    def reconnect(
+    async def reconnect(
         self, *, refresh_token: str, scopes: list[str], identity: dict[str, Any] | None = None
     ) -> None:
         self.refresh_token = refresh_token
@@ -164,45 +162,43 @@ class OauthConnection(Base, Uuid7Pk):
         self.connected_at = Base.utc_now()
         self.revoked_at = None
         self.revoked_reason = ""
-        db_session().flush()
+        await db_session().flush()
 
-    def revoke(self, reason: str) -> None:
+    async def revoke(self, reason: str) -> None:
         # The consent's facts survive; only the secret is cleared. A second
         # revoke keeps the first stamp.
         self.revoked_at = self.revoked_at or Base.utc_now()
         self.revoked_reason = self.revoked_reason or reason
         self.refresh_token = ""
-        db_session().flush()
+        await db_session().flush()
 
-    def _load_refresh_token(self) -> str:
+    async def _load_refresh_token(self) -> str:
         # Under the refresh lock: another process may have rotated and
         # committed, and this transaction may already hold the row —
         # populate_existing re-reads it past the identity map.
         fresh = (
-            db_session()
-            .scalars(
+            await db_session().scalars(
                 select(OauthConnection)
                 .where(OauthConnection.id == self.id)
                 .execution_options(populate_existing=True)
             )
-            .one()
-        )
+        ).one()
         if fresh.revoked_at:
             raise OauthRefreshError(self.provider, "the connection was revoked mid-refresh")
         return fresh.refresh_token.decrypt()
 
-    def _save_refresh_token(self, rotated: str) -> None:
+    async def _save_refresh_token(self, rotated: str) -> None:
         # The provider invalidated the old token the moment it rotated, so
         # the write commits on its own session, never the enclosing
         # transaction — a step that rolls back later must not brick the
         # connection.
-        with get_session(db_session().get_bind()) as session:
-            stored = session.execute(
+        async with get_session(db_session().bind) as session:
+            stored = await session.execute(
                 update(OauthConnection)
                 .where(OauthConnection.id == self.id, OauthConnection.revoked_at.is_(None))
                 .values(refresh_token=rotated)
             )
-            session.commit()
+            await session.commit()
         if not stored.rowcount:
             # A revoke landed mid-refresh. Nothing secret outlives the
             # consent at rest, so the rotated token is not stored.
