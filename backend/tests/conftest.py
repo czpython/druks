@@ -110,7 +110,7 @@ def browser_session_declarations():
 # opt out and reset themselves. Everything else — including the durable *unit*
 # tests that use the fixtures here — gets transaction rollback.
 _OWN_DATABASE_MODULES = {
-    "test_build_durable",
+    "test_durable_async_database_loop",
     "test_durable_sdk",
     "test_notifications_durable",
     "test_harness_login_persistence",
