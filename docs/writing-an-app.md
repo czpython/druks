@@ -57,6 +57,7 @@ package modules:
 | --- | --- |
 | `app.py` | `App` subclass, agents, app settings |
 | `workflows.py` | durable `Workflow` and `Gate` subclasses |
+| `tasks.py` | `@task` background functions; add when needed |
 | `models.py` | SQLAlchemy models with `<name>_` table names, `StoredSubject` among them |
 | `contracts.py` | `AgentOutput` contracts |
 | `schemas.py` | HTTP responses and subject summaries |
@@ -67,7 +68,7 @@ package modules:
 | `migrations/versions/` | this distribution's Alembic history |
 | `dist/` | optional built frontend module, mounted inside the shell (served under `/app/<name>`) |
 
-Druks recursively discovers leaf modules named `workflows`, `routes`,
+Druks recursively discovers leaf modules named `workflows`, `tasks`, `routes`,
 `subscribers`, `webhooks`, and `services`. A capability hidden in `workflow.py` is not
 discovered. Ordinary names such as `policy.py` and `workspace.py` have no import
 side effect unless a discovered module imports them.
@@ -239,6 +240,35 @@ class Engage(Workflow):
 A scheduled `dispatch()` fires with no arguments, so it must be nullary. Druks
 evaluates cron expressions in the operator timezone. The dashboard can retune or
 disable a declared schedule but cannot invent a new workflow schedule.
+
+### Background tasks
+
+A `Workflow` is the right home for work you want on a subject's timeline — a run
+with agent calls, gates, and operator-tunable settings. Plumbing that wants none
+of that — periodic maintenance, a fire-and-forget side effect — is a `task`:
+
+```python
+from druks.workflows import task
+
+
+@task(every="*/15 * * * *")
+async def refresh_tokens() -> None:
+    ...
+
+
+@task(retries=4)
+async def sync_labels(pull_request_id: int) -> None:
+    ...
+```
+
+Call `await sync_labels.enqueue(pull_request_id=7)` to run one durably in the
+background — from a route, a subscriber, or a workflow body (never inside a
+`@step`). Like a workflow, the signature is the wire contract: parameters are
+annotated, and `enqueue()` validates them and stores JSON. A task keeps no run
+row and never reaches the timeline; it has no subject, gate, or operator
+settings, and it cannot make agent calls. `every=` runs it on a fixed UTC cadence
+the code owns — a workflow's `every=` is the one an operator can retune.
+`retries=` sets retries after the first attempt, both here and on `@step`.
 
 A workflow may declare its own operator settings:
 

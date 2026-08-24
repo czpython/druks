@@ -3,13 +3,13 @@ from druks.apps import loader as apps_loader
 from druks.apps.exceptions import MalformedApp
 from druks.apps.loader import register_workflow_package, resolve_workflow_app
 from druks.apps.registry import workflows
-from druks.core.workflows import RefreshTokens
+from druks.core.tasks import refresh_tokens
 from druks.durable.enums import RunState
 from druks.durable.exceptions import WorkflowError
 from druks.durable.models import Run
 from druks.durable.schemas import get_display_label
 from druks.events.models import Event
-from druks.workflows import Gate, Workflow, _log_run_event, step
+from druks.workflows import Gate, Workflow, _log_run_event, step, task
 from druks_field_notes.models import Note
 
 
@@ -60,6 +60,39 @@ def test_resolution_matches_package_boundaries():
         resolve_workflow_app("alpha_pkg_sibling.workflows")
 
 
+def _task_in(module: str, body, name: str | None = None):
+    body.__module__ = module
+    if name:
+        body.__name__ = name
+    return task(body)
+
+
+def test_duplicate_task_name_is_rejected():
+    # DBOS only warns on a duplicate durable name and lets the last registration
+    # win — enqueues of one task would silently run the other's body.
+    register_workflow_package("collide_pkg", None)
+
+    async def clash() -> None: ...
+
+    _task_in("collide_pkg.tasks", clash)
+
+    async def other() -> None: ...
+
+    with pytest.raises(WorkflowError, match="durable identity"):
+        _task_in("collide_pkg.nested.tasks", other, name="clash")
+
+
+def test_task_input_is_typed():
+    # The signature is the wire contract — enqueue validates against it and
+    # dumps to JSON, so an unannotated parameter has no wire shape.
+    register_workflow_package("untyped_pkg", None)
+
+    async def send(recipient) -> None: ...  # noqa: ANN001
+
+    with pytest.raises(WorkflowError, match="needs a type"):
+        _task_in("untyped_pkg.tasks", send)
+
+
 def test_unregistered_module_fails_at_class_definition():
     # The error carries the invariant: load through the loader, or register first.
     with pytest.raises(WorkflowError, match="druks.apps.loader"):
@@ -98,12 +131,10 @@ def test_none_owned_package_keeps_bare_kinds():
 
 
 def test_in_tree_identities_are_stable():
-    # These kinds are durable identities (DBOS workflow names, settings keys,
-    # dedup prefixes, step-name prefixes) — byte-for-byte pins.
+    # These are durable DBOS names — byte-for-byte pins.
     assert workflows.get("ship.build") is not None
     assert workflows.get("ship.profile") is not None
-    assert RefreshTokens.kind == "core.refresh_tokens"
-    assert (workflows.get("ship.build").app, RefreshTokens.app) == ("ship", "core")
+    assert refresh_tokens.name == "core.refresh_tokens"
 
 
 def test_steps_capture_the_namespaced_kind():

@@ -11,6 +11,7 @@ from types import ModuleType
 from urllib.parse import urlparse
 
 import httpx
+from dbos._dbos import _get_or_create_dbos_registry
 from drukbox_sdk import SandboxAPI
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
@@ -28,7 +29,7 @@ from .services.models import ServiceIdentity
 from .settings import Settings, load_settings
 from .user_settings.models import UserSettings
 from .webhooks.base import Webhook
-from .workflows import Workflow
+from .workflows import Workflow, _Task
 
 
 @dataclass(frozen=True)
@@ -330,6 +331,8 @@ def _defined_capability(module: ModuleType) -> tuple[str, str] | None:
     for value in vars(module).values():
         if isinstance(value, type) and issubclass(value, Workflow) and value.__module__ == name:
             return "workflows", value.kind
+        if isinstance(value, _Task) and value.module == name:
+            return "tasks", value.name
         if (
             isinstance(value, type)
             and issubclass(value, Webhook)
@@ -369,6 +372,8 @@ def check_capability_modules(settings: Settings) -> CheckResult:
         # an off-canon module below (which self-registers too) can't mask a stray.
         autodiscover(package)
         discovered = {role: set(registry._items) for role, registry in by_role.items()}
+        # Tasks register straight into DBOS's own map — it is their registry.
+        discovered["tasks"] = set(_get_or_create_dbos_registry().workflow_info_map)
         pkg = importlib.import_module(package)
         for info in pkgutil.walk_packages(pkg.__path__, prefix=f"{package}."):
             if info.ispkg or info.name.rsplit(".", 1)[-1] in _ROLES:

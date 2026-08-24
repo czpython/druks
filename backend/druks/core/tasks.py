@@ -5,35 +5,29 @@ from druks.harnesses.models import HarnessConnection
 from druks.harnesses.registry import get_harnesses
 from druks.sandbox import gate
 from druks.user_settings.models import HarnessSettings, UserSettings
-from druks.workflows import Workflow
+from druks.workflows import task
 
 logger = logging.getLogger(__name__)
 
 
-class RefreshTokens(Workflow):
-    every = "*/15 * * * *"
-
-    async def run(self) -> dict[str, object]:
-        # Every 15 min. With an ~8h Claude TTL refreshed at <2h remaining (and
-        # codex ~10d at <24h), this keeps both tokens alive with a wide margin
-        # while doing almost nothing on most ticks.
-        return await _refresh()
+@task(every="*/15 * * * *")
+async def refresh_tokens() -> None:
+    # Every 15 min. With an ~8h Claude TTL refreshed at <2h remaining (and
+    # codex ~10d at <24h), this keeps both tokens alive with a wide margin
+    # while doing almost nothing on most ticks.
+    await _refresh()
 
 
-class RefreshModels(Workflow):
-    every = "0 6 * * *"
-
-    async def run(self) -> dict[str, object]:
-        fallback_id = UserSettings.get().fallback_account_id
-        results = []
-        for harness in get_harnesses():
-            connections = HarnessConnection.list_for_harness(harness.name)
-            if not connections:
-                continue
-            preferred = [c for c in connections if c.account_id == fallback_id]
-            settings = HarnessSettings.require(harness.name)
-            results.append(await settings.refresh_models((preferred or connections)[0]))
-        return {"results": results}
+@task(every="0 6 * * *")
+async def refresh_models() -> None:
+    fallback_id = UserSettings.get().fallback_account_id
+    for harness in get_harnesses():
+        connections = HarnessConnection.list_for_harness(harness.name)
+        if not connections:
+            continue
+        preferred = [c for c in connections if c.account_id == fallback_id]
+        settings = HarnessSettings.require(harness.name)
+        await settings.refresh_models((preferred or connections)[0])
 
 
 async def _refresh() -> dict[str, object]:

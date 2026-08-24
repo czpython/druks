@@ -8,7 +8,7 @@ from typing import Any
 # imports exactly these (``routes`` defines routers the loader mounts; the rest
 # fire registration as an import side effect). The set is the single source of
 # truth for what "a capability module" is named.
-_ROLES = frozenset({"webhooks", "subscribers", "workflows", "routes", "services"})
+_ROLES = frozenset({"webhooks", "subscribers", "workflows", "tasks", "routes", "services"})
 
 
 class Registry:

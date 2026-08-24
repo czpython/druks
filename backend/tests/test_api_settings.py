@@ -411,7 +411,6 @@ def test_incoherent_app_save_is_rejected_and_rolled_back_before_schedules(
             "/api/settings/apps",
             json={
                 "agentModels": {"generate_plan": "claude-opus-4-7"},
-                "workflowSettings": {"core.refresh_tokens": {"schedule": "0 9 * * *"}},
                 "appSettings": {"review": {"app_id": "42"}},
             },
         )
@@ -424,7 +423,6 @@ def test_incoherent_app_save_is_rejected_and_rolled_back_before_schedules(
         assert _review_settings_fields(client)["app_id"]["secretSet"] is False
         agents = {agent["name"]: agent for agent in _ship_app(client)["agents"]}
         assert agents["generate_plan"]["model"] == "gpt-5.5"
-        assert _refresh_tokens_fields(client)["schedule"]["value"] == "*/15 * * * *"
 
 
 def test_clearing_the_identity_deletes_its_overrides_and_stays_coherent(tmp_path: Path):
@@ -548,65 +546,6 @@ def test_build_review_code_is_a_workflow_setting(tmp_path: Path):
         fields = {f["name"]: f for f in _ship_app(client)["workflows"][0]["fields"]}
         assert fields["review_code"]["value"] is False
         assert fields["review_code"]["overridden"] is True
-
-
-def _app(client: TestClient, name: str) -> dict:
-    body = client.get("/api/settings/apps").json()
-    return next(m for m in body["apps"] if m["name"] == name)
-
-
-def _refresh_tokens_fields(client: TestClient) -> dict:
-    workflows = {w["kind"]: w for w in _app(client, "core")["workflows"]}
-    return {f["name"]: f for f in workflows["core.refresh_tokens"]["fields"]}
-
-
-def test_scheduled_workflow_surfaces_schedule_fields(tmp_path: Path):
-    """A workflow's every= surfaces as two ordinary settings fields on the
-    app that owns it."""
-    with _build_client(tmp_path) as client:
-        fields = _refresh_tokens_fields(client)
-        assert fields["schedule"]["value"] == "*/15 * * * *"
-        assert fields["schedule"]["default"] == "*/15 * * * *"
-        assert fields["schedule"]["overridden"] is False
-        assert fields["schedule_enabled"]["value"] is True
-        assert fields["schedule_enabled"]["type"] == "bool"
-
-
-def test_schedule_override_persists_and_reconciles(tmp_path: Path, monkeypatch):
-    """Overriding the cadence or pausing persists like any workflow setting and
-    repoints the DBOS crons now, not at the next launch."""
-    reconciled = []
-    monkeypatch.setattr(
-        "druks.user_settings.routes.apply_schedules", lambda: reconciled.append(True)
-    )
-    with _build_client(tmp_path) as client:
-        patch = client.patch(
-            "/api/settings/apps",
-            json={
-                "workflowSettings": {
-                    "core.refresh_tokens": {
-                        "schedule": "0 9 * * *",
-                        "schedule_enabled": False,
-                    }
-                }
-            },
-        )
-        assert patch.status_code == 200
-        assert reconciled
-        fields = _refresh_tokens_fields(client)
-        assert fields["schedule"]["value"] == "0 9 * * *"
-        assert fields["schedule"]["overridden"] is True
-        assert fields["schedule_enabled"]["value"] is False
-
-
-def test_schedule_rejects_invalid_cron(tmp_path: Path):
-    # A malformed cron would be silently never-fired by DBOS — reject at the write.
-    with _build_client(tmp_path) as client:
-        patch = client.patch(
-            "/api/settings/apps",
-            json={"workflowSettings": {"core.refresh_tokens": {"schedule": "not a cron"}}},
-        )
-        assert patch.status_code == 422
 
 
 def test_apps_clearing_an_override_reverts_to_the_family_default(tmp_path: Path):

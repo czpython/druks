@@ -1,6 +1,6 @@
 import logging
 
-from druks.core.workflows import _log_result
+from druks.core.tasks import _log_result
 from druks.harnesses.datastructures import RotationResult
 
 
