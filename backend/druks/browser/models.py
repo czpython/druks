@@ -19,7 +19,7 @@ class StoredBrowserSession(Base, Uuid7Pk):
     __tablename__ = "browser_sessions"
     __table_args__ = (
         CheckConstraint(
-            "status IN ('needs_login', 'ready', 'stale')",
+            "status IN ('needs_login', 'ready', 'stale', 'anonymous')",
             name="browser_sessions_status_check",
         ),
         CheckConstraint(
@@ -44,6 +44,7 @@ class StoredBrowserSession(Base, Uuid7Pk):
         name: str,
         payload_format: BrowserSessionPayloadFormat,
         site: str,
+        status: BrowserSessionStatus = BrowserSessionStatus.NEEDS_LOGIN,
     ):
         """Concurrency-safe lookup-or-create: two first actions racing on the
         same session both INSERT with ON CONFLICT DO NOTHING, then converge on
@@ -54,7 +55,7 @@ class StoredBrowserSession(Base, Uuid7Pk):
         session = db_session()
         session.execute(
             insert(cls)
-            .values(name=name, payload_format=payload_format.value, site=site)
+            .values(name=name, payload_format=payload_format.value, site=site, status=status.value)
             .on_conflict_do_nothing(index_elements=["name"])
         )
         return session.scalars(select(cls).where(cls.name == name)).one()

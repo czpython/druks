@@ -14,6 +14,7 @@ from druks.browser.exceptions import (
 )
 from druks.browser.models import StoredBrowserSession
 from druks.browser.sessions import BrowserSession
+from druks.browser.subscribers import signed_out_session_goes_stale
 from druks.database import db_session
 from druks.sandbox.datastructures import ExecResult
 from druks.secrets import utils as secret_utils
@@ -26,6 +27,7 @@ def night_watch(browser_session_declarations):
         name = "night_watch"
         acme = BrowserSession(site="acme.example", persist=True)
         docs = BrowserSession(site="docs.example")
+        status_page = BrowserSession(site="status.example", anonymous=True)
 
     return NightWatch
 
@@ -235,6 +237,45 @@ async def test_signed_out_borrow_stamps_the_session_and_stores_nothing(borrow, n
     )
     assert ["session-export"] not in browser.commands
     assert not redis.values  # the writer lock released on the way out
+
+
+async def test_anonymous_borrow_needs_no_login(borrow, night_watch):
+    """An anonymous borrow works with zero operator setup: the browser opens
+    on a blank profile, the row records the use, and nothing is stored."""
+    browser, redis = borrow
+
+    async with night_watch.status_page.cdp() as cdp_url:
+        assert cdp_url == "http://127.0.0.1:43987"
+
+    assert list(browser.files) == ["/work/session/state.meta.json"]
+    assert json.loads(browser.files["/work/session/state.meta.json"]) == {
+        "format": "profile_dir",
+        "version": 0,
+    }
+    assert ["session-export"] not in browser.commands
+    assert not redis.values  # no writer lock: nothing to serialize
+    row = StoredBrowserSession.get_for_name(night_watch.status_page.name)
+    assert row.status == BrowserSessionStatus.ANONYMOUS.value
+    assert row.last_used_at
+    assert not row.payload
+
+
+def test_anonymous_with_persist_fails_at_class_definition():
+    with pytest.raises(ValueError, match="anonymous=True, persist=True"):
+        BrowserSession(site="acme.example", anonymous=True, persist=True)
+
+
+async def test_signed_out_in_an_anonymous_borrow_keeps_the_row_anonymous(borrow, night_watch):
+    """The run still fails under the signed-out reason, but there is no login
+    to go stale: the subscriber leaves the row anonymous, never wanting a login."""
+    with pytest.raises(BrowserSessionSignedOutError) as caught:
+        async with night_watch.status_page.cdp():
+            raise BrowserSessionSignedOutError("the target bounced the borrow")
+
+    assert caught.value.session_name == "night_watch.status_page"
+    await signed_out_session_goes_stale(session_name="night_watch.status_page")
+    row = StoredBrowserSession.get_for_name("night_watch.status_page")
+    assert row.status == BrowserSessionStatus.ANONYMOUS.value
 
 
 async def test_playwright_yields_the_logged_in_context(borrow, night_watch, monkeypatch):

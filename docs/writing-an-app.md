@@ -372,7 +372,13 @@ wrapper.
 
 ``persist=True`` writes rotated state back after each borrow — for sites that
 expire an unused login. ``headless=True`` is an opt-in optimization for sites
-that don't fingerprint headless browsers. When your code inside the borrow
+that don't fingerprint headless browsers.
+
+``anonymous=True`` declares a session that needs no login. A borrow opens a
+browser with an empty profile and the operator is never asked to sign in. Use
+it when the target is public or the app carries its own credentials — an
+identity header, a token in the URL. An anonymous session stores no state, so
+``persist=True`` with it fails when the class is defined. When your code inside the borrow
 sees the site bounce the login, raise ``BrowserSessionSignedOutError`` (from
 ``druks.browser``) and druks does the rest: the session goes stale — the pane
 shows it and refuses further borrows until the operator signs in again — and

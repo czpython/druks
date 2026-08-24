@@ -19,7 +19,7 @@ from druks.browser.constants import (
 )
 from druks.browser.enums import BrowserSessionPayloadFormat
 from druks.browser.models import StoredBrowserSession
-from druks.browser.sessions import SESSION_ROOT
+from druks.browser.sessions import SESSION_ROOT, seed_state
 from druks.redis import get_client
 from druks.sandbox.client import sandbox_client
 from druks.sandbox.host import Sandbox
@@ -51,7 +51,7 @@ class LoginWindow:
         except Exception as error:
             raise exceptions.BrowserLaunchError(session.name, str(error)) from error
         try:
-            await _seed(browser, session)
+            await seed_state(browser, session)
             await _launch(
                 browser,
                 session.name,
@@ -151,27 +151,6 @@ async def _carry_clicks(websocket: WebSocket, screen_writer: asyncssh.SSHWriter[
 async def _carry_screen(websocket: WebSocket, screen_reader: asyncssh.SSHReader[bytes]) -> None:
     while pixels := await screen_reader.read(SCREEN_CHUNK_BYTES):
         await websocket.send_bytes(pixels)
-
-
-async def _seed(browser: Sandbox, session: StoredBrowserSession) -> None:
-    with tempfile.TemporaryDirectory(prefix="druks-browser-") as staging:
-        if session.payload:
-            filename = (
-                "state.json"
-                if session.payload_format == BrowserSessionPayloadFormat.STORAGE_STATE.value
-                else "state.tar.gz"
-            )
-            state = Path(staging) / filename
-            state.write_bytes(session.payload.decrypt())
-            await browser.upload_file(local=state, remote=f"{SESSION_ROOT}/{filename}")
-            metadata = {"format": session.payload_format, "version": 1}
-        else:
-            # A session no one has logged into yet has nothing to unpack; version
-            # zero tells the launcher to open a blank profile.
-            metadata = {"format": BrowserSessionPayloadFormat.PROFILE_DIR.value, "version": 0}
-        meta = Path(staging) / "state.meta.json"
-        meta.write_text(json.dumps(metadata))
-        await browser.upload_file(local=meta, remote=f"{SESSION_ROOT}/state.meta.json")
 
 
 async def _launch(

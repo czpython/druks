@@ -320,7 +320,7 @@ export interface UpdateUserSettingsRequest {
   timezone?: string
 }
 
-export type BrowserSessionStatus = 'needs_login' | 'ready' | 'stale'
+export type BrowserSessionStatus = 'needs_login' | 'ready' | 'stale' | 'anonymous'
 export type BrowserSessionPayloadFormat = 'storage_state' | 'profile_dir'
 
 export interface BrowserSession {
