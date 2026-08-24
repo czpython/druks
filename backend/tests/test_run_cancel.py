@@ -17,15 +17,15 @@ async def test_cancel_frees_subject_immediately(druks_db, monkeypatch):
 
     async def _dbos_cancel(workflow_id: str) -> None:
         cancelled.append(workflow_id)
-        druks_db.execute(
+        await druks_db.execute(
             update(workflow_status)
             .where(workflow_status.c.workflow_uuid == workflow_id)
             .values(status="CANCELLED")
         )
 
     monkeypatch.setattr("dbos.DBOS.cancel_workflow_async", _dbos_cancel)
-    note = Note.create(body="cancelled while parked")
-    run = seed_run(
+    note = await Note.create(body="cancelled while parked")
+    run = await seed_run(
         druks_db,
         kind=Summarize.kind,
         subject=note,
@@ -39,8 +39,8 @@ async def test_cancel_frees_subject_immediately(druks_db, monkeypatch):
     # cancel() never writes state — the already-loaded Run still carries the old
     # one until expired/re-selected, which is exactly what responses must do.
     # (cancel flushes the ambient session; the fixture session holds `run`.)
-    druks_db.flush()
-    druks_db.expire(run)
+    await druks_db.flush()
+    await druks_db.refresh(run)
     assert run.state == RunState.CANCELLED.value
     assert run.input_gate is None
     assert run.input_request is None

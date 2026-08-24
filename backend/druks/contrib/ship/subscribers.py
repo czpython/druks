@@ -10,14 +10,14 @@ from druks.workflows import WorkflowEvent
 
 @subscribe(WorkflowEvent.SCHEDULED, workflow=Build)
 async def new_build_claims_the_item(*, subject: WorkItem, **_: object) -> None:
-    subject.start_attempt()
+    await subject.start_attempt()
 
 
 @subscribe(WorkflowEvent.CANCELLED, workflow=Build)
 async def cancelled_build_settles_the_item(*, subject: WorkItem, **_: object) -> None:
     """An operator cancellation explicitly abandons the work item."""
     if not subject.resolution:
-        subject.resolve(merged=False, at=Base.utc_now())
+        await subject.resolve(merged=False, at=Base.utc_now())
 
 
 @subscribe("pr.opened", workflow=Build)
@@ -26,7 +26,7 @@ async def pr_open_mirrors_onto_item(
 ) -> None:
     # The implementer's provisioned PR + branch, mirrored onto the work item —
     # the read side (board links, webhook routing by repo+PR) keys off them.
-    subject.update(pr_number=pr_number, branch=branch)
+    await subject.update(pr_number=pr_number, branch=branch)
 
 
 @subscribe(WorkflowEvent.RUNNING, workflow=Build)
@@ -46,7 +46,7 @@ async def policy_push_reprofiles_the_repo(*, repo: str, paths: list, **_: object
     # The operator edited the repo's build policy — re-apply it over the
     # profiled baseline.
     if ".druks/ship/config.yml" in paths:
-        project_repo = ProjectRepo.get_for_repo(repo)
+        project_repo = await ProjectRepo.get_for_repo(repo)
 
         if project_repo:
             await Profile.dispatch(project_repo, refresh_only=True)
@@ -54,10 +54,10 @@ async def policy_push_reprofiles_the_repo(*, repo: str, paths: list, **_: object
 
 @subscribe("pr.review_submitted")
 async def pr_review_answers_the_gate(*, repo: str, pr_number: int, payload: dict) -> None:
-    item = WorkItem.get_for_pr(repo=repo, pr_number=pr_number, branch=payload["branch"])
+    item = await WorkItem.get_for_pr(repo=repo, pr_number=pr_number, branch=payload["branch"])
     if not item:
         return
-    status = item.get_status(workflow=Build)
+    status = await item.get_status(workflow=Build)
     if status.is_parked and status.gate == ReviewWork.name:
         await ReviewWork.answer(
             item,
@@ -71,9 +71,9 @@ async def pr_review_answers_the_gate(*, repo: str, pr_number: int, payload: dict
 async def pr_close_settles_the_item(*, repo: str, pr_number: int, payload: dict) -> None:
     """GitHub announcing the verdict on a PR druks owns — one path for every merge,
     druks's own included. A stored verdict makes a redelivery a no-op."""
-    item = WorkItem.get_for_pr(repo=repo, pr_number=pr_number, branch=payload["branch"])
+    item = await WorkItem.get_for_pr(repo=repo, pr_number=pr_number, branch=payload["branch"])
     if item and not item.resolution:
-        item.resolve(merged=payload["merged"], at=payload["resolved_at"])
+        await item.resolve(merged=payload["merged"], at=payload["resolved_at"])
         if payload["merged"]:
             await item.ship()
         else:
@@ -83,6 +83,6 @@ async def pr_close_settles_the_item(*, repo: str, pr_number: int, payload: dict)
 @subscribe("ticket.transitioned")
 async def ticket_transition_drives_the_funnel(*, payload: dict) -> None:
     """Dispatch a build when a ticket from the chosen tracker enters its trigger status."""
-    settings = Ship.settings()
+    settings = await Ship.settings()
     if payload["source"] == settings.tracker and payload["status"] == settings.trigger_status:
         await Build.dispatch(ticket=payload)

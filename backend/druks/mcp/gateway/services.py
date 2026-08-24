@@ -27,8 +27,8 @@ _ARTIFACT_CHUNK_BYTES = 4 * 1024
 _HISTORY_POINTS = 8
 
 
-def get_gate(run_id: str) -> schemas.GateResponse:
-    run = Run.get(run_id)
+async def get_gate(run_id: str) -> schemas.GateResponse:
+    run = await Run.get(run_id)
     if not run:
         raise RunNotFound(run_id)
     if run.state != RunState.PARKED.value:
@@ -40,18 +40,18 @@ def get_gate(run_id: str) -> schemas.GateResponse:
         run=run.id,
         gate=run.input_gate,  # type: ignore[arg-type]
         parked_at=run.input_requested_at,  # type: ignore[arg-type]
-        ask=run.get_ask(),
-        artifact=_artifact_content(Artifact.get_latest_for_run(run.id)),
+        ask=await run.get_ask(),
+        artifact=await _artifact_content(await Artifact.get_latest_for_run(run.id)),
     )
 
 
 async def answer_gate(
     run_id: str, *, parked_at: datetime, control: str, answers: dict[str, str], note: str
 ) -> schemas.GateAnswerResponse:
-    run = Run.get(run_id)
+    run = await Run.get(run_id)
     if not run:
         raise RunNotFound(run_id)
-    db_session().expire(run)  # the receipt/park comparison must read fresh
+    await db_session().refresh(run)  # the receipt/park comparison must read fresh
     if run.answer_parked_at == parked_at:
         return schemas.GateAnswerResponse(
             run=run.id, parked_at=parked_at, result="already_answered"
@@ -64,15 +64,15 @@ async def answer_gate(
     if not ask or ask.get("presentation") != "in_app":
         raise exceptions.GateNotAnswerable(run_id)
     try:
-        payload = validate_in_app_answer(run.get_ask(), control, answers, note)
+        payload = validate_in_app_answer(await run.get_ask(), control, answers, note)
     except InvalidChoiceError as error:
         raise exceptions.InvalidGateAnswer(str(error)) from error
     await run.resume(**payload)
     return schemas.GateAnswerResponse(run=run.id, parked_at=parked_at, result="answered")
 
 
-def get_agent_call(call_id: str) -> schemas.AgentCallDetailResponse:
-    call = AgentCall.get(call_id)
+async def get_agent_call(call_id: str) -> schemas.AgentCallDetailResponse:
+    call = await AgentCall.get(call_id)
     layout = call.artifact_layout
     return schemas.AgentCallDetailResponse(
         run=call.run_id,
@@ -81,15 +81,15 @@ def get_agent_call(call_id: str) -> schemas.AgentCallDetailResponse:
             layout.transcript, offset=-_TRANSCRIPT_TAIL_BYTES, limit=_TRANSCRIPT_TAIL_BYTES
         ).text,
         stderr=read_slice(layout.stderr, offset=-_STDERR_TAIL_BYTES, limit=_STDERR_TAIL_BYTES).text,
-        artifact=_artifact_content(Artifact.get_for_call(call.id)),
+        artifact=await _artifact_content(await Artifact.get_for_call(call.id)),
     )
 
 
-def _artifact_content(artifact: Artifact | None) -> schemas.ArtifactContent | None:
+async def _artifact_content(artifact: Artifact | None) -> schemas.ArtifactContent | None:
     if not artifact:
         return
     try:
-        call = AgentCall.get(artifact.agent_call_id)
+        call = await AgentCall.get(artifact.agent_call_id)
     except AgentCallNotFound:
         return
     path = call.get_file_path(artifact.path)
@@ -103,10 +103,12 @@ def _artifact_content(artifact: Artifact | None) -> schemas.ArtifactContent | No
     )
 
 
-def get_usage(account: Account) -> schemas.AgentUsageResponse:
+async def get_usage(account: Account) -> schemas.AgentUsageResponse:
     now = datetime.now(UTC)
-    timezone, local_start = operator_local_day(UserSettings.get().timezone, now)
-    rows = list_finished_calls(account.id, since=local_start, until=local_start + timedelta(days=1))
+    timezone, local_start = operator_local_day((await UserSettings.get()).timezone, now)
+    rows = await list_finished_calls(
+        account.id, since=local_start, until=local_start + timedelta(days=1)
+    )
     spend = 0.0
     tokens = 0
     for _, cost_usd, cost_metadata, _ in rows:
@@ -121,16 +123,16 @@ def get_usage(account: Account) -> schemas.AgentUsageResponse:
         spend_today_usd=round(spend, 4),
         tokens_today=tokens,
         runs_today=len(rows),
-        harnesses=[_harness_usage(h.name, account.id, now=now) for h in get_harnesses()],
+        harnesses=[await _harness_usage(h.name, account.id, now=now) for h in get_harnesses()],
     )
 
 
-def _harness_usage(name: str, account_id: str, *, now: datetime) -> schemas.AgentHarnessUsage:
-    is_connected = bool(HarnessConnection.get_for_account(name, account_id))
-    row = UsageScrape.latest_for(name, account_id)
+async def _harness_usage(name: str, account_id: str, *, now: datetime) -> schemas.AgentHarnessUsage:
+    is_connected = bool(await HarnessConnection.get_for_account(name, account_id))
+    row = await UsageScrape.latest_for(name, account_id)
     if not row:
         return schemas.AgentHarnessUsage(name=name, is_connected=is_connected)
-    history = UsageScrape.history_for(name, account_id, since=now - WEEK_RANGE)
+    history = await UsageScrape.history_for(name, account_id, since=now - WEEK_RANGE)
     five_hour_cutoff = now - FIVE_HOUR_RANGE
     five_hour = [
         UsageHistoryPoint(t=point.scraped_at, pct=point.five_hour_percent_left)

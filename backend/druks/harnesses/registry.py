@@ -16,7 +16,7 @@ def get_harness(name: str) -> type[Harness] | None:
             return harness
 
 
-def get_harness_for_model(model: str) -> type[Harness]:
+async def get_harness_for_model(model: str) -> type[Harness]:
     """The harness that runs ``model`` from its fetched-or-shipped model list.
 
     A miss raises loudly; namespace-shaped models do not route until a fetch
@@ -24,7 +24,7 @@ def get_harness_for_model(model: str) -> type[Harness]:
     """
     from druks.user_settings.models import HarnessSettings
 
-    for row in HarnessSettings.all():
+    for row in await HarnessSettings.all():
         if model == row.name or any(m["id"] == model for m in row.allowed_models):
             return row.harness
     raise HarnessError(f"no harness runs model {model!r}")

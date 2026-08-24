@@ -123,16 +123,16 @@ class Agent:
     # override → the agent's declared value → the operator's global default.
     # ``run`` uses these; callers that drive the harness themselves call them
     # directly.
-    def get_model_name(self) -> str:
-        return SettingsOverride.agent_model(self.id, self.model).value
+    async def get_model_name(self) -> str:
+        return (await SettingsOverride.agent_model(self.id, self.model)).value
 
-    def get_effort(self) -> str:
-        harness = get_harness_for_model(self.get_model_name()).name
-        return SettingsOverride.agent_effort(self.id, self.effort, harness).value
+    async def get_effort(self) -> str:
+        harness = (await get_harness_for_model(await self.get_model_name())).name
+        return (await SettingsOverride.agent_effort(self.id, self.effort, harness)).value
 
-    def get_timeout(self) -> int:
-        harness = get_harness_for_model(self.get_model_name()).name
-        resolved = SettingsOverride.agent_timeout(self.id, self.timeout, harness).value
+    async def get_timeout(self) -> int:
+        harness = (await get_harness_for_model(await self.get_model_name())).name
+        resolved = (await SettingsOverride.agent_timeout(self.id, self.timeout, harness)).value
         # Capped so a single call always fits inside a fresh sandbox lease.
         return min(resolved, MAX_AGENT_TIMEOUT_SECONDS)
 
@@ -187,11 +187,11 @@ class Agent:
             # Runs as its own step: the body does no IO, and replay reuses the
             # recorded wait instead of re-reading the scrape.
             async with step_session():
-                harness = get_harness_for_model(self.get_model_name())
+                harness = await get_harness_for_model(await self.get_model_name())
                 # The scrape belongs to the charged connection — its account
                 # differs from the run's on fallback.
-                connection = HarnessConnection.lookup(harness.name, workflow.account_id)
-                scrape = UsageScrape.latest_for(harness.name, connection.account_id)
+                connection = await HarnessConnection.lookup(harness.name, workflow.account_id)
+                scrape = await UsageScrape.latest_for(harness.name, connection.account_id)
                 if scrape:
                     now = datetime.now(UTC)
                     reset = scrape.soonest_reset_after(now)
@@ -253,18 +253,18 @@ class Agent:
         the harness. ``__call__`` handles the durable wrapping + nesting."""
         if not self.prompt:
             raise WorkflowError(f"agent {self.id!r} has no prompt template to render")
-        model = self.get_model_name()
-        harness = get_harness_for_model(model)
+        model = await self.get_model_name()
+        harness = await get_harness_for_model(model)
         workflow = current_workflow.get()
         # Refusing an unservable call here beats provisioning a VM and
         # 401ing mid-run.
-        connection = HarnessConnection.lookup(harness.name, workflow.account_id)
+        connection = await HarnessConnection.lookup(harness.name, workflow.account_id)
         # Plain snapshots: the commits below expire the ORM row mid-flight.
         connection_id, charged_account_id = connection.id, connection.account_id
         # An agent call is a durability boundary — its effects don't roll back —
         # so commit here rather than hold the step's connection idle through the
         # minutes of provisioning and the run.
-        db_session().commit()
+        await db_session().commit()
         settings = load_settings()
         artifact_dir = settings.artifacts_dir / f"run-{workflow_id}"
 
@@ -290,7 +290,7 @@ class Agent:
                 prompt_context.setdefault("workspace", runner)
                 prompt = await render_prompt(self.prompt, **prompt_context)
                 await set_run_phase("agent_running")
-                AgentCall.start(
+                await AgentCall.start(
                     engine,
                     call_id=call_id,
                     run_id=workflow_id,
@@ -310,16 +310,16 @@ class Agent:
                         account_id=workflow.account_id,
                     )
                 except BaseException as error:
-                    AgentCall.fail(engine, call_id=call_id, error=error)
+                    await AgentCall.fail(engine, call_id=call_id, error=error)
                     raise
-                AgentCall.finish(engine, call_id=call_id, result=result)
+                await AgentCall.finish(engine, call_id=call_id, result=result)
 
         if result.error:
             raise result.error
 
         output = self.contract.model_validate(result.output)
         if spec := output.get_artifact():
-            Artifact.record(call_dir=artifact_dir / call_id, call_id=call_id, **spec)
+            await Artifact.record(call_dir=artifact_dir / call_id, call_id=call_id, **spec)
         return output.to_result()
 
     async def _execute(
@@ -340,8 +340,8 @@ class Agent:
             prompt=prompt,
             schema=schema,
             agent=self.id,
-            effort=self.get_effort(),
-            timeout=self.get_timeout(),
+            effort=await self.get_effort(),
+            timeout=await self.get_timeout(),
             artifact_dir=artifact_dir,
             call_id=call_id,
             include_plugins=self.include_plugins,

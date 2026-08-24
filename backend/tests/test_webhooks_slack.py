@@ -27,7 +27,7 @@ _IN_APP_ASK = {
 }
 
 
-def _parked_notification(druks_db):
+async def _parked_notification(druks_db):
     run = Run(
         id=str(uuid7()),
         kind="notifications.test",
@@ -36,12 +36,12 @@ def _parked_notification(druks_db):
         input_requested_at=Base.utc_now(),
     )
     druks_db.add(run)
-    druks_db.flush()
-    seed_dbos_status(druks_db, run.id, "parked")
-    destination = Destination.create(
+    await druks_db.flush()
+    await seed_dbos_status(druks_db, run.id, "parked")
+    destination = await Destination.create(
         name=f"slack-{run.id[-8:]}", kind="slack_webhook", url=_WEBHOOK_URL
     )
-    notification = Notification.create(
+    notification = await Notification.create(
         destination_id=destination.id,
         reason="gate.parked",
         body="review the plan",
@@ -117,7 +117,7 @@ def test_signature_verifier_against_a_known_answer(monkeypatch):
 
 
 async def test_unsigned_or_stale_requests_401_and_never_resume(tmp_path, druks_db, resume_spy):
-    run, notification = _parked_notification(druks_db)
+    run, notification = await _parked_notification(druks_db)
     body = _interactivity_body(encode_button(notification.correlation_token, "approve"))
     with _client(tmp_path) as client:
         no_headers = client.post("/_external/slack/interactivity/", content=body)
@@ -138,14 +138,14 @@ async def test_unsigned_or_stale_requests_401_and_never_resume(tmp_path, druks_d
         assert replayed.status_code == 401
 
     assert resume_spy == []
-    assert Notification.get(notification.id).state == "pending"
+    assert (await Notification.get(notification.id)).state == "pending"
     for response in (no_headers, wrong_secret, replayed):
         assert _SIGNING_SECRET not in response.text
         assert notification.correlation_token not in response.text
 
 
 async def test_signed_click_routes_through_respond(tmp_path, druks_db, resume_spy):
-    run, notification = _parked_notification(druks_db)
+    run, notification = await _parked_notification(druks_db)
     body = _interactivity_body(encode_button(notification.correlation_token, "approve"))
     with _client(tmp_path) as client:
         response = client.post(
@@ -157,15 +157,15 @@ async def test_signed_click_routes_through_respond(tmp_path, druks_db, resume_sp
     assert resume_spy == [{"id": run.id, "action": "approve", "answers": {}, "note": ""}]
     # The request's own session committed the transition; drop the ambient
     # (task-scoped) session's cached instance to read it.
-    ambient_db_session().expire_all()
-    assert Notification.get(notification.id).state == "acknowledged"
+    ambient_db_session().expunge_all()
+    assert (await Notification.get(notification.id)).state == "acknowledged"
     assert notification.correlation_token not in response.text
     assert _SIGNING_SECRET not in response.text
 
 
 async def test_dead_round_click_is_acknowledged_without_resume(tmp_path, druks_db, resume_spy):
-    run, notification = _parked_notification(druks_db)
-    notification.mark_acknowledged()
+    run, notification = await _parked_notification(druks_db)
+    await notification.mark_acknowledged()
     with _client(tmp_path) as client:
         body = _interactivity_body(encode_button(notification.correlation_token, "approve"))
         acknowledged = client.post(
@@ -186,7 +186,7 @@ async def test_dead_round_click_is_acknowledged_without_resume(tmp_path, druks_d
 
 
 async def test_malformed_payloads_400_never_500_never_resume(tmp_path, druks_db, resume_spy):
-    run, notification = _parked_notification(druks_db)
+    run, notification = await _parked_notification(druks_db)
     malformed = [
         b"not-a-form",
         urlencode({"payload": "not json"}).encode(),
@@ -204,11 +204,11 @@ async def test_malformed_payloads_400_never_500_never_resume(tmp_path, druks_db,
             assert response.status_code == 400
 
     assert resume_spy == []
-    assert Notification.get(notification.id).state == "pending"
+    assert (await Notification.get(notification.id)).state == "pending"
 
 
 async def test_unknown_interactivity_type_is_acknowledged_unhandled(tmp_path, druks_db, resume_spy):
-    _parked_notification(druks_db)
+    await _parked_notification(druks_db)
     body = urlencode({"payload": json.dumps({"type": "view_submission"})}).encode()
 
     with _client(tmp_path) as client:

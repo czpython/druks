@@ -3,16 +3,17 @@ import os
 import secrets
 import tempfile
 from collections.abc import AsyncIterator, Iterator
+from contextlib import asynccontextmanager
 from pathlib import Path
 from unittest import mock
 
+import httpx
 import pytest
 import redis.asyncio as aioredis
 from dbos import run_dbos_database_migrations
-from fastapi.testclient import TestClient
-from sqlalchemy import text, update
+from sqlalchemy import NullPool, text, update
 from sqlalchemy.engine import Engine
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from uuid_utils import uuid7
 
 import druks.browser.models  # noqa: F401
@@ -39,6 +40,7 @@ from druks.workflows import Workflow, WorkflowError, _bind_instance, current_wor
 # fixtures the pytest11 entry point registers. Everything else here is the
 # repository suite's own harness.
 __all__ = [
+    "asgi_client",
     "init_db",
     "run_workflow",
     "seed_call",
@@ -53,6 +55,10 @@ TEST_DATABASE_URL = os.environ.get(
     "DRUKS_TEST_DATABASE_URL", "postgresql+psycopg://druks:druks@localhost:5432/druks_test"
 )
 TEST_REDIS_URL = os.environ.get("DRUKS_TEST_REDIS_URL", "redis://127.0.0.1:6379/15")
+
+# The rollback fixture's async connection, for consumers that need the bind
+# itself (the app under test binds its ambient session factory to it).
+_fixture_connection = None
 
 # Discovery runs once for the session, and a broken app is an ordinary state to
 # be in mid-edit. Holding the failure here lets a suite that never asks for a druks
@@ -123,34 +129,40 @@ def _druks_schema(_druks_engine: Engine) -> Iterator[None]:
 
 
 @pytest.fixture
-def druks_db(_druks_engine: Engine, _druks_schema: None) -> Iterator[Session]:
-    connection = _druks_engine.connect()
-    transaction = connection.begin()
-    # The app lifespan must not dispose the connection before this fixture rolls it back.
-    connection.dispose = lambda: None  # type: ignore[method-assign]
+async def druks_db(_druks_schema: None) -> AsyncIterator[AsyncSession]:
+    # Per-test async engine: connections bind to the running event loop, and
+    # pytest gives each test its own — NullPool so nothing pools across tests.
+    global _fixture_connection
+    engine = create_async_engine(TEST_DATABASE_URL, poolclass=NullPool)
+    connection = await engine.connect()
+    transaction = await connection.begin()
     configure_session(connection)
     configure_engine(connection)
-    db_session.remove()
-    session = Session(
+    _fixture_connection = connection
+    session = AsyncSession(
         connection,
         join_transaction_mode="create_savepoint",
         autoflush=True,
+        expire_on_commit=False,
     )
     db_session.registry.set(session)
     try:
         yield session
     finally:
-        db_session.remove()
+        _fixture_connection = None
+        await db_session.remove()
         configure_engine(None)
-        transaction.rollback()
-        connection.close()
+        if transaction.is_active:
+            await transaction.rollback()
+        await connection.close()
+        await engine.dispose()
 
 
 async def _operator_account():
     from druks.accounts.context import current_account_id
     from druks.accounts.models import Account
 
-    account = Account.get_or_create("op@example.com")
+    account = await Account.get_or_create("op@example.com")
     current_account_id.set(account.id)
     return account
 
@@ -180,7 +192,7 @@ def configure_app_for_test(
     from druks.api.server import app
 
     if not engine:
-        engine = db_session().get_bind()
+        engine = _fixture_connection
     configure_session(engine)
     app.state.settings = settings
     app.state.engine = engine
@@ -190,21 +202,30 @@ def configure_app_for_test(
     return app
 
 
+@asynccontextmanager
+async def asgi_client(app) -> AsyncIterator[httpx.AsyncClient]:
+    """An HTTP client for ``app`` on the caller's own event loop — the test
+    fixtures' loop-bound connection rules out a portal-thread TestClient. No
+    lifespan: a fixture's teardown runs in another task, and the app lifespan's
+    anyio scopes cannot cross one; a test that needs the lifespan enters
+    ``app.router.lifespan_context(app)`` itself, inline."""
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        yield client
+
+
 @pytest.fixture
-def druks_client(druks_db: Session, tmp_path: Path) -> Iterator[TestClient]:
+async def druks_client(druks_db: AsyncSession, tmp_path: Path) -> AsyncIterator[httpx.AsyncClient]:
     from druks.accounts.dependencies import current_account, current_session_account
 
     dependencies = (current_account, current_session_account)
-    app = configure_app_for_test(
-        settings=make_settings(tmp_path),
-        engine=druks_db.connection(),
-    )
-    # The app lifespan opens the Redis client on its own event loop and closes it
-    # there; one left behind by another loop cannot be closed from it. Drop it on
-    # both sides so each consumer dials on the loop it runs on.
+    app = configure_app_for_test(settings=make_settings(tmp_path))
+    # ASGITransport, not TestClient: requests must run on this test's own event
+    # loop — the fixture connection is bound to it, and a portal thread's loop
+    # could never touch it.
     druks.redis._client = None
     try:
-        with TestClient(app) as client:
+        async with asgi_client(app) as client:
             yield client
     finally:
         druks.redis._client = None
@@ -240,7 +261,7 @@ def druks_without_dispatch() -> Iterator[None]:
         pass
 
     async def _cancel(workflow_id: str) -> None:
-        db_session().execute(
+        await db_session().execute(
             update(workflow_status)
             .where(workflow_status.c.workflow_uuid == workflow_id)
             .values(status="CANCELLED")
@@ -292,8 +313,8 @@ async def run_workflow(
         current_workflow.reset(token)
 
 
-def seed_run(
-    session: Session,
+async def seed_run(
+    session: AsyncSession,
     *,
     kind: str,
     subject: Subject | StoredSubject | None = None,
@@ -315,17 +336,18 @@ def seed_run(
         account_id=account_id,
     )
     session.add(run)
-    session.flush()
+    await session.flush()
+    await session.refresh(run, ["account"])
     identity = None
     if subject:
         identity = {**subject.identity, "label": subject.label}
-    seed_dbos_status(session, run.id, state, subject=identity)
-    session.expire(run, ["state", "updated_at"])
+    await seed_dbos_status(session, run.id, state, subject=identity)
+    await session.refresh(run, ["state", "updated_at"])
     return run
 
 
-def seed_dbos_status(
-    session: Session,
+async def seed_dbos_status(
+    session: AsyncSession,
     run_id: str,
     state: str,
     *,
@@ -350,7 +372,7 @@ def seed_dbos_status(
             # itself by its id — Subject.label's own rule.
             "subject_label": subject.get("label") or str(subject["id"]),
         }
-    session.execute(
+    await session.execute(
         workflow_status.insert().values(
             workflow_uuid=run_id,
             status=status,
@@ -358,11 +380,11 @@ def seed_dbos_status(
             attributes=attributes,
         )
     )
-    session.flush()
+    await session.flush()
 
 
-def seed_call(
-    session: Session,
+async def seed_call(
+    session: AsyncSession,
     run: Run,
     agent: str,
     *,
@@ -381,5 +403,8 @@ def seed_call(
         sandbox_host_id=f"test-host-{run.id}",
     )
     session.add(call)
-    session.flush()
+    await session.flush()
+    # The read side serializes account and run off the row; a flush loads
+    # neither, and under async a lazy touch is an error.
+    await session.refresh(call, ["account", "run"])
     return call

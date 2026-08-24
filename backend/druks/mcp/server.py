@@ -43,20 +43,20 @@ class PatTokenVerifier(TokenVerifier):
         # Auth middleware runs outside the request session boundary, so this
         # owns one — authenticate stamps last_used_at.
         try:
-            pat = PersonalAccessToken.authenticate(token)
+            pat = await PersonalAccessToken.authenticate(token)
             access = AccessToken(
                 token=token,
                 client_id=pat.token_prefix,
                 scopes=[],
                 claims={"account_id": pat.account_id, "pat_id": pat.id},
             )
-            db_session().commit()
+            await db_session().commit()
             return access
         except InvalidPatError:
-            db_session().rollback()
+            await db_session().rollback()
             return
         finally:
-            db_session.remove()
+            await db_session.remove()
 
 
 class CallerPat(httpx.Auth):

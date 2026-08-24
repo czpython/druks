@@ -48,7 +48,7 @@ def _no_durable_dispatch(request):
         from druks.durable.dbos_state import workflow_status
         from sqlalchemy import update
 
-        db_session().execute(
+        await db_session().execute(
             update(workflow_status)
             .where(workflow_status.c.workflow_uuid == workflow_id)
             .values(status="CANCELLED")
@@ -110,24 +110,26 @@ def browser_session_declarations():
 # opt out and reset themselves. Everything else — including the durable *unit*
 # tests that use the fixtures here — gets transaction rollback.
 _OWN_DATABASE_MODULES = {
-    "test_build_durable",
     "test_durable_sdk",
     "test_notifications_durable",
     "test_harness_login_persistence",
     "test_app_migrations",
-    "test_plan_gate_migration",
     "test_proof_app_migration",
 }
 
 
-@pytest.fixture(autouse=True)
-def _platform_database(request):
-    if request.module.__name__.rsplit(".", 1)[-1] in _OWN_DATABASE_MODULES:
-        yield
-        return
-
-    request.getfixturevalue("druks_db")
-    yield
+def pytest_collection_modifyitems(items):
+    # druks_db is async, so a sync fixture can't getfixturevalue it any more;
+    # injecting it into each test's fixture list keeps the same guarantee —
+    # every test outside the own-database modules runs inside the rollback
+    # transaction.
+    for item in items:
+        module = item.module.__name__.rsplit(".", 1)[-1]
+        if module in _OWN_DATABASE_MODULES:
+            continue
+        if not hasattr(item, "fixturenames") or "druks_db" in item.fixturenames:
+            continue
+        item.fixturenames.append("druks_db")
 
 
 @pytest.fixture(autouse=True)
@@ -160,18 +162,18 @@ def bind_ambient_session(session) -> None:
     db_session.registry.set(session)
 
 
-def connect_harness(harness_cls, payload: dict, *, provider_email: str = "op@example.com"):
+async def connect_harness(harness_cls, payload: dict, *, provider_email: str = "op@example.com"):
     """Seed the HarnessConnection row a finished connect flow would leave."""
     from druks.accounts.models import Account
     from druks.harnesses.models import HarnessConnection
     from druks.user_settings.models import UserSettings
 
-    account = Account.get_or_create(provider_email)
-    settings = UserSettings.get()
+    account = await Account.get_or_create(provider_email)
+    settings = await UserSettings.get()
     if not settings.fallback_account_id:
-        settings.set_fallback_account(account.id)
+        await settings.set_fallback_account(account.id)
     _, expires_at = harness_cls._refresh_state(payload)
-    return HarnessConnection.connect(
+    return await HarnessConnection.connect(
         harness=harness_cls.name,
         account=account,
         payload=payload,
@@ -202,7 +204,7 @@ def make_agent_result(output, *, agent="agent", error=None, cost_usd=None, cost_
     )
 
 
-def finish_agent_run(call, *, status=None, last_error=None):
+async def finish_agent_run(call, *, status=None, last_error=None):
     # Mark a seeded AgentCall finished (prod builds finished rows via AgentCall.record).
     from druks.database import db_session
     from druks.durable.enums import AgentCallStatus
@@ -210,32 +212,32 @@ def finish_agent_run(call, *, status=None, last_error=None):
     call.status = (status or AgentCallStatus.SUCCEEDED).value
     call.last_error = last_error
     call.finished_at = Base.utc_now()
-    db_session().flush()
+    await db_session().flush()
     return call
 
 
-def make_test_note(body: str = "a note"):
+async def make_test_note(body: str = "a note"):
     """The platform suite's subject. It belongs to the proof app, not to ship —
     platform behavior must hold for any app's rows."""
     from druks_field_notes.models import Note
 
-    return Note.create(body=body)
+    return await Note.create(body=body)
 
 
-def seed_note_run(session, *, note=None, state: str = "running", **kwargs):
+async def seed_note_run(session, *, note=None, state: str = "running", **kwargs):
     """A run on a note, seeding one if the caller has none."""
     from druks.testing import seed_run
     from druks_field_notes.workflows import Summarize
 
-    subject = note or make_test_note()
-    return seed_run(session, kind=Summarize.kind, subject=subject, state=state, **kwargs)
+    subject = note or await make_test_note()
+    return await seed_run(session, kind=Summarize.kind, subject=subject, state=state, **kwargs)
 
 
-def seed_note_agent_run(*, agent: str = "implement", model: str = "gpt-5.5", **kwargs):
+async def seed_note_agent_run(*, agent: str = "implement", model: str = "gpt-5.5", **kwargs):
     """A run on a fresh note with one agent call on it — the call is what the caller wants."""
     from druks.database import db_session
     from druks.testing import seed_call
 
     session = db_session()
-    run = seed_note_run(session, **kwargs)
-    return seed_call(session, run, agent, status="running", model=model)
+    run = await seed_note_run(session, **kwargs)
+    return await seed_call(session, run, agent, status="running", model=model)

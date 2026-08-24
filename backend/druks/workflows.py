@@ -156,11 +156,23 @@ class _DeclaredSubject:
     def __get__(self, run: "Workflow | None", owner: type) -> Any:
         if run is None:
             return self.subject_class
+
         # Live, not a snapshot taken at dispatch: a long-parked run resumes against
         # whatever the declared class says then, and finds nothing if it went away.
-        if not run._subject:
-            return
-        return self.subject_class.get_for_subject_id(str(run._subject["id"]))
+        # Awaitable either way, so ``await self.subject`` is the one shape.
+        async def resolve() -> Any:
+            if "subject" in run.__dict__:
+                return run.__dict__["subject"]
+            if not run._subject:
+                return None
+            return await self.subject_class.get_for_subject_id(str(run._subject["id"]))
+
+        return resolve()
+
+    def __set__(self, run: "Workflow", value: Any) -> None:
+        # A test hands the run its subject directly; ``await self.subject``
+        # then resolves to it without a read.
+        run.__dict__["subject"] = value
 
 
 def _declare_subject(cls: type["Workflow"]) -> None:
@@ -267,7 +279,7 @@ class Gate(BaseModel):
                 f"{cls.__name__}.answer() takes the subject whose run is parked on it, "
                 f"not {type(subject).__name__}"
             )
-        runs = Run.list_for_subject(subject.subject_type, str(subject.id))
+        runs = await Run.list_for_subject(subject.subject_type, str(subject.id))
         parked = next((run for run in runs if run.is_parked and run.input_gate == cls.name), None)
         if parked:
             await parked.resume(**reply)
@@ -356,9 +368,10 @@ async def _notify_designated_destination(workflow_id: str, subject: dict[str, An
     # the settings pointer is the operator's off-switch.
     async def _create() -> str | None:
         async with step_session():
-            destination_id = UserSettings.get().gate_park_destination_id
+            destination_id = (await UserSettings.get()).gate_park_destination_id
             if destination_id:
-                return Run.get(workflow_id).create_park_notification(destination_id, subject)
+                run = await Run.get(workflow_id)
+                return await run.create_park_notification(destination_id, subject)
 
     notification_id = await DBOS.run_step_async(
         StepOptions(name="notifications.gate_park", **_IO_RETRIES), _create
@@ -532,17 +545,20 @@ async def _emit_run_event(
     # own arguments, so a replay stamps the same routing every time.
     async def _transition() -> dict[str, Any] | None:
         async with step_session() as session:
-            run = Run.get(workflow_id)
+            run = await Run.get(workflow_id)
+            # Read before the flush: flushing the update unloads the row's
+            # computed columns, and reading one back would be implicit IO.
+            label = run.subject_label
             if facts:
                 for field, value in facts.items():
                     setattr(run, field, value)
-                session.flush()
+                await session.flush()
             # Subjectless framework crons are plumbing: no feed entry.
             if subject:
                 return {
                     "kind": run.kind,
                     "subject": subject,
-                    "payload": _log_run_event(run, state, subject, result),
+                    "payload": await _log_run_event(run, state, subject, label, result),
                 }
 
     transition = await DBOS.run_step_async(
@@ -565,10 +581,11 @@ async def _emit_run_event(
     )
 
 
-def _log_run_event(
+async def _log_run_event(
     run: Run,
     state: RunState,
     subject: dict[str, Any],
+    label: str | None,
     result: Any = None,
 ) -> dict[str, Any]:
     # One event per transition — the feed's run-level granularity, read off the
@@ -584,10 +601,10 @@ def _log_run_event(
         payload["result"] = result.model_dump(mode="json")
     elif isinstance(result, dict):
         payload["result"] = result
-    Event.emit(
+    await Event.emit(
         type=WorkflowEvent.for_state(state),
         subject=subject,
-        label=run.subject_label,
+        label=label,
         payload=payload,
         app=workflows.get(run.kind).app,
     )
@@ -625,7 +642,7 @@ async def _execute_run(
     # Every failure re-raises so DBOS records the terminal ERROR derived state
     # reads; an operator cancel already carries its own reason and terminal
     # status, so it passes through untouched.
-    Run.create_row(_step_engine(), workflow_id=workflow_id, kind=kind, account_id=account_id)
+    await Run.create_row(_step_engine(), workflow_id=workflow_id, kind=kind, account_id=account_id)
     await _emit_run_event(workflow_id, RunState.RUNNING, subject=subject)
 
     async def record_failed(exc: BaseException, code: str) -> None:
@@ -844,28 +861,28 @@ class Workflow:
     # operator override → the declared default. The reconciler and the settings
     # read both go through these, so the workflow owns its own knobs.
     @classmethod
-    def get_schedule(cls) -> str | None:
-        return SettingsOverride.workflow_setting(cls.kind, "schedule", cls.every)
+    async def get_schedule(cls) -> str | None:
+        return await SettingsOverride.workflow_setting(cls.kind, "schedule", cls.every)
 
     @classmethod
-    def has_enabled_schedule(cls) -> bool:
+    async def has_enabled_schedule(cls) -> bool:
         # There is a schedule and it's on — False for unscheduled workflows too.
         if not cls.every:
             return False
-        return SettingsOverride.workflow_setting(cls.kind, "schedule_enabled", True)
+        return await SettingsOverride.workflow_setting(cls.kind, "schedule_enabled", True)
 
     @classmethod
-    def settings(cls) -> BaseModel:
+    async def settings(cls) -> BaseModel:
         """The workflow's ``Settings``, resolved through the override store — the read
         twin of ``override_setting``, like ``App.settings()`` for an app."""
         values = {
-            name: SettingsOverride.workflow_setting(cls.kind, name, field.default)
+            name: await SettingsOverride.workflow_setting(cls.kind, name, field.default)
             for name, field in cls.Settings.model_fields.items()
         }
         return cls.Settings.model_validate(values)
 
     @classmethod
-    def override_setting(cls, field: str, value: Any) -> None:
+    async def override_setting(cls, field: str, value: Any) -> None:
         # An operator's override for one knob; None clears it back to the declared
         # default. Raises ValueError so the API layer can 422 it. The schedule pair
         # is validated here, not against Settings — those knobs live beside every=.
@@ -878,8 +895,10 @@ class Workflow:
             raise ValueError(f"Unknown {cls.kind} setting {field!r}")
         elif value is not None:
             value = coerce_setting_value(cls.Settings, field, value)
-            validate_setting_override(cls.Settings, cls.settings().model_dump(), field, value)
-        SettingsOverride.set_workflow_setting(cls.kind, field, value)
+            validate_setting_override(
+                cls.Settings, (await cls.settings()).model_dump(), field, value
+            )
+        await SettingsOverride.set_workflow_setting(cls.kind, field, value)
 
     @classmethod
     def _validate_subject(cls, subject: "Subject | StoredSubject | None") -> None:
@@ -900,7 +919,7 @@ class Workflow:
     @classmethod
     async def cancel(cls, subject: Subject | StoredSubject, *, failure: str | None = None) -> None:
         cls._validate_subject(subject)
-        runs = Run.list_for_subject(subject.subject_type, str(subject.id), kind=cls.kind)
+        runs = await Run.list_for_subject(subject.subject_type, str(subject.id), kind=cls.kind)
         run = next((run for run in runs if run.is_active), None)
         if run:
             await run.cancel(failure=failure)
@@ -970,7 +989,7 @@ class Workflow:
         if handle.workflow_id == workflow_id:
             # The body also creates its row (idempotently) — this one just makes it
             # visible before an executor picks the workflow up.
-            Run.create_row(
+            await Run.create_row(
                 _step_engine(), workflow_id=workflow_id, kind=cls.kind, account_id=account_id
             )
             if subject:

@@ -34,7 +34,7 @@ class Event(Base):
     payload: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
 
     @classmethod
-    def emit(
+    async def emit(
         cls,
         *,
         type: str,
@@ -54,4 +54,4 @@ class Event(Base):
                 payload=payload or {},
             )
         )
-        db_session().flush()
+        await db_session().flush()

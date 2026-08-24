@@ -57,7 +57,11 @@ class TestFetchFile:
     def _wire(self, monkeypatch, tmp_path, github):
         settings = make_settings(tmp_path)
         monkeypatch.setattr("druks.apps.fetcher.load_settings", lambda: settings)
-        monkeypatch.setattr("druks.apps.fetcher.get_github_client", lambda: github)
+
+        async def _client():
+            return github
+
+        monkeypatch.setattr("druks.apps.fetcher.get_github_client", _client)
 
     async def test_404_is_cached_as_empty(self, monkeypatch, tmp_path):
         from druks.apps.fetcher import fetch_file
@@ -133,10 +137,10 @@ class TestLoadPolicyAndProfile:
     needed."""
 
     @pytest.fixture(autouse=True)
-    def _passthrough_step(self, monkeypatch, druks_db):
+    async def _passthrough_step(self, monkeypatch, druks_db):
         from druks.durable.engine import configure_engine
 
-        configure_engine(druks_db.connection())
+        configure_engine(await druks_db.connection())
 
         async def _run_step(_options, fn):
             return await fn()
@@ -163,8 +167,8 @@ class TestLoadPolicyAndProfile:
 
         # A build only runs for a registered repo; seed it so live resolution
         # reads its (as-yet-empty) profile.
-        project = Project.create(name="Acme")
-        ProjectRepo.create(project_id=project.id, full_name=REPO)
+        project = await Project.create(name="Acme")
+        await ProjectRepo.create(project_id=project.id, full_name=REPO)
 
         resolved = await self._flow(repo=REPO)._load_policy_and_profile()
         assert RepoPolicy.model_validate(resolved["policy"]).sandbox.image == "live"

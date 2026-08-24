@@ -10,35 +10,35 @@ from druks.user_settings.schemas import HarnessUpdate
 from fastapi import HTTPException
 
 
-def test_shipped_tuple_fallback_routes_shipped_models(druks_db):
-    assert get_harness_for_model("claude-opus-4-7") is ClaudeHarness
-    assert get_harness_for_model("gpt-5.5") is CodexHarness
+async def test_shipped_tuple_fallback_routes_shipped_models(druks_db):
+    assert await get_harness_for_model("claude-opus-4-7") is ClaudeHarness
+    assert await get_harness_for_model("gpt-5.5") is CodexHarness
 
 
-def test_fetched_list_routes_provider_models(druks_db):
-    HarnessSettings.require("claude").models_fetched = [
+async def test_fetched_list_routes_provider_models(druks_db):
+    (await HarnessSettings.require("claude")).models_fetched = [
         {"id": "claude-fable-5", "label": "Claude Fable 5"}
     ]
-    druks_db.flush()
+    await druks_db.flush()
 
-    assert get_harness_for_model("claude-fable-5") is ClaudeHarness
-
-
-def test_bare_harness_name_routes(druks_db):
-    assert get_harness_for_model("claude") is ClaudeHarness
-    assert get_harness_for_model("codex") is CodexHarness
+    assert await get_harness_for_model("claude-fable-5") is ClaudeHarness
 
 
-def test_unknown_model_raises_harness_error(druks_db):
+async def test_bare_harness_name_routes(druks_db):
+    assert await get_harness_for_model("claude") is ClaudeHarness
+    assert await get_harness_for_model("codex") is CodexHarness
+
+
+async def test_unknown_model_raises_harness_error(druks_db):
     with pytest.raises(HarnessError):
-        get_harness_for_model("llama-3-70b")
+        await get_harness_for_model("llama-3-70b")
     with pytest.raises(HarnessError):
-        get_harness_for_model("claude-opus-99")
+        await get_harness_for_model("claude-opus-99")
 
 
-def test_settings_reject_model_missing_from_lists_returns_422(druks_db):
+async def test_settings_reject_model_missing_from_lists_returns_422(druks_db):
     with pytest.raises(HTTPException) as error:
-        _validate_model("llama-3-70b")
+        await _validate_model("llama-3-70b")
 
     assert error.value.status_code == 422
     assert error.value.detail == "No installed harness runs model 'llama-3-70b'."
@@ -52,8 +52,8 @@ def test_settings_reject_model_missing_from_lists_returns_422(druks_db):
     ],
 )
 async def test_settings_reject_invalid_model_returns_422(druks_db, model, detail):
-    account = Account.get_or_create("op@example.com")
-    settings = HarnessSettings.require("claude")
+    account = await Account.get_or_create("op@example.com")
+    settings = await HarnessSettings.require("claude")
     original_model = settings.model
 
     with pytest.raises(HTTPException) as error:

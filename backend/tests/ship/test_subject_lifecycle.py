@@ -15,11 +15,11 @@ from ship.factories import make_test_work_item
 pytestmark = pytest.mark.asyncio
 
 
-def _work_item(**fields):
-    return make_test_work_item(repo="ClawHaven/acme-app", title="probe", **fields)
+async def _work_item(**fields):
+    return await make_test_work_item(repo="ClawHaven/acme-app", title="probe", **fields)
 
 
-def _subject_run(
+async def _subject_run(
     druks_db,
     *,
     subject: WorkItem,
@@ -35,8 +35,8 @@ def _subject_run(
         created_at=Base.utc_now() + timedelta(seconds=order),
     )
     druks_db.add(run)
-    druks_db.flush()
-    seed_dbos_status(druks_db, run.id, state, subject=subject.identity)
+    await druks_db.flush()
+    await seed_dbos_status(druks_db, run.id, state, subject=subject.identity)
     return run
 
 
@@ -44,15 +44,15 @@ async def test_gate_answer_resumes_only_a_run_parked_on_its_gate(druks_db, monke
     # A subject can carry runs of several workflows at once; the gate names which one
     # answers, so a newer run of another kind never hides the parked one. A timed-out
     # run keeps its stale ``input_gate``, so parked-ness decides, not that column.
-    subject = _work_item(ticket_key="ENG-748-A")
-    parked = _subject_run(
+    subject = await _work_item(ticket_key="ENG-748-A")
+    parked = await _subject_run(
         druks_db,
         subject=subject,
         kind=Build.kind,
         state="parked",
         gate=OperatorReply.name,
     )
-    _subject_run(druks_db, subject=subject, kind=Profile.kind, state="running", order=1)
+    await _subject_run(druks_db, subject=subject, kind=Profile.kind, state="running", order=1)
     resumed = []
 
     async def resume(self, **reply):
@@ -63,8 +63,8 @@ async def test_gate_answer_resumes_only_a_run_parked_on_its_gate(druks_db, monke
     await OperatorReply.answer(subject, action="approve")
     assert resumed == [parked.id]
 
-    timed_out = _work_item(ticket_key="ENG-748-B")
-    _subject_run(
+    timed_out = await _work_item(ticket_key="ENG-748-B")
+    await _subject_run(
         druks_db,
         subject=timed_out,
         kind=Build.kind,
@@ -81,9 +81,9 @@ async def test_workflow_cancel_takes_its_own_kind_and_passes_over_idle_subjects(
 ):
     # Webhooks redeliver, and a PR can close long after its build ended: cancelling what
     # is already gone is the no-op the caller expects, not an error.
-    subject = _work_item(ticket_key="ENG-748-C")
-    build = _subject_run(druks_db, subject=subject, kind=Build.kind, state="running")
-    _subject_run(druks_db, subject=subject, kind=Profile.kind, state="running", order=1)
+    subject = await _work_item(ticket_key="ENG-748-C")
+    build = await _subject_run(druks_db, subject=subject, kind=Build.kind, state="running")
+    await _subject_run(druks_db, subject=subject, kind=Profile.kind, state="running", order=1)
     cancelled = []
 
     async def cancel(self, *, failure=None):
@@ -94,8 +94,8 @@ async def test_workflow_cancel_takes_its_own_kind_and_passes_over_idle_subjects(
     await Build.cancel(subject)
     assert cancelled == [build.id]
 
-    idle = _work_item(ticket_key="ENG-748-D")
-    _subject_run(druks_db, subject=idle, kind=Build.kind, state="finished")
+    idle = await _work_item(ticket_key="ENG-748-D")
+    await _subject_run(druks_db, subject=idle, kind=Build.kind, state="finished")
     await Build.cancel(idle)
     assert cancelled == [build.id]
 
@@ -103,8 +103,8 @@ async def test_workflow_cancel_takes_its_own_kind_and_passes_over_idle_subjects(
 async def test_cancel_and_answer_hold_the_caller_to_the_declared_subject(druks_db):
     # Build is about a work item; a repo names another timeline entirely, and a
     # non-subject names none. Both fail at the door rather than quietly no-opping.
-    item = _work_item(ticket_key="ENG-748-F")
-    repo = ProjectRepo.create(project_id=item.project_id, full_name="acme/app")
+    item = await _work_item(ticket_key="ENG-748-F")
+    repo = await ProjectRepo.create(project_id=item.project_id, full_name="acme/app")
 
     with pytest.raises(WorkflowError, match="is about WorkItem, not ProjectRepo"):
         await Build.cancel(repo)
@@ -113,15 +113,17 @@ async def test_cancel_and_answer_hold_the_caller_to_the_declared_subject(druks_d
 
 
 async def test_subject_phase_reads_the_driving_running_workflow(druks_db, monkeypatch):
-    subject = _work_item(ticket_key="ENG-748-E")
-    _subject_run(
+    subject = await _work_item(ticket_key="ENG-748-E")
+    await _subject_run(
         druks_db,
         subject=subject,
         kind=Build.kind,
         state="parked",
         gate=OperatorReply.name,
     )
-    driving = _subject_run(druks_db, subject=subject, kind=Profile.kind, state="running", order=1)
+    driving = await _subject_run(
+        druks_db, subject=subject, kind=Profile.kind, state="running", order=1
+    )
     seen = []
 
     async def phase(workflow_id):

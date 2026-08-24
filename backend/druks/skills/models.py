@@ -26,19 +26,22 @@ class SkillCollection(Base, Uuid7Pk):
     )
 
     @classmethod
-    def list_all(cls) -> list["SkillCollection"]:
-        return list(db_session().execute(select(cls).order_by(cls.name)).scalars())
+    async def list_all(cls) -> list["SkillCollection"]:
+        return list((await db_session().execute(select(cls).order_by(cls.name))).scalars())
 
     @classmethod
-    def get(cls, collection_id: str) -> "SkillCollection | None":
-        return db_session().get(cls, collection_id)
+    async def get(cls, collection_id: str) -> "SkillCollection | None":
+        return await db_session().get(cls, collection_id)
 
     @classmethod
-    def get_for_source(cls, source: str) -> "SkillCollection | None":
-        return db_session().execute(select(cls).where(cls.source == source)).scalar_one_or_none()
+    async def get_for_source(cls, source: str) -> "SkillCollection | None":
+        result = await db_session().execute(select(cls).where(cls.source == source))
+        return result.scalar_one_or_none()
 
     @classmethod
-    def create(cls, *, source: str, name: str, skills: list[InstalledSkill]) -> "SkillCollection":
+    async def create(
+        cls, *, source: str, name: str, skills: list[InstalledSkill]
+    ) -> "SkillCollection":
         session = db_session()
         collection = cls(source=source, name=name)
         collection.skills = [
@@ -51,13 +54,13 @@ class SkillCollection(Base, Uuid7Pk):
             for skill in skills
         ]
         session.add(collection)
-        session.flush()
+        await session.flush()
         return collection
 
-    def delete(self) -> None:
+    async def delete(self) -> None:
         session = db_session()
-        session.delete(self)
-        session.flush()
+        await session.delete(self)
+        await session.flush()
 
 
 class Skill(Base, Uuid7Pk):
@@ -76,31 +79,32 @@ class Skill(Base, Uuid7Pk):
     updated_at: Mapped[datetime] = mapped_column(default=Base.utc_now, onupdate=Base.utc_now)
 
     @classmethod
-    def installed_names(cls) -> set[str]:
-        return set(db_session().execute(select(cls.name)).scalars())
+    async def installed_names(cls) -> set[str]:
+        return set((await db_session().execute(select(cls.name))).scalars())
 
     @classmethod
-    def list_enabled(cls) -> list["Skill"]:
+    async def list_enabled(cls) -> list["Skill"]:
         # The operator's enabled catalog.
         stmt = select(cls).where(cls.enabled.is_(True)).order_by(cls.name)
-        return list(db_session().scalars(stmt))
+        return list(await db_session().scalars(stmt))
 
     @classmethod
-    def list_delivered(cls, requested: Collection[str]) -> list["Skill"]:
+    async def list_delivered(cls, requested: Collection[str]) -> list["Skill"]:
         # What one call receives: the enabled skills it named, or the whole enabled
         # catalog when it named none.
-        enabled = cls.list_enabled()
+        enabled = await cls.list_enabled()
         if requested:
             return [skill for skill in enabled if skill.name in requested]
         return enabled
 
     @classmethod
-    def delivery_excludes(cls, requested: Collection[str]) -> tuple[str, ...]:
+    async def delivery_excludes(cls, requested: Collection[str]) -> tuple[str, ...]:
         # Patterns are anchored to the skills_dir tar root (``-C skills_dir .``);
         # excluded skills remain installed on disk.
-        delivered = {skill.name for skill in cls.list_delivered(requested)}
-        return tuple(f"./{name}" for name in sorted(cls.installed_names() - delivered))
+        delivered = {skill.name for skill in await cls.list_delivered(requested)}
+        return tuple(f"./{name}" for name in sorted(await cls.installed_names() - delivered))
 
     @classmethod
-    def get(cls, name: str) -> "Skill | None":
-        return db_session().execute(select(cls).where(cls.name == name)).scalar_one_or_none()
+    async def get(cls, name: str) -> "Skill | None":
+        result = await db_session().execute(select(cls).where(cls.name == name))
+        return result.scalar_one_or_none()

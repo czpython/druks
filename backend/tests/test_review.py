@@ -38,23 +38,23 @@ def test_a_pull_requests_identity_is_its_handle():
 
 
 @pytest.mark.parametrize("subject_id", ["acme/app", "acme/app#", "acme/app#0", "app#7", "#7"])
-def test_an_id_that_names_no_pull_request_is_a_miss(subject_id):
-    assert PullRequest.get_for_subject_id(subject_id) is None
+async def test_an_id_that_names_no_pull_request_is_a_miss(subject_id):
+    assert await PullRequest.get_for_subject_id(subject_id) is None
 
 
-def test_a_pull_request_heads_its_own_page():
-    summary = PullRequest.get_for_subject_id("acme/app#7").get_summary()
+async def test_a_pull_request_heads_its_own_page():
+    summary = (await PullRequest.get_for_subject_id("acme/app#7")).get_summary()
 
     assert summary.repo == "acme/app"
     assert summary.pr_number == 7
     assert summary.pull_request_url == "https://github.com/acme/app/pull/7"
 
 
-def test_the_pull_request_board_and_page_mount(client: TestClient, druks_db):
+async def test_the_pull_request_board_and_page_mount(client: TestClient, druks_db):
     # PullRequestReview declares PullRequest, so the app mounts its board and
     # page — keyed by a handle that carries both a path separator and a `#`.
     pull_request = PullRequest.get("acme/app", 7)
-    seed_run(druks_db, kind=PullRequestReview.kind, subject=pull_request, state="running")
+    await seed_run(druks_db, kind=PullRequestReview.kind, subject=pull_request, state="running")
 
     (row,) = client.get("/api/review/pull_request").json()["rows"]
     assert row["summary"]["id"] == "acme/app#7"
@@ -72,7 +72,7 @@ def test_the_run_carries_the_pull_request_once():
     assert list(PullRequestReview._run_input_model.model_fields) == ["requested_by"]
 
 
-def test_a_queued_run_replays_through_its_subject():
+async def test_a_queued_run_replays_through_its_subject():
     # A review enqueued before the repo and number came off the input still carries
     # them in its durable payload. The extra keys are ignored and the subject rides
     # separately, so the body binds and reads the pull request off the declaration.
@@ -83,7 +83,8 @@ def test_a_queued_run_replays_through_its_subject():
     )
 
     assert run_kwargs == {"requested_by": "dev@example.com"}
-    assert (instance.subject.repo, instance.subject.number) == ("acme/app", 7)
+    subject = await instance.subject
+    assert (subject.repo, subject.number) == ("acme/app", 7)
 
 
 async def test_the_reviewer_prompt_names_the_pull_request_it_is_about():
@@ -130,44 +131,44 @@ async def test_comment_mode_reviews_publish_as_comments():
     assert "`COMMENT` event" in output
 
 
-def _connect_operator() -> None:
-    ServiceIdentity.connect(
+async def _connect_operator() -> None:
+    await ServiceIdentity.connect(
         "github",
         identity={"app_id": "1", "slug": "druks-operator"},
         secrets={"private_key": "operator-pem", "webhook_secret": "hook-secret"},
     )
 
 
-def _set_review_setting(field: str, value: str) -> None:
-    SettingsOverride.set_app_setting("review", field, value, is_secret=True)
+async def _set_review_setting(field: str, value: str) -> None:
+    await SettingsOverride.set_app_setting("review", field, value, is_secret=True)
 
 
-def test_a_configured_review_identity_approves(druks_db):
-    _set_review_setting("app_id", "2")
-    _set_review_setting("private_key", "review-pem\nline-two")
+async def test_a_configured_review_identity_approves(druks_db):
+    await _set_review_setting("app_id", "2")
+    await _set_review_setting("private_key", "review-pem\nline-two")
 
-    actor = get_review_actor()
+    actor = await get_review_actor()
 
     assert actor.mode == "approve"
     assert actor.client._app_id == "2"
 
 
-def test_an_unset_review_identity_borrows_the_operator_in_comment_mode(druks_db):
-    _connect_operator()
+async def test_an_unset_review_identity_borrows_the_operator_in_comment_mode(druks_db):
+    await _connect_operator()
 
-    actor = get_review_actor()
+    actor = await get_review_actor()
 
     assert actor.mode == "comment"
     assert actor.client._app_id == "1"
 
 
-def test_a_half_configured_review_identity_still_borrows_the_operator(druks_db):
+async def test_a_half_configured_review_identity_still_borrows_the_operator(druks_db):
     # Only a complete pair selects the distinct client; app_id alone is the
     # incoherent state clean() flags, not a mode switch.
-    _connect_operator()
-    _set_review_setting("app_id", "2")
+    await _connect_operator()
+    await _set_review_setting("app_id", "2")
 
-    actor = get_review_actor()
+    actor = await get_review_actor()
 
     assert actor.mode == "comment"
     assert actor.client._app_id == "1"
@@ -192,14 +193,14 @@ def test_the_review_pem_declares_the_multiline_secret_presentation():
     assert not field_multiline(Review.Settings.model_fields["app_id"])
 
 
-def test_review_identity_check_is_healthy_set_or_unset(druks_db):
-    assert check_review_identity().ok
-    assert "unset" in check_review_identity().detail
+async def test_review_identity_check_is_healthy_set_or_unset(druks_db):
+    assert (await check_review_identity()).ok
+    assert "unset" in (await check_review_identity()).detail
 
-    _set_review_setting("app_id", "2")
-    _set_review_setting("private_key", "review-pem")
+    await _set_review_setting("app_id", "2")
+    await _set_review_setting("private_key", "review-pem")
 
-    result = check_review_identity()
+    result = await check_review_identity()
     assert result.ok
     assert "distinct App" in result.detail
 
@@ -222,7 +223,7 @@ async def test_review_dispatch_refuses_before_start_without_github(druks_db, mon
 
 
 async def test_review_dispatch_starts_once_github_is_connected(druks_db, monkeypatch):
-    _connect_operator()
+    await _connect_operator()
     started = []
 
     async def _start(cls, **kwargs):

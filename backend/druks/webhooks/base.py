@@ -95,7 +95,7 @@ class Webhook:
         """
         raise NotImplementedError
 
-    def request_is_authentic(self) -> bool:
+    async def request_is_authentic(self) -> bool:
         """Verify the request is from the claimed provider.
 
         Return ``True`` if the request should be processed, ``False`` to
@@ -145,7 +145,7 @@ class Webhook:
     async def respond(self) -> Response:
         self.raw_body = await self.request.body()
 
-        if not self.request_is_authentic():
+        if not await self.request_is_authentic():
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid webhook signature.",

@@ -32,19 +32,19 @@ class HarnessConnection(Base, Uuid7Pk):
     updated_at: Mapped[datetime] = mapped_column(default=Base.utc_now, onupdate=Base.utc_now)
 
     @classmethod
-    def get(cls, connection_id: str) -> "HarnessConnection | None":
-        return db_session().get(cls, connection_id)
+    async def get(cls, connection_id: str) -> "HarnessConnection | None":
+        return await db_session().get(cls, connection_id)
 
     @classmethod
-    def lookup(cls, harness: str, account_id: str | None) -> "HarnessConnection":
+    async def lookup(cls, harness: str, account_id: str | None) -> "HarnessConnection":
         """The connection a call runs with: the account's own, else the
         fallback account's — which carries unmatched work so automation keeps
         moving."""
         if account_id:
-            own = cls.get_for_account(harness, account_id)
+            own = await cls.get_for_account(harness, account_id)
             if own:
                 return own
-        fallback = cls.get_for_account(harness, fallback=True)
+        fallback = await cls.get_for_account(harness, fallback=True)
         if fallback:
             return fallback
         raise HarnessNotConnectedError(
@@ -53,42 +53,42 @@ class HarnessConnection(Base, Uuid7Pk):
         )
 
     @classmethod
-    def get_for_account(
+    async def get_for_account(
         cls, harness: str, account_id: str | None = None, *, fallback: bool = False
     ) -> "HarnessConnection | None":
         """``fallback=True`` resolves the fallback account's connection — what
         actor-less execution runs as."""
         if fallback:
-            account_id = UserSettings.get().fallback_account_id
-        return db_session().scalar(
+            account_id = (await UserSettings.get()).fallback_account_id
+        return await db_session().scalar(
             select(cls).where(cls.harness == harness, cls.account_id == account_id)
         )
 
     @classmethod
-    def list_all(cls) -> list["HarnessConnection"]:
-        return list(db_session().scalars(select(cls).order_by(cls.harness, cls.id)))
+    async def list_all(cls) -> list["HarnessConnection"]:
+        return list(await db_session().scalars(select(cls).order_by(cls.harness, cls.id)))
 
     @classmethod
-    def list_for_account(cls, account_id: str) -> list["HarnessConnection"]:
+    async def list_for_account(cls, account_id: str) -> list["HarnessConnection"]:
         stmt = select(cls).where(cls.account_id == account_id).order_by(cls.harness)
-        return list(db_session().scalars(stmt))
+        return list(await db_session().scalars(stmt))
 
     @classmethod
-    def list_for_harness(cls, harness: str) -> list["HarnessConnection"]:
+    async def list_for_harness(cls, harness: str) -> list["HarnessConnection"]:
         stmt = select(cls).where(cls.harness == harness).order_by(cls.id)
-        return list(db_session().scalars(stmt))
+        return list(await db_session().scalars(stmt))
 
     @classmethod
-    def reload(cls, connection_id: str) -> "HarnessConnection | None":
+    async def reload(cls, connection_id: str) -> "HarnessConnection | None":
         """Fresh-from-DB read of one row, past the identity map's cached state
         — the post-lock re-read that keeps a refresher from re-presenting a
         refresh token a concurrent winner already advanced."""
-        return db_session().scalar(
+        return await db_session().scalar(
             select(cls).where(cls.id == connection_id).execution_options(populate_existing=True)
         )
 
     @classmethod
-    def connect(
+    async def connect(
         cls,
         *,
         harness: str,
@@ -100,17 +100,17 @@ class HarnessConnection(Base, Uuid7Pk):
         """Upsert ``account``'s connection for this harness — update its
         existing row or create one."""
         session = db_session()
-        row = cls.get_for_account(harness, account.id)
+        row = await cls.get_for_account(harness, account.id)
         if not row:
             row = cls(harness=harness, account_id=account.id)
             session.add(row)
         row.payload = payload
         row.provider_email = provider_email
         row.expires_at = expires_at
-        session.flush()
+        await session.flush()
         return row
 
-    def update_payload(self, payload: dict, *, expires_at: datetime | None) -> None:
+    async def update_payload(self, payload: dict, *, expires_at: datetime | None) -> None:
         # Whole-value reassignment is the write path: the encrypted column
         # re-encrypts what it's handed. The caller's dict may alias the live
         # mapping's nested blocks (a dict() copy is shallow), making old and
@@ -120,9 +120,9 @@ class HarnessConnection(Base, Uuid7Pk):
         self.payload = payload
         flag_modified(self, "payload")
         self.expires_at = expires_at
-        db_session().flush()
+        await db_session().flush()
 
-    def delete(self) -> None:
+    async def delete(self) -> None:
         session = db_session()
-        session.delete(self)
-        session.flush()
+        await session.delete(self)
+        await session.flush()

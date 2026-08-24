@@ -23,7 +23,12 @@ from druks.apps.routes import router as apps_router
 from druks.browser.exceptions import BrowserApiError
 from druks.browser.routes import router as browser_sessions_router
 from druks.core.templates import render_page
-from druks.database import configure_session, create_engine_from_url, db_session, session_scope
+from druks.database import (
+    configure_session,
+    create_async_engine_from_url,
+    db_session,
+    session_scope,
+)
 from druks.durable.engine import init_dbos, launch, shutdown
 from druks.durable.exceptions import AgentCallNotFound
 from druks.events.routes import router as events_router
@@ -49,7 +54,7 @@ from .routes import router as health_router
 def configure_state(app: FastAPI, settings: Settings) -> None:
     ensure_data_dirs(settings)
     app.state.settings = settings
-    app.state.engine = create_engine_from_url(settings.database_url)
+    app.state.engine = create_async_engine_from_url(settings.database_url)
     # Bind the ambient (``scoped_session``) factory to this engine so
     # request handlers can use ``db_session()`` without per-call setup.
     configure_session(app.state.engine)
@@ -57,12 +62,14 @@ def configure_state(app: FastAPI, settings: Settings) -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    # Tests pre-populate ``app.state.settings`` before lifespan fires (or
-    # skip lifespan entirely by constructing ``TestClient(app)`` without
-    # ``with``). Production hits this branch and reads env config.
+    # Tests pre-populate ``app.state.settings`` before lifespan fires (their
+    # engine is a fixture-owned connection this lifespan must not dispose).
+    # Production hits this branch and reads env config.
+    created_engine = None
     if not hasattr(app.state, "settings"):
         settings = load_settings()
         configure_state(app, settings)
+        created_engine = app.state.engine
         # uvicorn runs this module directly and never calls setup_logging, so
         # app loggers default to WARNING-only and INFO is dropped; the web
         # process configures it here.
@@ -75,13 +82,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             # A drifted none-mode install (more than one operator account) must
             # refuse at boot, not per request; the per-request resolver repeats
             # the check for drift that happens while running.
-            with session_scope(app.state.engine):
-                resolve_single_operator()
+            async with session_scope(app.state.engine):
+                await resolve_single_operator()
         # DBOS runs embedded here: this process both serves HTTP and executes
         # durable workflows. Tests pre-populate app.state.settings and never
         # reach here — they drive DBOS through their own fixtures.
         init_dbos()
-        launch()
+        await launch()
         # Each app converges its own runtime state (e.g. schedules) here, after
         # DBOS is live. A failing hook is logged, not fatal — one app can't wedge boot.
         for registered_app in iter_apps():
@@ -96,33 +103,36 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         yield
     finally:
         shutdown()
-        engine = getattr(app.state, "engine", None)
-        if engine:
-            engine.dispose()
+        if created_engine:
+            await created_engine.dispose()
         await close_client()
 
 
 async def _release_db_session() -> AsyncIterator[None]:
-    """Commit the request's scoped DB session on success, roll back on error,
-    then release it — one transaction per request. Model writes ``flush()``
-    without committing, so this is the commit boundary. FastAPI runs this
-    yield-dependency's teardown in the *same* asyncio task as the endpoint
-    (the scoped_session is keyed by that task), so it acts on exactly the
-    session this request opened. Frontend responses (the SPA, an app's
-    dist/) run app dependencies too, so only touch the registry when the
-    request actually opened a session — never open one just to commit nothing.
-    """
+    """Bind a fresh DB session for the request and commit it on success, roll
+    back on error — one transaction per request. Model writes ``flush()``
+    without committing, so this is the commit boundary. The session is the
+    request's own, never an ambient one already on this task (the test client
+    runs requests on the caller's task), and the prior binding is restored
+    after. The session object is lazy — a frontend response (the SPA, an
+    app's dist/) that never touches the DB opens no connection, and the
+    commit is a no-op."""
+    previous = db_session() if db_session.registry.has() else None
+    session = db_session.session_factory()
+    db_session.registry.set(session)
     try:
         yield
     except BaseException:
-        if db_session.registry.has():
-            db_session().rollback()
+        await session.rollback()
         raise
     else:
-        if db_session.registry.has():
-            db_session().commit()
+        await session.commit()
     finally:
-        db_session.remove()
+        await session.close()
+        if previous is not None:
+            db_session.registry.set(previous)
+        else:
+            db_session.registry.clear()
 
 
 def _mcp_lifespan(app: FastAPI) -> AbstractAsyncContextManager[Mapping[str, Any] | None]:

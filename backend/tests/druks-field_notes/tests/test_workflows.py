@@ -8,14 +8,14 @@ from druks_field_notes.workflows import Summarize
 
 
 async def test_summarize_writes_the_gist(druks_db, monkeypatch):
-    note = Note.create(body="the pump ran hot on the second pass")
+    note = await Note.create(body="the pump ran hot on the second pass")
     summarize = mock.AsyncMock(return_value=GistOutput(gist="The pump ran hot on the second pass."))
     monkeypatch.setattr(FieldNotes, "summarize", staticmethod(summarize))
 
     await run_workflow(Summarize, subject=note)
 
     summarize.assert_awaited_once_with(note_body=note.body)
-    assert Note.get(note.id).gist == "The pump ran hot on the second pass."
+    assert (await Note.get(note.id)).gist == "The pump ran hot on the second pass."
 
 
 async def test_dispatch_starts_the_workflow_for_the_note(monkeypatch):

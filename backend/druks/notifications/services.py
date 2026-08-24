@@ -46,7 +46,7 @@ def validate_in_app_answer(
 
 
 async def respond_to_notification(token: str, choice: dict[str, Any]) -> None:
-    notification = Notification.get_for_token(token)
+    notification = await Notification.get_for_token(token)
     if not notification:
         raise UnknownTokenError()
     if notification.is_acknowledged:
@@ -54,15 +54,15 @@ async def respond_to_notification(token: str, choice: dict[str, Any]) -> None:
     if not notification.run_id:
         # A run-less notification routes no reply.
         raise InvalidChoiceError("this notification does not take an answer")
-    run = Run.get(notification.run_id)
+    run = await Run.get(notification.run_id)
     if not run:
         raise CorruptCorrelationError(notification.id, notification.run_id)
     # The notification snapshots the round it was sent for; the answer must
-    # land on the run's live round — expire so the comparison reads fresh.
-    db_session().expire(run)
+    # land on the run's live round — refresh so the comparison reads fresh.
+    await db_session().refresh(run)
     if run.state != RunState.PARKED.value or run.input_requested_at != notification.run_parked_at:
         raise StaleRoundError()
-    ask = run.get_ask()
+    ask = await run.get_ask()
     if ask.get("presentation") != "in_app":
         # External gates are answered on their source (PR review, ticket
         # comment) via the existing webhook paths, never through this rail —
@@ -73,7 +73,7 @@ async def respond_to_notification(token: str, choice: dict[str, Any]) -> None:
         ask, choice["control"], choice.get("answers", {}), choice.get("note", "")
     )
     await run.resume(**resume_payload)
-    if not notification.mark_acknowledged():
+    if not await notification.mark_acknowledged():
         # A concurrent responder won the claim; this send already collapsed on
         # the DBOS round key.
         raise AlreadyAcknowledgedError()

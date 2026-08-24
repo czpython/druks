@@ -1,3 +1,4 @@
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 import pytest
@@ -6,6 +7,14 @@ from druks.apps import App, AppSettings
 from druks.database import db_session
 from druks.testing import make_settings
 from druks.user_settings.models import SettingsOverride
+
+
+@asynccontextmanager
+async def _fixture_check_engine(_settings):
+    from druks.database import db_session
+
+    yield db_session().bind
+
 
 # field_notes is the out-of-tree proof app (``backend/tests/druks-field_notes``).
 # It declares settings coherence and one check on its class. These tests drive both
@@ -24,7 +33,7 @@ def _named(results: list[doctor.CheckResult], name: str) -> doctor.CheckResult:
     return next(result for result in results if result.name == name)
 
 
-def test_passing_app_check_reports_under_the_app(
+async def test_passing_app_check_reports_under_the_app(
     installed, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A satisfied precondition passes and its result is namespaced under the app
@@ -32,44 +41,46 @@ def test_passing_app_check_reports_under_the_app(
     monkeypatch.setenv("FIELD_NOTES_API_KEY", "sk-test")
     settings = make_settings(tmp_path)
 
-    result = _named(doctor.check_apps(settings), "field_notes:summary_api_key")
+    result = _named(await doctor.check_apps(settings), "field_notes:summary_api_key")
 
     assert result.ok
     assert result.detail == "set"
 
 
-def test_failing_app_check_reports_under_the_app(installed, tmp_path: Path) -> None:
+async def test_failing_app_check_reports_under_the_app(installed, tmp_path: Path) -> None:
     """The app's API-key check fails when the credential is unset, reported
     under the app name so the operator knows which app is broken."""
     settings = make_settings(tmp_path)
 
-    result = _named(doctor.check_apps(settings), "field_notes:summary_api_key")
+    result = _named(await doctor.check_apps(settings), "field_notes:summary_api_key")
 
     assert not result.ok
     assert "FIELD_NOTES_API_KEY" in result.detail
 
 
-def test_unreachable_settings_database_is_an_app_check_failure(installed, tmp_path: Path) -> None:
+async def test_unreachable_settings_database_is_an_app_check_failure(
+    installed, tmp_path: Path
+) -> None:
     settings = make_settings(
         tmp_path,
         database_url="postgresql+psycopg://druks:druks@127.0.0.1:1/druks",
     )
 
-    results = doctor.check_apps(settings)
+    results = await doctor.check_apps(settings)
 
     result = _named(results, "ship:settings")
     assert not result.ok
     assert "check raised" in result.detail
 
 
-def test_selected_unconnected_tracker_pends_through_ships_own_check(
+async def test_selected_unconnected_tracker_pends_through_ships_own_check(
     installed, tmp_path: Path, druks_db, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # The default selector names linear; no identity is connected in this db.
-    monkeypatch.setattr(doctor, "create_engine_from_url", lambda _: druks_db.get_bind())
+    monkeypatch.setattr(doctor, "_check_engine", _fixture_check_engine)
 
     try:
-        result = _named(doctor.check_apps(make_settings(tmp_path)), "ship:tracker")
+        result = _named(await doctor.check_apps(make_settings(tmp_path)), "ship:tracker")
     finally:
         db_session.registry.set(druks_db)
 
@@ -78,17 +89,17 @@ def test_selected_unconnected_tracker_pends_through_ships_own_check(
     assert "linear" in result.detail
 
 
-def test_half_configured_review_identity_fails_through_review_settings(
+async def test_half_configured_review_identity_fails_through_review_settings(
     installed, tmp_path: Path, druks_db, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # Review identity health is Review's own: the incoherent pair fails under
     # ``review:settings`` while the set/unset check stays healthy — no core
     # doctor check hardcodes review knowledge, and no GitHub call is made.
-    SettingsOverride.set_app_setting("review", "app_id", "42", is_secret=True)
-    monkeypatch.setattr(doctor, "create_engine_from_url", lambda _: druks_db.get_bind())
+    await SettingsOverride.set_app_setting("review", "app_id", "42", is_secret=True)
+    monkeypatch.setattr(doctor, "_check_engine", _fixture_check_engine)
 
     try:
-        results = doctor.check_apps(make_settings(tmp_path))
+        results = await doctor.check_apps(make_settings(tmp_path))
     finally:
         db_session.registry.set(druks_db)
 
@@ -100,16 +111,16 @@ def test_half_configured_review_identity_fails_through_review_settings(
     assert _named(results, "review:identity").ok
 
 
-def test_coherent_stored_settings_pass(
+async def test_coherent_stored_settings_pass(
     installed, tmp_path: Path, druks_db, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    SettingsOverride.set_app_setting(
+    await SettingsOverride.set_app_setting(
         "ship", "linear_trigger_status", "Agent Queue", is_secret=False
     )
-    monkeypatch.setattr(doctor, "create_engine_from_url", lambda _: druks_db.get_bind())
+    monkeypatch.setattr(doctor, "_check_engine", _fixture_check_engine)
 
     try:
-        result = _named(doctor.check_apps(make_settings(tmp_path)), "ship:settings")
+        result = _named(await doctor.check_apps(make_settings(tmp_path)), "ship:settings")
     finally:
         db_session.registry.set(druks_db)
 
@@ -117,7 +128,7 @@ def test_coherent_stored_settings_pass(
     assert result.detail == "coherent"
 
 
-def test_app_without_settings_has_no_settings_row(
+async def test_app_without_settings_has_no_settings_row(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     class Plain(App):
@@ -125,10 +136,10 @@ def test_app_without_settings_has_no_settings_row(
 
     monkeypatch.setattr(doctor, "iter_apps", lambda: iter([Plain]))
 
-    assert doctor.check_apps(make_settings(tmp_path)) == []
+    assert await doctor.check_apps(make_settings(tmp_path)) == []
 
 
-def test_raising_settings_clean_is_contained(
+async def test_raising_settings_clean_is_contained(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     class Broken(App):
@@ -140,13 +151,13 @@ def test_raising_settings_clean_is_contained(
 
     monkeypatch.setattr(doctor, "iter_apps", lambda: iter([Broken]))
 
-    result = _named(doctor.check_apps(make_settings(tmp_path)), "broken_settings:settings")
+    result = _named(await doctor.check_apps(make_settings(tmp_path)), "broken_settings:settings")
 
     assert not result.ok
     assert "coherence crashed" in result.detail
 
 
-def test_app_checks_are_wired_into_the_check_battery(installed, tmp_path: Path) -> None:
+async def test_app_checks_are_wired_into_the_check_battery(installed, tmp_path: Path) -> None:
     """``run_checks`` runs the app checks: ``check_apps`` is one of the
     battery's entries and, like ``check_harness_credentials``, fans its several
     results into the run — so the app's checks reach the report beside core's."""
@@ -154,12 +165,12 @@ def test_app_checks_are_wired_into_the_check_battery(installed, tmp_path: Path) 
 
     assert doctor.check_apps in doctor.CHECKS
 
-    app_results = doctor.check_apps(settings)
+    app_results = await doctor.check_apps(settings)
     assert isinstance(app_results, list)
     assert "field_notes:summary_api_key" in {result.name for result in app_results}
 
 
-def test_raising_app_check_is_isolated_and_does_not_stop_siblings(
+async def test_raising_app_check_is_isolated_and_does_not_stop_siblings(
     installed, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A check that raises becomes one failing result tagged with the app name,
@@ -175,7 +186,7 @@ def test_raising_app_check_is_isolated_and_does_not_stop_siblings(
     monkeypatch.setattr(field_notes.FieldNotes, "checks", [boom, healthy])
     settings = make_settings(tmp_path)
 
-    results = doctor.check_apps(settings)
+    results = await doctor.check_apps(settings)
 
     raised = _named(results, "field_notes:boom")
     assert not raised.ok
@@ -184,7 +195,7 @@ def test_raising_app_check_is_isolated_and_does_not_stop_siblings(
     assert _named(results, "field_notes:healthy").ok
 
 
-def test_broken_app_check_does_not_hide_core_failures(
+async def test_broken_app_check_does_not_hide_core_failures(
     installed, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The key robustness contract: a raising app check is contained inside
@@ -205,7 +216,7 @@ def test_broken_app_check_does_not_hide_core_failures(
     assert doctor.check_redis in doctor.CHECKS
 
     # The app's raising check is contained as a failure under its own name…
-    app_result = _named(doctor.check_apps(settings), "field_notes:boom")
+    app_result = _named(await doctor.check_apps(settings), "field_notes:boom")
     assert not app_result.ok
     assert "kaboom" in app_result.detail
 
@@ -226,7 +237,7 @@ def test_default_app_contributes_no_checks(tmp_path: Path) -> None:
     assert Plain.checks == []
 
 
-def test_malformed_check_return_is_contained(
+async def test_malformed_check_return_is_contained(
     installed, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A check that returns something other than a ``CheckResult`` — a missing
@@ -244,7 +255,7 @@ def test_malformed_check_return_is_contained(
     monkeypatch.setattr(field_notes.FieldNotes, "checks", [check_forgot_return, healthy])
     settings = make_settings(tmp_path)
 
-    results = doctor.check_apps(settings)
+    results = await doctor.check_apps(settings)
     by_name = {result.name: result for result in results}
 
     # The malformed return is contained as a failure under its own name…

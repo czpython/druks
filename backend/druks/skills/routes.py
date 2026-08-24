@@ -13,7 +13,7 @@ router = APIRouter(prefix="/api/skills", tags=["skills"])
 
 @router.get("", response_model=list[CollectionResponse])
 async def list_collections() -> list[SkillCollection]:
-    return SkillCollection.list_all()
+    return await SkillCollection.list_all()
 
 
 @router.post("", response_model=CollectionResponse)
@@ -21,12 +21,12 @@ async def install_collection(
     settings: SettingsDep,
     url: str = Body(..., embed=True),
 ) -> SkillCollection:
-    if SkillCollection.get_for_source(url):
+    if await SkillCollection.get_for_source(url):
         raise HTTPException(
             status_code=409, detail=f"Collection {url!r} already installed; remove it first."
         )
     try:
-        contents = await fetch_collection(url, settings.skills_dir, Skill.installed_names())
+        contents = await fetch_collection(url, settings.skills_dir, await Skill.installed_names())
     except (ValueError, RequestFailed, RequestTimeout) as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
     except OSError as error:
@@ -35,16 +35,16 @@ async def install_collection(
         raise HTTPException(
             status_code=500, detail=f"Could not write skills under {settings.skills_dir}: {error}"
         ) from error
-    return SkillCollection.create(source=url, name=contents.name, skills=contents.skills)
+    return await SkillCollection.create(source=url, name=contents.name, skills=contents.skills)
 
 
 @router.post("/{collection_id}/sync", response_model=CollectionResponse)
 async def sync_collection(collection_id: str, settings: SettingsDep) -> SkillCollection:
-    collection = SkillCollection.get(collection_id)
+    collection = await SkillCollection.get(collection_id)
     if not collection:
         raise HTTPException(status_code=404, detail=f"Collection {collection_id!r} not found")
     current_skills = {skill.name: skill for skill in collection.skills}
-    reserved_names = Skill.installed_names() - current_skills.keys()
+    reserved_names = await Skill.installed_names() - current_skills.keys()
     try:
         contents = await fetch_collection(collection.source, settings.skills_dir, reserved_names)
     except (ValueError, RequestFailed, RequestTimeout) as error:
@@ -75,7 +75,7 @@ async def sync_collection(collection_id: str, settings: SettingsDep) -> SkillCol
             )
         )
     collection.updated_at = SkillCollection.utc_now()
-    db_session().flush()
+    await db_session().flush()
     return collection
 
 
@@ -85,19 +85,19 @@ async def set_skill_enabled(
     name: str,
     enabled: bool = Body(..., embed=True),
 ) -> Skill:
-    skill = Skill.get(name)
+    skill = await Skill.get(name)
     if not skill or skill.collection_id != collection_id:
         raise HTTPException(status_code=404, detail=f"Skill {name!r} not found")
     skill.enabled = enabled
-    db_session().flush()
+    await db_session().flush()
     return skill
 
 
 @router.delete("/{collection_id}", status_code=204)
 async def remove_collection(collection_id: str) -> None:
-    collection = SkillCollection.get(collection_id)
+    collection = await SkillCollection.get(collection_id)
     if not collection:
         raise HTTPException(status_code=404, detail=f"Collection {collection_id!r} not found")
     for skill in collection.skills:
         remove_files(skill.path)
-    collection.delete()
+    await collection.delete()

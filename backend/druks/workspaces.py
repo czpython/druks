@@ -46,7 +46,7 @@ class Workspace:
         run_kwargs = await self.with_mcp_servers(account_id, **self.get_agent_run_kwargs(**kwargs))
         # with_mcp_servers is the run's last DB read; commit so the step's
         # connection isn't held idle through the minutes the agent runs.
-        db_session().commit()
+        await db_session().commit()
         return await self.sandbox.run_agent(**run_kwargs)
 
     async def with_mcp_servers(self, account_id: str | None, **kwargs: Any) -> dict[str, Any]:
@@ -60,10 +60,10 @@ class Workspace:
             # One config key per name in the emitted harness config — a dupe
             # would break the VM's config parse mid-run.
             raise ValueError(f"duplicate required MCP server names: {sorted(required_names)}")
-        enabled = mcp_models.McpServer.list_enabled()
+        enabled = await mcp_models.McpServer.list_enabled()
         if not required and not enabled:
             return kwargs
-        run_account = account_id or UserSettings.get().fallback_account_id
+        run_account = account_id or (await UserSettings.get()).fallback_account_id
         # ``extra_env`` may be omitted or an explicit ``None`` (both valid for the
         # underlying run_agent); treat them the same so the merge never unpacks None.
         env = dict(kwargs.get("extra_env") or {})
@@ -152,14 +152,14 @@ class RepoWorkspace(Workspace):
         Rewritten before every agent call so a reused warm host follows the
         current run's dispatcher — a system dispatch carries no hook and
         credits nobody."""
-        author_name, author_email = await get_github_client().get_bot_git_author()
+        author_name, author_email = await (await get_github_client()).get_bot_git_author()
         steps = [
             f"cd {shlex.quote(self.repo_path)}",
             f"git config user.name {shlex.quote(author_name)}",
             f"git config user.email {shlex.quote(author_email)}",
             "rm -f .git/hooks/prepare-commit-msg",
         ]
-        if account_id and (account := Account.get(account_id, exclude_system=True)):
+        if account_id and (account := await Account.get(account_id, exclude_system=True)):
             trailer = f"Co-Authored-By: {account.username} <{account.username}>"
             hook = (
                 "#!/bin/sh\n"

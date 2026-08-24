@@ -36,8 +36,10 @@ def _claude_payload(*, access="A0", refresh="R0", expires_at=None, extra=None) -
     return {"claudeAiOauth": block}
 
 
-def _seed_claude(*, provider_email="op@example.com", **kwargs) -> HarnessConnection:
-    return connect_harness(ClaudeHarness, _claude_payload(**kwargs), provider_email=provider_email)
+async def _seed_claude(*, provider_email="op@example.com", **kwargs) -> HarnessConnection:
+    return await connect_harness(
+        ClaudeHarness, _claude_payload(**kwargs), provider_email=provider_email
+    )
 
 
 def _codex_payload(*, access=None, refresh="R0", account_id="acc-1", id_token="id-0") -> dict:
@@ -48,8 +50,10 @@ def _codex_payload(*, access=None, refresh="R0", account_id="acc-1", id_token="i
     return {"auth_mode": "chatgpt", "OPENAI_API_KEY": None, "tokens": tokens}
 
 
-def _seed_codex(*, provider_email="op@example.com", **kwargs) -> HarnessConnection:
-    return connect_harness(CodexHarness, _codex_payload(**kwargs), provider_email=provider_email)
+async def _seed_codex(*, provider_email="op@example.com", **kwargs) -> HarnessConnection:
+    return await connect_harness(
+        CodexHarness, _codex_payload(**kwargs), provider_email=provider_email
+    )
 
 
 def _resp(status: int, body: object) -> httpx.Response:
@@ -83,44 +87,46 @@ def _mock_get(monkeypatch, response):
     return calls
 
 
-def test_claude_load_token(druks_db):
-    connection = _seed_claude(access="live", expires_at=_NOW + timedelta(hours=2))
+async def test_claude_load_token(druks_db):
+    connection = await _seed_claude(access="live", expires_at=_NOW + timedelta(hours=2))
     token = ClaudeHarness.load_token(connection, now=_NOW)
     assert token.access_token == "live"
     assert token.subscription_type == "max"
     assert "user:profile" in token.scopes
 
 
-def test_claude_load_token_expired(druks_db):
-    connection = _seed_claude(expires_at=_NOW - timedelta(hours=1))
+async def test_claude_load_token_expired(druks_db):
+    connection = await _seed_claude(expires_at=_NOW - timedelta(hours=1))
     with pytest.raises(OAuthTokenError) as e:
         ClaudeHarness.load_token(connection, now=_NOW)
     assert e.value.tag == "token_expired"
 
 
-def test_claude_load_token_no_access(druks_db):
-    connection = connect_harness(ClaudeHarness, {"claudeAiOauth": {"subscriptionType": "max"}})
+async def test_claude_load_token_no_access(druks_db):
+    connection = await connect_harness(
+        ClaudeHarness, {"claudeAiOauth": {"subscriptionType": "max"}}
+    )
     with pytest.raises(OAuthTokenError) as e:
         ClaudeHarness.load_token(connection, now=_NOW)
     assert e.value.tag == "no_token"
 
 
-def test_codex_load_token(druks_db):
-    connection = _seed_codex()
+async def test_codex_load_token(druks_db):
+    connection = await _seed_codex()
     token = CodexHarness.load_token(connection, now=_NOW)
     assert "." in token.access_token
     assert token.account_id == "acc-1"
 
 
-def test_codex_load_token_expired(druks_db):
-    connection = _seed_codex(access=_jwt(int((_NOW - timedelta(hours=1)).timestamp())))
+async def test_codex_load_token_expired(druks_db):
+    connection = await _seed_codex(access=_jwt(int((_NOW - timedelta(hours=1)).timestamp())))
     with pytest.raises(OAuthTokenError) as e:
         CodexHarness.load_token(connection, now=_NOW)
     assert e.value.tag == "token_expired"
 
 
 async def test_claude_fresh_not_refreshed(monkeypatch, druks_db):
-    connection = _seed_claude(expires_at=_NOW + timedelta(hours=6))
+    connection = await _seed_claude(expires_at=_NOW + timedelta(hours=6))
     calls = _mock_post(monkeypatch, _resp(200, {}))
     result = await ClaudeHarness.rotate_token(connection.id, now=_NOW)
     assert result.action == "fresh"
@@ -130,14 +136,14 @@ async def test_claude_fresh_not_refreshed(monkeypatch, druks_db):
 
 async def test_claude_stale_refreshes_and_persists(monkeypatch, druks_db):
     soon = _NOW + timedelta(minutes=30)
-    connection = _seed_claude(access="old", refresh="R0", expires_at=soon)
+    connection = await _seed_claude(access="old", refresh="R0", expires_at=soon)
     calls = _mock_post(
         monkeypatch, _resp(200, {"access_token": "new", "refresh_token": "R1", "expires_in": 28800})
     )
     result = await ClaudeHarness.rotate_token(connection.id, now=_NOW)
     assert result.action == "refreshed"
     assert calls[0]["json"]["refresh_token"] == "R0"
-    block = ClaudeHarness.get_credentials()["claudeAiOauth"]
+    block = (await ClaudeHarness.get_credentials())["claudeAiOauth"]
     assert block["accessToken"] == "new"
     assert block["refreshToken"] == "R1"
     assert block["scopes"] == ["user:profile"]  # preserved
@@ -146,44 +152,44 @@ async def test_claude_stale_refreshes_and_persists(monkeypatch, druks_db):
 
 
 async def test_claude_invalid_grant_drops_row(monkeypatch, druks_db):
-    connection = _seed_claude(access="old", expires_at=_NOW - timedelta(minutes=1))
+    connection = await _seed_claude(access="old", expires_at=_NOW - timedelta(minutes=1))
     _mock_post(monkeypatch, _resp(400, {"error": "invalid_grant"}))
     result = await ClaudeHarness.rotate_token(connection.id, now=_NOW)
     assert result.action == "failed"
     assert result.error == "invalid_grant"
     # A revoked lineage self-disconnects and commits inside the rotation — the
     # deletion never rides (or rolls back with) the tick's later commit.
-    assert not HarnessConnection.list_all()
+    assert not await HarnessConnection.list_all()
     with pytest.raises(HarnessNotConnectedError):
-        ClaudeHarness.get_credentials()
+        await ClaudeHarness.get_credentials()
 
 
 async def test_claude_network_error_keeps_row(monkeypatch, druks_db):
-    connection = _seed_claude(access="old", expires_at=_NOW - timedelta(minutes=1))
+    connection = await _seed_claude(access="old", expires_at=_NOW - timedelta(minutes=1))
     _mock_post(monkeypatch, httpx.ConnectError("boom"))
     result = await ClaudeHarness.rotate_token(connection.id, now=_NOW)
     assert result.error == "network"
-    assert ClaudeHarness.get_credentials()["claudeAiOauth"]["accessToken"] == "old"
+    assert (await ClaudeHarness.get_credentials())["claudeAiOauth"]["accessToken"] == "old"
 
 
 async def test_claude_http_500_keeps_row(monkeypatch, druks_db):
-    connection = _seed_claude(access="old", expires_at=_NOW - timedelta(minutes=1))
+    connection = await _seed_claude(access="old", expires_at=_NOW - timedelta(minutes=1))
     _mock_post(monkeypatch, _resp(500, ""))
     result = await ClaudeHarness.rotate_token(connection.id, now=_NOW)
     assert result.error == "http_500"
-    assert ClaudeHarness.get_credentials()["claudeAiOauth"]["accessToken"] == "old"
+    assert (await ClaudeHarness.get_credentials())["claudeAiOauth"]["accessToken"] == "old"
 
 
 async def test_claude_bad_response_keeps_row(monkeypatch, druks_db):
-    connection = _seed_claude(access="old", expires_at=_NOW - timedelta(minutes=1))
+    connection = await _seed_claude(access="old", expires_at=_NOW - timedelta(minutes=1))
     _mock_post(monkeypatch, _resp(200, "not json"))
     result = await ClaudeHarness.rotate_token(connection.id, now=_NOW)
     assert result.error == "bad_response"
-    assert ClaudeHarness.get_credentials()["claudeAiOauth"]["accessToken"] == "old"
+    assert (await ClaudeHarness.get_credentials())["claudeAiOauth"]["accessToken"] == "old"
 
 
 async def test_rotation_of_a_deleted_row_is_a_no_op(monkeypatch, druks_db):
-    connection = _seed_claude(access="old", expires_at=_NOW - timedelta(minutes=1))
+    connection = await _seed_claude(access="old", expires_at=_NOW - timedelta(minutes=1))
     connection_id = connection.id
     _mock_post(monkeypatch, _resp(400, {"error": "invalid_grant"}))
     await ClaudeHarness.rotate_token(connection_id, now=_NOW)
@@ -197,7 +203,7 @@ async def test_rotation_of_a_deleted_row_is_a_no_op(monkeypatch, druks_db):
 
 
 async def test_claude_relogin_overwrite_picked_up(monkeypatch, druks_db):
-    connection = _seed_claude(refresh="R_NEW", expires_at=_NOW - timedelta(minutes=1))
+    connection = await _seed_claude(refresh="R_NEW", expires_at=_NOW - timedelta(minutes=1))
     calls = _mock_post(
         monkeypatch, _resp(200, {"access_token": "a", "refresh_token": "b", "expires_in": 100})
     )
@@ -208,14 +214,14 @@ async def test_claude_relogin_overwrite_picked_up(monkeypatch, druks_db):
 async def test_codex_stale_refreshes_and_preserves(monkeypatch, druks_db):
     stale = _jwt(int((_NOW + timedelta(hours=1)).timestamp()))
     fresh = _jwt(int((_NOW + timedelta(days=10)).timestamp()))
-    connection = _seed_codex(access=stale, refresh="R0", account_id="acc-9")
+    connection = await _seed_codex(access=stale, refresh="R0", account_id="acc-9")
     calls = _mock_post(
         monkeypatch, _resp(200, {"access_token": fresh, "refresh_token": "R1", "id_token": "id-1"})
     )
     result = await CodexHarness.rotate_token(connection.id, now=_NOW)
     assert result.action == "refreshed"
     assert calls[0]["json"]["client_id"] == "app_EMoamEEZ73f0CkXaXp7hrann"
-    data = CodexHarness.get_credentials()
+    data = await CodexHarness.get_credentials()
     assert data["tokens"]["access_token"] == fresh
     assert data["tokens"]["refresh_token"] == "R1"
     assert data["tokens"]["id_token"] == "id-1"
@@ -227,15 +233,15 @@ async def test_codex_stale_refreshes_and_preserves(monkeypatch, druks_db):
 async def test_codex_keeps_refresh_when_omitted(monkeypatch, druks_db):
     stale = _jwt(int((_NOW + timedelta(hours=1)).timestamp()))
     fresh = _jwt(int((_NOW + timedelta(days=10)).timestamp()))
-    connection = _seed_codex(access=stale, refresh="KEEP")
+    connection = await _seed_codex(access=stale, refresh="KEEP")
     _mock_post(monkeypatch, _resp(200, {"access_token": fresh}))
     await CodexHarness.rotate_token(connection.id, now=_NOW)
-    assert CodexHarness.get_credentials()["tokens"]["refresh_token"] == "KEEP"
+    assert (await CodexHarness.get_credentials())["tokens"]["refresh_token"] == "KEEP"
 
 
 async def test_codex_no_refresh_token(monkeypatch, druks_db):
     stale = _jwt(int((_NOW + timedelta(hours=1)).timestamp()))
-    connection = _seed_codex(refresh=None, access=stale)
+    connection = await _seed_codex(refresh=None, access=stale)
     calls = _mock_post(monkeypatch, _resp(200, {}))
     result = await CodexHarness.rotate_token(connection.id, now=_NOW)
     assert result.action == "no_refresh_token"
@@ -243,13 +249,13 @@ async def test_codex_no_refresh_token(monkeypatch, druks_db):
 
 
 async def test_rotation_touches_only_the_addressed_row(monkeypatch, druks_db):
-    stale = _seed_claude(
+    stale = await _seed_claude(
         access="old",
         refresh="R0",
         expires_at=_NOW + timedelta(minutes=30),
         provider_email="a@example.com",
     )
-    other = _seed_claude(
+    other = await _seed_claude(
         access="keep",
         refresh="RK",
         expires_at=_NOW + timedelta(minutes=30),
@@ -261,24 +267,32 @@ async def test_rotation_touches_only_the_addressed_row(monkeypatch, druks_db):
     )
     result = await ClaudeHarness.rotate_token(stale_id, now=_NOW)
     assert result.action == "refreshed"
-    assert dict(HarnessConnection.get(stale_id).payload)["claudeAiOauth"]["accessToken"] == "new"
-    assert dict(HarnessConnection.get(other_id).payload)["claudeAiOauth"]["accessToken"] == "keep"
+    assert (
+        dict((await HarnessConnection.get(stale_id)).payload)["claudeAiOauth"]["accessToken"]
+        == "new"
+    )
+    assert (
+        dict((await HarnessConnection.get(other_id)).payload)["claudeAiOauth"]["accessToken"]
+        == "keep"
+    )
 
 
 async def test_invalid_grant_drops_only_the_addressed_row(monkeypatch, druks_db):
-    kept = _seed_claude(access="d", expires_at=_NOW - timedelta(minutes=1))
-    other = _seed_claude(
+    kept = await _seed_claude(access="d", expires_at=_NOW - timedelta(minutes=1))
+    other = await _seed_claude(
         access="o", expires_at=_NOW - timedelta(minutes=1), provider_email="b@example.com"
     )
     kept_id, other_id = kept.id, other.id
     _mock_post(monkeypatch, _resp(400, {"error": "invalid_grant"}))
     await ClaudeHarness.rotate_token(other_id, now=_NOW)
-    assert not HarnessConnection.get(other_id)
-    assert HarnessConnection.get(kept_id)
+    assert not await HarnessConnection.get(other_id)
+    assert await HarnessConnection.get(kept_id)
 
 
 async def test_rotation_stands_down_while_the_lock_is_held(monkeypatch, druks_db):
-    connection = _seed_claude(access="old", refresh="R0", expires_at=_NOW + timedelta(minutes=30))
+    connection = await _seed_claude(
+        access="old", refresh="R0", expires_at=_NOW + timedelta(minutes=30)
+    )
     calls = _mock_post(
         monkeypatch, _resp(200, {"access_token": "new", "refresh_token": "R1", "expires_in": 100})
     )
@@ -291,7 +305,9 @@ async def test_rotation_stands_down_while_the_lock_is_held(monkeypatch, druks_db
 
 
 async def test_rotation_lock_is_released_after_refresh(monkeypatch, druks_db):
-    connection = _seed_claude(access="old", refresh="R0", expires_at=_NOW + timedelta(minutes=30))
+    connection = await _seed_claude(
+        access="old", refresh="R0", expires_at=_NOW + timedelta(minutes=30)
+    )
     _mock_post(
         monkeypatch, _resp(200, {"access_token": "new", "refresh_token": "R1", "expires_in": 100})
     )
@@ -299,54 +315,54 @@ async def test_rotation_lock_is_released_after_refresh(monkeypatch, druks_db):
     assert not await druks.redis.get_client().get(f"druks:harness:refresh:{connection.id}")
 
 
-def test_disconnect_removes_only_the_addressed_login(druks_db):
-    mine = _seed_claude(provider_email="a@example.com")
-    other = _seed_claude(provider_email="b@example.com")
+async def test_disconnect_removes_only_the_addressed_login(druks_db):
+    mine = await _seed_claude(provider_email="a@example.com")
+    other = await _seed_claude(provider_email="b@example.com")
 
-    mine.delete()
+    await mine.delete()
 
-    assert HarnessConnection.get(other.id)
+    assert await HarnessConnection.get(other.id)
     # The fallback account (the first) has no claude connection left; another
     # account's credential never leaks into execution.
     with pytest.raises(HarnessNotConnectedError):
-        ClaudeHarness.get_credentials()
+        await ClaudeHarness.get_credentials()
 
 
-def test_reconnect_restores_execution(druks_db):
-    mine = _seed_claude(provider_email="a@example.com")
-    mine.delete()
+async def test_reconnect_restores_execution(druks_db):
+    mine = await _seed_claude(provider_email="a@example.com")
+    await mine.delete()
     with pytest.raises(HarnessNotConnectedError):
-        ClaudeHarness.get_credentials()
+        await ClaudeHarness.get_credentials()
 
-    _seed_claude(access="fresh", provider_email="a@example.com")
-    assert ClaudeHarness.get_credentials()["claudeAiOauth"]["accessToken"] == "fresh"
+    await _seed_claude(access="fresh", provider_email="a@example.com")
+    assert (await ClaudeHarness.get_credentials())["claudeAiOauth"]["accessToken"] == "fresh"
 
 
-def test_connect_scopes_rows_by_harness_and_account(druks_db):
-    claude_row = _seed_claude(provider_email="a@example.com")
-    codex_row = _seed_codex(provider_email="a@example.com")
-    other = _seed_claude(provider_email="b@example.com")
+async def test_connect_scopes_rows_by_harness_and_account(druks_db):
+    claude_row = await _seed_claude(provider_email="a@example.com")
+    codex_row = await _seed_codex(provider_email="a@example.com")
+    other = await _seed_claude(provider_email="b@example.com")
 
     assert len({claude_row.id, codex_row.id, other.id}) == 3
     assert claude_row.account_id == codex_row.account_id  # same person, one account
     assert other.account_id != claude_row.account_id
-    assert Account.get_for_username("a@example.com").id == claude_row.account_id
+    assert (await Account.get_for_username("a@example.com")).id == claude_row.account_id
     # The first account adopted the execution fallback.
-    assert UserSettings.get().fallback_account_id == claude_row.account_id
+    assert (await UserSettings.get()).fallback_account_id == claude_row.account_id
 
 
-def test_reconnect_updates_the_existing_login_in_place(druks_db):
-    row = _seed_claude(access="old", provider_email="a@example.com")
+async def test_reconnect_updates_the_existing_login_in_place(druks_db):
+    row = await _seed_claude(access="old", provider_email="a@example.com")
     # Same email, different case — citext matches it to the existing account,
     # so the reconnect updates that one connection rather than making a second.
-    again = _seed_claude(access="new", provider_email="A@Example.com")
+    again = await _seed_claude(access="new", provider_email="A@Example.com")
     assert again.id == row.id
     assert dict(again.payload)["claudeAiOauth"]["accessToken"] == "new"
     assert again.provider_email == "A@Example.com"  # stored as last given
 
 
 async def test_claude_fetch_usage_success(monkeypatch, druks_db):
-    connection = _seed_claude(access="tok", expires_at=_NOW + timedelta(hours=2))
+    connection = await _seed_claude(access="tok", expires_at=_NOW + timedelta(hours=2))
     body = {
         "five_hour": {"utilization": 16.0, "resets_at": "2026-06-04T23:19:59+00:00"},
         "seven_day": {"utilization": 48.0, "resets_at": "2026-06-07T16:00:00+00:00"},
@@ -362,7 +378,7 @@ async def test_claude_fetch_usage_success(monkeypatch, druks_db):
 
 
 async def test_claude_fetch_usage_http_error(monkeypatch, druks_db):
-    connection = _seed_claude(access="tok", expires_at=_NOW + timedelta(hours=2))
+    connection = await _seed_claude(access="tok", expires_at=_NOW + timedelta(hours=2))
     _mock_get(monkeypatch, _resp(403, {"error": "x"}))
     parsed = await ClaudeHarness.fetch_usage(connection, now=_NOW)
     assert parsed.ok is False
@@ -371,7 +387,7 @@ async def test_claude_fetch_usage_http_error(monkeypatch, druks_db):
 
 async def test_fetch_usage_without_a_token_skips_http(monkeypatch, druks_db):
     # The connection exists but its payload carries no access token — never fetch.
-    connection = connect_harness(ClaudeHarness, {"claudeAiOauth": {}})
+    connection = await connect_harness(ClaudeHarness, {"claudeAiOauth": {}})
     calls = _mock_get(monkeypatch, _resp(200, {}))
     parsed = await ClaudeHarness.fetch_usage(connection, now=_NOW)
     assert parsed.ok is False
@@ -380,7 +396,7 @@ async def test_fetch_usage_without_a_token_skips_http(monkeypatch, druks_db):
 
 
 async def test_codex_fetch_usage_success(monkeypatch, druks_db):
-    connection = _seed_codex(account_id="acc-7")
+    connection = await _seed_codex(account_id="acc-7")
     body = {
         "plan_type": "pro",
         "rate_limit": {
@@ -405,20 +421,20 @@ async def test_codex_fetch_usage_success(monkeypatch, druks_db):
     assert calls[0]["headers"]["ChatGPT-Account-Id"] == "acc-7"
 
 
-def test_render_credentials_file_serializes_stored_payload(druks_db):
-    connection = _seed_claude(access="tok", refresh="R0")
-    rendered = ClaudeHarness.render_credentials_file(connection.id)
+async def test_render_credentials_file_serializes_stored_payload(druks_db):
+    connection = await _seed_claude(access="tok", refresh="R0")
+    rendered = await ClaudeHarness.render_credentials_file(connection.id)
     assert json.loads(rendered)["claudeAiOauth"]["accessToken"] == "tok"
 
 
-def test_render_credentials_file_raises_when_not_connected(druks_db):
+async def test_render_credentials_file_raises_when_not_connected(druks_db):
     # No selection and no fallback connection at all.
     with pytest.raises(HarnessNotConnectedError, match="connect it in Settings"):
-        ClaudeHarness.render_credentials_file()
+        await ClaudeHarness.render_credentials_file()
 
 
-def test_claude_builder_puts_db_credentials_on_the_bundle(druks_db):
-    _seed_claude(access="live", refresh="R0")
+async def test_claude_builder_puts_db_credentials_on_the_bundle(druks_db):
+    await _seed_claude(access="live", refresh="R0")
     sandbox = SandboxSettings(
         service_url="x",
         service_token="x",
@@ -427,14 +443,14 @@ def test_claude_builder_puts_db_credentials_on_the_bundle(druks_db):
         claude_config_dir=Path("/home/agent/.claude"),
         codex_config_dir=Path("/home/agent/.codex"),
     )
-    bundle = _claude_credentials(sandbox, github_token=None)
+    bundle = await _claude_credentials(sandbox, github_token=None)
     assert json.loads(bundle.claude_credentials)["claudeAiOauth"]["accessToken"] == "live"
     assert bundle.codex_credentials is None
 
 
-def test_credentials_builders_carry_global_instructions(druks_db):
-    _seed_claude()
-    _seed_codex()
+async def test_credentials_builders_carry_global_instructions(druks_db):
+    await _seed_claude()
+    await _seed_codex()
     claude_config_dir = Path("/home/agent/.claude")
     codex_config_dir = Path("/home/agent/.codex")
     sandbox = SandboxSettings(
@@ -446,8 +462,8 @@ def test_credentials_builders_carry_global_instructions(druks_db):
         codex_config_dir=codex_config_dir,
     )
 
-    claude_credentials = _claude_credentials(sandbox, github_token=None)
-    codex_credentials = CodexHarness(
+    claude_credentials = await _claude_credentials(sandbox, github_token=None)
+    codex_credentials = await CodexHarness(
         model=CodexHarness.default_model,
         fast_mode=False,
         effort=None,
@@ -462,11 +478,11 @@ def test_credentials_builders_carry_global_instructions(druks_db):
     )
 
 
-def test_no_config_dir_ships_credential_only(druks_db):
+async def test_no_config_dir_ships_credential_only(druks_db):
     # No local config dir for the CLI => nothing of the host's config/plugins
     # reaches the sandbox — but the DB credential still ships: connection state
     # alone decides whether a harness can run.
-    _seed_claude(access="live")
+    await _seed_claude(access="live")
     sandbox = SandboxSettings(
         service_url="x",
         service_token="x",
@@ -475,14 +491,14 @@ def test_no_config_dir_ships_credential_only(druks_db):
         claude_config_dir=None,
         codex_config_dir=None,
     )
-    bundle = _claude_credentials(sandbox, github_token="gh")
+    bundle = await _claude_credentials(sandbox, github_token="gh")
     assert json.loads(bundle.claude_credentials)["claudeAiOauth"]["accessToken"] == "live"
     assert bundle.extra_config_files == ()
     assert bundle.extra_config_dirs == ()
     assert bundle.github_token == "gh"
 
 
-def test_claude_builder_raises_when_not_connected(druks_db):
+async def test_claude_builder_raises_when_not_connected(druks_db):
     sandbox = SandboxSettings(
         service_url="x",
         service_token="x",
@@ -492,49 +508,49 @@ def test_claude_builder_raises_when_not_connected(druks_db):
         codex_config_dir=None,
     )
     with pytest.raises(HarnessNotConnectedError, match="claude is not connected"):
-        _claude_credentials(sandbox, github_token=None)
+        await _claude_credentials(sandbox, github_token=None)
 
 
-def test_lookup_prefers_the_accounts_own_connection(druks_db):
-    fallback = _seed_claude(provider_email="a@example.com")  # a@ adopts the fallback
-    own = _seed_claude(provider_email="b@example.com")
+async def test_lookup_prefers_the_accounts_own_connection(druks_db):
+    fallback = await _seed_claude(provider_email="a@example.com")  # a@ adopts the fallback
+    own = await _seed_claude(provider_email="b@example.com")
 
-    assert HarnessConnection.lookup("claude", own.account_id).id == own.id
-    assert HarnessConnection.lookup("claude", fallback.account_id).id == fallback.id
+    assert (await HarnessConnection.lookup("claude", own.account_id)).id == own.id
+    assert (await HarnessConnection.lookup("claude", fallback.account_id)).id == fallback.id
 
 
-def test_lookup_falls_back(druks_db):
-    fallback = _seed_claude(provider_email="a@example.com")
-    codex_only = _seed_codex(provider_email="b@example.com")
+async def test_lookup_falls_back(druks_db):
+    fallback = await _seed_claude(provider_email="a@example.com")
+    codex_only = await _seed_codex(provider_email="b@example.com")
 
     # An account with no claude connection, and no account at all.
-    assert HarnessConnection.lookup("claude", codex_only.account_id).id == fallback.id
-    assert HarnessConnection.lookup("claude", None).id == fallback.id
+    assert (await HarnessConnection.lookup("claude", codex_only.account_id)).id == fallback.id
+    assert (await HarnessConnection.lookup("claude", None)).id == fallback.id
 
 
-def test_lookup_without_any_connection_raises(druks_db):
-    _seed_codex(provider_email="a@example.com")  # the fallback account has codex only
+async def test_lookup_without_any_connection_raises(druks_db):
+    await _seed_codex(provider_email="a@example.com")  # the fallback account has codex only
     with pytest.raises(HarnessNotConnectedError, match="connect it in Settings"):
-        HarnessConnection.lookup("claude", None)
+        await HarnessConnection.lookup("claude", None)
 
 
-def test_render_credentials_file_renders_only_the_selected_login(druks_db):
-    mine = _seed_claude(access="mine-token", provider_email="a@example.com")
-    other = _seed_claude(access="other-token", provider_email="b@example.com")
+async def test_render_credentials_file_renders_only_the_selected_login(druks_db):
+    mine = await _seed_claude(access="mine-token", provider_email="a@example.com")
+    other = await _seed_claude(access="other-token", provider_email="b@example.com")
 
-    rendered = json.loads(ClaudeHarness.render_credentials_file(other.id))
+    rendered = json.loads(await ClaudeHarness.render_credentials_file(other.id))
     assert rendered["claudeAiOauth"]["accessToken"] == "other-token"
     assert "mine-token" not in json.dumps(rendered)
-    rendered = json.loads(ClaudeHarness.render_credentials_file(mine.id))
+    rendered = json.loads(await ClaudeHarness.render_credentials_file(mine.id))
     assert rendered["claudeAiOauth"]["accessToken"] == "mine-token"
 
 
-def test_render_credentials_file_for_a_deleted_connection_raises(druks_db):
-    _seed_claude(provider_email="a@example.com")  # the surviving fallback
-    gone = _seed_claude(provider_email="b@example.com")
+async def test_render_credentials_file_for_a_deleted_connection_raises(druks_db):
+    await _seed_claude(provider_email="a@example.com")  # the surviving fallback
+    gone = await _seed_claude(provider_email="b@example.com")
     gone_id = gone.id
-    gone.delete()
+    await gone.delete()
     # A disconnect between selection and render fails the call — it must never
     # fall through to another account's payload.
     with pytest.raises(HarnessNotConnectedError, match="removed"):
-        ClaudeHarness.render_credentials_file(gone_id)
+        await ClaudeHarness.render_credentials_file(gone_id)

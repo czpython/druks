@@ -106,18 +106,22 @@ class Build(Workflow):
     async def dispatch(cls, *, ticket: dict) -> str | None:
         # The tracker funnel's entry: a ticket at the trigger status opens a build.
         # Resolve-or-refresh the item, then start (start() dedups a live run).
-        item = WorkItem.get_for_ticket_key(source=ticket["source"], ticket_key=ticket["identifier"])
+        item = await WorkItem.get_for_ticket_key(
+            source=ticket["source"], ticket_key=ticket["identifier"]
+        )
         if item:
             if item.resolution == "merged":
                 logger.info(
                     "Ticket %s is already merged; skipping redelivery.", ticket["identifier"]
                 )
                 return
-            item.update(title=ticket["title"], ticket_url=ticket["url"])
+            await item.update(title=ticket["title"], ticket_url=ticket["url"])
         else:
-            repo = ProjectRepo.lookup(project_name=ticket["project_name"], labels=ticket["labels"])
+            repo = await ProjectRepo.lookup(
+                project_name=ticket["project_name"], labels=ticket["labels"]
+            )
             if repo:
-                item = WorkItem.create(
+                item = await WorkItem.create(
                     project_id=repo.project_id,
                     source=ticket["source"],
                     title=ticket["title"] or ticket["identifier"],
@@ -129,7 +133,7 @@ class Build(Workflow):
                 logger.info("Ticket %s has no routable repo; skipping.", ticket["identifier"])
                 return
         try:
-            ServiceIdentity.get(GITHUB)
+            await ServiceIdentity.get(GITHUB)
         except ServiceNotConnectedError as error:
             # A raise would 5xx the tracker's webhook and put the delivery into
             # provider redelivery; the delivery itself succeeded. Log the
@@ -137,7 +141,7 @@ class Build(Workflow):
             logger.info("Ticket %s cannot start a build: %s", ticket["identifier"], error)
             return
         email = ticket["assignee_email"]
-        assignee = Account.get_for_username(email.strip()) if email else None
+        assignee = await Account.get_for_username(email.strip()) if email else None
         return await cls.start(
             subject=item,
             account_id=assignee.id if assignee else None,
@@ -172,11 +176,11 @@ class Build(Workflow):
         # ones they actually need under get_related_root (the prompt names them, the
         # credential helper handles auth). The mkdir keeps Claude's --add-dir target
         # valid before the first on-demand clone.
-        repo = self.subject.repo
+        repo = (await self.subject).repo
         # Planning agents run before the first implement provisions the branch — their
         # VMs clone the default branch; every agent after delivery gets the PR branch.
         branch = self.branch
-        github_token = await get_github_client().token_for_repo(repo)
+        github_token = await (await get_github_client()).token_for_repo(repo)
         await sandbox.write_secret(
             secret=github_token, remote=get_github_token_remote_path(sandbox.ssh_username)
         )
@@ -188,7 +192,7 @@ class Build(Workflow):
         )
         await sandbox.exec(["mkdir", "-p", get_related_root(sandbox.ssh_username)], timeout=10.0)
         try:
-            mcp_token = await get_review_actor().client.token_for_repo(repo)
+            mcp_token = await (await get_review_actor()).client.token_for_repo(repo)
         except Exception as error:
             # There is no build without github: agents push and review through
             # the github MCP, so a run that can't mint its token fails here,
@@ -207,8 +211,8 @@ class Build(Workflow):
         }
 
     async def get_prompt_context(self, **context: Any) -> dict[str, Any]:
-        work_item = self.subject
-        target_repo = ProjectRepo.get_for_repo(work_item.repo, raise_on_missing=True)
+        work_item = await self.subject
+        target_repo = await ProjectRepo.get_for_repo(work_item.repo, raise_on_missing=True)
         endpoint = load_settings().urls.endpoint.rstrip("/")
         work_item_url = f"{endpoint}/ship/work-items/{work_item.id}" if endpoint else ""
         prompt_context = BuildPromptContext(
@@ -221,10 +225,10 @@ class Build(Workflow):
             issue_number=self.input.issue_number,
             task_owner_name=self.input.task_owner_name,
             task_owner_email=self.input.task_owner_email,
-            related_repos=target_repo.siblings(),
-            skills=Skill.list_delivered(self._profile.get("recommended_skills", [])),
+            related_repos=await target_repo.siblings(),
+            skills=await Skill.list_delivered(self._profile.get("recommended_skills", [])),
             review_code=self._settings.review_code,
-            review_mode=get_review_actor().mode,
+            review_mode=(await get_review_actor()).mode,
             journal=self.journal,
         )
         return {
@@ -238,9 +242,9 @@ class Build(Workflow):
     @step
     async def _load_policy_and_profile(self) -> dict[str, Any]:
         # One memoized read: the live policy + the work item's repo profiled facts.
-        repo = self.subject.repo
+        repo = (await self.subject).repo
         policy = await RepoPolicy.resolve(repo)
-        target = ProjectRepo.get_for_repo(repo, raise_on_missing=True)
+        target = await ProjectRepo.get_for_repo(repo, raise_on_missing=True)
         return {
             "policy": policy.model_dump(mode="json"),
             "profile": target.effective_profile,
@@ -249,7 +253,7 @@ class Build(Workflow):
     @step
     async def _load_settings(self) -> "Build.Settings":
         # A step so replay reuses the values the run started with, not later edits.
-        return self.settings()
+        return await self.settings()
 
     async def _plan_phase(self) -> bool:
         """True → implement."""
@@ -329,7 +333,7 @@ class Build(Workflow):
                 return True
             logger.warning(
                 "GitHub did not accept the merge of %s#%s; re-parking for review.",
-                self.subject.repo,
+                (await self.subject).repo,
                 self.pr_number,
             )
             return await self._work_gate()
@@ -366,8 +370,8 @@ class Build(Workflow):
     @step
     async def declare_merge_intent(self) -> bool:
         """Whether GitHub accepted ownership of the merge."""
-        github = get_github_client()
-        return await github.merge_when_ready(self.subject.repo, self.pr_number)
+        github = await get_github_client()
+        return await github.merge_when_ready((await self.subject).repo, self.pr_number)
 
     # The provisioned branch + PR, pinned to the FIRST delivery — None until then
     # (planning runs against the default branch, and there is no PR to point at).
@@ -389,10 +393,10 @@ class Build(Workflow):
 
     async def request_assignee_review(self) -> None:
         login = self.journal.assignee_github_login
-        repo = self.subject.repo
+        repo = (await self.subject).repo
         if login and self.pr_number:
             try:
-                await get_github_client().request_pull_request_reviewers(
+                await (await get_github_client()).request_pull_request_reviewers(
                     repo, self.pr_number, [login]
                 )
             except Exception:  # noqa: BLE001 — a missed ping must not fail the park
@@ -404,10 +408,10 @@ class Build(Workflow):
                 )
 
     async def set_pr_draft(self, *, draft: bool) -> None:
-        repo = self.subject.repo
+        repo = (await self.subject).repo
         if self.pr_number:
             try:
-                await get_github_client().set_pull_request_draft_state(
+                await (await get_github_client()).set_pull_request_draft_state(
                     repo, self.pr_number, draft=draft
                 )
             except Exception:  # noqa: BLE001 — a draft merge fails loudly anyway
@@ -429,7 +433,7 @@ class Profile(Workflow):
         # The profiler clones with an operator-App token, so resolve the
         # identity before the start spends a run and provisions a VM — the
         # raising lookup surfaces the actionable not-connected error.
-        ServiceIdentity.get(GITHUB)
+        await ServiceIdentity.get(GITHUB)
         return await cls.start(
             subject=repo,
             repo_id=repo.id,
@@ -439,7 +443,7 @@ class Profile(Workflow):
     async def run(self, repo_id: int, refresh_only: bool = False) -> None:
         # Every dispatch site verifies the repo exists first; a build never
         # profiles a repo that isn't there.
-        project_repo = ProjectRepo.get(repo_id)
+        project_repo = await ProjectRepo.get(repo_id)
 
         if refresh_only:
             baseline = project_repo.profile.get("baseline") or {}
@@ -447,7 +451,7 @@ class Profile(Workflow):
             baseline = await Ship.repo_profiler(repo=project_repo.full_name)
             # The agent picks from the catalog it was handed, but a skill can be
             # disabled between prompt render and result — read the ground truth again.
-            enabled = {skill.name for skill in Skill.list_enabled()}
+            enabled = {skill.name for skill in await Skill.list_enabled()}
             baseline["recommended_skills"] = [
                 name for name in baseline["recommended_skills"] if name in enabled
             ]
@@ -458,11 +462,11 @@ class Profile(Workflow):
             effective["verification"] = policy.verification.get_commands(
                 detected=baseline.get("verification") or {}
             )
-        project_repo.set_profile(baseline=baseline, effective=effective)
+        await project_repo.set_profile(baseline=baseline, effective=effective)
 
     async def get_workspace_kwargs(self, sandbox: "Sandbox") -> dict[str, Any]:
-        repo = ProjectRepo.get(self.input.repo_id).full_name
-        github_token = await get_github_client().token_for_repo(repo)
+        repo = (await ProjectRepo.get(self.input.repo_id)).full_name
+        github_token = await (await get_github_client()).token_for_repo(repo)
         await sandbox.write_secret(
             secret=github_token, remote=get_github_token_remote_path(sandbox.ssh_username)
         )
@@ -480,10 +484,10 @@ class Profile(Workflow):
 
     async def get_prompt_context(self, **context: Any) -> dict[str, Any]:
         return {
-            "repo": ProjectRepo.get(self.input.repo_id).full_name,
+            "repo": (await ProjectRepo.get(self.input.repo_id)).full_name,
             "skills_catalog": [
                 {"name": skill.name, "description": skill.description}
-                for skill in Skill.list_enabled()
+                for skill in await Skill.list_enabled()
             ],
             **await super().get_prompt_context(**context),
         }

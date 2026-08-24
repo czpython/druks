@@ -18,9 +18,9 @@ class LinearEvents(Webhook):
     provider = "linear"
     category = "events"
 
-    def request_is_authentic(self) -> bool:
+    async def request_is_authentic(self) -> bool:
         try:
-            row = services.Linear.get()
+            row = await services.Linear.get()
         except ServiceNotConnectedError as error:
             raise HTTPException(
                 status.HTTP_401_UNAUTHORIZED,
@@ -94,9 +94,9 @@ class JiraEvents(Webhook):
     provider = "jira"
     category = "events"
 
-    def request_is_authentic(self) -> bool:
+    async def request_is_authentic(self) -> bool:
         try:
-            webhook_secret = services.Jira.get().secrets["webhook_secret"]
+            webhook_secret = (await services.Jira.get()).secrets["webhook_secret"]
         except ServiceNotConnectedError as error:
             raise HTTPException(
                 status.HTTP_401_UNAUTHORIZED,
@@ -138,7 +138,7 @@ class JiraEvents(Webhook):
                 "identifier": key,
                 "status": issue_status["name"],
                 "title": fields["summary"],
-                "url": self._issue_url(key),
+                "url": await self._issue_url(key),
                 "project_name": fields["project"]["name"],
                 "labels": fields["labels"],
                 "assignee_email": assignee.get("emailAddress"),
@@ -151,7 +151,7 @@ class JiraEvents(Webhook):
         )
         return JSONResponse({"accepted": True})
 
-    def _issue_url(self, key: str) -> str:
+    async def _issue_url(self, key: str) -> str:
         # Dispatch runs after request_is_authentic, so the row is connected here.
-        base_url = services.Jira.get().identity["base_url"]
+        base_url = (await services.Jira.get()).identity["base_url"]
         return f"{base_url.rstrip('/')}/browse/{key}"

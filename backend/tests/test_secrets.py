@@ -4,6 +4,7 @@ import os
 import pytest
 from druks.accounts.constants import SYSTEM_ACCOUNT_ID
 from druks.core.models import Uuid7Pk
+from druks.database import db_session
 from druks.mcp.models import McpClientRegistration, McpServer
 from druks.models import Base
 from druks.secrets.exceptions import SecretDecryptError
@@ -11,7 +12,7 @@ from druks.secrets.fields import EncryptedJsonField
 from druks.services.models import OauthConnection
 from druks.settings import load_settings
 from pydantic import ValidationError
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.exc import StatementError
 
 _TOKEN = "lin_secret_value"
@@ -36,18 +37,20 @@ def _set_key(monkeypatch, tmp_path, value: str) -> None:
     monkeypatch.setenv("DRUKS_CONFIG", str(config_path))
 
 
-def _store_grant(refresh_token: str = "rt-secret", client_secret: str = "") -> OauthConnection:
-    server = McpServer.get_for_name("notion") or McpServer.create(
+async def _store_grant(
+    refresh_token: str = "rt-secret", client_secret: str = ""
+) -> OauthConnection:
+    server = await McpServer.get_for_name("notion") or await McpServer.create(
         name="notion", url="https://mcp.notion.test/sse"
     )
-    McpClientRegistration.store(
+    await McpClientRegistration.store(
         server_id=server.id,
         account_id=SYSTEM_ACCOUNT_ID,
         token_endpoint="https://auth.test/token",
         client_id="client-123",
         client_secret=client_secret,
     )
-    return OauthConnection.create(
+    return await OauthConnection.create(
         provider="mcp:notion",
         account_id=SYSTEM_ACCOUNT_ID,
         refresh_token=refresh_token,
@@ -55,37 +58,37 @@ def _store_grant(refresh_token: str = "rt-secret", client_secret: str = "") -> O
     )
 
 
-def test_stored_secrets_are_ciphertext_and_reads_restore_them(druks_db):
-    McpServer.create(name="linear", url="https://mcp.linear.app/sse", token=_TOKEN)
+async def test_stored_secrets_are_ciphertext_and_reads_restore_them(druks_db):
+    await McpServer.create(name="linear", url="https://mcp.linear.app/sse", token=_TOKEN)
 
-    blob = bytes(druks_db.execute(text("SELECT token FROM mcp_servers")).scalar_one())
+    blob = bytes((await druks_db.execute(text("SELECT token FROM mcp_servers"))).scalar_one())
     assert _TOKEN.encode() not in blob
-    druks_db.expire_all()
-    row = McpServer.get_for_name("linear")
+    druks_db.expunge_all()
+    row = await McpServer.get_for_name("linear")
     assert row.token.decrypt() == _TOKEN
     # The merged view every consumer reads carries the Secret itself, so the
     # plaintext exists only where decrypt() is called.
-    merged = McpServer._merged()["linear"]
+    merged = (await McpServer._merged())["linear"]
     assert merged["token"].decrypt() == _TOKEN
 
 
-def test_grant_secret_halves_round_trip(druks_db):
-    _store_grant(refresh_token="rt-secret", client_secret="cs-secret")
+async def test_grant_secret_halves_round_trip(druks_db):
+    await _store_grant(refresh_token="rt-secret", client_secret="cs-secret")
 
-    druks_db.expire_all()
-    grant = OauthConnection.list_for_account("mcp:notion", SYSTEM_ACCOUNT_ID)[0]
-    registration = McpClientRegistration.get_for_account("notion", SYSTEM_ACCOUNT_ID)
+    druks_db.expunge_all()
+    grant = (await OauthConnection.list_for_account("mcp:notion", SYSTEM_ACCOUNT_ID))[0]
+    registration = await McpClientRegistration.get_for_account("notion", SYSTEM_ACCOUNT_ID)
     assert grant.refresh_token.decrypt() == "rt-secret"
     assert registration.client_secret.decrypt() == "cs-secret"
 
 
-def test_loaded_secrets_are_lazy_and_redacted(monkeypatch, tmp_path, druks_db):
-    McpServer.create(name="linear", url="https://mcp.linear.app/sse", token=_TOKEN)
-    druks_db.expire_all()
+async def test_loaded_secrets_are_lazy_and_redacted(monkeypatch, tmp_path, druks_db):
+    await McpServer.create(name="linear", url="https://mcp.linear.app/sse", token=_TOKEN)
+    druks_db.expunge_all()
 
     # Loading and logging a row never touches key material — decryption
     # happens only on decrypt(), and repr leaks nothing either way.
-    row = McpServer.get_for_name("linear")
+    row = await McpServer.get_for_name("linear")
     _set_key(monkeypatch, tmp_path, "")
     assert repr(row.token) == "Secret(<redacted>)"
     assert str(row.token) == "Secret(<redacted>)"
@@ -93,25 +96,27 @@ def test_loaded_secrets_are_lazy_and_redacted(monkeypatch, tmp_path, druks_db):
         row.token.decrypt()
 
 
-def test_empty_value_needs_no_key(monkeypatch, tmp_path, druks_db):
+async def test_empty_value_needs_no_key(monkeypatch, tmp_path, druks_db):
     # "" stores as empty bytes — presence checks and decrypt() of an absent
     # secret never touch key material (proven by breaking the key first).
-    McpServer.create(name="linear", url="https://mcp.linear.app/sse", token="")
-    druks_db.expire_all()
+    await McpServer.create(name="linear", url="https://mcp.linear.app/sse", token="")
+    druks_db.expunge_all()
 
-    assert bytes(druks_db.execute(text("SELECT token FROM mcp_servers")).scalar_one()) == b""
-    row = McpServer.get_for_name("linear")
+    assert (
+        bytes((await druks_db.execute(text("SELECT token FROM mcp_servers"))).scalar_one()) == b""
+    )
+    row = await McpServer.get_for_name("linear")
     _set_key(monkeypatch, tmp_path, "")
     assert not row.token
     assert row.token.decrypt() == ""
 
 
-def test_non_str_assignment_is_rejected(druks_db):
-    server = McpServer.create(name="linear", url="https://mcp.linear.app/sse", token=_TOKEN)
+async def test_non_str_assignment_is_rejected(druks_db):
+    server = await McpServer.create(name="linear", url="https://mcp.linear.app/sse", token=_TOKEN)
 
     server.token = 123
     with pytest.raises(StatementError, match="takes a str"):
-        druks_db.flush()
+        await db_session().flush()
 
 
 def test_missing_key_refuses_boot(monkeypatch, tmp_path):
@@ -141,101 +146,102 @@ def test_malformed_key_refuses_boot(monkeypatch, tmp_path):
             load_settings()
 
 
-def test_undecryptable_secret_raises_the_named_error(monkeypatch, tmp_path, druks_db):
+async def test_undecryptable_secret_raises_the_named_error(monkeypatch, tmp_path, druks_db):
     # A key dropped from the list while rows written under it existed is the
     # usual cause — the error must say so, not surface a bare crypto traceback.
-    McpServer.create(name="linear", url="https://mcp.linear.app/sse", token=_TOKEN)
-    druks_db.expire_all()
+    await McpServer.create(name="linear", url="https://mcp.linear.app/sse", token=_TOKEN)
+    druks_db.expunge_all()
     _set_key(monkeypatch, tmp_path, _key())
 
     with pytest.raises(SecretDecryptError, match="rotated out"):
-        McpServer.get_for_name("linear").token.decrypt()
+        (await McpServer.get_for_name("linear")).token.decrypt()
 
 
-def test_garbled_envelope_raises_the_named_error(druks_db):
+async def test_garbled_envelope_raises_the_named_error(druks_db):
     # No structural pre-checks in decrypt: GCM authentication (and the
     # ValueError a mangled nonce raises) fold every unreadable shape into the
     # one named error.
-    McpServer.create(name="linear", url="https://mcp.linear.app/sse", token=_TOKEN)
-    druks_db.execute(text(r"UPDATE mcp_servers SET token = '\x01ab'::bytea"))
-    druks_db.expire_all()
+    await McpServer.create(name="linear", url="https://mcp.linear.app/sse", token=_TOKEN)
+    await druks_db.execute(text(r"UPDATE mcp_servers SET token = '\x01ab'::bytea"))
+    druks_db.expunge_all()
 
     with pytest.raises(SecretDecryptError):
-        McpServer.get_for_name("linear").token.decrypt()
+        (await McpServer.get_for_name("linear")).token.decrypt()
 
 
-def test_ciphertext_is_bound_to_its_column(druks_db):
+async def test_ciphertext_is_bound_to_its_column(druks_db):
     # An envelope can't be replayed into any other encrypted column — not
     # another table's, and not a sibling column on the same row.
-    McpServer.create(name="linear", url="https://mcp.linear.app/sse", token=_TOKEN)
-    _store_grant(refresh_token="rt-secret", client_secret="cs-secret")
-    druks_db.execute(
+    await McpServer.create(name="linear", url="https://mcp.linear.app/sse", token=_TOKEN)
+    await _store_grant(refresh_token="rt-secret", client_secret="cs-secret")
+    await druks_db.execute(
         text(
             "UPDATE oauth_connections SET refresh_token ="
             " (SELECT token FROM mcp_servers WHERE name = 'linear')"
         )
     )
-    druks_db.execute(
+    await druks_db.execute(
         text(
             "UPDATE mcp_client_registrations SET client_secret ="
             " (SELECT refresh_token FROM oauth_connections WHERE provider = 'mcp:notion')"
         )
     )
-    druks_db.expire_all()
+    druks_db.expunge_all()
 
-    grant = OauthConnection.list_for_account("mcp:notion", SYSTEM_ACCOUNT_ID)[0]
-    registration = McpClientRegistration.get_for_account("notion", SYSTEM_ACCOUNT_ID)
+    grant = (await OauthConnection.list_for_account("mcp:notion", SYSTEM_ACCOUNT_ID))[0]
+    registration = await McpClientRegistration.get_for_account("notion", SYSTEM_ACCOUNT_ID)
     with pytest.raises(SecretDecryptError):
         grant.refresh_token.decrypt()
     with pytest.raises(SecretDecryptError):
         registration.client_secret.decrypt()
 
 
-def test_prepended_key_still_decrypts(monkeypatch, tmp_path, druks_db):
+async def test_prepended_key_still_decrypts(monkeypatch, tmp_path, druks_db):
     # Rotation is prepend-only: new writes use the first key; rows written
     # under an older key keep decrypting as long as it stays in the list.
     old_key = _key()
     _set_key(monkeypatch, tmp_path, old_key)
-    McpServer.create(name="linear", url="https://mcp.linear.app/sse", token=_TOKEN)
-    _store_grant(refresh_token="rt-secret")
+    await McpServer.create(name="linear", url="https://mcp.linear.app/sse", token=_TOKEN)
+    await _store_grant(refresh_token="rt-secret")
 
     _set_key(monkeypatch, tmp_path, f"{_key()},{old_key}")
-    druks_db.expire_all()
-    assert McpServer.get_for_name("linear").token.decrypt() == _TOKEN
-    assert (
-        OauthConnection.list_for_account("mcp:notion", SYSTEM_ACCOUNT_ID)[0].refresh_token.decrypt()
-        == "rt-secret"
-    )
+    druks_db.expunge_all()
+    assert (await McpServer.get_for_name("linear")).token.decrypt() == _TOKEN
+    assert (await OauthConnection.list_for_account("mcp:notion", SYSTEM_ACCOUNT_ID))[
+        0
+    ].refresh_token.decrypt() == "rt-secret"
 
 
 # --- EncryptedJsonField (via the test-only model) ---------------------------
 
 
-def test_json_mapping_round_trips_as_ciphertext(druks_db):
+async def test_json_mapping_round_trips_as_ciphertext(druks_db):
     druks_db.add(EncryptedNote(data={"token": _TOKEN, "extra": "x"}))
-    druks_db.flush()
+    await druks_db.flush()
 
-    blob = bytes(druks_db.execute(text("SELECT data FROM test_encrypted_notes")).scalar_one())
+    blob = bytes(
+        (await druks_db.execute(text("SELECT data FROM test_encrypted_notes"))).scalar_one()
+    )
     assert _TOKEN.encode() not in blob
-    druks_db.expire_all()
-    note = druks_db.query(EncryptedNote).one()
+    druks_db.expunge_all()
+    note = (await druks_db.execute(select(EncryptedNote))).scalar_one()
     assert note.data["token"] == _TOKEN
     assert repr(note.data) == "SecretsMapping(<redacted>)"
 
 
-def test_json_in_place_write_persists(druks_db):
+async def test_json_in_place_write_persists(druks_db):
     # Writing one key of the mapping must mark the column dirty on its own
     # (the Mutable wiring) and survive the flush.
     druks_db.add(EncryptedNote(data={"token": "old"}))
-    druks_db.flush()
-    druks_db.expire_all()
+    await druks_db.flush()
+    druks_db.expunge_all()
 
-    note = druks_db.query(EncryptedNote).one()
+    note = (await druks_db.execute(select(EncryptedNote))).scalar_one()
     note.data["token"] = "new"
-    druks_db.flush()
-    druks_db.expire_all()
+    await druks_db.flush()
+    druks_db.expunge_all()
 
-    assert druks_db.query(EncryptedNote).one().data["token"] == "new"
+    assert (await druks_db.execute(select(EncryptedNote))).scalar_one().data["token"] == "new"
 
 
 def test_json_non_dict_assignment_is_rejected(druks_db):

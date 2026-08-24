@@ -20,11 +20,11 @@ _BEARER_CHALLENGE = 'Bearer realm="druks"'
 _bearer_scheme = HTTPBearer(auto_error=False, scheme_name="personalAccessToken")
 
 
-def resolve_pat_account(credentials: HTTPAuthorizationCredentials | None) -> Account:
+async def resolve_pat_account(credentials: HTTPAuthorizationCredentials | None) -> Account:
     """A present Authorization must authenticate — never a fall-through."""
     if credentials:
         try:
-            return PersonalAccessToken.authenticate(credentials.credentials).account
+            return (await PersonalAccessToken.authenticate(credentials.credentials)).account
         except InvalidPatError as error:
             raise HTTPException(
                 status_code=401,
@@ -38,10 +38,10 @@ def resolve_pat_account(credentials: HTTPAuthorizationCredentials | None) -> Acc
     )
 
 
-def resolve_single_operator() -> Account | None:
+async def resolve_single_operator() -> Account | None:
     """None while zero accounts exist (setup); more than one refuses rather
     than guesses."""
-    operators = Account.list_non_system()
+    operators = await Account.list_non_system()
     if len(operators) > 1:
         raise AuthConfigurationError(
             f"auth mode 'none' expects exactly one operator account, found "
@@ -56,16 +56,16 @@ async def _resolve_operator(connection: HTTPConnection) -> Account | None:
     connection, not a request, so a WebSocket upgrade resolves the same way."""
     settings = connection.app.state.settings
     if settings.identity.mode == "none":
-        return resolve_single_operator()
+        return await resolve_single_operator()
     values = connection.headers.getlist(settings.identity.header)
     if len(values) == 1 and (asserted := values[0].strip()):
         if settings.identity.mode == "header":
-            return Account.get_or_create(asserted)
+            return await Account.get_or_create(asserted)
         try:
             email = await verify_assertion(asserted, settings)
         except InvalidAssertionError as error:
             raise HTTPException(status_code=401, detail=str(error)) from error
-        return Account.get_or_create(email)
+        return await Account.get_or_create(email)
     raise HTTPException(
         status_code=401,
         detail=f"The edge must assert exactly one nonblank {settings.identity.header} identity.",
@@ -102,7 +102,7 @@ async def current_account(
     """The Bearer PAT when Authorization is present — present-but-empty still
     challenges — else the session identity."""
     if "Authorization" in request.headers:
-        account = resolve_pat_account(bearer)
+        account = await resolve_pat_account(bearer)
     else:
         account = await _resolve_operator(request)
         if not account:
@@ -154,7 +154,7 @@ async def current_account_or_setup(
     """PAT-first identity that reads none/zero setup as None instead of
     refusing — ``/api/auth/me`` only."""
     if "Authorization" in request.headers:
-        account = resolve_pat_account(bearer)
+        account = await resolve_pat_account(bearer)
     else:
         account = await _resolve_operator(request)
     token = current_account_id.set(account.id if account else None)

@@ -568,13 +568,13 @@ def _fold_comments_into_body(body: str, comments: list[ReviewComment]) -> str:
     return "\n".join(lines)
 
 
-def get_github_client() -> GitHubClient:
+async def get_github_client() -> GitHubClient:
     """The operator client, resolved from the GitHub service-identity row —
     the only credential source; there is no settings or file fallback. Raises
     ``ServiceNotConnectedError`` when GitHub isn't connected. ``github_api_url``
     stays a Settings input because it is transport, not identity. PEM plaintext
     exists only here, feeding the client's auth strategy."""
-    row = ServiceIdentity.get(GITHUB)
+    row = await ServiceIdentity.get(GITHUB)
     return GitHubClient(
         app_id=row.identity["app_id"],
         private_key=row.secrets["private_key"],

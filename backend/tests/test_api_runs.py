@@ -24,16 +24,16 @@ def client(tmp_path: Path, druks_db, monkeypatch):
         yield client
 
 
-def _seed_call_id(
+async def _seed_call_id(
     druks_db,
     *,
     finished: bool = True,
     run_state: str = "running",
 ) -> str:
-    note = Note.create(body="agent transcript")
-    run = seed_run(druks_db, kind=Summarize.kind, subject=note, state=run_state)
+    note = await Note.create(body="agent transcript")
+    run = await seed_run(druks_db, kind=Summarize.kind, subject=note, state=run_state)
     status = "succeeded" if finished else "running"
-    call = seed_call(druks_db, run, "summarize", status=status)
+    call = await seed_call(druks_db, run, "summarize", status=status)
 
     # The harness writes every file for a call into run-<run_id>/<call_id>/.
     call_dir = call.call_dir
@@ -46,11 +46,11 @@ def _seed_call_id(
     return call.id
 
 
-def test_list_files_inventories_call_artifacts(
+async def test_list_files_inventories_call_artifacts(
     client: TestClient,
     druks_db,
 ):
-    call_id = _seed_call_id(druks_db)
+    call_id = await _seed_call_id(druks_db)
 
     response = client.get(f"/api/field_notes/transcripts/{call_id}/files")
 
@@ -64,9 +64,9 @@ def test_list_files_inventories_call_artifacts(
     assert files["metadata"] is not None
 
 
-def test_get_agent_call_files_raises_for_unknown_call(druks_db):
+async def test_get_agent_call_files_raises_for_unknown_call(druks_db):
     with pytest.raises(AgentCallNotFound):
-        get_agent_call_files("missing")
+        await get_agent_call_files("missing")
 
 
 def test_transcript_unknown_call_returns_unified_404(client: TestClient, druks_db):
@@ -105,11 +105,11 @@ def test_file_download_unknown_call_returns_unified_404(client: TestClient, druk
     }
 
 
-def test_transcript_range_fetch_paginates(
+async def test_transcript_range_fetch_paginates(
     client: TestClient,
     druks_db,
 ):
-    call_id = _seed_call_id(druks_db)
+    call_id = await _seed_call_id(druks_db)
 
     first = client.get(
         f"/api/field_notes/transcripts/{call_id}",
@@ -133,11 +133,11 @@ def test_transcript_range_fetch_paginates(
     assert data["eof"] is True
 
 
-def test_transcript_of_a_running_call_is_never_cached(
+async def test_transcript_of_a_running_call_is_never_cached(
     client: TestClient,
     druks_db,
 ):
-    call_id = _seed_call_id(druks_db, finished=False)
+    call_id = await _seed_call_id(druks_db, finished=False)
 
     response = client.get(
         f"/api/field_notes/transcripts/{call_id}",
@@ -148,13 +148,13 @@ def test_transcript_of_a_running_call_is_never_cached(
     assert response.headers["cache-control"] == "no-store"
 
 
-def test_transcript_of_an_abandoned_call_is_cached_immutably(
+async def test_transcript_of_an_abandoned_call_is_cached_immutably(
     client: TestClient,
     druks_db,
 ):
     # The call never wrote finished_at, but its run died — nothing will append
     # to that log again, so the chunk is as permanent as a finished call's.
-    call_id = _seed_call_id(druks_db, finished=False, run_state="failed")
+    call_id = await _seed_call_id(druks_db, finished=False, run_state="failed")
 
     response = client.get(
         f"/api/field_notes/transcripts/{call_id}",
@@ -165,13 +165,13 @@ def test_transcript_of_an_abandoned_call_is_cached_immutably(
     assert response.headers["cache-control"] == "public, max-age=31536000, immutable"
 
 
-def test_transcript_missing_file_returns_eof(
+async def test_transcript_missing_file_returns_eof(
     client: TestClient,
     druks_db,
 ):
-    note = Note.create(body="missing transcript")
-    run = seed_run(druks_db, kind=Summarize.kind, subject=note)
-    call = seed_call(druks_db, run, "summarize", status="running")
+    note = await Note.create(body="missing transcript")
+    run = await seed_run(druks_db, kind=Summarize.kind, subject=note)
+    call = await seed_call(druks_db, run, "summarize", status="running")
 
     response = client.get(
         f"/api/field_notes/transcripts/{call.id}",
@@ -184,13 +184,13 @@ def test_transcript_missing_file_returns_eof(
     assert data["text"] == ""
 
 
-def test_transcript_stream_emits_chunk_then_finishes(
+async def test_transcript_stream_emits_chunk_then_finishes(
     client: TestClient,
     druks_db,
 ):
     # The terminal seeded run streams its stdout in one tick: a transcript.chunk
     # carrying the log, then agent_call.finished (which ends the SSE).
-    call_id = _seed_call_id(druks_db)
+    call_id = await _seed_call_id(druks_db)
 
     response = client.get(
         f"/api/field_notes/transcripts/{call_id}/stream",
@@ -218,11 +218,11 @@ def test_transcript_stream_unknown_call_closes(
     assert response.text == ""
 
 
-def test_get_file_serves_inventory_paths(
+async def test_get_file_serves_inventory_paths(
     client: TestClient,
     druks_db,
 ):
-    call_id = _seed_call_id(druks_db)
+    call_id = await _seed_call_id(druks_db)
 
     files = client.get(f"/api/field_notes/transcripts/{call_id}/files").json()
     # Compose the download URL the way the client does: the listing's own route
@@ -234,11 +234,11 @@ def test_get_file_serves_inventory_paths(
     assert response.json() == {"ok": True}
 
 
-def test_get_file_rejects_path_traversal(
+async def test_get_file_rejects_path_traversal(
     client: TestClient,
     druks_db,
 ):
-    call_id = _seed_call_id(druks_db)
+    call_id = await _seed_call_id(druks_db)
 
     response = client.get(
         f"/api/field_notes/transcripts/{call_id}/files/..%2F..%2Fetc%2Fpasswd",
@@ -251,11 +251,11 @@ def test_get_file_rejects_path_traversal(
     }
 
 
-def test_get_file_missing_returns_404(
+async def test_get_file_missing_returns_404(
     client: TestClient,
     druks_db,
 ):
-    call_id = _seed_call_id(druks_db)
+    call_id = await _seed_call_id(druks_db)
 
     response = client.get(
         f"/api/field_notes/transcripts/{call_id}/files/nope.json",
@@ -268,12 +268,12 @@ def test_get_file_missing_returns_404(
     }
 
 
-def test_agent_call_artifact_layout(druks_db, tmp_path):
+async def test_agent_call_artifact_layout(druks_db, tmp_path):
     # Layout sub-dir is the call id; the sandbox runner streams every run's stdout
     # to stdout.jsonl, so the layout is the same whichever harness ran the call.
-    note = Note.create(body="artifact layout")
-    run = seed_run(druks_db, kind=Summarize.kind, subject=note)
-    call = seed_call(druks_db, run, "summarize", model="claude-opus-4-7", status="running")
+    note = await Note.create(body="artifact layout")
+    run = await seed_run(druks_db, kind=Summarize.kind, subject=note)
+    call = await seed_call(druks_db, run, "summarize", model="claude-opus-4-7", status="running")
     sub = Path(call.artifact_dir) / call.id
     assert call.artifact_layout.transcript == sub / "stdout.jsonl"
     assert call.artifact_layout.stderr == sub / "stderr.log"

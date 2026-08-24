@@ -37,8 +37,8 @@ def _stub_profile_dispatch(monkeypatch):
 async def test_policy_push_on_default_branch_reprofiles(tmp_path, druks_db, monkeypatch):
     from druks.contrib.ship.models import Project, ProjectRepo
 
-    project = Project.create(name="Acme")
-    repo = ProjectRepo.create(project_id=project.id, full_name="acme/widget")
+    project = await Project.create(name="Acme")
+    repo = await ProjectRepo.create(project_id=project.id, full_name="acme/widget")
     calls = _stub_profile_dispatch(monkeypatch)
 
     await _fire_push(
@@ -62,8 +62,8 @@ async def test_policy_push_on_default_branch_reprofiles(tmp_path, druks_db, monk
 async def test_non_default_branch_push_is_ignored(tmp_path, druks_db, monkeypatch):
     from druks.contrib.ship.models import Project, ProjectRepo
 
-    project = Project.create(name="Acme")
-    ProjectRepo.create(project_id=project.id, full_name="acme/widget")
+    project = await Project.create(name="Acme")
+    await ProjectRepo.create(project_id=project.id, full_name="acme/widget")
     calls = _stub_profile_dispatch(monkeypatch)
 
     await _fire_push(
@@ -82,8 +82,8 @@ async def test_non_default_branch_push_is_ignored(tmp_path, druks_db, monkeypatc
 async def test_unrelated_path_push_is_ignored(tmp_path, druks_db, monkeypatch):
     from druks.contrib.ship.models import Project, ProjectRepo
 
-    project = Project.create(name="Acme")
-    ProjectRepo.create(project_id=project.id, full_name="acme/widget")
+    project = await Project.create(name="Acme")
+    await ProjectRepo.create(project_id=project.id, full_name="acme/widget")
     calls = _stub_profile_dispatch(monkeypatch)
 
     await _fire_push(

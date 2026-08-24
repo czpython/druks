@@ -46,7 +46,7 @@ async def request_review(
     account: Account = Depends(current_account),
 ) -> str:
     """Start a pull request review."""
-    if not ProjectRepo.get_for_repo(repo):
+    if not await ProjectRepo.get_for_repo(repo):
         raise HTTPException(
             status.HTTP_404_NOT_FOUND,
             f"{repo} is not a registered project repo — add it to a project first",

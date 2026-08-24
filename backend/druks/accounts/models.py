@@ -38,35 +38,35 @@ class Account(Base, Uuid7Pk):
     created_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
 
     @classmethod
-    def get(cls, account_id: str, *, exclude_system: bool = False) -> "Account | None":
+    async def get(cls, account_id: str, *, exclude_system: bool = False) -> "Account | None":
         if exclude_system and account_id == SYSTEM_ACCOUNT_ID:
             return
-        return db_session().get(cls, account_id)
+        return await db_session().get(cls, account_id)
 
     @classmethod
-    def get_for_username(cls, username: str) -> "Account | None":
-        return db_session().scalar(select(cls).where(cls.username == username))
+    async def get_for_username(cls, username: str) -> "Account | None":
+        return await db_session().scalar(select(cls).where(cls.username == username))
 
     @classmethod
-    def get_or_create(cls, username: str) -> "Account":
+    async def get_or_create(cls, username: str) -> "Account":
         """Concurrency-safe lookup-or-create: racing requests both INSERT with
         ON CONFLICT DO NOTHING, then converge on the one row through the
         canonical CITEXT lookup."""
-        account = cls.get_for_username(username)
+        account = await cls.get_for_username(username)
         if account:
             return account
         session = db_session()
-        session.execute(
+        await session.execute(
             insert(cls)
             .values(username=username)
             .on_conflict_do_nothing(index_elements=["username"])
         )
-        return session.scalars(select(cls).where(cls.username == username)).one()
+        return (await session.scalars(select(cls).where(cls.username == username))).one()
 
     @classmethod
-    def list_non_system(cls) -> list["Account"]:
+    async def list_non_system(cls) -> list["Account"]:
         stmt = select(cls).where(cls.username != SYSTEM_ACCOUNT_ID).order_by(cls.created_at)
-        return list(db_session().scalars(stmt))
+        return list(await db_session().scalars(stmt))
 
 
 def _hash_token(token: str) -> bytes:
@@ -108,24 +108,24 @@ class PersonalAccessToken(Base, Uuid7Pk):
         return "active"
 
     @classmethod
-    def get(cls, pat_id: str) -> "PersonalAccessToken | None":
-        return db_session().get(cls, pat_id)
+    async def get(cls, pat_id: str) -> "PersonalAccessToken | None":
+        return await db_session().get(cls, pat_id)
 
     @classmethod
-    def get_for_prefix(cls, prefix: str) -> "PersonalAccessToken | None":
-        return db_session().scalar(select(cls).where(cls.token_prefix == prefix))
+    async def get_for_prefix(cls, prefix: str) -> "PersonalAccessToken | None":
+        return await db_session().scalar(select(cls).where(cls.token_prefix == prefix))
 
     @classmethod
-    def list_for_account(cls, account_id: str) -> list["PersonalAccessToken"]:
+    async def list_for_account(cls, account_id: str) -> list["PersonalAccessToken"]:
         stmt = select(cls).where(cls.account_id == account_id).order_by(cls.created_at.desc())
-        return list(db_session().scalars(stmt))
+        return list(await db_session().scalars(stmt))
 
     @classmethod
-    def create(cls, *, account_id: str, name: str) -> "tuple[PersonalAccessToken, str]":
+    async def create(cls, *, account_id: str, name: str) -> "tuple[PersonalAccessToken, str]":
         """Mint ``account_id`` a token; returns (row, plaintext). The plaintext
         is shown exactly once — only its hash lands in the row."""
         prefix = _new_prefix()
-        while cls.get_for_prefix(prefix):
+        while await cls.get_for_prefix(prefix):
             prefix = _new_prefix()
         secret = base64.urlsafe_b64encode(secrets.token_bytes(PAT_SECRET_BYTES))
         token = f"{PAT_TOKEN_TAG}_{prefix}_{secret.rstrip(b'=').decode()}"
@@ -141,16 +141,16 @@ class PersonalAccessToken(Base, Uuid7Pk):
         )
         session = db_session()
         session.add(row)
-        session.flush()
+        await session.flush()
         return row, token
 
     @classmethod
-    def authenticate(cls, credential: str) -> "PersonalAccessToken":
+    async def authenticate(cls, credential: str) -> "PersonalAccessToken":
         """Resolve a presented bearer credential to its live row — the one
         authentication door for both HTTP and MCP — or raise InvalidPatError.
         Stamps last_used_at, at most hourly."""
         prefix, _, _ = credential.removeprefix(f"{PAT_TOKEN_TAG}_").partition("_")
-        row = cls.get_for_prefix(prefix)
+        row = await cls.get_for_prefix(prefix)
         if not row:
             raise InvalidPatError("Not a recognized personal access token.")
         if not hmac.compare_digest(_hash_token(credential), row.token_hash):
@@ -162,10 +162,10 @@ class PersonalAccessToken(Base, Uuid7Pk):
         now = Base.utc_now()
         if not row.last_used_at or now - row.last_used_at >= PAT_LAST_USED_RESOLUTION:
             row.last_used_at = now
-            db_session().flush()
+            await db_session().flush()
         return row
 
-    def revoke(self) -> None:
+    async def revoke(self) -> None:
         # Keep the first revocation instant — a repeat revoke changes nothing.
         self.revoked_at = self.revoked_at or Base.utc_now()
-        db_session().flush()
+        await db_session().flush()

@@ -27,44 +27,46 @@ def client(app_settings: Settings):
         yield c
 
 
-def _account_id() -> str:
+async def _account_id() -> str:
     # The suite's auth gate stands in op@example.com (conftest override).
-    return Account.get_or_create("op@example.com").id
+    return (await Account.get_or_create("op@example.com")).id
 
 
-def _seed(snapshots: list[UsageScrape]) -> None:
+async def _seed(snapshots: list[UsageScrape]) -> None:
     # save() flushes onto the ambient per-test connection session (bound by the
     # _txn fixture), so the rows are visible to the request and roll back with
     # the test — no separate engine, no commit. Every snapshot belongs to the
     # viewing account unless a test stamps another owner.
-    viewer = _account_id()
+    viewer = await _account_id()
     for snap in snapshots:
         if not snap.account_id:
             snap.account_id = viewer
-        snap.save()
+        await snap.save()
 
 
 def _harness(body: dict, name: str) -> dict:
     return next(entry for entry in body["harnesses"] if entry["name"] == name)
 
 
-def _seed_agent_call(druks_db, *, model: str = "gpt-5.5"):
-    note = Note.create(body="usage accounting")
-    run = seed_run(druks_db, kind=Summarize.kind, subject=note)
-    return seed_call(druks_db, run, "summarize", status="running", model=model)
+async def _seed_agent_call(druks_db, *, model: str = "gpt-5.5"):
+    note = await Note.create(body="usage accounting")
+    run = await seed_run(druks_db, kind=Summarize.kind, subject=note)
+    return await seed_call(druks_db, run, "summarize", status="running", model=model)
 
 
-def test_usage_today_counts_calls_whose_model_isnt_a_current_harness(client, druks_db) -> None:
+async def test_usage_today_counts_calls_whose_model_isnt_a_current_harness(
+    client, druks_db
+) -> None:
     # Model ids churn on deploys (opus-4-7 → 4-8), so a call finished earlier today
     # can carry an id no harness claims any more. Money spent must not vanish from
     # the display — the sys-strip's total_run_spend_between counts every call, and
     # the two surfaces must quote the same number. Unclaimed models land in the
     # "unattributed" bucket the panel's grand total sums.
-    call = _seed_agent_call(druks_db, model="claude-opus-4-5")
-    call.account_id = _account_id()
+    call = await _seed_agent_call(druks_db, model="claude-opus-4-5")
+    call.account_id = await _account_id()
     call.finished_at = datetime.now(UTC)
     call.cost_usd = 2.5
-    druks_db.flush()
+    await druks_db.flush()
 
     body = client.get("/api/usage/today").json()
     bucket = _harness(body, "unattributed")
@@ -81,10 +83,10 @@ def test_get_usage_empty_returns_available_false(client) -> None:
     assert all(entry["available"] is False for entry in body["harnesses"])
 
 
-def test_get_usage_serializes_latest_per_harness(client, app_settings) -> None:
+async def test_get_usage_serializes_latest_per_harness(client, app_settings) -> None:
     # Plant a snapshot for claude only — codex should still report
     # ``available=false`` rather than missing-key/404.
-    _seed(
+    await _seed(
         [
             UsageScrape(
                 harness="claude",
@@ -120,8 +122,8 @@ def test_get_usage_serializes_latest_per_harness(client, app_settings) -> None:
     assert _harness(body, "codex")["available"] is False
 
 
-def test_get_usage_flags_stale_after_24h(client, app_settings) -> None:
-    _seed(
+async def test_get_usage_flags_stale_after_24h(client, app_settings) -> None:
+    await _seed(
         [
             UsageScrape(
                 harness="claude",
@@ -136,11 +138,11 @@ def test_get_usage_flags_stale_after_24h(client, app_settings) -> None:
     assert _harness(body, "claude")["stale"] is True
 
 
-def test_get_usage_exposes_unlimited_flag(client, app_settings) -> None:
+async def test_get_usage_exposes_unlimited_flag(client, app_settings) -> None:
     # Codex business plan: scraper synthesizes permanently-full buckets
     # and marks the row unmetered so the UI can render "unmetered"
     # instead of a quota bar that never moves.
-    _seed(
+    await _seed(
         [
             UsageScrape(
                 harness="codex",
@@ -159,7 +161,7 @@ def test_get_usage_exposes_unlimited_flag(client, app_settings) -> None:
     assert _harness(body, "claude")["unlimited"] is False
 
 
-def test_usage_history_serializes_series_oldest_first(client, app_settings) -> None:
+async def test_usage_history_serializes_series_oldest_first(client, app_settings) -> None:
     now = datetime.now(UTC)
     snaps = [
         UsageScrape(
@@ -191,7 +193,7 @@ def test_usage_history_serializes_series_oldest_first(client, app_settings) -> N
     snaps.append(
         UsageScrape(harness="claude", parse_ok=False, scraped_at=now - timedelta(minutes=5))
     )
-    _seed(snaps)
+    await _seed(snaps)
 
     body = client.get("/api/usage/history").json()
 
@@ -213,11 +215,11 @@ def test_usage_history_serializes_series_oldest_first(client, app_settings) -> N
     assert _harness(body, "codex")["weeks"] == []
 
 
-def test_usage_today_aggregates_spend_and_tokens_by_provider(
+async def test_usage_today_aggregates_spend_and_tokens_by_provider(
     client, app_settings, druks_db
 ) -> None:
-    codex_run = _seed_agent_call(druks_db, model="gpt-5.5")
-    codex_run.account_id = _account_id()
+    codex_run = await _seed_agent_call(druks_db, model="gpt-5.5")
+    codex_run.account_id = await _account_id()
     codex_run.cost_usd = 1.25
     codex_run.cost_metadata = {
         "provider": "openai",
@@ -227,8 +229,8 @@ def test_usage_today_aggregates_spend_and_tokens_by_provider(
     }
     codex_run.finished_at = datetime.now(UTC)
 
-    claude_run = _seed_agent_call(druks_db, model="claude-opus-4-7")
-    claude_run.account_id = _account_id()
+    claude_run = await _seed_agent_call(druks_db, model="claude-opus-4-7")
+    claude_run.account_id = await _account_id()
     claude_run.cost_usd = 2.5
     claude_run.cost_metadata = {
         "provider": "anthropic",
@@ -240,13 +242,13 @@ def test_usage_today_aggregates_spend_and_tokens_by_provider(
     claude_run.finished_at = datetime.now(UTC)
 
     # Finished yesterday — outside today's boundary, must not count.
-    old_run = _seed_agent_call(druks_db, model="gpt-5.5")
+    old_run = await _seed_agent_call(druks_db, model="gpt-5.5")
     old_run.cost_usd = 99.0
     old_run.finished_at = datetime.now(UTC) - timedelta(days=2)
 
     # Still running — no cost yet, counted nowhere.
-    _seed_agent_call(druks_db, model="gpt-5.5")
-    druks_db.flush()
+    await _seed_agent_call(druks_db, model="gpt-5.5")
+    await druks_db.flush()
 
     body = client.get("/api/usage/today").json()
 
@@ -266,10 +268,10 @@ def test_usage_today_aggregates_spend_and_tokens_by_provider(
     assert sum(claude["hours"]) == 2.5
 
 
-def test_usage_excludes_another_accounts_scrape(client, druks_db) -> None:
+async def test_usage_excludes_another_accounts_scrape(client, druks_db) -> None:
     snap = UsageScrape(harness="claude", parse_ok=True, five_hour_percent_left=54)
-    snap.account_id = Account.get_or_create("other@example.com").id
-    snap.save()
+    snap.account_id = (await Account.get_or_create("other@example.com")).id
+    await snap.save()
 
     body = client.get("/api/usage").json()
     assert _harness(body, "claude")["available"] is False
@@ -277,10 +279,10 @@ def test_usage_excludes_another_accounts_scrape(client, druks_db) -> None:
     assert _harness(history, "claude")["fiveHour"] == []
 
 
-def test_usage_reports_viewers_connection_identity(client, druks_db) -> None:
-    HarnessConnection.connect(
+async def test_usage_reports_viewers_connection_identity(client, druks_db) -> None:
+    await HarnessConnection.connect(
         harness="claude",
-        account=Account.get_or_create("other@example.com"),
+        account=await Account.get_or_create("other@example.com"),
         payload={"claudeAiOauth": {"accessToken": "other"}},
         expires_at=None,
         provider_email="other-seat@example.com",
@@ -289,9 +291,9 @@ def test_usage_reports_viewers_connection_identity(client, druks_db) -> None:
     assert _harness(body, "claude")["connected"] is False
     assert _harness(body, "claude")["providerEmail"] is None
 
-    HarnessConnection.connect(
+    await HarnessConnection.connect(
         harness="claude",
-        account=Account.get_or_create("op@example.com"),
+        account=await Account.get_or_create("op@example.com"),
         payload={"claudeAiOauth": {"accessToken": "mine"}},
         expires_at=None,
         provider_email="subscription@example.com",
@@ -301,21 +303,21 @@ def test_usage_reports_viewers_connection_identity(client, druks_db) -> None:
     assert _harness(body, "claude")["providerEmail"] == "subscription@example.com"
 
 
-def test_usage_today_counts_only_the_viewers_calls(client, druks_db) -> None:
-    mine = _seed_agent_call(druks_db, model="claude-opus-4-7")
-    mine.account_id = _account_id()
+async def test_usage_today_counts_only_the_viewers_calls(client, druks_db) -> None:
+    mine = await _seed_agent_call(druks_db, model="claude-opus-4-7")
+    mine.account_id = await _account_id()
     mine.cost_usd = 2.0
     mine.finished_at = datetime.now(UTC)
 
-    other = _seed_agent_call(druks_db, model="claude-opus-4-7")
-    other.account_id = Account.get_or_create("other@example.com").id
+    other = await _seed_agent_call(druks_db, model="claude-opus-4-7")
+    other.account_id = (await Account.get_or_create("other@example.com")).id
     other.cost_usd = 5.0
     other.finished_at = datetime.now(UTC)
 
-    background = _seed_agent_call(druks_db, model="claude-opus-4-7")
+    background = await _seed_agent_call(druks_db, model="claude-opus-4-7")
     background.cost_usd = 9.0
     background.finished_at = datetime.now(UTC)
-    druks_db.flush()
+    await druks_db.flush()
 
     body = client.get("/api/usage/today").json()
     assert _harness(body, "claude")["spendUsd"] == 2.0
@@ -338,9 +340,9 @@ def _fake_fetch(fetched: list):
     return fake
 
 
-def test_refresh_scrapes_only_the_viewers_connections(client, druks_db, monkeypatch) -> None:
-    viewer = connect_harness(ClaudeHarness, {"claudeAiOauth": {"accessToken": "t"}})
-    connect_harness(
+async def test_refresh_scrapes_only_the_viewers_connections(client, druks_db, monkeypatch) -> None:
+    viewer = await connect_harness(ClaudeHarness, {"claudeAiOauth": {"accessToken": "t"}})
+    await connect_harness(
         ClaudeHarness, {"claudeAiOauth": {"accessToken": "t2"}}, provider_email="other@example.com"
     )
     fetched: list[str] = []
@@ -348,11 +350,11 @@ def test_refresh_scrapes_only_the_viewers_connections(client, druks_db, monkeypa
 
     assert client.post("/api/usage/refresh").status_code == 200
     assert fetched == [viewer.account_id]
-    assert UsageScrape.latest_for("claude", viewer.account_id).five_hour_percent_left == 50
+    assert (await UsageScrape.latest_for("claude", viewer.account_id)).five_hour_percent_left == 50
 
 
-def test_refresh_floors_repeat_scrapes(client, druks_db, monkeypatch) -> None:
-    connect_harness(ClaudeHarness, {"claudeAiOauth": {"accessToken": "t"}})
+async def test_refresh_floors_repeat_scrapes(client, druks_db, monkeypatch) -> None:
+    await connect_harness(ClaudeHarness, {"claudeAiOauth": {"accessToken": "t"}})
     fetched: list[str] = []
     monkeypatch.setattr(ClaudeHarness, "fetch_usage", _fake_fetch(fetched))
 

@@ -4,12 +4,12 @@ from druks_field_notes.models import Note
 from pydantic import ValidationError
 
 
-def test_the_board_honors_the_board_size(druks_db):
-    Note.create(body="first")
-    newest = Note.create(body="second")
-    FieldNotes.override_setting("board_size", 1)
+async def test_the_board_honors_the_board_size(druks_db):
+    await Note.create(body="first")
+    newest = await Note.create(body="second")
+    await FieldNotes.override_setting("board_size", 1)
 
-    summaries = Note.list_summaries(None)
+    summaries = await Note.list_summaries(None)
 
     assert [summary.id for summary in summaries] == [str(newest.id)]
     assert summaries[0].body == "second"

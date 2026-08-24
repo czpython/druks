@@ -43,10 +43,10 @@ class PullRequestReview(Workflow):
         # Even a distinct review identity clones alongside the operator App, so
         # resolve the operator identity before the start spends a run and
         # provisions a VM — the raising lookup surfaces the actionable error.
-        ServiceIdentity.get(GITHUB)
+        await ServiceIdentity.get(GITHUB)
         # Attribution follows the requester when druks knows them by that name; a
         # review asked for by someone with no account runs as the system's.
-        account = Account.get_for_username(requested_by)
+        account = await Account.get_for_username(requested_by)
         return await cls.start(
             subject=PullRequest.get(repo, pr_number),
             account_id=account.id if account else None,
@@ -61,8 +61,8 @@ class PullRequestReview(Workflow):
         # The token is the review actor's: it authenticates the clone and ``gh``, so the
         # review is authored under that identity. Siblings stay uncloned — the reviewer
         # clones the ones it opens, into a directory that must exist for the grant to hold.
-        repo = self.subject.repo
-        github_token = await get_review_actor().client.token_for_repo(repo)
+        repo = (await self.subject).repo
+        github_token = await (await get_review_actor()).client.token_for_repo(repo)
         await sandbox.write_secret(
             secret=github_token, remote=get_github_token_remote_path(sandbox.ssh_username)
         )
@@ -80,9 +80,9 @@ class PullRequestReview(Workflow):
         }
 
     async def get_prompt_context(self, **context: Any) -> dict[str, Any]:
-        target = ProjectRepo.get_for_repo(self.subject.repo, raise_on_missing=True)
+        target = await ProjectRepo.get_for_repo((await self.subject).repo, raise_on_missing=True)
         return {
-            "siblings": target.siblings(),
-            "review_mode": get_review_actor().mode,
+            "siblings": await target.siblings(),
+            "review_mode": (await get_review_actor()).mode,
             **await super().get_prompt_context(**context),
         }

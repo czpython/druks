@@ -586,7 +586,7 @@ async def test_review_work_ask_renders_a_notification_body(monkeypatch):
     await workflow._work_gate()
 
     run = Run(input_request=input_requests[0])
-    assert run.get_rendered_ask()["body"]
+    assert (await run.get_rendered_ask())["body"]
 
 
 async def test_needs_clarification_delivery_stops_the_run(monkeypatch):

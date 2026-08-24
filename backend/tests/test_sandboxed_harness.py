@@ -307,6 +307,10 @@ async def test_sandbox_unreachable_translates_to_harness_error(
     assert downloads == []
 
 
+async def _harness_stub(model):
+    return ClaudeHarness
+
+
 async def test_run_prompt_builds_executes_and_parses(
     ctx: SimpleNamespace,
 ):
@@ -329,7 +333,7 @@ async def test_run_prompt_builds_executes_and_parses(
         def mint_run_id(call_id: str | None) -> str:
             return call_id or "minted-id"
 
-        def build_invocation(self, **kwargs: Any) -> AgentInvocation:
+        async def build_invocation(self, **kwargs: Any) -> AgentInvocation:
             seen["build"] = kwargs
             return _inv(("claude", "--print"))
 
@@ -491,15 +495,13 @@ def test_agent_result_names_the_agent_in_its_failure():
 def _patch_harness_resolution(monkeypatch: pytest.MonkeyPatch) -> None:
     # run_agent resolves the harness + its settings from the DB; these tests
     # are about the failure boundary, not resolution.
-    from druks.harnesses.claude import ClaudeHarness
 
-    monkeypatch.setattr(
-        "druks.harnesses.registry.get_harness_for_model", lambda model: ClaudeHarness
-    )
-    monkeypatch.setattr(
-        "druks.user_settings.models.HarnessSettings.require",
-        staticmethod(lambda name: SimpleNamespace(effort="high", timeout=60, fast_mode=False)),
-    )
+    monkeypatch.setattr("druks.harnesses.registry.get_harness_for_model", _harness_stub)
+
+    async def require(name):
+        return SimpleNamespace(effort="high", timeout=60, fast_mode=False)
+
+    monkeypatch.setattr("druks.user_settings.models.HarnessSettings.require", staticmethod(require))
 
 
 async def test_run_agent_carries_foreign_failures_as_harness_errors(

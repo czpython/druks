@@ -44,17 +44,19 @@ class UsageScrape(Base):
     unlimited: Mapped[bool] = mapped_column(default=False)
 
     @classmethod
-    def latest_for(cls, harness: str, account_id: str) -> "UsageScrape | None":
+    async def latest_for(cls, harness: str, account_id: str) -> "UsageScrape | None":
         stmt = (
             select(cls)
             .where(cls.harness == harness, cls.account_id == account_id)
             .order_by(cls.scraped_at.desc())
             .limit(1)
         )
-        return db_session().execute(stmt).scalar_one_or_none()
+        return (await db_session().execute(stmt)).scalar_one_or_none()
 
     @classmethod
-    def history_for(cls, harness: str, account_id: str, *, since: datetime) -> list["UsageScrape"]:
+    async def history_for(
+        cls, harness: str, account_id: str, *, since: datetime
+    ) -> list["UsageScrape"]:
         """The account's successful scrapes for ``harness`` since ``since``,
         oldest first. Feeds the usage page's trend sparklines / burn-rate
         math, so failed scrapes (no percentages) are excluded."""
@@ -65,7 +67,7 @@ class UsageScrape(Base):
             .where(cls.parse_ok.is_(True))
             .order_by(cls.scraped_at.asc())
         )
-        return list(db_session().execute(stmt).scalars())
+        return list((await db_session().execute(stmt)).scalars())
 
     def binding_week(self) -> dict[str, Any] | None:
         """The window closest to exhaustion — whichever stops work first."""
@@ -85,18 +87,18 @@ class UsageScrape(Base):
         if resets:
             return min(resets)
 
-    def save(self) -> None:
+    async def save(self) -> None:
         if not self.scraped_at:
             self.scraped_at = Base.utc_now()
         session = db_session()
         session.add(self)
-        session.flush()
+        await session.flush()
 
     @classmethod
-    def prune_older_than(cls, *, days: int) -> int:
+    async def prune_older_than(cls, *, days: int) -> int:
         cutoff = Base.utc_now() - timedelta(days=days)
         stmt = delete(cls).where(cls.scraped_at < cutoff)
         session = db_session()
-        result = session.execute(stmt)
-        session.flush()
+        result = await session.execute(stmt)
+        await session.flush()
         return result.rowcount

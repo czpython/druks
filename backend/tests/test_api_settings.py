@@ -43,13 +43,13 @@ def test_harness_response_carries_connection_state(tmp_path: Path):
     assert "expiresAt" in claude
 
 
-def test_harnesses_show_only_the_requesting_accounts_connection(tmp_path: Path, druks_db):
+async def test_harnesses_show_only_the_requesting_accounts_connection(tmp_path: Path, druks_db):
     from conftest import connect_harness
     from druks.harnesses.claude import ClaudeHarness
 
     # The suite's identity gate stands in op@example.com; another account's
     # connection never shows on this card.
-    connect_harness(
+    await connect_harness(
         ClaudeHarness,
         {"claudeAiOauth": {"accessToken": "x"}},
         provider_email="someone-else@example.com",
@@ -59,14 +59,14 @@ def test_harnesses_show_only_the_requesting_accounts_connection(tmp_path: Path, 
     assert claude["connected"] is False
 
 
-def test_harness_card_reports_identity(tmp_path: Path, druks_db):
+async def test_harness_card_reports_identity(tmp_path: Path, druks_db):
     from druks.accounts.models import Account
     from druks.harnesses.models import HarnessConnection
 
     # The provider identity is display, never authority.
-    HarnessConnection.connect(
+    await HarnessConnection.connect(
         harness="claude",
-        account=Account.get_or_create("op@example.com"),
+        account=await Account.get_or_create("op@example.com"),
         payload={"claudeAiOauth": {"accessToken": "x"}},
         expires_at=None,
         provider_email="seat@corp.com",
@@ -78,15 +78,15 @@ def test_harness_card_reports_identity(tmp_path: Path, druks_db):
     assert claude["providerEmail"] == "seat@corp.com"
 
 
-def test_harness_card_reads_expired_token_as_not_connected(tmp_path: Path, druks_db):
+async def test_harness_card_reads_expired_token_as_not_connected(tmp_path: Path, druks_db):
     from datetime import UTC, datetime, timedelta
 
     from druks.accounts.models import Account
     from druks.harnesses.models import HarnessConnection
 
-    HarnessConnection.connect(
+    await HarnessConnection.connect(
         harness="claude",
-        account=Account.get_or_create("op@example.com"),
+        account=await Account.get_or_create("op@example.com"),
         payload={"claudeAiOauth": {"accessToken": "x"}},
         expires_at=datetime.now(UTC) - timedelta(hours=1),
         provider_email="seat@corp.com",
@@ -96,13 +96,13 @@ def test_harness_card_reads_expired_token_as_not_connected(tmp_path: Path, druks
     assert claude["connected"] is False
 
 
-def test_disconnect_removes_only_the_requesting_accounts_connection(tmp_path: Path, druks_db):
+async def test_disconnect_removes_only_the_requesting_accounts_connection(tmp_path: Path, druks_db):
     from conftest import connect_harness
     from druks.harnesses.claude import ClaudeHarness
     from druks.harnesses.models import HarnessConnection
 
-    mine = connect_harness(ClaudeHarness, {"claudeAiOauth": {"accessToken": "x"}})
-    other = connect_harness(
+    mine = await connect_harness(ClaudeHarness, {"claudeAiOauth": {"accessToken": "x"}})
+    other = await connect_harness(
         ClaudeHarness,
         {"claudeAiOauth": {"accessToken": "y"}},
         provider_email="someone-else@example.com",
@@ -114,8 +114,8 @@ def test_disconnect_removes_only_the_requesting_accounts_connection(tmp_path: Pa
     assert response.json()["connected"] is False
     # The request deleted in its own task-scoped session; read past this
     # task's identity map for what actually persisted.
-    assert not HarnessConnection.reload(mine_id)
-    assert HarnessConnection.reload(other_id)
+    assert not await HarnessConnection.reload(mine_id)
+    assert await HarnessConnection.reload(other_id)
 
 
 def test_disconnect_without_a_connection_is_a_no_op(tmp_path: Path):
@@ -126,7 +126,10 @@ def test_disconnect_without_a_connection_is_a_no_op(tmp_path: Path):
 
 
 def test_patch_settings_persists_valid_iana_zone(tmp_path: Path, monkeypatch):
-    monkeypatch.setattr("druks.user_settings.routes.apply_schedules", lambda: None)
+    async def _noop_schedules():
+        return None
+
+    monkeypatch.setattr("druks.user_settings.routes.apply_schedules", _noop_schedules)
     with _build_client(tmp_path) as client:
         patch = client.patch("/api/settings", json={"timezone": "Europe/Madrid"})
         assert patch.status_code == 200
@@ -150,9 +153,11 @@ def test_timezone_change_reconciles_schedules(tmp_path: Path, monkeypatch):
     """Crons are evaluated in the operator's timezone, so changing it repoints
     the DBOS schedules now; re-asserting the same zone doesn't churn them."""
     reconciled = []
-    monkeypatch.setattr(
-        "druks.user_settings.routes.apply_schedules", lambda: reconciled.append(True)
-    )
+
+    async def record():
+        reconciled.append(True)
+
+    monkeypatch.setattr("druks.user_settings.routes.apply_schedules", record)
     with _build_client(tmp_path) as client:
         patch = client.patch("/api/settings", json={"timezone": "Europe/Madrid"})
         assert patch.status_code == 200
@@ -274,7 +279,7 @@ def test_apps_surface_build_agents_and_workflow_defaults(tmp_path: Path):
     }
 
 
-def test_app_secret_round_trip_encrypts_at_rest(tmp_path: Path):
+async def test_app_secret_round_trip_encrypts_at_rest(tmp_path: Path):
     secret = "review-pem-value"
     app_id = "42424242"
     key = "app:review:private_key"
@@ -291,18 +296,16 @@ def test_app_secret_round_trip_encrypts_at_rest(tmp_path: Path):
             },
         )
         stored = (
-            db_session()
-            .execute(
+            await db_session().execute(
                 text(
                     "SELECT value, value IS NULL AS value_is_null, secret_value "
                     "FROM settings_overrides WHERE key = :key"
                 ),
                 {"key": key},
             )
-            .one()
-        )
+        ).one()
         read = client.get("/api/settings/apps")
-        resolved = Review.settings().private_key
+        resolved = (await Review.settings()).private_key
 
     assert written.status_code == 200
     assert read.status_code == 200
@@ -325,15 +328,15 @@ def test_app_secret_round_trip_encrypts_at_rest(tmp_path: Path):
     assert fields["app_id"]["secretSet"] is True
 
 
-def test_app_secret_plaintext_row_is_unset_until_resaved(tmp_path: Path):
+async def test_app_secret_plaintext_row_is_unset_until_resaved(tmp_path: Path):
     secret = "legacy-plaintext-secret"
     key = "app:review:private_key"
     db_session().add(SettingsOverride(key=key, value=secret))
-    db_session().flush()
+    await db_session().flush()
 
     with _build_client(tmp_path) as client:
         initial = _review_app(client)
-        resolved_initial = Review.settings().private_key
+        resolved_initial = (await Review.settings()).private_key
         saved = client.patch(
             "/api/settings/apps",
             json={
@@ -346,16 +349,14 @@ def test_app_secret_plaintext_row_is_unset_until_resaved(tmp_path: Path):
             },
         )
         stored = (
-            db_session()
-            .execute(
+            await db_session().execute(
                 text(
                     "SELECT value, value IS NULL AS value_is_null, secret_value "
                     "FROM settings_overrides WHERE key = :key"
                 ),
                 {"key": key},
             )
-            .one()
-        )
+        ).one()
 
     initial_field = next(
         setting for setting in initial["settings"] if setting["name"] == "private_key"
@@ -369,7 +370,7 @@ def test_app_secret_plaintext_row_is_unset_until_resaved(tmp_path: Path):
     assert secret.encode() not in stored.secret_value
 
 
-def test_app_non_secret_setting_stays_in_value(tmp_path: Path):
+async def test_app_non_secret_setting_stays_in_value(tmp_path: Path):
     status = "Agent Queue"
     key = "app:ship:linear_trigger_status"
 
@@ -379,13 +380,11 @@ def test_app_non_secret_setting_stays_in_value(tmp_path: Path):
             json={"appSettings": {"ship": {"linear_trigger_status": status}}},
         )
         stored = (
-            db_session()
-            .execute(
+            await db_session().execute(
                 text("SELECT value, secret_value FROM settings_overrides WHERE key = :key"),
                 {"key": key},
             )
-            .one()
-        )
+        ).one()
         ship = _ship_app(client)
 
     field = next(
@@ -394,7 +393,7 @@ def test_app_non_secret_setting_stays_in_value(tmp_path: Path):
     assert written.status_code == 200
     assert stored.value == status
     assert stored.secret_value == b""
-    assert Ship.settings().linear_trigger_status == status
+    assert (await Ship.settings()).linear_trigger_status == status
     assert field["value"] == status
     assert field["overridden"] is True
 
@@ -403,9 +402,11 @@ def test_incoherent_app_save_is_rejected_and_rolled_back_before_schedules(
     tmp_path: Path, monkeypatch
 ):
     reconciled = []
-    monkeypatch.setattr(
-        "druks.user_settings.routes.apply_schedules", lambda: reconciled.append(True)
-    )
+
+    async def record():
+        reconciled.append(True)
+
+    monkeypatch.setattr("druks.user_settings.routes.apply_schedules", record)
     with _build_client(tmp_path) as client:
         response = client.patch(
             "/api/settings/apps",
@@ -425,7 +426,7 @@ def test_incoherent_app_save_is_rejected_and_rolled_back_before_schedules(
         assert agents["generate_plan"]["model"] == "gpt-5.5"
 
 
-def test_clearing_the_identity_deletes_its_overrides_and_stays_coherent(tmp_path: Path):
+async def test_clearing_the_identity_deletes_its_overrides_and_stays_coherent(tmp_path: Path):
     key = "app:review:app_id"
 
     with _build_client(tmp_path) as client:
@@ -445,19 +446,17 @@ def test_clearing_the_identity_deletes_its_overrides_and_stays_coherent(tmp_path
             json={"appSettings": {"review": {"app_id": None, "private_key": None}}},
         )
         stored = (
-            db_session()
-            .execute(
+            await db_session().execute(
                 text("SELECT 1 FROM settings_overrides WHERE key = :key"),
                 {"key": key},
             )
-            .one_or_none()
-        )
+        ).one_or_none()
         fields = _review_settings_fields(client)
 
     assert configured.status_code == 200
     assert cleared.status_code == 200
     assert stored is None
-    assert not Review.settings().app_id
+    assert not (await Review.settings()).app_id
     assert fields["app_id"]["secretSet"] is False
     assert fields["private_key"]["secretSet"] is False
 
