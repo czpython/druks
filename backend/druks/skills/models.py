@@ -21,6 +21,7 @@ class SkillCollection(Base, Uuid7Pk):
     skills: Mapped[list["Skill"]] = relationship(
         back_populates="collection",
         cascade="all, delete-orphan",
+        lazy="selectin",
         order_by="Skill.name",
     )
 
@@ -64,7 +65,7 @@ class Skill(Base, Uuid7Pk):
 
     name: Mapped[str] = mapped_column(String, unique=True)
     description: Mapped[str] = mapped_column(String, default="")
-    collection: Mapped[SkillCollection] = relationship(back_populates="skills")
+    collection: Mapped[SkillCollection] = relationship(back_populates="skills", lazy="raise_on_sql")
     collection_id: Mapped[str] = mapped_column(ForeignKey("skill_collections.id"))
     # Disabled skills stay on disk but the delivery projection excludes them
     # from every sandbox upload.

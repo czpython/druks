@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, ClassVar, Self
 
 from sqlalchemy import DateTime, Integer, cast, select
+from sqlalchemy.ext.asyncio import AsyncAttrs
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.types import TypeDecorator
 
@@ -29,7 +30,7 @@ class _UtcDateTime(TypeDecorator):
         return ensure_utc(value) if value else value
 
 
-class Base(DeclarativeBase):
+class Base(AsyncAttrs, DeclarativeBase):
     # Every ``Mapped[datetime]`` column stores tz-aware UTC — the decorator
     # guarantees aware values on read (writes are unaffected). Mapping it here
     # means models declare ``Mapped[datetime]`` with no per-column type.
