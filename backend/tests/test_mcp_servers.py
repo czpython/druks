@@ -15,9 +15,10 @@ from druks.mcp.exceptions import (
 )
 from druks.mcp.helpers import get_bearer_token_env_var
 from druks.mcp.models import McpServer
-from druks.sandbox.datastructures import RequiredMcpServer, Workspace
+from druks.sandbox.datastructures import RequiredMcpServer
 from druks.settings import PACKAGED_MCP_CATALOG
 from druks.testing import configure_app_for_test, make_settings
+from druks.workspaces import Workspace
 from fastapi.testclient import TestClient
 
 _LINEAR_URL = "https://mcp.linear.app/mcp"

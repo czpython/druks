@@ -5,12 +5,12 @@ from druks.contrib.review.app import Review
 from druks.contrib.review.datastructures import PullRequest
 from druks.contrib.review.github import get_review_actor
 from druks.contrib.ship.models import ProjectRepo
-from druks.contrib.ship.workspace import RepoWorkspace
 from druks.core.apis.github import GITHUB
 from druks.sandbox import repo as _repo
 from druks.sandbox.layout import get_github_token_remote_path, get_related_root, get_repo_root
 from druks.services.models import ServiceIdentity
 from druks.workflows import Workflow
+from druks.workspaces import RepoWorkspace
 
 if TYPE_CHECKING:
     from druks.sandbox.host import Sandbox

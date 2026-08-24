@@ -44,9 +44,9 @@ from druks.models import StoredSubject, snake_name
 from druks.notifications.outbox import notifications_queue, send_notification
 from druks.sandbox.client import sandbox_client
 from druks.sandbox.constants import SANDBOX_HOST_ROTATE_BEFORE_SECONDS
-from druks.sandbox.datastructures import Workspace
 from druks.signals import publish
 from druks.user_settings.models import SettingsOverride, UserSettings
+from druks.workspaces import Workspace
 
 # druks.workflows is the author door for workflow authoring: the bases (Workflow,
 # Gate, step) defined below plus the author-facing read contracts. The engine
