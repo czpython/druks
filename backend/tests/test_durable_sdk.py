@@ -150,6 +150,15 @@ def _build_units():
         async def run_multistep(self) -> None:
             await self.unreliable()
 
+    class EnqueueInStepFlow(Workflow):
+        # A retried step would enqueue again, so enqueue() must refuse in-step.
+        @step
+        async def misuse(self) -> None:
+            await record_task.enqueue(repo="from-a-step")
+
+        async def run_multistep(self) -> None:
+            await self.misuse()
+
     # every= so launch()'s apply_schedules has a schedule to create (smoke).
     class DailySweep(Workflow):
         every = "0 6 * * *"
@@ -230,6 +239,7 @@ def _build_units():
         AttributedFlow,
         ScheduledDispatch,
         RetryingStepFlow,
+        EnqueueInStepFlow,
         record_task,
         retry_task,
         scheduled_task,
@@ -293,6 +303,7 @@ def rt():
         attributed_flow,
         scheduled_dispatch,
         retrying_step_flow,
+        enqueue_in_step_flow,
         record_task,
         retry_task,
         scheduled_task,
@@ -315,6 +326,7 @@ def rt():
             AttributedFlow=attributed_flow,
             ScheduledDispatch=scheduled_dispatch,
             RetryingStepFlow=retrying_step_flow,
+            EnqueueInStepFlow=enqueue_in_step_flow,
             record_task=record_task,
             retry_task=retry_task,
             scheduled_task=scheduled_task,
@@ -338,6 +350,7 @@ def rt():
         workflows._items.pop("attributed_flow", None)
         workflows._items.pop("scheduled_dispatch", None)
         workflows._items.pop("retrying_step_flow", None)
+        workflows._items.pop("enqueue_in_step_flow", None)
         if db_url_snap is None:
             os.environ.pop("DRUKS_DATABASE_URL", None)
         else:
@@ -740,6 +753,12 @@ async def test_step_retries(rt):
     await _wait_for(rt.engine, workflow_id, lambda run: run.state == RunState.FINISHED)
     assert "step:retried" in SINK
     assert STEP_RETRY_ATTEMPTS > 1
+
+
+async def test_enqueue_inside_a_step_fails_the_run(rt):
+    wfid = await rt.EnqueueInStepFlow.start(subject=None)
+    failed = await _wait_for(rt.engine, wfid, lambda r: r.state == RunState.FAILED)
+    assert "inside a @step" in failed.failure
 
 
 async def test_scheduled_task_runs_nullary_body(rt):

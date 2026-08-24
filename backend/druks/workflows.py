@@ -18,7 +18,7 @@ from typing import (
 
 from croniter import croniter
 from dbos import DBOS, Queue, SetEnqueueOptions, SetWorkflowAttributes, SetWorkflowID, StepOptions
-from dbos._dbos import _get_dbos_instance
+from dbos._dbos import _get_dbos_instance, _get_or_create_dbos_registry
 from dbos._error import (
     DBOSAwaitedWorkflowCancelledError,
     DBOSQueueDeduplicatedError,
@@ -180,29 +180,28 @@ def _declare_subject(cls: type["Workflow"]) -> None:
     cls.subject = _DeclaredSubject(declared)
 
 
-def _input_model_from_signature(cls: type["Workflow"]) -> type[BaseModel] | None:
-    # A workflow's input IS its body's signature: plain annotated parameters,
-    # Python's native way to declare inputs. The SDK synthesizes a pydantic
-    # model from them (the wire contract) — start() validates kwargs against it
-    # and dumps to JSON (it crosses a JSONB row and a DBOS checkpoint; never a
-    # live or pickled object), and the entry re-validates. A parameter without a
-    # default is required at start(); a cron-scheduled workflow must default
-    # every parameter.
-    method_name = cls._body_method
-    method = getattr(cls, method_name)
-    parameters = [p for name, p in inspect.signature(method).parameters.items() if name != "self"]
+def _input_model_from_signature(
+    function: Callable, *, owner: str, model_name: str
+) -> type[BaseModel] | None:
+    # A body's input IS its signature: plain annotated parameters, Python's
+    # native way to declare inputs. The synthesized model is the wire contract —
+    # the caller validates kwargs against it and dumps to JSON (input crosses a
+    # JSONB row and a DBOS checkpoint; never a live or pickled object), and the
+    # entry re-validates. A parameter without a default is required; a
+    # cron-scheduled body must default every parameter.
+    parameters = [p for name, p in inspect.signature(function).parameters.items() if name != "self"]
     if not parameters:
         return
-    hints = get_type_hints(method)
+    hints = get_type_hints(function)
     fields: dict[str, Any] = {}
     for p in parameters:
         if p.kind in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD):
-            raise WorkflowError(f"{cls.__name__}.{method_name}() cannot take *args/**kwargs")
+            raise WorkflowError(f"{owner} cannot take *args/**kwargs")
         if p.name not in hints:
-            raise WorkflowError(f"{cls.__name__}.{method_name}() parameter {p.name!r} needs a type")
+            raise WorkflowError(f"{owner} parameter {p.name!r} needs a type")
         default = ... if p.default is inspect.Parameter.empty else p.default
         fields[p.name] = (hints[p.name], default)
-    return create_model(f"{cls.__name__}Input", **fields)
+    return create_model(model_name, **fields)
 
 
 class Journal:
@@ -396,7 +395,7 @@ class _Task:
         retries: int,
     ) -> None:
         self._function = function
-        self._signature = inspect.signature(function)
+        self.module = function.__module__
         try:
             app = resolve_workflow_app(function.__module__)
         except LookupError:
@@ -408,19 +407,23 @@ class _Task:
             ) from None
         self.name = f"{app}.{function.__name__}" if app else function.__name__
         self._retries = retries
+        self._input_model = _input_model_from_signature(
+            function, owner=f"task {self.name}", model_name=f"{function.__name__}_input"
+        )
         self._scheduled_entry: Callable[..., Any] | None = None
 
-        if every:
+        # DBOS only warns on a duplicate durable name and lets the last
+        # registration win — enqueues would silently run the other body.
+        if self.name in _get_or_create_dbos_registry().workflow_info_map:
+            raise WorkflowError(
+                f"task {self.name} shares its durable name with a registered workflow "
+                "or task — two capabilities can't share a durable identity; rename one"
+            )
+        if every and self._input_model:
             required = [
                 name
-                for name, parameter in self._signature.parameters.items()
-                if parameter.default is inspect.Parameter.empty
-                and parameter.kind
-                in (
-                    parameter.POSITIONAL_ONLY,
-                    parameter.POSITIONAL_OR_KEYWORD,
-                    parameter.KEYWORD_ONLY,
-                )
+                for name, field in self._input_model.model_fields.items()
+                if field.is_required()
             ]
             if required:
                 raise WorkflowError(
@@ -429,8 +432,8 @@ class _Task:
                 )
 
         @DBOS.workflow(name=self.name)
-        async def _entry(**kwargs: Any) -> None:
-            await self._run(**kwargs)
+        async def _entry(input: dict[str, Any]) -> None:
+            await self._run(input)
 
         self._entry = _entry
 
@@ -439,17 +442,28 @@ class _Task:
             @DBOS.scheduled(every)
             @DBOS.workflow(name=f"{self.name}.scheduled")
             async def _scheduled_entry(scheduled_at: datetime, started_at: datetime | None) -> None:
-                await self._run()
+                await self._run({})
 
             self._scheduled_entry = _scheduled_entry
 
-    async def enqueue(self, **kwargs: Any) -> None:
-        # ponytail: This checks argument names and arity, not types. A typed
-        # consumer can add Pydantic coercion when tasks need wire validation.
-        self._signature.bind(**kwargs)
-        await task_queue.enqueue_async(self._entry, **kwargs)
+    async def enqueue(self, **input: Any) -> None:
+        if _in_step.get():
+            raise WorkflowError(
+                "enqueue() cannot run inside a @step — a retried step would enqueue the task again"
+            )
+        wire: dict[str, Any] = {}
+        if self._input_model:
+            wire = self._input_model.model_validate(input).model_dump(mode="json")
+        elif input:
+            raise WorkflowError(f"task {self.name} takes no input")
+        await task_queue.enqueue_async(self._entry, wire)
 
-    async def _run(self, **kwargs: Any) -> None:
+    async def _run(self, input: dict[str, Any]) -> None:
+        kwargs: dict[str, Any] = {}
+        if self._input_model:
+            validated = self._input_model.model_validate(input)
+            kwargs = {name: getattr(validated, name) for name in type(validated).model_fields}
+
         async def _do() -> None:
             async with step_session():
                 await self._function(**kwargs)
@@ -696,7 +710,11 @@ class Workflow:
         validate_settings_declaration(cls.Settings)
         cls._body_method = _resolve_body_method(cls)
         # Before _wrap_steps: run()'s wrapper signature is (*args, **kwargs).
-        cls._run_input_model = _input_model_from_signature(cls)
+        cls._run_input_model = _input_model_from_signature(
+            getattr(cls, cls._body_method),
+            owner=f"{cls.__name__}.{cls._body_method}()",
+            model_name=f"{cls.__name__}Input",
+        )
         if cls._run_input_model:
             claimed = {"account_id"} & set(cls._run_input_model.model_fields)
             if claimed:

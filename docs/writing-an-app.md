@@ -262,7 +262,9 @@ async def sync_labels(pull_request_id: int) -> None:
 ```
 
 Call `await sync_labels.enqueue(pull_request_id=7)` to run one durably in the
-background — from a route, a subscriber, or a workflow body. A task keeps no run
+background — from a route, a subscriber, or a workflow body (never inside a
+`@step`). Like a workflow, the signature is the wire contract: parameters are
+annotated, and `enqueue()` validates them and stores JSON. A task keeps no run
 row and never reaches the timeline; it has no subject, gate, or operator
 settings, and it cannot make agent calls. `every=` runs it on a fixed UTC cadence
 the code owns — a workflow's `every=` is the one an operator can retune.
