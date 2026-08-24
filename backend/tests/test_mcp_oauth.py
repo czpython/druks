@@ -21,10 +21,10 @@ from druks.mcp.exceptions import (
 from druks.mcp.helpers import get_bearer_token_env_var, get_grant_account
 from druks.mcp.models import McpClientRegistration, McpServer
 from druks.redis import close_client, get_client
-from druks.sandbox.datastructures import Workspace
 from druks.services.models import OauthConnection
 from druks.testing import configure_app_for_test, make_settings
 from druks.user_settings.models import UserSettings
+from druks.workspaces import Workspace
 from fastapi.testclient import TestClient
 
 _NAME = "linear_oauth"

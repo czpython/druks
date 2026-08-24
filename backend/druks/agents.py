@@ -29,8 +29,9 @@ from druks.user_settings.models import SettingsOverride
 from druks.workflows import _in_step, current_workflow
 
 if TYPE_CHECKING:
-    from druks.sandbox.datastructures import AgentResult, Workspace
+    from druks.sandbox.datastructures import AgentResult
     from druks.workflows import Workflow
+    from druks.workspaces import Workspace
 
 __all__ = ["Agent", "AgentOutput"]
 

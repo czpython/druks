@@ -27,13 +27,13 @@ from druks.services.models import ServiceIdentity
 from druks.settings import load_settings
 from druks.skills.models import Skill
 from druks.workflows import FatalError, Workflow, step
+from druks.workspaces import RepoWorkspace
 
 from .app import Ship
 from .constants import GITHUB_MCP_NAME, GITHUB_MCP_URL
 from .journal import BuildJournal
 from .policy import PlanGate, RepoPolicy
 from .prompt_context import BuildPromptContext
-from .workspace import RepoWorkspace
 
 if TYPE_CHECKING:
     from druks.sandbox.host import Sandbox

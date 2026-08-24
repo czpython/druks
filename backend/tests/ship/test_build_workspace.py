@@ -5,14 +5,14 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from druks.contrib.ship import workspace as workspace_mod
+from druks import workspaces as workspace_mod
 from druks.contrib.ship.constants import GITHUB_MCP_NAME, GITHUB_MCP_URL
 from druks.contrib.ship.workflows import Build, BuildWorkspace
-from druks.contrib.ship.workspace import RepoWorkspace
 from druks.mcp.helpers import get_bearer_token_env_var
 from druks.sandbox import host as host_mod
 from druks.sandbox.layout import get_related_root, get_repo_root
 from druks.workflows import FatalError
+from druks.workspaces import RepoWorkspace
 
 
 class _FakeSandbox:
