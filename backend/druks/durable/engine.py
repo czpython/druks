@@ -49,7 +49,6 @@ def init_dbos() -> None:
         "application_database_url": url,
         "system_database_url": url,
         "dbos_system_schema": DBOS_SYSTEM_SCHEMA,
-        "run_admin_server": False,
         "log_level": settings.log_level,
     }
     DBOS(config=config)
@@ -105,10 +104,9 @@ def shutdown() -> None:
     # lifespan with app.state.settings pre-set skips the branch that launches it
     # — so the lifespan can call shutdown() unconditionally.
     global _initialized
-    if not _initialized:
-        return
-    DBOS.destroy()
-    _initialized = False
+    if _initialized:
+        DBOS.destroy()
+        _initialized = False
 
 
 def configure_engine(engine) -> None:
