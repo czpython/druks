@@ -235,8 +235,8 @@ class _OwnerReposClient(GitHubClient):
 
 
 class _InstallationGitHub:
-    def __init__(self, apps: Any) -> None:
-        self.rest = SimpleNamespace(apps=apps)
+    def __init__(self, **rest: Any) -> None:
+        self.rest = SimpleNamespace(**rest)
 
     async def __aenter__(self) -> "_InstallationGitHub":
         return self
@@ -270,7 +270,7 @@ async def test_list_repos_for_user_installation_falls_back_and_paginates(
             ]
         )
     )
-    installation_github = _InstallationGitHub(repo_apis)
+    installation_github = _InstallationGitHub(apps=repo_apis)
     monkeypatch.setattr(github_api, "GitHub", lambda *_args, **_kwargs: installation_github)
     client = _OwnerReposClient(app_apis)
 
@@ -312,7 +312,7 @@ async def test_list_repos_for_org_installation_does_not_consult_user_endpoint(
             )
         )
     )
-    installation_github = _InstallationGitHub(repo_apis)
+    installation_github = _InstallationGitHub(apps=repo_apis)
     monkeypatch.setattr(github_api, "GitHub", lambda *_args, **_kwargs: installation_github)
     client = _OwnerReposClient(app_apis)
 
@@ -600,3 +600,54 @@ async def test_get_bot_git_author_composes_the_public_bot_identity(
     )
     assert await client.get_bot_git_author() == author
     assert requested == ["example-app[bot]"]
+
+
+def _template_generating_client(
+    repo_apis: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> _OwnerReposClient:
+    monkeypatch.setattr(
+        github_api, "GitHub", lambda *_args, **_kwargs: _InstallationGitHub(repos=repo_apis)
+    )
+    return _OwnerReposClient(
+        SimpleNamespace(
+            async_get_org_installation=AsyncMock(
+                return_value=SimpleNamespace(parsed_data=SimpleNamespace(id=7))
+            )
+        )
+    )
+
+
+async def test_create_repo_from_template_generates_a_private_repo(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_apis = SimpleNamespace(async_create_using_template=AsyncMock())
+    client = _template_generating_client(repo_apis, monkeypatch)
+
+    full_name = await client.create_repo_from_template(
+        "clawhaven", "clawhaven/shop-template", "acme-coffee"
+    )
+
+    assert full_name == "clawhaven/acme-coffee"
+    repo_apis.async_create_using_template.assert_awaited_once_with(
+        "clawhaven",
+        "shop-template",
+        name="acme-coffee",
+        owner="clawhaven",
+        private=True,
+    )
+
+
+async def test_create_repo_from_template_reads_a_taken_name_as_already_created(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_apis = SimpleNamespace(
+        async_create_using_template=AsyncMock(side_effect=_make_request_failed(422))
+    )
+    client = _template_generating_client(repo_apis, monkeypatch)
+
+    full_name = await client.create_repo_from_template(
+        "clawhaven", "clawhaven/shop-template", "acme-coffee"
+    )
+
+    assert full_name == "clawhaven/acme-coffee"
