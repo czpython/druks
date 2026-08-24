@@ -97,7 +97,7 @@ def create_engine_from_url(database_url: str):
 
 
 def get_session(engine) -> Session:
-    return Session(engine, autocommit=False, autoflush=True)
+    return Session(engine, autocommit=False, autoflush=True, expire_on_commit=False)
 
 
 def _session_scope() -> object | None:
@@ -107,7 +107,7 @@ def _session_scope() -> object | None:
         return None
 
 
-_session_factory = sessionmaker(class_=Session, autoflush=True)
+_session_factory = sessionmaker(class_=Session, autoflush=True, expire_on_commit=False)
 db_session: scoped_session = scoped_session(_session_factory, scopefunc=_session_scope)
 
 
