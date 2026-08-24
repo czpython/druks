@@ -76,7 +76,7 @@ class ProjectRepo(StoredSubject):
     profile: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
     created_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
 
-    project: Mapped[Project] = relationship(back_populates="repos")
+    project: Mapped[Project] = relationship(back_populates="repos", lazy="joined")
 
     @classmethod
     def create(

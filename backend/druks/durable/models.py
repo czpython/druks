@@ -419,7 +419,7 @@ class AgentCall(Base, Uuid7Pk):
     model: Mapped[str] = mapped_column(String)
     # The run this LLM call ran in. ON DELETE CASCADE, so a call never outlives it.
     run_id: Mapped[str] = mapped_column(ForeignKey("durable_runs.id", ondelete="CASCADE"))
-    run: Mapped["Run"] = relationship(back_populates="agent_calls")
+    run: Mapped["Run"] = relationship(back_populates="agent_calls", lazy="joined")
     # Which agent (registry id: "scope", "implement", …) made this call — the
     # timeline's grouping label. An agent is what makes a call, so there is no
     # unattributed one: the row is written from the registered agent's own id.
