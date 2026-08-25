@@ -16,7 +16,10 @@ x-sbx-rig: &sbx-rig
   volumes:
     - ${DRUKS_SBX_HOME:?set DRUKS_SBX_HOME in .env — run install.sh}/.local/state/sandboxes/sandboxes/sandboxd/sandboxd.sock:/run/sandboxd.sock
     - /usr/bin/sbx:/usr/local/bin/sbx:ro
-    - ${DRUKS_SBX_HOME:?}/.config/com.docker.sandboxes:${DRUKS_SBX_HOME:?}/.config/com.docker.sandboxes:ro
+    # The auth store must be writable: the credential store takes a lock file
+    # inside it (.posixage.lock) also for reads, and every create loads
+    # registry credentials. A read-only mount fails each create.
+    - ${DRUKS_SBX_HOME:?}/.config/com.docker.sandboxes:${DRUKS_SBX_HOME:?}/.config/com.docker.sandboxes
     # The CLI settings store. The CLI writes it on first use, and it panics
     # when it cannot. install.sh creates the directory with the correct owner.
     - ${DRUKS_SBX_HOME:?}/.config/sandboxes:${DRUKS_SBX_HOME:?}/.config/sandboxes
