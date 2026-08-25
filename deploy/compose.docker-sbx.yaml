@@ -17,6 +17,9 @@ x-sbx-rig: &sbx-rig
     - ${DRUKS_SBX_HOME:?set DRUKS_SBX_HOME in .env — run install.sh}/.local/state/sandboxes/sandboxes/sandboxd/sandboxd.sock:/run/sandboxd.sock
     - /usr/bin/sbx:/usr/local/bin/sbx:ro
     - ${DRUKS_SBX_HOME:?}/.config/com.docker.sandboxes:${DRUKS_SBX_HOME:?}/.config/com.docker.sandboxes:ro
+    # The CLI settings store. The CLI writes it on first use, and it panics
+    # when it cannot. install.sh creates the directory with the correct owner.
+    - ${DRUKS_SBX_HOME:?}/.config/sandboxes:${DRUKS_SBX_HOME:?}/.config/sandboxes
     - ${DRUKS_SBX_HOME:?}/.drukbox:${DRUKS_SBX_HOME:?}/.drukbox
 
 # The image has no user with the deploy uid, and defaults that come from the
