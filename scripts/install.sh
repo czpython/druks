@@ -162,7 +162,7 @@ main() {
       # engine would make it root-owned, and the deploy-uid services could
       # not write the workspaces or the gateway host key.
       set_env_var DRUKS_SBX_HOME "$HOME"
-      mkdir -p "$HOME/.drukbox/sbx-workspaces"
+      mkdir -p "$HOME/.drukbox/sbx-workspaces" "$HOME/.config/sandboxes"
       # sandboxd must run before the first compose command. A bind of a
       # missing socket path makes a root-owned directory there, and that
       # blocks the daemon itself.
