@@ -35,7 +35,7 @@ async def get_template_id(sandbox: Sandbox) -> str:
     base_image = load_settings().sandbox.image
     try:
         template = await sandbox_client.get_template(
-            setup_script_hash=setup_script_hash, base_image=base_image
+            base_image=base_image, setup_script_hash=setup_script_hash
         )
     except TemplateNotFound as error:
         raise TemplateUnavailable(

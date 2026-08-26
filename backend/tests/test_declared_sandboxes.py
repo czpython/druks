@@ -117,7 +117,7 @@ async def test_get_template_id_uses_available_template(monkeypatch):
 
     assert await templates.get_template_id(sandbox) == "template-1"
     get_template.assert_awaited_once_with(
-        setup_script_hash=hashlib.sha256(b"setup").hexdigest(), base_image="base"
+        base_image="base", setup_script_hash=hashlib.sha256(b"setup").hexdigest()
     )
 
 
@@ -270,7 +270,7 @@ async def test_client_template_primitives_use_sdk_contract(monkeypatch):
         await client.create_template(setup_script="setup", base_image="base", label="notes")
         is created
     )
-    assert await client.get_template(setup_script_hash="hash-1", base_image="base") is listed
+    assert await client.get_template(base_image="base", setup_script_hash="hash-1") is listed
     assert await client.get_template(setup_script_hash="hash-1") is other_base
     with pytest.raises(TemplateNotFound):
         await client.get_template(setup_script_hash="hash-2")

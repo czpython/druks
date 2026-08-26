@@ -163,9 +163,7 @@ class Client:
         finally:
             await api.aclose()
 
-    async def get_template(self, *, setup_script_hash: str, base_image: str = ""):
-        # Newest first from drukbox, so a base change finds its fresh template
-        # while the old base's twin ages out.
+    async def get_template(self, *, base_image: str = "", setup_script_hash: str):
         api = self._api()
         try:
             for template in await api.list_templates():
