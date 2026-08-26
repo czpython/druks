@@ -115,7 +115,6 @@ _OWN_DATABASE_MODULES = {
     "test_harness_login_persistence",
     "test_app_migrations",
     "test_proof_app_migration",
-    "test_mcp_orphan_migration",
 }
 
 
