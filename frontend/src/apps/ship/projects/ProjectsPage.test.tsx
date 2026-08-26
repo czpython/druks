@@ -52,6 +52,21 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
+describe('ProjectsPage empty state', () => {
+  // The zero-project copy describes the real model: a project is a grouping of
+  // repos, and each work item targets one of them while the rest supply
+  // cross-repo context. It must not resurface the old "primary app" claim.
+  it('describes the project model without the primary-app characterization', async () => {
+    renderPage([])
+
+    expect(await screen.findByText('No projects yet')).toBeTruthy()
+    expect(screen.getByText(/groups the GitHub repositories a build operates on/)).toBeTruthy()
+    expect(screen.getByText(/each work item targets one of those repos/i)).toBeTruthy()
+    expect(screen.getByText(/give agents cross-repo context/i)).toBeTruthy()
+    expect(screen.queryByText(/primary app/i)).toBeNull()
+  })
+})
+
 describe('ProjectsPage create row', () => {
   // The shared Button gates on ``disabled`` alone — the old markup also wrapped
   // the handler in an ``enabled &&`` guard. Pin that the gate still holds.
