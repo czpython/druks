@@ -9,7 +9,7 @@ from .layout import (
 )
 
 if TYPE_CHECKING:
-    from .host import Sandbox
+    from .host import Host
 
 # Tar excludes for credential-dir uploads. These never carry value into the
 # VM and dominate upload time when shipped naively:
@@ -31,28 +31,28 @@ DEFAULT_DIR_EXCLUDES: tuple[str, ...] = (
 )
 
 
-async def push(sandbox: "Sandbox", creds: Credentials) -> None:
+async def push(host: "Host", creds: Credentials) -> None:
     if creds.claude_credentials:
-        await sandbox.write_secret(
+        await host.write_secret(
             secret=creds.claude_credentials,
-            remote=get_claude_credentials_remote(sandbox.ssh_username),
+            remote=get_claude_credentials_remote(host.ssh_username),
         )
     if creds.codex_credentials:
-        await sandbox.write_secret(
+        await host.write_secret(
             secret=creds.codex_credentials,
-            remote=get_codex_auth_remote(sandbox.ssh_username),
+            remote=get_codex_auth_remote(host.ssh_username),
         )
     if creds.github_token is not None:
         # TODO: This token expires in ~60 min and is not refreshed, so a run
         # outliving it 401s on late git pushes. The in-VM credential helper
         # should mint on demand from a druks token-broker endpoint, retiring
         # this static file.
-        await sandbox.write_secret(
+        await host.write_secret(
             secret=creds.github_token,
-            remote=get_github_token_remote_path(sandbox.ssh_username),
+            remote=get_github_token_remote_path(host.ssh_username),
         )
 
-    home = get_remote_home(sandbox.ssh_username)
+    home = get_remote_home(host.ssh_username)
     for local, dest_suffix in creds.extra_config_files:
         # Optional — a dev box may not have config.toml etc., and a Docker bind
         # mount whose host file never existed leaves a directory at the path.
@@ -60,11 +60,11 @@ async def push(sandbox: "Sandbox", creds: Credentials) -> None:
         # own defaults in the VM).
         if not local.is_file():
             continue
-        await sandbox.upload_file(local=local, remote=f"{home}/{dest_suffix}")
+        await host.upload_file(local=local, remote=f"{home}/{dest_suffix}")
     for local, dest_suffix in creds.extra_config_dirs:
         if not local.is_dir():
             continue
-        await sandbox.upload_dir(
+        await host.upload_dir(
             local=local,
             remote=f"{home}/{dest_suffix}",
             excludes=DEFAULT_DIR_EXCLUDES + creds.extra_dir_excludes.get(dest_suffix, ()),

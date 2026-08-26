@@ -26,6 +26,8 @@ from .database import create_async_engine_from_url, create_engine_from_url, sess
 from .harnesses.models import HarnessConnection
 from .harnesses.registry import get_harnesses
 from .sandbox.client import sandbox_client
+from .sandbox.exceptions import TemplateNotFound
+from .sandbox.templates import get_declared_sandboxes, prepare_sandbox_templates
 from .services import Service, ServiceNotConnectedError
 from .services.models import ServiceIdentity
 from .settings import Settings, load_settings
@@ -293,6 +295,53 @@ async def check_sandbox_e2e(settings: Settings) -> CheckResult:
     return CheckResult(name="sandbox_e2e", ok=True, detail=detail)
 
 
+async def check_declared_sandboxes(settings: Settings) -> CheckResult | list[CheckResult]:
+    try:
+        await prepare_sandbox_templates()
+        declared = get_declared_sandboxes()
+    except Exception as error:  # noqa: BLE001 — doctor reports, never raises
+        return CheckResult(
+            name="sandbox_templates",
+            ok=False,
+            detail=f"could not prepare declared sandbox templates: {error}",
+        )
+
+    if not declared:
+        return CheckResult(name="sandbox_templates", ok=True, detail="no declared sandboxes")
+
+    results = []
+    for requirements_hash, sandbox in declared.items():
+        name = f"sandbox:{requirements_hash[:12]}"
+        detail = f"{sandbox.setup}; hash {requirements_hash}"
+        try:
+            template = await sandbox_client.get_template(requirements_hash=requirements_hash)
+        except TemplateNotFound:
+            result = CheckResult(
+                name=name,
+                ok=False,
+                detail=f"{detail}; missing",
+            )
+        except Exception as error:  # noqa: BLE001 — one lookup failure is one result
+            result = CheckResult(
+                name=name,
+                ok=False,
+                detail=f"{detail}; lookup failed: {error}",
+            )
+        else:
+            ok, pending = {
+                "available": (True, False),
+                "building": (False, True),
+            }.get(template.status, (False, False))
+            result = CheckResult(
+                name=name,
+                ok=ok,
+                pending=pending,
+                detail=f"{detail}; {template.status}",
+            )
+        results.append(result)
+    return results
+
+
 async def _sandbox_e2e() -> str:
     start = time.monotonic()
     # acquire rolls its own host back on failure; once it yields, we own
@@ -482,6 +531,7 @@ CHECKS = (
     check_drukbox,
     check_capability_modules,
     check_apps,
+    check_declared_sandboxes,
 )
 
 

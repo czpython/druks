@@ -22,7 +22,7 @@ from druks.browser.models import StoredBrowserSession
 from druks.browser.sessions import SESSION_ROOT, seed_state
 from druks.redis import get_client
 from druks.sandbox.client import sandbox_client
-from druks.sandbox.host import Sandbox
+from druks.sandbox.host import Host
 from druks.settings import load_settings
 
 
@@ -154,7 +154,7 @@ async def _carry_screen(websocket: WebSocket, screen_reader: asyncssh.SSHReader[
 
 
 async def _launch(
-    browser: Sandbox, name: str, *, start_url: str, login_proxy: str, login_tz: str
+    browser: Host, name: str, *, start_url: str, login_proxy: str, login_tz: str
 ) -> None:
     # The launcher and its browser read these from the environment: the site to
     # open on so the operator lands where they log in, the egress proxy that
@@ -186,7 +186,7 @@ async def _launch(
         raise exceptions.BrowserLaunchError(name, ready.stderr.strip())
 
 
-async def _export(browser: Sandbox, name: str) -> bytes:
+async def _export(browser: Host, name: str) -> bytes:
     exported = await browser.exec(["session-export"], timeout=SESSION_EXPORT_TIMEOUT_SECONDS)
     if not exported.ok:
         raise exceptions.BrowserExportError(name, exported.stderr.strip())

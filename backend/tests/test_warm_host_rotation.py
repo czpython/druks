@@ -19,7 +19,8 @@ class _FakeSandboxClient:
         self.provisions: list[str] = []
         self.released: list[str] = []
 
-    async def provision(self, *, idempotency_key: str) -> _FakeSandbox:
+    async def provision(self, *, idempotency_key: str, template: str | None) -> _FakeSandbox:
+        assert template is None
         self.provisions.append(idempotency_key)
         host_id = f"host-{len(self.provisions)}"
         return _FakeSandbox(id=host_id, expires_at=datetime.now(UTC) + self.lease)
@@ -30,7 +31,7 @@ class _FakeSandboxClient:
 
 def _warm_workflow(*, reuse: bool = True) -> Workflow:
     # __new__ skips __init__/__init_subclass__ so the host logic can be exercised
-    # without standing up DBOS; we set only what _ensure_host reads.
+    # without standing up DBOS; we set only what _lease_host reads.
     flow = Workflow.__new__(Workflow)
     flow.steps_reuse_sandbox = reuse
     flow._host = None
@@ -45,8 +46,8 @@ async def test_warm_host_reused_while_lease_covers_another_call(monkeypatch):
     monkeypatch.setattr(sdk, "sandbox_client", fake)
     flow = _warm_workflow()
 
-    first = await flow._ensure_host()
-    second = await flow._ensure_host()
+    first = await flow._lease_host()
+    second = await flow._lease_host()
 
     assert first == second == "host-1"
     assert fake.provisions == ["wf-1:sandbox"]
@@ -61,8 +62,8 @@ async def test_warm_host_rotates_when_lease_cannot_cover_a_call(monkeypatch):
     monkeypatch.setattr(sdk, "sandbox_client", fake)
     flow = _warm_workflow()
 
-    first = await flow._ensure_host()
-    second = await flow._ensure_host()
+    first = await flow._lease_host()
+    second = await flow._lease_host()
 
     assert first == "host-1"
     assert second == "host-2"
@@ -78,5 +79,5 @@ async def test_no_warm_host_when_reuse_disabled(monkeypatch):
     monkeypatch.setattr(sdk, "sandbox_client", fake)
     flow = _warm_workflow(reuse=False)
 
-    assert await flow._ensure_host() is None
+    assert await flow._lease_host() is None
     assert fake.provisions == []

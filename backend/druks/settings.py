@@ -152,8 +152,6 @@ class Sandbox(BaseModel):
     # over Tailscale to execute the CLI inside it. See
     # ``docs/design/sandboxed-execution.md`` for the full architecture.
     #
-    # An empty URL disables sandbox-backed execution; workflows that call an
-    # agent then fail when they try to acquire a host.
     service_url: str = ""
     service_token: str = ""
     # Empty → drukbox decides.

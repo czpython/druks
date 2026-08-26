@@ -18,7 +18,7 @@ from druks.sandbox.layout import get_repo_root
 from druks.user_settings.models import UserSettings
 
 if TYPE_CHECKING:
-    from druks.sandbox.host import Sandbox
+    from druks.sandbox.host import Host
 
 
 @dataclass(frozen=True)
@@ -26,11 +26,11 @@ class Workspace:
     # What an agent runs in: the VM it abstracts. An app subclasses this and
     # overrides get_agent_run_kwargs for its project scaffolding (repo token, dirs)
     # and get_required_mcp_servers for MCP servers it credentials itself.
-    sandbox: "Sandbox"
+    host: "Host"
 
     @property
     def host_id(self) -> str:
-        return self.sandbox.id
+        return self.host.id
 
     def get_agent_run_kwargs(self, **kwargs: Any) -> dict[str, Any]:
         # Override to add what the agent's run needs on this workspace (github_token,
@@ -47,7 +47,7 @@ class Workspace:
         # with_mcp_servers is the run's last DB read; commit so the step's
         # connection isn't held idle through the minutes the agent runs.
         await db_session().commit()
-        return await self.sandbox.run_agent(**run_kwargs)
+        return await self.host.run_agent(**run_kwargs)
 
     async def with_mcp_servers(self, account_id: str | None, **kwargs: Any) -> dict[str, Any]:
         # Fold every MCP server into this call — the workspace's required
@@ -136,7 +136,7 @@ class RepoWorkspace(Workspace):
 
     @property
     def repo_path(self) -> str:
-        return get_repo_root(self.sandbox.ssh_username)
+        return get_repo_root(self.host.ssh_username)
 
     def get_agent_run_kwargs(self, **kwargs: Any) -> dict[str, Any]:
         kwargs["github_token"] = self.github_token
@@ -170,7 +170,7 @@ class RepoWorkspace(Workspace):
                 f"printf %s {shlex.quote(hook)} > .git/hooks/prepare-commit-msg",
                 "chmod 755 .git/hooks/prepare-commit-msg",
             ]
-        result = await self.sandbox.exec(["sh", "-c", " && ".join(steps)], timeout=10.0)
+        result = await self.host.exec(["sh", "-c", " && ".join(steps)], timeout=10.0)
         if not result.ok:
             raise ExecFailed(
                 f"failed to set the workspace git identity: "

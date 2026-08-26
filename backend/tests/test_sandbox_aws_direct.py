@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock
 import pytest
 from drukbox_sdk import SandboxHost as SandboxHostRecord
 from druks.sandbox import client as client_module
-from druks.sandbox.host import Sandbox
+from druks.sandbox.host import Host
 
 
 def _tailscale_record() -> SandboxHostRecord:
@@ -69,7 +69,7 @@ def _patch_import_known_hosts(monkeypatch: pytest.MonkeyPatch):
 
 def test_ssh_connect_kwargs_picks_tailscale_when_internal_ssh_host_is_set():
     """Tailnet record dials MagicDNS without client keys."""
-    kwargs = Sandbox(record=_tailscale_record())._ssh_connect_kwargs()
+    kwargs = Host(record=_tailscale_record())._ssh_connect_kwargs()
     assert kwargs["host"] == "ts.tailnet.ts.net"
     assert kwargs["port"] == 22
     assert "client_keys" not in kwargs
@@ -85,7 +85,7 @@ def test_ssh_connect_kwargs_picks_aws_direct_when_key_is_persisted(
         lambda: type("_S", (), {"sandbox_keys_dir": tmp_path})(),
     )
     (tmp_path / "host-aws").write_text("fakekey")
-    kwargs = Sandbox(record=_aws_direct_record())._ssh_connect_kwargs()
+    kwargs = Host(record=_aws_direct_record())._ssh_connect_kwargs()
     assert kwargs["host"] == "ec2-1-2-3-4.compute.amazonaws.com"
     assert kwargs["port"] == 22
     assert kwargs["client_keys"] == [str(tmp_path / "host-aws")]
@@ -104,7 +104,7 @@ def test_ssh_connect_kwargs_dials_a_reattached_record_via_persisted_key(
     )
     (tmp_path / "host-aws").write_text("fakekey")
     reattached = replace(_aws_direct_record(), private_key=None)
-    kwargs = Sandbox(record=reattached)._ssh_connect_kwargs()
+    kwargs = Host(record=reattached)._ssh_connect_kwargs()
     assert kwargs["host"] == "ec2-1-2-3-4.compute.amazonaws.com"
     assert kwargs["client_keys"] == [str(tmp_path / "host-aws")]
 
@@ -119,7 +119,7 @@ def test_ssh_connect_kwargs_raises_when_the_key_was_never_persisted(
         lambda: type("_S", (), {"sandbox_keys_dir": tmp_path})(),
     )
     with pytest.raises(RuntimeError, match="no reachable address"):
-        Sandbox(record=_aws_direct_record())._ssh_connect_kwargs()
+        Host(record=_aws_direct_record())._ssh_connect_kwargs()
 
 
 def _stub_acquire_settings(
@@ -201,3 +201,27 @@ async def test_acquire_persists_private_key_when_returned(
     key_path = tmp_path / "host-aws"
     assert key_path.read_text().startswith("-----BEGIN OPENSSH")
     assert oct(os.stat(key_path).st_mode & 0o777) == "0o600"
+
+
+async def test_acquire_passes_template_to_drukbox(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    client, calls = _stub_acquire_settings(monkeypatch, tmp_path, sandbox_image="base")
+
+    async with client.acquire(idempotency_key="op", template="template-1"):
+        pass
+
+    assert calls[0]["template"] == "template-1"
+
+
+async def test_acquire_omits_unset_template_from_drukbox(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    client, calls = _stub_acquire_settings(monkeypatch, tmp_path, sandbox_image="base")
+
+    async with client.acquire(idempotency_key="op"):
+        pass
+
+    assert "template" not in calls[0]

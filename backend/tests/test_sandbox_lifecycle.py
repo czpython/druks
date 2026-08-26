@@ -29,8 +29,8 @@ class _FakeUpload:
 
 class _FakeSandbox:
     def __init__(self, host_id: str = "host-xyz") -> None:
-        self.id = host_id  # mirrors real Sandbox.id (== record.id)
-        self.ssh_username = "root"  # mirrors real Sandbox.ssh_username
+        self.id = host_id  # mirrors real Host.id (== record.id)
+        self.ssh_username = "root"  # mirrors real Host.ssh_username
         self.exec_log: list[tuple[list[str], float]] = []
         self.uploads: list[_FakeUpload] = []
         self.secrets: list[tuple[str, str]] = []  # (secret, remote)
@@ -51,7 +51,7 @@ class _FakeSandbox:
         remote: str,
         mode: int = 0o600,
     ) -> None:
-        del mode  # tested at the Sandbox level, not via the fake
+        del mode  # tested at the Host level, not via the fake
         self.uploads.append(_FakeUpload(local=local, remote=remote))
 
     async def upload_dir(
@@ -72,7 +72,7 @@ class _FakeSandbox:
         remote: str,
         mode: int = 0o600,
     ) -> None:
-        del mode  # tested at the Sandbox level, not via the fake
+        del mode  # tested at the Host level, not via the fake
         self.secrets.append((secret, remote))
 
     async def aclose(self) -> None:
@@ -153,9 +153,9 @@ def _record(
     )
 
 
-# NOTE: ``Sandbox.upload_file`` (mkdir + sftp + chmod) and
-# ``Sandbox.write_secret`` (printf with shell quoting) are exercised
-# against the real Sandbox in test_sandbox_host.py — the fake here
+# NOTE: ``Host.upload_file`` (mkdir + sftp + chmod) and
+# ``Host.write_secret`` (printf with shell quoting) are exercised
+# against the real Host in test_sandbox_host.py — the fake here
 # just records the calls. Tests below cover the credentials.push
 # orchestration that drives them.
 
@@ -432,10 +432,10 @@ def patched_real_sandbox(monkeypatch: pytest.MonkeyPatch) -> list[_FakeSandbox]:
         built.append(fake)
         return fake
 
-    # Patch in both places: client.py constructs the Sandbox (lifecycle
+    # Patch in both places: client.py constructs the Host (lifecycle
     # tests want the fake) and host.py is where the real class lives.
-    monkeypatch.setattr("druks.sandbox.client.Sandbox", make_sandbox)
-    monkeypatch.setattr("druks.sandbox.host.Sandbox", make_sandbox)
+    monkeypatch.setattr("druks.sandbox.client.Host", make_sandbox)
+    monkeypatch.setattr("druks.sandbox.host.Host", make_sandbox)
     return built
 
 

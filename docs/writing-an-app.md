@@ -130,6 +130,29 @@ decorate its side-effecting operations instead. An agent called directly from
 the orchestration body gets its own step. An agent called inside `@step` or
 `run()` shares that enclosing checkpoint.
 
+### Declare the sandbox environment
+
+A workflow can ship the environment its agents need as a plain shell file:
+
+```python
+from druks.sandbox import Sandbox
+from druks.workflows import Workflow
+
+
+class BuildSite(Workflow):
+    sandbox = Sandbox(setup="sandboxes/build.sh")
+```
+
+The path is relative to the app package: place the file at
+`site_builder/sandboxes/build.sh`. Druks reads the raw bytes. It does not render
+the file or run it during import. Drukbox builds a reusable template from the
+platform base and the script.
+A run waits with a visible sandbox-building phase when that template is still
+building. A workflow with no declaration uses the platform base unchanged.
+
+The content hash of the base and script identifies the template. App authors do
+not name provider images.
+
 Completed checkpoints are reused on recovery. An interrupted operation can run
 again, so use provider idempotency keys for writes. Keep decisions in replayable
 control flow and I/O inside steps. See
@@ -1139,6 +1162,7 @@ Import from concern namespaces, not from `druks.durable` or internal modules:
 | `druks.secrets.fields` | `EncryptedJsonField`, `SecretsMapping` |
 | `druks.agents` | `Agent`, `AgentOutput` |
 | `druks.workflows` | `Workflow`, `Gate`, `step`, run/agent response types, lifecycle enums and workflow errors |
+| `druks.sandbox` | `Sandbox` |
 | `druks.db` | `Base`, `StoredSubject`, `db_session` |
 | `druks.schemas` | `BaseResponse` |
 | `druks.signals` | `subscribe` |

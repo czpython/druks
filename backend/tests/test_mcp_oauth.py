@@ -593,7 +593,7 @@ async def test_delivery_mints_and_injects_the_oauth_token(registry_state, auth_s
     _register_oauth_server()
     await _store_grant()
 
-    kwargs = await Workspace(sandbox=_FakeSandbox()).with_mcp_servers(  # type: ignore[arg-type]
+    kwargs = await Workspace(host=_FakeSandbox()).with_mcp_servers(  # type: ignore[arg-type]
         SYSTEM_ACCOUNT_ID
     )
 
@@ -613,7 +613,7 @@ async def test_delivery_fails_loudly_for_an_unconnected_enabled_oauth_server(
     server.identity_mode = IdentityMode.SHARED
 
     with pytest.raises(MissingGrantError, match=_NAME):
-        await Workspace(sandbox=_FakeSandbox()).with_mcp_servers(  # type: ignore[arg-type]
+        await Workspace(host=_FakeSandbox()).with_mcp_servers(  # type: ignore[arg-type]
             SYSTEM_ACCOUNT_ID
         )
 
@@ -624,7 +624,7 @@ async def test_delivery_names_the_account_missing_its_per_user_grant(druks_db):
     server.identity_mode = IdentityMode.PER_USER
 
     with pytest.raises(MissingGrantError) as error:
-        await Workspace(sandbox=_FakeSandbox()).with_mcp_servers(  # type: ignore[arg-type]
+        await Workspace(host=_FakeSandbox()).with_mcp_servers(  # type: ignore[arg-type]
             account.id
         )
 
@@ -639,7 +639,7 @@ async def test_delivery_without_a_run_account_uses_the_fallback(auth_server, dru
     await (await UserSettings.get()).set_fallback_account(fallback.id)
     await _store_grant(account_id=fallback.id, identity_mode=IdentityMode.PER_USER)
 
-    kwargs = await Workspace(sandbox=_FakeSandbox()).with_mcp_servers(  # type: ignore[arg-type]
+    kwargs = await Workspace(host=_FakeSandbox()).with_mcp_servers(  # type: ignore[arg-type]
         None
     )
 
@@ -653,7 +653,7 @@ async def test_delivery_with_a_named_account_does_not_use_the_fallback(auth_serv
     await _store_grant(account_id=fallback.id, identity_mode=IdentityMode.PER_USER)
 
     with pytest.raises(MissingGrantError) as error:
-        await Workspace(sandbox=_FakeSandbox()).with_mcp_servers(  # type: ignore[arg-type]
+        await Workspace(host=_FakeSandbox()).with_mcp_servers(  # type: ignore[arg-type]
             named.id
         )
 

@@ -1,3 +1,4 @@
+from druks.sandbox import Sandbox
 from druks.workflows import Workflow
 
 from druks_field_notes.app import FieldNotes
@@ -9,6 +10,7 @@ class Summarize(Workflow):
     produces the line, and the run stores it on the note."""
 
     subject = Note
+    sandbox = Sandbox(setup="sandboxes/setup.sh")
 
     async def run(self) -> None:
         note = await self.subject

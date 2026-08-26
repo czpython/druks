@@ -1,9 +1,16 @@
+import hashlib
+import importlib.util
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field
+
+from druks.apps import loader
+from druks.settings import load_settings
+
+from .exceptions import SetupScriptError
 
 if TYPE_CHECKING:
     from druks.durable.enums import AgentCallStatus
@@ -19,6 +26,46 @@ class Profile(BaseModel):
     env: dict[str, str] = Field(default_factory=dict)
 
 
+def get_content_hash(base: str, script: bytes) -> str:
+    content = base.encode("utf-8") + b"\0" + script
+    return hashlib.sha256(content).hexdigest()
+
+
+@dataclass(frozen=True)
+class Sandbox:
+    # Path of the setup script inside the declaring app's package, by
+    # convention under ``sandboxes/``. The owning module is stamped when the
+    # declaration is assigned on a workflow class.
+    setup: str
+    module: str = field(init=False, compare=False, default="")
+
+    def __set_name__(self, owner: type, attr: str) -> None:
+        object.__setattr__(self, "module", owner.__module__)
+
+    def read_setup_script(self) -> bytes:
+        if not self.module:
+            raise SetupScriptError(
+                f"sandbox setup {self.setup!r} is not declared on a workflow class"
+            )
+        app = loader.get_app(loader.resolve_workflow_app(self.module))
+        spec = importlib.util.find_spec(app.package)
+        if not spec or not spec.submodule_search_locations:
+            raise SetupScriptError(
+                f"sandbox setup {self.setup!r} cannot find app package {app.package!r}"
+            )
+        path = Path(spec.submodule_search_locations[0]) / self.setup
+        try:
+            return path.read_bytes()
+        except OSError as error:
+            raise SetupScriptError(
+                f"sandbox setup {self.setup!r} cannot be read: {error}"
+            ) from error
+
+    @property
+    def content_hash(self) -> str:
+        return get_content_hash(load_settings().sandbox.image, self.read_setup_script())
+
+
 @dataclass(frozen=True)
 class ExecResult:
     exit_code: int
@@ -32,7 +79,7 @@ class ExecResult:
 
 @dataclass(frozen=True)
 class AgentResult:
-    """Result of one agent execution, what ``Sandbox.run_agent`` returns.
+    """Result of one agent execution, what ``Host.run_agent`` returns.
     the agent call records it as an ``AgentCall`` and parses ``output``."""
 
     output: Any
@@ -57,7 +104,7 @@ class AgentResult:
 
 @dataclass
 class HarnessRunResult:
-    """Raw outcome of one CLI execution in the VM — what ``Sandbox._exec``
+    """Raw outcome of one CLI execution in the VM — what ``Host._exec``
     returns and a harness's ``parse`` consumes."""
 
     returncode: int
@@ -67,7 +114,7 @@ class HarnessRunResult:
 
 @dataclass(frozen=True)
 class AgentInvocation:
-    """A fully-built CLI invocation, ready for ``Sandbox._exec``.
+    """A fully-built CLI invocation, ready for ``Host._exec``.
 
     Produced by a harness's ``build_invocation`` — the harness is a pure
     planner (argv in, parsed payload out) and never touches the live

@@ -24,7 +24,7 @@ def test_build_workspace_grants_related_root_add_dir():
     # file-tool grant, no per-repo threading. MCP delivery is the fold's job —
     # scaffolding kwargs never carry it.
     workspace = BuildWorkspace(
-        sandbox=_FakeSandbox(),  # type: ignore[arg-type]
+        host=_FakeSandbox(),  # type: ignore[arg-type]
         repo="o/main",
         branch="b",
         github_token="t",
@@ -47,7 +47,7 @@ async def test_build_workspace_declares_its_github_mcp(druks_db):
     # is no build without github). Delivery ships it whole: wire shape + token
     # in the run env.
     workspace = BuildWorkspace(
-        sandbox=_FakeSandbox(),  # type: ignore[arg-type]
+        host=_FakeSandbox(),  # type: ignore[arg-type]
         repo="o/main",
         branch="b",
         github_token="t",
@@ -79,8 +79,8 @@ def _workspace_kwargs_stubs(monkeypatch: pytest.MonkeyPatch, *, review_actor):
         execs.append(argv)
         return SimpleNamespace(ok=True, exit_code=0, stdout="", stderr="")
 
-    monkeypatch.setattr(host_mod.Sandbox, "write_secret", _noop)
-    monkeypatch.setattr(host_mod.Sandbox, "exec", fake_exec)
+    monkeypatch.setattr(host_mod.Host, "write_secret", _noop)
+    monkeypatch.setattr(host_mod.Host, "exec", fake_exec)
 
     async def _github_client():
         return SimpleNamespace(token_for_repo=_token)
@@ -108,7 +108,7 @@ async def test_get_workspace_kwargs_clones_primary_only(monkeypatch: pytest.Monk
             client=SimpleNamespace(token_for_repo=_review_token), mode="approve"
         ),
     )
-    sandbox = host_mod.Sandbox(record=SimpleNamespace(id="h1", ssh_username="exedev"))  # type: ignore[arg-type]
+    sandbox = host_mod.Host(record=SimpleNamespace(id="h1", ssh_username="exedev"))  # type: ignore[arg-type]
 
     workflow = Build()
     workflow.input = Build._run_input_model()
@@ -138,7 +138,7 @@ async def test_get_workspace_kwargs_fails_loudly_when_the_token_wont_mint(
             client=SimpleNamespace(token_for_repo=_no_token), mode="comment"
         ),
     )
-    sandbox = host_mod.Sandbox(record=SimpleNamespace(id="h1", ssh_username="exedev"))  # type: ignore[arg-type]
+    sandbox = host_mod.Host(record=SimpleNamespace(id="h1", ssh_username="exedev"))  # type: ignore[arg-type]
 
     workflow = Build()
     workflow.input = Build._run_input_model()
@@ -185,7 +185,7 @@ async def test_set_git_identity_stamps_the_workspace_repo(
 ) -> None:
     repo_path = tmp_path / "repo"
     subprocess.run(["git", "init", "-q", str(repo_path)], check=True)
-    workspace = RepoWorkspace(sandbox=_IdentitySandbox(repo_path), repo="o/main", github_token="t")  # type: ignore[arg-type]
+    workspace = RepoWorkspace(host=_IdentitySandbox(repo_path), repo="o/main", github_token="t")  # type: ignore[arg-type]
     hook = repo_path / ".git" / "hooks" / "prepare-commit-msg"
     message = repo_path / "COMMIT_EDITMSG"
 

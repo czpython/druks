@@ -13,7 +13,7 @@ from druks.workflows import Workflow
 from druks.workspaces import RepoWorkspace
 
 if TYPE_CHECKING:
-    from druks.sandbox.host import Sandbox
+    from druks.sandbox.host import Host
 
 
 class ReviewWorkspace(RepoWorkspace):
@@ -23,7 +23,7 @@ class ReviewWorkspace(RepoWorkspace):
 
     @property
     def related_root(self) -> str:
-        return get_related_root(self.sandbox.ssh_username)
+        return get_related_root(self.host.ssh_username)
 
     def get_agent_run_kwargs(self, **kwargs: Any) -> dict[str, Any]:
         kwargs = super().get_agent_run_kwargs(**kwargs)
@@ -56,25 +56,25 @@ class PullRequestReview(Workflow):
     async def run(self, requested_by: str) -> None:
         await Review.review_pull_request()
 
-    async def get_workspace_kwargs(self, sandbox: "Sandbox") -> dict[str, Any]:
+    async def get_workspace_kwargs(self, host: "Host") -> dict[str, Any]:
         # Cloned at the default branch — the reviewer checks the pull request out itself.
         # The token is the review actor's: it authenticates the clone and ``gh``, so the
         # review is authored under that identity. Siblings stay uncloned — the reviewer
         # clones the ones it opens, into a directory that must exist for the grant to hold.
         repo = (await self.subject).repo
         github_token = await (await get_review_actor()).client.token_for_repo(repo)
-        await sandbox.write_secret(
-            secret=github_token, remote=get_github_token_remote_path(sandbox.ssh_username)
+        await host.write_secret(
+            secret=github_token, remote=get_github_token_remote_path(host.ssh_username)
         )
         await _repo.ensure(
-            sandbox,
+            host,
             repo_url=f"https://github.com/{repo}",
             ref=None,
-            target_path=get_repo_root(sandbox.ssh_username),
+            target_path=get_repo_root(host.ssh_username),
         )
-        await sandbox.exec(["mkdir", "-p", get_related_root(sandbox.ssh_username)], timeout=10.0)
+        await host.exec(["mkdir", "-p", get_related_root(host.ssh_username)], timeout=10.0)
         return {
-            **await super().get_workspace_kwargs(sandbox),
+            **await super().get_workspace_kwargs(host),
             "repo": repo,
             "github_token": github_token,
         }
