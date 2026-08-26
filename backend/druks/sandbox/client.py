@@ -95,10 +95,6 @@ class Client:
             # Fixed lease: drukbox reaps the host when this lapses, so a run whose
             # worker dies frees its VM without a druks-side reconciler.
             expires_at = datetime.now(UTC) + timedelta(seconds=SANDBOX_HOST_LEASE_SECONDS)
-            create_host_kwargs = {}
-            if template:
-                # SDK 0.0.7 rejects template= even when unset, so ordinary leases omit it.
-                create_host_kwargs["template"] = template
             try:
                 record = await api.create_host(
                     expires_at=expires_at,
@@ -106,7 +102,7 @@ class Client:
                     idempotency_key=key,
                     image=image or None,
                     provider=provider,
-                    **create_host_kwargs,
+                    template=template,
                 )
             except (SandboxProvisioningError, SandboxUnavailableError) as exc:
                 # Transient control-plane failures — a 502 the service raises
@@ -156,26 +152,31 @@ class Client:
         finally:
             await api.aclose()
 
-    async def create_template(self, *, base_image: str, script: bytes, requirements_hash: str):
+    async def create_template(self, *, setup_script: str, base_image: str | None, label: str):
         api = self._api()
         try:
             return await api.create_template(
+                setup_script=setup_script,
                 base_image=base_image,
-                script=script,
-                requirements_hash=requirements_hash,
+                label=label,
             )
         finally:
             await api.aclose()
 
-    async def get_template(self, *, requirements_hash: str):
+    async def get_template(self, *, setup_script_hash: str, base_image: str = ""):
+        # Newest first from drukbox, so a base change finds its fresh template
+        # while the old base's twin ages out.
         api = self._api()
         try:
             for template in await api.list_templates():
-                if template.requirements_hash == requirements_hash:
-                    return template
+                if template.setup_script_hash != setup_script_hash:
+                    continue
+                if base_image and template.base_image != base_image:
+                    continue
+                return template
         finally:
             await api.aclose()
-        raise TemplateNotFound(f"sandbox template {requirements_hash} does not exist")
+        raise TemplateNotFound(f"sandbox template {setup_script_hash} does not exist")
 
     @staticmethod
     async def _best_effort_delete(api: SandboxAPI, host_id: str) -> None:

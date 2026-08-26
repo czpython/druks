@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING, Any
 from pydantic import BaseModel, Field
 
 from druks.apps import loader
-from druks.settings import load_settings
 
 from .exceptions import SetupScriptError
 
@@ -24,11 +23,6 @@ class Profile(BaseModel):
 
     image: str | None = None
     env: dict[str, str] = Field(default_factory=dict)
-
-
-def get_content_hash(base: str, script: bytes) -> str:
-    content = base.encode("utf-8") + b"\0" + script
-    return hashlib.sha256(content).hexdigest()
 
 
 @dataclass(frozen=True)
@@ -62,8 +56,10 @@ class Sandbox:
             ) from error
 
     @property
-    def content_hash(self) -> str:
-        return get_content_hash(load_settings().sandbox.image, self.read_setup_script())
+    def setup_script_hash(self) -> str:
+        # Drukbox's template identity: sha256 of the script text. Base image and
+        # provider are the other two columns of its unique key, resolved there.
+        return hashlib.sha256(self.read_setup_script()).hexdigest()
 
 
 @dataclass(frozen=True)

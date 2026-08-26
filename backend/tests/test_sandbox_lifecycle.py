@@ -102,6 +102,7 @@ class _FakeAPI:
         idempotency_key: str | None = None,
         expires_at: datetime | None = None,
         provider: str | None = None,
+        template: str | None = None,
     ) -> SandboxHostRecord:
         self.created_envs.append(env)
         self.created_expires_at.append(expires_at)

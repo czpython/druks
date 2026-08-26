@@ -10,12 +10,12 @@ import pytest
 from druks.contrib.ship.app import _PHASE_META
 from druks.sandbox import datastructures, templates
 from druks.sandbox.client import Client
-from druks.sandbox.datastructures import Sandbox, get_content_hash
+from druks.sandbox.datastructures import Sandbox
 from druks.sandbox.exceptions import TemplateNotFound, TemplateUnavailable
 from druks.workflows import Workflow
 
 
-def test_sandbox_resolves_package_bytes_and_hashes_base_with_script(monkeypatch, tmp_path):
+def test_sandbox_reads_package_bytes_and_hashes_the_script(monkeypatch, tmp_path):
     package = tmp_path / "site_builder"
     (package / "sandboxes").mkdir(parents=True)
     (package / "__init__.py").write_text("")
@@ -29,11 +29,6 @@ def test_sandbox_resolves_package_bytes_and_hashes_base_with_script(monkeypatch,
             get_app=lambda name: SimpleNamespace(name="site_builder", package="site_builder"),
         ),
     )
-    monkeypatch.setattr(
-        datastructures,
-        "load_settings",
-        lambda: SimpleNamespace(sandbox=SimpleNamespace(image="base-image")),
-    )
 
     class BuildSite:
         sandbox = Sandbox(setup="sandboxes/build.sh")
@@ -41,7 +36,7 @@ def test_sandbox_resolves_package_bytes_and_hashes_base_with_script(monkeypatch,
     script = BuildSite.sandbox.read_setup_script()
 
     assert script.startswith(b"#!/bin/sh\n")
-    assert BuildSite.sandbox.content_hash == hashlib.sha256(b"base-image\0" + script).hexdigest()
+    assert BuildSite.sandbox.setup_script_hash == hashlib.sha256(script).hexdigest()
 
 
 def test_get_declared_sandboxes_deduplicates_by_content(monkeypatch):
@@ -58,15 +53,10 @@ def test_get_declared_sandboxes_deduplicates_by_content(monkeypatch):
     app = SimpleNamespace(workflows=lambda: [First, Second])
     monkeypatch.setattr(templates, "loader", SimpleNamespace(iter_apps=lambda: [app]))
     monkeypatch.setattr(Sandbox, "read_setup_script", lambda self: b"setup")
-    monkeypatch.setattr(
-        datastructures,
-        "load_settings",
-        lambda: SimpleNamespace(sandbox=SimpleNamespace(image="base")),
-    )
 
     declared = templates.get_declared_sandboxes()
 
-    assert declared == {get_content_hash("base", b"setup"): shared}
+    assert declared == {hashlib.sha256(b"setup").hexdigest(): shared}
 
 
 def test_ship_maps_the_sandbox_building_phase():
@@ -76,7 +66,7 @@ def test_ship_maps_the_sandbox_building_phase():
 
 async def test_prepare_sandbox_templates_requests_each_declaration(monkeypatch):
     sandbox = Sandbox(setup="sandboxes/setup.sh")
-    requirements_hash = get_content_hash("base", b"setup")
+    object.__setattr__(sandbox, "module", "druks_notes.workflows")
     create_template = AsyncMock()
     monkeypatch.setattr(Sandbox, "read_setup_script", lambda self: b"setup")
     monkeypatch.setattr(
@@ -86,8 +76,13 @@ async def test_prepare_sandbox_templates_requests_each_declaration(monkeypatch):
     )
     monkeypatch.setattr(
         templates,
+        "loader",
+        SimpleNamespace(resolve_workflow_app=lambda module: "notes"),
+    )
+    monkeypatch.setattr(
+        templates,
         "get_declared_sandboxes",
-        lambda: {requirements_hash: sandbox},
+        lambda: {sandbox.setup_script_hash: sandbox},
     )
     monkeypatch.setattr(
         templates,
@@ -98,11 +93,10 @@ async def test_prepare_sandbox_templates_requests_each_declaration(monkeypatch):
     await templates.prepare_sandbox_templates()
 
     create_template.assert_awaited_once_with(
+        setup_script="setup",
         base_image="base",
-        script=b"setup",
-        requirements_hash=requirements_hash,
+        label="notes/sandboxes/setup.sh",
     )
-
 
 
 async def test_get_template_id_uses_available_template(monkeypatch):
@@ -111,7 +105,7 @@ async def test_get_template_id_uses_available_template(monkeypatch):
     get_template = AsyncMock(return_value=template)
     monkeypatch.setattr(Sandbox, "read_setup_script", lambda self: b"setup")
     monkeypatch.setattr(
-        datastructures,
+        templates,
         "load_settings",
         lambda: SimpleNamespace(sandbox=SimpleNamespace(image="base")),
     )
@@ -122,7 +116,9 @@ async def test_get_template_id_uses_available_template(monkeypatch):
     )
 
     assert await templates.get_template_id(sandbox) == "template-1"
-    get_template.assert_awaited_once_with(requirements_hash=get_content_hash("base", b"setup"))
+    get_template.assert_awaited_once_with(
+        setup_script_hash=hashlib.sha256(b"setup").hexdigest(), base_image="base"
+    )
 
 
 async def test_get_template_id_waits_with_visible_phase(monkeypatch):
@@ -137,7 +133,7 @@ async def test_get_template_id_waits_with_visible_phase(monkeypatch):
     sleep = AsyncMock()
     monkeypatch.setattr(Sandbox, "read_setup_script", lambda self: b"setup")
     monkeypatch.setattr(
-        datastructures,
+        templates,
         "load_settings",
         lambda: SimpleNamespace(sandbox=SimpleNamespace(image="base")),
     )
@@ -159,7 +155,7 @@ async def test_get_template_id_rejects_missing_template(monkeypatch):
     sandbox = Sandbox(setup="sandboxes/setup.sh")
     monkeypatch.setattr(Sandbox, "read_setup_script", lambda self: b"setup")
     monkeypatch.setattr(
-        datastructures,
+        templates,
         "load_settings",
         lambda: SimpleNamespace(sandbox=SimpleNamespace(image="base")),
     )
@@ -177,7 +173,7 @@ async def test_get_template_id_rejects_failed_template(monkeypatch):
     sandbox = Sandbox(setup="sandboxes/setup.sh")
     monkeypatch.setattr(Sandbox, "read_setup_script", lambda self: b"setup")
     monkeypatch.setattr(
-        datastructures,
+        templates,
         "load_settings",
         lambda: SimpleNamespace(sandbox=SimpleNamespace(image="base")),
     )
@@ -253,16 +249,17 @@ async def test_ephemeral_lease_uses_workflow_template(monkeypatch):
 
 async def test_client_template_primitives_use_sdk_contract(monkeypatch):
     created = SimpleNamespace(id="template-1", status="building")
+    other_base = SimpleNamespace(
+        id="template-0", status="available", setup_script_hash="hash-1", base_image="older"
+    )
     listed = SimpleNamespace(
-        id="template-1",
-        status="available",
-        requirements_hash="requirements-1",
+        id="template-1", status="available", setup_script_hash="hash-1", base_image="base"
     )
 
     class FakeAPI:
         def __init__(self):
             self.create_template = AsyncMock(return_value=created)
-            self.list_templates = AsyncMock(return_value=[listed])
+            self.list_templates = AsyncMock(return_value=[other_base, listed])
             self.aclose = AsyncMock()
 
     api = FakeAPI()
@@ -270,18 +267,14 @@ async def test_client_template_primitives_use_sdk_contract(monkeypatch):
     monkeypatch.setattr(Client, "_api", lambda self: api)
 
     assert (
-        await client.create_template(
-            base_image="base",
-            script=b"setup",
-            requirements_hash="requirements-1",
-        )
+        await client.create_template(setup_script="setup", base_image="base", label="notes")
         is created
     )
-    assert await client.get_template(requirements_hash="requirements-1") is listed
+    assert await client.get_template(setup_script_hash="hash-1", base_image="base") is listed
+    assert await client.get_template(setup_script_hash="hash-1") is other_base
+    with pytest.raises(TemplateNotFound):
+        await client.get_template(setup_script_hash="hash-2")
     api.create_template.assert_awaited_once_with(
-        base_image="base",
-        script=b"setup",
-        requirements_hash="requirements-1",
+        setup_script="setup", base_image="base", label="notes"
     )
-    api.list_templates.assert_awaited_once_with()
-    assert api.aclose.await_count == 2
+    assert api.aclose.await_count == 4

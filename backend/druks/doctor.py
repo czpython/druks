@@ -310,11 +310,11 @@ async def check_declared_sandboxes(settings: Settings) -> CheckResult | list[Che
         return CheckResult(name="sandbox_templates", ok=True, detail="no declared sandboxes")
 
     results = []
-    for requirements_hash, sandbox in declared.items():
-        name = f"sandbox:{requirements_hash[:12]}"
-        detail = f"{sandbox.setup}; hash {requirements_hash}"
+    for setup_script_hash, sandbox in declared.items():
+        name = f"sandbox:{setup_script_hash[:12]}"
+        detail = f"{sandbox.setup}; hash {setup_script_hash}"
         try:
-            template = await sandbox_client.get_template(requirements_hash=requirements_hash)
+            template = await sandbox_client.get_template(setup_script_hash=setup_script_hash)
         except TemplateNotFound:
             result = CheckResult(
                 name=name,
