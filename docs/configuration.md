@@ -327,8 +327,11 @@ to deliver the notification does not unpark or fail the run.
 ## MCP servers
 
 `DRUKS_MCP_CATALOG` points at a JSON catalog of server definitions loaded at
-startup. The packaged catalog declares Linear OAuth but leaves it disabled; a
-deployment may replace the catalog. Catalogs contain definitions, not tokens.
+startup. The packaged catalog is an empty `mcpServers` map, so a fresh install
+ships no built-in servers; a deployment points `DRUKS_MCP_CATALOG` at its own
+mounted file to declare defaults. The catalog is always loaded — the packaged
+file stays in place because a missing catalog aborts boot. Catalogs contain
+definitions, not tokens.
 
 `DRUKS_MCP_TRUSTED` points at the trust-pins JSON behind the registry
 resolver's official badge. The badge is computed: an entry is official when

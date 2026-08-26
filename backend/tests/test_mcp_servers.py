@@ -453,31 +453,14 @@ def _static_entry(url):
     return {"url": url, "auth": {"type": "static"}}
 
 
-async def test_packaged_catalog_ships_linear_disabled(registry_state, druks_db):
-    # The one packaged default: Linear's hosted MCP, shipped dark — an oauth
-    # entry has no grant until an operator connects it, and an enabled
-    # unconnected one would fail every run's delivery. Ship's github MCP is
-    # Ship's own requirement (get_required_mcp_servers), never a catalog entry.
+async def test_packaged_catalog_is_empty_and_delivers_nothing(registry_state, druks_db):
+    # The packaged default is an explicit empty ``mcpServers`` map: a fresh
+    # install registers no built-ins and delivers no MCP servers. Ship's github
+    # MCP is Ship's own requirement (get_required_mcp_servers), never a catalog
+    # entry.
     load_mcp_catalog(PACKAGED_MCP_CATALOG)
 
-    assert "github" not in mcp_servers
-    builtins = [s for s in (await McpServer._merged()).values() if s["builtin"]]
-    assert [s["name"] for s in builtins] == ["linear"]
-    linear = builtins[0]
-    assert linear["url"] == "https://mcp.linear.app/mcp"
-    assert linear["token_source"] == "oauth"
-    assert linear["is_enabled"] is False
-    assert "linear" not in {s["name"] for s in await McpServer.list_enabled()}
-
-
-async def test_packaged_catalog_delivers_nothing_until_linear_is_connected(
-    registry_state, druks_db
-):
-    # The regression the disabled default exists for: a fresh install has no
-    # grant, and delivery fails loudly for an enabled unconnected oauth server
-    # (test_delivery_fails_loudly_for_an_unconnected_enabled_oauth_server) —
-    # disabled, linear is simply not delivered and runs work out of the box.
-    load_mcp_catalog(PACKAGED_MCP_CATALOG)
+    assert not [s for s in (await McpServer._merged()).values() if s["builtin"]]
 
     kwargs = await _delivery()
     assert "mcp_servers" not in kwargs

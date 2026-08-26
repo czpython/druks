@@ -15,8 +15,12 @@ from pydantic_settings import (
 
 DEFAULT_DATA_DIR = Path("/var/lib/druks")
 
-# The MCP default-server catalog Druks ships (Linear declared but disabled);
-# ``mcp_catalog_path`` points a deployment at its own file instead.
+# The MCP default-server catalog Druks ships: an explicit empty ``mcpServers``
+# map, so a fresh install registers and delivers no built-in servers.
+# ``mcp_catalog_path`` points a deployment at its own file instead. The file
+# stays even though it declares nothing: startup loads the configured path
+# unconditionally (see druks/api/server.py) and a missing file raises
+# ``InvalidCatalogError`` during boot.
 PACKAGED_MCP_CATALOG = Path(__file__).with_name("mcp") / "catalog.json"
 
 # The trust pins for the MCP registry picker's official badge (see
