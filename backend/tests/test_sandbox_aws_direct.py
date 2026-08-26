@@ -215,7 +215,7 @@ async def test_acquire_passes_template_to_drukbox(
     assert calls[0]["template"] == "template-1"
 
 
-async def test_acquire_omits_unset_template_from_drukbox(
+async def test_acquire_sends_no_template_by_default(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ):
@@ -224,4 +224,4 @@ async def test_acquire_omits_unset_template_from_drukbox(
     async with client.acquire(idempotency_key="op"):
         pass
 
-    assert "template" not in calls[0]
+    assert calls[0]["template"] is None

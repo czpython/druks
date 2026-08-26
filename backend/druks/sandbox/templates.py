@@ -16,27 +16,30 @@ def get_declared_sandboxes() -> dict[str, Sandbox]:
     for app in loader.iter_apps():
         for workflow in app.workflows():
             if sandbox := workflow.sandbox:
-                declared[sandbox.content_hash] = sandbox
+                declared[sandbox.setup_script_hash] = sandbox
     return declared
 
 
 async def prepare_sandbox_templates() -> None:
     base_image = load_settings().sandbox.image
-    for requirements_hash, sandbox in get_declared_sandboxes().items():
+    for sandbox in get_declared_sandboxes().values():
         await sandbox_client.create_template(
-            base_image=base_image,
-            script=sandbox.read_setup_script(),
-            requirements_hash=requirements_hash,
+            setup_script=sandbox.read_setup_script().decode("utf-8"),
+            base_image=base_image or None,
+            label=f"{loader.resolve_workflow_app(sandbox.module)}/{sandbox.setup}",
         )
 
 
 async def get_template_id(sandbox: Sandbox) -> str:
-    requirements_hash = sandbox.content_hash
+    setup_script_hash = sandbox.setup_script_hash
+    base_image = load_settings().sandbox.image
     try:
-        template = await sandbox_client.get_template(requirements_hash=requirements_hash)
+        template = await sandbox_client.get_template(
+            base_image=base_image, setup_script_hash=setup_script_hash
+        )
     except TemplateNotFound as error:
         raise TemplateUnavailable(
-            f"sandbox template {requirements_hash} is missing. "
+            f"sandbox template {setup_script_hash} is missing. "
             "Reinstall the app or run `druks doctor`."
         ) from error
 
@@ -44,12 +47,14 @@ async def get_template_id(sandbox: Sandbox) -> str:
         await set_run_phase("sandbox_building")
         while template.status == "building":
             await asyncio.sleep(_TEMPLATE_POLL_SECONDS)
-            template = await sandbox_client.get_template(requirements_hash=requirements_hash)
+            template = await sandbox_client.get_template(
+                setup_script_hash=setup_script_hash, base_image=base_image
+            )
 
     if template.status == "available":
         return template.id
 
     raise TemplateUnavailable(
-        f"sandbox template {requirements_hash} has status {template.status!r}. "
+        f"sandbox template {setup_script_hash} has status {template.status!r}. "
         "Fix its setup and run `druks doctor`."
     )

@@ -246,7 +246,7 @@ async def test_declared_sandboxes_report_template_status(
     results = await doctor.check_declared_sandboxes(settings)
 
     request_templates.assert_awaited_once_with()
-    lookup.assert_awaited_once_with(requirements_hash="requirements-1")
+    lookup.assert_awaited_once_with(setup_script_hash="requirements-1")
     assert len(results) == 1
     assert results[0].ok is ok
     assert results[0].pending is pending
