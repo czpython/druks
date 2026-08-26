@@ -706,8 +706,8 @@ async def test_reused_host_retry_presents_a_stable_idempotency_key(monkeypatch, 
     monkeypatch.setattr("druks.sandbox.client.Client.provision", fake_provision)
 
     with pytest.raises(HarnessSandboxProvisioningError):
-        await current_run._ensure_host()
-    host_id = await current_run._ensure_host()
+        await current_run._lease_host()
+    host_id = await current_run._lease_host()
 
     assert host_id == "warm-host"
     assert keys == ["wf-9:sandbox", "wf-9:sandbox"]

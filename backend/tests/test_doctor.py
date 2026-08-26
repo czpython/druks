@@ -1,11 +1,14 @@
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import httpx
 import pytest
 from druks import doctor
 from druks.database import db_session
+from druks.sandbox.exceptions import TemplateNotFound
 from druks.services.models import ServiceIdentity
 from druks.testing import make_settings
 
@@ -192,6 +195,90 @@ async def test_drukbox_passes_when_unconfigured(tmp_path: Path) -> None:
 
     assert result.ok
     assert "not configured" in result.detail
+
+
+async def test_declared_sandboxes_pass_when_none_are_declared(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request_templates = AsyncMock()
+    monkeypatch.setattr(doctor, "prepare_sandbox_templates", request_templates)
+    monkeypatch.setattr(doctor, "get_declared_sandboxes", lambda: {})
+    settings = make_settings(tmp_path, sandbox={"service_url": "http://drukbox"})
+
+    result = await doctor.check_declared_sandboxes(settings)
+
+    assert result == doctor.CheckResult(
+        name="sandbox_templates",
+        ok=True,
+        detail="no declared sandboxes",
+    )
+    request_templates.assert_awaited_once_with()
+
+
+@pytest.mark.parametrize(
+    ("status", "ok", "pending"),
+    [
+        ("available", True, False),
+        ("building", False, True),
+        ("failed", False, False),
+    ],
+)
+async def test_declared_sandboxes_report_template_status(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    status: str,
+    ok: bool,
+    pending: bool,
+) -> None:
+    declared = {"requirements-1": SimpleNamespace(setup="sandboxes/setup.sh")}
+    request_templates = AsyncMock()
+    lookup = AsyncMock(return_value=SimpleNamespace(status=status))
+    monkeypatch.setattr(doctor, "prepare_sandbox_templates", request_templates)
+    monkeypatch.setattr(doctor, "get_declared_sandboxes", lambda: declared)
+    monkeypatch.setattr(
+        doctor,
+        "sandbox_client",
+        SimpleNamespace(get_template=lookup),
+    )
+    settings = make_settings(tmp_path, sandbox={"service_url": "http://drukbox"})
+
+    results = await doctor.check_declared_sandboxes(settings)
+
+    request_templates.assert_awaited_once_with()
+    lookup.assert_awaited_once_with(requirements_hash="requirements-1")
+    assert len(results) == 1
+    assert results[0].ok is ok
+    assert results[0].pending is pending
+    assert "sandboxes/setup.sh" in results[0].detail
+    assert "requirements-1" in results[0].detail
+    assert status in results[0].detail
+
+
+async def test_declared_sandboxes_report_missing_template(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(doctor, "prepare_sandbox_templates", AsyncMock())
+    monkeypatch.setattr(
+        doctor,
+        "get_declared_sandboxes",
+        lambda: {"requirements-1": SimpleNamespace(setup="sandboxes/setup.sh")},
+    )
+    monkeypatch.setattr(
+        doctor,
+        "sandbox_client",
+        SimpleNamespace(get_template=AsyncMock(side_effect=TemplateNotFound("missing"))),
+    )
+    settings = make_settings(tmp_path, sandbox={"service_url": "http://drukbox"})
+
+    result = (await doctor.check_declared_sandboxes(settings))[0]
+
+    assert not result.ok
+    assert not result.pending
+    assert "sandboxes/setup.sh" in result.detail
+    assert "requirements-1" in result.detail
+    assert "missing" in result.detail
 
 
 async def test_run_checks_covers_all_check_names(tmp_path: Path) -> None:

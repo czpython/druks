@@ -55,7 +55,7 @@ export interface SubjectStatus {
   accountUsername: string | null
 }
 
-// The live sub-phase a running run pushes ("Building sandbox VM…", "Working…") —
+// The live sub-phase a running run pushes ("Provisioning sandbox VM…", "Working…") —
 // finer than the lifecycle status; null unless something is actively running.
 export interface SubjectActivity {
   label: string

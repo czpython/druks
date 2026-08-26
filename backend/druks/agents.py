@@ -23,6 +23,7 @@ from druks.prompts import render_prompt
 from druks.sandbox import gate as sandbox_gate
 from druks.sandbox.client import sandbox_client
 from druks.sandbox.constants import MAX_AGENT_TIMEOUT_SECONDS
+from druks.sandbox.templates import get_template_id
 from druks.settings import load_settings
 from druks.usage.models import UsageScrape
 from druks.user_settings.models import SettingsOverride
@@ -50,7 +51,14 @@ async def _runner(
     if host_id:
         vm = sandbox_client.attach(host_id=host_id)
     else:
-        vm = sandbox_client.ephemeral(idempotency_key=f"{workflow_id}:{step}")
+        template = None
+        if workflow.sandbox:
+            template = await get_template_id(workflow.sandbox)
+            await set_run_phase("provisioning_vm")
+        vm = sandbox_client.ephemeral(
+            idempotency_key=f"{workflow_id}:{step}",
+            template=template,
+        )
     async with vm as box:
         yield await workflow.get_workspace(box)
 
@@ -275,7 +283,7 @@ class Agent:
         # rotation defers around it.
         async with sandbox_gate.use(connection_id, call_id):
             await set_run_phase("provisioning_vm")
-            host_id = await workflow._ensure_host()
+            host_id = await workflow._lease_host()
 
             # Record the call RUNNING once it has a host to run on (its id names
             # the on-disk transcript dir) so the live step shows while the agent

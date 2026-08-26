@@ -25,7 +25,8 @@ from druks.workflows import SubjectActivity
 # Only what the timeline can't already show. A running agent has an agent call
 # to name it, so the phase that clears provisioning maps to nothing.
 _PHASE_META: dict[str, SubjectActivity] = {
-    "provisioning_vm": SubjectActivity(label="Building sandbox VM…", kind="infra"),
+    "provisioning_vm": SubjectActivity(label="Provisioning sandbox VM…", kind="infra"),
+    "sandbox_building": SubjectActivity(label="Building sandbox…", kind="infra"),
 }
 
 

@@ -71,7 +71,7 @@ _CONNECT_TIMEOUT_SECONDS = 30.0
 _KEEPALIVE_INTERVAL_SECONDS = 15.0
 
 
-class Sandbox:
+class Host:
     def __init__(
         self,
         *,
@@ -538,7 +538,7 @@ class Sandbox:
         cwd: str | None = None,
         stdin_data: bytes | None = None,
     ) -> "Exec":
-        # cycle: each sibling imports Sandbox from this module
+        # cycle: each sibling imports Host from this module
         from . import credentials as _credentials
         from . import runner as _runner
 
@@ -651,7 +651,7 @@ class Sandbox:
                     "client_keys": [str(key_path)],
                 }
         raise RuntimeError(
-            f"Sandbox {self.record.id}: no reachable address on the record.",
+            f"Host {self.record.id}: no reachable address on the record.",
         )
 
 

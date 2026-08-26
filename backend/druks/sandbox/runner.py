@@ -9,7 +9,7 @@ from typing import Literal, NamedTuple
 import asyncssh
 
 from .exceptions import ExecFailed, SandboxUnreachable
-from .host import Sandbox
+from .host import Host
 from .layout import get_helper_script_path, get_runs_root
 
 # Polling cadence for tail() and wait(). 500ms is the cap on how stale
@@ -49,7 +49,7 @@ class Exec:
     def __init__(
         self,
         *,
-        host: Sandbox,
+        host: Host,
         run_id: str,
         run_dir: str,
     ) -> None:
@@ -221,7 +221,7 @@ class Exec:
 
 async def start_exec(
     *,
-    host: Sandbox,
+    host: Host,
     run_id: str,
     cmd: list[str],
     cwd: str,
@@ -309,7 +309,7 @@ async def start_exec(
 
 async def attach(
     *,
-    host: Sandbox,
+    host: Host,
     run_id: str,
 ) -> Exec:
     runs_root_path = get_runs_root(host.ssh_username)

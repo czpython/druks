@@ -102,14 +102,14 @@ describe('runSubLine', () => {
 
   it('leaves the step to its own row when the calls are split out', () => {
     const many = run({ agentCalls: [call({ status: 'succeeded' }), call({ id: 'c2' })] })
-    expect(runSubLine(many, { label: 'Building sandbox VM…', kind: 'infra' }, false)).toBe(
-      'Building sandbox VM…',
+    expect(runSubLine(many, { label: 'Provisioning sandbox VM…', kind: 'infra' }, false)).toBe(
+      'Provisioning sandbox VM…',
     )
   })
 
   it('shows the infra phase while no agent has started', () => {
-    expect(runSubLine(run(), { label: 'Building sandbox VM…', kind: 'infra' }, true)).toBe(
-      'Building sandbox VM…',
+    expect(runSubLine(run(), { label: 'Provisioning sandbox VM…', kind: 'infra' }, true)).toBe(
+      'Provisioning sandbox VM…',
     )
   })
 

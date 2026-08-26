@@ -506,6 +506,6 @@ class App:
     async def get_subject_activity(
         cls, subject: "Subject | StoredSubject"
     ) -> "SubjectActivity | None":
-        """The subject's live sub-phase, if any (e.g. "Building sandbox VM…"). Optional —
+        """The subject's live sub-phase, if any (e.g. "Provisioning sandbox VM…"). Optional —
         override to surface a transient signal the running run pushes."""
         return

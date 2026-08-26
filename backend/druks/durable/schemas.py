@@ -194,7 +194,7 @@ class SubjectList(BaseResponse):
 
 
 class SubjectActivity(BaseResponse):
-    # The running sub-phase the timeline can't show ("Building sandbox VM…"), supplied
+    # The running sub-phase the timeline can't show ("Provisioning sandbox VM…"), supplied
     # by the app; ``kind`` groups it for display ("infra" | "agent").
     label: str
     kind: str

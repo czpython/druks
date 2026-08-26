@@ -36,7 +36,7 @@ from .policy import PlanGate, RepoPolicy
 from .prompt_context import BuildPromptContext
 
 if TYPE_CHECKING:
-    from druks.sandbox.host import Sandbox
+    from druks.sandbox.host import Host
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +53,7 @@ class BuildWorkspace(RepoWorkspace):
 
     @property
     def workspace_root(self) -> str:
-        return get_work_root(self.sandbox.ssh_username)
+        return get_work_root(self.host.ssh_username)
 
     def get_required_mcp_servers(self) -> tuple[RequiredMcpServer, ...]:
         return (RequiredMcpServer(name=GITHUB_MCP_NAME, url=GITHUB_MCP_URL, token=self.mcp_token),)
@@ -64,7 +64,7 @@ class BuildWorkspace(RepoWorkspace):
         # Codex has full FS access and ignores it). get_related_root is never the repo
         # cwd — Claude wedges (no stdout, forever) on ``--add-dir <cwd>``.
         kwargs = super().get_agent_run_kwargs(**kwargs)
-        kwargs["add_dirs"] = (get_related_root(self.sandbox.ssh_username),)
+        kwargs["add_dirs"] = (get_related_root(self.host.ssh_username),)
         kwargs["skills"] = self.skills
         return kwargs
 
@@ -166,7 +166,7 @@ class Build(Workflow):
         if await self._plan_phase():
             await self._implement_phase()
 
-    async def get_workspace_kwargs(self, sandbox: "Sandbox") -> dict[str, Any]:
+    async def get_workspace_kwargs(self, host: "Host") -> dict[str, Any]:
         # The BuildWorkspace fields: mint a fresh GitHub token, push it, and clone the
         # primary repo (at branch) into the VM. Re-runs per agent call — the clone is
         # idempotent (one test -d on a warm VM) so it's cheap, and the ~60min token
@@ -181,16 +181,16 @@ class Build(Workflow):
         # VMs clone the default branch; every agent after delivery gets the PR branch.
         branch = self.branch
         github_token = await (await get_github_client()).token_for_repo(repo)
-        await sandbox.write_secret(
-            secret=github_token, remote=get_github_token_remote_path(sandbox.ssh_username)
+        await host.write_secret(
+            secret=github_token, remote=get_github_token_remote_path(host.ssh_username)
         )
         await _repo.ensure(
-            sandbox,
+            host,
             repo_url=f"https://github.com/{repo}",
             ref=branch,
-            target_path=get_repo_root(sandbox.ssh_username),
+            target_path=get_repo_root(host.ssh_username),
         )
-        await sandbox.exec(["mkdir", "-p", get_related_root(sandbox.ssh_username)], timeout=10.0)
+        await host.exec(["mkdir", "-p", get_related_root(host.ssh_username)], timeout=10.0)
         try:
             mcp_token = await (await get_review_actor()).client.token_for_repo(repo)
         except Exception as error:
@@ -202,7 +202,7 @@ class Build(Workflow):
                 "for its github MCP server."
             ) from error
         return {
-            **await super().get_workspace_kwargs(sandbox),
+            **await super().get_workspace_kwargs(host),
             "repo": repo,
             "branch": branch,
             "github_token": github_token,
@@ -464,20 +464,20 @@ class Profile(Workflow):
             )
         await project_repo.set_profile(baseline=baseline, effective=effective)
 
-    async def get_workspace_kwargs(self, sandbox: "Sandbox") -> dict[str, Any]:
+    async def get_workspace_kwargs(self, host: "Host") -> dict[str, Any]:
         repo = (await ProjectRepo.get(self.input.repo_id)).full_name
         github_token = await (await get_github_client()).token_for_repo(repo)
-        await sandbox.write_secret(
-            secret=github_token, remote=get_github_token_remote_path(sandbox.ssh_username)
+        await host.write_secret(
+            secret=github_token, remote=get_github_token_remote_path(host.ssh_username)
         )
         await _repo.ensure(
-            sandbox,
+            host,
             repo_url=f"https://github.com/{repo}",
             ref=None,
-            target_path=get_repo_root(sandbox.ssh_username),
+            target_path=get_repo_root(host.ssh_username),
         )
         return {
-            **await super().get_workspace_kwargs(sandbox),
+            **await super().get_workspace_kwargs(host),
             "repo": repo,
             "github_token": github_token,
         }

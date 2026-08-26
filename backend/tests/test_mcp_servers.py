@@ -42,7 +42,7 @@ def _sandbox_config() -> SandboxSettings:
 async def _delivery(**kwargs) -> dict:
     # Delivery is resolved at the workspace seam: the enabled servers become wire
     # shapes on ``mcp_servers`` and their tokens land in ``extra_env``.
-    return await Workspace(sandbox=_FakeSandbox()).with_mcp_servers(  # type: ignore[arg-type]
+    return await Workspace(host=_FakeSandbox()).with_mcp_servers(  # type: ignore[arg-type]
         None, **kwargs
     )
 
@@ -54,7 +54,7 @@ def _requiring_workspace(*servers: RequiredMcpServer) -> Workspace:
         def get_required_mcp_servers(self) -> tuple[RequiredMcpServer, ...]:
             return servers
 
-    return _Requiring(sandbox=_FakeSandbox())  # type: ignore[arg-type]
+    return _Requiring(host=_FakeSandbox())  # type: ignore[arg-type]
 
 
 # --- custom servers: CRUD + enable/disable -------------------------------

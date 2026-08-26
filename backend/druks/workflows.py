@@ -53,6 +53,8 @@ from druks.models import StoredSubject, snake_name
 from druks.notifications.outbox import notifications_queue, send_notification
 from druks.sandbox.client import sandbox_client
 from druks.sandbox.constants import SANDBOX_HOST_ROTATE_BEFORE_SECONDS
+from druks.sandbox.datastructures import Sandbox
+from druks.sandbox.templates import get_template_id
 from druks.signals import publish
 from druks.user_settings.models import SettingsOverride, UserSettings
 from druks.workspaces import Workspace
@@ -82,7 +84,7 @@ __all__ = [
 ]
 
 if TYPE_CHECKING:
-    from druks.sandbox.host import Sandbox
+    from druks.sandbox.host import Host
 
 # A human gate can park for days; a long recv TTL still caps zombie parks.
 GATE_TTL_SECONDS = 14 * 24 * 60 * 60
@@ -683,6 +685,8 @@ class Workflow:
     # True holds one warm VM across the run's agent calls (released at gate parks);
     # False gives each call a throwaway VM.
     steps_reuse_sandbox: ClassVar[bool] = False
+    # The environment this workflow's agents need. None uses the platform base.
+    sandbox: ClassVar[Sandbox | None] = None
     # The Workspace subclass agents run in; an app sets it (default: the bare VM).
     workspace_class: ClassVar[type[Workspace]] = Workspace
     # The Journal subclass the run keeps; an app sets it for named projections.
@@ -770,7 +774,7 @@ class Workflow:
         self.journal = self.journal_class()
         # The run's warm VM, provisioned lazily and reaped at segment boundaries;
         # its lease expiry decides when it must rotate.
-        self._host: Sandbox | None = None
+        self._host: Host | None = None
 
     async def announce(self, topic: str, **facts: Any) -> None:
         # The workflow announcing a domain event in its app's vocabulary
@@ -819,17 +823,17 @@ class Workflow:
         # values (expensive derived prose); the call's own kwargs win on collision.
         return dict(context)
 
-    async def get_workspace_kwargs(self, sandbox: "Sandbox") -> dict[str, Any]:
+    async def get_workspace_kwargs(self, host: "Host") -> dict[str, Any]:
         # Extend via super() to add the fields workspace_class needs (an app clones + mints
         # here). Base: just the VM.
-        return {"sandbox": sandbox}
+        return {"host": host}
 
-    async def get_workspace(self, sandbox: "Sandbox") -> Workspace:
+    async def get_workspace(self, host: "Host") -> Workspace:
         # What an agent runs in on this run's VM, built per agent call from workspace_class
         # + the app's kwargs — so short-lived tokens (git) mint fresh each call.
-        return self.workspace_class(**await self.get_workspace_kwargs(sandbox))
+        return self.workspace_class(**await self.get_workspace_kwargs(host))
 
-    async def _ensure_host(self) -> str | None:
+    async def _lease_host(self) -> str | None:
         # The warm VM, provisioned once per segment; state is carried in git, so
         # only the host-id matters across steps — held-across-steps never fights replay.
         if not self.steps_reuse_sandbox:
@@ -842,8 +846,13 @@ class Workflow:
                 # host it lands on (state lives in git), so a bare VM is fine.
                 await self._reap_run()
         if not self._host:
+            template = None
+            if self.sandbox:
+                template = await get_template_id(self.sandbox)
+                await set_run_phase("provisioning_vm")
             self._host = await sandbox_client.provision(
-                idempotency_key=f"{self._workflow_id}:sandbox"
+                idempotency_key=f"{self._workflow_id}:sandbox",
+                template=template,
             )
         return self._host.id
 
