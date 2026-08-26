@@ -79,7 +79,7 @@ export function ProjectsPage() {
           <EmptyState
             glyph="⊞"
             msg="No projects yet"
-            sub="A project groups the GitHub repos a build operates on — a primary app plus the sibling repos that give agents cross-repo context. Name your first one to get started."
+            sub="A project groups the GitHub repositories a build operates on. Each work item targets one of those repos for its changes, while the rest give agents cross-repo context. Name your first one to get started."
             action={
               <div className="pj-empty-create">
                 <CreateRow
