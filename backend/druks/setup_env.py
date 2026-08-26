@@ -216,7 +216,7 @@ def _fresh_values(*, provider: str, home: str) -> tuple[tuple[tuple[str, ...], s
             (("urls", "endpoint"), "http://127.0.0.1:8001"),
             (("sandbox", "service_url"), "http://127.0.0.1:8780"),
             (("sandbox", "service_token"), "dev-token"),
-            (("sandbox", "image"), "ghcr.io/czpython/druks-sandbox:latest"),
+            (("sandbox", "image"), "ghcr.io/czpython/druks/sandbox:latest"),
         )
     elif provider == "exe":
         shape = (

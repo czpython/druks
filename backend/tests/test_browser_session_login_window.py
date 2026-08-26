@@ -164,7 +164,7 @@ async def test_open_seeds_a_blank_profile_and_records_the_container(window_runti
     assert PROFILE_PATH not in browser.files
     assert (await LoginWindow.get_for_session(session.name)).host_id == browser.id
     assert client.provisions == [
-        {"image_override": "ghcr.io/czpython/druks-browser:latest", "provider": "docker"}
+        {"image_override": "ghcr.io/czpython/druks/browser:latest", "provider": "docker"}
     ]
 
 

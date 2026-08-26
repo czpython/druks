@@ -130,7 +130,7 @@ async def test_borrow_yields_a_tunneled_cdp_url(borrow, night_watch):
         assert cdp_url == "http://127.0.0.1:43987"
 
     assert browser.forwarded_port == 9222
-    assert browser.image == "ghcr.io/czpython/druks-browser:latest"
+    assert browser.image == "ghcr.io/czpython/druks/browser:latest"
     assert browser.provider == "docker"
     assert browser.files["/work/session/state.json"] == b"stored-state"
     assert json.loads(browser.files["/work/session/state.meta.json"]) == {

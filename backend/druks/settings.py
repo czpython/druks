@@ -160,7 +160,7 @@ class Sandbox(BaseModel):
     image: str = ""
     # The browser home: browser containers boot on this provider with this image.
     browser_sandbox_provider: str = "docker"
-    browser_sandbox_image: str = "ghcr.io/czpython/druks-browser:latest"
+    browser_sandbox_image: str = "ghcr.io/czpython/druks/browser:latest"
     # An HTTP proxy for the login window. The login then leaves from a different
     # IP than the box. Use it for sign-in flows that refuse the box IP. The value
     # can include a user name and password (http://user:pass@host:port); the
