@@ -1,17 +1,29 @@
-# Sandbox image for local druks development: the drukbox docker provider
-# boots these containers as per-run "VMs" and druks drives the harnesses
-# inside over SSH. Same contract as a real exe/aws VM — sshd plus the
-# tools the build prompts assume are on PATH (git, gh, node, claude,
-# codex).
+# Sandbox images for druks agents: a drukbox base (sshd and its boot
+# contract) plus the tools the build prompts assume are on PATH (git, gh,
+# node, claude, codex). drukbox publishes one base per provider, and each
+# druks image builds on the matching one — the ``toolchain`` stage applies
+# the same tool layers to whichever base ``BASE`` selects:
 #
-# Built from the drukbox sandbox base (Ubuntu + sshd + key-seeding
-# entrypoint); we swap the entrypoint to seed a non-root user because
-# Claude Code refuses ``--permission-mode bypassPermissions`` as root.
+#   - ``sandbox`` (the default target, on ``docker-base``) serves the drukbox
+#     docker provider, published as ghcr.io/czpython/druks-sandbox. It swaps
+#     the base entrypoint to seed the non-root ``druks`` user because Claude
+#     Code refuses ``--permission-mode bypassPermissions`` as root. Point
+#     DRUKS_SANDBOX_IMAGE at it and run drukbox with DOCKER_SSH_USERNAME=druks.
+#   - ``sbx`` (build with ``--build-arg BASE=sbx-base``) serves the drukbox
+#     docker-sbx provider as a Docker Sandboxes template, published as
+#     ghcr.io/czpython/druks-sandbox-sbx. The base's env-free entrypoint and
+#     EXPOSE 22 stand unchanged: ``sbx create`` sends no environment
+#     variables, and drukbox injects the SSH key and caller environment over
+#     the exec channel after boot. Select the image with drukbox's
+#     DOCKER_SBX_DEFAULT_IMAGE or the per-host image field.
 #
-# Published by .github/workflows/publish-sandbox-image.yml as
-# ghcr.io/czpython/druks-sandbox; point DRUKS_SANDBOX_IMAGE at it and
-# run drukbox with DOCKER_SSH_USERNAME=druks.
-FROM ghcr.io/czpython/drukbox/sandbox:latest@sha256:a5312ab8289cab543f30ec7ba1f1ada8e027c78c9fe06ed5d52c0459e5a2ffef
+# Both targets are published by .github/workflows/publish-sandbox-image.yml.
+ARG BASE=docker-base
+
+FROM ghcr.io/czpython/drukbox/sandbox:latest@sha256:a5312ab8289cab543f30ec7ba1f1ada8e027c78c9fe06ed5d52c0459e5a2ffef AS docker-base
+FROM ghcr.io/czpython/drukbox/sbx-sandbox:latest@sha256:ba4d9dc7454931b3f8c432855733453b005162a4c0c805f321bbef22a74b5ac6 AS sbx-base
+
+FROM ${BASE} AS toolchain
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
@@ -42,6 +54,14 @@ RUN npm install -g \
     "@openai/codex@${CODEX_VERSION}"
 
 RUN useradd --create-home --shell /bin/bash druks
+
+# The Docker Sandboxes template is the toolchain on sbx-base, boot contract
+# untouched. Only valid with ``--build-arg BASE=sbx-base``.
+FROM toolchain AS sbx
+
+# Docker provider image, the default target: ``docker build deploy/sandbox``
+# builds this one.
+FROM toolchain AS sandbox
 
 COPY entrypoint.sh /usr/local/bin/druks-sandbox-entrypoint
 RUN chmod +x /usr/local/bin/druks-sandbox-entrypoint
