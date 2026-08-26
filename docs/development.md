@@ -159,7 +159,7 @@ Drukbox on the host from its own checkout
 [sandbox]
 service_url = "http://127.0.0.1:8000"
 service_token = "dev-token"
-image = "ghcr.io/czpython/druks-sandbox:latest"
+image = "ghcr.io/czpython/druks/sandbox:latest"
 ```
 
 `uv run druks doctor --sandbox` creates a real host. Run it deliberately; it is

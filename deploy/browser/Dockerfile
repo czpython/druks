@@ -7,7 +7,7 @@
 # seeds a non-root user and starts the display stack.
 #
 # Published by .github/workflows/publish-sandbox-image.yml as
-# ghcr.io/czpython/druks-browser.
+# ghcr.io/czpython/druks/browser.
 FROM ghcr.io/czpython/drukbox/sandbox:latest@sha256:a5312ab8289cab543f30ec7ba1f1ada8e027c78c9fe06ed5d52c0459e5a2ffef
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]

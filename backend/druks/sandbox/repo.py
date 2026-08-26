@@ -54,8 +54,9 @@ async def clone(
         # token never lives in the URL, but git could still echo a
         # cached credential in some future error path.
         sanitized = _strip_token(result.stderr.strip() or result.stdout.strip())
+        target = f"{repo_url}@{ref}" if ref else repo_url
         raise ExecFailed(
-            f"git clone {repo_url}@{ref} failed: {sanitized}",
+            f"git clone {target} failed: {sanitized}",
             exit_code=result.exit_code,
         )
 

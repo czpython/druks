@@ -294,12 +294,33 @@ async def test_clone_raises_exec_failed_on_clone_failure():
     sandbox = _FakeSandbox()
     sandbox.exec_results = {0: ExecResult(128, "", "fatal: not found")}
 
-    with pytest.raises(ExecFailed, match="git clone"):
+    with pytest.raises(ExecFailed) as excinfo:
         await repo.clone(
             sandbox,  # type: ignore[arg-type]
             repo_url="https://github.com/owner/missing.git",
             ref="main",
         )
+
+    assert "git clone https://github.com/owner/missing.git@main failed" in str(
+        excinfo.value
+    )
+
+
+async def test_clone_failure_message_omits_ref_when_none():
+    sandbox = _FakeSandbox()
+    sandbox.exec_results = {0: ExecResult(128, "", "fatal: not found")}
+
+    with pytest.raises(ExecFailed) as excinfo:
+        await repo.clone(
+            sandbox,  # type: ignore[arg-type]
+            repo_url="https://github.com/owner/missing.git",
+            ref=None,
+        )
+
+    assert "git clone https://github.com/owner/missing.git failed" in str(
+        excinfo.value
+    )
+    assert "@None" not in str(excinfo.value)
 
 
 async def test_clone_redacts_token_from_error_output():

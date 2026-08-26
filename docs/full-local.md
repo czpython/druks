@@ -136,7 +136,7 @@ development Druks environment and invoke its documented trigger or
 ## Sandbox image
 
 `[sandbox].image` selects the image Drukbox starts. The shipped
-`ghcr.io/czpython/druks-sandbox:latest` image contains the non-root `druks`
+`ghcr.io/czpython/druks/sandbox:latest` image contains the non-root `druks`
 user plus Git, GitHub CLI, Node, Claude, and Codex.
 
 Build it from the repository when changing the sandbox:

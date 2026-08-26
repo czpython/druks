@@ -5,13 +5,13 @@
 # the same tool layers to whichever base ``BASE`` selects:
 #
 #   - ``sandbox`` (the default target, on ``docker-base``) serves the drukbox
-#     docker provider, published as ghcr.io/czpython/druks-sandbox. It swaps
+#     docker provider, published as ghcr.io/czpython/druks/sandbox. It swaps
 #     the base entrypoint to seed the non-root ``druks`` user because Claude
 #     Code refuses ``--permission-mode bypassPermissions`` as root. Point
 #     DRUKS_SANDBOX_IMAGE at it and run drukbox with DOCKER_SSH_USERNAME=druks.
 #   - ``sbx`` (build with ``--build-arg BASE=sbx-base``) serves the drukbox
 #     docker-sbx provider as a Docker Sandboxes template, published as
-#     ghcr.io/czpython/druks-sandbox-sbx. The base's env-free entrypoint and
+#     ghcr.io/czpython/druks/sandbox-sbx. The base's env-free entrypoint and
 #     EXPOSE 22 stand unchanged: ``sbx create`` sends no environment
 #     variables, and drukbox injects the SSH key and caller environment over
 #     the exec channel after boot. Select the image with drukbox's
