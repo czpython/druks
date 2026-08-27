@@ -68,9 +68,9 @@ class File:
             storage.discard(temp)
             storage.delete(file_id)
             raise
-        file = cls()
-        file._hydrate(record)
-        return file
+        return cls(
+            id=record.id, name=record.name, size=record.size, content_type=record.content_type
+        )
 
     @classmethod
     def _validate(cls, value: str, info: core_schema.ValidationInfo) -> "File":
