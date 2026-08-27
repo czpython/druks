@@ -16,6 +16,7 @@ from druks.durable.activity import set_run_phase
 from druks.durable.engine import _step_engine, step_session
 from druks.durable.exceptions import WorkflowError
 from druks.durable.models import AgentCall, Artifact
+from druks.files.datastructures import File
 from druks.harnesses.exceptions import HarnessError, Retry
 from druks.harnesses.models import HarnessConnection
 from druks.harnesses.registry import get_harness_for_model
@@ -291,6 +292,7 @@ class Agent:
             # starting. A provisioning failure happens before this and records
             # no call.
             async with _runner(workflow, host_id, workflow_id, self.id) as runner:
+                context = await runner.prepare_context(context, agent_call_id=call_id)
                 # Templates read the live workflow + the workspace the agent runs in,
                 # alongside whatever the workflow's get_prompt_context composes.
                 prompt_context = await workflow.get_prompt_context(**context)
@@ -320,12 +322,26 @@ class Agent:
                 except BaseException as error:
                     await AgentCall.fail(engine, call_id=call_id, error=error)
                     raise
-                await AgentCall.finish(engine, call_id=call_id, result=result)
+                if result.error:
+                    await AgentCall.finish(engine, call_id=call_id, result=result)
+                    raise result.error
+                try:
+                    workspace_files: list[File] = []
+                    output = self.contract.model_validate(
+                        result.output,
+                        context={"workspace_files": workspace_files},
+                    )
+                    if workspace_files:
+                        await runner.save_files(
+                            workspace_files,
+                            app=workflow.app,
+                            agent_call_id=call_id,
+                        )
+                    await AgentCall.finish(engine, call_id=call_id, result=result)
+                except BaseException as error:
+                    await AgentCall.fail(engine, call_id=call_id, error=error)
+                    raise
 
-        if result.error:
-            raise result.error
-
-        output = self.contract.model_validate(result.output)
         if spec := output.get_artifact():
             await Artifact.record(call_dir=artifact_dir / call_id, call_id=call_id, **spec)
         return output.to_result()

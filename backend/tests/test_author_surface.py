@@ -41,6 +41,7 @@ AUTHOR_SURFACE = {
     "druks.schemas": {"BaseResponse"},
     "druks.signals": {"subscribe"},
     "druks.events": {"Event"},
+    "druks.files": {"File", "FileField"},
     "druks.prompts": {"render_prompt"},
 }
 

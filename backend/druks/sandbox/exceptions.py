@@ -2,6 +2,10 @@ class SandboxError(Exception):
     """Base for everything ``druks.sandbox`` raises out of its layer."""
 
 
+class SandboxDownloadError(SandboxError):
+    pass
+
+
 class SetupScriptError(SandboxError):
     """A declared setup path cannot resolve to package bytes."""
 

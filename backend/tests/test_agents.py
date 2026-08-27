@@ -6,6 +6,8 @@ import pytest
 from conftest import make_agent_result
 from druks import agents
 from druks.durable import AgentCall, WorkflowError
+from druks.files import File
+from druks.sandbox.exceptions import SandboxDownloadError
 from druks.usage.models import UsageScrape
 
 
@@ -17,6 +19,18 @@ DUMMY_AGENT = agents.Agent(
     id="dummy",
     prompt="dummy/agent.md",
     contract=DummyOutput,
+    model="claude-haiku-4-5",
+)
+
+
+class FileOutput(agents.AgentOutput):
+    image: File
+
+
+FILE_AGENT = agents.Agent(
+    id="file",
+    prompt="dummy/agent.md",
+    contract=FileOutput,
     model="claude-haiku-4-5",
 )
 
@@ -204,6 +218,7 @@ async def test_runner_comes_from_workflow_workspace_factory(
     _patch_ephemeral(monkeypatch, MagicMock())  # the box; the factory below ignores it
     workspace = MagicMock()
     workspace.host_id = "host-test"
+    workspace.prepare_context = AsyncMock(side_effect=lambda context, **_: context)
     workspace.run_agent = AsyncMock(return_value=make_agent_result({"ok": True}, agent="dummy"))
 
     async def _get_workspace(sandbox):
@@ -298,6 +313,82 @@ async def test_crash_after_start_fails_the_call(druks_db, tmp_path, monkeypatch,
     [call] = await AgentCall.list_for_run("wf-9")
     assert call.status == "failed"
     assert "kaboom" in call.last_error
+
+
+@pytest.mark.parametrize(
+    ("error", "message"),
+    [
+        ("reported file is missing: shots/home.png", "missing"),
+        ("reported file escapes the workspace: shots/home.png", "escapes"),
+        ("reported file exceeds the 104857600-byte limit: shots/home.png", "exceeds"),
+    ],
+    ids=("missing-path", "symlink-escape", "size-cap"),
+)
+async def test_file_hydration_failure_fails_the_agent_call(
+    druks_db,
+    tmp_path,
+    monkeypatch,
+    current_run,
+    error,
+    message,
+):
+    """A rejected output file closes the already-started call as failed."""
+    monkeypatch.setenv("DRUKS_DATA_DIR", str(tmp_path))
+    current_run.app = "field_notes"
+    sandbox = _patch_runtime(monkeypatch, tmp_path, {"image": "shots/home.png"})
+    sandbox.ssh_username = "root"
+    sandbox.download = AsyncMock(side_effect=SandboxDownloadError(error))
+    _patch_ephemeral(monkeypatch, sandbox)
+
+    with pytest.raises(SandboxDownloadError, match=message):
+        await FILE_AGENT._run(workflow_id="wf-9")
+
+    [call] = await AgentCall.list_for_run("wf-9")
+    assert call.status == "failed"
+    assert message in call.last_error
+    assert list((tmp_path / "files").iterdir()) == []
+
+
+async def test_file_output_reaches_the_next_agents_input(
+    druks_db,
+    tmp_path,
+    monkeypatch,
+    current_run,
+):
+    """Call A's hydrated output reaches call B as a fresh in-sandbox path."""
+    monkeypatch.setenv("DRUKS_DATA_DIR", str(tmp_path))
+    current_run.app = "field_notes"
+    sandbox = _patch_runtime(monkeypatch, tmp_path, {"ok": True})
+    sandbox.ssh_username = "root"
+    sandbox.run_agent = AsyncMock(
+        side_effect=[
+            make_agent_result({"image": "shots/home.png"}, agent="file"),
+            make_agent_result({"ok": True}, agent="dummy"),
+        ]
+    )
+
+    async def download(*, remote, local, workspace_root, max_bytes):
+        local.write_bytes(b"image")
+
+    sandbox.download = AsyncMock(side_effect=download)
+    sandbox.upload_file = AsyncMock()
+    _patch_ephemeral(monkeypatch, sandbox)
+    prompt_contexts = []
+
+    async def render(name, /, **context):
+        prompt_contexts.append(context)
+        return name
+
+    monkeypatch.setattr(agents, "render_prompt", render)
+
+    produced = await FILE_AGENT._run(workflow_id="wf-9")
+    consumed = await DUMMY_AGENT._run(workflow_id="wf-9", image=produced.image)
+
+    assert consumed == DummyOutput(ok=True)
+    assert prompt_contexts[1]["image"].endswith(f"/{produced.image.id}/{produced.image.name}")
+    sandbox.upload_file.assert_awaited_once()
+    calls = await AgentCall.list_for_run("wf-9")
+    assert [call.status for call in calls] == ["succeeded", "succeeded"]
 
 
 async def test_a_carried_failure_is_raised_with_its_code(

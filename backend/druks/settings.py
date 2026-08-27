@@ -193,7 +193,7 @@ class Settings(BaseSettings):
     secrets: Secrets
     sandbox: Sandbox = Sandbox()
 
-    # ``data_dir`` is the root for run artifacts and logs (via computed
+    # ``data_dir`` is the root for files, run artifacts, and logs (via computed
     # properties below).
     data_dir: ExpandedPath = Field(default=DEFAULT_DATA_DIR, alias="DRUKS_DATA_DIR")
 
@@ -286,6 +286,10 @@ class Settings(BaseSettings):
         return self.data_dir / "artifacts"
 
     @property
+    def files_dir(self) -> Path:
+        return self.data_dir / "files"
+
+    @property
     def skills_dir(self) -> Path:
         # Operator-installed skills, pushed into every VM. Defaults to a writable
         # dir under ``data_dir`` (the UI installs into it); an explicit
@@ -294,7 +298,7 @@ class Settings(BaseSettings):
 
 
 def load_settings() -> Settings:
-    return Settings()
+    return Settings()  # pyright: ignore[reportCallIssue]
 
 
 def setup_logging(settings: Settings) -> None:
@@ -317,4 +321,5 @@ def ensure_data_dirs(settings: Settings) -> None:
     settings.data_dir.mkdir(parents=True, exist_ok=True)
     settings.logs_dir.mkdir(parents=True, exist_ok=True)
     settings.artifacts_dir.mkdir(parents=True, exist_ok=True)
+    settings.files_dir.mkdir(parents=True, exist_ok=True)
     settings.skills_dir.mkdir(parents=True, exist_ok=True)

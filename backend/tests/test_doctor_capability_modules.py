@@ -70,7 +70,7 @@ def test_task_under_off_canon_filename_is_flagged(tmp_path: Path, monkeypatch) -
         module_name="task",
         source="from druks.workflows import task\n\n\n@task\nasync def tock() -> None: ...\n",
     )
-    register_workflow_package("doctorprobe", None)
+    register_workflow_package("doctorprobe", "")
     settings = make_settings(tmp_path)
 
     result = doctor.check_capability_modules(settings)

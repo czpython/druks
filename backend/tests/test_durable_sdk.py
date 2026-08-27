@@ -794,7 +794,7 @@ async def test_scheduled_task_must_be_nullary(rt):
 async def test_task_name_uses_declaring_app(rt):
     from druks.apps.loader import register_workflow_package
 
-    register_workflow_package("plain_task_package", None)
+    register_workflow_package("plain_task_package", "")
     register_workflow_package("app_task_package", "alpha")
 
     async def bare_task() -> None: ...
