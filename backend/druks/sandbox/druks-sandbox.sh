@@ -4,7 +4,7 @@
 # Uploaded by Druks to <home>/druks-sandbox (the SSH user's home; the
 # previous /usr/local/bin path needed root and broke when the image
 # SSHes as a non-root user like ``exedev``) at sandbox-acquire time and
-# invoked over SSH by the runner. Three verbs:
+# invoked over SSH by the runner. Four verbs:
 #
 #   exec-start --run-id ID --cwd PATH [--env-file PATH]
 #               [--stdin-from PATH] -- CMD [ARGS...]
@@ -20,6 +20,11 @@
 #   exec-kill --run-id ID
 #       SIGTERM the pid recorded for ID. Best-effort: succeeds even
 #       when the process is already gone.
+#
+#   read-file <workspace> <reported-path> <max-bytes>
+#       Stream a bounded regular file that resolves inside <workspace>
+#       to stdout. Rejects missing paths, non-files, symlink escapes,
+#       and oversized files with a distinct exit code.
 #
 #   git-credential <get|store|erase>
 #       git credential helper. Configured via
@@ -53,8 +58,32 @@ die() {
 }
 
 verb="${1:-}"
-[ -z "$verb" ] && die "usage: druks-sandbox <exec-start|exec-kill|git-credential> [options]"
+[ -z "$verb" ] && die "usage: druks-sandbox <exec-start|exec-kill|git-credential|read-file> [options]"
 shift
+
+# read-file streams a bounded regular file that must resolve inside the given
+# workspace — the transport for agent-declared output files:
+#   druks-sandbox read-file <workspace> <reported-path> <max-bytes>
+if [ "$verb" = "read-file" ]; then
+    workspace=$(realpath "$1")
+    reported="$2"
+    limit="$3"
+    case "$reported" in
+        /*) candidate="$reported" ;;
+        *) candidate="$workspace/$reported" ;;
+    esac
+    resolved=$(realpath "$candidate" 2>/dev/null) || die "reported file is missing: $reported" 2
+    [ -e "$resolved" ] || die "reported file is missing: $reported" 2
+    [ -f "$resolved" ] || die "reported path is not a regular file: $reported" 3
+    case "$resolved" in
+        "$workspace"/*) ;;
+        *) die "reported file escapes the workspace: $reported" 3 ;;
+    esac
+    size=$(wc -c < "$resolved")
+    [ "$size" -le "$limit" ] || die "reported file exceeds the $limit-byte limit: $reported" 4
+    cat "$resolved"
+    exit 0
+fi
 
 # git-credential is special: git invokes it as
 #   druks-sandbox git-credential <get|store|erase>

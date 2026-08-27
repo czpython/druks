@@ -1,11 +1,21 @@
+import asyncio
+import hashlib
+import mimetypes
 import os
 import shlex
 from dataclasses import dataclass
+from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
 
 from druks.accounts.models import Account
 from druks.core.apis.github import get_github_client
+from druks.core.models import uuid7_str
 from druks.database import db_session
+from druks.files.constants import MAX_FILE_BYTES
+from druks.files.datastructures import File
+from druks.files.exceptions import FileUnavailableError
+from druks.files.models import FileRecord
+from druks.files.storage import get_file_storage
 from druks.mcp import models as mcp_models
 from druks.mcp import oauth
 from druks.mcp.constants import TOKEN_ENV_PREFIX
@@ -14,7 +24,7 @@ from druks.mcp.exceptions import MissingTokenError, SourceEnvVarUnsetError
 from druks.mcp.helpers import get_bearer_token_env_var, get_grant_account
 from druks.sandbox.datastructures import AgentResult, McpServer, RequiredMcpServer
 from druks.sandbox.exceptions import ExecFailed
-from druks.sandbox.layout import get_repo_root
+from druks.sandbox.layout import get_repo_root, get_work_root
 from druks.user_settings.models import UserSettings
 
 if TYPE_CHECKING:
@@ -41,6 +51,89 @@ class Workspace:
         # Override to declare the servers this workspace requires and
         # credentials itself. Base: none.
         return ()
+
+    async def prepare_context(
+        self, context: dict[str, Any], *, agent_call_id: str
+    ) -> dict[str, Any]:
+        # Every File in the call's kwargs lands in the VM and reads as its
+        # in-VM path; a file arrives as a File or inside a list, never buried
+        # in a nested structure.
+        prepared: dict[str, Any] = {}
+        for key, value in context.items():
+            if type(value) is File:
+                prepared[key] = await self._upload_input_file(value, agent_call_id)
+            elif type(value) is list:
+                prepared[key] = [
+                    await self._upload_input_file(item, agent_call_id)
+                    if type(item) is File
+                    else item
+                    for item in value
+                ]
+            else:
+                prepared[key] = value
+        return prepared
+
+    async def save_files(self, files: list[File], *, app: str, agent_call_id: str) -> None:
+        storage = get_file_storage()
+        staged: list[tuple[File, FileRecord, Path]] = []
+        try:
+            for file in files:
+                record, temp = await self._pull_output_file(
+                    file, app=app, agent_call_id=agent_call_id
+                )
+                staged.append((file, record, temp))
+            db_session().add_all([record for _, record, _ in staged])
+            await db_session().flush()
+            for file, record, temp in staged:
+                storage.save(temp, record.id)
+                file._hydrate(record)
+        except BaseException:
+            for _, record, temp in staged:
+                storage.discard(temp)
+                storage.delete(record.id)
+            raise
+
+    async def _pull_output_file(
+        self, file: File, *, app: str, agent_call_id: str
+    ) -> tuple[FileRecord, Path]:
+        reported = file.path
+        name = PurePosixPath(reported).name
+        file_id = uuid7_str()
+        temp = get_file_storage().new_temp(file_id)
+        try:
+            await self.host.download(
+                remote=reported,
+                local=temp,
+                workspace_root=get_work_root(self.host.ssh_username),
+                max_bytes=MAX_FILE_BYTES,
+            )
+            sha256 = await asyncio.to_thread(_file_sha256, temp)
+        except BaseException:
+            get_file_storage().discard(temp)
+            raise
+        record = FileRecord(
+            id=file_id,
+            name=name,
+            size=temp.stat().st_size,
+            content_type=mimetypes.guess_type(name)[0] or "application/octet-stream",
+            sha256=sha256,
+            app=app,
+            origin_type="agent_call",
+            origin_id=agent_call_id,
+        )
+        return record, temp
+
+    async def _upload_input_file(self, file: File, agent_call_id: str) -> str:
+        record = await db_session().get(FileRecord, file.id)
+        if not record or record.deleted_at:
+            raise FileUnavailableError(f"file {file.id} is deleted or missing")
+        source = get_file_storage().path(file.id)
+        if not source.is_file():
+            raise FileUnavailableError(f"file {file.id} content is missing")
+        workspace_root = get_work_root(self.host.ssh_username)
+        remote = f"{workspace_root}/.druks-files/{agent_call_id}/{file.id}/{record.name}"
+        await self.host.upload_file(local=source, remote=remote)
+        return remote
 
     async def run_agent(self, *, account_id: str | None, **kwargs: Any) -> AgentResult:
         run_kwargs = await self.with_mcp_servers(account_id, **self.get_agent_run_kwargs(**kwargs))
@@ -177,3 +270,8 @@ class RepoWorkspace(Workspace):
                 f"exit={result.exit_code} stderr={result.stderr.strip()}",
                 exit_code=result.exit_code,
             )
+
+
+def _file_sha256(path: Path) -> str:
+    with path.open("rb") as content:
+        return hashlib.file_digest(content, "sha256").hexdigest()

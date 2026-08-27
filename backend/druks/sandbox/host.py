@@ -31,8 +31,8 @@ from .datastructures import (
     HarnessRunResult,
     McpServer,
 )
-from .exceptions import SandboxError
-from .layout import get_work_root
+from .exceptions import SandboxDownloadError, SandboxError
+from .layout import get_helper_script_path, get_work_root
 
 if TYPE_CHECKING:
     from druks.harnesses.base import Harness
@@ -148,9 +148,42 @@ class Host:
                 f"exit={result.exit_code} {result.stderr.strip()}"
             )
 
-    async def download(self, *, remote: str, local: Path) -> None:
+    async def download(
+        self,
+        *,
+        remote: str,
+        local: Path,
+        workspace_root: str = "",
+        max_bytes: int = 0,
+    ) -> None:
         conn = await self._ensure_conn()
         local.parent.mkdir(parents=True, exist_ok=True)
+        if workspace_root:
+            helper = get_helper_script_path(self.ssh_username)
+            # The reported path is the agent's word — quoted so it can't grow
+            # shell syntax; the other arguments are our own.
+            command = f"{helper} read-file {workspace_root} {shlex.quote(remote)} {max_bytes}"
+            process = await conn.create_process(command, encoding=None)
+            transferred = 0
+            try:
+                with local.open("wb") as destination:
+                    while chunk := await process.stdout.read(64 * 1024):
+                        transferred += len(chunk)
+                        if transferred > max_bytes:
+                            process.terminate()
+                            await process.wait()
+                            raise SandboxDownloadError(
+                                f"reported file exceeds the {max_bytes}-byte limit: {remote}"
+                            )
+                        destination.write(chunk)
+                completed = await process.wait()
+                if completed.exit_status != 0:
+                    detail = (await process.stderr.read()).decode().strip()
+                    raise SandboxDownloadError(detail or f"failed to download {remote}")
+            except BaseException:
+                local.unlink(missing_ok=True)
+                raise
+            return
         async with conn.start_sftp_client() as sftp:
             await sftp.get(remote, str(local))
 
@@ -655,17 +688,11 @@ class Host:
         )
 
 
-class _TarWriter:
-    def write(self, data: bytes) -> None: ...  # pragma: no cover
-    async def drain(self) -> None: ...  # pragma: no cover
-    def write_eof(self) -> None: ...  # pragma: no cover
-
-
 async def _stream_local_tar_into(
     *,
     local: Path,
     excludes: Sequence[str],
-    writer: _TarWriter,
+    writer: "asyncssh.SSHWriter[Any]",
 ) -> None:
     exclude_args: list[str] = []
     for pattern in excludes:

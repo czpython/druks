@@ -15,12 +15,11 @@ _GROUP = "druks.apps"
 
 # Which app owns each workflow-declaring package — the loader-validated
 # installation claims, stamped once an entry point checks out, so a Workflow
-# class resolves its identity at definition time. None marks a package whose
-# workflows belong to no app (how test modules register themselves).
-_workflow_packages: dict[str, str | None] = {}
+# class resolves its identity at definition time.
+_workflow_packages: dict[str, str] = {}
 
 
-def register_workflow_package(package: str, app: str | None) -> None:
+def register_workflow_package(package: str, app: str) -> None:
     # Conflicting or overlapping claims are a packaging mistake — two installs
     # can't share a workflow package.
     if package in _workflow_packages:
@@ -40,7 +39,7 @@ def register_workflow_package(package: str, app: str | None) -> None:
     _workflow_packages[package] = app
 
 
-def resolve_workflow_app(module: str) -> str | None:
+def resolve_workflow_app(module: str) -> str:
     """The app owning ``module``'s nearest registered ancestor package.
     Raises ``LookupError`` when no registered package contains the module."""
     prefix = module

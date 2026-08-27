@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import (
 )
 
 _ALEMBIC_INI = Path(__file__).resolve().parent.parent / "alembic.ini"
+_MIGRATION_SUPPORT_ONLY = "migration_support_only"
 
 
 def run_migrations(database_url: str) -> None:
@@ -48,6 +49,7 @@ def make_app_migration(app_name: str, message: str, database_url: str) -> None:
     from sqlalchemy import MetaData
 
     from druks.apps.loader import get_app, import_app_models
+    from druks.files import models  # noqa: F401  # the files table joins Base.metadata
     from druks.models import Base
 
     import_app_models()
@@ -61,6 +63,8 @@ def make_app_migration(app_name: str, message: str, database_url: str) -> None:
     for table in Base.metadata.tables.values():
         if table.name.startswith(app.table_prefix):
             table.to_metadata(scoped)
+    files_table = Base.metadata.tables["files"].to_metadata(scoped)
+    files_table.info[_MIGRATION_SUPPORT_ONLY] = True
 
     config = Config(str(_ALEMBIC_INI))
     config.set_main_option("version_locations", str(migrations_dir / "versions"))

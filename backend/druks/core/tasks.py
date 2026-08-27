@@ -1,5 +1,6 @@
 import logging
 
+from druks.files.storage import reap_deleted_file_bytes
 from druks.harnesses.datastructures import RotationResult
 from druks.harnesses.models import HarnessConnection
 from druks.harnesses.registry import get_harnesses
@@ -8,6 +9,13 @@ from druks.user_settings.models import HarnessSettings, UserSettings
 from druks.workflows import task
 
 logger = logging.getLogger(__name__)
+
+
+# Scheduled here because @task registration is app-scoped and core is the
+# platform's app; the files concern owns the mechanics.
+@task(every="0 * * * *")
+async def reap_deleted_files() -> None:
+    await reap_deleted_file_bytes()
 
 
 @task(every="*/15 * * * *")
@@ -50,10 +58,10 @@ async def _refresh() -> dict[str, object]:
     ]
 
     results: list[RotationResult] = []
-    for harness_name, connection_id, due, urgent in rows:
-        if due:
-            async with gate.shut(connection_id) as idle:
-                if idle or urgent:
+    for harness_name, connection_id, is_due, is_urgent in rows:
+        if is_due:
+            async with gate.shut(connection_id) as is_idle:
+                if is_idle or is_urgent:
                     result = await by_name[harness_name].rotate_token(connection_id)
                 else:
                     result = RotationResult(harness_name, "busy", connection_id=connection_id)

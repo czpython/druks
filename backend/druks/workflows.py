@@ -674,7 +674,7 @@ class Workflow:
     # The app that declares this workflow — class identity, resolved from
     # the loader's package registrations at definition time and namespacing
     # ``kind``. Never supplied or stored per run.
-    app: ClassVar[str | None] = None
+    app: ClassVar[str] = ""
     # What this workflow's runs are about, written ``subject = WorkItem`` on the
     # subclass. None for a workflow about nothing, which says so by silence.
     subject = _DeclaredSubject(None)

@@ -138,3 +138,4 @@ def test_ensure_data_dirs_provisions_skills_dir(tmp_path):
     settings = make_settings(tmp_path, sandbox_skills_dir=skills_dir)
     ensure_data_dirs(settings)
     assert settings.skills_dir.is_dir()
+    assert settings.files_dir.is_dir()

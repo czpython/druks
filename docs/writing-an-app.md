@@ -347,6 +347,10 @@ CLI, validates the structured output, and records the call. Override
 `AgentOutput.to_result()` to map the strict agent contract to a domain value;
 override `get_artifact()` to publish a reviewable artifact.
 
+Use [`File` and `FileField`](files.md) when an agent produces a file.
+The contract declares the file, Druks transports and serves it, and the app can
+persist its stable reference on an app row.
+
 Do not ask the framework to infer domain side effects from agent prose.
 The prompt or a subsequent explicit step owns those actions.
 
@@ -1167,6 +1171,7 @@ Import from concern namespaces, not from `druks.durable` or internal modules:
 | `druks.schemas` | `BaseResponse` |
 | `druks.signals` | `subscribe` |
 | `druks.events` | `Event` |
+| `druks.files` | `File`, `FileField` |
 | `druks.prompts` | `render_prompt` |
 | `druks.webhooks` | `Webhook`, `verify_hmac_sha256` |
 | `druks.testing` | `run_workflow`, `seed_run`, `seed_call`, `init_db` — plus the fixtures the plugin registers |

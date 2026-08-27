@@ -16,7 +16,7 @@ from druks.testing import TEST_DATABASE_URL
 # collection imports any test module.
 iter_apps()
 for test_module in ("test_durable_sdk", "test_notifications_durable"):
-    register_workflow_package(test_module, None)
+    register_workflow_package(test_module, "")
 
 
 @pytest.fixture(autouse=True)

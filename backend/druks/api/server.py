@@ -32,6 +32,7 @@ from druks.database import (
 from druks.durable.engine import init_dbos, launch, shutdown
 from druks.durable.exceptions import AgentCallNotFound
 from druks.events.routes import router as events_router
+from druks.files.routes import router as files_router
 from druks.harnesses.routes import router as harness_connection_router
 from druks.mcp.catalog import load_mcp_catalog
 from druks.mcp.gateway import exceptions as gate_errors
@@ -286,6 +287,7 @@ app.include_router(runs_router, dependencies=_identity_gate)
 app.include_router(subjects_router, dependencies=_identity_gate)
 app.include_router(gateway_router, dependencies=_identity_gate)
 app.include_router(artifacts_router, dependencies=_identity_gate)
+app.include_router(files_router, dependencies=_identity_gate)
 load(app)
 
 # Tools derive from every route tagged "agent", so the endpoint composes

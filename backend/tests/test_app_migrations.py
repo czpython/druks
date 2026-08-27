@@ -1,15 +1,28 @@
 from pathlib import Path
+from unittest.mock import MagicMock
 
 from alembic import command
 from alembic.config import Config
+from druks.database import make_app_migration
+from druks.files import File, FileField
+from druks.files.models import FileRecord
+from druks.models import Base
 from druks.testing import TEST_DATABASE_URL
 from sqlalchemy import Column, Integer, MetaData, String, Table, create_engine
+from sqlalchemy.orm import Mapped, mapped_column
 
 # The real platform ``alembic.ini`` — its script_location is the one shared env.py
 # that serves every app. These tests run a synthetic app's revisions through it
 # from an external version_locations, proving the target shape: shared env, the
 # app's own version_locations and version_table, isolated from core's history.
 _ALEMBIC_INI = Path(__file__).resolve().parent.parent / "alembic.ini"
+
+
+class MigrationProbeFile(Base):
+    __tablename__ = "migration_probe_files"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    image: Mapped[File] = FileField()
 
 
 _BASELINE = """\
@@ -113,4 +126,60 @@ def test_app_autogenerate_scopes_to_the_app_metadata(tmp_path):
     finally:
         with engine.connect() as conn:
             _drop(conn)
+        engine.dispose()
+
+
+def test_file_field_autogenerates_and_upgrades_with_the_platform_foreign_key(tmp_path, monkeypatch):
+    """An app migration renders FileField as a String FK without owning the files table."""
+    engine = create_engine(TEST_DATABASE_URL, isolation_level="AUTOCOMMIT")
+    package_dir = tmp_path / "migration_probe"
+    versions = package_dir / "migrations" / "versions"
+    versions.mkdir(parents=True)
+    app = MagicMock()
+    app.name = "migration_probe"
+    app.table_prefix = "migration_probe_"
+    app.package_dir.return_value = package_dir
+    monkeypatch.setattr("druks.apps.loader.get_app", lambda name: app)
+
+    with engine.connect() as connection:
+        connection.exec_driver_sql(
+            "DROP TABLE IF EXISTS migration_probe_files, alembic_version_migration_probe"
+        )
+        FileRecord.__table__.create(connection, checkfirst=True)
+        connection.commit()
+    try:
+        make_app_migration(
+            "migration_probe",
+            "add file reference",
+            TEST_DATABASE_URL,
+        )
+        [revision] = versions.glob("*.py")
+        body = revision.read_text()
+        assert "create_table('migration_probe_files'" in body
+        assert "sa.String()" in body
+        assert "sa.ForeignKeyConstraint(['image'], ['files.id']" in body
+        assert "create_table('files'" not in body
+
+        command.upgrade(
+            _config(
+                versions,
+                version_table="alembic_version_migration_probe",
+            ),
+            "head",
+        )
+        with engine.connect() as connection:
+            foreign_key = connection.exec_driver_sql(
+                "SELECT ccu.table_name || '.' || ccu.column_name "
+                "FROM information_schema.table_constraints tc "
+                "JOIN information_schema.constraint_column_usage ccu "
+                "ON ccu.constraint_name = tc.constraint_name "
+                "WHERE tc.table_name = 'migration_probe_files' "
+                "AND tc.constraint_type = 'FOREIGN KEY'"
+            ).scalar()
+            assert foreign_key == "files.id"
+    finally:
+        with engine.connect() as connection:
+            connection.exec_driver_sql(
+                "DROP TABLE IF EXISTS migration_probe_files, alembic_version_migration_probe"
+            )
         engine.dispose()

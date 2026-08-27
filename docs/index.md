@@ -30,6 +30,8 @@ with the route that matches what you are doing.
 - [Writing an app](writing-an-app.md) — scaffold a separately
   packaged app and use workflows, agents, gates, events, webhooks,
   settings, routes, and migrations.
+- [Files](files.md) — receive files agents produce, pass them
+  between agents, persist references, serve content, and delete it.
 - [Concepts and guarantees](concepts.md#the-app-boundary) — the ownership
   contract behind the author API.
 

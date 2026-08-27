@@ -71,7 +71,7 @@ def _task_in(module: str, body, name: str | None = None):
 def test_duplicate_task_name_is_rejected():
     # DBOS only warns on a duplicate durable name and lets the last registration
     # win — enqueues of one task would silently run the other's body.
-    register_workflow_package("collide_pkg", None)
+    register_workflow_package("collide_pkg", "")
 
     async def clash() -> None: ...
 
@@ -86,7 +86,7 @@ def test_duplicate_task_name_is_rejected():
 def test_task_input_is_typed():
     # The signature is the wire contract — enqueue validates against it and
     # dumps to JSON, so an unannotated parameter has no wire shape.
-    register_workflow_package("untyped_pkg", None)
+    register_workflow_package("untyped_pkg", "")
 
     async def send(recipient) -> None: ...  # noqa: ANN001
 
@@ -125,9 +125,9 @@ def test_dotted_explicit_kind_is_rejected():
 
 
 def test_none_owned_package_keeps_bare_kinds():
-    register_workflow_package("plain_pkg", None)
+    register_workflow_package("plain_pkg", "")
     flow = _workflow("Sweep", "plain_pkg.workflows")
-    assert flow.app is None
+    assert flow.app == ""
     assert flow.kind == "sweep"
 
 
