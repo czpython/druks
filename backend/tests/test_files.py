@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from druks.agents import AgentOutput
 from druks.files import File, FileField
-from druks.files.exceptions import FileUnavailableError
+from druks.files.exceptions import FileTooLargeError, FileUnavailableError
 from druks.files.models import FileRecord
 from druks.files.storage import LocalFileStorage, reap_deleted_file_bytes
 from druks.models import Base
@@ -50,6 +50,66 @@ async def _hydrate_file(tmp_path, monkeypatch, *, name="home.png", content=b"ima
         agent_call_id="call-1",
     )
     return output.shots[0].image
+
+
+async def test_create_stores_a_user_upload(druks_db, tmp_path, monkeypatch):
+    """File.create stores bytes and a user_upload record and returns a live handle."""
+    monkeypatch.setenv("DRUKS_DATA_DIR", str(tmp_path))
+
+    file = await File.create(
+        name="shopfront.jpg",
+        content_type="image/jpeg",
+        content=b"jpeg bytes",
+        app="site_builder",
+        origin_id="site-1",
+    )
+
+    record = await druks_db.get(FileRecord, file.id)
+    assert (file.name, file.size, file.content_type, file.url) == (
+        "shopfront.jpg",
+        10,
+        "image/jpeg",
+        f"/api/files/{file.id}",
+    )
+    assert record.app == "site_builder"
+    assert record.origin_type == "user_upload"
+    assert record.origin_id == "site-1"
+    assert record.sha256 == hashlib.sha256(b"jpeg bytes").hexdigest()
+    assert await file.open() == b"jpeg bytes"
+
+
+async def test_create_refuses_an_oversized_upload(monkeypatch):
+    """An upload past the byte cap raises before any byte or row lands."""
+    monkeypatch.setattr("druks.files.datastructures.MAX_FILE_BYTES", 4)
+
+    with pytest.raises(FileTooLargeError, match="cap"):
+        await File.create(
+            name="shopfront.jpg",
+            content_type="image/jpeg",
+            content=b"jpeg bytes",
+            app="site_builder",
+            origin_id="site-1",
+        )
+
+
+async def test_uploaded_file_delete_and_reap(druks_db, tmp_path, monkeypatch):
+    """A deleted upload loses its bytes to the reaper and keeps its tombstone."""
+    monkeypatch.setenv("DRUKS_DATA_DIR", str(tmp_path))
+    file = await File.create(
+        name="shopfront.jpg",
+        content_type="image/jpeg",
+        content=b"jpeg bytes",
+        app="site_builder",
+        origin_id="site-1",
+    )
+    await file.delete()
+    record = await druks_db.get(FileRecord, file.id)
+    record.deleted_at = Base.utc_now() - timedelta(days=2)
+    await druks_db.flush()
+
+    assert await reap_deleted_file_bytes() == 1
+    assert await druks_db.get(FileRecord, file.id) is record
+    assert not LocalFileStorage(tmp_path / "files").path(file.id).exists()
 
 
 def test_file_contract_is_a_strict_nested_workspace_path():

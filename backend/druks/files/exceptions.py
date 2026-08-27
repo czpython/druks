@@ -4,3 +4,7 @@ class FileError(Exception):
 
 class FileUnavailableError(FileError):
     pass
+
+
+class FileTooLargeError(FileError):
+    pass

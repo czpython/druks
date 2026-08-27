@@ -10,7 +10,9 @@ from druks.models import Base
 class FileRecord(Base, Uuid7Pk):
     __tablename__ = "files"
     __table_args__ = (
-        CheckConstraint("origin_type IN ('agent_call')", name="files_origin_type_check"),
+        CheckConstraint(
+            "origin_type IN ('agent_call', 'user_upload')", name="files_origin_type_check"
+        ),
         Index("files_deleted_at_idx", "deleted_at"),
     )
 

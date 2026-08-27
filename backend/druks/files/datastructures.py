@@ -1,11 +1,14 @@
 import asyncio
+import hashlib
 from typing import Any
 
 from pydantic import GetCoreSchemaHandler
 from pydantic_core import CoreSchema, core_schema
 
+from druks.core.models import uuid7_str
 from druks.database import db_session
-from druks.files.exceptions import FileUnavailableError
+from druks.files.constants import MAX_FILE_BYTES
+from druks.files.exceptions import FileTooLargeError, FileUnavailableError
 from druks.files.models import FileRecord
 from druks.files.storage import get_file_storage
 from druks.models import Base
@@ -29,6 +32,45 @@ class File:
         self.name = name
         self.size = size
         self.content_type = content_type
+
+    @classmethod
+    async def create(
+        cls,
+        *,
+        name: str,
+        content_type: str,
+        content: bytes,
+        app: str,
+        origin_id: str,
+    ) -> "File":
+        if len(content) > MAX_FILE_BYTES:
+            raise FileTooLargeError(f"{name} is {len(content)} bytes; the cap is {MAX_FILE_BYTES}")
+        file_id = uuid7_str()
+        storage = get_file_storage()
+        temp = storage.new_temp(file_id)
+        try:
+            await asyncio.to_thread(temp.write_bytes, content)
+            digest = await asyncio.to_thread(hashlib.sha256, content)
+            record = FileRecord(
+                id=file_id,
+                name=name,
+                size=len(content),
+                content_type=content_type,
+                sha256=digest.hexdigest(),
+                app=app,
+                origin_type="user_upload",
+                origin_id=origin_id,
+            )
+            db_session().add(record)
+            await db_session().flush()
+            storage.save(temp, file_id)
+        except BaseException:
+            storage.discard(temp)
+            storage.delete(file_id)
+            raise
+        file = cls()
+        file._hydrate(record)
+        return file
 
     @classmethod
     def _validate(cls, value: str, info: core_schema.ValidationInfo) -> "File":
