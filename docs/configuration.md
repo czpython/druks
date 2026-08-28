@@ -83,6 +83,13 @@ caches, and the sandbox provisioning gate.
 | `identity.jwt_audience` | `jwt` mode: required `aud` claim value |
 | `identity.jwt_identity_claim` | `jwt` mode: the claim mapped to the account (default `email`) |
 
+The `urls.webhook_host` listener binds every interface. A second TLS
+terminator on the same box, for example `tailscale serve` on the tailnet
+address, collides with it on port 443. One of the two stops. To keep the
+other addresses free, set `DRUKS_WEBHOOK_BIND_HOST` in `[env]` to the public
+address. Caddy then serves only that address. To keep IPv6, list the IPv4
+and the IPv6 addresses.
+
 `urls.endpoint` and `urls.webhook_host` are different. The first is where an
 operator's browser reaches Druks; the second is the public ingress webhook
 senders reach. They may share a hostname on exe.dev.
