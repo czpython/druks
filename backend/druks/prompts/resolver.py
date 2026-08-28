@@ -22,6 +22,8 @@ def _environment() -> Environment:
     # ``os.system``, and being immutable it blocks mutating the live ``workflow``/
     # ``workspace`` objects in context. Bundled templates only read public attributes,
     # so the sandbox is invisible to them.
+    # ``enable_async``: attribute reads that return coroutines (the async
+    # ``workflow.subject``) are awaited during render.
     return ImmutableSandboxedEnvironment(
         loader=PrefixLoader(_app_template_roots()),
         autoescape=False,
@@ -29,6 +31,7 @@ def _environment() -> Environment:
         keep_trailing_newline=True,
         trim_blocks=True,
         lstrip_blocks=True,
+        enable_async=True,
     )
 
 
@@ -70,19 +73,17 @@ async def render_prompt(
         context.setdefault("repo", repo)
     override = await _resolve_override(name, repo=repo)
     if override:
-        return _environment().from_string(override).render(**context)
-    return _environment().get_template(name).render(**context)
+        return await _environment().from_string(override).render_async(**context)
+    return await _environment().get_template(name).render_async(**context)
 
 
 async def _resolve_override(name: str, *, repo: str | None) -> str | None:
     namespaced = _app_prompt_path(name)
-    if not repo or not namespaced:
-        return None
-    owner = repo.partition("/")[0]
-    body = await fetch_file(repo=repo, path=f".druks/{namespaced}")
-    if body:
-        return body
-    return await fetch_file(repo=f"{owner}/.druks", path=namespaced)
+    if repo and namespaced:
+        owner = repo.partition("/")[0]
+        body = await fetch_file(repo=repo, path=f".druks/{namespaced}")
+        return body or await fetch_file(repo=f"{owner}/.druks", path=namespaced)
+    return
 
 
 def _app_prompt_path(name: str) -> str | None:
@@ -91,6 +92,6 @@ def _app_prompt_path(name: str) -> str | None:
     so the override is ``<app>/prompts/<rest>`` — derived from the name, no table
     to keep in sync. A name with no app segment (no ``/``) isn't overridable."""
     app, _, rest = name.partition("/")
-    if not rest:
-        return None
-    return f"{app}/prompts/{rest}"
+    if rest:
+        return f"{app}/prompts/{rest}"
+    return
