@@ -1,25 +1,25 @@
 # AGENTS.md
 
-Druks runs durable agent apps on DBOS and Postgres. It owns
-workflow execution, persisted state and events, gates, webhooks, sandbox access,
-and the shared dashboard. Apps are standalone Python packages
-that self-register through the `druks.apps` entry point. `software_factory` is the
-bundled reference app for coordinating coding agents through GitHub PRs.
+Druks runs durable agent apps on DBOS and Postgres. It owns workflow execution,
+persisted state, events, gates, webhooks, sandbox access, and the shared
+dashboard. Apps are standalone Python packages. They register through the
+`druks.apps` entry point. `software_factory` is the bundled reference app for
+coding work through GitHub pull requests.
 
 ## Read map
 
 Start with `README.md`, then read only the material relevant to the task:
 
-- Workflow lifecycle, state, replay, or recovery: `docs/concepts.md`.
-- App contracts or the public author surface: `docs/writing-an-app.md`.
-- Configuration or environment variables: `docs/configuration.md`.
-- Local install and operations: `docs/full-local.md`.
-- Remote deployment: `docs/deployment.md`.
-- Failure diagnosis: `docs/troubleshooting.md`.
-- Backend contribution, migrations, or verification: `docs/development.md`.
-- The current migration head is `alembic heads` — not a scan of `backend/migrations/versions/`.
-- Shared SPA work: `frontend/README.md`.
-- Documentation navigation and audience ownership: `docs/index.md`.
+- Workflow lifecycle, state, replay, or recovery: `docs/concepts.md`
+- App contracts or the public author surface: `docs/writing-an-app.md`
+- Configuration or environment variables: `docs/configuration.md`
+- Local install and operations: `docs/full-local.md`
+- Remote deployment: `docs/deployment.md`
+- Failure diagnosis: `docs/troubleshooting.md`
+- Backend contribution, migrations, or verification: `docs/development.md`
+- Migration head: `alembic heads`, not a scan of `backend/migrations/versions/`
+- Shared SPA work: `frontend/README.md`
+- Documentation navigation and audience ownership: `docs/index.md`
 - The checklist and craft gate every change is held to: `.druks/review/checklist.md`.
 
 For app-surface changes, inspect the proof app at
@@ -27,63 +27,59 @@ For app-surface changes, inspect the proof app at
 
 ## Architectural boundaries
 
-- Keep platform and app ownership explicit. GitHub issue, branch, PR, and
-  coding-agent policy belongs to `software_factory`, not to Druks core.
-- Describe durability precisely: completed durable checkpoints are reused when
-  orchestration replays, but an interrupted operation may run again. Do not imply
+Apply these boundaries:
+
+- Keep platform and app ownership explicit. Keep GitHub issue, branch, PR, and
+  coding-agent policy in `software_factory`, not in Druks core.
+- Describe durability precisely. Druks reuses completed durable checkpoints
+  during replay. An interrupted operation can run again. Do not imply
   arbitrary-line resume or exactly-once external side effects.
-- `Run.state` is derived from DBOS workflow status. Do not add a second writable
-  state mirror.
-- App authors import the public concern namespaces documented in
-  `docs/writing-an-app.md`, not Druks internals.
-- Backend app discovery is runtime packaging. Shared-dashboard app UI
-  registration is a compile-time frontend concern. Standalone apps may ship
-  their own `dist/`; do not conflate the two delivery paths.
-- Druks owns generic agent, harness, workspace, sandbox, event, gate, webhook, and
-  settings plumbing. Domain-specific policy stays in the app.
-- The author surface grows by parameter, not by namespace. When an app needs
-  something the SDK lacks, widen the primitive that already owns the concern — a keyword
-  argument, a method on the class holding the data. Do not add a namespace, a facade, a
-  context object, or a helper module whose only justification is that the call site
-  would read shorter.
-- No author-surface module imports an app. `druks.workflows`, `druks.agents`,
-  `druks.events`, `druks.signals`, `druks.db`, `druks.schemas`, `druks.prompts`,
-  `druks.durable`, `druks.apps`, and `druks.webhooks` are what an author imports;
-  a reference to `druks.build` or any other app inside them inverts the platform.
-- Liveness — is this subject still being worked — derives from run state; never mirror
-  it in a column. An outcome somebody else owns, such as whether a pull request was
-  merged, is stored when its owner announces it — never inferred from run lifecycle,
-  which cannot see a merge that happens after druks has stopped.
-- `@step` marks a replay checkpoint, not an expensive call. On replay the body
+- Derive `Run.state` from DBOS workflow status. Do not add a second writable state mirror.
+- Import the public concern namespaces documented in `docs/writing-an-app.md`.
+  Do not import Druks internals.
+- Keep backend app discovery in runtime packaging. Keep shared-dashboard app UI
+  registration in the frontend build. Keep standalone `dist/` delivery separate.
+- Keep generic agent, harness, workspace, sandbox, event, gate, webhook, and
+  settings plumbing in Druks. Keep domain-specific policy in the app.
+- Grow the author surface by parameter, not by namespace. If the SDK lacks a
+  capability, widen the primitive that owns it. Add a keyword argument or a
+  method to the class that holds the data. Do not add a namespace, facade,
+  context object, or one-use helper module.
+- Do not import an app from an author-surface module. Import only
+  `druks.workflows`, `druks.agents`, `druks.events`, `druks.signals`, `druks.db`,
+  `druks.schemas`, `druks.prompts`, `druks.durable`, `druks.apps`, and
+  `druks.webhooks`. A reference to `druks.build` or another app in these modules
+  inverts the platform.
+- Derive liveness from run state. Do not mirror it in a column. Store an external
+  outcome after its owner announces it. Do not infer that outcome from run
+  lifecycle. A merge can occur after Druks stops the related run.
+- Use `@step` to mark a replay checkpoint, not an expensive call. On replay the body
   re-executes from the top and completed steps return cached results, so code outside a
   step runs again. Moving the boundary changes correctness, not performance.
-- Transient live state and mutual exclusion live in Redis, keyed by run id. Neither
-  gets a durable column, a row lock, or an in-process lock.
-- Do not add a store before something reads it, and route a workflow's cadence or pause
-  through its schedule overrides rather than a settings column.
-- A contract is one canonical name and shape that fails loudly on anything else. Do not
-  accept two spellings of the same thing.
-- App code does not type-switch over a typed stream. When a projection needs
+- Store transient live state and mutual exclusion in Redis, keyed by run id.
+  Do not give either one a durable column, row lock, or in-process lock.
+- Do not add a store before something reads it.
+- Route a workflow cadence or pause through its schedule overrides. Do not use a
+  settings column for this purpose.
+- Use one canonical name and shape for each contract. Fail loudly on every other shape.
+- Do not type-switch over a typed stream in app code. When a projection needs
   ordering or anchoring, grow the SDK primitive instead of an `isinstance` chain.
-- A read-side field carries identity and facts — gate name, kind, reason code. UI
-  wording lives in the app's own pages, never on the wire.
-- A shared resource gets one global registry delivered everywhere. Add a scoping axis
-  when a second consumer needs a different answer, not in anticipation.
+- Put only identity and facts in a read-side field. Keep UI wording in the app pages.
+- Give a shared resource one global registry. When a second
+  consumer needs a different answer, add a scoping axis. Do not add one in anticipation.
 
 ## Layout
 
-- `backend/druks/` — FastAPI, DBOS, SQLAlchemy 2.0, Pydantic v2, and bundled
-  apps.
-- `backend/migrations/` — platform Alembic migrations.
-- `backend/tests/` — pytest suite backed by real Postgres.
-- `backend/tests/druks-field_notes/` — independently packaged proof app.
-- `frontend/` — React 19 and Vite shared SPA; production output is repository-root
-  `dist/` and is copied into the backend image.
-- `deploy/` — Compose files, the bind-mounted Caddy configuration, and sandbox
-  image inputs. Its public runbook lives at `docs/deployment.md`.
-- `docs/` — public concepts, configuration, author, operator, troubleshooting, and
-  contributor guides.
-- `.github/workflows/` — PR checks and release image build.
+Use this repository layout:
+
+- The `backend/druks/` directory contains FastAPI, DBOS, SQLAlchemy 2.0, Pydantic v2, and bundled apps.
+- The `backend/migrations/` directory contains platform Alembic migrations.
+- The `backend/tests/` directory contains the pytest suite backed by real Postgres.
+- The `backend/tests/druks-field_notes/` directory contains the independently packaged proof app.
+- The `frontend/` directory contains the React 19 and Vite shared SPA. The backend image includes its repository-root `dist/` output.
+- The `deploy/` directory contains Compose files, Caddy configuration, and sandbox image inputs. Its public runbook is `docs/deployment.md`.
+- The `docs/` directory contains the public and contributor guides.
+- The `.github/workflows/` directory contains PR checks and the release-image build.
 
 ## Verification
 
@@ -125,24 +121,28 @@ truth for CI, including the proof-app install phase.
 
 ## Documentation discipline
 
+Use these documentation rules:
+
 - Put product behavior, setup, operations, troubleshooting, and app author
   contracts in the appropriate public guide. Keep this file limited to task
   routing, architectural boundaries, and contributor rules.
 - Link to one canonical explanation instead of copying it into multiple pages.
-- Verify behavioral claims against current source and focused tests. Distinguish
+- Make sure that behavioral claims match current source and focused tests. Distinguish
   framework capabilities from `software_factory` behavior and guarantees from policy.
-- Update this file only when contributor routing, repository structure, commands,
-  or a load-bearing architectural invariant changes.
+- If contributor routing, repository structure, commands, or an architectural
+  invariant changes, update this file.
 
 ## Style
 
+Use these style rules:
+
 - Make the minimum change that solves the problem. No speculative abstractions,
-  configurability, or error handling for impossible cases. Every changed line
-  should trace to the request; do not improve adjacent code.
+  configurability, or error handling for impossible cases. Each changed line
+  must trace to the request. Do not improve adjacent code.
 - Comments explain a non-obvious *why*—a constraint, invariant, or workaround—not
   what the next line does. Do not add section-divider banner comments.
-- Add class, module, or function docstrings only when the
-  signature and body do not already make the contract obvious.
+- If the signature and body do not make a contract obvious, add a class, module,
+  or function docstring.
 - Exception classes live in the package's `exceptions.py`, not in contracts or
   models.
 - Keep forward-looking notes in the issue tracker, not in source comments.

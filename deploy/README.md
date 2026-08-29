@@ -1,8 +1,7 @@
 # Deploy Druks
 
-The public deployment runbook is maintained in
-[`docs/deployment.md`](../docs/deployment.md) and published with the rest of the
-Druks documentation.
+[`docs/deployment.md`](../docs/deployment.md) is the public deployment runbook.
+Mintlify publishes it with the other Druks documents.
 
-This directory contains the Compose, Caddy, installer, and sandbox-image inputs
-described by that runbook.
+This directory contains the Compose, Caddy, installer, and sandbox-image files
+that the runbook describes.

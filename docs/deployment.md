@@ -5,10 +5,11 @@ sidebarTitle: "Deployment"
 icon: "server"
 ---
 
-`compose.yaml` holds the full stack: Druks (`web`, which embeds the DBOS
-durable engine and serves the dashboard SPA), Postgres, Redis, the Drukbox
-sandbox control plane (`drukbox`), the janitor, the SSH gateway, and the Caddy
-edge. `install.sh` writes `COMPOSE_PROFILES` to `.env`. Then plain
+`compose.yaml` holds the full stack. It includes Druks, Postgres, Redis,
+Drukbox, the janitor, the SSH gateway, and the Caddy edge. The `web` service
+contains the DBOS durable engine and serves the dashboard SPA. The `drukbox`
+service is the sandbox control plane. `install.sh` writes `COMPOSE_PROFILES` to
+`.env`. Then plain
 `docker compose` commands in the install directory do the correct thing.
 
 A **local** install (`DRUKS_PROVIDER=docker`) runs bare, with no profiles.
@@ -16,21 +17,22 @@ A **local** install (`DRUKS_PROVIDER=docker`) runs bare, with no profiles.
 containers on the host daemon. The dashboard is on `127.0.0.1:8001`, with no
 Caddy. See [Full local](full-local.md).
 
-A **remote** install (each other `DRUKS_PROVIDER`) enables
-`COMPOSE_PROFILES=hosted`: the Drukbox control plane against a cloud provider,
-the periodic janitor, and stock Caddy (identity edge and proxy, with the
-Caddyfile bind-mounted).
+A **remote** installation uses each other `DRUKS_PROVIDER` value. It enables
+`COMPOSE_PROFILES=hosted`. This profile includes a remote Drukbox control plane,
+the periodic janitor, and stock Caddy. Caddy supplies the identity edge and
+proxy with a bind-mounted Caddyfile.
 
 The **docker-sbx** provider also layers `compose.docker-sbx.yaml` and enables
 the `gateway` profile. The overlay connects the Drukbox services to the
 [Docker Sandboxes](https://docs.docker.com/ai/sandboxes/) daemon of the host
-(microVM sandboxes). The gateway is the SSH path into them. Prepare the host
-first: install `docker-sbx`, put the service user in the `kvm` group, then run
-`sbx login` and `sbx daemon start -d --policy balanced`. The installer stops
+(microVM sandboxes). The gateway is the SSH path into them.
+
+Prepare the host first. Install `docker-sbx`. Put the service user in the `kvm` group. Run
+`sbx login`. Then run `sbx daemon start -d --policy balanced`. The installer stops
 with a clear message when the daemon socket is missing.
 
 Before this layout, each shape had its own overlay file. Those files are
-retired: `compose.local.yaml` is now the base with no profiles, and
+retired. `compose.local.yaml` is the base with no profiles.
 `compose.remote.yaml` is the base with `COMPOSE_PROFILES=hosted`. Deployments
 that fetch compose files by path must update to `compose.yaml` (and
 `compose.docker-sbx.yaml` for that provider).
@@ -38,24 +40,25 @@ that fetch compose files by path must update to `compose.yaml` (and
 Drukbox keeps its own schema in a `drukbox` database in the same Postgres, so
 there is no second datastore to run or back up separately.
 
-The Druks services use the **host network** so they can reach Postgres, Redis,
+The Druks services use the **host network** so they can connect to Postgres, Redis,
 Drukbox, and provider-specific sandbox addresses from the host network
-namespace. The exe.dev shape reaches VMs over the host's tailnet;
-other providers may return directly reachable SSH addresses.
+namespace. The exe.dev shape reaches VMs over the host tailnet. Other providers
+can return SSH addresses that are directly reachable.
 
 ## First-time setup on a fresh box
 
 Prerequisites: Docker with the Compose plugin. The exe.dev shape also
 needs `tailscaled` joined to the intended tailnet (`tailscale status` shows
 peers). Other remote providers have their own network and credential
-requirements; the local Docker shape is covered in
-[Full local](full-local.md).
+requirements.
 
-The Druks service and sandbox images are published for both `linux/amd64`
-and `linux/arm64`.
+For the local Docker shape, see [Full local](full-local.md).
 
-Everything else — `compose.yaml`, the Caddyfile, `druks.toml`, the rendered
-`.env`, image pulls, and DB init — is handled by `install.sh`.
+The image registry provides Druks service and sandbox images for both
+`linux/amd64` and `linux/arm64`.
+
+`install.sh` handles everything else. This work includes `compose.yaml`, the
+Caddyfile, `druks.toml`, the rendered `.env`, image pulls, and DB initialization.
 
 ### 1. Run the installer
 
@@ -63,26 +66,29 @@ Everything else — `compose.yaml`, the Caddyfile, `druks.toml`, the rendered
 curl -fsSL https://druks.ai/install.sh | DRUKS_PROVIDER=exe bash
 ```
 
-`docker` is the default provider (the local shape); a remote deploy names its
-provider — `exe` for exe.dev, any other Drukbox provider name for the generic
-remote shape. First pass writes `~/druks/druks.toml` with random secrets
-pre-filled, renders `~/druks/.env`, and exits when required values are missing.
-It tells you exactly what to do next: edit `druks.toml` — for a generic remote
-shape, fill `[sandbox.<provider>]` from Drukbox's
+`docker` is the default provider for the local shape. A remote deployment names
+its provider. Use `exe` for exe.dev. Use another Drukbox provider name for the
+generic remote shape. The first pass writes `~/druks/druks.toml` with generated
+secrets.
+
+It creates `~/druks/.env` and exits if required values are missing.
+The output identifies each missing value. Edit `druks.toml`. For a generic
+remote shape, fill `[sandbox.<provider>]` from the Drukbox
 [configuration reference](https://github.com/czpython/drukbox).
 
-The GitHub App druks acts as is connected from the dashboard after boot
-(**Settings → Services**), per the permission table in
-[Configuration](configuration.md#github).
+After boot, connect the GitHub App that Druks uses from **Settings → Services**.
+Use the permission table in [Configuration](configuration.md#github).
 
-The sandbox backend defaults to the local `docker` shape. Pass `DRUKS_PROVIDER`
-on the first run to choose another: `exe` for exe.dev + Tailscale, any other
-Drukbox provider name for the generic remote shape (passed through without a
-Druks provider registry). Re-runs read `[sandbox].provider` from `druks.toml`,
-so the environment flag is only a fresh-install seed.
+The sandbox backend defaults to the local `docker` shape. On the first run, set
+`DRUKS_PROVIDER` to select another shape. Use `exe` for exe.dev with Tailscale.
+Use another Drukbox provider name for the generic remote shape. Druks passes this
+name through without a provider registry.
 
-Override the install dir with `DRUKS_INSTALL_DIR=/srv/druks` if you
-want it elsewhere.
+Later runs read `[sandbox].provider`
+from `druks.toml`. Thus, the environment flag only seeds a new installation.
+
+If you want another installation directory, set
+`DRUKS_INSTALL_DIR=/srv/druks`.
 
 ### 2. Re-run the installer
 
@@ -90,12 +96,13 @@ want it elsewhere.
 curl -fsSL https://druks.ai/install.sh | bash
 ```
 
-Second pass renders `.env` from `druks.toml`, validates the required values,
-then: `docker compose pull` → migrate the databases out of band
-(`docker compose run --rm web druks init-db`, plus drukbox's schema on a
-remote install) → `docker compose up -d`. Nothing migrates on boot.
+The second pass creates `.env` from `druks.toml` and validates the required
+values. Then it runs `docker compose pull`. It migrates the databases with
+`docker compose run --rm web druks init-db`. A remote installation also migrates
+the Drukbox schema. Finally, it runs `docker compose up -d`. Startup does not
+run migrations.
 
-### 3. Verify
+### 3. Make sure that the stack operates
 
 ```bash
 cd ~/druks
@@ -103,11 +110,10 @@ docker compose ps
 curl -fsS http://127.0.0.1:8001/health
 ```
 
-Then connect Claude and Codex from the dashboard (Settings →
-Harnesses → Connect): each card opens the provider's authorize page
-and takes the pasted code back. Subscription tokens live in the
-database — no host CLI login — and agent runs refuse to start on a
-harness that isn't connected.
+Then connect Claude and Codex from **Settings → Harnesses → Connect**. Each card
+opens the provider authorization page. Paste the returned code into the card.
+Subscription tokens live in the database, not in a host CLI login. Agent runs
+do not start with a disconnected harness.
 
 After both connections:
 
@@ -115,9 +121,8 @@ After both connections:
 docker compose exec web druks doctor
 ```
 
-Every configured check should pass. Before the connections, the same command
-is still useful for infrastructure but correctly reports both harness
-credential checks as failures.
+Each configured check must pass. You can run the command before you connect the
+harnesses. In that state, both harness credential checks report errors.
 
 ### 4. Expose the public surfaces
 
@@ -128,92 +133,106 @@ ssh exe.dev share port druks 8000
 ssh exe.dev share set-public druks
 ```
 
-Public URLs: `https://<host>/_external/{github,linear,jira}/events/`
-(authenticated provider webhooks), `https://<host>/mcp` (PAT-authenticated MCP endpoint —
-[Connect your agent](connect-your-agent.md)), and `https://<host>/`
-(exe.dev authenticates at the edge; druks maps its asserted email to your
-account).
+The public provider webhooks use
+`https://<host>/_external/{github,linear,jira}/events/`. The PAT-authenticated MCP
+endpoint uses `https://<host>/mcp`. See
+[Connect your agent](connect-your-agent.md). The dashboard uses
+`https://<host>/`. exe.dev authenticates at the edge. Druks maps the asserted
+email to your account.
 
-**On another remote provider**, the dashboard goes through your identity proxy
-(set `[identity].header` in `druks.toml` to the header it injects), but
-webhook senders can't authenticate through SSO — they need their own
-public HTTPS path. The stack's Caddy provides it:
+**On another remote provider**, the dashboard uses your identity proxy. Set
+`[identity].header` in `druks.toml` to the injected header. Webhook senders
+cannot authenticate through SSO. They require a separate public HTTPS path.
+The stack Caddy provides this path:
 
 The proxy must strip any client-supplied copy of that identity header before
-inserting its authenticated value. It must also terminate TLS and set HSTS;
+inserting its authenticated value. It must also terminate TLS and set HSTS.
 Druks' shipped Caddy dashboard listener is loopback HTTP behind that edge.
 
-1. Point an A-record (e.g. `druks.example.com`) at the box and open
-   inbound 80 + 443.
-2. Set `[urls].webhook_host = "druks.example.com"` in `druks.toml` and re-run
-   the installer.
+Configure public webhook access:
 
-Caddy auto-provisions Let's Encrypt for that hostname and serves **only**
-`POST /_external/*` and the PAT-authenticated `/mcp` endpoint on it — no
-dashboard routes, no identity header, so the SSO gate can't be forged from
-the public side. Webhook URLs become
-`https://druks.example.com/_external/<provider>/events/`; agents connect at
+1. Point an A record, such as `druks.example.com`, at the host.
+2. Open inbound ports 80 and 443.
+3. Set `[urls].webhook_host = "druks.example.com"` in `druks.toml`.
+4. Run the installer again.
+
+Caddy provisions a Let's Encrypt certificate for that hostname. It serves only
+`POST /_external/*` and the PAT-authenticated `/mcp` endpoint. It does not serve
+dashboard routes or the identity header. Thus, a public client cannot forge the
+SSO gate.
+
+Webhook URLs become
+`https://druks.example.com/_external/<provider>/events/`. Agents connect at
 `https://druks.example.com/mcp`
 ([Connect your agent](connect-your-agent.md)). Leave
 `[urls].webhook_host` blank to bring your own ingress instead.
 
 ## Update / redeploy
 
-Edit `druks.toml`, then re-run the installer from the same version you intend
-to deploy. It renders `.env`, refreshes `compose.yaml` and the Caddyfile
-from the repo, applies any new migrations out of band
-(`docker compose run --rm web druks init-db`, plus drukbox's on a remote
-install), then runs `docker compose pull && up -d`, so it is the upgrade
-path. Compose recreates only changed services. To migrate by hand without the
-installer, run that same `docker compose run --rm web druks init-db`.
+Edit `druks.toml`. Then run the installer from the version that you will deploy.
+The installer creates `.env` and refreshes `compose.yaml` and the Caddyfile. It
+applies new migrations with `docker compose run --rm web druks init-db`. A remote
+installation also migrates Drukbox.
+
+Then the installer pulls the images and
+starts the stack. Compose replaces only changed services. To migrate without
+the installer, run `docker compose run --rm web druks init-db`.
 
 Recreating `web` interrupts in-flight execution. DBOS recovers compatible
-workflows from completed checkpoints when the process returns. Treat changes to
-workflow structure, step order or names, and serialized input as deployment
-compatibility changes: drain affected runs or keep an executor with compatible
-code until they finish. Recovery does not preserve a live agent process inside
-a sandbox; it follows the operation boundary described in
+workflows from completed checkpoints when the process returns. Changes to
+workflow structure, step order, step names, or serialized input can break
+compatibility.
+
+Before such a deployment, drain affected runs. You can also keep
+an executor with compatible code until the runs finish. Recovery does not
+preserve a live agent process inside a sandbox. It follows the operation
+boundary in
 [Concepts](concepts.md#durability-and-recovery).
 
 ### One-time: upgrading a box that ran the backend as root
 
-The backend containers now run as the deploy user (`DRUKS_UID`/`DRUKS_GID`),
-not root. A box deployed before this change has root-owned files the non-root
-containers must write — the `logs/` + `prompt-cache/` dirs under the data dir.
-`install.sh` sets `DRUKS_UID`/`DRUKS_GID` and chowns the sandbox-keys volume on
-re-run, but it runs unprivileged, so take over the root-owned host files once
-first (adjust the path if you customized `DRUKS_DATA_HOST_DIR`):
+The backend containers use the deployment user (`DRUKS_UID` and `DRUKS_GID`),
+not root. A host from an older deployment can have root-owned files. The
+non-root containers must write to `logs/` and `prompt-cache/` in the data
+directory.
+
+`install.sh` sets `DRUKS_UID` and `DRUKS_GID`. It also changes the
+owner of the sandbox-keys volume. The script does not have root privileges. If
+the host has root-owned files, run this command one time. If you changed
+`DRUKS_DATA_HOST_DIR`, adjust the path:
 
 ```bash
 docker run --rm -v "$HOME/druks-data:/d" alpine chown -R "$(id -u):$(id -g)" /d
 ```
 
-A root container chowns the bind-mounted host paths, so no host `sudo`. Then
-run the normal upgrade (re-run `install.sh`) — it writes `DRUKS_UID`/`DRUKS_GID`,
-chowns the sandbox-keys volume, and recreates the stack as the deploy user. New
-installs need none of this: `install.sh` and the deploy user own everything
-from the start.
+The root container changes the owner of the bind-mounted host paths. The host
+does not require `sudo`. Then run the normal upgrade with `install.sh`. It writes
+`DRUKS_UID` and `DRUKS_GID`. It changes the owner of the sandbox-keys volume and
+recreates the stack as the deployment user.
 
-`main` and `latest` are the edge channel. For a tagged install, fetch the
-installer from that tag and set the same `DRUKS_REF`; it automatically selects
-the matching image tag. See [Releasing Druks](releasing.md) for the
+A new installation does not require
+this step. `install.sh` and the deployment user own its files from the start.
+
+`main` and `latest` are the edge channel. For a tagged installation, get the
+installer from that tag. Set `DRUKS_REF` to the same tag. The installer selects
+the related image tag. See [Releasing Druks](releasing.md) for the
 immutable install shape.
 
 ## Rollback
 
-The Druks image is tagged `:sha-<full-git-sha>` per commit and carries both
-the API and the SPA build — one artifact, nothing to keep in lockstep.
+Each Druks commit has an image tag in the form `:sha-<full-git-sha>`. The image
+contains both the API and the SPA build. It is one release artifact.
 Pin a specific build by setting `DRUKS_TAG` in `.env`:
 
 ```bash
 DRUKS_TAG=sha-0123456789abcdef0123456789abcdef01234567 docker compose up -d
 ```
 
-This rolls back the image, not the database schema. `druks init-db` only
-upgrades; it does not downgrade migrations. Before pinning an older image,
-confirm that its code can read the current schema, the current `druks.toml`
-and rendered `.env`, and that in-flight workflows are compatible with that
-code.
+This command rolls back the image, not the database schema. `druks init-db`
+only upgrades migrations. It does not downgrade them. Before you select an
+older image, make sure that its code can read the current schema. Make sure that
+it can read the current `druks.toml` and `.env`. Active workflows must also be
+compatible with that code.
 
 ## Logs / stop
 
@@ -225,17 +244,17 @@ docker compose down
 
 ## How the proxy routes
 
-exe.dev exposes one port; Caddy (stock image, host network, `:8000`,
-Caddyfile fetched by the installer) enforces path-level access:
+exe.dev exposes one port. Caddy enforces access for each path. It uses the stock
+image, host network, port `:8000`, and the Caddyfile from the installer:
 
-- `POST /_external/*` — public, authenticated by the matching webhook class in
-  Druks. Per-provider paths land under
-  `/_external/<provider>/<category>/`; app role-module discovery
+- **Webhooks:** Druks exposes `POST /_external/*` publicly. The matching webhook
+  class authenticates each request. Per-provider paths land under
+  `/_external/<provider>/<category>/`. App role-module discovery
   registers them at import time.
-- `/mcp` — public, authenticated per request by personal access token inside
-  Druks; proxied unbuffered so its SSE frames stream.
-- Everything else — a nonempty trusted identity header (exe.dev login
-  provides one) required, then proxied to `web` (`127.0.0.1:8001`), which
-  serves the API, the SPA, and app frontends alike; Druks maps that
-  asserted email to your account per request
+- **MCP:** Druks exposes `/mcp` publicly. A personal access token authenticates
+  each request inside Druks. Caddy does not buffer this route, so its SSE frames stream.
+- **Dashboard:** Everything else requires a nonempty trusted identity header. The exe.dev
+  login supplies this header. Caddy proxies the request to `web` at
+  `127.0.0.1:8001`. This service supplies the API, SPA, and app frontends. Druks
+  maps the asserted email to your account for each request
   ([access control](configuration.md#public-urls-and-access-control)).

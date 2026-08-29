@@ -5,20 +5,22 @@ sidebarTitle: "Releasing"
 icon: "package"
 ---
 
-Druks publishes the backend and sandbox as container images, and the Python
-distribution to PyPI. `main` is the edge channel: a successful main build updates
-`latest` and also publishes an immutable `sha-<full-git-sha>` tag. A `v*` Git tag
-publishes the matching version tag and the immutable SHA tag; it does not move
-`latest`.
+Druks publishes the backend and sandbox as container images. It publishes the
+Python distribution to PyPI. `main` is the edge channel. A successful build
+from `main` updates `latest` and publishes an immutable
+`sha-<full-git-sha>` tag. A `v*` Git tag publishes the version tag and the
+immutable SHA tag. It does not move `latest`.
 
 ## Prepare a release
 
+Prepare the release:
+
 1. Start from a clean checkout of the commit to release.
-2. Run the complete backend, proof-app, frontend, package, secret, and
-   workflow checks from [Development](development.md#verification).
+2. Run all backend, proof-app, frontend, package, secret, and workflow checks in
+   [Development](development.md#verification).
 3. Review migrations and workflow replay compatibility. A container rollback
    does not downgrade Postgres or DBOS state.
-4. Update the version in `pyproject.toml` and add the release's section to
+4. Update the version in `pyproject.toml`. Add the release section to
    [the changelog](https://github.com/czpython/druks/blob/main/CHANGELOG.md).
 5. Merge the release change and record the resulting full commit SHA.
 
@@ -29,36 +31,36 @@ git tag -s v0.1.0 <full-commit-sha> -m "Druks v0.1.0"
 git push origin v0.1.0
 ```
 
-Wait for both image workflows, then verify the version and SHA tags in GHCR and
-create the GitHub release from the same tag.
+Wait for both image workflows. Then make sure that GHCR contains the version and
+SHA tags. Create the GitHub release from the same tag.
 
 ## Publish to PyPI
 
-Publishing the GitHub release runs `release.yml`, which builds the released tag
-and uploads it over a PyPI Trusted Publisher. No token is stored; the `pypi`
-environment on this repository and the publisher registered on PyPI are what
-authorize the upload.
+The GitHub release starts `release.yml`. This workflow builds the release tag
+and uploads it through a PyPI Trusted Publisher. Druks does not store a token.
+The `pypi` environment and the registered PyPI publisher authorize the upload.
 
-To publish a tag whose release already exists, run the workflow manually and give
-it that tag:
+If the release already exists, start the workflow manually. Give the workflow
+the release tag:
 
 ```bash
 gh workflow run release.yml -f tag=v0.1.0
 ```
 
-PyPI rejects a version it already holds, so a version is published once. A
-mistaken upload needs a new version, not a retry.
+PyPI rejects an existing version. Thus, you can publish a version one time. If
+an upload is incorrect, publish a new version. Do not retry the old version.
 
 ## Install an immutable version
 
-Fetch the installer from the same release and pass that ref through to the
-files it downloads. When `DRUKS_TAG` is omitted, a `v*` ref selects the matching
-image tag and a full commit SHA selects `sha-<full-git-sha>`.
+Get the installer from the same release. Pass that ref to each file that it
+downloads. If `DRUKS_TAG` is absent, a `v*` ref selects the related image tag.
+A full commit SHA selects `sha-<full-git-sha>`.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/czpython/druks/v0.1.0/scripts/install.sh \
   | DRUKS_REF=v0.1.0 bash
 ```
 
-For rollback, prefer the immutable full-SHA tag recorded during release. Check
-database and workflow compatibility before starting the older image.
+For a rollback, use the immutable full-SHA tag from the release record. Before
+you start the older image, make sure that its database and workflows are
+compatible.

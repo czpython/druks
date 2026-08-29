@@ -5,8 +5,8 @@ sidebarTitle: "Development"
 icon: "code"
 ---
 
-This guide is for changing Druks itself. The backend and Vite dev server run on
-the host; Compose supplies isolated Postgres and Redis.
+This guide is for changes to Druks itself. The backend and Vite development
+server operate on the host. Compose supplies isolated Postgres and Redis.
 
 ## Set up
 
@@ -27,23 +27,25 @@ initialize the development database:
 uv run druks init-db
 ```
 
-Settings reads `./druks.toml` from the current working directory. The example
-runs with `[identity].mode = "none"`: the loopback dashboard has no
-authentication and exactly one operator account, created by your first harness
-connection. To exercise `header` mode against the dev server, set
-`identity.mode = "header"` and `identity.header` in `druks.toml`, then send the
-header yourself (for example with a browser header add-on or
-`curl -H 'X-Edge-Email: you@example.com'`).
+Settings reads `./druks.toml` from the current directory. The example uses
+`[identity].mode = "none"`. The loopback dashboard has no authentication and
+exactly one operator account. Your first harness connection creates this
+account.
+
+To use `header` mode with the development server, set
+`identity.mode = "header"` in `druks.toml`. Set `identity.header` in the same
+file. Then send the header with a browser add-on or
+`curl -H 'X-Edge-Email: you@example.com'`.
 
 The dev Compose project creates two databases:
 
-- `druks_dev` for the host-run server
-- `druks_test` for pytest, which rebuilds its schema during the suite
+- **Development:** `druks_dev` for the host-run server.
+- **Tests:** `druks_test` for pytest. The suite rebuilds this schema.
 
 `.env.example` points the server at `druks_dev`. The suite reaches
 `druks_test` and Redis index 15 through `DRUKS_TEST_DATABASE_URL` and
-`DRUKS_TEST_REDIS_URL`, never through the server's own settings, so the two
-cannot be confused.
+`DRUKS_TEST_REDIS_URL`. It does not use the server settings. Thus, the two
+databases cannot be confused.
 
 Start the backend:
 
@@ -89,14 +91,14 @@ The main package registers bundled apps through `pyproject.toml`. CI also
 installs `backend/tests/druks-field_notes` as a real editable distribution and
 runs the proof-app tests. Those tests are the executable contract for:
 
-- headless and boot-time entry-point loading
-- role-module discovery
-- route and subject read-side mounting
-- independent migrations and table-prefix enforcement
-- workflow start, settings, and feed formatting
+- Headless and boot-time entry-point loading
+- Role-module discovery
+- Route and subject read-side mounting
+- Independent migrations and table-prefix enforcement
+- Workflow start, settings, and feed formatting.
 
-When changing the author API, update the scaffold, proof app, author
-guide, and tests together.
+If you change the author API, update the scaffold, proof app, author guide, and
+tests together.
 
 ## Database changes
 
@@ -128,11 +130,13 @@ uv run ruff format --check backend
 uv run pytest backend/
 ```
 
-The suite builds its subjects out of `field_notes`, the proof app. It is a
-standalone distribution that depends on druks, so it installs like any author's
-app rather than being a dependency of druks — install it once and the whole
-suite runs. The pull-request backend workflow does the same. Pyright is configured
-for local/editor use but is not currently a CI gate.
+The suite builds its subjects from `field_notes`, the proof app. This standalone
+distribution depends on Druks. It installs like an author app, not as a Druks
+dependency. Install it one time for the full suite.
+
+The pull-request backend
+workflow does the same. Pyright is available for local and editor use. It is not
+a CI gate.
 
 Frontend checks:
 
@@ -144,7 +148,7 @@ npm --prefix frontend run build
 
 The frontend CI workflow runs those three commands on Node 22.
 
-Documentation-only changes should also run:
+For documentation-only changes, also run these commands:
 
 ```bash
 git diff --check
@@ -153,8 +157,9 @@ mint validate
 mint broken-links --check-anchors --check-redirects
 ```
 
-Mintlify builds `docs/` directly. Its GitHub App owns deployments and pull-request
-previews; the repository does not need a docs-specific GitHub Actions workflow.
+Mintlify builds `docs/` directly. Its GitHub App owns deployments and
+pull-request previews. The repository does not require a documentation-specific
+GitHub Actions workflow.
 
 ## Working with sandboxes
 
@@ -170,8 +175,8 @@ service_token = "dev-token"
 image = "ghcr.io/czpython/druks/sandbox:latest"
 ```
 
-`uv run druks doctor --sandbox` creates a real host. Run it deliberately; it is
-not part of the normal test suite.
+`uv run druks doctor --sandbox` creates a real host. If you require a real
+sandbox test, run this command. It is not part of the normal test suite.
 
 ## Frontend ownership
 
@@ -180,7 +185,7 @@ delivery mechanisms. Python discovery can load an installed app at
 runtime. An app can ship a standalone static frontend in its package's
 `dist/`, served at `/app/<name>`. React code that joins the bundled dashboard
 shell must already be in the SPA and register through
-`frontend/src/apps/index.ts`; a wheel cannot inject routes into that
+`frontend/src/apps/index.ts`. A wheel cannot put routes into that
 existing JavaScript bundle.
 
 See the [frontend guide](https://github.com/czpython/druks/blob/main/frontend/README.md)

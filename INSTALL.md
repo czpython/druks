@@ -1,13 +1,13 @@
 # Install runbook
 
-A deterministic install of the local (laptop) shape, written for a coding
-agent operating a shell on the target machine. Humans are welcome too — the
-narrative version is [docs/full-local.md](docs/full-local.md), and remote
-shapes are covered by [deploy/README.md](deploy/README.md).
+A coding agent can use this runbook to install the local shape on a target
+machine. A human can also use it. [Full local setup](docs/full-local.md)
+contains more explanation. The [deployment runbook](deploy/README.md) covers
+remote shapes.
 
-Rules: run the steps in order; after each step run its verification exactly;
-if a verification fails, stop and report the failing step with its command
-output — do not improvise a fix or continue.
+Do the steps in order. After each step, do its verification. If a verification
+fails, stop. Report the failed step and its command output. Do not improvise a
+fix. Do not continue the installation.
 
 ## 1. Preconditions
 
@@ -16,9 +16,8 @@ docker info --format '{{.ServerVersion}}'
 docker compose version
 ```
 
-Verification: both commands succeed. If either fails, stop — Docker with the
-Compose plugin is the one prerequisite, and installing it is the operator's
-call, not yours.
+Verification: both commands succeed. If a command fails, stop. Docker with the
+Compose plugin is the only prerequisite. The operator must install it.
 
 ## 2. Install
 
@@ -26,8 +25,8 @@ call, not yours.
 curl -fsSL https://druks.ai/install.sh | bash
 ```
 
-Verification: the command exits 0 and ends with `docker compose up -d`
-output followed by a message that the stack is up. `~/druks` now contains
+Verification: the command exits with status 0. Its final output includes
+`docker compose up -d` and a message that the stack is up. `~/druks` contains
 `druks.toml`, `.env`, and `compose.yaml`.
 
 ## 3. Services are up
@@ -38,8 +37,8 @@ docker compose ps
 curl -fsS http://127.0.0.1:8001/health
 ```
 
-Verification: `web`, `postgres`, `redis`, and `drukbox` are running
-(none restarting), and the health endpoint returns `{"status":"ok"}`.
+Verification: `web`, `postgres`, `redis`, and `drukbox` operate without
+restarts. The health endpoint returns `{"status":"ok"}`.
 
 ## 4. Preflight
 
@@ -48,31 +47,34 @@ cd ~/druks
 docker compose exec web druks doctor
 ```
 
-Verification: `druks doctor` exits 0. Every genuine-health check passes; the
-Claude, Codex, and GitHub checks show as pending (`○`) — the operator clears
-those in the browser, which no shell step can do, so they never fail the
-command. A non-zero exit means a genuine fault: stop and report it.
+Verification: `druks doctor` exits with status 0. Each health check passes.
+The Claude, Codex, and GitHub checks can show as pending (`○`). The operator
+clears these checks in the browser.
+
+A shell step cannot clear them, so they do
+not fail the command. If the command exits with another status, stop. Report
+the error.
 
 ## 5. Hand back to the operator
 
-Report that druks is installed and tell the operator to finish in the
-dashboard at <http://127.0.0.1:8001>: **Settings → Harnesses** connects
-Claude and Codex (agent runs refuse to start on an unconnected harness) and
-the GitHub App druks acts as. Then `docker compose exec web druks doctor
---sandbox` proves the full sandbox path with a real container.
+Report that the installation succeeded. Tell the operator to open
+<http://127.0.0.1:8001>. Connect Claude and Codex under **Settings → Harnesses**.
+Agent runs do not start with a disconnected harness. Then connect the GitHub
+App that Druks uses. Run `docker compose exec web druks doctor --sandbox` to
+prove the full sandbox path with a real container.
 
 ## Local customizations
 
 Put host-local Docker Compose changes in `~/druks/compose.override.yaml`. Add
-local services, service overrides, and named volumes there. install.sh creates
-this file once and never changes it. Your changes survive every install and
-upgrade.
+local services, service overrides, and named volumes to this file. `install.sh`
+creates the file one time and does not change it. Your changes remain after an
+install or upgrade.
 
-install.sh refreshes the repo compose files on each run. Do not edit
+`install.sh` refreshes the repository Compose files each time. Do not edit
 `compose.yaml` or `compose.docker-sbx.yaml`. The next install overwrites
 these files.
 
-Example — bake locally-installed apps into the web image:
+This example installs local apps in the web image:
 
 ```yaml
 services:

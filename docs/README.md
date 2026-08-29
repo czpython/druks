@@ -1,8 +1,8 @@
 # Druks documentation workspace
 
 Mintlify builds this directory as the public documentation site. Product and
-operator documentation belongs here; repository-only contribution instructions
-stay at the repository root.
+operator documents belong here. Repository-only contribution instructions stay
+at the repository root.
 
 ## Preview and validate
 
@@ -14,9 +14,8 @@ mint validate
 mint broken-links --check-anchors --check-redirects
 ```
 
-The repository deliberately has no docs-specific CI workflow. Mintlify's GitHub
-App handles deployment and pull-request previews when the deployment branch
-changes.
+The repository has no documentation-specific CI workflow. The Mintlify GitHub
+App deploys the site and creates pull-request previews after a branch change.
 
 ## One-time Mintlify setup
 
@@ -29,16 +28,16 @@ In the Mintlify dashboard, configure the Git source as:
 | Branch | `main` |
 | Documentation directory | `docs` |
 
-Install the Mintlify GitHub App for only `czpython/druks`. This is sufficient
-for automatic deployments and pull-request previews; no GitHub Actions workflow
-or deploy token is required.
+Install the Mintlify GitHub App for only `czpython/druks`. This permission gives
+Mintlify access for deployments and pull-request previews. A GitHub Actions
+workflow and a deploy token are not necessary.
 
 For the custom domain, add `docs.druks.ai` in **Settings → Domain Setup**. Add
-the two verification TXT records shown by Mintlify and wait until both verify
-before changing the CNAME. Then point `docs` to `cname.mintlify.builders` and
-set the canonical URL in `docs.json` after the domain is serving correctly.
+the two TXT records that Mintlify shows. Wait until Mintlify accepts both
+records. Then point `docs` to `cname.mintlify.builders`. After the domain serves
+the site, set the canonical URL in `docs.json`.
 
 References:
 
 - [Connect a GitHub repository](https://www.mintlify.com/docs/deploy/github)
-- [Configure a custom domain](https://www.mintlify.com/docs/customize/custom-domain)
+- [Configure a custom domain](https://www.mintlify.com/docs/customize/custom-domain).
