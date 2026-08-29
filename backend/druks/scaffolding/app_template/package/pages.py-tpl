@@ -1,0 +1,38 @@
+from druks import ui
+
+# Every ``@ui.page`` here becomes a screen in the shared dashboard. A page
+# function is a pure read: Druks reruns it on load, on an event, on a
+# reconnect, and on a retry, so it must never write, start work, or answer a
+# gate. The full block, value, and field catalog is in docs/druks-ui.md.
+
+
+@ui.page("/")
+async def overview():
+    return ui.Page(
+        "{{ Name }}",
+        description="TODO: what an operator comes here to see.",
+        blocks=[
+            ui.Stack(
+                [
+                    ui.Text("This page is Python. The dashboard renders it."),
+                    ui.Card(
+                        title="Next",
+                        blocks=[
+                            ui.Facts(
+                                [
+                                    ui.Fact(
+                                        "Pages",
+                                        value=ui.TextValue("druks_{{ name }}/pages.py"),
+                                    ),
+                                    ui.Fact(
+                                        "State",
+                                        value=ui.StatusValue("scaffolded", tone="active"),
+                                    ),
+                                ]
+                            )
+                        ],
+                    ),
+                ]
+            )
+        ],
+    )

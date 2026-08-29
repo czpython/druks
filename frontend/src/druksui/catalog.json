@@ -1,0 +1,385 @@
+{
+  "title": "Catalog",
+  "description": "One of every block the contract carries.",
+  "blocks": [
+    {
+      "block": "text",
+      "text": "Text."
+    },
+    {
+      "block": "markdown",
+      "text": "**Markdown.**"
+    },
+    {
+      "block": "callout",
+      "tone": "warning",
+      "title": "Callout",
+      "text": "Something to notice."
+    },
+    {
+      "block": "divider"
+    },
+    {
+      "block": "link",
+      "label": "Notes",
+      "page": "notes",
+      "arguments": {},
+      "url": "",
+      "subject": null
+    },
+    {
+      "block": "link",
+      "label": "The note itself",
+      "page": "",
+      "arguments": {},
+      "url": "",
+      "subject": {
+        "subjectType": "note",
+        "subjectId": "0"
+      }
+    },
+    {
+      "block": "empty_state",
+      "title": "Nothing here",
+      "description": "An empty state.",
+      "actions": []
+    },
+    {
+      "block": "timeline",
+      "title": "Timeline",
+      "items": [
+        {
+          "when": "2026-08-29T09:14:02Z",
+          "title": "Started",
+          "description": "",
+          "status": {
+            "value": "status",
+            "label": "running",
+            "tone": "active"
+          }
+        }
+      ]
+    },
+    {
+      "block": "progress",
+      "label": "Progress",
+      "completed": 1.0,
+      "total": 2.0,
+      "steps": []
+    },
+    {
+      "block": "progress",
+      "label": "Stages",
+      "completed": null,
+      "total": 1.0,
+      "steps": [
+        {
+          "label": "plan",
+          "status": {
+            "value": "status",
+            "label": "running",
+            "tone": "active"
+          }
+        }
+      ]
+    },
+    {
+      "block": "image",
+      "url": "/api/files/example",
+      "alternativeText": "A worked example.",
+      "caption": ""
+    },
+    {
+      "block": "image_gallery",
+      "title": "",
+      "images": [
+        {
+          "block": "image",
+          "url": "/api/files/example",
+          "alternativeText": "A worked example.",
+          "caption": ""
+        }
+      ]
+    },
+    {
+      "block": "files",
+      "title": "Files",
+      "files": []
+    },
+    {
+      "block": "chart",
+      "kind": "bar",
+      "title": "Chart",
+      "categories": [
+        "Mon",
+        "Tue"
+      ],
+      "series": [
+        {
+          "label": "notes",
+          "points": [
+            1.0,
+            2.0
+          ]
+        }
+      ],
+      "categoryLabel": "Day",
+      "valueLabel": "Notes"
+    },
+    {
+      "block": "metrics",
+      "title": "",
+      "metrics": [
+        {
+          "label": "Notes",
+          "value": {
+            "value": "number",
+            "number": 2.0,
+            "unit": ""
+          },
+          "description": ""
+        }
+      ]
+    },
+    {
+      "block": "facts",
+      "title": "",
+      "facts": [
+        {
+          "label": "Text",
+          "value": {
+            "value": "text",
+            "text": "a",
+            "link": null
+          }
+        },
+        {
+          "label": "Number",
+          "value": {
+            "value": "number",
+            "number": 1.0,
+            "unit": "ms"
+          }
+        },
+        {
+          "label": "Status",
+          "value": {
+            "value": "status",
+            "label": "running",
+            "tone": "active"
+          }
+        },
+        {
+          "label": "Time",
+          "value": {
+            "value": "time",
+            "when": "2026-08-29T09:14:02Z"
+          }
+        }
+      ]
+    },
+    {
+      "block": "table",
+      "title": "Table",
+      "columns": [
+        {
+          "label": "Note",
+          "align": "start"
+        }
+      ],
+      "rows": [
+        {
+          "cells": [
+            {
+              "value": "text",
+              "text": "one",
+              "link": null
+            }
+          ]
+        }
+      ],
+      "emptyText": "No notes yet."
+    },
+    {
+      "block": "list",
+      "title": "List",
+      "items": [
+        {
+          "value": "text",
+          "text": "one",
+          "link": null
+        }
+      ]
+    },
+    {
+      "block": "columns",
+      "blocks": [
+        {
+          "block": "text",
+          "text": "left"
+        },
+        {
+          "block": "text",
+          "text": "right"
+        }
+      ]
+    },
+    {
+      "block": "stack",
+      "blocks": [
+        {
+          "block": "text",
+          "text": "stacked"
+        }
+      ],
+      "gap": "medium"
+    },
+    {
+      "block": "card",
+      "blocks": [
+        {
+          "block": "text",
+          "text": "in a card"
+        }
+      ],
+      "title": "Card",
+      "description": "",
+      "actions": []
+    },
+    {
+      "block": "section",
+      "blocks": [
+        {
+          "block": "text",
+          "text": "in a section"
+        }
+      ],
+      "title": "Section",
+      "name": "catalog",
+      "follows": null
+    },
+    {
+      "block": "section",
+      "blocks": [
+        {
+          "block": "gate_controls",
+          "run": "run-example"
+        }
+      ],
+      "title": "Decision",
+      "name": "catalog_gate",
+      "follows": {
+        "subjectType": "note",
+        "subjectId": "0"
+      }
+    },
+    {
+      "block": "form",
+      "title": "Form",
+      "description": "",
+      "fields": [
+        {
+          "field": "text",
+          "name": "body",
+          "label": "Note",
+          "value": "",
+          "placeholder": "",
+          "helpText": "",
+          "isRequired": false
+        },
+        {
+          "field": "text_area",
+          "name": "detail",
+          "label": "Detail",
+          "value": "",
+          "placeholder": "",
+          "helpText": "",
+          "isRequired": false,
+          "rows": 4
+        },
+        {
+          "field": "number",
+          "name": "budget",
+          "label": "Budget",
+          "value": null,
+          "minimum": null,
+          "maximum": null,
+          "step": null,
+          "helpText": "",
+          "isRequired": false
+        },
+        {
+          "field": "select",
+          "name": "severity",
+          "label": "Severity",
+          "options": [
+            {
+              "value": "low",
+              "label": "Low"
+            }
+          ],
+          "value": "",
+          "helpText": "",
+          "isRequired": false
+        },
+        {
+          "field": "multi_select",
+          "name": "tags",
+          "label": "Tags",
+          "options": [
+            {
+              "value": "low",
+              "label": "Low"
+            }
+          ],
+          "value": [],
+          "helpText": "",
+          "isRequired": false
+        },
+        {
+          "field": "radio",
+          "name": "decision",
+          "label": "Decision",
+          "options": [
+            {
+              "value": "low",
+              "label": "Low"
+            }
+          ],
+          "value": "",
+          "helpText": "",
+          "isRequired": false
+        },
+        {
+          "field": "checkbox",
+          "name": "notify",
+          "label": "Notify the owner",
+          "value": false,
+          "helpText": "",
+          "isRequired": false
+        }
+      ],
+      "action": {
+        "block": "action",
+        "label": "Save",
+        "operation": "write_note",
+        "arguments": {},
+        "tone": "primary",
+        "confirm": "",
+        "refresh": "page",
+        "link": null
+      }
+    },
+    {
+      "block": "action",
+      "label": "Write a note",
+      "operation": "write_note",
+      "arguments": {},
+      "tone": "default",
+      "confirm": "",
+      "refresh": "page",
+      "link": null
+    }
+  ],
+  "follows": null
+}

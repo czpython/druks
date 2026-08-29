@@ -375,9 +375,12 @@ The shell resolves the operation to its method and URL. The author writes no
 URL.
 
 Druks indexes every route the app mounts by its `operation_id` at boot. Two
-routes in one app with the same `operation_id` are a boot error.
+routes in one app with the same `operation_id` are a boot error, and so is one
+route answering two methods under it.
 
-Druks validates the reference when it builds the page. Two failures answer
+An `Action` exists only once a page function has run, so the reference is
+checked when Druks builds the page — the earliest moment it exists. Two
+failures answer
 with the page-read error, and each one names the operation:
 
 - No route carries that `operation_id`.
@@ -1356,7 +1359,8 @@ dashboard.
 
 | Failure | Answer |
 | --- | --- |
-| A page function raises | The page API answers 500 with the platform envelope. The shell shows an app-scoped error and a retry control. |
+| A page function raises | The page API answers 500 and `PAGE_FAILED`, naming the app and the page. What the app's own code said stays in the process log: it can carry a query, a URL, or a credential. The shell shows an app-scoped error and a retry control. |
+| A page answers with something that is not a `Page` | The same answer, saying what it answered with. |
 | A payload fails validation | The shell shows an app-scoped error. It renders the rest of the dashboard. |
 | An unknown discriminator | The shell shows an app-scoped error and names the block. |
 | A stream drops | The shell reconnects. The last good snapshot stays on screen. |

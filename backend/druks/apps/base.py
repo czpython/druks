@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field, SecretStr
 
 from druks.events.models import Event
 from druks.models import StoredSubject
-from druks.ui.exceptions import PageRouteError
+from druks.ui.exceptions import PageContractError, PageReadError, PageRouteError
 from druks.user_settings.models import SettingsOverride
 
 from .exceptions import AppRouteConflict, AppSubjectContractError, SettingsDeclarationError
@@ -405,7 +405,7 @@ class App:
                 # The landing page's route is "/", and its snapshot answers at
                 # the bare /pages.
                 declaration.route.rstrip("/"),
-                cls._page_endpoint(declaration.function, operations),
+                cls._page_endpoint(declaration, operations),
                 methods=["GET"],
                 response_model=Page,
                 response_model_by_alias=True,
@@ -414,15 +414,30 @@ class App:
         return router
 
     @classmethod
-    def _page_endpoint(cls, project, operations: "dict[str, Operation]"):
+    def _page_endpoint(cls, declaration: "PageRoute", operations: "dict[str, Operation]"):
         """``wraps`` keeps the page function's signature, so FastAPI still
         validates every route parameter."""
+        from druks.ui import Page
 
-        @wraps(project)
+        @wraps(declaration.function)
         async def read_page(**parameters):
-            page = await project(**parameters)
-            for action in page.iter_actions():
-                action.check_operation(cls.name, operations)
+            try:
+                page = await declaration.function(**parameters)
+            except Exception as error:
+                raise PageReadError(
+                    cls.name, declaration.name, f"its own code raised {type(error).__name__}"
+                ) from error
+            if not isinstance(page, Page):
+                raise PageContractError(
+                    cls.name,
+                    declaration.name,
+                    f"it answered with {type(page).__name__}, not a Page",
+                )
+            try:
+                for action in page.iter_actions():
+                    action.check_operation(cls.name, operations)
+            except ValueError as error:
+                raise PageContractError(cls.name, declaration.name, str(error)) from error
             return page
 
         return read_page

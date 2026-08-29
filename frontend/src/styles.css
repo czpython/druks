@@ -2649,3 +2649,4 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
 .dui-action-primary { border-color: var(--bucket-run); color: var(--bucket-run); }
 .dui-action-danger { border-color: var(--outcome-failed); color: var(--outcome-failed); }
 .dui-action-broken { color: var(--text-faint); text-decoration: line-through; cursor: help; }
+.review-note-label { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-dim); margin-bottom: 5px; }

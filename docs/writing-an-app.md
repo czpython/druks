@@ -1304,6 +1304,16 @@ operation the app does not declare, a GET route, or a route with a query
 parameter fails the page read: a GET is a read, and an action fills path
 parameters and a JSON body.
 
+### What V1 leaves out
+
+V1 has no `Tabs` block, no accordion, no expandable table row, no modal, no
+inline reveal form, and no general client-state API. Static child pages already
+give tabs, and the URL holds the current one.
+
+`MoneyValue`, `PercentValue`, `DurationValue`, and date and time input fields
+are agreed and named. Druks adds each one when an app needs it; ask rather than
+working around it.
+
 The [Druks UI contract](druks-ui.md) holds the block, value, and field catalog,
 actions, and liveness.
 
@@ -1318,14 +1328,16 @@ summary fields form the board row.
 No additional declaration is necessary.
 The shell derives the switcher label from `name` (underscores become spaces).
 
-An app that needs full control of its interface ships a frontend instead. Its
-pages are its own JavaScript, so it declares its own tabs there and leaves
-`App.navigation` empty.
+An app that needs full control of its interface ships a frontend instead — the
+escape hatch, not the ordinary path. Its pages are its own JavaScript, so it
+declares its own tabs there and leaves `App.navigation` empty. The scaffold
+writes no JavaScript and no `dist/`; add one only when the block catalog cannot
+say what your app needs to say.
 
 The frontend is an ES module that the shell mounts
-inside its own document, below the chrome. The scaffold ships a placeholder
-`druks_night_watch/dist/entry.js`. Set the frontend build output to that `dist/`
-directory. The contract uses `shellApi: 1`:
+inside its own document, below the chrome. The scaffold writes none, so an app
+that takes this path creates `druks_night_watch/dist/` itself and points its
+frontend build output there. The contract uses `shellApi: 1`:
 
 - **Entry module:** `entry.js` exports `shellApi = 1` and `mount(el, ctx)`. The function renders into
   `el` and returns a dispose function. A missing `mount` or a version mismatch
