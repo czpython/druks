@@ -3,6 +3,101 @@
 All notable changes to Druks. Versions follow [semantic versioning](https://semver.org);
 while Druks is pre-1.0, a minor bump may break compatibility.
 
+## [0.4.0] — 2026-08-29
+
+### Added
+
+- **Files are a platform primitive.** An agent contract declares a `File` field.
+  Druks pulls the file out of the sandbox, stores immutable bytes under a stable
+  id, and serves it at `/api/files/{id}` behind the identity gate — images, PDF,
+  and plain text inline, everything else as a download, validated with a SHA-256
+  ETag. An app keeps the reference on its own row with `FileField` and decides
+  when to delete it. A file can also arrive as a user upload, not only as an
+  agent output. Apps write no transport and no file routes.
+- **A workflow declares the sandbox it needs.** `sandbox = Sandbox(setup="sandboxes/build.sh")`
+  ships the environment as a plain shell file next to the app. Drukbox builds a
+  reusable template from the platform base and that script, identified by content
+  hash, and a run that waits for the build shows a sandbox-building phase. App
+  authors do not name provider images.
+- **Background work runs as a task.** `@task` is the lighter door next to a
+  workflow: a durable, replay-recoverable function with no run row, no timeline,
+  no subject, and no gates. `every="*/15 * * * *"` runs it on a cadence the code
+  owns, `.enqueue(**kwargs)` runs one from a route, a subscriber, or a workflow
+  body, and `retries=` sets the retry count for a task or a step. The token and
+  model refresh chores are tasks now, so they no longer fill the run timeline or
+  ask the operator for a cadence. Apps declare tasks in `tasks.py`.
+- **A browser session with no login.** An app can declare an anonymous session, so
+  a workflow borrows a real browser for a site that needs no sign-in.
+- **Every run shows its transcript.** Each run on the subject timeline has a
+  transcript toggle that loads on demand — the newest stays open — so a failure
+  further back is readable. A failed run always states a real reason: when the
+  crash left no failure record, the run reads the error from its last agent call,
+  and a crash before any agent call says exactly that instead of a bare "failed".
+- **A repo from a template.** `GitHubClient.create_repo_from_template()` generates
+  a private repo under an owner and returns its full name. A name already taken
+  returns that repo, so a retry after a partial failure is safe. The GitHub App
+  needs `Administration: write` on the target owner.
+- **The documentation site.** The guides are published at
+  [docs.druks.ai](https://docs.druks.ai), and `docs/` holds the same pages the
+  site builds from.
+
+### Changed
+
+- **The pluggable unit is an app, not an extension.** One word runs through the
+  whole surface: `from druks.apps import App, AppSettings, Secret`, packages
+  register under the `druks.apps` entry-point group and keep the class in
+  `<package>/app.py`, the roster and settings routes become `/api/apps` and
+  `/api/settings/apps` with `app`, `apps`, and `appSettings` wire fields, and
+  `druks create app` scaffolds the package. The ASGI modules move to
+  `druks.api.server` and `druks.mcp.server`. One migration renames the events
+  column and the settings-override key prefix in place. App slugs, the
+  `/api/<name>` and `/app/<name>` mounts, and GitHub App settings are unchanged.
+- **The ship app is `software_factory`.** The name now says what the app does:
+  a ticket becomes a pull request, planned, built, and gated on the operator
+  before it ships. The class, app name, durable kinds, MCP tool, routes, prompt
+  paths, and the per-repo config path follow. A data migration rewrites stored
+  kinds, event and file app tags, and settings keys, so history and saved
+  settings survive the rename.
+- **The ORM is async end to end.** Every session on the serving loop is a
+  SQLAlchemy `AsyncSession`: an async engine, a request-owned session committed
+  at the request boundary, a session per durable step, and async model and read
+  surfaces throughout. Sync engines remain only for one-shot processes —
+  migrate, the CLI, and the plain doctor checks.
+- **DBOS 2.30.** Queue dispatch and partitioned-queue reads are faster, recovery
+  is idempotent, and a duplicate `start()` now takes the holder's handle from
+  DBOS itself instead of looking the holder up through private API.
+- **Workspaces are their own module.** `druks.workspaces` holds the `Workspace`
+  base and `RepoWorkspace`. Both sat in the wrong layer: the base resolves OAuth,
+  folds the MCP registry, and commits the database — execution policy, not VM
+  plumbing — while `RepoWorkspace` was buried inside one app, out of reach of the
+  others. `druks.sandbox.datastructures` keeps only its data shapes.
+- **Images live under the repo namespace.** Every image this repo publishes is
+  `ghcr.io/czpython/druks/<name>` — `sandbox`, `sandbox-sbx`, and `browser`. The
+  old owner-level packages stay on GHCR, so an existing deployment keeps pulling
+  until it moves.
+- **The shared review gate reads app-neutral.** The in-app review component no
+  longer speaks in one app's words or claims that a note starts another plan
+  pass. It states only what holds for every gate: the note goes to the agent as
+  feedback.
+- **The webhook host names the addresses it binds.** `DRUKS_WEBHOOK_BIND` lists
+  them and defaults to every interface. A host that also terminates TLS with
+  `tailscale serve` no longer makes the edge crash-loop on a port 443 bind error.
+
+### Removed
+
+- **The packaged Linear MCP entry.** The catalog ships empty. An operator adds
+  the servers they want through the API, and MCP delivery no longer fails on a
+  packaged entry that holds no token.
+
+### Fixed
+
+- **The sbx sandbox provider works on a fresh deployment.** The sbx settings and
+  auth stores are mounted writable and created with the right owner before the
+  first compose command, so the CLI no longer panics on start and a credential
+  read no longer fails on a read-only store. The agent toolchain is published as
+  an sbx template that boots with no environment, so the first clone in a microVM
+  finds `git` instead of dying on `git: not found`.
+
 ## [0.3.0] — 2026-08-22
 
 ### Added
