@@ -2,12 +2,16 @@
 
 ## Reporting a vulnerability
 
-Do not open a public issue. Use GitHub's private
+Do not open a public issue. Use the private GitHub
 [security advisory form](https://github.com/czpython/druks/security/advisories/new)
-and include the affected version or commit, impact, reproduction steps, and any
-suggested mitigation.
+and include this information:
 
-You should receive an acknowledgement within five business days. We will keep
-the report private while validating it, preparing a fix, and agreeing on a
-coordinated disclosure date. Please do not access data that is not yours or
-disrupt a running service while testing.
+- The affected version or commit
+- The impact
+- The reproduction steps
+- A suggested mitigation, if you have one.
+
+We will acknowledge the report within five business days. We will keep the
+report private during validation and repair. We will agree with you on a
+disclosure date. Do not access data that is not yours. Do not disrupt an active
+service during your investigation.

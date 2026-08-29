@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Restart an already configured Druks checkout via Docker Compose. This shortcut
 # does not run setup or migrations; scripts/install.sh is the install and upgrade
-# path documented in deploy/README.md.
+# path documented in docs/deployment.md.
 #
 # One image is published from CI (.github/workflows/build-release-images.yml)
 # and pinned in compose.yaml via ${DRUKS_TAG:-latest}:

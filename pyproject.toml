@@ -42,7 +42,7 @@ dependencies = [
 ]
 
 [project.urls]
-Documentation = "https://github.com/czpython/druks/tree/main/docs"
+Documentation = "https://docs.druks.ai"
 Issues = "https://github.com/czpython/druks/issues"
 Repository = "https://github.com/czpython/druks"
 
