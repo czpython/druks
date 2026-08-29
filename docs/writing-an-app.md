@@ -1145,6 +1145,10 @@ runs `FLUSHDB` on the test index.
 
 ## Frontends
 
+An app declares its screens in Python and ships no JavaScript. The
+[Druks UI contract](druks-ui.md) holds the page declarations, the block,
+value, and field catalog, actions, and liveness.
+
 An installed app is visible in the dashboard without a custom UI. The shell
 reads the installed roster from `/api/apps`. It gives each app an entry in the
 app switcher and generic pages. Each subject type gets a board. Each subject
