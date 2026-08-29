@@ -1,4 +1,16 @@
-from druks.ui import Callout, Card, Divider, EmptyState, Link, Markdown, Page, Section, Text, page
+from druks.ui import (
+    Callout,
+    Card,
+    Divider,
+    EmptyState,
+    GateControls,
+    Link,
+    Markdown,
+    Page,
+    Section,
+    Text,
+    page,
+)
 
 from druks_field_notes.models import Note
 
@@ -66,10 +78,20 @@ async def new_note():
 async def note(note_id: int):
     found = await Note.get(note_id)
     if found:
+        status = await found.get_status()
+        # The region follows the note, so answering the gate refreshes it and
+        # the controls go away.
+        if status.gate:
+            decision = [GateControls(status.run)]
+        else:
+            decision = [Text("Nothing is waiting on you.")]
         return Page(
             title=f"Note {note_id}",
             description=found.gist or "Waiting for its gist.",
-            blocks=[Markdown(found.body)],
+            blocks=[
+                Markdown(found.body),
+                Section(title="Your decision", name="decision", follows=found, blocks=decision),
+            ],
         )
     return Page(title=f"Note {note_id}", blocks=[EmptyState("No such note")])
 

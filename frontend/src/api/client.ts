@@ -20,6 +20,8 @@ import type {
   UsageHistoryResponse,
   UsageResponse,
   UsageTodayResponse,
+  Gate,
+  GateAnswer,
   McpRegistryCandidate,
   PageSnapshot,
   McpServer,
@@ -188,6 +190,14 @@ export const api = {
   // ``path`` is the location under the app's own root: "" for the landing
   // page, "/notes/7" for a detail page.
   readPage: (app: string, path: string) => getJSON<PageSnapshot>(`/api/${app}/pages${path}`),
+  // A parked run's gate. The answer echoes ``parkedAt`` unchanged, so it names
+  // the exact question it answers; a run that re-parked rejects the stale one.
+  getGate: (run: string) => getJSON<Gate>(`/api/gates/${run}`),
+  answerGate: (run: string, answer: GateAnswer) =>
+    postJSON<{ run: string; parkedAt: string; result: string }>(
+      `/api/gates/${run}/answer`,
+      answer,
+    ),
   artifact: (id: string) => getJSON<ArtifactContent>(`/api/artifacts/${id}`),
   resumeRun: (
     runId: string,

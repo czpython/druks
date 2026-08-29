@@ -1,6 +1,10 @@
+from datetime import UTC, datetime
+
 import httpx
 import pytest
+from druks.testing import seed_run
 from druks_field_notes.models import Note
+from druks_field_notes.workflows import Summarize
 
 
 @pytest.fixture
@@ -102,3 +106,36 @@ async def test_an_undeclared_page_path_answers_404(druks_client: httpx.AsyncClie
     response = await druks_client.get("/api/field_notes/pages/nowhere/at/all")
 
     assert response.status_code == 404
+
+
+async def test_a_page_carries_the_region_that_follows_its_subject(
+    druks_client: httpx.AsyncClient, note: Note
+):
+    page = (await druks_client.get(f"/api/field_notes/pages/notes/{note.id}")).json()
+
+    region = page["blocks"][1]
+    assert region["block"] == "section"
+    assert region["name"] == "decision"
+    assert region["follows"] == {"subjectType": "note", "subjectId": str(note.id)}
+    assert region["blocks"][0]["block"] == "text"
+
+
+async def test_a_parked_run_puts_gate_controls_in_the_followed_region(
+    druks_client: httpx.AsyncClient, druks_db, note: Note
+):
+    run = await seed_run(
+        druks_db,
+        kind=Summarize.kind,
+        subject=note,
+        state="parked",
+        input_gate="review",
+        input_request={"presentation": "in_app", "controls": ["approve"], "questions": []},
+    )
+    run.input_requested_at = datetime.now(UTC)
+    await druks_db.flush()
+
+    page = (await druks_client.get(f"/api/field_notes/pages/notes/{note.id}")).json()
+
+    region = page["blocks"][1]
+    assert region["follows"] == {"subjectType": "note", "subjectId": str(note.id)}
+    assert region["blocks"] == [{"block": "gate_controls", "run": run.id}]

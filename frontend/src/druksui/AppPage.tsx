@@ -1,24 +1,70 @@
-import { useQuery } from '@tanstack/react-query'
-import type { ReactNode } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useCallback, useMemo, useRef, type ReactNode } from 'react'
 import { Link as RouteLink, useLocation } from 'wouter'
 
 import { api } from '../api/client'
+import type { Follows, PageSnapshot } from '../api/types'
 import { EmptyState } from '../components/EmptyState'
 import { Page } from '../components/Page'
 import { AppSurface } from './AppSurface'
 import { Blocks } from './Blocks'
-import { hrefUnder, isDetail, PagesContext, parentOf, tabsFor } from './pages'
+import { followedSubjects, hrefUnder, isDetail, mergeRegions, PagesContext, parentOf, tabsFor } from './pages'
+import { SubjectStream } from './SubjectStream'
+
+// The wait before each attempt at one refresh. Three tries, then the page
+// keeps what it had until the subject changes again.
+const REFRESH_WAITS = [0, 300, 1200]
 
 /** One page an app declared in Python, rendered by the shell. */
 export function AppPage({ app, page }: { app: string; page: string }) {
   const [location] = useLocation()
+  const queryClient = useQueryClient()
   const roster = useQuery({ queryKey: ['apps'], queryFn: api.listApps, staleTime: 60_000 })
   const pages = roster.data?.find((entry) => entry.name === app)?.pages ?? []
   const path = location.slice(`/${app}`.length)
+  const key = useMemo(() => ['page', app, path], [app, path])
   const snapshot = useQuery({
-    queryKey: ['page', app, path],
+    queryKey: key,
     queryFn: () => api.readPage(app, path),
+    // The stream is what keeps this page fresh. Without this, a background
+    // refetch would write the cache outside the numbered reads below and could
+    // land after a newer snapshot.
+    staleTime: Infinity,
   })
+
+  // Every read gets a number, per subject: a read that lands after a newer read
+  // of the same subject is stale, while another subject's read is not.
+  const latest = useRef(new Map<string, number>())
+  const reread = useCallback(
+    async (subject: Follows) => {
+      const watched = `${subject.subjectType}/${subject.subjectId}`
+      const mine = (latest.current.get(watched) ?? 0) + 1
+      latest.current.set(watched, mine)
+      // The stream repeats nothing, so a read that fails would leave the page
+      // stale until the subject changes again. Back off and try again, still
+      // numbered, so a newer read still wins.
+      for (const wait of REFRESH_WAITS) {
+        if (wait) await new Promise((resume) => setTimeout(resume, wait))
+        const fresh = await api.readPage(app, path).catch(() => undefined)
+        if (mine !== latest.current.get(watched)) return
+        if (fresh) {
+          queryClient.setQueryData(key, (previous?: PageSnapshot) =>
+            previous ? mergeRegions(previous, fresh, subject) : fresh,
+          )
+          // A snapshot can open, change, or close a gate on a run this page
+          // already shows, so the gates read themselves again.
+          void queryClient.invalidateQueries({ queryKey: ['gate'] })
+          return
+        }
+      }
+    },
+    [app, path, key, queryClient],
+  )
+
+  const followed = useMemo(
+    () => (snapshot.data ? followedSubjects(snapshot.data) : []),
+    [snapshot.data],
+  )
 
   if (snapshot.isLoading) {
     return (
@@ -49,6 +95,14 @@ export function AppPage({ app, page }: { app: string; page: string }) {
         })
       }
     >
+      {followed.map((subject) => (
+        <SubjectStream
+          key={`${subject.subjectType}/${subject.subjectId}`}
+          app={app}
+          subject={subject}
+          onSnapshot={reread}
+        />
+      ))}
       <PagesContext.Provider value={{ app, pages }}>
         <Page className="dui-page">
           {parent && (
