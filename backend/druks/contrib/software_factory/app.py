@@ -55,9 +55,8 @@ class SoftwareFactory(App):
     prefix_tables = False
     icon = "factory"
     description = (
-        "Each stage of the build pipeline runs as its own agent. An agent runs its own "
-        "model, or inherits its harness default — the backend dispatches the harness "
-        "from the model you pick."
+        "Turns a ticket into a pull request — it plans the change, builds it, and "
+        "gates on you before shipping."
     )
     navigation = [
         ("/software_factory", "active"),
