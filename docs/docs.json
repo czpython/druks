@@ -3,6 +3,11 @@
   "theme": "linden",
   "name": "Druks",
   "description": "Build and operate durable agent apps on your own infrastructure.",
+  "seo": {
+    "metatags": {
+      "canonical": "https://docs.druks.ai"
+    }
+  },
   "colors": {
     "primary": "#0F766E",
     "light": "#2DD4BF",
