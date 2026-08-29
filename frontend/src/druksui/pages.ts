@@ -1,14 +1,23 @@
 import { createContext } from 'react'
 
-import type { Block, Follows, PageEntry, PageSnapshot } from '../api/types'
+import type { Block, Follows, Operation, PageEntry, PageSnapshot } from '../api/types'
 
 // Which app's pages a block tree belongs to. A Link carries a page name, and
 // only this table turns that name into a URL — so the renderer reads it here
 // rather than threading it through every nested block.
-export const PagesContext = createContext<{ app: string; pages: PageEntry[] }>({
+export const PagesContext = createContext<{
+  app: string
+  pages: PageEntry[]
+  operations: Operation[]
+}>({
   app: '',
   pages: [],
+  operations: [],
 })
+
+// The named region a block sits in, if any. An action that refreshes its region
+// reads this to know which one.
+export const RegionContext = createContext('')
 
 /** Empty when an argument is missing, which reads as a broken link. */
 export function fillPath(path: string, args: Record<string, string>): string {
@@ -71,6 +80,7 @@ export function followedSubjects(snapshot: PageSnapshot): Follows[] {
   }
   take(snapshot.follows)
   for (const region of regionsIn(snapshot.blocks)) take(region.follows)
+
   return [...found.values()]
 }
 
@@ -106,21 +116,38 @@ function watches(follows: Follows | null, subject: Follows): boolean {
   )
 }
 
+/** Take one named region from ``fresh`` and put it in place of the one
+ * ``previous`` holds. What an action refreshes is the region it sits in, and
+ * nothing else on the page moves. */
+export function mergeRegion(
+  previous: PageSnapshot,
+  fresh: PageSnapshot,
+  name: string,
+): PageSnapshot {
+  const replacement = regionsIn(fresh.blocks).find((region) => region.name === name)
+  if (!replacement) return fresh
+  return { ...previous, blocks: replaceRegions(previous.blocks, new Map([[name, replacement]])) }
+}
+
 type Region = Extract<Block, { block: 'section' }>
 
 // A page snapshot is data an app produced, and this runs in the component body
 // where no error boundary can catch a throw. A shape that is not a block list
 // simply holds no regions; the renderer is where the app hears about it.
+// Every block that holds other blocks; a region can sit inside any of them.
+function inside(block: Block): Block[] | undefined {
+  if (block.block === 'section' || block.block === 'card') return block.blocks
+  if (block.block === 'stack' || block.block === 'columns') return block.blocks
+  return undefined
+}
+
 function regionsIn(blocks: Block[]): Region[] {
   if (!Array.isArray(blocks)) return []
   const found: Region[] = []
   for (const block of blocks) {
-    if (block.block === 'section') {
-      if (block.follows) found.push(block)
-      found.push(...regionsIn(block.blocks))
-    } else if (block.block === 'card') {
-      found.push(...regionsIn(block.blocks))
-    }
+    if (block.block === 'section' && block.name) found.push(block)
+    const nested = inside(block)
+    if (nested) found.push(...regionsIn(nested))
   }
   return found
 }
@@ -136,7 +163,15 @@ function replaceRegions(blocks: Block[], replacements: Map<string, Region>): Blo
         return fresh
       }
     }
-    if (block.block !== 'section' && block.block !== 'card') return block
+    // Only a block that holds blocks can hold a region.
+    if (
+      block.block !== 'section' &&
+      block.block !== 'card' &&
+      block.block !== 'stack' &&
+      block.block !== 'columns'
+    ) {
+      return block
+    }
     const inner = replaceRegions(block.blocks, replacements)
     // Nothing under this block moved, so hand back the block itself: React
     // sees the same object and renders none of it again.

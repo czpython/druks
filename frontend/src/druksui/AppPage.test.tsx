@@ -26,6 +26,7 @@ const ROSTER = [
     subjectTypes: ['note'],
     hasFrontend: false,
     navigation: [['/field_notes', 'notes']],
+    operations: [],
     pages: [
       { name: 'notes', label: 'notes', path: '/field_notes', parent: '', order: 0 },
       { name: 'new_note', label: 'new note', path: '/field_notes/notes/new', parent: '', order: 2 },

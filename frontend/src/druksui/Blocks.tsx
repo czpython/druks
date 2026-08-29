@@ -1,12 +1,13 @@
 import { useContext } from 'react'
 import { Link as RouteLink } from 'wouter'
 
-import type { Block, Link } from '../api/types'
+import type { Action, Block, Link } from '../api/types'
 import { Markdown } from '../components/Markdown'
 import { GateControls } from './GateControls'
 import { Chart, Facts, ImageGallery, List, Metrics, Table } from './DataBlocks'
+import { ActionButton, Form } from './Form'
 import { Files, Image, Progress, Timeline } from './RunBlocks'
-import { fillPath, PagesContext } from './pages'
+import { fillPath, PagesContext, RegionContext } from './pages'
 
 export function Blocks({ blocks }: { blocks: Block[] }) {
   return (
@@ -28,6 +29,17 @@ function BlockContent({ block }: { block: Block }) {
       return <hr className="dui-divider" />
     case 'link':
       return <LinkControl link={block} />
+    case 'action':
+      return <ActionButton action={block} />
+    case 'form':
+      return (
+        <Form
+          title={block.title}
+          description={block.description}
+          fields={block.fields}
+          action={block.action}
+        />
+      )
     case 'gate_controls':
       return <GateControls run={block.run} />
     case 'timeline':
@@ -119,7 +131,10 @@ function BlockContent({ block }: { block: Block }) {
       return (
         <section className="dui-section" data-region={block.name || undefined}>
           {block.title && <h2 className="dui-section-title">{block.title}</h2>}
-          <Blocks blocks={block.blocks} />
+          {/* An action inside reads this to know which region it refreshes. */}
+          <RegionContext.Provider value={block.name}>
+            <Blocks blocks={block.blocks} />
+          </RegionContext.Provider>
         </section>
       )
     default:
@@ -133,13 +148,17 @@ function BlockContent({ block }: { block: Block }) {
   }
 }
 
-function LinkRow({ links }: { links: Link[] }) {
+function LinkRow({ links }: { links: (Action | Link)[] }) {
   if (links.length === 0) return null
   return (
     <div className="dui-links">
-      {links.map((link, index) => (
-        <LinkControl key={index} link={link} />
-      ))}
+      {links.map((control, index) =>
+        control.block === 'action' ? (
+          <ActionButton key={index} action={control} />
+        ) : (
+          <LinkControl key={index} link={control} />
+        ),
+      )}
     </div>
   )
 }

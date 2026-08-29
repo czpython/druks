@@ -97,13 +97,13 @@ const CONTROL_LABEL: Record<string, string> = {
 export function InAppReview({
   runId,
   ask,
-  submit,
+  send,
 }: {
   runId: string
   ask: InputRequest
   // How the answer reaches the platform. A page's GateControls answers through
   // the gate route with the run's parkedAt; without one, this resumes the run.
-  submit?: (answer: {
+  send?: (answer: {
     control: string
     answers: Record<string, string>
     note: string
@@ -144,8 +144,8 @@ export function InAppReview({
     try {
       // The run un-parks; the subject's SSE stream re-emits the snapshot and this
       // banner clears itself.
-      if (submit) {
-        await submit(answer)
+      if (send) {
+        await send(answer)
       } else {
         await api.resumeRun(runId, answer)
       }

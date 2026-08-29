@@ -20,7 +20,9 @@ export function AppPage({ app, page }: { app: string; page: string }) {
   const [location] = useLocation()
   const queryClient = useQueryClient()
   const roster = useQuery({ queryKey: ['apps'], queryFn: api.listApps, staleTime: 60_000 })
-  const pages = roster.data?.find((entry) => entry.name === app)?.pages ?? []
+  const installed = roster.data?.find((entry) => entry.name === app)
+  const pages = installed?.pages ?? []
+  const operations = installed?.operations ?? []
   const path = location.slice(`/${app}`.length)
   const key = useMemo(() => ['page', app, path], [app, path])
   const snapshot = useQuery({
@@ -103,7 +105,7 @@ export function AppPage({ app, page }: { app: string; page: string }) {
           onSnapshot={reread}
         />
       ))}
-      <PagesContext.Provider value={{ app, pages }}>
+      <PagesContext.Provider value={{ app, pages, operations }}>
         <Page className="dui-page">
           {parent && (
             <RouteLink href={hrefUnder(location, parent)} className="breadcrumb dui-parent">

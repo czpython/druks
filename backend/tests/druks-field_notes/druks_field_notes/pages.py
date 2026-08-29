@@ -117,9 +117,27 @@ async def new_note():
     return ui.Page(
         "Write a note",
         blocks=[
-            ui.Callout("Notes arrive through the API.", tone="info", title="Not here yet"),
+            ui.Callout("An agent writes its gist.", tone="info", title="One line is enough"),
             ui.Divider(),
-            ui.Markdown("Post a note to `/api/field_notes/notes`."),
+            ui.Form(
+                title="New note",
+                description="What did you see?",
+                fields=[
+                    ui.TextAreaField(
+                        name="body",
+                        label="Note",
+                        placeholder="Fan noise on rack 3.",
+                        is_required=True,
+                        rows=3,
+                    )
+                ],
+                action=ui.Action(
+                    label="Save",
+                    operation="write_note",
+                    tone="primary",
+                    link=ui.Link("Notes", page="notes"),
+                ),
+            ),
         ],
     )
 
@@ -140,6 +158,19 @@ async def note(note_id: int):
             description=found.gist or "Waiting for its gist.",
             blocks=[
                 ui.Markdown(found.body),
+                ui.Card(
+                    title="Gist",
+                    description=found.gist or "Waiting for its gist.",
+                    actions=[
+                        ui.Action(
+                            label="Clear the gist",
+                            operation="clear_gist",
+                            arguments={"note_id": found.id},
+                            tone="danger",
+                            confirm="Clear this note's gist? An agent has to read it again.",
+                        )
+                    ],
+                ),
                 ui.Section(title="Your decision", name="decision", follows=found, blocks=decision),
             ],
         )

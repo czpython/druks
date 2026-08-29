@@ -1254,6 +1254,56 @@ context, and its artifact from the parked run, and submits the operator's
 answer with the run's `parkedAt`. A `GateControls` block must sit inside
 something that follows a subject, or an answered gate would stay on screen.
 
+### Let an operator act
+
+A page acts through the app's own routes. Give the route an `operation_id`, and
+name it from an `Action`:
+
+```python
+# routes.py
+@router.post("/notes", status_code=201, operation_id="write_note")
+async def write_note(body: Annotated[str, Body(embed=True)]) -> dict[str, int]:
+    note = await Note.create(body=body)
+    await Summarize.dispatch(note=note)
+    return {"id": note.id}
+```
+
+```python
+# pages.py
+@ui.page("/notes/new")
+async def new_note():
+    return ui.Page(
+        "Write a note",
+        blocks=[
+            ui.Form(
+                title="New note",
+                fields=[ui.TextAreaField(name="body", label="Note", is_required=True, rows=3)],
+                action=ui.Action(
+                    label="Save",
+                    operation="write_note",
+                    tone="primary",
+                    link=ui.Link("Notes", page="notes"),
+                ),
+            )
+        ],
+    )
+```
+
+The shell resolves the operation to its method and URL, so the author writes no
+URL. It sends the action's `arguments` and the field values as one object, fills
+the route's path parameters from it, and posts the rest as the body. Your route
+keeps the identity gate, and its Pydantic and FastAPI errors come back on the
+fields they belong to.
+
+Once the operation answers, the action does what it declared: `refresh` reads
+the page or the region again, `link` navigates, and `confirm` asks the operator
+first. A `tone` of `danger` says so on screen.
+
+Two routes of one app cannot share an `operation_id`. An action that names an
+operation the app does not declare, a GET route, or a route with a query
+parameter fails the page read: a GET is a read, and an action fills path
+parameters and a JSON body.
+
 The [Druks UI contract](druks-ui.md) holds the block, value, and field catalog,
 actions, and liveness.
 
@@ -1315,7 +1365,7 @@ Import from concern namespaces, not from `druks.durable` or internal modules:
 | `druks.sandbox` | `Sandbox` |
 | `druks.db` | `Base`, `StoredSubject`, `db_session` |
 | `druks.schemas` | `BaseResponse` |
-| `druks.ui` | `Block`, `Callout`, `Card`, `Chart`, `ChartSeries`, `Columns`, `Divider`, `EmptyState`, `Fact`, `Facts`, `FileSummary`, `Files`, `Follows`, `GateControls`, `Image`, `ImageGallery`, `Link`, `List`, `Markdown`, `Metric`, `Metrics`, `NumberValue`, `Page`, `Progress`, `ProgressStep`, `Section`, `Stack`, `StatusValue`, `Table`, `TableColumn`, `TableRow`, `Text`, `TextValue`, `TimeValue`, `Timeline`, `TimelineItem`, `Value`, `page` |
+| `druks.ui` | `Action`, `Block`, `Callout`, `Card`, `Chart`, `ChartSeries`, `CheckboxField`, `Columns`, `Divider`, `EmptyState`, `Fact`, `Facts`, `Field`, `FileSummary`, `Files`, `Follows`, `Form`, `GateControls`, `Image`, `ImageGallery`, `Link`, `List`, `Markdown`, `Metric`, `Metrics`, `MultiSelectField`, `NumberField`, `NumberValue`, `Option`, `Page`, `Progress`, `ProgressStep`, `RadioField`, `Section`, `SelectField`, `Stack`, `StatusValue`, `Table`, `TableColumn`, `TableRow`, `Text`, `TextAreaField`, `TextField`, `TextValue`, `TimeValue`, `Timeline`, `TimelineItem`, `Value`, `page` |
 | `druks.signals` | `subscribe` |
 | `druks.events` | `Event` |
 | `druks.files` | `File`, `FileField` |

@@ -1,4 +1,5 @@
-from typing import Annotated, Literal
+from collections.abc import Iterable
+from typing import Annotated, Any, Literal
 
 from pydantic import (
     AwareDatetime,
@@ -12,6 +13,8 @@ from pydantic import (
 )
 
 from druks.schemas import BaseResponse
+
+from .fields import Field as FormField
 
 
 def _subject_identity(value):
@@ -45,10 +48,14 @@ class PageBlock(BaseResponse):
 
     block: str
 
-    def check_placement(self, *, followed: bool, regions: set[str]) -> None:
+    def check_placement(self, *, followed: bool, regions: set[str], region: str = "") -> None:
         """Raise when this block cannot sit where the page put it. ``followed``
-        says whether any ancestor watches a subject; ``regions`` collects the
-        region names already taken."""
+        says whether any ancestor watches a subject, ``region`` names the nearest
+        one around it, and ``regions`` collects the region names already taken."""
+
+    def iter_actions(self) -> "Iterable[Action]":
+        """Every action this block offers, however deep."""
+        return ()
 
 
 class BlockParent(PageBlock):
@@ -56,9 +63,13 @@ class BlockParent(PageBlock):
 
     blocks: list["Block"] = Field(default_factory=list)
 
-    def check_placement(self, *, followed: bool, regions: set[str]) -> None:
+    def check_placement(self, *, followed: bool, regions: set[str], region: str = "") -> None:
         for block in self.blocks:
-            block.check_placement(followed=followed, regions=regions)
+            block.check_placement(followed=followed, regions=regions, region=region)
+
+    def iter_actions(self) -> "Iterable[Action]":
+        for block in self.blocks:
+            yield from block.iter_actions()
 
 
 class Link(PageBlock):
@@ -80,6 +91,84 @@ class Link(PageBlock):
         if [bool(self.page), bool(self.url), bool(self.subject)].count(True) == 1:
             return self
         raise ValueError(f"Link {self.label!r} must set exactly one of page, url, or subject")
+
+
+class Action(PageBlock):
+    """A control that calls one of the app's own operations. ``operation`` is a
+    route's ``operation_id``; the shell resolves it to a method and a URL, so
+    the author writes no URL."""
+
+    block: Literal["action"] = "action"
+    label: str
+    operation: str
+    arguments: dict[str, Any] = Field(default_factory=dict)
+    tone: Literal["default", "primary", "danger"] = "default"
+    # Non-empty text asks the operator before the shell sends anything.
+    confirm: str = ""
+    # What happens once the operation answers. A ``link`` navigates, and then
+    # ``refresh`` does not apply.
+    refresh: Literal["none", "page", "region"] = "page"
+    link: Link | None = None
+
+    def iter_actions(self) -> "Iterable[Action]":
+        yield self
+
+    def check_placement(self, *, followed: bool, regions: set[str], region: str = "") -> None:
+        if self.refresh != "region" or region:
+            return
+        raise ValueError(
+            f"action {self.label!r} refreshes its region, and it sits in none. Put it in a "
+            'named Section, or refresh the page with refresh="page".'
+        )
+
+    def check_operation(self, app_name: str, operations) -> None:
+        """The operation must be one of the app's own writes."""
+        found = operations.get(self.operation)
+        if not found:
+            raise ValueError(
+                f"app {app_name!r} action {self.label!r} names operation "
+                f"{self.operation!r}, which none of its routes declares. This app declares "
+                f"{sorted(operations)}."
+            )
+        if found.method == "GET":
+            raise ValueError(
+                f"app {app_name!r} action {self.label!r} names {self.operation!r}, a GET "
+                "route. A GET is a read, so it can never be an action."
+            )
+
+
+class Form(PageBlock):
+    """Inputs and the action that submits them. The shell sends the action's
+    arguments and the field values as one object."""
+
+    block: Literal["form"] = "form"
+    title: str = ""
+    description: str = ""
+    fields: list[FormField] = Field(default_factory=list)
+    action: Action
+
+    def iter_actions(self) -> "Iterable[Action]":
+        yield self.action
+
+    def check_placement(self, *, followed: bool, regions: set[str], region: str = "") -> None:
+        self.action.check_placement(followed=followed, regions=regions, region=region)
+
+    @model_validator(mode="after")
+    def _one_name_for_each_value(self) -> "Form":
+        names = [one.name for one in self.fields]
+        repeated = sorted({name for name in names if names.count(name) > 1})
+        if repeated:
+            raise ValueError(
+                f"form {self.title!r} has two fields named {repeated}; one would take the "
+                "other's value. Give each field its own name."
+            )
+        taken = sorted(set(names) & set(self.action.arguments))
+        if taken:
+            raise ValueError(
+                f"form {self.title!r} has fields named {taken}, which its action already "
+                "carries as arguments. Send each value once."
+            )
+        return self
 
 
 class Text(PageBlock):
@@ -121,7 +210,15 @@ class EmptyState(PageBlock):
     block: Literal["empty_state"] = "empty_state"
     title: str
     description: str = ""
-    actions: list[Link] = Field(default_factory=list)
+    actions: list[Action | Link] = Field(default_factory=list)
+
+    def iter_actions(self) -> "Iterable[Action]":
+        for control in self.actions:
+            yield from control.iter_actions()
+
+    def check_placement(self, *, followed: bool, regions: set[str], region: str = "") -> None:
+        for control in self.actions:
+            control.check_placement(followed=followed, regions=regions, region=region)
 
     def __init__(self, title: str, **data):
         super().__init__(title=title, **data)
@@ -138,7 +235,7 @@ class GateControls(PageBlock):
     def __init__(self, run: str, **data):
         super().__init__(run=run, **data)
 
-    def check_placement(self, *, followed: bool, regions: set[str]) -> None:
+    def check_placement(self, *, followed: bool, regions: set[str], region: str = "") -> None:
         if followed:
             return
         raise ValueError(
@@ -436,7 +533,17 @@ class Card(BlockParent):
     block: Literal["card"] = "card"
     title: str = ""
     description: str = ""
-    actions: list[Link] = Field(default_factory=list)
+    actions: list[Action | Link] = Field(default_factory=list)
+
+    def iter_actions(self) -> "Iterable[Action]":
+        yield from super().iter_actions()
+        for control in self.actions:
+            yield from control.iter_actions()
+
+    def check_placement(self, *, followed: bool, regions: set[str], region: str = "") -> None:
+        super().check_placement(followed=followed, regions=regions, region=region)
+        for control in self.actions:
+            control.check_placement(followed=followed, regions=regions, region=region)
 
 
 class Section(BlockParent):
@@ -448,7 +555,7 @@ class Section(BlockParent):
     name: str = ""
     follows: Watched = None
 
-    def check_placement(self, *, followed: bool, regions: set[str]) -> None:
+    def check_placement(self, *, followed: bool, regions: set[str], region: str = "") -> None:
         if self.name in regions:
             raise ValueError(
                 f"this page has two regions named {self.name!r}; the shell replaces a region "
@@ -456,7 +563,11 @@ class Section(BlockParent):
             )
         if self.name:
             regions.add(self.name)
-        super().check_placement(followed=followed or bool(self.follows), regions=regions)
+        super().check_placement(
+            followed=followed or bool(self.follows),
+            regions=regions,
+            region=self.name or region,
+        )
 
     @model_validator(mode="after")
     def _named_when_followed(self) -> "Section":
@@ -488,7 +599,9 @@ Block = Annotated[
     | Table
     | List
     | Stack
-    | Columns,
+    | Columns
+    | Action
+    | Form,
     Field(discriminator="block"),
 ]
 

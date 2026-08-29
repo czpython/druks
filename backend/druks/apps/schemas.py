@@ -9,6 +9,12 @@ class PageEntry(BaseResponse):
     order: int
 
 
+class Operation(BaseResponse):
+    id: str
+    method: str
+    path: str
+
+
 class AppResponse(BaseResponse):
     name: str
     icon: str
@@ -20,3 +26,5 @@ class AppResponse(BaseResponse):
     navigation: list[tuple[str, str]]
     # In route-match order.
     pages: list[PageEntry]
+    # The app's non-GET operations, which an Action names.
+    operations: list[Operation]

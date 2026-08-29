@@ -1,8 +1,10 @@
+from collections.abc import Iterable
+
 from pydantic import Field, model_validator
 
 from druks.schemas import BaseResponse
 
-from .blocks import Block, Watched
+from .blocks import Action, Block, Watched
 
 
 class Page(BaseResponse):
@@ -23,3 +25,7 @@ class Page(BaseResponse):
         for block in self.blocks:
             block.check_placement(followed=bool(self.follows), regions=regions)
         return self
+
+    def iter_actions(self) -> "Iterable[Action]":
+        for block in self.blocks:
+            yield from block.iter_actions()
