@@ -1,4 +1,8 @@
-# Files
+---
+title: "Files"
+description: "Receive, pass, persist, serve, and delete files produced by agents."
+icon: "file"
+---
 
 Use `druks.files` when an agent produces a file that must outlive its
 sandbox. Druks pulls the file from the sandbox, stores immutable bytes under a

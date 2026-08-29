@@ -1,4 +1,9 @@
-# Releasing Druks
+---
+title: "Release Druks"
+description: "Publish Druks and install or roll back an immutable release."
+sidebarTitle: "Releasing"
+icon: "package"
+---
 
 Druks publishes the backend and sandbox as container images, and the Python
 distribution to PyPI. `main` is the edge channel: a successful main build updates
@@ -14,7 +19,7 @@ publishes the matching version tag and the immutable SHA tag; it does not move
 3. Review migrations and workflow replay compatibility. A container rollback
    does not downgrade Postgres or DBOS state.
 4. Update the version in `pyproject.toml` and add the release's section to
-   [the changelog](../CHANGELOG.md).
+   [the changelog](https://github.com/czpython/druks/blob/main/CHANGELOG.md).
 5. Merge the release change and record the resulting full commit SHA.
 
 Create a signed annotated tag from that exact commit:

@@ -1,4 +1,8 @@
-# Configuration
+---
+title: "Configuration"
+description: "Configure deployment settings, access control, harnesses, services, sandboxes, notifications, MCP servers, and skills."
+icon: "settings"
+---
 
 Druks has two authored configuration planes. Use `druks.toml` for process and
 deployment topology. Use the dashboard for operator choices that should change
@@ -22,7 +26,8 @@ byte-exact. The two files share no keys and no reader.
 
 `druks.toml` is the authority for authored process configuration. Environment
 variables are reserved for Compose-injected infrastructure such as database,
-Redis, data, and container paths. [`.env.example`](../.env.example) is the
+Redis, data, and container paths.
+[`.env.example`](https://github.com/czpython/druks/blob/main/.env.example) is the
 host-run development template for that environment plane.
 
 ## Deployment file
@@ -317,7 +322,7 @@ timezone.
 local install shape, `exe` selects the exe.dev + tailnet shape, and every other
 name selects the generic remote shape. Provider-specific credentials and host
 options live in `[sandbox.<provider>]` and are interpreted by Drukbox. See
-[deployment](../deploy/README.md) or [full local setup](full-local.md) for the
+[deployment](deployment.md) or [full local setup](full-local.md) for the
 topology.
 
 ## Notifications

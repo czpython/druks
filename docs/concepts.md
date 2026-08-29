@@ -1,4 +1,8 @@
-# Concepts and guarantees
+---
+title: "Concepts and guarantees"
+description: "Understand Druks ownership boundaries, durable recovery, gates, agents, events, and access topology."
+icon: "blocks"
+---
 
 ## The problem Druks solves
 

@@ -1,4 +1,9 @@
-# Development
+---
+title: "Develop Druks"
+description: "Set up the repository, understand its architecture, change the database, and run verification."
+sidebarTitle: "Development"
+icon: "code"
+---
 
 This guide is for changing Druks itself. The backend and Vite dev server run on
 the host; Compose supplies isolated Postgres and Redis.
@@ -143,10 +148,13 @@ Documentation-only changes should also run:
 
 ```bash
 git diff --check
+cd docs
+mint validate
+mint broken-links --check-anchors --check-redirects
 ```
 
-and a relative-link/anchor check over Markdown. The repository does not
-currently ship a Markdown linter or link-check command.
+Mintlify builds `docs/` directly. Its GitHub App owns deployments and pull-request
+previews; the repository does not need a docs-specific GitHub Actions workflow.
 
 ## Working with sandboxes
 
@@ -175,4 +183,5 @@ shell must already be in the SPA and register through
 `frontend/src/apps/index.ts`; a wheel cannot inject routes into that
 existing JavaScript bundle.
 
-See the [frontend guide](../frontend/README.md) before adding dashboard pages.
+See the [frontend guide](https://github.com/czpython/druks/blob/main/frontend/README.md)
+before adding dashboard pages.

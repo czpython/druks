@@ -1,4 +1,9 @@
-# Writing an app
+---
+title: "Writing an app"
+description: "Build a separately packaged Druks app with workflows, agents, gates, routes, models, and migrations."
+sidebarTitle: "Author guide"
+icon: "puzzle"
+---
 
 An app is a Python distribution installed into Druks. It owns domain behavior;
 Druks supplies durable execution and shared operating services. Read
@@ -1152,7 +1157,8 @@ inside its own document, below the chrome. The scaffold ships a placeholder
 The bundled Druks SPA also has a shared React app registry. Joining that
 shell requires compiling the app's UI module into the dashboard image;
 installing a Python wheel cannot mutate an existing JavaScript bundle. See the
-[frontend guide](../frontend/README.md) for that in-repository path.
+[frontend guide](https://github.com/czpython/druks/blob/main/frontend/README.md)
+for that in-repository path.
 
 ## Stable author imports
 

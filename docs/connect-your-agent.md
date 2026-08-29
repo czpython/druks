@@ -1,4 +1,8 @@
-# Connect your agent
+---
+title: "Connect your agent"
+description: "Connect Claude Code or Codex to the Druks MCP endpoint with a personal access token."
+icon: "plug"
+---
 
 Druks serves an MCP endpoint at `/mcp` (streamable HTTP, stateless). Its
 tools are derived from the agent-tagged API routes. The platform contributes
@@ -16,7 +20,7 @@ lifecycle and compromise handling.
 Use the public integrations host as the canonical address:
 `https://druks.example.com/mcp` (the same `DRUKS_WEBHOOK_HOST` listener that
 serves webhooks — see
-[expose the public surfaces](../deploy/README.md#4-expose-the-public-surfaces)).
+[expose the public surfaces](deployment.md#4-expose-the-public-surfaces)).
 The dashboard host also serves `/mcp` in front of its identity gate, and a
 [local install](full-local.md) answers at `http://127.0.0.1:8001/mcp`.
 

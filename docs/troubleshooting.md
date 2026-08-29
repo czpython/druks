@@ -1,4 +1,8 @@
-# Troubleshooting
+---
+title: "Troubleshooting"
+description: "Diagnose startup, access, webhook, harness, sandbox, gate, recovery, and app-loading failures."
+icon: "life-buoy"
+---
 
 Start with the non-mutating diagnostics:
 
@@ -102,7 +106,8 @@ docker compose logs --tail=200 caddy web
 ```
 
 The local `docker` shape intentionally skips Caddy; use
-<http://127.0.0.1:8001>. It runs with `[identity].mode = "none"` — no authentication —
+[http://127.0.0.1:8001](http://127.0.0.1:8001). It runs with
+`[identity].mode = "none"` — no authentication —
 and must remain loopback-only.
 
 ## Webhooks are not arriving

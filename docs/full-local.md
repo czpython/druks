@@ -1,4 +1,8 @@
-# Full local setup
+---
+title: "Full local setup"
+description: "Run Druks, Postgres, Redis, Drukbox, and local sandbox containers on one machine."
+icon: "laptop"
+---
 
 The local shape keeps every component on one machine:
 
@@ -65,7 +69,8 @@ curl -fsS http://127.0.0.1:8001/health
 ```
 
 Success means the Compose services are up and the health endpoint returns
-`{"status":"ok"}`. The dashboard is at <http://127.0.0.1:8001>.
+`{"status":"ok"}`. The dashboard is at
+[http://127.0.0.1:8001](http://127.0.0.1:8001).
 
 ## 3. Connect agent harnesses
 

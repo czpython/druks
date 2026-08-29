@@ -1,54 +1,68 @@
-# Druks documentation
+---
+title: "Druks"
+description: "The self-hosted runtime for durable agent apps."
+sidebarTitle: "Overview"
+---
 
-Druks has three distinct audiences: operators run the platform, app
-authors build apps on it, and contributors change Druks itself. Start
-with the route that matches what you are doing.
+Druks is the self-hosted runtime for agent apps that must survive restarts,
+cross process boundaries, wait for people, and leave an inspectable record of
+what happened.
 
-## Understand the platform
+Your app owns the domain: its workflows, agents, prompts, models, routes, and
+policy. Druks owns the operating substrate around it: durable execution,
+Postgres-backed state, queues, gates, sandboxes, harnesses, events, settings,
+and the shared dashboard.
 
-- [Concepts and guarantees](concepts.md) — platform versus app ownership,
-  durable execution, recovery, gates, events, harnesses, sandboxes, and the
-  access boundary.
-- [README](../README.md) — short project overview and installation entry point.
+## Why use Druks
 
-## Install and operate
+An ordinary agent script assumes its process stays alive. Real work does not:
+models take time, sandboxes disappear, providers retry webhooks, deployments
+restart workers, and a human decision can arrive hours later.
 
-- [Full local setup](full-local.md) — Druks and sandbox containers on one
-  machine.
-- [Deployment runbook](../deploy/README.md) — any Drukbox provider, install
-  shapes, upgrades, rollback, logs, and public ingress.
-- [Configuration](configuration.md) — `druks.toml`, process settings, dashboard
-  settings, integrations, MCP, skills, and stored-secret handling.
-- [Connect your agent](connect-your-agent.md) — the `/mcp` endpoint, personal
-  access tokens, and client configuration.
-- [Changelog](../CHANGELOG.md) — what each release added, changed, and removed.
-- [Troubleshooting](troubleshooting.md) — symptom-driven diagnosis for boot,
-  webhooks, harnesses, sandboxes, gates, and recovery.
+Druks records completed durable operations. When execution recovers, the
+workflow runs its orchestration again and reuses those recorded results at the
+same operation boundaries. Work interrupted inside an operation may run again,
+so external writes still require idempotency.
 
-## Build an app
+That gives an app a practical control loop:
 
-- [Writing an app](writing-an-app.md) — scaffold a separately
-  packaged app and use workflows, agents, gates, events, webhooks,
-  settings, routes, and migrations.
-- [Files](files.md) — receive files agents produce, pass them
-  between agents, persist references, serve content, and delete it.
-- [Concepts and guarantees](concepts.md#the-app-boundary) — the ownership
-  contract behind the author API.
+```text
+event or schedule
+      ↓
+durable workflow
+      ↓
+agent calls in isolated sandboxes
+      ↓
+typed result or human gate
+      ↓
+recovery, history, and operations in one place
+```
 
-## Contribute
+## What you can build
 
-- [Contributing](../CONTRIBUTING.md) — contribution process, change scope, and
-  pull-request expectations.
-- [Development](development.md) — local services, backend and frontend
-  processes, architecture map, migrations, and verification.
-- [Security policy](../SECURITY.md) — private vulnerability reporting.
-- [Release process](releasing.md) — immutable image tags, release checks, and
-  rollback inputs.
-- [Open-source cut](open-source-cut.md) — one-time clean-history publication and
-  public repository settings.
-- [Frontend guide](../frontend/README.md) — dashboard shell, compile-time
-  app UI registry, and frontend commands.
+Druks fits apps whose work spans several durable operations, external triggers,
+isolated agent calls, or waits for people and systems. Examples include software
+delivery, incident investigation, research review, approval flows, and recurring
+operational checks.
 
-The repository intentionally uses plain Markdown rather than a documentation
-framework. The pages above are the navigation; internal research and temporary
-design notes do not belong in this index.
+The bundled **Software Factory** app coordinates coding agents from a work item
+to a reviewed pull request. It demonstrates the framework; GitHub policy and
+software-delivery behavior belong to that app, not to Druks itself.
+
+## Choose a path
+
+- **Evaluate Druks:** complete the [quickstart](quickstart.md) on one machine.
+- **Understand recovery:** read [concepts and guarantees](concepts.md).
+- **Build an app:** start with [writing an app](writing-an-app.md).
+- **Run a production stack:** follow the [deployment runbook](deployment.md).
+- **Diagnose a failure:** use [troubleshooting](troubleshooting.md).
+
+## What Druks is not
+
+Druks is not a model SDK or a sandbox provider. It does not preserve a live
+agent process through a crash, resume at an arbitrary Python line, or guarantee
+exactly-once external side effects. Drukbox provisions hosts; model providers
+and harness subscriptions remain separate; your app still owns domain policy.
+
+Druks is under active development. Before 1.0, expect breaking changes and use
+`main` and `latest` as edge builds rather than stable releases.

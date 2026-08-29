@@ -20,7 +20,7 @@ workflow records the result of each completed durable operation in Postgres.
 After a restart or deploy, Druks replays the workflow and reuses those recorded
 results instead of repeating completed work. If the process was interrupted
 *inside* an operation, that operation may run again, so side effects still need
-idempotency. [Durability and recovery](https://github.com/czpython/druks/blob/main/docs/concepts.md#durability-and-recovery)
+idempotency. [Durability and recovery](https://docs.druks.ai/concepts#durability-and-recovery)
 explains the exact boundary.
 
 ## Install
@@ -42,9 +42,9 @@ curl -fsSL https://druks.ai/install.sh | bash
 
 That command follows the edge channel while Druks has no stable release. Once
 versioned releases exist, install the script and image from the same tag as
-described in [the release process](https://github.com/czpython/druks/blob/main/docs/releasing.md#install-an-immutable-version).
+described in [the release process](https://docs.druks.ai/releasing#install-an-immutable-version).
 Re-running is also the upgrade path. Then follow
-[full local setup](https://github.com/czpython/druks/blob/main/docs/full-local.md) to finish in
+[full local setup](https://docs.druks.ai/full-local) to finish in
 the dashboard: connect the agent harnesses and the GitHub App the bundled
 `software_factory` app acts through; a standalone app may have different
 integration requirements.
@@ -68,7 +68,7 @@ The installer is non-interactive: the first run writes `~/druks/druks.toml`
 with generated secrets, and when a remote shape still needs values only you
 know (provider credentials, identity edge) it prints that checklist and exits;
 set them in `druks.toml` and re-run the same command. See the
-[deployment runbook](https://github.com/czpython/druks/blob/main/deploy/README.md)
+[deployment runbook](https://docs.druks.ai/deployment)
 for prerequisites, access control, verification, and rollback.
 
 ```text
@@ -111,12 +111,11 @@ agents through tickets and GitHub pull requests, but GitHub PR orchestration is
 
 ## Documentation
 
-- **Evaluating Druks:** [Concepts and guarantees](https://github.com/czpython/druks/blob/main/docs/concepts.md)
-- **Installing locally:** [Full local setup](https://github.com/czpython/druks/blob/main/docs/full-local.md)
-- **Operating a remote stack:** [Deployment runbook](https://github.com/czpython/druks/blob/main/deploy/README.md)
-- **Configuring integrations and secrets:** [Configuration](https://github.com/czpython/druks/blob/main/docs/configuration.md)
-- **Building an app:** [Writing an app](https://github.com/czpython/druks/blob/main/docs/writing-an-app.md)
-- **Diagnosing a run or service:** [Troubleshooting](https://github.com/czpython/druks/blob/main/docs/troubleshooting.md)
+- **Start here:** [Quickstart](https://docs.druks.ai/quickstart)
+- **Understand recovery:** [Concepts and guarantees](https://docs.druks.ai/concepts)
+- **Build an app:** [Author guide](https://docs.druks.ai/writing-an-app)
+- **Operate Druks:** [Deployment](https://docs.druks.ai/deployment) and [configuration](https://docs.druks.ai/configuration)
+- **Diagnose a failure:** [Troubleshooting](https://docs.druks.ai/troubleshooting)
 - **Contributing to Druks:** [Contribution guide](https://github.com/czpython/druks/blob/main/CONTRIBUTING.md)
 - **Reporting a vulnerability:** [Security policy](https://github.com/czpython/druks/blob/main/SECURITY.md)
-- **All documentation:** [Documentation index](https://github.com/czpython/druks/blob/main/docs/index.md)
+- **All documentation:** [docs.druks.ai](https://docs.druks.ai)

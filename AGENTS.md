@@ -14,7 +14,7 @@ Start with `README.md`, then read only the material relevant to the task:
 - App contracts or the public author surface: `docs/writing-an-app.md`.
 - Configuration or environment variables: `docs/configuration.md`.
 - Local install and operations: `docs/full-local.md`.
-- Remote deployment: `deploy/README.md`.
+- Remote deployment: `docs/deployment.md`.
 - Failure diagnosis: `docs/troubleshooting.md`.
 - Backend contribution, migrations, or verification: `docs/development.md`.
 - The current migration head is `alembic heads` — not a scan of `backend/migrations/versions/`.
@@ -80,7 +80,7 @@ For app-surface changes, inspect the proof app at
 - `frontend/` — React 19 and Vite shared SPA; production output is repository-root
   `dist/` and is copied into the backend image.
 - `deploy/` — Compose files, the bind-mounted Caddy configuration, and sandbox
-  image inputs.
+  image inputs. Its public runbook lives at `docs/deployment.md`.
 - `docs/` — public concepts, configuration, author, operator, troubleshooting, and
   contributor guides.
 - `.github/workflows/` — PR checks and release image build.
