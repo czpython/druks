@@ -2559,3 +2559,70 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
 .dui-file:last-child { border-bottom: none; }
 .dui-file-preview { width: 40px; height: 40px; object-fit: cover; border-radius: 4px; border: 1px solid var(--border); }
 .run-truncated { font-size: 11.5px; padding: 6px 10px; border-top: 1px solid var(--border); }
+
+/* ---- Druks UI: rich data and layout ------------------------- */
+.dui-stack { display: flex; flex-direction: column; }
+.dui-stack-small { gap: 6px; }
+.dui-stack-medium { gap: 14px; }
+.dui-stack-large { gap: 28px; }
+.dui-columns { display: flex; gap: 18px; margin: 14px 0; }
+.dui-column { flex: 1 1 0; min-width: 0; }
+
+.dui-metric-row { display: flex; flex-wrap: wrap; gap: 28px; margin: 12px 0; }
+.dui-metric { margin: 0; }
+.dui-metric-label { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.08em; }
+.dui-metric-value { margin: 3px 0 0; font-size: 20px; color: var(--text); }
+.dui-metric-desc { margin: 3px 0 0; font-size: 11.5px; }
+
+.dui-fact-list { margin: 10px 0; display: grid; grid-template-columns: minmax(90px, max-content) 1fr; gap: 6px 16px; }
+.dui-fact { display: contents; }
+.dui-fact-label { font-size: 12px; }
+.dui-fact-value { margin: 0; font-size: 12.5px; }
+
+.dui-table-scroll { overflow-x: auto; }
+.dui-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.dui-table th { text-align: left; font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-dim); padding: 6px 12px 6px 0; border-bottom: 1px solid var(--border); font-weight: 600; }
+.dui-table td { padding: 7px 12px 7px 0; border-bottom: 1px solid var(--border-soft); }
+.dui-table [data-align='end'] { text-align: right; padding-right: 0; }
+.dui-table-empty { font-size: 12.5px; padding: 18px 0; }
+
+.dui-list { margin: 10px 0; padding-left: 18px; font-size: 12.5px; }
+.dui-list li { padding: 2px 0; }
+.dui-unit { font-size: 11px; }
+
+.dui-chart { margin: 16px 0; }
+.dui-chart-plot { display: block; width: 100%; height: 140px; }
+.dui-chart-zero { stroke: var(--border-loud); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.dui-chart-bar { fill: var(--bucket-run); }
+.dui-chart-line { fill: none; stroke: var(--bucket-run); stroke-width: 2; vector-effect: non-scaling-stroke; }
+.dui-chart-area { fill: var(--bucket-run); fill-opacity: 0.28; stroke: var(--bucket-run); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+.dui-chart-bar-1 { fill: var(--accent-violet); stroke: var(--accent-violet); }
+.dui-chart-bar-2 { fill: var(--bucket-plan); stroke: var(--bucket-plan); }
+.dui-chart-bar-3 { fill: var(--accent-amber); stroke: var(--accent-amber); }
+.dui-chart-swatch.dui-chart-bar-1 { background: var(--accent-violet); }
+.dui-chart-swatch.dui-chart-bar-2 { background: var(--bucket-plan); }
+.dui-chart-swatch.dui-chart-bar-3 { background: var(--accent-amber); }
+.dui-chart-swatch { background: var(--bucket-run); }
+.dui-chart-categories { display: flex; margin-top: 5px; }
+.dui-chart-label { flex: 1 1 0; font-size: 10px; text-align: center; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.dui-chart-legend { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 9px; font-size: 11.5px; color: var(--text-dim); }
+.dui-chart-key { display: inline-flex; align-items: center; gap: 6px; }
+.dui-chart-swatch { width: 9px; height: 9px; border-radius: 2px; }
+/* The chart's numbers stay in the page for a screen reader, out of sight. */
+.dui-chart-data { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+.dui-gallery-grid { list-style: none; margin: 10px 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 12px; }
+.dui-gallery-item { display: block; }
+.dui-gallery-item:focus-visible { outline: 2px solid var(--bucket-run); outline-offset: 3px; }
+.dui-gallery .dui-image { margin: 0; }
+
+/* A narrow screen scrolls the table sideways rather than restacking it: a
+   stacked row loses the header each cell belongs to, and a screen reader reads
+   the values without knowing what they are. */
+@media (max-width: 720px) {
+  .dui-columns { flex-direction: column; }
+  .dui-table { font-size: 12px; }
+  .dui-table th, .dui-table td { white-space: nowrap; padding-right: 16px; }
+}
+.dui-table-caption { text-align: left; caption-side: top; margin: 18px 0 8px; }
+.dui-chart-mark { stroke: none; }

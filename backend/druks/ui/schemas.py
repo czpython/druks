@@ -14,6 +14,9 @@ class Page(BaseResponse):
     blocks: list[Block] = Field(default_factory=list)
     follows: Watched = None
 
+    def __init__(self, title: str, **data):
+        super().__init__(title=title, **data)
+
     @model_validator(mode="after")
     def _blocks_sit_where_they_work(self) -> "Page":
         regions: set[str] = set()
