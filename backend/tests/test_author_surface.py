@@ -39,6 +39,7 @@ AUTHOR_SURFACE = {
     },
     "druks.db": {"Base", "StoredSubject", "db_session"},
     "druks.schemas": {"BaseResponse"},
+    "druks.ui": {"Page", "page"},
     "druks.signals": {"subscribe"},
     "druks.events": {"Event"},
     "druks.files": {"File", "FileField"},

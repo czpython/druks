@@ -9,9 +9,10 @@ from pydantic import BaseModel, Field, SecretStr
 
 from druks.events.models import Event
 from druks.models import StoredSubject
+from druks.ui.exceptions import PageRouteError
 from druks.user_settings.models import SettingsOverride
 
-from .exceptions import AppSubjectContractError, SettingsDeclarationError
+from .exceptions import AppRouteConflict, AppSubjectContractError, SettingsDeclarationError
 from .registry import agents as agent_registry
 from .registry import autodiscover
 from .registry import workflows as workflow_registry
@@ -29,6 +30,7 @@ if TYPE_CHECKING:
     from druks.doctor import CheckResult
     from druks.durable.datastructures import Subject
     from druks.durable.schemas import SubjectActivity
+    from druks.ui.page import PageRoute
     from druks.workflows import Workflow
 
     # A check the app owns returns a verdict on one of its own preconditions
@@ -40,6 +42,11 @@ if TYPE_CHECKING:
 # be a lowercase SQL/URL-safe identifier. Public: the scaffolder validates against the
 # same rule so ``druks create app`` can't emit a package that fails this check.
 NAME_RE = re.compile(r"^[a-z][a-z0-9_]*$")
+
+# Segments under ``/api/<name>`` the platform serves for every app: the
+# agent-call reads and the page snapshots. Neither a subject type nor an app
+# router can take one, so an app can never shadow a platform read.
+RESERVED_SEGMENTS = frozenset({"transcripts", "pages"})
 
 
 # A secret-kind settings field: unset is an empty ``SecretStr`` — falsy, so
@@ -84,10 +91,11 @@ class App:
     icon: ClassVar[str] = "box"
     # One-line blurb shown in the settings pane when the app is selected.
     description: ClassVar[str] = ""
-    # The app's appbar subnav tabs, as (url, name) pairs. The switcher
-    # label itself is derived from ``name`` (underscores become spaces), so an
-    # app only declares destinations, never a title.
-    navigation: ClassVar[list[tuple[str, str]]] = []
+    # The app's appbar subnav tabs, as page names in the order they show. Each
+    # names a static top-level page, and the tab wears that page's label, so an
+    # app never spells a label twice. An app that ships its own frontend
+    # declares its tabs there instead.
+    navigation: ClassVar[list[str]] = []
     # The app's top-level package, walked by ``discover``. Defaults to the
     # package the subclass is defined in — the ``<package>/app.py`` convention
     # means that's always the app's root — so it's only set explicitly when the
@@ -195,10 +203,10 @@ class App:
         stubs = {Subject.list_summaries.__func__, StoredSubject.list_summaries.__func__}
         declared = {workflow.subject for workflow in cls.workflows() if workflow.subject}
         for subject_class in declared:
-            if subject_class.subject_type == "transcripts":
+            if subject_class.subject_type in RESERVED_SEGMENTS:
                 raise AppSubjectContractError(
-                    f"{subject_class.__name__} is a 'transcripts' subject; that segment "
-                    "serves every app's agent-call reads. Name it for what it is"
+                    f"{subject_class.__name__} is a {subject_class.subject_type!r} subject; "
+                    "that segment serves every app's platform reads. Name it for what it is"
                 )
             if subject_class.list_summaries.__func__ in stubs:
                 raise AppSubjectContractError(
@@ -207,6 +215,35 @@ class App:
                     f"list_summaries() on {subject_class.__name__}."
                 )
         return sorted(declared, key=lambda subject_class: subject_class.subject_type)
+
+    @classmethod
+    def pages(cls) -> "list[PageRoute]":
+        """The pages this app declares, in route-match order — imported first,
+        like ``routers()`` does, so a headless caller reads the whole surface.
+        Empty for an app that ships no ``pages.py``. Raises
+        ``PageRouteError`` on a table a request could not resolve."""
+        from druks.ui.page import list_pages_for_app
+
+        cls.discover()
+        return list_pages_for_app(cls.name, cls.package)
+
+    @classmethod
+    def navigation_pages(cls) -> "list[PageRoute]":
+        """The pages ``navigation`` names, in the order it names them. The shell
+        shows one tab for each, labelled by the page."""
+        declared = {page.name: page for page in cls.pages()}
+        chosen = []
+        for name in cls.navigation:
+            page = declared.get(name)
+            if page and page.is_static and not page.parent:
+                chosen.append(page)
+                continue
+            raise PageRouteError(
+                f"app {cls.name!r} navigation names {name!r}. A navigation entry must be a "
+                f"static top-level page the shell can open with no parameters. This app "
+                f"declares {sorted(declared)}."
+            )
+        return chosen
 
     @classmethod
     def discover(cls) -> list[ModuleType]:
@@ -244,10 +281,10 @@ class App:
         contains is what ``druks init-db`` upgrades under
         ``alembic_version_<name>``."""
         package_dir = cls.package_dir()
-        if not package_dir:
-            return None
-        migrations = package_dir / "migrations"
-        return migrations if (migrations / "versions").is_dir() else None
+        if package_dir:
+            migrations = package_dir / "migrations"
+            return migrations if (migrations / "versions").is_dir() else None
+        return
 
     @classmethod
     def package_dir(cls) -> Path | None:
@@ -255,9 +292,9 @@ class App:
         assets (``migrations/``, ``dist/``) live. None when the package has no
         location (a namespace-less or frozen import)."""
         spec = importlib.util.find_spec(cls.package)
-        if not spec or not spec.submodule_search_locations:
-            return None
-        return Path(spec.submodule_search_locations[0])
+        if spec and spec.submodule_search_locations:
+            return Path(spec.submodule_search_locations[0])
+        return
 
     @classmethod
     def frontend_dist(cls) -> Path | None:
@@ -266,10 +303,10 @@ class App:
         is its marker. Inside the package, not the project root, so the same
         path resolves for a wheel and an editable install alike."""
         package_dir = cls.package_dir()
-        if not package_dir:
-            return None
-        dist = package_dir / "dist"
-        return dist if (dist / "entry.js").is_file() else None
+        if package_dir:
+            dist = package_dir / "dist"
+            return dist if (dist / "entry.js").is_file() else None
+        return
 
     @classmethod
     def get_routers(cls, modules: list[ModuleType]) -> "list[APIRouter]":
@@ -291,6 +328,20 @@ class App:
             for value in vars(module).values():
                 if isinstance(value, APIRouter) and id(value) not in seen:
                     seen.add(id(value))
+                    # Every path the router would mount, prefixed or not: a
+                    # reserved first segment anywhere in it takes a platform read.
+                    # Starlette route kinds differ, so read the path defensively.
+                    taken = {
+                        f"{value.prefix}{getattr(route, 'path', '')}".strip("/").partition("/")[0]
+                        for route in value.routes
+                    }
+                    reserved = sorted(taken & RESERVED_SEGMENTS)
+                    if reserved:
+                        raise AppRouteConflict(
+                            f"app {cls.name!r} mounts a router on {reserved}, and those "
+                            "segments serve every app's platform reads. Name the router for "
+                            "its own resource."
+                        )
                     declared.append(value)
         # The platform's routers are narrow — each confined to its own segment — so
         # matching them first costs an app nothing anywhere else and leaves it

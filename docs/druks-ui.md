@@ -122,6 +122,11 @@ cause.
 - A child declaration can live in another module.
 - A child inherits every parameter of its parent route.
 - An extra child parameter must come from the relative child path.
+- A page function takes one parameter for each parameter of its route, and no
+  others. Each one must be callable by name, so a positional-only or variadic
+  parameter is a boot error.
+- A catch-all is the last segment of its route. A catch-all anywhere else would
+  swallow every route under it, so it is a boot error.
 - A static child is a tab. The parent is the first tab.
 - A parameterized child is not a tab. A `Link` reaches it.
 - A parameterized detail page shows a link back to its parent.

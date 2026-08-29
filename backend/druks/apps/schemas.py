@@ -8,5 +8,5 @@ class AppResponse(BaseResponse):
     builtin: bool
     subject_types: list[str]
     has_frontend: bool
-    # (url, name) pairs, straight from the app's declaration.
+    # (url, label) pairs, one for each page the app's navigation names.
     navigation: list[tuple[str, str]]

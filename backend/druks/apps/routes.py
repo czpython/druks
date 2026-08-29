@@ -16,7 +16,10 @@ async def list_apps() -> list[AppResponse]:
             builtin=app.builtin,
             subject_types=[subject.subject_type for subject in app.subjects()],
             has_frontend=bool(app.frontend_dist()),
-            navigation=app.navigation,
+            navigation=[
+                (f"/{app.name}{page.route}".rstrip("/"), page.label)
+                for page in app.navigation_pages()
+            ],
         )
         for app in iter_apps()
     ]
