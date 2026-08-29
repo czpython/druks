@@ -1,4 +1,8 @@
+from pydantic import Field
+
 from druks.schemas import BaseResponse
+
+from .blocks import Block
 
 
 class Page(BaseResponse):
@@ -7,3 +11,4 @@ class Page(BaseResponse):
 
     title: str
     description: str = ""
+    blocks: list[Block] = Field(default_factory=list)

@@ -76,7 +76,7 @@ from druks.ui import Page, Text, page
 
 @page("/")
 async def overview():
-    return Page(title="Overview", blocks=[Text(text="Peers this install tracks.")])
+    return Page(title="Overview", blocks=[Text("Peers this install tracks.")])
 
 
 @page("/peers")
@@ -141,13 +141,18 @@ The app roster at `GET /api/apps` carries the page table. The shell resolves a
 ```json
 {
   "pages": [
-    {"name": "overview", "label": "overview", "path": "/night_watch", "parent": ""},
-    {"name": "peers", "label": "peers", "path": "/night_watch/peers", "parent": ""},
-    {"name": "peer", "label": "peer", "path": "/night_watch/peers/{peer_id}", "parent": ""},
-    {"name": "peer_history", "label": "peer history", "path": "/night_watch/peers/{peer_id}/history", "parent": "peer"}
+    {"name": "overview", "label": "overview", "path": "/night_watch", "parent": "", "order": 0},
+    {"name": "peers", "label": "peers", "path": "/night_watch/peers", "parent": "", "order": 1},
+    {"name": "peer", "label": "peer", "path": "/night_watch/peers/{peer_id}", "parent": "", "order": 2},
+    {"name": "peer_history", "label": "peer history", "path": "/night_watch/peers/{peer_id}/history", "parent": "peer", "order": 3}
   ]
 }
 ```
+
+The table arrives in route-match order, so a renderer that mounts a route for
+each entry in turn gives a literal segment its win over a parameter. `order` is
+the page's place in the app's declarations, which is the order its tabs show
+in. Route matching sorts the table, so that order survives only here.
 
 `path` is the shell path, not the API path. The shell fills each `{name}`
 placeholder from the `Link` `arguments` and percent-encodes the value.
@@ -439,8 +444,8 @@ form errors.
 A `Link` navigates and never calls an operation:
 
 ```python
-Link(label="History", page="peer_history", arguments={"peer_id": peer.id})
-Link(label="Provider status", url="https://status.example.com")
+Link("History", page="peer_history", arguments={"peer_id": peer.id})
+Link("Provider status", url="https://status.example.com")
 ```
 
 A `Link` sets `page` or `url`, never both and never neither. Druks rejects a
@@ -460,7 +465,7 @@ Each listing below gives the exact Python fields and the exact JSON. Three
 rules hold for every one of them.
 
 **A discriminator carries its own literal as its default.** `Text.block` is
-`Literal["text"] = "text"`. The author writes `Text(text="…")` and never passes
+`Literal["text"] = "text"`. The author writes `Text("…")` and never passes
 the discriminator.
 
 **Wire names are camelCase.** `alternative_text` serializes as
@@ -502,6 +507,19 @@ shows an app-scoped error and names the block.
 
 Every block carries a `block` discriminator.
 
+A block with exactly one required value takes that value positionally, and
+every other value by keyword:
+
+```python
+Text("Three peers answered in the last hour.")
+Callout("Notes arrive through the API.", tone="info", title="Not here yet")
+Link("Open", page="note", arguments={"note_id": "7"})
+```
+
+A block with no required value, or with more than one, takes all of them by
+keyword. Every container is one of those, so `Card`, `Section`, `Table`, and
+`Timeline` name each argument.
+
 ### Text
 
 ```python
@@ -519,11 +537,11 @@ class Text:
 ```python
 class Markdown:
     block: Literal["markdown"] = "markdown"
-    markdown: str
+    text: str
 ```
 
 ```json
-{"block": "markdown", "markdown": "## Report\n\nThe sweep found **2** stale peers."}
+{"block": "markdown", "text": "## Report\n\nThe sweep found **2** stale peers."}
 ```
 
 The shell renders the markdown. It strips raw HTML.

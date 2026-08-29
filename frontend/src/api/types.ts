@@ -195,6 +195,48 @@ export interface App {
   subjectTypes: string[]
   hasFrontend: boolean
   navigation: [string, string][]
+  pages: PageEntry[]
+}
+
+// --- Druks UI --------------------------------------------------------------
+// The app's Python page declarations, as the shell sees them. They mirror
+// docs/druks-ui.md, and arrive in route-match order.
+export interface PageEntry {
+  name: string
+  label: string
+  path: string
+  parent: string
+  order: number
+}
+
+export interface Link {
+  block: 'link'
+  label: string
+  page: string
+  arguments: Record<string, string>
+  url: string
+}
+
+export type Block =
+  | { block: 'text'; text: string }
+  | { block: 'markdown'; text: string }
+  | { block: 'section'; title: string; name: string; blocks: Block[] }
+  | { block: 'card'; title: string; description: string; blocks: Block[]; actions: Link[] }
+  | {
+      block: 'callout'
+      tone: 'info' | 'success' | 'warning' | 'danger'
+      title: string
+      text: string
+    }
+  | { block: 'divider' }
+  | { block: 'empty_state'; title: string; description: string; actions: Link[] }
+  | Link
+
+// What a page function returned at one moment — the contract's ``Page``.
+export interface PageSnapshot {
+  title: string
+  description: string
+  blocks: Block[]
 }
 
 // --- System health ---------------------------------------------------------
