@@ -291,7 +291,7 @@ async def test_run_checks_covers_all_check_names(tmp_path: Path) -> None:
         "webhook_ingress",
         "github_identity",
         "installations",
-        "ship:settings",
+        "software_factory:settings",
         "review:settings",
         "claude_credentials",
         "codex_credentials",

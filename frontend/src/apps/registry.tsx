@@ -9,7 +9,7 @@ import type { ReactNode } from 'react'
 // per-app contributions.
 
 // One route an app mounts. ``path`` is a wouter pattern under the router base
-// (e.g. ``/ship`` or ``/ship/work-items/:slug``); ``render`` receives the matched
+// (e.g. ``/software_factory`` or ``/software_factory/work-items/:slug``); ``render`` receives the matched
 // params.
 export interface AppRoute {
   path: string
@@ -61,7 +61,7 @@ export function appHome(name: string): string {
   return REGISTRY.get(name)?.home ?? `/${name}`
 }
 
-// A wouter-style pattern (``/ship/work-items/:slug``) as a regex anchored to the
+// A wouter-style pattern (``/software_factory/work-items/:slug``) as a regex anchored to the
 // whole path — for deciding which app owns the current URL (its dropdown +
 // accent).
 function patternRegex(pattern: string): RegExp {

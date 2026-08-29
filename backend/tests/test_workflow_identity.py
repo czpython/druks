@@ -133,8 +133,8 @@ def test_none_owned_package_keeps_bare_kinds():
 
 def test_in_tree_identities_are_stable():
     # These are durable DBOS names — byte-for-byte pins.
-    assert workflows.get("ship.build") is not None
-    assert workflows.get("ship.profile") is not None
+    assert workflows.get("software_factory.build") is not None
+    assert workflows.get("software_factory.profile") is not None
     assert refresh_tokens.name == "core.refresh_tokens"
 
 

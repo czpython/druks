@@ -29,7 +29,7 @@ class TokenUsage(BaseResponse):
 
 
 def get_display_label(kind: str) -> str:
-    # "ship.build" → "Build"; "implement" → "Implement".
+    # "software_factory.build" → "Build"; "implement" → "Implement".
     return kind.rsplit(".", 1)[-1].replace("_", " ").capitalize()
 
 
@@ -89,7 +89,7 @@ class AgentCallFiles(BaseResponse):
 
 class RunResponse(BaseResponse):
     id: str
-    # The durable kind ("ship.build"); ``label`` is its display name ("Build").
+    # The durable kind ("software_factory.build"); ``label`` is its display name ("Build").
     kind: str
     label: str
     state: Literal["scheduled", "running", "parked", "finished", "failed", "cancelled"]

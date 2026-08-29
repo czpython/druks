@@ -58,7 +58,7 @@ function isLifecycle(event: FeedItem): boolean {
   return event.kind in LIFECYCLE_VERBS
 }
 
-// "ship.build" → "build": the durable kind identifies the workflow, its tail names it.
+// "software_factory.build" → "build": the durable kind identifies the workflow, its tail names it.
 function localName(kind: string | null | undefined): string {
   return kind ? (kind.split('.').pop() ?? '') : ''
 }

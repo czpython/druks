@@ -1,6 +1,6 @@
 from druks.contrib.review.github import get_review_actor
 from druks.contrib.review.workflows import PullRequestReview
-from druks.contrib.ship.models import ProjectRepo
+from druks.contrib.software_factory.models import ProjectRepo
 from druks.signals import subscribe
 
 

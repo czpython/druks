@@ -193,7 +193,7 @@ async def test_a_pat_reads_but_cannot_write_app_settings(tmp_path, druks_db):
         read = client.get("/api/settings/apps", headers=headers)
         write = client.patch(
             "/api/settings/apps",
-            json={"appSettings": {"ship": {"linear_trigger_status": "Agent Queue"}}},
+            json={"appSettings": {"software_factory": {"linear_trigger_status": "Agent Queue"}}},
             headers=headers,
         )
 

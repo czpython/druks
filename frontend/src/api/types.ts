@@ -115,7 +115,7 @@ export interface ArtifactContent {
 // One run on the subject's timeline, with its agent calls in execution order.
 export interface RunSummary {
   id: string
-  // The durable kind ("ship.build"); label is its backend display name ("Build").
+  // The durable kind ("software_factory.build"); label is its backend display name ("Build").
   kind: string
   label: string
   state: RunState
@@ -428,7 +428,7 @@ export interface FeedItem {
   // ("merged"). The words are this client's — see lib/feed.
   kind: string
   app?: string | null
-  // The durable kind of the workflow a lifecycle row is about ("ship.build").
+  // The durable kind of the workflow a lifecycle row is about ("software_factory.build").
   workflow?: string | null
   subjectType?: string | null
   subjectId?: string | null

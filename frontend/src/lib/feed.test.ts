@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
 
 import { eventLine } from './feed'
-// Ship's own registration, not a stand-in: its subjectPath is what makes a row navigate.
-import '../apps/ship/ui'
+// Software Factory's own registration, not a stand-in: its subjectPath is what makes a row navigate.
+import '../apps/software_factory/ui'
 import type { FeedItem } from '../api/types'
 
 function event(fields: Partial<FeedItem>): FeedItem {
@@ -17,23 +17,23 @@ function event(fields: Partial<FeedItem>): FeedItem {
 
 describe('eventLine', () => {
   it('names the workflow and what it did', () => {
-    const line = eventLine(event({ kind: 'workflow.running', workflow: 'ship.build' }))
+    const line = eventLine(event({ kind: 'workflow.running', workflow: 'software_factory.build' }))
 
     expect(line.label).toBe('build started')
     expect(line.source).toBe('build')
   })
 
   it('calls a parked run waiting on you', () => {
-    expect(eventLine(event({ kind: 'workflow.parked', workflow: 'ship.build' })).label).toBe(
+    expect(eventLine(event({ kind: 'workflow.parked', workflow: 'software_factory.build' })).label).toBe(
       'build waiting on you',
     )
   })
 
   it("reads an app's own milestone as its own word", () => {
-    const line = eventLine(event({ kind: 'merged', app: 'ship' }))
+    const line = eventLine(event({ kind: 'merged', app: 'software_factory' }))
 
     expect(line.label).toBe('merged')
-    expect(line.source).toBe('ship')
+    expect(line.source).toBe('software_factory')
     expect(line.bucket).toBe('event-kind-audit')
   })
 
@@ -41,8 +41,8 @@ describe('eventLine', () => {
     const line = eventLine(
       event({
         kind: 'workflow.finished',
-        workflow: 'ship.build',
-        app: 'ship',
+        workflow: 'software_factory.build',
+        app: 'software_factory',
         subjectType: 'work_item',
         subjectId: '42',
         subjectLabel: 'ENG-767',
@@ -50,15 +50,15 @@ describe('eventLine', () => {
     )
 
     expect(line.subject).toBe('ENG-767')
-    expect(line.path).toBe('/ship/work-items/42')
+    expect(line.path).toBe('/software_factory/work-items/42')
   })
 
   it("leaves a row about a subject with no page of its own unclickable", () => {
     const line = eventLine(
       event({
         kind: 'workflow.running',
-        workflow: 'ship.profile',
-        app: 'ship',
+        workflow: 'software_factory.profile',
+        app: 'software_factory',
         subjectType: 'project_repo',
         subjectId: '3',
         subjectLabel: 'acme/widget',

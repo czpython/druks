@@ -47,7 +47,7 @@ user may use it. Drukbox keeps its schema in a `drukbox` database in the same
 Postgres — no separate datastore. On macOS, if sandbox SSH turns out
 unreachable, enable host networking in Docker Desktop's settings.
 
-For the bundled `ship` app, connect the GitHub App druks acts as from
+For the bundled `software_factory` app, connect the GitHub App druks acts as from
 the dashboard after boot (**Settings → Services**) — create it there or
 paste an existing GitHub App's credentials, see
 [the GitHub connection](configuration.md#github).
@@ -124,7 +124,7 @@ was originally imported as Playwright `storage_state`.
 ## 5. Exercise an app
 
 Druks does not invent a generic domain job: an installed app supplies the
-workflow and its trigger. In the bundled distribution, `ship` is the reference
+workflow and its trigger. In the bundled distribution, `software_factory` is the reference
 app. Register a project in its dashboard and use its configured ticket
 or GitHub trigger. Watch the run appear in the subject page and Events feed;
 agent-call pages stream transcript and artifact data.

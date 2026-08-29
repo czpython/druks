@@ -2004,7 +2004,7 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
 }
 
 /* Color buckets reuse the dashboard palette so colors carry the
-   same meaning here as on /ship. Cyan = in-flight runs, teal =
+   same meaning here as on /software_factory. Cyan = in-flight runs, teal =
    planning/scope, amber = inbound webhook, magenta = human signal,
    neutral = audit/jobs. */
 .event-kind-agent {

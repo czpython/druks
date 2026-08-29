@@ -37,7 +37,7 @@ describe('RunTranscript', () => {
       .mockReturnValueOnce(secondResponse.promise)
     vi.stubGlobal('fetch', fetchMock)
 
-    render(<RunTranscript basePath="/api/ship/transcripts/call-1" isLive={false} />)
+    render(<RunTranscript basePath="/api/software_factory/transcripts/call-1" isLive={false} />)
 
     expect(await screen.findByText('first row')).toBeTruthy()
     expect(fetchMock).toHaveBeenCalledTimes(2)
@@ -57,16 +57,16 @@ describe('RunTranscript', () => {
     )
     vi.stubGlobal('fetch', fetchMock)
 
-    render(<RunTranscript basePath="/api/ship/transcripts/call-2" isLive />)
+    render(<RunTranscript basePath="/api/software_factory/transcripts/call-2" isLive />)
 
     expect(await screen.findByText('initial row')).toBeTruthy()
     expect(fetchMock).toHaveBeenCalledTimes(1)
     expect(fetchMock).toHaveBeenCalledWith(
-      '/api/ship/transcripts/call-2?stream=stdout&offset=0&limit=262144',
+      '/api/software_factory/transcripts/call-2?stream=stdout&offset=0&limit=262144',
       { headers: { Accept: 'application/json' } },
     )
     expect(useSSEMock).toHaveBeenLastCalledWith(
-      '/api/ship/transcripts/call-2/stream?stream=stdout&offset=12',
+      '/api/software_factory/transcripts/call-2/stream?stream=stdout&offset=12',
       expect.objectContaining({ enabled: true }),
     )
 
@@ -81,7 +81,7 @@ describe('RunTranscript', () => {
       handlers?.['agent_call.finished']?.({})
     })
     expect(useSSEMock).toHaveBeenLastCalledWith(
-      '/api/ship/transcripts/call-2/stream?stream=stdout&offset=12',
+      '/api/software_factory/transcripts/call-2/stream?stream=stdout&offset=12',
       expect.objectContaining({ enabled: false }),
     )
   })

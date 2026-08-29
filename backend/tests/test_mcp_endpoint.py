@@ -8,7 +8,7 @@ import pytest
 from conftest import finish_agent_run, make_test_note, seed_note_agent_run, seed_note_run
 from druks.accounts.models import Account, PersonalAccessToken
 from druks.api.server import mcp_app
-from druks.contrib.ship.app import Ship
+from druks.contrib.software_factory.app import SoftwareFactory
 from druks.core.apis.exceptions import UnknownTicketError
 from druks.durable.models import Artifact, Run
 from druks.mcp.exceptions import InvalidAgentToolError
@@ -164,7 +164,7 @@ async def test_tools_list_pins_platform_and_app_tools(app, pat_token):
         tools = {tool.name: tool for tool in await client.list_tools()}
 
     assert list(tools)[:7] == _TOOL_NAMES
-    assert list(tools)[7:] == ["review_request", "ship_start"]
+    assert list(tools)[7:] == ["review_request", "software_factory_start"]
 
     expected_annotations = {
         "cancel_run": (False, True, True),
@@ -184,7 +184,7 @@ async def test_tools_list_pins_platform_and_app_tools(app, pat_token):
         ) == expected
         assert tools[name].description
 
-    for name in ("review_request", "ship_start"):
+    for name in ("review_request", "software_factory_start"):
         app_tool = tools[name]
         assert (
             app_tool.annotations.readOnlyHint,
@@ -200,14 +200,14 @@ async def test_tools_list_pins_platform_and_app_tools(app, pat_token):
     )
     reason = tools["cancel_run"].inputSchema["properties"]["reason"]
     assert (reason["minLength"], reason["maxLength"]) == (1, 500)
-    assert tools["ship_start"].inputSchema["properties"]["ticket"]["description"] == (
+    assert tools["software_factory_start"].inputSchema["properties"]["ticket"]["description"] == (
         "The tracker's ticket key, e.g. ENG-831."
     )
-    # ship_start moves the tracker ticket and waits on webhook intake — its
+    # software_factory_start moves the tracker ticket and waits on webhook intake — its
     # derived description must say so, run-id-free.
-    assert "trigger status" in tools["ship_start"].description
-    assert "webhook intake" in tools["ship_start"].description
-    assert "list_open_subjects" in tools["ship_start"].description
+    assert "trigger status" in tools["software_factory_start"].description
+    assert "webhook intake" in tools["software_factory_start"].description
+    assert "list_open_subjects" in tools["software_factory_start"].description
     assert not tools["list_open_subjects"].inputSchema.get("required")
     assert not tools["get_usage"].inputSchema.get("required")
 
@@ -482,7 +482,9 @@ async def test_cancel_run_is_destructive_but_repeatable(app, pat_token, druks_db
     assert cancels == [{"id": active.id, "failure": "wrong branch"}]
 
 
-async def test_ship_start_embeds_the_typed_ticket_error(app, pat_token, druks_db, monkeypatch):
+async def test_software_factory_start_embeds_the_typed_ticket_error(
+    app, pat_token, druks_db, monkeypatch
+):
     class _UnknownTicketTracker:
         async def __aenter__(self):
             return self
@@ -499,10 +501,10 @@ async def test_ship_start_embeds_the_typed_ticket_error(app, pat_token, druks_db
     async def _get_tracker(cls, source=None):
         return _UnknownTicketTracker()
 
-    monkeypatch.setattr(Ship, "get_tracker", classmethod(_get_tracker))
+    monkeypatch.setattr(SoftwareFactory, "get_tracker", classmethod(_get_tracker))
 
     async with live(app), _client(app, pat_token) as client:
-        error = await _call_error(client, "ship_start", {"ticket": "ENG-9999"})
+        error = await _call_error(client, "software_factory_start", {"ticket": "ENG-9999"})
 
     assert error == {
         "code": "TICKET_NOT_FOUND",

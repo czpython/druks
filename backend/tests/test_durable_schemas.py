@@ -34,8 +34,8 @@ async def _status_of(runs):
 
 async def test_subject_state_takes_the_newest_run():
     runs = [
-        _run("new", "ship.build", RunState.RUNNING),
-        _run("old", "ship.build", RunState.PARKED),
+        _run("new", "software_factory.build", RunState.RUNNING),
+        _run("old", "software_factory.build", RunState.PARKED),
     ]
     assert (await _status_of(runs)).state == RunState.RUNNING
 
@@ -43,35 +43,35 @@ async def test_subject_state_takes_the_newest_run():
 async def test_subject_state_takes_a_newer_parked_run_over_an_older_running_one():
     # Recency decides, not a hardcoded state preference.
     runs = [
-        _run("new", "ship.build", RunState.PARKED),
-        _run("old", "ship.build", RunState.RUNNING),
+        _run("new", "software_factory.build", RunState.PARKED),
+        _run("old", "software_factory.build", RunState.RUNNING),
     ]
     assert (await _status_of(runs)).state == RunState.PARKED
 
 
 async def test_subject_state_uses_the_latest_outcome_once_every_run_is_terminal():
     runs = [
-        _run("new", "ship.build", RunState.FINISHED),
-        _run("old", "ship.build", RunState.FAILED),
+        _run("new", "software_factory.build", RunState.FINISHED),
+        _run("old", "software_factory.build", RunState.FAILED),
     ]
     assert (await _status_of(runs)).state == RunState.FINISHED
 
 
 async def test_status_surfaces_the_newest_active_runs_gate():
     runs = [
-        _run("new", "ship.build", RunState.PARKED, "review"),
-        _run("old", "ship.build", RunState.PARKED, "review_work"),
+        _run("new", "software_factory.build", RunState.PARKED, "review"),
+        _run("old", "software_factory.build", RunState.PARKED, "review_work"),
     ]
     assert (await _status_of(runs)).gate == "review"
 
 
 async def test_status_carries_the_running_runs_kind_and_no_stale_gate():
     runs = [
-        _run("new", "ship.build", RunState.RUNNING),
-        _run("old", "ship.build", RunState.PARKED, "review"),
+        _run("new", "software_factory.build", RunState.RUNNING),
+        _run("old", "software_factory.build", RunState.PARKED, "review"),
     ]
     status = await _status_of(runs)
-    assert status.kind == "ship.build"
+    assert status.kind == "software_factory.build"
     assert not status.gate
 
 
@@ -79,7 +79,7 @@ async def test_status_carries_the_latest_agent_call_agent():
     runs = [
         _run(
             "new",
-            "ship.build",
+            "software_factory.build",
             RunState.RUNNING,
             agent_calls=[AgentCall(agent="generate_plan"), AgentCall(agent="implement")],
         )
@@ -93,7 +93,7 @@ async def test_parked_status_carries_no_agent_even_when_the_run_has_calls():
     runs = [
         _run(
             "new",
-            "ship.build",
+            "software_factory.build",
             RunState.PARKED,
             "review",
             agent_calls=[AgentCall(agent="implement")],

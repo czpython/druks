@@ -58,7 +58,7 @@ async def test_manifest_records_the_delivered_capability_set(druks_db):
         url="https://api.githubcopilot.com/mcp/",
         bearer_token_env_var=get_bearer_token_env_var("github"),
     )
-    # Both servers delivered with their token — github is Ship's own
+    # Both servers delivered with their token — github is SoftwareFactory's own
     # requirement (get_required_mcp_servers), so it reads delivered but not declared.
     manifest = await _build(
         mcp_servers=(linear, github),

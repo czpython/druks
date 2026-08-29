@@ -24,7 +24,7 @@ def _subjects(cls) -> list[type[Subject]]:
 
 def test_iter_apps_discovers_the_bundled_apps():
     """The bundled apps resolve from the ``druks.apps`` entry points."""
-    assert {app.name for app in iter_apps()} >= {"core", "ship", "usage"}
+    assert {app.name for app in iter_apps()} >= {"core", "software_factory", "usage"}
 
 
 def test_platform_apps_are_builtin():
@@ -33,9 +33,9 @@ def test_platform_apps_are_builtin():
     assert builtin >= {"core", "usage"}
 
 
-def test_ship_app_derives_its_package_from_the_defining_module():
-    ship = next(app for app in iter_apps() if app.name == "ship")
-    assert ship.package == "druks.contrib.ship"
+def test_software_factory_app_derives_its_package_from_the_defining_module():
+    software_factory = next(app for app in iter_apps() if app.name == "software_factory")
+    assert software_factory.package == "druks.contrib.software_factory"
 
 
 def test_app_without_a_name_is_rejected():
@@ -274,10 +274,13 @@ def test_an_app_declaring_a_subject_type_is_rejected():
 
 
 def test_an_apps_subjects_come_from_its_workflows():
-    ship = next(app for app in iter_apps() if app.name == "ship")
-    ship.discover()
+    software_factory = next(app for app in iter_apps() if app.name == "software_factory")
+    software_factory.discover()
 
-    assert [subject.subject_type for subject in ship.subjects()] == ["project_repo", "work_item"]
+    assert [subject.subject_type for subject in software_factory.subjects()] == [
+        "project_repo",
+        "work_item",
+    ]
 
 
 def test_the_app_name_tags_every_route(monkeypatch):

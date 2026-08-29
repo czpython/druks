@@ -12,7 +12,7 @@
 > before 1.0; `main` and `latest` are edge builds, not stable releases.
 
 Druks is the self-hosted **home for durable agent apps**, running on the
-Claude and Codex subscriptions you already pay for. Ship comes bundled:
+Claude and Codex subscriptions you already pay for. Software Factory comes bundled:
 autonomous software delivery from ticket to reviewed pull request.
 
 An ordinary agent script loses its place when the process dies. A Druks
@@ -46,7 +46,7 @@ described in [the release process](https://github.com/czpython/druks/blob/main/d
 Re-running is also the upgrade path. Then follow
 [full local setup](https://github.com/czpython/druks/blob/main/docs/full-local.md) to finish in
 the dashboard: connect the agent harnesses and the GitHub App the bundled
-`ship` app acts through; a standalone app may have different
+`software_factory` app acts through; a standalone app may have different
 integration requirements.
 
 Or hand the install to a coding agent — paste this into Claude Code, Codex,
@@ -105,9 +105,9 @@ uvx --from druks druks create app night_watch
 The generated project root carries an `AGENTS.md` with the contracts and a link
 to the authoring guide.
 
-The bundled `ship` app is a concrete example. It coordinates coding
+The bundled `software_factory` app is a concrete example. It coordinates coding
 agents through tickets and GitHub pull requests, but GitHub PR orchestration is
-`ship` behavior—not the definition of Druks.
+`software_factory` behavior—not the definition of Druks.
 
 ## Documentation
 

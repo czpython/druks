@@ -4,7 +4,7 @@ from druks.accounts.models import Account
 from druks.contrib.review.app import Review
 from druks.contrib.review.datastructures import PullRequest
 from druks.contrib.review.github import get_review_actor
-from druks.contrib.ship.models import ProjectRepo
+from druks.contrib.software_factory.models import ProjectRepo
 from druks.core.apis.github import GITHUB
 from druks.sandbox import repo as _repo
 from druks.sandbox.layout import get_github_token_remote_path, get_related_root, get_repo_root
