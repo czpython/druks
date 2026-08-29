@@ -7,8 +7,6 @@ through Git history.
 
 ## Before exporting
 
-Complete these checks:
-
 - Revoke and rotate each credential from local research, session exports, login
   captures, terminal output, or earlier Git history.
 - Make sure that the exact source commit passed CI. Record its full SHA.
@@ -24,8 +22,6 @@ Complete these checks:
 
 ## Publish the tree
 
-Publish the reviewed tree:
-
 1. Rename this private repository so that `czpython/druks` is available.
 2. Archive the renamed repository after its final write.
 3. Export the reviewed commit without its `.git` directory.
@@ -38,8 +34,6 @@ The public repository must not inherit private branches, pull requests, tags,
 Actions artifacts, caches, environments, secrets, deploy keys, or webhooks.
 
 ## Public repository settings
-
-Apply these repository settings:
 
 - Enable private vulnerability reports, secret scans, and push protection.
 - Require pull requests, review, successful CI, and conversation resolution on

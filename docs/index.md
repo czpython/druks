@@ -52,8 +52,6 @@ software-delivery behavior belong to the app, not to Druks.
 
 ## Choose a path
 
-Choose the path that matches your task:
-
 - **Evaluate Druks:** Complete the [quickstart](quickstart.md) on one machine.
 - **Understand recovery:** Read [concepts and guarantees](concepts.md).
 - **Build an app:** Start with [writing an app](writing-an-app.md).

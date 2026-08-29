@@ -27,8 +27,6 @@ For app-surface changes, inspect the proof app at
 
 ## Architectural boundaries
 
-Apply these boundaries:
-
 - Keep platform and app ownership explicit. Keep GitHub issue, branch, PR, and
   coding-agent policy in `software_factory`, not in Druks core.
 - Describe durability precisely. Druks reuses completed durable checkpoints
@@ -70,16 +68,18 @@ Apply these boundaries:
 
 ## Layout
 
-Use this repository layout:
-
-- The `backend/druks/` directory contains FastAPI, DBOS, SQLAlchemy 2.0, Pydantic v2, and bundled apps.
-- The `backend/migrations/` directory contains platform Alembic migrations.
-- The `backend/tests/` directory contains the pytest suite backed by real Postgres.
-- The `backend/tests/druks-field_notes/` directory contains the independently packaged proof app.
-- The `frontend/` directory contains the React 19 and Vite shared SPA. The backend image includes its repository-root `dist/` output.
-- The `deploy/` directory contains Compose files, Caddy configuration, and sandbox image inputs. Its public runbook is `docs/deployment.md`.
-- The `docs/` directory contains the public and contributor guides.
-- The `.github/workflows/` directory contains PR checks and the release-image build.
+- **Backend:** `backend/druks/` contains FastAPI, DBOS, SQLAlchemy 2.0,
+  Pydantic v2, and bundled apps.
+- **Migrations:** `backend/migrations/` contains platform Alembic migrations.
+- **Tests:** `backend/tests/` contains the pytest suite backed by real Postgres.
+- **Proof app:** `backend/tests/druks-field_notes/` contains the independently
+  packaged proof app.
+- **Frontend:** `frontend/` contains the React 19 and Vite shared SPA. The
+  backend image includes its repository-root `dist/` output.
+- **Deployment:** `deploy/` contains Compose files, Caddy configuration, and
+  sandbox image inputs. The public runbook is `docs/deployment.md`.
+- **Documentation:** `docs/` contains the public and contributor guides.
+- **CI:** `.github/workflows/` contains PR checks and the release-image build.
 
 ## Verification
 
@@ -121,8 +121,6 @@ truth for CI, including the proof-app install phase.
 
 ## Documentation discipline
 
-Use these documentation rules:
-
 - Put product behavior, setup, operations, troubleshooting, and app author
   contracts in the appropriate public guide. Keep this file limited to task
   routing, architectural boundaries, and contributor rules.
@@ -133,8 +131,6 @@ Use these documentation rules:
   invariant changes, update this file.
 
 ## Style
-
-Use these style rules:
 
 - Make the minimum change that solves the problem. No speculative abstractions,
   configurability, or error handling for impossible cases. Each changed line

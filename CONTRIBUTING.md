@@ -5,8 +5,6 @@ app surface and deployment model can change.
 
 ## Before opening a pull request
 
-Complete these steps:
-
 1. Search the existing issues. Open an issue for a behavior change or substantial work.
 2. Read [the development guide](docs/development.md).
 3. Read the applicable concept, operator, or app-author guide.
@@ -21,8 +19,6 @@ Run the repository checks that cover your change. The complete commands are in
 list each command that you ran. Explain each command that you did not run.
 
 ## Pull requests
-
-Apply these rules:
 
 - Keep each pull request focused. Explain the user-visible result.
 - Identify migrations, workflow replay compatibility, external side effects,

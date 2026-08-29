@@ -65,7 +65,7 @@ docker compose run --rm drukbox .venv/bin/alembic upgrade head
 docker compose up -d
 ```
 
-The installer does these steps in this order.
+The installer runs the same commands in this order.
 
 ## The dashboard is inaccessible
 

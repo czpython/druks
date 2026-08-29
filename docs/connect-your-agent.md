@@ -7,13 +7,13 @@ icon: "plug"
 Druks serves a stateless, streamable HTTP endpoint at `/mcp`. Its tools come
 from the agent-tagged API routes. The platform contributes seven tools:
 
-- Tool: `list_open_subjects`
-- Tool: `get_gate`
-- Tool: `answer_gate`
-- Tool: `get_agent_call`
-- Tool: `cancel_run`
-- Tool: `retry_run`
-- Tool: `get_usage`.
+- `list_open_subjects`
+- `get_gate`
+- `answer_gate`
+- `get_agent_call`
+- `cancel_run`
+- `retry_run`
+- `get_usage`.
 
 Each installed app can add its own tools. `tools/list` is the live catalog.
 Each request uses a personal access token in
@@ -51,7 +51,7 @@ bearer_token_env_var = "DRUKS_PAT"
 
 ## What to expect
 
-Expect these behaviors:
+Three details matter when an agent uses the MCP endpoint:
 
 - **Discovery first.** There is no push channel. The agent calls `list_open_subjects`
   first. It polls approximately every 30 seconds during a wait. Each workflow

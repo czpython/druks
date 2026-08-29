@@ -2,7 +2,7 @@
 
 A coding agent can use this runbook to install the local shape on a target
 machine. A human can also use it. [Full local setup](docs/full-local.md)
-contains more explanation. The [deployment runbook](deploy/README.md) covers
+contains more explanation. The [deployment runbook](docs/deployment.md) covers
 remote shapes.
 
 Do the steps in order. After each step, do its verification. If a verification

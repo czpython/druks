@@ -10,8 +10,6 @@ not require public ingress.
 
 ## Prerequisites
 
-Prepare these requirements:
-
 - Docker with the Compose plugin
 - Sufficient Docker capacity for the stack and short-lived sandbox containers
 - A Claude or Codex subscription to run an agent.
@@ -89,8 +87,6 @@ dashboard actions. The exact paths are in
 [full local setup](full-local.md#webhook-caveat).
 
 ## Next steps
-
-Choose a next step:
 
 - Read [concepts and guarantees](concepts.md) before judging recovery behavior.
 - Follow [full local setup](full-local.md) for browser sessions, webhook ingress,

@@ -13,8 +13,6 @@ immutable SHA tag. It does not move `latest`.
 
 ## Prepare a release
 
-Prepare the release:
-
 1. Start from a clean checkout of the commit to release.
 2. Run all backend, proof-app, frontend, package, secret, and workflow checks in
    [Development](development.md#verification).

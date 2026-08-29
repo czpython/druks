@@ -38,8 +38,6 @@ name must match `App.name`. The same name scopes:
 
 ### Druks owns
 
-Druks owns these platform concerns:
-
 - Durable execution, queues, schedules, run state, cancellation, and gates
 - Agent descriptors, Claude and Codex harness dispatch, and sandbox access
 - Subject timelines, the event feed, signals, webhook dispatch, and notifications
@@ -47,8 +45,6 @@ Druks owns these platform concerns:
 - The FastAPI server, shared dashboard shell, and app loading.
 
 ### An app owns
-
-An app owns these domain concerns:
 
 - Domain workflows, their subjects, and their start policy
 - Agents, prompts, and structured output contracts
@@ -122,14 +118,14 @@ that policy on subjectless background runs.
 
 ## Waiting for people and systems
 
-A `Gate` is a typed reply model plus a durable receive topic. A wait does these
-actions:
+A `Gate` defines a typed reply and a durable receive topic. When a workflow
+waits at a gate, Druks:
 
-1. The wait releases each warm sandbox that the workflow holds.
-2. The wait records `parked` and the request for the operator.
-3. The wait sends an optional notification.
-4. The wait suspends on DBOS until a related reply or the 14-day gate timeout.
-5. After resume, the wait clears the gate and returns the validated reply.
+1. Releases each warm sandbox that the workflow holds.
+2. Records `parked` and the request for the operator.
+3. Sends an optional notification.
+4. Suspends the workflow until a reply arrives or the 14-day timeout expires.
+5. Clears the gate and returns the validated reply after the workflow resumes.
 
 Each parked round accepts one answer through an idempotency key. In-app review
 requires a subject because the subject read-side is where the question appears.

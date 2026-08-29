@@ -116,8 +116,6 @@ orchestration belongs to `software_factory`, not to Druks.
 
 ## Documentation
 
-Use these documentation paths:
-
 - **Start here:** [Quickstart](https://docs.druks.ai/quickstart)
 - **Understand recovery:** [Concepts and guarantees](https://docs.druks.ai/concepts)
 - **Build an app:** [Author guide](https://docs.druks.ai/writing-an-app)

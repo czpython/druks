@@ -19,8 +19,6 @@ It does not run in the Druks process.
 
 ## Prerequisites
 
-Prepare these requirements:
-
 - Docker with the Compose plugin
 - Sufficient local Docker capacity for Postgres, Redis, Druks, Drukbox, and
   short-lived sandbox containers.
