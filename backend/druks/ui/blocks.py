@@ -1,6 +1,14 @@
 from typing import Annotated, Literal
 
-from pydantic import BeforeValidator, Field, model_validator
+from pydantic import (
+    AwareDatetime,
+    BeforeValidator,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    computed_field,
+    model_validator,
+)
 
 from druks.schemas import BaseResponse
 
@@ -53,22 +61,24 @@ class BlockParent(PageBlock):
 
 
 class Link(PageBlock):
-    """A control that navigates: to another page of this app, or outside."""
+    """A control that navigates: to another page of this app, to the subject's
+    own platform page, or outside."""
 
     block: Literal["link"] = "link"
     label: str
     page: str = ""
     arguments: dict[str, str] = Field(default_factory=dict)
     url: str = ""
+    subject: Watched = None
 
     def __init__(self, label: str, **data):
         super().__init__(label=label, **data)
 
     @model_validator(mode="after")
     def _one_destination(self) -> "Link":
-        if bool(self.page) != bool(self.url):
+        if [bool(self.page), bool(self.url), bool(self.subject)].count(True) == 1:
             return self
-        raise ValueError(f"Link {self.label!r} must set page or url, never both and never neither")
+        raise ValueError(f"Link {self.label!r} must set exactly one of page, url, or subject")
 
 
 class Text(PageBlock):
@@ -136,6 +146,114 @@ class GateControls(PageBlock):
         )
 
 
+class StatusValue(BaseResponse):
+    """Where something stands. The app writes the word; the tone selects the
+    presentation."""
+
+    value: Literal["status"] = "status"
+    label: str
+    tone: Literal["neutral", "active", "success", "warning", "danger"] = "neutral"
+
+    def __init__(self, label: str, **data):
+        super().__init__(label=label, **data)
+
+
+class TimelineItem(BaseResponse):
+    # Aware, so items from different sources order against each other.
+    when: AwareDatetime
+    title: str
+    description: str = ""
+    status: StatusValue | None = None
+
+
+class Timeline(PageBlock):
+    """What happened, in order."""
+
+    block: Literal["timeline"] = "timeline"
+    title: str = ""
+    items: list[TimelineItem] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _oldest_first(self) -> "Timeline":
+        # Druks orders here, where the stamps keep their full precision: a
+        # browser compares milliseconds and would call two microseconds apart
+        # the same moment. Sorting is stable, so items that truly share a
+        # moment keep the order the app gave them.
+        self.items.sort(key=lambda item: item.when)
+        return self
+
+
+class ProgressStep(BaseResponse):
+    label: str
+    status: StatusValue
+
+
+class Progress(PageBlock):
+    """How far along work is. Set ``completed`` for a share of ``total``, give
+    ``steps`` for staged work, or give neither when the end is unknown."""
+
+    block: Literal["progress"] = "progress"
+    label: str
+    completed: float | None = Field(default=None, ge=0, allow_inf_nan=False)
+    total: float = Field(default=1.0, gt=0, allow_inf_nan=False)
+    steps: list[ProgressStep] = Field(default_factory=list)
+
+    def __init__(self, label: str, **data):
+        super().__init__(label=label, **data)
+
+    @model_validator(mode="after")
+    def _one_shape(self) -> "Progress":
+        if self.completed is None:
+            return self
+        if self.steps:
+            raise ValueError(
+                f"Progress {self.label!r} gives both completed and steps. Staged work reads as "
+                "its steps, so give one or the other."
+            )
+        if self.completed > self.total:
+            raise ValueError(
+                f"Progress {self.label!r} has completed {self.completed} of {self.total}."
+            )
+        return self
+
+
+class Image(PageBlock):
+    """One image. ``alternative_text`` is what a reader gets in place of it, so
+    it says what the image shows, not that it is an image."""
+
+    block: Literal["image"] = "image"
+    url: str
+    alternative_text: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
+    caption: str = ""
+
+
+class FileSummary(BaseResponse):
+    """One file, as the shell shows it. The download is derived from the id, so
+    a file always travels through the platform's own route and its identity
+    gate."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    name: str
+    content_type: str
+    size: int
+
+    @computed_field
+    @property
+    def url(self) -> str:
+        return f"/api/files/{self.id}"
+
+
+class Files(PageBlock):
+    """Files an operator can preview or download. ``files`` takes
+    ``druks.files.File`` objects."""
+
+    block: Literal["files"] = "files"
+    title: str = ""
+    files: list[FileSummary] = Field(default_factory=list)
+
+
 class Card(BlockParent):
     block: Literal["card"] = "card"
     title: str = ""
@@ -172,7 +290,19 @@ class Section(BlockParent):
 
 
 Block = Annotated[
-    Text | Markdown | Section | Card | Callout | Divider | EmptyState | Link | GateControls,
+    Text
+    | Markdown
+    | Section
+    | Card
+    | Callout
+    | Divider
+    | EmptyState
+    | Link
+    | GateControls
+    | Timeline
+    | Progress
+    | Image
+    | Files,
     Field(discriminator="block"),
 ]
 

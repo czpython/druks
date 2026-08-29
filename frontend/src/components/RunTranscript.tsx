@@ -13,6 +13,9 @@ interface RunTranscriptProps {
   basePath: string
   stream?: 'stdout' | 'stderr'
   isLive: boolean
+  // How much of the backfill to read. Unset reads the whole call; a caller that
+  // shows one call among many bounds it, and the reader says what it left.
+  maxBytes?: number
 }
 
 /**
@@ -21,7 +24,12 @@ interface RunTranscriptProps {
  * chunks until ``agent_call.finished``. Used by the agent-call and work-item
  * pages; the only difference is ``basePath``.
  */
-export function RunTranscript({ basePath, stream = 'stdout', isLive }: RunTranscriptProps) {
+export function RunTranscript({
+  basePath,
+  stream = 'stdout',
+  isLive,
+  maxBytes,
+}: RunTranscriptProps) {
   const transcriptKey = `${basePath}:${stream}`
   const [initial, setInitial] = useState<{
     key: string
@@ -53,16 +61,20 @@ export function RunTranscript({ basePath, stream = 'stdout', isLive }: RunTransc
         // Publish after every chunk so a long backfill renders as it arrives,
         // and once more on a failed fetch so the view stops saying "loading".
         setInitial({ key: transcriptKey, text, nextOffset: offset, eof })
-      } while (ok && !isLive && !eof)
+      } while (ok && !isLive && !eof && !(maxBytes && text.length >= maxBytes))
     })()
     return () => {
       cancelled = true
     }
-  }, [basePath, stream, isLive, transcriptKey])
+  }, [basePath, stream, isLive, transcriptKey, maxBytes])
 
   if (!initial || initial.key !== transcriptKey) {
     return <pre className="run-pre mono dim">loading transcript…</pre>
   }
+
+  // The read stopped at its bound with output still to come: say so rather than
+  // let the last line read as the end of the call.
+  const bounded = Boolean(maxBytes) && !initial.eof && !isLive
 
   if (isLive) {
     return (
@@ -74,7 +86,16 @@ export function RunTranscript({ basePath, stream = 'stdout', isLive }: RunTransc
     )
   }
 
-  return <StreamTranscript text={initial.text} complete={initial.eof} />
+  return (
+    <>
+      <StreamTranscript text={initial.text} complete={initial.eof} />
+      {bounded && (
+        <div className="run-truncated mono dim">
+          output continues — open the agent call to read all of it
+        </div>
+      )}
+    </>
+  )
 }
 
 function RunTranscriptLive({

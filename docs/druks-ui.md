@@ -52,7 +52,7 @@ Text  Markdown  Section  Card  Callout     display and layout blocks
 Divider  EmptyState  Stack  Columns
 Link  Action  Form                         controls
 Timeline  TimelineItem  Progress           run and artifact blocks
-ProgressStep  Transcript  Image  Files
+ProgressStep  Image  Files
 FileSummary  GateControls
 Chart  ChartSeries  ImageGallery           rich data blocks
 Metrics  Metric  Facts  Fact  Table
@@ -476,7 +476,7 @@ input than they store:
 
 | Field | Author passes | Druks stores |
 | --- | --- | --- |
-| `Page.follows`, `Section.follows` | a subject | `Follows` |
+| `Page.follows`, `Section.follows`, `Link.subject` | a subject | `Follows` |
 | `Files.files` | `druks.files.File` objects | `list[FileSummary]` |
 | `Metric.value`, `Fact.value`, `TableRow.cells`, `List.items` | any `Value` | the same value |
 
@@ -485,7 +485,7 @@ input than they store:
 ```python
 Block = Annotated[
     Text | Markdown | Section | Card | Callout | Divider | EmptyState | Link
-    | Action | Form | Timeline | Progress | Transcript | Image | Files
+    | Action | Form | Timeline | Progress | Image | Files
     | GateControls | Chart | ImageGallery | Metrics | Facts | Table | List
     | Stack | Columns,
     Discriminator("block"),
@@ -641,10 +641,19 @@ class Link:
     page: str = ""
     arguments: dict[str, str] = {}
     url: str = ""
+    subject: Follows | None = None
 ```
 
 ```json
-{"block": "link", "label": "History", "page": "peer_history", "arguments": {"peer_id": "7"}, "url": ""}
+{"block": "link", "label": "History", "page": "peer_history", "arguments": {"peer_id": "7"}, "url": "", "subject": null}
+```
+
+A link sets exactly one destination: `page` for another page of this app,
+`url` for outside, or `subject` for the subject's own platform page — the
+full story of what druks did about it, which no app page recomposes:
+
+```python
+Link("Everything druks did", subject=found)
 ```
 
 ### Action
@@ -721,7 +730,7 @@ class Form:
 
 ```python
 class TimelineItem:
-    at: datetime
+    when: AwareDatetime
     title: str
     description: str = ""
     status: StatusValue | None = None
@@ -739,7 +748,7 @@ class Timeline:
   "title": "Sweep",
   "items": [
     {
-      "at": "2026-08-29T09:14:02Z",
+      "when": "2026-08-29T09:14:02Z",
       "title": "Run started",
       "description": "",
       "status": {"value": "status", "label": "active", "tone": "active"}
@@ -748,8 +757,10 @@ class Timeline:
 }
 ```
 
-The shell orders items by `at`, oldest first. Items with the same `at` keep
-their declared order. The order is deterministic for one snapshot.
+`at` must name an offset, so items from different sources order against each
+other. Druks orders the items oldest first, where the stamps keep their full
+precision, and items that share a moment keep their declared order. A snapshot
+arrives in the order it is shown.
 
 ### Progress
 
@@ -762,8 +773,8 @@ class ProgressStep:
 class Progress:
     block: Literal["progress"] = "progress"
     label: str
-    completed: float | None = None
-    total: float = 1.0
+    completed: float | None = None   # 0 <= completed <= total
+    total: float = 1.0               # > 0
     steps: list[ProgressStep] = []
 ```
 
@@ -775,6 +786,9 @@ class Progress:
 | indeterminate | `completed` unset, `steps` empty |
 | staged | `steps` set |
 
+Giving both `completed` and `steps` is a validation error, and so is a
+`completed` above `total` or a value that is not a number.
+
 ```json
 {
   "block": "progress",
@@ -785,25 +799,10 @@ class Progress:
 }
 ```
 
-The shell writes the same state as text and as an ARIA progress bar, so a
-screen reader gets it.
-
-### Transcript
-
-```python
-class Transcript:
-    block: Literal["transcript"] = "transcript"
-    title: str = ""
-    agent_call: str
-```
-
-```json
-{"block": "transcript", "title": "Summarize", "agentCall": "call-9f2c"}
-```
-
-The shell reads the call through the transcript routes every app already gets
-at `/api/<app>/transcripts/{call}`. Those routes page long output and keep the
-existing authorization. The app hands over an id, never the text.
+A determinate or indeterminate shape reads as text and as an ARIA progress bar,
+so a screen reader gets the same state as the eye. Staged work has no
+measurable value, so it reads as a named group in which each step announces its
+own state.
 
 ### Image
 
@@ -824,17 +823,19 @@ class Image:
 }
 ```
 
-`alternative_text` is required. An empty string is a validation error. When
-the image does not load, the shell shows the alternative text in its place.
+`alternative_text` is required, and text that is only whitespace is a
+validation error. When the image does not load, the shell shows the
+alternative text in its place.
 
 ### Files
 
 ```python
 class FileSummary:
-    file_id: str
+    id: str
     name: str
     content_type: str
     size: int
+    # Derived from the id, so a file always travels through the platform route.
     url: str
 
 
@@ -853,7 +854,7 @@ and size from the file record.
   "title": "Report",
   "files": [
     {
-      "fileId": "018f2c1e-9a3b-7c11-b0f5-2f6a1c9d4e77",
+      "id": "018f2c1e-9a3b-7c11-b0f5-2f6a1c9d4e77",
       "name": "sweep.csv",
       "contentType": "text/csv",
       "size": 4211,
@@ -863,9 +864,8 @@ and size from the file record.
 }
 ```
 
-The shell previews an image or a text media type. It offers a download for
-everything else. The download goes through `/api/files/{id}`, which keeps the
-platform's own authentication.
+The shell previews an image. Every file gets a download through
+`/api/files/{id}`, which keeps the platform's own authentication.
 
 ### GateControls
 

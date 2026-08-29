@@ -1,5 +1,5 @@
 import pytest
-from druks.ui import Card, GateControls, Page, Section, Text
+from druks.ui import Card, GateControls, Link, Page, Section, Text
 from druks_field_notes.models import Note
 
 
@@ -94,3 +94,16 @@ def test_a_nested_region_cannot_take_a_name_already_used(note: Note):
 def test_follows_takes_a_subject_and_says_so_when_it_does_not(note: Note):
     with pytest.raises(ValueError, match="takes the subject a page watches"):
         Page(title="Note", follows="run-6f0a")
+
+
+def test_a_link_reaches_the_subjects_own_page(note: Note):
+    link = Link("Everything druks did", subject=note)
+
+    assert link.subject
+    assert link.subject.subject_type == "note"
+    assert link.subject.subject_id == str(note.id)
+
+
+def test_a_link_takes_exactly_one_destination(note: Note):
+    with pytest.raises(ValueError, match="exactly one"):
+        Link("Everything druks did", page="notes", subject=note)

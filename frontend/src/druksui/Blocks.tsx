@@ -4,6 +4,7 @@ import { Link as RouteLink } from 'wouter'
 import type { Block, Link } from '../api/types'
 import { Markdown } from '../components/Markdown'
 import { GateControls } from './GateControls'
+import { Files, Image, Progress, Timeline } from './RunBlocks'
 import { fillPath, PagesContext } from './pages'
 
 export function Blocks({ blocks }: { blocks: Block[] }) {
@@ -28,6 +29,23 @@ function BlockContent({ block }: { block: Block }) {
       return <LinkControl link={block} />
     case 'gate_controls':
       return <GateControls run={block.run} />
+    case 'timeline':
+      return <Timeline title={block.title} items={block.items} />
+    case 'progress':
+      return (
+        <Progress
+          label={block.label}
+          completed={block.completed}
+          total={block.total}
+          steps={block.steps}
+        />
+      )
+    case 'image':
+      return (
+        <Image url={block.url} alternativeText={block.alternativeText} caption={block.caption} />
+      )
+    case 'files':
+      return <Files title={block.title} files={block.files} />
     case 'callout':
       return (
         <div className={`dui-callout dui-callout-${block.tone}`} role="note">
@@ -82,12 +100,23 @@ function LinkRow({ links }: { links: Link[] }) {
 }
 
 function LinkControl({ link }: { link: Link }) {
-  const { pages } = useContext(PagesContext)
+  const { app, pages } = useContext(PagesContext)
   if (link.url) {
     return (
       <a className="dui-link" href={link.url} target="_blank" rel="noreferrer">
         {link.label}
       </a>
+    )
+  }
+  if (link.subject) {
+    // The subject's own platform page — the full story of what druks did.
+    return (
+      <RouteLink
+        href={`/${app}/${link.subject.subjectType}/${link.subject.subjectId}`}
+        className="dui-link"
+      >
+        {link.label}
+      </RouteLink>
     )
   }
   const target = pages.find((entry) => entry.name === link.page)

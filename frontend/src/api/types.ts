@@ -217,6 +217,34 @@ export interface Link {
   page: string
   arguments: Record<string, string>
   url: string
+  subject: Follows | null
+}
+
+// Where something stands. The app writes the word; the tone picks the paint.
+export interface StatusValue {
+  value: 'status'
+  label: string
+  tone: 'neutral' | 'active' | 'success' | 'warning' | 'danger'
+}
+
+export interface TimelineItem {
+  when: string
+  title: string
+  description: string
+  status: StatusValue | null
+}
+
+export interface ProgressStep {
+  label: string
+  status: StatusValue
+}
+
+export interface FileSummary {
+  id: string
+  name: string
+  contentType: string
+  size: number
+  url: string
 }
 
 export type Block =
@@ -224,6 +252,16 @@ export type Block =
   | { block: 'markdown'; text: string }
   | { block: 'section'; title: string; name: string; blocks: Block[]; follows: Follows | null }
   | { block: 'gate_controls'; run: string }
+  | { block: 'timeline'; title: string; items: TimelineItem[] }
+  | {
+      block: 'progress'
+      label: string
+      completed: number | null
+      total: number
+      steps: ProgressStep[]
+    }
+  | { block: 'image'; url: string; alternativeText: string; caption: string }
+  | { block: 'files'; title: string; files: FileSummary[] }
   | { block: 'card'; title: string; description: string; blocks: Block[]; actions: Link[] }
   | {
       block: 'callout'
