@@ -238,9 +238,9 @@ class Host:
         still records what it cost before the agent call re-raises it.
 
         The repo is a *precondition*, not an input: callers that need one clone
-        it into the VM first (see Ship's workspace). ``include_plugins=False`` (Claude only)
-        skips uploading the operator's plugin state — for prompts that hit no MCP
-        server; a no-op for codex.
+        it into the VM first (see Software Factory's workspace).
+        ``include_plugins=False`` (Claude only) skips uploading the operator's plugin
+        state — for prompts that hit no MCP server; a no-op for codex.
         """
         # cycle: the harnesses package eagerly imports claude/codex, which
         # import this package's siblings — so the factory can't load while

@@ -3,7 +3,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException, status
 from druks.accounts.dependencies import current_account
 from druks.accounts.models import Account
 from druks.contrib.review.workflows import PullRequestReview
-from druks.contrib.ship.models import ProjectRepo
+from druks.contrib.software_factory.models import ProjectRepo
 
 router = APIRouter(prefix="/reviews")
 

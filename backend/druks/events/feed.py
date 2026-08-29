@@ -16,7 +16,7 @@ class FeedItem(BaseResponse):
     # milestone an app recorded ("merged"). The words are the client's.
     kind: str = Field(validation_alias="type")
     app: str | None = None
-    # The durable kind of the workflow a lifecycle row is about ("ship.build").
+    # The durable kind of the workflow a lifecycle row is about ("software_factory.build").
     workflow: str | None = Field(default=None, validation_alias=AliasPath("payload", "kind"))
     subject_type: str | None = None
     subject_id: str | None = None

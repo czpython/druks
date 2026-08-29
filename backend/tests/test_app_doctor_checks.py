@@ -68,19 +68,21 @@ async def test_unreachable_settings_database_is_an_app_check_failure(
 
     results = await doctor.check_apps(settings)
 
-    result = _named(results, "ship:settings")
+    result = _named(results, "software_factory:settings")
     assert not result.ok
     assert "check raised" in result.detail
 
 
-async def test_selected_unconnected_tracker_pends_through_ships_own_check(
+async def test_selected_unconnected_tracker_pends_through_software_factorys_own_check(
     installed, tmp_path: Path, druks_db, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # The default selector names linear; no identity is connected in this db.
     monkeypatch.setattr(doctor, "_check_engine", _fixture_check_engine)
 
     try:
-        result = _named(await doctor.check_apps(make_settings(tmp_path)), "ship:tracker")
+        result = _named(
+            await doctor.check_apps(make_settings(tmp_path)), "software_factory:tracker"
+        )
     finally:
         db_session.registry.set(druks_db)
 
@@ -115,12 +117,14 @@ async def test_coherent_stored_settings_pass(
     installed, tmp_path: Path, druks_db, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     await SettingsOverride.set_app_setting(
-        "ship", "linear_trigger_status", "Agent Queue", is_secret=False
+        "software_factory", "linear_trigger_status", "Agent Queue", is_secret=False
     )
     monkeypatch.setattr(doctor, "_check_engine", _fixture_check_engine)
 
     try:
-        result = _named(await doctor.check_apps(make_settings(tmp_path)), "ship:settings")
+        result = _named(
+            await doctor.check_apps(make_settings(tmp_path)), "software_factory:settings"
+        )
     finally:
         db_session.registry.set(druks_db)
 

@@ -82,7 +82,7 @@ def test_create_app_rejects_bad_and_taken_names(tmp_path):
     with pytest.raises(ValueError, match="must match"):
         create_app("Night-Watch", tmp_path)
     with pytest.raises(ValueError, match="already installed"):
-        create_app("ship", tmp_path)
+        create_app("software_factory", tmp_path)
     create_app("night_watch", tmp_path)
     with pytest.raises(ValueError, match="already exists"):
         create_app("night_watch", tmp_path)

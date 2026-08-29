@@ -15,8 +15,8 @@ configuration file. Edit `druks.toml` and re-run the installer to render and
 apply changes. Running `druks setup` alone re-renders `.env` but does not
 restart services.
 
-Format follows habitat: repository-committed files such as ship's
-`.druks/ship/config.yml` are YAML like the rest of the repository-dotfile
+Format follows habitat: repository-committed files such as software_factory's
+`.druks/software_factory/config.yml` are YAML like the rest of the repository-dotfile
 world; box-resident operator files are TOML because they render to env
 byte-exact. The two files share no keys and no reader.
 
@@ -203,7 +203,7 @@ Subscribe to issue comment, pull request, pull request review, and push events.
 | Commit statuses | Read |
 
 Install the GitHub App on the repositories Druks should work in; that installation
-set is where `ship` may act. Personal access tokens are not a supported
+set is where `software_factory` may act. Personal access tokens are not a supported
 substitute.
 
 **Upgrading an existing installation** is a one-time paste on each live box
@@ -231,8 +231,8 @@ Tracker credentials are service identities: connect Linear (API key + webhook
 secret) or Jira Cloud (base URL, email, API token, webhook secret) from
 **Settings → Services**, on the same cards as the GitHub App. Connecting
 verifies the credentials against the tracker before anything is stored. Which
-tracker drives `ship` work — and the statuses that trigger or move it — stays a
-ship app setting in **Settings → Ship**.
+tracker drives `software_factory` work — and the statuses that trigger or move it — stays a
+software_factory app setting in **Settings → Software Factory**.
 
 Webhook URLs remain `/_external/linear/events/` and
 `/_external/jira/events/`. The Jira webhook is a Jira Automation "Send web

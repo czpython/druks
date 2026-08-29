@@ -146,7 +146,7 @@ class Agent:
         return min(resolved, MAX_AGENT_TIMEOUT_SECONDS)
 
     async def __call__(self, **context: object) -> Any:
-        """Run the agent — ``await Ship.implement(...)`` — as a durable step in the
+        """Run the agent — ``await SoftwareFactory.implement(...)`` — as a durable step in the
         current workflow and return its parsed output. An agent run is always memoized —
         this picks which step does it: its own, or the @step it's already inside.
         workflow_id comes from the workflow context, not the caller; everything

@@ -12,8 +12,8 @@ from druks.apps.loader import iter_apps
 @functools.cache
 def _environment() -> Environment:
     # One Jinja environment over every installed app's own ``templates`` root,
-    # each mounted under the app's name: ``ship/build/implement.md`` is
-    # ``build/implement.md`` inside ship's package, so nothing repeats the app in
+    # each mounted under the app's name: ``software_factory/build/implement.md`` is
+    # ``build/implement.md`` inside software_factory's package, so nothing repeats the app in
     # its own tree. Overrides resolved as strings via ``from_string`` still see the
     # loader for ``{% include %}`` against partials.
     #

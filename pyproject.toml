@@ -69,7 +69,7 @@ druks = "druks.testing"
 [project.entry-points."druks.apps"]
 core = "druks.core.app:Core"
 review = "druks.contrib.review.app:Review"
-ship = "druks.contrib.ship.app:Ship"
+software_factory = "druks.contrib.software_factory.app:SoftwareFactory"
 usage = "druks.usage.app:Usage"
 
 [build-system]

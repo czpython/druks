@@ -49,7 +49,7 @@ name must match `App.name`. The same name scopes:
 - any provider credentials or prerequisites specific to its domain
 - optional static frontend assets shipped in the app package
 
-The bundled `ship` app owns projects, work items, ticket intake, GitHub
+The bundled `software_factory` app owns projects, work items, ticket intake, GitHub
 branches and pull requests, coding-agent policy, and its dashboard pages. Those
 are useful examples, not platform guarantees.
 

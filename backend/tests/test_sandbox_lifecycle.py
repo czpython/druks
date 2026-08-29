@@ -302,9 +302,7 @@ async def test_clone_raises_exec_failed_on_clone_failure():
             ref="main",
         )
 
-    assert "git clone https://github.com/owner/missing.git@main failed" in str(
-        excinfo.value
-    )
+    assert "git clone https://github.com/owner/missing.git@main failed" in str(excinfo.value)
 
 
 async def test_clone_failure_message_omits_ref_when_none():
@@ -318,9 +316,7 @@ async def test_clone_failure_message_omits_ref_when_none():
             ref=None,
         )
 
-    assert "git clone https://github.com/owner/missing.git failed" in str(
-        excinfo.value
-    )
+    assert "git clone https://github.com/owner/missing.git failed" in str(excinfo.value)
     assert "@None" not in str(excinfo.value)
 
 

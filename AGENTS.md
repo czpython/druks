@@ -3,7 +3,7 @@
 Druks runs durable agent apps on DBOS and Postgres. It owns
 workflow execution, persisted state and events, gates, webhooks, sandbox access,
 and the shared dashboard. Apps are standalone Python packages
-that self-register through the `druks.apps` entry point. `ship` is the
+that self-register through the `druks.apps` entry point. `software_factory` is the
 bundled reference app for coordinating coding agents through GitHub PRs.
 
 ## Read map
@@ -28,7 +28,7 @@ For app-surface changes, inspect the proof app at
 ## Architectural boundaries
 
 - Keep platform and app ownership explicit. GitHub issue, branch, PR, and
-  coding-agent policy belongs to `ship`, not to Druks core.
+  coding-agent policy belongs to `software_factory`, not to Druks core.
 - Describe durability precisely: completed durable checkpoints are reused when
   orchestration replays, but an interrupted operation may run again. Do not imply
   arbitrary-line resume or exactly-once external side effects.
@@ -130,7 +130,7 @@ truth for CI, including the proof-app install phase.
   routing, architectural boundaries, and contributor rules.
 - Link to one canonical explanation instead of copying it into multiple pages.
 - Verify behavioral claims against current source and focused tests. Distinguish
-  framework capabilities from `ship` behavior and guarantees from policy.
+  framework capabilities from `software_factory` behavior and guarantees from policy.
 - Update this file only when contributor routing, repository structure, commands,
   or a load-bearing architectural invariant changes.
 

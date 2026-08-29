@@ -148,7 +148,7 @@ class McpServer:
 @dataclass(frozen=True)
 class RequiredMcpServer:
     """An MCP server a workspace requires for its runs and credentials itself —
-    a run-scoped token the operator registry can't hold (Ship's per-repo
+    a run-scoped token the operator registry can't hold (Software Factory's per-repo
     reviewer token). It owns its name: a same-named registry entry is not
     delivered."""
 

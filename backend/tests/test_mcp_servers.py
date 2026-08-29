@@ -49,7 +49,7 @@ async def _delivery(**kwargs) -> dict:
 
 def _requiring_workspace(*servers: RequiredMcpServer) -> Workspace:
     # A workspace declaring the servers it requires and credentials itself,
-    # as Ship does.
+    # as SoftwareFactory does.
     class _Requiring(Workspace):
         def get_required_mcp_servers(self) -> tuple[RequiredMcpServer, ...]:
             return servers
@@ -122,7 +122,7 @@ async def test_delivery_carries_static_token_in_env(druks_db):
 
 async def test_required_server_delivers_beside_the_registry(druks_db):
     # A workspace declares a server with a run-scoped token it minted itself
-    # (Ship's per-repo reviewer token): wire shape + env var ride the same
+    # (SoftwareFactory's per-repo reviewer token): wire shape + env var ride the same
     # seam as every registry server.
     await McpServer.create(name="linear", url=_LINEAR_URL, token=_TOKEN)
     workspace = _requiring_workspace(
@@ -455,8 +455,8 @@ def _static_entry(url):
 
 async def test_packaged_catalog_is_empty_and_delivers_nothing(registry_state, druks_db):
     # The packaged default is an explicit empty ``mcpServers`` map: a fresh
-    # install registers no built-ins and delivers no MCP servers. Ship's github
-    # MCP is Ship's own requirement (get_required_mcp_servers), never a catalog
+    # install registers no built-ins and delivers no MCP servers. SoftwareFactory's github
+    # MCP is SoftwareFactory's own requirement (get_required_mcp_servers), never a catalog
     # entry.
     load_mcp_catalog(PACKAGED_MCP_CATALOG)
 

@@ -217,7 +217,7 @@ async def finish_agent_run(call, *, status=None, last_error=None):
 
 
 async def make_test_note(body: str = "a note"):
-    """The platform suite's subject. It belongs to the proof app, not to ship —
+    """The platform suite's subject. It belongs to the proof app, not to software_factory —
     platform behavior must hold for any app's rows."""
     from druks_field_notes.models import Note
 
