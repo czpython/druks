@@ -11,7 +11,7 @@ from pydantic import (
     computed_field,
 )
 
-from druks.schemas import BaseResponse
+from druks.schemas import Schema
 
 from .enums import AgentCallStatus, RunState
 
@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     from .models import Run
 
 
-class TokenUsage(BaseResponse):
+class TokenUsage(Schema):
     input_tokens: int
     output_tokens: int
     cached_input_tokens: int = 0
@@ -33,7 +33,7 @@ def get_display_label(kind: str) -> str:
     return kind.rsplit(".", 1)[-1].replace("_", " ").capitalize()
 
 
-class AgentCallResponse(BaseResponse):
+class AgentCallResponse(Schema):
     model_config = ConfigDict(from_attributes=True)
 
     id: str
@@ -56,13 +56,13 @@ class AgentCallResponse(BaseResponse):
         return get_display_label(self.agent)
 
 
-class ArtifactFile(BaseResponse):
+class ArtifactFile(Schema):
     name: str
     size_bytes: int
     updated_at: datetime
 
 
-class ArtifactDescriptor(BaseResponse):
+class ArtifactDescriptor(Schema):
     # A call's renderable output (a plan's markdown), rendered by kind — distinct
     # from the raw files. ``name`` is its file in the call dir, downloadable from
     # the transcript files route like any other.
@@ -71,7 +71,7 @@ class ArtifactDescriptor(BaseResponse):
     name: str
 
 
-class AgentCallFiles(BaseResponse):
+class AgentCallFiles(Schema):
     # A call's on-disk artifacts by role (prompt / response / stdout / stderr /
     # metadata / manifest). Each carries its file name; the client composes the
     # download URL from the transcript route it fetched this listing from.
@@ -87,7 +87,7 @@ class AgentCallFiles(BaseResponse):
     artifact: ArtifactDescriptor | None = None
 
 
-class RunResponse(BaseResponse):
+class RunResponse(Schema):
     id: str
     # The durable kind ("software_factory.build"); ``label`` is its display name ("Build").
     kind: str
@@ -136,7 +136,7 @@ SubjectId = Annotated[str, BeforeValidator(str)]
 SubjectLabel = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 
 
-class SubjectSummary(BaseResponse):
+class SubjectSummary(Schema):
     # The base an app's subject header subclasses; ``id`` keys the subject's
     # status, timeline and detail URL, and ``from_attributes`` builds the header
     # straight off the subject.
@@ -146,7 +146,7 @@ class SubjectSummary(BaseResponse):
     label: SubjectLabel
 
 
-class SubjectStatus(BaseResponse):
+class SubjectStatus(Schema):
     # The subject's lifecycle status for the dashboard lane — derived by the read
     # side, never stored; ``state`` is the canonical RunState aggregated across
     # the subject's runs. Everything else is a fact the app's UI renders
@@ -187,23 +187,23 @@ class SubjectStatus(BaseResponse):
         return self.state == RunState.FAILED
 
 
-class SubjectRow(BaseResponse):
+class SubjectRow(Schema):
     summary: SerializeAsAny[SubjectSummary]
     status: SubjectStatus
 
 
-class SubjectList(BaseResponse):
+class SubjectList(Schema):
     rows: list[SubjectRow] = Field(default_factory=list)
 
 
-class SubjectActivity(BaseResponse):
+class SubjectActivity(Schema):
     # The running sub-phase the timeline can't show ("Provisioning sandbox VM…"), supplied
     # by the app; ``kind`` groups it for display ("infra" | "agent").
     label: str
     kind: str
 
 
-class SubjectResponse(BaseResponse):
+class SubjectResponse(Schema):
     summary: SerializeAsAny[SubjectSummary]
     status: SubjectStatus
     # The subject's runs, oldest first, each with its agent calls — the timeline.
@@ -211,7 +211,7 @@ class SubjectResponse(BaseResponse):
     activity: SubjectActivity | None = None
 
 
-class TranscriptChunk(BaseResponse):
+class TranscriptChunk(Schema):
     call_id: str
     stream: Literal["stdout", "stderr"]
     offset: int
@@ -220,7 +220,7 @@ class TranscriptChunk(BaseResponse):
     text: str
 
 
-class TextSlice(BaseResponse):
+class TextSlice(Schema):
     # One bounded UTF-8-safe cut of an on-disk text file; offsets are byte
     # positions, has_earlier marks content before this slice.
     offset: int

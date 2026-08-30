@@ -2,10 +2,10 @@ from datetime import datetime
 
 from pydantic import Field
 
-from druks.schemas import BaseResponse
+from druks.schemas import Schema
 
 
-class UsageMetricSummary(BaseResponse):
+class UsageMetricSummary(Schema):
     percent_left: int | None = None
     resets_at: datetime | None = None
     # Set when this window meters one model separately from the rest,
@@ -13,7 +13,7 @@ class UsageMetricSummary(BaseResponse):
     model: str | None = None
 
 
-class UsageHarnessSummary(BaseResponse):
+class UsageHarnessSummary(Schema):
     # A registered harness name (get_harnesses()) — the UI keys panels,
     # colors, and legends off it.
     name: str
@@ -50,22 +50,22 @@ class UsageHarnessSummary(BaseResponse):
     raw_output: str | None = None
 
 
-class UsageResponse(BaseResponse):
+class UsageResponse(Schema):
     # One summary per registered harness, in registry order.
     harnesses: list[UsageHarnessSummary]
 
 
-class UsageHistoryPoint(BaseResponse):
+class UsageHistoryPoint(Schema):
     t: datetime
     pct: int
 
 
-class UsageWindowHistory(BaseResponse):
+class UsageWindowHistory(Schema):
     model: str | None = None
     points: list[UsageHistoryPoint] = Field(default_factory=list)
 
 
-class UsageHarnessHistory(BaseResponse):
+class UsageHarnessHistory(Schema):
     name: str
     # Percent-left samples, oldest first. ``five_hour`` covers the last
     # ~6h (one full 5h window plus headroom); ``weeks`` covers the last
@@ -75,11 +75,11 @@ class UsageHarnessHistory(BaseResponse):
     weeks: list[UsageWindowHistory] = Field(default_factory=list)
 
 
-class UsageHistoryResponse(BaseResponse):
+class UsageHistoryResponse(Schema):
     harnesses: list[UsageHarnessHistory]
 
 
-class UsageHarnessToday(BaseResponse):
+class UsageHarnessToday(Schema):
     name: str
     spend_usd: float
     tokens: int
@@ -88,7 +88,7 @@ class UsageHarnessToday(BaseResponse):
     hours: list[float]
 
 
-class UsageTodayResponse(BaseResponse):
+class UsageTodayResponse(Schema):
     # Local day the aggregates cover — same boundary as the sys-strip's
     # spend-today figure (operator timezone, finished_at attribution).
     day: str

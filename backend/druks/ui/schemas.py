@@ -2,12 +2,12 @@ from collections.abc import Iterable
 
 from pydantic import Field, model_validator
 
-from druks.schemas import BaseResponse
+from druks.schemas import Schema
 
 from .blocks import Action, Block, Watched
 
 
-class Page(BaseResponse):
+class Page(Schema):
     """One screen, as a page function projects it. The shared dashboard renders
     it, and rereads it on every snapshot of what ``follows`` watches."""
 

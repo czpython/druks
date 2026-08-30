@@ -731,8 +731,8 @@ Druks scopes autogeneration to the table prefix and writes the version to
 `alembic_version_night_watch`. Query through `druks.db.db_session()` inside an
 HTTP request, durable step, or other platform-bound session.
 
-HTTP response models subclass `druks.schemas.BaseResponse`, whose snake_case
-fields serialize as camelCase. Request models are ordinary Pydantic models.
+HTTP response models subclass `druks.schemas.Schema`, whose snake_case fields
+serialize as camelCase. Request models are ordinary Pydantic models.
 Druks mounts each router from a discovered `routes.py` below the app namespace.
 It tags the router with the app name. A router declares only the prefix of its
 resource:
@@ -1376,7 +1376,7 @@ Import from concern namespaces, not from `druks.durable` or internal modules:
 | `druks.workflows` | `Workflow`, `Gate`, `step`, run/agent response types, lifecycle enums and workflow errors |
 | `druks.sandbox` | `Sandbox` |
 | `druks.db` | `Base`, `StoredSubject`, `db_session` |
-| `druks.schemas` | `BaseResponse` |
+| `druks.schemas` | `Schema` |
 | `druks.ui` | `Action`, `Block`, `Callout`, `Card`, `Chart`, `ChartSeries`, `CheckboxField`, `Columns`, `Divider`, `EmptyState`, `Fact`, `Facts`, `Field`, `FileSummary`, `Files`, `Follows`, `Form`, `GateControls`, `Image`, `ImageGallery`, `Link`, `List`, `Markdown`, `Metric`, `Metrics`, `MultiSelectField`, `NumberField`, `NumberValue`, `Option`, `Page`, `Progress`, `ProgressStep`, `RadioField`, `Section`, `SelectField`, `Stack`, `StatusValue`, `Table`, `TableColumn`, `TableRow`, `Text`, `TextAreaField`, `TextField`, `TextValue`, `TimeValue`, `Timeline`, `TimelineItem`, `Value`, `page` |
 | `druks.signals` | `subscribe` |
 | `druks.events` | `Event` |

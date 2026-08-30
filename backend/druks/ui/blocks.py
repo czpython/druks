@@ -12,7 +12,7 @@ from pydantic import (
     model_validator,
 )
 
-from druks.schemas import BaseResponse
+from druks.schemas import Schema
 
 from .fields import Field as FormField
 
@@ -32,7 +32,7 @@ def _subject_identity(value):
     return {"subject_type": identity["type"], "subject_id": str(identity["id"])}
 
 
-class Follows(BaseResponse):
+class Follows(Schema):
     """The subject a page or a named region watches."""
 
     subject_type: str
@@ -42,7 +42,7 @@ class Follows(BaseResponse):
 Watched = Annotated[Follows | None, BeforeValidator(_subject_identity)]
 
 
-class PageBlock(BaseResponse):
+class PageBlock(Schema):
     """What every block shares. ``block`` names its kind on the wire, and
     ``check_placement`` is how a block refuses a spot it cannot work in."""
 
@@ -244,7 +244,7 @@ class GateControls(PageBlock):
         )
 
 
-class TextValue(BaseResponse):
+class TextValue(Schema):
     """Words. ``link`` is how a table cell, a fact, or a list item reaches
     another page."""
 
@@ -256,7 +256,7 @@ class TextValue(BaseResponse):
     link: Link | None = None
 
 
-class NumberValue(BaseResponse):
+class NumberValue(Schema):
     value: Literal["number"] = "number"
     number: float = Field(allow_inf_nan=False)
     unit: str = ""
@@ -265,7 +265,7 @@ class NumberValue(BaseResponse):
         super().__init__(number=number, **data)
 
 
-class StatusValue(BaseResponse):
+class StatusValue(Schema):
     """Where something stands. The app writes the word; the tone selects the
     presentation."""
 
@@ -277,7 +277,7 @@ class StatusValue(BaseResponse):
         super().__init__(label=label, **data)
 
 
-class TimeValue(BaseResponse):
+class TimeValue(Schema):
     value: Literal["time"] = "time"
     when: AwareDatetime
 
@@ -288,7 +288,7 @@ class TimeValue(BaseResponse):
 Value = Annotated[TextValue | NumberValue | StatusValue | TimeValue, Discriminator("value")]
 
 
-class TimelineItem(BaseResponse):
+class TimelineItem(Schema):
     # Aware, so items from different sources order against each other.
     when: AwareDatetime
     title: str
@@ -316,7 +316,7 @@ class Timeline(PageBlock):
         super().__init__(items=items, **data)
 
 
-class ProgressStep(BaseResponse):
+class ProgressStep(Schema):
     label: str
     status: StatusValue
 
@@ -360,7 +360,7 @@ class Image(PageBlock):
     caption: str = ""
 
 
-class FileSummary(BaseResponse):
+class FileSummary(Schema):
     """One file, as the shell shows it. The download is derived from the id, so
     a file always travels through the platform's own route and its identity
     gate."""
@@ -390,7 +390,7 @@ class Files(PageBlock):
         super().__init__(files=files, **data)
 
 
-class ChartSeries(BaseResponse):
+class ChartSeries(Schema):
     label: str
     points: list[Annotated[float, Field(allow_inf_nan=False)]]
 
@@ -427,7 +427,7 @@ class ImageGallery(PageBlock):
         super().__init__(images=images, **data)
 
 
-class Metric(BaseResponse):
+class Metric(Schema):
     label: str
     value: Value
     description: str = ""
@@ -445,7 +445,7 @@ class Metrics(PageBlock):
         super().__init__(metrics=metrics, **data)
 
 
-class Fact(BaseResponse):
+class Fact(Schema):
     label: str
     value: Value
 
@@ -464,7 +464,7 @@ class Facts(PageBlock):
         super().__init__(facts=facts, **data)
 
 
-class TableColumn(BaseResponse):
+class TableColumn(Schema):
     label: str
     align: Literal["start", "end"] = "start"
 
@@ -472,7 +472,7 @@ class TableColumn(BaseResponse):
         super().__init__(label=label, **data)
 
 
-class TableRow(BaseResponse):
+class TableRow(Schema):
     cells: list[Value] = Field(default_factory=list)
 
     def __init__(self, cells=(), **data):
