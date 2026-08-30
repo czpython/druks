@@ -12,6 +12,7 @@ Start with `README.md`, then read only the material relevant to the task:
 
 - Workflow lifecycle, state, replay, or recovery: `docs/concepts.md`
 - App contracts or the public author surface: `docs/writing-an-app.md`
+- App pages, blocks, values, fields, actions, and liveness: `docs/druks-ui.md`
 - Configuration or environment variables: `docs/configuration.md`
 - Local install and operations: `docs/full-local.md`
 - Remote deployment: `docs/deployment.md`
