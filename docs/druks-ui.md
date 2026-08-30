@@ -317,6 +317,16 @@ GET /api/<app>/<subject type>/<subject id>/stream
 
 There is no second streaming system.
 
+`follows=` also takes the subject class. The page or the region then watches
+every subject of that type, `subject_id` is empty, and the shell reads the board
+stream:
+
+```text
+GET /api/<app>/<subject type>/stream
+```
+
+A page that shows many subjects is live this way.
+
 On a `snapshot` event the shell reads the page again. It takes the named
 region from the new page and replaces that region in full. It sends no block
 diffs.

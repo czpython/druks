@@ -405,7 +405,8 @@ export type Block =
   | Link
 
 // The subject a page or a named region watches. The shell streams it and
-// rereads the page on every snapshot it sends.
+// rereads the page on every snapshot it sends. An empty ``subjectId`` watches
+// every subject of the type, through the board stream.
 export interface Follows {
   subjectType: string
   subjectId: string
