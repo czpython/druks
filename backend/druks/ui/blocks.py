@@ -4,6 +4,7 @@ from pydantic import (
     AwareDatetime,
     BeforeValidator,
     ConfigDict,
+    Discriminator,
     Field,
     StringConstraints,
     computed_field,
@@ -146,6 +147,27 @@ class GateControls(PageBlock):
         )
 
 
+class TextValue(BaseResponse):
+    """Words. ``link`` is how a table cell, a fact, or a list item reaches
+    another page."""
+
+    def __init__(self, text, **data):
+        super().__init__(text=text, **data)
+
+    value: Literal["text"] = "text"
+    text: str
+    link: Link | None = None
+
+
+class NumberValue(BaseResponse):
+    value: Literal["number"] = "number"
+    number: float = Field(allow_inf_nan=False)
+    unit: str = ""
+
+    def __init__(self, number, **data):
+        super().__init__(number=number, **data)
+
+
 class StatusValue(BaseResponse):
     """Where something stands. The app writes the word; the tone selects the
     presentation."""
@@ -156,6 +178,17 @@ class StatusValue(BaseResponse):
 
     def __init__(self, label: str, **data):
         super().__init__(label=label, **data)
+
+
+class TimeValue(BaseResponse):
+    value: Literal["time"] = "time"
+    when: AwareDatetime
+
+    def __init__(self, when, **data):
+        super().__init__(when=when, **data)
+
+
+Value = Annotated[TextValue | NumberValue | StatusValue | TimeValue, Discriminator("value")]
 
 
 class TimelineItem(BaseResponse):
@@ -181,6 +214,9 @@ class Timeline(PageBlock):
         # moment keep the order the app gave them.
         self.items.sort(key=lambda item: item.when)
         return self
+
+    def __init__(self, items=(), **data):
+        super().__init__(items=items, **data)
 
 
 class ProgressStep(BaseResponse):
@@ -253,6 +289,148 @@ class Files(PageBlock):
     title: str = ""
     files: list[FileSummary] = Field(default_factory=list)
 
+    def __init__(self, files=(), **data):
+        super().__init__(files=files, **data)
+
+
+class ChartSeries(BaseResponse):
+    label: str
+    points: list[Annotated[float, Field(allow_inf_nan=False)]]
+
+
+class Chart(PageBlock):
+    """Numbers over categories. Every series carries one point for each
+    category, so the shell can read the same table a chart draws."""
+
+    block: Literal["chart"] = "chart"
+    kind: Literal["line", "bar", "area"] = "line"
+    title: str = ""
+    categories: list[str] = Field(default_factory=list)
+    series: list[ChartSeries] = Field(default_factory=list)
+    category_label: str = ""
+    value_label: str = ""
+
+    @model_validator(mode="after")
+    def _series_match_the_categories(self) -> "Chart":
+        wrong = [one.label for one in self.series if len(one.points) != len(self.categories)]
+        if wrong:
+            raise ValueError(
+                f"chart series {wrong} do not carry one point for each of the "
+                f"{len(self.categories)} categories."
+            )
+        return self
+
+
+class ImageGallery(PageBlock):
+    block: Literal["image_gallery"] = "image_gallery"
+    title: str = ""
+    images: list[Image] = Field(default_factory=list)
+
+    def __init__(self, images=(), **data):
+        super().__init__(images=images, **data)
+
+
+class Metric(BaseResponse):
+    label: str
+    value: Value
+    description: str = ""
+
+    def __init__(self, label, **data):
+        super().__init__(label=label, **data)
+
+
+class Metrics(PageBlock):
+    block: Literal["metrics"] = "metrics"
+    title: str = ""
+    metrics: list[Metric] = Field(default_factory=list)
+
+    def __init__(self, metrics=(), **data):
+        super().__init__(metrics=metrics, **data)
+
+
+class Fact(BaseResponse):
+    label: str
+    value: Value
+
+    def __init__(self, label, **data):
+        super().__init__(label=label, **data)
+
+
+class Facts(PageBlock):
+    """The label-and-value list."""
+
+    block: Literal["facts"] = "facts"
+    title: str = ""
+    facts: list[Fact] = Field(default_factory=list)
+
+    def __init__(self, facts=(), **data):
+        super().__init__(facts=facts, **data)
+
+
+class TableColumn(BaseResponse):
+    label: str
+    align: Literal["start", "end"] = "start"
+
+    def __init__(self, label, **data):
+        super().__init__(label=label, **data)
+
+
+class TableRow(BaseResponse):
+    cells: list[Value] = Field(default_factory=list)
+
+    def __init__(self, cells=(), **data):
+        super().__init__(cells=cells, **data)
+
+
+class Table(PageBlock):
+    """Rows of values under named columns. Every row carries one cell for each
+    column; with no rows the shell shows ``empty_text``."""
+
+    block: Literal["table"] = "table"
+    title: str = ""
+    columns: list[TableColumn] = Field(default_factory=list)
+    rows: list[TableRow] = Field(default_factory=list)
+    empty_text: str = ""
+
+    @model_validator(mode="after")
+    def _rows_match_the_columns(self) -> "Table":
+        wrong = [len(row.cells) for row in self.rows if len(row.cells) != len(self.columns)]
+        if wrong:
+            raise ValueError(
+                f"table {self.title!r} has rows of {sorted(set(wrong))} cells under "
+                f"{len(self.columns)} columns."
+            )
+        return self
+
+
+class List(PageBlock):
+    block: Literal["list"] = "list"
+    title: str = ""
+    items: list[Value] = Field(default_factory=list)
+
+    def __init__(self, items=(), **data):
+        super().__init__(items=items, **data)
+
+
+class Stack(BlockParent):
+    """Blocks down the page."""
+
+    block: Literal["stack"] = "stack"
+    gap: Literal["small", "medium", "large"] = "medium"
+
+    def __init__(self, blocks=(), **data):
+        super().__init__(blocks=blocks, **data)
+
+
+class Columns(BlockParent):
+    """Blocks across the page. Each child is one column; they share the width
+    and stack on a narrow screen."""
+
+    block: Literal["columns"] = "columns"
+
+    def __init__(self, blocks=(), **data):
+        super().__init__(blocks=blocks, **data)
+
 
 class Card(BlockParent):
     block: Literal["card"] = "card"
@@ -302,10 +480,20 @@ Block = Annotated[
     | Timeline
     | Progress
     | Image
-    | Files,
+    | Files
+    | Chart
+    | ImageGallery
+    | Metrics
+    | Facts
+    | Table
+    | List
+    | Stack
+    | Columns,
     Field(discriminator="block"),
 ]
 
 Card.model_rebuild()
 Section.model_rebuild()
+Stack.model_rebuild()
+Columns.model_rebuild()
 BlockParent.model_rebuild()

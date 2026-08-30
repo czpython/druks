@@ -38,7 +38,7 @@ The contract uses eight terms. Each one has one meaning.
 Every public name comes from `druks.ui`:
 
 ```python
-from druks.ui import Card, Facts, Fact, Page, StatusValue, TextValue, page
+from druks import ui
 ```
 
 `druks.ui` imports no app. It is a platform namespace like `druks.workflows`.
@@ -71,19 +71,19 @@ Pages live in `pages.py`. Druks discovers that module the way it discovers
 `routes.py`.
 
 ```python
-from druks.ui import Page, Text, page
+from druks import ui
 
 
-@page("/")
+@ui.page("/")
 async def overview():
-    return Page(title="Overview", blocks=[Text("Peers this install tracks.")])
+    return ui.Page("Overview", blocks=[ui.Text("Peers this install tracks.")])
 
 
-@page("/peers")
+@ui.page("/peers")
 async def peers(): ...
 
 
-@page("/peers/{peer_id}")
+@ui.page("/peers/{peer_id}")
 async def peer(peer_id: int): ...
 
 
@@ -106,7 +106,7 @@ become spaces. `peer_history` becomes "peer history". Pass `label=` to
 override it:
 
 ```python
-@page("/peers", label="Peer roster")
+@ui.page("/peers", label="Peer roster")
 async def peers(): ...
 ```
 
@@ -276,17 +276,17 @@ guaranteed. Write the function so that a repeat call is free.
 A `Page` or a named region declares what it watches:
 
 ```python
-@page("/peers/{peer_id}")
+@ui.page("/peers/{peer_id}")
 async def peer(peer_id: int):
     watched = await Peer.get(peer_id)
-    return Page(
+    return ui.Page(
         title=watched.name,
         blocks=[
-            Section(
+            ui.Section(
                 name="decision",
                 title="Decision",
                 follows=watched,
-                blocks=[GateControls(watched.active_run)],
+                blocks=[ui.GateControls(watched.active_run)],
             )
         ],
     )
@@ -335,7 +335,7 @@ A `follows=` on the `Page` itself replaces the whole page body.
 `GateControls` declares only the run:
 
 ```python
-GateControls(peer.active_run)
+ui.GateControls(peer.active_run)
 ```
 
 The shell derives everything else from the parked run: the questions, the
@@ -361,7 +361,7 @@ When the run resumes, the followed region refreshes and the controls go away.
 An `Action` names an app-local operation:
 
 ```python
-Action(label="Archive", operation="archive_note", arguments={"note_id": note.id})
+ui.Action(label="Archive", operation="archive_note", arguments={"note_id": note.id})
 ```
 
 The `operation` is the `operation_id` of one of the app's own routes:
@@ -444,8 +444,8 @@ form errors.
 A `Link` navigates and never calls an operation:
 
 ```python
-Link("History", page="peer_history", arguments={"peer_id": peer.id})
-Link("Provider status", url="https://status.example.com")
+ui.Link("History", page="peer_history", arguments={"peer_id": peer.id})
+ui.Link("Provider status", url="https://status.example.com")
 ```
 
 A `Link` sets `page` or `url`, never both and never neither. Druks rejects a
@@ -511,14 +511,21 @@ A block with exactly one required value takes that value positionally, and
 every other value by keyword:
 
 ```python
-Text("Three peers answered in the last hour.")
-Callout("Notes arrive through the API.", tone="info", title="Not here yet")
-Link("Open", page="note", arguments={"note_id": "7"})
+ui.Text("Three peers answered in the last hour.")
+ui.Callout("Notes arrive through the API.", tone="info", title="Not here yet")
+ui.Link("Open", page="note", arguments={"note_id": "7"})
 ```
 
-A block with no required value, or with more than one, takes all of them by
-keyword. Every container is one of those, so `Card`, `Section`, `Table`, and
-`Timeline` name each argument.
+A container that holds one list takes that list positionally too:
+
+```python
+ui.Metrics([ui.Metric("Captured", value=ui.NumberValue(12))], title="Counts")
+ui.Stack([ui.Text("one"), ui.Divider()], gap="large")
+```
+
+`Metrics`, `Facts`, `List`, `Timeline`, `Files`, `ImageGallery`, `Stack`,
+`Columns`, and `TableRow` all read that way. A block that holds more than one
+thing names every argument — `Card`, `Section`, `Table`, and `Chart`.
 
 ### Text
 
@@ -653,7 +660,7 @@ A link sets exactly one destination: `page` for another page of this app,
 full story of what druks did about it, which no app page recomposes:
 
 ```python
-Link("Everything druks did", subject=found)
+ui.Link("Everything druks did", subject=found)
 ```
 
 ### Action
@@ -912,8 +919,9 @@ class Chart:
 }
 ```
 
-Every series must have one point for each category. The shell renders a
-table of the same numbers for a screen reader.
+Every series must have one point for each category, and every point must be a
+number JSON can carry. The shell renders a table of the same numbers, titled
+with the chart's own title and value label, for a screen reader.
 
 ### ImageGallery
 
@@ -1029,8 +1037,9 @@ class Table:
 ```
 
 Every row must have one cell for each column. With no rows the shell shows
-`empty_text`. A wide table scrolls inside its own container. On a narrow
-screen the shell stacks each row as a label-and-value list.
+`empty_text`, and nothing of its own. A wide table scrolls inside its own
+container, on a narrow screen as well: a stacked row would lose the header each
+cell belongs to.
 
 ### List
 
@@ -1134,14 +1143,15 @@ no type named `Status`.
 ```python
 class TimeValue:
     value: Literal["time"] = "time"
-    at: datetime
+    when: AwareDatetime
 ```
 
 ```json
-{"value": "time", "at": "2026-08-29T09:14:02Z"}
+{"value": "time", "when": "2026-08-29T09:14:02Z"}
 ```
 
-The shell shows a relative time and the exact time in the title attribute.
+`when` must name an offset. The shell shows a relative time, and the exact
+time in the title attribute.
 
 ## Fields
 

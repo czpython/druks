@@ -1152,22 +1152,22 @@ An app declares its screens in Python and ships no JavaScript. Pages live in
 `pages.py`:
 
 ```python
-from druks.ui import Page, page
+from druks import ui
 
 
-@page("/")
+@ui.page("/")
 async def reports():
-    return Page(title="Reports", description="Every sweep this install ran.")
+    return ui.Page("Reports", description="Every sweep this install ran.")
 
 
-@page("/peers/{peer_id}")
+@ui.page("/peers/{peer_id}")
 async def peer(peer_id: int):
-    return Page(title=f"Peer {peer_id}")
+    return ui.Page(title=f"Peer {peer_id}")
 
 
 @peer.child("/history")
 async def peer_history(peer_id: int):
-    return Page(title=f"Peer {peer_id} history")
+    return ui.Page(title=f"Peer {peer_id} history")
 ```
 
 `@page` declares a top-level page. `@parent.child` declares a page under it,
@@ -1231,17 +1231,17 @@ streams that subject through the read side every app already gets, and the
 shell rereads the page on each snapshot:
 
 ```python
-@page("/notes/{note_id}")
+@ui.page("/notes/{note_id}")
 async def note(note_id: int):
     found = await Note.get(note_id)
     status = await found.get_status()
     if status.gate:
-        decision = [GateControls(status.run)]
+        decision = [ui.GateControls(status.run)]
     else:
-        decision = [Text("Nothing is waiting on you.")]
-    return Page(
+        decision = [ui.Text("Nothing is waiting on you.")]
+    return ui.Page(
         title=f"Note {note_id}",
-        blocks=[Section(title="Your decision", name="decision", follows=found, blocks=decision)],
+        blocks=[ui.Section(title="Your decision", name="decision", follows=found, blocks=decision)],
     )
 ```
 
@@ -1315,7 +1315,7 @@ Import from concern namespaces, not from `druks.durable` or internal modules:
 | `druks.sandbox` | `Sandbox` |
 | `druks.db` | `Base`, `StoredSubject`, `db_session` |
 | `druks.schemas` | `BaseResponse` |
-| `druks.ui` | `page`, `Page`, `Block`, `Text`, `Markdown`, `Section`, `Card`, `Callout`, `Divider`, `EmptyState`, `Link`, `Follows`, `GateControls`, `Timeline`, `TimelineItem`, `Progress`, `ProgressStep`, `Image`, `Files`, `FileSummary`, `StatusValue` |
+| `druks.ui` | `Block`, `Callout`, `Card`, `Chart`, `ChartSeries`, `Columns`, `Divider`, `EmptyState`, `Fact`, `Facts`, `FileSummary`, `Files`, `Follows`, `GateControls`, `Image`, `ImageGallery`, `Link`, `List`, `Markdown`, `Metric`, `Metrics`, `NumberValue`, `Page`, `Progress`, `ProgressStep`, `Section`, `Stack`, `StatusValue`, `Table`, `TableColumn`, `TableRow`, `Text`, `TextValue`, `TimeValue`, `Timeline`, `TimelineItem`, `Value`, `page` |
 | `druks.signals` | `subscribe` |
 | `druks.events` | `Event` |
 | `druks.files` | `File`, `FileField` |

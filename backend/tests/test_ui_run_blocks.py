@@ -18,18 +18,18 @@ AT = datetime(2026, 8, 29, 9, 14, 2, tzinfo=UTC)
 
 
 def wire(*blocks):
-    return Page(title="Run", blocks=list(blocks)).model_dump(by_alias=True, mode="json")["blocks"]
+    return Page("Run", blocks=list(blocks)).model_dump(by_alias=True, mode="json")["blocks"]
 
 
 def test_a_timeline_item_carries_its_stamp_and_status():
     (block,) = wire(
         Timeline(
-            title="Sweep",
-            items=[
+            [
                 TimelineItem(
                     when=AT, title="Run started", status=StatusValue("active", tone="active")
                 )
             ],
+            title="Sweep",
         )
     )
 
@@ -76,7 +76,7 @@ def test_an_image_carries_its_alternative_text():
 def test_files_take_the_files_primitive():
     file = File(id="018f2c1e", name="sweep.csv", size=4211, content_type="text/csv")
 
-    (block,) = wire(Files(title="Report", files=[file]))
+    (block,) = wire(Files([file], title="Report"))
 
     assert block["files"] == [
         {
@@ -93,7 +93,7 @@ def test_files_take_the_files_primitive():
 def test_a_file_summary_can_be_given_directly():
     summary = FileSummary(id="a", name="n", content_type="text/plain", size=1)
 
-    (block,) = wire(Files(files=[summary]))
+    (block,) = wire(Files([summary]))
 
     assert block["files"][0]["id"] == "a"
 
@@ -131,7 +131,7 @@ def test_progress_takes_one_shape_inside_its_bounds(bad):
 
 def test_a_timeline_orders_itself_oldest_first():
     timeline = Timeline(
-        items=[
+        [
             TimelineItem(when=datetime(2026, 8, 29, 10, 0, tzinfo=UTC), title="finished"),
             TimelineItem(when=datetime(2026, 8, 29, 9, 0, tzinfo=UTC), title="started"),
         ]
@@ -142,7 +142,7 @@ def test_a_timeline_orders_itself_oldest_first():
 
 def test_a_timeline_keeps_microseconds_apart():
     timeline = Timeline(
-        items=[
+        [
             TimelineItem(when=datetime(2026, 8, 29, 9, 0, 0, 900, tzinfo=UTC), title="later"),
             TimelineItem(when=datetime(2026, 8, 29, 9, 0, 0, 100, tzinfo=UTC), title="earlier"),
         ]

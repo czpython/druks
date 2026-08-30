@@ -239,6 +239,58 @@ export interface ProgressStep {
   status: StatusValue
 }
 
+export interface TextValue {
+  value: 'text'
+  text: string
+  link: Link | null
+}
+
+export interface NumberValue {
+  value: 'number'
+  number: number
+  unit: string
+}
+
+export interface TimeValue {
+  value: 'time'
+  when: string
+}
+
+// One rendered datum. It reads the same way in Facts, Metrics, List, and Table.
+export type Value = TextValue | NumberValue | StatusValue | TimeValue
+
+export interface ChartSeries {
+  label: string
+  points: number[]
+}
+
+export interface Metric {
+  label: string
+  value: Value
+  description: string
+}
+
+export interface Fact {
+  label: string
+  value: Value
+}
+
+export interface TableColumn {
+  label: string
+  align: 'start' | 'end'
+}
+
+export interface TableRow {
+  cells: Value[]
+}
+
+export interface ImageBlock {
+  block: 'image'
+  url: string
+  alternativeText: string
+  caption: string
+}
+
 export interface FileSummary {
   id: string
   name: string
@@ -260,8 +312,30 @@ export type Block =
       total: number
       steps: ProgressStep[]
     }
-  | { block: 'image'; url: string; alternativeText: string; caption: string }
+  | ImageBlock
   | { block: 'files'; title: string; files: FileSummary[] }
+  | {
+      block: 'chart'
+      kind: 'line' | 'bar' | 'area'
+      title: string
+      categories: string[]
+      series: ChartSeries[]
+      categoryLabel: string
+      valueLabel: string
+    }
+  | { block: 'image_gallery'; title: string; images: ImageBlock[] }
+  | { block: 'metrics'; title: string; metrics: Metric[] }
+  | { block: 'facts'; title: string; facts: Fact[] }
+  | {
+      block: 'table'
+      title: string
+      columns: TableColumn[]
+      rows: TableRow[]
+      emptyText: string
+    }
+  | { block: 'list'; title: string; items: Value[] }
+  | { block: 'stack'; gap: 'small' | 'medium' | 'large'; blocks: Block[] }
+  | { block: 'columns'; blocks: Block[] }
   | { block: 'card'; title: string; description: string; blocks: Block[]; actions: Link[] }
   | {
       block: 'callout'

@@ -4,6 +4,7 @@ import { Link as RouteLink } from 'wouter'
 import type { Block, Link } from '../api/types'
 import { Markdown } from '../components/Markdown'
 import { GateControls } from './GateControls'
+import { Chart, Facts, ImageGallery, List, Metrics, Table } from './DataBlocks'
 import { Files, Image, Progress, Timeline } from './RunBlocks'
 import { fillPath, PagesContext } from './pages'
 
@@ -46,6 +47,50 @@ function BlockContent({ block }: { block: Block }) {
       )
     case 'files':
       return <Files title={block.title} files={block.files} />
+    case 'chart':
+      return (
+        <Chart
+          kind={block.kind}
+          title={block.title}
+          categories={block.categories}
+          series={block.series}
+          categoryLabel={block.categoryLabel}
+          valueLabel={block.valueLabel}
+        />
+      )
+    case 'image_gallery':
+      return <ImageGallery title={block.title} images={block.images} />
+    case 'metrics':
+      return <Metrics title={block.title} metrics={block.metrics} />
+    case 'facts':
+      return <Facts title={block.title} facts={block.facts} />
+    case 'table':
+      return (
+        <Table
+          title={block.title}
+          columns={block.columns}
+          rows={block.rows}
+          emptyText={block.emptyText}
+        />
+      )
+    case 'list':
+      return <List title={block.title} items={block.items} />
+    case 'stack':
+      return (
+        <div className={`dui-stack dui-stack-${block.gap}`}>
+          <Blocks blocks={block.blocks} />
+        </div>
+      )
+    case 'columns':
+      return (
+        <div className="dui-columns">
+          {block.blocks.map((column, index) => (
+            <div key={index} className="dui-column">
+              <BlockContent block={column} />
+            </div>
+          ))}
+        </div>
+      )
     case 'callout':
       return (
         <div className={`dui-callout dui-callout-${block.tone}`} role="note">
