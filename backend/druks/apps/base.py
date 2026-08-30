@@ -553,13 +553,14 @@ class App:
         router = APIRouter(prefix=f"/{subject_type}", tags=[f"{cls.name}:{subject_type}"])
 
         async def board(account_id: str | None) -> SubjectList:
+            summaries = await subject_class.list_summaries(account_id)
+            statuses = await reads.get_subject_statuses(
+                subject_type, [summary.id for summary in summaries]
+            )
             return SubjectList(
                 rows=[
-                    SubjectRow(
-                        summary=summary,
-                        status=await reads.get_subject_status(subject_type, summary.id),
-                    )
-                    for summary in await subject_class.list_summaries(account_id)
+                    SubjectRow(summary=summary, status=statuses[summary.id])
+                    for summary in summaries
                 ]
             )
 

@@ -6,6 +6,7 @@ from druks.apps.base import App
 from druks.database import db_session
 from druks.durable import AgentCall, Run
 from druks.durable.datastructures import Subject
+from druks.durable.reads import get_subject_statuses
 from druks.durable.schemas import SubjectSummary
 from druks.models import StoredSubject
 from druks.testing import asgi_client, seed_dbos_status
@@ -203,35 +204,67 @@ async def test_status_carries_the_latest_run_failure(client: TestClient, druks_d
     assert running["failure"] is None
 
 
-async def test_parked_board_row_skips_the_agent_call_query(client: TestClient, druks_db):
-    # A parked row's status carries its gate ask, never its latest agent call, so
-    # the per-subject status read must not load agent_calls — the board runs it
-    # for every subject.
-    run = await _seed_run(
+async def test_a_board_reads_status_in_the_same_queries_however_many_rows(
+    client: TestClient, druks_db
+):
+    # The board reads the whole page's status at once, and its /stream re-runs that
+    # read every couple of seconds per viewer — so a second row costs no more
+    # queries than the first. The ticket board lists one row per open run, so
+    # seeding a run is what grows it.
+    parked = await _seed_run(
         druks_db,
-        subject_id="1",
+        subject_type="ticket",
+        subject_id="owner/repo#1",
         state="parked",
         input_gate="approve_plan",
         input_request={"label": "Approve the plan"},
     )
-    await _seed_call(druks_db, run, agent="generate_plan")
+    await _seed_call(druks_db, parked, agent="generate_plan")
 
-    call_reads: list[str] = []
+    async def read_board() -> tuple[list[dict], int]:
+        run_reads: list[str] = []
 
-    def record(conn, cursor, statement, parameters, context, executemany):
-        if "agent_calls" in statement and statement.lstrip().upper().startswith("SELECT"):
-            call_reads.append(statement)
+        def record(conn, cursor, statement, parameters, context, executemany):
+            touches_runs = "durable_runs" in statement or "agent_calls" in statement
+            if touches_runs and statement.lstrip().upper().startswith("SELECT"):
+                run_reads.append(statement)
 
-    engine = druks_db.bind.sync_connection
-    event.listen(engine, "before_cursor_execute", record)
-    try:
-        body = (await client.get("/api/faketest/thing")).json()
-    finally:
-        event.remove(engine, "before_cursor_execute", record)
+        engine = druks_db.bind.sync_connection
+        event.listen(engine, "before_cursor_execute", record)
+        try:
+            body = (await client.get("/api/faketest/ticket")).json()
+        finally:
+            event.remove(engine, "before_cursor_execute", record)
+        return body["rows"], len(run_reads)
 
-    rows = {row["summary"]["id"]: row for row in body["rows"]}
-    assert rows["1"]["status"]["gate"] == "approve_plan"
-    assert call_reads == []
+    one_row, reads_for_one = await read_board()
+
+    running = await _seed_run(
+        druks_db, subject_type="ticket", subject_id="owner/repo#2", state="running"
+    )
+    await _seed_call(druks_db, running, agent="implement", status="running")
+    two_rows, reads_for_two = await read_board()
+
+    assert [row["summary"]["id"] for row in one_row] == ["owner/repo#1"]
+    rows = {row["summary"]["id"]: row for row in two_rows}
+    # A parked row carries its gate ask and not its latest agent call; a running
+    # row is the other way round.
+    assert rows["owner/repo#1"]["status"]["gate"] == "approve_plan"
+    assert rows["owner/repo#1"]["status"]["agent"] is None
+    assert rows["owner/repo#2"]["status"]["agent"] == "implement"
+    assert reads_for_two == reads_for_one
+
+
+async def test_the_board_status_read_answers_for_every_id_it_is_given(druks_db):
+    # One read covers the whole page, so every id it was asked about comes back —
+    # a subject with no run at all included.
+    live = await _seed_run(druks_db, subject_id="1", state="running")
+
+    statuses = await get_subject_statuses("thing", ["1", "2"])
+
+    assert set(statuses) == {"1", "2"}
+    assert statuses["1"].run == live.id
+    assert statuses["2"].run is None
 
 
 async def test_list_returns_every_subject_with_status(client: TestClient, druks_db):
