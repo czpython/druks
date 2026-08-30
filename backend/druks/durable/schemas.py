@@ -92,7 +92,7 @@ class RunResponse(Schema):
     # The durable kind ("software_factory.build"); ``label`` is its display name ("Build").
     kind: str
     label: str
-    state: Literal["scheduled", "running", "parked", "finished", "failed", "cancelled"]
+    state: RunState
     failure: str | None = None
     gate: str | None = None
     # The structured ask the parked run declared at ``Gate.wait(input_request=…)`` —
@@ -115,7 +115,7 @@ class RunResponse(Schema):
             id=run.id,
             kind=run.kind,
             label=get_display_label(run.kind),
-            state=run.state,  # type: ignore[arg-type]
+            state=RunState(run.state),
             failure=run.failure_message(),
             gate=run.input_gate,
             input_request=input_request,
