@@ -71,6 +71,7 @@ contains the built SPA and serves it from FastAPI.
 | `backend/druks/agents.py` | Public agent descriptor and output contract |
 | `backend/druks/durable/` | DBOS integration, run projection, lifecycle internals |
 | `backend/druks/apps/` | Entry-point loading, discovery, author settings |
+| `backend/druks/ui/` | Page declarations, the block/value/field catalog, the page API |
 | `backend/druks/events/`, `signals.py` | Event log, feed, and reactions |
 | `backend/druks/webhooks/` | Authenticated delivery framework and deduplication |
 | `backend/druks/harnesses/` | Claude/Codex invocation, auth, usage, capability manifests |
@@ -79,6 +80,7 @@ contains the built SPA and serves it from FastAPI.
 | `backend/druks/{mcp,skills,notifications,user_settings}/` | Shared operator services |
 | `backend/druks/contrib/software_factory/` | Bundled reference app, not framework core |
 | `frontend/src/` | Shared dashboard shell and bundled app UI |
+| `frontend/src/druksui/` | The renderer for an app's Python pages |
 | `backend/migrations/` | Core/bundled schema history |
 | `deploy/`, `scripts/` | Images, Compose, Caddy, setup, and deployment |
 
@@ -180,13 +182,18 @@ sandbox test, run this command. It is not part of the normal test suite.
 
 ## Frontend ownership
 
-Backend app entry points and shared-shell React routes have different
-delivery mechanisms. Python discovery can load an installed app at
-runtime. An app can ship a standalone static frontend in its package's
+An app's screens are Python. It declares them in `pages.py`, and the shell
+renders them through `frontend/src/druksui/`. An installed wheel therefore
+adds pages without touching the JavaScript bundle. The
+[Druks UI contract](druks-ui.md) is the one description of what those pages
+carry; change it first, then the renderer.
+
+Two escape hatches remain, and both are for an app that needs full control of
+its interface. An app can ship a standalone static frontend in its package's
 `dist/`, served at `/app/<name>`. React code that joins the bundled dashboard
 shell must already be in the SPA and register through
-`frontend/src/apps/index.ts`. A wheel cannot put routes into that
-existing JavaScript bundle.
+`frontend/src/apps/index.ts`; a wheel cannot put routes into that existing
+JavaScript bundle.
 
 See the [frontend guide](https://github.com/czpython/druks/blob/main/frontend/README.md)
 before adding dashboard pages.

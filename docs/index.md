@@ -55,6 +55,7 @@ software-delivery behavior belong to the app, not to Druks.
 - **Evaluate Druks:** Complete the [quickstart](quickstart.md) on one machine.
 - **Understand recovery:** Read [concepts and guarantees](concepts.md).
 - **Build an app:** Start with [writing an app](writing-an-app.md).
+- **Give it screens:** Read the [Druks UI contract](druks-ui.md).
 - **Run a production stack:** Follow the [deployment runbook](deployment.md).
 - **Diagnose a failure:** Use [troubleshooting](troubleshooting.md).
 

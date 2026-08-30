@@ -193,7 +193,11 @@ export function InAppReview({
           </fieldset>
         )
       })}
+      <label className="review-note-label" htmlFor={`${runId}-note`}>
+        Your note
+      </label>
       <textarea
+        id={`${runId}-note`}
         className="review-note"
         placeholder="optional note — what should change?"
         value={note}

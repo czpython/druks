@@ -9,6 +9,11 @@ on:
       - "backend/**"
       - "pyproject.toml"
       - "uv.lock"
+      # The page wire snapshot is shared: the backend suite compares what the
+      # proof app serializes against the file the renderer reads, so a rename on
+      # the frontend side has to run this suite too.
+      - "frontend/src/api/types.ts"
+      - "frontend/src/druksui/**"
 
 concurrency:
   group: on-pull-request-backend-${{ github.event.pull_request.number }}

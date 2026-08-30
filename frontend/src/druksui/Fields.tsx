@@ -1,3 +1,5 @@
+import { useId } from 'react'
+
 import type { Field } from '../api/types'
 
 /** Every input in a form, with the value the operator has given it so far and
@@ -13,15 +15,23 @@ export function Fields({
   errors: Record<string, string>
   onChange: (name: string, value: unknown) => void
 }) {
+  // A page can hold two forms that both take a "body", so the id a label points
+  // at belongs to this form, not to the field name alone.
+  const form = useId()
   return (
     <>
       {fields.map((field) => (
         <div key={field.name} className="dui-field">
-          <label className="dui-field-label" htmlFor={field.name}>
+          <label className="dui-field-label" htmlFor={`${form}${field.name}`}>
             {field.label}
             {field.isRequired && <span className="dui-field-required"> *</span>}
           </label>
-          <Input field={field} value={values[field.name]} onChange={onChange} />
+          <Input
+            field={field}
+            id={`${form}${field.name}`}
+            value={values[field.name]}
+            onChange={onChange}
+          />
           {field.helpText && <div className="dui-field-help dim">{field.helpText}</div>}
           {errors[field.name] && (
             <div className="dui-field-error" role="alert">
@@ -36,16 +46,21 @@ export function Fields({
 
 function Input({
   field,
+  id,
   value,
   onChange,
 }: {
   field: Field
+  id: string
   value: unknown
   onChange: (name: string, value: unknown) => void
 }) {
   const shared = {
-    id: field.name,
-    name: field.name,
+    id,
+    // Scoped like the id: two radio groups sharing a name would become one, and
+    // choosing in the second form would clear the first. The submitted payload
+    // is keyed by the field's own name, not by this one.
+    name: id,
     required: field.isRequired,
     'aria-invalid': undefined,
   }
@@ -112,7 +127,7 @@ function Input({
               <label key={option.value} className="dui-choice">
                 <input
                   type="checkbox"
-                  name={field.name}
+                  name={id}
                   value={option.value}
                   checked={chosen.includes(option.value)}
                   onChange={(event) =>
@@ -137,7 +152,7 @@ function Input({
             <label key={option.value} className="dui-choice">
               <input
                 type="radio"
-                name={field.name}
+                name={id}
                 value={option.value}
                 checked={value === option.value}
                 onChange={() => onChange(field.name, option.value)}
