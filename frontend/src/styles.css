@@ -2472,3 +2472,53 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
 .subject-run { border: 1px solid var(--border-soft); border-radius: 6px; padding: 12px 14px; margin-bottom: 12px; }
 .subject-run-head { display: flex; align-items: center; gap: 10px; font-size: 12.5px; margin-bottom: 8px; }
 .subject-run-more { margin: 6px 0; }
+
+/* ============================================================
+   DRUKS UI — the shell renders an app's Python page declarations
+   ============================================================ */
+.dui-page { max-width: 900px; padding: 20px 24px 40px; }
+.dui-parent { display: inline-block; margin-bottom: 10px; }
+.dui-title { font-size: 20px; font-weight: 600; margin: 0; }
+.dui-description { font-size: 13px; margin: 6px 0 0; line-height: 1.55; }
+.dui-retry { padding: 6px 12px; border: 1px solid var(--border-loud); border-radius: 6px; color: var(--text-mid); font-size: 12px; }
+.dui-retry:hover { background: var(--surface-2); color: var(--text); }
+
+.dui-tabs { display: flex; gap: 2px; margin: 16px 0 4px; border-bottom: 1px solid var(--border); }
+.dui-tab { padding: 7px 14px; font-size: 12px; color: var(--text-dim); border-bottom: 2px solid transparent; margin-bottom: -1px; }
+.dui-tab:hover { color: var(--text); }
+.dui-tab-active { color: var(--text); border-bottom-color: var(--accent-violet); }
+
+.dui-section { margin-top: 22px; }
+.dui-section-title { font-size: 11px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-dim); margin: 0 0 10px; font-weight: 600; }
+.dui-text { font-size: 13.5px; line-height: 1.6; color: var(--text-mid); margin: 12px 0; }
+.dui-markdown { font-size: 13.5px; line-height: 1.6; margin: 12px 0; }
+.dui-divider { border: none; border-top: 1px solid var(--border); margin: 18px 0; }
+
+.dui-card { border: 1px solid var(--border); border-radius: 8px; background: var(--surface); padding: 14px 16px; margin: 10px 0; }
+.dui-card-title { font-size: 13.5px; font-weight: 600; color: var(--text); }
+.dui-card-desc { font-size: 12.5px; margin-top: 3px; line-height: 1.5; }
+
+.dui-callout { border: 1px solid var(--border-loud); border-left-width: 3px; border-radius: 6px; padding: 11px 14px; margin: 12px 0; font-size: 13px; line-height: 1.55; }
+.dui-callout-title { font-weight: 600; color: var(--text); margin-bottom: 3px; }
+.dui-callout-text { color: var(--text-mid); }
+.dui-callout-info { border-left-color: var(--bucket-run); }
+.dui-callout-success { border-left-color: var(--outcome-merged); }
+.dui-callout-warning { border-left-color: var(--decision-request-revision); }
+.dui-callout-danger { border-left-color: var(--outcome-failed); }
+
+.dui-empty { border: 1px dashed var(--border-loud); border-radius: 8px; padding: 26px 20px; margin: 12px 0; text-align: center; }
+.dui-empty-title { font-size: 13.5px; color: var(--text); }
+.dui-empty-desc { font-size: 12.5px; margin-top: 5px; }
+.dui-empty .dui-links { justify-content: center; }
+
+.dui-links { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
+.dui-link { font-size: 12.5px; color: var(--bucket-run); }
+.dui-link:hover { text-decoration: underline; }
+.dui-link-broken { color: var(--text-faint); text-decoration: line-through; cursor: help; }
+
+.dui-unknown { font-size: 12px; color: var(--outcome-failed); border: 1px solid color-mix(in oklch, var(--outcome-failed) 30%, transparent); border-radius: 6px; padding: 9px 12px; margin: 10px 0; }
+
+@media (max-width: 720px) {
+  .dui-page { padding: 16px 14px 32px; }
+  .dui-tabs { overflow-x: auto; }
+}

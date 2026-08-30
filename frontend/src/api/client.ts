@@ -21,6 +21,7 @@ import type {
   UsageResponse,
   UsageTodayResponse,
   McpRegistryCandidate,
+  PageSnapshot,
   McpServer,
   Service,
   Skill,
@@ -184,6 +185,9 @@ export const subjectApi = {
 export const api = {
   systemHealth: () => getJSON<DashboardHealth>('/api/system/health'),
   listApps: () => getJSON<App[]>('/api/apps'),
+  // ``path`` is the location under the app's own root: "" for the landing
+  // page, "/notes/7" for a detail page.
+  readPage: (app: string, path: string) => getJSON<PageSnapshot>(`/api/${app}/pages${path}`),
   artifact: (id: string) => getJSON<ArtifactContent>(`/api/artifacts/${id}`),
   resumeRun: (
     runId: string,

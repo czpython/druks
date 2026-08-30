@@ -1260,7 +1260,7 @@ Import from concern namespaces, not from `druks.durable` or internal modules:
 | `druks.sandbox` | `Sandbox` |
 | `druks.db` | `Base`, `StoredSubject`, `db_session` |
 | `druks.schemas` | `BaseResponse` |
-| `druks.ui` | `Page`, `page` |
+| `druks.ui` | `page`, `Page`, `Block`, `Text`, `Markdown`, `Section`, `Card`, `Callout`, `Divider`, `EmptyState`, `Link` |
 | `druks.signals` | `subscribe` |
 | `druks.events` | `Event` |
 | `druks.files` | `File`, `FileField` |

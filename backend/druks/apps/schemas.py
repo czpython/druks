@@ -1,6 +1,14 @@
 from druks.schemas import BaseResponse
 
 
+class PageEntry(BaseResponse):
+    name: str
+    label: str
+    path: str
+    parent: str
+    order: int
+
+
 class AppResponse(BaseResponse):
     name: str
     icon: str
@@ -10,3 +18,5 @@ class AppResponse(BaseResponse):
     has_frontend: bool
     # (url, label) pairs, one for each page the app's navigation names.
     navigation: list[tuple[str, str]]
+    # In route-match order.
+    pages: list[PageEntry]

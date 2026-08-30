@@ -348,9 +348,32 @@ class App:
         # no way to take a read the platform serves, not even with a catch-all.
         return [
             cls._get_transcript_routes(),
+            cls._get_page_routes(),
             *(cls._get_subject_routes(subject) for subject in cls.subjects()),
             *declared,
         ]
+
+    @classmethod
+    def _get_page_routes(cls) -> "APIRouter":
+        """The page function is the endpoint, so FastAPI validates every route
+        parameter against the declared signature."""
+        from fastapi import APIRouter
+
+        from druks.ui import Page
+
+        router = APIRouter(prefix="/pages", tags=[f"{cls.name}:pages"])
+        for declaration in cls.pages():
+            router.add_api_route(
+                # The landing page's route is "/", and its snapshot answers at
+                # the bare /pages.
+                declaration.route.rstrip("/"),
+                declaration.function,
+                methods=["GET"],
+                response_model=Page,
+                response_model_by_alias=True,
+                name=declaration.name,
+            )
+        return router
 
     @classmethod
     def _get_transcript_routes(cls) -> "APIRouter":
