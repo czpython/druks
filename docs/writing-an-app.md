@@ -1199,6 +1199,61 @@ name, a nested child, two routes a request could not tell apart, a signature
 that does not match its route, or a navigation entry that is not a static
 top-level page fails the load, with the app name and the exact cause.
 
+### A page function is a pure read
+
+Druks reruns a page function on initial load, on an event, on reconnect, on a
+manual refresh, and on a retry. The call count and the call order are not
+guaranteed. These are the rules.
+
+A page function can:
+
+- read Druks state,
+- read the app's own data,
+- read a projection,
+- read a read-only external source.
+
+A page function must not:
+
+- write data,
+- start or enqueue work,
+- publish an event,
+- answer a gate,
+- cause an external effect,
+- depend on mutable process state.
+
+Write the function so that a repeat call is free. Put every write behind an
+operation the operator triggers.
+
+### Watch a subject
+
+A page, or a named region inside it, declares the subject it `follows`. Druks
+streams that subject through the read side every app already gets, and the
+shell rereads the page on each snapshot:
+
+```python
+@page("/notes/{note_id}")
+async def note(note_id: int):
+    found = await Note.get(note_id)
+    status = await found.get_status()
+    if status.gate:
+        decision = [GateControls(status.run)]
+    else:
+        decision = [Text("Nothing is waiting on you.")]
+    return Page(
+        title=f"Note {note_id}",
+        blocks=[Section(title="Your decision", name="decision", follows=found, blocks=decision)],
+    )
+```
+
+The shell replaces the named region and leaves the rest of the page alone, so
+scroll position, focus, and half-filled inputs outside it survive. A region
+that follows a subject must have a name; that is how the shell finds it.
+
+`GateControls` names only the run. The shell reads the ask, its options, its
+context, and its artifact from the parked run, and submits the operator's
+answer with the run's `parkedAt`. A `GateControls` block must sit inside
+something that follows a subject, or an answered gate would stay on screen.
+
 The [Druks UI contract](druks-ui.md) holds the block, value, and field catalog,
 actions, and liveness.
 
@@ -1260,7 +1315,7 @@ Import from concern namespaces, not from `druks.durable` or internal modules:
 | `druks.sandbox` | `Sandbox` |
 | `druks.db` | `Base`, `StoredSubject`, `db_session` |
 | `druks.schemas` | `BaseResponse` |
-| `druks.ui` | `page`, `Page`, `Block`, `Text`, `Markdown`, `Section`, `Card`, `Callout`, `Divider`, `EmptyState`, `Link` |
+| `druks.ui` | `page`, `Page`, `Block`, `Text`, `Markdown`, `Section`, `Card`, `Callout`, `Divider`, `EmptyState`, `Link`, `Follows`, `GateControls` |
 | `druks.signals` | `subscribe` |
 | `druks.events` | `Event` |
 | `druks.files` | `File`, `FileField` |

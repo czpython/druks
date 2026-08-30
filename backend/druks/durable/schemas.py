@@ -152,6 +152,9 @@ class SubjectStatus(BaseResponse):
     # the subject's runs. Everything else is a fact the app's UI renders
     # its own copy from; the platform ships no prose.
     state: RunState
+    # The driving run's id — identity, so an app page can name it in a block
+    # (GateControls) without reaching for the platform's own read side.
+    run: str | None = None
     # The driving run's kind and, while running, its latest agent call's agent.
     kind: str | None = None
     agent: str | None = None

@@ -73,6 +73,7 @@ const NOTES: PageSnapshot = {
   title: 'Notes',
   description: 'Every note this install captured.',
   blocks: [{ block: 'text', text: 'a jotted observation' }],
+  follows: null,
 }
 
 describe('a declared page', () => {
@@ -86,7 +87,7 @@ describe('a declared page', () => {
   })
 
   it('reads a detail page at its own location', async () => {
-    renderAt('/field_notes/notes/7', 'note', { title: 'Note 7', description: '', blocks: [] })
+    renderAt('/field_notes/notes/7', 'note', { title: 'Note 7', description: '', blocks: [], follows: null })
 
     await waitFor(() => expect(screen.getByText('Note 7')).toBeTruthy())
     expect(readPage).toHaveBeenCalledWith('field_notes', '/notes/7')
@@ -126,6 +127,7 @@ describe('tabs', () => {
       title: 'Recent notes',
       description: '',
       blocks: [],
+      follows: null,
     })
 
     await waitFor(() => expect(container.querySelector('.dui-tab-active')).toBeTruthy())
@@ -138,6 +140,7 @@ describe('tabs', () => {
       title: 'Note 7',
       description: '',
       blocks: [],
+      follows: null,
     })
 
     await waitFor(() => expect(container.querySelector('.dui-tabs')).toBeTruthy())
@@ -152,6 +155,7 @@ describe('tabs', () => {
       title: 'Write a note',
       description: '',
       blocks: [],
+      follows: null,
     })
 
     await waitFor(() => expect(screen.getByText('Write a note')).toBeTruthy())
@@ -161,7 +165,7 @@ describe('tabs', () => {
 
 describe('the parent link', () => {
   it('takes a parameterized detail page back to its longest declared prefix', async () => {
-    renderAt('/field_notes/notes/7', 'note', { title: 'Note 7', description: '', blocks: [] })
+    renderAt('/field_notes/notes/7', 'note', { title: 'Note 7', description: '', blocks: [], follows: null })
 
     await waitFor(() => expect(screen.getByText('← notes')).toBeTruthy())
     expect(screen.getByText('← notes').getAttribute('href')).toBe('/field_notes')
@@ -172,6 +176,7 @@ describe('the parent link', () => {
       title: 'Run 9',
       description: '',
       blocks: [],
+      follows: null,
     })
 
     await waitFor(() => expect(screen.getByText('← note')).toBeTruthy())

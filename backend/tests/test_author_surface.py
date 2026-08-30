@@ -45,6 +45,8 @@ AUTHOR_SURFACE = {
         "Card",
         "Divider",
         "EmptyState",
+        "Follows",
+        "GateControls",
         "Link",
         "Markdown",
         "Page",

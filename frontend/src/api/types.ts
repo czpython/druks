@@ -39,6 +39,8 @@ export interface SubjectSummary {
 
 export interface SubjectStatus {
   state: RunState
+  // The driving run's id.
+  run: string | null
   // Facts the app renders its lane copy from; the backend ships no prose.
   // The driving run's kind and, while running, its latest agent call's agent.
   kind: string | null
@@ -220,7 +222,8 @@ export interface Link {
 export type Block =
   | { block: 'text'; text: string }
   | { block: 'markdown'; text: string }
-  | { block: 'section'; title: string; name: string; blocks: Block[] }
+  | { block: 'section'; title: string; name: string; blocks: Block[]; follows: Follows | null }
+  | { block: 'gate_controls'; run: string }
   | { block: 'card'; title: string; description: string; blocks: Block[]; actions: Link[] }
   | {
       block: 'callout'
@@ -232,11 +235,36 @@ export type Block =
   | { block: 'empty_state'; title: string; description: string; actions: Link[] }
   | Link
 
+// The subject a page or a named region watches. The shell streams it and
+// rereads the page on every snapshot it sends.
+export interface Follows {
+  subjectType: string
+  subjectId: string
+}
+
 // What a page function returned at one moment — the contract's ``Page``.
 export interface PageSnapshot {
   title: string
   description: string
   blocks: Block[]
+  follows: Follows | null
+}
+
+// A parked run's open gate. ``parkedAt`` names the exact question being
+// answered, and the answer echoes it unchanged.
+export interface Gate {
+  run: string
+  gate: string
+  parkedAt: string
+  ask: InputRequest
+  artifact: ArtifactContent | null
+}
+
+export interface GateAnswer {
+  parkedAt: string
+  control: string
+  answers: Record<string, string>
+  note: string
 }
 
 // --- System health ---------------------------------------------------------

@@ -1,6 +1,6 @@
 import { createContext } from 'react'
 
-import type { PageEntry } from '../api/types'
+import type { Block, Follows, PageEntry, PageSnapshot } from '../api/types'
 
 // Which app's pages a block tree belongs to. A Link carries a page name, and
 // only this table turns that name into a URL — so the renderer reads it here
@@ -59,4 +59,91 @@ export function parentOf(pages: PageEntry[], current: PageEntry): PageEntry | un
  * depth, so the parameters already in the URL come along. */
 export function hrefUnder(location: string, ancestor: PageEntry): string {
   return location.split('/').slice(0, ancestor.path.split('/').length).join('/')
+}
+
+/** Every subject this snapshot watches: the page's own, and each named
+ * region's. One entry per subject, so a page that follows the same subject
+ * twice opens one stream. */
+export function followedSubjects(snapshot: PageSnapshot): Follows[] {
+  const found = new Map<string, Follows>()
+  const take = (follows: Follows | null) => {
+    if (follows) found.set(`${follows.subjectType}/${follows.subjectId}`, follows)
+  }
+  take(snapshot.follows)
+  for (const region of regionsIn(snapshot.blocks)) take(region.follows)
+  return [...found.values()]
+}
+
+/** Take the regions that watch ``subject`` from ``fresh`` and put them in place
+ * of the ones ``previous`` holds. Everything else stays the object it already
+ * was, so nothing else re-renders. A page that watches ``subject`` itself is
+ * replaced whole. */
+export function mergeRegions(
+  previous: PageSnapshot,
+  fresh: PageSnapshot,
+  subject: Follows,
+): PageSnapshot {
+  if (watches(previous.follows, subject)) return fresh
+  const standing = regionsIn(previous.blocks).filter((region) => watches(region.follows, subject))
+  if (standing.length === 0) return previous
+  const replacements = new Map(
+    regionsIn(fresh.blocks)
+      .filter((region) => watches(region.follows, subject))
+      .map((region) => [region.name, region]),
+  )
+  // A page that dropped or renamed one of these regions is a different page, so
+  // nothing is left to merge into: take the new one whole.
+  if (standing.length !== replacements.size) return fresh
+  if (standing.some((region) => !replacements.has(region.name))) return fresh
+  return { ...previous, blocks: replaceRegions(previous.blocks, replacements) }
+}
+
+function watches(follows: Follows | null, subject: Follows): boolean {
+  return (
+    !!follows &&
+    follows.subjectType === subject.subjectType &&
+    follows.subjectId === subject.subjectId
+  )
+}
+
+type Region = Extract<Block, { block: 'section' }>
+
+// A page snapshot is data an app produced, and this runs in the component body
+// where no error boundary can catch a throw. A shape that is not a block list
+// simply holds no regions; the renderer is where the app hears about it.
+function regionsIn(blocks: Block[]): Region[] {
+  if (!Array.isArray(blocks)) return []
+  const found: Region[] = []
+  for (const block of blocks) {
+    if (block.block === 'section') {
+      if (block.follows) found.push(block)
+      found.push(...regionsIn(block.blocks))
+    } else if (block.block === 'card') {
+      found.push(...regionsIn(block.blocks))
+    }
+  }
+  return found
+}
+
+function replaceRegions(blocks: Block[], replacements: Map<string, Region>): Block[] {
+  if (!Array.isArray(blocks)) return blocks
+  let changed = false
+  const next = blocks.map((block): Block => {
+    if (block.block === 'section') {
+      const fresh = replacements.get(block.name)
+      if (fresh) {
+        changed = true
+        return fresh
+      }
+    }
+    if (block.block !== 'section' && block.block !== 'card') return block
+    const inner = replaceRegions(block.blocks, replacements)
+    // Nothing under this block moved, so hand back the block itself: React
+    // sees the same object and renders none of it again.
+    if (inner === block.blocks) return block
+    changed = true
+    return { ...block, blocks: inner }
+  })
+  if (changed) return next
+  return blocks
 }

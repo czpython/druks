@@ -140,6 +140,7 @@ async def _status(driving_run: Run | None) -> SubjectStatus:
             agent = calls[-1].agent
     return SubjectStatus(
         state=RunState(driving_run.state),
+        run=driving_run.id,
         kind=driving_run.kind,
         agent=agent,
         gate=driving_run.input_gate if parked else None,

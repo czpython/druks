@@ -47,6 +47,7 @@ describe('the display core', () => {
         block: 'section',
         title: 'Recent',
         name: 'recent',
+        follows: null,
         blocks: [
           {
             block: 'card',

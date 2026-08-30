@@ -286,7 +286,7 @@ async def peer(peer_id: int):
                 name="decision",
                 title="Decision",
                 follows=watched,
-                blocks=[GateControls(run=watched.active_run)],
+                blocks=[GateControls(watched.active_run)],
             )
         ],
     )
@@ -335,7 +335,7 @@ A `follows=` on the `Page` itself replaces the whole page body.
 `GateControls` declares only the run:
 
 ```python
-GateControls(run=peer.active_run)
+GateControls(peer.active_run)
 ```
 
 The shell derives everything else from the parked run: the questions, the
@@ -476,7 +476,7 @@ input than they store:
 
 | Field | Author passes | Druks stores |
 | --- | --- | --- |
-| `Page.follows`, `Section.follows` | a subject, or a run id | `Follows` |
+| `Page.follows`, `Section.follows` | a subject | `Follows` |
 | `Files.files` | `druks.files.File` objects | `list[FileSummary]` |
 | `Metric.value`, `Fact.value`, `TableRow.cells`, `List.items` | any `Value` | the same value |
 

@@ -94,7 +94,21 @@ const CONTROL_LABEL: Record<string, string> = {
 // note, and the workflow's controls. A click resumes the run with
 // {control, answers, note}; free text is content for the next agent prompt,
 // never a control.
-export function InAppReview({ runId, ask }: { runId: string; ask: InputRequest }) {
+export function InAppReview({
+  runId,
+  ask,
+  submit,
+}: {
+  runId: string
+  ask: InputRequest
+  // How the answer reaches the platform. A page's GateControls answers through
+  // the gate route with the run's parkedAt; without one, this resumes the run.
+  submit?: (answer: {
+    control: string
+    answers: Record<string, string>
+    note: string
+  }) => Promise<unknown>
+}) {
   const [answers, setAnswers] = useState<Record<string, string>>({})
   const [note, setNote] = useState('')
   const [pending, setPending] = useState<string | null>(null)
@@ -126,10 +140,15 @@ export function InAppReview({ runId, ask }: { runId: string; ask: InputRequest }
   async function choose(control: string) {
     setPending(control)
     setError(null)
+    const answer = { control, answers, note: note.trim() }
     try {
       // The run un-parks; the subject's SSE stream re-emits the snapshot and this
       // banner clears itself.
-      await api.resumeRun(runId, { control, answers, note: note.trim() })
+      if (submit) {
+        await submit(answer)
+      } else {
+        await api.resumeRun(runId, answer)
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'could not submit')
       setPending(null)

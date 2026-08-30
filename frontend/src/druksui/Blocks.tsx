@@ -3,6 +3,7 @@ import { Link as RouteLink } from 'wouter'
 
 import type { Block, Link } from '../api/types'
 import { Markdown } from '../components/Markdown'
+import { GateControls } from './GateControls'
 import { fillPath, PagesContext } from './pages'
 
 export function Blocks({ blocks }: { blocks: Block[] }) {
@@ -25,6 +26,8 @@ function BlockContent({ block }: { block: Block }) {
       return <hr className="dui-divider" />
     case 'link':
       return <LinkControl link={block} />
+    case 'gate_controls':
+      return <GateControls run={block.run} />
     case 'callout':
       return (
         <div className={`dui-callout dui-callout-${block.tone}`} role="note">
