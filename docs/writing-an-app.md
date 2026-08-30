@@ -1315,7 +1315,7 @@ Import from concern namespaces, not from `druks.durable` or internal modules:
 | `druks.sandbox` | `Sandbox` |
 | `druks.db` | `Base`, `StoredSubject`, `db_session` |
 | `druks.schemas` | `BaseResponse` |
-| `druks.ui` | `page`, `Page`, `Block`, `Text`, `Markdown`, `Section`, `Card`, `Callout`, `Divider`, `EmptyState`, `Link`, `Follows`, `GateControls` |
+| `druks.ui` | `page`, `Page`, `Block`, `Text`, `Markdown`, `Section`, `Card`, `Callout`, `Divider`, `EmptyState`, `Link`, `Follows`, `GateControls`, `Timeline`, `TimelineItem`, `Progress`, `ProgressStep`, `Image`, `Files`, `FileSummary`, `StatusValue` |
 | `druks.signals` | `subscribe` |
 | `druks.events` | `Event` |
 | `druks.files` | `File`, `FileField` |

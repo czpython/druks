@@ -72,7 +72,7 @@ describe('the display core', () => {
         block: 'empty_state',
         title: 'No notes yet',
         description: 'Write one.',
-        actions: [{ block: 'link', label: 'Write a note', page: 'notes', arguments: {}, url: '' }],
+        actions: [{ block: 'link', label: 'Write a note', page: 'notes', arguments: {}, url: '', subject: null }],
       },
     ])
 
@@ -84,7 +84,7 @@ describe('the display core', () => {
 describe('links', () => {
   it('fills a page path from its arguments', () => {
     renderBlocks([
-      { block: 'link', label: 'Open', page: 'note', arguments: { note_id: '7' }, url: '' },
+      { block: 'link', label: 'Open', page: 'note', arguments: { note_id: '7' }, url: '', subject: null },
     ])
 
     expect(screen.getByText('Open').getAttribute('href')).toBe('/field_notes/notes/7')
@@ -92,7 +92,7 @@ describe('links', () => {
 
   it('opens an external url in a new tab', () => {
     renderBlocks([
-      { block: 'link', label: 'Status', page: '', arguments: {}, url: 'https://example.com' },
+      { block: 'link', label: 'Status', page: '', arguments: {}, url: 'https://example.com', subject: null },
     ])
 
     const link = screen.getByText('Status')
@@ -102,7 +102,7 @@ describe('links', () => {
 
   it('shows a link to an undeclared page as broken', () => {
     const { container } = renderBlocks([
-      { block: 'link', label: 'Ghost', page: 'nowhere', arguments: {}, url: '' },
+      { block: 'link', label: 'Ghost', page: 'nowhere', arguments: {}, url: '', subject: null },
     ])
 
     expect(container.querySelector('.dui-link-broken')).toBeTruthy()
@@ -111,7 +111,7 @@ describe('links', () => {
 
   it('shows a link missing an argument as broken', () => {
     const { container } = renderBlocks([
-      { block: 'link', label: 'Open', page: 'note', arguments: {}, url: '' },
+      { block: 'link', label: 'Open', page: 'note', arguments: {}, url: '', subject: null },
     ])
 
     expect(container.querySelector('.dui-link-broken')).toBeTruthy()
@@ -127,5 +127,24 @@ describe('an unknown block', () => {
 
     expect(screen.getByRole('alert').textContent).toContain('hologram')
     expect(screen.getByText('still here')).toBeTruthy()
+  })
+})
+
+describe('a subject link', () => {
+  it('routes to the subject page inside the dashboard', () => {
+    renderBlocks([
+      {
+        block: 'link',
+        label: 'Everything druks did',
+        page: '',
+        arguments: {},
+        url: '',
+        subject: { subjectType: 'note', subjectId: '7' },
+      },
+    ])
+
+    const link = screen.getByText('Everything druks did')
+    expect(link.getAttribute('href')).toBe('/field_notes/note/7')
+    expect(link.getAttribute('target')).toBeNull()
   })
 })

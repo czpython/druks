@@ -2522,3 +2522,40 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
   .dui-page { padding: 16px 14px 32px; }
   .dui-tabs { overflow-x: auto; }
 }
+
+/* ---- Druks UI: run and artifact blocks ---------------------- */
+.dui-block-title { font-size: 11px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-dim); margin: 18px 0 8px; font-weight: 600; }
+.dui-status { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.06em; padding: 2px 7px; border: 1px solid var(--border-loud); border-radius: 10px; color: var(--text-mid); white-space: nowrap; }
+.dui-status-active { color: var(--bucket-run); border-color: var(--bucket-run); }
+.dui-status-success { color: var(--outcome-merged); border-color: var(--outcome-merged); }
+.dui-status-warning { color: var(--decision-request-revision); border-color: var(--decision-request-revision); }
+.dui-status-danger { color: var(--outcome-failed); border-color: var(--outcome-failed); }
+
+.dui-timeline-items { list-style: none; margin: 0; padding: 0; border-left: 1px solid var(--border); }
+.dui-timeline-item { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; padding: 7px 0 7px 14px; position: relative; font-size: 13px; }
+.dui-timeline-item::before { content: ''; position: absolute; left: -4px; top: 13px; width: 7px; height: 7px; border-radius: 50%; background: var(--border-loud); }
+.dui-timeline-at { font-size: 11px; min-width: 72px; }
+.dui-timeline-desc { font-size: 12px; flex-basis: 100%; }
+
+.dui-progress { margin: 14px 0; }
+.dui-progress-head { display: flex; justify-content: space-between; font-size: 12.5px; margin-bottom: 6px; }
+.dui-progress-bar { height: 6px; border-radius: 3px; background: var(--surface-2); overflow: hidden; }
+.dui-progress-fill { display: block; height: 100%; background: var(--bucket-run); }
+.dui-progress-unknown .dui-progress-fill { width: 35% !important; animation: dui-drift 1.4s ease-in-out infinite; }
+@keyframes dui-drift { 0% { transform: translateX(-100%); } 100% { transform: translateX(300%); } }
+.dui-progress-steps { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.dui-progress-step { display: flex; align-items: center; gap: 9px; font-size: 12.5px; }
+
+.dui-transcript { margin: 14px 0; }
+.dui-transcript .stream-transcript { max-height: 420px; overflow: auto; border: 1px solid var(--border); border-radius: 6px; }
+
+.dui-image { margin: 14px 0; }
+.dui-image img { max-width: 100%; height: auto; border-radius: 6px; border: 1px solid var(--border); display: block; }
+.dui-image-missing { font-size: 12.5px; border: 1px dashed var(--border-loud); border-radius: 6px; padding: 18px; }
+.dui-image-caption { font-size: 12px; margin-top: 6px; }
+
+.dui-file-list { list-style: none; margin: 0; padding: 0; }
+.dui-file { display: flex; align-items: center; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--border-soft); font-size: 12.5px; }
+.dui-file:last-child { border-bottom: none; }
+.dui-file-preview { width: 40px; height: 40px; object-fit: cover; border-radius: 4px; border: 1px solid var(--border); }
+.run-truncated { font-size: 11.5px; padding: 6px 10px; border-top: 1px solid var(--border); }

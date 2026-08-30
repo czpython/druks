@@ -7,8 +7,11 @@ from druks.ui import (
     Link,
     Markdown,
     Page,
+    Progress,
     Section,
     Text,
+    Timeline,
+    TimelineItem,
     page,
 )
 
@@ -32,7 +35,11 @@ async def notes():
                             description=note.gist or "Waiting for its gist.",
                             blocks=[Text(note.body)],
                             actions=[
-                                Link("Open", page="note", arguments={"note_id": str(note.id)})
+                                Link(
+                                    "Open",
+                                    page="note",
+                                    arguments={"note_id": str(note.id)},
+                                )
                             ],
                         )
                         for note in recent
@@ -67,7 +74,7 @@ async def new_note():
     return Page(
         title="Write a note",
         blocks=[
-            Callout("Notes arrive through the API.", tone="info", title="Not here yet"),
+            Callout(tone="info", title="Not here yet", text="Notes arrive through the API."),
             Divider(),
             Markdown("Post a note to `/api/field_notes/notes`."),
         ],
@@ -98,7 +105,17 @@ async def note(note_id: int):
 
 @note.child("/history")
 async def note_history(note_id: int):
-    return Page(
-        title=f"Note {note_id} history",
-        blocks=[Text("Every run about this note lands here.")],
-    )
+    found = await Note.get(note_id)
+    if found:
+        return Page(
+            title=f"Note {note_id} history",
+            blocks=[
+                Timeline(
+                    title="This note",
+                    items=[TimelineItem(when=found.created_at, title="Captured")],
+                ),
+                Progress("Summarized", completed=1 if found.gist else 0, total=1),
+                Link("Everything druks did about this note", subject=found),
+            ],
+        )
+    return Page(title=f"Note {note_id} history", blocks=[EmptyState("No such note")])

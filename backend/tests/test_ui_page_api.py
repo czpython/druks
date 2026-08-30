@@ -63,6 +63,7 @@ async def test_a_page_projects_the_app_data(druks_client: httpx.AsyncClient, not
         "page": "note",
         "arguments": {"note_id": str(note.id)},
         "url": "",
+        "subject": None,
     }
 
 
@@ -139,3 +140,24 @@ async def test_a_parked_run_puts_gate_controls_in_the_followed_region(
     region = page["blocks"][1]
     assert region["follows"] == {"subjectType": "note", "subjectId": str(note.id)}
     assert region["blocks"] == [{"block": "gate_controls", "run": run.id}]
+
+
+async def test_the_history_page_shows_the_domain_and_points_at_the_platform(
+    druks_client: httpx.AsyncClient, note: Note
+):
+    page = (await druks_client.get(f"/api/field_notes/pages/notes/{note.id}/history")).json()
+
+    timeline, progress, pointer = page["blocks"]
+    # A domain event needs no status; the platform's own story is not here.
+    assert timeline["items"][0]["title"] == "Captured"
+    assert timeline["items"][0]["status"] is None
+    # The note has no gist yet, and the page says so.
+    assert progress["completed"] == 0.0
+    assert pointer == {
+        "block": "link",
+        "label": "Everything druks did about this note",
+        "page": "",
+        "arguments": {},
+        "url": "",
+        "subject": {"subjectType": "note", "subjectId": str(note.id)},
+    }
