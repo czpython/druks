@@ -29,7 +29,7 @@ export function GateControls({ run }: { run: string }) {
       key={parkedAt}
       runId={run}
       ask={gate.data.ask}
-      submit={(answer) => api.answerGate(run, { parkedAt, ...answer })}
+      send={(answer) => api.answerGate(run, { parkedAt, ...answer })}
     />
   )
 }

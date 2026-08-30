@@ -198,6 +198,7 @@ export interface App {
   hasFrontend: boolean
   navigation: [string, string][]
   pages: PageEntry[]
+  operations: Operation[]
 }
 
 // --- Druks UI --------------------------------------------------------------
@@ -299,6 +300,54 @@ export interface FileSummary {
   url: string
 }
 
+export interface Option {
+  value: string
+  label: string
+}
+
+interface FieldBase {
+  name: string
+  label: string
+  helpText: string
+  isRequired: boolean
+}
+
+// One input inside a form. ``name`` is the key the shell sends.
+export type Field =
+  | (FieldBase & { field: 'text'; value: string; placeholder: string })
+  | (FieldBase & { field: 'text_area'; value: string; placeholder: string; rows: number })
+  | (FieldBase & {
+      field: 'number'
+      value: number | null
+      minimum: number | null
+      maximum: number | null
+      step: number | null
+    })
+  | (FieldBase & { field: 'select'; options: Option[]; value: string })
+  | (FieldBase & { field: 'multi_select'; options: Option[]; value: string[] })
+  | (FieldBase & { field: 'radio'; options: Option[]; value: string })
+  | (FieldBase & { field: 'checkbox'; value: boolean })
+
+// A control that calls one of the app's own operations. The shell resolves the
+// operation to a method and a URL through the roster.
+export interface Action {
+  block: 'action'
+  label: string
+  operation: string
+  arguments: Record<string, unknown>
+  tone: 'default' | 'primary' | 'danger'
+  confirm: string
+  refresh: 'none' | 'page' | 'region'
+  link: Link | null
+}
+
+// One route an Action can call. Reads are left out: a GET is not an action.
+export interface Operation {
+  id: string
+  method: string
+  path: string
+}
+
 export type Block =
   | { block: 'text'; text: string }
   | { block: 'markdown'; text: string }
@@ -336,7 +385,15 @@ export type Block =
   | { block: 'list'; title: string; items: Value[] }
   | { block: 'stack'; gap: 'small' | 'medium' | 'large'; blocks: Block[] }
   | { block: 'columns'; blocks: Block[] }
-  | { block: 'card'; title: string; description: string; blocks: Block[]; actions: Link[] }
+  | Action
+  | { block: 'form'; title: string; description: string; fields: Field[]; action: Action }
+  | {
+      block: 'card'
+      title: string
+      description: string
+      blocks: Block[]
+      actions: (Action | Link)[]
+    }
   | {
       block: 'callout'
       tone: 'info' | 'success' | 'warning' | 'danger'
@@ -344,7 +401,7 @@ export type Block =
       text: string
     }
   | { block: 'divider' }
-  | { block: 'empty_state'; title: string; description: string; actions: Link[] }
+  | { block: 'empty_state'; title: string; description: string; actions: (Action | Link)[] }
   | Link
 
 // The subject a page or a named region watches. The shell streams it and

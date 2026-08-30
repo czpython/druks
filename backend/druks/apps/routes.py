@@ -38,6 +38,11 @@ async def list_apps() -> list[AppResponse]:
                     )
                     for page in pages
                 ],
+                operations=[
+                    operation
+                    for operation in app.operations().values()
+                    if operation.method != "GET"
+                ],
             )
         )
     return roster

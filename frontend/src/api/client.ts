@@ -84,9 +84,11 @@ export async function getJSON<T>(path: string): Promise<T> {
   return response.json() as Promise<T>
 }
 
-export async function postJSON<T>(path: string, body: unknown): Promise<T> {
+// ``method`` widens this to the other writes an action can name; every caller
+// that omits it posts.
+export async function postJSON<T>(path: string, body: unknown, method = 'POST'): Promise<T> {
   const response = await fetch(path, {
-    method: 'POST',
+    method,
     headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
     credentials: SAME_ORIGIN,
     body: JSON.stringify(body),
@@ -184,6 +186,18 @@ export const subjectApi = {
     `/api/${app}/transcripts/${callId}/files/${encodeURIComponent(name)}`,
 }
 
+async function sendOperation(method: string, path: string, body: unknown): Promise<void> {
+  const response = await fetch(path, {
+    method,
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    credentials: SAME_ORIGIN,
+    body: JSON.stringify(body),
+  })
+  if (!response.ok) {
+    await throwApiError(response, path)
+  }
+}
+
 export const api = {
   systemHealth: () => getJSON<DashboardHealth>('/api/system/health'),
   listApps: () => getJSON<App[]>('/api/apps'),
@@ -193,6 +207,12 @@ export const api = {
   // A parked run's gate. The answer echoes ``parkedAt`` unchanged, so it names
   // the exact question it answers; a run that re-parked rejects the stale one.
   getGate: (run: string) => getJSON<Gate>(`/api/gates/${run}`),
+  // An action's own call. The shell fills the path from the payload and sends
+  // what is left as the body; the platform route keeps the identity gate. The
+  // answer is thrown away, so an operation that returns no content is a success
+  // like any other.
+  callOperation: (method: string, path: string, body: unknown) =>
+    sendOperation(method, path, body),
   answerGate: (run: string, answer: GateAnswer) =>
     postJSON<{ run: string; parkedAt: string; result: string }>(
       `/api/gates/${run}/answer`,

@@ -108,6 +108,7 @@ def load_app(name: str) -> type[App]:
     # Outside the try: a contract break is not an import error.
     app.subjects()
     app.navigation_pages()
+    app.operations()
     return app
 
 
@@ -249,4 +250,5 @@ def load(api: "FastAPI") -> None:
         modules = app.discover()
         app.subjects()
         app.navigation_pages()
+        app.operations()
         mount(api, app, modules)

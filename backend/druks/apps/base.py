@@ -1,6 +1,7 @@
 import importlib.util
 import re
 from collections.abc import Callable, Coroutine
+from functools import wraps
 from pathlib import Path
 from types import ModuleType
 from typing import TYPE_CHECKING, Annotated, Any, ClassVar
@@ -16,6 +17,7 @@ from .exceptions import AppRouteConflict, AppSubjectContractError, SettingsDecla
 from .registry import agents as agent_registry
 from .registry import autodiscover
 from .registry import workflows as workflow_registry
+from .schemas import Operation
 from .settings import (
     coerce_setting_value,
     field_kind,
@@ -36,6 +38,7 @@ if TYPE_CHECKING:
     # A check the app owns returns a verdict on one of its own preconditions
     # using the same ``CheckResult`` shape as a core check; sync or async.
     Check = Callable[[], "CheckResult | Coroutine[Any, Any, CheckResult]"]
+
 
 # An app name keys the ``/api/<name>`` namespace, the ``alembic_version_<name>``
 # table, the ``<name>_`` table prefix, and ``app:<name>:`` settings — so it must
@@ -316,6 +319,19 @@ class App:
         (``/<subject_type>`` → status + timeline + live stream) per subject its
         workflows declare. The platform's come first: those segments are its own.
         Override to add a router built outside a ``routes`` module."""
+        # The platform's routers are narrow — each confined to its own segment — so
+        # matching them first costs an app nothing anywhere else and leaves it
+        # no way to take a read the platform serves, not even with a catch-all.
+        return [
+            cls._get_transcript_routes(),
+            cls._get_page_routes(),
+            *(cls._get_subject_routes(subject) for subject in cls.subjects()),
+            *cls._declared_routers(modules),
+        ]
+
+    @classmethod
+    def _declared_routers(cls, modules: "list[ModuleType]") -> "list[APIRouter]":
+        """The routers the app itself declares in its ``routes`` modules."""
         # Local, not module-top: keeps FastAPI off the import graph so the loader
         # stays importable headlessly; enumerating routers is where it's really needed.
         from fastapi import APIRouter
@@ -343,15 +359,36 @@ class App:
                             "its own resource."
                         )
                     declared.append(value)
-        # The platform's routers are narrow — each confined to its own segment — so
-        # matching them first costs an app nothing anywhere else and leaves it
-        # no way to take a read the platform serves, not even with a catch-all.
-        return [
-            cls._get_transcript_routes(),
-            cls._get_page_routes(),
-            *(cls._get_subject_routes(subject) for subject in cls.subjects()),
-            *declared,
-        ]
+        return declared
+
+    @classmethod
+    def operations(cls) -> "dict[str, Operation]":
+        """Every route this app declares that names an ``operation_id``, keyed
+        by it. An ``Action`` names one, and the shell resolves it here rather
+        than making an author repeat a URL."""
+        found: dict[str, Operation] = {}
+        for router in cls._declared_routers(cls.discover()):
+            for route in router.routes:
+                # Starlette route kinds differ; only an API route carries these.
+                name = getattr(route, "operation_id", "") or ""
+                if not name:
+                    continue
+                # An APIRoute's own path already carries its router's prefix.
+                path = f"/api/{cls.name}{getattr(route, 'path', '')}"
+                if name in found:
+                    raise AppRouteConflict(
+                        f"app {cls.name!r} declares operation {name!r} twice, on "
+                        f"{found[name].method} {found[name].path} and on {path}. An "
+                        "action names one operation, so give each route its own."
+                    )
+                methods = sorted(getattr(route, "methods", set()) - {"HEAD", "OPTIONS"})
+                if len(methods) > 1:
+                    raise AppRouteConflict(
+                        f"app {cls.name!r} declares operation {name!r} on {methods}. An "
+                        "action calls one method, so give each its own route."
+                    )
+                found[name] = Operation(id=name, method=methods[0] if methods else "GET", path=path)
+        return {name: found[name] for name in sorted(found)}
 
     @classmethod
     def _get_page_routes(cls) -> "APIRouter":
@@ -361,19 +398,34 @@ class App:
 
         from druks.ui import Page
 
+        operations = cls.operations()
         router = APIRouter(prefix="/pages", tags=[f"{cls.name}:pages"])
         for declaration in cls.pages():
             router.add_api_route(
                 # The landing page's route is "/", and its snapshot answers at
                 # the bare /pages.
                 declaration.route.rstrip("/"),
-                declaration.function,
+                cls._page_endpoint(declaration.function, operations),
                 methods=["GET"],
                 response_model=Page,
                 response_model_by_alias=True,
                 name=declaration.name,
             )
         return router
+
+    @classmethod
+    def _page_endpoint(cls, project, operations: "dict[str, Operation]"):
+        """``wraps`` keeps the page function's signature, so FastAPI still
+        validates every route parameter."""
+
+        @wraps(project)
+        async def read_page(**parameters):
+            page = await project(**parameters)
+            for action in page.iter_actions():
+                action.check_operation(cls.name, operations)
+            return page
+
+        return read_page
 
     @classmethod
     def _get_transcript_routes(cls) -> "APIRouter":

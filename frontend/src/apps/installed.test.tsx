@@ -15,6 +15,7 @@ function roster(name: string, pages: App['pages']): App[] {
       subjectTypes: ['file'],
       hasFrontend: false,
       navigation: [],
+      operations: [],
       pages,
     },
   ]

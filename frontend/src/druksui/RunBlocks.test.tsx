@@ -13,7 +13,7 @@ function renderBlocks(blocks: Block[]) {
   const { hook } = memoryLocation({ path: '/field_notes' })
   return render(
     <Router hook={hook}>
-      <PagesContext.Provider value={{ app: 'field_notes', pages: [] }}>
+      <PagesContext.Provider value={{ app: 'field_notes', pages: [], operations: [] }}>
         <Blocks blocks={blocks} />
       </PagesContext.Provider>
     </Router>,
@@ -117,7 +117,7 @@ describe('Image', () => {
     const { hook } = memoryLocation({ path: '/field_notes' })
     rerender(
       <Router hook={hook}>
-        <PagesContext.Provider value={{ app: 'field_notes', pages: [] }}>
+        <PagesContext.Provider value={{ app: 'field_notes', pages: [], operations: [] }}>
           <Blocks blocks={[{ ...broken, url: '/api/files/fresh' }]} />
         </PagesContext.Provider>
       </Router>,

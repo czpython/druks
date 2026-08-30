@@ -377,17 +377,23 @@ URL.
 Druks indexes every route the app mounts by its `operation_id` at boot. Two
 routes in one app with the same `operation_id` are a boot error.
 
-Druks validates the reference when it builds the page. Three failures answer
+Druks validates the reference when it builds the page. Two failures answer
 with the page-read error, and each one names the operation:
 
 - No route carries that `operation_id`.
 - The route is a GET. A GET route is a read. It can never be an action.
-- The route declares a query parameter. Druks fills path parameters and a JSON
-  body, and nothing else.
-- A path parameter carries an alias, so its wire name and its Python name
-  differ.
-- The body is not a flat JSON object: a bare scalar, a list, or a model with an
-  aliased field.
+
+The route takes its values the way the shell sends them: path parameters and a
+flat JSON body, each value under its own name — `Body(embed=True)` or a model,
+no aliases, no query parameters. A route shaped otherwise answers 422 when the
+action runs.
+
+Two routes of one app cannot share an `operation_id`, and one route cannot
+answer two methods under it. Both are boot errors: an action names one
+operation and calls one method.
+
+`refresh: "region"` needs a region. An action that asks for one and sits in no
+named `Section` is an error when Druks builds the page.
 
 So an action target declares path parameters and a flat JSON body only:
 
@@ -402,7 +408,7 @@ against. It lists the app's non-GET operations only:
 ```json
 {
   "operations": [
-    {"operation": "archive_note", "method": "POST", "path": "/api/field_notes/notes/{note_id}/archive"}
+    {"id": "archive_note", "method": "POST", "path": "/api/field_notes/notes/{note_id}/archive"}
   ]
 }
 ```
@@ -507,8 +513,9 @@ shows an app-scoped error and names the block.
 
 Every block carries a `block` discriminator.
 
-A block with exactly one required value takes that value positionally, and
-every other value by keyword:
+A block whose one required value is the thing it shows — its words, its
+content, its identity — takes that value positionally, and every other value
+by keyword:
 
 ```python
 ui.Text("Three peers answered in the last hour.")
@@ -525,7 +532,9 @@ ui.Stack([ui.Text("one"), ui.Divider()], gap="large")
 
 `Metrics`, `Facts`, `List`, `Timeline`, `Files`, `ImageGallery`, `Stack`,
 `Columns`, and `TableRow` all read that way. A block that holds more than one
-thing names every argument — `Card`, `Section`, `Table`, and `Chart`.
+thing names every argument — `Card`, `Section`, `Table`, and `Chart`. So does
+`Form`: its required value is the action that sends it, not something it
+shows, so `action=` is spelled out.
 
 ### Text
 
@@ -701,7 +710,15 @@ class Form:
     title: str = ""
     description: str = ""
     fields: list[Field] = []
-    submit: Action
+    action: Action
+```
+
+```python
+ui.Form(
+    title="Write a note",
+    fields=[ui.TextAreaField(name="body", label="Note", is_required=True)],
+    action=ui.Action(label="Save", operation="write_note", tone="primary"),
+)
 ```
 
 ```json
@@ -720,7 +737,7 @@ class Form:
       "isRequired": true
     }
   ],
-  "submit": {
+  "action": {
     "block": "action",
     "label": "Save",
     "operation": "write_note",

@@ -18,7 +18,7 @@ function renderBlocks(blocks: Block[]) {
   const { hook } = memoryLocation({ path: '/field_notes' })
   return render(
     <Router hook={hook}>
-      <PagesContext.Provider value={{ app: 'field_notes', pages: PAGES }}>
+      <PagesContext.Provider value={{ app: 'field_notes', pages: PAGES, operations: [] }}>
         <Blocks blocks={blocks} />
       </PagesContext.Provider>
     </Router>,

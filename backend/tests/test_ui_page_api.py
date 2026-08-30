@@ -86,7 +86,7 @@ async def test_a_literal_segment_answers_before_a_parameter(druks_client: httpx.
     page = (await druks_client.get("/api/field_notes/pages/notes/new")).json()
 
     assert page["title"] == "Write a note"
-    assert [block["block"] for block in page["blocks"]] == ["callout", "divider", "markdown"]
+    assert [block["block"] for block in page["blocks"]] == ["callout", "divider", "form"]
 
 
 async def test_a_child_page_answers_under_its_parent(druks_client: httpx.AsyncClient, note: Note):
@@ -114,7 +114,7 @@ async def test_a_page_carries_the_region_that_follows_its_subject(
 ):
     page = (await druks_client.get(f"/api/field_notes/pages/notes/{note.id}")).json()
 
-    region = page["blocks"][1]
+    region = page["blocks"][2]
     assert region["block"] == "section"
     assert region["name"] == "decision"
     assert region["follows"] == {"subjectType": "note", "subjectId": str(note.id)}
@@ -137,7 +137,7 @@ async def test_a_parked_run_puts_gate_controls_in_the_followed_region(
 
     page = (await druks_client.get(f"/api/field_notes/pages/notes/{note.id}")).json()
 
-    region = page["blocks"][1]
+    region = page["blocks"][2]
     assert region["follows"] == {"subjectType": "note", "subjectId": str(note.id)}
     assert region["blocks"] == [{"block": "gate_controls", "run": run.id}]
 

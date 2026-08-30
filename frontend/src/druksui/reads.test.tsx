@@ -36,6 +36,7 @@ const ROSTER = [
     subjectTypes: ['note'],
     hasFrontend: false,
     navigation: [],
+    operations: [],
     pages: [{ name: 'note', label: 'note', path: '/field_notes/notes/{note_id}', parent: '', order: 0 }],
   },
 ] as App[]
