@@ -194,7 +194,7 @@ def test_a_subject_cannot_take_the_transcripts_segment():
         def workflows(cls):
             return [SimpleNamespace(subject=Transcripts)]
 
-    with pytest.raises(AppSubjectContractError, match="agent-call reads"):
+    with pytest.raises(AppSubjectContractError, match="serves every app's platform reads"):
         Colliding.subjects()
 
 

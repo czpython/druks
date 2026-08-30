@@ -46,8 +46,8 @@ For app-surface changes, inspect the proof app at
   context object, or one-use helper module.
 - Do not import an app from an author-surface module. Import only
   `druks.workflows`, `druks.agents`, `druks.events`, `druks.signals`, `druks.db`,
-  `druks.schemas`, `druks.prompts`, `druks.durable`, `druks.apps`, and
-  `druks.webhooks`. A reference to `druks.build` or another app in these modules
+  `druks.schemas`, `druks.prompts`, `druks.durable`, `druks.apps`, `druks.ui`,
+  and `druks.webhooks`. A reference to `druks.build` or another app in these modules
   inverts the platform.
 - Derive liveness from run state. Do not mirror it in a column. Store an external
   outcome after its owner announces it. Do not infer that outcome from run

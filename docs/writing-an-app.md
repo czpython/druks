@@ -67,6 +67,7 @@ package modules:
 | `contracts.py` | `AgentOutput` contracts |
 | `schemas.py` | HTTP responses and subject summaries |
 | `routes.py` | FastAPI routers |
+| `pages.py` | `@page` declarations that return `Page` objects |
 | `subscribers.py` | signal reactions |
 | `webhooks.py` | Optional authenticated provider deliveries |
 | `services.py` | Optional `Service` declarations for appliance credentials at external providers |
@@ -74,8 +75,8 @@ package modules:
 | `dist/` | optional built frontend module, mounted inside the shell (served under `/app/<name>`) |
 
 Druks recursively discovers leaf modules named `workflows`, `tasks`, `routes`,
-`subscribers`, `webhooks`, and `services`. A capability hidden in `workflow.py` is not
-discovered. Ordinary names such as `policy.py` and `workspace.py` have no import
+`pages`, `subscribers`, `webhooks`, and `services`. A capability hidden in
+`workflow.py` is not discovered. Ordinary names such as `policy.py` and `workspace.py` have no import
 side effect unless a discovered module imports them.
 
 ## Declare the app
@@ -772,9 +773,11 @@ Two spellings run through druks, and which one a segment wears says who owns it:
 
 Thus, `/api/review/pull_request` is the subject board for review runs.
 `/api/review/reviews` is the resource that your POST creates. The platform
-matches `<subject_type>` and `transcripts` before your routers. A custom router
-cannot take a platform read, including through a catch-all. Name the router for
-its resource to prevent a conflict.
+matches `<subject_type>`, `transcripts`, and `pages` before your routers. A
+custom router cannot take a platform read, including through a catch-all.
+`transcripts` and `pages` are reserved: a subject type or a router prefix that
+takes one fails the load. Name the router for its resource to prevent a
+conflict.
 
 ## Declare a service
 
@@ -1143,11 +1146,63 @@ DBOS system tables through DBOS database migrations. It does not reset or drop a
 schema. It rolls back each test write through `druks_db`. `druks_redis`
 runs `FLUSHDB` on the test index.
 
-## Frontends
+## Declare pages
 
-An app declares its screens in Python and ships no JavaScript. The
-[Druks UI contract](druks-ui.md) holds the page declarations, the block,
-value, and field catalog, actions, and liveness.
+An app declares its screens in Python and ships no JavaScript. Pages live in
+`pages.py`:
+
+```python
+from druks.ui import Page, page
+
+
+@page("/")
+async def reports():
+    return Page(title="Reports", description="Every sweep this install ran.")
+
+
+@page("/peers/{peer_id}")
+async def peer(peer_id: int):
+    return Page(title=f"Peer {peer_id}")
+
+
+@peer.child("/history")
+async def peer_history(peer_id: int):
+    return Page(title=f"Peer {peer_id} history")
+```
+
+`@page` declares a top-level page. `@parent.child` declares a page under it,
+one level deep. A page function takes one parameter for each parameter of its
+route, so a child inherits its parent's. It needs no return annotation.
+
+Exactly one page declares `/`. That page is the one the app opens on. A static
+child renders as a tab on its parent. A parameterized child is a detail page a
+`Link` reaches.
+
+The page name is the function name. The page label is that name with its
+underscores as spaces, and `label=` overrides it.
+
+`App.pages()` enumerates the pages in route-match order: literal segments
+before parameters, at every depth. Declaration order never decides a match.
+
+`navigation` names the pages the appbar shows as subnav tabs, in order. Each
+one must be a static top-level page. The tab wears the page's label, so an app
+never spells a label twice:
+
+```python
+class NightWatch(App):
+    name = "night_watch"
+    navigation = ["reports"]
+```
+
+Druks checks the whole table at boot. A missing landing page, a repeated page
+name, a nested child, two routes a request could not tell apart, a signature
+that does not match its route, or a navigation entry that is not a static
+top-level page fails the load, with the app name and the exact cause.
+
+The [Druks UI contract](druks-ui.md) holds the block, value, and field catalog,
+actions, and liveness.
+
+## Frontends
 
 An installed app is visible in the dashboard without a custom UI. The shell
 reads the installed roster from `/api/apps`. It gives each app an entry in the
@@ -1158,18 +1213,11 @@ summary fields form the board row.
 No additional declaration is necessary.
 The shell derives the switcher label from `name` (underscores become spaces).
 
-The app declares chrome contributions as data. `navigation` on the app class
-adds appbar subnav tabs as `(url, name)` pairs. The shell shows these tabs for
-generic pages and shipped frontends. The active tab has the URL that is the
-longest prefix of the current location:
+An app that needs full control of its interface ships a frontend instead. Its
+pages are its own JavaScript, so it declares its own tabs there and leaves
+`App.navigation` empty.
 
-```python
-class NightWatch(App):
-    name = "night_watch"
-    navigation = [("/night_watch", "reports")]
-```
-
-To add custom pages, ship a frontend. It is an ES module that the shell mounts
+The frontend is an ES module that the shell mounts
 inside its own document, below the chrome. The scaffold ships a placeholder
 `druks_night_watch/dist/entry.js`. Set the frontend build output to that `dist/`
 directory. The contract uses `shellApi: 1`:
@@ -1212,6 +1260,7 @@ Import from concern namespaces, not from `druks.durable` or internal modules:
 | `druks.sandbox` | `Sandbox` |
 | `druks.db` | `Base`, `StoredSubject`, `db_session` |
 | `druks.schemas` | `BaseResponse` |
+| `druks.ui` | `Page`, `page` |
 | `druks.signals` | `subscribe` |
 | `druks.events` | `Event` |
 | `druks.files` | `File`, `FileField` |
