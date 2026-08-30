@@ -625,6 +625,17 @@ is `status.run`. `get_status(workflow=NightWatch)` narrows the read to one
 workflow's runs. It answers the same way when the subject has no run of that
 kind.
 
+A page that lists subjects reads them all at once instead. `get_statuses()`
+takes the ids and returns one status per id, in a single read:
+
+```python
+summaries = await Repository.list_summaries(account_id)
+statuses = await Repository.get_statuses([summary.id for summary in summaries])
+```
+
+This is the read the platform's own board uses, so a declared page listing
+fifty rows costs one query rather than fifty.
+
 ## Record events and react to signals
 
 Record an event through the app. Druks stamps its ownership:

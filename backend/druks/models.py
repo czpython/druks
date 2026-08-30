@@ -110,6 +110,16 @@ class StoredSubject(Base):
 
         return await get_subject_status(self.subject_type, str(self.id), workflow=workflow)
 
+    @classmethod
+    async def get_statuses(cls, subject_ids: Sequence[str | int]) -> "dict[str, SubjectStatus]":
+        """Where a whole board stands, keyed by subject id — one read for the whole
+        board, so a page listing rows does not ask once per row."""
+        from druks.durable.reads import get_subject_statuses
+
+        return await get_subject_statuses(
+            cls.subject_type, [str(subject_id) for subject_id in subject_ids]
+        )
+
     async def get_phase(self) -> str | None:
         from druks.durable.reads import get_subject_phase
 
