@@ -82,6 +82,15 @@ async def get_subject_status(
     return await _status(latest)
 
 
+async def get_subject_statuses(
+    subject_type: str, subject_ids: list[str]
+) -> dict[str, SubjectStatus]:
+    """The status of every subject on a board, keyed by subject id — one driving-run
+    read for the whole page."""
+    driving_runs = await Run.get_latest_for_subjects(subject_type, subject_ids)
+    return {subject_id: await _status(driving_runs.get(subject_id)) for subject_id in subject_ids}
+
+
 async def get_subject_phase(subject_type: str, subject_id: str) -> str | None:
     runs = await Run.list_for_subject(subject_type, subject_id)
     active_run = next((run for run in runs if run.is_active), None)
