@@ -1,13 +1,10 @@
-import { useContext } from 'react'
-import { Link as RouteLink } from 'wouter'
-
 import type { Action, Block, Link } from '../api/types'
 import { Markdown } from '../components/Markdown'
 import { GateControls } from './GateControls'
-import { Chart, Facts, ImageGallery, List, Metrics, Table } from './DataBlocks'
+import { Chart, Facts, ImageGallery, LinkControl, List, Metrics, Table } from './DataBlocks'
 import { ActionButton, Form } from './Form'
 import { Files, Image, Progress, Timeline } from './RunBlocks'
-import { fillPath, PagesContext, RegionContext } from './pages'
+import { RegionContext } from './pages'
 
 export function Blocks({ blocks }: { blocks: Block[] }) {
   return (
@@ -163,38 +160,3 @@ function LinkRow({ links }: { links: (Action | Link)[] }) {
   )
 }
 
-function LinkControl({ link }: { link: Link }) {
-  const { app, pages } = useContext(PagesContext)
-  if (link.url) {
-    return (
-      <a className="dui-link" href={link.url} target="_blank" rel="noreferrer">
-        {link.label}
-      </a>
-    )
-  }
-  if (link.subject) {
-    // The subject's own platform page — the full story of what druks did.
-    return (
-      <RouteLink
-        href={`/${app}/${link.subject.subjectType}/${link.subject.subjectId}`}
-        className="dui-link"
-      >
-        {link.label}
-      </RouteLink>
-    )
-  }
-  const target = pages.find((entry) => entry.name === link.page)
-  const href = target ? fillPath(target.path, link.arguments) : ''
-  if (href) {
-    return (
-      <RouteLink href={href} className="dui-link">
-        {link.label}
-      </RouteLink>
-    )
-  }
-  return (
-    <span className="dui-link dui-link-broken" title={`no page named ${link.page}`}>
-      {link.label}
-    </span>
-  )
-}
