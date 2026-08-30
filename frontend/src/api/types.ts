@@ -19,7 +19,7 @@
 // app keys its board/detail on its own subject summary; SubjectRow and
 // SubjectResponse are generic over that summary (a WorkItemSummary for build).
 
-// The platform's canonical lifecycle states, aggregated across a subject's runs.
+// The platform's canonical lifecycle states, each one a run's own.
 export type RunState =
   | 'scheduled'
   | 'running'
@@ -38,7 +38,8 @@ export interface SubjectSummary {
 }
 
 export interface SubjectStatus {
-  state: RunState
+  // Null when no run drives the subject: druks has not run it.
+  state: RunState | null
   // The driving run's id.
   run: string | null
   // Facts the app renders its lane copy from; the backend ships no prose.
