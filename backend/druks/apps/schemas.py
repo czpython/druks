@@ -1,7 +1,7 @@
-from druks.schemas import BaseResponse
+from druks.schemas import Schema
 
 
-class PageEntry(BaseResponse):
+class PageEntry(Schema):
     name: str
     label: str
     path: str
@@ -9,13 +9,13 @@ class PageEntry(BaseResponse):
     order: int
 
 
-class Operation(BaseResponse):
+class Operation(Schema):
     id: str
     method: str
     path: str
 
 
-class AppResponse(BaseResponse):
+class AppResponse(Schema):
     name: str
     icon: str
     description: str

@@ -38,7 +38,7 @@ AUTHOR_SURFACE = {
         "task",
     },
     "druks.db": {"Base", "StoredSubject", "db_session"},
-    "druks.schemas": {"BaseResponse"},
+    "druks.schemas": {"Schema"},
     "druks.ui": {
         "Action",
         "Block",

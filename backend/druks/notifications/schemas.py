@@ -4,10 +4,10 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, computed_field
 
 from druks.notifications.models import DestinationKind
-from druks.schemas import BaseResponse
+from druks.schemas import Schema
 
 
-class DestinationResponse(BaseResponse):
+class DestinationResponse(Schema):
     model_config = ConfigDict(from_attributes=True)
 
     id: str
@@ -33,7 +33,7 @@ class CreateDestinationRequest(BaseModel):
     url: SecretStr
 
 
-class NotificationResponse(BaseResponse):
+class NotificationResponse(Schema):
     # Serializes exactly the fields declared here — the correlation token (the
     # respond capability) is deliberately not among them.
     model_config = ConfigDict(from_attributes=True)

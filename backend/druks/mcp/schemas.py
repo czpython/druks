@@ -2,12 +2,12 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field, StringConstraints
 
-from druks.schemas import BaseResponse
+from druks.schemas import Schema
 
 NonBlank = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 
 
-class McpServerResponse(BaseResponse):
+class McpServerResponse(Schema):
     # A pure projection of one account's ``McpServer.get_resolved()`` item — the dict's
     # ``token`` is not a field here, so the secret can't serialize (and it
     # arrives as a Secret, redacted even if it did).
@@ -24,13 +24,13 @@ class McpServerResponse(BaseResponse):
     has_token: bool
 
 
-class ConnectMcpServerResponse(BaseResponse):
+class ConnectMcpServerResponse(Schema):
     # The consent URL the operator's browser opens; the grant lands via the
     # callback, never through this response.
     authorization_url: str
 
 
-class McpRegistryCandidateResponse(BaseResponse):
+class McpRegistryCandidateResponse(Schema):
     name: str
     registry_name: str
     description: str

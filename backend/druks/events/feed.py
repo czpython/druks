@@ -2,10 +2,10 @@ from datetime import datetime
 
 from pydantic import AliasPath, ConfigDict, Field, computed_field
 
-from druks.schemas import BaseResponse
+from druks.schemas import Schema
 
 
-class FeedItem(BaseResponse):
+class FeedItem(Schema):
     model_config = ConfigDict(from_attributes=True)
 
     # The event's monotonic log position (its pk) — the feed's ordering and
@@ -28,7 +28,7 @@ class FeedItem(BaseResponse):
         return f"event:{self.seq}"
 
 
-class FeedResponse(BaseResponse):
+class FeedResponse(Schema):
     items: list[FeedItem]
     # Event sequence cursor for the next (older) page; None at the tail.
     next_cursor: str | None = None

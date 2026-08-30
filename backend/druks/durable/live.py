@@ -23,7 +23,7 @@ def keepalive_comment() -> str:
 
 def serialize_model_event(event_type: str, model: BaseModel) -> str:
     """Serialize a typed model as a named SSE event — the streaming twin of returning a
-    BaseResponse. Push events with this instead of hand-writing model_dump(by_alias)."""
+    Schema. Push events with this instead of hand-writing model_dump(by_alias)."""
     return serialize_event(event_type, model.model_dump(by_alias=True, mode="json"))
 
 

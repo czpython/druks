@@ -2,10 +2,10 @@ from datetime import datetime
 
 from pydantic import ConfigDict
 
-from druks.schemas import BaseResponse
+from druks.schemas import Schema
 
 
-class SkillResponse(BaseResponse):
+class SkillResponse(Schema):
     model_config = ConfigDict(from_attributes=True)
 
     name: str
@@ -14,7 +14,7 @@ class SkillResponse(BaseResponse):
     updated_at: datetime
 
 
-class CollectionResponse(BaseResponse):
+class CollectionResponse(Schema):
     model_config = ConfigDict(from_attributes=True)
 
     id: str

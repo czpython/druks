@@ -2,10 +2,10 @@ from typing import Annotated, Literal
 
 from pydantic import Discriminator
 
-from druks.schemas import BaseResponse
+from druks.schemas import Schema
 
 
-class Option(BaseResponse):
+class Option(Schema):
     value: str
     label: str
 
@@ -13,7 +13,7 @@ class Option(BaseResponse):
         super().__init__(label=label, **data)
 
 
-class TextField(BaseResponse):
+class TextField(Schema):
     field: Literal["text"] = "text"
     name: str
     label: str
@@ -23,7 +23,7 @@ class TextField(BaseResponse):
     is_required: bool = False
 
 
-class TextAreaField(BaseResponse):
+class TextAreaField(Schema):
     field: Literal["text_area"] = "text_area"
     name: str
     label: str
@@ -34,7 +34,7 @@ class TextAreaField(BaseResponse):
     rows: int = 4
 
 
-class NumberField(BaseResponse):
+class NumberField(Schema):
     field: Literal["number"] = "number"
     name: str
     label: str
@@ -46,7 +46,7 @@ class NumberField(BaseResponse):
     is_required: bool = False
 
 
-class SelectField(BaseResponse):
+class SelectField(Schema):
     field: Literal["select"] = "select"
     name: str
     label: str
@@ -56,7 +56,7 @@ class SelectField(BaseResponse):
     is_required: bool = False
 
 
-class MultiSelectField(BaseResponse):
+class MultiSelectField(Schema):
     field: Literal["multi_select"] = "multi_select"
     name: str
     label: str
@@ -66,7 +66,7 @@ class MultiSelectField(BaseResponse):
     is_required: bool = False
 
 
-class RadioField(BaseResponse):
+class RadioField(Schema):
     field: Literal["radio"] = "radio"
     name: str
     label: str
@@ -76,7 +76,7 @@ class RadioField(BaseResponse):
     is_required: bool = False
 
 
-class CheckboxField(BaseResponse):
+class CheckboxField(Schema):
     field: Literal["checkbox"] = "checkbox"
     name: str
     label: str

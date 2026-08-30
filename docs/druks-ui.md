@@ -478,7 +478,7 @@ rules hold for every one of them.
 the discriminator.
 
 **Wire names are camelCase.** `alternative_text` serializes as
-`alternativeText`. `BaseResponse` does that for every model here.
+`alternativeText`. `Schema` does that for every model here.
 
 **Druks coerces author input to the wire type.** Three fields take a friendlier
 input than they store:
