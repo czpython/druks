@@ -9,9 +9,11 @@ import { useSSE } from '../api/sse'
 import type { App, Block, PageSnapshot } from '../api/types'
 import { AppPage } from './AppPage'
 
-vi.mock('../api/client', () => ({
-  api: { listApps: vi.fn(), readPage: vi.fn(), getGate: vi.fn() },
-}))
+vi.mock('../api/client', async () => {
+  const real = await vi.importActual<typeof import('../api/client')>('../api/client')
+  const stubs = { listApps: vi.fn(), readPage: vi.fn(), getGate: vi.fn() }
+  return { subjectApi: real.subjectApi, api: stubs }
+})
 vi.mock('../api/sse', () => ({ useSSE: vi.fn() }))
 
 const listApps = vi.mocked(api.listApps)

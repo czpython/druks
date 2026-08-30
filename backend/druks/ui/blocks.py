@@ -18,25 +18,33 @@ from .fields import Field as FormField
 
 
 def _subject_identity(value):
-    """``follows=`` takes the subject a page or a region watches. Druks streams
-    that subject and rereads the page on every snapshot it sends."""
+    """``follows=`` takes the subject a page or a region watches, or a subject
+    class for every subject of that type. Druks streams what it names and
+    rereads the page on every snapshot it sends."""
     if isinstance(value, dict | Follows) or value is None:
         return value
-    identity = getattr(value, "identity", None)
-    if not identity:
-        raise ValueError(
-            f"follows= takes the subject a page watches, not {type(value).__name__}. A run is "
-            "about a subject, and the subject is what the stream carries."
-        )
-    # A subject id reaches the stream through a URL, so it travels as text.
-    return {"subject_type": identity["type"], "subject_id": str(identity["id"])}
+    if isinstance(value, type):
+        subject_type = getattr(value, "subject_type", "")
+        if subject_type:
+            return {"subject_type": subject_type, "subject_id": ""}
+    else:
+        identity = getattr(value, "identity", None)
+        if identity:
+            # A subject id reaches the stream through a URL, so it travels as text.
+            return {"subject_type": identity["type"], "subject_id": str(identity["id"])}
+    raise ValueError(
+        "follows= takes the subject a page watches, or its class for every subject of that "
+        f"type, not {type(value).__name__}. A run is about a subject, and the subject is what "
+        "the stream carries."
+    )
 
 
 class Follows(Schema):
-    """The subject a page or a named region watches."""
+    """The subject a page or a named region watches. An empty ``subject_id``
+    watches every subject of the type."""
 
     subject_type: str
-    subject_id: str
+    subject_id: str = ""
 
 
 Watched = Annotated[Follows | None, BeforeValidator(_subject_identity)]
@@ -88,6 +96,11 @@ class Link(PageBlock):
 
     @model_validator(mode="after")
     def _one_destination(self) -> "Link":
+        if self.subject and not self.subject.subject_id:
+            raise ValueError(
+                f"Link {self.label!r} names the {self.subject.subject_type} type, and a link "
+                "opens one subject's page. Give the subject itself."
+            )
         if [bool(self.page), bool(self.url), bool(self.subject)].count(True) == 1:
             return self
         raise ValueError(f"Link {self.label!r} must set exactly one of page, url, or subject")
