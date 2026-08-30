@@ -148,10 +148,10 @@ class SubjectSummary(Schema):
 
 class SubjectStatus(Schema):
     # The subject's lifecycle status for the dashboard lane — derived by the read
-    # side, never stored; ``state`` is the canonical RunState aggregated across
-    # the subject's runs. Everything else is a fact the app's UI renders
-    # its own copy from; the platform ships no prose.
-    state: RunState
+    # side, never stored; ``state`` is the state of the run driving the subject,
+    # and None when no run drives it. Everything else is a fact the app's UI
+    # renders its own copy from; the platform ships no prose.
+    state: RunState | None = None
     # The driving run's id — identity, so an app page can name it in a block
     # (GateControls) without reaching for the platform's own read side.
     run: str | None = None
@@ -161,11 +161,10 @@ class SubjectStatus(Schema):
     # A parked run's gate identity — the app's UI maps it to its own
     # words; the ask's content rides the timeline's ``input_request``.
     gate: str | None = None
-    # The stop reason of the run driving ``state`` — set only when that run is
-    # terminal-failed (an active or finished subject carries none). Lets a board
-    # render "why" inline without reaching into the timeline. ``reason`` is its
-    # machine-readable classification (``gate_timeout``): an unanswered gate,
-    # not a crash.
+    # The driving run's message: a crash's error, or the reason the operator typed
+    # at cancel. It is a message, not a state — read ``state`` to tell failed from
+    # cancelled from orphaned. ``reason`` is its machine-readable classification
+    # (``gate_timeout``): an unanswered gate, not a crash.
     failure: str | None = None
     reason: str | None = None
     # When druks last picked this subject up, and whose work it is. A subject with

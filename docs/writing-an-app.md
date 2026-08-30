@@ -620,6 +620,11 @@ if status.is_parked:
 question it stopped on. While a run is active, `await repository.get_phase()`
 returns the step it is on.
 
+A subject that Druks did not run has no state: `status.state` is None, and so
+is `status.run`. `get_status(workflow=NightWatch)` narrows the read to one
+workflow's runs. It answers the same way when the subject has no run of that
+kind.
+
 ## Record events and react to signals
 
 Record an event through the app. Druks stamps its ownership:

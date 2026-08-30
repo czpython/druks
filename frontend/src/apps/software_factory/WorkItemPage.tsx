@@ -134,7 +134,9 @@ const STATE_CLS: Record<RunState, string> = {
 // tone comes from the lifecycle state. Live (a dot animates) while a run is active.
 function statusView(status: SubjectStatus, resolution: PRResolution | null): Status {
   const live = status.state === 'running' || status.state === 'parked'
-  return { cls: STATE_CLS[status.state], label: statusLine(status, resolution), live }
+  // Nothing has run yet — the pill rests, in the same tone as a cancelled row.
+  const cls = status.state ? STATE_CLS[status.state] : 'cancelled'
+  return { cls, label: statusLine(status, resolution), live }
 }
 
 const fmtTok = (n: number) => (n > 0 ? formatTokenCount(n) : '0')

@@ -133,7 +133,8 @@ async def _timeline(runs: list[Run]) -> list[RunResponse]:
 async def _status(driving_run: Run | None) -> SubjectStatus:
     # Facts only: the app's UI renders its copy from them.
     if not driving_run:
-        return SubjectStatus(state=RunState.SCHEDULED)
+        # No run drives it, so it wears no run's state.
+        return SubjectStatus()
     # A parked run is always the active one (ACTIVE_STATES), so the
     # driving run alone decides parked-ness.
     parked = driving_run.state == RunState.PARKED.value

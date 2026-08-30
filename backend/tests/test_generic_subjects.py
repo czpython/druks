@@ -275,8 +275,8 @@ async def test_list_returns_every_subject_with_status(client: TestClient, druks_
     rows = {row["summary"]["id"]: row for row in body["rows"]}
     assert rows["1"]["summary"]["title"] == "First"
     assert rows["1"]["status"]["state"] == "running"
-    # "2" has no runs yet — it still lists, defaulting to scheduled.
-    assert rows["2"]["status"]["state"] == "scheduled"
+    # "2" has no runs yet — it still lists, and carries no state.
+    assert rows["2"]["status"]["state"] is None
 
 
 async def test_the_board_and_its_stream_hand_the_caller_to_list_summaries(druks_db):

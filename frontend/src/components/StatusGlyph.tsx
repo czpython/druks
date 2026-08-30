@@ -1,8 +1,8 @@
-import { STATES } from '../lib/states'
+import { NO_RUN, STATES } from '../lib/states'
 import type { RunState } from '../api/types'
 
 interface Props {
-  state: RunState
+  state: RunState | null
   size?: number
 }
 
@@ -10,8 +10,8 @@ interface Props {
 const PULSING: RunState[] = ['scheduled', 'running', 'parked']
 
 export function StatusGlyph({ state, size = 10 }: Props) {
-  const style = STATES[state]
-  const pulse = PULSING.includes(state)
+  const style = state ? STATES[state] : NO_RUN
+  const pulse = state ? PULSING.includes(state) : false
   return (
     <span
       className={`glyph${pulse ? ' glyph-pulse' : ''}`}
