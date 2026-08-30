@@ -52,13 +52,30 @@ export function Datum({ value }: { value: Value }) {
 }
 
 function TextDatum({ text, link }: { text: string; link: Link | null }) {
-  const { pages } = useContext(PagesContext)
   if (!link) return <span>{text}</span>
+  return <LinkControl link={link} label={text} />
+}
+
+/** A control that navigates. It is a block of its own, or the link on a value,
+    which shows the value's own text. */
+export function LinkControl({ link, label = link.label }: { link: Link; label?: string }) {
+  const { app, pages } = useContext(PagesContext)
   if (link.url) {
     return (
       <a className="dui-link" href={link.url} target="_blank" rel="noreferrer">
-        {text}
+        {label}
       </a>
+    )
+  }
+  if (link.subject) {
+    // The subject's own platform page — the full story of what druks did.
+    return (
+      <RouteLink
+        href={`/${app}/${link.subject.subjectType}/${link.subject.subjectId}`}
+        className="dui-link"
+      >
+        {label}
+      </RouteLink>
     )
   }
   const target = pages.find((entry) => entry.name === link.page)
@@ -66,13 +83,13 @@ function TextDatum({ text, link }: { text: string; link: Link | null }) {
   if (href) {
     return (
       <RouteLink href={href} className="dui-link">
-        {text}
+        {label}
       </RouteLink>
     )
   }
   return (
     <span className="dui-link dui-link-broken" title={`no page named ${link.page}`}>
-      {text}
+      {label}
     </span>
   )
 }

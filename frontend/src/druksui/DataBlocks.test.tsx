@@ -86,6 +86,31 @@ describe('values', () => {
     expect(screen.getByText('peer-7').getAttribute('href')).toBe('/field_notes/notes/7')
   })
 
+  it('follows a subject link out of a list item', () => {
+    renderBlocks([
+      {
+        block: 'list',
+        title: '',
+        items: [
+          {
+            value: 'text',
+            text: 'peer-7',
+            link: {
+              block: 'link',
+              label: 'peer-7',
+              page: '',
+              arguments: {},
+              url: '',
+              subject: { subjectType: 'note', subjectId: '7' },
+            },
+          },
+        ],
+      },
+    ])
+
+    expect(screen.getByText('peer-7').getAttribute('href')).toBe('/field_notes/note/7')
+  })
+
   it('shows a number the way the app gave it', () => {
     renderBlocks([
       {
