@@ -573,6 +573,28 @@ class Card(BlockParent):
             control.check_placement(followed=followed, regions=regions, region=region)
 
 
+class Cards(PageBlock):
+    """One card for each of a set of things. The shell arranges them, so a page
+    that wants a particular geometry reaches for ``Columns`` instead."""
+
+    block: Literal["cards"] = "cards"
+    title: str = ""
+    cards: list[Card] = Field(default_factory=list)
+    empty: EmptyState | None = None
+
+    def iter_actions(self) -> "Iterable[Action]":
+        for card in self.cards:
+            yield from card.iter_actions()
+        if self.empty:
+            yield from self.empty.iter_actions()
+
+    def check_placement(self, *, followed: bool, regions: set[str], region: str = "") -> None:
+        for card in self.cards:
+            card.check_placement(followed=followed, regions=regions, region=region)
+        if self.empty:
+            self.empty.check_placement(followed=followed, regions=regions, region=region)
+
+
 class Section(BlockParent):
     """A titled part of a page. A ``name`` makes it a region the shell can
     replace on its own, and ``follows`` is what makes it do so."""
@@ -611,6 +633,7 @@ Block = Annotated[
     | Quote
     | Section
     | Card
+    | Cards
     | Callout
     | Divider
     | EmptyState
@@ -634,6 +657,7 @@ Block = Annotated[
 ]
 
 Card.model_rebuild()
+Cards.model_rebuild()
 Section.model_rebuild()
 Stack.model_rebuild()
 Columns.model_rebuild()

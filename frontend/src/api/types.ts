@@ -289,6 +289,21 @@ export interface TableRow {
   detail: string
 }
 
+export interface CardBlock {
+  block: 'card'
+  title: string
+  description: string
+  blocks: Block[]
+  actions: (Action | Link)[]
+}
+
+export interface EmptyStateBlock {
+  block: 'empty_state'
+  title: string
+  description: string
+  actions: (Action | Link)[]
+}
+
 export interface ImageBlock {
   block: 'image'
   url: string
@@ -394,13 +409,8 @@ export type Block =
   | { block: 'columns'; blocks: Block[] }
   | Action
   | { block: 'form'; title: string; description: string; fields: Field[]; action: Action }
-  | {
-      block: 'card'
-      title: string
-      description: string
-      blocks: Block[]
-      actions: (Action | Link)[]
-    }
+  | CardBlock
+  | { block: 'cards'; title: string; cards: CardBlock[]; empty: EmptyStateBlock | null }
   | {
       block: 'callout'
       tone: 'info' | 'success' | 'warning' | 'danger'
@@ -408,7 +418,7 @@ export type Block =
       text: string
     }
   | { block: 'divider' }
-  | { block: 'empty_state'; title: string; description: string; actions: (Action | Link)[] }
+  | EmptyStateBlock
   | Link
 
 // The subject a page or a named region watches. The shell streams it and

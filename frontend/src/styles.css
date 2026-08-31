@@ -2639,6 +2639,10 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
 /* The chart's numbers stay in the page for a screen reader, out of sight. */
 .dui-chart-data { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
+/* The shell owns the arrangement: cards take a comfortable minimum and the
+   row fills with as many as fit. */
+.dui-cards { list-style: none; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px; margin: 12px 0; }
+.dui-cards .dui-card { margin: 0; }
 .dui-gallery-grid { list-style: none; margin: 10px 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 12px; }
 .dui-gallery-item { display: block; }
 .dui-gallery .dui-image { margin: 0; }

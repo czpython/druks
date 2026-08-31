@@ -49,7 +49,8 @@ It exports exactly these names:
 page                                       declaration
 Page  Follows                              the snapshot
 Text  Markdown  Quote  Section  Card       display and layout blocks
-Callout  Divider  EmptyState  Stack  Columns
+Cards  Callout  Divider  EmptyState
+Stack  Columns
 Link  Action  Form                         controls
 Timeline  TimelineItem  Progress           run and artifact blocks
 ProgressStep  Image  Files
@@ -509,7 +510,8 @@ input than they store:
 
 ```python
 Block = Annotated[
-    Text | Markdown | Quote | Section | Card | Callout | Divider | EmptyState
+    Text | Markdown | Quote | Section | Card | Cards | Callout | Divider
+    | EmptyState
     | Link | Action | Form | Timeline | Progress | Image | Files
     | GateControls | Chart | ImageGallery | Metrics | Facts | Table | List
     | Stack | Columns,
@@ -558,9 +560,10 @@ ui.Stack([ui.Text("one"), ui.Divider()], gap="large")
 
 `Metrics`, `Facts`, `List`, `Timeline`, `Files`, `ImageGallery`, `Stack`,
 `Columns`, and `TableRow` all read that way. A block that holds more than one
-thing names every argument — `Card`, `Section`, `Table`, and `Chart`. So does
-`Form`: its required value is the action that sends it, not something it
-shows, so `action=` is spelled out.
+thing names every argument: `Card`, `Section`, `Table`, `Chart`, and `Cards`.
+`Cards` is on that list because its `empty` is content, not decoration. So is
+`Form`: its required value is the action that sends it, not something it shows,
+so `action=` is spelled out.
 
 ### Text
 
@@ -645,6 +648,44 @@ class Card:
   "actions": [{"block": "link", "label": "Open", "page": "peer", "arguments": {"peer_id": "7"}, "url": ""}]
 }
 ```
+
+### Cards
+
+```python
+class Cards:
+    block: Literal["cards"] = "cards"
+    title: str = ""
+    cards: list[Card] = []
+    empty: EmptyState | None = None
+```
+
+```json
+{
+  "block": "cards",
+  "title": "Peers",
+  "cards": [{"block": "card", "title": "peer-7", "description": "", "blocks": [], "actions": []}],
+  "empty": null
+}
+```
+
+One card for each of a set of things.
+
+```python
+ui.Cards(
+    title="Peers",
+    cards=[ui.Card(title=peer.name, blocks=[...], actions=[...]) for peer in peers],
+    empty=ui.EmptyState("No peer yet", actions=[ui.Link("Add one", page="new_peer")]),
+)
+```
+
+The shell arranges the cards. It fits as many across as the screen takes, so
+`Cards` sets no geometry of its own.
+
+With no cards, the shell shows the title and `empty` in their place. With no
+cards and no `empty`, it shows nothing. `Table` reads the same way.
+
+`empty` takes an `EmptyState`, not a line of text, because an empty page
+usually has to say what to do next.
 
 ### Callout
 
@@ -1153,6 +1194,9 @@ screen they stack.
 
 `Stack` and `Columns` hold every V1 block, including each other. They have no
 special cases.
+
+`Columns` is geometry. Each child is one column, however many there are. For a
+collection of cards, use `Cards`: the shell chooses how many fit across.
 
 ## Values
 

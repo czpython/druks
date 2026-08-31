@@ -44,6 +44,7 @@ AUTHOR_SURFACE = {
         "Block",
         "Callout",
         "Card",
+        "Cards",
         "Chart",
         "ChartSeries",
         "CheckboxField",

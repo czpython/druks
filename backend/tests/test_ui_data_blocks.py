@@ -2,9 +2,13 @@ from datetime import UTC, datetime
 
 import pytest
 from druks.ui import (
+    Action,
+    Card,
+    Cards,
     Chart,
     ChartSeries,
     Columns,
+    EmptyState,
     Fact,
     Facts,
     Link,
@@ -150,3 +154,18 @@ def test_a_number_must_be_one_json_can_carry(bad):
         NumberValue(bad)
     with pytest.raises(ValueError):
         ChartSeries(label="s", points=[bad])
+
+
+def test_cards_finds_an_action_in_a_card_and_in_its_empty_state():
+    """Boot checks every action against the app's operations, so an action the
+    walk misses is one that ships naming a route nobody declares."""
+    block = Cards(
+        cards=[Card(title="Peer 7", actions=[Action(label="Retire", operation="retire_peer")])],
+        empty=EmptyState("No peer yet", actions=[Action(label="Scan", operation="scan")]),
+    )
+
+    assert [action.operation for action in block.iter_actions()] == ["retire_peer", "scan"]
+
+
+def test_cards_with_none_and_nothing_to_say_carries_no_empty_state():
+    assert Cards().empty is None
