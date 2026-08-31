@@ -200,6 +200,17 @@ class Markdown(PageBlock):
         super().__init__(text=text, **data)
 
 
+class Quote(PageBlock):
+    """Someone else's words, kept as they arrived — a message, a reply, an
+    answer. Line breaks survive; nothing is read as markup."""
+
+    block: Literal["quote"] = "quote"
+    text: str
+
+    def __init__(self, text: str, **data):
+        super().__init__(text=text, **data)
+
+
 class Callout(PageBlock):
     """A short message the reader should not miss. The tone selects the
     presentation; the app writes the words."""
@@ -266,6 +277,7 @@ class TextValue(Schema):
 
     value: Literal["text"] = "text"
     text: str
+    description: str = ""
     link: Link | None = None
 
 
@@ -273,6 +285,7 @@ class NumberValue(Schema):
     value: Literal["number"] = "number"
     number: float = Field(allow_inf_nan=False)
     unit: str = ""
+    tone: Literal["neutral", "active", "success", "warning", "danger"] = "neutral"
 
     def __init__(self, number, **data):
         super().__init__(number=number, **data)
@@ -280,11 +293,12 @@ class NumberValue(Schema):
 
 class StatusValue(Schema):
     """Where something stands. The app writes the word; the tone selects the
-    presentation."""
+    presentation, and a ``state`` still moves where a ``verdict`` has settled."""
 
     value: Literal["status"] = "status"
     label: str
     tone: Literal["neutral", "active", "success", "warning", "danger"] = "neutral"
+    kind: Literal["state", "verdict"] = "state"
 
     def __init__(self, label: str, **data):
         super().__init__(label=label, **data)
@@ -487,6 +501,7 @@ class TableColumn(Schema):
 
 class TableRow(Schema):
     cells: list[Value] = Field(default_factory=list)
+    detail: str = ""
 
     def __init__(self, cells=(), **data):
         super().__init__(cells=cells, **data)
@@ -594,6 +609,7 @@ class Section(BlockParent):
 Block = Annotated[
     Text
     | Markdown
+    | Quote
     | Section
     | Card
     | Callout

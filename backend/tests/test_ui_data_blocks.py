@@ -107,7 +107,12 @@ def test_every_value_carries_its_own_discriminator():
         "status",
         "time",
     ]
-    assert facts["facts"][1]["value"] == {"value": "number", "number": 40.0, "unit": "ms"}
+    assert facts["facts"][1]["value"] == {
+        "value": "number",
+        "number": 40.0,
+        "unit": "ms",
+        "tone": "neutral",
+    }
     assert facts["facts"][3]["value"] == {"value": "time", "when": "2026-08-29T09:14:02Z"}
 
 

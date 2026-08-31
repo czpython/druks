@@ -72,6 +72,7 @@ AUTHOR_SURFACE = {
         "Page",
         "Progress",
         "ProgressStep",
+        "Quote",
         "RadioField",
         "Section",
         "SelectField",

@@ -1,4 +1,4 @@
-import { useContext } from 'react'
+import { useContext, useState } from 'react'
 import { Link as RouteLink } from 'wouter'
 
 import type {
@@ -24,10 +24,10 @@ const BAR_GAP = 1
 export function Datum({ value }: { value: Value }) {
   switch (value.value) {
     case 'text':
-      return <TextDatum text={value.text} link={value.link} />
+      return <TextDatum text={value.text} description={value.description} link={value.link} />
     case 'number':
       return (
-        <span className="dui-number mono">
+        <span className={`dui-number mono dui-number-${value.tone}`}>
           {/* Grouped for reading, but never rounded: the app's number is the
               operator's number. */}
           {value.number.toLocaleString(undefined, { maximumFractionDigits: 20 })}
@@ -51,9 +51,25 @@ export function Datum({ value }: { value: Value }) {
   }
 }
 
-function TextDatum({ text, link }: { text: string; link: Link | null }) {
-  if (!link) return <span>{text}</span>
-  return <LinkControl link={link} label={text} />
+function TextDatum({
+  text,
+  description,
+  link,
+}: {
+  text: string
+  description: string
+  link: Link | null
+}) {
+  const name = link ? <LinkControl link={link} label={text} /> : <span>{text}</span>
+  if (description) {
+    return (
+      <span className="dui-value">
+        {name}
+        <span className="dui-value-desc dim">{description}</span>
+      </span>
+    )
+  }
+  return name
 }
 
 /** A control that navigates. It is a block of its own, or the link on a value,
@@ -317,27 +333,49 @@ export function Table({
           </thead>
           <tbody>
             {rows.map((row, index) => (
-              <tr key={index}>
-                {row.cells.map((cell, place) =>
-                  // The first cell names its row, the way the column header
-                  // names its column, so a reader hears which row a value
-                  // belongs to.
-                  place === 0 ? (
-                    <th key={place} scope="row" data-align={columns[place]?.align}>
-                      <Datum value={cell} />
-                    </th>
-                  ) : (
-                    <td key={place} data-align={columns[place]?.align}>
-                      <Datum value={cell} />
-                    </td>
-                  ),
-                )}
-              </tr>
+              <Row key={index} row={row} columns={columns} />
             ))}
           </tbody>
         </table>
       </div>
     </div>
+  )
+}
+
+function Row({ row, columns }: { row: TableRow; columns: TableColumn[] }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <>
+      <tr>
+        {row.cells.map((cell, place) =>
+          // The first cell names its row, the way a column header names its column.
+          place === 0 ? (
+            <th key={place} scope="row" data-align={columns[place]?.align}>
+              <Datum value={cell} />
+              {row.detail && (
+                <button
+                  type="button"
+                  className="dui-row-more"
+                  aria-expanded={open}
+                  onClick={() => setOpen(!open)}
+                >
+                  {open ? 'Less' : 'More'}
+                </button>
+              )}
+            </th>
+          ) : (
+            <td key={place} data-align={columns[place]?.align}>
+              <Datum value={cell} />
+            </td>
+          ),
+        )}
+      </tr>
+      {row.detail && open && (
+        <tr className="dui-row-detail">
+          <td colSpan={columns.length}>{row.detail}</td>
+        </tr>
+      )}
+    </>
   )
 }
 

@@ -227,6 +227,7 @@ export interface StatusValue {
   value: 'status'
   label: string
   tone: 'neutral' | 'active' | 'success' | 'warning' | 'danger'
+  kind: 'state' | 'verdict'
 }
 
 export interface TimelineItem {
@@ -244,6 +245,7 @@ export interface ProgressStep {
 export interface TextValue {
   value: 'text'
   text: string
+  description: string
   link: Link | null
 }
 
@@ -251,6 +253,7 @@ export interface NumberValue {
   value: 'number'
   number: number
   unit: string
+  tone: 'neutral' | 'active' | 'success' | 'warning' | 'danger'
 }
 
 export interface TimeValue {
@@ -284,6 +287,7 @@ export interface TableColumn {
 
 export interface TableRow {
   cells: Value[]
+  detail: string
 }
 
 export interface ImageBlock {
@@ -353,6 +357,7 @@ export interface Operation {
 export type Block =
   | { block: 'text'; text: string }
   | { block: 'markdown'; text: string }
+  | { block: 'quote'; text: string }
   | { block: 'section'; title: string; name: string; blocks: Block[]; follows: Follows | null }
   | { block: 'gate_controls'; run: string }
   | { block: 'timeline'; title: string; items: TimelineItem[] }

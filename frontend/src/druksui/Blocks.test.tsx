@@ -41,6 +41,13 @@ describe('the display core', () => {
     expect(container.querySelector('hr.dui-divider')).toBeTruthy()
   })
 
+  it('quotes words it did not write, as they arrived', () => {
+    const { container } = renderBlocks([{ block: 'quote', text: 'one\ntwo' }])
+
+    const quoted = container.querySelector('blockquote.dui-quote')
+    expect(quoted?.textContent).toBe('one\ntwo')
+  })
+
   it('nests blocks through sections and cards', () => {
     const { container } = renderBlocks([
       {
