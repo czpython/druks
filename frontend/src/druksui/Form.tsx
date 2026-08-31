@@ -31,15 +31,31 @@ export function Form({
   const shape = fields.map((one) => `${one.field}:${one.name}`).join('|')
   const [known, setKnown] = useState(shape)
   const [values, setValues] = useState<Payload>(() => Object.fromEntries(fields.map(startingValue)))
+  // A successful submit owes the form a reset to what the server now declares.
+  // The submit's own refresh can reach this component before or after the reset
+  // lands, so the form takes the declaration it holds now and the refreshed one
+  // the moment it arrives. The count also keys the file input, which holds its
+  // selection outside React state.
+  const [resetsOwed, setResetsOwed] = useState(0)
+  const [resetsMade, setResetsMade] = useState(0)
+  const [awaitingRefresh, setAwaitingRefresh] = useState(false)
+  const [declaration, setDeclaration] = useState(fields)
+  const refreshed = awaitingRefresh && fields !== declaration
   if (known !== shape) {
     setKnown(shape)
     setValues(Object.fromEntries(fields.map(startingValue)))
+    setDeclaration(fields)
+    if (awaitingRefresh) setAwaitingRefresh(false)
+  } else if (resetsMade !== resetsOwed || refreshed) {
+    if (resetsMade !== resetsOwed) setResetsMade(resetsOwed)
+    if (refreshed) setAwaitingRefresh(false)
+    setValues(Object.fromEntries(fields.map(startingValue)))
+    setDeclaration(fields)
   }
-  const run = useAction(
-    action,
-    fields.map((one) => one.name),
-    () => setValues(Object.fromEntries(fields.map(startingValue))),
-  )
+  const run = useAction(action, fields.map((one) => one.name), () => {
+    setAwaitingRefresh(true)
+    setResetsOwed((count) => count + 1)
+  })
 
   return (
     <form
@@ -55,7 +71,11 @@ export function Form({
         fields={fields}
         values={values}
         errors={run.fieldErrors}
-        onChange={(name, value) => setValues((previous) => ({ ...previous, [name]: value }))}
+        resets={resetsOwed}
+        onChange={(name, value) => {
+          if (awaitingRefresh) setAwaitingRefresh(false)
+          setValues((previous) => ({ ...previous, [name]: value }))
+        }}
       />
       {run.problem && (
         <div className="dui-form-error" role="alert">
