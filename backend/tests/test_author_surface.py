@@ -6,7 +6,7 @@ import pytest
 # exact names it exports. Pattern A — no root facade; druks stays thin.
 AUTHOR_SURFACE = {
     "druks.apps": {"App", "AppSettings", "Secret"},
-    "druks.browser": {"BrowserSession", "BrowserSessionSignedOutError"},
+    "druks.browser": {"BrowserSession", "BrowserSessionSignedOutError", "BrowserSessionStatus"},
     "druks.services": {
         "OauthClient",
         "OauthExchangeError",
@@ -38,12 +38,13 @@ AUTHOR_SURFACE = {
         "task",
     },
     "druks.db": {"Base", "StoredSubject", "db_session"},
-    "druks.schemas": {"BaseResponse"},
+    "druks.schemas": {"Schema"},
     "druks.ui": {
         "Action",
         "Block",
         "Callout",
         "Card",
+        "Cards",
         "Chart",
         "ChartSeries",
         "CheckboxField",
@@ -72,7 +73,9 @@ AUTHOR_SURFACE = {
         "Page",
         "Progress",
         "ProgressStep",
+        "Quote",
         "RadioField",
+        "SecretField",
         "Section",
         "SelectField",
         "Stack",
@@ -87,6 +90,7 @@ AUTHOR_SURFACE = {
         "TimeValue",
         "Timeline",
         "TimelineItem",
+        "UploadField",
         "Value",
         "page",
     },

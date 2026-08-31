@@ -2,17 +2,17 @@ from datetime import datetime
 
 from pydantic import ConfigDict, Field
 
-from druks.schemas import BaseResponse
+from druks.schemas import Schema
 
 
-class AccountResponse(BaseResponse):
+class AccountResponse(Schema):
     model_config = ConfigDict(from_attributes=True)
 
     id: str
     username: str
 
 
-class IdentityResponse(BaseResponse):
+class IdentityResponse(Schema):
     # What /api/auth/me answers: how this deployment authenticates, who the
     # request resolved to (null in the none/zero setup state), and whether that
     # identity still needs its first harness connection.
@@ -21,7 +21,7 @@ class IdentityResponse(BaseResponse):
     onboarding_required: bool
 
 
-class PatResponse(BaseResponse):
+class PatResponse(Schema):
     model_config = ConfigDict(from_attributes=True)
 
     id: str

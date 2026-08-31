@@ -24,6 +24,22 @@ def test_a_page_follows_a_subject_too(note: Note):
     assert page.follows.subject_id == str(note.id)
 
 
+def test_a_region_follows_every_subject_of_a_type():
+    section = Section(name="board", follows=Note, blocks=[])
+
+    assert section.follows
+    assert section.follows.subject_type == "note"
+    assert section.follows.subject_id == ""
+
+
+def test_a_page_follows_every_subject_of_a_type():
+    page = Page(title="Notes", follows=Note)
+
+    assert page.follows
+    assert page.follows.subject_type == "note"
+    assert page.follows.subject_id == ""
+
+
 def test_a_followed_region_needs_a_name(note: Note):
     with pytest.raises(ValueError, match="needs a name"):
         Section(follows=note, blocks=[])
@@ -107,3 +123,8 @@ def test_a_link_reaches_the_subjects_own_page(note: Note):
 def test_a_link_takes_exactly_one_destination(note: Note):
     with pytest.raises(ValueError, match="exactly one"):
         Link("Everything druks did", page="notes", subject=note)
+
+
+def test_a_link_refuses_a_subject_type():
+    with pytest.raises(ValueError, match="opens one subject's page"):
+        Link("Everything druks did", subject=Note)

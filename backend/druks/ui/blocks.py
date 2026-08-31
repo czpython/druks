@@ -12,37 +12,45 @@ from pydantic import (
     model_validator,
 )
 
-from druks.schemas import BaseResponse
+from druks.schemas import Schema
 
 from .fields import Field as FormField
 
 
 def _subject_identity(value):
-    """``follows=`` takes the subject a page or a region watches. Druks streams
-    that subject and rereads the page on every snapshot it sends."""
+    """``follows=`` takes the subject a page or a region watches, or a subject
+    class for every subject of that type. Druks streams what it names and
+    rereads the page on every snapshot it sends."""
     if isinstance(value, dict | Follows) or value is None:
         return value
-    identity = getattr(value, "identity", None)
-    if not identity:
-        raise ValueError(
-            f"follows= takes the subject a page watches, not {type(value).__name__}. A run is "
-            "about a subject, and the subject is what the stream carries."
-        )
-    # A subject id reaches the stream through a URL, so it travels as text.
-    return {"subject_type": identity["type"], "subject_id": str(identity["id"])}
+    if isinstance(value, type):
+        subject_type = getattr(value, "subject_type", "")
+        if subject_type:
+            return {"subject_type": subject_type, "subject_id": ""}
+    else:
+        identity = getattr(value, "identity", None)
+        if identity:
+            # A subject id reaches the stream through a URL, so it travels as text.
+            return {"subject_type": identity["type"], "subject_id": str(identity["id"])}
+    raise ValueError(
+        "follows= takes the subject a page watches, or its class for every subject of that "
+        f"type, not {type(value).__name__}. A run is about a subject, and the subject is what "
+        "the stream carries."
+    )
 
 
-class Follows(BaseResponse):
-    """The subject a page or a named region watches."""
+class Follows(Schema):
+    """The subject a page or a named region watches. An empty ``subject_id``
+    watches every subject of the type."""
 
     subject_type: str
-    subject_id: str
+    subject_id: str = ""
 
 
 Watched = Annotated[Follows | None, BeforeValidator(_subject_identity)]
 
 
-class PageBlock(BaseResponse):
+class PageBlock(Schema):
     """What every block shares. ``block`` names its kind on the wire, and
     ``check_placement`` is how a block refuses a spot it cannot work in."""
 
@@ -88,6 +96,11 @@ class Link(PageBlock):
 
     @model_validator(mode="after")
     def _one_destination(self) -> "Link":
+        if self.subject and not self.subject.subject_id:
+            raise ValueError(
+                f"Link {self.label!r} names the {self.subject.subject_type} type, and a link "
+                "opens one subject's page. Give the subject itself."
+            )
         if [bool(self.page), bool(self.url), bool(self.subject)].count(True) == 1:
             return self
         raise ValueError(f"Link {self.label!r} must set exactly one of page, url, or subject")
@@ -187,6 +200,17 @@ class Markdown(PageBlock):
         super().__init__(text=text, **data)
 
 
+class Quote(PageBlock):
+    """Someone else's words, kept as they arrived — a message, a reply, an
+    answer. Line breaks survive; nothing is read as markup."""
+
+    block: Literal["quote"] = "quote"
+    text: str
+
+    def __init__(self, text: str, **data):
+        super().__init__(text=text, **data)
+
+
 class Callout(PageBlock):
     """A short message the reader should not miss. The tone selects the
     presentation; the app writes the words."""
@@ -244,7 +268,7 @@ class GateControls(PageBlock):
         )
 
 
-class TextValue(BaseResponse):
+class TextValue(Schema):
     """Words. ``link`` is how a table cell, a fact, or a list item reaches
     another page."""
 
@@ -253,19 +277,21 @@ class TextValue(BaseResponse):
 
     value: Literal["text"] = "text"
     text: str
+    description: str = ""
     link: Link | None = None
 
 
-class NumberValue(BaseResponse):
+class NumberValue(Schema):
     value: Literal["number"] = "number"
     number: float = Field(allow_inf_nan=False)
     unit: str = ""
+    tone: Literal["neutral", "active", "success", "warning", "danger"] = "neutral"
 
     def __init__(self, number, **data):
         super().__init__(number=number, **data)
 
 
-class StatusValue(BaseResponse):
+class StatusValue(Schema):
     """Where something stands. The app writes the word; the tone selects the
     presentation."""
 
@@ -277,7 +303,7 @@ class StatusValue(BaseResponse):
         super().__init__(label=label, **data)
 
 
-class TimeValue(BaseResponse):
+class TimeValue(Schema):
     value: Literal["time"] = "time"
     when: AwareDatetime
 
@@ -288,7 +314,7 @@ class TimeValue(BaseResponse):
 Value = Annotated[TextValue | NumberValue | StatusValue | TimeValue, Discriminator("value")]
 
 
-class TimelineItem(BaseResponse):
+class TimelineItem(Schema):
     # Aware, so items from different sources order against each other.
     when: AwareDatetime
     title: str
@@ -316,7 +342,7 @@ class Timeline(PageBlock):
         super().__init__(items=items, **data)
 
 
-class ProgressStep(BaseResponse):
+class ProgressStep(Schema):
     label: str
     status: StatusValue
 
@@ -360,7 +386,7 @@ class Image(PageBlock):
     caption: str = ""
 
 
-class FileSummary(BaseResponse):
+class FileSummary(Schema):
     """One file, as the shell shows it. The download is derived from the id, so
     a file always travels through the platform's own route and its identity
     gate."""
@@ -390,7 +416,7 @@ class Files(PageBlock):
         super().__init__(files=files, **data)
 
 
-class ChartSeries(BaseResponse):
+class ChartSeries(Schema):
     label: str
     points: list[Annotated[float, Field(allow_inf_nan=False)]]
 
@@ -427,7 +453,7 @@ class ImageGallery(PageBlock):
         super().__init__(images=images, **data)
 
 
-class Metric(BaseResponse):
+class Metric(Schema):
     label: str
     value: Value
     description: str = ""
@@ -445,7 +471,7 @@ class Metrics(PageBlock):
         super().__init__(metrics=metrics, **data)
 
 
-class Fact(BaseResponse):
+class Fact(Schema):
     label: str
     value: Value
 
@@ -464,7 +490,7 @@ class Facts(PageBlock):
         super().__init__(facts=facts, **data)
 
 
-class TableColumn(BaseResponse):
+class TableColumn(Schema):
     label: str
     align: Literal["start", "end"] = "start"
 
@@ -472,8 +498,9 @@ class TableColumn(BaseResponse):
         super().__init__(label=label, **data)
 
 
-class TableRow(BaseResponse):
+class TableRow(Schema):
     cells: list[Value] = Field(default_factory=list)
+    detail: str = ""
 
     def __init__(self, cells=(), **data):
         super().__init__(cells=cells, **data)
@@ -546,6 +573,28 @@ class Card(BlockParent):
             control.check_placement(followed=followed, regions=regions, region=region)
 
 
+class Cards(PageBlock):
+    """One card for each of a set of things. The shell arranges them, so a page
+    that wants a particular geometry reaches for ``Columns`` instead."""
+
+    block: Literal["cards"] = "cards"
+    title: str = ""
+    cards: list[Card] = Field(default_factory=list)
+    empty: EmptyState | None = None
+
+    def iter_actions(self) -> "Iterable[Action]":
+        for card in self.cards:
+            yield from card.iter_actions()
+        if self.empty:
+            yield from self.empty.iter_actions()
+
+    def check_placement(self, *, followed: bool, regions: set[str], region: str = "") -> None:
+        for card in self.cards:
+            card.check_placement(followed=followed, regions=regions, region=region)
+        if self.empty:
+            self.empty.check_placement(followed=followed, regions=regions, region=region)
+
+
 class Section(BlockParent):
     """A titled part of a page. A ``name`` makes it a region the shell can
     replace on its own, and ``follows`` is what makes it do so."""
@@ -581,8 +630,10 @@ class Section(BlockParent):
 Block = Annotated[
     Text
     | Markdown
+    | Quote
     | Section
     | Card
+    | Cards
     | Callout
     | Divider
     | EmptyState
@@ -606,6 +657,7 @@ Block = Annotated[
 ]
 
 Card.model_rebuild()
+Cards.model_rebuild()
 Section.model_rebuild()
 Stack.model_rebuild()
 Columns.model_rebuild()

@@ -47,9 +47,10 @@ if TYPE_CHECKING:
 NAME_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 
 # Segments under ``/api/<name>`` the platform serves for every app: the
-# agent-call reads and the page snapshots. Neither a subject type nor an app
-# router can take one, so an app can never shadow a platform read.
-RESERVED_SEGMENTS = frozenset({"transcripts", "pages"})
+# agent-call reads, the page snapshots, and the upload door. Neither a subject
+# type nor an app router can take one, so an app can never shadow a platform
+# read.
+RESERVED_SEGMENTS = frozenset({"transcripts", "pages", "uploads"})
 
 
 # A secret-kind settings field: unset is an empty ``SecretStr`` — falsy, so
@@ -325,6 +326,7 @@ class App:
         return [
             cls._get_transcript_routes(),
             cls._get_page_routes(),
+            cls._get_upload_routes(),
             *(cls._get_subject_routes(subject) for subject in cls.subjects()),
             *cls._declared_routers(modules),
         ]
@@ -530,6 +532,45 @@ class App:
         return router
 
     @classmethod
+    def _get_upload_routes(cls) -> "APIRouter":
+        """The door an UploadField posts to. The app owning the file is this
+        route's own, so a caller cannot file bytes under another app's name."""
+        import mimetypes
+        from pathlib import PurePosixPath
+
+        from fastapi import APIRouter, HTTPException, UploadFile, status
+
+        from druks.accounts.context import current_account_id
+        from druks.files import File
+        from druks.files.constants import MAX_UPLOAD_BYTES
+        from druks.ui import FileSummary
+
+        router = APIRouter(prefix="/uploads", tags=[f"{cls.name}:uploads"])
+        limit_in_megabytes = MAX_UPLOAD_BYTES // (1024 * 1024)
+
+        @router.post("", response_model=FileSummary, response_model_by_alias=True)
+        async def upload(file: UploadFile) -> FileSummary:
+            content = await file.read()
+            if len(content) > MAX_UPLOAD_BYTES:
+                raise HTTPException(
+                    status.HTTP_413_CONTENT_TOO_LARGE,
+                    f"That file is larger than {limit_in_megabytes} MB. Choose a smaller one.",
+                )
+            name = PurePosixPath(file.filename or "file").name
+            stored = await File.create(
+                name=name,
+                # The name types the file, the way it does for an agent's own
+                # files. What the browser claims is the browser's claim.
+                content_type=mimetypes.guess_type(name)[0] or "application/octet-stream",
+                content=content,
+                app=cls.name,
+                uploaded_by=current_account_id.get(),
+            )
+            return FileSummary.model_validate(stored)
+
+        return router
+
+    @classmethod
     def _get_subject_routes(
         cls, subject_class: "type[Subject] | type[StoredSubject]"
     ) -> "APIRouter":
@@ -553,13 +594,14 @@ class App:
         router = APIRouter(prefix=f"/{subject_type}", tags=[f"{cls.name}:{subject_type}"])
 
         async def board(account_id: str | None) -> SubjectList:
+            summaries = await subject_class.list_summaries(account_id)
+            statuses = await reads.get_subject_statuses(
+                subject_type, [summary.id for summary in summaries]
+            )
             return SubjectList(
                 rows=[
-                    SubjectRow(
-                        summary=summary,
-                        status=await reads.get_subject_status(subject_type, summary.id),
-                    )
-                    for summary in await subject_class.list_summaries(account_id)
+                    SubjectRow(summary=summary, status=statuses[summary.id])
+                    for summary in summaries
                 ]
             )
 

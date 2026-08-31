@@ -54,8 +54,8 @@ supplies one shared React instance. See the app-author guide.
 
 Shared requests use `src/api/client.ts`. The event feed and transcript
 components consume server-sent events. Standard HTTP queries supply the initial
-state. Keep API field names aligned with the camelCase `BaseResponse` output
-from the backend.
+state. Keep API field names aligned with the camelCase `Schema` output from the
+backend.
 
 If a backend response contract changes, update the TypeScript type, consumer,
 and focused frontend test in the same change. The `types:openapi` script is

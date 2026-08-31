@@ -620,6 +620,22 @@ if status.is_parked:
 question it stopped on. While a run is active, `await repository.get_phase()`
 returns the step it is on.
 
+A subject that Druks did not run has no state: `status.state` is None, and so
+is `status.run`. `get_status(workflow=NightWatch)` narrows the read to one
+workflow's runs. It answers the same way when the subject has no run of that
+kind.
+
+A page that lists subjects reads them all at once instead. `get_statuses()`
+takes the ids and returns one status per id, in a single read:
+
+```python
+summaries = await Repository.list_summaries(account_id)
+statuses = await Repository.get_statuses([summary.id for summary in summaries])
+```
+
+This is the read the platform's own board uses, so a declared page listing
+fifty rows costs one query rather than fifty.
+
 ## Record events and react to signals
 
 Record an event through the app. Druks stamps its ownership:
@@ -731,8 +747,8 @@ Druks scopes autogeneration to the table prefix and writes the version to
 `alembic_version_night_watch`. Query through `druks.db.db_session()` inside an
 HTTP request, durable step, or other platform-bound session.
 
-HTTP response models subclass `druks.schemas.BaseResponse`, whose snake_case
-fields serialize as camelCase. Request models are ordinary Pydantic models.
+HTTP response models subclass `druks.schemas.Schema`, whose snake_case fields
+serialize as camelCase. Request models are ordinary Pydantic models.
 Druks mounts each router from a discovered `routes.py` below the app namespace.
 It tags the router with the app name. A router declares only the prefix of its
 resource:
@@ -1299,6 +1315,22 @@ Once the operation answers, the action does what it declared: `refresh` reads
 the page or the region again, `link` navigates, and `confirm` asks the operator
 first. A `tone` of `danger` says so on screen.
 
+A form that needs a token takes a `ui.SecretField`:
+
+```python
+ui.SecretField(name="token", label="Access token", help_text="From your account settings.")
+```
+
+Druks masks it, keeps it from the browser's password managers, and leaves it
+empty after a successful submit. A refusal shows a fixed line, never the
+server's words, because a validation message can carry the token back.
+
+The masking protects the screen. Your operation receives the token in plain
+text and owns it from there. Keep one secret per record in an
+`EncryptedJsonField` column or a `SecretsMapping`. A token the whole app shares
+belongs in `AppSettings` as a `Secret`, where Druks encrypts it and never reads
+it back.
+
 Two routes of one app cannot share an `operation_id`. An action that names an
 operation the app does not declare, a GET route, or a route with a query
 parameter fails the page read: a GET is a read, and an action fills path
@@ -1376,8 +1408,8 @@ Import from concern namespaces, not from `druks.durable` or internal modules:
 | `druks.workflows` | `Workflow`, `Gate`, `step`, run/agent response types, lifecycle enums and workflow errors |
 | `druks.sandbox` | `Sandbox` |
 | `druks.db` | `Base`, `StoredSubject`, `db_session` |
-| `druks.schemas` | `BaseResponse` |
-| `druks.ui` | `Action`, `Block`, `Callout`, `Card`, `Chart`, `ChartSeries`, `CheckboxField`, `Columns`, `Divider`, `EmptyState`, `Fact`, `Facts`, `Field`, `FileSummary`, `Files`, `Follows`, `Form`, `GateControls`, `Image`, `ImageGallery`, `Link`, `List`, `Markdown`, `Metric`, `Metrics`, `MultiSelectField`, `NumberField`, `NumberValue`, `Option`, `Page`, `Progress`, `ProgressStep`, `RadioField`, `Section`, `SelectField`, `Stack`, `StatusValue`, `Table`, `TableColumn`, `TableRow`, `Text`, `TextAreaField`, `TextField`, `TextValue`, `TimeValue`, `Timeline`, `TimelineItem`, `Value`, `page` |
+| `druks.schemas` | `Schema` |
+| `druks.ui` | `Action`, `Block`, `Callout`, `Card`, `Cards`, `Chart`, `ChartSeries`, `CheckboxField`, `Columns`, `Divider`, `EmptyState`, `Fact`, `Facts`, `Field`, `FileSummary`, `Files`, `Follows`, `Form`, `GateControls`, `Image`, `ImageGallery`, `Link`, `List`, `Markdown`, `Metric`, `Metrics`, `MultiSelectField`, `NumberField`, `NumberValue`, `Option`, `Page`, `Progress`, `ProgressStep`, `RadioField`, `Section`, `SecretField`, `SelectField`, `Stack`, `StatusValue`, `Table`, `TableColumn`, `TableRow`, `Text`, `TextAreaField`, `TextField`, `TextValue`, `TimeValue`, `Timeline`, `TimelineItem`, `UploadField`, `Value`, `page` |
 | `druks.signals` | `subscribe` |
 | `druks.events` | `Event` |
 | `druks.files` | `File`, `FileField` |

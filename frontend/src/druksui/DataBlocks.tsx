@@ -1,4 +1,4 @@
-import { useContext } from 'react'
+import { useContext, useState } from 'react'
 import { Link as RouteLink } from 'wouter'
 
 import type {
@@ -24,10 +24,10 @@ const BAR_GAP = 1
 export function Datum({ value }: { value: Value }) {
   switch (value.value) {
     case 'text':
-      return <TextDatum text={value.text} link={value.link} />
+      return <TextDatum text={value.text} description={value.description} link={value.link} />
     case 'number':
       return (
-        <span className="dui-number mono">
+        <span className={`dui-number mono dui-number-${value.tone}`}>
           {/* Grouped for reading, but never rounded: the app's number is the
               operator's number. */}
           {value.number.toLocaleString(undefined, { maximumFractionDigits: 20 })}
@@ -51,14 +51,47 @@ export function Datum({ value }: { value: Value }) {
   }
 }
 
-function TextDatum({ text, link }: { text: string; link: Link | null }) {
-  const { pages } = useContext(PagesContext)
-  if (!link) return <span>{text}</span>
+function TextDatum({
+  text,
+  description,
+  link,
+}: {
+  text: string
+  description: string
+  link: Link | null
+}) {
+  const name = link ? <LinkControl link={link} label={text} /> : <span>{text}</span>
+  if (description) {
+    return (
+      <span className="dui-value">
+        {name}
+        <span className="dui-value-desc dim">{description}</span>
+      </span>
+    )
+  }
+  return name
+}
+
+/** A control that navigates. It is a block of its own, or the link on a value,
+    which shows the value's own text. */
+export function LinkControl({ link, label = link.label }: { link: Link; label?: string }) {
+  const { app, pages } = useContext(PagesContext)
   if (link.url) {
     return (
       <a className="dui-link" href={link.url} target="_blank" rel="noreferrer">
-        {text}
+        {label}
       </a>
+    )
+  }
+  if (link.subject) {
+    // The subject's own platform page — the full story of what druks did.
+    return (
+      <RouteLink
+        href={`/${app}/${link.subject.subjectType}/${link.subject.subjectId}`}
+        className="dui-link"
+      >
+        {label}
+      </RouteLink>
     )
   }
   const target = pages.find((entry) => entry.name === link.page)
@@ -66,13 +99,13 @@ function TextDatum({ text, link }: { text: string; link: Link | null }) {
   if (href) {
     return (
       <RouteLink href={href} className="dui-link">
-        {text}
+        {label}
       </RouteLink>
     )
   }
   return (
     <span className="dui-link dui-link-broken" title={`no page named ${link.page}`}>
-      {text}
+      {label}
     </span>
   )
 }
@@ -204,9 +237,10 @@ export function Chart({
 }
 
 export function ImageGallery({ title, images }: { title: string; images: ImageBlock[] }) {
+  if (!images.length) return null
   return (
     <div className="dui-gallery">
-      {title && <div className="dui-block-title">{title}</div>}
+      {title && <h3 className="dui-block-title">{title}</h3>}
       <ul className="dui-gallery-grid">
         {images.map((image) => (
           <li key={image.url}>
@@ -227,9 +261,10 @@ export function ImageGallery({ title, images }: { title: string; images: ImageBl
 }
 
 export function Metrics({ title, metrics }: { title: string; metrics: Metric[] }) {
+  if (!metrics.length) return null
   return (
     <div className="dui-metrics">
-      {title && <div className="dui-block-title">{title}</div>}
+      {title && <h3 className="dui-block-title">{title}</h3>}
       <dl className="dui-metric-row">
         {metrics.map((metric) => (
           <div key={metric.label} className="dui-metric">
@@ -246,9 +281,10 @@ export function Metrics({ title, metrics }: { title: string; metrics: Metric[] }
 }
 
 export function Facts({ title, facts }: { title: string; facts: Fact[] }) {
+  if (!facts.length) return null
   return (
     <div className="dui-facts">
-      {title && <div className="dui-block-title">{title}</div>}
+      {title && <h3 className="dui-block-title">{title}</h3>}
       <dl className="dui-fact-list">
         {facts.map((fact) => (
           <div key={fact.label} className="dui-fact">
@@ -275,9 +311,12 @@ export function Table({
   emptyText: string
 }) {
   if (rows.length === 0) {
+    // Nothing to show and nothing to say about it: a heading over an empty box
+    // is worse than no block at all.
+    if (!emptyText) return null
     return (
       <div className="dui-table-block">
-        {title && <div className="dui-block-title">{title}</div>}
+        {title && <h3 className="dui-block-title">{title}</h3>}
         <div className="dui-table-empty dim">{emptyText}</div>
       </div>
     )
@@ -300,19 +339,7 @@ export function Table({
           </thead>
           <tbody>
             {rows.map((row, index) => (
-              <tr key={index}>
-                {row.cells.map((cell, place) => (
-                  // The column label doubles as the row's label on a narrow
-                  // screen, where each row stacks as label and value.
-                  <td
-                    key={place}
-                    data-align={columns[place]?.align}
-                    data-label={columns[place]?.label}
-                  >
-                    <Datum value={cell} />
-                  </td>
-                ))}
-              </tr>
+              <Row key={index} row={row} columns={columns} />
             ))}
           </tbody>
         </table>
@@ -321,10 +348,48 @@ export function Table({
   )
 }
 
+function Row({ row, columns }: { row: TableRow; columns: TableColumn[] }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <>
+      <tr>
+        {row.cells.map((cell, place) =>
+          // The first cell names its row, the way a column header names its column.
+          place === 0 ? (
+            <th key={place} scope="row" data-align={columns[place]?.align}>
+              <Datum value={cell} />
+              {row.detail && (
+                <button
+                  type="button"
+                  className="dui-row-more"
+                  aria-expanded={open}
+                  onClick={() => setOpen(!open)}
+                >
+                  {open ? 'Less' : 'More'}
+                </button>
+              )}
+            </th>
+          ) : (
+            <td key={place} data-align={columns[place]?.align}>
+              <Datum value={cell} />
+            </td>
+          ),
+        )}
+      </tr>
+      {row.detail && open && (
+        <tr className="dui-row-detail">
+          <td colSpan={columns.length}>{row.detail}</td>
+        </tr>
+      )}
+    </>
+  )
+}
+
 export function List({ title, items }: { title: string; items: Value[] }) {
+  if (!items.length) return null
   return (
     <div className="dui-list-block">
-      {title && <div className="dui-block-title">{title}</div>}
+      {title && <h3 className="dui-block-title">{title}</h3>}
       <ul className="dui-list">
         {items.map((item, index) => (
           <li key={index}>

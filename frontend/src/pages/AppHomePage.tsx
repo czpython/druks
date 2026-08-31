@@ -83,5 +83,5 @@ function statusText(row: SubjectRow): string {
   const { state, gate, failure } = row.status
   if (state === 'parked' && gate) return `parked · ${gate.replaceAll('_', ' ')}`
   if (state === 'failed' && failure) return `failed · ${failure.slice(0, 60)}`
-  return state
+  return state ?? 'never run'
 }

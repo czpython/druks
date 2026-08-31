@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Self
 from druks.models import snake_name
 
 if TYPE_CHECKING:
-    from druks.durable.schemas import RunResponse, SubjectStatus, SubjectSummary
+    from druks.durable.schemas import SubjectStatus, SubjectSummary
     from druks.workflows import Workflow
 
 
@@ -69,11 +69,13 @@ class Subject:
 
         return await get_subject_status(self.subject_type, self.id, workflow=workflow)
 
-    async def get_timeline(self) -> "list[RunResponse]":
-        """Every run about this subject, oldest first, each with its agent calls."""
-        from druks.durable.reads import list_subject_timeline
+    @classmethod
+    async def get_statuses(cls, subject_ids: Sequence[str]) -> "dict[str, SubjectStatus]":
+        """Where a whole board stands, keyed by subject id — one read for the whole
+        board, so a page listing subjects does not ask once per row."""
+        from druks.durable.reads import get_subject_statuses
 
-        return await list_subject_timeline(self.subject_type, self.id)
+        return await get_subject_statuses(cls.subject_type, list(subject_ids))
 
     async def get_phase(self) -> str | None:
         """The step it is on right now ("provisioning_vm"), while something is running."""

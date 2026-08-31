@@ -1,0 +1,30 @@
+name: On Pull Request Other
+
+# The backend and frontend suites both report the required "checks" context,
+# and both are path-filtered. A pull request that touches neither — a base
+# image digest, a deploy Dockerfile, an action pin — reports nothing and can
+# never merge. This reports the context for those pull requests.
+on:
+  pull_request:
+    branches: [main]
+    paths-ignore:
+      - ".dockerignore"
+      - ".github/workflows/on-pull-request-backend.yml"
+      - ".github/workflows/on-pull-request-frontend.yml"
+      - "backend/**"
+      - "frontend/**"
+      - "pyproject.toml"
+      - "uv.lock"
+
+concurrency:
+  group: on-pull-request-other-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "No backend or frontend change. The suites that guard them do not apply."

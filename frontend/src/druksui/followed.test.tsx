@@ -10,9 +10,11 @@ import type { App, Block, PageSnapshot } from '../api/types'
 import { AppPage } from './AppPage'
 import { followedSubjects, mergeRegions } from './pages'
 
-vi.mock('../api/client', () => ({
-  api: { listApps: vi.fn(), readPage: vi.fn(), getGate: vi.fn() },
-}))
+vi.mock('../api/client', async () => {
+  const real = await vi.importActual<typeof import('../api/client')>('../api/client')
+  const stubs = { listApps: vi.fn(), readPage: vi.fn(), getGate: vi.fn() }
+  return { subjectApi: real.subjectApi, api: stubs }
+})
 vi.mock('../api/sse', () => ({ useSSE: vi.fn() }))
 
 const listApps = vi.mocked(api.listApps)
@@ -145,6 +147,13 @@ describe('a followed region', () => {
 
     await waitFor(() => expect(screen.getByText('waiting')).toBeTruthy())
     expect(sse.mock.calls.at(-1)?.[0]).toBe('/api/field_notes/note/7/stream')
+  })
+
+  it('watches every subject of the type through the board stream', async () => {
+    renderPage(snapshot([region('board', 'waiting', { subjectType: 'note', subjectId: '' })]))
+
+    await waitFor(() => expect(screen.getByText('waiting')).toBeTruthy())
+    expect(sse.mock.calls.at(-1)?.[0]).toBe('/api/field_notes/note/stream')
   })
 
   it('opens no stream for a page that follows nothing', async () => {

@@ -11,6 +11,10 @@
       "text": "**Markdown.**"
     },
     {
+      "block": "quote",
+      "text": "Their words.\nKept as they arrived."
+    },
+    {
       "block": "callout",
       "tone": "warning",
       "title": "Callout",
@@ -135,7 +139,8 @@
           "value": {
             "value": "number",
             "number": 2.0,
-            "unit": ""
+            "unit": "",
+            "tone": "neutral"
           },
           "description": ""
         }
@@ -150,7 +155,8 @@
           "value": {
             "value": "text",
             "text": "a",
-            "link": null
+            "link": null,
+            "description": ""
           }
         },
         {
@@ -158,7 +164,8 @@
           "value": {
             "value": "number",
             "number": 1.0,
-            "unit": "ms"
+            "unit": "ms",
+            "tone": "neutral"
           }
         },
         {
@@ -193,9 +200,11 @@
             {
               "value": "text",
               "text": "one",
-              "link": null
+              "link": null,
+              "description": "what this row is about"
             }
-          ]
+          ],
+          "detail": "The scout could not reach the repository: HTTP 404."
         }
       ],
       "emptyText": "No notes yet."
@@ -207,7 +216,8 @@
         {
           "value": "text",
           "text": "one",
-          "link": null
+          "link": null,
+          "description": ""
         }
       ]
     },
@@ -245,6 +255,30 @@
       "title": "Card",
       "description": "",
       "actions": []
+    },
+    {
+      "block": "cards",
+      "title": "Recent",
+      "cards": [
+        {
+          "block": "card",
+          "blocks": [
+            {
+              "block": "text",
+              "text": "The rack has been loud since Tuesday."
+            }
+          ],
+          "title": "Note 7",
+          "description": "Fan noise on rack 3.",
+          "actions": []
+        }
+      ],
+      "empty": {
+        "block": "empty_state",
+        "title": "No notes yet",
+        "description": "Write one and its gist appears here.",
+        "actions": []
+      }
     },
     {
       "block": "section",
@@ -356,6 +390,21 @@
           "label": "Notify the owner",
           "value": false,
           "helpText": "",
+          "isRequired": false
+        },
+        {
+          "field": "upload",
+          "name": "photo",
+          "label": "Photo",
+          "accept": "image/*",
+          "helpText": "A picture of the shopfront.",
+          "isRequired": false
+        },
+        {
+          "field": "secret",
+          "name": "token",
+          "label": "Access token",
+          "helpText": "From your account settings.",
           "isRequired": false
         }
       ],

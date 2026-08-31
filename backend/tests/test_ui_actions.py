@@ -2,7 +2,18 @@ import pytest
 from druks.apps.exceptions import AppRouteConflict
 from druks.apps.loader import load_app
 from druks.apps.schemas import Operation
-from druks.ui import Action, Card, EmptyState, Form, Link, Page, Section, TextField
+from druks.ui import (
+    Action,
+    Card,
+    EmptyState,
+    Form,
+    Link,
+    Page,
+    SecretField,
+    Section,
+    TextField,
+)
+from druks.ui.fields import PageField
 
 OPERATIONS = {
     "write_note": Operation(id="write_note", method="POST", path="/api/field_notes/notes"),
@@ -59,6 +70,37 @@ def test_a_form_carries_its_fields_and_the_action_that_sends_them():
         }
     ]
     assert block["action"]["operation"] == "write_note"
+
+
+def test_a_secret_field_declares_no_value():
+    (block,) = wire(
+        Form(
+            action=Action(label="Connect", operation="write_note", tone="primary"),
+            fields=[
+                SecretField(
+                    name="token",
+                    label="Access token",
+                    help_text="From your account settings.",
+                )
+            ],
+        )
+    )
+
+    assert block["fields"] == [
+        {
+            "field": "secret",
+            "name": "token",
+            "label": "Access token",
+            "helpText": "From your account settings.",
+            "isRequired": False,
+        }
+    ]
+
+
+def test_the_shared_base_has_no_value_to_hand_out():
+    """An upload and a secret have none. A value on the base would give every
+    secret field somewhere to carry a stored secret back to the browser."""
+    assert "value" not in PageField.model_fields
 
 
 def test_a_form_sends_each_value_once():

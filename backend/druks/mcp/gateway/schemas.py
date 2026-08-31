@@ -5,18 +5,18 @@ from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 
 from druks.durable.schemas import AgentCallResponse
-from druks.schemas import BaseResponse
+from druks.schemas import Schema
 from druks.usage.schemas import UsageHistoryPoint
 
 
-class ArtifactContent(BaseResponse):
+class ArtifactContent(Schema):
     call_id: str
     kind: str
     title: str
     content: str
 
 
-class GateResponse(BaseResponse):
+class GateResponse(Schema):
     # parked_at is the park identity answer_gate must echo back.
     run: str
     gate: str
@@ -25,7 +25,7 @@ class GateResponse(BaseResponse):
     artifact: ArtifactContent | None = None
 
 
-class GateAnswerResponse(BaseResponse):
+class GateAnswerResponse(Schema):
     run: str
     parked_at: datetime
     result: Literal["answered", "already_answered"]
@@ -48,7 +48,7 @@ class AnswerGateRequest(BaseModel):
     note: str = Field(default="", description="The optional note to submit with this answer.")
 
 
-class AgentCallDetailResponse(BaseResponse):
+class AgentCallDetailResponse(Schema):
     run: str
     call: AgentCallResponse
     transcript: str
@@ -56,7 +56,7 @@ class AgentCallDetailResponse(BaseResponse):
     artifact: ArtifactContent | None = None
 
 
-class AgentHarnessUsage(BaseResponse):
+class AgentHarnessUsage(Schema):
     # *_history: percent-left trend samples, oldest first.
     name: str
     is_connected: bool = False
@@ -71,7 +71,7 @@ class AgentHarnessUsage(BaseResponse):
     week_history: list[UsageHistoryPoint] = Field(default_factory=list)
 
 
-class AgentUsageResponse(BaseResponse):
+class AgentUsageResponse(Schema):
     day: str
     timezone: str
     spend_today_usd: float

@@ -2,10 +2,10 @@ from typing import Annotated, Literal
 
 from pydantic import Discriminator
 
-from druks.schemas import BaseResponse
+from druks.schemas import Schema
 
 
-class Option(BaseResponse):
+class Option(Schema):
     value: str
     label: str
 
@@ -13,76 +13,79 @@ class Option(BaseResponse):
         super().__init__(label=label, **data)
 
 
-class TextField(BaseResponse):
+class PageField(Schema):
+    """What every field shares. ``field`` names its kind on the wire, and
+    ``name`` is the key the shell sends the operator's answer under."""
+
+    field: str
+    name: str
+    label: str
+    help_text: str = ""
+    is_required: bool = False
+    # No ``value`` here: an upload and a secret have none, and a field with
+    # nowhere to hold one cannot send a stored secret to the browser.
+
+
+class TextField(PageField):
     field: Literal["text"] = "text"
-    name: str
-    label: str
     value: str = ""
     placeholder: str = ""
-    help_text: str = ""
-    is_required: bool = False
 
 
-class TextAreaField(BaseResponse):
+class TextAreaField(PageField):
     field: Literal["text_area"] = "text_area"
-    name: str
-    label: str
     value: str = ""
     placeholder: str = ""
-    help_text: str = ""
-    is_required: bool = False
     rows: int = 4
 
 
-class NumberField(BaseResponse):
+class NumberField(PageField):
     field: Literal["number"] = "number"
-    name: str
-    label: str
     value: float | None = None
     minimum: float | None = None
     maximum: float | None = None
     step: float | None = None
-    help_text: str = ""
-    is_required: bool = False
 
 
-class SelectField(BaseResponse):
+class SelectField(PageField):
     field: Literal["select"] = "select"
-    name: str
-    label: str
     options: list[Option] = []
     value: str = ""
-    help_text: str = ""
-    is_required: bool = False
 
 
-class MultiSelectField(BaseResponse):
+class MultiSelectField(PageField):
     field: Literal["multi_select"] = "multi_select"
-    name: str
-    label: str
     options: list[Option] = []
     value: list[str] = []
-    help_text: str = ""
-    is_required: bool = False
 
 
-class RadioField(BaseResponse):
+class RadioField(PageField):
     field: Literal["radio"] = "radio"
-    name: str
-    label: str
     options: list[Option] = []
     value: str = ""
-    help_text: str = ""
-    is_required: bool = False
 
 
-class CheckboxField(BaseResponse):
+class CheckboxField(PageField):
     field: Literal["checkbox"] = "checkbox"
-    name: str
-    label: str
     value: bool = False
-    help_text: str = ""
-    is_required: bool = False
+
+
+class UploadField(PageField):
+    """One file the operator picks. The shell stores it through the platform and
+    submits its id, so the operation takes a plain string."""
+
+    field: Literal["upload"] = "upload"
+    # Straight into the file dialog's own filter, in its own syntax:
+    # "image/*", ".csv,.tsv". It narrows what the operator sees. It is not a
+    # promise about the bytes.
+    accept: str = ""
+
+
+class SecretField(PageField):
+    """One secret the operator hands over: a token, a key. It has no ``value``,
+    so a page cannot send a stored secret back to the browser."""
+
+    field: Literal["secret"] = "secret"
 
 
 Field = Annotated[
@@ -92,6 +95,8 @@ Field = Annotated[
     | SelectField
     | MultiSelectField
     | RadioField
-    | CheckboxField,
+    | CheckboxField
+    | UploadField
+    | SecretField,
     Discriminator("field"),
 ]

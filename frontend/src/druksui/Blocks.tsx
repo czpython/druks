@@ -1,13 +1,10 @@
-import { useContext } from 'react'
-import { Link as RouteLink } from 'wouter'
-
 import type { Action, Block, Link } from '../api/types'
 import { Markdown } from '../components/Markdown'
 import { GateControls } from './GateControls'
-import { Chart, Facts, ImageGallery, List, Metrics, Table } from './DataBlocks'
+import { Chart, Facts, ImageGallery, LinkControl, List, Metrics, Table } from './DataBlocks'
 import { ActionButton, Form } from './Form'
 import { Files, Image, Progress, Timeline } from './RunBlocks'
-import { fillPath, PagesContext, RegionContext } from './pages'
+import { RegionContext } from './pages'
 
 export function Blocks({ blocks }: { blocks: Block[] }) {
   return (
@@ -25,6 +22,8 @@ function BlockContent({ block }: { block: Block }) {
       return <p className="dui-text">{block.text}</p>
     case 'markdown':
       return <Markdown source={block.text} className="dui-markdown" />
+    case 'quote':
+      return <blockquote className="dui-quote">{block.text}</blockquote>
     case 'divider':
       return <hr className="dui-divider" />
     case 'link':
@@ -88,12 +87,14 @@ function BlockContent({ block }: { block: Block }) {
     case 'list':
       return <List title={block.title} items={block.items} />
     case 'stack':
+      if (!block.blocks.length) return null
       return (
         <div className={`dui-stack dui-stack-${block.gap}`}>
           <Blocks blocks={block.blocks} />
         </div>
       )
     case 'columns':
+      if (!block.blocks.length) return null
       return (
         <div className="dui-columns">
           {block.blocks.map((column, index) => (
@@ -127,6 +128,26 @@ function BlockContent({ block }: { block: Block }) {
           <LinkRow links={block.actions} />
         </div>
       )
+    case 'cards': {
+      const inside = block.cards.length ? (
+        <ul className="dui-cards">
+          {block.cards.map((card, index) => (
+            <li key={index}>
+              <BlockContent block={card} />
+            </li>
+          ))}
+        </ul>
+      ) : (
+        block.empty && <BlockContent block={block.empty} />
+      )
+      if (!inside) return null
+      return (
+        <div className="dui-cards-block">
+          {block.title && <h3 className="dui-block-title">{block.title}</h3>}
+          {inside}
+        </div>
+      )
+    }
     case 'section':
       return (
         <section className="dui-section" data-region={block.name || undefined}>
@@ -163,38 +184,3 @@ function LinkRow({ links }: { links: (Action | Link)[] }) {
   )
 }
 
-function LinkControl({ link }: { link: Link }) {
-  const { app, pages } = useContext(PagesContext)
-  if (link.url) {
-    return (
-      <a className="dui-link" href={link.url} target="_blank" rel="noreferrer">
-        {link.label}
-      </a>
-    )
-  }
-  if (link.subject) {
-    // The subject's own platform page — the full story of what druks did.
-    return (
-      <RouteLink
-        href={`/${app}/${link.subject.subjectType}/${link.subject.subjectId}`}
-        className="dui-link"
-      >
-        {link.label}
-      </RouteLink>
-    )
-  }
-  const target = pages.find((entry) => entry.name === link.page)
-  const href = target ? fillPath(target.path, link.arguments) : ''
-  if (href) {
-    return (
-      <RouteLink href={href} className="dui-link">
-        {link.label}
-      </RouteLink>
-    )
-  }
-  return (
-    <span className="dui-link dui-link-broken" title={`no page named ${link.page}`}>
-      {link.label}
-    </span>
-  )
-}

@@ -3,7 +3,7 @@ import { useCallback, useMemo, useRef, type ReactNode } from 'react'
 import { Link as RouteLink, useLocation } from 'wouter'
 
 import { api } from '../api/client'
-import type { Follows, PageSnapshot } from '../api/types'
+import type { Follows, PageEntry, PageSnapshot } from '../api/types'
 import { EmptyState } from '../components/EmptyState'
 import { Page } from '../components/Page'
 import { AppSurface } from './AppSurface'
@@ -68,18 +68,6 @@ export function AppPage({ app, page }: { app: string; page: string }) {
     [snapshot.data],
   )
 
-  if (snapshot.isLoading) {
-    return (
-      <Page className="dui-page">
-        <EmptyState glyph="…" msg="loading" />
-      </Page>
-    )
-  }
-  if (snapshot.isError || !snapshot.data) {
-    const detail = snapshot.error instanceof Error ? snapshot.error.message : ''
-    return appError(app, detail, () => snapshot.refetch())
-  }
-
   const current = pages.find((entry) => entry.name === page)
   const root = pages.find((entry) => entry.name === current?.parent) ?? current
   // A page shows its family's tabs only when it is one of them. A
@@ -87,6 +75,33 @@ export function AppPage({ app, page }: { app: string; page: string }) {
   const family = root ? tabsFor(pages, root) : []
   const tabs = family.some((tab) => tab.name === page) ? family : []
   const parent = current && isDetail(pages, current) ? parentOf(pages, current) : undefined
+  const chrome = { app, page, location, parent, root, tabs }
+
+  if (snapshot.isLoading) {
+    const waiting = `loading ${app.replaceAll('_', ' ')}`
+    // The breadcrumb and the tabs come from the roster, which is already warm,
+    // so the page keeps its frame while the body arrives. A cold deeplink has
+    // no roster yet and waits bare.
+    if (!pages.length) {
+      return (
+        <Page className="dui-page">
+          <EmptyState glyph="…" msg={waiting} />
+        </Page>
+      )
+    }
+    return (
+      <Page className="dui-page">
+        {/* The title is the app's to compute, so it is held rather than
+            guessed: a page label would show the wrong words first. */}
+        <PageChrome {...chrome} title="…" />
+        <EmptyState glyph="…" msg={waiting} />
+      </Page>
+    )
+  }
+  if (snapshot.isError || !snapshot.data) {
+    const detail = snapshot.error instanceof Error ? snapshot.error.message : ''
+    return appError(app, detail, () => snapshot.refetch())
+  }
 
   return (
     <AppSurface
@@ -107,33 +122,65 @@ export function AppPage({ app, page }: { app: string; page: string }) {
       ))}
       <PagesContext.Provider value={{ app, pages, operations }}>
         <Page className="dui-page">
-          {parent && (
-            <RouteLink href={hrefUnder(location, parent)} className="breadcrumb dui-parent">
-              ← {parent.label}
-            </RouteLink>
-          )}
-          <h1 className="dui-title">{snapshot.data.title}</h1>
-          {snapshot.data.description && (
-            <p className="dui-description dim">{snapshot.data.description}</p>
-          )}
-          {tabs.length > 0 && root && (
-            <nav className="dui-tabs" aria-label={`${app} page tabs`}>
-              {tabs.map((tab) => (
-                <RouteLink
-                  key={tab.name}
-                  href={hrefUnder(location, root) + tab.path.slice(root.path.length)}
-                  className={`dui-tab mono ${tab.name === page ? 'dui-tab-active' : ''}`}
-                  aria-current={tab.name === page ? 'page' : undefined}
-                >
-                  {tab.label}
-                </RouteLink>
-              ))}
-            </nav>
-          )}
+          <PageChrome
+            {...chrome}
+            title={snapshot.data.title}
+            description={snapshot.data.description}
+          />
           <Blocks blocks={snapshot.data.blocks} />
         </Page>
       </PagesContext.Provider>
     </AppSurface>
+  )
+}
+
+// The frame a page wears whether or not its body has arrived: where it sits,
+// what it is called, and the tabs beside it.
+function PageChrome({
+  app,
+  page,
+  location,
+  parent,
+  root,
+  tabs,
+  title,
+  description,
+}: {
+  app: string
+  page: string
+  location: string
+  parent?: PageEntry
+  root?: PageEntry
+  tabs: PageEntry[]
+  title: ReactNode
+  description?: string
+}) {
+  return (
+    <>
+      {parent && (
+        <RouteLink href={hrefUnder(location, parent)} className="breadcrumb dui-parent">
+          {/* The arrow points; it is not part of the link's name. */}
+          <span aria-hidden="true">← </span>
+          {parent.label}
+        </RouteLink>
+      )}
+      <h1 className="dui-title">{title}</h1>
+      {description && <p className="dui-description dim">{description}</p>}
+      {tabs.length > 0 && root && (
+        <nav className="dui-tabs" aria-label={`${app} page tabs`}>
+          {tabs.map((tab) => (
+            <RouteLink
+              key={tab.name}
+              href={hrefUnder(location, root) + tab.path.slice(root.path.length)}
+              className={`dui-tab mono ${tab.name === page ? 'dui-tab-active' : ''}`}
+              aria-current={tab.name === page ? 'page' : undefined}
+            >
+              {tab.label}
+            </RouteLink>
+          ))}
+        </nav>
+      )}
+    </>
   )
 }
 

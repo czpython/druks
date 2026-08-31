@@ -19,7 +19,7 @@
 // app keys its board/detail on its own subject summary; SubjectRow and
 // SubjectResponse are generic over that summary (a WorkItemSummary for build).
 
-// The platform's canonical lifecycle states, aggregated across a subject's runs.
+// The platform's canonical lifecycle states, each one a run's own.
 export type RunState =
   | 'scheduled'
   | 'running'
@@ -38,7 +38,8 @@ export interface SubjectSummary {
 }
 
 export interface SubjectStatus {
-  state: RunState
+  // Null when no run drives the subject: druks has not run it.
+  state: RunState | null
   // The driving run's id.
   run: string | null
   // Facts the app renders its lane copy from; the backend ships no prose.
@@ -243,6 +244,7 @@ export interface ProgressStep {
 export interface TextValue {
   value: 'text'
   text: string
+  description: string
   link: Link | null
 }
 
@@ -250,6 +252,7 @@ export interface NumberValue {
   value: 'number'
   number: number
   unit: string
+  tone: 'neutral' | 'active' | 'success' | 'warning' | 'danger'
 }
 
 export interface TimeValue {
@@ -283,6 +286,22 @@ export interface TableColumn {
 
 export interface TableRow {
   cells: Value[]
+  detail: string
+}
+
+export interface CardBlock {
+  block: 'card'
+  title: string
+  description: string
+  blocks: Block[]
+  actions: (Action | Link)[]
+}
+
+export interface EmptyStateBlock {
+  block: 'empty_state'
+  title: string
+  description: string
+  actions: (Action | Link)[]
 }
 
 export interface ImageBlock {
@@ -327,6 +346,8 @@ export type Field =
   | (FieldBase & { field: 'multi_select'; options: Option[]; value: string[] })
   | (FieldBase & { field: 'radio'; options: Option[]; value: string })
   | (FieldBase & { field: 'checkbox'; value: boolean })
+  | (FieldBase & { field: 'upload'; accept: string })
+  | (FieldBase & { field: 'secret' })
 
 // A control that calls one of the app's own operations. The shell resolves the
 // operation to a method and a URL through the roster.
@@ -351,6 +372,7 @@ export interface Operation {
 export type Block =
   | { block: 'text'; text: string }
   | { block: 'markdown'; text: string }
+  | { block: 'quote'; text: string }
   | { block: 'section'; title: string; name: string; blocks: Block[]; follows: Follows | null }
   | { block: 'gate_controls'; run: string }
   | { block: 'timeline'; title: string; items: TimelineItem[] }
@@ -387,13 +409,8 @@ export type Block =
   | { block: 'columns'; blocks: Block[] }
   | Action
   | { block: 'form'; title: string; description: string; fields: Field[]; action: Action }
-  | {
-      block: 'card'
-      title: string
-      description: string
-      blocks: Block[]
-      actions: (Action | Link)[]
-    }
+  | CardBlock
+  | { block: 'cards'; title: string; cards: CardBlock[]; empty: EmptyStateBlock | null }
   | {
       block: 'callout'
       tone: 'info' | 'success' | 'warning' | 'danger'
@@ -401,11 +418,12 @@ export type Block =
       text: string
     }
   | { block: 'divider' }
-  | { block: 'empty_state'; title: string; description: string; actions: (Action | Link)[] }
+  | EmptyStateBlock
   | Link
 
 // The subject a page or a named region watches. The shell streams it and
-// rereads the page on every snapshot it sends.
+// rereads the page on every snapshot it sends. An empty ``subjectId`` watches
+// every subject of the type, through the board stream.
 export interface Follows {
   subjectType: string
   subjectId: string

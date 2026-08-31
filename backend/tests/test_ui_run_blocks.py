@@ -58,7 +58,10 @@ def test_progress_carries_its_three_shapes():
     assert determinate["steps"] == []
     assert indeterminate["completed"] is None
     assert staged["steps"] == [
-        {"label": "plan", "status": {"value": "status", "label": "done", "tone": "neutral"}}
+        {
+            "label": "plan",
+            "status": {"value": "status", "label": "done", "tone": "neutral"},
+        }
     ]
 
 

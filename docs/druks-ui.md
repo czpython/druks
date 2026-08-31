@@ -48,8 +48,9 @@ It exports exactly these names:
 ```text
 page                                       declaration
 Page  Follows                              the snapshot
-Text  Markdown  Section  Card  Callout     display and layout blocks
-Divider  EmptyState  Stack  Columns
+Text  Markdown  Quote  Section  Card       display and layout blocks
+Cards  Callout  Divider  EmptyState
+Stack  Columns
 Link  Action  Form                         controls
 Timeline  TimelineItem  Progress           run and artifact blocks
 ProgressStep  Image  Files
@@ -61,7 +62,8 @@ TextValue  NumberValue  StatusValue        values
 TimeValue
 Option  TextField  TextAreaField           fields
 NumberField  SelectField  MultiSelectField
-RadioField  CheckboxField
+RadioField  CheckboxField  UploadField
+SecretField
 Block  Value  Field                        the three unions
 ```
 
@@ -242,10 +244,10 @@ against the declared signature. A value the declared type rejects answers 422. T
 The shell reads a page at `/<app><page path>`. It calls the matching page API
 route.
 
-`pages` is a reserved segment under `/api/<app>`, like `transcripts`. A subject
-type named `pages` is a boot error. An app router whose prefix is `/pages` is a
-boot error. Without the check, FastAPI would hide one of the two by
-registration order.
+`pages` is a reserved segment under `/api/<app>`, with `transcripts` and
+`uploads`. A subject type with one of those names is a boot error. An app router
+whose prefix is one of them is a boot error. Without the check, FastAPI would
+hide one of the two by registration order.
 
 ## Page purity
 
@@ -316,6 +318,16 @@ GET /api/<app>/<subject type>/<subject id>/stream
 ```
 
 There is no second streaming system.
+
+`follows=` also takes the subject class. The page or the region then watches
+every subject of that type, `subject_id` is empty, and the shell reads the board
+stream:
+
+```text
+GET /api/<app>/<subject type>/stream
+```
+
+A page that shows many subjects is live this way.
 
 On a `snapshot` event the shell reads the page again. It takes the named
 region from the new page and replaces that region in full. It sends no block
@@ -470,15 +482,20 @@ hold one directly. `Card.actions` and `EmptyState.actions` hold either one.
 
 ## How to read the model listings
 
-Each listing below gives the exact Python fields and the exact JSON. Three
-rules hold for every one of them.
+Each listing below gives every field a model carries and the JSON it sends.
+Four rules hold for every one of them.
+
+**A listing is the whole shape, not the class body.** Some models share a base:
+every field carries a name and a label, and a section, a card and a column all
+carry blocks. A listing shows what the model carries, whichever class declares
+it. A sample fixes the keys and their values, never their order.
 
 **A discriminator carries its own literal as its default.** `Text.block` is
 `Literal["text"] = "text"`. The author writes `Text("…")` and never passes
 the discriminator.
 
 **Wire names are camelCase.** `alternative_text` serializes as
-`alternativeText`. `BaseResponse` does that for every model here.
+`alternativeText`. `Schema` does that for every model here.
 
 **Druks coerces author input to the wire type.** Three fields take a friendlier
 input than they store:
@@ -493,8 +510,9 @@ input than they store:
 
 ```python
 Block = Annotated[
-    Text | Markdown | Section | Card | Callout | Divider | EmptyState | Link
-    | Action | Form | Timeline | Progress | Image | Files
+    Text | Markdown | Quote | Section | Card | Cards | Callout | Divider
+    | EmptyState
+    | Link | Action | Form | Timeline | Progress | Image | Files
     | GateControls | Chart | ImageGallery | Metrics | Facts | Table | List
     | Stack | Columns,
     Discriminator("block"),
@@ -504,7 +522,7 @@ Value = Annotated[TextValue | NumberValue | StatusValue | TimeValue, Discriminat
 
 Field = Annotated[
     TextField | TextAreaField | NumberField | SelectField | MultiSelectField
-    | RadioField | CheckboxField,
+    | RadioField | CheckboxField | UploadField | SecretField,
     Discriminator("field"),
 ]
 ```
@@ -515,6 +533,13 @@ shows an app-scoped error and names the block.
 ## Blocks
 
 Every block carries a `block` discriminator.
+
+A page fills the screen it is given, and each block decides what to do with the
+room. A table, an image gallery, `Columns`, a timeline and a metric row take the
+width. A fact list is as wide as its facts. A chart and a progress bar grow with
+the page and stop where more width stops helping them. Prose keeps a line
+length, measured against the type size rather than the screen, so it stays
+readable however wide the display is.
 
 A block whose one required value is the thing it shows — its words, its
 content, its identity — takes that value positionally, and every other value
@@ -535,9 +560,10 @@ ui.Stack([ui.Text("one"), ui.Divider()], gap="large")
 
 `Metrics`, `Facts`, `List`, `Timeline`, `Files`, `ImageGallery`, `Stack`,
 `Columns`, and `TableRow` all read that way. A block that holds more than one
-thing names every argument — `Card`, `Section`, `Table`, and `Chart`. So does
-`Form`: its required value is the action that sends it, not something it
-shows, so `action=` is spelled out.
+thing names every argument: `Card`, `Section`, `Table`, `Chart`, and `Cards`.
+`Cards` is on that list because its `empty` is content, not decoration. So is
+`Form`: its required value is the action that sends it, not something it shows,
+so `action=` is spelled out.
 
 ### Text
 
@@ -564,6 +590,22 @@ class Markdown:
 ```
 
 The shell renders the markdown. It strips raw HTML.
+
+### Quote
+
+```python
+class Quote:
+    block: Literal["quote"] = "quote"
+    text: str
+```
+
+```json
+{"block": "quote", "text": "No access to that repository.\nFalling back."}
+```
+
+Someone else's words, kept as they arrived — a message, a reply, an answer.
+Line breaks survive, and nothing is read as markup. `Text` closes the breaks
+up into a paragraph, and `Markdown` would rewrite the text.
 
 ### Section
 
@@ -606,6 +648,44 @@ class Card:
   "actions": [{"block": "link", "label": "Open", "page": "peer", "arguments": {"peer_id": "7"}, "url": ""}]
 }
 ```
+
+### Cards
+
+```python
+class Cards:
+    block: Literal["cards"] = "cards"
+    title: str = ""
+    cards: list[Card] = []
+    empty: EmptyState | None = None
+```
+
+```json
+{
+  "block": "cards",
+  "title": "Peers",
+  "cards": [{"block": "card", "title": "peer-7", "description": "", "blocks": [], "actions": []}],
+  "empty": null
+}
+```
+
+One card for each of a set of things.
+
+```python
+ui.Cards(
+    title="Peers",
+    cards=[ui.Card(title=peer.name, blocks=[...], actions=[...]) for peer in peers],
+    empty=ui.EmptyState("No peer yet", actions=[ui.Link("Add one", page="new_peer")]),
+)
+```
+
+The shell arranges the cards. It fits as many across as the screen takes, so
+`Cards` sets no geometry of its own.
+
+With no cards, the shell shows the title and `empty` in their place. With no
+cards and no `empty`, it shows nothing. `Table` reads the same way.
+
+`empty` takes an `EmptyState`, not a line of text, because an empty page
+usually has to say what to do next.
 
 ### Callout
 
@@ -1029,6 +1109,7 @@ class TableColumn:
 
 class TableRow:
     cells: list[Value] = []
+    detail: str = ""
 
 
 class Table:
@@ -1060,6 +1141,11 @@ Every row must have one cell for each column. With no rows the shell shows
 `empty_text`, and nothing of its own. A wide table scrolls inside its own
 container, on a narrow screen as well: a stacked row would lose the header each
 cell belongs to.
+
+A row's `detail` is the sentence it has no room for — the failure behind a
+status, the reason behind a verdict. The shell keeps it folded and the reader
+opens it, so twenty rows that stopped for one reason do not cost twenty page
+loads to find that out. It is text, not blocks.
 
 ### List
 
@@ -1109,6 +1195,9 @@ screen they stack.
 `Stack` and `Columns` hold every V1 block, including each other. They have no
 special cases.
 
+`Columns` is geometry. Each child is one column, however many there are. For a
+collection of cards, use `Cards`: the shell chooses how many fit across.
+
 ## Values
 
 Every value carries a `value` discriminator. A value renders the same way in
@@ -1120,14 +1209,17 @@ Every value carries a `value` discriminator. A value renders the same way in
 class TextValue:
     value: Literal["text"] = "text"
     text: str
+    description: str = ""
     link: Link | None = None
 ```
 
 ```json
-{"value": "text", "text": "peer-7", "link": null}
+{"value": "text", "text": "peer-7", "description": "the fastest peer", "link": null}
 ```
 
 `link` is how a table cell, a fact, or a list item reaches another page.
+`description` says what the thing is, on a quieter second line under what it
+is called, so a name needs no column of its own to explain it.
 
 ### NumberValue
 
@@ -1136,11 +1228,15 @@ class NumberValue:
     value: Literal["number"] = "number"
     number: float
     unit: str = ""
+    tone: Literal["neutral", "active", "success", "warning", "danger"] = "neutral"
 ```
 
 ```json
-{"value": "number", "number": 40.0, "unit": "ms"}
+{"value": "number", "number": 40.0, "unit": "ms", "tone": "neutral"}
 ```
+
+A `tone` colours a count that is itself the warning — how many need attention.
+A figure that is only a figure stays `neutral`.
 
 ### StatusValue
 
@@ -1156,7 +1252,8 @@ class StatusValue:
 ```
 
 The app writes the word. The tone selects the presentation. The contract has
-no type named `Status`.
+no type named `Status`. `active` reads as work in flight, so a settled fact
+takes another tone.
 
 ### TimeValue
 
@@ -1175,8 +1272,9 @@ time in the title attribute.
 
 ## Fields
 
-Every field carries a `field` discriminator. Every field has `name`, `label`,
-`help_text`, `is_required`, and `value`. `name` is the key the shell sends.
+Every field carries a `field` discriminator, `name`, `label`, `help_text`, and
+`is_required`. `name` is the key the shell sends. Every field but `UploadField`
+and `SecretField` also has a `value`, which is what it starts on.
 
 ### TextField
 
@@ -1328,6 +1426,83 @@ class CheckboxField:
 {"field": "checkbox", "name": "notify", "label": "Notify the owner", "value": false, "helpText": "", "isRequired": false}
 ```
 
+### UploadField
+
+```python
+class UploadField:
+    field: Literal["upload"] = "upload"
+    name: str
+    label: str
+    accept: str = ""
+    help_text: str = ""
+    is_required: bool = False
+```
+
+```json
+{"field": "upload", "name": "photo", "label": "Add a photo", "accept": "image/*", "helpText": "", "isRequired": false}
+```
+
+One file, and no starting value: nothing the server sends could put a file back
+into a file input.
+
+`accept` goes straight into the file dialog's own filter, in its own syntax —
+`"image/*"`, `".csv,.tsv"`. It narrows what the operator can pick. It is not a
+promise about the bytes, and the platform does not check it. An operation that
+needs certainty opens the file and looks.
+
+On submit the shell sends the bytes to `POST /api/<app>/uploads`, which stores
+them and answers with a `FileSummary`. The shell then submits `id` as the
+field's value, so the operation takes a plain string:
+
+```python
+@router.post("/photos", operation_id="add_photo")
+async def add_photo(photo: Annotated[str, Body(embed=True)]) -> None:
+    shop.image = File(id=photo)
+```
+
+A `FileField` column takes the id and keeps a real foreign key, so an id naming
+no file is refused by the database rather than stored.
+
+The upload is filed under the app whose page holds the form and under the
+operator who sent it, both taken from the request rather than from the client.
+A file over the platform's upload cap is refused, and the shell puts the refusal
+on that field. A file whose form is never submitted stays stored with nothing
+pointing at it.
+
+### SecretField
+
+```python
+class SecretField:
+    field: Literal["secret"] = "secret"
+    name: str
+    label: str
+    help_text: str = ""
+    is_required: bool = False
+```
+
+```python
+ui.SecretField(name="token", label="Access token", help_text="From your account settings.")
+```
+
+```json
+{"field": "secret", "name": "token", "label": "Access token", "helpText": "From your account settings.", "isRequired": false}
+```
+
+One secret the operator hands over: a token, a key.
+
+It has no `value`. A file input cannot be seeded, and a secret must not be. A
+field with nowhere to put one cannot send a stored secret back to the browser.
+
+The shell masks it and keeps it from the browser's password managers. A
+successful submit leaves it empty.
+
+Masking protects the screen. It does not protect the stored secret.
+
+A refusal never repeats the server's words on a secret field. The shell shows a
+fixed line, because a validation message can carry the submitted value back. It
+shows a fixed line on the form too, for a refusal that names no field on screen.
+Every other field keeps the server's own words.
+
 ## Page and Follows
 
 ```python
@@ -1377,8 +1552,9 @@ needs it:
 
 ## Not in V1
 
-V1 has no `Tabs` block, no accordion, no expandable table row, no modal, no
-inline reveal form, and no general client-state API.
+V1 has no `Tabs` block, no accordion, no modal, no inline reveal form, and no
+general client-state API. A table row folds its `detail` away, and that is the
+whole of it: the app declares the sentence, the shell owns whether it is open.
 
 Static child pages already give tabs, and the URL holds the current one. An
 app that needs a control the contract does not have ships an ESM frontend.

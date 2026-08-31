@@ -3,6 +3,7 @@ from .blocks import (
     Block,
     Callout,
     Card,
+    Cards,
     Chart,
     ChartSeries,
     Columns,
@@ -25,6 +26,7 @@ from .blocks import (
     NumberValue,
     Progress,
     ProgressStep,
+    Quote,
     Section,
     Stack,
     StatusValue,
@@ -45,9 +47,11 @@ from .fields import (
     NumberField,
     Option,
     RadioField,
+    SecretField,
     SelectField,
     TextAreaField,
     TextField,
+    UploadField,
 )
 from .page import page
 from .schemas import Page
@@ -57,6 +61,7 @@ __all__ = [
     "Block",
     "Callout",
     "Card",
+    "Cards",
     "Chart",
     "ChartSeries",
     "CheckboxField",
@@ -85,7 +90,9 @@ __all__ = [
     "Page",
     "Progress",
     "ProgressStep",
+    "Quote",
     "RadioField",
+    "SecretField",
     "Section",
     "SelectField",
     "Stack",
@@ -100,6 +107,7 @@ __all__ = [
     "TimeValue",
     "Timeline",
     "TimelineItem",
+    "UploadField",
     "Value",
     "page",
 ]

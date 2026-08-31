@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { Router } from 'wouter'
 import { memoryLocation } from 'wouter/memory-location'
 
-import type { Block, PageEntry } from '../api/types'
+import type { Block, CardBlock, EmptyStateBlock, PageEntry } from '../api/types'
 import { Blocks } from './Blocks'
 import { PagesContext } from './pages'
 
@@ -39,6 +39,13 @@ describe('the display core', () => {
     expect(screen.getByText('Stale')).toBeTruthy()
     expect(container.querySelector('.dui-callout-warning')).toBeTruthy()
     expect(container.querySelector('hr.dui-divider')).toBeTruthy()
+  })
+
+  it('quotes words it did not write, as they arrived', () => {
+    const { container } = renderBlocks([{ block: 'quote', text: 'one\ntwo' }])
+
+    const quoted = container.querySelector('blockquote.dui-quote')
+    expect(quoted?.textContent).toBe('one\ntwo')
   })
 
   it('nests blocks through sections and cards', () => {
@@ -146,5 +153,43 @@ describe('a subject link', () => {
     const link = screen.getByText('Everything druks did')
     expect(link.getAttribute('href')).toBe('/field_notes/note/7')
     expect(link.getAttribute('target')).toBeNull()
+  })
+})
+
+describe('Cards', () => {
+  function card(title: string): CardBlock {
+    return { block: 'card', title, description: '', blocks: [], actions: [] }
+  }
+  const nothingYet: EmptyStateBlock = {
+    block: 'empty_state',
+    title: 'No peer yet',
+    description: 'Add one and it shows here.',
+    actions: [],
+  }
+
+  it('shows one card for each thing, under the title', () => {
+    const { container } = renderBlocks([
+      { block: 'cards', title: 'Peers', cards: [card('peer-7'), card('peer-9')], empty: null },
+    ])
+
+    expect(screen.getByText('Peers')).toBeTruthy()
+    expect(container.querySelectorAll('ul.dui-cards > li')).toHaveLength(2)
+    expect(screen.getByText('peer-7')).toBeTruthy()
+    expect(screen.getByText('peer-9')).toBeTruthy()
+  })
+
+  it('shows the empty state in place of the cards, under the same title', () => {
+    renderBlocks([{ block: 'cards', title: 'Peers', cards: [], empty: nothingYet }])
+
+    expect(screen.getByText('No peer yet')).toBeTruthy()
+    expect(screen.getByText('Peers')).toBeTruthy()
+  })
+
+  it('renders nothing when it holds nothing and says nothing', () => {
+    const { container } = renderBlocks([
+      { block: 'cards', title: 'Peers', cards: [], empty: null },
+    ])
+
+    expect(container.textContent).toBe('')
   })
 })
