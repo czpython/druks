@@ -46,6 +46,7 @@ from druks.services.routes import oauth_router
 from druks.services.routes import router as service_identities_router
 from druks.settings import Settings, ensure_data_dirs, load_settings, setup_logging
 from druks.skills.routes import router as skills_router
+from druks.ui.exceptions import PageReadError
 from druks.user_settings.routes import router as settings_router
 from druks.webhooks import router as webhooks_router
 
@@ -180,6 +181,12 @@ async def _agent_api_error_handler(request: Request, exc: AgentApiError) -> JSON
 @app.exception_handler(AgentCallNotFound)
 async def _agent_call_not_found_handler(request: Request, exc: AgentCallNotFound) -> JSONResponse:
     return await _agent_api_error_handler(request, gate_errors.AgentCallNotFound(exc.agent_call_id))
+
+
+@app.exception_handler(PageReadError)
+async def _page_read_error_handler(request: Request, exc: PageReadError) -> JSONResponse:
+    logging.getLogger(__name__).exception("page read failed: %s", exc)
+    return JSONResponse(status_code=500, content={"error": "PAGE_FAILED", "detail": str(exc)})
 
 
 # Auth-mode drift (e.g. none mode grew a second operator account) is an

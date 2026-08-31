@@ -6,6 +6,7 @@ import { runSubLine, statusLine } from './statusLine'
 function status(overrides: Partial<SubjectStatus>): SubjectStatus {
   return {
     state: 'running',
+    run: null,
     kind: 'software_factory.build',
     agent: null,
     gate: null,

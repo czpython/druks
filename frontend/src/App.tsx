@@ -152,9 +152,10 @@ function AppShell() {
 
   const home = app ? appHome(app) : '/'
   const accentColor = app ? accent[app] : undefined
-  // The subnav tabs the app declared on its backend class, off the roster —
-  // the one nav channel, for bundled and installed apps alike.
-  const navigation = rosterQuery.data?.find((entry) => entry.name === app)?.navigation
+  // The subnav tabs: an app that owns its own pages in JavaScript declares
+  // them in its registry entry, and a Python-page app gets them from the
+  // roster, resolved from its declared pages.
+  const navigation = ui?.navigation ?? rosterQuery.data?.find((entry) => entry.name === app)?.navigation
 
   return (
     <>

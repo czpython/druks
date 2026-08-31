@@ -40,6 +40,12 @@ class AppImportError(AppLoadError):
     import — carries the original exception as its cause."""
 
 
+class AppRouteConflict(AppLoadError):
+    """An app mounts a router on a segment the platform serves for every app.
+    Raised when the routers are enumerated, so the conflict fails the load
+    instead of hiding one route behind the other."""
+
+
 class AppSubjectContractError(AppLoadError):
     """A declared subject fails the read-side contract: no ``list_summaries()``
     implementation, or it names the reserved ``transcripts`` segment."""

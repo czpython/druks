@@ -1,5 +1,5 @@
-from druks.schemas import BaseResponse
+from druks.schemas import Schema
 
-# HTTP request/response models for this app's routes. Response models subclass
-# ``BaseResponse`` (snake_case fields serialize to camelCase for the frontend);
-# request bodies are plain ``pydantic.BaseModel``.
+# HTTP request and response models for this app's routes. A response subclasses
+# ``Schema``, whose snake_case fields serialize as camelCase; a request body is
+# a plain ``pydantic.BaseModel``.

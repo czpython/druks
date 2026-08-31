@@ -3,7 +3,7 @@ from typing import Any, Literal
 
 from pydantic import AliasPath, BaseModel, ConfigDict, Field, computed_field
 
-from druks.schemas import BaseResponse
+from druks.schemas import Schema
 from druks.workflows import SubjectSummary
 
 # GitHub's verdict on a PR, verbatim.
@@ -21,7 +21,7 @@ class ProjectRepoSummary(SubjectSummary):
     created_at: datetime
 
 
-class ProjectSummary(BaseResponse):
+class ProjectSummary(Schema):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
@@ -31,7 +31,7 @@ class ProjectSummary(BaseResponse):
     repos: list[ProjectRepoSummary] = Field(default_factory=list)
 
 
-class ProjectsResponse(BaseResponse):
+class ProjectsResponse(Schema):
     projects: list[ProjectSummary]
 
 
@@ -44,16 +44,16 @@ class AddProjectRepoRequest(BaseModel):
     purpose: str | None = None
 
 
-class GitHubRepoSummary(BaseResponse):
+class GitHubRepoSummary(Schema):
     full_name: str
     description: str | None = None
 
 
-class GitHubReposResponse(BaseResponse):
+class GitHubReposResponse(Schema):
     repos: list[GitHubRepoSummary]
 
 
-class Links(BaseResponse):
+class Links(Schema):
     repo: str
     pr: str | None = None
     ticket: str | None = None
@@ -87,7 +87,7 @@ class WorkItemSummary(SubjectSummary):
         return Links(repo=f"https://github.com/{self.repo}", pr=pr, ticket=self.ticket_url)
 
 
-class DashboardItem(BaseResponse):
+class DashboardItem(Schema):
     model_config = ConfigDict(from_attributes=True)
 
     source_id: int | str = Field(validation_alias="id")
@@ -110,5 +110,5 @@ class DashboardItem(BaseResponse):
         return f"code:{self.source_id}"
 
 
-class WorkItemsHistoryResponse(BaseResponse):
+class WorkItemsHistoryResponse(Schema):
     items: list[DashboardItem]

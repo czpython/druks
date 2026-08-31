@@ -73,6 +73,10 @@ def pytest_configure(config) -> None:
     including suites that never touch druks."""
     global _discovery_error
 
+    # A Workflow resolves its declaring app at definition, so collection cannot
+    # import an app's workflows module before every installed package is claimed.
+    iter_apps()
+
     with tempfile.NamedTemporaryFile(mode="w", suffix=".toml", delete=False) as settings_file:
         settings_file.write(
             f'[secrets]\nsecrets_key = "{base64.b64encode(secrets.token_bytes(32)).decode()}"\n'

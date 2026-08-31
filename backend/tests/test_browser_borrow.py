@@ -122,6 +122,23 @@ def test_declaration_carries_the_app_namespace(night_watch):
     assert night_watch.docs.name == "night_watch.docs"
 
 
+async def test_status_reads_the_row_and_writes_nothing(druks_db, night_watch):
+    """A page reads where the login stands: the declaration's own status while
+    no row exists, then the row's."""
+    assert await night_watch.docs.get_status() == BrowserSessionStatus.NEEDS_LOGIN
+    assert await night_watch.status_page.get_status() == BrowserSessionStatus.ANONYMOUS
+    assert not await StoredBrowserSession.list_all()
+
+    row = await StoredBrowserSession.get_or_create(
+        name=night_watch.docs.name,
+        payload_format=BrowserSessionPayloadFormat.PROFILE_DIR,
+        site=night_watch.docs.site,
+    )
+    await row.mark_stale()
+
+    assert await night_watch.docs.get_status() == BrowserSessionStatus.STALE
+
+
 async def test_borrow_yields_a_tunneled_cdp_url(borrow, night_watch):
     browser, redis = borrow
     await stored_session(night_watch.docs)

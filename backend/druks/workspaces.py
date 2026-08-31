@@ -118,8 +118,7 @@ class Workspace:
             content_type=mimetypes.guess_type(name)[0] or "application/octet-stream",
             sha256=sha256,
             app=app,
-            origin_type="agent_call",
-            origin_id=agent_call_id,
+            agent_call_id=agent_call_id,
         )
         return record, temp
 
