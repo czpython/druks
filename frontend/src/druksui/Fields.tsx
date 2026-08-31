@@ -20,26 +20,52 @@ export function Fields({
   const form = useId()
   return (
     <>
-      {fields.map((field) => (
-        <div key={field.name} className="dui-field">
-          <label className="dui-field-label" htmlFor={`${form}${field.name}`}>
+      {fields.map((field) => {
+        const id = `${form}${field.name}`
+        const help = field.helpText ? `${id}-help` : ''
+        const error = errors[field.name] ? `${id}-error` : ''
+        const describedBy = [help, error].filter(Boolean).join(' ') || undefined
+        // Radio and multi-select are a group of inputs rather than one, so the
+        // label names the group instead of pointing at an id no element has.
+        const isGroup = field.field === 'radio' || field.field === 'multi_select'
+        const name = (
+          <>
             {field.label}
             {field.isRequired && <span className="dui-field-required"> *</span>}
-          </label>
-          <Input
-            field={field}
-            id={`${form}${field.name}`}
-            value={values[field.name]}
-            onChange={onChange}
-          />
-          {field.helpText && <div className="dui-field-help dim">{field.helpText}</div>}
-          {errors[field.name] && (
-            <div className="dui-field-error" role="alert">
-              {errors[field.name]}
-            </div>
-          )}
-        </div>
-      ))}
+          </>
+        )
+        return (
+          <div key={field.name} className="dui-field">
+            {isGroup ? (
+              <div className="dui-field-label" id={`${id}-label`}>
+                {name}
+              </div>
+            ) : (
+              <label className="dui-field-label" htmlFor={id}>
+                {name}
+              </label>
+            )}
+            <Input
+              field={field}
+              id={id}
+              value={values[field.name]}
+              onChange={onChange}
+              describedBy={describedBy}
+              isInvalid={Boolean(errors[field.name])}
+            />
+            {field.helpText && (
+              <div className="dui-field-help dim" id={help}>
+                {field.helpText}
+              </div>
+            )}
+            {errors[field.name] && (
+              <div className="dui-field-error" role="alert" id={error}>
+                {errors[field.name]}
+              </div>
+            )}
+          </div>
+        )
+      })}
     </>
   )
 }
@@ -49,11 +75,15 @@ function Input({
   id,
   value,
   onChange,
+  describedBy,
+  isInvalid,
 }: {
   field: Field
   id: string
   value: unknown
   onChange: (name: string, value: unknown) => void
+  describedBy?: string
+  isInvalid: boolean
 }) {
   const shared = {
     id,
@@ -62,8 +92,12 @@ function Input({
     // is keyed by the field's own name, not by this one.
     name: id,
     required: field.isRequired,
-    'aria-invalid': undefined,
+    'aria-describedby': describedBy,
+    'aria-invalid': isInvalid || undefined,
   }
+  // A group is described and labelled as a whole; invalidity belongs to an
+  // input, not to the box around several.
+  const group = { 'aria-labelledby': `${id}-label`, 'aria-describedby': describedBy }
   switch (field.field) {
     case 'text':
       return (
@@ -120,7 +154,7 @@ function Input({
       )
     case 'multi_select':
       return (
-        <div className="dui-choices" role="group" aria-label={field.label}>
+        <div className="dui-choices" role="group" {...group}>
           {field.options.map((option) => {
             const chosen = Array.isArray(value) ? (value as string[]) : []
             return (
@@ -147,7 +181,7 @@ function Input({
       )
     case 'radio':
       return (
-        <div className="dui-choices" role="radiogroup" aria-label={field.label}>
+        <div className="dui-choices" role="radiogroup" {...group}>
           {field.options.map((option) => (
             <label key={option.value} className="dui-choice">
               <input

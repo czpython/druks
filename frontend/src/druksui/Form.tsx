@@ -3,6 +3,7 @@ import { useContext, useState } from 'react'
 import { useLocation } from 'wouter'
 
 import { ApiError, api } from '../api/client'
+import { useFlashNote } from '../lib/useFlashNote'
 import type { Action, Field, Operation, PageEntry } from '../api/types'
 import type { PageSnapshot } from '../api/types'
 import { Fields } from './Fields'
@@ -37,6 +38,7 @@ export function Form({
   const run = useAction(
     action,
     fields.map((one) => one.name),
+    () => setValues(Object.fromEntries(fields.map(startingValue))),
   )
 
   return (
@@ -47,7 +49,7 @@ export function Form({
         void run.call(values)
       }}
     >
-      {title && <div className="dui-block-title">{title}</div>}
+      {title && <h3 className="dui-block-title">{title}</h3>}
       {description && <p className="dui-form-desc dim">{description}</p>}
       <Fields
         fields={fields}
@@ -61,14 +63,22 @@ export function Form({
         </div>
       )}
       <div className="dui-form-submit">
-        <button
-          type="submit"
-          className={`dui-action dui-action-${action.tone}`}
-          disabled={run.pending}
-        >
-          {run.pending ? 'working…' : action.label}
-        </button>
+        {run.confirming ? (
+          <Confirm action={action} run={run} />
+        ) : (
+          <button
+            type="submit"
+            className={`dui-action dui-action-${action.tone}`}
+            disabled={run.pending}
+            aria-busy={run.pending}
+          >
+            {action.label}
+          </button>
+        )}
       </div>
+      <p className="dui-action-note" role="status">
+        {run.note}
+      </p>
     </form>
   )
 }
@@ -87,29 +97,62 @@ export function ActionButton({ action }: { action: Action }) {
   }
   return (
     <>
-      <button
-        type="button"
-        className={`dui-action dui-action-${action.tone}`}
-        disabled={run.pending}
-        onClick={() => void run.call({})}
-      >
-        {run.pending ? 'working…' : action.label}
-      </button>
+      {run.confirming ? (
+        <Confirm action={action} run={run} />
+      ) : (
+        <button
+          type="button"
+          className={`dui-action dui-action-${action.tone}`}
+          disabled={run.pending}
+          aria-busy={run.pending}
+          onClick={() => void run.call({})}
+        >
+          {action.label}
+        </button>
+      )}
       {run.problem && (
         <span className="dui-form-error" role="alert">
           {run.problem}
         </span>
       )}
+      <span className="dui-action-note" role="status">
+        {run.note}
+      </span>
     </>
+  )
+}
+
+// An action that asks first asks in the page, in the page's own type and
+// colour. The browser's own dialog is the one thing an author cannot restyle.
+function Confirm({ action, run }: { action: Action; run: ReturnType<typeof useAction> }) {
+  return (
+    <span className="dui-confirm">
+      <span className="dui-confirm-ask">{action.confirm}</span>
+      <button
+        type="button"
+        className={`dui-action dui-action-${action.tone}`}
+        disabled={run.pending}
+        aria-busy={run.pending}
+        onClick={() => void run.confirm()}
+      >
+        {action.label}
+      </button>
+      <button type="button" className="dui-action" disabled={run.pending} onClick={run.back}>
+        Back
+      </button>
+    </span>
   )
 }
 
 // Everything an action does once someone presses it: ask first when it says to,
 // send the one payload, keep a second press out while it runs, and then stay,
 // refresh, or navigate.
-function useAction(action: Action, fieldNames: string[] = []) {
+function useAction(action: Action, fieldNames: string[] = [], clear?: () => void) {
   const [pending, setPending] = useState(false)
   const [problem, setProblem] = useState('')
+  const [note, setNote] = useFlashNote<string>()
+  // The payload an action is holding while it asks; null when it is not asking.
+  const [asked, setAsked] = useState<Payload | null>(null)
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
   const { app, pages, operations } = useContext(PagesContext)
   const region = useContext(RegionContext)
@@ -119,7 +162,21 @@ function useAction(action: Action, fieldNames: string[] = []) {
 
   async function call(values: Payload) {
     if (pending) return
-    if (action.confirm && !window.confirm(action.confirm)) return
+    if (action.confirm) {
+      setAsked(values)
+      return
+    }
+    await perform(values)
+  }
+
+  async function confirm() {
+    if (pending) return
+    const values = asked ?? {}
+    setAsked(null)
+    await perform(values)
+  }
+
+  async function perform(values: Payload) {
     const target = operations.find((one) => one.id === action.operation)
     if (!target) {
       setProblem(`this app declares no operation named ${action.operation}`)
@@ -156,6 +213,8 @@ function useAction(action: Action, fieldNames: string[] = []) {
     // twice.
     try {
       await finish()
+      clear?.()
+      setNote(`${action.label} — done`)
       setPending(false)
     } catch (error) {
       setProblem(`saved, but the page did not refresh: ${message(error)}`)
@@ -207,7 +266,7 @@ function useAction(action: Action, fieldNames: string[] = []) {
     await queryClient.invalidateQueries({ queryKey: ['gate'] })
   }
 
-  return { pending, problem, fieldErrors, call }
+  return { pending, problem, note, fieldErrors, call, confirm, back: () => setAsked(null), confirming: asked !== null }
 }
 
 // The operation's path parameters come out of the payload; everything left is

@@ -12,7 +12,7 @@ import { PagesContext } from './pages'
 
 vi.mock('../components/RunTranscript', () => ({ RunTranscript: () => <pre /> }))
 vi.mock('../api/client', () => ({
-  api: { getGate: vi.fn(), answerGate: vi.fn(), artifact: vi.fn() },
+  api: { getGate: vi.fn(), answerGate: vi.fn(), artifact: vi.fn(), callOperation: vi.fn(), readPage: vi.fn() },
 }))
 
 afterEach(cleanup)
@@ -45,7 +45,7 @@ vi.mocked(api.getGate).mockResolvedValue({
   artifact: null,
 })
 
-function renderCatalog() {
+function renderBlocks(blocks: Block[]) {
   const { hook } = memoryLocation({ path: '/field_notes' })
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
@@ -54,11 +54,15 @@ function renderCatalog() {
         <PagesContext.Provider
           value={{ app: 'field_notes', pages: PAGES, operations: OPERATIONS }}
         >
-          <Blocks blocks={CATALOG} />
+          <Blocks blocks={blocks} />
         </PagesContext.Provider>
       </Router>
     </QueryClientProvider>,
   )
+}
+
+function renderCatalog() {
+  return renderBlocks(CATALOG)
 }
 
 describe('every V1 renderer', () => {
@@ -171,5 +175,77 @@ describe('every V1 renderer', () => {
     renderCatalog()
 
     expect(screen.getAllByRole('columnheader').map((one) => one.textContent)).toContain('Note')
+  })
+
+  it('names every row as well as every column', () => {
+    renderCatalog()
+
+    // A value read on its own says which column it is in and which row.
+    expect(screen.getAllByRole('rowheader').length).toBeGreaterThan(0)
+  })
+
+  it('points a field at its own help, and marks the one that failed', () => {
+    renderBlocks([
+            {
+              block: 'form',
+              title: '',
+              description: '',
+              fields: [
+                {
+                  field: 'text',
+                  name: 'repo',
+                  label: 'Repository',
+                  value: '',
+                  isRequired: true,
+                  helpText: 'owner/name',
+                  placeholder: '',
+                },
+              ],
+              action: {
+                block: 'action',
+                label: 'Track',
+                operation: 'write_note',
+                tone: 'primary',
+                confirm: '',
+                refresh: 'page',
+                link: null,
+                arguments: {},
+              },
+            },
+          ])
+
+    const input = screen.getByLabelText(/Repository/)
+    const help = screen.getByText('owner/name')
+    expect(input.getAttribute('aria-describedby')).toBe(help.getAttribute('id'))
+    expect(input.getAttribute('aria-invalid')).toBeNull()
+  })
+
+  it('says so when an action has happened', async () => {
+    vi.mocked(api.callOperation).mockResolvedValue(undefined)
+    renderBlocks([
+            {
+              block: 'card',
+              title: '',
+              description: '',
+              blocks: [],
+              actions: [
+                {
+                  block: 'action',
+                  label: 'Rescout peer',
+                  operation: 'write_note',
+                  tone: 'primary',
+                  confirm: '',
+                  refresh: 'none',
+                  link: null,
+                  arguments: {},
+                },
+              ],
+            },
+          ])
+
+    screen.getByRole('button', { name: 'Rescout peer' }).click()
+
+    // Success is announced; before this a reader heard nothing at all.
+    await waitFor(() => expect(screen.getByRole('status').textContent).toContain('Rescout peer'))
   })
 })

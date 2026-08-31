@@ -168,8 +168,8 @@ describe('the parent link', () => {
   it('takes a parameterized detail page back to its longest declared prefix', async () => {
     renderAt('/field_notes/notes/7', 'note', { title: 'Note 7', description: '', blocks: [], follows: null })
 
-    await waitFor(() => expect(screen.getByText('← notes')).toBeTruthy())
-    expect(screen.getByText('← notes').getAttribute('href')).toBe('/field_notes')
+    await waitFor(() => expect(screen.getByRole('link', { name: 'notes' })).toBeTruthy())
+    expect(screen.getByRole('link', { name: 'notes' }).getAttribute('href')).toBe('/field_notes')
   })
 
   it('takes a parameterized child back to the page it was declared under', async () => {
@@ -180,8 +180,10 @@ describe('the parent link', () => {
       follows: null,
     })
 
-    await waitFor(() => expect(screen.getByText('← note')).toBeTruthy())
-    expect(screen.getByText('← note').getAttribute('href')).toBe('/field_notes/notes/7')
+    await waitFor(() => expect(screen.getByRole('link', { name: 'note' })).toBeTruthy())
+    expect(screen.getByRole('link', { name: 'note' }).getAttribute('href')).toBe(
+      '/field_notes/notes/7',
+    )
     // A detail page is not one of its parent's tabs, so it shows none.
     expect(container.querySelector('.dui-tabs')).toBeNull()
   })

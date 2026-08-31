@@ -208,7 +208,9 @@ describe('Table', () => {
       'Peer',
       'Answers',
     ])
-    expect(container.querySelectorAll('td')[1]?.getAttribute('data-align')).toBe('end')
+    // The first cell names its row, so a reader hears which row a value is in.
+    expect(screen.getAllByRole('rowheader').map((one) => one.textContent)).toEqual(['peer-7'])
+    expect(container.querySelectorAll('td')[0]?.getAttribute('data-align')).toBe('end')
   })
 })
 
