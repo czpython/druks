@@ -41,7 +41,7 @@ def test_a_timeline_item_carries_its_stamp_and_status():
                 "when": "2026-08-29T09:14:02Z",
                 "title": "Run started",
                 "description": "",
-                "status": {"value": "status", "label": "active", "tone": "active", "kind": "state"},
+                "status": {"value": "status", "label": "active", "tone": "active"},
             }
         ],
     }
@@ -60,7 +60,7 @@ def test_progress_carries_its_three_shapes():
     assert staged["steps"] == [
         {
             "label": "plan",
-            "status": {"value": "status", "label": "done", "tone": "neutral", "kind": "state"},
+            "status": {"value": "status", "label": "done", "tone": "neutral"},
         }
     ]
 

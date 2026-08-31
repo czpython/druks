@@ -48,8 +48,8 @@ It exports exactly these names:
 ```text
 page                                       declaration
 Page  Follows                              the snapshot
-Text  Markdown  Section  Card  Callout     display and layout blocks
-Divider  EmptyState  Stack  Columns
+Text  Markdown  Quote  Section  Card       display and layout blocks
+Callout  Divider  EmptyState  Stack  Columns
 Link  Action  Form                         controls
 Timeline  TimelineItem  Progress           run and artifact blocks
 ProgressStep  Image  Files
@@ -503,8 +503,8 @@ input than they store:
 
 ```python
 Block = Annotated[
-    Text | Markdown | Section | Card | Callout | Divider | EmptyState | Link
-    | Action | Form | Timeline | Progress | Image | Files
+    Text | Markdown | Quote | Section | Card | Callout | Divider | EmptyState
+    | Link | Action | Form | Timeline | Progress | Image | Files
     | GateControls | Chart | ImageGallery | Metrics | Facts | Table | List
     | Stack | Columns,
     Discriminator("block"),
@@ -574,6 +574,22 @@ class Markdown:
 ```
 
 The shell renders the markdown. It strips raw HTML.
+
+### Quote
+
+```python
+class Quote:
+    block: Literal["quote"] = "quote"
+    text: str
+```
+
+```json
+{"block": "quote", "text": "No access to that repository.\nFalling back."}
+```
+
+Someone else's words, kept as they arrived — a message, a reply, an answer.
+Line breaks survive, and nothing is read as markup. `Text` closes the breaks
+up into a paragraph, and `Markdown` would rewrite the text.
 
 ### Section
 
@@ -1039,6 +1055,7 @@ class TableColumn:
 
 class TableRow:
     cells: list[Value] = []
+    detail: str = ""
 
 
 class Table:
@@ -1070,6 +1087,11 @@ Every row must have one cell for each column. With no rows the shell shows
 `empty_text`, and nothing of its own. A wide table scrolls inside its own
 container, on a narrow screen as well: a stacked row would lose the header each
 cell belongs to.
+
+A row's `detail` is the sentence it has no room for — the failure behind a
+status, the reason behind a verdict. The shell keeps it folded and the reader
+opens it, so twenty rows that stopped for one reason do not cost twenty page
+loads to find that out. It is text, not blocks.
 
 ### List
 
@@ -1130,14 +1152,17 @@ Every value carries a `value` discriminator. A value renders the same way in
 class TextValue:
     value: Literal["text"] = "text"
     text: str
+    description: str = ""
     link: Link | None = None
 ```
 
 ```json
-{"value": "text", "text": "peer-7", "link": null}
+{"value": "text", "text": "peer-7", "description": "the fastest peer", "link": null}
 ```
 
 `link` is how a table cell, a fact, or a list item reaches another page.
+`description` says what the thing is, on a quieter second line under what it
+is called, so a name needs no column of its own to explain it.
 
 ### NumberValue
 
@@ -1146,11 +1171,15 @@ class NumberValue:
     value: Literal["number"] = "number"
     number: float
     unit: str = ""
+    tone: Literal["neutral", "active", "success", "warning", "danger"] = "neutral"
 ```
 
 ```json
-{"value": "number", "number": 40.0, "unit": "ms"}
+{"value": "number", "number": 40.0, "unit": "ms", "tone": "neutral"}
 ```
+
+A `tone` colours a count that is itself the warning — how many need attention.
+A figure that is only a figure stays `neutral`.
 
 ### StatusValue
 
@@ -1166,7 +1195,8 @@ class StatusValue:
 ```
 
 The app writes the word. The tone selects the presentation. The contract has
-no type named `Status`.
+no type named `Status`. `active` reads as work in flight, so a settled fact
+takes another tone.
 
 ### TimeValue
 
@@ -1431,8 +1461,9 @@ needs it:
 
 ## Not in V1
 
-V1 has no `Tabs` block, no accordion, no expandable table row, no modal, no
-inline reveal form, and no general client-state API.
+V1 has no `Tabs` block, no accordion, no modal, no inline reveal form, and no
+general client-state API. A table row folds its `detail` away, and that is the
+whole of it: the app declares the sentence, the shell owns whether it is open.
 
 Static child pages already give tabs, and the URL holds the current one. An
 app that needs a control the contract does not have ships an ESM frontend.

@@ -2691,11 +2691,6 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
 .dui-number-warning { color: var(--decision-request-revision); }
 .dui-number-danger { color: var(--outcome-failed); }
 
-/* The settled judgement is the filled pill; a state that still moves is drawn
-   in outline. */
-.dui-status-state { background: none; }
-.dui-status-verdict { font-weight: 600; }
-
 .dui-quote { font-size: 13.5px; line-height: 1.6; color: var(--text-mid); max-width: 68ch;
   white-space: pre-wrap; margin: 0; padding-left: 12px; border-left: 2px solid var(--border); }
 

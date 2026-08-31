@@ -26,7 +26,7 @@ function renderBlocks(blocks: Block[]) {
 
 const TEXT: Value = { value: 'text', text: 'peer-7', description: '', link: null }
 const NUMBER: Value = { value: 'number', number: 1234, unit: 'ms', tone: 'neutral' }
-const STATUS: Value = { value: 'status', label: 'parked', tone: 'warning', kind: 'state' }
+const STATUS: Value = { value: 'status', label: 'parked', tone: 'warning' }
 const TIME: Value = { value: 'time', when: '2026-08-29T09:14:02Z' }
 
 describe('values', () => {
@@ -187,21 +187,6 @@ describe('values', () => {
     expect(container.querySelector('.dui-number-danger')).toBeTruthy()
   })
 
-  it('tells a verdict apart from a state', () => {
-    const { container } = renderBlocks([
-      {
-        block: 'facts',
-        title: '',
-        facts: [
-          { label: 'Run', value: { value: 'status', label: 'scouting', tone: 'active', kind: 'state' } },
-          { label: 'Parity', value: { value: 'status', label: 'yes', tone: 'success', kind: 'verdict' } },
-        ],
-      },
-    ])
-
-    expect(container.querySelector('.dui-status-state')).toBeTruthy()
-    expect(container.querySelector('.dui-status-verdict')).toBeTruthy()
-  })
 })
 
 describe('Table', () => {
