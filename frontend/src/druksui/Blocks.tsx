@@ -22,6 +22,8 @@ function BlockContent({ block }: { block: Block }) {
       return <p className="dui-text">{block.text}</p>
     case 'markdown':
       return <Markdown source={block.text} className="dui-markdown" />
+    case 'quote':
+      return <blockquote className="dui-quote">{block.text}</blockquote>
     case 'divider':
       return <hr className="dui-divider" />
     case 'link':

@@ -1,4 +1,4 @@
-import { cleanup, render, screen, within } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, describe, expect, it } from 'vitest'
 import { Router } from 'wouter'
 import { memoryLocation } from 'wouter/memory-location'
@@ -24,9 +24,9 @@ function renderBlocks(blocks: Block[]) {
   )
 }
 
-const TEXT: Value = { value: 'text', text: 'peer-7', link: null }
-const NUMBER: Value = { value: 'number', number: 1234, unit: 'ms' }
-const STATUS: Value = { value: 'status', label: 'parked', tone: 'warning' }
+const TEXT: Value = { value: 'text', text: 'peer-7', description: '', link: null }
+const NUMBER: Value = { value: 'number', number: 1234, unit: 'ms', tone: 'neutral' }
+const STATUS: Value = { value: 'status', label: 'parked', tone: 'warning', kind: 'state' }
 const TIME: Value = { value: 'time', when: '2026-08-29T09:14:02Z' }
 
 describe('values', () => {
@@ -44,7 +44,7 @@ describe('values', () => {
         block: 'table',
         title: '',
         columns: cells.map((_value, index) => ({ label: `c${index}`, align: 'start' as const })),
-        rows: [{ cells }],
+        rows: [{ cells, detail: '' }],
         emptyText: '',
       },
     ])
@@ -67,6 +67,7 @@ describe('values', () => {
               {
                 value: 'text',
                 text: 'peer-7',
+                description: '',
                 link: {
                   block: 'link',
                   label: 'peer-7',
@@ -77,6 +78,7 @@ describe('values', () => {
                 },
               },
             ],
+            detail: '',
           },
         ],
         emptyText: '',
@@ -95,6 +97,7 @@ describe('values', () => {
           {
             value: 'text',
             text: 'peer-7',
+            description: '',
             link: {
               block: 'link',
               label: 'peer-7',
@@ -117,8 +120,8 @@ describe('values', () => {
         block: 'list',
         title: '',
         items: [
-          { value: 'number', number: 0.0001, unit: '' },
-          { value: 'number', number: 1234567.25, unit: '' },
+          { value: 'number', number: 0.0001, unit: '', tone: 'neutral' },
+          { value: 'number', number: 1234567.25, unit: '', tone: 'neutral' },
         ],
       },
     ])
@@ -141,6 +144,63 @@ describe('values', () => {
     ])
 
     expect(screen.getByRole('alert').textContent).toContain('money')
+  })
+
+  it('shows a description under the name it belongs to', () => {
+    renderBlocks([
+      {
+        block: 'facts',
+        title: '',
+        facts: [
+          {
+            label: 'Feature',
+            value: {
+              value: 'text',
+              text: 'human-gates',
+              description: 'a run waits for a person',
+              link: null,
+            },
+          },
+        ],
+      },
+    ])
+
+    expect(screen.getByText('human-gates')).toBeTruthy()
+    expect(screen.getByText('a run waits for a person')).toBeTruthy()
+  })
+
+  it('colours a number by its tone', () => {
+    const { container } = renderBlocks([
+      {
+        block: 'metrics',
+        title: '',
+        metrics: [
+          {
+            label: 'Needs attention',
+            value: { value: 'number', number: 3, unit: '', tone: 'danger' },
+            description: '',
+          },
+        ],
+      },
+    ])
+
+    expect(container.querySelector('.dui-number-danger')).toBeTruthy()
+  })
+
+  it('tells a verdict apart from a state', () => {
+    const { container } = renderBlocks([
+      {
+        block: 'facts',
+        title: '',
+        facts: [
+          { label: 'Run', value: { value: 'status', label: 'scouting', tone: 'active', kind: 'state' } },
+          { label: 'Parity', value: { value: 'status', label: 'yes', tone: 'success', kind: 'verdict' } },
+        ],
+      },
+    ])
+
+    expect(container.querySelector('.dui-status-state')).toBeTruthy()
+    expect(container.querySelector('.dui-status-verdict')).toBeTruthy()
   })
 })
 
@@ -180,7 +240,7 @@ describe('Table', () => {
         block: 'table',
         title: 'Peers',
         columns: [{ label: 'Peer', align: 'start' }],
-        rows: [{ cells: [TEXT] }],
+        rows: [{ cells: [TEXT], detail: '' }],
         emptyText: '',
       },
     ])
@@ -197,7 +257,7 @@ describe('Table', () => {
           { label: 'Peer', align: 'start' },
           { label: 'Answers', align: 'end' },
         ],
-        rows: [{ cells: [TEXT, NUMBER] }],
+        rows: [{ cells: [TEXT, NUMBER], detail: '' }],
         emptyText: '',
       },
     ])
@@ -211,6 +271,27 @@ describe('Table', () => {
     // The first cell names its row, so a reader hears which row a value is in.
     expect(screen.getAllByRole('rowheader').map((one) => one.textContent)).toEqual(['peer-7'])
     expect(container.querySelectorAll('td')[0]?.getAttribute('data-align')).toBe('end')
+  })
+
+  it('folds a row detail away until it is asked for', () => {
+    renderBlocks([
+      {
+        block: 'table',
+        title: '',
+        columns: [{ label: 'Peer', align: 'start' }],
+        rows: [
+          {
+            cells: [{ value: 'text', text: 'peer-7', description: '', link: null }],
+            detail: 'the GitHub App has no access to this repository',
+          },
+        ],
+        emptyText: '',
+      },
+    ])
+
+    expect(screen.queryByText(/no access/)).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'More' }))
+    expect(screen.getByText(/no access/)).toBeTruthy()
   })
 })
 

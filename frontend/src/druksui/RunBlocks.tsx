@@ -6,7 +6,11 @@ import { RelTime } from '../components/RelTime'
 // How much of one call a page block reads. A page can hold several.
 
 export function Status({ status }: { status: StatusValue }) {
-  return <span className={`dui-status dui-status-${status.tone}`}>{status.label}</span>
+  return (
+    <span className={`dui-status dui-status-${status.tone} dui-status-${status.kind}`}>
+      {status.label}
+    </span>
+  )
 }
 
 export function Timeline({ title, items }: { title: string; items: TimelineItem[] }) {

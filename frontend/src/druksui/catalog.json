@@ -11,6 +11,10 @@
       "text": "**Markdown.**"
     },
     {
+      "block": "quote",
+      "text": "Their words.\nKept as they arrived."
+    },
+    {
       "block": "callout",
       "tone": "warning",
       "title": "Callout",
@@ -55,7 +59,8 @@
           "status": {
             "value": "status",
             "label": "running",
-            "tone": "active"
+            "tone": "active",
+            "kind": "state"
           }
         }
       ]
@@ -78,7 +83,8 @@
           "status": {
             "value": "status",
             "label": "running",
-            "tone": "active"
+            "tone": "active",
+            "kind": "state"
           }
         }
       ]
@@ -135,7 +141,8 @@
           "value": {
             "value": "number",
             "number": 2.0,
-            "unit": ""
+            "unit": "",
+            "tone": "neutral"
           },
           "description": ""
         }
@@ -150,7 +157,8 @@
           "value": {
             "value": "text",
             "text": "a",
-            "link": null
+            "link": null,
+            "description": ""
           }
         },
         {
@@ -158,7 +166,8 @@
           "value": {
             "value": "number",
             "number": 1.0,
-            "unit": "ms"
+            "unit": "ms",
+            "tone": "neutral"
           }
         },
         {
@@ -166,7 +175,8 @@
           "value": {
             "value": "status",
             "label": "running",
-            "tone": "active"
+            "tone": "active",
+            "kind": "state"
           }
         },
         {
@@ -193,9 +203,11 @@
             {
               "value": "text",
               "text": "one",
-              "link": null
+              "link": null,
+              "description": "what this row is about"
             }
-          ]
+          ],
+          "detail": "The scout could not reach the repository: HTTP 404."
         }
       ],
       "emptyText": "No notes yet."
@@ -207,7 +219,8 @@
         {
           "value": "text",
           "text": "one",
-          "link": null
+          "link": null,
+          "description": ""
         }
       ]
     },

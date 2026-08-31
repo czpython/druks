@@ -2683,6 +2683,26 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
 .dui-action-danger { border-color: var(--outcome-failed); color: var(--outcome-failed); }
 .dui-action-broken { color: var(--text-faint); text-decoration: line-through; cursor: help; }
 
+.dui-value { display: inline-flex; flex-direction: column; gap: 2px; }
+.dui-value-desc { font-size: 11.5px; line-height: 1.45; }
+
+.dui-number-active { color: var(--bucket-run); }
+.dui-number-success { color: var(--outcome-merged); }
+.dui-number-warning { color: var(--decision-request-revision); }
+.dui-number-danger { color: var(--outcome-failed); }
+
+/* The settled judgement is the filled pill; a state that still moves is drawn
+   in outline. */
+.dui-status-state { background: none; }
+.dui-status-verdict { font-weight: 600; }
+
+.dui-quote { font-size: 13.5px; line-height: 1.6; color: var(--text-mid); max-width: 68ch;
+  white-space: pre-wrap; margin: 0; padding-left: 12px; border-left: 2px solid var(--border); }
+
+.dui-row-more { font-size: 11px; color: var(--text-faint); margin-left: 8px; text-underline-offset: 2px; }
+.dui-row-more:hover, .dui-row-more[aria-expanded='true'] { color: var(--text); text-decoration: underline; }
+.dui-table .dui-row-detail td { white-space: pre-wrap; color: var(--text-mid); font-size: 12px; line-height: 1.6; padding-top: 0; }
+
 /* ---- Druks UI: rhythm, reach and focus ---------------------- */
 
 /* A block owns what is inside it; the container owns the space between
