@@ -58,11 +58,6 @@ class SoftwareFactory(App):
         "Turns a ticket into a pull request — it plans the change, builds it, and "
         "gates on you before shipping."
     )
-    navigation = [
-        ("/software_factory", "active"),
-        ("/software_factory/history", "history"),
-        ("/software_factory/projects", "projects"),
-    ]
 
     class Settings(AppSettings):
         tracker: Literal["none", "linear", "jira"] = Field(

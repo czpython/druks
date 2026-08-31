@@ -15,3 +15,10 @@ export const STATES: Record<RunState, StateStyle> = {
   cancelled: { color: 'var(--outcome-abandoned)', glyph: '◯', label: 'cancelled' },
   orphaned: { color: 'var(--bucket-dead)', glyph: '⚠', label: 'orphaned' },
 }
+
+// What a subject with no run wears: it holds none of the states above.
+export const NO_RUN: StateStyle = {
+  color: 'var(--text-faint)',
+  glyph: '◌',
+  label: 'never run',
+}

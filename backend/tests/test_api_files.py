@@ -21,8 +21,7 @@ async def _seed_file(druks_db, *, name: str, content_type: str, content: bytes) 
         content_type=content_type,
         sha256=hashlib.sha256(content).hexdigest(),
         app="field_notes",
-        origin_type="agent_call",
-        origin_id="call-1",
+        uploaded_by="system",
     )
     druks_db.add(record)
     await druks_db.flush()

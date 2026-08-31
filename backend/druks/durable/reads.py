@@ -82,6 +82,15 @@ async def get_subject_status(
     return await _status(latest)
 
 
+async def get_subject_statuses(
+    subject_type: str, subject_ids: list[str]
+) -> dict[str, SubjectStatus]:
+    """The status of every subject on a board, keyed by subject id — one driving-run
+    read for the whole page."""
+    driving_runs = await Run.get_latest_for_subjects(subject_type, subject_ids)
+    return {subject_id: await _status(driving_runs.get(subject_id)) for subject_id in subject_ids}
+
+
 async def get_subject_phase(subject_type: str, subject_id: str) -> str | None:
     runs = await Run.list_for_subject(subject_type, subject_id)
     active_run = next((run for run in runs if run.is_active), None)
@@ -124,7 +133,8 @@ async def _timeline(runs: list[Run]) -> list[RunResponse]:
 async def _status(driving_run: Run | None) -> SubjectStatus:
     # Facts only: the app's UI renders its copy from them.
     if not driving_run:
-        return SubjectStatus(state=RunState.SCHEDULED)
+        # No run drives it, so it wears no run's state.
+        return SubjectStatus()
     # A parked run is always the active one (ACTIVE_STATES), so the
     # driving run alone decides parked-ness.
     parked = driving_run.state == RunState.PARKED.value
@@ -140,6 +150,7 @@ async def _status(driving_run: Run | None) -> SubjectStatus:
             agent = calls[-1].agent
     return SubjectStatus(
         state=RunState(driving_run.state),
+        run=driving_run.id,
         kind=driving_run.kind,
         agent=agent,
         gate=driving_run.input_gate if parked else None,

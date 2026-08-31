@@ -3,7 +3,7 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import ConfigDict
 
-from druks.schemas import BaseResponse
+from druks.schemas import Schema
 
 if TYPE_CHECKING:
     from druks.services.base import Service
@@ -12,7 +12,7 @@ if TYPE_CHECKING:
 
 # The settings-form field vocabulary (label/help/type), minus everything a
 # write-only paste form has no use for (values, defaults, overrides).
-class ServiceFieldSpec(BaseResponse):
+class ServiceFieldSpec(Schema):
     name: str
     label: str
     help: str
@@ -20,7 +20,7 @@ class ServiceFieldSpec(BaseResponse):
     multiline: bool
 
 
-class ConnectionResponse(BaseResponse):
+class ConnectionResponse(Schema):
     model_config = ConfigDict(from_attributes=True)
 
     id: str
@@ -32,7 +32,7 @@ class ConnectionResponse(BaseResponse):
     revoked_reason: str
 
 
-class ServiceResponse(BaseResponse):
+class ServiceResponse(Schema):
     # Connection state and identity facts only — never a stored secret.
     slug: str
     title: str

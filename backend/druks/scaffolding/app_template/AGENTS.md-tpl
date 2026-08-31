@@ -8,6 +8,8 @@ webhooks, and the dashboard.
 
 - App contracts and the full author surface:
   https://github.com/czpython/druks/blob/main/docs/writing-an-app.md.
+- Pages, blocks, values, fields, actions, and liveness:
+  https://github.com/czpython/druks/blob/main/docs/druks-ui.md.
 - A worked app to read alongside it:
   https://github.com/czpython/druks/tree/main/backend/tests/druks-field_notes.
 - Each stub module under `druks_{{ name }}/` documents its own role in comments.
@@ -18,13 +20,19 @@ webhooks, and the dashboard.
   `[project.entry-points."druks.apps"]` key must equal `{{ name }}`. Boot fails
   loudly on a mismatched key, a duplicate name, an import error, or an unprefixed
   table.
-- Druks discovers leaf modules named `workflows`, `routes`, `subscribers`, and
-  `webhooks`. A capability placed in `workflow.py` is never discovered. Any other
-  module name is inert until a discovered module imports it.
+- Druks discovers leaf modules named `workflows`, `routes`, `pages`,
+  `subscribers`, and `webhooks`. A capability placed in `workflow.py` is never
+  discovered. Any other module name is inert until a discovered module imports it.
+- Screens are Python. `pages.py` declares them and the dashboard renders them;
+  this app writes no JavaScript. An app that needs full control of its interface
+  ships an ESM frontend instead, which the author guide describes.
+- A page function is a pure read. Druks reruns it on load, on an event, on a
+  reconnect, and on a retry, so it must never write, start work, publish an
+  event, answer a gate, or depend on process state.
 - Import the concern namespaces — `druks.apps`, `druks.workflows`,
   `druks.agents`, `druks.db`, `druks.schemas`, `druks.signals`, `druks.events`,
-  `druks.prompts`, `druks.webhooks`, `druks.testing` — never `druks.durable` or an
-  internal module. The root `druks` package exports only its version.
+  `druks.prompts`, `druks.ui`, `druks.webhooks`, `druks.testing` — never
+  `druks.durable` or an internal module. The root `druks` package exports only its version.
 - Domain policy lives here. Generic agent, harness, workspace, sandbox, event, gate,
   webhook, and settings plumbing belongs to Druks. When this app needs
   something the author surface lacks, widen the primitive that already owns the

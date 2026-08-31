@@ -3,6 +3,8 @@ from druks.durable.enums import RunState
 from druks.durable.exceptions import GateTimeout
 from druks.durable.models import AgentCall, Run
 from druks.durable.reads import _status
+from druks.durable.schemas import RunResponse
+from druks.models import Base
 from druks_field_notes.workflows import Summarize
 
 
@@ -136,3 +138,10 @@ async def test_status_falls_back_to_the_terminal_call_error_when_failure_is_null
         )
     ]
     assert (await _status_of(runs)).failure == "crashed in implement"
+
+
+def test_a_run_response_carries_an_orphaned_run():
+    # Every state a run derives projects onto a run response, orphaned included.
+    run = _run("gone", Summarize.kind, RunState.ORPHANED)
+    run.created_at = run.updated_at = Base.utc_now()
+    assert RunResponse.from_run(run, input_request=None).state == RunState.ORPHANED

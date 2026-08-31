@@ -1,8 +1,20 @@
+function span(seconds: number): string {
+  if (seconds < 60) return `${Math.floor(seconds)}s`
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m`
+  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h`
+  return `${Math.floor(seconds / 86400)}d`
+}
+
 export function relTime(secondsAgo: number): string {
-  if (secondsAgo < 60) return `${Math.floor(secondsAgo)}s ago`
-  if (secondsAgo < 3600) return `${Math.floor(secondsAgo / 60)}m ago`
-  if (secondsAgo < 86400) return `${Math.floor(secondsAgo / 3600)}h ago`
-  return `${Math.floor(secondsAgo / 86400)}d ago`
+  return `${span(secondsAgo)} ago`
+}
+
+// How far off a moment is, reading both ways: "5m ago" for one that has passed,
+// "in 5m" for one still to come. A schedule or a deadline needs the second.
+export function timeAway(iso: string): string {
+  const ahead = secondsUntil(iso)
+  if (ahead > 0) return `in ${span(ahead)}`
+  return `${span(-ahead)} ago`
 }
 
 const _absFormatterCache = new Map<string, Intl.DateTimeFormat>()

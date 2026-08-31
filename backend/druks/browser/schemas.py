@@ -3,10 +3,10 @@ from datetime import datetime
 from pydantic import ConfigDict
 
 from druks.browser.enums import BrowserSessionPayloadFormat, BrowserSessionStatus
-from druks.schemas import BaseResponse
+from druks.schemas import Schema
 
 
-class BrowserSessionResponse(BaseResponse):
+class BrowserSessionResponse(Schema):
     model_config = ConfigDict(from_attributes=True)
 
     name: str

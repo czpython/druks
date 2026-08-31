@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react'
 
-import { relTime, secondsSince } from '../lib/format'
+import { timeAway } from '../lib/format'
 
 /**
- * RelTime — a relative-time label ("2m ago") that updates on its own.
+ * RelTime — a relative-time label ("2m ago", "in 2m") that updates on its own.
  *
  * Use instead of inlining ``relTime(secondsSince(iso))``. Pages don't
  * need to refetch just to bump "5m ago" to "6m ago"; the label
@@ -20,7 +20,7 @@ interface RelTimeProps {
 export function RelTime({ iso, fallback = '—', intervalMs = 30_000 }: RelTimeProps) {
   // Force re-render every `intervalMs` ms. Cheaper than tracking the
   // current time in state — we only need React to recompute, not the
-  // actual time value (relTime + secondsSince read Date.now directly).
+  // actual time value (timeAway reads Date.now directly).
   const [, setTick] = useState(0)
   useEffect(() => {
     if (!iso) return
@@ -29,5 +29,5 @@ export function RelTime({ iso, fallback = '—', intervalMs = 30_000 }: RelTimeP
   }, [iso, intervalMs])
 
   if (!iso) return <>{fallback}</>
-  return <>{relTime(secondsSince(iso))}</>
+  return <>{timeAway(iso)}</>
 }

@@ -2,11 +2,12 @@ import type { ReactNode } from 'react'
 
 // The client-side app-UI registry: how an app contributes frontend.
 // An app calls ``registerAppUI`` once at import time with the routes
-// its pages live at; the shell mounts them. Subnav tabs are not part of this —
-// every app declares those on its backend class, and the shell renders them
-// from the roster. An app that registers nothing still gets feed, settings,
-// and usage from the shell for free — those are platform surfaces, not
-// per-app contributions.
+// its pages live at; the shell mounts them. An app whose pages are its own
+// JavaScript declares its subnav tabs here too, because only it knows those
+// URLs; an app whose pages are Python declarations gets its tabs from the
+// roster. An app that registers nothing still gets feed, settings, and usage
+// from the shell for free — those are platform surfaces, not per-app
+// contributions.
 
 // One route an app mounts. ``path`` is a wouter pattern under the router base
 // (e.g. ``/software_factory`` or ``/software_factory/work-items/:slug``); ``render`` receives the matched
@@ -22,6 +23,10 @@ export interface AppUI {
   // The path the brand + dropdown land on (defaults to ``/<name>``).
   home?: string
   routes: AppRoute[]
+  // Subnav tabs as (url, label) pairs, for an app whose pages are its own
+  // JavaScript. A Python-page app leaves this off and declares
+  // ``App.navigation`` on its backend class instead.
+  navigation?: [string, string][]
   // Where a feed row about one of this app's subjects navigates. The shell knows
   // an app has subjects, never where its pages put them.
   subjectPath?: (subject: { type: string; id: string }) => string | undefined
