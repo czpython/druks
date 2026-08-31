@@ -10,6 +10,7 @@ export function Status({ status }: { status: StatusValue }) {
 }
 
 export function Timeline({ title, items }: { title: string; items: TimelineItem[] }) {
+  if (!items.length) return null
   // Already oldest first: Druks orders the items where their stamps keep full
   // precision.
   const ordered = items
@@ -112,6 +113,7 @@ export function Image({
 }
 
 export function Files({ title, files }: { title: string; files: FileSummary[] }) {
+  if (!files.length) return null
   return (
     <div className="dui-files">
       {title && <h3 className="dui-block-title">{title}</h3>}

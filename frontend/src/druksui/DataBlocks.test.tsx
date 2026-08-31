@@ -205,7 +205,7 @@ describe('Table', () => {
     expect(screen.queryByRole('table')).toBeNull()
   })
 
-  it('says nothing of its own when the app said nothing', () => {
+  it('renders nothing at all when the app said nothing', () => {
     const { container } = renderBlocks([
       {
         block: 'table',
@@ -216,7 +216,9 @@ describe('Table', () => {
       },
     ])
 
-    expect(container.querySelector('.dui-table-empty')?.textContent).toBe('')
+    // A heading over an empty box is worse than no block.
+    expect(container.querySelector('.dui-table-block')).toBeNull()
+    expect(screen.queryByText('Peers')).toBeNull()
   })
 
   it('names the table itself, so a reader can tell it from another', () => {
@@ -277,6 +279,21 @@ describe('Table', () => {
     expect(screen.queryByText(/no access/)).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'More' }))
     expect(screen.getByText(/no access/)).toBeTruthy()
+  })
+})
+
+describe('a collection with nothing in it', () => {
+  it('renders nothing rather than a heading over a void', () => {
+    const { container } = renderBlocks([
+      { block: 'list', title: 'Peers', items: [] },
+      { block: 'facts', title: 'About', facts: [] },
+      { block: 'metrics', title: 'Today', metrics: [] },
+      { block: 'image_gallery', title: 'Shots', images: [] },
+      { block: 'columns', blocks: [] },
+      { block: 'stack', gap: 'small', blocks: [] },
+    ])
+
+    expect(container.textContent).toBe('')
   })
 })
 
