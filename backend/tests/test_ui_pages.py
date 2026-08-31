@@ -210,8 +210,16 @@ def test_navigation_takes_only_a_static_top_level_page(monkeypatch, named):
         app.navigation_pages()
 
 
-@pytest.mark.parametrize("prefix, path", [("/pages", "/one"), ("", "/pages/hidden")])
-def test_a_router_cannot_take_the_pages_segment(prefix, path):
+@pytest.mark.parametrize(
+    "prefix, path",
+    [
+        ("/pages", "/one"),
+        ("", "/pages/hidden"),
+        ("/uploads", "/one"),
+        ("", "/uploads/mine"),
+    ],
+)
+def test_a_router_cannot_take_a_platform_segment(prefix, path):
     app = load_app("field_notes")
     module = ModuleType("druks_field_notes.routes")
     module.router = APIRouter(prefix=prefix)

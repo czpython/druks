@@ -132,7 +132,7 @@ def _boot(registered_app: type[App], monkeypatch) -> TestClient:
 
 
 def test_nothing_an_app_declares_can_take_a_read_the_platform_serves(monkeypatch):
-    """Not even a catch-all: the platform's two segments are matched before any router
+    """Not even a catch-all: the platform's own segments are matched before any router
     an app declares, so an author never has to know they are reserved."""
     greedy = APIRouter()
 

@@ -328,6 +328,7 @@ export type Field =
   | (FieldBase & { field: 'multi_select'; options: Option[]; value: string[] })
   | (FieldBase & { field: 'radio'; options: Option[]; value: string })
   | (FieldBase & { field: 'checkbox'; value: boolean })
+  | (FieldBase & { field: 'upload'; accept: string })
 
 // A control that calls one of the app's own operations. The shell resolves the
 // operation to a method and a URL through the roster.

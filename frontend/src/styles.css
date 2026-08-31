@@ -2636,6 +2636,9 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
 .dui-input { width: 100%; background: var(--surface-2); border: 1px solid var(--border-loud); border-radius: 6px; color: var(--text); padding: 8px 10px; font-size: 13px; font-family: inherit; }
 .dui-input:focus-visible { outline: 2px solid var(--bucket-run); outline-offset: 1px; }
 .dui-checkbox { width: 15px; height: 15px; }
+.dui-upload { padding: 6px 8px; }
+.dui-upload::file-selector-button { margin-right: 10px; padding: 5px 10px; border: 1px solid var(--border-loud); border-radius: 5px; background: var(--surface-2); color: var(--text-mid); font-size: 12.5px; font-family: inherit; }
+.dui-upload::file-selector-button:hover { color: var(--text); border-color: var(--text-faint); }
 .dui-field-help { font-size: 11.5px; margin-top: 4px; }
 .dui-field-error { font-size: 11.5px; margin-top: 4px; color: var(--outcome-failed); }
 .dui-form-error { font-size: 12.5px; color: var(--outcome-failed); margin: 8px 0; }

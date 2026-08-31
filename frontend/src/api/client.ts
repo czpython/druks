@@ -8,6 +8,7 @@ import type {
   DashboardHealth,
   App,
   FeedResponse,
+  FileSummary,
   AppsSettingsResponse,
   Harness,
   Identity,
@@ -92,6 +93,24 @@ export async function postJSON<T>(path: string, body: unknown, method = 'POST'):
     headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
     credentials: SAME_ORIGIN,
     body: JSON.stringify(body),
+  })
+  if (!response.ok) {
+    await throwApiError(response, path)
+  }
+  return response.json() as Promise<T>
+}
+
+// A file the operator picked. FormData carries its own multipart boundary, so
+// this sends no content type: setting one would replace the boundary and the
+// server would read nothing.
+export async function postFile<T>(path: string, file: File): Promise<T> {
+  const body = new FormData()
+  body.append('file', file)
+  const response = await fetch(path, {
+    method: 'POST',
+    headers: { Accept: 'application/json' },
+    credentials: SAME_ORIGIN,
+    body,
   })
   if (!response.ok) {
     await throwApiError(response, path)
@@ -213,6 +232,9 @@ export const api = {
   // like any other.
   callOperation: (method: string, path: string, body: unknown) =>
     sendOperation(method, path, body),
+  // An UploadField's file, stored under the app whose page holds the form. The
+  // form then submits the id it answers with.
+  upload: (app: string, file: File) => postFile<FileSummary>(`/api/${app}/uploads`, file),
   answerGate: (run: string, answer: GateAnswer) =>
     postJSON<{ run: string; parkedAt: string; result: string }>(
       `/api/gates/${run}/answer`,

@@ -48,6 +48,7 @@ from .fields import (
     SelectField,
     TextAreaField,
     TextField,
+    UploadField,
 )
 from .page import page
 from .schemas import Page
@@ -100,6 +101,7 @@ __all__ = [
     "TimeValue",
     "Timeline",
     "TimelineItem",
+    "UploadField",
     "Value",
     "page",
 ]

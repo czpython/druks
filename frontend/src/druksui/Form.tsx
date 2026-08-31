@@ -129,7 +129,13 @@ function useAction(action: Action, fieldNames: string[] = []) {
     setProblem('')
     setFieldErrors({})
     try {
-      const { path, body, missing } = address(target, { ...action.arguments, ...values })
+      const { payload, failures } = await store(values)
+      if (Object.keys(failures).length) {
+        setFieldErrors(failures)
+        setPending(false)
+        return
+      }
+      const { path, body, missing } = address(target, { ...action.arguments, ...payload })
       if (missing.length) {
         setProblem(`this action carries no value for ${missing.join(', ')}`)
         setPending(false)
@@ -154,6 +160,23 @@ function useAction(action: Action, fieldNames: string[] = []) {
     } catch (error) {
       setProblem(`saved, but the page did not refresh: ${message(error)}`)
     }
+  }
+
+  // A picked file becomes a stored file before the operation runs, so the
+  // operation takes an id and never the bytes. One that will not store says so
+  // on its own field.
+  async function store(values: Payload) {
+    const payload: Payload = { ...values }
+    const failures: Record<string, string> = {}
+    for (const [name, value] of Object.entries(values)) {
+      if (!(value instanceof File)) continue
+      try {
+        payload[name] = (await api.upload(app, value)).id
+      } catch (error) {
+        failures[name] = message(error)
+      }
+    }
+    return { payload, failures }
   }
 
   async function finish() {
@@ -246,5 +269,8 @@ function message(error: unknown): string {
 }
 
 function startingValue(field: Field): [string, unknown] {
+  // An upload starts empty. No value the server sends could put a file back
+  // into a file input, and the browser would refuse it if it tried.
+  if (field.field === 'upload') return [field.name, null]
   return [field.name, field.value]
 }

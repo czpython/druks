@@ -85,6 +85,21 @@ class CheckboxField(Schema):
     is_required: bool = False
 
 
+class UploadField(Schema):
+    """One file the operator picks. The shell stores it through the platform and
+    submits its id, so the operation takes a plain string."""
+
+    field: Literal["upload"] = "upload"
+    name: str
+    label: str
+    # Straight into the file dialog's own filter, in its own syntax:
+    # "image/*", ".csv,.tsv". It narrows what the operator sees. It is not a
+    # promise about the bytes.
+    accept: str = ""
+    help_text: str = ""
+    is_required: bool = False
+
+
 Field = Annotated[
     TextField
     | TextAreaField
@@ -92,6 +107,7 @@ Field = Annotated[
     | SelectField
     | MultiSelectField
     | RadioField
-    | CheckboxField,
+    | CheckboxField
+    | UploadField,
     Discriminator("field"),
 ]
