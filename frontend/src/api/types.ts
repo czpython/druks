@@ -227,7 +227,6 @@ export interface StatusValue {
   value: 'status'
   label: string
   tone: 'neutral' | 'active' | 'success' | 'warning' | 'danger'
-  kind: 'state' | 'verdict'
 }
 
 export interface TimelineItem {

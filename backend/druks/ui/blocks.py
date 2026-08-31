@@ -293,12 +293,11 @@ class NumberValue(Schema):
 
 class StatusValue(Schema):
     """Where something stands. The app writes the word; the tone selects the
-    presentation, and a ``state`` still moves where a ``verdict`` has settled."""
+    presentation."""
 
     value: Literal["status"] = "status"
     label: str
     tone: Literal["neutral", "active", "success", "warning", "danger"] = "neutral"
-    kind: Literal["state", "verdict"] = "state"
 
     def __init__(self, label: str, **data):
         super().__init__(label=label, **data)

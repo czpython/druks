@@ -59,8 +59,7 @@
           "status": {
             "value": "status",
             "label": "running",
-            "tone": "active",
-            "kind": "state"
+            "tone": "active"
           }
         }
       ]
@@ -83,8 +82,7 @@
           "status": {
             "value": "status",
             "label": "running",
-            "tone": "active",
-            "kind": "state"
+            "tone": "active"
           }
         }
       ]
@@ -175,8 +173,7 @@
           "value": {
             "value": "status",
             "label": "running",
-            "tone": "active",
-            "kind": "state"
+            "tone": "active"
           }
         },
         {
