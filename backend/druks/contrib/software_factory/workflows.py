@@ -99,10 +99,7 @@ class Build(Workflow):
         review_code: bool = Field(
             default=True,
             title="Code review",
-            description=(
-                "Include the code-review lens in the implementation review. It is advisory, "
-                "except that it blocks a regression this PR introduced."
-            ),
+            description="Include the advisory code-review lens in the implementation review.",
         )
 
     @classmethod
