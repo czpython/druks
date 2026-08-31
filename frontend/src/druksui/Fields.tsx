@@ -211,6 +211,22 @@ function Input({
           onChange={(event) => onChange(field.name, event.target.checked)}
         />
       )
+    case 'secret':
+      return (
+        <input
+          {...shared}
+          className="dui-input"
+          // The same masked, password-manager-ignored input the settings modal
+          // uses for the MCP bearer token, so a secret is never on screen and
+          // never offered to a manager as ordinary text.
+          type="password"
+          autoComplete="new-password"
+          data-1p-ignore=""
+          data-lpignore="true"
+          value={String(value ?? '')}
+          onChange={(event) => onChange(field.name, event.target.value)}
+        />
+      )
     case 'upload':
       return (
         <input

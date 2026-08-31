@@ -375,6 +375,13 @@
           "accept": "image/*",
           "helpText": "A picture of the shopfront.",
           "isRequired": false
+        },
+        {
+          "field": "secret",
+          "name": "token",
+          "label": "Access token",
+          "helpText": "From your account settings.",
+          "isRequired": false
         }
       ],
       "action": {

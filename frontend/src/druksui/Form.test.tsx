@@ -133,6 +133,14 @@ const PHOTO: Field = {
   isRequired: false,
 }
 
+const SECRET: Field = {
+  field: 'secret',
+  name: 'token',
+  label: 'Access token',
+  helpText: 'From your account settings.',
+  isRequired: false,
+}
+
 describe('fields', () => {
   it('renders every V1 field', () => {
     renderBlocks([
@@ -580,6 +588,104 @@ describe('what an action does next', () => {
 
     expect(container.querySelector('.dui-action-broken')).toBeTruthy()
     expect(screen.getByText('Ghost').tagName).toBe('SPAN')
+  })
+})
+
+describe('a secret field', () => {
+  it('renders a masked input kept from the password manager, with its metadata', () => {
+    renderBlocks([form([{ ...SECRET, isRequired: true }])])
+
+    const input = screen.getByLabelText(/Access token/) as HTMLInputElement
+    expect(input.type).toBe('password')
+    expect(input.getAttribute('autocomplete')).toBe('new-password')
+    expect(input.getAttribute('data-1p-ignore')).toBe('')
+    expect(input.getAttribute('data-lpignore')).toBe('true')
+    // Label, help, and required survive the same as any other field.
+    expect(input.required).toBe(true)
+    expect(screen.getByText('From your account settings.')).toBeTruthy()
+  })
+
+  it('submits the secret under its name and is empty after a successful submit', async () => {
+    renderBlocks([form([SECRET], action({ refresh: 'none' }))])
+    fireEvent.change(screen.getByLabelText(/Access token/), { target: { value: 'sk-live-abc123' } })
+
+    fireEvent.click(screen.getByText('Save'))
+
+    await waitFor(() => expect(callOperation).toHaveBeenCalled())
+    expect(callOperation).toHaveBeenCalledWith('POST', '/api/field_notes/notes', {
+      token: 'sk-live-abc123',
+    })
+    // The successful-submit reset returns the no-value field to empty.
+    await waitFor(() =>
+      expect((screen.getByLabelText(/Access token/) as HTMLInputElement).value).toBe(''),
+    )
+  })
+
+  it('redacts a refusal that names the secret field, showing neither message nor secret', async () => {
+    callOperation.mockRejectedValueOnce(
+      new ApiError('validation', 422, [
+        { loc: ['body', 'token'], msg: 'Value error, sk-live-abc123 is not a valid token' },
+      ]),
+    )
+    renderBlocks([form([SECRET], action({ refresh: 'none' }))])
+    fireEvent.change(screen.getByLabelText(/Access token/), { target: { value: 'sk-live-abc123' } })
+
+    fireEvent.click(screen.getByText('Save'))
+
+    await waitFor(() => expect(screen.getByText('This value is not valid.')).toBeTruthy())
+    expect(screen.queryByText(/is not a valid token/)).toBeNull()
+    expect(screen.queryByText(/sk-live-abc123/)).toBeNull()
+  })
+
+  it('redacts a refusal naming no field to a fixed form message when a secret is present', async () => {
+    callOperation.mockRejectedValueOnce(
+      new ApiError('validation', 422, [
+        { loc: ['body'], msg: 'Value error, token sk-live-abc123 was rejected' },
+      ]),
+    )
+    renderBlocks([form([SECRET], action({ refresh: 'none' }))])
+
+    fireEvent.click(screen.getByText('Save'))
+
+    await waitFor(() =>
+      expect(screen.getByText('Some of what you entered is not valid.')).toBeTruthy(),
+    )
+    expect(screen.queryByText(/sk-live-abc123/)).toBeNull()
+  })
+
+  it('keeps the server words for a non-secret field even when the form holds a secret', async () => {
+    callOperation.mockRejectedValueOnce(
+      new ApiError('validation', 422, [
+        { loc: ['body', 'budget'], msg: 'Input should be greater than 0' },
+      ]),
+    )
+    const budget: Field = {
+      field: 'number',
+      name: 'budget',
+      label: 'Budget',
+      value: null,
+      minimum: 0,
+      maximum: null,
+      step: null,
+      helpText: '',
+      isRequired: false,
+    }
+    renderBlocks([form([budget, SECRET], action({ refresh: 'none' }))])
+
+    fireEvent.click(screen.getByText('Save'))
+
+    await waitFor(() => expect(screen.getByText('Input should be greater than 0')).toBeTruthy())
+  })
+
+  it('keeps the server words for an unmatched refusal when the form holds no secret', async () => {
+    callOperation.mockRejectedValueOnce(
+      new ApiError('validation', 422, [{ loc: ['body', 'nowhere'], msg: 'model level: incoherent' }]),
+    )
+    renderBlocks([form([BODY], action({ refresh: 'none' }))])
+
+    fireEvent.click(screen.getByText('Save'))
+
+    await waitFor(() => expect(screen.getByText(/model level: incoherent/)).toBeTruthy())
   })
 })
 

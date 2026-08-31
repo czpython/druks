@@ -100,6 +100,20 @@ class UploadField(Schema):
     is_required: bool = False
 
 
+class SecretField(Schema):
+    """A secret the operator hands over — a token, a key. It carries no
+    ``value``, the way ``UploadField`` carries none: a file input cannot be
+    seeded, and a secret must not be, so an app can never echo a stored secret
+    back to the browser by declaring one. The shell masks the input and keeps it
+    from the password manager, and the successful-submit reset clears it."""
+
+    field: Literal["secret"] = "secret"
+    name: str
+    label: str
+    help_text: str = ""
+    is_required: bool = False
+
+
 Field = Annotated[
     TextField
     | TextAreaField
@@ -108,6 +122,7 @@ Field = Annotated[
     | MultiSelectField
     | RadioField
     | CheckboxField
-    | UploadField,
+    | UploadField
+    | SecretField,
     Discriminator("field"),
 ]

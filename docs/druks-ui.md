@@ -62,6 +62,7 @@ TimeValue
 Option  TextField  TextAreaField           fields
 NumberField  SelectField  MultiSelectField
 RadioField  CheckboxField  UploadField
+SecretField
 Block  Value  Field                        the three unions
 ```
 
@@ -514,7 +515,7 @@ Value = Annotated[TextValue | NumberValue | StatusValue | TimeValue, Discriminat
 
 Field = Annotated[
     TextField | TextAreaField | NumberField | SelectField | MultiSelectField
-    | RadioField | CheckboxField | UploadField,
+    | RadioField | CheckboxField | UploadField | SecretField,
     Discriminator("field"),
 ]
 ```
@@ -1217,7 +1218,7 @@ time in the title attribute.
 
 Every field carries a `field` discriminator, `name`, `label`, `help_text`, and
 `is_required`. `name` is the key the shell sends. Every field but `UploadField`
-also has a `value`, which is what it starts on.
+and `SecretField` also has a `value`, which is what it starts on.
 
 ### TextField
 
@@ -1411,6 +1412,41 @@ operator who sent it, both taken from the request rather than from the client.
 A file over the platform's upload cap is refused, and the shell puts the refusal
 on that field. A file whose form is never submitted stays stored with nothing
 pointing at it.
+
+### SecretField
+
+```python
+class SecretField:
+    field: Literal["secret"] = "secret"
+    name: str
+    label: str
+    help_text: str = ""
+    is_required: bool = False
+```
+
+```python
+ui.SecretField(name="token", label="Access token", help_text="From your account settings.")
+```
+
+```json
+{"field": "secret", "name": "token", "label": "Access token", "helpText": "From your account settings.", "isRequired": false}
+```
+
+One secret the operator hands over — a token, a key — and, like `UploadField`,
+no starting `value`: a file input cannot be seeded, and a secret must not be, so
+an app can never echo a stored secret back to the browser by declaring one.
+
+The shell renders it as a masked `type="password"` input that the browser's
+password managers leave alone, the same input the settings modal uses for a
+bearer token. On a successful submit the form's reset returns the field to empty,
+so nothing has to clear it.
+
+Masking protects the screen, not the stored secret. When a route rejects the
+submitted value, its 422 message can carry the secret back — Pydantic embeds the
+submitted input in many of its messages. So the shell shows a fixed line on a
+secret field, and a fixed form-level line for any refusal that names no field on
+screen, whenever the form holds a secret. Every other field still shows the
+server's own words.
 
 ## Page and Follows
 
