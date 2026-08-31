@@ -8,11 +8,13 @@ export function Fields({
   fields,
   values,
   errors,
+  resets,
   onChange,
 }: {
   fields: Field[]
   values: Record<string, unknown>
   errors: Record<string, string>
+  resets: number
   onChange: (name: string, value: unknown) => void
 }) {
   // A page can hold two forms that both take a "body", so the id a label points
@@ -52,6 +54,7 @@ export function Fields({
               onChange={onChange}
               describedBy={describedBy}
               isInvalid={Boolean(errors[field.name])}
+              resets={resets}
             />
             {field.helpText && (
               <div className="dui-field-help dim" id={help}>
@@ -77,6 +80,7 @@ function Input({
   onChange,
   describedBy,
   isInvalid,
+  resets,
 }: {
   field: Field
   id: string
@@ -84,6 +88,7 @@ function Input({
   onChange: (name: string, value: unknown) => void
   describedBy?: string
   isInvalid: boolean
+  resets: number
 }) {
   const shared = {
     id,
@@ -210,6 +215,9 @@ function Input({
       return (
         <input
           {...shared}
+          // A reset gives this a fresh identity, so the browser drops the file
+          // it still holds; clearing React state alone would not.
+          key={resets}
           className="dui-input dui-upload"
           type="file"
           // The picked file itself. The form stores it and submits its id, so

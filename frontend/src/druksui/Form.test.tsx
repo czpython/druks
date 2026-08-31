@@ -5,7 +5,8 @@ import { Router } from 'wouter'
 import { memoryLocation } from 'wouter/memory-location'
 
 import { ApiError, api } from '../api/client'
-import type { Action, Block, Field, Operation, PageEntry } from '../api/types'
+import type { Action, App, Block, Field, Operation, PageEntry, PageSnapshot } from '../api/types'
+import { AppPage } from './AppPage'
 import { Blocks } from './Blocks'
 import { PagesContext } from './pages'
 
@@ -13,12 +14,14 @@ vi.mock('../api/client', async () => {
   const real = await vi.importActual<typeof import('../api/client')>('../api/client')
   return {
     ApiError: real.ApiError,
-    api: { callOperation: vi.fn(), readPage: vi.fn(), upload: vi.fn() },
+    api: { callOperation: vi.fn(), readPage: vi.fn(), upload: vi.fn(), listApps: vi.fn() },
   }
 })
 
 const callOperation = vi.mocked(api.callOperation)
 const upload = vi.mocked(api.upload)
+const readPage = vi.mocked(api.readPage)
+const listApps = vi.mocked(api.listApps)
 
 const PAGES: PageEntry[] = [
   { name: 'notes', label: 'notes', path: '/field_notes', parent: '', order: 0 },
@@ -52,6 +55,41 @@ function renderBlocks(blocks: Block[]) {
     </QueryClientProvider>,
   )
   return { ...rendered, queryClient, location }
+}
+
+// The roster the page path reads its pages and operations from, so a form the
+// server declares resolves its own operation.
+const ROSTER: App[] = [
+  {
+    name: 'field_notes',
+    icon: 'notebook',
+    description: '',
+    builtin: false,
+    subjectTypes: [],
+    hasFrontend: false,
+    navigation: [],
+    pages: [{ name: 'new_note', label: 'new note', path: '/field_notes/notes/new', parent: '', order: 0 }],
+    operations: OPERATIONS,
+  },
+]
+
+// A page whose only block is the form under test, so a refresh reads the page
+// again and hands the form a freshly declared value.
+function notePage(fields: Field[]): PageSnapshot {
+  return { title: 'New note', description: '', blocks: [form(fields)], follows: null }
+}
+
+function renderPage() {
+  listApps.mockResolvedValue(ROSTER)
+  const { hook } = memoryLocation({ path: '/field_notes/notes/new' })
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <Router hook={hook}>
+        <AppPage app="field_notes" page="new_note" />
+      </Router>
+    </QueryClientProvider>,
+  )
 }
 
 function action(overrides: Partial<Action> = {}): Action {
@@ -249,6 +287,17 @@ describe('submitting a form', () => {
 
     await waitFor(() => expect(screen.getByText('the note service is down')).toBeTruthy())
   })
+
+  it('leaves the typed value in place when the submit fails', async () => {
+    callOperation.mockRejectedValueOnce(new ApiError('the note service is down', 503, 'down'))
+    renderBlocks([form([BODY], action({ refresh: 'none' }))])
+    fireEvent.change(screen.getByLabelText(/Note/), { target: { value: 'fix me and retry' } })
+
+    fireEvent.click(screen.getByText('Save'))
+
+    await waitFor(() => expect(screen.getByText('the note service is down')).toBeTruthy())
+    expect((screen.getByLabelText(/Note/) as HTMLInputElement).value).toBe('fix me and retry')
+  })
 })
 
 describe('what an action does next', () => {
@@ -260,6 +309,26 @@ describe('what an action does next', () => {
 
     await waitFor(() => expect(invalidate).toHaveBeenCalled())
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ['page', 'field_notes'] })
+  })
+
+  it('shows what the refreshed declaration carries after a successful submit', async () => {
+    readPage
+      .mockResolvedValueOnce(notePage([{ ...BODY, value: 'first draft' }]))
+      .mockResolvedValue(notePage([{ ...BODY, value: 'server truth' }]))
+    renderPage()
+
+    await waitFor(() =>
+      expect((screen.getByLabelText(/Note/) as HTMLInputElement).value).toBe('first draft'),
+    )
+    fireEvent.change(screen.getByLabelText(/Note/), { target: { value: 'operator typed' } })
+    fireEvent.click(screen.getByText('Save'))
+
+    await waitFor(() => expect(callOperation).toHaveBeenCalled())
+    // The refresh reads the page again, and the form takes the value the server
+    // now declares, not the one the operator typed nor the one it submitted.
+    await waitFor(() =>
+      expect((screen.getByLabelText(/Note/) as HTMLInputElement).value).toBe('server truth'),
+    )
   })
 
   it('navigates to the link it carries, and refreshes nothing', async () => {
@@ -393,12 +462,10 @@ describe('what an action does next', () => {
   })
 
   it('starts a refreshed form over when its fields change', () => {
-    const { rerender } = renderBlocks([form([BODY], action({ refresh: 'none' }))])
+    const { rerender, queryClient, location } = renderBlocks([form([BODY], action({ refresh: 'none' }))])
     fireEvent.change(screen.getByLabelText(/Note/), { target: { value: 'typed' } })
     expect((screen.getByLabelText(/Note/) as HTMLInputElement).value).toBe('typed')
 
-    const location = memoryLocation({ path: '/field_notes/notes/new' })
-    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     rerender(
       <QueryClientProvider client={queryClient}>
         <Router hook={location.hook}>
@@ -414,6 +481,49 @@ describe('what an action does next', () => {
     )
 
     expect((screen.getByLabelText(/Summary/) as HTMLInputElement).value).toBe('')
+  })
+
+  it('keeps a half-filled value across an unsolicited same-shape refresh', () => {
+    const { rerender, queryClient, location } = renderBlocks([form([BODY], action({ refresh: 'none' }))])
+    fireEvent.change(screen.getByLabelText(/Note/), { target: { value: 'half typed' } })
+
+    rerender(
+      <QueryClientProvider client={queryClient}>
+        <Router hook={location.hook}>
+          <PagesContext.Provider
+            value={{ app: 'field_notes', pages: PAGES, operations: OPERATIONS }}
+          >
+            <Blocks blocks={[form([{ ...BODY, value: 'a background value' }], action())]} />
+          </PagesContext.Provider>
+        </Router>
+      </QueryClientProvider>,
+    )
+
+    // The shape did not change, so the operator's edit outlives the refresh.
+    expect((screen.getByLabelText(/Note/) as HTMLInputElement).value).toBe('half typed')
+  })
+
+  it('shows the new declared value when a same-shape refresh arrives after a successful submit with no own refresh', async () => {
+    const { rerender, queryClient, location } = renderBlocks([form([BODY], action({ refresh: 'none' }))])
+    fireEvent.change(screen.getByLabelText(/Note/), { target: { value: 'operator typed' } })
+    fireEvent.click(screen.getByText('Save'))
+    await waitFor(() => expect(callOperation).toHaveBeenCalled())
+
+    rerender(
+      <QueryClientProvider client={queryClient}>
+        <Router hook={location.hook}>
+          <PagesContext.Provider
+            value={{ app: 'field_notes', pages: PAGES, operations: OPERATIONS }}
+          >
+            <Blocks blocks={[form([{ ...BODY, value: 'background declared' }], action({ refresh: 'none' }))]} />
+          </PagesContext.Provider>
+        </Router>
+      </QueryClientProvider>,
+    )
+
+    // The submit had no refresh, so its reset already cleared the edit; the next
+    // same-shape declaration now shows through.
+    expect((screen.getByLabelText(/Note/) as HTMLInputElement).value).toBe('background declared')
   })
 
   it('keeps the control down when the write landed but the refresh did not', async () => {
@@ -507,6 +617,26 @@ describe('an upload field', () => {
     expect(callOperation).toHaveBeenCalledWith('POST', '/api/field_notes/notes', {
       photo: 'file-7',
     })
+  })
+
+  it('has no selected file after a successful submit', async () => {
+    upload.mockResolvedValue({
+      id: 'file-7',
+      name: 'shopfront.jpg',
+      contentType: 'image/jpeg',
+      size: 12,
+      url: '/api/files/file-7',
+    })
+    const { container } = renderBlocks([form([PHOTO], action({ refresh: 'none' }))])
+    pick(container, new File(['jpeg bytes'], 'shopfront.jpg', { type: 'image/jpeg' }))
+    expect(container.querySelector<HTMLInputElement>('input[type="file"]')!.files).toHaveLength(1)
+
+    fireEvent.submit(container.querySelector('form')!)
+
+    await waitFor(() => expect(callOperation).toHaveBeenCalled())
+    await waitFor(() =>
+      expect(container.querySelector<HTMLInputElement>('input[type="file"]')!.files).toHaveLength(0),
+    )
   })
 
   it('puts a refused file on its own field and writes nothing', async () => {

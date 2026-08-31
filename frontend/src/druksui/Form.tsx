@@ -30,16 +30,18 @@ export function Form({
   // so a submission always carries the form on screen.
   const shape = fields.map((one) => `${one.field}:${one.name}`).join('|')
   const [known, setKnown] = useState(shape)
-  const [values, setValues] = useState<Payload>(() => Object.fromEntries(fields.map(startingValue)))
+  const [edits, setEdits] = useState<Payload | null>(null)
+  const [submits, setSubmits] = useState(0)
+  const declared = Object.fromEntries(fields.map(startingValue))
+  const values = edits ?? declared
   if (known !== shape) {
     setKnown(shape)
-    setValues(Object.fromEntries(fields.map(startingValue)))
+    setEdits(null)
   }
-  const run = useAction(
-    action,
-    fields.map((one) => one.name),
-    () => setValues(Object.fromEntries(fields.map(startingValue))),
-  )
+  const run = useAction(action, fields.map((one) => one.name), () => {
+    setEdits(null)
+    setSubmits((count) => count + 1)
+  })
 
   return (
     <form
@@ -55,7 +57,8 @@ export function Form({
         fields={fields}
         values={values}
         errors={run.fieldErrors}
-        onChange={(name, value) => setValues((previous) => ({ ...previous, [name]: value }))}
+        resets={submits}
+        onChange={(name, value) => setEdits({ ...values, [name]: value })}
       />
       {run.problem && (
         <div className="dui-form-error" role="alert">
