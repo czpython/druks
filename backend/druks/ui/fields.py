@@ -22,8 +22,8 @@ class PageField(Schema):
     label: str
     help_text: str = ""
     is_required: bool = False
-    # ``value`` is not here on purpose. An upload and a secret have none, and a
-    # field with nowhere to hold one cannot send a stored secret to the browser.
+    # No ``value`` here: an upload and a secret have none, and a field with
+    # nowhere to hold one cannot send a stored secret to the browser.
 
 
 class TextField(PageField):
