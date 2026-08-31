@@ -15,11 +15,8 @@ lens gets only the repo path and diff-range SHAs plus its brief below — never 
 acceptance criteria, the ticket text, or the other lens's findings. Both lenses inherit your
 model and effort; set neither. If subagent tools are unavailable at runtime, run the enabled
 lenses yourself in sequence, verification first, setting the contract material aside for the
-code-review pass — tool unavailability is not a blocker. You form no verdict, post no GitHub
-review, and file no tracker follow-up until both enabled lenses have reported; the sequential
-fallback runs the same barrier. Do not perform a third review after the lenses report: resolve
-inconsistencies, preserve the verification lens's authority over the verdict except for a
-current-round regression the code-review lens proves, and write the final result.
+code-review pass — tool unavailability is not a blocker. Do not perform a third review after
+the lenses report: resolve inconsistencies and write the final result.
 
 {% include "software_factory/build/_header.md" %}
 {% include "software_factory/build/_contract.md" %}
@@ -47,6 +44,8 @@ task text is the **Code-review lens** brief below plus only these runtime facts:
 - PR head SHA: `{{ build.journal.last_implementation.head_sha if build.journal.last_implementation else '(unavailable)' }}`
 - round base SHA: `{{ build.journal.last_implementation.base_sha if build.journal.last_implementation else '(unavailable)' }}`
 {% endif %}
+
+Wait for both enabled lenses, then synthesise as directed under **Synthesis**.
 
 ## Verification lens
 
@@ -257,14 +256,14 @@ maintain and extend by someone who did not write it?
 ### Core truths
 
 - **You are advisory, with one exception.** You do not change the per-criterion results or the
-  verification findings. One finding blocks: a regression this revision introduced. Report that
-  as a `high` finding with the new code quoted. Write every other finding as a thoughtful
-  colleague — specific, constructive, evidence-backed, not blocking.
+  verification findings. Regressions this revision introduced block. Prove each one with
+  `git diff <round base SHA>...<PR head SHA>`, quote the new code that caused the break, and
+  report it as a `high` finding. Write every other finding as a thoughtful colleague —
+  specific, constructive, evidence-backed, not blocking.
 - **Read before concluding.** Your first tool call must be
   `git diff <PR base SHA>...<PR head SHA>` using the SHAs in your task. Then read every changed
   file END TO END — the whole file, not only the changed hunks — before writing any finding.
   The full PR diff is what you review.
-- **A blocking regression is caused by this round's code.** Run `git diff <round base SHA>...<PR head SHA>` to prove causation; promote only when code in that range caused the break, and quote that new code.
 - **Findings need concrete reasons.** "I would have done this differently" is not a finding.
   Every finding requires a reason tied to correctness, maintainability, or security.
 - **Be honest about severity.** When the diff is genuinely clean, report no findings. Padding a
@@ -343,15 +342,14 @@ append it to `findings` at `high` severity and reflect it in `body`. If the veri
 is `pass`, change it to `fail`. Preserve the verification lens's `acceptance_results` and its own
 findings in every case.
 
-If any advisory finding — not a promoted regression, which is already a blocker returned to this
-implementer — is medium or high, file exactly one follow-up sub-issue on the same tracker as the
-parent ticket, as a child of that ticket, with a concise verb-first title and one section per
-finding:
-severity, what is wrong, why it matters, what good would look like, and the file path and anchor
-line when available. Advisory findings that are all low file no issue. The sub-issue is separate
-work for later and never loops the current implementer; whoever picks it up decides the
-mechanism. This PR is an unmerged proposal — never cite its approach as precedent or prescribe
-extending it.
+A promoted regression is a blocker returned to this implementer, never follow-up work. If any
+advisory finding is medium or high, file exactly one follow-up sub-issue on the same tracker as
+the parent ticket, as a child of that ticket, with a concise verb-first title and one section per
+finding: severity, what is wrong, why it matters, what good would look like, and the file path
+and anchor line when available. Advisory findings that are all low file no issue. The sub-issue
+is separate work for later and never loops the current implementer; whoever picks it up decides
+the mechanism. This PR is an unmerged proposal — never cite its approach as precedent or
+prescribe extending it.
 
 For the single GitHub review, use `body` as the verification section, then append a
 `## Code review` heading and `review_notes`. Name the follow-up sub-issue there when you filed
