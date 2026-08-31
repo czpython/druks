@@ -462,12 +462,10 @@ describe('what an action does next', () => {
   })
 
   it('starts a refreshed form over when its fields change', () => {
-    const { rerender } = renderBlocks([form([BODY], action({ refresh: 'none' }))])
+    const { rerender, queryClient, location } = renderBlocks([form([BODY], action({ refresh: 'none' }))])
     fireEvent.change(screen.getByLabelText(/Note/), { target: { value: 'typed' } })
     expect((screen.getByLabelText(/Note/) as HTMLInputElement).value).toBe('typed')
 
-    const location = memoryLocation({ path: '/field_notes/notes/new' })
-    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     rerender(
       <QueryClientProvider client={queryClient}>
         <Router hook={location.hook}>
@@ -486,11 +484,9 @@ describe('what an action does next', () => {
   })
 
   it('keeps a half-filled value across an unsolicited same-shape refresh', () => {
-    const { rerender } = renderBlocks([form([BODY], action({ refresh: 'none' }))])
+    const { rerender, queryClient, location } = renderBlocks([form([BODY], action({ refresh: 'none' }))])
     fireEvent.change(screen.getByLabelText(/Note/), { target: { value: 'half typed' } })
 
-    const location = memoryLocation({ path: '/field_notes/notes/new' })
-    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     rerender(
       <QueryClientProvider client={queryClient}>
         <Router hook={location.hook}>
@@ -505,6 +501,29 @@ describe('what an action does next', () => {
 
     // The shape did not change, so the operator's edit outlives the refresh.
     expect((screen.getByLabelText(/Note/) as HTMLInputElement).value).toBe('half typed')
+  })
+
+  it('shows the new declared value when a same-shape refresh arrives after a successful submit with no own refresh', async () => {
+    const { rerender, queryClient, location } = renderBlocks([form([BODY], action({ refresh: 'none' }))])
+    fireEvent.change(screen.getByLabelText(/Note/), { target: { value: 'operator typed' } })
+    fireEvent.click(screen.getByText('Save'))
+    await waitFor(() => expect(callOperation).toHaveBeenCalled())
+
+    rerender(
+      <QueryClientProvider client={queryClient}>
+        <Router hook={location.hook}>
+          <PagesContext.Provider
+            value={{ app: 'field_notes', pages: PAGES, operations: OPERATIONS }}
+          >
+            <Blocks blocks={[form([{ ...BODY, value: 'background declared' }], action({ refresh: 'none' }))]} />
+          </PagesContext.Provider>
+        </Router>
+      </QueryClientProvider>,
+    )
+
+    // The submit had no refresh, so its reset already cleared the edit; the next
+    // same-shape declaration now shows through.
+    expect((screen.getByLabelText(/Note/) as HTMLInputElement).value).toBe('background declared')
   })
 
   it('keeps the control down when the write landed but the refresh did not', async () => {
