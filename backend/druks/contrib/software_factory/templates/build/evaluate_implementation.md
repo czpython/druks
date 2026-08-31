@@ -15,10 +15,11 @@ lens gets only the repo path and diff-range SHAs plus its brief below — never 
 acceptance criteria, the ticket text, or the other lens's findings. Both lenses inherit your
 model and effort; set neither. If subagent tools are unavailable at runtime, run the enabled
 lenses yourself in sequence, verification first, setting the contract material aside for the
-code-review pass — tool unavailability is not a blocker. Do not perform a third review after
-the lenses report: resolve inconsistencies, preserve the verification lens's authority over the
-verdict except for a current-round regression the code-review lens proves, and write the final
-result.
+code-review pass — tool unavailability is not a blocker. You form no verdict, post no GitHub
+review, and file no tracker follow-up until both enabled lenses have reported; the sequential
+fallback runs the same barrier. Do not perform a third review after the lenses report: resolve
+inconsistencies, preserve the verification lens's authority over the verdict except for a
+current-round regression the code-review lens proves, and write the final result.
 
 {% include "software_factory/build/_header.md" %}
 {% include "software_factory/build/_contract.md" %}
