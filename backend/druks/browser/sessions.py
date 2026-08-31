@@ -70,6 +70,14 @@ class BrowserSession:
             return BrowserSessionStatus.ANONYMOUS
         return BrowserSessionStatus.NEEDS_LOGIN
 
+    async def get_status(self) -> BrowserSessionStatus:
+        """Where the login stands: READY to borrow, STALE after a run found it
+        signed out, NEEDS_LOGIN before the first sign-in."""
+        row = await StoredBrowserSession.get_for_name(self.name)
+        if row:
+            return BrowserSessionStatus(row.status)
+        return self.initial_status
+
     @asynccontextmanager
     async def cdp(self):
         """A browser carrying the session's login (blank for an anonymous

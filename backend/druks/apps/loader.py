@@ -97,7 +97,8 @@ def load_app(name: str) -> type[App]:
     an entry point that doesn't resolve to an ``App`` raises
     ``MalformedApp``; the app's own code raising on import raises
     ``AppImportError``; a declared subject that fails the read-side contract
-    raises ``AppSubjectContractError``."""
+    raises ``AppSubjectContractError``; a page table a request could not
+    resolve raises ``PageRouteError``."""
     app = _resolve(name)
     try:
         import_app_models(app)
@@ -106,6 +107,8 @@ def load_app(name: str) -> type[App]:
         raise AppImportError(f"app {name!r} failed to import: {error}") from error
     # Outside the try: a contract break is not an import error.
     app.subjects()
+    app.navigation_pages()
+    app.operations()
     return app
 
 
@@ -239,11 +242,13 @@ def mount(api: "FastAPI", app: type[App], modules: list["ModuleType"]) -> None:
 
 
 def load(api: "FastAPI") -> None:
-    """API boot: for each app — discover, validate subjects, mount."""
+    """API boot: for each app — discover, validate subjects and pages, mount."""
     # The table-prefix check runs here, not just in makemigrations — an author
     # who hand-writes migrations still can't boot with an unprefixed table.
     import_app_models()
     for app in iter_apps():
         modules = app.discover()
         app.subjects()
+        app.navigation_pages()
+        app.operations()
         mount(api, app, modules)

@@ -6,6 +6,9 @@ class {{ Name }}(App):
     # Any Lucide glyph name the frontend bundles ("telescope", "hammer", ...).
     icon = "box"
     description = "TODO: one-line blurb shown in the settings pane."
+    # The appbar tabs, as the names of pages declared in pages.py. Each must be
+    # a static top-level page; the tab wears that page's label.
+    navigation = ["overview"]
 
     # Operator-tunable knobs go on an inner ``class Settings(AppSettings)``
     # after importing AppSettings from druks.apps —

@@ -4,7 +4,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from druks.durable.enums import RunState
-from druks.schemas import BaseResponse
+from druks.schemas import Schema
 
 
 class ResumeRequest(BaseModel):
@@ -18,16 +18,16 @@ class ResumeRequest(BaseModel):
     note: str = ""
 
 
-class CancelRunResponse(BaseResponse):
+class CancelRunResponse(Schema):
     run: str
     result: Literal["cancelled", "already_cancelled"]
 
 
-class RetryRunResponse(BaseResponse):
+class RetryRunResponse(Schema):
     run: str
 
 
-class OpenWorkflowResponse(BaseResponse):
+class OpenWorkflowResponse(Schema):
     app: str
     state: RunState
     run: str = Field(description="What get_gate, cancel_run, and retry_run take.")
@@ -38,18 +38,18 @@ class OpenWorkflowResponse(BaseResponse):
     created_at: datetime
 
 
-class OpenSubjectResponse(BaseResponse):
+class OpenSubjectResponse(Schema):
     subject_type: str
     subject_id: str
     subject_label: str
     workflows: list[OpenWorkflowResponse]
 
 
-class OpenSubjectsResponse(BaseResponse):
+class OpenSubjectsResponse(Schema):
     subjects: list[OpenSubjectResponse]
 
 
-class ArtifactContent(BaseResponse):
+class ArtifactContent(Schema):
     # A call's renderable output, served to the in-app review so it can show the
     # plan (or other markdown) beside its controls.
     kind: str
@@ -57,18 +57,18 @@ class ArtifactContent(BaseResponse):
     content: str
 
 
-class WebhookSource(BaseResponse):
+class WebhookSource(Schema):
     source: str
     last_at: datetime | None = None
 
 
-class WebhookFreshness(BaseResponse):
+class WebhookFreshness(Schema):
     # One entry per monitored webhook source, with its newest delivery timestamp;
     # the strip labels a tile per source.
     sources: list[WebhookSource] = Field(default_factory=list)
 
 
-class DashboardHealth(BaseResponse):
+class DashboardHealth(Schema):
     web: Literal["ok", "degraded"]
     webhook_freshness: WebhookFreshness
     spend_today_usd: float | None

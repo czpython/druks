@@ -5,7 +5,6 @@ from alembic import command
 from alembic.config import Config
 from druks.database import make_app_migration
 from druks.files import File, FileField
-from druks.files.models import FileRecord
 from druks.models import Base
 from druks.testing import TEST_DATABASE_URL
 from sqlalchemy import Column, Integer, MetaData, String, Table, create_engine
@@ -80,7 +79,7 @@ def test_app_upgrade_runs_through_platform_env_with_its_own_version_table(tmp_pa
     try:
         command.upgrade(_config(versions, version_table="alembic_version_ext"), "head")
         with engine.connect() as conn:
-            assert conn.exec_driver_sql("SELECT to_regclass('ext_probe')").scalar() is not None
+            assert conn.exec_driver_sql("SELECT to_regclass('ext_probe')").scalar()
             assert (
                 conn.exec_driver_sql("SELECT version_num FROM alembic_version_ext").scalar()
                 == "ext0001"
@@ -129,7 +128,9 @@ def test_app_autogenerate_scopes_to_the_app_metadata(tmp_path):
         engine.dispose()
 
 
-def test_file_field_autogenerates_and_upgrades_with_the_platform_foreign_key(tmp_path, monkeypatch):
+def test_file_field_autogenerates_and_upgrades_with_the_platform_foreign_key(
+    _druks_schema, tmp_path, monkeypatch
+):
     """An app migration renders FileField as a String FK without owning the files table."""
     engine = create_engine(TEST_DATABASE_URL, isolation_level="AUTOCOMMIT")
     package_dir = tmp_path / "migration_probe"
@@ -145,7 +146,6 @@ def test_file_field_autogenerates_and_upgrades_with_the_platform_foreign_key(tmp
         connection.exec_driver_sql(
             "DROP TABLE IF EXISTS migration_probe_files, alembic_version_migration_probe"
         )
-        FileRecord.__table__.create(connection, checkfirst=True)
         connection.commit()
     try:
         make_app_migration(
@@ -158,7 +158,9 @@ def test_file_field_autogenerates_and_upgrades_with_the_platform_foreign_key(tmp
         assert "create_table('migration_probe_files'" in body
         assert "sa.String()" in body
         assert "sa.ForeignKeyConstraint(['image'], ['files.id']" in body
-        assert "create_table('files'" not in body
+        # Only the app's own table: files and everything it names ride along to
+        # resolve foreign keys, and nothing more.
+        assert body.count("create_table(") == 1
 
         command.upgrade(
             _config(

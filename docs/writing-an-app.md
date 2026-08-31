@@ -67,6 +67,7 @@ package modules:
 | `contracts.py` | `AgentOutput` contracts |
 | `schemas.py` | HTTP responses and subject summaries |
 | `routes.py` | FastAPI routers |
+| `pages.py` | `@page` declarations that return `Page` objects |
 | `subscribers.py` | signal reactions |
 | `webhooks.py` | Optional authenticated provider deliveries |
 | `services.py` | Optional `Service` declarations for appliance credentials at external providers |
@@ -74,8 +75,8 @@ package modules:
 | `dist/` | optional built frontend module, mounted inside the shell (served under `/app/<name>`) |
 
 Druks recursively discovers leaf modules named `workflows`, `tasks`, `routes`,
-`subscribers`, `webhooks`, and `services`. A capability hidden in `workflow.py` is not
-discovered. Ordinary names such as `policy.py` and `workspace.py` have no import
+`pages`, `subscribers`, `webhooks`, and `services`. A capability hidden in
+`workflow.py` is not discovered. Ordinary names such as `policy.py` and `workspace.py` have no import
 side effect unless a discovered module imports them.
 
 ## Declare the app
@@ -619,6 +620,22 @@ if status.is_parked:
 question it stopped on. While a run is active, `await repository.get_phase()`
 returns the step it is on.
 
+A subject that Druks did not run has no state: `status.state` is None, and so
+is `status.run`. `get_status(workflow=NightWatch)` narrows the read to one
+workflow's runs. It answers the same way when the subject has no run of that
+kind.
+
+A page that lists subjects reads them all at once instead. `get_statuses()`
+takes the ids and returns one status per id, in a single read:
+
+```python
+summaries = await Repository.list_summaries(account_id)
+statuses = await Repository.get_statuses([summary.id for summary in summaries])
+```
+
+This is the read the platform's own board uses, so a declared page listing
+fifty rows costs one query rather than fifty.
+
 ## Record events and react to signals
 
 Record an event through the app. Druks stamps its ownership:
@@ -730,8 +747,8 @@ Druks scopes autogeneration to the table prefix and writes the version to
 `alembic_version_night_watch`. Query through `druks.db.db_session()` inside an
 HTTP request, durable step, or other platform-bound session.
 
-HTTP response models subclass `druks.schemas.BaseResponse`, whose snake_case
-fields serialize as camelCase. Request models are ordinary Pydantic models.
+HTTP response models subclass `druks.schemas.Schema`, whose snake_case fields
+serialize as camelCase. Request models are ordinary Pydantic models.
 Druks mounts each router from a discovered `routes.py` below the app namespace.
 It tags the router with the app name. A router declares only the prefix of its
 resource:
@@ -772,9 +789,11 @@ Two spellings run through druks, and which one a segment wears says who owns it:
 
 Thus, `/api/review/pull_request` is the subject board for review runs.
 `/api/review/reviews` is the resource that your POST creates. The platform
-matches `<subject_type>` and `transcripts` before your routers. A custom router
-cannot take a platform read, including through a catch-all. Name the router for
-its resource to prevent a conflict.
+matches `<subject_type>`, `transcripts`, and `pages` before your routers. A
+custom router cannot take a platform read, including through a catch-all.
+`transcripts` and `pages` are reserved: a subject type or a router prefix that
+takes one fails the load. Name the router for its resource to prevent a
+conflict.
 
 ## Declare a service
 
@@ -1143,6 +1162,193 @@ DBOS system tables through DBOS database migrations. It does not reset or drop a
 schema. It rolls back each test write through `druks_db`. `druks_redis`
 runs `FLUSHDB` on the test index.
 
+## Declare pages
+
+An app declares its screens in Python and ships no JavaScript. Pages live in
+`pages.py`:
+
+```python
+from druks import ui
+
+
+@ui.page("/")
+async def reports():
+    return ui.Page("Reports", description="Every sweep this install ran.")
+
+
+@ui.page("/peers/{peer_id}")
+async def peer(peer_id: int):
+    return ui.Page(title=f"Peer {peer_id}")
+
+
+@peer.child("/history")
+async def peer_history(peer_id: int):
+    return ui.Page(title=f"Peer {peer_id} history")
+```
+
+`@page` declares a top-level page. `@parent.child` declares a page under it,
+one level deep. A page function takes one parameter for each parameter of its
+route, so a child inherits its parent's. It needs no return annotation.
+
+Exactly one page declares `/`. That page is the one the app opens on. A static
+child renders as a tab on its parent. A parameterized child is a detail page a
+`Link` reaches.
+
+The page name is the function name. The page label is that name with its
+underscores as spaces, and `label=` overrides it.
+
+`App.pages()` enumerates the pages in route-match order: literal segments
+before parameters, at every depth. Declaration order never decides a match.
+
+`navigation` names the pages the appbar shows as subnav tabs, in order. Each
+one must be a static top-level page. The tab wears the page's label, so an app
+never spells a label twice:
+
+```python
+class NightWatch(App):
+    name = "night_watch"
+    navigation = ["reports"]
+```
+
+Druks checks the whole table at boot. A missing landing page, a repeated page
+name, a nested child, two routes a request could not tell apart, a signature
+that does not match its route, or a navigation entry that is not a static
+top-level page fails the load, with the app name and the exact cause.
+
+### A page function is a pure read
+
+Druks reruns a page function on initial load, on an event, on reconnect, on a
+manual refresh, and on a retry. The call count and the call order are not
+guaranteed. These are the rules.
+
+A page function can:
+
+- read Druks state,
+- read the app's own data,
+- read a projection,
+- read a read-only external source.
+
+A page function must not:
+
+- write data,
+- start or enqueue work,
+- publish an event,
+- answer a gate,
+- cause an external effect,
+- depend on mutable process state.
+
+Write the function so that a repeat call is free. Put every write behind an
+operation the operator triggers.
+
+### Watch a subject
+
+A page, or a named region inside it, declares the subject it `follows`. Druks
+streams that subject through the read side every app already gets, and the
+shell rereads the page on each snapshot:
+
+```python
+@ui.page("/notes/{note_id}")
+async def note(note_id: int):
+    found = await Note.get(note_id)
+    status = await found.get_status()
+    if status.gate:
+        decision = [ui.GateControls(status.run)]
+    else:
+        decision = [ui.Text("Nothing is waiting on you.")]
+    return ui.Page(
+        title=f"Note {note_id}",
+        blocks=[ui.Section(title="Your decision", name="decision", follows=found, blocks=decision)],
+    )
+```
+
+The shell replaces the named region and leaves the rest of the page alone, so
+scroll position, focus, and half-filled inputs outside it survive. A region
+that follows a subject must have a name; that is how the shell finds it.
+
+`GateControls` names only the run. The shell reads the ask, its options, its
+context, and its artifact from the parked run, and submits the operator's
+answer with the run's `parkedAt`. A `GateControls` block must sit inside
+something that follows a subject, or an answered gate would stay on screen.
+
+### Let an operator act
+
+A page acts through the app's own routes. Give the route an `operation_id`, and
+name it from an `Action`:
+
+```python
+# routes.py
+@router.post("/notes", status_code=201, operation_id="write_note")
+async def write_note(body: Annotated[str, Body(embed=True)]) -> dict[str, int]:
+    note = await Note.create(body=body)
+    await Summarize.dispatch(note=note)
+    return {"id": note.id}
+```
+
+```python
+# pages.py
+@ui.page("/notes/new")
+async def new_note():
+    return ui.Page(
+        "Write a note",
+        blocks=[
+            ui.Form(
+                title="New note",
+                fields=[ui.TextAreaField(name="body", label="Note", is_required=True, rows=3)],
+                action=ui.Action(
+                    label="Save",
+                    operation="write_note",
+                    tone="primary",
+                    link=ui.Link("Notes", page="notes"),
+                ),
+            )
+        ],
+    )
+```
+
+The shell resolves the operation to its method and URL, so the author writes no
+URL. It sends the action's `arguments` and the field values as one object, fills
+the route's path parameters from it, and posts the rest as the body. Your route
+keeps the identity gate, and its Pydantic and FastAPI errors come back on the
+fields they belong to.
+
+Once the operation answers, the action does what it declared: `refresh` reads
+the page or the region again, `link` navigates, and `confirm` asks the operator
+first. A `tone` of `danger` says so on screen.
+
+A form that needs a token takes a `ui.SecretField`:
+
+```python
+ui.SecretField(name="token", label="Access token", help_text="From your account settings.")
+```
+
+Druks masks it, keeps it from the browser's password managers, and leaves it
+empty after a successful submit. A refusal shows a fixed line, never the
+server's words, because a validation message can carry the token back.
+
+The masking protects the screen. Your operation receives the token in plain
+text and owns it from there. Keep one secret per record in an
+`EncryptedJsonField` column or a `SecretsMapping`. A token the whole app shares
+belongs in `AppSettings` as a `Secret`, where Druks encrypts it and never reads
+it back.
+
+Two routes of one app cannot share an `operation_id`. An action that names an
+operation the app does not declare, a GET route, or a route with a query
+parameter fails the page read: a GET is a read, and an action fills path
+parameters and a JSON body.
+
+### What V1 leaves out
+
+V1 has no `Tabs` block, no accordion, no expandable table row, no modal, no
+inline reveal form, and no general client-state API. Static child pages already
+give tabs, and the URL holds the current one.
+
+`MoneyValue`, `PercentValue`, `DurationValue`, and date and time input fields
+are agreed and named. Druks adds each one when an app needs it; ask rather than
+working around it.
+
+The [Druks UI contract](druks-ui.md) holds the block, value, and field catalog,
+actions, and liveness.
+
 ## Frontends
 
 An installed app is visible in the dashboard without a custom UI. The shell
@@ -1154,21 +1360,16 @@ summary fields form the board row.
 No additional declaration is necessary.
 The shell derives the switcher label from `name` (underscores become spaces).
 
-The app declares chrome contributions as data. `navigation` on the app class
-adds appbar subnav tabs as `(url, name)` pairs. The shell shows these tabs for
-generic pages and shipped frontends. The active tab has the URL that is the
-longest prefix of the current location:
+An app that needs full control of its interface ships a frontend instead — the
+escape hatch, not the ordinary path. Its pages are its own JavaScript, so it
+declares its own tabs there and leaves `App.navigation` empty. The scaffold
+writes no JavaScript and no `dist/`; add one only when the block catalog cannot
+say what your app needs to say.
 
-```python
-class NightWatch(App):
-    name = "night_watch"
-    navigation = [("/night_watch", "reports")]
-```
-
-To add custom pages, ship a frontend. It is an ES module that the shell mounts
-inside its own document, below the chrome. The scaffold ships a placeholder
-`druks_night_watch/dist/entry.js`. Set the frontend build output to that `dist/`
-directory. The contract uses `shellApi: 1`:
+The frontend is an ES module that the shell mounts
+inside its own document, below the chrome. The scaffold writes none, so an app
+that takes this path creates `druks_night_watch/dist/` itself and points its
+frontend build output there. The contract uses `shellApi: 1`:
 
 - **Entry module:** `entry.js` exports `shellApi = 1` and `mount(el, ctx)`. The function renders into
   `el` and returns a dispose function. A missing `mount` or a version mismatch
@@ -1207,7 +1408,8 @@ Import from concern namespaces, not from `druks.durable` or internal modules:
 | `druks.workflows` | `Workflow`, `Gate`, `step`, run/agent response types, lifecycle enums and workflow errors |
 | `druks.sandbox` | `Sandbox` |
 | `druks.db` | `Base`, `StoredSubject`, `db_session` |
-| `druks.schemas` | `BaseResponse` |
+| `druks.schemas` | `Schema` |
+| `druks.ui` | `Action`, `Block`, `Callout`, `Card`, `Cards`, `Chart`, `ChartSeries`, `CheckboxField`, `Columns`, `Divider`, `EmptyState`, `Fact`, `Facts`, `Field`, `FileSummary`, `Files`, `Follows`, `Form`, `GateControls`, `Image`, `ImageGallery`, `Link`, `List`, `Markdown`, `Metric`, `Metrics`, `MultiSelectField`, `NumberField`, `NumberValue`, `Option`, `Page`, `Progress`, `ProgressStep`, `RadioField`, `Section`, `SecretField`, `SelectField`, `Stack`, `StatusValue`, `Table`, `TableColumn`, `TableRow`, `Text`, `TextAreaField`, `TextField`, `TextValue`, `TimeValue`, `Timeline`, `TimelineItem`, `UploadField`, `Value`, `page` |
 | `druks.signals` | `subscribe` |
 | `druks.events` | `Event` |
 | `druks.files` | `File`, `FileField` |

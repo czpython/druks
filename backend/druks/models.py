@@ -11,7 +11,7 @@ from sqlalchemy.types import TypeDecorator
 from druks.core.utils.time import ensure_utc
 
 if TYPE_CHECKING:
-    from druks.durable.schemas import RunResponse, SubjectStatus, SubjectSummary
+    from druks.durable.schemas import SubjectStatus, SubjectSummary
     from druks.workflows import Workflow
 
 _CAMEL_BOUNDARY = re.compile(r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])")
@@ -110,10 +110,15 @@ class StoredSubject(Base):
 
         return await get_subject_status(self.subject_type, str(self.id), workflow=workflow)
 
-    async def get_timeline(self) -> "list[RunResponse]":
-        from druks.durable.reads import list_subject_timeline
+    @classmethod
+    async def get_statuses(cls, subject_ids: Sequence[str | int]) -> "dict[str, SubjectStatus]":
+        """Where a whole board stands, keyed by subject id — one read for the whole
+        board, so a page listing rows does not ask once per row."""
+        from druks.durable.reads import get_subject_statuses
 
-        return await list_subject_timeline(self.subject_type, str(self.id))
+        return await get_subject_statuses(
+            cls.subject_type, [str(subject_id) for subject_id in subject_ids]
+        )
 
     async def get_phase(self) -> str | None:
         from druks.durable.reads import get_subject_phase
