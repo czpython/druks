@@ -1321,18 +1321,15 @@ A form that needs a token takes a `ui.SecretField`:
 ui.SecretField(name="token", label="Access token", help_text="From your account settings.")
 ```
 
-It renders masked, is kept from the browser's password managers, carries no
-starting value, and clears itself on a successful submit. When a route rejects
-the value, the shell shows a fixed line rather than the server's — a validation
-message can echo the submitted token back — and does the same for any refusal
-that names no field on screen while the form holds a secret.
+Druks masks it, keeps it from the browser's password managers, and leaves it
+empty after a successful submit. A refusal shows a fixed line, never the
+server's words, because a validation message can carry the token back.
 
-That masking protects the screen, not the stored secret. Your operation receives
-the plaintext token and stays responsible for keeping it safe. For one secret per
-record — a credential per connected account — store it in an
-`EncryptedJsonField` column or a `SecretsMapping`, never a plain string. A token
-the whole app shares belongs in `AppSettings` with a `Secret` field instead,
-where the platform masks, encrypts, and never reads it back — not in a form.
+The masking protects the screen. Your operation receives the token in plain
+text and owns it from there. Keep one secret per record in an
+`EncryptedJsonField` column or a `SecretsMapping`. A token the whole app shares
+belongs in `AppSettings` as a `Secret`, where Druks encrypts it and never reads
+it back.
 
 Two routes of one app cannot share an `operation_id`. An action that names an
 operation the app does not declare, a GET route, or a route with a query

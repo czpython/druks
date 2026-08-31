@@ -1432,21 +1432,20 @@ ui.SecretField(name="token", label="Access token", help_text="From your account 
 {"field": "secret", "name": "token", "label": "Access token", "helpText": "From your account settings.", "isRequired": false}
 ```
 
-One secret the operator hands over — a token, a key — and, like `UploadField`,
-no starting `value`: a file input cannot be seeded, and a secret must not be, so
-an app can never echo a stored secret back to the browser by declaring one.
+One secret the operator hands over: a token, a key.
 
-The shell renders it as a masked `type="password"` input that the browser's
-password managers leave alone, the same input the settings modal uses for a
-bearer token. On a successful submit the form's reset returns the field to empty,
-so nothing has to clear it.
+It has no `value`. A file input cannot be seeded, and a secret must not be. A
+field with nowhere to put one cannot send a stored secret back to the browser.
 
-Masking protects the screen, not the stored secret. When a route rejects the
-submitted value, its 422 message can carry the secret back — Pydantic embeds the
-submitted input in many of its messages. So the shell shows a fixed line on a
-secret field, and a fixed form-level line for any refusal that names no field on
-screen, whenever the form holds a secret. Every other field still shows the
-server's own words.
+The shell masks it and keeps it from the browser's password managers. A
+successful submit leaves it empty.
+
+Masking protects the screen. It does not protect the stored secret.
+
+A refusal never repeats the server's words on a secret field. The shell shows a
+fixed line, because a validation message can carry the submitted value back. It
+shows a fixed line on the form too, for a refusal that names no field on screen.
+Every other field keeps the server's own words.
 
 ## Page and Follows
 

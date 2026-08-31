@@ -101,10 +101,8 @@ class UploadField(Schema):
 
 
 class SecretField(Schema):
-    """A secret the operator hands over — a token, a key. It carries no
-    ``value``, the way ``UploadField`` carries none: a file input cannot be
-    seeded, and a secret must not be, so an app can never echo a stored secret
-    back to the browser by declaring one."""
+    """One secret the operator hands over: a token, a key. It has no ``value``,
+    so a page cannot send a stored secret back to the browser."""
 
     field: Literal["secret"] = "secret"
     name: str

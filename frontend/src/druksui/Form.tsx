@@ -325,9 +325,8 @@ function problems(
       continue
     }
     if (hasSecret) {
-      // No field on screen owns this — a model-level validator, or a route
-      // parameter named otherwise. Either could have seen the secret, so keep
-      // its words off the screen.
+      // No field on screen owns this one. Whatever raised it saw the whole
+      // body, so keep its words off the screen.
       redactForm = true
       continue
     }
