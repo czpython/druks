@@ -17,6 +17,16 @@ class BrowserSessionUnknownError(BrowserApiError):
         super().__init__(f"Browser session {name!r} does not exist.")
 
 
+class BrowserSessionAnonymousError(BrowserApiError):
+    status_code = 409
+
+    def __init__(self, name: str) -> None:
+        super().__init__(
+            f"Browser session {name!r} is anonymous; it needs no login and "
+            "stores no state. Borrow it directly."
+        )
+
+
 class BrowserSessionNotReadyError(Exception):
     def __init__(self, name: str, status: str) -> None:
         super().__init__(f"Browser session {name!r} is {status}; log in before borrowing it.")

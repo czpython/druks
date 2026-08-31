@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Self
 from druks.models import snake_name
 
 if TYPE_CHECKING:
-    from druks.durable.schemas import RunResponse, SubjectStatus, SubjectSummary
+    from druks.durable.schemas import SubjectStatus, SubjectSummary
     from druks.workflows import Workflow
 
 
@@ -39,7 +39,7 @@ class Subject:
         return self.id
 
     @classmethod
-    def get_for_subject_id(cls, subject_id: str) -> Self | None:
+    async def get_for_subject_id(cls, subject_id: str) -> Self | None:
         """The subject this id names. Ids reach the read side as free text off a URL,
         so override to return None for a shape this subject could never wear."""
         return cls(id=subject_id)
@@ -52,7 +52,7 @@ class Subject:
         )
 
     @classmethod
-    def list_summaries(cls, account_id: str | None) -> "Sequence[SubjectSummary]":
+    async def list_summaries(cls, account_id: str | None) -> "Sequence[SubjectSummary]":
         """The subjects on this class's board, newest-movement first, each as its domain
         summary. ``account_id`` is the caller, or None outside a request. A shared
         board ignores it. Returns a covariant ``Sequence`` so an app can return
@@ -62,18 +62,20 @@ class Subject:
             f"a workflow declares {cls.__name__}, so it needs a list_summaries()"
         )
 
-    def get_status(self, *, workflow: "type[Workflow] | None" = None) -> "SubjectStatus":
+    async def get_status(self, *, workflow: "type[Workflow] | None" = None) -> "SubjectStatus":
         """Where this subject stands: the state of the run driving it, narrowed to one
         workflow's runs when a subject has several kinds in flight."""
         from druks.durable.reads import get_subject_status
 
-        return get_subject_status(self.subject_type, self.id, workflow=workflow)
+        return await get_subject_status(self.subject_type, self.id, workflow=workflow)
 
-    def get_timeline(self) -> "list[RunResponse]":
-        """Every run about this subject, oldest first, each with its agent calls."""
-        from druks.durable.reads import list_subject_timeline
+    @classmethod
+    async def get_statuses(cls, subject_ids: Sequence[str]) -> "dict[str, SubjectStatus]":
+        """Where a whole board stands, keyed by subject id — one read for the whole
+        board, so a page listing subjects does not ask once per row."""
+        from druks.durable.reads import get_subject_statuses
 
-        return list_subject_timeline(self.subject_type, self.id)
+        return await get_subject_statuses(cls.subject_type, list(subject_ids))
 
     async def get_phase(self) -> str | None:
         """The step it is on right now ("provisioning_vm"), while something is running."""
@@ -82,7 +84,7 @@ class Subject:
         return await get_subject_phase(self.subject_type, self.id)
 
     @classmethod
-    def list_open(cls, *, limit: int = 50) -> list[Self]:
+    async def list_open(cls, *, limit: int = 50) -> list[Self]:
         """The subjects of this class whose newest run hasn't handed off — still going,
         or failed and wanting the operator. What an app's active view lists when
         the subject is identity alone; a subject with rows of its own lists them with
@@ -91,5 +93,5 @@ class Subject:
         from druks.database import db_session
         from druks.durable.models import Run
 
-        open_ids = db_session().scalars(Run.open_subject_ids(cls.subject_type).limit(limit))
+        open_ids = await db_session().scalars(Run.open_subject_ids(cls.subject_type).limit(limit))
         return [cls(id=subject_id) for subject_id in open_ids]

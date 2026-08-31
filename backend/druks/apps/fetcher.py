@@ -17,7 +17,7 @@ async def fetch_file(*, repo: str, path: str) -> str | None:
         if time.time() - cache.stat().st_mtime < _TTL_SECONDS:
             return cache.read_text() or None
 
-    github = get_github_client()
+    github = await get_github_client()
 
     try:
         body = await github.get_file_content(repo, path)

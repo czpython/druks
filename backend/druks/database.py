@@ -1,12 +1,18 @@
 import asyncio
-from collections.abc import Iterator
-from contextlib import contextmanager
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from sqlalchemy import create_engine
-from sqlalchemy.orm import Session, scoped_session, sessionmaker
+from sqlalchemy.ext.asyncio import (
+    AsyncSession,
+    async_scoped_session,
+    async_sessionmaker,
+    create_async_engine,
+)
 
 _ALEMBIC_INI = Path(__file__).resolve().parent.parent / "alembic.ini"
+_MIGRATION_SUPPORT_ONLY = "migration_support_only"
 
 
 def run_migrations(database_url: str) -> None:
@@ -43,6 +49,7 @@ def make_app_migration(app_name: str, message: str, database_url: str) -> None:
     from sqlalchemy import MetaData
 
     from druks.apps.loader import get_app, import_app_models
+    from druks.files import models  # noqa: F401  # the files table joins Base.metadata
     from druks.models import Base
 
     import_app_models()
@@ -56,6 +63,16 @@ def make_app_migration(app_name: str, message: str, database_url: str) -> None:
     for table in Base.metadata.tables.values():
         if table.name.startswith(app.table_prefix):
             table.to_metadata(scoped)
+    # FileField points at the platform files table, and that table points at
+    # others. They all ride along so every foreign key resolves; include_object
+    # keeps each of them out of the app's own diff.
+    supporting = [Base.metadata.tables["files"]]
+    for table in supporting:
+        for key in table.foreign_key_constraints:
+            if key.referred_table not in supporting:
+                supporting.append(key.referred_table)
+    for table in supporting:
+        table.to_metadata(scoped).info[_MIGRATION_SUPPORT_ONLY] = True
 
     config = Config(str(_ALEMBIC_INI))
     config.set_main_option("version_locations", str(migrations_dir / "versions"))
@@ -77,17 +94,24 @@ def _app_migration_dirs() -> list[tuple[str, Path]]:
 
 
 def create_engine_from_url(database_url: str):
-    # Normal transactional engine: one transaction per request/task, committed
-    # at the lifecycle boundary (the API session dependency, the worker session
-    # wrapper) so a failed unit of work rolls back instead of leaving partial
-    # writes. Model methods ``flush()``; the boundary commits. Low pool_timeout
-    # because a checkout wait blocks the event loop. The pool serves every
-    # concurrent run's steps plus request handling at once: a modest steady
-    # pool, with overflow doing the burst work — overflow connections open on
-    # demand and close on return, so the ceiling is high while idle cost is
-    # not. Ceiling 50 keeps the appliance (with DBOS's two engines at 20 each)
-    # inside Postgres's default 100 connections.
-    return create_engine(
+    # Synchronous engine for one-shot processes outside the event loop: the
+    # migrate step's seeding, the test harness's schema setup. The running app
+    # uses create_async_engine_from_url.
+    return create_engine(database_url, pool_pre_ping=True)
+
+
+def create_async_engine_from_url(database_url: str):
+    # The app's engine: one transaction per request/task, committed at the
+    # lifecycle boundary (the API session dependency, the step session) so a
+    # failed unit of work rolls back instead of leaving partial writes. Model
+    # methods ``flush()``; the boundary commits. A checkout wait suspends the
+    # task, so exhaustion is backpressure — the low pool_timeout still bounds
+    # it. The pool serves every concurrent run's steps plus request handling
+    # at once: a modest steady pool, with overflow doing the burst work —
+    # overflow connections open on demand and close on return, so the ceiling
+    # is high while idle cost is not. Ceiling 50 keeps the appliance (with
+    # DBOS's two engines at 20 each) inside Postgres's default 100 connections.
+    return create_async_engine(
         database_url,
         pool_pre_ping=True,
         pool_timeout=5,
@@ -96,8 +120,8 @@ def create_engine_from_url(database_url: str):
     )
 
 
-def get_session(engine) -> Session:
-    return Session(engine, autocommit=False, autoflush=True)
+def get_session(engine) -> AsyncSession:
+    return AsyncSession(engine, autoflush=True, expire_on_commit=False)
 
 
 def _session_scope() -> object | None:
@@ -107,30 +131,30 @@ def _session_scope() -> object | None:
         return None
 
 
-_session_factory = sessionmaker(class_=Session, autoflush=True)
-db_session: scoped_session = scoped_session(_session_factory, scopefunc=_session_scope)
+_session_factory = async_sessionmaker(class_=AsyncSession, autoflush=True, expire_on_commit=False)
+db_session: async_scoped_session = async_scoped_session(_session_factory, scopefunc=_session_scope)
 
 
 def configure_session(engine) -> None:
     _session_factory.configure(bind=engine)
 
 
-@contextmanager
-def session_scope(engine) -> Iterator[None]:
+@asynccontextmanager
+async def session_scope(engine) -> AsyncIterator[None]:
     """Bind a fresh DB session to the ``db_session`` registry for the block,
     removing it on exit — for work that runs outside the request/task session
     boundary (launch's schedule reconcile, a stream's per-poll snapshot), so it
     can't leak a session per viewer. Commits on success like the request
     boundary — a bare Session close rolls back, silently discarding the
     block's writes."""
-    with get_session(engine) as session:
+    async with get_session(engine) as session:
         db_session.registry.set(session)
         try:
             yield
         except BaseException:
-            session.rollback()
+            await session.rollback()
             raise
         else:
-            session.commit()
+            await session.commit()
         finally:
-            db_session.remove()
+            await db_session.remove()

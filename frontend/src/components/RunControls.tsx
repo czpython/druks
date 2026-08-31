@@ -90,11 +90,25 @@ const CONTROL_LABEL: Record<string, string> = {
   revise_contract: 'Revise contract',
 }
 
-// The in-app review: the artifact (the plan), structured question options, one
+// The in-app review: the reviewed artifact, structured question options, one
 // note, and the workflow's controls. A click resumes the run with
-// {control, answers, note}; free text is content for the next plan pass, never a
-// control.
-export function InAppReview({ runId, ask }: { runId: string; ask: InputRequest }) {
+// {control, answers, note}; free text is content for the next agent prompt,
+// never a control.
+export function InAppReview({
+  runId,
+  ask,
+  send,
+}: {
+  runId: string
+  ask: InputRequest
+  // How the answer reaches the platform. A page's GateControls answers through
+  // the gate route with the run's parkedAt; without one, this resumes the run.
+  send?: (answer: {
+    control: string
+    answers: Record<string, string>
+    note: string
+  }) => Promise<unknown>
+}) {
   const [answers, setAnswers] = useState<Record<string, string>>({})
   const [note, setNote] = useState('')
   const [pending, setPending] = useState<string | null>(null)
@@ -126,10 +140,15 @@ export function InAppReview({ runId, ask }: { runId: string; ask: InputRequest }
   async function choose(control: string) {
     setPending(control)
     setError(null)
+    const answer = { control, answers, note: note.trim() }
     try {
       // The run un-parks; the subject's SSE stream re-emits the snapshot and this
       // banner clears itself.
-      await api.resumeRun(runId, { control, answers, note: note.trim() })
+      if (send) {
+        await send(answer)
+      } else {
+        await api.resumeRun(runId, answer)
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'could not submit')
       setPending(null)
@@ -140,7 +159,7 @@ export function InAppReview({ runId, ask }: { runId: string; ask: InputRequest }
     <div className="ins-needs">
       {critique && (
         <div className="review-artifact">
-          <div className="review-artifact-title">Plan reviewer critique</div>
+          <div className="review-artifact-title">Critique</div>
           <Markdown source={critique} />
         </div>
       )}
@@ -174,14 +193,18 @@ export function InAppReview({ runId, ask }: { runId: string; ask: InputRequest }
           </fieldset>
         )
       })}
+      <label className="review-note-label" htmlFor={`${runId}-note`}>
+        Your note
+      </label>
       <textarea
+        id={`${runId}-note`}
         className="review-note"
-        placeholder="optional note — what should the next pass change?"
+        placeholder="optional note — what should change?"
         value={note}
         onChange={(e) => setNote(e.target.value)}
       />
       <div className="review-helper">
-        Approving with a note starts another plan pass instead of confirming the plan.
+        A note is sent to the agent as feedback.
       </div>
       <div className="review-controls">
         {ask.controls?.map((control) => {

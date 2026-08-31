@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock
 import pytest
 from drukbox_sdk import SandboxHost as SandboxHostRecord
 from druks.sandbox.exceptions import SandboxError
-from druks.sandbox.host import ExecResult, Sandbox, _stream_local_tar_into
+from druks.sandbox.host import ExecResult, Host, _stream_local_tar_into
 
 
 @dataclass
@@ -121,9 +121,9 @@ def patched_asyncssh(
 
 def test_expires_at_parses_the_record_lease(fake_record: SandboxHostRecord):
     """expires_at reads the record's ISO lease as an aware datetime, None when absent."""
-    leased = Sandbox(record=replace(fake_record, expires_at="2026-05-28T12:00:00+00:00"))
+    leased = Host(record=replace(fake_record, expires_at="2026-05-28T12:00:00+00:00"))
     assert leased.expires_at == datetime(2026, 5, 28, 12, 0, tzinfo=UTC)
-    assert Sandbox(record=fake_record).expires_at is None
+    assert Host(record=fake_record).expires_at is None
 
 
 async def test_connect_is_lazy(
@@ -131,7 +131,7 @@ async def test_connect_is_lazy(
     patched_asyncssh: tuple[AsyncMock, _FakeConnection],
 ):
     connect_mock, _ = patched_asyncssh
-    Sandbox(record=fake_record)
+    Host(record=fake_record)
     connect_mock.assert_not_called()
 
 
@@ -140,7 +140,7 @@ async def test_first_call_opens_connection_with_record_details(
     patched_asyncssh: tuple[AsyncMock, _FakeConnection],
 ):
     connect_mock, _ = patched_asyncssh
-    sandbox = Sandbox(record=replace(fake_record, ssh_username="druks"))
+    sandbox = Host(record=replace(fake_record, ssh_username="druks"))
 
     await sandbox.exec(["true"])
 
@@ -165,7 +165,7 @@ async def test_connection_is_reused_across_calls(
     tmp_path: Path,
 ):
     connect_mock, _ = patched_asyncssh
-    sandbox = Sandbox(record=fake_record)
+    sandbox = Host(record=fake_record)
 
     local = tmp_path / "payload"
     local.write_text("(dummy)")
@@ -182,7 +182,7 @@ async def test_concurrent_first_callers_do_not_open_two_connections(
     patched_asyncssh: tuple[AsyncMock, _FakeConnection],
 ):
     connect_mock, _ = patched_asyncssh
-    sandbox = Sandbox(record=fake_record)
+    sandbox = Host(record=fake_record)
 
     await asyncio.gather(
         sandbox.exec(["echo", "1"]),
@@ -198,7 +198,7 @@ async def test_aclose_closes_and_is_idempotent(
     patched_asyncssh: tuple[AsyncMock, _FakeConnection],
 ):
     connect_mock, fake_conn = patched_asyncssh
-    sandbox = Sandbox(record=fake_record)
+    sandbox = Host(record=fake_record)
 
     # Before first use: nothing to close, nothing dialed.
     await sandbox.aclose()
@@ -223,7 +223,7 @@ async def test_async_context_manager_closes_on_exception(
     _, fake_conn = patched_asyncssh
 
     with pytest.raises(RuntimeError):
-        async with Sandbox(
+        async with Host(
             record=fake_record,
         ) as sandbox:
             await sandbox.exec(["true"])
@@ -238,7 +238,7 @@ async def test_upload_pushes_via_sftp(
     tmp_path: Path,
 ):
     _, fake_conn = patched_asyncssh
-    sandbox = Sandbox(record=fake_record)
+    sandbox = Host(record=fake_record)
 
     local = tmp_path / "credentials.json"
     local.write_text('{"token": "..."}')
@@ -253,7 +253,7 @@ async def test_download_fetches_via_sftp_and_creates_parent_dir(
     tmp_path: Path,
 ):
     _, fake_conn = patched_asyncssh
-    sandbox = Sandbox(record=fake_record)
+    sandbox = Host(record=fake_record)
 
     local = tmp_path / "nested" / "subdir" / "out.jsonl"
     await sandbox.download(remote="/work/runs/42/stdout.jsonl", local=local)
@@ -267,7 +267,7 @@ async def test_exec_oneshot_shell_quotes_argv(
     patched_asyncssh: tuple[AsyncMock, _FakeConnection],
 ):
     _, fake_conn = patched_asyncssh
-    sandbox = Sandbox(record=fake_record)
+    sandbox = Host(record=fake_record)
 
     await sandbox.exec(["git", "commit", "-m", "hello world; rm -rf /"])
 
@@ -287,7 +287,7 @@ async def test_exec_oneshot_returns_typed_result_with_ok_helper(
         stdout="abc123\n",
         stderr="",
     )
-    sandbox = Sandbox(record=fake_record)
+    sandbox = Host(record=fake_record)
 
     result = await sandbox.exec(["git", "rev-parse", "HEAD"])
 
@@ -307,7 +307,7 @@ async def test_exec_oneshot_nonzero_exit_returns_not_raises(
         stdout="",
         stderr="rg: backend/missing: No such file or directory\n",
     )
-    sandbox = Sandbox(record=fake_record)
+    sandbox = Host(record=fake_record)
 
     result = await sandbox.exec(["rg", "needle", "backend/missing"])
 
@@ -329,7 +329,7 @@ async def test_exec_signal_killed_command_is_not_ok(
         stdout="",
         stderr="",
     )
-    sandbox = Sandbox(record=fake_record)
+    sandbox = Host(record=fake_record)
 
     result = await sandbox.exec(["sh", "-c", "git clone https://example/big"])
 
@@ -345,7 +345,7 @@ async def test_exec_closed_channel_without_status_is_not_ok(
     # fall back to the -1 sentinel rather than a success.
     _, fake_conn = patched_asyncssh
     fake_conn.run_result = _FakeCompletedProcess(exit_status=None)
-    sandbox = Sandbox(record=fake_record)
+    sandbox = Host(record=fake_record)
 
     result = await sandbox.exec(["true"])
 
@@ -442,7 +442,7 @@ async def test_upload_dir_tar_honours_excludes(tmp_path: Path):
 async def test_write_secret_raises_when_the_remote_write_fails(fake_record):
     # push() now writes the harness OAuth credential through write_secret, so a
     # failed remote write must fail the run, not start the agent unauthenticated.
-    sandbox = Sandbox(record=fake_record)
+    sandbox = Host(record=fake_record)
 
     async def failing_exec(cmd, *, timeout=30.0):
         return ExecResult(1, "", "permission denied")

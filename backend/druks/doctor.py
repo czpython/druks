@@ -1,9 +1,11 @@
 import asyncio
 import importlib
+import inspect
 import os
 import pkgutil
 import socket
 import time
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -11,6 +13,7 @@ from types import ModuleType
 from urllib.parse import urlparse
 
 import httpx
+from dbos._dbos import _get_or_create_dbos_registry
 from drukbox_sdk import SandboxAPI
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
@@ -19,16 +22,18 @@ from .agents import Agent
 from .apps.loader import iter_apps
 from .apps.registry import _ROLES, agents, autodiscover, services, webhooks, workflows
 from .core.apis.github import get_github_client
-from .database import create_engine_from_url, db_session
+from .database import create_async_engine_from_url, create_engine_from_url, session_scope
 from .harnesses.models import HarnessConnection
 from .harnesses.registry import get_harnesses
 from .sandbox.client import sandbox_client
+from .sandbox.exceptions import TemplateNotFound
+from .sandbox.templates import get_declared_sandboxes, prepare_sandbox_templates
 from .services import Service, ServiceNotConnectedError
 from .services.models import ServiceIdentity
 from .settings import Settings, load_settings
 from .user_settings.models import UserSettings
 from .webhooks.base import Webhook
-from .workflows import Workflow
+from .workflows import Workflow, _Task
 
 
 @dataclass(frozen=True)
@@ -42,22 +47,32 @@ class CheckResult:
     pending: bool = False
 
 
-def check_service_identities(settings: Settings) -> list[CheckResult]:
+@asynccontextmanager
+async def _check_engine(settings: Settings):
+    # One seam for every DB-reading check; the suite patches it to hand the
+    # fixture's connection in instead of a fresh engine.
+    engine = create_async_engine_from_url(settings.database_url)
+    try:
+        yield engine
+    finally:
+        await engine.dispose()
+
+
+async def check_service_identities(settings: Settings) -> list[CheckResult]:
     """One result per declared service, so a newly-declared one is covered
     without editing doctor. Declarations self-register through the same
     discovery walk the loader runs. Identities are database-backed like harness
     connections — this reports each row's presence, not a file or setting."""
     for app in iter_apps():
         app.discover()
-    engine = create_engine_from_url(settings.database_url)
-    try:
-        with Session(engine) as session:
-            db_session.registry.set(session)
+
+    async def _read() -> list[CheckResult]:
+        async with _check_engine(settings) as engine, session_scope(engine):
             results: list[CheckResult] = []
             for service in services.all():
                 name = f"{service.slug}_identity"
                 try:
-                    row = ServiceIdentity.get(service.slug)
+                    row = await ServiceIdentity.get(service.slug)
                 except ServiceNotConnectedError:
                     results.append(
                         CheckResult(
@@ -72,28 +87,31 @@ def check_service_identities(settings: Settings) -> list[CheckResult]:
                 facts = " ".join(f"{key}={value}" for key, value in row.identity.items())
                 results.append(CheckResult(name=name, ok=True, detail=f"connected; {facts}"))
             return results
+
+    try:
+        return await _read()
     except Exception as error:  # noqa: BLE001 — a DB-read failure is a fail, not a crash
         return [
             CheckResult(
                 name="service_identities", ok=False, detail=f"cannot read the identities: {error}"
             )
         ]
-    finally:
-        db_session.remove()
-        engine.dispose()
 
 
-def check_installations(settings: Settings) -> CheckResult:
+async def check_installations(settings: Settings) -> CheckResult:
     """Where druks may act = the operator App's installation accounts;
     this check is the audit surface for that set. The zero-argument client
     factory reads the service-identity row, so a one-off Session is bound
     into the ambient ``db_session`` registry for the duration."""
-    engine = create_engine_from_url(settings.database_url)
+
+    async def _list_accounts() -> tuple[str, ...]:
+        async with _check_engine(settings) as engine:
+            async with session_scope(engine):
+                client = await get_github_client()
+            return await client.list_installation_accounts()
+
     try:
-        with Session(engine) as session:
-            db_session.registry.set(session)
-            client = get_github_client()
-        accounts = asyncio.run(client.list_installation_accounts())
+        accounts = await _list_accounts()
     except ServiceNotConnectedError:
         return CheckResult(
             name="installations",
@@ -107,9 +125,6 @@ def check_installations(settings: Settings) -> CheckResult:
             ok=False,
             detail=f"could not list operator App installations: {exc}",
         )
-    finally:
-        db_session.remove()
-        engine.dispose()
     if not accounts:
         return CheckResult(
             name="installations",
@@ -234,7 +249,7 @@ def check_database(settings: Settings) -> CheckResult:
     return CheckResult(name="database", ok=True, detail="reachable")
 
 
-def check_drukbox(settings: Settings) -> CheckResult:
+async def check_drukbox(settings: Settings) -> CheckResult:
     if not settings.sandbox.service_url:
         return CheckResult(
             name="drukbox",
@@ -242,7 +257,7 @@ def check_drukbox(settings: Settings) -> CheckResult:
             detail="not configured (deployments: [sandbox].service_url in druks.toml)",
         )
     try:
-        report = asyncio.run(_drukbox_doctor(settings))
+        report = await _drukbox_doctor(settings)
     except Exception as error:  # noqa: BLE001 — surface any SDK/transport failure as fail
         return CheckResult(name="drukbox", ok=False, detail=f"unreachable: {error}")
     if report.ok:
@@ -266,7 +281,7 @@ async def _drukbox_doctor(settings: Settings):
         await api.aclose()
 
 
-def check_sandbox_e2e(settings: Settings) -> CheckResult:
+async def check_sandbox_e2e(settings: Settings) -> CheckResult:
     """Provision a real VM and exercise the two dial paths builds use:
     the acquire-time connection and a reattach from a GET-built record.
     Costs one VM-minute — opt-in via ``druks doctor --sandbox``, never
@@ -274,10 +289,57 @@ def check_sandbox_e2e(settings: Settings) -> CheckResult:
     if not settings.sandbox.service_url:
         return CheckResult(name="sandbox_e2e", ok=True, detail="not configured")
     try:
-        detail = asyncio.run(_sandbox_e2e())
+        detail = await _sandbox_e2e()
     except Exception as error:  # noqa: BLE001 — doctor reports, never raises
         return CheckResult(name="sandbox_e2e", ok=False, detail=f"{error}")
     return CheckResult(name="sandbox_e2e", ok=True, detail=detail)
+
+
+async def check_declared_sandboxes(settings: Settings) -> CheckResult | list[CheckResult]:
+    try:
+        await prepare_sandbox_templates()
+        declared = get_declared_sandboxes()
+    except Exception as error:  # noqa: BLE001 — doctor reports, never raises
+        return CheckResult(
+            name="sandbox_templates",
+            ok=False,
+            detail=f"could not prepare declared sandbox templates: {error}",
+        )
+
+    if not declared:
+        return CheckResult(name="sandbox_templates", ok=True, detail="no declared sandboxes")
+
+    results = []
+    for setup_script_hash, sandbox in declared.items():
+        name = f"sandbox:{setup_script_hash[:12]}"
+        detail = f"{sandbox.setup}; hash {setup_script_hash}"
+        try:
+            template = await sandbox_client.get_template(setup_script_hash=setup_script_hash)
+        except TemplateNotFound:
+            result = CheckResult(
+                name=name,
+                ok=False,
+                detail=f"{detail}; missing",
+            )
+        except Exception as error:  # noqa: BLE001 — one lookup failure is one result
+            result = CheckResult(
+                name=name,
+                ok=False,
+                detail=f"{detail}; lookup failed: {error}",
+            )
+        else:
+            ok, pending = {
+                "available": (True, False),
+                "building": (False, True),
+            }.get(template.status, (False, False))
+            result = CheckResult(
+                name=name,
+                ok=ok,
+                pending=pending,
+                detail=f"{detail}; {template.status}",
+            )
+        results.append(result)
+    return results
 
 
 async def _sandbox_e2e() -> str:
@@ -330,6 +392,8 @@ def _defined_capability(module: ModuleType) -> tuple[str, str] | None:
     for value in vars(module).values():
         if isinstance(value, type) and issubclass(value, Workflow) and value.__module__ == name:
             return "workflows", value.kind
+        if isinstance(value, _Task) and value.module == name:
+            return "tasks", value.name
         if (
             isinstance(value, type)
             and issubclass(value, Webhook)
@@ -369,6 +433,8 @@ def check_capability_modules(settings: Settings) -> CheckResult:
         # an off-canon module below (which self-registers too) can't mask a stray.
         autodiscover(package)
         discovered = {role: set(registry._items) for role, registry in by_role.items()}
+        # Tasks register straight into DBOS's own map — it is their registry.
+        discovered["tasks"] = set(_get_or_create_dbos_registry().workflow_info_map)
         pkg = importlib.import_module(package)
         for info in pkgutil.walk_packages(pkg.__path__, prefix=f"{package}."):
             if info.ispkg or info.name.rsplit(".", 1)[-1] in _ROLES:
@@ -393,20 +459,19 @@ def check_capability_modules(settings: Settings) -> CheckResult:
     )
 
 
-def check_apps(settings: Settings) -> list[CheckResult]:
+async def check_apps(settings: Settings) -> list[CheckResult]:
     """Each installed app's resolved settings and own checks, namespaced under it.
     Read off the class headlessly through the loader, so doctor never imports an
     app's private modules. A check or settings clean that raises is contained
     under the app's name, and core checks remain separate ``CHECKS`` entries."""
-    engine = create_engine_from_url(settings.database_url)
-    try:
-        with Session(engine) as session:
-            db_session.registry.set(session)
+
+    async def _read() -> list[CheckResult]:
+        async with _check_engine(settings) as engine, session_scope(engine):
             results: list[CheckResult] = []
             for app in iter_apps():
                 if settings_model := app.settings_model:
                     try:
-                        problems = app.settings().clean()
+                        problems = (await app.settings()).clean()
                         detail = "; ".join(
                             f"{settings_model.model_fields[field].title or field}: {message}"
                             for field, message in problems.items()
@@ -428,20 +493,21 @@ def check_apps(settings: Settings) -> list[CheckResult]:
                             )
                         )
                 for check in app.checks or ():
-                    results.append(_run_app_check(app.name, check))
+                    results.append(await _run_app_check(app.name, check))
             return results
-    finally:
-        db_session.remove()
-        engine.dispose()
+
+    return await _read()
 
 
-def _run_app_check(app_name: str, check) -> CheckResult:
+async def _run_app_check(app_name: str, check) -> CheckResult:
     """One app check, its result namespaced under the app. A check that
     raises, or returns anything but a ``CheckResult`` (a missing ``return`` yields
     ``None``), becomes a failing result rather than escaping and hiding later checks."""
     label = getattr(check, "__name__", repr(check))
     try:
         outcome = check()
+        if inspect.iscoroutine(outcome):
+            outcome = await outcome
         if not isinstance(outcome, CheckResult):
             raise TypeError(f"check returned {type(outcome).__name__}, expected CheckResult")
     except Exception as error:  # noqa: BLE001 — the check fails, never aborts
@@ -465,18 +531,21 @@ CHECKS = (
     check_drukbox,
     check_capability_modules,
     check_apps,
+    check_declared_sandboxes,
 )
 
 
-def run_checks(settings: Settings, *, sandbox: bool = False) -> list[CheckResult]:
+async def run_checks(settings: Settings, *, sandbox: bool = False) -> list[CheckResult]:
     # A check yields one result, or several (check_harness_credentials fans out
     # over the harness registry).
     results: list[CheckResult] = []
     for check in CHECKS:
         outcome = check(settings)
+        if inspect.iscoroutine(outcome):
+            outcome = await outcome
         results.extend(outcome if isinstance(outcome, list) else [outcome])
     if sandbox:
-        results.append(check_sandbox_e2e(settings))
+        results.append(await check_sandbox_e2e(settings))
     return results
 
 
@@ -515,4 +584,4 @@ def main(*, sandbox: bool = False) -> int:
         print()
         print("doctor: could not load Settings. Fix the configuration and re-run.")
         return 1
-    return print_results(run_checks(settings, sandbox=sandbox))
+    return print_results(asyncio.run(run_checks(settings, sandbox=sandbox)))

@@ -28,12 +28,12 @@ class GitHubEvents(Webhook):
     EVENT_HEADER: ClassVar[str] = "x-github-event"
     DELIVERY_HEADER: ClassVar[str] = "x-github-delivery"
 
-    def request_is_authentic(self) -> bool:
+    async def request_is_authentic(self) -> bool:
         # The delivery secret lives on the GitHub service-identity row — the
         # same paste that connected the App. No identity, no secret to verify
         # against: reject before any event dispatch.
         try:
-            identity = ServiceIdentity.get(GITHUB)
+            identity = await ServiceIdentity.get(GITHUB)
         except ServiceNotConnectedError as error:
             raise HTTPException(
                 status.HTTP_401_UNAUTHORIZED,

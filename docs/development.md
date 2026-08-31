@@ -1,7 +1,12 @@
-# Development
+---
+title: "Develop Druks"
+description: "Set up the repository, understand its architecture, change the database, and run verification."
+sidebarTitle: "Development"
+icon: "code"
+---
 
-This guide is for changing Druks itself. The backend and Vite dev server run on
-the host; Compose supplies isolated Postgres and Redis.
+This guide is for changes to Druks itself. The backend and Vite development
+server operate on the host. Compose supplies isolated Postgres and Redis.
 
 ## Set up
 
@@ -22,28 +27,30 @@ initialize the development database:
 uv run druks init-db
 ```
 
-Settings reads `./druks.toml` from the current working directory. The example
-runs with `[identity].mode = "none"`: the loopback dashboard has no
-authentication and exactly one operator account, created by your first harness
-connection. To exercise `header` mode against the dev server, set
-`identity.mode = "header"` and `identity.header` in `druks.toml`, then send the
-header yourself (for example with a browser header extension or
-`curl -H 'X-Edge-Email: you@example.com'`).
+Settings reads `./druks.toml` from the current directory. The example uses
+`[identity].mode = "none"`. The loopback dashboard has no authentication and
+exactly one operator account. Your first harness connection creates this
+account.
+
+To use `header` mode with the development server, set
+`identity.mode = "header"` in `druks.toml`. Set `identity.header` in the same
+file. Then send the header with a browser add-on or
+`curl -H 'X-Edge-Email: you@example.com'`.
 
 The dev Compose project creates two databases:
 
-- `druks_dev` for the host-run application
-- `druks_test` for pytest, which rebuilds its schema during the suite
+- **Development:** `druks_dev` for the host-run server.
+- **Tests:** `druks_test` for pytest. The suite rebuilds this schema.
 
-`.env.example` points the application at `druks_dev`. The suite reaches
+`.env.example` points the server at `druks_dev`. The suite reaches
 `druks_test` and Redis index 15 through `DRUKS_TEST_DATABASE_URL` and
-`DRUKS_TEST_REDIS_URL`, never through the application's own settings, so the two
-cannot be confused.
+`DRUKS_TEST_REDIS_URL`. It does not use the server settings. Thus, the two
+databases cannot be confused.
 
 Start the backend:
 
 ```bash
-uv run uvicorn druks.api.app:app --host 127.0.0.1 --port 8001
+uv run uvicorn druks.api.server:app --host 127.0.0.1 --port 8001
 ```
 
 In another terminal:
@@ -63,35 +70,37 @@ contains the built SPA and serves it from FastAPI.
 | `backend/druks/workflows.py` | Public workflow, step, gate, scheduling, and start API |
 | `backend/druks/agents.py` | Public agent descriptor and output contract |
 | `backend/druks/durable/` | DBOS integration, run projection, lifecycle internals |
-| `backend/druks/extensions/` | Entry-point loading, discovery, author settings |
+| `backend/druks/apps/` | Entry-point loading, discovery, author settings |
+| `backend/druks/ui/` | Page declarations, the block/value/field catalog, the page API |
 | `backend/druks/events/`, `signals.py` | Event log, feed, and reactions |
 | `backend/druks/webhooks/` | Authenticated delivery framework and deduplication |
 | `backend/druks/harnesses/` | Claude/Codex invocation, auth, usage, capability manifests |
 | `backend/druks/sandbox/` | Drukbox lifecycle, SSH execution, workspace delivery |
 | `backend/druks/api/` | FastAPI composition and platform routes |
 | `backend/druks/{mcp,skills,notifications,user_settings}/` | Shared operator services |
-| `backend/druks/contrib/ship/` | Bundled reference extension, not framework core |
-| `frontend/src/` | Shared dashboard shell and bundled extension UI |
+| `backend/druks/contrib/software_factory/` | Bundled reference app, not framework core |
+| `frontend/src/` | Shared dashboard shell and bundled app UI |
+| `frontend/src/druksui/` | The renderer for an app's Python pages |
 | `backend/migrations/` | Core/bundled schema history |
 | `deploy/`, `scripts/` | Images, Compose, Caddy, setup, and deployment |
 
-The API process embeds DBOS and executes workflows. Extension modules register
+The API process embeds DBOS and executes workflows. App modules register
 capabilities during boot, after DBOS initialization and before launch.
 
-## Extension test surface
+## App test surface
 
-The main package registers bundled extensions through `pyproject.toml`. CI also
+The main package registers bundled apps through `pyproject.toml`. CI also
 installs `backend/tests/druks-field_notes` as a real editable distribution and
-runs the proof-extension tests. Those tests are the executable contract for:
+runs the proof-app tests. Those tests are the executable contract for:
 
-- app-less and boot-time entry-point loading
-- role-module discovery
-- route and subject read-side mounting
-- independent migrations and table-prefix enforcement
-- workflow start, settings, and feed formatting
+- Headless and boot-time entry-point loading
+- Role-module discovery
+- Route and subject read-side mounting
+- Independent migrations and table-prefix enforcement
+- Workflow start, settings, and feed formatting.
 
-When changing the author API, update the scaffold, proof extension, author
-guide, and tests together.
+If you change the author API, update the scaffold, proof app, author guide, and
+tests together.
 
 ## Database changes
 
@@ -102,14 +111,14 @@ uv run alembic -c backend/alembic.ini revision --autogenerate -m "describe chang
 uv run druks init-db
 ```
 
-For an independently packaged extension:
+For an independently packaged app:
 
 ```bash
-uv run druks makemigrations <extension-name> -m "describe change"
+uv run druks makemigrations <app-name> -m "describe change"
 uv run druks init-db
 ```
 
-The extension owns its migration directory and version table. Review every
+The app owns its migration directory and version table. Review every
 autogenerated revision before applying it.
 
 ## Verification
@@ -123,11 +132,13 @@ uv run ruff format --check backend
 uv run pytest backend/
 ```
 
-The suite builds its subjects out of `field_notes`, the proof extension. It is a
-standalone distribution that depends on druks, so it installs like any author's
-extension rather than being a dependency of druks — install it once and the whole
-suite runs. The pull-request backend workflow does the same. Pyright is configured
-for local/editor use but is not currently a CI gate.
+The suite builds its subjects from `field_notes`, the proof app. This standalone
+distribution depends on Druks. It installs like an author app, not as a Druks
+dependency. Install it one time for the full suite.
+
+The pull-request backend
+workflow does the same. Pyright is available for local and editor use. It is not
+a CI gate.
 
 Frontend checks:
 
@@ -139,14 +150,18 @@ npm --prefix frontend run build
 
 The frontend CI workflow runs those three commands on Node 22.
 
-Documentation-only changes should also run:
+For documentation-only changes, also run these commands:
 
 ```bash
 git diff --check
+cd docs
+mint validate
+mint broken-links --check-anchors --check-redirects
 ```
 
-and a relative-link/anchor check over Markdown. The repository does not
-currently ship a Markdown linter or link-check command.
+Mintlify builds `docs/` directly. Its GitHub App owns deployments and
+pull-request previews. The repository does not require a documentation-specific
+GitHub Actions workflow.
 
 ## Working with sandboxes
 
@@ -159,20 +174,26 @@ Drukbox on the host from its own checkout
 [sandbox]
 service_url = "http://127.0.0.1:8000"
 service_token = "dev-token"
-image = "ghcr.io/czpython/druks-sandbox:latest"
+image = "ghcr.io/czpython/druks/sandbox:latest"
 ```
 
-`uv run druks doctor --sandbox` creates a real host. Run it deliberately; it is
-not part of the normal test suite.
+`uv run druks doctor --sandbox` creates a real host. If you require a real
+sandbox test, run this command. It is not part of the normal test suite.
 
 ## Frontend ownership
 
-Backend extension entry points and shared-shell React routes have different
-delivery mechanisms. Python discovery can load an installed extension at
-runtime. An extension can ship a standalone static app in its package's
+An app's screens are Python. It declares them in `pages.py`, and the shell
+renders them through `frontend/src/druksui/`. An installed wheel therefore
+adds pages without touching the JavaScript bundle. The
+[Druks UI contract](druks-ui.md) is the one description of what those pages
+carry; change it first, then the renderer.
+
+Two escape hatches remain, and both are for an app that needs full control of
+its interface. An app can ship a standalone static frontend in its package's
 `dist/`, served at `/app/<name>`. React code that joins the bundled dashboard
 shell must already be in the SPA and register through
-`frontend/src/extensions/index.ts`; a wheel cannot inject routes into that
-existing JavaScript bundle.
+`frontend/src/apps/index.ts`; a wheel cannot put routes into that existing
+JavaScript bundle.
 
-See the [frontend guide](../frontend/README.md) before adding dashboard pages.
+See the [frontend guide](https://github.com/czpython/druks/blob/main/frontend/README.md)
+before adding dashboard pages.

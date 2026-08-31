@@ -6,6 +6,8 @@ import pytest
 from conftest import make_agent_result
 from druks import agents
 from druks.durable import AgentCall, WorkflowError
+from druks.files import File
+from druks.sandbox.exceptions import SandboxDownloadError
 from druks.usage.models import UsageScrape
 
 
@@ -21,7 +23,19 @@ DUMMY_AGENT = agents.Agent(
 )
 
 
-def test_get_timeout_caps_at_the_sandbox_lease_max(druks_db):
+class FileOutput(agents.AgentOutput):
+    image: File
+
+
+FILE_AGENT = agents.Agent(
+    id="file",
+    prompt="dummy/agent.md",
+    contract=FileOutput,
+    model="claude-haiku-4-5",
+)
+
+
+async def test_get_timeout_caps_at_the_sandbox_lease_max(druks_db):
     """A resolved timeout over the sandbox-lease max is clamped; a shorter one passes through."""
     from druks.sandbox.constants import MAX_AGENT_TIMEOUT_SECONDS
 
@@ -40,27 +54,27 @@ def test_get_timeout_caps_at_the_sandbox_lease_max(druks_db):
         timeout=600,
     )
 
-    assert over.get_timeout() == MAX_AGENT_TIMEOUT_SECONDS
-    assert under.get_timeout() == 600
+    assert await over.get_timeout() == MAX_AGENT_TIMEOUT_SECONDS
+    assert await under.get_timeout() == 600
 
 
 @pytest.fixture(autouse=True)
-def _seed_run_for_record(druks_db):
+async def _seed_run_for_record(druks_db):
     # An agent call records an AgentCall, which FKs to its run.
     from druks.testing import seed_run
     from druks_field_notes.workflows import Summarize
 
-    seed_run(druks_db, kind=Summarize.kind, run_id="wf-9")
+    await seed_run(druks_db, kind=Summarize.kind, run_id="wf-9")
 
 
 @pytest.fixture(autouse=True)
-def _connected_claude(druks_db):
+async def _connected_claude(druks_db):
     # A run refuses to dispatch on an unconnected harness; the runtime tests
     # here resolve to claude models, so connect it once.
     from conftest import connect_harness
     from druks.harnesses.claude import ClaudeHarness
 
-    connect_harness(ClaudeHarness, {"claudeAiOauth": {"accessToken": "test-token"}})
+    await connect_harness(ClaudeHarness, {"claudeAiOauth": {"accessToken": "test-token"}})
 
 
 def _patch_runtime(monkeypatch, tmp_path, payload):
@@ -140,8 +154,10 @@ async def test_run_refuses_unconnected_harness(druks_db, tmp_path, monkeypatch, 
     from druks.harnesses.exceptions import HarnessNotConnectedError
     from druks.harnesses.models import HarnessConnection
 
-    HarnessConnection.get_for_account(
-        "claude", Account.get_for_username("op@example.com").id
+    await (
+        await HarnessConnection.get_for_account(
+            "claude", (await Account.get_for_username("op@example.com")).id
+        )
     ).delete()
     sandbox = _patch_runtime(monkeypatch, tmp_path, {"ok": True})
     _patch_ephemeral(monkeypatch, sandbox)
@@ -202,6 +218,7 @@ async def test_runner_comes_from_workflow_workspace_factory(
     _patch_ephemeral(monkeypatch, MagicMock())  # the box; the factory below ignores it
     workspace = MagicMock()
     workspace.host_id = "host-test"
+    workspace.prepare_context = AsyncMock(side_effect=lambda context, **_: context)
     workspace.run_agent = AsyncMock(return_value=make_agent_result({"ok": True}, agent="dummy"))
 
     async def _get_workspace(sandbox):
@@ -244,7 +261,7 @@ async def test_running_call_visible_then_finished(druks_db, tmp_path, monkeypatc
     during: dict[str, object] = {}
 
     async def _run_agent(*, call_id, **_kwargs):
-        row = AgentCall.get(call_id)
+        row = await AgentCall.get(call_id)
         during["status"] = row.status
         during["host"] = row.sandbox_host_id
         return make_agent_result({"ok": True}, agent="dummy")
@@ -255,7 +272,7 @@ async def test_running_call_visible_then_finished(druks_db, tmp_path, monkeypatc
     await DUMMY_AGENT._run(workflow_id="wf-9")
 
     assert during == {"status": "running", "host": "host-test"}
-    [call] = AgentCall.list_for_run("wf-9")
+    [call] = await AgentCall.list_for_run("wf-9")
     assert call.status == "succeeded"
     assert call.sandbox_host_id == "host-test"
     assert call.finished_at is not None
@@ -276,7 +293,7 @@ async def test_provisioning_failure_records_no_call(druks_db, tmp_path, monkeypa
     with pytest.raises(RuntimeError, match="no capacity"):
         await DUMMY_AGENT._run(workflow_id="wf-9")
 
-    assert AgentCall.list_for_run("wf-9") == []
+    assert await AgentCall.list_for_run("wf-9") == []
 
 
 async def test_crash_after_start_fails_the_call(druks_db, tmp_path, monkeypatch, current_run):
@@ -293,9 +310,85 @@ async def test_crash_after_start_fails_the_call(druks_db, tmp_path, monkeypatch,
     with pytest.raises(RuntimeError, match="kaboom"):
         await DUMMY_AGENT._run(workflow_id="wf-9")
 
-    [call] = AgentCall.list_for_run("wf-9")
+    [call] = await AgentCall.list_for_run("wf-9")
     assert call.status == "failed"
     assert "kaboom" in call.last_error
+
+
+@pytest.mark.parametrize(
+    ("error", "message"),
+    [
+        ("reported file is missing: shots/home.png", "missing"),
+        ("reported file escapes the workspace: shots/home.png", "escapes"),
+        ("reported file exceeds the 104857600-byte limit: shots/home.png", "exceeds"),
+    ],
+    ids=("missing-path", "symlink-escape", "size-cap"),
+)
+async def test_file_hydration_failure_fails_the_agent_call(
+    druks_db,
+    tmp_path,
+    monkeypatch,
+    current_run,
+    error,
+    message,
+):
+    """A rejected output file closes the already-started call as failed."""
+    monkeypatch.setenv("DRUKS_DATA_DIR", str(tmp_path))
+    current_run.app = "field_notes"
+    sandbox = _patch_runtime(monkeypatch, tmp_path, {"image": "shots/home.png"})
+    sandbox.ssh_username = "root"
+    sandbox.download = AsyncMock(side_effect=SandboxDownloadError(error))
+    _patch_ephemeral(monkeypatch, sandbox)
+
+    with pytest.raises(SandboxDownloadError, match=message):
+        await FILE_AGENT._run(workflow_id="wf-9")
+
+    [call] = await AgentCall.list_for_run("wf-9")
+    assert call.status == "failed"
+    assert message in call.last_error
+    assert list((tmp_path / "files").iterdir()) == []
+
+
+async def test_file_output_reaches_the_next_agents_input(
+    druks_db,
+    tmp_path,
+    monkeypatch,
+    current_run,
+):
+    """Call A's hydrated output reaches call B as a fresh in-sandbox path."""
+    monkeypatch.setenv("DRUKS_DATA_DIR", str(tmp_path))
+    current_run.app = "field_notes"
+    sandbox = _patch_runtime(monkeypatch, tmp_path, {"ok": True})
+    sandbox.ssh_username = "root"
+    sandbox.run_agent = AsyncMock(
+        side_effect=[
+            make_agent_result({"image": "shots/home.png"}, agent="file"),
+            make_agent_result({"ok": True}, agent="dummy"),
+        ]
+    )
+
+    async def download(*, remote, local, workspace_root, max_bytes):
+        local.write_bytes(b"image")
+
+    sandbox.download = AsyncMock(side_effect=download)
+    sandbox.upload_file = AsyncMock()
+    _patch_ephemeral(monkeypatch, sandbox)
+    prompt_contexts = []
+
+    async def render(name, /, **context):
+        prompt_contexts.append(context)
+        return name
+
+    monkeypatch.setattr(agents, "render_prompt", render)
+
+    produced = await FILE_AGENT._run(workflow_id="wf-9")
+    consumed = await DUMMY_AGENT._run(workflow_id="wf-9", image=produced.image)
+
+    assert consumed == DummyOutput(ok=True)
+    assert prompt_contexts[1]["image"].endswith(f"/{produced.image.id}/{produced.image.name}")
+    sandbox.upload_file.assert_awaited_once()
+    calls = await AgentCall.list_for_run("wf-9")
+    assert [call.status for call in calls] == ["succeeded", "succeeded"]
 
 
 async def test_a_carried_failure_is_raised_with_its_code(
@@ -319,7 +412,7 @@ async def test_a_carried_failure_is_raised_with_its_code(
         await DUMMY_AGENT._run(workflow_id="wf-9")
 
     assert excinfo.value is overloaded
-    [call] = AgentCall.list_for_run("wf-9")
+    [call] = await AgentCall.list_for_run("wf-9")
     assert call.status == "failed"
     assert call.failure_code == "overloaded"
     assert call.last_error == (
@@ -355,7 +448,7 @@ async def test_body_level_overload_retries_as_separate_durable_attempts(
     assert [awaited.args[0] for awaited in sleep.await_args_list] == [285.0, 945.0]
     assert [options["name"] for options in checkpoints] == ["test.agent.dummy"] * 3
     assert current_run._reap_run.await_count == 2
-    calls = AgentCall.list_for_run("wf-9")
+    calls = await AgentCall.list_for_run("wf-9")
     assert len(calls) == 3
     assert sum(call.status == "failed" for call in calls) == 2
     assert sum(call.status == "succeeded" for call in calls) == 1
@@ -385,9 +478,16 @@ async def test_body_level_first_byte_retries_immediately_then_reraises(
     assert excinfo.value.code == "first_byte"
     assert [awaited.args[0] for awaited in sleep.await_args_list] == [0.0, 0.0]
     current_run._reap_run.assert_not_awaited()
-    calls = AgentCall.list_for_run("wf-9")
+    calls = await AgentCall.list_for_run("wf-9")
     assert len(calls) == 3
     assert all(call.status == "failed" for call in calls)
+
+
+def _async_scrape(make):
+    async def latest_for(_cls, _harness, _account_id):
+        return make()
+
+    return latest_for
 
 
 async def test_body_level_quota_waits_for_the_reset_once(
@@ -409,20 +509,22 @@ async def test_body_level_quota_waits_for_the_reset_once(
         agents.UsageScrape,
         "latest_for",
         classmethod(
-            lambda _cls, _harness, _account_id: UsageScrape(
-                five_hour_resets_at=now + timedelta(hours=2),
-                weeks=[
-                    {
-                        "percent_left": 0,
-                        "resets_at": (now + timedelta(hours=1)).isoformat(),
-                        "model": "Fable",
-                    },
-                    {
-                        "percent_left": 20,
-                        "resets_at": (now + timedelta(days=1)).isoformat(),
-                        "model": None,
-                    },
-                ],
+            _async_scrape(
+                lambda: UsageScrape(
+                    five_hour_resets_at=now + timedelta(hours=2),
+                    weeks=[
+                        {
+                            "percent_left": 0,
+                            "resets_at": (now + timedelta(hours=1)).isoformat(),
+                            "model": "Fable",
+                        },
+                        {
+                            "percent_left": 20,
+                            "resets_at": (now + timedelta(days=1)).isoformat(),
+                            "model": None,
+                        },
+                    ],
+                )
             )
         ),
     )
@@ -443,7 +545,7 @@ async def test_body_level_quota_waits_for_the_reset_once(
         "test.agent.dummy.retry_wait",
         "test.agent.dummy",
     ]
-    calls = AgentCall.list_for_run("wf-9")
+    calls = await AgentCall.list_for_run("wf-9")
     assert len(calls) == 2
     assert all(call.failure_code == "rate_limited" for call in calls)
 
@@ -467,15 +569,17 @@ async def test_body_level_quota_reset_over_six_hours_reraises_without_sleeping(
         agents.UsageScrape,
         "latest_for",
         classmethod(
-            lambda _cls, _harness, _account_id: UsageScrape(
-                five_hour_resets_at=now + timedelta(hours=7),
-                weeks=[
-                    {
-                        "percent_left": 0,
-                        "resets_at": (now + timedelta(days=1)).isoformat(),
-                        "model": None,
-                    }
-                ],
+            _async_scrape(
+                lambda: UsageScrape(
+                    five_hour_resets_at=now + timedelta(hours=7),
+                    weeks=[
+                        {
+                            "percent_left": 0,
+                            "resets_at": (now + timedelta(days=1)).isoformat(),
+                            "model": None,
+                        }
+                    ],
+                )
             )
         ),
     )
@@ -491,7 +595,7 @@ async def test_body_level_quota_reset_over_six_hours_reraises_without_sleeping(
     sleep.assert_not_awaited()
     jitter.assert_not_called()
     current_run._reap_run.assert_not_awaited()
-    [call] = AgentCall.list_for_run("wf-9")
+    [call] = await AgentCall.list_for_run("wf-9")
     assert call.failure_code == "usage_limit"
 
 
@@ -520,7 +624,7 @@ async def test_body_level_never_retry_errors_run_once(
     sleep.assert_not_awaited()
     current_run._reap_run.assert_not_awaited()
     sandbox.run_agent.assert_awaited_once()
-    assert len(AgentCall.list_for_run("wf-9")) == 1
+    assert len(await AgentCall.list_for_run("wf-9")) == 1
 
 
 async def test_in_step_transient_retry_uses_asyncio_sleep(monkeypatch, current_run):
@@ -693,8 +797,8 @@ async def test_reused_host_retry_presents_a_stable_idempotency_key(monkeypatch, 
     monkeypatch.setattr("druks.sandbox.client.Client.provision", fake_provision)
 
     with pytest.raises(HarnessSandboxProvisioningError):
-        await current_run._ensure_host()
-    host_id = await current_run._ensure_host()
+        await current_run._lease_host()
+    host_id = await current_run._lease_host()
 
     assert host_id == "warm-host"
     assert keys == ["wf-9:sandbox", "wf-9:sandbox"]
@@ -766,7 +870,7 @@ async def test_recovery_supersedes_the_orphaned_running_call(druks_db):
     from druks.durable.engine import _step_engine
 
     engine = _step_engine()
-    AgentCall.start(
+    await AgentCall.start(
         engine,
         call_id="a",
         run_id="wf-9",
@@ -775,7 +879,7 @@ async def test_recovery_supersedes_the_orphaned_running_call(druks_db):
         host_id="h",
         account_id="system",
     )
-    AgentCall.start(
+    await AgentCall.start(
         engine,
         call_id="b",
         run_id="wf-9",
@@ -785,7 +889,7 @@ async def test_recovery_supersedes_the_orphaned_running_call(druks_db):
         account_id="system",
     )
 
-    by_id = {call.id: call for call in AgentCall.list_for_run("wf-9")}
+    by_id = {call.id: call for call in await AgentCall.list_for_run("wf-9")}
     assert by_id["a"].status == "abandoned"
     assert by_id["a"].finished_at is not None
     assert by_id["b"].status == "running"

@@ -1,6 +1,7 @@
 import importlib.util
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Coroutine
+from functools import wraps
 from pathlib import Path
 from types import ModuleType
 from typing import TYPE_CHECKING, Annotated, Any, ClassVar
@@ -9,12 +10,14 @@ from pydantic import BaseModel, Field, SecretStr
 
 from druks.events.models import Event
 from druks.models import StoredSubject
+from druks.ui.exceptions import PageContractError, PageReadError, PageRouteError
 from druks.user_settings.models import SettingsOverride
 
-from .exceptions import AppSubjectContractError, SettingsDeclarationError
+from .exceptions import AppRouteConflict, AppSubjectContractError, SettingsDeclarationError
 from .registry import agents as agent_registry
 from .registry import autodiscover
 from .registry import workflows as workflow_registry
+from .schemas import Operation
 from .settings import (
     coerce_setting_value,
     field_kind,
@@ -29,17 +32,25 @@ if TYPE_CHECKING:
     from druks.doctor import CheckResult
     from druks.durable.datastructures import Subject
     from druks.durable.schemas import SubjectActivity
+    from druks.ui.page import PageRoute
     from druks.workflows import Workflow
 
     # A check the app owns returns a verdict on one of its own preconditions
-    # using the same ``CheckResult`` shape as a core check.
-    Check = Callable[[], CheckResult]
+    # using the same ``CheckResult`` shape as a core check; sync or async.
+    Check = Callable[[], "CheckResult | Coroutine[Any, Any, CheckResult]"]
+
 
 # An app name keys the ``/api/<name>`` namespace, the ``alembic_version_<name>``
 # table, the ``<name>_`` table prefix, and ``app:<name>:`` settings — so it must
 # be a lowercase SQL/URL-safe identifier. Public: the scaffolder validates against the
 # same rule so ``druks create app`` can't emit a package that fails this check.
 NAME_RE = re.compile(r"^[a-z][a-z0-9_]*$")
+
+# Segments under ``/api/<name>`` the platform serves for every app: the
+# agent-call reads, the page snapshots, and the upload door. Neither a subject
+# type nor an app router can take one, so an app can never shadow a platform
+# read.
+RESERVED_SEGMENTS = frozenset({"transcripts", "pages", "uploads"})
 
 
 # A secret-kind settings field: unset is an empty ``SecretStr`` — falsy, so
@@ -84,10 +95,11 @@ class App:
     icon: ClassVar[str] = "box"
     # One-line blurb shown in the settings pane when the app is selected.
     description: ClassVar[str] = ""
-    # The app's appbar subnav tabs, as (url, name) pairs. The switcher
-    # label itself is derived from ``name`` (underscores become spaces), so an
-    # app only declares destinations, never a title.
-    navigation: ClassVar[list[tuple[str, str]]] = []
+    # The app's appbar subnav tabs, as page names in the order they show. Each
+    # names a static top-level page, and the tab wears that page's label, so an
+    # app never spells a label twice. An app that ships its own frontend
+    # declares its tabs there instead.
+    navigation: ClassVar[list[str]] = []
     # The app's top-level package, walked by ``discover``. Defaults to the
     # package the subclass is defined in — the ``<package>/app.py`` convention
     # means that's always the app's root — so it's only set explicitly when the
@@ -135,14 +147,14 @@ class App:
             cls.settings_model = declared
 
     @classmethod
-    def settings(cls) -> AppSettings:
+    async def settings(cls) -> AppSettings:
         """The app's settings, resolved through the override store keyed by app
         name. Raises if the app declares no ``Settings``."""
         model = cls.settings_model
         if not model:
             raise TypeError(f"app {cls.name!r} declares no Settings")
         values = {
-            name: SettingsOverride.app_setting(
+            name: await SettingsOverride.app_setting(
                 cls.name,
                 name,
                 field.default,
@@ -153,7 +165,7 @@ class App:
         return model.model_validate(values)
 
     @classmethod
-    def override_setting(cls, field: str, value: Any) -> None:
+    async def override_setting(cls, field: str, value: Any) -> None:
         """An operator's override for one declared setting; ``None`` clears it back
         to the declared default. Raises ``ValueError`` so the API layer can 422 it."""
         model = cls.settings_model
@@ -161,8 +173,8 @@ class App:
             raise ValueError(f"Unknown {cls.name} setting {field!r}")
         if value is not None:
             value = coerce_setting_value(model, field, value)
-            validate_setting_override(model, cls.settings().model_dump(), field, value)
-        SettingsOverride.set_app_setting(
+            validate_setting_override(model, (await cls.settings()).model_dump(), field, value)
+        await SettingsOverride.set_app_setting(
             cls.name,
             field,
             value,
@@ -195,10 +207,10 @@ class App:
         stubs = {Subject.list_summaries.__func__, StoredSubject.list_summaries.__func__}
         declared = {workflow.subject for workflow in cls.workflows() if workflow.subject}
         for subject_class in declared:
-            if subject_class.subject_type == "transcripts":
+            if subject_class.subject_type in RESERVED_SEGMENTS:
                 raise AppSubjectContractError(
-                    f"{subject_class.__name__} is a 'transcripts' subject; that segment "
-                    "serves every app's agent-call reads. Name it for what it is"
+                    f"{subject_class.__name__} is a {subject_class.subject_type!r} subject; "
+                    "that segment serves every app's platform reads. Name it for what it is"
                 )
             if subject_class.list_summaries.__func__ in stubs:
                 raise AppSubjectContractError(
@@ -207,6 +219,35 @@ class App:
                     f"list_summaries() on {subject_class.__name__}."
                 )
         return sorted(declared, key=lambda subject_class: subject_class.subject_type)
+
+    @classmethod
+    def pages(cls) -> "list[PageRoute]":
+        """The pages this app declares, in route-match order — imported first,
+        like ``routers()`` does, so a headless caller reads the whole surface.
+        Empty for an app that ships no ``pages.py``. Raises
+        ``PageRouteError`` on a table a request could not resolve."""
+        from druks.ui.page import list_pages_for_app
+
+        cls.discover()
+        return list_pages_for_app(cls.name, cls.package)
+
+    @classmethod
+    def navigation_pages(cls) -> "list[PageRoute]":
+        """The pages ``navigation`` names, in the order it names them. The shell
+        shows one tab for each, labelled by the page."""
+        declared = {page.name: page for page in cls.pages()}
+        chosen = []
+        for name in cls.navigation:
+            page = declared.get(name)
+            if page and page.is_static and not page.parent:
+                chosen.append(page)
+                continue
+            raise PageRouteError(
+                f"app {cls.name!r} navigation names {name!r}. A navigation entry must be a "
+                f"static top-level page the shell can open with no parameters. This app "
+                f"declares {sorted(declared)}."
+            )
+        return chosen
 
     @classmethod
     def discover(cls) -> list[ModuleType]:
@@ -244,10 +285,10 @@ class App:
         contains is what ``druks init-db`` upgrades under
         ``alembic_version_<name>``."""
         package_dir = cls.package_dir()
-        if not package_dir:
-            return None
-        migrations = package_dir / "migrations"
-        return migrations if (migrations / "versions").is_dir() else None
+        if package_dir:
+            migrations = package_dir / "migrations"
+            return migrations if (migrations / "versions").is_dir() else None
+        return
 
     @classmethod
     def package_dir(cls) -> Path | None:
@@ -255,9 +296,9 @@ class App:
         assets (``migrations/``, ``dist/``) live. None when the package has no
         location (a namespace-less or frozen import)."""
         spec = importlib.util.find_spec(cls.package)
-        if not spec or not spec.submodule_search_locations:
-            return None
-        return Path(spec.submodule_search_locations[0])
+        if spec and spec.submodule_search_locations:
+            return Path(spec.submodule_search_locations[0])
+        return
 
     @classmethod
     def frontend_dist(cls) -> Path | None:
@@ -266,10 +307,10 @@ class App:
         is its marker. Inside the package, not the project root, so the same
         path resolves for a wheel and an editable install alike."""
         package_dir = cls.package_dir()
-        if not package_dir:
-            return None
-        dist = package_dir / "dist"
-        return dist if (dist / "entry.js").is_file() else None
+        if package_dir:
+            dist = package_dir / "dist"
+            return dist if (dist / "entry.js").is_file() else None
+        return
 
     @classmethod
     def get_routers(cls, modules: list[ModuleType]) -> "list[APIRouter]":
@@ -279,6 +320,20 @@ class App:
         (``/<subject_type>`` → status + timeline + live stream) per subject its
         workflows declare. The platform's come first: those segments are its own.
         Override to add a router built outside a ``routes`` module."""
+        # The platform's routers are narrow — each confined to its own segment — so
+        # matching them first costs an app nothing anywhere else and leaves it
+        # no way to take a read the platform serves, not even with a catch-all.
+        return [
+            cls._get_transcript_routes(),
+            cls._get_page_routes(),
+            cls._get_upload_routes(),
+            *(cls._get_subject_routes(subject) for subject in cls.subjects()),
+            *cls._declared_routers(modules),
+        ]
+
+    @classmethod
+    def _declared_routers(cls, modules: "list[ModuleType]") -> "list[APIRouter]":
+        """The routers the app itself declares in its ``routes`` modules."""
         # Local, not module-top: keeps FastAPI off the import graph so the loader
         # stays importable headlessly; enumerating routers is where it's really needed.
         from fastapi import APIRouter
@@ -291,15 +346,103 @@ class App:
             for value in vars(module).values():
                 if isinstance(value, APIRouter) and id(value) not in seen:
                     seen.add(id(value))
+                    # Every path the router would mount, prefixed or not: a
+                    # reserved first segment anywhere in it takes a platform read.
+                    # Starlette route kinds differ, so read the path defensively.
+                    taken = {
+                        f"{value.prefix}{getattr(route, 'path', '')}".strip("/").partition("/")[0]
+                        for route in value.routes
+                    }
+                    reserved = sorted(taken & RESERVED_SEGMENTS)
+                    if reserved:
+                        raise AppRouteConflict(
+                            f"app {cls.name!r} mounts a router on {reserved}, and those "
+                            "segments serve every app's platform reads. Name the router for "
+                            "its own resource."
+                        )
                     declared.append(value)
-        # The platform's routers are narrow — each confined to its own segment — so
-        # matching them first costs an app nothing anywhere else and leaves it
-        # no way to take a read the platform serves, not even with a catch-all.
-        return [
-            cls._get_transcript_routes(),
-            *(cls._get_subject_routes(subject) for subject in cls.subjects()),
-            *declared,
-        ]
+        return declared
+
+    @classmethod
+    def operations(cls) -> "dict[str, Operation]":
+        """Every route this app declares that names an ``operation_id``, keyed
+        by it. An ``Action`` names one, and the shell resolves it here rather
+        than making an author repeat a URL."""
+        found: dict[str, Operation] = {}
+        for router in cls._declared_routers(cls.discover()):
+            for route in router.routes:
+                # Starlette route kinds differ; only an API route carries these.
+                name = getattr(route, "operation_id", "") or ""
+                if not name:
+                    continue
+                # An APIRoute's own path already carries its router's prefix.
+                path = f"/api/{cls.name}{getattr(route, 'path', '')}"
+                if name in found:
+                    raise AppRouteConflict(
+                        f"app {cls.name!r} declares operation {name!r} twice, on "
+                        f"{found[name].method} {found[name].path} and on {path}. An "
+                        "action names one operation, so give each route its own."
+                    )
+                methods = sorted(getattr(route, "methods", set()) - {"HEAD", "OPTIONS"})
+                if len(methods) > 1:
+                    raise AppRouteConflict(
+                        f"app {cls.name!r} declares operation {name!r} on {methods}. An "
+                        "action calls one method, so give each its own route."
+                    )
+                found[name] = Operation(id=name, method=methods[0] if methods else "GET", path=path)
+        return {name: found[name] for name in sorted(found)}
+
+    @classmethod
+    def _get_page_routes(cls) -> "APIRouter":
+        """The page function is the endpoint, so FastAPI validates every route
+        parameter against the declared signature."""
+        from fastapi import APIRouter
+
+        from druks.ui import Page
+
+        operations = cls.operations()
+        router = APIRouter(prefix="/pages", tags=[f"{cls.name}:pages"])
+        for declaration in cls.pages():
+            router.add_api_route(
+                # The landing page's route is "/", and its snapshot answers at
+                # the bare /pages.
+                declaration.route.rstrip("/"),
+                cls._page_endpoint(declaration, operations),
+                methods=["GET"],
+                response_model=Page,
+                response_model_by_alias=True,
+                name=declaration.name,
+            )
+        return router
+
+    @classmethod
+    def _page_endpoint(cls, declaration: "PageRoute", operations: "dict[str, Operation]"):
+        """``wraps`` keeps the page function's signature, so FastAPI still
+        validates every route parameter."""
+        from druks.ui import Page
+
+        @wraps(declaration.function)
+        async def read_page(**parameters):
+            try:
+                page = await declaration.function(**parameters)
+            except Exception as error:
+                raise PageReadError(
+                    cls.name, declaration.name, f"its own code raised {type(error).__name__}"
+                ) from error
+            if not isinstance(page, Page):
+                raise PageContractError(
+                    cls.name,
+                    declaration.name,
+                    f"it answered with {type(page).__name__}, not a Page",
+                )
+            try:
+                for action in page.iter_actions():
+                    action.check_operation(cls.name, operations)
+            except ValueError as error:
+                raise PageContractError(cls.name, declaration.name, str(error)) from error
+            return page
+
+        return read_page
 
     @classmethod
     def _get_transcript_routes(cls) -> "APIRouter":
@@ -345,7 +488,7 @@ class App:
                 raise HTTPException(
                     status.HTTP_400_BAD_REQUEST, f"limit must be in 1..{max_limit}."
                 )
-            call = AgentCall.get(call_id)
+            call = await AgentCall.get(call_id)
             if call.live_status == AgentCallStatus.RUNNING:
                 response.headers["Cache-Control"] = "no-store"
             else:
@@ -367,7 +510,7 @@ class App:
 
         @router.get("/files", response_model=AgentCallFiles, response_model_by_alias=True)
         async def list_files(call_id: str) -> AgentCallFiles:
-            return reads.get_agent_call_files(call_id)
+            return await reads.get_agent_call_files(call_id)
 
         @router.get("/files/{file_name:path}")
         async def get_file(
@@ -375,7 +518,7 @@ class App:
             file_name: str,
             disposition: Literal["inline", "attachment"] = "inline",
         ) -> FileResponse:
-            call = AgentCall.get(call_id)
+            call = await AgentCall.get(call_id)
             resolved = call.get_file_path(file_name)
             if not resolved:
                 raise HTTPException(status.HTTP_404_NOT_FOUND, "File not found for this call.")
@@ -385,6 +528,45 @@ class App:
                 media_type=media_type or "application/octet-stream",
                 filename=resolved.name if disposition == "attachment" else None,
             )
+
+        return router
+
+    @classmethod
+    def _get_upload_routes(cls) -> "APIRouter":
+        """The door an UploadField posts to. The app owning the file is this
+        route's own, so a caller cannot file bytes under another app's name."""
+        import mimetypes
+        from pathlib import PurePosixPath
+
+        from fastapi import APIRouter, HTTPException, UploadFile, status
+
+        from druks.accounts.context import current_account_id
+        from druks.files import File
+        from druks.files.constants import MAX_UPLOAD_BYTES
+        from druks.ui import FileSummary
+
+        router = APIRouter(prefix="/uploads", tags=[f"{cls.name}:uploads"])
+        limit_in_megabytes = MAX_UPLOAD_BYTES // (1024 * 1024)
+
+        @router.post("", response_model=FileSummary, response_model_by_alias=True)
+        async def upload(file: UploadFile) -> FileSummary:
+            content = await file.read()
+            if len(content) > MAX_UPLOAD_BYTES:
+                raise HTTPException(
+                    status.HTTP_413_CONTENT_TOO_LARGE,
+                    f"That file is larger than {limit_in_megabytes} MB. Choose a smaller one.",
+                )
+            name = PurePosixPath(file.filename or "file").name
+            stored = await File.create(
+                name=name,
+                # The name types the file, the way it does for an agent's own
+                # files. What the browser claims is the browser's claim.
+                content_type=mimetypes.guess_type(name)[0] or "application/octet-stream",
+                content=content,
+                app=cls.name,
+                uploaded_by=current_account_id.get(),
+            )
+            return FileSummary.model_validate(stored)
 
         return router
 
@@ -411,22 +593,23 @@ class App:
         subject_type = subject_class.subject_type
         router = APIRouter(prefix=f"/{subject_type}", tags=[f"{cls.name}:{subject_type}"])
 
-        def board(account_id: str | None) -> SubjectList:
+        async def board(account_id: str | None) -> SubjectList:
+            summaries = await subject_class.list_summaries(account_id)
+            statuses = await reads.get_subject_statuses(
+                subject_type, [summary.id for summary in summaries]
+            )
             return SubjectList(
                 rows=[
-                    SubjectRow(
-                        summary=summary,
-                        status=reads.get_subject_status(subject_type, summary.id),
-                    )
-                    for summary in subject_class.list_summaries(account_id)
+                    SubjectRow(summary=summary, status=statuses[summary.id])
+                    for summary in summaries
                 ]
             )
 
         async def subject_response(subject_id: str) -> SubjectResponse | None:
-            subject = subject_class.get_for_subject_id(subject_id)
+            subject = await subject_class.get_for_subject_id(subject_id)
             if subject is None:
                 return
-            return reads.get_subject_response(
+            return await reads.get_subject_response(
                 subject_type,
                 subject_id,
                 summary=subject.get_summary(),
@@ -435,7 +618,7 @@ class App:
 
         @router.get("", response_model=SubjectList, response_model_by_alias=True)
         async def list_subjects() -> SubjectList:
-            return board(current_account_id.get())
+            return await board(current_account_id.get())
 
         # ``/stream`` before ``/{subject_id}`` so the literal path wins over the id matcher.
         @router.get("/stream", response_class=StreamingResponse)
@@ -444,8 +627,8 @@ class App:
             account_id = current_account_id.get()
 
             async def snapshot() -> SubjectList:
-                with session_scope(engine):
-                    return board(account_id)
+                async with session_scope(engine):
+                    return await board(account_id)
 
             return StreamingResponse(
                 stream(snapshot), media_type="text/event-stream", headers=SSE_HEADERS
@@ -457,7 +640,7 @@ class App:
         @router.get("/{subject_id:path}/stream", response_class=StreamingResponse)
         async def stream_subject(subject_id: str, engine: EngineDep) -> StreamingResponse:
             async def snapshot() -> SubjectResponse | None:
-                with session_scope(engine):
+                async with session_scope(engine):
                     return await subject_response(subject_id)
 
             return StreamingResponse(
@@ -483,7 +666,7 @@ class App:
         boot."""
 
     @classmethod
-    def record_event(
+    async def record_event(
         cls,
         *,
         type: str,
@@ -494,7 +677,7 @@ class App:
         app automatically. Apps record through here so the ``Event`` model
         stays a platform internal. ``type`` is the milestone's own word ("merged") —
         the feed reads it as one, so an app writes no rendering."""
-        Event.emit(
+        await Event.emit(
             type=type,
             subject=subject.identity if subject else None,
             label=subject.label if subject else None,
@@ -506,6 +689,6 @@ class App:
     async def get_subject_activity(
         cls, subject: "Subject | StoredSubject"
     ) -> "SubjectActivity | None":
-        """The subject's live sub-phase, if any (e.g. "Building sandbox VM…"). Optional —
+        """The subject's live sub-phase, if any (e.g. "Provisioning sandbox VM…"). Optional —
         override to surface a transient signal the running run pushes."""
         return

@@ -2,7 +2,7 @@ from druks_field_notes.models import Note
 from druks_field_notes.workflows import Summarize
 
 
-def test_notes_routes_create_and_list_notes(druks_client, monkeypatch):
+async def test_notes_routes_create_and_list_notes(druks_client, monkeypatch):
     # The route dispatches from its own session and that session closes with the
     # request, so read the note's id here while the row is still attached.
     summarized = []
@@ -13,17 +13,17 @@ def test_notes_routes_create_and_list_notes(druks_client, monkeypatch):
 
     monkeypatch.setattr(Summarize, "dispatch", staticmethod(dispatch))
 
-    created = druks_client.post(
+    created = await druks_client.post(
         "/api/field_notes/notes",
         json={"body": "the pump ran hot"},
     )
 
     assert created.status_code == 201
-    note = Note.get(created.json()["id"])
+    note = await Note.get(created.json()["id"])
     assert note.body == "the pump ran hot"
     assert summarized == [note.id]
 
-    listed = druks_client.get("/api/field_notes/notes")
+    listed = await druks_client.get("/api/field_notes/notes")
 
     assert listed.status_code == 200
     assert listed.json()[0]["body"] == "the pump ran hot"

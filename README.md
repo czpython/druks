@@ -8,30 +8,31 @@
 # Druks
 
 > [!WARNING]
-> Druks is under active development. Expect breaking changes and rough edges
-> before 1.0; `main` and `latest` are edge builds, not stable releases.
+> Druks is under active development. Breaking changes and rough edges can occur
+> before version 1.0. `main` and `latest` contain edge builds. They are not
+> stable releases.
 
-Druks is the self-hosted **home for durable agent apps**, running on the
-Claude and Codex subscriptions you already pay for. Ship comes bundled:
-autonomous software delivery from ticket to reviewed pull request.
+Druks is a self-hosted **home for durable agent apps**. It runs agents with the
+Claude and Codex subscriptions that you already use. Druks includes Software
+Factory. This app automates software delivery from a ticket to a reviewed pull
+request.
 
 An ordinary agent script loses its place when the process dies. A Druks
 workflow records the result of each completed durable operation in Postgres.
 After a restart or deploy, Druks replays the workflow and reuses those recorded
-results instead of repeating completed work. If the process was interrupted
-*inside* an operation, that operation may run again, so side effects still need
-idempotency. [Durability and recovery](https://github.com/czpython/druks/blob/main/docs/concepts.md#durability-and-recovery)
-explains the exact boundary.
+results instead of repeating completed work. If the process stops *inside* an
+operation, that operation can run again. Thus, side effects still require
+idempotency. [Durability and recovery](https://docs.druks.ai/concepts#durability-and-recovery)
+explains this boundary.
 
 ## Install
 
 The installer supports three deployment shapes backed by
 [Drukbox](https://github.com/czpython/drukbox):
 
-- `docker` (default): local sandbox containers on the host Docker daemon — the
-  zero-config laptop shape
-- `exe`: exe.dev sandbox VMs over a tailnet
-- any other provider name: the generic remote shape
+- **Docker:** `docker` (default) starts local sandbox containers on the host Docker daemon.
+- **Remote:** `exe` starts exe.dev sandbox VMs over a tailnet.
+- Each other provider name selects the generic remote shape.
 
 The default is the local shape, so the bare command boots a stack with no
 authored values:
@@ -40,22 +41,22 @@ authored values:
 curl -fsSL https://druks.ai/install.sh | bash
 ```
 
-That command follows the edge channel while Druks has no stable release. Once
-versioned releases exist, install the script and image from the same tag as
-described in [the release process](https://github.com/czpython/druks/blob/main/docs/releasing.md#install-an-immutable-version).
-Re-running is also the upgrade path. Then follow
-[full local setup](https://github.com/czpython/druks/blob/main/docs/full-local.md) to finish in
-the dashboard: connect the agent harnesses and the GitHub App the bundled
-`ship` extension acts through; a standalone extension may have different
-integration requirements.
+That command follows the edge channel while Druks has no stable release.
+Versioned releases use an installer script and an image from the same tag.
+[The release process](https://docs.druks.ai/releasing#install-an-immutable-version)
+explains this method. Run the installer again to upgrade Druks.
+
+Then follow [full local setup](https://docs.druks.ai/full-local). Connect the
+agent harnesses in the dashboard. Connect the GitHub App that
+`software_factory` uses. A standalone app can require different integrations.
 
 Or hand the install to a coding agent — paste this into Claude Code, Codex,
 or any agent with shell access on the target machine:
 
 > Install druks on this machine by following
 > <https://raw.githubusercontent.com/czpython/druks/main/INSTALL.md>
-> exactly: run every step's verification, and if one fails, stop and show me
-> the failing step and its output instead of improvising.
+> exactly. Run each verification step. If a verification fails, stop. Show me
+> the failed step and its output. Do not improvise a fix.
 
 For a remote install, name the provider — `exe` for exe.dev VMs, any other
 Drukbox provider name for the generic remote shape:
@@ -64,60 +65,62 @@ Drukbox provider name for the generic remote shape:
 curl -fsSL https://druks.ai/install.sh | DRUKS_PROVIDER=exe bash
 ```
 
-The installer is non-interactive: the first run writes `~/druks/druks.toml`
-with generated secrets, and when a remote shape still needs values only you
-know (provider credentials, identity edge) it prints that checklist and exits;
-set them in `druks.toml` and re-run the same command. See the
-[deployment runbook](https://github.com/czpython/druks/blob/main/deploy/README.md)
-for prerequisites, access control, verification, and rollback.
+The installer does not ask questions. The first run writes
+`~/druks/druks.toml` with generated secrets. A remote shape can require values
+that only you know. These values include provider credentials and identity-edge
+details.
+
+The installer prints this list and exits. Set the values in
+`druks.toml`. Then run the same command again.
+
+See the [deployment runbook](https://docs.druks.ai/deployment) for
+prerequisites, access control, verification, and rollback.
 
 ```text
-trigger ──> extension workflow ──> durable step ──> agent ──> sandbox
+trigger ──> app workflow ──> durable step ──> agent ──> sandbox
                  │                     │              │
                  │                     │              └─ Claude or Codex harness
                  │                     └─ result checkpointed in Postgres
-                 ├─ event ──> feed / extension reaction
+                 ├─ event ──> feed / app reaction
                  └─ gate  ──> wait for human or external system ──> resume
 ```
 
-**Platform and applications stay separate**
+**Platform and apps stay separate**
 
 Druks owns the execution and operating substrate:
 
-- DBOS workflows and queues backed by Postgres
-- typed human gates, cancellation, schedules, and observable run state
+- DBOS workflows and queues that use Postgres
+- Typed human gates, cancellation, schedules, and observable run state
 - Claude and Codex harness dispatch through isolated Drukbox sandboxes
-- append-only events, live feeds, webhooks, notifications, MCP servers, and skills
-- validated operator settings, encrypted MCP/OAuth secrets, and the dashboard shell
-- extension discovery, API namespaces, and independent migration histories
+- Append-only events, live feeds, webhooks, notifications, MCP servers, and skills
+- Validated operator settings, encrypted MCP and OAuth secrets, and the dashboard shell
+- App discovery, API namespaces, and independent migration histories.
 
-An **extension** owns the application: its workflows, agents, domain models,
-routes, events, provider reactions, and optional dashboard pages. It is a normal
-Python distribution registered through the `druks.extensions` entry-point
-group. Installing the distribution registers it; Druks does not need an
-extension-specific plugin list.
+An **app** owns its workflows, agents, domain models, routes, events, provider
+reactions, and optional dashboard pages. It is a Python distribution that uses
+the `druks.apps` entry-point group. Install the distribution to register it.
+Druks does not require an app-specific plugin list.
 
 Scaffold one with the published CLI, no checkout required:
 
 ```bash
-uvx --from druks druks create extension night_watch
+uvx --from druks druks create app night_watch
 ```
 
 The generated project root carries an `AGENTS.md` with the contracts and a link
 to the authoring guide.
 
-The bundled `ship` extension is a concrete example. It coordinates coding
-agents through tickets and GitHub pull requests, but GitHub PR orchestration is
-`ship` behavior—not the definition of Druks.
+The bundled `software_factory` app is a concrete example. It coordinates coding
+agents through tickets and GitHub pull requests. GitHub pull-request
+orchestration belongs to `software_factory`, not to Druks.
 
 ## Documentation
 
-- **Evaluating Druks:** [Concepts and guarantees](https://github.com/czpython/druks/blob/main/docs/concepts.md)
-- **Installing locally:** [Full local setup](https://github.com/czpython/druks/blob/main/docs/full-local.md)
-- **Operating a remote stack:** [Deployment runbook](https://github.com/czpython/druks/blob/main/deploy/README.md)
-- **Configuring integrations and secrets:** [Configuration](https://github.com/czpython/druks/blob/main/docs/configuration.md)
-- **Building an application:** [Writing an extension](https://github.com/czpython/druks/blob/main/docs/writing-an-extension.md)
-- **Diagnosing a run or service:** [Troubleshooting](https://github.com/czpython/druks/blob/main/docs/troubleshooting.md)
+- **Start here:** [Quickstart](https://docs.druks.ai/quickstart)
+- **Understand recovery:** [Concepts and guarantees](https://docs.druks.ai/concepts)
+- **Build an app:** [Author guide](https://docs.druks.ai/writing-an-app)
+- **Operate Druks:** [Deployment](https://docs.druks.ai/deployment) and [configuration](https://docs.druks.ai/configuration)
+- **Diagnose a failure:** [Troubleshooting](https://docs.druks.ai/troubleshooting)
 - **Contributing to Druks:** [Contribution guide](https://github.com/czpython/druks/blob/main/CONTRIBUTING.md)
 - **Reporting a vulnerability:** [Security policy](https://github.com/czpython/druks/blob/main/SECURITY.md)
-- **All documentation:** [Documentation index](https://github.com/czpython/druks/blob/main/docs/index.md)
+- **All documentation:** [docs.druks.ai](https://docs.druks.ai).

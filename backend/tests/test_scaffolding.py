@@ -18,6 +18,10 @@ def test_create_app_scaffolds_a_loadable_package(tmp_path):
     assert rendered
     # The generated suite is what an author runs first; the scaffold is useless without it.
     assert (target / "tests" / "test_app.py").is_file()
+    # Screens are Python. The scaffold writes no JavaScript and no dist/.
+    assert (package / "pages.py").is_file()
+    assert not (package / "dist").exists()
+    assert 'navigation = ["overview"]' in (package / "app.py").read_text()
     for path in rendered:
         assert "-tpl" not in path.name
         assert "{{" not in path.read_text()
@@ -34,12 +38,14 @@ def test_create_app_scaffolds_a_loadable_package(tmp_path):
         lowered = text.lower()
         assert "druks.storage" not in text
         assert "taskiq" not in lowered
+        assert not path.name.endswith(".js")
+        assert "shellApi" not in text
         assert "``config``" not in text
         assert "subject_type" not in text
         assert "Subject(" not in text
 
     # The generated app.py must survive App.__init_subclass__ validation,
-    # and mounting must serve both the API routes and the shipped dist/ frontend.
+    # and mounting must serve its API routes and the pages it declares.
     sys.path.insert(0, str(target))
     try:
         module = importlib.import_module("druks_night_watch.app")
@@ -52,7 +58,15 @@ def test_create_app_scaffolds_a_loadable_package(tmp_path):
         # module imports; the generated workflow resolves its identity from that.
         register_workflow_package(night_watch.package, night_watch.name)
 
-        for role in ("models", "schemas", "contracts", "workflows", "routes", "subscribers"):
+        for role in (
+            "models",
+            "schemas",
+            "contracts",
+            "workflows",
+            "routes",
+            "pages",
+            "subscribers",
+        ):
             importlib.import_module(f"druks_night_watch.{role}")
 
         # The workflow guidance must not teach a per-run app= argument —
@@ -67,10 +81,15 @@ def test_create_app_scaffolds_a_loadable_package(tmp_path):
         api.dependency_overrides[current_account] = lambda: None
         client = TestClient(api)
         assert client.get("/api/night_watch/status").json() == {"app": "night_watch"}
-        entry = client.get("/app/night_watch/entry.js")
-        assert entry.status_code == 200
-        assert "shellApi" in entry.text
-        assert "night_watch" in entry.text
+        # The landing page is the scaffold's own, and it renders with no
+        # JavaScript anywhere in the package.
+        landing = client.get("/api/night_watch/pages")
+        assert landing.status_code == 200
+        assert landing.json()["title"] == "NightWatch"
+        assert landing.json()["blocks"][0]["block"] == "stack"
+        assert night_watch.frontend_dist() is None
+        assert [page.name for page in night_watch.pages()] == ["overview"]
+        assert [page.label for page in night_watch.navigation_pages()] == ["overview"]
     finally:
         sys.path.remove(str(target))
         _workflow_packages.pop("druks_night_watch", None)
@@ -82,7 +101,7 @@ def test_create_app_rejects_bad_and_taken_names(tmp_path):
     with pytest.raises(ValueError, match="must match"):
         create_app("Night-Watch", tmp_path)
     with pytest.raises(ValueError, match="already installed"):
-        create_app("ship", tmp_path)
+        create_app("software_factory", tmp_path)
     create_app("night_watch", tmp_path)
     with pytest.raises(ValueError, match="already exists"):
         create_app("night_watch", tmp_path)

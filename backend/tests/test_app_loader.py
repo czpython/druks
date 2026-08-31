@@ -3,14 +3,14 @@ from pathlib import Path
 _PLATFORM_ROOT = Path(__file__).resolve().parent.parent / "druks"
 
 
-def test_import_app_models_registers_ship_via_generic_discovery():
-    # Ship's tables are unprefixed (they live in core's schema), so it flows through the
+def test_import_app_models_registers_software_factory_via_generic_discovery():
+    # SoftwareFactory's tables are unprefixed (they live in core's schema), so it flows through the
     # same iter_apps() path as any app — exempt via prefix_tables=False, not a
     # hardcoded platform import.
     from druks.apps.loader import get_app, import_app_models
     from druks.models import Base
 
-    assert get_app("ship").prefix_tables is False
+    assert get_app("software_factory").prefix_tables is False
     import_app_models()  # idempotent; raises if the unprefixed tables aren't exempt
     assert {"projects", "work_items", "project_repos"} <= set(Base.metadata.tables)
 

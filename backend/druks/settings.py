@@ -15,8 +15,12 @@ from pydantic_settings import (
 
 DEFAULT_DATA_DIR = Path("/var/lib/druks")
 
-# The MCP default-server catalog Druks ships (Linear declared but disabled);
-# ``mcp_catalog_path`` points a deployment at its own file instead.
+# The MCP default-server catalog Druks ships: an explicit empty ``mcpServers``
+# map, so a fresh install registers and delivers no built-in servers.
+# ``mcp_catalog_path`` points a deployment at its own file instead. The file
+# stays even though it declares nothing: startup loads the configured path
+# unconditionally (see druks/api/server.py) and a missing file raises
+# ``InvalidCatalogError`` during boot.
 PACKAGED_MCP_CATALOG = Path(__file__).with_name("mcp") / "catalog.json"
 
 # The trust pins for the MCP registry picker's official badge (see
@@ -148,15 +152,13 @@ class Sandbox(BaseModel):
     # over Tailscale to execute the CLI inside it. See
     # ``docs/design/sandboxed-execution.md`` for the full architecture.
     #
-    # An empty URL disables sandbox-backed execution; workflows that call an
-    # agent then fail when they try to acquire a host.
     service_url: str = ""
     service_token: str = ""
     # Empty → drukbox decides.
     image: str = ""
     # The browser home: browser containers boot on this provider with this image.
     browser_sandbox_provider: str = "docker"
-    browser_sandbox_image: str = "ghcr.io/czpython/druks-browser:latest"
+    browser_sandbox_image: str = "ghcr.io/czpython/druks/browser:latest"
     # An HTTP proxy for the login window. The login then leaves from a different
     # IP than the box. Use it for sign-in flows that refuse the box IP. The value
     # can include a user name and password (http://user:pass@host:port); the
@@ -191,7 +193,7 @@ class Settings(BaseSettings):
     secrets: Secrets
     sandbox: Sandbox = Sandbox()
 
-    # ``data_dir`` is the root for run artifacts and logs (via computed
+    # ``data_dir`` is the root for files, run artifacts, and logs (via computed
     # properties below).
     data_dir: ExpandedPath = Field(default=DEFAULT_DATA_DIR, alias="DRUKS_DATA_DIR")
 
@@ -284,6 +286,10 @@ class Settings(BaseSettings):
         return self.data_dir / "artifacts"
 
     @property
+    def files_dir(self) -> Path:
+        return self.data_dir / "files"
+
+    @property
     def skills_dir(self) -> Path:
         # Operator-installed skills, pushed into every VM. Defaults to a writable
         # dir under ``data_dir`` (the UI installs into it); an explicit
@@ -292,7 +298,7 @@ class Settings(BaseSettings):
 
 
 def load_settings() -> Settings:
-    return Settings()
+    return Settings()  # pyright: ignore[reportCallIssue]
 
 
 def setup_logging(settings: Settings) -> None:
@@ -315,4 +321,5 @@ def ensure_data_dirs(settings: Settings) -> None:
     settings.data_dir.mkdir(parents=True, exist_ok=True)
     settings.logs_dir.mkdir(parents=True, exist_ok=True)
     settings.artifacts_dir.mkdir(parents=True, exist_ok=True)
+    settings.files_dir.mkdir(parents=True, exist_ok=True)
     settings.skills_dir.mkdir(parents=True, exist_ok=True)

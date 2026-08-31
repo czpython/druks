@@ -19,7 +19,7 @@ class StoredBrowserSession(Base, Uuid7Pk):
     __tablename__ = "browser_sessions"
     __table_args__ = (
         CheckConstraint(
-            "status IN ('needs_login', 'ready', 'stale')",
+            "status IN ('needs_login', 'ready', 'stale', 'anonymous')",
             name="browser_sessions_status_check",
         ),
         CheckConstraint(
@@ -38,52 +38,54 @@ class StoredBrowserSession(Base, Uuid7Pk):
     last_used_at: Mapped[datetime | None] = mapped_column(default=None)
 
     @classmethod
-    def get_or_create(
+    async def get_or_create(
         cls,
         *,
         name: str,
         payload_format: BrowserSessionPayloadFormat,
         site: str,
+        status: BrowserSessionStatus = BrowserSessionStatus.NEEDS_LOGIN,
     ):
         """Concurrency-safe lookup-or-create: two first actions racing on the
         same session both INSERT with ON CONFLICT DO NOTHING, then converge on
         the one row through the name lookup."""
-        browser_session = cls.get_for_name(name)
+        browser_session = await cls.get_for_name(name)
         if browser_session:
             return browser_session
         session = db_session()
-        session.execute(
+        await session.execute(
             insert(cls)
-            .values(name=name, payload_format=payload_format.value, site=site)
+            .values(name=name, payload_format=payload_format.value, site=site, status=status.value)
             .on_conflict_do_nothing(index_elements=["name"])
         )
-        return session.scalars(select(cls).where(cls.name == name)).one()
+        return (await session.scalars(select(cls).where(cls.name == name))).one()
 
     @classmethod
-    def list_all(cls):
-        return list(db_session().scalars(select(cls).order_by(cls.name)))
+    async def list_all(cls):
+        return list(await db_session().scalars(select(cls).order_by(cls.name)))
 
     @classmethod
-    def get_for_name(cls, name: str):
-        return db_session().scalar(select(cls).where(cls.name == name))
+    async def get_for_name(cls, name: str):
+        return await db_session().scalar(select(cls).where(cls.name == name))
 
-    def mark_stale(self) -> None:
+    async def mark_stale(self) -> None:
         self.status = BrowserSessionStatus.STALE.value
-        db_session().flush()
+        await db_session().flush()
 
-    def mark_used(self) -> None:
+    async def mark_used(self) -> None:
         self.last_used_at = Base.utc_now()
-        db_session().flush()
+        await db_session().flush()
 
-    def store_payload(self, payload: bytes) -> None:
+    async def store_payload(self, payload: bytes) -> None:
         self.payload = payload  # type: ignore[assignment] — the column takes plaintext in, hands SecretBytes back
         self.status = BrowserSessionStatus.READY.value
         self.last_refreshed_at = Base.utc_now()
-        db_session().flush()
+        await db_session().flush()
         # Assignment holds the plaintext; a read must always hand back the
-        # encrypted column's SecretBytes, so the next access reloads.
-        db_session().expire(self, ["payload"])
+        # encrypted column's SecretBytes, so reload the column now — an expired
+        # attribute can't lazy-load under the async session.
+        await db_session().refresh(self, ["payload"])
 
-    def delete(self) -> None:
-        db_session().delete(self)
-        db_session().flush()
+    async def delete(self) -> None:
+        await db_session().delete(self)
+        await db_session().flush()

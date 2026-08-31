@@ -1,6 +1,6 @@
 [project]
 name = "druks"
-version = "0.3.0"
+version = "0.4.0"
 description = "Autonomous software delivery; the self-hosted home for durable agent apps."
 readme = "README.md"
 license = "MIT"
@@ -17,7 +17,7 @@ classifiers = [
 requires-python = ">=3.11"
 dependencies = [
     "asyncssh>=2.22",
-    "drukbox-python-sdk>=0.0.6",
+    "drukbox-python-sdk>=0.1.0",
     # 0.138 adds app.frontend(), which serves an app's shipped dist/.
     "fastapi>=0.138.0",
     "githubkit[auth-app]>=0.15.5",
@@ -31,7 +31,7 @@ dependencies = [
     "uuid-utils>=0.16.0",
     "psycopg[binary]>=3.2",
     "alembic>=1.13",
-    "dbos>=2.26",
+    "dbos>=2.30",
     "croniter>=6.2.2",
     "redis>=8",
     "tomlkit>=0.13",
@@ -42,7 +42,7 @@ dependencies = [
 ]
 
 [project.urls]
-Documentation = "https://github.com/czpython/druks/tree/main/docs"
+Documentation = "https://docs.druks.ai"
 Issues = "https://github.com/czpython/druks/issues"
 Repository = "https://github.com/czpython/druks"
 
@@ -69,7 +69,7 @@ druks = "druks.testing"
 [project.entry-points."druks.apps"]
 core = "druks.core.app:Core"
 review = "druks.contrib.review.app:Review"
-ship = "druks.contrib.ship.app:Ship"
+software_factory = "druks.contrib.software_factory.app:SoftwareFactory"
 usage = "druks.usage.app:Usage"
 
 [build-system]

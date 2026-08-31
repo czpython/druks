@@ -8,9 +8,9 @@ const appSettings = {
   allowedEfforts: [],
   apps: [
     {
-      name: 'ship',
-      description: 'Ship settings',
-      icon: 'ship',
+      name: 'software_factory',
+      description: 'Software Factory settings',
+      icon: 'factory',
       builtin: false,
       agents: [],
       workflows: [],
@@ -224,8 +224,8 @@ describe('SettingsModal app fields', () => {
     stubFetch(false)
     const onClose = renderModal()
 
-    fireEvent.click(await screen.findByRole('button', { name: 'ship' }))
-    const options = screen.getByText('ship options').closest('.set-group')
+    fireEvent.click(await screen.findByRole('button', { name: 'software factory' }))
+    const options = screen.getByText('software factory options').closest('.set-group')
     expect(options?.textContent?.indexOf('Tracker')).toBeLessThan(
       options?.textContent?.indexOf('Linear') ?? -1,
     )
@@ -250,7 +250,7 @@ describe('SettingsModal app fields', () => {
           String(input) === '/api/settings/apps' && init?.method === 'PATCH',
       )
     const body = JSON.parse(String(patchCall?.[1]?.body))
-    expect(body.appSettings.ship).toEqual({ tracker: 'jira' })
+    expect(body.appSettings.software_factory).toEqual({ tracker: 'jira' })
   })
 
   it('renders a multiline secret as a textarea and PATCHes the paste with newlines intact', async () => {
@@ -286,10 +286,10 @@ describe('SettingsModal app fields', () => {
   })
 
   it('renders a 422 message for a field hidden by the tracker selection', async () => {
-    stubFetch(true, { ship: { linear_trigger_status: 'Not a Linear status name.' } })
+    stubFetch(true, { software_factory: { linear_trigger_status: 'Not a Linear status name.' } })
     renderModal()
 
-    fireEvent.click(await screen.findByRole('button', { name: 'ship' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'software factory' }))
     const trackerField = screen.getByText('Tracker').closest('.set-field')
     fireEvent.change(trackerField?.querySelector('select') as HTMLSelectElement, {
       target: { value: 'jira' },

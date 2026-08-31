@@ -112,11 +112,11 @@ function AppShell() {
         return
       }
       if (event.key === 'Escape') {
-        if (location.startsWith('/ship/work-items/') && location.includes('/agent-calls/')) {
+        if (location.startsWith('/software_factory/work-items/') && location.includes('/agent-calls/')) {
           // Capture the whole work-item segment (id + slug) so Esc from a call page
-          // lands on the canonical /ship/work-items/<id>-<slug>, not a bare
-          // /ship/work-items/<id> that the page would then redirect.
-          const match = /^(\/ship\/work-items\/[^/]+)\/agent-calls\//.exec(location)
+          // lands on the canonical /software_factory/work-items/<id>-<slug>, not a bare
+          // /software_factory/work-items/<id> that the page would then redirect.
+          const match = /^(\/software_factory\/work-items\/[^/]+)\/agent-calls\//.exec(location)
           const workItemPath = match?.[1]
           if (workItemPath) {
             navigate(workItemPath)
@@ -124,7 +124,7 @@ function AppShell() {
           }
         }
         if (
-          location.startsWith('/ship/work-items/') ||
+          location.startsWith('/software_factory/work-items/') ||
           // The app-independent detail pages (Usage panel, Events feed) are
           // reached from appbar pills; Esc returns to the current app's home
           // rather than leaving the operator stuck without a visible back affordance.
@@ -152,9 +152,10 @@ function AppShell() {
 
   const home = app ? appHome(app) : '/'
   const accentColor = app ? accent[app] : undefined
-  // The subnav tabs the app declared on its backend class, off the roster —
-  // the one nav channel, for bundled and installed apps alike.
-  const navigation = rosterQuery.data?.find((entry) => entry.name === app)?.navigation
+  // The subnav tabs: an app that owns its own pages in JavaScript declares
+  // them in its registry entry, and a Python-page app gets them from the
+  // roster, resolved from its declared pages.
+  const navigation = ui?.navigation ?? rosterQuery.data?.find((entry) => entry.name === app)?.navigation
 
   return (
     <>

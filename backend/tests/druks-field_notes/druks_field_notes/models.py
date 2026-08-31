@@ -18,33 +18,33 @@ class Note(StoredSubject):
     created_at: Mapped[datetime] = mapped_column(default=StoredSubject.utc_now)
 
     @classmethod
-    def create(cls, *, body: str) -> "Note":
+    async def create(cls, *, body: str) -> "Note":
         session = db_session()
         note = cls(body=body)
         session.add(note)
-        session.flush()
+        await session.flush()
         return note
 
     @classmethod
-    def get(cls, note_id: int) -> "Note | None":
-        return db_session().get(cls, note_id)
+    async def get(cls, note_id: int) -> "Note | None":
+        return await db_session().get(cls, note_id)
 
     @classmethod
-    def list_recent(cls, *, limit: int = 100) -> list["Note"]:
+    async def list_recent(cls, *, limit: int = 100) -> list["Note"]:
         stmt = select(cls).order_by(cls.created_at.desc(), cls.id.desc()).limit(limit)
-        return list(db_session().scalars(stmt))
+        return list(await db_session().scalars(stmt))
 
-    def save_gist(self, gist: str) -> None:
+    async def save_gist(self, gist: str) -> None:
         self.gist = gist
-        db_session().flush()
+        await db_session().flush()
 
     def get_summary(self) -> NoteSummary:
         return NoteSummary.model_validate(self)
 
     @classmethod
-    def list_summaries(cls, account_id: str | None) -> list[NoteSummary]:
+    async def list_summaries(cls, account_id: str | None) -> list[NoteSummary]:
         # How many the board shows is an operator knob, so it lives on the app.
         from druks_field_notes.app import FieldNotes
 
-        notes = cls.list_recent(limit=FieldNotes.settings().board_size)
+        notes = await cls.list_recent(limit=(await FieldNotes.settings()).board_size)
         return [note.get_summary() for note in notes]

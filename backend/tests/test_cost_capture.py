@@ -76,29 +76,31 @@ def test_read_cost_returns_none_for_corrupt_file(tmp_path: Path):
     assert metadata is None
 
 
-def test_record_agent_run_cost_persists_to_db(druks_db):
-    note = Note.create(body="cost capture")
-    run = seed_run(druks_db, kind=Summarize.kind, subject=note)
-    call = seed_call(druks_db, run, "summarize", status="running")
-    call.record_cost(
+async def test_record_agent_run_cost_persists_to_db(druks_db):
+    note = await Note.create(body="cost capture")
+    run = await seed_run(druks_db, kind=Summarize.kind, subject=note)
+    call = await seed_call(druks_db, run, "summarize", status="running")
+    # record_cost flushes the ambient session, so mutate the ambient copy.
+    call = await AgentCall.get(call.id)
+    await call.record_cost(
         cost_usd=1.23,
         cost_metadata={"input_tokens": 200, "model": "claude-opus-4-7"},
     )
 
-    fetched = AgentCall.get(call.id)
+    fetched = await AgentCall.get(call.id)
     assert fetched is not None
     assert fetched.cost_usd == 1.23
     assert fetched.cost_metadata == {"input_tokens": 200, "model": "claude-opus-4-7"}
 
 
-def test_record_agent_run_cost_noop_when_empty(druks_db):
-    note = Note.create(body="empty cost")
-    run = seed_run(druks_db, kind=Summarize.kind, subject=note)
-    call = seed_call(druks_db, run, "summarize", status="running")
+async def test_record_agent_run_cost_noop_when_empty(druks_db):
+    note = await Note.create(body="empty cost")
+    run = await seed_run(druks_db, kind=Summarize.kind, subject=note)
+    call = await seed_call(druks_db, run, "summarize", status="running")
 
-    call.record_cost(cost_usd=None, cost_metadata=None)
+    await call.record_cost(cost_usd=None, cost_metadata=None)
 
-    fetched = AgentCall.get(call.id)
+    fetched = await AgentCall.get(call.id)
     assert fetched is not None
     assert fetched.cost_usd is None
     assert fetched.cost_metadata is None

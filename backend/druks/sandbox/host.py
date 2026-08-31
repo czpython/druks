@@ -31,8 +31,8 @@ from .datastructures import (
     HarnessRunResult,
     McpServer,
 )
-from .exceptions import SandboxError
-from .layout import get_work_root
+from .exceptions import SandboxDownloadError, SandboxError
+from .layout import get_helper_script_path, get_work_root
 
 if TYPE_CHECKING:
     from druks.harnesses.base import Harness
@@ -71,7 +71,7 @@ _CONNECT_TIMEOUT_SECONDS = 30.0
 _KEEPALIVE_INTERVAL_SECONDS = 15.0
 
 
-class Sandbox:
+class Host:
     def __init__(
         self,
         *,
@@ -148,9 +148,42 @@ class Sandbox:
                 f"exit={result.exit_code} {result.stderr.strip()}"
             )
 
-    async def download(self, *, remote: str, local: Path) -> None:
+    async def download(
+        self,
+        *,
+        remote: str,
+        local: Path,
+        workspace_root: str = "",
+        max_bytes: int = 0,
+    ) -> None:
         conn = await self._ensure_conn()
         local.parent.mkdir(parents=True, exist_ok=True)
+        if workspace_root:
+            helper = get_helper_script_path(self.ssh_username)
+            # The reported path is the agent's word — quoted so it can't grow
+            # shell syntax; the other arguments are our own.
+            command = f"{helper} read-file {workspace_root} {shlex.quote(remote)} {max_bytes}"
+            process = await conn.create_process(command, encoding=None)
+            transferred = 0
+            try:
+                with local.open("wb") as destination:
+                    while chunk := await process.stdout.read(64 * 1024):
+                        transferred += len(chunk)
+                        if transferred > max_bytes:
+                            process.terminate()
+                            await process.wait()
+                            raise SandboxDownloadError(
+                                f"reported file exceeds the {max_bytes}-byte limit: {remote}"
+                            )
+                        destination.write(chunk)
+                completed = await process.wait()
+                if completed.exit_status != 0:
+                    detail = (await process.stderr.read()).decode().strip()
+                    raise SandboxDownloadError(detail or f"failed to download {remote}")
+            except BaseException:
+                local.unlink(missing_ok=True)
+                raise
+            return
         async with conn.start_sftp_client() as sftp:
             await sftp.get(remote, str(local))
 
@@ -205,9 +238,9 @@ class Sandbox:
         still records what it cost before the agent call re-raises it.
 
         The repo is a *precondition*, not an input: callers that need one clone
-        it into the VM first (see Ship's workspace). ``include_plugins=False`` (Claude only)
-        skips uploading the operator's plugin state — for prompts that hit no MCP
-        server; a no-op for codex.
+        it into the VM first (see Software Factory's workspace).
+        ``include_plugins=False`` (Claude only) skips uploading the operator's plugin
+        state — for prompts that hit no MCP server; a no-op for codex.
         """
         # cycle: the harnesses package eagerly imports claude/codex, which
         # import this package's siblings — so the factory can't load while
@@ -220,8 +253,8 @@ class Sandbox:
 
         settings = load_settings()
         # Effort/timeout fall back to the model's harness defaults.
-        harness_class = get_harness_for_model(model)
-        harness_settings = HarnessSettings.require(harness_class.name)
+        harness_class = await get_harness_for_model(model)
+        harness_settings = await HarnessSettings.require(harness_class.name)
         effort = effort or harness_settings.effort
         timeout = timeout if timeout is not None else harness_settings.timeout
         harness = harness_class(
@@ -303,14 +336,14 @@ class Sandbox:
         persist_manifest(
             artifact_dir,
             call_id=run_id,
-            manifest=harness.get_manifest(
+            manifest=await harness.get_manifest(
                 mcp_servers=mcp_servers,
                 skills=skills,
                 extra_env=extra_env,
             ),
         )
 
-        invocation = harness.build_invocation(
+        invocation = await harness.build_invocation(
             prompt=prompt,
             schema=schema,
             run_id=run_id,
@@ -538,7 +571,7 @@ class Sandbox:
         cwd: str | None = None,
         stdin_data: bytes | None = None,
     ) -> "Exec":
-        # cycle: each sibling imports Sandbox from this module
+        # cycle: each sibling imports Host from this module
         from . import credentials as _credentials
         from . import runner as _runner
 
@@ -651,21 +684,15 @@ class Sandbox:
                     "client_keys": [str(key_path)],
                 }
         raise RuntimeError(
-            f"Sandbox {self.record.id}: no reachable address on the record.",
+            f"Host {self.record.id}: no reachable address on the record.",
         )
-
-
-class _TarWriter:
-    def write(self, data: bytes) -> None: ...  # pragma: no cover
-    async def drain(self) -> None: ...  # pragma: no cover
-    def write_eof(self) -> None: ...  # pragma: no cover
 
 
 async def _stream_local_tar_into(
     *,
     local: Path,
     excludes: Sequence[str],
-    writer: _TarWriter,
+    writer: "asyncssh.SSHWriter[Any]",
 ) -> None:
     exclude_args: list[str] = []
     for pattern in excludes:

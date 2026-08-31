@@ -16,6 +16,7 @@ from druks.durable.activity import set_run_phase
 from druks.durable.engine import _step_engine, step_session
 from druks.durable.exceptions import WorkflowError
 from druks.durable.models import AgentCall, Artifact
+from druks.files.datastructures import File
 from druks.harnesses.exceptions import HarnessError, Retry
 from druks.harnesses.models import HarnessConnection
 from druks.harnesses.registry import get_harness_for_model
@@ -23,14 +24,16 @@ from druks.prompts import render_prompt
 from druks.sandbox import gate as sandbox_gate
 from druks.sandbox.client import sandbox_client
 from druks.sandbox.constants import MAX_AGENT_TIMEOUT_SECONDS
+from druks.sandbox.templates import get_template_id
 from druks.settings import load_settings
 from druks.usage.models import UsageScrape
 from druks.user_settings.models import SettingsOverride
 from druks.workflows import _in_step, current_workflow
 
 if TYPE_CHECKING:
-    from druks.sandbox.datastructures import AgentResult, Workspace
+    from druks.sandbox.datastructures import AgentResult
     from druks.workflows import Workflow
+    from druks.workspaces import Workspace
 
 __all__ = ["Agent", "AgentOutput"]
 
@@ -49,7 +52,14 @@ async def _runner(
     if host_id:
         vm = sandbox_client.attach(host_id=host_id)
     else:
-        vm = sandbox_client.ephemeral(idempotency_key=f"{workflow_id}:{step}")
+        template = None
+        if workflow.sandbox:
+            template = await get_template_id(workflow.sandbox)
+            await set_run_phase("provisioning_vm")
+        vm = sandbox_client.ephemeral(
+            idempotency_key=f"{workflow_id}:{step}",
+            template=template,
+        )
     async with vm as box:
         yield await workflow.get_workspace(box)
 
@@ -122,21 +132,21 @@ class Agent:
     # override → the agent's declared value → the operator's global default.
     # ``run`` uses these; callers that drive the harness themselves call them
     # directly.
-    def get_model_name(self) -> str:
-        return SettingsOverride.agent_model(self.id, self.model).value
+    async def get_model_name(self) -> str:
+        return (await SettingsOverride.agent_model(self.id, self.model)).value
 
-    def get_effort(self) -> str:
-        harness = get_harness_for_model(self.get_model_name()).name
-        return SettingsOverride.agent_effort(self.id, self.effort, harness).value
+    async def get_effort(self) -> str:
+        harness = (await get_harness_for_model(await self.get_model_name())).name
+        return (await SettingsOverride.agent_effort(self.id, self.effort, harness)).value
 
-    def get_timeout(self) -> int:
-        harness = get_harness_for_model(self.get_model_name()).name
-        resolved = SettingsOverride.agent_timeout(self.id, self.timeout, harness).value
+    async def get_timeout(self) -> int:
+        harness = (await get_harness_for_model(await self.get_model_name())).name
+        resolved = (await SettingsOverride.agent_timeout(self.id, self.timeout, harness)).value
         # Capped so a single call always fits inside a fresh sandbox lease.
         return min(resolved, MAX_AGENT_TIMEOUT_SECONDS)
 
     async def __call__(self, **context: object) -> Any:
-        """Run the agent — ``await Ship.implement(...)`` — as a durable step in the
+        """Run the agent — ``await SoftwareFactory.implement(...)`` — as a durable step in the
         current workflow and return its parsed output. An agent run is always memoized —
         this picks which step does it: its own, or the @step it's already inside.
         workflow_id comes from the workflow context, not the caller; everything
@@ -186,11 +196,11 @@ class Agent:
             # Runs as its own step: the body does no IO, and replay reuses the
             # recorded wait instead of re-reading the scrape.
             async with step_session():
-                harness = get_harness_for_model(self.get_model_name())
+                harness = await get_harness_for_model(await self.get_model_name())
                 # The scrape belongs to the charged connection — its account
                 # differs from the run's on fallback.
-                connection = HarnessConnection.lookup(harness.name, workflow.account_id)
-                scrape = UsageScrape.latest_for(harness.name, connection.account_id)
+                connection = await HarnessConnection.lookup(harness.name, workflow.account_id)
+                scrape = await UsageScrape.latest_for(harness.name, connection.account_id)
                 if scrape:
                     now = datetime.now(UTC)
                     reset = scrape.soonest_reset_after(now)
@@ -252,18 +262,18 @@ class Agent:
         the harness. ``__call__`` handles the durable wrapping + nesting."""
         if not self.prompt:
             raise WorkflowError(f"agent {self.id!r} has no prompt template to render")
-        model = self.get_model_name()
-        harness = get_harness_for_model(model)
+        model = await self.get_model_name()
+        harness = await get_harness_for_model(model)
         workflow = current_workflow.get()
         # Refusing an unservable call here beats provisioning a VM and
         # 401ing mid-run.
-        connection = HarnessConnection.lookup(harness.name, workflow.account_id)
+        connection = await HarnessConnection.lookup(harness.name, workflow.account_id)
         # Plain snapshots: the commits below expire the ORM row mid-flight.
         connection_id, charged_account_id = connection.id, connection.account_id
         # An agent call is a durability boundary — its effects don't roll back —
         # so commit here rather than hold the step's connection idle through the
         # minutes of provisioning and the run.
-        db_session().commit()
+        await db_session().commit()
         settings = load_settings()
         artifact_dir = settings.artifacts_dir / f"run-{workflow_id}"
 
@@ -274,7 +284,7 @@ class Agent:
         # rotation defers around it.
         async with sandbox_gate.use(connection_id, call_id):
             await set_run_phase("provisioning_vm")
-            host_id = await workflow._ensure_host()
+            host_id = await workflow._lease_host()
 
             # Record the call RUNNING once it has a host to run on (its id names
             # the on-disk transcript dir) so the live step shows while the agent
@@ -282,6 +292,7 @@ class Agent:
             # starting. A provisioning failure happens before this and records
             # no call.
             async with _runner(workflow, host_id, workflow_id, self.id) as runner:
+                context = await runner.prepare_context(context, agent_call_id=call_id)
                 # Templates read the live workflow + the workspace the agent runs in,
                 # alongside whatever the workflow's get_prompt_context composes.
                 prompt_context = await workflow.get_prompt_context(**context)
@@ -289,7 +300,7 @@ class Agent:
                 prompt_context.setdefault("workspace", runner)
                 prompt = await render_prompt(self.prompt, **prompt_context)
                 await set_run_phase("agent_running")
-                AgentCall.start(
+                await AgentCall.start(
                     engine,
                     call_id=call_id,
                     run_id=workflow_id,
@@ -309,16 +320,30 @@ class Agent:
                         account_id=workflow.account_id,
                     )
                 except BaseException as error:
-                    AgentCall.fail(engine, call_id=call_id, error=error)
+                    await AgentCall.fail(engine, call_id=call_id, error=error)
                     raise
-                AgentCall.finish(engine, call_id=call_id, result=result)
+                if result.error:
+                    await AgentCall.finish(engine, call_id=call_id, result=result)
+                    raise result.error
+                try:
+                    workspace_files: list[File] = []
+                    output = self.contract.model_validate(
+                        result.output,
+                        context={"workspace_files": workspace_files},
+                    )
+                    if workspace_files:
+                        await runner.save_files(
+                            workspace_files,
+                            app=workflow.app,
+                            agent_call_id=call_id,
+                        )
+                    await AgentCall.finish(engine, call_id=call_id, result=result)
+                except BaseException as error:
+                    await AgentCall.fail(engine, call_id=call_id, error=error)
+                    raise
 
-        if result.error:
-            raise result.error
-
-        output = self.contract.model_validate(result.output)
         if spec := output.get_artifact():
-            Artifact.record(call_dir=artifact_dir / call_id, call_id=call_id, **spec)
+            await Artifact.record(call_dir=artifact_dir / call_id, call_id=call_id, **spec)
         return output.to_result()
 
     async def _execute(
@@ -339,8 +364,8 @@ class Agent:
             prompt=prompt,
             schema=schema,
             agent=self.id,
-            effort=self.get_effort(),
-            timeout=self.get_timeout(),
+            effort=await self.get_effort(),
+            timeout=await self.get_timeout(),
             artifact_dir=artifact_dir,
             call_id=call_id,
             include_plugins=self.include_plugins,

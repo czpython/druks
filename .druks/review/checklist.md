@@ -70,7 +70,7 @@ English (ASD-STE100 register):
 - Active voice with a named actor: "Druks checks this at load", not "this is
   checked at load".
 - Plain words: use, not utilize; missing, not unimplemented.
-- Error messages state the fact, then the fix, imperative: "extension 'x'
+- Error messages state the fact, then the fix, imperative: "app 'x'
   declares subject Ledger without list_summaries(); the board calls it.
   Implement list_summaries() on Ledger."
 
@@ -98,7 +98,7 @@ the code is wrong: fix the code, delete the explanation.
   and why it falls short — a second copy of one the repo already runs is the
   finding.
 
-The author-facing surface (extensions/SDK) is the product, not the plumbing.
+The author-facing surface (apps/SDK) is the product, not the plumbing.
 Design it by writing the example first: the obvious call is the correct one, the
 correct one is short, and a newcomer gets it right without reading the source or
 the docs. No exposed internals, no required boilerplate, no ceremony, no knowledge

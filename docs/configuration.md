@@ -1,7 +1,11 @@
-# Configuration
+---
+title: "Configuration"
+description: "Configure deployment settings, access control, harnesses, services, sandboxes, notifications, MCP servers, and skills."
+icon: "settings"
+---
 
 Druks has two authored configuration planes. Use `druks.toml` for process and
-deployment topology. Use the dashboard for operator choices that should change
+deployment topology. Use the dashboard for operator choices that can change
 without replacing the process.
 
 | Plane | Examples | Stored in |
@@ -9,20 +13,21 @@ without replacing the process.
 | Deployment | identity, ingress, Drukbox, encryption key | `~/druks/druks.toml` |
 | Dashboard | timezone, the GitHub connection, harness and tracker credentials, workflow and agent overrides, notifications, MCP servers, skills | Postgres |
 
-The installer renders the complete deployment `.env` from `druks.toml`; `.env`
-is a build artifact consumed by Compose, Druks, and Drukbox, not an authored
-configuration file. Edit `druks.toml` and re-run the installer to render and
-apply changes. Running `druks setup` alone re-renders `.env` but does not
-restart services.
+The installer creates the deployment `.env` from `druks.toml`. Compose, Druks,
+and Drukbox consume this build artifact. Do not edit `.env`. Edit `druks.toml`,
+then run the installer again to apply changes. `druks setup` creates `.env` but
+does not restart services.
 
-Format follows habitat: repository-committed files such as ship's
-`.druks/ship/config.yml` are YAML like the rest of the repository-dotfile
-world; box-resident operator files are TOML because they render to env
-byte-exact. The two files share no keys and no reader.
+The file location determines its format. Repository files such as
+`.druks/software_factory/config.yml` use YAML. Other repository dotfiles use
+the same format. Operator files on the host use TOML because the installer must
+create the environment without value changes. These files share no keys or
+readers.
 
-`druks.toml` is the authority for authored process configuration. Environment
-variables are reserved for Compose-injected infrastructure such as database,
-Redis, data, and container paths. [`.env.example`](../.env.example) is the
+`druks.toml` is the authority for authored process configuration. Druks reserves
+environment variables for infrastructure that Compose injects, such as database,
+Redis, data, and container paths.
+[`.env.example`](https://github.com/czpython/druks/blob/main/.env.example) is the
 host-run development template for that environment plane.
 
 ## Deployment file
@@ -39,34 +44,36 @@ host-run development template for that environment plane.
 | `[sandbox.<provider>]` | Provider environment passed through to the remote stack |
 | `[env]` | Additional deployment environment settings rendered verbatim |
 
-A blank string is unset and is omitted from `.env`. Use `[env]` for settings
-without another `druks.toml` home, including additional `DRUKS_*` settings. A
-key already owned by the renderer is reported as a configuration gap instead
-of overriding its canonical value. On a remote shape,
+A blank string means unset, and the renderer omits it from `.env`. Use `[env]` for settings
+without another `druks.toml` home, including additional `DRUKS_*` settings. The
+renderer reports a key that it already owns as a configuration gap instead
+of overriding its canonical value.
+
+On a remote shape,
 `[sandbox.<provider>]` accepts the variables documented by
-[Drukbox](https://github.com/czpython/drukbox); Druks does not enumerate
+[Drukbox](https://github.com/czpython/drukbox). Druks does not enumerate
 providers. `docker` and `exe` select shape-specific first-write templates.
-Every other provider name selects the generic remote shape and is validated by
-Drukbox.
+Every other provider name selects the generic remote shape. Drukbox validates it.
+
 The local `docker` shape does not render `[sandbox.<provider>]`. Its Drukbox
 service gets its environment from the defaults in `deploy/compose.yaml`.
 
-Secrets are generated only when the TOML is first created. Preserve
-`[secrets]` when moving or recovering an installation. Use repeatable
+The installer generates secrets only when it first creates the TOML. When you move or
+recover an installation, preserve `[secrets]`. Use repeatable
 `druks setup ... --set key.path=value` arguments for explicit scripted writes.
 
 ## Core process settings
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `DRUKS_DATABASE_URL` | local `druks` Postgres | Application and DBOS database |
-| `DRUKS_TEST_DATABASE_URL` | local `druks_test` Postgres | What the shipped pytest fixtures use — never the application's |
+| `DRUKS_DATABASE_URL` | local `druks` Postgres | Runtime and DBOS database |
+| `DRUKS_TEST_DATABASE_URL` | local `druks_test` Postgres | What the shipped pytest fixtures use — never the runtime's |
 | `DRUKS_TEST_REDIS_URL` | `redis://127.0.0.1:6379/15` | What the shipped pytest fixtures flush |
 | `DRUKS_REDIS_URL` | `redis://127.0.0.1:6379/0` | Short-lived coordination and caches |
 | `DRUKS_DATA_DIR` | `/var/lib/druks` | Logs, artifacts, installed skills |
 | `DRUKS_LOG_LEVEL` | `INFO` | Python and DBOS log level |
 
-Postgres is durable state. Redis is not the workflow state store: it supports
+Postgres stores durable state. Redis does not store workflow state. It supports
 short-lived concerns including webhook delivery claims, OAuth state and token
 caches, and the sandbox provisioning gate.
 
@@ -76,110 +83,130 @@ caches, and the sandbox provisioning gate.
 | --- | --- |
 | `urls.endpoint` | Browser-visible dashboard base URL used to build MCP OAuth callbacks |
 | `urls.webhook_host` | Public webhook hostname used by `druks doctor` for its ingress probe |
-| `identity.mode` | `none` (default; no authentication, single operator), `header` (edge-asserted identity), or `jwt` (edge-signed assertion, verified) |
-| `identity.header` | The trusted identity header; rendered for the shipped Caddy edge too. No default — header and jwt modes refuse to start without it |
+| `identity.mode` | `none` (default, no authentication, single operator), `header` (edge-asserted identity), or `jwt` (validated edge-signed assertion) |
+| `identity.header` | The trusted identity header. The shipped Caddy edge also uses it. Header and JWT modes have no default and require it |
 | `identity.jwks_url` | `jwt` mode: where the edge publishes its signing keys |
 | `identity.jwt_issuer` | `jwt` mode: required `iss` claim value |
 | `identity.jwt_audience` | `jwt` mode: required `aud` claim value |
 | `identity.jwt_identity_claim` | `jwt` mode: the claim mapped to the account (default `email`) |
 
+The `urls.webhook_host` listener binds every interface. A second TLS
+terminator on the same box, for example `tailscale serve` on the tailnet
+address, collides with it on port 443. One of the two stops. To keep the
+other addresses free, set `DRUKS_WEBHOOK_BIND_HOST` in `[env]` to the public
+address. Caddy then serves only that address. To keep IPv6, list the IPv4
+and the IPv6 addresses.
+
 `urls.endpoint` and `urls.webhook_host` are different. The first is where an
-operator's browser reaches Druks; the second is the public ingress webhook
-senders reach. They may share a hostname on exe.dev.
+operator's browser reaches Druks. The second is the public ingress host for
+webhook senders. They can share a hostname on exe.dev.
 
 Druks does not authenticate browsers. Identity resolves per request, in this
 order:
 
-1. **Personal access token.** When an `Authorization` header is present it
-   must authenticate — a malformed or dead bearer is a 401, never a fall
-   through to the modes below.
-2. **`header` mode.** The edge (exe.dev, Teleport, Cloudflare Access, …)
-   authenticates and asserts the operator's email as exactly one nonblank
-   `identity.header` value; Druks trims outer whitespace and maps it to an
-   account, creating one on first sight (open enrollment — the edge decides
-   who reaches Druks at all; the account column is case-insensitive).
-3. **`jwt` mode.** The same assertion channel as `header` mode, but the value
-   is a signed JWT: Druks verifies the RS256 signature against
-   `identity.jwks_url` (keys cached for five minutes and refetched on
-   rotation), requires `exp`, `iss`, and `aud` to match the configured
-   issuer and audience, and maps the verified
-   `identity.jwt_identity_claim` through the same open enrollment. A
-   failed verification is a 401 naming only the failure class — never the
-   token. Confirm the real edge's header name, claims, and rotation story
-   before enabling the mode; the RS256 profile is pinned, not negotiated.
-4. **`none` mode.** No authentication and no identity edge: Druks resolves
-   the only non-system account. Zero accounts is the setup state — the
-   dashboard onboards by connecting a harness, and the first completed
-   connection creates the operator account from the provider-verified email.
-   More than one non-system account is configuration drift: Druks refuses
-   requests (and startup) loudly rather than guess.
+1. **Personal access token.** If an `Authorization` header is present, it must
+   authenticate. A malformed or inactive bearer returns a 401. Druks does not
+   continue to another mode.
+2. **Header mode (`header`).** The edge authenticates the operator. The edge can be
+   exe.dev, Teleport, or Cloudflare Access. It supplies exactly one nonblank
+   `identity.header` value. Druks removes outer whitespace and maps the value to
+   an account. Druks creates the account at first access.
 
-Trust requirements for `header` mode: the edge must authenticate every
-dashboard request, must strip any client-supplied copy of the configured
-identity header before inserting its authenticated value — a client that can
-inject the header can be anyone — and must terminate TLS and set HSTS.
-`jwt` mode keeps the same strip requirement but adds cryptographic
-provenance: a forged header value fails signature verification instead of
-becoming an identity, so a misconfigured proxy degrades to a 401 rather
-than an impersonation.
+   The edge controls who
+   can access Druks. Account values are case-insensitive.
+3. **JWT mode (`jwt`).** This mode uses the assertion channel from `header` mode, but
+   its value is a signed JWT. Druks validates the RS256 signature against
+   `identity.jwks_url`. It caches keys for five minutes and gets new keys after
+   rotation.
+
+   The `exp`, `iss`, and `aud` claims must match the configuration.
+   Druks maps `identity.jwt_identity_claim` to an account. A validation error
+   returns a 401 with the error class, not the token. Druks uses a fixed RS256
+   profile and does not negotiate it.
+4. **No-authentication mode (`none`).** This mode has no authentication or identity edge. Druks
+   resolves the only non-system account. Zero accounts is the setup state. The
+   first completed harness connection creates the operator account from the
+   provider-validated email.
+
+   More than one non-system account is configuration
+   drift. Druks refuses requests and startup in this state.
+
+Before you enable `jwt` mode, make sure that the edge uses the configured header,
+claims, and rotation process.
+
+The edge in `header` mode must authenticate each dashboard request. It must
+remove client-supplied copies of the configured identity header. Then it must
+put the authenticated value in the header. Otherwise, a client can select an
+identity. The edge must also terminate TLS and set HSTS.
+
+`jwt` mode has the same header-removal requirement. It also adds cryptographic
+provenance. A forged value fails signature validation and returns a 401. Thus,
+a bad proxy configuration does not create an impersonated identity.
+
 The shipped Caddy listener is loopback HTTP behind that edge, and the Druks
 web listener itself binds loopback by default. In `none` mode there is no
-authentication at all, so the listener must stay loopback-only — never
-publish it.
+authentication. Keep the listener on loopback. Never publish it.
 
-Any public listener that bypasses the identity edge must never forward the
-configured identity header upstream. The shipped webhook listener already
-serves only provider-authenticated `/_external/*` and the PAT-authenticated `/mcp` —
-nothing that resolves the header — and any future public listener (for example
-the planned MCP integrations listener) must keep that same isolation.
+A public listener that bypasses the identity edge must not forward the
+configured identity header. The shipped webhook listener serves only
+provider-authenticated `/_external/*` and PAT-authenticated `/mcp` routes. These
+routes do not resolve the header. A future public listener must keep the same
+isolation.
 
-Public `POST /_external/*` routes bypass the identity gate and carry their
-own authentication — webhook signature verification, and the notification
-respond route's correlation token. `GET /api/auth/me` answers without a
+Public `POST /_external/*` routes bypass the identity gate and use their own
+authentication. Webhooks use signature validation. The notification response
+route uses its correlation token. `GET /api/auth/me` answers without a
 resolved account so the dashboard can render onboarding in the `none`-mode
 setup state.
 
 ## Personal access tokens
 
-Agents and other non-browser clients authenticate the same internal API with
-personal access tokens minted in Settings → Tokens, sent as
-`Authorization: Bearer <token>`. A token serializes as
-`druks_pat_<prefix>_<secret>`; Druks stores only the SHA-256 of the full
-token, shows the plaintext exactly once at mint, and expires it 365 days
-after creation. When the header is present it must authenticate — a bad
-token is a 401, never a fall back to edge identity — and token management
-itself accepts the signed-in identity only (edge-asserted, or the none-mode
-operator) and refuses any `Authorization` header, so a leaked token cannot
-mint or revoke tokens. On compromise, revoke the token in Settings → Tokens
-(immediate; the list shows each token's prefix and last use, tracked hourly,
-to identify it) and mint a replacement — rotation is mint first, revoke
-second. Agents consume the API through the MCP endpoint; see
+Agents and other non-browser clients use personal access tokens for the
+internal API. Mint these tokens in Settings → Tokens. Send a token as
+`Authorization: Bearer <token>`. A token has the form
+`druks_pat_<prefix>_<secret>`. Druks stores only the SHA-256 hash of the full
+token. It shows the plaintext one time and expires the token after 365 days.
+
+If the header is present, it must authenticate. A bad token returns a 401.
+Druks does not use edge identity as a fallback. Token management accepts only a
+signed-in identity. It refuses requests that contain an `Authorization` header.
+Thus, a leaked token cannot mint or revoke tokens.
+
+If someone compromises a token, mint a replacement. Then revoke the old token in
+Settings → Tokens. Revocation is immediate. The list shows the prefix and last
+use of each token.
+
+Druks updates last use each hour. Agents consume the API
+through the MCP endpoint. See
 [Connect your agent](connect-your-agent.md).
 
 ## GitHub
 
-Druks acts at GitHub as one **operator App** — its service identity. The App
-receives webhooks and performs application-owned writes such as branches,
+Druks acts at GitHub as one **operator GitHub App**. This app is its service
+identity. The GitHub App receives webhooks and does domain writes such as branches,
 pull requests, comments, labels, and merges. Its credentials live encrypted
-in Postgres; there is no TOML, environment, or PEM-file source — until GitHub
-is connected, agent runs refuse with a pointed message and `druks doctor`
-reports the identity as not connected.
+in Postgres. They do not come from TOML, the environment, or a PEM file.
 
-Connect it from **Settings → Services**. **Create GitHub App** registers the
-App through GitHub's manifest flow: name a GitHub org (or leave it empty for
-a personal account), confirm on GitHub, and druks stores the created App's
-credentials and sends you on to install it on your repositories. Creating the
-App needs `urls.endpoint` set to the base URL the operator's browser reaches
-druks at, and the webhook lands on `urls.webhook_host` when configured, the
-endpoint host otherwise.
+Until an operator connects GitHub, agent runs stop with a direct message.
+`druks doctor` reports that no GitHub connection exists.
 
-Alternatively paste an existing App's credentials into the same card: the App
-ID, the PEM private key exactly as GitHub issued it, and the webhook secret.
-Connecting validates the pasted credentials against GitHub and stores the
-App's slug; from then on every operator client resolves from that row and
-webhook deliveries verify against its stored secret.
+Connect it from **Settings → Services**. **Create GitHub App** starts the GitHub
+manifest flow. Enter a GitHub organization, or leave the field empty for a
+personal account. Accept the request on GitHub. Druks stores the credentials and
+opens the installation page. Install the GitHub App on the applicable
+repositories.
 
-Registering the App by hand instead:
+Before you create the app, set `urls.endpoint` to the dashboard base URL. If
+you set `urls.webhook_host`, the webhook uses that host. Otherwise, it uses the
+endpoint host.
+
+You can paste the credentials of an existing GitHub App into the same card.
+Enter the GitHub App ID, original PEM private key, and webhook secret. Druks
+validates the credentials against GitHub and stores the app slug. Each operator
+client then uses this service-identity row. Webhook deliveries use its stored
+secret for validation.
+
+To register the GitHub App manually, use this webhook URL:
 
 Webhook URL:
 `https://<webhook-host>/_external/github/events/`
@@ -195,52 +222,52 @@ Subscribe to issue comment, pull request, pull request review, and push events.
 | Checks | Read |
 | Commit statuses | Read |
 
-Install the App on the repositories Druks should work in; that installation
-set is where `ship` may act. Personal access tokens are not a supported
-substitute.
+Install the GitHub App on the repositories that Druks will use. This
+installation set defines where `software_factory` can act. Personal access
+tokens are not a supported substitute.
 
-**Upgrading an existing installation** is a one-time paste on each live box
-after rollout: open Settings → Services and connect GitHub with the existing
-operator App's ID, private key, and webhook secret. Do not create a
-replacement App — the current App's webhook and installations keep working
-under the pasted credentials.
+**To upgrade an existing installation**, paste the credentials one time on each
+active host. Open Settings → Services. Connect GitHub with the existing operator
+GitHub App ID, private key, and webhook secret. Do not create a replacement
+GitHub App. The current webhook and installations continue to use the pasted
+credentials.
 
 ### Review identity (optional)
 
-The bundled `review` extension can post its verdict reviews as a second
+The bundled `review` app can post its verdict reviews as a second
 GitHub App, so GitHub accepts approvals on Druks-authored pull requests.
-Configure it in **Settings → Review**: the review App ID and its PEM private
-key, both stored encrypted and empty-as-unset. Leave the pair empty and
-reviews publish as operator comments; setting both flips reviews to distinct
-approving reviews. The review App needs read access to metadata and contents,
-read/write access to pull requests, and no webhook.
+Configure it in **Settings → Review**. Enter the review GitHub App ID and its PEM
+private key, both stored encrypted and empty-as-unset. Leave the pair empty and
+reviews publish as operator comments. Set both values to publish separate
+approval reviews. The review GitHub App needs read access to metadata and
+contents, read/write access to pull requests, and no webhook.
 
 `GITHUB_API_URL` defaults to `https://api.github.com` and can point every
 client at another compatible GitHub API endpoint.
 
 ## Ticketing integrations
 
-Tracker credentials are service identities: connect Linear (API key + webhook
-secret) or Jira Cloud (base URL, email, API token, webhook secret) from
-**Settings → Services**, on the same cards as the GitHub App. Connecting
-verifies the credentials against the tracker before anything is stored. Which
-tracker drives `ship` work — and the statuses that trigger or move it — stays a
-ship extension setting in **Settings → Ship**.
+Tracker credentials are service identities. Connect Linear or Jira Cloud from
+**Settings → Services**. The Linear identity uses an API key and webhook secret.
+The Jira identity uses a base URL, email, API token, and webhook secret. Druks
+validates the credentials before it stores them. Select the tracker and its
+workflow statuses in **Settings → Software Factory**.
 
 Webhook URLs remain `/_external/linear/events/` and
-`/_external/jira/events/`. The Jira webhook is a Jira Automation "Send web
-request" action with **Issue data (Jira format)** as its body — the REST issue
-JSON under `issue` is the one accepted shape — and the shared token in the
+`/_external/jira/events/`. The Jira webhook uses a Jira Automation
+**Send web request** action.
+
+Select **Issue data (Jira format)** as its body.
+Druks accepts the REST issue JSON under `issue`. Put the shared token in the
 `x-druks-webhook-token` header. `druks doctor` treats a disconnected tracker as
-optional, and reports pending setup when the selected tracker's identity is not
-connected.
+optional. It reports pending setup if the selected tracker lacks a connection.
 
 ## Harnesses
 
-Claude and Codex subscription credentials are connected from **Settings →
-Harnesses**. The connect flow stores each credential in Postgres; Druks
-refreshes it on a schedule and synthesizes the CLI credential file inside each
-sandbox. It does not copy a host login. Connecting is a capability connect for
+Claude and Codex subscription credentials connect from **Settings → Harnesses**.
+The connection flow stores each credential in Postgres. Druks refreshes the
+credential on a schedule. It creates the CLI credential file inside each
+sandbox. It does not copy a host login. This is a capability connection for
 the requesting account — in a fresh `none`-mode install the first completed
 connection also creates the operator account (see
 [access control](#public-urls-and-access-control)).
@@ -249,19 +276,19 @@ Process settings such as `DRUKS_CLAUDE_CONFIG_DIR` and
 `DRUKS_CODEX_CONFIG_DIR` point at optional non-auth CLI configuration to carry
 into sandboxes. The Compose deployment mounts these read-only. Harness defaults
 and per-agent model, effort, and timeout overrides live in dashboard settings.
-A call refuses before provisioning a VM if its selected harness is not
-connected.
+A call refuses before provisioning a VM if its selected harness lacks a
+connection.
 
 ## Sandboxes
 
 | TOML key | Purpose |
 | --- | --- |
-| `sandbox.service_url` | Drukbox API base URL; empty disables sandbox-backed execution |
+| `sandbox.service_url` | Drukbox API base URL. An empty value disables sandbox-backed execution |
 | `sandbox.service_token` | Drukbox API token |
-| `sandbox.timeout` | Control-plane request timeout; default 180 seconds |
+| `sandbox.timeout` | Control-plane request timeout. The default is 180 seconds |
 | `sandbox.image` | Optional provider image override |
-| `sandbox.browser_login_proxy` | Login-window egress proxy; empty keeps the box IP |
-| `sandbox.browser_login_tz` | Login-window timezone (IANA zone); empty keeps the container default |
+| `sandbox.browser_login_proxy` | Login-window egress proxy. An empty value keeps the box IP |
+| `sandbox.browser_login_tz` | Login-window timezone (IANA zone). An empty value keeps the container default |
 
 `DRUKS_SANDBOX_KEYS_DIR` remains a process environment override for the
 per-host SSH private-key directory.
@@ -269,7 +296,8 @@ per-host SSH private-key directory.
 `[sandbox].browser_login_proxy` sends the browser **login window** through an
 HTTP proxy. The login then leaves from a different IP than the box. Use it for
 sign-in flows that refuse a login from the box IP. Only the login window uses the
-proxy. Borrows keep the box IP. This is enough after Druks makes the session.
+proxy. Borrowed sessions keep the box IP. This is sufficient after Druks makes
+the session.
 
 If you do not set the proxy, the login uses the box IP. If you set the proxy and
 the exit is not available, the login browser fails. It does not fall back to the
@@ -284,24 +312,27 @@ are two common types.
 **Your own connection.** Do these steps:
 
 1. Install Tailscale on a home device.
-2. Make the device an exit node from the Tailscale app.
-3. Add a `tailscale/tailscale` container to the deployment in userspace mode. Set
-   these variables: `TS_USERSPACE=true`, `TS_OUTBOUND_HTTP_PROXY_LISTEN=:8080`,
-   and `TS_EXTRA_ARGS=--exit-node=<your-device>`.
-4. Set `browser_login_proxy = http://172.17.0.1:8080`.
+2. Make the device an exit node in the Tailscale app.
+3. Add a `tailscale/tailscale` container to the deployment in userspace mode.
+4. Set `TS_USERSPACE=true`.
+5. Set `TS_OUTBOUND_HTTP_PROXY_LISTEN=:8080`.
+6. Set `TS_EXTRA_ARGS=--exit-node=<your-device>`.
+7. Set `browser_login_proxy = http://172.17.0.1:8080`.
 
 The login then leaves from your home connection. The box keeps its own IP for all
 other traffic. This exit needs no user name or password.
 
-**A rented static-residential (ISP) proxy.** Set the value to the proxy with its
-user name and password: `browser_login_proxy = http://user:pass@isp-host:port`.
-First make sure that a detection service does not already know the IP as a proxy.
+**A rented static-residential (ISP) proxy.** First make sure that a detection
+service does not already know the IP as a proxy. Then set the proxy with its user
+name and password: `browser_login_proxy = http://user:pass@isp-host:port`.
 An ISP IP passes the datacenter-ASN check. A detection service can still find it
 and mark it as a proxy.
 
 `[sandbox].browser_login_tz` sets the timezone of the login browser. Use an IANA
 zone name, for example `Europe/Madrid`. The browser reports a region, and the IP
-has a region. Set both to the same region. Some sign-in flows check this. If the
+has a region.
+
+Set both to the same region. Some sign-in flows compare these values. If the
 two regions are different, a flow can refuse the login. Only the login window
 uses this value. If you do not set it, the browser keeps the container default
 timezone.
@@ -309,15 +340,15 @@ timezone.
 `[sandbox].provider` accepts any Drukbox provider name. `docker` selects the
 local install shape, `exe` selects the exe.dev + tailnet shape, and every other
 name selects the generic remote shape. Provider-specific credentials and host
-options live in `[sandbox.<provider>]` and are interpreted by Drukbox. See
-[deployment](../deploy/README.md) or [full local setup](full-local.md) for the
+options live in `[sandbox.<provider>]`, and Drukbox interprets them. See
+[deployment](deployment.md) or [full local setup](full-local.md) for the
 topology.
 
 ## Notifications
 
-Destinations are managed from the dashboard. The current destination kind is a
-Slack incoming webhook. Actionable messages use Slack Block Kit;
-non-actionable messages use the same URL through Apprise.
+Manage destinations from the dashboard. The current destination type is a Slack
+incoming webhook. Actionable messages use Slack Block Kit. Other messages use
+the same URL through Apprise.
 `SLACK_SIGNING_SECRET` authenticates Slack interactivity callbacks.
 
 Choose one enabled destination as the gate-notification destination in
@@ -326,45 +357,52 @@ to deliver the notification does not unpark or fail the run.
 
 ## MCP servers
 
-`DRUKS_MCP_CATALOG` points at a JSON catalog of server definitions loaded at
-startup. The packaged catalog declares Linear OAuth but leaves it disabled; a
-deployment may replace the catalog. Catalogs contain definitions, not tokens.
+`DRUKS_MCP_CATALOG` points to a JSON catalog of server definitions. Druks loads
+this catalog at startup. The packaged catalog contains an empty `mcpServers`
+map. Thus, a new installation has no built-in servers. A deployment can point
+`DRUKS_MCP_CATALOG` to a mounted file with its defaults.
 
-`DRUKS_MCP_TRUSTED` points at the trust-pins JSON behind the registry
-resolver's official badge. The badge is computed: an entry is official when
-its publisher namespace, reversed into a domain, matches the remote endpoint's
-host (`com.grafana` publishing on `*.grafana.com` self-certifies). Pins cover
-the two gaps the rule cannot derive, one `name: value` line each, told apart
-by the value's shape:
+Druks always loads a
+catalog. A missing catalog stops startup. Catalogs contain definitions, not
+tokens.
 
-- a publisher namespace (`"grafana": "io.github.grafana"`) vouches for a
-  publisher the rule cannot match; the entry's url stays live from the
+`DRUKS_MCP_TRUSTED` points to the trust-pins JSON for the official registry
+badge. Druks calculates the badge. An entry is official if its reversed
+publisher namespace matches the remote host. For example, `com.grafana` matches
+`*.grafana.com`. A pin covers a value that this rule cannot derive. The value
+shape selects one of two pin types:
+
+- A publisher namespace (`"grafana": "io.github.grafana"`) identifies a
+  publisher that the rule cannot match. The entry URL stays live from the
   registry.
-- an `http…` url (`"sentry": "https://mcp.sentry.dev/mcp"`) supplies the
-  hosted endpoint the registry entry omits entirely.
+- An `http…` URL (`"sentry": "https://mcp.sentry.dev/mcp"`) supplies a hosted
+  endpoint that the registry entry omits.
 
-To decide which to write: if the registry entry already declares the hosted
-url, pin the publisher; if it lacks one, pin the url.
+If the registry entry declares the hosted URL, pin the publisher. If it does
+not declare the URL, pin the URL.
 
 The dashboard can enable catalog entries and add custom servers. Authentication
 is one of:
 
-- static token stored encrypted in Postgres
-- token read from a named process environment variable
-- OAuth connection, which requires `urls.endpoint`
+- A static token that Druks stores encrypted in Postgres
+- A token from a named process environment variable
+- An OAuth connection, which requires `urls.endpoint`.
 
-Enabled servers are delivered to both harnesses unless an extension workspace
+Druks delivers enabled servers to both harnesses unless an app workspace
 owns a required server with the same name. Tokens enter the agent environment
 under a derived variable and are never returned by the API.
 
 ## Skills
 
 The dashboard installs skill collections from GitHub repositories.
-`DRUKS_SKILLS_DIR` selects the shared writable directory; otherwise it defaults
-to `<DRUKS_DATA_DIR>/skills`. A call receives the enabled skills it requests, or
-every enabled skill when it requests none; build requests the repo profile's
-recommended set. Other installed skills are excluded from the upload, and the
-per-agent capability manifest records the delivered set.
+`DRUKS_SKILLS_DIR` selects the shared writable directory. Its default is
+`<DRUKS_DATA_DIR>/skills`. A call receives the enabled skills that it requests.
+If it requests none, it receives each enabled skill. A Software Factory build
+requests the recommended set from the repository profile.
+
+Druks excludes other
+installed skills from the upload. The capability manifest records the delivered
+set for each agent.
 
 ## Credential custody and secrets at rest
 
@@ -379,21 +417,22 @@ base64-encoded 32-byte master keys:
 python3 -c 'import base64, os; print(base64.b64encode(os.urandom(32)).decode())'
 ```
 
-The first key encrypts new values; every listed key may decrypt. To rotate,
-prepend a new key in `druks.toml`, then re-run the installer:
+The first key encrypts new values. Each listed key can decrypt values. To rotate
+the key, put a new key first in `druks.toml`. Then run the installer again:
 
 ```toml
 [secrets]
 secrets_key = "<new>,<old>"
 ```
 
-Keep the old key until no stored row depends on it. Losing every key used for a
-row makes that secret unrecoverable; reconnect OAuth grants, re-enter static
-tokens, and log in to affected browser sessions again. Validation and API errors intentionally omit submitted secret values.
+While a stored row depends on the old key, keep that key. If you lose each key for a
+row, you cannot recover that secret. Reconnect the OAuth grants. Enter the
+static tokens again. Log in to the affected browser sessions again. Validation
+and API errors do not include submitted secret values.
 
 The encryption envelope does **not** currently cover harness subscription
-payloads or notification webhook URLs. They are stored as
+payloads or notification webhook URLs. Postgres stores them as
 ordinary Postgres fields, although APIs withhold or mask their values. Treat
 access to Postgres and its backups as access to those credentials. GitHub App
-private keys — the operator identity's and the review extension's — are
+private keys — the operator identity's and the review app's — are
 database values under the envelope, no longer files mounted into the process.

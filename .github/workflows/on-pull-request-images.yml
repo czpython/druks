@@ -30,9 +30,50 @@ jobs:
       - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: deploy/sandbox
+          target: sandbox
           platforms: linux/amd64
           push: false
           cache-from: type=gha,scope=sandbox
+
+  # The Docker Sandboxes template must keep its base's boot contract after
+  # the toolchain layers: `sbx create` sends no environment variables, drukbox
+  # writes the SSH key and /etc/environment over the exec channel after boot,
+  # and pam_env serves that file to SSH sessions. Assert each piece on the
+  # built image.
+  sandbox-sbx:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+      - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: deploy/sandbox
+          target: sbx
+          build-args: BASE=sbx-base
+          platforms: linux/amd64
+          push: false
+          load: true
+          tags: druks-sandbox-sbx:pr
+          cache-from: type=gha,scope=sandbox-sbx
+      - name: The agent toolchain is on PATH
+        run: >
+          docker run --rm --entrypoint sh druks-sandbox-sbx:pr
+          -ec 'for tool in git node gh claude codex; do command -v "$tool"; done'
+      - name: An env-free boot leaves sshd running as PID 1
+        run: |
+          docker run -d --name sbx-boot druks-sandbox-sbx:pr
+          sleep 5
+          docker inspect -f '{{.State.Running}}' sbx-boot | grep -x true
+          docker exec sbx-boot cat /proc/1/comm | grep -x sshd
+      - name: sshd hands /etc/environment to sessions and lets root log in
+        run: |
+          docker exec sbx-boot /usr/sbin/sshd -T | grep -ix 'usepam yes'
+          docker exec sbx-boot grep -E '^session[[:space:]]+required[[:space:]]+pam_env\.so' /etc/pam.d/sshd
+          # sshd -T prints the legacy spelling "without-password" for
+          # prohibit-password; both allow the key login drukbox injects.
+          docker exec sbx-boot /usr/sbin/sshd -T | grep -iEx 'permitrootlogin (prohibit-password|without-password|yes)'
 
   browser:
     runs-on: ubuntu-latest

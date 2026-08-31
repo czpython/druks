@@ -111,7 +111,7 @@ class _FakeSandbox:
         self.exec_results = exec_results or [ExecResult(0, "", "")]
         self.conn = _FakeConnection(self.vm)
         self.aclose_calls = 0
-        # Matches the real ``Sandbox`` interface — the runner reads this
+        # Matches the real ``Host`` interface — the runner reads this
         # to derive the per-user druks-sandbox helper path. Tests pin
         # ``root`` by default so existing path assertions stay simple.
         self.ssh_username = ssh_username

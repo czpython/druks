@@ -5,9 +5,9 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from dbos import DBOS, DBOSConfig, Queue
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from druks.database import create_engine_from_url, db_session, get_session, session_scope
+from druks.database import create_async_engine_from_url, db_session, get_session, session_scope
 from druks.durable.dbos_state import DBOS_SYSTEM_SCHEMA
 from druks.settings import load_settings
 from druks.user_settings.models import UserSettings
@@ -49,7 +49,6 @@ def init_dbos() -> None:
         "application_database_url": url,
         "system_database_url": url,
         "dbos_system_schema": DBOS_SYSTEM_SCHEMA,
-        "run_admin_server": False,
         "log_level": settings.log_level,
     }
     DBOS(config=config)
@@ -69,7 +68,7 @@ def register_schedule(
     _scheduled.append((cls, _sched_entry))
 
 
-def apply_schedules() -> None:
+async def apply_schedules() -> None:
     # Declared crons name the schedule set; the operator's settings overrides only
     # retune or pause a declared name, never add one — so an undeclared sys-db
     # schedule is a renamed/removed cron: drop it. The workflow class owns its
@@ -77,27 +76,29 @@ def apply_schedules() -> None:
     # launch() binds one, and the settings route that just wrote an override
     # re-runs this on its request session).
     declared = {cls.kind for cls, _ in _scheduled}
-    for existing in DBOS.list_schedules():
+    for existing in await DBOS.list_schedules_async():
         if existing["schedule_name"] not in declared:
-            DBOS.delete_schedule(existing["schedule_name"])
+            await DBOS.delete_schedule_async(existing["schedule_name"])
     # Crons fire on the operator's clock: "daily at midnight" means their
     # midnight. Evaluating in-zone (rather than converting to a UTC cron once)
     # keeps wall-clock cadences honest across DST. The timezone setting is
     # validated at its write boundary, so it's a real IANA name here.
-    timezone = UserSettings.get().timezone
+    timezone = (await UserSettings.get()).timezone
     for cls, fn in _scheduled:
-        DBOS.delete_schedule(cls.kind)
-        cron = cls.get_schedule()
-        if cls.has_enabled_schedule() and cron:
-            DBOS.create_schedule(
+        await DBOS.delete_schedule_async(cls.kind)
+        cron = await cls.get_schedule()
+        if await cls.has_enabled_schedule() and cron:
+            await DBOS.create_schedule_async(
                 schedule_name=cls.kind, workflow_fn=fn, schedule=cron, cron_timezone=timezone
             )
 
 
-def launch() -> None:
+async def launch() -> None:
+    # Called with the serving loop running, so DBOS captures it as the main
+    # loop and async steps share it.
     DBOS.launch()
-    with session_scope(_step_engine()):
-        apply_schedules()
+    async with session_scope(_step_engine()):
+        await apply_schedules()
 
 
 def shutdown() -> None:
@@ -105,10 +106,9 @@ def shutdown() -> None:
     # lifespan with app.state.settings pre-set skips the branch that launches it
     # — so the lifespan can call shutdown() unconditionally.
     global _initialized
-    if not _initialized:
-        return
-    DBOS.destroy()
-    _initialized = False
+    if _initialized:
+        DBOS.destroy()
+        _initialized = False
 
 
 def configure_engine(engine) -> None:
@@ -119,22 +119,22 @@ def configure_engine(engine) -> None:
 def _step_engine():
     global _engine
     if not _engine:
-        _engine = create_engine_from_url(load_settings().database_url)
+        _engine = create_async_engine_from_url(load_settings().database_url)
     return _engine
 
 
 @asynccontextmanager
-async def step_session() -> AsyncIterator[Session]:
+async def step_session() -> AsyncIterator[AsyncSession]:
     # One transaction per durable step (the body itself does no IO).
     session = get_session(_step_engine())
     db_session.registry.set(session)
     try:
         yield session
     except BaseException:
-        session.rollback()
+        await session.rollback()
         raise
     else:
-        session.commit()
+        await session.commit()
     finally:
-        db_session.remove()
-        session.close()
+        await db_session.remove()
+        await session.close()

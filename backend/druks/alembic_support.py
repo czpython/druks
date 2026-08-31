@@ -1,6 +1,7 @@
 from alembic import context
 from sqlalchemy import engine_from_config, pool
 
+from druks.database import _MIGRATION_SUPPORT_ONLY
 from druks.models import Base
 from druks.secrets.fields import _EncryptedColumn
 from druks.settings import load_settings
@@ -12,6 +13,8 @@ def _render_item(type_, obj, autogen_context):
     # (DDL is TIMESTAMPTZ); the encrypted columns store as LargeBinary (bytea).
     if type_ == "type" and obj.__class__.__name__ == "_UtcDateTime":
         return "sa.DateTime(timezone=True)"
+    if type_ == "type" and obj.__class__.__name__ == "_FileColumn":
+        return "sa.String()"
     if type_ == "type" and isinstance(obj, _EncryptedColumn):
         return "sa.LargeBinary()"
     return False
@@ -32,6 +35,9 @@ def run_alembic_env(target_metadata=None) -> None:
         config.set_main_option("sqlalchemy.url", load_settings().database_url)
 
     def include_object(obj, name, type_, reflected, compare_to):
+        target = compare_to if compare_to is not None else obj
+        if type_ == "table" and target.info.get(_MIGRATION_SUPPORT_ONLY):
+            return False
         if type_ == "table" and reflected and compare_to is None:
             return name in target_metadata.tables
         return True

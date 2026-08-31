@@ -43,20 +43,20 @@ class PatTokenVerifier(TokenVerifier):
         # Auth middleware runs outside the request session boundary, so this
         # owns one — authenticate stamps last_used_at.
         try:
-            pat = PersonalAccessToken.authenticate(token)
+            pat = await PersonalAccessToken.authenticate(token)
             access = AccessToken(
                 token=token,
                 client_id=pat.token_prefix,
                 scopes=[],
                 claims={"account_id": pat.account_id, "pat_id": pat.id},
             )
-            db_session().commit()
+            await db_session().commit()
             return access
         except InvalidPatError:
-            db_session().rollback()
+            await db_session().rollback()
             return
         finally:
-            db_session.remove()
+            await db_session.remove()
 
 
 class CallerPat(httpx.Auth):
@@ -99,7 +99,7 @@ def _namespace_agent_operations(spec: dict, app_names: set[str]) -> None:
     # app's name, so among an agent operation's tags the one naming an
     # installed app is the owner; platform agent operations carry no such
     # tag and keep their declared ids. An already-prefixed id passes through, so
-    # stable names like ship_start never double — and the namespace is what makes
+    # stable names like software_factory_start never double — and the namespace is what makes
     # the merged document's operation ids globally unique. A derived id that would
     # collide with another route's explicit id is rejected: before this derivation
     # the clash was visible in the author's code, so the framework must surface it

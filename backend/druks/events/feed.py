@@ -2,10 +2,10 @@ from datetime import datetime
 
 from pydantic import AliasPath, ConfigDict, Field, computed_field
 
-from druks.schemas import BaseResponse
+from druks.schemas import Schema
 
 
-class FeedItem(BaseResponse):
+class FeedItem(Schema):
     model_config = ConfigDict(from_attributes=True)
 
     # The event's monotonic log position (its pk) — the feed's ordering and
@@ -16,7 +16,7 @@ class FeedItem(BaseResponse):
     # milestone an app recorded ("merged"). The words are the client's.
     kind: str = Field(validation_alias="type")
     app: str | None = None
-    # The durable kind of the workflow a lifecycle row is about ("ship.build").
+    # The durable kind of the workflow a lifecycle row is about ("software_factory.build").
     workflow: str | None = Field(default=None, validation_alias=AliasPath("payload", "kind"))
     subject_type: str | None = None
     subject_id: str | None = None
@@ -28,7 +28,7 @@ class FeedItem(BaseResponse):
         return f"event:{self.seq}"
 
 
-class FeedResponse(BaseResponse):
+class FeedResponse(Schema):
     items: list[FeedItem]
     # Event sequence cursor for the next (older) page; None at the tail.
     next_cursor: str | None = None

@@ -19,7 +19,7 @@
 // app keys its board/detail on its own subject summary; SubjectRow and
 // SubjectResponse are generic over that summary (a WorkItemSummary for build).
 
-// The platform's canonical lifecycle states, aggregated across a subject's runs.
+// The platform's canonical lifecycle states, each one a run's own.
 export type RunState =
   | 'scheduled'
   | 'running'
@@ -38,7 +38,10 @@ export interface SubjectSummary {
 }
 
 export interface SubjectStatus {
-  state: RunState
+  // Null when no run drives the subject: druks has not run it.
+  state: RunState | null
+  // The driving run's id.
+  run: string | null
   // Facts the app renders its lane copy from; the backend ships no prose.
   // The driving run's kind and, while running, its latest agent call's agent.
   kind: string | null
@@ -55,7 +58,7 @@ export interface SubjectStatus {
   accountUsername: string | null
 }
 
-// The live sub-phase a running run pushes ("Building sandbox VM…", "Working…") —
+// The live sub-phase a running run pushes ("Provisioning sandbox VM…", "Working…") —
 // finer than the lifecycle status; null unless something is actively running.
 export interface SubjectActivity {
   label: string
@@ -115,7 +118,7 @@ export interface ArtifactContent {
 // One run on the subject's timeline, with its agent calls in execution order.
 export interface RunSummary {
   id: string
-  // The durable kind ("ship.build"); label is its backend display name ("Build").
+  // The durable kind ("software_factory.build"); label is its backend display name ("Build").
   kind: string
   label: string
   state: RunState
@@ -195,6 +198,260 @@ export interface App {
   subjectTypes: string[]
   hasFrontend: boolean
   navigation: [string, string][]
+  pages: PageEntry[]
+  operations: Operation[]
+}
+
+// --- Druks UI --------------------------------------------------------------
+// The app's Python page declarations, as the shell sees them. They mirror
+// docs/druks-ui.md, and arrive in route-match order.
+export interface PageEntry {
+  name: string
+  label: string
+  path: string
+  parent: string
+  order: number
+}
+
+export interface Link {
+  block: 'link'
+  label: string
+  page: string
+  arguments: Record<string, string>
+  url: string
+  subject: Follows | null
+}
+
+// Where something stands. The app writes the word; the tone picks the paint.
+export interface StatusValue {
+  value: 'status'
+  label: string
+  tone: 'neutral' | 'active' | 'success' | 'warning' | 'danger'
+}
+
+export interface TimelineItem {
+  when: string
+  title: string
+  description: string
+  status: StatusValue | null
+}
+
+export interface ProgressStep {
+  label: string
+  status: StatusValue
+}
+
+export interface TextValue {
+  value: 'text'
+  text: string
+  description: string
+  link: Link | null
+}
+
+export interface NumberValue {
+  value: 'number'
+  number: number
+  unit: string
+  tone: 'neutral' | 'active' | 'success' | 'warning' | 'danger'
+}
+
+export interface TimeValue {
+  value: 'time'
+  when: string
+}
+
+// One rendered datum. It reads the same way in Facts, Metrics, List, and Table.
+export type Value = TextValue | NumberValue | StatusValue | TimeValue
+
+export interface ChartSeries {
+  label: string
+  points: number[]
+}
+
+export interface Metric {
+  label: string
+  value: Value
+  description: string
+}
+
+export interface Fact {
+  label: string
+  value: Value
+}
+
+export interface TableColumn {
+  label: string
+  align: 'start' | 'end'
+}
+
+export interface TableRow {
+  cells: Value[]
+  detail: string
+}
+
+export interface CardBlock {
+  block: 'card'
+  title: string
+  description: string
+  blocks: Block[]
+  actions: (Action | Link)[]
+}
+
+export interface EmptyStateBlock {
+  block: 'empty_state'
+  title: string
+  description: string
+  actions: (Action | Link)[]
+}
+
+export interface ImageBlock {
+  block: 'image'
+  url: string
+  alternativeText: string
+  caption: string
+}
+
+export interface FileSummary {
+  id: string
+  name: string
+  contentType: string
+  size: number
+  url: string
+}
+
+export interface Option {
+  value: string
+  label: string
+}
+
+interface FieldBase {
+  name: string
+  label: string
+  helpText: string
+  isRequired: boolean
+}
+
+// One input inside a form. ``name`` is the key the shell sends.
+export type Field =
+  | (FieldBase & { field: 'text'; value: string; placeholder: string })
+  | (FieldBase & { field: 'text_area'; value: string; placeholder: string; rows: number })
+  | (FieldBase & {
+      field: 'number'
+      value: number | null
+      minimum: number | null
+      maximum: number | null
+      step: number | null
+    })
+  | (FieldBase & { field: 'select'; options: Option[]; value: string })
+  | (FieldBase & { field: 'multi_select'; options: Option[]; value: string[] })
+  | (FieldBase & { field: 'radio'; options: Option[]; value: string })
+  | (FieldBase & { field: 'checkbox'; value: boolean })
+  | (FieldBase & { field: 'upload'; accept: string })
+  | (FieldBase & { field: 'secret' })
+
+// A control that calls one of the app's own operations. The shell resolves the
+// operation to a method and a URL through the roster.
+export interface Action {
+  block: 'action'
+  label: string
+  operation: string
+  arguments: Record<string, unknown>
+  tone: 'default' | 'primary' | 'danger'
+  confirm: string
+  refresh: 'none' | 'page' | 'region'
+  link: Link | null
+}
+
+// One route an Action can call. Reads are left out: a GET is not an action.
+export interface Operation {
+  id: string
+  method: string
+  path: string
+}
+
+export type Block =
+  | { block: 'text'; text: string }
+  | { block: 'markdown'; text: string }
+  | { block: 'quote'; text: string }
+  | { block: 'section'; title: string; name: string; blocks: Block[]; follows: Follows | null }
+  | { block: 'gate_controls'; run: string }
+  | { block: 'timeline'; title: string; items: TimelineItem[] }
+  | {
+      block: 'progress'
+      label: string
+      completed: number | null
+      total: number
+      steps: ProgressStep[]
+    }
+  | ImageBlock
+  | { block: 'files'; title: string; files: FileSummary[] }
+  | {
+      block: 'chart'
+      kind: 'line' | 'bar' | 'area'
+      title: string
+      categories: string[]
+      series: ChartSeries[]
+      categoryLabel: string
+      valueLabel: string
+    }
+  | { block: 'image_gallery'; title: string; images: ImageBlock[] }
+  | { block: 'metrics'; title: string; metrics: Metric[] }
+  | { block: 'facts'; title: string; facts: Fact[] }
+  | {
+      block: 'table'
+      title: string
+      columns: TableColumn[]
+      rows: TableRow[]
+      emptyText: string
+    }
+  | { block: 'list'; title: string; items: Value[] }
+  | { block: 'stack'; gap: 'small' | 'medium' | 'large'; blocks: Block[] }
+  | { block: 'columns'; blocks: Block[] }
+  | Action
+  | { block: 'form'; title: string; description: string; fields: Field[]; action: Action }
+  | CardBlock
+  | { block: 'cards'; title: string; cards: CardBlock[]; empty: EmptyStateBlock | null }
+  | {
+      block: 'callout'
+      tone: 'info' | 'success' | 'warning' | 'danger'
+      title: string
+      text: string
+    }
+  | { block: 'divider' }
+  | EmptyStateBlock
+  | Link
+
+// The subject a page or a named region watches. The shell streams it and
+// rereads the page on every snapshot it sends. An empty ``subjectId`` watches
+// every subject of the type, through the board stream.
+export interface Follows {
+  subjectType: string
+  subjectId: string
+}
+
+// What a page function returned at one moment — the contract's ``Page``.
+export interface PageSnapshot {
+  title: string
+  description: string
+  blocks: Block[]
+  follows: Follows | null
+}
+
+// A parked run's open gate. ``parkedAt`` names the exact question being
+// answered, and the answer echoes it unchanged.
+export interface Gate {
+  run: string
+  gate: string
+  parkedAt: string
+  ask: InputRequest
+  artifact: ArtifactContent | null
+}
+
+export interface GateAnswer {
+  parkedAt: string
+  control: string
+  answers: Record<string, string>
+  note: string
 }
 
 // --- System health ---------------------------------------------------------
@@ -320,7 +577,7 @@ export interface UpdateUserSettingsRequest {
   timezone?: string
 }
 
-export type BrowserSessionStatus = 'needs_login' | 'ready' | 'stale'
+export type BrowserSessionStatus = 'needs_login' | 'ready' | 'stale' | 'anonymous'
 export type BrowserSessionPayloadFormat = 'storage_state' | 'profile_dir'
 
 export interface BrowserSession {
@@ -428,7 +685,7 @@ export interface FeedItem {
   // ("merged"). The words are this client's — see lib/feed.
   kind: string
   app?: string | null
-  // The durable kind of the workflow a lifecycle row is about ("ship.build").
+  // The durable kind of the workflow a lifecycle row is about ("software_factory.build").
   workflow?: string | null
   subjectType?: string | null
   subjectId?: string | null

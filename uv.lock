@@ -487,19 +487,19 @@ wheels = [
 
 [[package]]
 name = "dbos"
-version = "2.26.0"
+version = "2.30.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
+    { name = "click" },
     { name = "psycopg", extra = ["binary"] },
     { name = "python-dateutil" },
     { name = "pyyaml" },
     { name = "sqlalchemy", extra = ["asyncio"] },
-    { name = "typer-slim" },
     { name = "websockets" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/68/aa/d5119d8772ff01e1d133bfca513d86723cdf9fc87391d4dfa9afbfcf2e5d/dbos-2.26.0.tar.gz", hash = "sha256:1be900963e7c00fdd9734a8defbc9e90acd32241d7ebea71e0a9af6c5b6090ea", size = 541758, upload-time = "2026-06-30T15:35:34.469Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/68/8e/bc4f33b2cd2c2a3094948762457fb4c1a9fc84dbc23bbf8b5ee7587082fc/dbos-2.30.0.tar.gz", hash = "sha256:777c30908360707de6a95678649016d277f49eafceddff88e732d2df4145a06f", size = 671789, upload-time = "2026-08-18T15:13:42.245Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/ca/32/6a8c03e39e733b0483cf949232576800fff730a232fa5af4b62f7d3c3660/dbos-2.26.0-py3-none-any.whl", hash = "sha256:f60e57078d2f67e3938c0f9fc455a399654689d78645dd915214a442bd9474f4", size = 218086, upload-time = "2026-06-30T15:35:32.631Z" },
+    { url = "https://files.pythonhosted.org/packages/c7/44/361cbc8fc2b8285b17798638a4f372c3e3e4102c197d1d8f40f15bd2d673/dbos-2.30.0-py3-none-any.whl", hash = "sha256:363f8209f808fd42c59ad0f19f7e2c25abdd17d73b581dd8ada6336c4ef47e8e", size = 268218, upload-time = "2026-08-18T15:13:40.694Z" },
 ]
 
 [[package]]
@@ -522,19 +522,19 @@ wheels = [
 
 [[package]]
 name = "drukbox-python-sdk"
-version = "0.0.7"
+version = "0.1.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "httpx" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/ba/3f/ce6179b6135f304e830aeabef60c73d082c1b0b039c26f302b6becb9347d/drukbox_python_sdk-0.0.7.tar.gz", hash = "sha256:a4baed3e7190aced215b0a0041d4f816b741f3ac78e97adf88f2b63c721cbeed", size = 17350, upload-time = "2026-07-12T11:52:54.731Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/96/01/73e978566c3c6670ec2f5fcbd4829508f4f3edb992fa01856a120ef4f7b0/drukbox_python_sdk-0.1.0.tar.gz", hash = "sha256:d81cb31f865f67c01b28d531989525f9367bbbae0a335835aa61ad4400756715", size = 18394, upload-time = "2026-08-26T19:44:28.841Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/52/86/29b6b900de63d2e05c760c09c9163782607fb7aeda76e16ebfd373cd9f6a/drukbox_python_sdk-0.0.7-py3-none-any.whl", hash = "sha256:8b8d9087d3fc1e75da9fdd99fdd88632d6af5548a6782cdc0e554f69dd1ae2eb", size = 11728, upload-time = "2026-07-12T11:52:53.748Z" },
+    { url = "https://files.pythonhosted.org/packages/65/f7/70dc580b901cbb6eec1fd6aa12cfa5c87f9ba8854840793ce59c534b8a11/drukbox_python_sdk-0.1.0-py3-none-any.whl", hash = "sha256:9a72cc443404d40bbdb23b08e691ff89746130b88e5bc2ac2e375f93eafebe04", size = 12186, upload-time = "2026-08-26T19:44:27.836Z" },
 ]
 
 [[package]]
 name = "druks"
-version = "0.3.0"
+version = "0.4.0"
 source = { editable = "." }
 dependencies = [
     { name = "alembic" },
@@ -579,8 +579,8 @@ requires-dist = [
     { name = "blinker", specifier = ">=1.9" },
     { name = "croniter", specifier = ">=6.2.2" },
     { name = "cryptography", specifier = ">=48.0.1" },
-    { name = "dbos", specifier = ">=2.26" },
-    { name = "drukbox-python-sdk", specifier = ">=0.0.6" },
+    { name = "dbos", specifier = ">=2.30" },
+    { name = "drukbox-python-sdk", specifier = ">=0.1.0" },
     { name = "fastapi", specifier = ">=0.138.0" },
     { name = "fastmcp", specifier = ">=3.4.4,<4" },
     { name = "githubkit", extras = ["auth-app"], specifier = ">=0.15.5" },
@@ -2056,15 +2056,6 @@ wheels = [
 ]
 
 [[package]]
-name = "shellingham"
-version = "1.5.4"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/58/15/8b3609fd3830ef7b27b655beb4b4e9c62313a4e8da8c676e142cc210d58e/shellingham-1.5.4.tar.gz", hash = "sha256:8dbca0739d487e5bd35ab3ca4b36e11c4078f3a234bfce294b0a0291363404de", size = 10310, upload-time = "2023-10-24T04:13:40.426Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/e0/f9/0595336914c5619e5f28a1fb793285925a8cd4b432c9da0a987836c7f822/shellingham-1.5.4-py2.py3-none-any.whl", hash = "sha256:7ecfff8f2fd72616f7481040475a65b2bf8af90a56c89140852d1120324e8686", size = 9755, upload-time = "2023-10-24T04:13:38.866Z" },
-]
-
-[[package]]
 name = "six"
 version = "1.17.0"
 source = { registry = "https://pypi.org/simple" }
@@ -2159,33 +2150,6 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/94/96/e07752635b98536177fa1f37671c8f3cdde2e724c6bcf6034b2cfb571565/tomlkit-0.15.1.tar.gz", hash = "sha256:e25bbf38843005246210a12982776f27f99cb9be67160e14434d0c0d21ee1e97", size = 180129, upload-time = "2026-07-17T01:48:04.562Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/13/bc/8c13eb66537dce1d2bd3a57132902f38d0e7f5bb46fa9f4daed9fe9d76ee/tomlkit-0.15.1-py3-none-any.whl", hash = "sha256:177a05aece5a8ca5266fd3c448abb47b8d352f09d477d3ca8332db4d89b24304", size = 49449, upload-time = "2026-07-17T01:48:05.728Z" },
-]
-
-[[package]]
-name = "typer"
-version = "0.26.8"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "annotated-doc" },
-    { name = "colorama", marker = "sys_platform == 'win32'" },
-    { name = "rich" },
-    { name = "shellingham" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/7c/f7/68adc395201b20b872d68e975386832e8005ffeacedd43a1d837a32815be/typer-0.26.8.tar.gz", hash = "sha256:c244a6bd558886fe3f8780efb6bdd28bb9aff005a94eedebaa5cb32926fe2f7e", size = 202097, upload-time = "2026-06-26T09:22:45.705Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/80/87/b9fd69c92c6102a066e1b86a35243f53e70bd4c709f2a26d9f4fee4f4dc0/typer-0.26.8-py3-none-any.whl", hash = "sha256:3512ca79ac5c11113414b36e80281b872884477722440691c89d1112e321a49c", size = 122564, upload-time = "2026-06-26T09:22:44.72Z" },
-]
-
-[[package]]
-name = "typer-slim"
-version = "0.24.0"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "typer" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/a7/a7/e6aecc4b4eb59598829a3b5076a93aff291b4fdaa2ded25efc4e1f4d219c/typer_slim-0.24.0.tar.gz", hash = "sha256:f0ed36127183f52ae6ced2ecb2521789995992c521a46083bfcdbb652d22ad34", size = 4776, upload-time = "2026-02-16T22:08:51.2Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/a7/24/5480c20380dfd18cf33d14784096dca45a24eae6102e91d49a718d3b6855/typer_slim-0.24.0-py3-none-any.whl", hash = "sha256:d5d7ee1ee2834d5020c7c616ed5e0d0f29b9a4b1dd283bdebae198ec09778d0e", size = 3394, upload-time = "2026-02-16T22:08:49.92Z" },
 ]
 
 [[package]]

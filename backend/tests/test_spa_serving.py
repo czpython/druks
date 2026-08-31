@@ -60,34 +60,30 @@ def test_cache_policy_lives_with_the_server(tmp_path):
     assert "cache-control" not in client.get("/assets/gone.js").headers
 
 
-def test_request_that_never_touches_the_db_opens_no_session(monkeypatch):
-    opened = []
-    original = db_session.registry.createfunc
+def test_request_that_never_touches_the_db_opens_no_connection(monkeypatch):
+    from sqlalchemy.orm import Session
 
-    def counting():
-        opened.append(1)
-        return original()
+    connected = []
+    original = Session._connection_for_bind
 
-    monkeypatch.setattr(db_session.registry, "createfunc", counting)
-    # The harness binds an ambient session; drop it so what the registry holds here
-    # is only what a request opened.
-    db_session.remove()
+    def counting(self, *args, **kwargs):
+        connected.append(1)
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(Session, "_connection_for_bind", counting)
+    # Outside a loop the registry scopes to None; an earlier test's leftover
+    # binding under that key would masquerade as ours below.
+    db_session.registry.clear()
     app = FastAPI(dependencies=[Depends(_release_db_session)])
 
     @app.get("/plain")
     async def plain() -> dict[str, str]:
         return {}
 
-    @app.get("/touch")
-    async def touch() -> dict[str, str]:
-        db_session()
-        return {}
-
     client = TestClient(app)
-    # The SPA/asset case: the boundary must not open a session to commit nothing.
+    # The SPA/asset case: the boundary binds a session for every request, but
+    # the session is lazy — serving a request that never touches the DB checks
+    # out no connection, and the commit is a no-op. The binding is gone after.
     assert client.get("/plain").status_code == 200
-    assert not opened
-    # The API case: a session the request opened still gets committed + released.
-    assert client.get("/touch").status_code == 200
-    assert opened == [1]
+    assert not connected
     assert not db_session.registry.has()

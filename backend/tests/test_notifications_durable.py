@@ -20,7 +20,9 @@ from druks.user_settings.models import UserSettings
 from druks.workflows import Gate, OperatorReply, Run, Workflow
 from fastapi.testclient import TestClient
 from pydantic import BaseModel, Field
-from sqlalchemy import create_engine, select, text
+from sqlalchemy import NullPool, create_engine, select, text
+from sqlalchemy.ext.asyncio import create_async_engine
+from sqlalchemy.orm import Session
 
 PG_BASE = os.environ.get("DRUKS_TEST_PG", "postgresql://druks:druks@localhost:5432")
 DB = "druks_notifications_durable_test"
@@ -119,7 +121,7 @@ def _build_park_flows():
 
 
 @pytest.fixture(scope="module", autouse=True)
-def rt():
+async def rt():
     db_url_snap = os.environ.get("DRUKS_DATABASE_URL")
 
     admin = psycopg.connect(f"{PG_BASE}/postgres", autocommit=True)
@@ -127,19 +129,19 @@ def rt():
     admin.execute(f"CREATE DATABASE {DB}")
     admin.close()
 
-    engine = create_engine(URL)
-    init_db(engine)
-    configure_engine(engine)
-    configure_session(engine)
-    session = get_session(engine)
-    try:
+    schema_engine = create_engine(URL)
+    init_db(schema_engine)
+    with Session(schema_engine) as session:
         session.add_all(
             NotificationProbe(id=subject_id)
             for subject_id in (9001, 9002, 9003, 9004, 9005, 9006, 9007, 9008, 9009, 9010, 9014)
         )
         session.commit()
-    finally:
-        session.close()
+    # NullPool: the TestClient below runs requests on its own loop, and a pooled
+    # async connection must never cross loops.
+    engine = create_async_engine(URL, poolclass=NullPool)
+    configure_engine(engine)
+    configure_session(engine)
     (
         in_app_flow,
         external_flow,
@@ -151,10 +153,11 @@ def rt():
     # The outbox module was imported above — its queue + workflow register
     # before launch(), which is the wiring this whole module runs through.
     init_dbos()
-    launch()
+    await launch()
     try:
         yield SimpleNamespace(
             engine=engine,
+            schema_engine=schema_engine,
             InAppFlow=in_app_flow,
             ExternalFlow=external_flow,
             SubjectlessFlow=subjectless_flow,
@@ -163,7 +166,8 @@ def rt():
         )
     finally:
         shutdown()
-        engine.dispose()
+        await engine.dispose()
+        schema_engine.dispose()
         for kind in (
             "in_app_flow",
             "external_flow",
@@ -203,52 +207,59 @@ class _DeliverSpy:
 
 
 @pytest.fixture
-def deliver_spy(monkeypatch):
+async def deliver_spy(monkeypatch):
     spy = _DeliverSpy()
     monkeypatch.setattr(outbox, "deliver", spy)
     return spy
 
 
-def _seed(rt, seeder):
+async def _seed(rt, seeder):
     # Commit for real: the outbox worker reads through its own sessions.
     # Expunge first so the returned instance keeps its loaded attributes past
     # the commit's expiry.
     session = get_session(rt.engine)
     db_session.registry.set(session)
     try:
-        result = seeder()
-        session.flush()
+        result = await seeder()
+        await session.flush()
         session.expunge_all()
-        session.commit()
+        await session.commit()
         return result
     finally:
-        db_session.remove()
-        session.close()
+        await db_session.remove()
+        await session.close()
+
+
+async def _seed_destination(rt, name):
+    async def create():
+        return await Destination.create(name=name, kind="slack_webhook", url=_WEBHOOK_URL)
+
+    return await _seed(rt, create)
 
 
 async def _deliver(rt, *, to, subject=None, reason="r", body="b", actions=None):
     # The create-seam path a producer uses (the gate-park producer's shape):
     # persist the row committed, then enqueue the outbox — no notify() hatch.
-    notification_id = _seed(
-        rt,
-        lambda: (
-            Notification.create(
-                destination_id=Destination.get_for_name(to).id,
-                reason=reason,
-                body=body,
-                subject=subject or {"type": "notification_probe", "id": 1},
-                actions=actions,
-            ).id
-        ),
-    )
+    async def create():
+        destination = await Destination.get_for_name(to)
+        notification = await Notification.create(
+            destination_id=destination.id,
+            reason=reason,
+            body=body,
+            subject=subject or {"type": "notification_probe", "id": 1},
+            actions=actions,
+        )
+        return notification.id
+
+    notification_id = await _seed(rt, create)
     await notifications_queue.enqueue_async(send_notification, notification_id)
     return notification_id
 
 
-def _snapshot(rt, notification_id) -> dict:
+async def _snapshot(rt, notification_id) -> dict:
     session = get_session(rt.engine)
     try:
-        notification = session.get(Notification, notification_id)
+        notification = await session.get(Notification, notification_id)
         return {
             "state": notification.state,
             "attempts": notification.attempts,
@@ -257,21 +268,21 @@ def _snapshot(rt, notification_id) -> dict:
             "token": notification.correlation_token,
         }
     finally:
-        session.close()
+        await session.close()
 
 
 async def _wait_for(rt, notification_id, predicate, timeout=30.0):
     deadline = asyncio.get_event_loop().time() + timeout
     while asyncio.get_event_loop().time() < deadline:
-        snapshot = _snapshot(rt, notification_id)
+        snapshot = await _snapshot(rt, notification_id)
         if predicate(snapshot):
             return snapshot
         await asyncio.sleep(0.1)
-    raise AssertionError(f"timed out; last={_snapshot(rt, notification_id)}")
+    raise AssertionError(f"timed out; last={await _snapshot(rt, notification_id)}")
 
 
 async def test_outbox_delivers_with_actions_token_and_key(rt, deliver_spy):
-    _seed(rt, lambda: Destination.create(name="happy", kind="slack_webhook", url=_WEBHOOK_URL))
+    await _seed_destination(rt, "happy")
 
     notification_id = await _deliver(
         rt, to="happy", reason="ops.alert", body="hello", actions=[{"id": "ok", "label": "OK"}]
@@ -290,7 +301,7 @@ async def test_outbox_delivers_with_actions_token_and_key(rt, deliver_spy):
 
 async def test_transient_failure_retries_to_delivered_and_touches_no_run(rt, deliver_spy):
     deliver_spy.failures_remaining = 2
-    _seed(rt, lambda: Destination.create(name="flaky", kind="slack_webhook", url=_WEBHOOK_URL))
+    await _seed_destination(rt, "flaky")
 
     notification_id = await _deliver(rt, to="flaky")
 
@@ -298,7 +309,7 @@ async def test_transient_failure_retries_to_delivered_and_touches_no_run(rt, del
     assert done["attempts"] == 3
     assert len(deliver_spy.calls) == 3
     # Delivery is decoupled from the run lifecycle: no Run row exists or was touched.
-    with rt.engine.connect() as connection:
+    with rt.schema_engine.connect() as connection:
         assert connection.execute(text("SELECT count(*) FROM durable_runs")).scalar_one() == 0
 
 
@@ -309,7 +320,7 @@ async def test_terminal_failure_marks_failed_sanitized_and_reads_back(
     deliver_spy.error = DeliveryError("doomed", "HTTPStatusError")
     # Two attempts instead of five: same terminal path, fraction of the backoff.
     monkeypatch.setattr(outbox, "_SEND_RETRIES", {"retries_allowed": True, "max_attempts": 2})
-    _seed(rt, lambda: Destination.create(name="doomed", kind="slack_webhook", url=_WEBHOOK_URL))
+    await _seed_destination(rt, "doomed")
 
     notification_id = await _deliver(rt, to="doomed")
 
@@ -334,7 +345,7 @@ async def test_unexpected_error_reduces_to_class_name(rt, deliver_spy, monkeypat
     deliver_spy.always_fail = True
     deliver_spy.error = RuntimeError(f"boom at {_WEBHOOK_URL}")
     monkeypatch.setattr(outbox, "_SEND_RETRIES", {"retries_allowed": True, "max_attempts": 2})
-    _seed(rt, lambda: Destination.create(name="leaky", kind="slack_webhook", url=_WEBHOOK_URL))
+    await _seed_destination(rt, "leaky")
 
     notification_id = await _deliver(rt, to="leaky")
 
@@ -344,7 +355,7 @@ async def test_unexpected_error_reduces_to_class_name(rt, deliver_spy, monkeypat
 
 
 async def test_rerun_on_delivered_notification_skips_the_send(rt, deliver_spy):
-    _seed(rt, lambda: Destination.create(name="once", kind="slack_webhook", url=_WEBHOOK_URL))
+    await _seed_destination(rt, "once")
     notification_id = await _deliver(rt, to="once")
     await _wait_for(rt, notification_id, lambda s: s["state"] == "delivered")
     assert len(deliver_spy.calls) == 1
@@ -356,96 +367,91 @@ async def test_rerun_on_delivered_notification_skips_the_send(rt, deliver_spy):
 
 
 async def test_create_seam_plus_direct_enqueue_delivers(rt, deliver_spy):
-    destination = _seed(
-        rt, lambda: Destination.create(name="seam", kind="slack_webhook", url=_WEBHOOK_URL)
-    )
-    notification = _seed(
-        rt,
-        lambda: Notification.create(
-            destination_id=destination.id, reason="r", body="b", subject={"type": "probe", "id": 1}
-        ),
-    )
+    destination = await _seed_destination(rt, "seam")
+
+    async def create():
+        return await Notification.create(
+            destination_id=destination.id,
+            reason="r",
+            body="b",
+            subject={"type": "probe", "id": 1},
+        )
+
+    notification = await _seed(rt, create)
     # The create seam persisted a pending row and enqueued nothing.
-    assert _snapshot(rt, notification.id)["state"] == "pending"
+    assert (await _snapshot(rt, notification.id))["state"] == "pending"
     assert deliver_spy.calls == []
 
     handle = await notifications_queue.enqueue_async(send_notification, notification.id)
     await handle.get_result()
 
-    assert _snapshot(rt, notification.id)["state"] == "delivered"
+    assert (await _snapshot(rt, notification.id))["state"] == "delivered"
     assert len(deliver_spy.calls) == 1
 
 
 # --- gate-park notifications ---------------------------------------------------
 
 
-def _set_gate_park_pointer(rt, destination_id):
+async def _set_gate_park_pointer(rt, destination_id):
     session = get_session(rt.engine)
     db_session.registry.set(session)
     try:
-        UserSettings.get().set_gate_park_destination(destination_id)
-        session.commit()
+        await (await UserSettings.get()).set_gate_park_destination(destination_id)
+        await session.commit()
     finally:
-        db_session.remove()
-        session.close()
+        await db_session.remove()
+        await session.close()
 
 
-def _run_snapshot(rt, workflow_id) -> Run:
+async def _run_snapshot(rt, workflow_id) -> Run:
     session = get_session(rt.engine)
     try:
-        return session.get(Run, workflow_id)
+        return await session.get(Run, workflow_id)
     finally:
-        session.close()
+        await session.close()
 
 
-def _notifications_for_run(rt, workflow_id) -> list[Notification]:
+async def _notifications_for_run(rt, workflow_id) -> list[Notification]:
     session = get_session(rt.engine)
     try:
-        return list(
-            session.execute(
-                select(Notification)
-                .where(Notification.run_id == workflow_id)
-                .order_by(Notification.id)
-            )
-            .scalars()
-            .all()
+        result = await session.execute(
+            select(Notification).where(Notification.run_id == workflow_id).order_by(Notification.id)
         )
+        return list(result.scalars().all())
     finally:
-        session.close()
+        await session.close()
 
 
 async def _wait_run(rt, workflow_id, predicate, timeout=30.0) -> Run:
     deadline = asyncio.get_event_loop().time() + timeout
     while asyncio.get_event_loop().time() < deadline:
-        run = _run_snapshot(rt, workflow_id)
+        run = await _run_snapshot(rt, workflow_id)
         if run and predicate(run):
             return run
 
         await asyncio.sleep(0.1)
-    raise AssertionError(f"timed out; last={_run_snapshot(rt, workflow_id)}")
+    raise AssertionError(f"timed out; last={await _run_snapshot(rt, workflow_id)}")
 
 
 async def _wait_notification(rt, workflow_id, state, timeout=30.0) -> Notification:
     deadline = asyncio.get_event_loop().time() + timeout
     while asyncio.get_event_loop().time() < deadline:
-        rows = _notifications_for_run(rt, workflow_id)
+        rows = await _notifications_for_run(rt, workflow_id)
         if rows and rows[0].state == state:
             return rows[0]
         await asyncio.sleep(0.1)
-    raise AssertionError(f"timed out; last={_notifications_for_run(rt, workflow_id)}")
+    raise AssertionError(f"timed out; last={await _notifications_for_run(rt, workflow_id)}")
 
 
 async def test_in_app_park_notifies_with_actions(rt, deliver_spy):
-    destination = _seed(
-        rt, lambda: Destination.create(name="inbox-inapp", kind="slack_webhook", url=_WEBHOOK_URL)
-    )
-    _set_gate_park_pointer(rt, destination.id)
+    destination = await _seed_destination(rt, "inbox-inapp")
+    await _set_gate_park_pointer(rt, destination.id)
 
     workflow_id = await rt.InAppFlow.start(subject=NotificationProbe(id=9001))
     parked = await _wait_run(rt, workflow_id, lambda run: run.state == RunState.PARKED)
 
     notification = await _wait_notification(rt, workflow_id, "delivered")
-    assert len(_notifications_for_run(rt, workflow_id)) == 1
+    assert len(await _notifications_for_run(rt, workflow_id)) == 1
     assert notification.reason == "gate.parked"
     assert notification.body.startswith("Review")
     assert "Which database?" in notification.body
@@ -465,10 +471,8 @@ async def test_in_app_park_notifies_with_actions(rt, deliver_spy):
 
 
 async def test_external_park_notifies_without_actions(rt, deliver_spy):
-    destination = _seed(
-        rt, lambda: Destination.create(name="inbox-ext", kind="slack_webhook", url=_WEBHOOK_URL)
-    )
-    _set_gate_park_pointer(rt, destination.id)
+    destination = await _seed_destination(rt, "inbox-ext")
+    await _set_gate_park_pointer(rt, destination.id)
 
     workflow_id = await rt.ExternalFlow.start(subject=NotificationProbe(id=9002))
     await _wait_run(rt, workflow_id, lambda run: run.state == RunState.PARKED)
@@ -482,10 +486,8 @@ async def test_external_park_notifies_without_actions(rt, deliver_spy):
 
 
 async def test_external_park_with_declared_url_sets_deep_link(rt, deliver_spy):
-    destination = _seed(
-        rt, lambda: Destination.create(name="inbox-url", kind="slack_webhook", url=_WEBHOOK_URL)
-    )
-    _set_gate_park_pointer(rt, destination.id)
+    destination = await _seed_destination(rt, "inbox-url")
+    await _set_gate_park_pointer(rt, destination.id)
 
     workflow_id = await rt.ExternalUrlFlow.start(subject=NotificationProbe(id=9003))
     await _wait_run(rt, workflow_id, lambda run: run.state == RunState.PARKED)
@@ -496,7 +498,7 @@ async def test_external_park_with_declared_url_sets_deep_link(rt, deliver_spy):
 
 
 async def test_no_designated_destination_notifies_nothing(rt, deliver_spy):
-    _set_gate_park_pointer(rt, None)
+    await _set_gate_park_pointer(rt, None)
 
     in_app_id = await rt.InAppFlow.start(subject=NotificationProbe(id=9004))
     external_id = await rt.ExternalFlow.start(subject=NotificationProbe(id=9014))
@@ -504,54 +506,52 @@ async def test_no_designated_destination_notifies_nothing(rt, deliver_spy):
     await _wait_run(rt, external_id, lambda run: run.state == RunState.PARKED)
 
     await asyncio.sleep(1.0)
-    assert _notifications_for_run(rt, in_app_id) == []
-    assert _notifications_for_run(rt, external_id) == []
+    assert await _notifications_for_run(rt, in_app_id) == []
+    assert await _notifications_for_run(rt, external_id) == []
     assert deliver_spy.calls == []
 
 
 async def test_deleted_designated_destination_notifies_nothing(rt, deliver_spy):
-    destination = _seed(
-        rt,
-        lambda: Destination.create(name="inbox-deleted", kind="slack_webhook", url=_WEBHOOK_URL),
-    )
-    _set_gate_park_pointer(rt, destination.id)
-    _seed(rt, lambda: Destination.get(destination.id).delete())
+    destination = await _seed_destination(rt, "inbox-deleted")
+    await _set_gate_park_pointer(rt, destination.id)
+
+    async def delete_destination():
+        await (await Destination.get(destination.id)).delete()
+
+    await _seed(rt, delete_destination)
 
     workflow_id = await rt.ExternalFlow.start(subject=NotificationProbe(id=9005))
     await _wait_run(rt, workflow_id, lambda run: run.state == RunState.PARKED)
 
     await asyncio.sleep(1.0)
-    assert _notifications_for_run(rt, workflow_id) == []
+    assert await _notifications_for_run(rt, workflow_id) == []
     assert deliver_spy.calls == []
     # ON DELETE SET NULL cleared the pointer itself.
     session = get_session(rt.engine)
     try:
-        assert session.get(UserSettings, UserSettings.SINGLETON_ID).gate_park_destination_id is None
+        settings = await session.get(UserSettings, UserSettings.SINGLETON_ID)
+        assert settings.gate_park_destination_id is None
     finally:
-        session.close()
+        await session.close()
 
 
 async def test_subjectless_park_notifies_nothing(rt, deliver_spy):
-    destination = _seed(
-        rt, lambda: Destination.create(name="inbox-nosubj", kind="slack_webhook", url=_WEBHOOK_URL)
-    )
-    _set_gate_park_pointer(rt, destination.id)
+    destination = await _seed_destination(rt, "inbox-nosubj")
+    await _set_gate_park_pointer(rt, destination.id)
 
     workflow_id = await rt.SubjectlessFlow.start(subject=None)
     await _wait_run(rt, workflow_id, lambda run: run.state == RunState.PARKED)
 
     await asyncio.sleep(1.0)
-    assert _notifications_for_run(rt, workflow_id) == []
+    assert await _notifications_for_run(rt, workflow_id) == []
     assert deliver_spy.calls == []
 
 
 async def test_failed_delivery_leaves_run_parked_and_resumable(rt, deliver_spy, monkeypatch):
     deliver_spy.always_fail = True
     monkeypatch.setattr(outbox, "_SEND_RETRIES", {"retries_allowed": True, "max_attempts": 2})
-    destination = _seed(
-        rt, lambda: Destination.create(name="inbox-flaky", kind="slack_webhook", url=_WEBHOOK_URL)
-    )
-    _set_gate_park_pointer(rt, destination.id)
+    destination = await _seed_destination(rt, "inbox-flaky")
+    await _set_gate_park_pointer(rt, destination.id)
 
     workflow_id = await rt.InAppFlow.start(subject=NotificationProbe(id=9006))
     await _wait_run(rt, workflow_id, lambda run: run.state == RunState.PARKED)
@@ -559,17 +559,15 @@ async def test_failed_delivery_leaves_run_parked_and_resumable(rt, deliver_spy, 
     assert _WEBHOOK_URL not in notification.last_error
 
     # The park never noticed the dead endpoint: still waiting, still resumable.
-    parked = _run_snapshot(rt, workflow_id)
+    parked = await _run_snapshot(rt, workflow_id)
     assert parked.state == RunState.PARKED
     await parked.resume(action="approve")
     await _wait_run(rt, workflow_id, lambda run: run.state == RunState.FINISHED)
 
 
 async def test_replayed_park_notifies_once(rt, deliver_spy):
-    destination = _seed(
-        rt, lambda: Destination.create(name="inbox-replay", kind="slack_webhook", url=_WEBHOOK_URL)
-    )
-    _set_gate_park_pointer(rt, destination.id)
+    destination = await _seed_destination(rt, "inbox-replay")
+    await _set_gate_park_pointer(rt, destination.id)
 
     workflow_id = await rt.ExternalFlow.start(subject=NotificationProbe(id=9007))
     await _wait_run(rt, workflow_id, lambda run: run.state == RunState.PARKED)
@@ -577,7 +575,7 @@ async def test_replayed_park_notifies_once(rt, deliver_spy):
     assert len(deliver_spy.calls) == 1
 
     def _execution_claim():
-        with rt.engine.connect() as connection:
+        with rt.schema_engine.connect() as connection:
             return connection.execute(
                 text(
                     "SELECT started_at_epoch_ms FROM dbos.workflow_status WHERE workflow_uuid = :id"
@@ -602,7 +600,7 @@ async def test_replayed_park_notifies_once(rt, deliver_spy):
     await _wait_run(rt, workflow_id, lambda run: run.state == RunState.PARKED)
     await asyncio.sleep(1.0)  # room for a wrong duplicate enqueue to land
 
-    assert len(_notifications_for_run(rt, workflow_id)) == 1
+    assert len(await _notifications_for_run(rt, workflow_id)) == 1
     assert len(deliver_spy.calls) == 1
 
     # Two recv waiters now share the topic (the pre-resume one and the
@@ -610,18 +608,17 @@ async def test_replayed_park_notifies_once(rt, deliver_spy):
     session = get_session(rt.engine)
     db_session.registry.set(session)
     try:
-        await session.get(Run, workflow_id).cancel()
-        session.commit()
+        run = await session.get(Run, workflow_id)
+        await run.cancel()
+        await session.commit()
     finally:
-        db_session.remove()
-        session.close()
+        await db_session.remove()
+        await session.close()
 
 
 async def test_each_park_round_gets_its_own_notification(rt, deliver_spy):
-    destination = _seed(
-        rt, lambda: Destination.create(name="inbox-rounds", kind="slack_webhook", url=_WEBHOOK_URL)
-    )
-    _set_gate_park_pointer(rt, destination.id)
+    destination = await _seed_destination(rt, "inbox-rounds")
+    await _set_gate_park_pointer(rt, destination.id)
 
     workflow_id = await rt.DoubleParkFlow.start(subject=NotificationProbe(id=9008))
     first_round = await _wait_run(rt, workflow_id, lambda run: run.state == RunState.PARKED)
@@ -641,14 +638,14 @@ async def test_each_park_round_gets_its_own_notification(rt, deliver_spy):
     )
     deadline = asyncio.get_event_loop().time() + 30
     while asyncio.get_event_loop().time() < deadline:
-        rows = _notifications_for_run(rt, workflow_id)
+        rows = await _notifications_for_run(rt, workflow_id)
         if len(rows) == 2 and rows[1].state == "delivered":
             break
         await asyncio.sleep(0.1)
     else:
         raise AssertionError(f"second round never notified; {deliver_spy.calls=}")
 
-    rows = _notifications_for_run(rt, workflow_id)
+    rows = await _notifications_for_run(rt, workflow_id)
     assert [row.body for row in rows] == ["Round one", "Round two"]
     assert rows[0].run_parked_at != rows[1].run_parked_at
     assert len(deliver_spy.calls) == 2
@@ -666,18 +663,18 @@ async def _respond_in_own_session(rt, token, choice):
     db_session.registry.set(session)
     try:
         await respond_to_notification(token, choice)
-        session.commit()
+        await session.commit()
         return "ok"
     except NotificationError as error:
-        session.rollback()
+        await session.rollback()
         return type(error).__name__
     finally:
-        db_session.remove()
-        session.close()
+        await db_session.remove()
+        await session.close()
 
 
 def _dbos_replies(rt, workflow_id) -> int:
-    with rt.engine.connect() as connection:
+    with rt.schema_engine.connect() as connection:
         return connection.execute(
             text(
                 "SELECT count(*) FROM dbos.notifications"
@@ -688,10 +685,8 @@ def _dbos_replies(rt, workflow_id) -> int:
 
 
 async def test_respond_round_trip_finishes_the_run(rt, deliver_spy):
-    destination = _seed(
-        rt, lambda: Destination.create(name="inbox-respond", kind="slack_webhook", url=_WEBHOOK_URL)
-    )
-    _set_gate_park_pointer(rt, destination.id)
+    destination = await _seed_destination(rt, "inbox-respond")
+    await _set_gate_park_pointer(rt, destination.id)
     workflow_id = await rt.InAppFlow.start(subject=NotificationProbe(id=9009))
     await _wait_run(rt, workflow_id, lambda run: run.state == RunState.PARKED)
     notification = await _wait_notification(rt, workflow_id, "delivered")
@@ -704,7 +699,7 @@ async def test_respond_round_trip_finishes_the_run(rt, deliver_spy):
 
     await _wait_run(rt, workflow_id, lambda run: run.state == RunState.FINISHED)
     assert OperatorReply(action="approve", answers={"q1": "postgres"}) in _REVIEW_REPLIES
-    assert _notifications_for_run(rt, workflow_id)[0].state == "acknowledged"
+    assert (await _notifications_for_run(rt, workflow_id))[0].state == "acknowledged"
 
     # Sequential second answer: the acknowledged fast-path rejects it, and the
     # round's DBOS bookkeeping still holds exactly one reply.
@@ -714,10 +709,8 @@ async def test_respond_round_trip_finishes_the_run(rt, deliver_spy):
 
 
 async def test_concurrent_responds_resolve_to_one_answer(rt, deliver_spy):
-    destination = _seed(
-        rt, lambda: Destination.create(name="inbox-race", kind="slack_webhook", url=_WEBHOOK_URL)
-    )
-    _set_gate_park_pointer(rt, destination.id)
+    destination = await _seed_destination(rt, "inbox-race")
+    await _set_gate_park_pointer(rt, destination.id)
     workflow_id = await rt.InAppFlow.start(subject=NotificationProbe(id=9010))
     await _wait_run(rt, workflow_id, lambda run: run.state == RunState.PARKED)
     notification = await _wait_notification(rt, workflow_id, "delivered")
@@ -731,4 +724,4 @@ async def test_concurrent_responds_resolve_to_one_answer(rt, deliver_spy):
     assert results.count("ok") == 1
     assert _dbos_replies(rt, workflow_id) == 1
     await _wait_run(rt, workflow_id, lambda run: run.state == RunState.FINISHED)
-    assert _notifications_for_run(rt, workflow_id)[0].state == "acknowledged"
+    assert (await _notifications_for_run(rt, workflow_id))[0].state == "acknowledged"

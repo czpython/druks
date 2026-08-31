@@ -18,7 +18,7 @@ async def get_identity(
         account=AccountResponse.model_validate(account) if account else None,
         # An account needs onboarding exactly while it has no harness
         # connection; none/zero is onboarding before the account exists.
-        onboarding_required=not (account and HarnessConnection.list_for_account(account.id)),
+        onboarding_required=not (account and await HarnessConnection.list_for_account(account.id)),
     )
 
 
@@ -26,7 +26,7 @@ async def get_identity(
 async def list_pats(
     account: Account = Depends(current_session_account),
 ) -> list[PersonalAccessToken]:
-    return PersonalAccessToken.list_for_account(account.id)
+    return await PersonalAccessToken.list_for_account(account.id)
 
 
 @router.post("/personal-tokens")
@@ -38,7 +38,7 @@ async def create_pat(
     if name and len(name) <= PAT_NAME_LENGTH:
         # The plaintext, handed back exactly once — only its hash is stored,
         # and the new row surfaces through the list.
-        _, token = PersonalAccessToken.create(account_id=account.id, name=name)
+        _, token = await PersonalAccessToken.create(account_id=account.id, name=name)
         return {"token": token}
     raise HTTPException(
         status_code=422,
@@ -52,9 +52,9 @@ async def create_pat(
 async def revoke_pat(
     pat_id: str, account: Account = Depends(current_session_account)
 ) -> PersonalAccessToken:
-    pat = PersonalAccessToken.get(pat_id)
+    pat = await PersonalAccessToken.get(pat_id)
     if pat and pat.account_id == account.id:
-        pat.revoke()
+        await pat.revoke()
         return pat
     # One shape for missing and foreign — existence stays account-scoped.
     raise HTTPException(status_code=404, detail="No such token.")

@@ -9,3 +9,12 @@ from druks_{{ name }}.workflows import Echo
 
 async def test_echo_returns_its_message():
     assert await run_workflow(Echo, message="hello") == "hello"
+
+
+async def test_the_landing_page_renders():
+    from druks_{{ name }}.pages import overview
+
+    page = await overview.function()
+
+    assert page.title == "{{ Name }}"
+    assert page.blocks

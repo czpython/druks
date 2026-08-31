@@ -2,6 +2,22 @@ class SandboxError(Exception):
     """Base for everything ``druks.sandbox`` raises out of its layer."""
 
 
+class SandboxDownloadError(SandboxError):
+    pass
+
+
+class SetupScriptError(SandboxError):
+    """A declared setup path cannot resolve to package bytes."""
+
+
+class TemplateNotFound(SandboxError):
+    """Drukbox has no template for a requirements hash."""
+
+
+class TemplateUnavailable(SandboxError):
+    """A declared template cannot be leased."""
+
+
 class SandboxUnreachable(SandboxError):
     """The SSH connection to the VM cannot be (re-)established.
 

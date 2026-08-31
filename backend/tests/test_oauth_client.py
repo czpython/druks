@@ -53,8 +53,10 @@ def _client(**overrides) -> OauthClient:
     return OauthClient(**kwargs)
 
 
-def _connection(refresh_token: str = "rt-old", scopes: list[str] | None = None) -> OauthConnection:
-    return OauthConnection.create(
+async def _connection(
+    refresh_token: str = "rt-old", scopes: list[str] | None = None
+) -> OauthConnection:
+    return await OauthConnection.create(
         provider=_PROVIDER,
         account_id=SYSTEM_ACCOUNT_ID,
         refresh_token=refresh_token,
@@ -75,7 +77,7 @@ def _lock_key(connection: OauthConnection) -> str:
 
 
 async def test_get_serves_the_cache_without_a_refresh(token_endpoint):
-    connection = _connection()
+    connection = await _connection()
     await get_client().set(_token_key(connection), "at-cached")
 
     token = await _client().get_access_token(connection=connection)
@@ -86,13 +88,13 @@ async def test_get_serves_the_cache_without_a_refresh(token_endpoint):
 
 async def test_get_refreshes_persists_rotation_and_fills_with_skewed_ttl(token_endpoint):
     token_endpoint.response = {"access_token": "at-2", "refresh_token": "rt-new", "expires_in": 300}
-    connection = _connection()
+    connection = await _connection()
 
     token = await _client().get_access_token(connection=connection)
 
     assert token == "at-2"
-    db_session().expire_all()
-    assert OauthConnection.get(connection.id).refresh_token.decrypt() == "rt-new"
+    db_session().expunge_all()
+    assert (await OauthConnection.get(connection.id)).refresh_token.decrypt() == "rt-new"
     refresh = token_endpoint.requests[0]
     assert refresh["grant_type"] == "refresh_token"
     assert refresh["refresh_token"] == "rt-old"
@@ -107,7 +109,7 @@ async def test_get_refreshes_persists_rotation_and_fills_with_skewed_ttl(token_e
 
 async def test_get_fills_the_cache_only_after_the_rotation_is_saved(token_endpoint, monkeypatch):
     token_endpoint.response = {"access_token": "at-2", "refresh_token": "rt-new", "expires_in": 300}
-    connection = _connection()
+    connection = await _connection()
 
     def _unsavable(self, rotated: str) -> None:
         raise RuntimeError("rotation write failed")
@@ -122,7 +124,7 @@ async def test_get_fills_the_cache_only_after_the_rotation_is_saved(token_endpoi
 
 
 async def test_get_losing_the_lock_polls_for_the_winners_token(token_endpoint):
-    connection = _connection()
+    connection = await _connection()
     redis = get_client()
     await redis.set(_lock_key(connection), "1")
 
@@ -139,7 +141,7 @@ async def test_get_losing_the_lock_polls_for_the_winners_token(token_endpoint):
 
 
 async def test_get_times_out_loudly_when_the_lock_never_frees(token_endpoint):
-    connection = _connection()
+    connection = await _connection()
     await get_client().set(_lock_key(connection), "1")
 
     with pytest.raises(OauthRefreshError, match="concurrent refresh"):
@@ -148,19 +150,19 @@ async def test_get_times_out_loudly_when_the_lock_never_frees(token_endpoint):
 
 async def test_get_refresh_rejection_evicts_and_raises(token_endpoint):
     token_endpoint.status = 400
-    connection = _connection()
+    connection = await _connection()
 
     with pytest.raises(OauthRefreshError, match="HTTP 400"):
         await _client().get_access_token(connection=connection)
 
-    assert OauthConnection.get(connection.id).refresh_token.decrypt() == "rt-old"
+    assert (await OauthConnection.get(connection.id)).refresh_token.decrypt() == "rt-old"
     redis = get_client()
     assert not await redis.get(_token_key(connection))
     assert not await redis.get(_lock_key(connection))
 
 
 async def test_get_refresh_uses_basic_auth(token_endpoint):
-    connection = _connection()
+    connection = await _connection()
 
     await _client(basic_auth=True).get_access_token(connection=connection)
 
@@ -171,12 +173,12 @@ async def test_get_refresh_uses_basic_auth(token_endpoint):
 
 
 async def test_disconnect_revokes_the_connection_and_drops_the_cached_token(token_endpoint):
-    connection = _connection()
+    connection = await _connection()
     await get_client().set(_token_key(connection), "at-cached")
 
     await _client().disconnect(connection, reason="user")
 
-    revoked = OauthConnection.get(connection.id)
+    revoked = await OauthConnection.get(connection.id)
     assert revoked.revoked_at
     assert revoked.revoked_reason == "user"
     # Nothing secret outlives the consent at rest.
@@ -186,17 +188,17 @@ async def test_disconnect_revokes_the_connection_and_drops_the_cached_token(toke
 
     # A second revoke keeps the first stamp.
     first_stamp = revoked.revoked_at
-    revoked.revoke("client_replaced")
+    await revoked.revoke("client_replaced")
     assert revoked.revoked_at == first_stamp
     assert revoked.revoked_reason == "user"
 
 
 async def test_a_revoke_landing_mid_refresh_is_not_overwritten(token_endpoint):
-    connection = _connection()
+    connection = await _connection()
     exchange = token_endpoint.handler
 
-    def revoke_then_rotate(request: httpx.Request) -> httpx.Response:
-        connection.revoke("user")
+    async def revoke_then_rotate(request: httpx.Request) -> httpx.Response:
+        await connection.revoke("user")
         return exchange(request)
 
     token_endpoint.handler = revoke_then_rotate
@@ -205,13 +207,13 @@ async def test_a_revoke_landing_mid_refresh_is_not_overwritten(token_endpoint):
         await _client().get_access_token(connection=connection)
 
     # The rotated token is not stored and no access token is cached.
-    assert not OauthConnection.get(connection.id).refresh_token
+    assert not (await OauthConnection.get(connection.id)).refresh_token
     assert not await get_client().get(_token_key(connection))
 
 
 async def test_get_refuses_a_revoked_connection(token_endpoint):
-    connection = _connection()
-    connection.revoke("user")
+    connection = await _connection()
+    await connection.revoke("user")
 
     with pytest.raises(OauthRefreshError, match="revoked"):
         await _client().get_access_token(connection=connection)
@@ -273,7 +275,7 @@ async def test_complete_connect_requires_a_refresh_token(token_endpoint):
 
 
 async def test_downscoped_get_asks_and_caches_apart_from_the_full_grant(token_endpoint):
-    connection = _connection(scopes=["posts.write", "profile.read"])
+    connection = await _connection(scopes=["posts.write", "profile.read"])
     token_endpoint.response = {
         "access_token": "at-narrow",
         "refresh_token": "rt-1",
@@ -311,7 +313,7 @@ async def test_downscoped_get_asks_and_caches_apart_from_the_full_grant(token_en
 
 
 async def test_downscoped_get_rejects_scopes_outside_the_grant(token_endpoint):
-    connection = _connection(scopes=["profile.read"])
+    connection = await _connection(scopes=["profile.read"])
 
     with pytest.raises(OauthRefreshError, match="does not grant scope"):
         await _client().get_access_token(connection=connection, scopes=("posts.write",))
@@ -320,7 +322,7 @@ async def test_downscoped_get_rejects_scopes_outside_the_grant(token_endpoint):
 
 
 async def test_downscoped_get_rejects_a_provider_that_ignores_the_ask(token_endpoint):
-    connection = _connection(scopes=["posts.write", "profile.read"])
+    connection = await _connection(scopes=["posts.write", "profile.read"])
     token_endpoint.response = {
         "access_token": "at-broad",
         "refresh_token": "rt-1",
@@ -336,7 +338,7 @@ async def test_downscoped_get_rejects_a_provider_that_ignores_the_ask(token_endp
 
 
 async def test_uncached_get_refreshes_past_a_live_cache_and_refills_it(token_endpoint):
-    connection = _connection()
+    connection = await _connection()
     redis = get_client()
     await redis.set(_token_key(connection), "at-tail")
 
@@ -349,7 +351,7 @@ async def test_uncached_get_refreshes_past_a_live_cache_and_refills_it(token_end
 
 
 async def test_refresher_election_is_per_scope_set(token_endpoint):
-    connection = _connection(scopes=["profile.read"])
+    connection = await _connection(scopes=["profile.read"])
     redis = get_client()
     await redis.set(_lock_key(connection) + _scoped_suffix(("profile.read",)), "1")
 
@@ -359,7 +361,7 @@ async def test_refresher_election_is_per_scope_set(token_endpoint):
 
 
 async def test_disconnect_evicts_the_scope_variant_keys(token_endpoint):
-    connection = _connection(scopes=["profile.read"])
+    connection = await _connection(scopes=["profile.read"])
     redis = get_client()
     scoped_key = _token_key(connection) + _scoped_suffix(("profile.read",))
     await redis.set(_token_key(connection), "at-full")

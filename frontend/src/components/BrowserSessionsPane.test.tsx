@@ -103,6 +103,22 @@ describe('BrowserSessionsPane', () => {
     expect(screen.queryByText('Delete')).toBeNull()
   })
 
+  it('shows an anonymous session without any login action', async () => {
+    stubFetch([
+      browserSession({
+        name: 'critic.target',
+        status: 'anonymous',
+        payloadFormat: null,
+        lastUsedAt: new Date(Date.now() - 5 * 60 * 1000).toISOString(),
+      }),
+    ])
+    renderPane()
+
+    expect(await screen.findByText('critic.target')).toBeTruthy()
+    expect(screen.getByText('Anonymous — no login needed')).toBeTruthy()
+    expect(screen.queryByRole('link')).toBeNull()
+  })
+
   it('flags an undeclared leftover row and deletes it by name', async () => {
     const fetchMock = stubFetch([browserSession({ isDeclared: false })])
     const confirm = vi.fn(() => true)

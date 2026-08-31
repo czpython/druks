@@ -6,11 +6,11 @@ from druks.contrib.review.contracts import ReviewReport
 from druks.doctor import CheckResult
 
 
-def check_review_identity() -> CheckResult:
+async def check_review_identity() -> CheckResult:
     """Set or unset, both healthy: an empty pair is comment mode by design.
     A half-configured pair is the settings clean's failure (``review:settings``),
     not this check's."""
-    settings = Review.settings()
+    settings = await Review.settings()
     if settings.app_id and settings.private_key:
         return CheckResult(
             name="identity", ok=True, detail="set — reviews approve as the distinct App"

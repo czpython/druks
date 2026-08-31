@@ -162,7 +162,7 @@ main() {
       # engine would make it root-owned, and the deploy-uid services could
       # not write the workspaces or the gateway host key.
       set_env_var DRUKS_SBX_HOME "$HOME"
-      mkdir -p "$HOME/.drukbox/sbx-workspaces"
+      mkdir -p "$HOME/.drukbox/sbx-workspaces" "$HOME/.config/sandboxes"
       # sandboxd must run before the first compose command. A bind of a
       # missing socket path makes a root-owned directory there, and that
       # blocks the daemon itself.
@@ -195,7 +195,7 @@ main() {
   # it is not a compose service and `docker compose pull` misses it — pull it
   # here so a redeploy refreshes it rather than leaving the box on a cached tag.
   echo "→ pulling browser image"
-  docker pull -q ghcr.io/czpython/druks-browser:latest >/dev/null
+  docker pull -q ghcr.io/czpython/druks/browser:latest >/dev/null
 
   # The shared sandbox-keys volume: a fresh named volume mounts root-owned, but
   # the backend runs as the deploy user and must write the per-VM SSH keys here.

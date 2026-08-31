@@ -2,7 +2,7 @@ import re
 import shlex
 
 from .exceptions import ExecFailed
-from .host import Sandbox
+from .host import Host
 from .layout import get_repo_root
 
 # Reasonable cap for the clone-fetch-checkout chain. Most internal
@@ -13,7 +13,7 @@ CLONE_TIMEOUT_SECONDS = 600.0
 
 
 async def clone(
-    sandbox: Sandbox,
+    host: Host,
     *,
     repo_url: str,
     ref: str | None,
@@ -25,7 +25,7 @@ async def clone(
         )
 
     if not target_path:
-        target_path = get_repo_root(sandbox.ssh_username)
+        target_path = get_repo_root(host.ssh_username)
     quoted_url = shlex.quote(repo_url)
     quoted_target = shlex.quote(target_path)
     parent = target_path.rsplit("/", 1)[0]
@@ -47,21 +47,22 @@ async def clone(
             f" && git checkout -B {quoted_ref} FETCH_HEAD"
             f" && git config push.default current"
         )
-    result = await sandbox.exec(["sh", "-c", cmd], timeout=CLONE_TIMEOUT_SECONDS)
+    result = await host.exec(["sh", "-c", cmd], timeout=CLONE_TIMEOUT_SECONDS)
     if not result.ok:
         # Strip any token that somehow surfaced in error output before
         # surfacing — belt-and-braces. With the credential-helper the
         # token never lives in the URL, but git could still echo a
         # cached credential in some future error path.
         sanitized = _strip_token(result.stderr.strip() or result.stdout.strip())
+        target = f"{repo_url}@{ref}" if ref else repo_url
         raise ExecFailed(
-            f"git clone {repo_url}@{ref} failed: {sanitized}",
+            f"git clone {target} failed: {sanitized}",
             exit_code=result.exit_code,
         )
 
 
 async def ensure(
-    sandbox: Sandbox,
+    host: Host,
     *,
     repo_url: str,
     ref: str | None,
@@ -73,14 +74,14 @@ async def ensure(
         )
 
     if not target_path:
-        target_path = get_repo_root(sandbox.ssh_username)
-    present = await sandbox.exec(
+        target_path = get_repo_root(host.ssh_username)
+    present = await host.exec(
         ["test", "-d", f"{target_path}/.git"],
         timeout=10.0,
     )
     if not present.ok:
         # Fresh VM (or first run on this PR) — full clone.
-        await clone(sandbox, repo_url=repo_url, ref=ref, target_path=target_path)
+        await clone(host, repo_url=repo_url, ref=ref, target_path=target_path)
         return
 
     if not ref:
@@ -96,7 +97,7 @@ async def ensure(
         f" && git checkout -fB {quoted_ref} FETCH_HEAD"
         f" && git config push.default current"
     )
-    result = await sandbox.exec(["sh", "-c", cmd], timeout=CLONE_TIMEOUT_SECONDS)
+    result = await host.exec(["sh", "-c", cmd], timeout=CLONE_TIMEOUT_SECONDS)
     if not result.ok:
         sanitized = _strip_token(result.stderr.strip() or result.stdout.strip())
         raise ExecFailed(

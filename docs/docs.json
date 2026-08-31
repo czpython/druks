@@ -1,0 +1,106 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "theme": "linden",
+  "name": "Druks",
+  "description": "Build and operate durable agent apps on your own infrastructure.",
+  "seo": {
+    "metatags": {
+      "canonical": "https://docs.druks.ai"
+    }
+  },
+  "colors": {
+    "primary": "#0F766E",
+    "light": "#2DD4BF",
+    "dark": "#0F766E"
+  },
+  "logo": {
+    "light": "/assets/logo/web/DruksLogo_Black.svg",
+    "dark": "/assets/logo/web/DruksLogo_White.svg",
+    "href": "https://druks.ai"
+  },
+  "appearance": {
+    "default": "system"
+  },
+  "icons": {
+    "library": "lucide"
+  },
+  "navbar": {
+    "links": [
+      {
+        "label": "Website",
+        "href": "https://druks.ai"
+      }
+    ],
+    "primary": {
+      "type": "github",
+      "href": "https://github.com/czpython/druks"
+    }
+  },
+  "navigation": {
+    "groups": [
+      {
+        "group": "Get started",
+        "pages": [
+          "index",
+          "quickstart",
+          "full-local"
+        ]
+      },
+      {
+        "group": "Understand Druks",
+        "pages": [
+          "concepts"
+        ]
+      },
+      {
+        "group": "Build an app",
+        "pages": [
+          "writing-an-app",
+          "druks-ui",
+          "files"
+        ]
+      },
+      {
+        "group": "Operate",
+        "pages": [
+          "deployment",
+          "configuration",
+          "connect-your-agent",
+          "troubleshooting"
+        ]
+      },
+      {
+        "group": "Contribute",
+        "pages": [
+          "development",
+          "releasing"
+        ]
+      }
+    ]
+  },
+  "footer": {
+    "socials": {
+      "github": "https://github.com/czpython/druks",
+      "website": "https://druks.ai"
+    },
+    "links": [
+      {
+        "header": "Project",
+        "items": [
+          {
+            "label": "GitHub",
+            "href": "https://github.com/czpython/druks"
+          },
+          {
+            "label": "Changelog",
+            "href": "https://github.com/czpython/druks/blob/main/CHANGELOG.md"
+          },
+          {
+            "label": "Security",
+            "href": "https://github.com/czpython/druks/blob/main/SECURITY.md"
+          }
+        ]
+      }
+    ]
+  }
+}

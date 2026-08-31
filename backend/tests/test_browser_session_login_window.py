@@ -82,8 +82,8 @@ def window_runtime(tmp_path, monkeypatch):
     return client
 
 
-def create_session(name: str = "acme-main") -> StoredBrowserSession:
-    return StoredBrowserSession.get_or_create(
+async def create_session(name: str = "acme-main") -> StoredBrowserSession:
+    return await StoredBrowserSession.get_or_create(
         name=name,
         payload_format=BrowserSessionPayloadFormat.STORAGE_STATE,
         site="acme.example",
@@ -93,7 +93,7 @@ def create_session(name: str = "acme-main") -> StoredBrowserSession:
 async def test_login_launch_leaves_the_box_untouched_when_nothing_is_set(window_runtime):
     client = window_runtime
 
-    await LoginWindow.open(create_session())
+    await LoginWindow.open(await create_session())
 
     command = client.browsers[0].launch_command or ""
     assert "DRUKS_BROWSER_LOGIN_PROXY" not in command
@@ -103,7 +103,7 @@ async def test_login_launch_leaves_the_box_untouched_when_nothing_is_set(window_
 async def test_login_launch_opens_on_the_session_site(window_runtime):
     client = window_runtime
 
-    await LoginWindow.open(create_session())
+    await LoginWindow.open(await create_session())
 
     command = client.browsers[0].launch_command or ""
     assert "DRUKS_BROWSER_URL=https://acme.example" in command
@@ -122,7 +122,7 @@ async def test_login_launch_routes_through_the_configured_proxy(tmp_path, monkey
     proxy = "http://172.17.0.1:8888"
     client = _runtime_with_sandbox(tmp_path, monkeypatch, browser_login_proxy=proxy)
 
-    await LoginWindow.open(create_session())
+    await LoginWindow.open(await create_session())
 
     command = client.browsers[0].launch_command or ""
     assert f"DRUKS_BROWSER_LOGIN_PROXY={shlex.quote(proxy)}" in command
@@ -131,7 +131,7 @@ async def test_login_launch_routes_through_the_configured_proxy(tmp_path, monkey
 async def test_login_launch_sets_the_configured_timezone(tmp_path, monkeypatch):
     client = _runtime_with_sandbox(tmp_path, monkeypatch, browser_login_tz="Europe/Madrid")
 
-    await LoginWindow.open(create_session())
+    await LoginWindow.open(await create_session())
 
     command = client.browsers[0].launch_command or ""
     assert "TZ=Europe/Madrid" in command
@@ -141,7 +141,7 @@ async def test_login_launch_quotes_values_so_a_bad_one_cannot_inject(tmp_path, m
     proxy = "http://h:8888; rm -rf /"
     client = _runtime_with_sandbox(tmp_path, monkeypatch, browser_login_proxy=proxy)
 
-    await LoginWindow.open(create_session())
+    await LoginWindow.open(await create_session())
 
     command = client.browsers[0].launch_command or ""
     assert shlex.quote(proxy) in command
@@ -151,7 +151,7 @@ async def test_login_launch_quotes_values_so_a_bad_one_cannot_inject(tmp_path, m
 
 async def test_open_seeds_a_blank_profile_and_records_the_container(window_runtime):
     client = window_runtime
-    session = create_session()
+    session = await create_session()
 
     await LoginWindow.open(session)
 
@@ -164,13 +164,13 @@ async def test_open_seeds_a_blank_profile_and_records_the_container(window_runti
     assert PROFILE_PATH not in browser.files
     assert (await LoginWindow.get_for_session(session.name)).host_id == browser.id
     assert client.provisions == [
-        {"image_override": "ghcr.io/czpython/druks-browser:latest", "provider": "docker"}
+        {"image_override": "ghcr.io/czpython/druks/browser:latest", "provider": "docker"}
     ]
 
 
 async def test_reopening_disposes_the_previous_window(window_runtime):
     client = window_runtime
-    session = create_session()
+    session = await create_session()
     await LoginWindow.open(session)
 
     await LoginWindow.open(session)
@@ -181,9 +181,9 @@ async def test_reopening_disposes_the_previous_window(window_runtime):
 
 async def test_storage_state_reconnect_saves_a_profile(window_runtime):
     client = window_runtime
-    session = create_session()
-    session.store_payload(b'{"cookies": [{"name": "login"}], "origins": []}')
-    session.mark_stale()
+    session = await create_session()
+    await session.store_payload(b'{"cookies": [{"name": "login"}], "origins": []}')
+    await session.mark_stale()
 
     await LoginWindow.open(session)
     browser = client.browsers[0]
@@ -196,8 +196,8 @@ async def test_storage_state_reconnect_saves_a_profile(window_runtime):
     saved = await (await LoginWindow.get_for_session(session.name)).save()
 
     assert saved.payload_format == BrowserSessionPayloadFormat.PROFILE_DIR
-    db_session().expire_all()
-    stored = StoredBrowserSession.get_for_name(session.name)
+    db_session().expunge_all()
+    stored = await StoredBrowserSession.get_for_name(session.name)
     assert stored.status == BrowserSessionStatus.READY.value
     assert stored.payload.decrypt() == b"fresh-profile"
     assert client.released == [browser.id]
@@ -207,7 +207,7 @@ async def test_storage_state_reconnect_saves_a_profile(window_runtime):
 
 async def test_failed_export_closes_the_window(window_runtime):
     client = window_runtime
-    session = create_session()
+    session = await create_session()
     await LoginWindow.open(session)
     client.browsers[0].export_exit_code = 1
 
@@ -221,7 +221,7 @@ async def test_failed_export_closes_the_window(window_runtime):
 
 async def test_cancel_then_cancel_again_reports_the_window_gone(window_runtime):
     client = window_runtime
-    session = create_session()
+    session = await create_session()
     await LoginWindow.open(session)
 
     await (await LoginWindow.get_for_session(session.name)).cancel()

@@ -4,13 +4,14 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, ClassVar, Self
 
 from sqlalchemy import DateTime, Integer, cast, select
+from sqlalchemy.ext.asyncio import AsyncAttrs
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.types import TypeDecorator
 
 from druks.core.utils.time import ensure_utc
 
 if TYPE_CHECKING:
-    from druks.durable.schemas import RunResponse, SubjectStatus, SubjectSummary
+    from druks.durable.schemas import SubjectStatus, SubjectSummary
     from druks.workflows import Workflow
 
 _CAMEL_BOUNDARY = re.compile(r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])")
@@ -29,7 +30,7 @@ class _UtcDateTime(TypeDecorator):
         return ensure_utc(value) if value else value
 
 
-class Base(DeclarativeBase):
+class Base(AsyncAttrs, DeclarativeBase):
     # Every ``Mapped[datetime]`` column stores tz-aware UTC — the decorator
     # guarantees aware values on read (writes are unaffected). Mapping it here
     # means models declare ``Mapped[datetime]`` with no per-column type.
@@ -74,7 +75,7 @@ class StoredSubject(Base):
         return self.get_label()
 
     @classmethod
-    def get_for_subject_id(cls, subject_id: str) -> Self | None:
+    async def get_for_subject_id(cls, subject_id: str) -> Self | None:
         """The row this subject id names. A subject id is free text and reaches the
         read-side straight off a URL, so an id this table could never hold is a miss
         rather than an error."""
@@ -84,7 +85,7 @@ class StoredSubject(Base):
             key = int(subject_id)
         except ValueError:
             return
-        return db_session().get(cls, key)
+        return await db_session().get(cls, key)
 
     def get_summary(self) -> "SubjectSummary":
         """The header its board and page show it under — the app's own fields;
@@ -94,7 +95,7 @@ class StoredSubject(Base):
         )
 
     @classmethod
-    def list_summaries(cls, account_id: str | None) -> "Sequence[SubjectSummary]":
+    async def list_summaries(cls, account_id: str | None) -> "Sequence[SubjectSummary]":
         """The rows on this class's board, newest-movement first, each as its domain
         summary. ``account_id`` is the caller, or None outside a request. A shared
         board ignores it. Returns a covariant ``Sequence`` so an app can return
@@ -104,15 +105,20 @@ class StoredSubject(Base):
             f"a workflow declares {cls.__name__}, so it needs a list_summaries()"
         )
 
-    def get_status(self, *, workflow: "type[Workflow] | None" = None) -> "SubjectStatus":
+    async def get_status(self, *, workflow: "type[Workflow] | None" = None) -> "SubjectStatus":
         from druks.durable.reads import get_subject_status
 
-        return get_subject_status(self.subject_type, str(self.id), workflow=workflow)
+        return await get_subject_status(self.subject_type, str(self.id), workflow=workflow)
 
-    def get_timeline(self) -> "list[RunResponse]":
-        from druks.durable.reads import list_subject_timeline
+    @classmethod
+    async def get_statuses(cls, subject_ids: Sequence[str | int]) -> "dict[str, SubjectStatus]":
+        """Where a whole board stands, keyed by subject id — one read for the whole
+        board, so a page listing rows does not ask once per row."""
+        from druks.durable.reads import get_subject_statuses
 
-        return list_subject_timeline(self.subject_type, str(self.id))
+        return await get_subject_statuses(
+            cls.subject_type, [str(subject_id) for subject_id in subject_ids]
+        )
 
     async def get_phase(self) -> str | None:
         from druks.durable.reads import get_subject_phase
@@ -120,7 +126,7 @@ class StoredSubject(Base):
         return await get_subject_phase(self.subject_type, str(self.id))
 
     @classmethod
-    def list_open(cls, *, limit: int = 50) -> list[Self]:
+    async def list_open(cls, *, limit: int = 50) -> list[Self]:
         """The rows whose newest run hasn't handed off — still going, or failed
         and wanting the operator. What an app's active view lists."""
         # Cycle: the durable read side is built on this module's Base.
@@ -136,4 +142,4 @@ class StoredSubject(Base):
             .order_by(cls.id.desc())
             .limit(limit)
         )
-        return list(db_session().scalars(stmt))
+        return list(await db_session().scalars(stmt))

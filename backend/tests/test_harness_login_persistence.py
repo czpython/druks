@@ -7,6 +7,7 @@ from druks.harnesses.claude import ClaudeHarness
 from druks.harnesses.models import HarnessConnection
 from druks.testing import init_db
 from sqlalchemy import create_engine, text
+from sqlalchemy.ext.asyncio import create_async_engine
 
 # The credential store's whole job is to persist a rotated credential dict
 # through a real commit. The rollback-based suite can't verify that — its identity
@@ -31,42 +32,44 @@ pytestmark = pytest.mark.skipif(not _pg_up(), reason="test Postgres not reachabl
 
 
 @pytest.fixture
-def engine():
+async def engine():
     admin = psycopg.connect(f"{PG_BASE}/postgres", autocommit=True)
     admin.execute(f"DROP DATABASE IF EXISTS {DB}")
     admin.execute(f"CREATE DATABASE {DB}")
     admin.close()
 
-    created = create_engine(URL)
-    init_db(created)
+    schema_engine = create_engine(URL)
+    init_db(schema_engine)
+    schema_engine.dispose()
+    created = create_async_engine(URL)
     configure_session(created)
     try:
         yield created
     finally:
-        created.dispose()
+        await created.dispose()
 
 
-def _committed(engine, work):
+async def _committed(engine, work):
     session = get_session(engine)
     db_session.registry.set(session)
     try:
-        result = work()
-        session.commit()
+        result = await work()
+        await session.commit()
         return result
     finally:
-        db_session.remove()
-        session.close()
+        await db_session.remove()
+        await session.close()
 
 
-def _connect(payload: dict) -> str:
+async def _connect(payload: dict) -> str:
     from druks.accounts.models import Account
     from druks.user_settings.models import UserSettings
 
-    account = Account.get_or_create("op@example.com")
-    settings = UserSettings.get()
+    account = await Account.get_or_create("op@example.com")
+    settings = await UserSettings.get()
     if not settings.fallback_account_id:
-        settings.set_fallback_account(account.id)
-    row = HarnessConnection.connect(
+        await settings.set_fallback_account(account.id)
+    row = await HarnessConnection.connect(
         harness="claude",
         account=account,
         payload=payload,
@@ -76,37 +79,46 @@ def _connect(payload: dict) -> str:
     return row.id
 
 
-def test_rotation_persists_new_payload_across_sessions(engine):
+async def test_rotation_persists_new_payload_across_sessions(engine):
     # Connect, then rotate the payload the way rotate_token does (plain-dict
     # copy, edit, whole-value update), then read it back from a fresh session —
     # commit + new session proves the edit reached the DB, not just the
     # in-memory object.
-    connection_id = _committed(
-        engine, lambda: _connect({"claudeAiOauth": {"accessToken": "old", "refreshToken": "R0"}})
-    )
+    async def connect_old():
+        return await _connect({"claudeAiOauth": {"accessToken": "old", "refreshToken": "R0"}})
 
-    def rotate_in_place():
-        row = HarnessConnection.get(connection_id)
+    connection_id = await _committed(engine, connect_old)
+
+    async def rotate_in_place():
+        row = await HarnessConnection.get(connection_id)
         data = dict(row.payload)
         data["claudeAiOauth"]["accessToken"] = "new"
-        row.update_payload(data, expires_at=None)
+        await row.update_payload(data, expires_at=None)
 
-    _committed(engine, rotate_in_place)
+    await _committed(engine, rotate_in_place)
 
-    block = _committed(
-        engine, lambda: dict(HarnessConnection.get(connection_id).payload)["claudeAiOauth"]
-    )
+    async def read_back():
+        row = await HarnessConnection.get(connection_id)
+        return dict(row.payload)["claudeAiOauth"]
+
+    block = await _committed(engine, read_back)
     assert block["accessToken"] == "new"
 
 
-def test_payload_is_ciphertext_at_rest(engine):
-    _committed(engine, lambda: _connect({"claudeAiOauth": {"accessToken": "supersecret"}}))
+async def test_payload_is_ciphertext_at_rest(engine):
+    async def connect_secret():
+        return await _connect({"claudeAiOauth": {"accessToken": "supersecret"}})
 
-    with engine.connect() as connection:
-        stored = connection.execute(text("SELECT payload FROM harness_logins")).scalar_one()
+    await _committed(engine, connect_secret)
+
+    async with engine.connect() as connection:
+        stored = (await connection.execute(text("SELECT payload FROM harness_logins"))).scalar_one()
     raw = bytes(stored)
     assert b"supersecret" not in raw
     assert b"claudeAiOauth" not in raw
 
-    block = _committed(engine, lambda: ClaudeHarness.get_credentials()["claudeAiOauth"])
+    async def read_credentials():
+        return (await ClaudeHarness.get_credentials())["claudeAiOauth"]
+
+    block = await _committed(engine, read_credentials)
     assert block["accessToken"] == "supersecret"

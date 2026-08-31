@@ -157,6 +157,9 @@ services:
       # default. Caddy reads a set-but-empty value as a real, broken site
       # address.
       DRUKS_WEBHOOK_HOST: ${DRUKS_WEBHOOK_HOST:-http://127.0.0.1:8081}
+      # The addresses where Caddy serves the webhook host. The default is
+      # every interface. Set one address to keep the other addresses free.
+      DRUKS_WEBHOOK_BIND_HOST: ${DRUKS_WEBHOOK_BIND_HOST:-0.0.0.0 ::}
     volumes:
       - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data

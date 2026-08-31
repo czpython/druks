@@ -12,7 +12,7 @@ from druks.accounts.models import Account
 from druks.apps.registry import browser_sessions
 from druks.browser import exceptions
 from druks.browser.constants import MAX_PAYLOAD_BYTES, PAYLOAD_WARNING_BYTES
-from druks.browser.enums import BrowserSessionPayloadFormat, BrowserSessionStatus
+from druks.browser.enums import BrowserSessionPayloadFormat
 from druks.browser.login import LoginWindow, is_same_origin
 from druks.browser.models import StoredBrowserSession
 from druks.browser.schemas import BrowserSessionResponse
@@ -25,7 +25,7 @@ router = APIRouter(prefix="/api/browser-sessions", tags=["browser-sessions"])
 
 @router.get("", response_model=list[BrowserSessionResponse])
 async def list_browser_sessions(account: Account = Depends(current_account)):
-    rows = {row.name: row for row in StoredBrowserSession.list_all()}
+    rows = {row.name: row for row in await StoredBrowserSession.list_all()}
     sessions = []
     for declaration in browser_sessions.all():
         try:
@@ -36,7 +36,7 @@ async def list_browser_sessions(account: Account = Depends(current_account)):
                     "name": declaration.name,
                     "site": declaration.site,
                     "is_declared": True,
-                    "status": BrowserSessionStatus.NEEDS_LOGIN,
+                    "status": declaration.initial_status,
                 }
             )
         else:
@@ -64,7 +64,9 @@ async def upload_state(
     account: Account = Depends(current_session_account),
 ) -> None:
     if declaration := browser_sessions.get(name):
-        row = declaration.get_or_create_row()
+        if declaration.anonymous:
+            raise exceptions.BrowserSessionAnonymousError(name)
+        row = await declaration.get_or_create_row()
         payload = bytearray()
         async for chunk in request.stream():
             payload.extend(chunk)
@@ -76,7 +78,7 @@ async def upload_state(
         if len(payload) >= PAYLOAD_WARNING_BYTES:
             logger.warning("Browser session %s received a %d-byte payload.", name, len(payload))
         row.payload_format = payload_format.value
-        row.store_payload(bytes(payload))
+        await row.store_payload(bytes(payload))
         return
     raise exceptions.BrowserSessionUnknownError(name)
 
@@ -87,7 +89,9 @@ async def open_login_window(
     account: Account = Depends(current_session_account),
 ) -> None:
     if declaration := browser_sessions.get(name):
-        await LoginWindow.open(declaration.get_or_create_row())
+        if declaration.anonymous:
+            raise exceptions.BrowserSessionAnonymousError(name)
+        await LoginWindow.open(await declaration.get_or_create_row())
         return
     raise exceptions.BrowserSessionUnknownError(name)
 
@@ -98,7 +102,7 @@ async def login_window_socket(websocket: WebSocket, name: str) -> None:
         await websocket.close(code=1008)
         return
     try:
-        with session_scope(websocket.app.state.engine):
+        async with session_scope(websocket.app.state.engine):
             await require_operator(websocket)
         window = await LoginWindow.get_for_session(name)
     except (HTTPException, exceptions.BrowserApiError):
@@ -133,7 +137,7 @@ async def delete_browser_session(
     name: str,
     account: Account = Depends(current_session_account),
 ) -> None:
-    if row := StoredBrowserSession.get_for_name(name):
-        row.delete()
+    if row := await StoredBrowserSession.get_for_name(name):
+        await row.delete()
         return
     raise exceptions.BrowserSessionUnknownError(name)

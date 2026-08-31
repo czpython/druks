@@ -5,6 +5,7 @@ class BrowserSessionStatus(StrEnum):
     NEEDS_LOGIN = "needs_login"
     READY = "ready"
     STALE = "stale"
+    ANONYMOUS = "anonymous"
 
 
 class BrowserSessionPayloadFormat(StrEnum):

@@ -1,4 +1,8 @@
-# Troubleshooting
+---
+title: "Troubleshooting"
+description: "Diagnose startup, access, webhook, harness, sandbox, gate, recovery, and app-loading failures."
+icon: "life-buoy"
+---
 
 Start with the non-mutating diagnostics:
 
@@ -9,13 +13,13 @@ docker compose exec web druks doctor
 docker compose logs --tail=200 web
 ```
 
-`druks doctor` checks settings, secrets, GitHub App credentials and
-installations, optional ticketing integrations, data-directory writes,
-Postgres, Redis, Drukbox, harness connections, extension imports, capability
-module names, and extension-owned checks. A failed check exits nonzero.
+`druks doctor` examines the full platform. It covers settings, secrets, service
+credentials, data-directory writes, Postgres, Redis, Drukbox, harnesses, app
+imports, capability modules, and app-owned checks. A failed check exits with a
+nonzero status.
 
-Use the opt-in sandbox check only when the normal Drukbox check passes but real
-execution fails:
+If the normal Drukbox check passes but real execution fails, use the opt-in
+sandbox check:
 
 ```bash
 docker compose exec web druks doctor --sandbox
@@ -30,12 +34,12 @@ provider capacity and can take about a VM minute.
 
 Read the named field in the error. Common causes:
 
-- `secrets.secrets_key` is empty, not valid base64, or does not decode to 32 bytes
-- a `druks.toml` value renders an invalid process setting
+- **Secrets key:** `secrets.secrets_key` is empty, has invalid base64, or does not decode to 32 bytes.
+- A `druks.toml` value creates an invalid process setting.
 
 Re-running `install.sh` renders `.env` from `druks.toml` and prints remaining
-prerequisites. It does not replace a nonblank broken value; fix that value in
-`~/druks/druks.toml` and re-run the installer.
+prerequisites. It does not replace a nonblank invalid value. Fix that value in
+`~/druks/druks.toml`. Then run the installer again.
 
 ### Postgres or Redis is unreachable
 
@@ -61,39 +65,28 @@ docker compose run --rm drukbox .venv/bin/alembic upgrade head
 docker compose up -d
 ```
 
-The installer performs these steps in this order.
+The installer runs the same commands in this order.
 
 ## The dashboard is inaccessible
 
-The edge authenticates; Druks maps its asserted identity to an account.
+The edge authenticates the request. Druks maps its asserted identity to an account.
 Distinguish the failure by what you see:
 
-- **A redirect to `__exe.dev/login`** — no trusted identity header reached
-  Caddy; sign in at the edge.
-- **A "couldn't resolve your identity" page (`header` mode 401)** — the
-  request reached Druks without exactly one nonblank `identity.header`
-  value. Confirm the proxy injects the header Druks expects, and that
-  nothing between them drops or duplicates it.
-- **An "Assertion rejected: …" 401 (`jwt` mode)** — the edge asserted a token
-  Druks could not verify. The named failure class says which check failed:
-  signature or key problems point at `identity.jwks_url` (is it reachable
-  from the container? did the edge rotate keys?), issuer/audience mismatches
-  at `identity.jwt_issuer` or `identity.jwt_audience`, and expiry classes at
-  clock skew between edge and host.
-- **Onboarding ("connect a harness to finish setup")** — identity resolved
-  but that account has no harness connection yet; in a fresh `none`-mode
-  install the first completed connection creates the operator account.
-  Ordinary API calls answer 409 until then.
-- **A 503 (or refused startup) in `none` mode** — more than one non-system
-  account exists. Druks refuses to guess which is the operator; remove the
-  extras or switch to `header` mode.
-- **Runs refusing to start** — identity is fine; the selected harness is not
-  connected (see below).
+- If the browser redirects to `__exe.dev/login`, sign in at the edge.
+- If the browser shows "couldn't resolve your identity," examine the configured
+  identity header. Make sure that the proxy sends exactly one nonblank value.
+- If the browser shows "Assertion rejected: …," use the error class to select
+  the configuration. For signature or key errors, examine `identity.jwks_url`.
+  For issuer or audience errors, examine the related claim setting. For expiry
+  errors, compare the clocks of the edge and host.
+- If onboarding asks you to connect a harness, complete that connection.
+- If `none` mode returns 503, remove extra accounts or switch to `header` mode.
+- If a run refuses to start, connect its selected harness.
 
 Redis loss does not sign browsers out — there are no sessions. It only drops
 in-flight connect attempts and other transient coordination.
 
-Check:
+Examine the identity configuration:
 
 ```bash
 sed -n '/^\[identity\]/,/^\[/p' ~/druks/druks.toml | grep '^mode ='
@@ -101,37 +94,40 @@ grep -E '^(DRUKS_AUTH_HEADER|DRUKS_UPSTREAM)=' ~/druks/.env
 docker compose logs --tail=200 caddy web
 ```
 
-The local `docker` shape intentionally skips Caddy; use
-<http://127.0.0.1:8001>. It runs with `[identity].mode = "none"` — no authentication —
+The local `docker` shape does not use Caddy. Use
+[http://127.0.0.1:8001](http://127.0.0.1:8001). It runs with
+`[identity].mode = "none"` — no authentication —
 and must remain loopback-only.
 
 ## Webhooks are not arriving
 
-1. Run `druks doctor`. If `webhook_ingress` fails, fix DNS, TLS, or edge routing
-   before debugging the provider.
-2. Confirm the provider URL is
+Examine the webhook path:
+
+1. Run `druks doctor`.
+2. If `webhook_ingress` fails, fix DNS, TLS, or edge routing before you examine the provider.
+3. Make sure that the provider URL is
    `https://<host>/_external/<provider>/events/`.
-3. Confirm its webhook secret matches the corresponding `druks.toml` value.
-4. Inspect the provider's delivery log and `docker compose logs web`.
+4. Make sure that its webhook secret matches the related `druks.toml` value.
+5. Examine the provider delivery log and `docker compose logs web`.
 
-When `urls.webhook_host` is set, the doctor sends an unsigned GitHub probe and
+When you set `urls.webhook_host`, the doctor sends an unsigned GitHub probe and
 expects HTTP 401 from Druks. A different response means the request did not
-reach the webhook verifier.
+arrive at the webhook verifier.
 
-Webhook delivery is deduplicated in Redis. A handler failure releases the claim
-and returns an error so the provider can redeliver. Extension subscribers must
+Druks deduplicates webhook delivery in Redis. A handler failure releases the claim
+and returns an error so the provider can redeliver. App subscribers must
 be idempotent.
 
-## An agent cannot reach `/mcp`
+## An agent cannot connect to `/mcp`
 
-1. A 401 means the personal access token is missing, malformed, expired, or
-   revoked — mint a fresh one in **Settings → Tokens** and resend it as
-   `Authorization: Bearer <token>` ([Connect your agent](connect-your-agent.md)).
-2. A redirect or 404 at the edge means the host's Caddyfile predates the
-   `/mcp` handlers: deploys never refresh the host copy, so re-run the
-   installer (or copy `deploy/caddy/Caddyfile`) and `docker compose up -d
-   caddy`.
-3. Confirm the backend answers directly:
+Examine the MCP path:
+
+1. If the endpoint returns 401, mint a new token in **Settings → Tokens**.
+2. Send the token as `Authorization: Bearer <token>`.
+3. If the edge redirects or returns 404, run the installer again.
+4. As an alternative, copy `deploy/caddy/Caddyfile`.
+5. Then run `docker compose up -d caddy`.
+6. Make sure that the backend answers directly:
    `curl -X POST http://127.0.0.1:8001/mcp` returns 401, never 404.
 
 ## An agent run will not start
@@ -139,12 +135,12 @@ be idempotent.
 ### Harness not connected or expired
 
 Open **Settings → Harnesses** and reconnect the selected Claude or Codex
-harness. Host CLI logins do not count. Druks checks the database credential
+harness. Host CLI logins do not count. Druks validates the database credential
 before provisioning a sandbox.
 
 ### Model has no harness
 
-Models are restricted to the model lists registered by the shipped harnesses.
+The model lists from shipped harnesses restrict model selection.
 Clear a stale per-agent override in Settings or select a current listed model.
 Druks does not silently route an unknown model to another CLI.
 
@@ -157,30 +153,29 @@ docker compose exec web druks doctor
 docker compose logs --tail=200 drukbox
 ```
 
-Confirm the service listens at `[sandbox].service_url` in `druks.toml`. For
-remote providers, a healthy Drukbox API does not prove SSH reachability;
+Make sure that the service listens at `[sandbox].service_url` in `druks.toml`.
+For remote providers, a healthy Drukbox API does not prove SSH access. Then
 follow with `druks doctor --sandbox`.
 
 ### A sandbox process appears stuck
 
-The dashboard transcript is copied from files written by a detached process in
-the VM. Druks polls over SSH and retries transient reconnects for up to five
-minutes. Check the agent call's transcript and stderr first, then the web and
+Druks copies the dashboard transcript from files that a detached VM process writes.
+Druks polls over SSH and retries transient reconnects for up to five
+minutes. Examine the agent call transcript and stderr first. Then examine the web and
 Drukbox logs. A worker restart does not guarantee attachment to the same live
-agent process; recovery follows the durable operation boundary.
+agent process. Recovery follows the durable operation boundary.
 
-## A run is waiting
+## A run waits
 
-`parked` means the DBOS workflow is suspended on a gate, not stalled.
+`parked` means that DBOS suspended the workflow on a gate. The workflow did not stall.
 Open the subject detail page to see its current ask. In-app review offers
-approve, request changes, or cancel; an external gate is answered by its owning
-system.
+approve, request changes, or cancel. The owner system answers an external gate.
 
 If no notification arrived:
 
-- confirm an enabled destination is selected as the gate destination
-- inspect the Notifications page and its recorded delivery failure
-- answer from the subject page if it is an in-app gate
+- Make sure that an enabled destination is the gate destination.
+- Examine the Notifications page and its recorded delivery error.
+- If it is an in-app gate, answer from the subject page.
 
 Notification failure deliberately leaves the run parked and resumable.
 
@@ -189,56 +184,56 @@ code. Cancelling a parked run clears the ask and frees its subject slot.
 
 ## A run is `failed`, `cancelled`, or `orphaned`
 
-- `failed`: the workflow raised; inspect its failure text, last agent call, and
-  transcript/stderr.
-- `cancelled`: an operator or application reaction asked DBOS to stop it.
-- `orphaned`: the Druks run row exists, but its DBOS workflow row has been
-  missing for more than five minutes. It cannot resume.
+Use the state to select the next action:
 
-Do not edit `durable_runs.state`; it is derived from DBOS and is not a writable
-column. Do not mark an orphaned run as scheduled. Preserve the database and
-determine why DBOS system state was removed or the wrong database is connected.
+- If the state is `failed`, examine the error text, last agent call, transcript, and stderr.
+- If the state is `cancelled`, identify the operator or app reaction that stopped it.
+- If the state is `orphaned`, do not attempt a resume. Its DBOS workflow row is absent.
+
+Do not edit `durable_runs.state`. DBOS determines it, and the application cannot write it.
+Do not mark an orphaned run as scheduled. Preserve the database. Determine why
+the DBOS system state disappeared or why Druks uses the wrong database.
 
 ## A run repeats or does not reflect new settings
 
 Completed durable operations reuse their recorded result. Settings read inside
-a step intentionally remain the values captured by that run; a later settings
-edit affects a new operation or run, not a completed checkpoint.
+a step remain the values that the run captured. A later settings edit affects a
+new operation or run, not a completed checkpoint.
 
 If an interrupted step repeats a side effect, that step lacks adequate
 idempotency. The recovery guarantee is “reuse completed operations,” not “an
 arbitrary line of Python executes exactly once.”
 
-If two starts for the same subject return the same run id, deduplication is
-working: only one active run per workflow kind and subject is allowed. Cancel
+If two starts for the same subject return the same run ID, deduplication
+operates correctly. Druks permits one active run for each workflow kind and
+subject. Cancel
 or finish the active run before expecting a new id.
 
-## An extension does not load
+## An app does not load
 
 Run `druks doctor` and inspect the boot error. Typical causes:
 
-- entry-point key does not equal `Extension.name`
-- duplicate installed distributions register the same name
-- the entry point does not resolve to an `Extension` subclass
-- an extension table lacks its `<name>_` prefix
-- a capability lives in `workflow.py` or `webhook.py` instead of a discoverable
-  `workflows.py` or `webhooks.py` leaf
-- the extension's import raised
+- The entry-point key does not equal `App.name`.
+- Duplicate installed distributions register the same name.
+- The entry point does not resolve to an `App` subclass.
+- An app table does not have its `<name>_` prefix.
+- A capability is in `workflow.py` or `webhook.py` instead of a discoverable
+  `workflows.py` or `webhooks.py` leaf.
+- The app import raised an error.
 
-The loader fails loudly because the extension name owns API, settings, and
-migration namespaces. See [writing an extension](writing-an-extension.md).
+The loader fails loudly because the app name owns API, settings, and
+migration namespaces. See [writing an app](writing-an-app.md).
 
-## Collecting a useful incident report
+## Create a useful incident report
 
 Record:
 
-- Druks image tag and `git` revision if running from a checkout
-- sandbox provider name and install shape (`exe`, `docker`, or generic remote)
-- affected workflow id, subject, state, and last agent-call id
-- `druks doctor` output
-- relevant web and Drukbox logs with secret values removed
-- whether the failure happened before a step completed, during a gate, or after
-  a deploy
+- The Druks image tag and `git` revision if you use a checkout
+- The sandbox provider name and installation shape (`exe`, `docker`, or generic remote)
+- The affected workflow ID, subject, state, and last agent-call ID
+- The `druks doctor` output
+- The applicable web and Drukbox logs without secret values
+- The error point: before a completed step, during a gate, or after a deployment.
 
 Do not include `druks.toml`, `.env`, PEM files, OAuth grants, sandbox credential
 files, or raw MCP tokens.

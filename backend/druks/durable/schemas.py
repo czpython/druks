@@ -11,15 +11,15 @@ from pydantic import (
     computed_field,
 )
 
-from druks.schemas import BaseResponse
+from druks.schemas import Schema
 
 from .enums import AgentCallStatus, RunState
 
 if TYPE_CHECKING:
-    from .models import AgentCall, Run
+    from .models import Run
 
 
-class TokenUsage(BaseResponse):
+class TokenUsage(Schema):
     input_tokens: int
     output_tokens: int
     cached_input_tokens: int = 0
@@ -29,11 +29,11 @@ class TokenUsage(BaseResponse):
 
 
 def get_display_label(kind: str) -> str:
-    # "ship.build" → "Build"; "implement" → "Implement".
+    # "software_factory.build" → "Build"; "implement" → "Implement".
     return kind.rsplit(".", 1)[-1].replace("_", " ").capitalize()
 
 
-class AgentCallResponse(BaseResponse):
+class AgentCallResponse(Schema):
     model_config = ConfigDict(from_attributes=True)
 
     id: str
@@ -56,13 +56,13 @@ class AgentCallResponse(BaseResponse):
         return get_display_label(self.agent)
 
 
-class ArtifactFile(BaseResponse):
+class ArtifactFile(Schema):
     name: str
     size_bytes: int
     updated_at: datetime
 
 
-class ArtifactDescriptor(BaseResponse):
+class ArtifactDescriptor(Schema):
     # A call's renderable output (a plan's markdown), rendered by kind — distinct
     # from the raw files. ``name`` is its file in the call dir, downloadable from
     # the transcript files route like any other.
@@ -71,7 +71,7 @@ class ArtifactDescriptor(BaseResponse):
     name: str
 
 
-class AgentCallFiles(BaseResponse):
+class AgentCallFiles(Schema):
     # A call's on-disk artifacts by role (prompt / response / stdout / stderr /
     # metadata / manifest). Each carries its file name; the client composes the
     # download URL from the transcript route it fetched this listing from.
@@ -87,12 +87,12 @@ class AgentCallFiles(BaseResponse):
     artifact: ArtifactDescriptor | None = None
 
 
-class RunResponse(BaseResponse):
+class RunResponse(Schema):
     id: str
-    # The durable kind ("ship.build"); ``label`` is its display name ("Build").
+    # The durable kind ("software_factory.build"); ``label`` is its display name ("Build").
     kind: str
     label: str
-    state: Literal["scheduled", "running", "parked", "finished", "failed", "cancelled"]
+    state: RunState
     failure: str | None = None
     gate: str | None = None
     # The structured ask the parked run declared at ``Gate.wait(input_request=…)`` —
@@ -108,7 +108,6 @@ class RunResponse(BaseResponse):
     def from_run(
         cls,
         run: "Run",
-        calls: list["AgentCall"],
         *,
         input_request: dict[str, Any] | None,
     ) -> "RunResponse":
@@ -116,14 +115,14 @@ class RunResponse(BaseResponse):
             id=run.id,
             kind=run.kind,
             label=get_display_label(run.kind),
-            state=run.state,  # type: ignore[arg-type]
-            failure=run.failure,
+            state=RunState(run.state),
+            failure=run.failure_message(),
             gate=run.input_gate,
             input_request=input_request,
             created_at=run.created_at,
             updated_at=run.updated_at,
             account_username=run.account.username,
-            agent_calls=[AgentCallResponse.model_validate(call) for call in calls],
+            agent_calls=[AgentCallResponse.model_validate(call) for call in run.agent_calls],
         )
 
 
@@ -137,7 +136,7 @@ SubjectId = Annotated[str, BeforeValidator(str)]
 SubjectLabel = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 
 
-class SubjectSummary(BaseResponse):
+class SubjectSummary(Schema):
     # The base an app's subject header subclasses; ``id`` keys the subject's
     # status, timeline and detail URL, and ``from_attributes`` builds the header
     # straight off the subject.
@@ -147,23 +146,25 @@ class SubjectSummary(BaseResponse):
     label: SubjectLabel
 
 
-class SubjectStatus(BaseResponse):
+class SubjectStatus(Schema):
     # The subject's lifecycle status for the dashboard lane — derived by the read
-    # side, never stored; ``state`` is the canonical RunState aggregated across
-    # the subject's runs. Everything else is a fact the app's UI renders
-    # its own copy from; the platform ships no prose.
-    state: RunState
+    # side, never stored; ``state`` is the state of the run driving the subject,
+    # and None when no run drives it. Everything else is a fact the app's UI
+    # renders its own copy from; the platform ships no prose.
+    state: RunState | None = None
+    # The driving run's id — identity, so an app page can name it in a block
+    # (GateControls) without reaching for the platform's own read side.
+    run: str | None = None
     # The driving run's kind and, while running, its latest agent call's agent.
     kind: str | None = None
     agent: str | None = None
     # A parked run's gate identity — the app's UI maps it to its own
     # words; the ask's content rides the timeline's ``input_request``.
     gate: str | None = None
-    # The stop reason of the run driving ``state`` — set only when that run is
-    # terminal-failed (an active or finished subject carries none). Lets a board
-    # render "why" inline without reaching into the timeline. ``reason`` is its
-    # machine-readable classification (``gate_timeout``): an unanswered gate,
-    # not a crash.
+    # The driving run's message: a crash's error, or the reason the operator typed
+    # at cancel. It is a message, not a state — read ``state`` to tell failed from
+    # cancelled from orphaned. ``reason`` is its machine-readable classification
+    # (``gate_timeout``): an unanswered gate, not a crash.
     failure: str | None = None
     reason: str | None = None
     # When druks last picked this subject up, and whose work it is. A subject with
@@ -185,23 +186,23 @@ class SubjectStatus(BaseResponse):
         return self.state == RunState.FAILED
 
 
-class SubjectRow(BaseResponse):
+class SubjectRow(Schema):
     summary: SerializeAsAny[SubjectSummary]
     status: SubjectStatus
 
 
-class SubjectList(BaseResponse):
+class SubjectList(Schema):
     rows: list[SubjectRow] = Field(default_factory=list)
 
 
-class SubjectActivity(BaseResponse):
-    # The running sub-phase the timeline can't show ("Building sandbox VM…"), supplied
+class SubjectActivity(Schema):
+    # The running sub-phase the timeline can't show ("Provisioning sandbox VM…"), supplied
     # by the app; ``kind`` groups it for display ("infra" | "agent").
     label: str
     kind: str
 
 
-class SubjectResponse(BaseResponse):
+class SubjectResponse(Schema):
     summary: SerializeAsAny[SubjectSummary]
     status: SubjectStatus
     # The subject's runs, oldest first, each with its agent calls — the timeline.
@@ -209,7 +210,7 @@ class SubjectResponse(BaseResponse):
     activity: SubjectActivity | None = None
 
 
-class TranscriptChunk(BaseResponse):
+class TranscriptChunk(Schema):
     call_id: str
     stream: Literal["stdout", "stderr"]
     offset: int
@@ -218,7 +219,7 @@ class TranscriptChunk(BaseResponse):
     text: str
 
 
-class TextSlice(BaseResponse):
+class TextSlice(Schema):
     # One bounded UTF-8-safe cut of an on-disk text file; offsets are byte
     # positions, has_earlier marks content before this slice.
     offset: int

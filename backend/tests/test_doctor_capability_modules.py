@@ -25,7 +25,9 @@ class ThingHook(Webhook):
 """
 
 
-def _temp_capability_package(tmp_path: Path, monkeypatch, *, module_name: str) -> str:
+def _temp_capability_package(
+    tmp_path: Path, monkeypatch, *, module_name: str, source: str = _CAPABILITY_SOURCE
+) -> str:
     """A real, importable one-module package whose capability lives in
     ``{module_name}.py`` — canonical (``webhooks``) or off-canon (``webhook``).
     Points the check's package walk at it and returns the package name."""
@@ -33,7 +35,7 @@ def _temp_capability_package(tmp_path: Path, monkeypatch, *, module_name: str) -
     pkg_dir = tmp_path / package
     pkg_dir.mkdir()
     (pkg_dir / "__init__.py").write_text("")
-    (pkg_dir / f"{module_name}.py").write_text(_CAPABILITY_SOURCE)
+    (pkg_dir / f"{module_name}.py").write_text(source)
 
     monkeypatch.syspath_prepend(str(tmp_path))
     for name in list(sys.modules):
@@ -57,6 +59,25 @@ def test_capability_under_off_canon_filename_is_flagged(tmp_path: Path, monkeypa
     assert not result.ok
     assert "doctorprobe.webhook" in result.detail
     assert "rename to webhooks.py" in result.detail
+
+
+def test_task_under_off_canon_filename_is_flagged(tmp_path: Path, monkeypatch) -> None:
+    from druks.apps.loader import register_workflow_package
+
+    _temp_capability_package(
+        tmp_path,
+        monkeypatch,
+        module_name="task",
+        source="from druks.workflows import task\n\n\n@task\nasync def tock() -> None: ...\n",
+    )
+    register_workflow_package("doctorprobe", "")
+    settings = make_settings(tmp_path)
+
+    result = doctor.check_capability_modules(settings)
+
+    assert not result.ok
+    assert "doctorprobe.task" in result.detail
+    assert "rename to tasks.py" in result.detail
 
 
 def test_capability_under_canonical_filename_passes(tmp_path: Path, monkeypatch) -> None:

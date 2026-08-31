@@ -6,6 +6,9 @@ from druks.workflows import FatalError, Gate, Workflow, step  # noqa: F401
 # The parameters ARE the workflow's input: plain typed params, validated at start().
 # Set ``every = "<cron>"`` to schedule one; raise ``FatalError`` for a clean domain
 # stop; a ``Gate`` subclass parks the run for human input.
+# Set ``sandbox = Sandbox(setup="sandboxes/setup.sh")`` (from druks.sandbox) when the
+# workflow needs an environment beyond the platform base. SoftwareFactory the shell file under the
+# package's sandboxes/.
 #
 # Declare what a workflow's runs are about with ``subject = YourSubject`` — the class,
 # with a table or without — and druks gives that subject a board and a page.

@@ -5,10 +5,11 @@ from types import ModuleType
 from typing import Any
 
 # Leaf-module names that carry self-registering capabilities. ``autodiscover``
-# imports exactly these (``routes`` defines routers the loader mounts; the rest
-# fire registration as an import side effect). The set is the single source of
-# truth for what "a capability module" is named.
-_ROLES = frozenset({"webhooks", "subscribers", "workflows", "routes", "services"})
+# imports exactly these (``routes`` defines routers the loader mounts, ``pages``
+# defines the app's screens; the rest fire registration as an import side
+# effect). The set is the single source of truth for what "a capability module"
+# is named.
+_ROLES = frozenset({"webhooks", "subscribers", "workflows", "tasks", "routes", "pages", "services"})
 
 
 class Registry:
@@ -62,6 +63,7 @@ def autodiscover(package: str) -> list[ModuleType]:
 
 
 webhooks = Registry("webhooks", key=lambda cls: f"{cls.__module__}.{cls.__qualname__}")
+pages = Registry("pages", key=lambda page_route: page_route.key)
 services = Registry("services", key=lambda cls: cls.slug)
 workflows = Registry("workflows", key=lambda cls: cls.kind)
 agents = Registry("agents", key=lambda agent: agent.id)

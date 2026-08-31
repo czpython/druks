@@ -29,8 +29,8 @@ class _FakeUpload:
 
 class _FakeSandbox:
     def __init__(self, host_id: str = "host-xyz") -> None:
-        self.id = host_id  # mirrors real Sandbox.id (== record.id)
-        self.ssh_username = "root"  # mirrors real Sandbox.ssh_username
+        self.id = host_id  # mirrors real Host.id (== record.id)
+        self.ssh_username = "root"  # mirrors real Host.ssh_username
         self.exec_log: list[tuple[list[str], float]] = []
         self.uploads: list[_FakeUpload] = []
         self.secrets: list[tuple[str, str]] = []  # (secret, remote)
@@ -51,7 +51,7 @@ class _FakeSandbox:
         remote: str,
         mode: int = 0o600,
     ) -> None:
-        del mode  # tested at the Sandbox level, not via the fake
+        del mode  # tested at the Host level, not via the fake
         self.uploads.append(_FakeUpload(local=local, remote=remote))
 
     async def upload_dir(
@@ -72,7 +72,7 @@ class _FakeSandbox:
         remote: str,
         mode: int = 0o600,
     ) -> None:
-        del mode  # tested at the Sandbox level, not via the fake
+        del mode  # tested at the Host level, not via the fake
         self.secrets.append((secret, remote))
 
     async def aclose(self) -> None:
@@ -102,6 +102,7 @@ class _FakeAPI:
         idempotency_key: str | None = None,
         expires_at: datetime | None = None,
         provider: str | None = None,
+        template: str | None = None,
     ) -> SandboxHostRecord:
         self.created_envs.append(env)
         self.created_expires_at.append(expires_at)
@@ -153,9 +154,9 @@ def _record(
     )
 
 
-# NOTE: ``Sandbox.upload_file`` (mkdir + sftp + chmod) and
-# ``Sandbox.write_secret`` (printf with shell quoting) are exercised
-# against the real Sandbox in test_sandbox_host.py — the fake here
+# NOTE: ``Host.upload_file`` (mkdir + sftp + chmod) and
+# ``Host.write_secret`` (printf with shell quoting) are exercised
+# against the real Host in test_sandbox_host.py — the fake here
 # just records the calls. Tests below cover the credentials.push
 # orchestration that drives them.
 
@@ -294,12 +295,29 @@ async def test_clone_raises_exec_failed_on_clone_failure():
     sandbox = _FakeSandbox()
     sandbox.exec_results = {0: ExecResult(128, "", "fatal: not found")}
 
-    with pytest.raises(ExecFailed, match="git clone"):
+    with pytest.raises(ExecFailed) as excinfo:
         await repo.clone(
             sandbox,  # type: ignore[arg-type]
             repo_url="https://github.com/owner/missing.git",
             ref="main",
         )
+
+    assert "git clone https://github.com/owner/missing.git@main failed" in str(excinfo.value)
+
+
+async def test_clone_failure_message_omits_ref_when_none():
+    sandbox = _FakeSandbox()
+    sandbox.exec_results = {0: ExecResult(128, "", "fatal: not found")}
+
+    with pytest.raises(ExecFailed) as excinfo:
+        await repo.clone(
+            sandbox,  # type: ignore[arg-type]
+            repo_url="https://github.com/owner/missing.git",
+            ref=None,
+        )
+
+    assert "git clone https://github.com/owner/missing.git failed" in str(excinfo.value)
+    assert "@None" not in str(excinfo.value)
 
 
 async def test_clone_redacts_token_from_error_output():
@@ -411,10 +429,10 @@ def patched_real_sandbox(monkeypatch: pytest.MonkeyPatch) -> list[_FakeSandbox]:
         built.append(fake)
         return fake
 
-    # Patch in both places: client.py constructs the Sandbox (lifecycle
+    # Patch in both places: client.py constructs the Host (lifecycle
     # tests want the fake) and host.py is where the real class lives.
-    monkeypatch.setattr("druks.sandbox.client.Sandbox", make_sandbox)
-    monkeypatch.setattr("druks.sandbox.host.Sandbox", make_sandbox)
+    monkeypatch.setattr("druks.sandbox.client.Host", make_sandbox)
+    monkeypatch.setattr("druks.sandbox.host.Host", make_sandbox)
     return built
 
 

@@ -3,14 +3,15 @@ from druks.apps import loader as apps_loader
 from druks.apps.exceptions import MalformedApp
 from druks.apps.loader import register_workflow_package, resolve_workflow_app
 from druks.apps.registry import workflows
-from druks.core.workflows import RefreshTokens
+from druks.core.tasks import refresh_tokens
 from druks.durable.enums import RunState
 from druks.durable.exceptions import WorkflowError
 from druks.durable.models import Run
 from druks.durable.schemas import get_display_label
 from druks.events.models import Event
-from druks.workflows import Gate, Workflow, _log_run_event, step
+from druks.workflows import Gate, Workflow, _log_run_event, step, task
 from druks_field_notes.models import Note
+from sqlalchemy import select
 
 
 @pytest.fixture(autouse=True)
@@ -60,6 +61,39 @@ def test_resolution_matches_package_boundaries():
         resolve_workflow_app("alpha_pkg_sibling.workflows")
 
 
+def _task_in(module: str, body, name: str | None = None):
+    body.__module__ = module
+    if name:
+        body.__name__ = name
+    return task(body)
+
+
+def test_duplicate_task_name_is_rejected():
+    # DBOS only warns on a duplicate durable name and lets the last registration
+    # win — enqueues of one task would silently run the other's body.
+    register_workflow_package("collide_pkg", "")
+
+    async def clash() -> None: ...
+
+    _task_in("collide_pkg.tasks", clash)
+
+    async def other() -> None: ...
+
+    with pytest.raises(WorkflowError, match="durable identity"):
+        _task_in("collide_pkg.nested.tasks", other, name="clash")
+
+
+def test_task_input_is_typed():
+    # The signature is the wire contract — enqueue validates against it and
+    # dumps to JSON, so an unannotated parameter has no wire shape.
+    register_workflow_package("untyped_pkg", "")
+
+    async def send(recipient) -> None: ...  # noqa: ANN001
+
+    with pytest.raises(WorkflowError, match="needs a type"):
+        _task_in("untyped_pkg.tasks", send)
+
+
 def test_unregistered_module_fails_at_class_definition():
     # The error carries the invariant: load through the loader, or register first.
     with pytest.raises(WorkflowError, match="druks.apps.loader"):
@@ -91,19 +125,17 @@ def test_dotted_explicit_kind_is_rejected():
 
 
 def test_none_owned_package_keeps_bare_kinds():
-    register_workflow_package("plain_pkg", None)
+    register_workflow_package("plain_pkg", "")
     flow = _workflow("Sweep", "plain_pkg.workflows")
-    assert flow.app is None
+    assert flow.app == ""
     assert flow.kind == "sweep"
 
 
 def test_in_tree_identities_are_stable():
-    # These kinds are durable identities (DBOS workflow names, settings keys,
-    # dedup prefixes, step-name prefixes) — byte-for-byte pins.
-    assert workflows.get("ship.build") is not None
-    assert workflows.get("ship.profile") is not None
-    assert RefreshTokens.kind == "core.refresh_tokens"
-    assert (workflows.get("ship.build").app, RefreshTokens.app) == ("ship", "core")
+    # These are durable DBOS names — byte-for-byte pins.
+    assert workflows.get("software_factory.build") is not None
+    assert workflows.get("software_factory.profile") is not None
+    assert refresh_tokens.name == "core.refresh_tokens"
 
 
 def test_steps_capture_the_namespaced_kind():
@@ -127,18 +159,18 @@ def test_steps_capture_the_namespaced_kind():
     assert "alpha.pinger" in captured
 
 
-def test_lifecycle_event_stamps_the_declaring_app(druks_db):
+async def test_lifecycle_event_stamps_the_declaring_app(druks_db):
     # The event's app derives from the run's kind through the registry —
     # never an argument, never a stored copy on the run.
     register_workflow_package("alpha_pkg", "alpha")
     flow = _workflow("Beacon", "alpha_pkg.workflows")
     run = Run(id="wf-identity-1", kind=flow.kind)
     druks_db.add(run)
-    druks_db.flush()
+    await druks_db.flush()
 
-    payload = _log_run_event(run, RunState.FINISHED, {"type": "note", "id": 1})
+    payload = await _log_run_event(run, RunState.FINISHED, {"type": "note", "id": 1}, None)
 
-    event = druks_db.query(Event).filter_by(type="workflow.finished").one()
+    event = (await druks_db.scalars(select(Event).filter_by(type="workflow.finished"))).one()
     assert payload["run"] == run.id
     assert event.app == "alpha"
 
@@ -147,14 +179,14 @@ def test_display_label_reads_the_local_kind():
     assert get_display_label("field_notes.summarize") == "Summarize"
 
 
-def test_a_declared_subject_answers_off_the_workflow_and_off_a_run():
+async def test_a_declared_subject_answers_off_the_workflow_and_off_a_run():
     # One word, two answers: the workflow says what kind of thing its runs are about,
     # a run of it says which one.
     register_workflow_package("alpha_pkg", "alpha")
     flow = _workflow("Sweep", "alpha_pkg.workflows", subject=Note)
 
     assert flow.subject is Note
-    assert flow().subject is None  # a run with no subject has none to resolve
+    assert await flow().subject is None  # a run with no subject has none to resolve
 
 
 def test_a_workflow_about_nothing_says_so_by_silence():

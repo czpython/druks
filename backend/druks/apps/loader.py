@@ -15,12 +15,11 @@ _GROUP = "druks.apps"
 
 # Which app owns each workflow-declaring package — the loader-validated
 # installation claims, stamped once an entry point checks out, so a Workflow
-# class resolves its identity at definition time. None marks a package whose
-# workflows belong to no app (how test modules register themselves).
-_workflow_packages: dict[str, str | None] = {}
+# class resolves its identity at definition time.
+_workflow_packages: dict[str, str] = {}
 
 
-def register_workflow_package(package: str, app: str | None) -> None:
+def register_workflow_package(package: str, app: str) -> None:
     # Conflicting or overlapping claims are a packaging mistake — two installs
     # can't share a workflow package.
     if package in _workflow_packages:
@@ -40,7 +39,7 @@ def register_workflow_package(package: str, app: str | None) -> None:
     _workflow_packages[package] = app
 
 
-def resolve_workflow_app(module: str) -> str | None:
+def resolve_workflow_app(module: str) -> str:
     """The app owning ``module``'s nearest registered ancestor package.
     Raises ``LookupError`` when no registered package contains the module."""
     prefix = module
@@ -98,7 +97,8 @@ def load_app(name: str) -> type[App]:
     an entry point that doesn't resolve to an ``App`` raises
     ``MalformedApp``; the app's own code raising on import raises
     ``AppImportError``; a declared subject that fails the read-side contract
-    raises ``AppSubjectContractError``."""
+    raises ``AppSubjectContractError``; a page table a request could not
+    resolve raises ``PageRouteError``."""
     app = _resolve(name)
     try:
         import_app_models(app)
@@ -107,6 +107,8 @@ def load_app(name: str) -> type[App]:
         raise AppImportError(f"app {name!r} failed to import: {error}") from error
     # Outside the try: a contract break is not an import error.
     app.subjects()
+    app.navigation_pages()
+    app.operations()
     return app
 
 
@@ -240,11 +242,13 @@ def mount(api: "FastAPI", app: type[App], modules: list["ModuleType"]) -> None:
 
 
 def load(api: "FastAPI") -> None:
-    """API boot: for each app — discover, validate subjects, mount."""
+    """API boot: for each app — discover, validate subjects and pages, mount."""
     # The table-prefix check runs here, not just in makemigrations — an author
     # who hand-writes migrations still can't boot with an unprefixed table.
     import_app_models()
     for app in iter_apps():
         modules = app.discover()
         app.subjects()
+        app.navigation_pages()
+        app.operations()
         mount(api, app, modules)

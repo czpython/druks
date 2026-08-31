@@ -51,10 +51,10 @@ async def get_usage(account: Account = Depends(current_account)) -> UsageRespons
     now = datetime.now(UTC)
     summaries = []
     for harness in get_harnesses():
-        connection = HarnessConnection.get_for_account(harness.name, account.id)
+        connection = await HarnessConnection.get_for_account(harness.name, account.id)
         summaries.append(
             _summarize(
-                UsageScrape.latest_for(harness.name, account.id),
+                await UsageScrape.latest_for(harness.name, account.id),
                 name=harness.name,
                 now=now,
                 connected=bool(connection),
@@ -68,8 +68,8 @@ async def get_usage(account: Account = Depends(current_account)) -> UsageRespons
 async def refresh_usage(account: Account = Depends(current_account)) -> None:
     now = datetime.now(UTC)
     for harness in get_harnesses():
-        connection = HarnessConnection.get_for_account(harness.name, account.id)
-        row = UsageScrape.latest_for(harness.name, account.id)
+        connection = await HarnessConnection.get_for_account(harness.name, account.id)
+        row = await UsageScrape.latest_for(harness.name, account.id)
         age = _age_seconds(row.scraped_at, now=now) if row else None
         if connection and (age is None or age >= _REFRESH_FLOOR_SECONDS):
             await harness.poll_usage(connection)
@@ -83,7 +83,7 @@ async def refresh_usage(account: Account = Depends(current_account)) -> None:
 async def get_usage_history(account: Account = Depends(current_account)) -> UsageHistoryResponse:
     now = datetime.now(UTC)
     return UsageHistoryResponse(
-        harnesses=[_harness_history(h.name, account.id, now=now) for h in get_harnesses()],
+        harnesses=[await _harness_history(h.name, account.id, now=now) for h in get_harnesses()],
     )
 
 
@@ -95,8 +95,12 @@ async def get_usage_history(account: Account = Depends(current_account)) -> Usag
 async def get_usage_today(account: Account = Depends(current_account)) -> UsageTodayResponse:
     # Deriving the operator-local-day window here (the query just takes it) keeps
     # this total identical to the sys-strip's and the agent surface's figures.
-    timezone, local_start = operator_local_day(UserSettings.get().timezone, datetime.now(UTC))
-    rows = list_finished_calls(account.id, since=local_start, until=local_start + timedelta(days=1))
+    timezone, local_start = operator_local_day(
+        (await UserSettings.get()).timezone, datetime.now(UTC)
+    )
+    rows = await list_finished_calls(
+        account.id, since=local_start, until=local_start + timedelta(days=1)
+    )
     timezone_name = str(timezone)
 
     # Every call counts, even one whose model no picker list claims (pinned
@@ -107,7 +111,7 @@ async def get_usage_today(account: Account = Depends(current_account)) -> UsageT
     # whole list.
     harness_by_model = {
         entry["id"]: settings.name
-        for settings in HarnessSettings.all()
+        for settings in await HarnessSettings.all()
         for entry in settings.allowed_models
     }
     names = [h.name for h in get_harnesses()]
@@ -141,8 +145,8 @@ async def get_usage_today(account: Account = Depends(current_account)) -> UsageT
     )
 
 
-def _harness_history(name: str, account_id: str, *, now: datetime) -> UsageHarnessHistory:
-    rows = UsageScrape.history_for(name, account_id, since=now - WEEK_RANGE)
+async def _harness_history(name: str, account_id: str, *, now: datetime) -> UsageHarnessHistory:
+    rows = await UsageScrape.history_for(name, account_id, since=now - WEEK_RANGE)
     five_hour_cutoff = now - FIVE_HOUR_RANGE
     five_hour = [
         UsageHistoryPoint(t=row.scraped_at, pct=row.five_hour_percent_left)

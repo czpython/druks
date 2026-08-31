@@ -11,7 +11,7 @@ from druks.apps.settings import (
     field_section,
     field_visibility,
 )
-from druks.schemas import BaseResponse
+from druks.schemas import Schema
 
 if TYPE_CHECKING:
     from druks.accounts.models import Account
@@ -19,12 +19,12 @@ if TYPE_CHECKING:
     from druks.user_settings.models import HarnessSettings
 
 
-class AllowedModel(BaseResponse):
+class AllowedModel(Schema):
     id: str
     label: str
 
 
-class HarnessResponse(BaseResponse):
+class HarnessResponse(Schema):
     name: str
     provider: str
     model: str
@@ -73,7 +73,7 @@ class HarnessUpdate(BaseModel):
     timeout: int | None = None
 
 
-class UserSettingsResponse(BaseResponse):
+class UserSettingsResponse(Schema):
     model_config = ConfigDict(from_attributes=True)
 
     timezone: str
@@ -89,7 +89,7 @@ class UpdateUserSettingsRequest(BaseModel):
     )
 
 
-class AgentSettingResponse(BaseResponse):
+class AgentSettingResponse(Schema):
     name: str
     description: str
     model: str
@@ -102,7 +102,7 @@ class AgentSettingResponse(BaseResponse):
     timeout_source: Literal["agent", "declared", "harness"]
 
 
-class SettingsFieldResponse(BaseResponse):
+class SettingsFieldResponse(Schema):
     name: str
     # Human label + one-line help, from the field's ``Field(title=, description=)``.
     label: str
@@ -153,12 +153,12 @@ class SettingsFieldResponse(BaseResponse):
         )
 
 
-class WorkflowSettingsResponse(BaseResponse):
+class WorkflowSettingsResponse(Schema):
     kind: str
     fields: list[SettingsFieldResponse]
 
 
-class AppSettingsResponse(BaseResponse):
+class AppSettingsResponse(Schema):
     name: str
     description: str
     # A Lucide icon name the frontend renders (falls back to a default if unknown).
@@ -173,7 +173,7 @@ class AppSettingsResponse(BaseResponse):
     settings: list[SettingsFieldResponse]
 
 
-class AppsSettingsResponse(BaseResponse):
+class AppsSettingsResponse(Schema):
     allowed_efforts: list[str]
     apps: list[AppSettingsResponse]
 

@@ -1,7 +1,7 @@
 from typing import Literal
 
 from druks.agents import AgentOutput
-from druks.contrib.ship.contracts import FindingOutput
+from druks.contrib.software_factory.contracts import FindingOutput
 
 
 class ReviewReport(AgentOutput):

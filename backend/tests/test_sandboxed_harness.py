@@ -30,7 +30,7 @@ from druks.sandbox.datastructures import (
     HarnessRunResult,
 )
 from druks.sandbox.exceptions import SandboxUnreachable
-from druks.sandbox.host import Sandbox
+from druks.sandbox.host import Host
 
 
 @dataclass
@@ -66,9 +66,9 @@ class _LifecycleCall:
 
 
 def _fake_sandbox(run: _FakeRun) -> SimpleNamespace:
-    """Build a Sandbox-stub for the flat exec path.
+    """Build a Host-stub for the flat exec path.
 
-    ``Sandbox._exec`` / ``Sandbox.run_prompt`` are invoked unbound with this
+    ``Host._exec`` / ``Host.run_prompt`` are invoked unbound with this
     stub as ``self`` — they only touch ``_start_instruction`` /
     ``_download_artifacts`` / ``ssh_username``. The ``calls`` list captures
     every start's kwargs; ``downloads`` the artifact pulls.
@@ -127,7 +127,7 @@ async def test_returns_harness_run_result_with_stdout_stderr(
     )
     sandbox = _fake_sandbox(run)
 
-    result = await Sandbox._exec(
+    result = await Host._exec(
         sandbox,
         _inv(("claude", "--print", "hi")),
         run_id=_DEFAULT_RUN_ID,
@@ -146,7 +146,7 @@ async def test_writes_log_files_in_dashboard_convention(
     run = _FakeRun(stdout_chunks=[b"hello\n"], stderr_chunks=[b"oops\n"])
     sandbox = _fake_sandbox(run)
 
-    await Sandbox._exec(
+    await Host._exec(
         sandbox,
         _inv(("claude",)),
         run_id=_DEFAULT_RUN_ID,
@@ -176,7 +176,7 @@ async def test_forwards_invocation_to_lifecycle(
     run = _FakeRun(stdout_chunks=[b""])
     sandbox = _fake_sandbox(run)
 
-    await Sandbox._exec(
+    await Host._exec(
         sandbox,
         _inv(
             ("codex", "exec", "--print"),
@@ -226,7 +226,7 @@ async def test_overall_timeout_raises_harness_timeout_error(
     monkeypatch.setattr("druks.sandbox.host.asyncio.wait_for", fast_wait_for)
 
     with pytest.raises(HarnessTimeoutError, match="timed out"):
-        await Sandbox._exec(
+        await Host._exec(
             sandbox,
             _inv(("claude",)),
             run_id=_DEFAULT_RUN_ID,
@@ -266,7 +266,7 @@ async def test_first_byte_kill_raises_typed_error(
     monkeypatch.setattr("druks.sandbox.host.asyncio.wait_for", fast_wait_for)
 
     with pytest.raises(HarnessFirstByteTimeoutError, match="no output"):
-        await Sandbox._exec(
+        await Host._exec(
             sandbox,
             _inv(("claude",)),
             run_id=_DEFAULT_RUN_ID,
@@ -294,7 +294,7 @@ async def test_sandbox_unreachable_translates_to_harness_error(
     sandbox._download_artifacts = _download_artifacts
 
     with pytest.raises(HarnessSandboxError, match="sandbox failure") as excinfo:
-        await Sandbox._exec(
+        await Host._exec(
             sandbox,
             _inv(("claude",)),
             run_id=_DEFAULT_RUN_ID,
@@ -307,6 +307,10 @@ async def test_sandbox_unreachable_translates_to_harness_error(
     assert downloads == []
 
 
+async def _harness_stub(model):
+    return ClaudeHarness
+
+
 async def test_run_prompt_builds_executes_and_parses(
     ctx: SimpleNamespace,
 ):
@@ -315,7 +319,7 @@ async def test_run_prompt_builds_executes_and_parses(
     run = _FakeRun(stdout_chunks=[b"streamed\n"], exit_code=0)
     sandbox = _fake_sandbox(run)
     # run_prompt delegates to self._exec — bind the real one onto the stub.
-    sandbox._exec = lambda *args, **kwargs: Sandbox._exec(sandbox, *args, **kwargs)
+    sandbox._exec = lambda *args, **kwargs: Host._exec(sandbox, *args, **kwargs)
     seen: dict[str, Any] = {}
 
     class _FakeHarness:
@@ -329,7 +333,7 @@ async def test_run_prompt_builds_executes_and_parses(
         def mint_run_id(call_id: str | None) -> str:
             return call_id or "minted-id"
 
-        def build_invocation(self, **kwargs: Any) -> AgentInvocation:
+        async def build_invocation(self, **kwargs: Any) -> AgentInvocation:
             seen["build"] = kwargs
             return _inv(("claude", "--print"))
 
@@ -337,7 +341,7 @@ async def test_run_prompt_builds_executes_and_parses(
             seen["parse"] = {"result": result, "artifact_dir": artifact_dir, "run_id": run_id}
             return {"answer": 42}
 
-    payload = await Sandbox.run_prompt(
+    payload = await Host.run_prompt(
         sandbox,
         _FakeHarness(),
         prompt="do the thing",
@@ -491,15 +495,13 @@ def test_agent_result_names_the_agent_in_its_failure():
 def _patch_harness_resolution(monkeypatch: pytest.MonkeyPatch) -> None:
     # run_agent resolves the harness + its settings from the DB; these tests
     # are about the failure boundary, not resolution.
-    from druks.harnesses.claude import ClaudeHarness
 
-    monkeypatch.setattr(
-        "druks.harnesses.registry.get_harness_for_model", lambda model: ClaudeHarness
-    )
-    monkeypatch.setattr(
-        "druks.user_settings.models.HarnessSettings.require",
-        staticmethod(lambda name: SimpleNamespace(effort="high", timeout=60, fast_mode=False)),
-    )
+    monkeypatch.setattr("druks.harnesses.registry.get_harness_for_model", _harness_stub)
+
+    async def require(name):
+        return SimpleNamespace(effort="high", timeout=60, fast_mode=False)
+
+    monkeypatch.setattr("druks.user_settings.models.HarnessSettings.require", staticmethod(require))
 
 
 async def test_run_agent_carries_foreign_failures_as_harness_errors(
@@ -518,7 +520,7 @@ async def test_run_agent_carries_foreign_failures_as_harness_errors(
         raise original
 
     sandbox.run_prompt = run_prompt
-    result = await Sandbox.run_agent(
+    result = await Host.run_agent(
         sandbox,
         model="claude-opus-4-7",
         prompt="p",
@@ -547,7 +549,7 @@ async def test_run_agent_carries_a_taxonomy_failure_as_itself(
         raise timeout
 
     sandbox.run_prompt = run_prompt
-    result = await Sandbox.run_agent(
+    result = await Host.run_agent(
         sandbox,
         model="claude-opus-4-7",
         prompt="p",

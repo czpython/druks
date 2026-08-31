@@ -7,7 +7,7 @@ from dbos import DBOS
 from sqlalchemy import ForeignKey, Index, Select, String, func, select, update
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import insert as pg_insert
-from sqlalchemy.orm import Mapped, column_property, mapped_column, relationship
+from sqlalchemy.orm import Mapped, column_property, mapped_column, relationship, selectinload
 
 from druks.accounts.constants import SYSTEM_ACCOUNT_ID
 from druks.accounts.models import Account
@@ -77,6 +77,11 @@ class Run(Base):
     account: Mapped[Account] = relationship(
         lazy="joined", innerjoin=True, foreign_keys=[account_id]
     )
+    # The run's agent calls in execution order — lazy, so a parked board row that
+    # never reads them costs no query; the timeline read eager-loads them.
+    agent_calls: Mapped[list["AgentCall"]] = relationship(
+        back_populates="run", order_by="AgentCall.created_at, AgentCall.id"
+    )
 
     # When the run last changed — the newest of creation, the parked ask, and
     # DBOS's status write.
@@ -96,27 +101,42 @@ class Run(Base):
     def is_running(self) -> bool:
         return self.state == RunState.RUNNING.value
 
+    def failure_message(self) -> str | None:
+        # A crash leaves failure None by design; the terminal call's captured
+        # error is then the run's real reason.
+        if self.failure:
+            return self.failure
+        if self.state == RunState.FAILED.value and self.agent_calls:
+            return self.agent_calls[-1].last_error
+
     @classmethod
-    def create_row(cls, engine, *, workflow_id: str, kind: str, account_id: str | None) -> None:
+    async def create_row(
+        cls, engine, *, workflow_id: str, kind: str, account_id: str | None
+    ) -> None:
         # Own committed transaction (not the caller's request txn) so the row
         # exists before the running workflow's first lifecycle event. Idempotent:
         # a scheduled run creates its row inside the (replayable) body, and a
         # start that races its own retry must not double-insert.
-        with get_session(engine) as session:
-            session.execute(
+        async with get_session(engine) as session:
+            await session.execute(
                 pg_insert(cls)
                 .values(id=workflow_id, kind=kind, account_id=account_id or SYSTEM_ACCOUNT_ID)
                 .on_conflict_do_nothing()
             )
-            session.commit()
+            await session.commit()
 
     @classmethod
-    def get(cls, workflow_id: str) -> "Run | None":
-        return db_session().get(cls, workflow_id)
+    async def get(cls, workflow_id: str) -> "Run | None":
+        return await db_session().get(cls, workflow_id)
 
     @classmethod
-    def list_for_subject(
-        cls, subject_type: str, subject_id: str, kind: str | None = None
+    async def list_for_subject(
+        cls,
+        subject_type: str,
+        subject_id: str,
+        kind: str | None = None,
+        *,
+        include_calls: bool = False,
     ) -> list["Run"]:
         # Every run about this subject (stamped at start), newest first — a
         # subject's lifecycle spans many runs, so its status is theirs
@@ -132,10 +152,12 @@ class Run(Base):
         )
         if kind:
             stmt = stmt.where(cls.kind == kind)
-        return list(db_session().scalars(stmt))
+        if include_calls:
+            stmt = stmt.options(selectinload(cls.agent_calls))
+        return list(await db_session().scalars(stmt))
 
     @classmethod
-    def get_latest_for_subject(
+    async def get_latest_for_subject(
         cls, subject_type: str, subject_id: str, kind: str | None = None
     ) -> "Run | None":
         """The run that speaks for the subject: a subject holds at most one active
@@ -149,7 +171,42 @@ class Run(Base):
         )
         if kind:
             stmt = stmt.where(cls.kind == kind)
-        return db_session().scalars(stmt).first()
+        return (await db_session().scalars(stmt)).first()
+
+    @classmethod
+    async def get_latest_for_subjects(
+        cls, subject_type: str, subject_ids: list[str]
+    ) -> dict[str, "Run"]:
+        """The driving run of each subject, keyed by subject id — get_latest_for_subject
+        for a whole board in one statement. Agent calls come with it: the status read
+        needs the latest agent of every running row."""
+        subject_id = workflow_status.c.attributes["subject_id"].as_string().label("subject_id")
+        driving = (
+            select(
+                subject_id,
+                cls.id.label("run_id"),
+                func.row_number()
+                .over(
+                    partition_by=subject_id,
+                    order_by=(cls.created_at.desc(), cls.id.desc()),
+                )
+                .label("rank"),
+            )
+            .join_from(cls, workflow_status, workflow_status.c.workflow_uuid == cls.id)
+            .where(
+                workflow_status.c.attributes["subject_type"].as_string() == subject_type,
+                subject_id.in_(subject_ids),
+            )
+            .subquery()
+        )
+        stmt = (
+            select(driving.c.subject_id, cls)
+            .join_from(cls, driving, driving.c.run_id == cls.id)
+            .where(driving.c.rank == 1)
+            .options(selectinload(cls.agent_calls))
+        )
+        rows = await db_session().execute(stmt)
+        return {found_id: run for found_id, run in rows}
 
     @classmethod
     def open_subject_ids(cls, subject_type: str) -> Select:
@@ -229,7 +286,7 @@ class Run(Base):
             .order_by(driving.c.created_at.desc(), driving.c.run_id.desc())
         )
 
-    def get_ask(self) -> dict[str, Any]:
+    async def get_ask(self) -> dict[str, Any]:
         # The parked ask, ready to serve. An in-app review's ask names neither
         # label nor artifact — a parked run can't produce new artifacts, so the
         # latest resolves here on demand; fields the gate declared win.
@@ -238,20 +295,20 @@ class Run(Base):
             raise ValueError(f"run {self.id} is not parked on an ask")
         if ask.get("presentation") != "in_app":
             return ask
-        artifact = Artifact.get_latest_for_run(self.id)
+        artifact = await Artifact.get_latest_for_run(self.id)
         return {
             "label": f"Review: {artifact.title}" if artifact else "Review",
             "artifact_id": artifact.id if artifact else None,
             **ask,
         }
 
-    def get_rendered_ask(self) -> dict[str, Any]:
+    async def get_rendered_ask(self) -> dict[str, Any]:
         # The parked ask as notification content. The body is the ask's own
         # prose (plain text, never a template); actions are data — deliver()
         # renders the buttons and encodes the token. Shape-dispatch on
         # presentation happens before any subscripting, so the external branch
         # never touches in-app-only keys.
-        ask = self.get_ask()
+        ask = await self.get_ask()
         if ask["presentation"] == "in_app":
             questions = ask["questions"]
             lines = [ask["label"], *(question["prompt"] for question in questions)]
@@ -269,13 +326,13 @@ class Run(Base):
         # actions; url is an optional gate-author-declared view-link.
         return {"body": ask["label"], "actions": None, "deep_link": ask.get("url")}
 
-    def create_park_notification(self, destination_id: str, subject: dict[str, Any]) -> str:
+    async def create_park_notification(self, destination_id: str, subject: dict[str, Any]) -> str:
         # Create the notification for the round this run just parked on — the
         # caller supplies the run's subject and enqueues delivery. run_id +
         # run_parked_at snapshot the round so a click on an old button can be
         # refused once the run re-parks.
-        rendered = self.get_rendered_ask()
-        notification = Notification.create(
+        rendered = await self.get_rendered_ask()
+        notification = await Notification.create(
             destination_id=destination_id,
             reason="gate.parked",
             body=rendered["body"],
@@ -306,10 +363,9 @@ class Run(Base):
             idempotency_key=f"{self.input_gate}:{self.input_requested_at}",
         )
 
-    @property
-    def subject(self) -> dict[str, str] | None:
+    async def get_subject(self) -> dict[str, str] | None:
         # Stamped at start; a subjectless cron has none.
-        attributes = db_session().scalar(
+        attributes = await db_session().scalar(
             select(workflow_status.c.attributes).where(workflow_status.c.workflow_uuid == self.id)
         )
         if attributes:
@@ -326,11 +382,11 @@ class Run(Base):
         self.input_gate = None
         self.input_request = None
         self.failure = failure
-        db_session().flush()
+        await db_session().flush()
         await DBOS.cancel_workflow_async(self.id)
         # The body raises DBOSWorkflowCancelledError and re-raises without
         # emitting, so the canceller announces the terminal state itself.
-        subject = self.subject
+        subject = await self.get_subject()
         if subject:
             await publish(
                 WorkflowEvent.CANCELLED,
@@ -351,13 +407,13 @@ class Run(Base):
             queue_name=run_queue.name,
         )
         workflow_id = handle.workflow_id
-        Run.create_row(
+        await Run.create_row(
             _step_engine(),
             workflow_id=workflow_id,
             kind=self.kind,
             account_id=self.account_id,
         )
-        subject = self.subject
+        subject = await self.get_subject()
         if subject:
             await publish(
                 WorkflowEvent.RETRIED,
@@ -399,7 +455,7 @@ class AgentCall(Base, Uuid7Pk):
     model: Mapped[str] = mapped_column(String)
     # The run this LLM call ran in. ON DELETE CASCADE, so a call never outlives it.
     run_id: Mapped[str] = mapped_column(ForeignKey("durable_runs.id", ondelete="CASCADE"))
-    run: Mapped["Run"] = relationship()
+    run: Mapped["Run"] = relationship(back_populates="agent_calls", lazy="joined")
     # Which agent (registry id: "scope", "implement", …) made this call — the
     # timeline's grouping label. An agent is what makes a call, so there is no
     # unattributed one: the row is written from the registered agent's own id.
@@ -476,7 +532,7 @@ class AgentCall(Base, Uuid7Pk):
         return candidate if candidate.exists() else None
 
     @classmethod
-    def start(
+    async def start(
         cls,
         engine,
         *,
@@ -492,11 +548,11 @@ class AgentCall(Base, Uuid7Pk):
         # shows while the agent works — the running step's session won't commit
         # until it ends. Provisioning isn't part of the call, so the row only
         # exists once there's a host to run on.
-        with get_session(engine) as session:
+        async with get_session(engine) as session:
             # A crash-recovered step re-runs with a fresh call id; abandon the
             # prior attempt's RUNNING row (a run's calls are sequential) so it
             # doesn't linger as a phantom live step.
-            session.execute(
+            await session.execute(
                 update(cls)
                 .where(cls.run_id == run_id, cls.status == AgentCallStatus.RUNNING.value)
                 .values(status=AgentCallStatus.ABANDONED.value, finished_at=Base.utc_now())
@@ -511,12 +567,12 @@ class AgentCall(Base, Uuid7Pk):
                     account_id=account_id,
                 )
             )
-            session.commit()
+            await session.commit()
 
     @classmethod
-    def finish(cls, engine, *, call_id: str, result: "AgentResult") -> None:
-        with get_session(engine) as session:
-            call = session.get(cls, call_id)
+    async def finish(cls, engine, *, call_id: str, result: "AgentResult") -> None:
+        async with get_session(engine) as session:
+            call = await session.get(cls, call_id)
             call.status = result.status.value
             call.started_at = result.started_at
             call.finished_at = Base.utc_now()
@@ -524,52 +580,43 @@ class AgentCall(Base, Uuid7Pk):
             call.failure_code = result.error.code if result.error else ""
             call.cost_usd = result.cost_usd
             call.cost_metadata = result.cost_metadata
-            session.commit()
+            await session.commit()
 
     @classmethod
-    def fail(cls, engine, *, call_id: str, error: BaseException) -> None:
+    async def fail(cls, engine, *, call_id: str, error: BaseException) -> None:
         # The run raised after the call started (a cancel, or a crash past the
         # agent body) — close the row so it doesn't linger as a phantom step.
-        with get_session(engine) as session:
-            call = session.get(cls, call_id)
+        async with get_session(engine) as session:
+            call = await session.get(cls, call_id)
             call.status = AgentCallStatus.FAILED.value
             call.finished_at = Base.utc_now()
             call.last_error = str(error)
-            session.commit()
+            await session.commit()
 
     @classmethod
-    def get(cls, agent_call_id: str) -> "AgentCall":
-        call = db_session().get(cls, agent_call_id)
+    async def get(cls, agent_call_id: str) -> "AgentCall":
+        call = await db_session().get(cls, agent_call_id)
         if not call:
             raise AgentCallNotFound(agent_call_id)
         return call
 
     @classmethod
-    def list_for_run(cls, run_id: str) -> list["AgentCall"]:
-        # Execution order, so the read side zips calls onto their runs.
+    async def list_for_run(cls, run_id: str) -> list["AgentCall"]:
+        # Execution order — the same order Run.agent_calls loads.
         stmt = select(cls).where(cls.run_id == run_id).order_by(cls.created_at, cls.id)
-        return list(db_session().scalars(stmt))
+        return list(await db_session().scalars(stmt))
 
     @classmethod
-    def get_by_run(cls, run_ids: list[str]) -> dict[str, list["AgentCall"]]:
-        # The calls under each run, in execution order — one query for a timeline.
-        stmt = select(cls).where(cls.run_id.in_(run_ids)).order_by(cls.created_at, cls.id)
-        grouped: dict[str, list[AgentCall]] = {run_id: [] for run_id in run_ids}
-        for call in db_session().scalars(stmt):
-            grouped[call.run_id].append(call)
-        return grouped
-
-    @classmethod
-    def list_for_subject(cls, subject_type: str, subject_id: str) -> list["AgentCall"]:
+    async def list_for_subject(cls, subject_type: str, subject_id: str) -> list["AgentCall"]:
         stmt = (
             select(cls)
             .where(subject_filter(cls.run_id, subject_type, subject_id))
             .order_by(cls.created_at, cls.id)
         )
-        return list(db_session().scalars(stmt))
+        return list(await db_session().scalars(stmt))
 
     @classmethod
-    def total_run_spend_between(cls, *, start: datetime, end: datetime) -> tuple[float, int]:
+    async def total_run_spend_between(cls, *, start: datetime, end: datetime) -> tuple[float, int]:
         stmt = (
             select(cls.cost_usd, cls.cost_metadata)
             .where(cls.finished_at.is_not(None))
@@ -578,7 +625,7 @@ class AgentCall(Base, Uuid7Pk):
         )
         cost = 0.0
         tokens = 0
-        for cost_usd, metadata in db_session().execute(stmt):
+        for cost_usd, metadata in await db_session().execute(stmt):
             if cost_usd is not None:
                 cost += float(cost_usd)
             canonical = normalize_token_usage(metadata)
@@ -586,14 +633,14 @@ class AgentCall(Base, Uuid7Pk):
                 tokens += canonical["total_tokens"]
         return cost, tokens
 
-    def record_cost(self, *, cost_usd: float | None, cost_metadata: dict | None) -> None:
+    async def record_cost(self, *, cost_usd: float | None, cost_metadata: dict | None) -> None:
         if cost_usd is None and not cost_metadata:
             return
         if cost_usd is not None:
             self.cost_usd = cost_usd
         if cost_metadata:
             self.cost_metadata = cost_metadata
-        db_session().flush()
+        await db_session().flush()
 
 
 class Artifact(Base, Uuid7Pk):
@@ -610,7 +657,9 @@ class Artifact(Base, Uuid7Pk):
     path: Mapped[str]
 
     @classmethod
-    def record(cls, *, call_dir: Path, call_id: str, kind: str, title: str, content: str) -> None:
+    async def record(
+        cls, *, call_dir: Path, call_id: str, kind: str, title: str, content: str
+    ) -> None:
         # Platform-owned: write a call's declared renderable output into its dir and
         # record the descriptor on the call's step session. Idempotent per call
         # (unique fk) so a replayed step never double-records.
@@ -618,22 +667,22 @@ class Artifact(Base, Uuid7Pk):
         call_dir.mkdir(parents=True, exist_ok=True)
         (call_dir / name).write_text(content)
         session = db_session()
-        session.execute(
+        await session.execute(
             pg_insert(cls)
             .values(agent_call_id=call_id, kind=kind, title=title, path=name)
             .on_conflict_do_nothing(index_elements=["agent_call_id"])
         )
-        session.flush()
+        await session.flush()
 
     @classmethod
-    def get_for_call(cls, call_id: str) -> "Artifact | None":
-        return db_session().scalar(select(cls).where(cls.agent_call_id == call_id))
+    async def get_for_call(cls, call_id: str) -> "Artifact | None":
+        return await db_session().scalar(select(cls).where(cls.agent_call_id == call_id))
 
     @classmethod
-    def get_latest_for_run(cls, run_id: str) -> "Artifact | None":
+    async def get_latest_for_run(cls, run_id: str) -> "Artifact | None":
         # The run's most recent renderable output, reached through its calls — an
         # in-app review shows this beside its controls. Newest call wins.
-        return db_session().scalar(
+        return await db_session().scalar(
             select(cls)
             .join(AgentCall, AgentCall.id == cls.agent_call_id)
             .where(AgentCall.run_id == run_id)

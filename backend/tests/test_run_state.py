@@ -18,64 +18,64 @@ from sqlalchemy import select, update
 from uuid_utils import uuid7
 
 
-def _item_and_run(druks_db, state, **kwargs):
-    note = Note.create(body=f"run in {state}")
-    return note, seed_run(druks_db, kind=Summarize.kind, subject=note, state=state, **kwargs)
+async def _item_and_run(druks_db, state, **kwargs):
+    note = await Note.create(body=f"run in {state}")
+    return note, await seed_run(druks_db, kind=Summarize.kind, subject=note, state=state, **kwargs)
 
 
-def test_session_get_derives_state(druks_db):
-    _, run = _item_and_run(druks_db, "finished")
-    druks_db.expire_all()
-    assert Run.get(run.id).state == RunState.FINISHED.value
+async def test_session_get_derives_state(druks_db):
+    _, run = await _item_and_run(druks_db, "finished")
+    druks_db.expunge_all()
+    assert (await Run.get(run.id)).state == RunState.FINISHED.value
 
 
-def test_pending_splits_on_the_gate(druks_db):
+async def test_pending_splits_on_the_gate(druks_db):
     # DBOS says PENDING either way; the gate is the one fact it can't know.
-    _, parked = _item_and_run(druks_db, "parked", input_gate="review_work")
-    _, live = _item_and_run(druks_db, "running")
-    druks_db.expire_all()
-    assert Run.get(parked.id).state == RunState.PARKED.value
-    assert Run.get(live.id).state == RunState.RUNNING.value
+    _, parked = await _item_and_run(druks_db, "parked", input_gate="review_work")
+    _, live = await _item_and_run(druks_db, "running")
+    druks_db.expunge_all()
+    assert (await Run.get(parked.id)).state == RunState.PARKED.value
+    assert (await Run.get(live.id)).state == RunState.RUNNING.value
 
 
-def _rowless_run(session):
+async def _rowless_run(session):
     """A run with no ``dbos.workflow_status`` row — the gap these tests are about,
     which ``seed_run`` closes by design."""
     run = Run(id=str(uuid7()), kind=Summarize.kind, account_id="system")
     session.add(run)
-    session.flush()
+    await session.flush()
     return run
 
 
-def test_fresh_run_without_a_dbos_row_reads_scheduled(druks_db):
+async def test_fresh_run_without_a_dbos_row_reads_scheduled(druks_db):
     # start() writes the row before DBOS commits the enqueue; inside that gap a
     # brand-new run legitimately has no workflow_status row and reads scheduled.
-    run = _rowless_run(druks_db)
-    druks_db.expire_all()
-    assert Run.get(run.id).state == RunState.SCHEDULED.value
+    run = await _rowless_run(druks_db)
+    druks_db.expunge_all()
+    assert (await Run.get(run.id)).state == RunState.SCHEDULED.value
 
 
-def test_run_without_a_dbos_row_past_grace_reads_orphaned(druks_db):
+async def test_run_without_a_dbos_row_past_grace_reads_orphaned(druks_db):
     # A run still rowless past the grace window won't start — its DBOS row is
     # gone (system tables wiped, or the executor destroyed) — so derived state
     # reads orphaned instead of scheduled forever.
-    run = _rowless_run(druks_db)
+    run = await _rowless_run(druks_db)
     run.created_at = Base.utc_now() - timedelta(minutes=10)
-    druks_db.flush()
-    druks_db.expire_all()
-    assert Run.get(run.id).state == RunState.ORPHANED.value
+    await druks_db.flush()
+    druks_db.expunge_all()
+    assert (await Run.get(run.id)).state == RunState.ORPHANED.value
 
 
-def test_unknown_dbos_status_reads_running(druks_db):
+async def test_unknown_dbos_status_reads_running(druks_db):
     # A DBOS status this mapping predates must not crash reads.
-    _, run = _item_and_run(druks_db, "running")
-    druks_db.execute(
+    _, run = await _item_and_run(druks_db, "running")
+    await druks_db.execute(
         update(workflow_status)
         .where(workflow_status.c.workflow_uuid == run.id)
         .values(status="SOME_FUTURE_STATUS")
     )
-    druks_db.expire_all()
-    assert Run.get(run.id).state == RunState.RUNNING.value
+    druks_db.expunge_all()
+    assert (await Run.get(run.id)).state == RunState.RUNNING.value
 
 
 @pytest.mark.parametrize(
@@ -86,22 +86,22 @@ def test_unknown_dbos_status_reads_running(druks_db):
         ("MAX_RECOVERY_ATTEMPTS_EXCEEDED", RunState.FAILED),
     ],
 )
-def test_statuses_the_seed_map_never_writes(druks_db, status, state):
-    _, run = _item_and_run(druks_db, "running")
-    druks_db.execute(
+async def test_statuses_the_seed_map_never_writes(druks_db, status, state):
+    _, run = await _item_and_run(druks_db, "running")
+    await druks_db.execute(
         update(workflow_status)
         .where(workflow_status.c.workflow_uuid == run.id)
         .values(status=status)
     )
-    druks_db.expire_all()
-    assert Run.get(run.id).state == state.value
+    druks_db.expunge_all()
+    assert (await Run.get(run.id)).state == state.value
 
 
-def test_queries_filter_on_derived_state(druks_db):
-    _, parked = _item_and_run(druks_db, "parked", input_gate="review_work")
-    _, done = _item_and_run(druks_db, "finished")
+async def test_queries_filter_on_derived_state(druks_db):
+    _, parked = await _item_and_run(druks_db, "parked", input_gate="review_work")
+    _, done = await _item_and_run(druks_db, "finished")
     ids = set(
-        druks_db.scalars(
+        await druks_db.scalars(
             select(Run.id).where(
                 Run.id.in_([parked.id, done.id]),
                 Run.state.in_([RunState.PARKED.value, RunState.RUNNING.value]),
@@ -111,18 +111,18 @@ def test_queries_filter_on_derived_state(druks_db):
     assert ids == {parked.id}
 
 
-def test_updated_at_folds_in_the_dbos_write(druks_db):
+async def test_updated_at_folds_in_the_dbos_write(druks_db):
     # DBOS stamps its updated_at in epoch milliseconds; the derived updated_at
     # converts it and wins over creation and the parked ask.
-    _, run = _item_and_run(druks_db, "finished")
+    _, run = await _item_and_run(druks_db, "finished")
     later_ms = int(datetime(2031, 1, 2, 3, 4, 5, tzinfo=UTC).timestamp() * 1000)
-    druks_db.execute(
+    await druks_db.execute(
         update(workflow_status)
         .where(workflow_status.c.workflow_uuid == run.id)
         .values(updated_at=later_ms)
     )
-    druks_db.expire_all()
-    row = Run.get(run.id)
+    druks_db.expunge_all()
+    row = await Run.get(run.id)
     assert row.updated_at == datetime(2031, 1, 2, 3, 4, 5, tzinfo=UTC)
     assert row.updated_at > row.created_at
 
@@ -143,7 +143,7 @@ async def test_facts_and_event_land_before_a_raising_subscriber(druks_db, _inlin
     # The fact write and its event commit before the signal fires, so a raising
     # subscriber can't roll them back. The failure itself still propagates:
     # delivery is at-least-once.
-    item, run = _item_and_run(druks_db, "running")
+    item, run = await _item_and_run(druks_db, "running")
 
     @subscribe(WorkflowEvent.PARKED, run=run.id)
     async def _raises(**_: object) -> None:
@@ -157,14 +157,15 @@ async def test_facts_and_event_land_before_a_raising_subscriber(druks_db, _inlin
             facts={"input_gate": "review_work", "input_request": {"label": "Review"}},
         )
 
-    ambient_session().expire_all()
-    row = Run.get(run.id)
+    ambient_session().expunge_all()
+    row = await Run.get(run.id)
     assert row.input_gate == "review_work"
-    events = (
-        ambient_session()
-        .query(Event)
-        .filter_by(type="workflow.parked", subject_id=str(item.id))
-        .all()
+    events = list(
+        (
+            await ambient_session().execute(
+                select(Event).filter_by(type="workflow.parked", subject_id=str(item.id))
+            )
+        ).scalars()
     )
     assert len(events) == 1
     assert events[0].payload["gate"] == "review_work"
@@ -176,12 +177,12 @@ async def test_lifecycle_subscribers_get_the_payload_before_dbos_commits(druks_d
     # derived state hasn't turned yet, which is why subscribers read the
     # payload, never Run.state. The body gets the run's own facts, never the
     # routing keys the filters match on.
-    item, run = _item_and_run(druks_db, "running")
+    item, run = await _item_and_run(druks_db, "running")
     seen: list[tuple[str, dict]] = []
 
     @subscribe(WorkflowEvent.FINISHED, run=run.id)
     async def _reads_the_payload(**payload: object) -> None:
-        seen.append((Run.get(run.id).state, payload))
+        seen.append(((await Run.get(run.id)).state, payload))
 
     await _emit_run_event(
         run.id,
@@ -202,7 +203,7 @@ async def test_cancellation_passes_through_untouched(druks_db, _inline_steps):
     # Operator cancel already carries its own reason and terminal status; the
     # body's cancellation exception must reach DBOS without a workflow.failed event
     # or a failure overwrite.
-    item, run = _item_and_run(druks_db, "running")
+    item, run = await _item_and_run(druks_db, "running")
 
     async def body() -> None:
         raise DBOSWorkflowCancelledError(f"workflow {run.id} cancelled")
@@ -210,11 +211,12 @@ async def test_cancellation_passes_through_untouched(druks_db, _inline_steps):
     with pytest.raises(DBOSWorkflowCancelledError):
         await _execute_run(run.id, run.kind, {"type": "work_item", "id": item.id}, None, body)
 
-    ambient_session().expire_all()
-    assert Run.get(run.id).failure is None
-    types = [
-        e.type for e in ambient_session().query(Event).filter_by(subject_id=str(item.id)).all()
-    ]
+    ambient_session().expunge_all()
+    assert (await Run.get(run.id)).failure is None
+    rows = (
+        await ambient_session().execute(select(Event).filter_by(subject_id=str(item.id)))
+    ).scalars()
+    types = [e.type for e in rows]
     assert "workflow.failed" not in types
 
 
@@ -226,7 +228,7 @@ async def test_failure_writes_the_reason_and_reraises(druks_db, _inline_steps):
     # derived state reads.
     from druks.durable.exceptions import FatalError
 
-    item, run = _item_and_run(
+    item, run = await _item_and_run(
         druks_db,
         "parked",
         input_gate="review_work",
@@ -239,19 +241,18 @@ async def test_failure_writes_the_reason_and_reraises(druks_db, _inline_steps):
     with pytest.raises(FatalError):
         await _execute_run(run.id, run.kind, {"type": "work_item", "id": item.id}, None, body)
 
-    ambient_session().expire_all()
-    row = Run.get(run.id)
+    ambient_session().expunge_all()
+    row = await Run.get(run.id)
     assert row.failure == "closed at review"
     # A bare FatalError carries no distinguishing code — only its message.
     assert row.failure_code == ""
     assert row.input_gate is None
     assert row.input_request is None
     failed = (
-        ambient_session()
-        .query(Event)
-        .filter_by(type="workflow.failed", subject_id=str(item.id))
-        .one()
-    )
+        await ambient_session().execute(
+            select(Event).filter_by(type="workflow.failed", subject_id=str(item.id))
+        )
+    ).scalar_one()
     assert failed.payload["failure"] == "closed at review"
 
 
@@ -261,7 +262,7 @@ async def test_gate_timeout_stamps_its_failure_code(druks_db, _inline_steps):
     # unanswered gate from a crash without parsing the failure text.
     from druks.durable.exceptions import GateTimeout
 
-    item, run = _item_and_run(druks_db, "running")
+    item, run = await _item_and_run(druks_db, "running")
 
     async def body() -> None:
         raise GateTimeout("review_work")
@@ -269,15 +270,15 @@ async def test_gate_timeout_stamps_its_failure_code(druks_db, _inline_steps):
     with pytest.raises(GateTimeout):
         await _execute_run(run.id, run.kind, {"type": "work_item", "id": item.id}, None, body)
 
-    ambient_session().expire_all()
-    assert Run.get(run.id).failure_code == "gate_timeout"
+    ambient_session().expunge_all()
+    assert (await Run.get(run.id)).failure_code == "gate_timeout"
 
 
 @pytest.mark.asyncio
 async def test_a_harness_failure_stamps_its_code(druks_db, _inline_steps):
     from druks.harnesses.exceptions import HarnessOverloadedError
 
-    item, run = _item_and_run(druks_db, "running")
+    item, run = await _item_and_run(druks_db, "running")
 
     async def body() -> None:
         raise HarnessOverloadedError("claude exited with 1. API Error: 529 Overloaded.")
@@ -285,8 +286,8 @@ async def test_a_harness_failure_stamps_its_code(druks_db, _inline_steps):
     with pytest.raises(HarnessOverloadedError):
         await _execute_run(run.id, run.kind, {"type": "work_item", "id": item.id}, None, body)
 
-    ambient_session().expire_all()
-    assert Run.get(run.id).failure_code == "overloaded"
+    ambient_session().expunge_all()
+    assert (await Run.get(run.id)).failure_code == "overloaded"
 
 
 @pytest.mark.asyncio
@@ -296,7 +297,7 @@ async def test_an_exhausted_provisioning_failure_stamps_its_code(druks_db, _inli
     # SDK exception used to leave behind — so the dashboard/taxonomy can name it.
     from druks.harnesses.exceptions import HarnessSandboxProvisioningError
 
-    item, run = _item_and_run(druks_db, "running")
+    item, run = await _item_and_run(druks_db, "running")
 
     async def body() -> None:
         raise HarnessSandboxProvisioningError("exe.dev VM creation timed out")
@@ -304,8 +305,8 @@ async def test_an_exhausted_provisioning_failure_stamps_its_code(druks_db, _inli
     with pytest.raises(HarnessSandboxProvisioningError):
         await _execute_run(run.id, run.kind, {"type": "work_item", "id": item.id}, None, body)
 
-    ambient_session().expire_all()
-    assert Run.get(run.id).failure_code == "sandbox_provisioning"
+    ambient_session().expunge_all()
+    assert (await Run.get(run.id)).failure_code == "sandbox_provisioning"
 
 
 @pytest.mark.asyncio
@@ -314,7 +315,7 @@ async def test_a_foreign_code_never_becomes_the_failure_code(druks_db, _inline_s
     the declaring families stamp the run; anything else records a crash."""
     import asyncssh
 
-    item, run = _item_and_run(druks_db, "running")
+    item, run = await _item_and_run(druks_db, "running")
 
     async def body() -> None:
         raise asyncssh.PermissionDenied("denied")
@@ -322,8 +323,8 @@ async def test_a_foreign_code_never_becomes_the_failure_code(druks_db, _inline_s
     with pytest.raises(asyncssh.PermissionDenied):
         await _execute_run(run.id, run.kind, {"type": "work_item", "id": item.id}, None, body)
 
-    ambient_session().expire_all()
-    assert Run.get(run.id).failure_code == ""
+    ambient_session().expunge_all()
+    assert (await Run.get(run.id)).failure_code == ""
 
 
 @pytest.mark.asyncio

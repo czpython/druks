@@ -27,7 +27,7 @@ const INITIAL_FETCH = 200
  * between the initial fetch and the SSE backfill doesn't double-render.
  *
  * The feed spans every app by default. The app filter lives
- * in the URL query (``/events?app=ship``, absent = all) so the view
+ * in the URL query (``/events?app=software_factory``, absent = all) so the view
  * is shareable, survives a refresh, and moves with back/forward.
  */
 export function EventsPage() {

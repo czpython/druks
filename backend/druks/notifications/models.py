@@ -37,19 +37,21 @@ class Destination(Base, Uuid7Pk):
     updated_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
 
     @classmethod
-    def list_all(cls) -> list["Destination"]:
-        return list(db_session().execute(select(cls).order_by(cls.name)).scalars())
+    async def list_all(cls) -> list["Destination"]:
+        return list((await db_session().execute(select(cls).order_by(cls.name))).scalars())
 
     @classmethod
-    def get(cls, destination_id: str) -> "Destination | None":
-        return db_session().get(cls, destination_id)
+    async def get(cls, destination_id: str) -> "Destination | None":
+        return await db_session().get(cls, destination_id)
 
     @classmethod
-    def get_for_name(cls, name: str) -> "Destination | None":
-        return db_session().execute(select(cls).where(cls.name == name)).scalar_one_or_none()
+    async def get_for_name(cls, name: str) -> "Destination | None":
+        return (
+            await db_session().execute(select(cls).where(cls.name == name))
+        ).scalar_one_or_none()
 
     @classmethod
-    def create(cls, *, name: str, kind: str, url: str) -> "Destination":
+    async def create(cls, *, name: str, kind: str, url: str) -> "Destination":
         try:
             DestinationKind(kind)
         except ValueError as error:
@@ -57,13 +59,13 @@ class Destination(Base, Uuid7Pk):
         session = db_session()
         destination = cls(name=name, kind=kind, url=url)
         session.add(destination)
-        session.flush()
+        await session.flush()
         return destination
 
-    def delete(self) -> None:
+    async def delete(self) -> None:
         session = db_session()
-        session.delete(self)
-        session.flush()
+        await session.delete(self)
+        await session.flush()
 
 
 class Notification(Base, Uuid7Pk):
@@ -103,7 +105,7 @@ class Notification(Base, Uuid7Pk):
     updated_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
 
     @classmethod
-    def create(
+    async def create(
         cls,
         *,
         destination_id: str,
@@ -130,48 +132,46 @@ class Notification(Base, Uuid7Pk):
         )
         session = db_session()
         session.add(notification)
-        session.flush()
+        await session.flush()
         return notification
 
     @classmethod
-    def get(cls, notification_id: str) -> "Notification | None":
-        return db_session().get(cls, notification_id)
+    async def get(cls, notification_id: str) -> "Notification | None":
+        return await db_session().get(cls, notification_id)
 
     @classmethod
-    def list_recent(cls, limit: int = 50) -> list["Notification"]:
+    async def list_recent(cls, limit: int = 50) -> list["Notification"]:
         # uuid7 ids are time-ordered, breaking created_at ties toward the newest.
         stmt = select(cls).order_by(cls.created_at.desc(), cls.id.desc()).limit(limit)
-        return list(db_session().scalars(stmt))
+        return list(await db_session().scalars(stmt))
 
     @classmethod
-    def get_for_token(cls, token: str) -> "Notification | None":
+    async def get_for_token(cls, token: str) -> "Notification | None":
         return (
-            db_session()
-            .execute(select(cls).where(cls.correlation_token == token))
-            .scalar_one_or_none()
-        )
+            await db_session().execute(select(cls).where(cls.correlation_token == token))
+        ).scalar_one_or_none()
 
     @property
     def is_acknowledged(self) -> bool:
         return self.state == NotificationState.ACKNOWLEDGED
 
-    def mark_delivered(self) -> None:
+    async def mark_delivered(self) -> None:
         self.state = NotificationState.DELIVERED.value
         self.delivered_at = Base.utc_now()
         self.updated_at = Base.utc_now()
-        db_session().flush()
+        await db_session().flush()
 
-    def mark_failed(self, reason: str) -> None:
+    async def mark_failed(self, reason: str) -> None:
         self.state = NotificationState.FAILED.value
         self.last_error = reason
         self.updated_at = Base.utc_now()
-        db_session().flush()
+        await db_session().flush()
 
-    def mark_acknowledged(self) -> bool:
+    async def mark_acknowledged(self) -> bool:
         # Atomic claim: exactly one concurrent responder wins the transition
         # (the loser's duplicate send already collapsed on the DBOS round key).
         session = db_session()
-        claimed = session.execute(
+        claimed = await session.execute(
             update(Notification)
             .where(
                 Notification.id == self.id,
@@ -179,5 +179,5 @@ class Notification(Base, Uuid7Pk):
             )
             .values(state=NotificationState.ACKNOWLEDGED.value, updated_at=Base.utc_now())
         )
-        session.expire(self)
+        await session.refresh(self)
         return claimed.rowcount == 1

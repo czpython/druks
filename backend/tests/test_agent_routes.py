@@ -5,10 +5,10 @@ import pytest
 from druks.accounts.models import Account, PersonalAccessToken
 from druks.api.server import app
 from druks.contrib.review.workflows import PullRequestReview
-from druks.contrib.ship.app import Ship
-from druks.contrib.ship.models import Project, ProjectRepo, WorkItem
-from druks.contrib.ship.ticketing.enums import TicketStatus
-from druks.contrib.ship.workflows import Build
+from druks.contrib.software_factory.app import SoftwareFactory
+from druks.contrib.software_factory.models import Project, ProjectRepo, WorkItem
+from druks.contrib.software_factory.ticketing.enums import TicketStatus
+from druks.contrib.software_factory.workflows import Build
 from druks.core.apis.exceptions import LinearAPIError, UnknownTicketError
 from druks.durable.dbos_state import workflow_status
 from druks.durable.models import AgentCall, Run
@@ -46,14 +46,14 @@ def client(tmp_path: Path, druks_db, monkeypatch):
 
 
 @pytest.fixture
-def account(druks_db):
+async def account(druks_db):
     # The account configure_app_for_test signs requests in as.
-    return Account.get_or_create("op@example.com")
+    return await Account.get_or_create("op@example.com")
 
 
-def _connect_github() -> None:
+async def _connect_github() -> None:
     # Start routes guard on the GitHub service identity before spending a run.
-    ServiceIdentity.connect(
+    await ServiceIdentity.connect(
         "github",
         identity={"app_id": "1", "slug": "druks-operator"},
         secrets={"private_key": "operator-pem", "webhook_secret": "hook-secret"},
@@ -71,11 +71,11 @@ def resume_spy(monkeypatch):
     return calls
 
 
-def _park(druks_db, note, *, context: str = ""):
+async def _park(druks_db, note, *, context: str = ""):
     ask = dict(_IN_APP_ASK)
     if context:
         ask["context"] = context
-    run = seed_run(
+    run = await seed_run(
         druks_db,
         kind=Summarize.kind,
         subject=note,
@@ -84,7 +84,7 @@ def _park(druks_db, note, *, context: str = ""):
         input_request=ask,
     )
     run.input_requested_at = datetime.now(UTC)
-    druks_db.flush()
+    await druks_db.flush()
     return run
 
 
@@ -98,7 +98,10 @@ def test_openapi_pins_platform_and_app_agent_routes(client: TestClient):
     }
     assert {key: found[key]["operationId"] for key in _MCP_ROUTES} == _MCP_ROUTES
     assert found[("post", "/api/review/reviews")]["operationId"] == "review_request"
-    assert found[("post", "/api/ship/work-items/{ticket}/start")]["operationId"] == "ship_start"
+    assert (
+        found[("post", "/api/software_factory/work-items/{ticket}/start")]["operationId"]
+        == "software_factory_start"
+    )
 
     apps = {
         key: {name: value for name, value in found[key].items() if name.startswith("x-")}
@@ -119,17 +122,17 @@ def test_openapi_pins_platform_and_app_agent_routes(client: TestClient):
     assert not {name for name in found[("post", "/api/review/reviews")] if name.startswith("x-")}
     assert not {
         name
-        for name in found[("post", "/api/ship/work-items/{ticket}/start")]
+        for name in found[("post", "/api/software_factory/work-items/{ticket}/start")]
         if name.startswith("x-")
     }
 
 
-def test_review_request_returns_the_run_id_start_hands_back(
+async def test_review_request_returns_the_run_id_start_hands_back(
     client: TestClient, account: Account, monkeypatch
 ):
-    _connect_github()
-    project = Project.create(name="Acme")
-    ProjectRepo.create(project_id=project.id, full_name="acme/app")
+    await _connect_github()
+    project = await Project.create(name="Acme")
+    await ProjectRepo.create(project_id=project.id, full_name="acme/app")
     live_run_id = "review-run-id"
     starts = []
 
@@ -178,23 +181,30 @@ class _FakeTracker:
         self.calls.append("aclose")
 
 
-def test_ship_start_stamps_the_trigger_status_for_known_and_unknown_tickets(
+def _tracker_stub(fake):
+    async def get_tracker(cls, source=None):
+        return fake
+
+    return classmethod(get_tracker)
+
+
+async def test_software_factory_start_stamps_the_trigger_status_for_known_and_unknown_tickets(
     client: TestClient, account: Account, monkeypatch
 ):
     # ENG-831 has a local work item, ENG-777 has never been seen — both take
     # the same tracker path; webhook intake, not the route, opens builds.
-    project = Project.create(name="Acme")
-    ProjectRepo.create(project_id=project.id, full_name="acme/app")
-    WorkItem.create(
+    project = await Project.create(name="Acme")
+    await ProjectRepo.create(project_id=project.id, full_name="acme/app")
+    await WorkItem.create(
         project_id=project.id,
         source="linear",
         title="Build the agent route",
         ticket_key="ENG-831",
         repo="acme/app",
     )
-    _, pat_token = PersonalAccessToken.create(account_id=account.id, name="agent")
+    _, pat_token = await PersonalAccessToken.create(account_id=account.id, name="agent")
     fake = _FakeTracker()
-    monkeypatch.setattr(Ship, "get_tracker", classmethod(lambda cls, source=None: fake))
+    monkeypatch.setattr(SoftwareFactory, "get_tracker", _tracker_stub(fake))
     starts = []
 
     async def start(cls, **kwargs):
@@ -204,7 +214,7 @@ def test_ship_start_stamps_the_trigger_status_for_known_and_unknown_tickets(
 
     responses = [
         client.post(
-            f"/api/ship/work-items/{ticket}/start",
+            f"/api/software_factory/work-items/{ticket}/start",
             headers={"Authorization": f"Bearer {pat_token}"},
         )
         for ticket in ("ENG-831", "ENG-777", "ENG-831")
@@ -224,11 +234,13 @@ def test_ship_start_stamps_the_trigger_status_for_known_and_unknown_tickets(
     assert starts == []  # a repeat call re-stamps; it never dispatches locally
 
 
-def test_ship_start_translates_an_unknown_tracker_ticket(client: TestClient, monkeypatch):
+def test_software_factory_start_translates_an_unknown_tracker_ticket(
+    client: TestClient, monkeypatch
+):
     fake = _FakeTracker(error=UnknownTicketError("ENG-9999", "Linear"))
-    monkeypatch.setattr(Ship, "get_tracker", classmethod(lambda cls, source=None: fake))
+    monkeypatch.setattr(SoftwareFactory, "get_tracker", _tracker_stub(fake))
 
-    response = client.post("/api/ship/work-items/ENG-9999/start")
+    response = client.post("/api/software_factory/work-items/ENG-9999/start")
 
     assert response.status_code == 404
     assert response.json() == {
@@ -239,10 +251,10 @@ def test_ship_start_translates_an_unknown_tracker_ticket(client: TestClient, mon
     assert "aclose" in fake.calls  # the tracker closes even on failure
 
 
-def test_ship_start_reports_a_missing_tracker_configuration(client: TestClient):
+def test_software_factory_start_reports_a_missing_tracker_configuration(client: TestClient):
     # Default settings select Linear but carry no API key, so no tracker
     # resolves — the operator-configuration error, not a 404 or a 500.
-    response = client.post("/api/ship/work-items/ENG-1/start")
+    response = client.post("/api/software_factory/work-items/ENG-1/start")
 
     assert response.status_code == 503
     body = response.json()
@@ -250,22 +262,24 @@ def test_ship_start_reports_a_missing_tracker_configuration(client: TestClient):
     assert body["retryable"] is False
 
 
-def test_ship_start_does_not_acknowledge_a_tracker_failure(tmp_path, druks_db, monkeypatch):
+def test_software_factory_start_does_not_acknowledge_a_tracker_failure(
+    tmp_path, druks_db, monkeypatch
+):
     monkeypatch.setenv("DRUKS_DATA_DIR", str(tmp_path))
     app = configure_app_for_test(settings=make_settings(tmp_path))
     fake = _FakeTracker(error=LinearAPIError("linear fell over"))
-    monkeypatch.setattr(Ship, "get_tracker", classmethod(lambda cls, source=None: fake))
+    monkeypatch.setattr(SoftwareFactory, "get_tracker", _tracker_stub(fake))
 
     with TestClient(app, raise_server_exceptions=False) as failing:
-        response = failing.post("/api/ship/work-items/ENG-831/start")
+        response = failing.post("/api/software_factory/work-items/ENG-831/start")
 
     assert response.status_code == 500
     assert response.json() == {"error": "INTERNAL_ERROR", "detail": "Internal server error"}
 
 
-def test_review_request_refuses_when_github_is_not_connected(client: TestClient, monkeypatch):
-    project = Project.create(name="Acme")
-    ProjectRepo.create(project_id=project.id, full_name="acme/app")
+async def test_review_request_refuses_when_github_is_not_connected(client: TestClient, monkeypatch):
+    project = await Project.create(name="Acme")
+    await ProjectRepo.create(project_id=project.id, full_name="acme/app")
 
     async def start(cls, **kwargs):
         raise AssertionError("start must not be reached without a GitHub identity")
@@ -291,10 +305,10 @@ def test_agent_routes_sit_behind_the_gate(tmp_path, druks_db):
         assert anonymous.get("/api/gates/x").status_code == 401
         assert anonymous.get("/api/open-subjects").status_code == 401
         assert anonymous.get("/api/usage/summary").status_code == 401
-        assert anonymous.post("/api/ship/work-items/ENG-831/start").status_code == 401
+        assert anonymous.post("/api/software_factory/work-items/ENG-831/start").status_code == 401
 
 
-def test_agent_errors_share_one_shape(client: TestClient, druks_db):
+async def test_agent_errors_share_one_shape(client: TestClient, druks_db):
     missing = client.get("/api/gates/no-such-run")
     assert missing.status_code == 404
     assert missing.json() == {
@@ -303,8 +317,8 @@ def test_agent_errors_share_one_shape(client: TestClient, druks_db):
         "retryable": False,
     }
 
-    note = Note.create(body="stale gate")
-    run = _park(druks_db, note)
+    note = await Note.create(body="stale gate")
+    run = await _park(druks_db, note)
     stale = client.post(
         f"/api/gates/{run.id}/answer",
         json={"parkedAt": "2020-01-01T00:00:00+00:00", "control": "approve"},
@@ -326,16 +340,18 @@ def test_missing_agent_call_uses_the_unified_shape(client: TestClient, druks_db)
     }
 
 
-def test_list_open_subjects_returns_newest_open_work_and_latest_calls(client: TestClient, druks_db):
-    finished_note = Note.create(body="finished")
-    seed_run(druks_db, kind=Summarize.kind, subject=finished_note, state="finished")
+async def test_list_open_subjects_returns_newest_open_work_and_latest_calls(
+    client: TestClient, druks_db
+):
+    finished_note = await Note.create(body="finished")
+    await seed_run(druks_db, kind=Summarize.kind, subject=finished_note, state="finished")
 
-    failed_note = Note.create(body="failed")
-    older = seed_run(druks_db, kind=Summarize.kind, subject=failed_note)
+    failed_note = await Note.create(body="failed")
+    older = await seed_run(druks_db, kind=Summarize.kind, subject=failed_note)
     older.created_at = datetime(2026, 1, 1, tzinfo=UTC)
-    seed_call(druks_db, older, "older")
+    await seed_call(druks_db, older, "older")
     failure = "discarded failure prefix " + "f" * 512
-    newest = seed_run(
+    newest = await seed_run(
         druks_db,
         kind=Summarize.kind,
         subject=failed_note,
@@ -343,10 +359,10 @@ def test_list_open_subjects_returns_newest_open_work_and_latest_calls(client: Te
         failure=failure,
     )
     newest.created_at = older.created_at + timedelta(days=1)
-    seed_call(druks_db, newest, "first")
-    latest_call = seed_call(druks_db, newest, "latest")
+    await seed_call(druks_db, newest, "first")
+    latest_call = await seed_call(druks_db, newest, "latest")
     subject_label = "long label kept whole " + "l" * 512
-    druks_db.execute(
+    await druks_db.execute(
         workflow_status.update()
         .where(workflow_status.c.workflow_uuid == newest.id)
         .values(
@@ -358,9 +374,9 @@ def test_list_open_subjects_returns_newest_open_work_and_latest_calls(client: Te
         )
     )
 
-    callless_note = Note.create(body="callless")
-    seed_run(druks_db, kind="field_notes.audit", subject=callless_note)
-    seed_run(druks_db, kind="usage.scrape")
+    callless_note = await Note.create(body="callless")
+    await seed_run(druks_db, kind="field_notes.audit", subject=callless_note)
+    await seed_run(druks_db, kind="usage.scrape")
 
     response = client.get("/api/open-subjects")
 
@@ -386,11 +402,11 @@ def test_list_open_subjects_returns_newest_open_work_and_latest_calls(client: Te
     assert subjects[str(callless_note.id)]["workflows"][0]["latestAgentCall"] is None
 
 
-def test_list_open_subjects_keeps_type_and_kind_partitions(client: TestClient, druks_db):
-    typed_note = Note.create(body="two types")
-    note_run = seed_run(druks_db, kind=Summarize.kind, subject=typed_note)
-    ticket_run = seed_run(druks_db, kind=Summarize.kind, subject=typed_note)
-    druks_db.execute(
+async def test_list_open_subjects_keeps_type_and_kind_partitions(client: TestClient, druks_db):
+    typed_note = await Note.create(body="two types")
+    note_run = await seed_run(druks_db, kind=Summarize.kind, subject=typed_note)
+    ticket_run = await seed_run(druks_db, kind=Summarize.kind, subject=typed_note)
+    await druks_db.execute(
         workflow_status.update()
         .where(workflow_status.c.workflow_uuid == ticket_run.id)
         .values(
@@ -402,26 +418,26 @@ def test_list_open_subjects_keeps_type_and_kind_partitions(client: TestClient, d
         )
     )
 
-    multi_kind_note = Note.create(body="two kinds")
-    scan = seed_run(druks_db, kind="field_notes.scan", subject=multi_kind_note)
-    audit = seed_run(druks_db, kind="field_notes.audit", subject=multi_kind_note)
+    multi_kind_note = await Note.create(body="two kinds")
+    scan = await seed_run(druks_db, kind="field_notes.scan", subject=multi_kind_note)
+    audit = await seed_run(druks_db, kind="field_notes.audit", subject=multi_kind_note)
 
-    terminal_sibling_note = Note.create(body="terminal sibling")
-    failed_scan = seed_run(
+    terminal_sibling_note = await Note.create(body="terminal sibling")
+    failed_scan = await seed_run(
         druks_db,
         kind="field_notes.scan",
         subject=terminal_sibling_note,
         state="failed",
     )
     failed_scan.created_at = datetime(2026, 1, 1, tzinfo=UTC)
-    finished_audit = seed_run(
+    finished_audit = await seed_run(
         druks_db,
         kind="field_notes.audit",
         subject=terminal_sibling_note,
         state="finished",
     )
     finished_audit.created_at = failed_scan.created_at + timedelta(days=1)
-    druks_db.flush()
+    await druks_db.flush()
 
     body = client.get("/api/open-subjects").json()
 
@@ -444,15 +460,15 @@ def test_list_open_subjects_keeps_type_and_kind_partitions(client: TestClient, d
     assert shared_id_types == {typed_note.subject_type, "ticket"}
 
 
-def test_list_open_subjects_excludes_historical_runs(client: TestClient, druks_db):
-    note = Note.create(body="one open subject")
+async def test_list_open_subjects_excludes_historical_runs(client: TestClient, druks_db):
+    note = await Note.create(body="one open subject")
     start = datetime(2026, 1, 1, tzinfo=UTC)
     for number in range(10):
-        historical = seed_run(druks_db, kind=Summarize.kind, subject=note, state="finished")
+        historical = await seed_run(druks_db, kind=Summarize.kind, subject=note, state="finished")
         historical.created_at = start + timedelta(seconds=number)
-    current = seed_run(druks_db, kind=Summarize.kind, subject=note)
+    current = await seed_run(druks_db, kind=Summarize.kind, subject=note)
     current.created_at = start + timedelta(seconds=10)
-    druks_db.flush()
+    await druks_db.flush()
 
     body = client.get("/api/open-subjects").json()
 
@@ -461,24 +477,24 @@ def test_list_open_subjects_excludes_historical_runs(client: TestClient, druks_d
     ] == [current.id]
 
 
-def test_list_open_subjects_caps_the_workflows(client: TestClient, druks_db):
+async def test_list_open_subjects_caps_the_workflows(client: TestClient, druks_db):
     for number in range(51):
-        note = Note.create(body=f"open {number}")
-        seed_run(druks_db, kind=Summarize.kind, subject=note)
+        note = await Note.create(body=f"open {number}")
+        await seed_run(druks_db, kind=Summarize.kind, subject=note)
 
     body = client.get("/api/open-subjects").json()
 
     assert len(body["subjects"]) == 50
 
 
-def test_get_gate_then_answer_roundtrip(client: TestClient, druks_db, resume_spy):
-    note = Note.create(body="answer gate")
-    run = _park(druks_db, note)
+async def test_get_gate_then_answer_roundtrip(client: TestClient, druks_db, resume_spy):
+    note = await Note.create(body="answer gate")
+    run = await _park(druks_db, note)
 
     view = client.get(f"/api/gates/{run.id}")
     assert view.status_code == 200
     data = view.json()
-    assert data == services.get_gate(run.id).model_dump(mode="json", by_alias=True)
+    assert data == (await services.get_gate(run.id)).model_dump(mode="json", by_alias=True)
 
     answered = client.post(
         f"/api/gates/{run.id}/answer",
@@ -489,14 +505,13 @@ def test_get_gate_then_answer_roundtrip(client: TestClient, druks_db, resume_spy
     assert resume_spy == [{"id": run.id, "action": "approve", "answers": {}, "note": "ship it"}]
 
 
-def test_answer_gate_keys_empty_request_changes_on_ask_context(
+async def test_answer_gate_keys_empty_request_changes_on_ask_context(
     client: TestClient, druks_db, resume_spy
 ):
-    critique_note = Note.create(body="critique-backed gate")
-    critique_run = _park(druks_db, critique_note, context="name the rollback boundary")
-    critique_parked_at = services.get_gate(critique_run.id).model_dump(mode="json", by_alias=True)[
-        "parkedAt"
-    ]
+    critique_note = await Note.create(body="critique-backed gate")
+    critique_run = await _park(druks_db, critique_note, context="name the rollback boundary")
+    critique_gate = await services.get_gate(critique_run.id)
+    critique_parked_at = critique_gate.model_dump(mode="json", by_alias=True)["parkedAt"]
 
     answered = client.post(
         f"/api/gates/{critique_run.id}/answer",
@@ -523,9 +538,9 @@ def test_answer_gate_keys_empty_request_changes_on_ask_context(
         }
     ]
 
-    contextless_note = Note.create(body="contextless gate")
-    contextless_run = _park(druks_db, contextless_note)
-    contextless_parked_at = services.get_gate(contextless_run.id).model_dump(
+    contextless_note = await Note.create(body="contextless gate")
+    contextless_run = await _park(druks_db, contextless_note)
+    contextless_parked_at = (await services.get_gate(contextless_run.id)).model_dump(
         mode="json", by_alias=True
     )["parkedAt"]
 
@@ -548,15 +563,15 @@ def test_answer_gate_keys_empty_request_changes_on_ask_context(
     assert len(resume_spy) == 1
 
 
-def test_answer_gate_reads_already_answered_off_the_receipt(
+async def test_answer_gate_reads_already_answered_off_the_receipt(
     client: TestClient, druks_db, resume_spy
 ):
-    note = Note.create(body="answered gate")
+    note = await Note.create(body="answered gate")
     parked_at = datetime.now(UTC)
-    run = seed_run(druks_db, kind=Summarize.kind, subject=note)
+    run = await seed_run(druks_db, kind=Summarize.kind, subject=note)
     run.input_requested_at = parked_at
     run.answer_parked_at = parked_at
-    druks_db.flush()
+    await druks_db.flush()
 
     response = client.post(
         f"/api/gates/{run.id}/answer",
@@ -568,9 +583,9 @@ def test_answer_gate_reads_already_answered_off_the_receipt(
     assert resume_spy == []
 
 
-def test_answer_gate_requires_an_aware_parked_at(client: TestClient, druks_db):
-    note = Note.create(body="naive parked timestamp")
-    run = _park(druks_db, note)
+async def test_answer_gate_requires_an_aware_parked_at(client: TestClient, druks_db):
+    note = await Note.create(body="naive parked timestamp")
+    run = await _park(druks_db, note)
 
     naive = client.post(
         f"/api/gates/{run.id}/answer",
@@ -580,14 +595,14 @@ def test_answer_gate_requires_an_aware_parked_at(client: TestClient, druks_db):
     assert naive.status_code == 422  # Pydantic's, not the agent taxonomy
 
 
-def test_cancel_run_route(client: TestClient, druks_db):
-    note = Note.create(body="cancelled note")
-    run = seed_run(druks_db, kind=Summarize.kind, subject=note)
+async def test_cancel_run_route(client: TestClient, druks_db):
+    note = await Note.create(body="cancelled note")
+    run = await seed_run(druks_db, kind=Summarize.kind, subject=note)
     # Parked, so the cancel must clear the gate — and never write the receipt.
     run.input_gate = "review"
     run.input_request = {"presentation": "in_app", "questions": []}
     run.input_requested_at = run.utc_now()
-    druks_db.flush()
+    await druks_db.flush()
 
     unbounded = client.post(f"/api/runs/{run.id}/cancel", json={"reason": "r" * 501})
     assert unbounded.status_code == 422
@@ -598,8 +613,8 @@ def test_cancel_run_route(client: TestClient, druks_db):
     assert cancelled.status_code == 200
     assert cancelled.json() == {"run": run.id, "result": "cancelled"}
 
-    druks_db.expire_all()
-    run = druks_db.get(type(run), run.id)
+    druks_db.expunge_all()
+    run = await druks_db.get(type(run), run.id)
     assert not run.answer_parked_at
     assert not run.input_gate
     assert run.failure == "wrong branch"
@@ -609,10 +624,10 @@ def test_cancel_run_route(client: TestClient, druks_db):
     assert again.json()["result"] == "already_cancelled"
 
 
-def test_transcript_route_matches_the_read_machinery(client: TestClient, druks_db):
-    note = Note.create(body="transcript route")
-    run = seed_run(druks_db, kind=Summarize.kind, subject=note)
-    call = seed_call(druks_db, run, "summarize", status="running")
+async def test_transcript_route_matches_the_read_machinery(client: TestClient, druks_db):
+    note = await Note.create(body="transcript route")
+    run = await seed_run(druks_db, kind=Summarize.kind, subject=note)
+    call = await seed_call(druks_db, run, "summarize", status="running")
     call_dir = call.call_dir
     call_dir.mkdir(parents=True, exist_ok=True)
     (call_dir / "stdout.jsonl").write_bytes(b"hello " + "é".encode() + b" transcript")
@@ -628,17 +643,17 @@ def test_transcript_route_matches_the_read_machinery(client: TestClient, druks_d
     assert response.json()["text"] == "hello �"
 
 
-def test_resume_route_contract_is_preserved(client: TestClient, druks_db, resume_spy):
+async def test_resume_route_contract_is_preserved(client: TestClient, druks_db, resume_spy):
     unknown = client.post("/api/runs/no-such-run/resume", json={"control": "approve"})
     assert unknown.status_code == 404
 
-    idle_note = Note.create(body="idle run")
-    idle = seed_run(druks_db, kind=Summarize.kind, subject=idle_note)
+    idle_note = await Note.create(body="idle run")
+    idle = await seed_run(druks_db, kind=Summarize.kind, subject=idle_note)
     not_waiting = client.post(f"/api/runs/{idle.id}/resume", json={"control": "approve"})
     assert not_waiting.status_code == 409
 
-    parked_note = Note.create(body="parked run")
-    run = _park(druks_db, parked_note)
+    parked_note = await Note.create(body="parked run")
+    run = await _park(druks_db, parked_note)
     bad_control = client.post(f"/api/runs/{run.id}/resume", json={"control": "merge"})
     assert bad_control.status_code == 422
     assert resume_spy == []
@@ -666,15 +681,15 @@ def test_resume_route_contract_is_preserved(client: TestClient, druks_db, resume
     run.answer_parked_at = run.input_requested_at
     run.input_gate = None
     run.input_request = None
-    druks_db.flush()
+    await druks_db.flush()
     late = client.post(f"/api/runs/{run.id}/resume", json={"control": "approve"})
     assert late.status_code == 409
     assert len(resume_spy) == 1
 
 
-def test_usage_agent_route_matches_the_service(client: TestClient, druks_db, account):
-    note = Note.create(body="usage route")
-    run = seed_run(
+async def test_usage_agent_route_matches_the_service(client: TestClient, druks_db, account):
+    note = await Note.create(body="usage route")
+    run = await seed_run(
         druks_db,
         kind=Summarize.kind,
         subject=note,
@@ -693,12 +708,12 @@ def test_usage_agent_route_matches_the_service(client: TestClient, druks_db, acc
             cost_metadata={"total_tokens": 500},
         )
     )
-    druks_db.flush()
+    await druks_db.flush()
 
     response = client.get("/api/usage/summary")
     assert response.status_code == 200
     body = response.json()
-    assert body == services.get_usage(account).model_dump(mode="json", by_alias=True)
+    assert body == (await services.get_usage(account)).model_dump(mode="json", by_alias=True)
     assert len(response.content) <= 4 * 1024
 
     today = client.get("/api/usage/today").json()

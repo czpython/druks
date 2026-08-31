@@ -75,6 +75,11 @@ http://:8000 {
 # loopback listener; deployments whose edge already carries webhooks (exe.dev
 # port-share) need nothing here.
 {$DRUKS_WEBHOOK_HOST:http://127.0.0.1:8081} {
+	# The default is every interface. A public webhook host needs that.
+	# When a second TLS terminator runs on this box, for example
+	# `tailscale serve` on the tailnet address, set one address here.
+	# Two listeners on one port collide, and one of them stops.
+	bind {$DRUKS_WEBHOOK_BIND_HOST:0.0.0.0 ::}
 	header {
 		X-Content-Type-Options "nosniff"
 		Referrer-Policy "no-referrer"

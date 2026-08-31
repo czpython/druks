@@ -19,8 +19,8 @@ from druks.harnesses.exceptions import HarnessSandboxProvisioningError
 from druks.settings import load_settings
 
 from .constants import SANDBOX_HOST_LEASE_SECONDS
-from .exceptions import HostGone, SandboxError, SandboxUnreachable
-from .host import Sandbox
+from .exceptions import HostGone, SandboxError, SandboxUnreachable, TemplateNotFound
+from .host import Host
 from .layout import get_helper_script_path, get_remote_home
 
 logger = logging.getLogger(__name__)
@@ -53,7 +53,8 @@ class Client:
         image_override: str | None = None,
         provider: str | None = None,
         sandbox_env: dict[str, str] | None = None,
-    ) -> AsyncIterator[Sandbox]:
+        template: str | None = None,
+    ) -> AsyncIterator[Host]:
         """One-shot lifecycle: acquire → yield → release. For callers
         whose sandbox is bound to a single context manager body."""
         host_id: str | None = None
@@ -64,9 +65,10 @@ class Client:
                 image_override=image_override,
                 provider=provider,
                 sandbox_env=sandbox_env,
-            ) as sandbox:
-                host_id = sandbox.id
-                yield sandbox
+                template=template,
+            ) as host:
+                host_id = host.id
+                yield host
         finally:
             if host_id:
                 await self.release(host_id=host_id)
@@ -79,7 +81,8 @@ class Client:
         image_override: str | None = None,
         provider: str | None = None,
         sandbox_env: dict[str, str] | None = None,
-    ) -> AsyncIterator[Sandbox]:
+        template: str | None = None,
+    ) -> AsyncIterator[Host]:
         """Create a new host (or reuse one matching ``idempotency_key``)
         and yield it with SSH connected. Closes SSH on exit but does NOT
         release the VM — pair with ``release`` for long-lived flows or
@@ -99,6 +102,7 @@ class Client:
                     idempotency_key=key,
                     image=image or None,
                     provider=provider,
+                    template=template,
                 )
             except (SandboxProvisioningError, SandboxUnavailableError) as exc:
                 # Transient control-plane failures — a 502 the service raises
@@ -117,26 +121,26 @@ class Client:
                 settings.sandbox_keys_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
                 key_path.write_text(record.private_key)
                 key_path.chmod(0o600)
-            sandbox = Sandbox(record=record)
+            host = Host(record=record)
             try:
-                await _upload_helper_script(sandbox)
+                await _upload_helper_script(host)
             except _ACQUIRE_SETUP_REACHABILITY_ERRORS as error:
                 # Fresh VM never became usable; roll back and classify as provisioning.
-                await sandbox.aclose()
+                await host.aclose()
                 await self._best_effort_delete(api, record.id)
                 key_path.unlink(missing_ok=True)
                 raise HarnessSandboxProvisioningError(
                     f"sandbox host {record.id} unreachable during setup: {error}"
                 ) from error
             except BaseException:
-                await sandbox.aclose()
+                await host.aclose()
                 await self._best_effort_delete(api, record.id)
                 key_path.unlink(missing_ok=True)
                 raise
             try:
-                yield sandbox
+                yield host
             finally:
-                await sandbox.aclose()
+                await host.aclose()
         finally:
             await api.aclose()
 
@@ -148,6 +152,30 @@ class Client:
         finally:
             await api.aclose()
 
+    async def create_template(self, *, setup_script: str, base_image: str | None, label: str):
+        api = self._api()
+        try:
+            return await api.create_template(
+                setup_script=setup_script,
+                base_image=base_image,
+                label=label,
+            )
+        finally:
+            await api.aclose()
+
+    async def get_template(self, *, base_image: str = "", setup_script_hash: str):
+        api = self._api()
+        try:
+            for template in await api.list_templates():
+                if template.setup_script_hash != setup_script_hash:
+                    continue
+                if base_image and template.base_image != base_image:
+                    continue
+                return template
+        finally:
+            await api.aclose()
+        raise TemplateNotFound(f"sandbox template {setup_script_hash} does not exist")
+
     @staticmethod
     async def _best_effort_delete(api: SandboxAPI, host_id: str) -> None:
         try:
@@ -158,7 +186,7 @@ class Client:
             logger.exception("rollback delete failed for host %s", host_id)
 
     @asynccontextmanager
-    async def attach(self, *, host_id: str) -> AsyncIterator[Sandbox]:
+    async def attach(self, *, host_id: str) -> AsyncIterator[Host]:
         """Reattach to an existing host. Raises ``HostGone`` if the VM
         has been torn down. SSH closes on exit; the VM stays up."""
         api = self._api()
@@ -178,11 +206,11 @@ class Client:
                 raise HarnessSandboxProvisioningError(
                     f"sandbox host {host_id} lookup failed: {exc}"
                 ) from exc
-            sandbox = Sandbox(record=record)
+            host = Host(record=record)
             try:
-                yield sandbox
+                yield host
             finally:
-                await sandbox.aclose()
+                await host.aclose()
         finally:
             await api.aclose()
 
@@ -193,7 +221,8 @@ class Client:
         image_override: str | None = None,
         provider: str | None = None,
         sandbox_env: dict[str, str] | None = None,
-    ) -> Sandbox:
+        template: str | None = None,
+    ) -> Host:
         """Create a host and return its handle without holding an SSH connection —
         the handle reconnects lazily when used (its id and lease expiry are readable
         without one). Caller is responsible for ``release``."""
@@ -202,8 +231,9 @@ class Client:
             image_override=image_override,
             provider=provider,
             sandbox_env=sandbox_env,
-        ) as sandbox:
-            return sandbox
+            template=template,
+        ) as host:
+            return host
 
     async def release(self, *, host_id: str) -> None:
         """Terminate the VM. Idempotent and infallible — already-gone hosts
@@ -239,24 +269,24 @@ class Client:
         )
 
 
-async def _upload_helper_script(sandbox: Sandbox) -> None:
-    helper_path = get_helper_script_path(sandbox.ssh_username)
-    await sandbox.upload_file(
+async def _upload_helper_script(host: Host) -> None:
+    helper_path = get_helper_script_path(host.ssh_username)
+    await host.upload_file(
         local=_DRUKS_SANDBOX_LOCAL_SCRIPT,
         remote=helper_path,
     )
-    await sandbox.exec(["chmod", "755", helper_path], timeout=10.0)
+    await host.exec(["chmod", "755", helper_path], timeout=10.0)
 
     # Direct .gitconfig write — scope helper to github.com so it never
     # intercepts auth for other hosts. The ``!`` tells git to run the
     # value as a shell command rather than appending it to
     # ``git credential-``.
-    gitconfig_path = f"{get_remote_home(sandbox.ssh_username)}/.gitconfig"
+    gitconfig_path = f"{get_remote_home(host.ssh_username)}/.gitconfig"
     gitconfig_body = (
         f'[credential "https://github.com"]\n\thelper = !{helper_path} git-credential\n'
     )
     write_cmd = f"printf %s {shlex.quote(gitconfig_body)} > {shlex.quote(gitconfig_path)}"
-    write_result = await sandbox.exec(
+    write_result = await host.exec(
         ["sh", "-c", write_cmd],
         timeout=10.0,
     )
