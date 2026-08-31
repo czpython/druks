@@ -63,8 +63,16 @@ def make_app_migration(app_name: str, message: str, database_url: str) -> None:
     for table in Base.metadata.tables.values():
         if table.name.startswith(app.table_prefix):
             table.to_metadata(scoped)
-    files_table = Base.metadata.tables["files"].to_metadata(scoped)
-    files_table.info[_MIGRATION_SUPPORT_ONLY] = True
+    # FileField points at the platform files table, and that table points at
+    # others. They all ride along so every foreign key resolves; include_object
+    # keeps each of them out of the app's own diff.
+    supporting = [Base.metadata.tables["files"]]
+    for table in supporting:
+        for key in table.foreign_key_constraints:
+            if key.referred_table not in supporting:
+                supporting.append(key.referred_table)
+    for table in supporting:
+        table.to_metadata(scoped).info[_MIGRATION_SUPPORT_ONLY] = True
 
     config = Config(str(_ALEMBIC_INI))
     config.set_main_option("version_locations", str(migrations_dir / "versions"))
