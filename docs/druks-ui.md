@@ -61,7 +61,7 @@ TextValue  NumberValue  StatusValue        values
 TimeValue
 Option  TextField  TextAreaField           fields
 NumberField  SelectField  MultiSelectField
-RadioField  CheckboxField
+RadioField  CheckboxField  UploadField
 Block  Value  Field                        the three unions
 ```
 
@@ -242,10 +242,10 @@ against the declared signature. A value the declared type rejects answers 422. T
 The shell reads a page at `/<app><page path>`. It calls the matching page API
 route.
 
-`pages` is a reserved segment under `/api/<app>`, like `transcripts`. A subject
-type named `pages` is a boot error. An app router whose prefix is `/pages` is a
-boot error. Without the check, FastAPI would hide one of the two by
-registration order.
+`pages` is a reserved segment under `/api/<app>`, with `transcripts` and
+`uploads`. A subject type with one of those names is a boot error. An app router
+whose prefix is one of them is a boot error. Without the check, FastAPI would
+hide one of the two by registration order.
 
 ## Page purity
 
@@ -514,7 +514,7 @@ Value = Annotated[TextValue | NumberValue | StatusValue | TimeValue, Discriminat
 
 Field = Annotated[
     TextField | TextAreaField | NumberField | SelectField | MultiSelectField
-    | RadioField | CheckboxField,
+    | RadioField | CheckboxField | UploadField,
     Discriminator("field"),
 ]
 ```
@@ -1185,8 +1185,9 @@ time in the title attribute.
 
 ## Fields
 
-Every field carries a `field` discriminator. Every field has `name`, `label`,
-`help_text`, `is_required`, and `value`. `name` is the key the shell sends.
+Every field carries a `field` discriminator, `name`, `label`, `help_text`, and
+`is_required`. `name` is the key the shell sends. Every field but `UploadField`
+also has a `value`, which is what it starts on.
 
 ### TextField
 
@@ -1337,6 +1338,49 @@ class CheckboxField:
 ```json
 {"field": "checkbox", "name": "notify", "label": "Notify the owner", "value": false, "helpText": "", "isRequired": false}
 ```
+
+### UploadField
+
+```python
+class UploadField:
+    field: Literal["upload"] = "upload"
+    name: str
+    label: str
+    accept: str = ""
+    help_text: str = ""
+    is_required: bool = False
+```
+
+```json
+{"field": "upload", "name": "photo", "label": "Add a photo", "accept": "image/*", "helpText": "", "isRequired": false}
+```
+
+One file, and no starting value: nothing the server sends could put a file back
+into a file input.
+
+`accept` goes straight into the file dialog's own filter, in its own syntax —
+`"image/*"`, `".csv,.tsv"`. It narrows what the operator can pick. It is not a
+promise about the bytes, and the platform does not check it. An operation that
+needs certainty opens the file and looks.
+
+On submit the shell sends the bytes to `POST /api/<app>/uploads`, which stores
+them and answers with a `FileSummary`. The shell then submits `id` as the
+field's value, so the operation takes a plain string:
+
+```python
+@router.post("/photos", operation_id="add_photo")
+async def add_photo(photo: Annotated[str, Body(embed=True)]) -> None:
+    shop.image = File(id=photo)
+```
+
+A `FileField` column takes the id and keeps a real foreign key, so an id naming
+no file is refused by the database rather than stored.
+
+The upload is filed under the app whose page holds the form and under the
+operator who sent it, both taken from the request rather than from the client.
+A file over the platform's upload cap is refused, and the shell puts the refusal
+on that field. A file whose form is never submitted stays stored with nothing
+pointing at it.
 
 ## Page and Follows
 

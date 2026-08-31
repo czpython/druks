@@ -11,10 +11,14 @@ import { PagesContext } from './pages'
 
 vi.mock('../api/client', async () => {
   const real = await vi.importActual<typeof import('../api/client')>('../api/client')
-  return { ApiError: real.ApiError, api: { callOperation: vi.fn(), readPage: vi.fn() } }
+  return {
+    ApiError: real.ApiError,
+    api: { callOperation: vi.fn(), readPage: vi.fn(), upload: vi.fn() },
+  }
 })
 
 const callOperation = vi.mocked(api.callOperation)
+const upload = vi.mocked(api.upload)
 
 const PAGES: PageEntry[] = [
   { name: 'notes', label: 'notes', path: '/field_notes', parent: '', order: 0 },
@@ -81,6 +85,15 @@ const BODY: Field = {
 // A required field the browser itself will not let past empty; the server's own
 // errors are what the rest of these tests exercise.
 const REQUIRED_BODY: Field = { ...BODY, isRequired: true }
+
+const PHOTO: Field = {
+  field: 'upload',
+  name: 'photo',
+  label: 'Photo',
+  accept: 'image/*',
+  helpText: '',
+  isRequired: false,
+}
 
 describe('fields', () => {
   it('renders every V1 field', () => {
@@ -433,5 +446,58 @@ describe('what an action does next', () => {
 
     expect(container.querySelector('.dui-action-broken')).toBeTruthy()
     expect(screen.getByText('Ghost').tagName).toBe('SPAN')
+  })
+})
+
+describe('an upload field', () => {
+  function pick(container: HTMLElement, file: File) {
+    const input = container.querySelector<HTMLInputElement>('input[type="file"]')!
+    fireEvent.change(input, { target: { files: [file] } })
+  }
+
+  it('offers the file dialog only what the field accepts', () => {
+    const { container } = renderBlocks([form([PHOTO])])
+
+    expect(
+      container.querySelector<HTMLInputElement>('input[type="file"]')?.accept,
+    ).toBe('image/*')
+  })
+
+  it('stores the file first and submits what it is called', async () => {
+    upload.mockResolvedValue({
+      id: 'file-7',
+      name: 'shopfront.jpg',
+      contentType: 'image/jpeg',
+      size: 12,
+      url: '/api/files/file-7',
+    })
+    const { container } = renderBlocks([form([PHOTO])])
+    const chosen = new File(['jpeg bytes'], 'shopfront.jpg', { type: 'image/jpeg' })
+    pick(container, chosen)
+
+    fireEvent.submit(container.querySelector('form')!)
+
+    await waitFor(() => expect(callOperation).toHaveBeenCalled())
+    expect(upload).toHaveBeenCalledWith('field_notes', chosen)
+    // The operation takes the id. The bytes never reach it.
+    expect(callOperation).toHaveBeenCalledWith('POST', '/api/field_notes/notes', {
+      photo: 'file-7',
+    })
+  })
+
+  it('puts a refused file on its own field and writes nothing', async () => {
+    upload.mockRejectedValue(
+      new ApiError('That file is larger than 25 MB. Choose a smaller one.', 413, null),
+    )
+    const { container } = renderBlocks([form([PHOTO])])
+    pick(container, new File(['jpeg bytes'], 'huge.jpg', { type: 'image/jpeg' }))
+
+    fireEvent.submit(container.querySelector('form')!)
+
+    await waitFor(() =>
+      expect(screen.getByRole('alert').textContent).toContain('larger than 25 MB'),
+    )
+    expect(callOperation).not.toHaveBeenCalled()
+    expect(container.querySelector('.dui-field-error')).toBeTruthy()
   })
 })

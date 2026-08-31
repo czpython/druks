@@ -172,6 +172,18 @@ function Input({
           onChange={(event) => onChange(field.name, event.target.checked)}
         />
       )
+    case 'upload':
+      return (
+        <input
+          {...shared}
+          className="dui-input dui-upload"
+          type="file"
+          // The picked file itself. The form stores it and submits its id, so
+          // this input never carries a value of its own to put back.
+          accept={field.accept || undefined}
+          onChange={(event) => onChange(field.name, event.target.files?.[0] ?? null)}
+        />
+      )
     default:
       return (
         <div className="dui-unknown mono" role="alert">

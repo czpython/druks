@@ -87,6 +87,7 @@ AUTHOR_SURFACE = {
         "TimeValue",
         "Timeline",
         "TimelineItem",
+        "UploadField",
         "Value",
         "page",
     },

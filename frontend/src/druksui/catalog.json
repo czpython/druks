@@ -357,6 +357,14 @@
           "value": false,
           "helpText": "",
           "isRequired": false
+        },
+        {
+          "field": "upload",
+          "name": "photo",
+          "label": "Photo",
+          "accept": "image/*",
+          "helpText": "A picture of the shopfront.",
+          "isRequired": false
         }
       ],
       "action": {
