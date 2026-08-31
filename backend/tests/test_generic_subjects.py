@@ -267,6 +267,25 @@ async def test_the_board_status_read_answers_for_every_id_it_is_given(druks_db):
     assert statuses["2"].run is None
 
 
+async def test_a_page_reads_a_whole_board_through_the_subject_class(druks_db):
+    # What a declared page calls to fill a list of rows: the read the platform's
+    # own board makes, reached without importing the durable read side.
+    live = await _seed_run(druks_db, subject_id="1", state="running")
+    parked = await _seed_run(
+        druks_db, subject_type="ticket", subject_id="owner/repo#7", state="parked"
+    )
+
+    # A stored subject keys its rows by integer and answers by the id its summary
+    # carries; an identity-only subject is asked with the id it already is.
+    stored = await Thing.get_statuses([1, 2])
+    tickets = await Ticket.get_statuses(["owner/repo#7", "owner/repo#9"])
+
+    assert stored["1"].run == live.id
+    assert stored["2"].run is None
+    assert tickets["owner/repo#7"].run == parked.id
+    assert tickets["owner/repo#9"].run is None
+
+
 async def test_list_returns_every_subject_with_status(client: TestClient, druks_db):
     live = await _seed_run(druks_db, subject_id="1", state="running")
     await _seed_call(druks_db, live, agent="implement", status="running")
