@@ -104,8 +104,7 @@ class SecretField(Schema):
     """A secret the operator hands over — a token, a key. It carries no
     ``value``, the way ``UploadField`` carries none: a file input cannot be
     seeded, and a secret must not be, so an app can never echo a stored secret
-    back to the browser by declaring one. The shell masks the input and keeps it
-    from the password manager, and the successful-submit reset clears it."""
+    back to the browser by declaring one."""
 
     field: Literal["secret"] = "secret"
     name: str

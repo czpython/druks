@@ -217,8 +217,7 @@ function Input({
           {...shared}
           className="dui-input"
           // The same masked, password-manager-ignored input the settings modal
-          // uses for the MCP bearer token, so a secret is never on screen and
-          // never offered to a manager as ordinary text.
+          // uses for the MCP bearer token.
           type="password"
           autoComplete="new-password"
           data-1p-ignore=""

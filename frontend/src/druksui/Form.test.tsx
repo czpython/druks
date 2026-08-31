@@ -653,6 +653,23 @@ describe('a secret field', () => {
     expect(screen.queryByText(/sk-live-abc123/)).toBeNull()
   })
 
+  it('redacts a string-detail refusal to a fixed form message when a secret is present', async () => {
+    // The repo's normal app-route failure is HTTPException(status, "detail"): a
+    // plain string, not the array Pydantic ships. It must be redacted too.
+    const said = 'token sk-live-abc123 was rejected by the provider'
+    callOperation.mockRejectedValueOnce(new ApiError(said, 400, said))
+    renderBlocks([form([SECRET], action({ refresh: 'none' }))])
+    fireEvent.change(screen.getByLabelText(/Access token/), { target: { value: 'sk-live-abc123' } })
+
+    fireEvent.click(screen.getByText('Save'))
+
+    await waitFor(() =>
+      expect(screen.getByText('Some of what you entered is not valid.')).toBeTruthy(),
+    )
+    expect(screen.queryByText(/was rejected by the provider/)).toBeNull()
+    expect(screen.queryByText(/sk-live-abc123/)).toBeNull()
+  })
+
   it('keeps the server words for a non-secret field even when the form holds a secret', async () => {
     callOperation.mockRejectedValueOnce(
       new ApiError('validation', 422, [

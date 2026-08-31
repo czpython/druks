@@ -332,8 +332,6 @@ export type Field =
   | (FieldBase & { field: 'radio'; options: Option[]; value: string })
   | (FieldBase & { field: 'checkbox'; value: boolean })
   | (FieldBase & { field: 'upload'; accept: string })
-  // A secret carries no value: nothing the server sends could seed it, so an app
-  // cannot echo a stored secret back to the browser.
   | (FieldBase & { field: 'secret' })
 
 // A control that calls one of the app's own operations. The shell resolves the

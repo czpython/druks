@@ -38,8 +38,7 @@ export function Form({
     setKnown(shape)
     setEdits(null)
   }
-  const secretNames = fields.filter((one) => one.field === 'secret').map((one) => one.name)
-  const run = useAction(action, fields.map((one) => one.name), secretNames, () => {
+  const run = useAction(action, fields, () => {
     setEdits(null)
     setSubmits((count) => count + 1)
   })
@@ -151,12 +150,9 @@ function Confirm({ action, run }: { action: Action; run: ReturnType<typeof useAc
 // Everything an action does once someone presses it: ask first when it says to,
 // send the one payload, keep a second press out while it runs, and then stay,
 // refresh, or navigate.
-function useAction(
-  action: Action,
-  fieldNames: string[] = [],
-  secretNames: string[] = [],
-  clear?: () => void,
-) {
+function useAction(action: Action, fields: Field[] = [], clear?: () => void) {
+  const fieldNames = fields.map((one) => one.name)
+  const secretNames = fields.filter((one) => one.field === 'secret').map((one) => one.name)
   const [pending, setPending] = useState(false)
   const [problem, setProblem] = useState('')
   const [note, setNote] = useFlashNote<string>()
@@ -302,26 +298,19 @@ function address(
 }
 
 // Pydantic embeds the submitted input in many of its messages, so the server's
-// own words about a secret can print the token back on screen. These two fixed
-// lines take their place: one on the secret field, one on the form.
+// own words about a secret can print the token back on screen.
 const SECRET_MESSAGE = 'This value is not valid.'
 const SECRET_FORM_MESSAGE = 'Some of what you entered is not valid.'
 
-// FastAPI names the field a value failed on in the last part of ``loc``. One
-// that names a field on screen belongs to it; the rest belong to the form, and
-// so does every other failure. A secret can carry the token out two ways — its
-// own message, and the form-level bucket a `loc` naming no field falls into — so
-// both go generic whenever the form holds a secret. Every other field keeps the
-// server's real words: a number under its minimum should still say so.
 function problems(
   error: unknown,
   fieldNames: string[],
   secretNames: string[] = [],
 ): { fields: Record<string, string>; rest: string } {
-  if (!(error instanceof ApiError) || !Array.isArray(error.detail)) {
-    return { fields: {}, rest: message(error) }
-  }
   const hasSecret = secretNames.length > 0
+  if (!(error instanceof ApiError) || !Array.isArray(error.detail)) {
+    return { fields: {}, rest: hasSecret ? SECRET_FORM_MESSAGE : message(error) }
+  }
   const fields: Record<string, string> = {}
   const loose: string[] = []
   let redactForm = false
@@ -360,8 +349,6 @@ function startingValue(field: Field): [string, unknown] {
   // An upload starts empty. No value the server sends could put a file back
   // into a file input, and the browser would refuse it if it tried.
   if (field.field === 'upload') return [field.name, null]
-  // A secret carries no value by type — it starts empty, and the reset after a
-  // successful submit brings it back here.
   if (field.field === 'secret') return [field.name, '']
   return [field.name, field.value]
 }
