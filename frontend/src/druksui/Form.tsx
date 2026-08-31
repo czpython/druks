@@ -308,7 +308,10 @@ function problems(
   secretNames: string[] = [],
 ): { fields: Record<string, string>; rest: string } {
   const hasSecret = secretNames.length > 0
-  if (!(error instanceof ApiError) || !Array.isArray(error.detail)) {
+  // A failure that never reached the server carries no server words, so there
+  // is nothing in it to take away.
+  if (!(error instanceof ApiError)) return { fields: {}, rest: message(error) }
+  if (!Array.isArray(error.detail)) {
     return { fields: {}, rest: hasSecret ? SECRET_FORM_MESSAGE : message(error) }
   }
   const fields: Record<string, string> = {}

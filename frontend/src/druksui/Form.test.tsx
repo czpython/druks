@@ -670,6 +670,19 @@ describe('a secret field', () => {
     expect(screen.queryByText(/sk-live-abc123/)).toBeNull()
   })
 
+  it('says what went wrong when a secret form never reached the server', async () => {
+    // No response, so no server words to echo the secret back. Redacting here
+    // would send the operator to revoke a credential that is fine.
+    callOperation.mockRejectedValueOnce(new TypeError('Failed to fetch'))
+    renderBlocks([form([SECRET], action({ refresh: 'none' }))])
+    fireEvent.change(screen.getByLabelText(/Access token/), { target: { value: 'sk-live-abc123' } })
+
+    fireEvent.click(screen.getByText('Save'))
+
+    await waitFor(() => expect(screen.getByText('Failed to fetch')).toBeTruthy())
+    expect(screen.queryByText('Some of what you entered is not valid.')).toBeNull()
+  })
+
   it('keeps the server words for a non-secret field even when the form holds a secret', async () => {
     callOperation.mockRejectedValueOnce(
       new ApiError('validation', 422, [
