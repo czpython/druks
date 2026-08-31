@@ -2668,6 +2668,14 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
 .dui-choice { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; }
 .dui-form-submit { margin-top: 16px; }
 
+/* An action that asks does it in the page. */
+.dui-confirm { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.dui-confirm-ask { font-size: 12.5px; color: var(--text-mid); }
+/* What an action says once it has happened; it clears itself. */
+.dui-action-note { font-size: 12.5px; color: var(--outcome-merged); margin: 0; }
+.dui-action-note:empty { display: none; }
+.dui-action[aria-busy='true'] { opacity: 0.7; cursor: progress; }
+
 .dui-action { padding: 7px 14px; border: 1px solid var(--border-loud); border-radius: 6px; background: var(--surface-2); color: var(--text-mid); font-size: 12.5px; font-family: inherit; }
 .dui-action:hover:not(:disabled) { color: var(--text); border-color: var(--text-faint); }
 .dui-action:disabled { opacity: 0.5; }

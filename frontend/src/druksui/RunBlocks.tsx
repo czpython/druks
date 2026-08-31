@@ -15,7 +15,7 @@ export function Timeline({ title, items }: { title: string; items: TimelineItem[
   const ordered = items
   return (
     <div className="dui-timeline">
-      {title && <div className="dui-block-title">{title}</div>}
+      {title && <h3 className="dui-block-title">{title}</h3>}
       <ol className="dui-timeline-items">
         {ordered.map((item, index) => (
           <li key={index} className="dui-timeline-item">
@@ -114,7 +114,7 @@ export function Image({
 export function Files({ title, files }: { title: string; files: FileSummary[] }) {
   return (
     <div className="dui-files">
-      {title && <div className="dui-block-title">{title}</div>}
+      {title && <h3 className="dui-block-title">{title}</h3>}
       <ul className="dui-file-list">
         {files.map((file) => (
           <li key={file.id} className="dui-file">

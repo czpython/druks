@@ -223,7 +223,7 @@ export function Chart({
 export function ImageGallery({ title, images }: { title: string; images: ImageBlock[] }) {
   return (
     <div className="dui-gallery">
-      {title && <div className="dui-block-title">{title}</div>}
+      {title && <h3 className="dui-block-title">{title}</h3>}
       <ul className="dui-gallery-grid">
         {images.map((image) => (
           <li key={image.url}>
@@ -246,7 +246,7 @@ export function ImageGallery({ title, images }: { title: string; images: ImageBl
 export function Metrics({ title, metrics }: { title: string; metrics: Metric[] }) {
   return (
     <div className="dui-metrics">
-      {title && <div className="dui-block-title">{title}</div>}
+      {title && <h3 className="dui-block-title">{title}</h3>}
       <dl className="dui-metric-row">
         {metrics.map((metric) => (
           <div key={metric.label} className="dui-metric">
@@ -265,7 +265,7 @@ export function Metrics({ title, metrics }: { title: string; metrics: Metric[] }
 export function Facts({ title, facts }: { title: string; facts: Fact[] }) {
   return (
     <div className="dui-facts">
-      {title && <div className="dui-block-title">{title}</div>}
+      {title && <h3 className="dui-block-title">{title}</h3>}
       <dl className="dui-fact-list">
         {facts.map((fact) => (
           <div key={fact.label} className="dui-fact">
@@ -294,7 +294,7 @@ export function Table({
   if (rows.length === 0) {
     return (
       <div className="dui-table-block">
-        {title && <div className="dui-block-title">{title}</div>}
+        {title && <h3 className="dui-block-title">{title}</h3>}
         <div className="dui-table-empty dim">{emptyText}</div>
       </div>
     )
@@ -318,17 +318,20 @@ export function Table({
           <tbody>
             {rows.map((row, index) => (
               <tr key={index}>
-                {row.cells.map((cell, place) => (
-                  // The column label doubles as the row's label on a narrow
-                  // screen, where each row stacks as label and value.
-                  <td
-                    key={place}
-                    data-align={columns[place]?.align}
-                    data-label={columns[place]?.label}
-                  >
-                    <Datum value={cell} />
-                  </td>
-                ))}
+                {row.cells.map((cell, place) =>
+                  // The first cell names its row, the way the column header
+                  // names its column, so a reader hears which row a value
+                  // belongs to.
+                  place === 0 ? (
+                    <th key={place} scope="row" data-align={columns[place]?.align}>
+                      <Datum value={cell} />
+                    </th>
+                  ) : (
+                    <td key={place} data-align={columns[place]?.align}>
+                      <Datum value={cell} />
+                    </td>
+                  ),
+                )}
               </tr>
             ))}
           </tbody>
@@ -341,7 +344,7 @@ export function Table({
 export function List({ title, items }: { title: string; items: Value[] }) {
   return (
     <div className="dui-list-block">
-      {title && <div className="dui-block-title">{title}</div>}
+      {title && <h3 className="dui-block-title">{title}</h3>}
       <ul className="dui-list">
         {items.map((item, index) => (
           <li key={index}>

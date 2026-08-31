@@ -216,13 +216,17 @@ describe('submitting a form', () => {
     )
     renderBlocks([form([BODY], action({ refresh: 'none' }))])
 
-    fireEvent.click(screen.getByText('Save'))
-    await waitFor(() => expect(screen.getByText('working…')).toBeTruthy())
-    fireEvent.click(screen.getByText('working…'))
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Save' }).getAttribute('aria-busy')).toBe('true'),
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
 
     expect(callOperation).toHaveBeenCalledTimes(1)
     release()
-    await waitFor(() => expect(screen.getByText('Save')).toBeTruthy())
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Save' }).getAttribute('aria-busy')).toBe('false'),
+    )
   })
 
   it('puts a server validation error on the field it belongs to', async () => {
@@ -316,7 +320,6 @@ describe('what an action does next', () => {
   })
 
   it('asks first when the action says to, and sends nothing on a refusal', async () => {
-    vi.stubGlobal('confirm', vi.fn().mockReturnValue(false))
     renderBlocks([
       {
         block: 'card',
@@ -327,10 +330,31 @@ describe('what an action does next', () => {
       },
     ])
 
-    fireEvent.click(screen.getByText('Clear the gist'))
+    fireEvent.click(screen.getByRole('button', { name: 'Clear the gist' }))
 
-    expect(window.confirm).toHaveBeenCalledWith('Clear it?')
+    // The question is asked in the page, and going back sends nothing.
+    expect(screen.getByText('Clear it?')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }))
     expect(callOperation).not.toHaveBeenCalled()
+    expect(screen.queryByText('Clear it?')).toBeNull()
+  })
+
+  it('sends once the operator answers the question in the page', async () => {
+    renderBlocks([
+      {
+        block: 'card',
+        title: '',
+        description: '',
+        blocks: [],
+        actions: [action({ label: 'Clear the gist', confirm: 'Clear it?', tone: 'danger' })],
+      },
+    ])
+
+    fireEvent.click(screen.getByRole('button', { name: 'Clear the gist' }))
+    // The question replaces the control, so answering it presses the same name.
+    fireEvent.click(screen.getByRole('button', { name: 'Clear the gist' }))
+
+    await waitFor(() => expect(callOperation).toHaveBeenCalledTimes(1))
   })
 
   it('leaves the browser to navigate somewhere outside the app', async () => {
@@ -416,7 +440,7 @@ describe('what an action does next', () => {
     await waitFor(() => expect(screen.getByText(/saved, but the page did not refresh/)).toBeTruthy())
     // One write happened, and the control cannot make a second.
     expect(callOperation).toHaveBeenCalledTimes(1)
-    expect(screen.getByText('working…')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Clear' }).getAttribute('aria-busy')).toBe('true')
   })
 
   it('shows a danger action as one', () => {
