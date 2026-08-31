@@ -38,7 +38,7 @@ export function Form({
     setKnown(shape)
     setEdits(null)
   }
-  const run = useAction(action, fields.map((one) => one.name), () => {
+  const run = useAction(action, fields, () => {
     setEdits(null)
     setSubmits((count) => count + 1)
   })
@@ -150,7 +150,9 @@ function Confirm({ action, run }: { action: Action; run: ReturnType<typeof useAc
 // Everything an action does once someone presses it: ask first when it says to,
 // send the one payload, keep a second press out while it runs, and then stay,
 // refresh, or navigate.
-function useAction(action: Action, fieldNames: string[] = [], clear?: () => void) {
+function useAction(action: Action, fields: Field[] = [], clear?: () => void) {
+  const fieldNames = fields.map((one) => one.name)
+  const secretNames = fields.filter((one) => one.field === 'secret').map((one) => one.name)
   const [pending, setPending] = useState(false)
   const [problem, setProblem] = useState('')
   const [note, setNote] = useFlashNote<string>()
@@ -205,7 +207,7 @@ function useAction(action: Action, fieldNames: string[] = [], clear?: () => void
     } catch (error) {
       // A validation error names where it came from; the ones naming a field
       // this form shows go to that field, and everything else is the form's.
-      const { fields, rest } = problems(error, fieldNames)
+      const { fields, rest } = problems(error, fieldNames, secretNames)
       setFieldErrors(fields)
       setProblem(rest)
       setPending(false)
@@ -295,28 +297,43 @@ function address(
   return { path, body, missing }
 }
 
-// FastAPI names the field a value failed on in the last part of ``loc``. One
-// that names a field on screen belongs to it; the rest belong to the form, and
-// so does every other failure.
+// Pydantic embeds the submitted input in many of its messages, so the server's
+// own words about a secret can print the token back on screen.
+const SECRET_MESSAGE = 'This value is not valid.'
+const SECRET_FORM_MESSAGE = 'Some of what you entered is not valid.'
+
 function problems(
   error: unknown,
   fieldNames: string[],
+  secretNames: string[] = [],
 ): { fields: Record<string, string>; rest: string } {
-  if (!(error instanceof ApiError) || !Array.isArray(error.detail)) {
-    return { fields: {}, rest: message(error) }
+  const hasSecret = secretNames.length > 0
+  // A failure that never reached the server carries no server words, so there
+  // is nothing in it to take away.
+  if (!(error instanceof ApiError)) return { fields: {}, rest: message(error) }
+  if (!Array.isArray(error.detail)) {
+    return { fields: {}, rest: hasSecret ? SECRET_FORM_MESSAGE : message(error) }
   }
   const fields: Record<string, string> = {}
   const loose: string[] = []
+  let redactForm = false
   for (const one of error.detail as { loc?: unknown[]; msg?: string }[]) {
     const name = one.loc?.at(-1)
     const said = one.msg ?? 'is not valid'
     if (typeof name === 'string' && fieldNames.includes(name)) {
-      fields[name] = said
+      fields[name] = secretNames.includes(name) ? SECRET_MESSAGE : said
+      continue
+    }
+    if (hasSecret) {
+      // No field on screen owns this one. Whatever raised it saw the whole
+      // body, so keep its words off the screen.
+      redactForm = true
       continue
     }
     loose.push(typeof name === 'string' ? `${name}: ${said}` : said)
   }
-  return { fields, rest: loose.join('; ') }
+  const rest = loose.join('; ')
+  return { fields, rest: rest || (redactForm ? SECRET_FORM_MESSAGE : '') }
 }
 
 // Where an action's result link goes: a page of this app, or an outside URL.
@@ -334,5 +351,6 @@ function startingValue(field: Field): [string, unknown] {
   // An upload starts empty. No value the server sends could put a file back
   // into a file input, and the browser would refuse it if it tried.
   if (field.field === 'upload') return [field.name, null]
+  if (field.field === 'secret') return [field.name, '']
   return [field.name, field.value]
 }

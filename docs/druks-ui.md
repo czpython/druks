@@ -62,6 +62,7 @@ TimeValue
 Option  TextField  TextAreaField           fields
 NumberField  SelectField  MultiSelectField
 RadioField  CheckboxField  UploadField
+SecretField
 Block  Value  Field                        the three unions
 ```
 
@@ -514,7 +515,7 @@ Value = Annotated[TextValue | NumberValue | StatusValue | TimeValue, Discriminat
 
 Field = Annotated[
     TextField | TextAreaField | NumberField | SelectField | MultiSelectField
-    | RadioField | CheckboxField | UploadField,
+    | RadioField | CheckboxField | UploadField | SecretField,
     Discriminator("field"),
 ]
 ```
@@ -1224,7 +1225,7 @@ time in the title attribute.
 
 Every field carries a `field` discriminator, `name`, `label`, `help_text`, and
 `is_required`. `name` is the key the shell sends. Every field but `UploadField`
-also has a `value`, which is what it starts on.
+and `SecretField` also has a `value`, which is what it starts on.
 
 ### TextField
 
@@ -1418,6 +1419,40 @@ operator who sent it, both taken from the request rather than from the client.
 A file over the platform's upload cap is refused, and the shell puts the refusal
 on that field. A file whose form is never submitted stays stored with nothing
 pointing at it.
+
+### SecretField
+
+```python
+class SecretField:
+    field: Literal["secret"] = "secret"
+    name: str
+    label: str
+    help_text: str = ""
+    is_required: bool = False
+```
+
+```python
+ui.SecretField(name="token", label="Access token", help_text="From your account settings.")
+```
+
+```json
+{"field": "secret", "name": "token", "label": "Access token", "helpText": "From your account settings.", "isRequired": false}
+```
+
+One secret the operator hands over: a token, a key.
+
+It has no `value`. A file input cannot be seeded, and a secret must not be. A
+field with nowhere to put one cannot send a stored secret back to the browser.
+
+The shell masks it and keeps it from the browser's password managers. A
+successful submit leaves it empty.
+
+Masking protects the screen. It does not protect the stored secret.
+
+A refusal never repeats the server's words on a secret field. The shell shows a
+fixed line, because a validation message can carry the submitted value back. It
+shows a fixed line on the form too, for a refusal that names no field on screen.
+Every other field keeps the server's own words.
 
 ## Page and Follows
 

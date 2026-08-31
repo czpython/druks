@@ -100,6 +100,17 @@ class UploadField(Schema):
     is_required: bool = False
 
 
+class SecretField(Schema):
+    """One secret the operator hands over: a token, a key. It has no ``value``,
+    so a page cannot send a stored secret back to the browser."""
+
+    field: Literal["secret"] = "secret"
+    name: str
+    label: str
+    help_text: str = ""
+    is_required: bool = False
+
+
 Field = Annotated[
     TextField
     | TextAreaField
@@ -108,6 +119,7 @@ Field = Annotated[
     | MultiSelectField
     | RadioField
     | CheckboxField
-    | UploadField,
+    | UploadField
+    | SecretField,
     Discriminator("field"),
 ]

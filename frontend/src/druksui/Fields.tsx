@@ -211,6 +211,21 @@ function Input({
           onChange={(event) => onChange(field.name, event.target.checked)}
         />
       )
+    case 'secret':
+      return (
+        <input
+          {...shared}
+          className="dui-input"
+          // The set the settings modal uses for its bearer token. Keep them
+          // together.
+          type="password"
+          autoComplete="new-password"
+          data-1p-ignore=""
+          data-lpignore="true"
+          value={String(value ?? '')}
+          onChange={(event) => onChange(field.name, event.target.value)}
+        />
+      )
     case 'upload':
       return (
         <input
