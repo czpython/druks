@@ -2479,7 +2479,7 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
 .dui-page { max-width: 900px; padding: 20px 24px 40px; }
 .dui-parent { display: inline-block; margin-bottom: 10px; }
 .dui-title { font-size: 20px; font-weight: 600; margin: 0; }
-.dui-description { font-size: 13px; margin: 6px 0 0; line-height: 1.55; }
+.dui-description { font-size: 13px; margin: 6px 0 0; line-height: 1.55; max-width: 68ch; }
 .dui-retry { padding: 6px 12px; border: 1px solid var(--border-loud); border-radius: 6px; color: var(--text-mid); font-size: 12px; }
 .dui-retry:hover { background: var(--surface-2); color: var(--text); }
 
@@ -2489,22 +2489,33 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
 .dui-tab-active { color: var(--text); border-bottom-color: var(--accent-violet); }
 
 .dui-section { margin-top: 22px; }
-.dui-section-title { font-size: 11px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-dim); margin: 0 0 10px; font-weight: 600; }
-.dui-text { font-size: 13.5px; line-height: 1.6; color: var(--text-mid); margin: 12px 0; }
-.dui-markdown { font-size: 13.5px; line-height: 1.6; margin: 12px 0; }
+.dui-section-title { font-size: 11px; text-transform: uppercase; letter-spacing: 0.12em; color: var(--text-mid); margin: 0; font-weight: 600; }
+.dui-text { font-size: 13.5px; line-height: 1.6; color: var(--text-mid); max-width: 68ch; }
+.dui-markdown { font-size: 13.5px; line-height: 1.65; color: var(--text-mid); max-width: 58ch; }
+.dui-markdown :is(h1, h2, h3, h4), .dui-markdown strong { color: var(--text); }
+.dui-markdown h1 { font-size: 17px; line-height: 1.3; margin: 0 0 0.5em; }
+.dui-markdown h2 { font-size: 16px; line-height: 1.3; margin: 1.9em 0 0.5em; padding-top: 0.9em; border-top: 1px solid var(--border-soft); }
+.dui-markdown :is(h3, h4) { font-size: 13.5px; line-height: 1.4; margin: 1.5em 0 0.4em; }
+.dui-markdown > :first-child { margin-top: 0; padding-top: 0; border-top: none; }
 .dui-divider { border: none; border-top: 1px solid var(--border); margin: 18px 0; }
 
 .dui-card { border: 1px solid var(--border); border-radius: 8px; background: var(--surface); padding: 14px 16px; margin: 10px 0; }
 .dui-card-title { font-size: 13.5px; font-weight: 600; color: var(--text); }
 .dui-card-desc { font-size: 12.5px; margin-top: 3px; line-height: 1.5; }
 
-.dui-callout { border: 1px solid var(--border-loud); border-left-width: 3px; border-radius: 6px; padding: 11px 14px; margin: 12px 0; font-size: 13px; line-height: 1.55; }
+.dui-callout { border: 1px solid var(--border-loud); border-left-width: 3px; border-radius: 6px; padding: 11px 14px; font-size: 13px; line-height: 1.55; max-width: 76ch; }
 .dui-callout-title { font-weight: 600; color: var(--text); margin-bottom: 3px; }
-.dui-callout-text { color: var(--text-mid); }
-.dui-callout-info { border-left-color: var(--bucket-run); }
-.dui-callout-success { border-left-color: var(--outcome-merged); }
-.dui-callout-warning { border-left-color: var(--decision-request-revision); }
-.dui-callout-danger { border-left-color: var(--outcome-failed); }
+.dui-callout-text { color: var(--text-mid); overflow-wrap: anywhere; }
+/* The tone reaches the whole box: a stripe alone reads as a grey panel. */
+.dui-callout-info { --dui-callout-tone: var(--bucket-run); }
+.dui-callout-success { --dui-callout-tone: var(--outcome-merged); }
+.dui-callout-warning { --dui-callout-tone: var(--decision-request-revision); }
+.dui-callout-danger { --dui-callout-tone: var(--outcome-failed); }
+.dui-callout:not(.dui-callout-plain) {
+  border-color: color-mix(in oklch, var(--dui-callout-tone) 35%, transparent);
+  border-left-color: var(--dui-callout-tone);
+  background: color-mix(in oklch, var(--dui-callout-tone) 7%, var(--surface));
+}
 
 .dui-empty { border: 1px dashed var(--border-loud); border-radius: 8px; padding: 26px 20px; margin: 12px 0; text-align: center; }
 .dui-empty-title { font-size: 13.5px; color: var(--text); }
@@ -2512,8 +2523,8 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
 .dui-empty .dui-links { justify-content: center; }
 
 .dui-links { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
-.dui-link { font-size: 12.5px; color: var(--bucket-run); }
-.dui-link:hover { text-decoration: underline; }
+.dui-link { font-size: 12.5px; color: var(--text-mid); text-decoration: none; }
+.dui-link:hover { color: var(--bucket-run); text-decoration: underline; }
 .dui-link-broken { color: var(--text-faint); text-decoration: line-through; cursor: help; }
 
 .dui-unknown { font-size: 12px; color: var(--outcome-failed); border: 1px solid color-mix(in oklch, var(--outcome-failed) 30%, transparent); border-radius: 6px; padding: 9px 12px; margin: 10px 0; }
@@ -2525,11 +2536,15 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
 
 /* ---- Druks UI: run and artifact blocks ---------------------- */
 .dui-block-title { font-size: 11px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-dim); margin: 18px 0 8px; font-weight: 600; }
-.dui-status { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.06em; padding: 2px 7px; border: 1px solid var(--border-loud); border-radius: 10px; color: var(--text-mid); white-space: nowrap; }
-.dui-status-active { color: var(--bucket-run); border-color: var(--bucket-run); }
-.dui-status-success { color: var(--outcome-merged); border-color: var(--outcome-merged); }
-.dui-status-warning { color: var(--decision-request-revision); border-color: var(--decision-request-revision); }
-.dui-status-danger { color: var(--outcome-failed); border-color: var(--outcome-failed); }
+/* The app writes the word; the tone is the paint. currentColor carries it, so
+   a tone rule sets colour alone and neutral keeps the muted default. */
+.dui-status { font-size: 11.5px; letter-spacing: 0.02em; padding: 2px 8px; border-radius: 10px; color: var(--text-mid); white-space: nowrap;
+  border: 1px solid color-mix(in oklch, currentColor 45%, transparent);
+  background: color-mix(in oklch, currentColor 10%, transparent); }
+.dui-status-active { color: var(--bucket-run); animation: pulse 1.6s ease-in-out infinite; }
+.dui-status-success { color: var(--outcome-merged); }
+.dui-status-warning { color: var(--decision-request-revision); }
+.dui-status-danger { color: var(--outcome-failed); }
 
 .dui-timeline-items { list-style: none; margin: 0; padding: 0; border-left: 1px solid var(--border); }
 .dui-timeline-item { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; padding: 7px 0 7px 14px; position: relative; font-size: 13px; }
@@ -2572,6 +2587,7 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
 .dui-metric { margin: 0; }
 .dui-metric-label { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.08em; }
 .dui-metric-value { margin: 3px 0 0; font-size: 20px; color: var(--text); }
+.dui-metric-value .dui-number { font-size: inherit; }
 .dui-metric-desc { margin: 3px 0 0; font-size: 11.5px; }
 
 .dui-fact-list { margin: 10px 0; display: grid; grid-template-columns: minmax(90px, max-content) 1fr; gap: 6px 16px; }
@@ -2580,11 +2596,16 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
 .dui-fact-value { margin: 0; font-size: 12.5px; }
 
 .dui-table-scroll { overflow-x: auto; }
-.dui-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
-.dui-table th { text-align: left; font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-dim); padding: 6px 12px 6px 0; border-bottom: 1px solid var(--border); font-weight: 600; }
-.dui-table td { padding: 7px 12px 7px 0; border-bottom: 1px solid var(--border-soft); }
-.dui-table [data-align='end'] { text-align: right; padding-right: 0; }
+.dui-table { width: 100%; border-collapse: collapse; font-size: 12.5px; line-height: 1.5; }
+.dui-table thead th { text-align: left; font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-dim); padding: 6px 12px 6px 0; border-bottom: 1px solid var(--border); font-weight: 600; white-space: nowrap; }
+.dui-table :is(td, tbody th) { text-align: left; font-weight: 400; vertical-align: top; padding: 7px 12px 7px 0; border-bottom: 1px solid var(--border-soft); }
+.dui-table tbody tr:hover { background: var(--surface-2); }
+.dui-table [data-align='end'] { text-align: right; }
+/* Only the last cell gives up its gutter; every other end-aligned column keeps
+   the space that separates it from the next. */
+.dui-table tr > :last-child { padding-right: 0; }
 .dui-table-empty { font-size: 12.5px; padding: 18px 0; }
+.dui-table-empty:empty { display: none; }
 
 .dui-list { margin: 10px 0; padding-left: 18px; font-size: 12.5px; }
 .dui-list li { padding: 2px 0; }
@@ -2613,7 +2634,6 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
 
 .dui-gallery-grid { list-style: none; margin: 10px 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 12px; }
 .dui-gallery-item { display: block; }
-.dui-gallery-item:focus-visible { outline: 2px solid var(--bucket-run); outline-offset: 3px; }
 .dui-gallery .dui-image { margin: 0; }
 
 /* A narrow screen scrolls the table sideways rather than restacking it: a
@@ -2622,7 +2642,10 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
 @media (max-width: 720px) {
   .dui-columns { flex-direction: column; }
   .dui-table { font-size: 12px; }
-  .dui-table th, .dui-table td { white-space: nowrap; padding-right: 16px; }
+  .dui-table :is(th, td) { padding-right: 16px; }
+  /* Times and figures ride one line; prose wraps, so a long sentence no
+     longer decides how far the table scrolls. */
+  .dui-table .mono { white-space: nowrap; }
 }
 .dui-table-caption { text-align: left; caption-side: top; margin: 18px 0 8px; }
 .dui-chart-mark { stroke: none; }
@@ -2634,7 +2657,6 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
 .dui-field-label { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-dim); margin-bottom: 5px; }
 .dui-field-required { color: var(--decision-request-revision); }
 .dui-input { width: 100%; background: var(--surface-2); border: 1px solid var(--border-loud); border-radius: 6px; color: var(--text); padding: 8px 10px; font-size: 13px; font-family: inherit; }
-.dui-input:focus-visible { outline: 2px solid var(--bucket-run); outline-offset: 1px; }
 .dui-checkbox { width: 15px; height: 15px; }
 .dui-upload { padding: 6px 8px; }
 .dui-upload::file-selector-button { margin-right: 10px; padding: 5px 10px; border: 1px solid var(--border-loud); border-radius: 5px; background: var(--surface-2); color: var(--text-mid); font-size: 12.5px; font-family: inherit; }
@@ -2652,4 +2674,48 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
 .dui-action-primary { border-color: var(--bucket-run); color: var(--bucket-run); }
 .dui-action-danger { border-color: var(--outcome-failed); color: var(--outcome-failed); }
 .dui-action-broken { color: var(--text-faint); text-decoration: line-through; cursor: help; }
+
+/* ---- Druks UI: rhythm, reach and focus ---------------------- */
+
+/* A block owns what is inside it; the container owns the space between
+   blocks. Margins sum in these flex columns, so a block carries none and the
+   rhythm is chosen once. */
+.dui-page > .page-shell-body > * { margin-top: 22px; margin-bottom: 0; }
+.dui-page > .page-shell-body > :first-child { margin-top: 0; }
+/* The title and its tabs read as one cluster, tighter than the page below. */
+.dui-page > .page-shell-body > .dui-title { margin-top: 14px; }
+.dui-page > .page-shell-body > .dui-description { margin-top: 6px; }
+.dui-page > .page-shell-body > .dui-tabs { margin-top: 16px; }
+
+.dui-section, .dui-card, .dui-column { display: flex; flex-direction: column; }
+.dui-section { gap: 14px; }
+.dui-column { gap: 14px; }
+.dui-card { gap: 6px; }
+.dui-page :is(.dui-section, .dui-card, .dui-column, .dui-stack) > * { margin-top: 0; margin-bottom: 0; }
+
+/* A control is as wide as its label. Stretching is the flex default, which
+   welds two buttons into one bar the width of the page. */
+.dui-page > .page-shell-body > :is(.dui-action, .dui-link, .dui-parent, .dui-retry),
+.dui-stack > :is(.dui-action, .dui-link) { align-self: flex-start; }
+.dui-page > .page-shell-body > :is(.dui-action, .dui-link) + :is(.dui-action, .dui-link) { margin-top: 10px; }
+
+/* A path, a URL or a repository name breaks rather than leaving its box. */
+.dui-page { overflow-wrap: break-word; }
+.dui-fact-value { overflow-wrap: anywhere; }
+
+:is(.dui-action, .dui-link, .dui-tab, .dui-retry, .dui-parent, .dui-checkbox,
+    .dui-choice input, .dui-input, .dui-gallery-item):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+/* A run's length is not a reason to animate at someone. The indeterminate bar
+   has to give up its width too: frozen at 35% it reads as 35% done. */
+@media (prefers-reduced-motion: reduce) {
+  .dui-status-active,
+  .dui-progress-unknown .dui-progress-fill { animation: none; }
+  .dui-progress-unknown .dui-progress-fill { width: 100% !important; opacity: 0.45; }
+}
+
 .review-note-label { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-dim); margin-bottom: 5px; }
