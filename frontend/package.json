@@ -14,8 +14,8 @@
   },
   "dependencies": {
     "@novnc/novnc": "1.7.0",
-    "@tanstack/react-query": "^5.101.4",
-    "lucide-react": "^1.27.0",
+    "@tanstack/react-query": "^5.102.6",
+    "lucide-react": "^1.34.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "react-markdown": "^10.1.0",
