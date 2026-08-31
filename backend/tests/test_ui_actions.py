@@ -13,6 +13,7 @@ from druks.ui import (
     Section,
     TextField,
 )
+from druks.ui.fields import PageField
 
 OPERATIONS = {
     "write_note": Operation(id="write_note", method="POST", path="/api/field_notes/notes"),
@@ -94,6 +95,12 @@ def test_a_secret_field_declares_no_value():
             "isRequired": False,
         }
     ]
+
+
+def test_the_shared_base_has_no_value_to_hand_out():
+    """An upload and a secret have none. A value on the base would give every
+    secret field somewhere to carry a stored secret back to the browser."""
+    assert "value" not in PageField.model_fields
 
 
 def test_a_form_sends_each_value_once():

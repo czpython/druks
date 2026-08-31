@@ -481,8 +481,13 @@ hold one directly. `Card.actions` and `EmptyState.actions` hold either one.
 
 ## How to read the model listings
 
-Each listing below gives the exact Python fields and the exact JSON. Three
-rules hold for every one of them.
+Each listing below gives every field a model carries and the JSON it sends.
+Four rules hold for every one of them.
+
+**A listing is the whole shape, not the class body.** Some models share a base:
+every field carries a name and a label, and a section, a card and a column all
+carry blocks. A listing shows what the model carries, whichever class declares
+it. A sample fixes the keys and their values, never their order.
 
 **A discriminator carries its own literal as its default.** `Text.block` is
 `Literal["text"] = "text"`. The author writes `Text("…")` and never passes
