@@ -41,7 +41,7 @@ class File:
         content_type: str,
         content: bytes,
         app: str,
-        origin_id: str,
+        uploaded_by: str,
     ) -> "File":
         if len(content) > MAX_FILE_BYTES:
             raise FileTooLargeError(f"{name} is {len(content)} bytes; the cap is {MAX_FILE_BYTES}")
@@ -58,8 +58,7 @@ class File:
                 content_type=content_type,
                 sha256=digest.hexdigest(),
                 app=app,
-                origin_type="user_upload",
-                origin_id=origin_id,
+                uploaded_by=uploaded_by,
             )
             db_session().add(record)
             await db_session().flush()
