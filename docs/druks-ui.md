@@ -526,6 +526,13 @@ shows an app-scoped error and names the block.
 
 Every block carries a `block` discriminator.
 
+A page fills the screen it is given, and each block decides what to do with the
+room. A table, an image gallery, `Columns`, a timeline and a metric row take the
+width. A fact list is as wide as its facts. A chart and a progress bar grow with
+the page and stop where more width stops helping them. Prose keeps a line
+length, measured against the type size rather than the screen, so it stays
+readable however wide the display is.
+
 A block whose one required value is the thing it shows — its words, its
 content, its identity — takes that value positionally, and every other value
 by keyword:

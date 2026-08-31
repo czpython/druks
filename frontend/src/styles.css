@@ -2476,7 +2476,12 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
 /* ============================================================
    DRUKS UI — the shell renders an app's Python page declarations
    ============================================================ */
-.dui-page { max-width: 900px; padding: 20px 24px 40px; }
+/* A declared page fills the screen, the way every other app page does. A block
+   that draws rather than reads takes the measure below: it grows with the page
+   and stops where more width stops helping. rem, so it follows the density the
+   operator chose; per cent, so it follows the page. Prose sets its own measure
+   in ch, which is the type size and not the screen. */
+.dui-page { padding: 20px 24px 40px; --dui-measure: clamp(20rem, 60%, 63rem); }
 .dui-parent { display: inline-block; margin-bottom: 10px; }
 .dui-title { font-size: 20px; font-weight: 600; margin: 0; }
 .dui-description { font-size: 13px; margin: 6px 0 0; line-height: 1.55; max-width: 68ch; }
@@ -2552,7 +2557,7 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
 .dui-timeline-at { font-size: 11px; min-width: 72px; }
 .dui-timeline-desc { font-size: 12px; flex-basis: 100%; }
 
-.dui-progress { margin: 14px 0; }
+.dui-progress { margin: 14px 0; max-width: var(--dui-measure); }
 .dui-progress-head { display: flex; justify-content: space-between; font-size: 12.5px; margin-bottom: 6px; }
 .dui-progress-bar { height: 6px; border-radius: 3px; background: var(--surface-2); overflow: hidden; }
 .dui-progress-fill { display: block; height: 100%; background: var(--bucket-run); }
@@ -2590,7 +2595,9 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
 .dui-metric-value .dui-number { font-size: inherit; }
 .dui-metric-desc { margin: 3px 0 0; font-size: 11.5px; }
 
-.dui-fact-list { margin: 10px 0; display: grid; grid-template-columns: minmax(90px, max-content) 1fr; gap: 6px 16px; }
+/* Both columns size to what they hold, so a fact list is as wide as its facts
+   and a label never drifts away from its value on a wide page. */
+.dui-fact-list { margin: 10px 0; display: grid; grid-template-columns: minmax(90px, max-content) minmax(0, max-content); gap: 6px 16px; }
 .dui-fact { display: contents; }
 .dui-fact-label { font-size: 12px; }
 .dui-fact-value { margin: 0; font-size: 12.5px; }
@@ -2611,7 +2618,7 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
 .dui-list li { padding: 2px 0; }
 .dui-unit { font-size: 11px; }
 
-.dui-chart { margin: 16px 0; }
+.dui-chart { margin: 16px 0; max-width: var(--dui-measure); }
 .dui-chart-plot { display: block; width: 100%; height: 140px; }
 .dui-chart-zero { stroke: var(--border-loud); stroke-width: 1; vector-effect: non-scaling-stroke; }
 .dui-chart-bar { fill: var(--bucket-run); }
