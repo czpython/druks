@@ -45,13 +45,7 @@ task text is the **Code-review lens** brief below plus only these runtime facts:
 - PR base SHA: `{{ build.journal.pr_base_sha or '(unavailable)' }}`
 - PR head SHA: `{{ build.journal.last_implementation.head_sha if build.journal.last_implementation else '(unavailable)' }}`
 - round base SHA: `{{ build.journal.last_implementation.base_sha if build.journal.last_implementation else '(unavailable)' }}`
-- round head SHA: `{{ build.journal.last_implementation.head_sha if build.journal.last_implementation else '(unavailable)' }}`
 {% endif %}
-
-Wait for both enabled lenses to report before you synthesise. Form no verdict, submit no
-GitHub review, and create no tracker follow-up until both enabled passes finish. In the
-sequential fallback the barrier is the same: finish the code-review pass after verification,
-then synthesise as directed under **Synthesis**.
 
 ## Verification lens
 
@@ -269,11 +263,7 @@ maintain and extend by someone who did not write it?
   `git diff <PR base SHA>...<PR head SHA>` using the SHAs in your task. Then read every changed
   file END TO END — the whole file, not only the changed hunks — before writing any finding.
   The full PR diff is what you review.
-- **A blocking regression is caused by this round's code.** Run
-  `git diff <round base SHA>...<round head SHA>` to see the code this revision changed. Promote a
-  regression to a blocker only when code in that round range causes the broken behavior, and your
-  finding quotes that new code. On the first round the round range and the PR range cover the same
-  commits, so a regression the PR introduced in behavior that worked before the PR qualifies.
+- **A blocking regression is caused by this round's code.** Run `git diff <round base SHA>...<PR head SHA>` to prove causation; promote only when code in that range caused the break, and quote that new code.
 - **Findings need concrete reasons.** "I would have done this differently" is not a finding.
   Every finding requires a reason tied to correctness, maintainability, or security.
 - **Be honest about severity.** When the diff is genuinely clean, report no findings. Padding a
@@ -337,10 +327,6 @@ If there are none, say so plainly.
 
 ## Synthesis
 
-Synthesise only after both enabled lenses have reported. Form no verdict, submit no GitHub
-review, and create no tracker follow-up before that barrier — in the subagent path and in the
-sequential fallback alike.
-
 Start from the verification lens's proposed result. It supplies `verdict`, `findings`, `checks`,
 and `acceptance_results`; keep its `acceptance_results` and its findings as it proposed them.
 Write `body` as the verification decision and evidence, including the verification lens's open
@@ -350,20 +336,16 @@ findings and round history.
 Write the code-review lens's report into `review_notes`; if the lens found nothing, say so
 plainly.
 
-The code-review lens can promote one finding into a blocker: a regression this revision
-introduced, with the new code quoted. When it does, append that regression to `findings` at
-`high` severity, reflect it in `body`, and set the verdict from the verification result:
-- verification `pass` becomes `fail`.
-- verification `fail` stays `fail`.
-- verification `blocked` stays `blocked`; carry the regression in `body` and `findings` so the
-  infeasible-blocker gate still escalates instead of restarting implementation.
-Preserve the verification lens's `acceptance_results` and its own findings in every case; you
-only append the promoted regression.
+The code-review lens blocks on every regression it proves this revision introduced, with the new
+code quoted. For each such regression not already listed in the verification lens's own findings,
+append it to `findings` at `high` severity and reflect it in `body`. If the verification verdict
+is `pass`, change it to `fail`. Preserve the verification lens's `acceptance_results` and its own
+findings in every case.
 
-Weigh only the code-review lens's advisory findings for follow-up work — never the promoted
-regression, which is already a blocker returned to this implementer. If any advisory finding is
-medium or high, file exactly one follow-up sub-issue on the same tracker as the parent ticket,
-as a child of that ticket, with a concise verb-first title and one section per finding:
+If any advisory finding — not a promoted regression, which is already a blocker returned to this
+implementer — is medium or high, file exactly one follow-up sub-issue on the same tracker as the
+parent ticket, as a child of that ticket, with a concise verb-first title and one section per
+finding:
 severity, what is wrong, why it matters, what good would look like, and the file path and anchor
 line when available. Advisory findings that are all low file no issue. The sub-issue is separate
 work for later and never loops the current implementer; whoever picks it up decides the
