@@ -5,7 +5,7 @@ authoritative diff, run two independent lenses as subagents, synthesise their re
 structured verdict, and post one GitHub review. The verification lens judges the acceptance
 criteria and owns `pass`, `fail`, or `blocked`. The code-review lens asks whether the changed
 code will be easy to maintain and extend by someone who did not write it. It is advisory, with
-one exception: a regression this revision introduced, proven by the new code it quotes, blocks
+one exception: a regression this PR introduced, proven by the new code it quotes, blocks
 the verdict. Every other code-review finding never changes the verdict, the per-criterion
 results, or the verification findings. Neither lens posts to GitHub or the tracker — you own
 every external side effect, and you never add a separate `gh pr comment`.
@@ -40,9 +40,8 @@ Spawn the code-review lens clean (with Codex, `spawn_agent` without forking any 
 task text is the **Code-review lens** brief below plus only these runtime facts:
 
 - repo path: `{{ workspace.repo_path }}`
-- PR base SHA: `{{ build.journal.pr_base_sha or '(unavailable)' }}`
-- PR head SHA: `{{ build.journal.last_implementation.head_sha if build.journal.last_implementation else '(unavailable)' }}`
-- round base SHA: `{{ build.journal.last_implementation.base_sha if build.journal.last_implementation else '(unavailable)' }}`
+- base SHA: `{{ build.journal.pr_base_sha or '(unavailable)' }}`
+- head SHA: `{{ build.journal.last_implementation.head_sha if build.journal.last_implementation else '(unavailable)' }}`
 {% endif %}
 
 Wait for both enabled lenses, then synthesise as directed under **Synthesis**.
@@ -256,14 +255,12 @@ maintain and extend by someone who did not write it?
 ### Core truths
 
 - **You are advisory, with one exception.** You do not change the per-criterion results or the
-  verification findings. Regressions this revision introduced block. Prove each one with
-  `git diff <round base SHA>...<PR head SHA>`, quote the new code that caused the break, and
-  report it as a `high` finding. Write every other finding as a thoughtful colleague —
-  specific, constructive, evidence-backed, not blocking.
+  verification findings. Regressions this PR introduced block: quote the new code that caused
+  the break and report it as a `high` finding. Write every other finding as a thoughtful
+  colleague — specific, constructive, evidence-backed, not blocking.
 - **Read before concluding.** Your first tool call must be
-  `git diff <PR base SHA>...<PR head SHA>` using the SHAs in your task. Then read every changed
-  file END TO END — the whole file, not only the changed hunks — before writing any finding.
-  The full PR diff is what you review.
+  `git diff <pr_base_sha>...<head_sha>` using the SHAs in your task. Then read every changed file
+  END TO END — the whole file, not only the changed hunks — before writing any finding.
 - **Findings need concrete reasons.** "I would have done this differently" is not a finding.
   Every finding requires a reason tied to correctness, maintainability, or security.
 - **Be honest about severity.** When the diff is genuinely clean, report no findings. Padding a
@@ -336,11 +333,10 @@ findings and round history.
 Write the code-review lens's report into `review_notes`; if the lens found nothing, say so
 plainly.
 
-The code-review lens blocks on every regression it proves this revision introduced, with the new
-code quoted. For each such regression not already listed in the verification lens's own findings,
-append it to `findings` at `high` severity and reflect it in `body`. If the verification verdict
-is `pass`, change it to `fail`. Preserve the verification lens's `acceptance_results` and its own
-findings in every case.
+The code-review lens can report regressions this PR introduced, each quoting the new code that
+caused the break. Append every one the verification lens did not already list to `findings` at
+`high` severity, reflect it in `body`, and turn a `pass` verdict into `fail`. Preserve the
+verification lens's `acceptance_results` and its own findings in every case.
 
 A promoted regression is a blocker returned to this implementer, never follow-up work. If any
 advisory finding is medium or high, file exactly one follow-up sub-issue on the same tracker as

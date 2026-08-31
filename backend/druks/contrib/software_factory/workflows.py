@@ -100,9 +100,8 @@ class Build(Workflow):
             default=True,
             title="Code review",
             description=(
-                "Include the code-review lens in the implementation review. The lens is "
-                "advisory, with one exception: it blocks a regression the current revision "
-                "introduced, with the new code quoted."
+                "Include the code-review lens in the implementation review. It is advisory, "
+                "except that it blocks a regression this PR introduced."
             ),
         )
 
