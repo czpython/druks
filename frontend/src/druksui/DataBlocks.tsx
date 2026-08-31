@@ -237,6 +237,7 @@ export function Chart({
 }
 
 export function ImageGallery({ title, images }: { title: string; images: ImageBlock[] }) {
+  if (!images.length) return null
   return (
     <div className="dui-gallery">
       {title && <h3 className="dui-block-title">{title}</h3>}
@@ -260,6 +261,7 @@ export function ImageGallery({ title, images }: { title: string; images: ImageBl
 }
 
 export function Metrics({ title, metrics }: { title: string; metrics: Metric[] }) {
+  if (!metrics.length) return null
   return (
     <div className="dui-metrics">
       {title && <h3 className="dui-block-title">{title}</h3>}
@@ -279,6 +281,7 @@ export function Metrics({ title, metrics }: { title: string; metrics: Metric[] }
 }
 
 export function Facts({ title, facts }: { title: string; facts: Fact[] }) {
+  if (!facts.length) return null
   return (
     <div className="dui-facts">
       {title && <h3 className="dui-block-title">{title}</h3>}
@@ -308,6 +311,9 @@ export function Table({
   emptyText: string
 }) {
   if (rows.length === 0) {
+    // Nothing to show and nothing to say about it: a heading over an empty box
+    // is worse than no block at all.
+    if (!emptyText) return null
     return (
       <div className="dui-table-block">
         {title && <h3 className="dui-block-title">{title}</h3>}
@@ -380,6 +386,7 @@ function Row({ row, columns }: { row: TableRow; columns: TableColumn[] }) {
 }
 
 export function List({ title, items }: { title: string; items: Value[] }) {
+  if (!items.length) return null
   return (
     <div className="dui-list-block">
       {title && <h3 className="dui-block-title">{title}</h3>}

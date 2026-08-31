@@ -87,12 +87,14 @@ function BlockContent({ block }: { block: Block }) {
     case 'list':
       return <List title={block.title} items={block.items} />
     case 'stack':
+      if (!block.blocks.length) return null
       return (
         <div className={`dui-stack dui-stack-${block.gap}`}>
           <Blocks blocks={block.blocks} />
         </div>
       )
     case 'columns':
+      if (!block.blocks.length) return null
       return (
         <div className="dui-columns">
           {block.blocks.map((column, index) => (
