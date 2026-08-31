@@ -6,40 +6,37 @@ from druks_field_notes.models import Note
 @ui.page("/")
 async def notes():
     recent = await Note.list_recent(limit=10)
-    if recent:
-        return ui.Page(
-            "Notes",
-            description="Every note this install captured.",
-            blocks=[
-                ui.Section(
-                    title="Recent",
-                    name="recent",
-                    blocks=[
-                        ui.Card(
-                            title=f"Note {note.id}",
-                            description=note.gist or "Waiting for its gist.",
-                            blocks=[ui.Text(note.body)],
-                            actions=[
-                                ui.Link(
-                                    "Open",
-                                    page="note",
-                                    arguments={"note_id": str(note.id)},
-                                )
-                            ],
-                        )
-                        for note in recent
-                    ],
-                )
-            ],
-        )
     return ui.Page(
         "Notes",
         description="Every note this install captured.",
         blocks=[
-            ui.EmptyState(
-                "No notes yet",
-                description="Write one and its gist appears here.",
-                actions=[ui.Link("Write a note", page="new_note")],
+            ui.Section(
+                name="recent",
+                blocks=[
+                    ui.Cards(
+                        title="Recent",
+                        cards=[
+                            ui.Card(
+                                title=f"Note {note.id}",
+                                description=note.gist or "Waiting for its gist.",
+                                blocks=[ui.Text(note.body)],
+                                actions=[
+                                    ui.Link(
+                                        "Open",
+                                        page="note",
+                                        arguments={"note_id": str(note.id)},
+                                    )
+                                ],
+                            )
+                            for note in recent
+                        ],
+                        empty=ui.EmptyState(
+                            "No notes yet",
+                            description="Write one and its gist appears here.",
+                            actions=[ui.Link("Write a note", page="new_note")],
+                        ),
+                    )
+                ],
             )
         ],
     )

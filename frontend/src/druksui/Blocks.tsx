@@ -128,6 +128,26 @@ function BlockContent({ block }: { block: Block }) {
           <LinkRow links={block.actions} />
         </div>
       )
+    case 'cards': {
+      const inside = block.cards.length ? (
+        <ul className="dui-cards">
+          {block.cards.map((card, index) => (
+            <li key={index}>
+              <BlockContent block={card} />
+            </li>
+          ))}
+        </ul>
+      ) : (
+        block.empty && <BlockContent block={block.empty} />
+      )
+      if (!inside) return null
+      return (
+        <div className="dui-cards-block">
+          {block.title && <h3 className="dui-block-title">{block.title}</h3>}
+          {inside}
+        </div>
+      )
+    }
     case 'section':
       return (
         <section className="dui-section" data-region={block.name || undefined}>

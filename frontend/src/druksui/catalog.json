@@ -257,6 +257,30 @@
       "actions": []
     },
     {
+      "block": "cards",
+      "title": "Recent",
+      "cards": [
+        {
+          "block": "card",
+          "blocks": [
+            {
+              "block": "text",
+              "text": "The rack has been loud since Tuesday."
+            }
+          ],
+          "title": "Note 7",
+          "description": "Fan noise on rack 3.",
+          "actions": []
+        }
+      ],
+      "empty": {
+        "block": "empty_state",
+        "title": "No notes yet",
+        "description": "Write one and its gist appears here.",
+        "actions": []
+      }
+    },
+    {
       "block": "section",
       "blocks": [
         {

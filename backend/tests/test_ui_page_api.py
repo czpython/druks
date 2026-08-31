@@ -44,8 +44,10 @@ async def test_the_landing_page_answers_at_the_bare_pages_path(druks_client: htt
     assert response.status_code == 200
     page = response.json()
     assert page["title"] == "Notes"
-    assert page["blocks"][0]["block"] == "empty_state"
-    assert page["blocks"][0]["actions"][0]["page"] == "new_note"
+    (section,) = page["blocks"]
+    (cards,) = section["blocks"]
+    assert cards["cards"] == []
+    assert cards["empty"]["actions"][0]["page"] == "new_note"
 
 
 async def test_a_page_projects_the_app_data(druks_client: httpx.AsyncClient, note: Note):
@@ -54,7 +56,8 @@ async def test_a_page_projects_the_app_data(druks_client: httpx.AsyncClient, not
     (section,) = page["blocks"]
     assert section["block"] == "section"
     assert section["name"] == "recent"
-    (card,) = section["blocks"]
+    (cards,) = section["blocks"]
+    (card,) = cards["cards"]
     assert card["title"] == f"Note {note.id}"
     assert card["blocks"][0]["text"] == "Fan noise on rack 3."
     assert card["actions"][0] == {
