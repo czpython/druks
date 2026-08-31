@@ -13,102 +13,79 @@ class Option(Schema):
         super().__init__(label=label, **data)
 
 
-class TextField(Schema):
+class PageField(Schema):
+    """What every field shares. ``field`` names its kind on the wire, and
+    ``name`` is the key the shell sends the operator's answer under."""
+
+    field: str
+    name: str
+    label: str
+    help_text: str = ""
+    is_required: bool = False
+    # ``value`` is not here on purpose. An upload and a secret have none, and a
+    # field with nowhere to hold one cannot send a stored secret to the browser.
+
+
+class TextField(PageField):
     field: Literal["text"] = "text"
-    name: str
-    label: str
     value: str = ""
     placeholder: str = ""
-    help_text: str = ""
-    is_required: bool = False
 
 
-class TextAreaField(Schema):
+class TextAreaField(PageField):
     field: Literal["text_area"] = "text_area"
-    name: str
-    label: str
     value: str = ""
     placeholder: str = ""
-    help_text: str = ""
-    is_required: bool = False
     rows: int = 4
 
 
-class NumberField(Schema):
+class NumberField(PageField):
     field: Literal["number"] = "number"
-    name: str
-    label: str
     value: float | None = None
     minimum: float | None = None
     maximum: float | None = None
     step: float | None = None
-    help_text: str = ""
-    is_required: bool = False
 
 
-class SelectField(Schema):
+class SelectField(PageField):
     field: Literal["select"] = "select"
-    name: str
-    label: str
     options: list[Option] = []
     value: str = ""
-    help_text: str = ""
-    is_required: bool = False
 
 
-class MultiSelectField(Schema):
+class MultiSelectField(PageField):
     field: Literal["multi_select"] = "multi_select"
-    name: str
-    label: str
     options: list[Option] = []
     value: list[str] = []
-    help_text: str = ""
-    is_required: bool = False
 
 
-class RadioField(Schema):
+class RadioField(PageField):
     field: Literal["radio"] = "radio"
-    name: str
-    label: str
     options: list[Option] = []
     value: str = ""
-    help_text: str = ""
-    is_required: bool = False
 
 
-class CheckboxField(Schema):
+class CheckboxField(PageField):
     field: Literal["checkbox"] = "checkbox"
-    name: str
-    label: str
     value: bool = False
-    help_text: str = ""
-    is_required: bool = False
 
 
-class UploadField(Schema):
+class UploadField(PageField):
     """One file the operator picks. The shell stores it through the platform and
     submits its id, so the operation takes a plain string."""
 
     field: Literal["upload"] = "upload"
-    name: str
-    label: str
     # Straight into the file dialog's own filter, in its own syntax:
     # "image/*", ".csv,.tsv". It narrows what the operator sees. It is not a
     # promise about the bytes.
     accept: str = ""
-    help_text: str = ""
-    is_required: bool = False
 
 
-class SecretField(Schema):
+class SecretField(PageField):
     """One secret the operator hands over: a token, a key. It has no ``value``,
     so a page cannot send a stored secret back to the browser."""
 
     field: Literal["secret"] = "secret"
-    name: str
-    label: str
-    help_text: str = ""
-    is_required: bool = False
 
 
 Field = Annotated[
