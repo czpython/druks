@@ -8,7 +8,7 @@ import { EmptyState } from '../components/EmptyState'
 import { Page } from '../components/Page'
 import { AppSurface } from './AppSurface'
 import { Blocks } from './Blocks'
-import { leadingDialog } from './blockLayout'
+import { leadingFieldAction } from './blockLayout'
 import { followedSubjects, hrefUnder, isDetail, mergeRegions, PagesContext, parentOf, tabsFor } from './pages'
 import { SubjectStream } from './SubjectStream'
 
@@ -104,7 +104,7 @@ export function AppPage({ app, page }: { app: string; page: string }) {
     return appError(app, detail, () => snapshot.refetch())
   }
 
-  const pageAction = leadingDialog(snapshot.data.blocks)
+  const pageAction = leadingFieldAction(snapshot.data.blocks)
   const bodyBlocks = pageAction ? snapshot.data.blocks.slice(1) : snapshot.data.blocks
 
   return (

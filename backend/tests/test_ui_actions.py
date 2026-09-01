@@ -14,6 +14,7 @@ from druks.ui import (
     TextField,
 )
 from druks.ui.fields import PageField
+from fastapi import APIRouter
 
 OPERATIONS = {
     "write_note": Operation(id="write_note", method="POST", path="/api/field_notes/notes"),
@@ -42,6 +43,7 @@ def test_an_action_carries_its_operation_and_what_happens_next():
         "label": "Archive",
         "operation": "write_note",
         "arguments": {"note_id": 7},
+        "fields": [],
         "tone": "danger",
         "confirm": "Archive this note?",
         "refresh": "page",
@@ -70,27 +72,45 @@ def test_a_form_carries_its_fields_and_the_action_that_sends_them():
         }
     ]
     assert block["action"]["operation"] == "write_note"
-    assert block["presentation"] == "inline"
+    assert "presentation" not in block
 
 
-def test_a_dialog_form_uses_its_title_as_the_trigger():
+def test_an_action_can_collect_fields_before_it_runs():
     (block,) = wire(
-        Form(
-            action=Action(label="Save", operation="write_note"),
-            title="Write a note",
-            presentation="dialog",
+        Action(
+            label="Write a note",
+            operation="write_note",
+            fields=[TextField(name="body", label="Note", is_required=True)],
         )
     )
 
-    assert block["title"] == "Write a note"
-    assert block["presentation"] == "dialog"
+    assert block["label"] == "Write a note"
+    assert block["fields"][0]["name"] == "body"
 
 
-def test_a_dialog_form_needs_a_title_for_its_trigger():
-    with pytest.raises(ValueError, match="dialog form needs a title"):
-        Form(
-            action=Action(label="Save", operation="write_note"),
-            presentation="dialog",
+def test_an_action_cannot_collect_fields_and_ask_for_confirmation():
+    with pytest.raises(ValueError, match="gives both fields and confirm"):
+        Action(
+            label="Write a note",
+            operation="write_note",
+            fields=[TextField(name="body", label="Note")],
+            confirm="Write this note?",
+        )
+
+
+def test_an_action_sends_each_value_once():
+    with pytest.raises(ValueError, match="two fields named"):
+        Action(
+            label="Save",
+            operation="write_note",
+            fields=[TextField(name="body", label="A"), TextField(name="body", label="B")],
+        )
+    with pytest.raises(ValueError, match="already carries as arguments"):
+        Action(
+            label="Save",
+            operation="write_note",
+            arguments={"body": "x"},
+            fields=[TextField(name="body", label="A")],
         )
 
 
@@ -194,8 +214,6 @@ def test_the_app_names_each_operation_once_with_its_method_and_path():
 
 
 def test_two_routes_cannot_share_one_operation(monkeypatch):
-    from fastapi import APIRouter
-
     async def stub() -> dict[str, str]:
         return {}
 

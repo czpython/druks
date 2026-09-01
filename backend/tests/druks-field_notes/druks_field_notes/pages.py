@@ -10,6 +10,20 @@ async def notes():
         "Notes",
         description="Every note this install captured.",
         blocks=[
+            ui.Action(
+                label="Write a note",
+                operation="write_note",
+                tone="primary",
+                fields=[
+                    ui.TextAreaField(
+                        name="body",
+                        label="Note",
+                        placeholder="Fan noise on rack 3.",
+                        is_required=True,
+                        rows=3,
+                    )
+                ],
+            ),
             ui.Section(
                 name="recent",
                 blocks=[
@@ -37,7 +51,7 @@ async def notes():
                         ),
                     )
                 ],
-            )
+            ),
         ],
     )
 

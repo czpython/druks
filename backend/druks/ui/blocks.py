@@ -115,6 +115,7 @@ class Action(PageBlock):
     label: str
     operation: str
     arguments: dict[str, Any] = Field(default_factory=dict)
+    fields: list[FormField] = Field(default_factory=list)
     tone: Literal["default", "primary", "danger"] = "default"
     # Non-empty text asks the operator before the shell sends anything.
     confirm: str = ""
@@ -122,6 +123,32 @@ class Action(PageBlock):
     # ``refresh`` does not apply.
     refresh: Literal["none", "page", "region"] = "page"
     link: Link | None = None
+
+    @model_validator(mode="after")
+    def _one_shape(self) -> "Action":
+        if self.fields and self.confirm:
+            raise ValueError(
+                f"Action {self.label!r} gives both fields and confirm. Each asks the operator "
+                "before the action runs, so give one or the other."
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _one_name_for_each_value(self) -> "Action":
+        names = [one.name for one in self.fields]
+        repeated = sorted({name for name in names if names.count(name) > 1})
+        if repeated:
+            raise ValueError(
+                f"action {self.label!r} has two fields named {repeated}; one would take the "
+                "other's value. Give each field its own name."
+            )
+        taken = sorted(set(names) & set(self.arguments))
+        if taken:
+            raise ValueError(
+                f"action {self.label!r} has fields named {taken}, which it already carries as "
+                "arguments. Send each value once."
+            )
+        return self
 
     def iter_actions(self) -> "Iterable[Action]":
         yield self
@@ -157,7 +184,6 @@ class Form(PageBlock):
     block: Literal["form"] = "form"
     title: str = ""
     description: str = ""
-    presentation: Literal["inline", "dialog"] = "inline"
     fields: list[FormField] = Field(default_factory=list)
     action: Action
 
@@ -169,8 +195,6 @@ class Form(PageBlock):
 
     @model_validator(mode="after")
     def _one_name_for_each_value(self) -> "Form":
-        if self.presentation == "dialog" and not self.title:
-            raise ValueError("a dialog form needs a title because its trigger uses that title")
         names = [one.name for one in self.fields]
         repeated = sorted({name for name in names if names.count(name) > 1})
         if repeated:

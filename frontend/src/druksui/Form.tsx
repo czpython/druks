@@ -17,39 +17,116 @@ type Payload = Record<string, unknown>
 export function Form({
   title,
   description,
-  presentation,
   fields,
   action,
 }: {
   title: string
   description: string
-  presentation: 'inline' | 'dialog'
   fields: Field[]
   action: Action
 }) {
-  if (presentation === 'dialog') {
-    return <DialogForm title={title} description={description} fields={fields} action={action} />
-  }
-  return <FormBody title={title} description={description} fields={fields} action={action} />
+  const fieldState = useFieldState(fields)
+  const run = useAction(action, fields, fieldState.clear)
+
+  return (
+    <form
+      className="dui-form"
+      onSubmit={(event) => {
+        event.preventDefault()
+        void run.call(fieldState.values)
+      }}
+    >
+      {title && <h3 className="dui-block-title">{title}</h3>}
+      {description && <p className="dui-form-desc dim">{description}</p>}
+      <Fields
+        fields={fields}
+        values={fieldState.values}
+        errors={run.fieldErrors}
+        resets={fieldState.resets}
+        onChange={fieldState.change}
+      />
+      {run.problem && (
+        <div className="dui-form-error" role="alert">
+          {run.problem}
+        </div>
+      )}
+      <div className="dui-form-submit">
+        {run.confirming ? (
+          <Confirm action={action} run={run} />
+        ) : (
+          <button
+            type="submit"
+            className={`dui-action dui-action-${action.tone}`}
+            disabled={run.pending}
+            aria-busy={run.pending}
+          >
+            {action.label}
+          </button>
+        )}
+      </div>
+      <p className="dui-action-note" role="status">
+        {run.note}
+      </p>
+    </form>
+  )
 }
 
-function DialogForm({
-  title,
-  description,
-  fields,
-  action,
-}: {
-  title: string
-  description: string
-  fields: Field[]
-  action: Action
-}) {
+/** A control that calls one of the app's operations on its own. */
+export function ActionButton({ action }: { action: Action }) {
+  const { operations } = useContext(PagesContext)
+  const known = operations.some((one) => one.id === action.operation)
+  if (!known) {
+    return (
+      <span className="dui-action dui-action-broken" title={`no operation named ${action.operation}`}>
+        {action.label}
+      </span>
+    )
+  }
+  if (action.fields.length) return <FieldAction action={action} />
+  return <ImmediateAction action={action} />
+}
+
+function ImmediateAction({ action }: { action: Action }) {
+  const run = useAction(action)
+
+  return (
+    <>
+      {run.confirming ? (
+        <Confirm action={action} run={run} />
+      ) : (
+        <button
+          type="button"
+          className={`dui-action dui-action-${action.tone}`}
+          disabled={run.pending}
+          aria-busy={run.pending}
+          onClick={() => void run.call({})}
+        >
+          {action.label}
+        </button>
+      )}
+      {run.problem && (
+        <span className="dui-form-error" role="alert">
+          {run.problem}
+        </span>
+      )}
+      <span className="dui-action-note" role="status">
+        {run.note}
+      </span>
+    </>
+  )
+}
+
+function FieldAction({ action }: { action: Action }) {
   const [open, setOpen] = useState(false)
-  const [pending, setPending] = useState(false)
   const dialog = useRef<HTMLDialogElement>(null)
   const trigger = useRef<HTMLButtonElement>(null)
   const titleId = useId()
   const wasOpen = useRef(false)
+  const fieldState = useFieldState(action.fields)
+  const run = useAction(action, action.fields, () => {
+    fieldState.clear()
+    setOpen(false)
+  })
 
   useEffect(() => {
     const node = dialog.current
@@ -76,6 +153,13 @@ function DialogForm({
     wasOpen.current = false
   }, [open])
 
+  function dismiss() {
+    if (run.pending) return
+    run.back()
+    fieldState.clear()
+    setOpen(false)
+  }
+
   return (
     <>
       <button
@@ -84,173 +168,100 @@ function DialogForm({
         className={`dui-action dui-action-${action.tone} dui-dialog-trigger`}
         onClick={() => setOpen(true)}
       >
-        {title}
+        {action.label}
       </button>
       <dialog
         ref={dialog}
         className="dui-dialog"
         aria-labelledby={titleId}
         onCancel={(event) => {
-          if (pending) event.preventDefault()
+          if (run.pending) event.preventDefault()
         }}
-        onClose={() => setOpen(false)}
+        onClose={() => {
+          if (open) dismiss()
+        }}
         onMouseDown={(event) => {
-          if (!pending && event.target === event.currentTarget) setOpen(false)
+          if (event.target === event.currentTarget) dismiss()
         }}
       >
         <div className="dui-dialog-head">
-          <div>
-            <h2 id={titleId} className="dui-dialog-title">
-              {title}
-            </h2>
-            {description && <p className="dui-form-desc dim">{description}</p>}
-          </div>
+          <h2 id={titleId} className="dui-dialog-title">
+            {action.label}
+          </h2>
           <button
             type="button"
             className="dui-dialog-close"
-            aria-label={`Close ${title}`}
-            disabled={pending}
-            onClick={() => setOpen(false)}
+            aria-label={`Close ${action.label}`}
+            disabled={run.pending}
+            onClick={dismiss}
           >
             <span aria-hidden="true">×</span>
           </button>
         </div>
-        <FormBody
-          title=""
-          description=""
-          fields={fields}
-          action={action}
-          onCancel={() => setOpen(false)}
-          onDone={() => setOpen(false)}
-          onPendingChange={setPending}
-        />
+        <form
+          className="dui-form"
+          onSubmit={(event) => {
+            event.preventDefault()
+            void run.call(fieldState.values)
+          }}
+        >
+          <Fields
+            fields={action.fields}
+            values={fieldState.values}
+            errors={run.fieldErrors}
+            resets={fieldState.resets}
+            onChange={fieldState.change}
+          />
+          {run.problem && (
+            <div className="dui-form-error" role="alert">
+              {run.problem}
+            </div>
+          )}
+          <div className="dui-form-submit">
+            <button
+              type="submit"
+              className={`dui-action dui-action-${action.tone}`}
+              disabled={run.pending}
+              aria-busy={run.pending}
+            >
+              {action.label}
+            </button>
+            <button type="button" className="dui-action" disabled={run.pending} onClick={dismiss}>
+              Cancel
+            </button>
+          </div>
+        </form>
       </dialog>
+      <span className="dui-action-note" role="status">
+        {run.note}
+      </span>
     </>
   )
 }
 
-function FormBody({
-  title,
-  description,
-  fields,
-  action,
-  onCancel,
-  onDone,
-  onPendingChange,
-}: {
-  title: string
-  description: string
-  fields: Field[]
-  action: Action
-  onCancel?: () => void
-  onDone?: () => void
-  onPendingChange?: (pending: boolean) => void
-}) {
-  // A refresh can bring back a form of different fields at the same place, and
-  // React keeps this component. Start over when the fields themselves change,
-  // so a submission always carries the form on screen.
+function useFieldState(fields: Field[]) {
+  // A refresh can put different fields in the same React position. Reset the
+  // edits so the next operation carries the fields that are on screen.
   const shape = fields.map((one) => `${one.field}:${one.name}`).join('|')
   const [known, setKnown] = useState(shape)
   const [edits, setEdits] = useState<Payload | null>(null)
-  const [submits, setSubmits] = useState(0)
+  const [resets, setResets] = useState(0)
   const declared = Object.fromEntries(fields.map(startingValue))
   const values = edits ?? declared
   if (known !== shape) {
     setKnown(shape)
     setEdits(null)
   }
-  const run = useAction(action, fields, () => {
-    setEdits(null)
-    setSubmits((count) => count + 1)
-    onDone?.()
-  })
-  useEffect(() => onPendingChange?.(run.pending), [onPendingChange, run.pending])
 
-  return (
-    <form
-      className="dui-form"
-      onSubmit={(event) => {
-        event.preventDefault()
-        void run.call(values)
-      }}
-    >
-      {title && <h3 className="dui-block-title">{title}</h3>}
-      {description && <p className="dui-form-desc dim">{description}</p>}
-      <Fields
-        fields={fields}
-        values={values}
-        errors={run.fieldErrors}
-        resets={submits}
-        onChange={(name, value) => setEdits({ ...values, [name]: value })}
-      />
-      {run.problem && (
-        <div className="dui-form-error" role="alert">
-          {run.problem}
-        </div>
-      )}
-      <div className="dui-form-submit">
-        {run.confirming ? (
-          <Confirm action={action} run={run} />
-        ) : (
-          <button
-            type="submit"
-            className={`dui-action dui-action-${action.tone}`}
-            disabled={run.pending}
-            aria-busy={run.pending}
-          >
-            {action.label}
-          </button>
-        )}
-        {onCancel && !run.confirming && (
-          <button type="button" className="dui-action" disabled={run.pending} onClick={onCancel}>
-            Cancel
-          </button>
-        )}
-      </div>
-      <p className="dui-action-note" role="status">
-        {run.note}
-      </p>
-    </form>
-  )
-}
-
-/** A control that calls one of the app's operations on its own. */
-export function ActionButton({ action }: { action: Action }) {
-  const run = useAction(action)
-  const { operations } = useContext(PagesContext)
-  const known = operations.some((one) => one.id === action.operation)
-  if (!known) {
-    return (
-      <span className="dui-action dui-action-broken" title={`no operation named ${action.operation}`}>
-        {action.label}
-      </span>
-    )
+  return {
+    values,
+    resets,
+    change: (name: string, value: unknown) => setEdits({ ...values, [name]: value }),
+    clear: () => {
+      setEdits(null)
+      setResets((count) => count + 1)
+    },
   }
-  return (
-    <>
-      {run.confirming ? (
-        <Confirm action={action} run={run} />
-      ) : (
-        <button
-          type="button"
-          className={`dui-action dui-action-${action.tone}`}
-          disabled={run.pending}
-          aria-busy={run.pending}
-          onClick={() => void run.call({})}
-        >
-          {action.label}
-        </button>
-      )}
-      {run.problem && (
-        <span className="dui-form-error" role="alert">
-          {run.problem}
-        </span>
-      )}
-      <span className="dui-action-note" role="status">
-        {run.note}
-      </span>
-    </>
-  )
 }
 
 // An action that asks first asks in the page, in the page's own type and

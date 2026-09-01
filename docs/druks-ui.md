@@ -376,6 +376,23 @@ An `Action` names an app-local operation:
 ui.Action(label="Archive", operation="archive_note", arguments={"note_id": note.id})
 ```
 
+An action can collect values before it runs:
+
+```python
+ui.Action(
+    label="Write a note",
+    operation="write_note",
+    tone="primary",
+    fields=[ui.TextAreaField(name="body", label="Note", is_required=True)],
+)
+```
+
+The shell shows the action as a control. When the action has fields, the shell
+collects the values before it runs the operation.
+
+Use a `Form` when field entry is the primary task of the page. Use an `Action`
+with fields when field entry is a detour from the page task.
+
 The `operation` is the `operation_id` of one of the app's own routes:
 
 ```python
@@ -432,9 +449,9 @@ App code never reads that table.
 
 ### Request shape
 
-The shell builds one JSON object. It takes the action `arguments` first, then
-the submitted field values. A field name that repeats an argument name is an
-error when Druks builds the page.
+The shell builds one JSON object. It takes the action `arguments` first. Then
+it adds the values from `Action.fields` or the enclosing `Form`. A field name
+that repeats an argument name is an error when Druks builds the page.
 
 The shell fills the operation's path parameters from that object. It sends
 every remaining key as the JSON request body. Authentication, authorization,
@@ -444,6 +461,7 @@ and request identity stay on the platform route.
 
 | Field | Effect |
 | --- | --- |
+| `fields` | The shell collects these values before it runs the action. |
 | `confirm` | Non-empty text. The shell asks before it sends. |
 | `tone: "danger"` | The shell shows a destructive presentation. |
 | `refresh: "page"` | The shell reads the whole page again. Default. |
@@ -763,6 +781,7 @@ class Action:
     label: str
     operation: str
     arguments: dict[str, Any] = {}
+    fields: list[Field] = []
     tone: Literal["default", "primary", "danger"] = "default"
     confirm: str = ""
     refresh: Literal["none", "page", "region"] = "page"
@@ -775,6 +794,7 @@ class Action:
   "label": "Archive",
   "operation": "archive_note",
   "arguments": {"note_id": 7},
+  "fields": [],
   "tone": "danger",
   "confirm": "Archive this note?",
   "refresh": "page",
@@ -785,6 +805,12 @@ class Action:
 `arguments` keys are the operation's own parameter names. Druks serializes
 them unchanged. A route parameter keeps its Python spelling on the wire.
 
+An action with fields stays an action in the declaration and on the wire. The
+shell decides how to collect the fields.
+
+An action cannot set both `fields` and `confirm`. Druks refuses this action at
+boot because each option asks the operator before the action runs.
+
 ### Form
 
 ```python
@@ -792,7 +818,6 @@ class Form:
     block: Literal["form"] = "form"
     title: str = ""
     description: str = ""
-    presentation: Literal["inline", "dialog"] = "inline"
     fields: list[Field] = []
     action: Action
 ```
@@ -800,7 +825,6 @@ class Form:
 ```python
 ui.Form(
     title="Write a note",
-    presentation="dialog",
     fields=[ui.TextAreaField(name="body", label="Note", is_required=True)],
     action=ui.Action(label="Save", operation="write_note", tone="primary"),
 )
@@ -811,7 +835,6 @@ ui.Form(
   "block": "form",
   "title": "Write a note",
   "description": "",
-  "presentation": "dialog",
   "fields": [
     {
       "field": "text",
@@ -828,6 +851,7 @@ ui.Form(
     "label": "Save",
     "operation": "write_note",
     "arguments": {},
+    "fields": [],
     "tone": "primary",
     "confirm": "",
     "refresh": "page",
@@ -835,10 +859,6 @@ ui.Form(
   }
 }
 ```
-
-An inline form is part of the page task. A dialog form is for short, infrequent work that must not occupy the page.
-
-The dialog trigger uses the form title. A dialog form must set `title`. The shell moves focus into the dialog and returns it to the trigger.
 
 ### Timeline
 
@@ -1452,7 +1472,7 @@ class UploadField:
 One file, and no starting value: nothing the server sends could put a file back
 into a file input.
 
-`accept` goes straight into the file dialog's own filter, in its own syntax —
+`accept` goes straight into the file picker's own filter, in its own syntax —
 `"image/*"`, `".csv,.tsv"`. It narrows what the operator can pick. It is not a
 promise about the bytes, and the platform does not check it. An operation that
 needs certainty opens the file and looks.
@@ -1559,11 +1579,9 @@ needs it:
 
 ## Not in V1
 
-V1 has no `Tabs` block, no accordion, no general modal, no inline reveal form, and no
-general client-state API. A table row folds its `detail` away, and that is the
-whole of it: the app declares the sentence, the shell owns whether it is open.
-
-`Form(presentation="dialog")` is the one dialog presentation. It does not add a general modal or client-state API.
+V1 has no `Tabs` block, no accordion, no inline reveal form, and no general
+client-state API. A table row folds its `detail` away. An action can collect
+fields before it runs. In both cases, the shell owns the interface.
 
 Static child pages already give tabs, and the URL holds the current one. An
 app that needs a control the contract does not have ships an ESM frontend.

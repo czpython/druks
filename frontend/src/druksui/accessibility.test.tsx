@@ -186,34 +186,34 @@ describe('every V1 renderer', () => {
 
   it('points a field at its own help, and marks the one that failed', () => {
     renderBlocks([
-            {
-              block: 'form',
-              title: '',
-              description: '',
-              presentation: 'inline',
-              fields: [
-                {
-                  field: 'text',
-                  name: 'repo',
-                  label: 'Repository',
-                  value: '',
-                  isRequired: true,
-                  helpText: 'owner/name',
-                  placeholder: '',
-                },
-              ],
-              action: {
-                block: 'action',
-                label: 'Track',
-                operation: 'write_note',
-                tone: 'primary',
-                confirm: '',
-                refresh: 'page',
-                link: null,
-                arguments: {},
-              },
-            },
-          ])
+      {
+        block: 'form',
+        title: '',
+        description: '',
+        fields: [
+          {
+            field: 'text',
+            name: 'repo',
+            label: 'Repository',
+            value: '',
+            isRequired: true,
+            helpText: 'owner/name',
+            placeholder: '',
+          },
+        ],
+        action: {
+          block: 'action',
+          label: 'Track',
+          operation: 'write_note',
+          tone: 'primary',
+          confirm: '',
+          refresh: 'page',
+          link: null,
+          arguments: {},
+          fields: [],
+        },
+      },
+    ])
 
     const input = screen.getByLabelText(/Repository/)
     const help = screen.getByText('owner/name')
@@ -224,25 +224,26 @@ describe('every V1 renderer', () => {
   it('says so when an action has happened', async () => {
     vi.mocked(api.callOperation).mockResolvedValue(undefined)
     renderBlocks([
-            {
-              block: 'card',
-              title: '',
-              description: '',
-              blocks: [],
-              actions: [
-                {
-                  block: 'action',
-                  label: 'Rescout peer',
-                  operation: 'write_note',
-                  tone: 'primary',
-                  confirm: '',
-                  refresh: 'none',
-                  link: null,
-                  arguments: {},
-                },
-              ],
-            },
-          ])
+      {
+        block: 'card',
+        title: '',
+        description: '',
+        blocks: [],
+        actions: [
+          {
+            block: 'action',
+            label: 'Rescout peer',
+            operation: 'write_note',
+            tone: 'primary',
+            confirm: '',
+            refresh: 'none',
+            link: null,
+            arguments: {},
+            fields: [],
+          },
+        ],
+      },
+    ])
 
     screen.getByRole('button', { name: 'Rescout peer' }).click()
 

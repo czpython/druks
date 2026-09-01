@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Router } from 'wouter'
 import { memoryLocation } from 'wouter/memory-location'
@@ -57,6 +57,10 @@ function renderBlocks(blocks: Block[]) {
   return { ...rendered, queryClient, location }
 }
 
+function dialogAction(label: string) {
+  return within(screen.getByRole('dialog', { name: label })).getByRole('button', { name: label })
+}
+
 // The roster the page path reads its pages and operations from, so a form the
 // server declares resolves its own operation.
 const ROSTER: App[] = [
@@ -98,6 +102,7 @@ function action(overrides: Partial<Action> = {}): Action {
     label: 'Save',
     operation: 'write_note',
     arguments: {},
+    fields: [],
     tone: 'primary',
     confirm: '',
     refresh: 'page',
@@ -111,7 +116,6 @@ function form(fields: Field[], sends = action()): Block {
     block: 'form',
     title: 'New note',
     description: 'What did you see?',
-    presentation: 'inline',
     fields,
     action: sends,
   }
@@ -231,51 +235,94 @@ describe('fields', () => {
 })
 
 describe('submitting a form', () => {
-  it('puts a leading dialog form in a section heading', () => {
-    const block = form([BODY])
-    if (block.block !== 'form') throw new Error('expected a form')
+  it('puts a leading field action in a section heading', () => {
     const { container } = renderBlocks([
       {
         block: 'section',
         title: 'Notes',
         name: 'notes',
         follows: null,
-        blocks: [{ ...block, presentation: 'dialog' }, { block: 'text', text: 'One note.' }],
+        blocks: [
+          action({ label: 'Write a note', fields: [BODY] }),
+          { block: 'text', text: 'One note.' },
+        ],
       },
     ])
 
     expect(container.querySelector('.dui-section-head .dui-dialog-trigger')?.textContent).toBe(
-      'New note',
+      'Write a note',
     )
     expect(screen.getByText('One note.')).toBeTruthy()
   })
 
-  it('opens a dialog form from its title and returns focus after cancel', () => {
-    const block = form([BODY])
-    if (block.block !== 'form') throw new Error('expected a form')
-    renderBlocks([{ ...block, presentation: 'dialog' }])
-    const trigger = screen.getByRole('button', { name: 'New note' })
+  it('opens field collection from an action and returns focus after cancel', () => {
+    renderBlocks([action({ label: 'Write a note', fields: [BODY] })])
+    const trigger = screen.getByRole('button', { name: 'Write a note' })
 
     fireEvent.click(trigger)
 
-    expect(screen.getByRole('dialog', { name: 'New note' })).toBeTruthy()
+    expect(screen.getByRole('dialog', { name: 'Write a note' })).toBeTruthy()
     expect(document.activeElement).toBe(screen.getByLabelText(/Note/))
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
-    expect(screen.queryByRole('dialog', { name: 'New note' })).toBeNull()
+    expect(screen.queryByRole('dialog', { name: 'Write a note' })).toBeNull()
     expect(document.activeElement).toBe(trigger)
   })
 
-  it('closes a dialog form after a successful submit', async () => {
-    const block = form([BODY], action({ refresh: 'none' }))
-    if (block.block !== 'form') throw new Error('expected a form')
-    renderBlocks([{ ...block, presentation: 'dialog' }])
-    fireEvent.click(screen.getByRole('button', { name: 'New note' }))
+  it('closes field collection after a successful action', async () => {
+    renderBlocks([
+      action({
+        label: 'Write a note',
+        arguments: { source: 'dashboard' },
+        fields: [BODY],
+        refresh: 'none',
+      }),
+    ])
+    fireEvent.click(screen.getByRole('button', { name: 'Write a note' }))
     fireEvent.change(screen.getByLabelText(/Note/), { target: { value: 'Fan noise.' } })
 
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    fireEvent.click(dialogAction('Write a note'))
 
     await waitFor(() => expect(callOperation).toHaveBeenCalled())
-    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'New note' })).toBeNull())
+    expect(callOperation).toHaveBeenCalledWith('POST', '/api/field_notes/notes', {
+      source: 'dashboard',
+      body: 'Fan noise.',
+    })
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Write a note' })).toBeNull())
+  })
+
+  it('keeps action field errors in the dialog', async () => {
+    callOperation.mockRejectedValueOnce(
+      new ApiError('validation', 422, [{ loc: ['body', 'body'], msg: 'Field required' }]),
+    )
+    renderBlocks([action({ label: 'Write a note', fields: [BODY], refresh: 'none' })])
+    fireEvent.click(screen.getByRole('button', { name: 'Write a note' }))
+
+    fireEvent.click(dialogAction('Write a note'))
+
+    await waitFor(() => expect(screen.getByText('Field required')).toBeTruthy())
+    expect(screen.getByRole('dialog', { name: 'Write a note' })).toBeTruthy()
+  })
+
+  it('disables dialog dismissal while the action runs', async () => {
+    let release = () => {}
+    callOperation.mockReturnValueOnce(
+      new Promise((resolve) => {
+        release = () => resolve()
+      }),
+    )
+    renderBlocks([action({ label: 'Write a note', fields: [BODY], refresh: 'none' })])
+    fireEvent.click(screen.getByRole('button', { name: 'Write a note' }))
+
+    fireEvent.click(dialogAction('Write a note'))
+
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Cancel' }).hasAttribute('disabled')).toBe(true),
+    )
+    expect(
+      screen.getByRole('button', { name: 'Close Write a note' }).hasAttribute('disabled'),
+    ).toBe(true)
+    release()
+    await waitFor(() => expect(callOperation).toHaveBeenCalledTimes(1))
   })
 
   it('calls the resolved operation with the arguments and the values as one object', async () => {
@@ -363,6 +410,15 @@ describe('submitting a form', () => {
 })
 
 describe('what an action does next', () => {
+  it('runs an action without fields when the operator presses it', async () => {
+    renderBlocks([action({ label: 'Refresh', refresh: 'none' })])
+
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh' }))
+
+    await waitFor(() => expect(callOperation).toHaveBeenCalledTimes(1))
+    expect(screen.queryByRole('dialog')).toBeNull()
+  })
+
   it('reads the page again when it refreshes', async () => {
     const { queryClient } = renderBlocks([form([BODY], action({ refresh: 'page' }))])
     const invalidate = vi.spyOn(queryClient, 'invalidateQueries')

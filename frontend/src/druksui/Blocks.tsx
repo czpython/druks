@@ -4,7 +4,7 @@ import { GateControls } from './GateControls'
 import { Chart, Facts, ImageGallery, LinkControl, List, Metrics, Table } from './DataBlocks'
 import { ActionButton, Form } from './Form'
 import { Files, Image, Progress, Timeline } from './RunBlocks'
-import { leadingDialog } from './blockLayout'
+import { leadingFieldAction } from './blockLayout'
 import { RegionContext } from './pages'
 
 export function Blocks({ blocks }: { blocks: Block[] }) {
@@ -36,7 +36,6 @@ function BlockContent({ block }: { block: Block }) {
         <Form
           title={block.title}
           description={block.description}
-          presentation={block.presentation}
           fields={block.fields}
           action={block.action}
         />
@@ -151,7 +150,7 @@ function BlockContent({ block }: { block: Block }) {
       )
     }
     case 'section': {
-      const action = block.title ? leadingDialog(block.blocks) : undefined
+      const action = block.title ? leadingFieldAction(block.blocks) : undefined
       const inside = action ? block.blocks.slice(1) : block.blocks
       const decision = block.blocks.some((insideBlock) => insideBlock.block === 'gate_controls')
       return (

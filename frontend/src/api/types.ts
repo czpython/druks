@@ -356,6 +356,7 @@ export interface Action {
   label: string
   operation: string
   arguments: Record<string, unknown>
+  fields: Field[]
   tone: 'default' | 'primary' | 'danger'
   confirm: string
   refresh: 'none' | 'page' | 'region'
@@ -412,7 +413,6 @@ export type Block =
       block: 'form'
       title: string
       description: string
-      presentation: 'inline' | 'dialog'
       fields: Field[]
       action: Action
     }
