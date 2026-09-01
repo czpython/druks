@@ -1,19 +1,10 @@
 name: On Pull Request Backend
 
+# No path filter: branch protection requires this job. A workflow that filters
+# itself out reports no context, and the pull request can never merge.
 on:
   pull_request:
     branches: [main]
-    paths:
-      - ".dockerignore"
-      - ".github/workflows/on-pull-request-backend.yml"
-      - "backend/**"
-      - "pyproject.toml"
-      - "uv.lock"
-      # The page wire snapshot is shared: the backend suite compares what the
-      # proof app serializes against the file the renderer reads, so a rename on
-      # the frontend side has to run this suite too.
-      - "frontend/src/api/types.ts"
-      - "frontend/src/druksui/**"
 
 concurrency:
   group: on-pull-request-backend-${{ github.event.pull_request.number }}
@@ -23,7 +14,7 @@ permissions:
   contents: read
 
 jobs:
-  checks:
+  backend:
     runs-on: ubuntu-latest
     # A hung await stalls forever, not loudly; the whole job normally takes
     # ~3 minutes. Pairs with pytest's faulthandler below: the dump names the
