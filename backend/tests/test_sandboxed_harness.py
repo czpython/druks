@@ -318,13 +318,18 @@ async def test_run_prompt_builds_executes_and_parses(
     the harness never sees the live sandbox, only ``ssh_username``."""
     run = _FakeRun(stdout_chunks=[b"streamed\n"], exit_code=0)
     sandbox = _fake_sandbox(run)
-    # run_prompt delegates to self._exec — bind the real one onto the stub.
-    sandbox._exec = lambda *args, **kwargs: Host._exec(sandbox, *args, **kwargs)
     seen: dict[str, Any] = {}
+
+    async def execute(*args: Any, **kwargs: Any) -> HarnessRunResult:
+        seen["exec"] = kwargs
+        return await Host._exec(sandbox, *args, **kwargs)
+
+    sandbox._exec = execute
 
     class _FakeHarness:
         name = "claude"
         model = "claude-opus-4-8"
+        first_byte_seconds = 17
         # The real manifest method on the stubbed build/parse seam, so the
         # test exercises what run_prompt actually writes.
         get_manifest = Harness.get_manifest
@@ -356,6 +361,7 @@ async def test_run_prompt_builds_executes_and_parses(
     # The harness planned from values, not the live sandbox.
     assert seen["build"]["ssh_username"] == "root"
     assert seen["build"]["extra_env"] == {"GITHUB_MCP_TOKEN": "ghs_x"}
+    assert seen["exec"]["first_byte_kill_seconds"] == 17
     # The prompt was persisted to the artifact dir before exec.
     assert (ctx.artifact_dir / "call-7" / "prompt.md").read_text() == "do the thing"
     # The capability manifest was written alongside it, keyed to the same call.

@@ -281,18 +281,17 @@ async def _drukbox_doctor(settings: Settings):
         await api.aclose()
 
 
-async def check_sandbox_e2e(settings: Settings) -> CheckResult:
-    """Provision a real VM and exercise the two dial paths builds use:
-    the acquire-time connection and a reattach from a GET-built record.
-    Costs one VM-minute — opt-in via ``druks doctor --sandbox``, never
-    part of the default check set."""
+async def check_sandbox_e2e(settings: Settings) -> CheckResult | list[CheckResult]:
+    """Provision a real VM, exercise the acquire and reattach dial paths, and
+    probe each registered harness CLI's presence on the image. Costs one
+    VM-minute — opt-in via ``druks doctor --sandbox``, never part of the
+    default check set."""
     if not settings.sandbox.service_url:
         return CheckResult(name="sandbox_e2e", ok=True, detail="not configured")
     try:
-        detail = await _sandbox_e2e()
+        return await _sandbox_e2e()
     except Exception as error:  # noqa: BLE001 — doctor reports, never raises
         return CheckResult(name="sandbox_e2e", ok=False, detail=f"{error}")
-    return CheckResult(name="sandbox_e2e", ok=True, detail=detail)
 
 
 async def check_declared_sandboxes(settings: Settings) -> CheckResult | list[CheckResult]:
@@ -342,8 +341,9 @@ async def check_declared_sandboxes(settings: Settings) -> CheckResult | list[Che
     return results
 
 
-async def _sandbox_e2e() -> str:
+async def _sandbox_e2e() -> list[CheckResult]:
     start = time.monotonic()
+    binary_results: list[CheckResult] = []
     # acquire rolls its own host back on failure; once it yields, we own
     # the release.
     async with sandbox_client.acquire() as sandbox:
@@ -351,17 +351,39 @@ async def _sandbox_e2e() -> str:
         try:
             await _doctor_exec(sandbox)
             provision_seconds = time.monotonic() - start
-
+            for harness in get_harnesses():
+                result = await sandbox.exec(
+                    ["sh", "-c", f"command -v {harness.command}"],
+                    timeout=30.0,
+                )
+                if result.ok:
+                    binary_detail = result.stdout.strip() or f"{harness.command} found"
+                else:
+                    binary_detail = result.stderr.strip() or f"{harness.command} not found"
+                binary_results.append(
+                    CheckResult(
+                        name=f"sandbox_binary:{harness.name}",
+                        ok=result.ok,
+                        detail=binary_detail,
+                    )
+                )
             reattach_start = time.monotonic()
             async with sandbox_client.attach(host_id=host_id) as reattached:
                 await _doctor_exec(reattached)
             reattach_seconds = time.monotonic() - reattach_start
         finally:
             await sandbox_client.release(host_id=host_id)
-    return (
-        f"provision+dial {provision_seconds:.0f}s · "
-        f"reattach {reattach_seconds:.1f}s · host {host_id}"
-    )
+    return [
+        CheckResult(
+            name="sandbox_e2e",
+            ok=True,
+            detail=(
+                f"provision+dial {provision_seconds:.0f}s · "
+                f"reattach {reattach_seconds:.1f}s · host {host_id}"
+            ),
+        ),
+        *binary_results,
+    ]
 
 
 async def _doctor_exec(sandbox) -> None:
@@ -545,7 +567,8 @@ async def run_checks(settings: Settings, *, sandbox: bool = False) -> list[Check
             outcome = await outcome
         results.extend(outcome if isinstance(outcome, list) else [outcome])
     if sandbox:
-        results.append(await check_sandbox_e2e(settings))
+        outcome = await check_sandbox_e2e(settings)
+        results.extend(outcome if isinstance(outcome, list) else [outcome])
     return results
 
 

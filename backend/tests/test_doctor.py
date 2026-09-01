@@ -416,34 +416,47 @@ def test_print_results_fails_on_a_genuine_fault_alongside_pending(capsys) -> Non
     assert "1 pending" in captured.out
 
 
-def _fake_sandbox_client(monkeypatch, *, reattach_fails=False):
+def _fake_sandbox_client(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    reattach_fails: bool = False,
+    missing_command: str | None = None,
+) -> list[object]:
     """Async-context-manager stubs mirroring acquire/attach/release."""
-    import contextlib
-
-    class _FakeExec:
-        ok = True
-        stderr = ""
 
     class _FakeSandbox:
         id = "host-doc"
 
-        async def exec(self, argv, timeout):
-            return _FakeExec()
+        def __init__(self, connection: str) -> None:
+            self.connection = connection
 
-    calls = []
+        async def exec(self, argv: list[str], timeout: float) -> SimpleNamespace:
+            calls.append((self.connection, argv, timeout))
+            command_missing = missing_command is not None and argv == [
+                "sh",
+                "-c",
+                f"command -v {missing_command}",
+            ]
+            return SimpleNamespace(
+                ok=not command_missing,
+                stdout="" if command_missing else "/usr/bin/tool\n",
+                stderr="missing\n" if command_missing else "",
+            )
+
+    calls: list[object] = []
 
     class _FakeClient:
-        @contextlib.asynccontextmanager
+        @asynccontextmanager
         async def acquire(self):
             calls.append("acquire")
-            yield _FakeSandbox()
+            yield _FakeSandbox("acquire")
 
-        @contextlib.asynccontextmanager
+        @asynccontextmanager
         async def attach(self, *, host_id):
             calls.append(f"attach:{host_id}")
             if reattach_fails:
                 raise TimeoutError("dial timed out")
-            yield _FakeSandbox()
+            yield _FakeSandbox("reattach")
 
         async def release(self, *, host_id):
             calls.append(f"release:{host_id}")
@@ -461,15 +474,42 @@ async def test_sandbox_e2e_not_configured_is_ok(tmp_path: Path) -> None:
     assert result.detail == "not configured"
 
 
-async def test_sandbox_e2e_exercises_dial_and_reattach(tmp_path: Path, monkeypatch) -> None:
+async def test_sandbox_e2e_exercises_dial_and_reattach(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     calls = _fake_sandbox_client(monkeypatch)
     settings = make_settings(tmp_path, sandbox={"service_url": "http://127.0.0.1:8780"})
 
-    result = await doctor.check_sandbox_e2e(settings)
+    results = await doctor.check_sandbox_e2e(settings)
 
-    assert result.ok
-    assert "reattach" in result.detail
-    assert calls == ["acquire", "attach:host-doc", "release:host-doc"]
+    assert [result.name for result in results] == [
+        "sandbox_e2e",
+        "sandbox_binary:claude",
+        "sandbox_binary:codex",
+    ]
+    assert all(result.ok for result in results)
+    assert calls == [
+        "acquire",
+        ("acquire", ["echo", "doctor"], 30.0),
+        ("acquire", ["sh", "-c", "command -v claude"], 30.0),
+        ("acquire", ["sh", "-c", "command -v codex"], 30.0),
+        "attach:host-doc",
+        ("reattach", ["echo", "doctor"], 30.0),
+        "release:host-doc",
+    ]
+
+
+async def test_sandbox_e2e_reports_a_missing_harness_binary(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls = _fake_sandbox_client(monkeypatch, missing_command="codex")
+    settings = make_settings(tmp_path, sandbox={"service_url": "http://127.0.0.1:8780"})
+
+    results = await doctor.check_sandbox_e2e(settings)
+
+    assert _named(results, "sandbox_binary:claude").ok
+    assert not _named(results, "sandbox_binary:codex").ok
+    assert ("acquire", ["sh", "-c", "command -v codex"], 30.0) in calls
 
 
 async def test_sandbox_e2e_failure_names_the_phase_and_releases(

@@ -66,6 +66,7 @@ _WEEKLY_WINDOWS = TypeAdapter(tuple[ParsedMetric, ...])
 
 class Harness(ABC):
     name: str
+    command: ClassVar[str]
     login_kinds: ClassVar[frozenset[str]] = frozenset({"subscription"})
     credentials_path: ClassVar[str]
     # Harness identity + shipped config, the seed source for the per-harness
@@ -82,6 +83,9 @@ class Harness(ABC):
     failure_markers: ClassVar[dict[str, type[exceptions.HarnessError]]] = {}
     default_effort: ClassVar[str] = "high"
     default_timeout: ClassVar[int] = 1800
+    # Claude's slowest measured cold start is under 60 seconds. This margin
+    # covers slow MCP loads, token refresh, and prompt assembly.
+    first_byte_seconds: ClassVar[int | None] = 90
     # Per-CLI OAuth refresh config (set by subclasses).
     REFRESH_MARGIN: timedelta
     _TOKEN_URL: str
