@@ -9,20 +9,24 @@ async def notes():
     return ui.Page(
         "Notes",
         description="Every note this install captured.",
-        action=ui.Action(
-            label="Write a note",
-            operation="write_note",
-            tone="primary",
-            fields=[
-                ui.TextAreaField(
-                    name="body",
-                    label="Note",
-                    placeholder="Fan noise on rack 3.",
-                    is_required=True,
-                    rows=3,
-                )
-            ],
-        ),
+        actions=[
+            ui.Action(
+                label="Write a note",
+                operation="write_note",
+                tone="primary",
+                fields=[
+                    ui.TextAreaField(
+                        name="body",
+                        label="Note",
+                        placeholder="Fan noise on rack 3.",
+                        is_required=True,
+                        rows=3,
+                    )
+                ],
+            ),
+            # A header holds whatever a card holds: an action, a link, or both.
+            ui.Link("Everything at once", page="new_note"),
+        ],
         blocks=[
             ui.Section(
                 name="recent",

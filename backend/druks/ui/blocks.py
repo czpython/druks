@@ -633,7 +633,7 @@ class Section(BlockParent):
     block: Literal["section"] = "section"
     title: str = ""
     name: str = ""
-    action: Action | None = None
+    actions: list[Action | Link] = Field(default_factory=list)
     follows: Watched = None
 
     def check_placement(self, *, followed: bool, regions: set[str], region: str = "") -> None:
@@ -645,8 +645,8 @@ class Section(BlockParent):
         if self.name:
             regions.add(self.name)
         inside = self.name or region
-        if self.action:
-            self.action.check_placement(
+        for control in self.actions:
+            control.check_placement(
                 followed=followed or bool(self.follows),
                 regions=regions,
                 region=inside,
@@ -658,8 +658,8 @@ class Section(BlockParent):
         )
 
     def iter_actions(self) -> "Iterable[Action]":
-        if self.action:
-            yield self.action
+        for control in self.actions:
+            yield from control.iter_actions()
         yield from super().iter_actions()
 
     @model_validator(mode="after")

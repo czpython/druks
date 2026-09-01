@@ -44,9 +44,10 @@ async def test_the_landing_page_answers_at_the_bare_pages_path(druks_client: htt
     assert response.status_code == 200
     page = response.json()
     assert page["title"] == "Notes"
-    action = page["action"]
+    # A header holds what a card holds: an action, a link, or both.
+    action, link = page["actions"]
     (section,) = page["blocks"]
-    assert action["block"] == "action"
+    assert (action["block"], link["block"]) == ("action", "link")
     assert action["fields"][0]["name"] == "body"
     (cards,) = section["blocks"]
     assert cards["cards"] == []

@@ -80,7 +80,7 @@ const ROSTER: App[] = [
 // A page whose only block is the form under test, so a refresh reads the page
 // again and hands the form a freshly declared value.
 function notePage(fields: Field[]): PageSnapshot {
-  return { title: 'New note', description: '', action: null, blocks: [form(fields)], follows: null }
+  return { title: 'New note', description: '', actions: [], blocks: [form(fields)], follows: null }
 }
 
 function renderPage() {
@@ -241,7 +241,7 @@ describe('submitting a form', () => {
         block: 'section',
         title: 'Notes',
         name: 'notes',
-        action: action({ label: 'Write a note', fields: [BODY] }),
+        actions: [action({ label: 'Write a note', fields: [BODY] })],
         follows: null,
         blocks: [{ block: 'text', text: 'One note.' }],
       },
@@ -497,7 +497,7 @@ describe('what an action does next', () => {
       block: 'section',
       title: 'Decision',
       name: 'decision',
-      action: null,
+      actions: [],
       follows: null,
       blocks: [
         {
@@ -513,7 +513,7 @@ describe('what an action does next', () => {
     readPage.mockResolvedValue({
       title: 'x',
       description: '',
-      action: null,
+      actions: [],
       blocks: [region],
       follows: null,
     })
@@ -682,7 +682,7 @@ describe('what an action does next', () => {
       block: 'section',
       title: '',
       name: 'decision',
-      action: null,
+      actions: [],
       follows: null,
       blocks: [
         {
@@ -712,11 +712,13 @@ describe('what an action does next', () => {
         block: 'section',
         title: 'Notes',
         name: 'notes',
-        action: action({
-          label: 'Write a note',
-          fields: [BODY],
-          refresh: 'region',
-        }),
+        actions: [
+          action({
+            label: 'Write a note',
+            fields: [BODY],
+            refresh: 'region',
+          }),
+        ],
         follows: null,
         blocks: [],
       },

@@ -73,7 +73,7 @@ function renderAt(location: string, page: string, snapshot: PageSnapshot) {
 const NOTES: PageSnapshot = {
   title: 'Notes',
   description: 'Every note this install captured.',
-  action: null,
+  actions: [],
   blocks: [{ block: 'text', text: 'a jotted observation' }],
   follows: null,
 }
@@ -91,27 +91,29 @@ describe('a declared page', () => {
   it('puts the page action beside the page title', async () => {
     const { container } = renderAt('/field_notes', 'notes', {
       ...NOTES,
-      action: {
-        block: 'action',
-        label: 'Write a note',
-        operation: 'write_note',
-        arguments: {},
-        fields: [
-          {
-            field: 'text',
-            name: 'body',
-            label: 'Note',
-            value: '',
-            placeholder: '',
-            helpText: '',
-            isRequired: true,
-          },
-        ],
-        tone: 'primary',
-        confirm: '',
-        refresh: 'page',
-        link: null,
-      },
+      actions: [
+        {
+          block: 'action',
+          label: 'Write a note',
+          operation: 'write_note',
+          arguments: {},
+          fields: [
+            {
+              field: 'text',
+              name: 'body',
+              label: 'Note',
+              value: '',
+              placeholder: '',
+              helpText: '',
+              isRequired: true,
+            },
+          ],
+          tone: 'primary',
+          confirm: '',
+          refresh: 'page',
+          link: null,
+        },
+      ],
       blocks: [{ block: 'text', text: 'a jotted observation' }],
     })
 
@@ -128,7 +130,7 @@ describe('a declared page', () => {
     renderAt('/field_notes/notes/7', 'note', {
       title: 'Note 7',
       description: '',
-      action: null,
+      actions: [],
       blocks: [],
       follows: null,
     })
@@ -170,7 +172,7 @@ describe('tabs', () => {
     const { container } = renderAt('/field_notes/recent', 'recent_notes', {
       title: 'Recent notes',
       description: '',
-      action: null,
+      actions: [],
       blocks: [],
       follows: null,
     })
@@ -184,7 +186,7 @@ describe('tabs', () => {
     const { container } = renderAt('/field_notes/notes/7', 'note', {
       title: 'Note 7',
       description: '',
-      action: null,
+      actions: [],
       blocks: [],
       follows: null,
     })
@@ -200,7 +202,7 @@ describe('tabs', () => {
     const { container } = renderAt('/field_notes/notes/new', 'new_note', {
       title: 'Write a note',
       description: '',
-      action: null,
+      actions: [],
       blocks: [],
       follows: null,
     })
@@ -215,7 +217,7 @@ describe('the parent link', () => {
     renderAt('/field_notes/notes/7', 'note', {
       title: 'Note 7',
       description: '',
-      action: null,
+      actions: [],
       blocks: [],
       follows: null,
     })
@@ -228,7 +230,7 @@ describe('the parent link', () => {
     const { container } = renderAt('/field_notes/notes/7/runs/9', 'note_run', {
       title: 'Run 9',
       description: '',
-      action: null,
+      actions: [],
       blocks: [],
       follows: null,
     })

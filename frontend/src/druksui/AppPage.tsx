@@ -3,11 +3,11 @@ import { useCallback, useMemo, useRef, type ReactNode } from 'react'
 import { Link as RouteLink, useLocation } from 'wouter'
 
 import { api } from '../api/client'
-import type { Follows, PageEntry, PageSnapshot } from '../api/types'
+import type { Action, Follows, Link, PageEntry, PageSnapshot } from '../api/types'
 import { EmptyState } from '../components/EmptyState'
 import { Page } from '../components/Page'
 import { AppSurface } from './AppSurface'
-import { Blocks } from './Blocks'
+import { Blocks, LinkRow } from './Blocks'
 import { followedSubjects, hrefUnder, isDetail, mergeRegions, PagesContext, parentOf, tabsFor } from './pages'
 import { SubjectStream } from './SubjectStream'
 
@@ -126,7 +126,7 @@ export function AppPage({ app, page }: { app: string; page: string }) {
             {...chrome}
             title={snapshot.data.title}
             description={snapshot.data.description}
-            action={snapshot.data.action && <Blocks blocks={[snapshot.data.action]} />}
+            actions={snapshot.data.actions}
           />
           <Blocks blocks={snapshot.data.blocks} />
         </Page>
@@ -146,7 +146,7 @@ function PageChrome({
   tabs,
   title,
   description,
-  action,
+  actions,
 }: {
   app: string
   page: string
@@ -156,7 +156,7 @@ function PageChrome({
   tabs: PageEntry[]
   title: ReactNode
   description?: string
-  action?: ReactNode
+  actions?: (Action | Link)[]
 }) {
   return (
     <>
@@ -172,7 +172,11 @@ function PageChrome({
           <h1 className="dui-title">{title}</h1>
           {description && <p className="dui-description dim">{description}</p>}
         </div>
-        {action && <div className="dui-page-actions">{action}</div>}
+        {actions?.length ? (
+          <div className="dui-page-actions">
+            <LinkRow links={actions} />
+          </div>
+        ) : null}
       </div>
       {tabs.length > 0 && root && (
         <nav className="dui-tabs" aria-label={`${app} page tabs`}>

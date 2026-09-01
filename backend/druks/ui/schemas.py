@@ -4,7 +4,7 @@ from pydantic import Field, model_validator
 
 from druks.schemas import Schema
 
-from .blocks import Action, Block, Watched
+from .blocks import Action, Block, Link, Watched
 
 
 class Page(Schema):
@@ -13,7 +13,7 @@ class Page(Schema):
 
     title: str
     description: str = ""
-    action: Action | None = None
+    actions: list[Action | Link] = Field(default_factory=list)
     blocks: list[Block] = Field(default_factory=list)
     follows: Watched = None
 
@@ -23,14 +23,14 @@ class Page(Schema):
     @model_validator(mode="after")
     def _blocks_sit_where_they_work(self) -> "Page":
         regions: set[str] = set()
-        if self.action:
-            self.action.check_placement(followed=bool(self.follows), regions=regions)
+        for control in self.actions:
+            control.check_placement(followed=bool(self.follows), regions=regions)
         for block in self.blocks:
             block.check_placement(followed=bool(self.follows), regions=regions)
         return self
 
     def iter_actions(self) -> "Iterable[Action]":
-        if self.action:
-            yield self.action
+        for control in self.actions:
+            yield from control.iter_actions()
         for block in self.blocks:
             yield from block.iter_actions()

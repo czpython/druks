@@ -632,7 +632,7 @@ class Section:
     block: Literal["section"] = "section"
     title: str = ""
     name: str = ""
-    action: Action | None = None
+    actions: list[Action | Link] = []
     blocks: list[Block] = []
     follows: Follows | None = None
 ```
@@ -642,17 +642,17 @@ class Section:
   "block": "section",
   "title": "Decision",
   "name": "decision",
-  "action": null,
+  "actions": [],
   "blocks": [],
   "follows": {"subjectType": "peers", "subjectId": "42"}
 }
 ```
 
-A section action belongs to that section. The shell chooses where to show it.
-An action in `blocks` stays with the body content.
+A section's actions belong to that section. The shell chooses where to show
+them. An action in `blocks` stays with the body content.
 
-The action of a followed section is inside the section region. A region refresh
-replaces the heading, action, and body together.
+They sit inside the section region, so a region refresh replaces the heading,
+the actions, and the body together.
 
 ### Card
 
@@ -1556,7 +1556,7 @@ class Follows:
 class Page:
     title: str
     description: str = ""
-    action: Action | None = None
+    actions: list[Action | Link] = []
     blocks: list[Block] = []
     follows: Follows | None = None
 ```
@@ -1565,23 +1565,29 @@ class Page:
 {
   "title": "peer-7",
   "description": "One peer and its last sweep.",
-  "action": null,
+  "actions": [],
   "blocks": [{"block": "text", "text": "Healthy."}],
   "follows": {"subjectType": "peers", "subjectId": "7"}
 }
 ```
 
-A page action belongs to that page. The shell chooses where to show it. An
+A page's actions belong to that page. The shell chooses where to show them. An
 action in `blocks` stays with the body content.
+
+`Page`, `Section`, `Card` and `EmptyState` all take `actions` the same way: a
+list of `Action` and `Link`, in the order the app wants them read.
 
 ```python
 return ui.Page(
     "Peers",
-    action=ui.Action(
-        label="Add a peer",
-        operation="add_peer",
-        fields=[ui.TextField(name="repo", label="Repository", is_required=True)],
-    ),
+    actions=[
+        ui.Action(
+            label="Add a peer",
+            operation="add_peer",
+            fields=[ui.TextField(name="repo", label="Repository", is_required=True)],
+        ),
+        ui.Link("What a peer is", url="https://docs.druks.ai/peers"),
+    ],
     blocks=[ui.Table(...)],
 )
 ```

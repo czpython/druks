@@ -160,10 +160,10 @@ function BlockContent({ block }: { block: Block }) {
           data-region={block.name || undefined}
         >
           <RegionContext.Provider value={block.name || enclosingRegion}>
-            {block.title || block.action ? (
+            {block.title || block.actions.length ? (
               <div className="dui-section-head">
                 {block.title && <h2 className="dui-section-title">{block.title}</h2>}
-                {block.action && <ActionButton action={block.action} />}
+                <LinkRow links={block.actions} />
               </div>
             ) : null}
             <Blocks blocks={block.blocks} />
@@ -182,7 +182,7 @@ function BlockContent({ block }: { block: Block }) {
   }
 }
 
-function LinkRow({ links }: { links: (Action | Link)[] }) {
+export function LinkRow({ links }: { links: (Action | Link)[] }) {
   if (links.length === 0) return null
   return (
     <div className="dui-links">

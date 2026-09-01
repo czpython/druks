@@ -378,7 +378,7 @@ export type Block =
       block: 'section'
       title: string
       name: string
-      action: Action | null
+      actions: (Action | Link)[]
       blocks: Block[]
       follows: Follows | null
     }
@@ -447,7 +447,7 @@ export interface Follows {
 export interface PageSnapshot {
   title: string
   description: string
-  action: Action | null
+  actions: (Action | Link)[]
   blocks: Block[]
   follows: Follows | null
 }

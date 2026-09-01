@@ -188,7 +188,7 @@ def test_a_get_route_can_never_be_an_action():
 def test_every_action_on_the_page_is_checked():
     page = Page(
         "x",
-        action=Action(label="Write", operation="write_note"),
+        actions=[Action(label="Write", operation="write_note")],
         blocks=[
             Card(
                 blocks=[
@@ -269,7 +269,7 @@ def test_a_section_action_belongs_to_its_region():
         blocks=[
             Section(
                 name="decision",
-                action=action,
+                actions=[action],
                 follows={"subject_type": "note", "subject_id": "1"},
             )
         ],
@@ -277,12 +277,13 @@ def test_a_section_action_belongs_to_its_region():
 
     assert list(page.iter_actions()) == [action]
     section = page.model_dump(by_alias=True, mode="json")["blocks"][0]
-    assert section["action"]["label"] == "Go"
+    (control,) = section["actions"]
+    assert control["label"] == "Go"
 
 
 def test_a_page_action_cannot_refresh_a_region():
     with pytest.raises(ValueError, match="refreshes its region, and it sits in none"):
         Page(
             "x",
-            action=Action(label="Go", operation="write_note", refresh="region"),
+            actions=[Action(label="Go", operation="write_note", refresh="region")],
         )
