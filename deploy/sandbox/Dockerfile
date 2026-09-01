@@ -1,6 +1,6 @@
 # Sandbox images for druks agents: a drukbox base (sshd and its boot
 # contract) plus the tools the build prompts assume are on PATH (git, gh,
-# node, claude, codex). drukbox publishes one base per provider, and each
+# node, claude, codex, opencode). drukbox publishes one base per provider, and each
 # druks image builds on the matching one — the ``toolchain`` stage applies
 # the same tool layers to whichever base ``BASE`` selects:
 #
@@ -29,6 +29,7 @@ SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
 ARG CLAUDE_CODE_VERSION=2.1.207
 ARG CODEX_VERSION=0.144.1
+ARG OPENCODE_VERSION=1.18.25
 ARG DEBIAN_FRONTEND=noninteractive
 
 # Package revisions differ across the base image's architectures and external
@@ -51,7 +52,8 @@ RUN apt-get update \
 
 RUN npm install -g \
     "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
-    "@openai/codex@${CODEX_VERSION}"
+    "@openai/codex@${CODEX_VERSION}" \
+    "opencode-ai@${OPENCODE_VERSION}"
 
 RUN useradd --create-home --shell /bin/bash druks
 
