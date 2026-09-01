@@ -4,6 +4,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from druks.accounts.models import Account
 from druks.harnesses.base import Harness
 from druks.harnesses.datastructures import SandboxSettings
 from druks.harnesses.exceptions import (
@@ -13,9 +14,12 @@ from druks.harnesses.exceptions import (
     HarnessOverloadedError,
     HarnessRateLimitError,
 )
+from druks.harnesses.models import HarnessConnection
 from druks.harnesses.pi import PiHarness
 from druks.harnesses.registry import get_harness
 from druks.sandbox.datastructures import HarnessRunResult, McpServer
+from druks.testing import configure_app_for_test, make_settings
+from fastapi.testclient import TestClient
 from pydantic import BaseModel
 
 _API_KEY = "sk-pi-secret"  # nosec B105
@@ -44,7 +48,13 @@ def _harness(*, effort: str | None = "high") -> PiHarness:
 
 
 async def _credentials(cls: type[Harness]) -> dict[str, str]:
-    return {"apiKey": _API_KEY}
+    return {"api_key": _API_KEY}
+
+
+@pytest.fixture
+def client(tmp_path: Path):
+    with TestClient(configure_app_for_test(settings=make_settings(tmp_path))) as c:
+        yield c
 
 
 def _parse(
@@ -268,3 +278,15 @@ def test_parse_treats_a_missing_result_file_as_invalid_output(tmp_path: Path) ->
 def test_parse_treats_a_broken_stream_as_invalid_output(tmp_path: Path) -> None:
     with pytest.raises(HarnessInvalidOutputError, match="no usable stream"):
         _parse(b"not json", tmp_path)
+
+
+async def test_a_pasted_key_renders_under_the_picked_models_provider(client, druks_db) -> None:
+    assert client.post("/api/harnesses/pi/connection", json={"key": _API_KEY}).status_code == 200
+    account = await Account.get_or_create("op@example.com")
+    connection = await HarnessConnection.get_for_account("pi", account.id)
+
+    rendered = await PiHarness.render_credentials_file(
+        connection.id, model="anthropic/claude-opus-5"
+    )
+
+    assert json.loads(rendered) == {"anthropic": {"type": "api_key", "key": _API_KEY}}
