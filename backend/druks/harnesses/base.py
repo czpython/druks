@@ -115,7 +115,7 @@ class Harness(ABC):
     @classmethod
     def check_returncode(cls, result: HarnessRunResult) -> None:
         if result.returncode != 0:
-            detail = _terminal_detail(result.stdout)
+            detail = _terminal_detail(result)
             message = f"{cls.name} exited with {result.returncode}.{detail}"
             lowered = detail.lower()
             for marker, error in cls.failure_markers.items():
@@ -685,11 +685,13 @@ async def post_token(url: str, body: dict, *, form: bool) -> dict:
         raise exceptions.ConnectError("The provider returned an unreadable response.") from exc
 
 
-def _terminal_detail(stdout: bytes) -> str:
+def _terminal_detail(result: HarnessRunResult) -> str:
     """The CLI's terminal error ("You've hit your session limit · resets
     5:10pm") rides the stream's last result event; without it the persisted
-    failure is a bare exit code and the operator has to dig transcripts."""
-    for line in reversed(stdout.splitlines()[-20:]):
+    failure is a bare exit code and the operator has to dig transcripts.
+    A CLI that died before emitting events leaves its reason on stderr,
+    so the last non-empty line stands in."""
+    for line in reversed(result.stdout.splitlines()[-20:]):
         try:
             event = json.loads(line)
         except ValueError:
@@ -706,4 +708,7 @@ def _terminal_detail(stdout: bytes) -> str:
             error = error.get("message")
         if isinstance(error, str) and error:
             return f" {error[:300]}"
+    for line in reversed(result.stderr.decode("utf-8", errors="replace").splitlines()):
+        if detail := line.strip():
+            return f" {detail[:300]}"
     return ""
