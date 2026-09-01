@@ -61,7 +61,7 @@ async def _committed(engine, work):
         await session.close()
 
 
-async def _connect(payload: dict) -> str:
+async def _connect(payload: dict, *, kind: str = "subscription") -> str:
     from druks.accounts.models import Account
     from druks.user_settings.models import UserSettings
 
@@ -75,8 +75,44 @@ async def _connect(payload: dict) -> str:
         payload=payload,
         expires_at=None,
         provider_email="op@example.com",
+        kind=kind,
     )
     return row.id
+
+
+async def test_connect_stores_the_default_kind(engine):
+    async def connect():
+        return await _connect({"claudeAiOauth": {"accessToken": "token"}})
+
+    connection_id = await _committed(engine, connect)
+
+    async def read_back():
+        row = await HarnessConnection.get(connection_id)
+        return row.kind, row.supports_refresh, row.is_metered
+
+    assert await _committed(engine, read_back) == ("subscription", True, True)
+
+
+async def test_reconnect_overwrites_the_kind(engine):
+    async def connect_subscription():
+        return await _connect({"claudeAiOauth": {"accessToken": "subscription"}})
+
+    connection_id = await _committed(engine, connect_subscription)
+
+    async def connect_api_key():
+        return await _connect(
+            {"claudeAiOauth": {"accessToken": "api-key"}},
+            kind="api_key",
+        )
+
+    reconnected_id = await _committed(engine, connect_api_key)
+
+    async def read_back():
+        row = await HarnessConnection.get(connection_id)
+        return row.kind, row.supports_refresh, row.is_metered
+
+    assert reconnected_id == connection_id
+    assert await _committed(engine, read_back) == ("api_key", False, False)
 
 
 async def test_rotation_persists_new_payload_across_sessions(engine):

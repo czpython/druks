@@ -65,6 +65,7 @@ _WEEKLY_WINDOWS = TypeAdapter(tuple[ParsedMetric, ...])
 
 class Harness(ABC):
     name: str
+    login_kinds: ClassVar[frozenset[str]] = frozenset({"subscription"})
     # Harness identity + shipped config, the seed source for the per-harness
     # ``HarnessSettings`` row the operator then tunes. Subclasses set provider,
     # models and default_model; effort/timeout default to the shipped values.

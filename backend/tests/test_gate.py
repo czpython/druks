@@ -11,6 +11,8 @@ from druks.sandbox import gate
 @pytest.fixture(autouse=True)
 def _fast_poll(monkeypatch):
     monkeypatch.setattr(gate, "_POLL", 0.01)
+    _FakeHarness.rotated_connection_ids = []
+    _FakeConnections.refresh_capable_connection_ids = {"login-1", "login-2"}
 
 
 async def test_use_registers_for_the_span_and_unregisters():
@@ -61,6 +63,7 @@ class _FakeHarness:
     name = "fake"
     due_connection_ids: set[str] = set()
     urgent_connection_ids: set[str] = set()
+    rotated_connection_ids: list[str] = []
 
     @classmethod
     def needs_refresh(cls, login):
@@ -72,20 +75,30 @@ class _FakeHarness:
 
     @classmethod
     async def rotate_token(cls, connection_id):
+        cls.rotated_connection_ids.append(connection_id)
         return RotationResult(cls.name, "refreshed", connection_id=connection_id)
 
 
 class _FakeConnection:
     harness = "fake"
 
-    def __init__(self, connection_id: str) -> None:
+    def __init__(self, connection_id: str, *, supports_refresh: bool) -> None:
         self.id = connection_id
+        self.supports_refresh = supports_refresh
 
 
 class _FakeConnections:
-    @staticmethod
-    async def list_all():
-        return [_FakeConnection("login-1"), _FakeConnection("login-2")]
+    refresh_capable_connection_ids = {"login-1", "login-2"}
+
+    @classmethod
+    async def list_all(cls):
+        return [
+            _FakeConnection(
+                connection_id,
+                supports_refresh=connection_id in cls.refresh_capable_connection_ids,
+            )
+            for connection_id in ("login-1", "login-2")
+        ]
 
 
 def _fake_shut(shut: list[str], *, idle: bool):
@@ -111,6 +124,22 @@ async def test_refresh_shuts_only_the_due_logins(monkeypatch):
     # no-ops inside rotate_token itself).
     assert shut == ["login-2"]
     assert [r["action"] for r in result["results"]] == ["refreshed", "refreshed"]
+
+
+async def test_refresh_skips_a_connection_that_does_not_refresh(monkeypatch):
+    shut: list[str] = []
+    monkeypatch.setattr(harness_workflows, "get_harnesses", lambda: (_FakeHarness,))
+    monkeypatch.setattr(harness_workflows, "HarnessConnection", _FakeConnections)
+    monkeypatch.setattr(harness_workflows.gate, "shut", _fake_shut(shut, idle=True))
+    _FakeHarness.due_connection_ids = {"login-1", "login-2"}
+    _FakeHarness.urgent_connection_ids = set()
+    _FakeConnections.refresh_capable_connection_ids = {"login-1"}
+
+    result = await harness_workflows._refresh()
+
+    assert shut == ["login-1"]
+    assert _FakeHarness.rotated_connection_ids == ["login-1"]
+    assert [row["connection_id"] for row in result["results"]] == ["login-1"]
 
 
 async def test_refresh_defers_a_busy_login(monkeypatch):

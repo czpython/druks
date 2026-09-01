@@ -71,7 +71,7 @@ async def refresh_usage(account: Account = Depends(current_account)) -> None:
         connection = await HarnessConnection.get_for_account(harness.name, account.id)
         row = await UsageScrape.latest_for(harness.name, account.id)
         age = _age_seconds(row.scraped_at, now=now) if row else None
-        if connection and (age is None or age >= _REFRESH_FLOOR_SECONDS):
+        if connection and connection.is_metered and (age is None or age >= _REFRESH_FLOOR_SECONDS):
             await harness.poll_usage(connection)
 
 

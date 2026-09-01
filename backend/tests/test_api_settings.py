@@ -3,6 +3,7 @@ from pathlib import Path
 from druks.contrib.review.app import Review
 from druks.contrib.software_factory.app import SoftwareFactory
 from druks.database import db_session
+from druks.harnesses.claude import ClaudeHarness
 from druks.testing import configure_app_for_test, make_settings
 from druks.user_settings.models import SettingsOverride
 from fastapi.testclient import TestClient
@@ -32,6 +33,20 @@ def test_get_harnesses_lists_seeded_defaults(tmp_path: Path):
     assert "claude-sonnet-4-6" in claude_model_ids
     assert harnesses["codex"]["provider"] == "openai"
     assert (harnesses["codex"]["effort"], harnesses["codex"]["timeout"]) == ("high", 1800)
+
+
+def test_harness_response_carries_sorted_login_kinds(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(
+        ClaudeHarness,
+        "login_kinds",
+        frozenset({"subscription", "api_key"}),
+    )
+
+    with _build_client(tmp_path) as client:
+        harnesses = {h["name"]: h for h in client.get("/api/settings/harnesses").json()}
+
+    assert harnesses["claude"]["loginKinds"] == ["api_key", "subscription"]
+    assert harnesses["codex"]["loginKinds"] == ["subscription"]
 
 
 def test_harness_response_carries_connection_state(tmp_path: Path):
