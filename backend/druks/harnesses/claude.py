@@ -42,6 +42,7 @@ class ClaudeHarness(Harness):
     default_model = "claude-opus-4-7"
     model_discovery_url = "https://api.anthropic.com/v1/models?limit=100"
     command = "claude"
+    credentials_path = ".claude/.credentials.json"
 
     # OAuth refresh config (consumed by the Harness templates).
     REFRESH_MARGIN = timedelta(hours=2)
@@ -140,7 +141,7 @@ class ClaudeHarness(Harness):
             name="claude",
             args=("sh", "-c", wrapper),
             stdin=prompt.encode("utf-8"),
-            credentials=await _claude_credentials(
+            credentials=await _get_credentials(
                 self.sandbox,
                 github_token=github_token,
                 include_plugins=include_plugins,
@@ -404,7 +405,7 @@ def _parse_iso(value: object) -> datetime | None:
     return ensure_utc(parsed)
 
 
-async def _claude_credentials(
+async def _get_credentials(
     sandbox: SandboxSettings,
     *,
     github_token: str | None,
@@ -426,16 +427,16 @@ async def _claude_credentials(
     and the skills tree are kept either way; those aren't plugins.
     """
     config_dir = sandbox.claude_config_dir
-    files: tuple[tuple[Path, str], ...] = ()
+    config_files: tuple[tuple[Path, str], ...] = ()
     dirs: tuple[tuple[Path, str], ...] = ()
     if config_dir:
-        files = (
+        config_files = (
             (config_dir.parent / ".claude.json", ".claude.json"),
             (config_dir / "settings.json", ".claude/settings.json"),
             (config_dir / "CLAUDE.md", ".claude/CLAUDE.md"),
         )
         if include_plugins:
-            files += (
+            config_files += (
                 (
                     config_dir / "plugins" / "installed_plugins.json",
                     ".claude/plugins/installed_plugins.json",
@@ -455,9 +456,14 @@ async def _claude_credentials(
     if skills_src:
         dirs += ((skills_src, ".claude/skills"),)
     return Credentials(
-        claude_credentials=await ClaudeHarness.render_credentials_file(connection_id),
+        files=(
+            (
+                ClaudeHarness.credentials_path,
+                await ClaudeHarness.render_credentials_file(connection_id),
+            ),
+        ),
         github_token=github_token,
-        extra_config_files=files,
+        extra_config_files=config_files,
         extra_config_dirs=dirs,
         extra_dir_excludes={".claude/skills": await Skill.delivery_excludes(skills)},
     )

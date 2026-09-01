@@ -290,6 +290,7 @@ class CodexHarness(Harness):
     # catches it if the server ever starts rejecting unknown versions.
     model_discovery_url = "https://chatgpt.com/backend-api/codex/models?client_version=99.99.99"
     command = "codex"
+    credentials_path = ".codex/auth.json"
 
     # The CLI's terminal {"type":"error"} event carries prose, not status
     # shapes: stream drops after its internal retries, usage windows, 429s.
@@ -606,7 +607,7 @@ class CodexHarness(Harness):
             name=self.name,
             args=tuple(cmd),
             stdin=_with_final_message_note(prompt).encode("utf-8"),
-            credentials=await self._codex_credentials(
+            credentials=await self._get_credentials(
                 github_token=github_token,
                 skills=skills,
                 connection_id=connection_id,
@@ -684,7 +685,7 @@ class CodexHarness(Harness):
         args = (*args, "--json")
         return args
 
-    async def _codex_credentials(
+    async def _get_credentials(
         self,
         *,
         github_token: str | None,
@@ -695,9 +696,9 @@ class CodexHarness(Harness):
         # isn't connected); the local config dir only adds config carry on top.
         assert self.sandbox is not None  # callers guard
         config_dir = self.sandbox.codex_config_dir
-        files: tuple[tuple[Path, str], ...] = ()
+        config_files: tuple[tuple[Path, str], ...] = ()
         if config_dir:
-            files = (
+            config_files = (
                 (config_dir / "config.toml", ".codex/config.toml"),
                 (config_dir / ".credentials.json", ".codex/.credentials.json"),
                 (config_dir / "AGENTS.md", ".codex/AGENTS.md"),
@@ -710,9 +711,9 @@ class CodexHarness(Harness):
         if skills_src:
             dirs = ((skills_src, ".codex/skills"),)
         return Credentials(
-            codex_credentials=await self.render_credentials_file(connection_id),
+            files=((self.credentials_path, await self.render_credentials_file(connection_id)),),
             github_token=github_token,
-            extra_config_files=files,
+            extra_config_files=config_files,
             extra_config_dirs=dirs,
             extra_dir_excludes={".codex/skills": await Skill.delivery_excludes(skills)},
         )

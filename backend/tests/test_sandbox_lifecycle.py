@@ -161,18 +161,16 @@ def _record(
 # orchestration that drives them.
 
 
-async def test_push_skips_none_fields():
+async def test_push_writes_one_credential_file():
     sandbox = _FakeSandbox()
 
     await creds_module.push(
         sandbox,  # type: ignore[arg-type]
-        Credentials(claude_credentials="{}"),
+        Credentials(files=((".claude/.credentials.json", "{}"),)),
     )
 
-    # Only the Claude credential, written as a secret. Codex + GitHub skipped,
-    # and credentials never travel by SFTP.
     assert sandbox.uploads == []
-    assert sandbox.secrets == [("{}", layout.get_claude_credentials_remote(sandbox.ssh_username))]
+    assert sandbox.secrets == [("{}", "/root/.claude/.credentials.json")]
 
 
 async def test_push_writes_all_three_when_supplied():
@@ -181,17 +179,18 @@ async def test_push_writes_all_three_when_supplied():
     await creds_module.push(
         sandbox,  # type: ignore[arg-type]
         Credentials(
-            claude_credentials='{"claude": 1}',
-            codex_credentials='{"codex": 1}',
+            files=(
+                (".claude/.credentials.json", '{"claude": 1}'),
+                (".codex/auth.json", '{"codex": 1}'),
+            ),
             github_token="gho_xxx",
         ),
     )
 
-    # All three are synthesized content written via write_secret — no SFTP.
     assert sandbox.uploads == []
     assert set(sandbox.secrets) == {
-        ('{"claude": 1}', layout.get_claude_credentials_remote(sandbox.ssh_username)),
-        ('{"codex": 1}', layout.get_codex_auth_remote(sandbox.ssh_username)),
+        ('{"claude": 1}', "/root/.claude/.credentials.json"),
+        ('{"codex": 1}', "/root/.codex/auth.json"),
         ("gho_xxx", layout.get_github_token_remote_path(sandbox.ssh_username)),
     }
 

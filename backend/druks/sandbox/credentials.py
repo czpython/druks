@@ -1,12 +1,7 @@
 from typing import TYPE_CHECKING
 
 from .datastructures import Credentials
-from .layout import (
-    get_claude_credentials_remote,
-    get_codex_auth_remote,
-    get_github_token_remote_path,
-    get_remote_home,
-)
+from .layout import get_github_token_remote_path, get_remote_home
 
 if TYPE_CHECKING:
     from .host import Host
@@ -31,29 +26,24 @@ DEFAULT_DIR_EXCLUDES: tuple[str, ...] = (
 )
 
 
-async def push(host: "Host", creds: Credentials) -> None:
-    if creds.claude_credentials:
+async def push(host: "Host", credentials: Credentials) -> None:
+    home = get_remote_home(host.ssh_username)
+    for remote_path_suffix, rendered_content in credentials.files:
         await host.write_secret(
-            secret=creds.claude_credentials,
-            remote=get_claude_credentials_remote(host.ssh_username),
+            secret=rendered_content,
+            remote=f"{home}/{remote_path_suffix}",
         )
-    if creds.codex_credentials:
-        await host.write_secret(
-            secret=creds.codex_credentials,
-            remote=get_codex_auth_remote(host.ssh_username),
-        )
-    if creds.github_token is not None:
+    if credentials.github_token:
         # TODO: This token expires in ~60 min and is not refreshed, so a run
         # outliving it 401s on late git pushes. The in-VM credential helper
         # should mint on demand from a druks token-broker endpoint, retiring
         # this static file.
         await host.write_secret(
-            secret=creds.github_token,
+            secret=credentials.github_token,
             remote=get_github_token_remote_path(host.ssh_username),
         )
 
-    home = get_remote_home(host.ssh_username)
-    for local, dest_suffix in creds.extra_config_files:
+    for local, dest_suffix in credentials.extra_config_files:
         # Optional — a dev box may not have config.toml etc., and a Docker bind
         # mount whose host file never existed leaves a directory at the path.
         # Push real files only; missing config isn't fatal (the CLIs mint their
@@ -61,11 +51,11 @@ async def push(host: "Host", creds: Credentials) -> None:
         if not local.is_file():
             continue
         await host.upload_file(local=local, remote=f"{home}/{dest_suffix}")
-    for local, dest_suffix in creds.extra_config_dirs:
+    for local, dest_suffix in credentials.extra_config_dirs:
         if not local.is_dir():
             continue
         await host.upload_dir(
             local=local,
             remote=f"{home}/{dest_suffix}",
-            excludes=DEFAULT_DIR_EXCLUDES + creds.extra_dir_excludes.get(dest_suffix, ()),
+            excludes=DEFAULT_DIR_EXCLUDES + credentials.extra_dir_excludes.get(dest_suffix, ()),
         )

@@ -159,13 +159,8 @@ class RequiredMcpServer:
 
 @dataclass(frozen=True)
 class Credentials:
-    # The credential-file JSON each CLI reads, synthesized from the DB row at
-    # push time (``Harness.render_credentials_file()``, which raises when that
-    # harness isn't connected); None when this bundle doesn't carry that CLI —
-    # a claude bundle ships no codex credential and vice versa. Written into
-    # the VM as a secret, never a host-file copy.
-    claude_credentials: str | None = None
-    codex_credentials: str | None = None
+    # Home-relative paths and rendered content for files written as VM secrets.
+    files: tuple[tuple[str, str], ...] = ()
     github_token: str | None = None
     # Extra config files to carry into the VM, as
     # ``(local_path, home_relative_dest)`` pairs. This is how the

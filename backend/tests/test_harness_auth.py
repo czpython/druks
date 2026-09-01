@@ -9,7 +9,7 @@ import pytest
 from conftest import connect_harness
 from druks.accounts.models import Account
 from druks.harnesses import base as hbase
-from druks.harnesses.claude import ClaudeHarness, _claude_credentials
+from druks.harnesses.claude import ClaudeHarness, _get_credentials
 from druks.harnesses.codex import CodexHarness
 from druks.harnesses.datastructures import SandboxSettings
 from druks.harnesses.exceptions import HarnessNotConnectedError, OAuthTokenError
@@ -443,9 +443,10 @@ async def test_claude_builder_puts_db_credentials_on_the_bundle(druks_db):
         claude_config_dir=Path("/home/agent/.claude"),
         codex_config_dir=Path("/home/agent/.codex"),
     )
-    bundle = await _claude_credentials(sandbox, github_token=None)
-    assert json.loads(bundle.claude_credentials)["claudeAiOauth"]["accessToken"] == "live"
-    assert bundle.codex_credentials is None
+    bundle = await _get_credentials(sandbox, github_token=None)
+    [(credential_path, rendered_content)] = bundle.files
+    assert credential_path == ".claude/.credentials.json"
+    assert json.loads(rendered_content)["claudeAiOauth"]["accessToken"] == "live"
 
 
 async def test_credentials_builders_carry_global_instructions(druks_db):
@@ -462,20 +463,24 @@ async def test_credentials_builders_carry_global_instructions(druks_db):
         codex_config_dir=codex_config_dir,
     )
 
-    claude_credentials = await _claude_credentials(sandbox, github_token=None)
-    codex_credentials = await CodexHarness(
+    claude_bundle = await _get_credentials(sandbox, github_token=None)
+    codex_bundle = await CodexHarness(
         model=CodexHarness.default_model,
         fast_mode=False,
         effort=None,
         sandbox=sandbox,
-    )._codex_credentials(github_token=None)
+    )._get_credentials(github_token=None)
 
-    assert (claude_config_dir / "CLAUDE.md", ".claude/CLAUDE.md") in (
-        claude_credentials.extra_config_files
-    )
-    assert (codex_config_dir / "AGENTS.md", ".codex/AGENTS.md") in (
-        codex_credentials.extra_config_files
-    )
+    assert claude_bundle.files[0][0] == ".claude/.credentials.json"
+    assert codex_bundle.files[0][0] == ".codex/auth.json"
+    assert (
+        claude_config_dir / "CLAUDE.md",
+        ".claude/CLAUDE.md",
+    ) in claude_bundle.extra_config_files
+    assert (
+        codex_config_dir / "AGENTS.md",
+        ".codex/AGENTS.md",
+    ) in codex_bundle.extra_config_files
 
 
 async def test_no_config_dir_ships_credential_only(druks_db):
@@ -491,8 +496,9 @@ async def test_no_config_dir_ships_credential_only(druks_db):
         claude_config_dir=None,
         codex_config_dir=None,
     )
-    bundle = await _claude_credentials(sandbox, github_token="gh")
-    assert json.loads(bundle.claude_credentials)["claudeAiOauth"]["accessToken"] == "live"
+    bundle = await _get_credentials(sandbox, github_token="gh")
+    [(_, rendered_content)] = bundle.files
+    assert json.loads(rendered_content)["claudeAiOauth"]["accessToken"] == "live"
     assert bundle.extra_config_files == ()
     assert bundle.extra_config_dirs == ()
     assert bundle.github_token == "gh"
@@ -508,7 +514,7 @@ async def test_claude_builder_raises_when_not_connected(druks_db):
         codex_config_dir=None,
     )
     with pytest.raises(HarnessNotConnectedError, match="claude is not connected"):
-        await _claude_credentials(sandbox, github_token=None)
+        await _get_credentials(sandbox, github_token=None)
 
 
 async def test_lookup_prefers_the_accounts_own_connection(druks_db):
