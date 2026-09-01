@@ -50,14 +50,14 @@ function region(name: string, text: string, follows = NOTE_7): Block {
     block: 'section',
     title: 'Decision',
     name,
-    actions: [],
+    controls: [],
     follows,
     blocks: [{ block: 'text', text }],
   }
 }
 
 function snapshot(blocks: Block[], follows: PageSnapshot['follows'] = null): PageSnapshot {
-  return { title: 'Note 7', description: '', actions: [], blocks, follows }
+  return { title: 'Note 7', description: '', controls: [], blocks, follows }
 }
 
 function renderPage(first: PageSnapshot) {

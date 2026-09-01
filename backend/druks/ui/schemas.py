@@ -13,7 +13,7 @@ class Page(Schema):
 
     title: str
     description: str = ""
-    actions: list[Action | Link] = Field(default_factory=list)
+    controls: list[Action | Link] = Field(default_factory=list)
     blocks: list[Block] = Field(default_factory=list)
     follows: Watched = None
 
@@ -23,14 +23,14 @@ class Page(Schema):
     @model_validator(mode="after")
     def _blocks_sit_where_they_work(self) -> "Page":
         regions: set[str] = set()
-        for control in self.actions:
+        for control in self.controls:
             control.check_placement(followed=bool(self.follows), regions=regions)
         for block in self.blocks:
             block.check_placement(followed=bool(self.follows), regions=regions)
         return self
 
     def iter_actions(self) -> "Iterable[Action]":
-        for control in self.actions:
+        for control in self.controls:
             yield from control.iter_actions()
         for block in self.blocks:
             yield from block.iter_actions()

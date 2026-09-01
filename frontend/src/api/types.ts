@@ -294,14 +294,14 @@ export interface CardBlock {
   title: string
   description: string
   blocks: Block[]
-  actions: (Action | Link)[]
+  controls: (Action | Link)[]
 }
 
 export interface EmptyStateBlock {
   block: 'empty_state'
   title: string
   description: string
-  actions: (Action | Link)[]
+  controls: (Action | Link)[]
 }
 
 export interface ImageBlock {
@@ -378,7 +378,7 @@ export type Block =
       block: 'section'
       title: string
       name: string
-      actions: (Action | Link)[]
+      controls: (Action | Link)[]
       blocks: Block[]
       follows: Follows | null
     }
@@ -447,7 +447,7 @@ export interface Follows {
 export interface PageSnapshot {
   title: string
   description: string
-  actions: (Action | Link)[]
+  controls: (Action | Link)[]
   blocks: Block[]
   follows: Follows | null
 }

@@ -80,7 +80,7 @@ const ROSTER: App[] = [
 // A page whose only block is the form under test, so a refresh reads the page
 // again and hands the form a freshly declared value.
 function notePage(fields: Field[]): PageSnapshot {
-  return { title: 'New note', description: '', actions: [], blocks: [form(fields)], follows: null }
+  return { title: 'New note', description: '', controls: [], blocks: [form(fields)], follows: null }
 }
 
 function renderPage() {
@@ -241,7 +241,7 @@ describe('submitting a form', () => {
         block: 'section',
         title: 'Notes',
         name: 'notes',
-        actions: [action({ label: 'Write a note', fields: [BODY] })],
+        controls: [action({ label: 'Write a note', fields: [BODY] })],
         follows: null,
         blocks: [{ block: 'text', text: 'One note.' }],
       },
@@ -497,7 +497,7 @@ describe('what an action does next', () => {
       block: 'section',
       title: 'Decision',
       name: 'decision',
-      actions: [],
+      controls: [],
       follows: null,
       blocks: [
         {
@@ -505,7 +505,7 @@ describe('what an action does next', () => {
           title: '',
           description: '',
           blocks: [],
-          actions: [action({ label: 'Clear', refresh: 'region' })],
+          controls: [action({ label: 'Clear', refresh: 'region' })],
         },
       ],
     }
@@ -513,7 +513,7 @@ describe('what an action does next', () => {
     readPage.mockResolvedValue({
       title: 'x',
       description: '',
-      actions: [],
+      controls: [],
       blocks: [region],
       follows: null,
     })
@@ -545,7 +545,7 @@ describe('what an action does next', () => {
         title: '',
         description: '',
         blocks: [],
-        actions: [action({ label: 'Clear the gist', confirm: 'Clear it?', tone: 'danger' })],
+        controls: [action({ label: 'Clear the gist', confirm: 'Clear it?', tone: 'danger' })],
       },
     ])
 
@@ -565,7 +565,7 @@ describe('what an action does next', () => {
         title: '',
         description: '',
         blocks: [],
-        actions: [action({ label: 'Clear the gist', confirm: 'Clear it?', tone: 'danger' })],
+        controls: [action({ label: 'Clear the gist', confirm: 'Clear it?', tone: 'danger' })],
       },
     ])
 
@@ -682,7 +682,7 @@ describe('what an action does next', () => {
       block: 'section',
       title: '',
       name: 'decision',
-      actions: [],
+      controls: [],
       follows: null,
       blocks: [
         {
@@ -690,7 +690,7 @@ describe('what an action does next', () => {
           title: '',
           description: '',
           blocks: [],
-          actions: [action({ label: 'Clear', refresh: 'region' })],
+          controls: [action({ label: 'Clear', refresh: 'region' })],
         },
       ],
     }
@@ -712,7 +712,7 @@ describe('what an action does next', () => {
         block: 'section',
         title: 'Notes',
         name: 'notes',
-        actions: [
+        controls: [
           action({
             label: 'Write a note',
             fields: [BODY],
@@ -743,7 +743,7 @@ describe('what an action does next', () => {
         title: '',
         description: '',
         blocks: [],
-        actions: [action({ label: 'Clear the gist', tone: 'danger' })],
+        controls: [action({ label: 'Clear the gist', tone: 'danger' })],
       },
     ])
 
@@ -757,7 +757,7 @@ describe('what an action does next', () => {
         title: '',
         description: '',
         blocks: [],
-        actions: [action({ label: 'Ghost', operation: 'nowhere' })],
+        controls: [action({ label: 'Ghost', operation: 'nowhere' })],
       },
     ])
 

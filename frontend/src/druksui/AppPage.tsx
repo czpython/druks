@@ -7,7 +7,7 @@ import type { Action, Follows, Link, PageEntry, PageSnapshot } from '../api/type
 import { EmptyState } from '../components/EmptyState'
 import { Page } from '../components/Page'
 import { AppSurface } from './AppSurface'
-import { Blocks, LinkRow } from './Blocks'
+import { Blocks, Controls } from './Blocks'
 import { followedSubjects, hrefUnder, isDetail, mergeRegions, PagesContext, parentOf, tabsFor } from './pages'
 import { SubjectStream } from './SubjectStream'
 
@@ -126,7 +126,7 @@ export function AppPage({ app, page }: { app: string; page: string }) {
             {...chrome}
             title={snapshot.data.title}
             description={snapshot.data.description}
-            actions={snapshot.data.actions}
+            controls={snapshot.data.controls}
           />
           <Blocks blocks={snapshot.data.blocks} />
         </Page>
@@ -146,7 +146,7 @@ function PageChrome({
   tabs,
   title,
   description,
-  actions,
+  controls,
 }: {
   app: string
   page: string
@@ -156,7 +156,7 @@ function PageChrome({
   tabs: PageEntry[]
   title: ReactNode
   description?: string
-  actions?: (Action | Link)[]
+  controls?: (Action | Link)[]
 }) {
   return (
     <>
@@ -172,9 +172,9 @@ function PageChrome({
           <h1 className="dui-title">{title}</h1>
           {description && <p className="dui-description dim">{description}</p>}
         </div>
-        {actions?.length ? (
+        {controls?.length ? (
           <div className="dui-page-actions">
-            <LinkRow links={actions} />
+            <Controls controls={controls} />
           </div>
         ) : null}
       </div>

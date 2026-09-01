@@ -126,7 +126,7 @@ describe('every V1 renderer', () => {
         block: 'section',
         title: 'Notes',
         name: 'notes',
-        actions: [
+        controls: [
           {
             block: 'action',
             label: 'Write a note',
@@ -275,7 +275,7 @@ describe('every V1 renderer', () => {
         title: '',
         description: '',
         blocks: [],
-        actions: [
+        controls: [
           {
             block: 'action',
             label: 'Rescout peer',

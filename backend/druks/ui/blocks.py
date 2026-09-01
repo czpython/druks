@@ -265,14 +265,14 @@ class EmptyState(PageBlock):
     block: Literal["empty_state"] = "empty_state"
     title: str
     description: str = ""
-    actions: list[Action | Link] = Field(default_factory=list)
+    controls: list[Action | Link] = Field(default_factory=list)
 
     def iter_actions(self) -> "Iterable[Action]":
-        for control in self.actions:
+        for control in self.controls:
             yield from control.iter_actions()
 
     def check_placement(self, *, followed: bool, regions: set[str], region: str = "") -> None:
-        for control in self.actions:
+        for control in self.controls:
             control.check_placement(followed=followed, regions=regions, region=region)
 
     def __init__(self, title: str, **data):
@@ -591,16 +591,16 @@ class Card(BlockParent):
     block: Literal["card"] = "card"
     title: str = ""
     description: str = ""
-    actions: list[Action | Link] = Field(default_factory=list)
+    controls: list[Action | Link] = Field(default_factory=list)
 
     def iter_actions(self) -> "Iterable[Action]":
         yield from super().iter_actions()
-        for control in self.actions:
+        for control in self.controls:
             yield from control.iter_actions()
 
     def check_placement(self, *, followed: bool, regions: set[str], region: str = "") -> None:
         super().check_placement(followed=followed, regions=regions, region=region)
-        for control in self.actions:
+        for control in self.controls:
             control.check_placement(followed=followed, regions=regions, region=region)
 
 
@@ -633,7 +633,7 @@ class Section(BlockParent):
     block: Literal["section"] = "section"
     title: str = ""
     name: str = ""
-    actions: list[Action | Link] = Field(default_factory=list)
+    controls: list[Action | Link] = Field(default_factory=list)
     follows: Watched = None
 
     def check_placement(self, *, followed: bool, regions: set[str], region: str = "") -> None:
@@ -645,7 +645,7 @@ class Section(BlockParent):
         if self.name:
             regions.add(self.name)
         inside = self.name or region
-        for control in self.actions:
+        for control in self.controls:
             control.check_placement(
                 followed=followed or bool(self.follows),
                 regions=regions,
@@ -658,7 +658,7 @@ class Section(BlockParent):
         )
 
     def iter_actions(self) -> "Iterable[Action]":
-        for control in self.actions:
+        for control in self.controls:
             yield from control.iter_actions()
         yield from super().iter_actions()
 

@@ -496,7 +496,7 @@ shows a `Link` it cannot resolve as broken and names the page it wanted, and
 the rest of the page still renders.
 
 `Link` and `Action` are different public types. Both are blocks, so a page can
-hold one directly. `Card.actions` and `EmptyState.actions` hold either one.
+hold one directly. Every container's `controls` holds either one.
 
 ## How to read the model listings
 
@@ -632,7 +632,7 @@ class Section:
     block: Literal["section"] = "section"
     title: str = ""
     name: str = ""
-    actions: list[Action | Link] = []
+    controls: list[Action | Link] = []
     blocks: list[Block] = []
     follows: Follows | None = None
 ```
@@ -642,17 +642,17 @@ class Section:
   "block": "section",
   "title": "Decision",
   "name": "decision",
-  "actions": [],
+  "controls": [],
   "blocks": [],
   "follows": {"subjectType": "peers", "subjectId": "42"}
 }
 ```
 
-A section's actions belong to that section. The shell chooses where to show
+A section's controls belong to that section. The shell chooses where to show
 them. An action in `blocks` stays with the body content.
 
 They sit inside the section region, so a region refresh replaces the heading,
-the actions, and the body together.
+the controls, and the body together.
 
 ### Card
 
@@ -662,7 +662,7 @@ class Card:
     title: str = ""
     description: str = ""
     blocks: list[Block] = []
-    actions: list[Action | Link] = []
+    controls: list[Action | Link] = []
 ```
 
 ```json
@@ -671,7 +671,7 @@ class Card:
   "title": "peer-7",
   "description": "Last answered 4 minutes ago.",
   "blocks": [{"block": "text", "text": "Healthy."}],
-  "actions": [{"block": "link", "label": "Open", "page": "peer", "arguments": {"peer_id": "7"}, "url": ""}]
+  "controls": [{"block": "link", "label": "Open", "page": "peer", "arguments": {"peer_id": "7"}, "url": ""}]
 }
 ```
 
@@ -689,7 +689,7 @@ class Cards:
 {
   "block": "cards",
   "title": "Peers",
-  "cards": [{"block": "card", "title": "peer-7", "description": "", "blocks": [], "actions": []}],
+  "cards": [{"block": "card", "title": "peer-7", "description": "", "blocks": [], "controls": []}],
   "empty": null
 }
 ```
@@ -699,8 +699,8 @@ One card for each of a set of things.
 ```python
 ui.Cards(
     title="Peers",
-    cards=[ui.Card(title=peer.name, blocks=[...], actions=[...]) for peer in peers],
-    empty=ui.EmptyState("No peer yet", actions=[ui.Link("Add one", page="new_peer")]),
+    cards=[ui.Card(title=peer.name, blocks=[...], controls=[...]) for peer in peers],
+    empty=ui.EmptyState("No peer yet", controls=[ui.Link("Add one", page="new_peer")]),
 )
 ```
 
@@ -745,7 +745,7 @@ class EmptyState:
     block: Literal["empty_state"] = "empty_state"
     title: str
     description: str = ""
-    actions: list[Action | Link] = []
+    controls: list[Action | Link] = []
 ```
 
 ```json
@@ -753,7 +753,7 @@ class EmptyState:
   "block": "empty_state",
   "title": "No peers yet",
   "description": "Add the first peer to start a sweep.",
-  "actions": []
+  "controls": []
 }
 ```
 
@@ -1556,7 +1556,7 @@ class Follows:
 class Page:
     title: str
     description: str = ""
-    actions: list[Action | Link] = []
+    controls: list[Action | Link] = []
     blocks: list[Block] = []
     follows: Follows | None = None
 ```
@@ -1565,22 +1565,24 @@ class Page:
 {
   "title": "peer-7",
   "description": "One peer and its last sweep.",
-  "actions": [],
+  "controls": [],
   "blocks": [{"block": "text", "text": "Healthy."}],
   "follows": {"subjectType": "peers", "subjectId": "7"}
 }
 ```
 
-A page's actions belong to that page. The shell chooses where to show them. An
+A page's controls belong to that page. The shell chooses where to show them. An
 action in `blocks` stays with the body content.
 
-`Page`, `Section`, `Card` and `EmptyState` all take `actions` the same way: a
-list of `Action` and `Link`, in the order the app wants them read.
+`Page`, `Section`, `Card` and `EmptyState` all take `controls` the same way: a
+list of `Action` and `Link`, in the order the app wants them read. An `Action`
+calls one of the app's operations; a `Link` navigates. Both are things an
+operator presses, so they share the row.
 
 ```python
 return ui.Page(
     "Peers",
-    actions=[
+    controls=[
         ui.Action(
             label="Add a peer",
             operation="add_peer",

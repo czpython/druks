@@ -45,13 +45,13 @@ async def test_the_landing_page_answers_at_the_bare_pages_path(druks_client: htt
     page = response.json()
     assert page["title"] == "Notes"
     # A header holds what a card holds: an action, a link, or both.
-    action, link = page["actions"]
+    action, link = page["controls"]
     (section,) = page["blocks"]
     assert (action["block"], link["block"]) == ("action", "link")
     assert action["fields"][0]["name"] == "body"
     (cards,) = section["blocks"]
     assert cards["cards"] == []
-    assert cards["empty"]["actions"][0]["page"] == "new_note"
+    assert cards["empty"]["controls"][0]["page"] == "new_note"
 
 
 async def test_a_page_projects_the_app_data(druks_client: httpx.AsyncClient, note: Note):
@@ -64,7 +64,7 @@ async def test_a_page_projects_the_app_data(druks_client: httpx.AsyncClient, not
     (card,) = cards["cards"]
     assert card["title"] == f"Note {note.id}"
     assert card["blocks"][0]["text"] == "Fan noise on rack 3."
-    assert card["actions"][0] == {
+    assert card["controls"][0] == {
         "block": "link",
         "label": "Open",
         "page": "note",

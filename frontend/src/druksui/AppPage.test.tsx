@@ -73,7 +73,7 @@ function renderAt(location: string, page: string, snapshot: PageSnapshot) {
 const NOTES: PageSnapshot = {
   title: 'Notes',
   description: 'Every note this install captured.',
-  actions: [],
+  controls: [],
   blocks: [{ block: 'text', text: 'a jotted observation' }],
   follows: null,
 }
@@ -91,7 +91,7 @@ describe('a declared page', () => {
   it('puts the page action beside the page title', async () => {
     const { container } = renderAt('/field_notes', 'notes', {
       ...NOTES,
-      actions: [
+      controls: [
         {
           block: 'action',
           label: 'Write a note',
@@ -130,7 +130,7 @@ describe('a declared page', () => {
     renderAt('/field_notes/notes/7', 'note', {
       title: 'Note 7',
       description: '',
-      actions: [],
+      controls: [],
       blocks: [],
       follows: null,
     })
@@ -172,7 +172,7 @@ describe('tabs', () => {
     const { container } = renderAt('/field_notes/recent', 'recent_notes', {
       title: 'Recent notes',
       description: '',
-      actions: [],
+      controls: [],
       blocks: [],
       follows: null,
     })
@@ -186,7 +186,7 @@ describe('tabs', () => {
     const { container } = renderAt('/field_notes/notes/7', 'note', {
       title: 'Note 7',
       description: '',
-      actions: [],
+      controls: [],
       blocks: [],
       follows: null,
     })
@@ -202,7 +202,7 @@ describe('tabs', () => {
     const { container } = renderAt('/field_notes/notes/new', 'new_note', {
       title: 'Write a note',
       description: '',
-      actions: [],
+      controls: [],
       blocks: [],
       follows: null,
     })
@@ -217,7 +217,7 @@ describe('the parent link', () => {
     renderAt('/field_notes/notes/7', 'note', {
       title: 'Note 7',
       description: '',
-      actions: [],
+      controls: [],
       blocks: [],
       follows: null,
     })
@@ -230,7 +230,7 @@ describe('the parent link', () => {
     const { container } = renderAt('/field_notes/notes/7/runs/9', 'note_run', {
       title: 'Run 9',
       description: '',
-      actions: [],
+      controls: [],
       blocks: [],
       follows: null,
     })

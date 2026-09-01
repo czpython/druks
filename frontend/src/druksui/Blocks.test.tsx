@@ -54,7 +54,7 @@ describe('the display core', () => {
         block: 'section',
         title: 'Recent',
         name: 'recent',
-        actions: [],
+        controls: [],
         follows: null,
         blocks: [
           {
@@ -62,7 +62,7 @@ describe('the display core', () => {
             title: 'Note 7',
             description: 'its gist',
             blocks: [{ block: 'text', text: 'the body' }],
-            actions: [],
+            controls: [],
           },
         ],
       },
@@ -80,7 +80,7 @@ describe('the display core', () => {
         block: 'empty_state',
         title: 'No notes yet',
         description: 'Write one.',
-        actions: [{ block: 'link', label: 'Write a note', page: 'notes', arguments: {}, url: '', subject: null }],
+        controls: [{ block: 'link', label: 'Write a note', page: 'notes', arguments: {}, url: '', subject: null }],
       },
     ])
 
@@ -159,13 +159,13 @@ describe('a subject link', () => {
 
 describe('Cards', () => {
   function card(title: string): CardBlock {
-    return { block: 'card', title, description: '', blocks: [], actions: [] }
+    return { block: 'card', title, description: '', blocks: [], controls: [] }
   }
   const nothingYet: EmptyStateBlock = {
     block: 'empty_state',
     title: 'No peer yet',
     description: 'Add one and it shows here.',
-    actions: [],
+    controls: [],
   }
 
   it('shows one card for each thing, under the title', () => {

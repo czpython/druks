@@ -188,7 +188,7 @@ def test_a_get_route_can_never_be_an_action():
 def test_every_action_on_the_page_is_checked():
     page = Page(
         "x",
-        actions=[Action(label="Write", operation="write_note")],
+        controls=[Action(label="Write", operation="write_note")],
         blocks=[
             Card(
                 blocks=[
@@ -197,12 +197,12 @@ def test_every_action_on_the_page_is_checked():
                         fields=[TextField(name="body", label="B")],
                     )
                 ],
-                actions=[
+                controls=[
                     Action(label="Archive", operation="write_note"),
                     Link("Home", url="/"),
                 ],
             ),
-            EmptyState("none", actions=[Action(label="Add", operation="nowhere")]),
+            EmptyState("none", controls=[Action(label="Add", operation="nowhere")]),
         ],
     )
 
@@ -253,7 +253,7 @@ def test_a_named_section_is_a_region_an_action_can_refresh():
             Section(
                 name="decision",
                 blocks=[
-                    Card(actions=[Action(label="Go", operation="write_note", refresh="region")])
+                    Card(controls=[Action(label="Go", operation="write_note", refresh="region")])
                 ],
             )
         ],
@@ -269,7 +269,7 @@ def test_a_section_action_belongs_to_its_region():
         blocks=[
             Section(
                 name="decision",
-                actions=[action],
+                controls=[action],
                 follows={"subject_type": "note", "subject_id": "1"},
             )
         ],
@@ -277,7 +277,7 @@ def test_a_section_action_belongs_to_its_region():
 
     assert list(page.iter_actions()) == [action]
     section = page.model_dump(by_alias=True, mode="json")["blocks"][0]
-    (control,) = section["actions"]
+    (control,) = section["controls"]
     assert control["label"] == "Go"
 
 
@@ -285,5 +285,5 @@ def test_a_page_action_cannot_refresh_a_region():
     with pytest.raises(ValueError, match="refreshes its region, and it sits in none"):
         Page(
             "x",
-            actions=[Action(label="Go", operation="write_note", refresh="region")],
+            controls=[Action(label="Go", operation="write_note", refresh="region")],
         )
