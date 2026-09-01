@@ -25,7 +25,23 @@ everything the original plan got right.
 {% include "software_factory/build/_contract.md" %}
 {% include "software_factory/build/_related_repos.md" %}
 {% include "software_factory/build/_skills.md" %}
-The human reviewer's feedback contradicts the current acceptance criteria. Revise the plan and acceptance criteria to incorporate the feedback while preserving the original issue intent. The latest triaged human feedback is in the **Human feedback** section above; the current acceptance criteria are in the **Acceptance criteria** section above. Return the full revised plan markdown, the complete updated acceptance criteria list, and concise implementation instructions describing what changed so the implementer knows what to redo.
+{% if build.journal.human_feedback %}
+{% set fb = build.journal.human_feedback | last %}
+## Rejecting review
+
+### {{ fb.reviewer }}
+
+{{ fb.body }}
+
+{% if fb.triage %}
+**Triage decision ({{ fb.triage.action }}):** {{ fb.triage.body }}
+
+{% if fb.triage.implementation_instructions %}
+**What must change:** {{ fb.triage.implementation_instructions }}
+
+{% endif %}
+{% endif %}
+{% endif %}The human reviewer's feedback contradicts the current acceptance criteria. Revise the plan and acceptance criteria to incorporate the feedback while preserving the original issue intent. The rejecting review is rendered above under **Rejecting review**; the current acceptance criteria are in the **Acceptance criteria** section above. Return the full revised plan markdown, the complete updated acceptance criteria list, and concise implementation instructions describing what changed so the implementer knows what to redo.
 
 # Update the PR description
 

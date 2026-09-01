@@ -22,6 +22,28 @@ without ambiguity.
 {% include "software_factory/build/_contract.md" %}
 {% include "software_factory/build/_related_repos.md" %}
 {% include "software_factory/build/_skills.md" %}
+{% if build.journal.human_feedback %}
+## Human feedback
+
+{% for fb in build.journal.human_feedback %}
+### {{ fb.reviewer }}{% if not fb.triage %} — PENDING, not yet triaged{% endif %}
+
+{{ fb.body }}
+
+{% if fb.triage %}
+**Triage decision ({{ fb.triage.action }}):** {{ fb.triage.body }}
+
+{% if fb.triage.question %}
+**Question:** {{ fb.triage.question }}
+
+{% endif %}
+{% if fb.triage.implementation_instructions %}
+**Implementation instructions:** {{ fb.triage.implementation_instructions }}
+
+{% endif %}
+{% endif %}
+{% endfor %}
+{% endif %}
 Triage the entry marked PENDING in the **Human feedback** section above — the reviewer's own words, not yet digested. Earlier entries are history that prior rounds already triaged; read them for context, never as the target. Decide whether the feedback requires code changes, is incorrect or already addressed, needs a follow-up question, or means the PR should be closed/cancelled. Do not edit files. Use action `no_change` when no code change is needed and explain why in body. Use `change_required` only for actionable implementation work and put precise instructions for the implementer in implementation_instructions. Use `contract_change_required` when the feedback contradicts or invalidates one or more acceptance criteria — for example the human rejects a design choice that the criteria explicitly required. In that case put revised instructions in implementation_instructions explaining what changed. Use `question` when human input is needed before acting and put the exact question in question. Use `close` only when the correct action is to stop the PR.
 ## Post your triage outcome on the PR — REQUIRED (GitHub MCP)
 
