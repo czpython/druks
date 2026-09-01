@@ -57,6 +57,20 @@ class BuildJournal(Journal):
         return
 
     @property
+    def revision_request(self) -> str | None:
+        # The newest triage's instructions drive exactly one implement round.
+        # An evaluation recorded after that triage means the round already ran —
+        # the evaluator's findings are the current request, not these.
+        triage = self.latest(TriageOutput)
+        if (
+            triage
+            and triage.implementation_instructions
+            and not self.filter(EvaluationOutput, after=triage)
+        ):
+            return triage.implementation_instructions
+        return
+
+    @property
     def human_feedback(self) -> list[dict[str, Any]]:
         # Every request_changes reply, in order, with the triage that digested it.
         # The newest reply has no triage yet while its own triage agent renders

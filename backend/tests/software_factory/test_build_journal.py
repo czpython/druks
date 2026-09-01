@@ -1,10 +1,11 @@
 from druks.contrib.software_factory.contracts import (
+    EvaluationOutput,
     ImplementationOutput,
     PlanData,
     ReviewWork,
     TriageOutput,
 )
-from druks.contrib.software_factory.enums import HumanFeedbackAction
+from druks.contrib.software_factory.enums import EvaluationVerdict, HumanFeedbackAction
 from druks.contrib.software_factory.journal import BuildJournal
 
 
@@ -36,6 +37,17 @@ def _implementation(
             "workspace_path": "/repo",
             "workspace_retention": None,
         }
+    )
+
+
+def _evaluation() -> EvaluationOutput:
+    return EvaluationOutput(
+        verdict=EvaluationVerdict.FAIL,
+        body="",
+        review_notes="",
+        findings=[],
+        checks=[],
+        acceptance_results=[],
     )
 
 
@@ -72,6 +84,18 @@ def test_assignee_scan_falls_through_unresolved_revisions():
     )
     assert journal.assignee_github_login == "bob"
     assert _journal(PlanData()).assignee_github_login is None
+
+
+def test_revision_request_is_the_newest_triage_until_an_evaluation_supersedes_it():
+    triage = TriageOutput(
+        action=HumanFeedbackAction.CHANGE_REQUIRED,
+        body="rename the flag",
+        question="",
+        implementation_instructions="rename X to Y",
+    )
+    assert _journal(triage).revision_request == "rename X to Y"
+    assert _journal(triage, _evaluation()).revision_request is None
+    assert _journal().revision_request is None
 
 
 def test_human_feedback_lists_every_reply_and_marks_the_untriaged_one_pending():
