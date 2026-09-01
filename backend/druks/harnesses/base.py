@@ -33,6 +33,7 @@ from .datastructures import (
     ParsedMetric,
     ParsedModels,
     ParsedUsage,
+    ProviderRequest,
     RotationResult,
     SandboxSettings,
 )
@@ -74,8 +75,6 @@ class Harness(ABC):
     # Suggested models for the settings picker and the ``default_model`` seed.
     models: ClassVar[tuple[str, ...]]
     default_model: ClassVar[str]
-    # The provider's model-list endpoint the picker refresh fetches.
-    model_discovery_url: ClassVar[str]
     # This CLI's terminal-error vocabulary: phrase → the failure it names, the
     # first phrase found in a death's text winning in declaration order; no
     # match stays a bare, never-retried HarnessError. The terminal event has no
@@ -276,17 +275,17 @@ class Harness(ABC):
         )
 
     @classmethod
-    @abstractmethod
     def authorize_url(cls, *, verifier: str, challenge: str) -> tuple[str, str]:
         """Build this provider's PKCE authorize URL; return (url, state), where
         ``state`` is what the provider echoes back so connect_complete can
         verify the round-trip."""
+        raise NotImplementedError
 
     @classmethod
-    @abstractmethod
     async def exchange(cls, *, code: str, verifier: str) -> tuple[dict, str | None]:
         """Exchange the authorization code for tokens; return (credential-file
         payload, provider-reported account email)."""
+        raise NotImplementedError
 
     @classmethod
     def load_token(cls, connection: HarnessConnection, *, now: datetime | None = None) -> Token:
@@ -301,10 +300,10 @@ class Harness(ABC):
         return token
 
     @classmethod
-    @abstractmethod
     def _token_from_credentials(cls, data: dict) -> Token:
         """Extract the token object from the parsed credential file;
         raise ``OAuthTokenError('no_token')`` if absent."""
+        raise NotImplementedError
 
     @classmethod
     async def rotate_token(
@@ -418,20 +417,20 @@ class Harness(ABC):
         return token.expires_at - now <= cls.REFRESH_MARGIN
 
     @classmethod
-    @abstractmethod
     def _refresh_state(cls, data: dict) -> tuple[str | None, datetime | None]:
         """Return (refresh_token, current_expiry) from the credential file."""
+        raise NotImplementedError
 
     @classmethod
-    @abstractmethod
     def _grant_body(cls, refresh_token: str) -> dict:
         """The JSON body for this CLI's refresh grant."""
+        raise NotImplementedError
 
     @classmethod
-    @abstractmethod
     def _apply_refresh(cls, data: dict, grant: dict, now: datetime) -> datetime | None:
         """Merge the grant response into ``data`` in place; return the new
         expiry. Raise ``ValueError`` if the response is unusable."""
+        raise NotImplementedError
 
     @classmethod
     async def fetch_usage(
@@ -443,13 +442,14 @@ class Harness(ABC):
         '0 metrics'."""
         try:
             token = cls.load_token(connection, now=now)
+            request = cls._usage_request(token)
         except exceptions.OAuthTokenError as exc:
             return ParsedUsage(ok=False, error=exc.tag)
-
-        url, headers = cls._usage_request(token)
+        except NotImplementedError:
+            return ParsedUsage(ok=False, error="unsupported")
         try:
             async with httpx.AsyncClient(timeout=_USAGE_TIMEOUT_SECONDS) as client:
-                response = await client.get(url, headers=headers)
+                response = await client.get(request.url, headers=request.headers)
         except httpx.TimeoutException:
             return ParsedUsage(ok=False, error="timeout")
         except httpx.HTTPError as exc:
@@ -514,14 +514,14 @@ class Harness(ABC):
         }
 
     @classmethod
-    @abstractmethod
-    def _usage_request(cls, token: Token) -> tuple[str, dict]:
-        """Return (url, headers) for the usage endpoint."""
+    def _usage_request(cls, token: Token) -> ProviderRequest:
+        """The authenticated request for the usage endpoint."""
+        raise NotImplementedError
 
     @classmethod
-    @abstractmethod
     def _parse_usage(cls, raw: str) -> ParsedUsage:
         """Map the usage endpoint's JSON body into :class:`ParsedUsage`."""
+        return ParsedUsage(ok=False, error="unsupported")
 
     @classmethod
     async def fetch_models(cls, connection: HarnessConnection) -> ParsedModels:
@@ -531,13 +531,14 @@ class Harness(ABC):
         only ever advances, it is never wiped by a bad fetch."""
         try:
             token = cls.load_token(connection)
+            request = cls._model_discovery_request(token)
         except exceptions.OAuthTokenError as exc:
             return ParsedModels(ok=False, error=exc.tag)
-
-        headers = cls.get_model_discovery_headers(token)
+        except NotImplementedError:
+            return ParsedModels(ok=False, error="unsupported")
         try:
             async with httpx.AsyncClient(timeout=_USAGE_TIMEOUT_SECONDS) as client:
-                response = await client.get(cls.model_discovery_url, headers=headers)
+                response = await client.get(request.url, headers=request.headers)
         except httpx.TimeoutException:
             return ParsedModels(ok=False, error="timeout")
         except httpx.HTTPError as exc:
@@ -556,15 +557,15 @@ class Harness(ABC):
         return ParsedModels(ok=False, error=tag)
 
     @classmethod
-    @abstractmethod
-    def get_model_discovery_headers(cls, token: Token) -> dict:
-        """Auth headers for the model-discovery endpoint."""
+    def _model_discovery_request(cls, token: Token) -> ProviderRequest:
+        """The authenticated request for the model-discovery endpoint."""
+        raise NotImplementedError
 
     @classmethod
-    @abstractmethod
     def _parse_models(cls, raw: str) -> ParsedModels:
         """Map the model-list endpoint's JSON body into :class:`ParsedModels`.
         A payload offering nothing is a tagged error, never an ok-empty."""
+        return ParsedModels(ok=False, error="unsupported")
 
 
 def _utc_now() -> datetime:

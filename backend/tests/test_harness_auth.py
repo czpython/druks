@@ -2,6 +2,7 @@ import base64
 import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 
 import druks.redis
 import httpx
@@ -11,7 +12,13 @@ from druks.accounts.models import Account
 from druks.harnesses import base as hbase
 from druks.harnesses.claude import ClaudeHarness, _get_credentials
 from druks.harnesses.codex import CodexHarness
-from druks.harnesses.datastructures import SandboxSettings
+from druks.harnesses.datastructures import (
+    AgentInvocation,
+    HarnessRunResult,
+    ParsedModels,
+    ParsedUsage,
+    SandboxSettings,
+)
 from druks.harnesses.exceptions import HarnessNotConnectedError, OAuthTokenError
 from druks.harnesses.models import HarnessConnection
 from druks.user_settings.models import UserSettings
@@ -421,6 +428,62 @@ async def test_codex_fetch_usage_success(monkeypatch, druks_db):
     assert calls[0]["headers"]["ChatGPT-Account-Id"] == "acc-7"
 
 
+async def test_claude_fetch_models_success(monkeypatch, druks_db):
+    # fetch_models reads the wall clock (no ``now=`` seam), so the token's
+    # expiry must be real-future, not _NOW-relative.
+    connection = await _seed_claude(access="tok", expires_at=datetime.now(UTC) + timedelta(hours=2))
+    body = {"data": [{"id": "claude-fable-5", "display_name": "Claude Fable 5"}]}
+    calls = _mock_get(monkeypatch, _resp(200, body))
+
+    parsed = await ClaudeHarness.fetch_models(connection)
+
+    assert parsed == ParsedModels(
+        ok=True,
+        models=({"id": "claude-fable-5", "label": "Claude Fable 5"},),
+        raw=json.dumps(body),
+    )
+    assert calls[0]["url"] == "https://api.anthropic.com/v1/models?limit=100"
+    assert calls[0]["headers"]["Authorization"] == "Bearer tok"
+
+
+async def test_codex_fetch_models_success(monkeypatch, druks_db):
+    connection = await _seed_codex(
+        account_id="acc-7",
+        access=_jwt(int((datetime.now(UTC) + timedelta(days=9)).timestamp())),
+    )
+    body = {
+        "models": [
+            {
+                "slug": "gpt-5.6-sol",
+                "display_name": "GPT-5.6-Sol",
+                "visibility": "list",
+                "supported_reasoning_levels": [{"effort": "high"}],
+                "minimal_client_version": "0.144.0",
+            }
+        ]
+    }
+    calls = _mock_get(monkeypatch, _resp(200, body))
+
+    parsed = await CodexHarness.fetch_models(connection)
+
+    assert parsed == ParsedModels(
+        ok=True,
+        models=(
+            {
+                "id": "gpt-5.6-sol",
+                "label": "GPT-5.6-Sol",
+                "efforts": ["high"],
+                "minimal_client_version": "0.144.0",
+            },
+        ),
+        raw=json.dumps(body),
+    )
+    assert calls[0]["url"] == (
+        "https://chatgpt.com/backend-api/codex/models?client_version=99.99.99"
+    )
+    assert calls[0]["headers"]["ChatGPT-Account-Id"] == "acc-7"
+
+
 async def test_render_credentials_file_serializes_stored_payload(druks_db):
     connection = await _seed_claude(access="tok", refresh="R0")
     rendered = await ClaudeHarness.render_credentials_file(connection.id)
@@ -560,3 +623,31 @@ async def test_render_credentials_file_for_a_deleted_connection_raises(druks_db)
     # fall through to another account's payload.
     with pytest.raises(HarnessNotConnectedError, match="removed"):
         await ClaudeHarness.render_credentials_file(gone_id)
+
+
+async def test_minimal_harness_reports_unsupported_optional_endpoints(monkeypatch):
+    class MinimalHarness(hbase.Harness):
+        name = "minimal"
+
+        async def build_invocation(self, **kwargs: object) -> AgentInvocation:
+            raise AssertionError("not called")
+
+        def parse(
+            self,
+            result: HarnessRunResult,
+            *,
+            artifact_dir: Path,
+            run_id: str,
+        ) -> object:
+            return {}
+
+    harness = MinimalHarness(model="minimal", fast_mode=False, effort=None)
+    connection = SimpleNamespace(payload={})
+    calls = _mock_get(monkeypatch, _resp(200, {}))
+
+    usage = await harness.fetch_usage(connection)
+    models = await harness.fetch_models(connection)
+
+    assert usage == ParsedUsage(ok=False, error="unsupported")
+    assert models == ParsedModels(ok=False, error="unsupported")
+    assert calls == []
