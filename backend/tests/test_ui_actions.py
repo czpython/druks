@@ -70,6 +70,28 @@ def test_a_form_carries_its_fields_and_the_action_that_sends_them():
         }
     ]
     assert block["action"]["operation"] == "write_note"
+    assert block["presentation"] == "inline"
+
+
+def test_a_dialog_form_uses_its_title_as_the_trigger():
+    (block,) = wire(
+        Form(
+            action=Action(label="Save", operation="write_note"),
+            title="Write a note",
+            presentation="dialog",
+        )
+    )
+
+    assert block["title"] == "Write a note"
+    assert block["presentation"] == "dialog"
+
+
+def test_a_dialog_form_needs_a_title_for_its_trigger():
+    with pytest.raises(ValueError, match="dialog form needs a title"):
+        Form(
+            action=Action(label="Save", operation="write_note"),
+            presentation="dialog",
+        )
 
 
 def test_a_secret_field_declares_no_value():

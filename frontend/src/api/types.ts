@@ -408,7 +408,14 @@ export type Block =
   | { block: 'stack'; gap: 'small' | 'medium' | 'large'; blocks: Block[] }
   | { block: 'columns'; blocks: Block[] }
   | Action
-  | { block: 'form'; title: string; description: string; fields: Field[]; action: Action }
+  | {
+      block: 'form'
+      title: string
+      description: string
+      presentation: 'inline' | 'dialog'
+      fields: Field[]
+      action: Action
+    }
   | CardBlock
   | { block: 'cards'; title: string; cards: CardBlock[]; empty: EmptyStateBlock | null }
   | {

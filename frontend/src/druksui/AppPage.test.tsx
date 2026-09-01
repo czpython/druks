@@ -87,6 +87,40 @@ describe('a declared page', () => {
     expect(screen.getByText('a jotted observation')).toBeTruthy()
   })
 
+  it('puts a leading dialog form beside the page title', async () => {
+    const { container } = renderAt('/field_notes', 'notes', {
+      ...NOTES,
+      blocks: [
+        {
+          block: 'form',
+          title: 'Write a note',
+          description: 'Capture one observation.',
+          presentation: 'dialog',
+          fields: [],
+          action: {
+            block: 'action',
+            label: 'Save',
+            operation: 'write_note',
+            arguments: {},
+            tone: 'primary',
+            confirm: '',
+            refresh: 'page',
+            link: null,
+          },
+        },
+        { block: 'text', text: 'a jotted observation' },
+      ],
+    })
+
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Write a note' })).toBeTruthy(),
+    )
+    expect(container.querySelector('.dui-page-head .dui-dialog-trigger')?.textContent).toBe(
+      'Write a note',
+    )
+    expect(screen.getByText('a jotted observation')).toBeTruthy()
+  })
+
   it('reads a detail page at its own location', async () => {
     renderAt('/field_notes/notes/7', 'note', { title: 'Note 7', description: '', blocks: [], follows: null })
 

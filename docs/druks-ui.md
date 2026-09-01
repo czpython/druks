@@ -792,6 +792,7 @@ class Form:
     block: Literal["form"] = "form"
     title: str = ""
     description: str = ""
+    presentation: Literal["inline", "dialog"] = "inline"
     fields: list[Field] = []
     action: Action
 ```
@@ -799,6 +800,7 @@ class Form:
 ```python
 ui.Form(
     title="Write a note",
+    presentation="dialog",
     fields=[ui.TextAreaField(name="body", label="Note", is_required=True)],
     action=ui.Action(label="Save", operation="write_note", tone="primary"),
 )
@@ -809,6 +811,7 @@ ui.Form(
   "block": "form",
   "title": "Write a note",
   "description": "",
+  "presentation": "dialog",
   "fields": [
     {
       "field": "text",
@@ -832,6 +835,10 @@ ui.Form(
   }
 }
 ```
+
+An inline form is part of the page task. A dialog form is for short, infrequent work that must not occupy the page.
+
+The dialog trigger uses the form title. A dialog form must set `title`. The shell moves focus into the dialog and returns it to the trigger.
 
 ### Timeline
 
@@ -1552,9 +1559,11 @@ needs it:
 
 ## Not in V1
 
-V1 has no `Tabs` block, no accordion, no modal, no inline reveal form, and no
+V1 has no `Tabs` block, no accordion, no general modal, no inline reveal form, and no
 general client-state API. A table row folds its `detail` away, and that is the
 whole of it: the app declares the sentence, the shell owns whether it is open.
+
+`Form(presentation="dialog")` is the one dialog presentation. It does not add a general modal or client-state API.
 
 Static child pages already give tabs, and the URL holds the current one. An
 app that needs a control the contract does not have ships an ESM frontend.

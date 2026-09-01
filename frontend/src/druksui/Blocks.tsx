@@ -4,6 +4,7 @@ import { GateControls } from './GateControls'
 import { Chart, Facts, ImageGallery, LinkControl, List, Metrics, Table } from './DataBlocks'
 import { ActionButton, Form } from './Form'
 import { Files, Image, Progress, Timeline } from './RunBlocks'
+import { leadingDialog } from './blockLayout'
 import { RegionContext } from './pages'
 
 export function Blocks({ blocks }: { blocks: Block[] }) {
@@ -35,6 +36,7 @@ function BlockContent({ block }: { block: Block }) {
         <Form
           title={block.title}
           description={block.description}
+          presentation={block.presentation}
           fields={block.fields}
           action={block.action}
         />
@@ -148,16 +150,30 @@ function BlockContent({ block }: { block: Block }) {
         </div>
       )
     }
-    case 'section':
+    case 'section': {
+      const action = block.title ? leadingDialog(block.blocks) : undefined
+      const inside = action ? block.blocks.slice(1) : block.blocks
+      const decision = block.blocks.some((insideBlock) => insideBlock.block === 'gate_controls')
       return (
-        <section className="dui-section" data-region={block.name || undefined}>
-          {block.title && <h2 className="dui-section-title">{block.title}</h2>}
-          {/* An action inside reads this to know which region it refreshes. */}
+        <section
+          className={`dui-section${decision ? ' dui-decision' : ''}`}
+          data-region={block.name || undefined}
+        >
+          {/* The heading action and the body share the region they refresh. */}
           <RegionContext.Provider value={block.name}>
-            <Blocks blocks={block.blocks} />
+            {block.title && action ? (
+              <div className="dui-section-head">
+                <h2 className="dui-section-title">{block.title}</h2>
+                <BlockContent block={action} />
+              </div>
+            ) : (
+              block.title && <h2 className="dui-section-title">{block.title}</h2>
+            )}
+            <Blocks blocks={inside} />
           </RegionContext.Provider>
         </section>
       )
+    }
     default:
       // An app on a newer Druks than this shell. Name the block and keep the
       // rest of the page.
@@ -183,4 +199,3 @@ function LinkRow({ links }: { links: (Action | Link)[] }) {
     </div>
   )
 }
-

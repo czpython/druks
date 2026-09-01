@@ -107,7 +107,14 @@ function action(overrides: Partial<Action> = {}): Action {
 }
 
 function form(fields: Field[], sends = action()): Block {
-  return { block: 'form', title: 'New note', description: 'What did you see?', fields, action: sends }
+  return {
+    block: 'form',
+    title: 'New note',
+    description: 'What did you see?',
+    presentation: 'inline',
+    fields,
+    action: sends,
+  }
 }
 
 const BODY: Field = {
@@ -224,6 +231,53 @@ describe('fields', () => {
 })
 
 describe('submitting a form', () => {
+  it('puts a leading dialog form in a section heading', () => {
+    const block = form([BODY])
+    if (block.block !== 'form') throw new Error('expected a form')
+    const { container } = renderBlocks([
+      {
+        block: 'section',
+        title: 'Notes',
+        name: 'notes',
+        follows: null,
+        blocks: [{ ...block, presentation: 'dialog' }, { block: 'text', text: 'One note.' }],
+      },
+    ])
+
+    expect(container.querySelector('.dui-section-head .dui-dialog-trigger')?.textContent).toBe(
+      'New note',
+    )
+    expect(screen.getByText('One note.')).toBeTruthy()
+  })
+
+  it('opens a dialog form from its title and returns focus after cancel', () => {
+    const block = form([BODY])
+    if (block.block !== 'form') throw new Error('expected a form')
+    renderBlocks([{ ...block, presentation: 'dialog' }])
+    const trigger = screen.getByRole('button', { name: 'New note' })
+
+    fireEvent.click(trigger)
+
+    expect(screen.getByRole('dialog', { name: 'New note' })).toBeTruthy()
+    expect(document.activeElement).toBe(screen.getByLabelText(/Note/))
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(screen.queryByRole('dialog', { name: 'New note' })).toBeNull()
+    expect(document.activeElement).toBe(trigger)
+  })
+
+  it('closes a dialog form after a successful submit', async () => {
+    const block = form([BODY], action({ refresh: 'none' }))
+    if (block.block !== 'form') throw new Error('expected a form')
+    renderBlocks([{ ...block, presentation: 'dialog' }])
+    fireEvent.click(screen.getByRole('button', { name: 'New note' }))
+    fireEvent.change(screen.getByLabelText(/Note/), { target: { value: 'Fan noise.' } })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    await waitFor(() => expect(callOperation).toHaveBeenCalled())
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'New note' })).toBeNull())
+  })
+
   it('calls the resolved operation with the arguments and the values as one object', async () => {
     renderBlocks([form([BODY], action({ arguments: { source: 'dashboard' }, refresh: 'none' }))])
 

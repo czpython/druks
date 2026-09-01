@@ -157,6 +157,7 @@ class Form(PageBlock):
     block: Literal["form"] = "form"
     title: str = ""
     description: str = ""
+    presentation: Literal["inline", "dialog"] = "inline"
     fields: list[FormField] = Field(default_factory=list)
     action: Action
 
@@ -168,6 +169,8 @@ class Form(PageBlock):
 
     @model_validator(mode="after")
     def _one_name_for_each_value(self) -> "Form":
+        if self.presentation == "dialog" and not self.title:
+            raise ValueError("a dialog form needs a title because its trigger uses that title")
         names = [one.name for one in self.fields]
         repeated = sorted({name for name in names if names.count(name) > 1})
         if repeated:

@@ -1,5 +1,5 @@
 import { useQueryClient } from '@tanstack/react-query'
-import { useContext, useState } from 'react'
+import { useContext, useEffect, useId, useRef, useState } from 'react'
 import { useLocation } from 'wouter'
 
 import { ApiError, api } from '../api/client'
@@ -17,6 +17,25 @@ type Payload = Record<string, unknown>
 export function Form({
   title,
   description,
+  presentation,
+  fields,
+  action,
+}: {
+  title: string
+  description: string
+  presentation: 'inline' | 'dialog'
+  fields: Field[]
+  action: Action
+}) {
+  if (presentation === 'dialog') {
+    return <DialogForm title={title} description={description} fields={fields} action={action} />
+  }
+  return <FormBody title={title} description={description} fields={fields} action={action} />
+}
+
+function DialogForm({
+  title,
+  description,
   fields,
   action,
 }: {
@@ -24,6 +43,108 @@ export function Form({
   description: string
   fields: Field[]
   action: Action
+}) {
+  const [open, setOpen] = useState(false)
+  const [pending, setPending] = useState(false)
+  const dialog = useRef<HTMLDialogElement>(null)
+  const trigger = useRef<HTMLButtonElement>(null)
+  const titleId = useId()
+  const wasOpen = useRef(false)
+
+  useEffect(() => {
+    const node = dialog.current
+    if (!node) return
+    if (open) {
+      if (!node.open) {
+        if (typeof node.showModal === 'function') node.showModal()
+        else node.setAttribute('open', '')
+      }
+      const firstField = node.querySelector<HTMLElement>(
+        'input:not(:disabled), textarea:not(:disabled), select:not(:disabled)',
+      )
+      const firstControl = firstField ?? node.querySelector<HTMLElement>('button:not(:disabled)')
+      firstControl?.focus()
+      wasOpen.current = true
+      return
+    }
+    if (!wasOpen.current) return
+    if (node.open) {
+      if (typeof node.close === 'function') node.close()
+      else node.removeAttribute('open')
+    }
+    trigger.current?.focus()
+    wasOpen.current = false
+  }, [open])
+
+  return (
+    <>
+      <button
+        ref={trigger}
+        type="button"
+        className={`dui-action dui-action-${action.tone} dui-dialog-trigger`}
+        onClick={() => setOpen(true)}
+      >
+        {title}
+      </button>
+      <dialog
+        ref={dialog}
+        className="dui-dialog"
+        aria-labelledby={titleId}
+        onCancel={(event) => {
+          if (pending) event.preventDefault()
+        }}
+        onClose={() => setOpen(false)}
+        onMouseDown={(event) => {
+          if (!pending && event.target === event.currentTarget) setOpen(false)
+        }}
+      >
+        <div className="dui-dialog-head">
+          <div>
+            <h2 id={titleId} className="dui-dialog-title">
+              {title}
+            </h2>
+            {description && <p className="dui-form-desc dim">{description}</p>}
+          </div>
+          <button
+            type="button"
+            className="dui-dialog-close"
+            aria-label={`Close ${title}`}
+            disabled={pending}
+            onClick={() => setOpen(false)}
+          >
+            <span aria-hidden="true">×</span>
+          </button>
+        </div>
+        <FormBody
+          title=""
+          description=""
+          fields={fields}
+          action={action}
+          onCancel={() => setOpen(false)}
+          onDone={() => setOpen(false)}
+          onPendingChange={setPending}
+        />
+      </dialog>
+    </>
+  )
+}
+
+function FormBody({
+  title,
+  description,
+  fields,
+  action,
+  onCancel,
+  onDone,
+  onPendingChange,
+}: {
+  title: string
+  description: string
+  fields: Field[]
+  action: Action
+  onCancel?: () => void
+  onDone?: () => void
+  onPendingChange?: (pending: boolean) => void
 }) {
   // A refresh can bring back a form of different fields at the same place, and
   // React keeps this component. Start over when the fields themselves change,
@@ -41,7 +162,9 @@ export function Form({
   const run = useAction(action, fields, () => {
     setEdits(null)
     setSubmits((count) => count + 1)
+    onDone?.()
   })
+  useEffect(() => onPendingChange?.(run.pending), [onPendingChange, run.pending])
 
   return (
     <form
@@ -76,6 +199,11 @@ export function Form({
             aria-busy={run.pending}
           >
             {action.label}
+          </button>
+        )}
+        {onCancel && !run.confirming && (
+          <button type="button" className="dui-action" disabled={run.pending} onClick={onCancel}>
+            Cancel
           </button>
         )}
       </div>

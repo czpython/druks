@@ -190,6 +190,7 @@ describe('every V1 renderer', () => {
               block: 'form',
               title: '',
               description: '',
+              presentation: 'inline',
               fields: [
                 {
                   field: 'text',

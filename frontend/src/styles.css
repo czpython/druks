@@ -2478,34 +2478,91 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
    and stops where more width stops helping. rem, so it follows the density the
    operator chose; per cent, so it follows the page. Prose sets its own measure
    in ch, which is the type size and not the screen. */
-.dui-page { padding: 20px 24px 40px; --dui-measure: clamp(20rem, 60%, 63rem); }
-.dui-parent { display: inline-block; margin-bottom: 10px; }
-.dui-title { font-size: 20px; font-weight: 600; margin: 0; }
-.dui-description { font-size: 13px; margin: 6px 0 0; line-height: 1.55; max-width: 68ch; }
-.dui-retry { padding: 6px 12px; border: 1px solid var(--border-loud); border-radius: 6px; color: var(--text-mid); font-size: 12px; }
-.dui-retry:hover { background: var(--surface-2); color: var(--text); }
+.dui-page {
+  --dui-measure: clamp(20rem, 68%, 70rem);
+  --dui-radius-control: 6px;
+  --dui-radius-surface: 8px;
+  --dui-radius-large: 12px;
+  --dui-primary: #6952d5;
+  --dui-primary-hover: #5f48c3;
+  --dui-primary-active: #5942b7;
+  --dui-control-height: 40px;
+  color-scheme: dark;
+  padding: 28px 32px 48px;
+}
+body[data-palette="desat"] .dui-page {
+  --dui-primary: #655b9f;
+  --dui-primary-hover: #5b518f;
+  --dui-primary-active: #51487f;
+}
+body[data-palette="mono"] .dui-page {
+  --dui-primary: #3f4655;
+  --dui-primary-hover: #343a47;
+  --dui-primary-active: #2d333e;
+}
+.dui-page ::selection { background: color-mix(in oklch, var(--accent-violet) 38%, transparent); color: var(--text); }
+.dui-parent { display: inline-block; margin-bottom: 12px; font-size: 13px; text-underline-offset: 3px; }
+.dui-page-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; }
+.dui-page-head-copy { min-width: 0; }
+.dui-page-actions { flex: none; }
+.dui-title { max-width: 28ch; margin: 0; font-size: 28px; font-weight: 600; line-height: 36px; letter-spacing: -0.02em; text-wrap: balance; }
+.dui-description { max-width: 68ch; margin: 6px 0 0; font-size: 15px; line-height: 22px; text-wrap: pretty; }
+.dui-retry {
+  display: inline-flex;
+  min-height: var(--dui-control-height);
+  align-items: center;
+  padding: 0 14px;
+  border: 1px solid var(--border-loud);
+  border-radius: var(--dui-radius-control);
+  background: var(--surface-2);
+  color: var(--text-mid);
+  font-size: 14px;
+  font-weight: 500;
+  touch-action: manipulation;
+  transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease;
+}
+.dui-retry:hover { background: var(--surface-3); border-color: var(--text-faint); color: var(--text); }
+.dui-retry:active { background: var(--surface); }
 
-.dui-tabs { display: flex; gap: 2px; margin: 16px 0 4px; border-bottom: 1px solid var(--border); }
-.dui-tab { padding: 7px 14px; font-size: 12px; color: var(--text-dim); border-bottom: 2px solid transparent; margin-bottom: -1px; }
+.dui-tabs { display: flex; gap: 4px; margin: 20px 0 4px; border-bottom: 1px solid var(--border); }
+.dui-tab { padding: 10px 12px; font-size: 13px; font-weight: 500; line-height: 18px; color: var(--text-dim); border-bottom: 2px solid transparent; margin-bottom: -1px; text-decoration: none; transition: border-color 160ms ease, color 160ms ease; }
 .dui-tab:hover { color: var(--text); }
 .dui-tab-active { color: var(--text); border-bottom-color: var(--accent-violet); }
 
-.dui-section { margin-top: 22px; }
-.dui-section-title { font-size: 11px; text-transform: uppercase; letter-spacing: 0.12em; color: var(--text-mid); margin: 0; font-weight: 600; }
-.dui-text { font-size: 13.5px; line-height: 1.6; color: var(--text-mid); max-width: 68ch; }
-.dui-markdown { font-size: 13.5px; line-height: 1.65; color: var(--text-mid); max-width: 58ch; }
+.dui-section { margin-top: 32px; }
+.dui-section-head { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
+.dui-section-title { font-size: 20px; line-height: 28px; color: var(--text); margin: 0; font-weight: 600; letter-spacing: -0.01em; text-wrap: balance; }
+.dui-decision { max-width: 76ch; padding: 20px; border: 1px solid color-mix(in oklch, var(--decision-request-revision) 30%, var(--border)); border-radius: var(--dui-radius-large); background: color-mix(in oklch, var(--decision-request-revision) 6%, var(--surface)); }
+.dui-decision .dui-section-title { font-size: 18px; line-height: 26px; }
+.dui-decision .ins-needs { margin: 0; padding: 0; border: 0; border-radius: 0; background: transparent; }
+.dui-decision .review-artifact { border-radius: var(--dui-radius-surface); padding: 14px 16px; }
+.dui-decision .review-artifact-title { font-family: inherit; font-size: 12px; letter-spacing: 0; text-transform: none; }
+.dui-decision .review-question { margin-bottom: 16px; }
+.dui-decision .review-question legend { margin-bottom: 8px; font-size: 14px; line-height: 20px; color: var(--text); }
+.dui-decision .review-option { min-height: 32px; padding: 4px 0; font-size: 14px; line-height: 20px; }
+.dui-decision .review-recommended { font-size: 12px; }
+.dui-decision .review-note-label { margin: 0 0 8px; font-size: 12px; letter-spacing: 0; text-transform: none; }
+.dui-decision .review-note { min-height: 88px; margin-top: 0; padding: 9px 12px; border-color: var(--border-loud); border-radius: var(--dui-radius-control); font-size: 14px; line-height: 20px; }
+.dui-decision .review-helper { margin-top: 6px; font-size: 12px; line-height: 16px; }
+.dui-decision .review-controls { gap: 8px; margin-top: 16px; }
+.dui-decision .review-btn { display: inline-flex; min-height: var(--dui-control-height); align-items: center; justify-content: center; padding: 0 14px; border-color: var(--border-loud); border-radius: var(--dui-radius-control); background: var(--surface-2); color: var(--text-mid); font-size: 14px; line-height: 20px; font-weight: 500; transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease; }
+.dui-decision .review-btn:hover:not(:disabled) { border-color: var(--text-faint); background: var(--surface-3); color: var(--text); }
+.dui-decision .review-btn-approve { border-color: transparent; background: var(--dui-primary); color: var(--text); }
+.dui-decision .review-btn-approve:hover:not(:disabled) { border-color: transparent; background: var(--dui-primary-hover); color: var(--text); }
+.dui-text { font-size: 14px; line-height: 20px; color: var(--text-mid); max-width: 68ch; }
+.dui-markdown { font-size: 14px; line-height: 1.6; color: var(--text-mid); max-width: 68ch; }
 .dui-markdown :is(h1, h2, h3, h4), .dui-markdown strong { color: var(--text); }
-.dui-markdown h1 { font-size: 17px; line-height: 1.3; margin: 0 0 0.5em; }
-.dui-markdown h2 { font-size: 16px; line-height: 1.3; margin: 1.9em 0 0.5em; padding-top: 0.9em; border-top: 1px solid var(--border-soft); }
-.dui-markdown :is(h3, h4) { font-size: 13.5px; line-height: 1.4; margin: 1.5em 0 0.4em; }
+.dui-markdown h1 { font-size: 20px; line-height: 28px; margin: 0 0 0.5em; }
+.dui-markdown h2 { font-size: 18px; line-height: 26px; margin: 1.9em 0 0.5em; padding-top: 0.9em; border-top: 1px solid var(--border-soft); }
+.dui-markdown :is(h3, h4) { font-size: 16px; line-height: 24px; margin: 1.5em 0 0.4em; }
 .dui-markdown > :first-child { margin-top: 0; padding-top: 0; border-top: none; }
 .dui-divider { border: none; border-top: 1px solid var(--border); margin: 18px 0; }
 
-.dui-card { border: 1px solid var(--border); border-radius: 8px; background: var(--surface); padding: 14px 16px; margin: 10px 0; }
-.dui-card-title { font-size: 13.5px; font-weight: 600; color: var(--text); }
-.dui-card-desc { font-size: 12.5px; margin-top: 3px; line-height: 1.5; }
+.dui-card { border: 1px solid var(--border); border-radius: var(--dui-radius-surface); background: var(--surface); padding: 20px; margin: 12px 0; }
+.dui-card-title { font-size: 16px; line-height: 24px; font-weight: 600; color: var(--text); }
+.dui-card-desc { font-size: 13px; margin-top: 4px; line-height: 18px; }
 
-.dui-callout { border: 1px solid var(--border-loud); border-left-width: 3px; border-radius: 6px; padding: 11px 14px; font-size: 13px; line-height: 1.55; max-width: 76ch; }
+.dui-callout { border: 1px solid var(--border-loud); border-radius: var(--dui-radius-surface); padding: 14px 16px; font-size: 14px; line-height: 20px; max-width: 76ch; }
 .dui-callout-title { font-weight: 600; color: var(--text); margin-bottom: 3px; }
 .dui-callout-text { color: var(--text-mid); overflow-wrap: anywhere; }
 /* The tone reaches the whole box: a stripe alone reads as a grey panel. */
@@ -2514,106 +2571,107 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
 .dui-callout-warning { --dui-callout-tone: var(--decision-request-revision); }
 .dui-callout-danger { --dui-callout-tone: var(--outcome-failed); }
 .dui-callout:not(.dui-callout-plain) {
-  border-color: color-mix(in oklch, var(--dui-callout-tone) 35%, transparent);
-  border-left-color: var(--dui-callout-tone);
+  border-color: color-mix(in oklch, var(--dui-callout-tone) 28%, var(--border));
   background: color-mix(in oklch, var(--dui-callout-tone) 7%, var(--surface));
 }
 
-.dui-empty { border: 1px dashed var(--border-loud); border-radius: 8px; padding: 26px 20px; margin: 12px 0; text-align: center; }
-.dui-empty-title { font-size: 13.5px; color: var(--text); }
-.dui-empty-desc { font-size: 12.5px; margin-top: 5px; }
+.dui-empty { border: 1px solid var(--border); border-radius: var(--dui-radius-large); background: var(--surface); padding: 32px 24px; margin: 16px 0; text-align: center; }
+.dui-empty-title { font-size: 16px; line-height: 24px; font-weight: 600; color: var(--text); }
+.dui-empty-desc { font-size: 13px; line-height: 18px; margin-top: 6px; }
 .dui-empty .dui-links { justify-content: center; }
 
-.dui-links { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
-.dui-link { font-size: 12.5px; color: var(--text-mid); text-decoration: none; }
+.dui-links { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+.dui-link { min-height: 32px; display: inline-flex; align-items: center; font-size: 13px; font-weight: 500; color: var(--text-mid); text-decoration: none; text-underline-offset: 3px; touch-action: manipulation; }
 .dui-link:hover { color: var(--bucket-run); text-decoration: underline; }
 .dui-link-broken { color: var(--text-faint); text-decoration: line-through; cursor: help; }
 
 .dui-unknown { font-size: 12px; color: var(--outcome-failed); border: 1px solid color-mix(in oklch, var(--outcome-failed) 30%, transparent); border-radius: 6px; padding: 9px 12px; margin: 10px 0; }
 
 @media (max-width: 720px) {
-  .dui-page { padding: 16px 14px 32px; }
+  .dui-page { padding: 20px 16px 40px; }
+  .dui-page-head, .dui-section-head { align-items: flex-start; flex-direction: column; }
+  .dui-title { font-size: 24px; line-height: 32px; }
   .dui-tabs { overflow-x: auto; }
 }
 
 /* ---- Druks UI: run and artifact blocks ---------------------- */
-.dui-block-title { font-size: 11px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-dim); margin: 18px 0 8px; font-weight: 600; }
+.dui-block-title { font-size: 16px; line-height: 24px; color: var(--text); margin: 20px 0 8px; font-weight: 600; letter-spacing: -0.005em; text-wrap: balance; }
 /* The app writes the word; the tone is the paint. currentColor carries it, so
    a tone rule sets colour alone and neutral keeps the muted default. */
-.dui-status { font-size: 11.5px; letter-spacing: 0.02em; padding: 2px 8px; border-radius: 10px; color: var(--text-mid); white-space: nowrap;
-  border: 1px solid color-mix(in oklch, currentColor 45%, transparent);
-  background: color-mix(in oklch, currentColor 10%, transparent); }
-.dui-status-active { color: var(--bucket-run); animation: pulse 1.6s ease-in-out infinite; }
+.dui-status { display: inline-flex; align-items: center; gap: 7px; color: var(--text-mid); font-size: 13px; line-height: 18px; white-space: nowrap; }
+.dui-status::before { content: ''; width: 7px; height: 7px; flex: none; border-radius: 50%; background: currentColor; }
+.dui-status-active { color: var(--bucket-run); }
+.dui-status-active::before { animation: pulse 1.6s ease-in-out infinite; }
 .dui-status-success { color: var(--outcome-merged); }
 .dui-status-warning { color: var(--decision-request-revision); }
 .dui-status-danger { color: var(--outcome-failed); }
 
 .dui-timeline-items { list-style: none; margin: 0; padding: 0; border-left: 1px solid var(--border); }
-.dui-timeline-item { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; padding: 7px 0 7px 14px; position: relative; font-size: 13px; }
+.dui-timeline-item { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; padding: 8px 0 8px 16px; position: relative; font-size: 14px; line-height: 20px; }
 .dui-timeline-item::before { content: ''; position: absolute; left: -4px; top: 13px; width: 7px; height: 7px; border-radius: 50%; background: var(--border-loud); }
-.dui-timeline-at { font-size: 11px; min-width: 72px; }
-.dui-timeline-desc { font-size: 12px; flex-basis: 100%; }
+.dui-timeline-at { font-size: 12px; min-width: 72px; font-variant-numeric: tabular-nums; }
+.dui-timeline-desc { font-size: 13px; line-height: 18px; flex-basis: 100%; }
 
 .dui-progress { margin: 14px 0; max-width: var(--dui-measure); }
-.dui-progress-head { display: flex; justify-content: space-between; font-size: 12.5px; margin-bottom: 6px; }
+.dui-progress-head { display: flex; justify-content: space-between; font-size: 13px; line-height: 18px; margin-bottom: 8px; }
 .dui-progress-bar { height: 6px; border-radius: 3px; background: var(--surface-2); overflow: hidden; }
 .dui-progress-fill { display: block; height: 100%; background: var(--bucket-run); }
 .dui-progress-unknown .dui-progress-fill { width: 35% !important; animation: dui-drift 1.4s ease-in-out infinite; }
 @keyframes dui-drift { 0% { transform: translateX(-100%); } 100% { transform: translateX(300%); } }
 .dui-progress-steps { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
-.dui-progress-step { display: flex; align-items: center; gap: 9px; font-size: 12.5px; }
+.dui-progress-step { display: flex; align-items: center; gap: 9px; font-size: 13px; line-height: 18px; }
 
 .dui-transcript { margin: 14px 0; }
-.dui-transcript .stream-transcript { max-height: 420px; overflow: auto; border: 1px solid var(--border); border-radius: 6px; }
+.dui-transcript .stream-transcript { max-height: 420px; overflow: auto; border: 1px solid var(--border); border-radius: var(--dui-radius-surface); }
 
 .dui-image { margin: 14px 0; }
-.dui-image img { max-width: 100%; height: auto; border-radius: 6px; border: 1px solid var(--border); display: block; }
-.dui-image-missing { font-size: 12.5px; border: 1px dashed var(--border-loud); border-radius: 6px; padding: 18px; }
-.dui-image-caption { font-size: 12px; margin-top: 6px; }
+.dui-image img { max-width: 100%; height: auto; border-radius: var(--dui-radius-surface); border: 1px solid var(--border); display: block; }
+.dui-image-missing { font-size: 13px; line-height: 18px; border: 1px solid var(--border); border-radius: var(--dui-radius-surface); padding: 20px; }
+.dui-image-caption { font-size: 12px; line-height: 16px; margin-top: 8px; }
 
 .dui-file-list { list-style: none; margin: 0; padding: 0; }
-.dui-file { display: flex; align-items: center; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--border-soft); font-size: 12.5px; }
+.dui-file { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--border-soft); font-size: 13px; line-height: 18px; }
 .dui-file:last-child { border-bottom: none; }
 .dui-file-preview { width: 40px; height: 40px; object-fit: cover; border-radius: 4px; border: 1px solid var(--border); }
 .run-truncated { font-size: 11.5px; padding: 6px 10px; border-top: 1px solid var(--border); }
 
 /* ---- Druks UI: rich data and layout ------------------------- */
 .dui-stack { display: flex; flex-direction: column; }
-.dui-stack-small { gap: 6px; }
-.dui-stack-medium { gap: 14px; }
-.dui-stack-large { gap: 28px; }
-.dui-columns { display: flex; gap: 18px; margin: 14px 0; }
+.dui-stack-small { gap: 8px; }
+.dui-stack-medium { gap: 16px; }
+.dui-stack-large { gap: 32px; }
+.dui-columns { display: flex; gap: 24px; margin: 16px 0; }
 .dui-column { flex: 1 1 0; min-width: 0; }
 
-.dui-metric-row { display: flex; flex-wrap: wrap; gap: 28px; margin: 12px 0; }
+.dui-metric-row { display: flex; flex-wrap: wrap; gap: 32px; margin: 16px 0; }
 .dui-metric { margin: 0; }
-.dui-metric-label { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.08em; }
-.dui-metric-value { margin: 3px 0 0; font-size: 20px; color: var(--text); }
+.dui-metric-label { font-size: 12px; line-height: 16px; font-weight: 500; }
+.dui-metric-value { margin: 4px 0 0; font-size: 24px; line-height: 32px; font-weight: 600; color: var(--text); font-variant-numeric: tabular-nums; }
 .dui-metric-value .dui-number { font-size: inherit; }
-.dui-metric-desc { margin: 3px 0 0; font-size: 11.5px; }
+.dui-metric-desc { margin: 4px 0 0; font-size: 13px; line-height: 18px; }
 
 /* Both columns size to what they hold, so a fact list is as wide as its facts
    and a label never drifts away from its value on a wide page. */
-.dui-fact-list { margin: 10px 0; display: grid; grid-template-columns: minmax(90px, max-content) minmax(0, max-content); gap: 6px 16px; }
+.dui-fact-list { margin: 12px 0; display: grid; grid-template-columns: minmax(90px, max-content) minmax(0, max-content); gap: 8px 20px; }
 .dui-fact { display: contents; }
-.dui-fact-label { font-size: 12px; }
-.dui-fact-value { margin: 0; font-size: 12.5px; }
+.dui-fact-label { font-size: 13px; line-height: 18px; }
+.dui-fact-value { margin: 0; font-size: 14px; line-height: 20px; }
 
-.dui-table-scroll { overflow-x: auto; }
-.dui-table { width: 100%; border-collapse: collapse; font-size: 12.5px; line-height: 1.5; }
-.dui-table thead th { text-align: left; font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-dim); padding: 6px 12px 6px 0; border-bottom: 1px solid var(--border); font-weight: 600; white-space: nowrap; }
-.dui-table :is(td, tbody th) { text-align: left; font-weight: 400; vertical-align: top; padding: 7px 12px 7px 0; border-bottom: 1px solid var(--border-soft); }
-.dui-table tbody tr:hover { background: var(--surface-2); }
+.dui-table-scroll { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--dui-radius-large); background: var(--surface); scrollbar-color: var(--border-loud) transparent; }
+.dui-table { width: 100%; border-collapse: collapse; font-size: 14px; line-height: 20px; font-variant-numeric: tabular-nums; }
+.dui-table thead th { text-align: left; font-size: 12px; line-height: 16px; color: var(--text-dim); padding: 14px 16px; border-bottom: 1px solid var(--border); background: color-mix(in oklch, var(--surface-2) 45%, var(--surface)); font-weight: 500; white-space: nowrap; }
+.dui-table :is(td, tbody th) { text-align: left; font-weight: 400; vertical-align: middle; padding: 16px; border-bottom: 1px solid var(--border-soft); transition: background-color 160ms ease; }
+.dui-table tbody tr:last-child > * { border-bottom: none; }
+.dui-table tbody tr:hover > * { background: var(--surface-2); }
 .dui-table [data-align='end'] { text-align: right; }
-/* Only the last cell gives up its gutter; every other end-aligned column keeps
-   the space that separates it from the next. */
-.dui-table tr > :last-child { padding-right: 0; }
-.dui-table-empty { font-size: 12.5px; padding: 18px 0; }
+/* Every column keeps its gutter, including an end-aligned last column. */
+.dui-table tr > :last-child { padding-right: 16px; }
+.dui-table-empty { font-size: 13px; line-height: 18px; padding: 24px 0; }
 .dui-table-empty:empty { display: none; }
 
-.dui-list { margin: 10px 0; padding-left: 18px; font-size: 12.5px; }
-.dui-list li { padding: 2px 0; }
-.dui-unit { font-size: 11px; }
+.dui-list { margin: 12px 0; padding-left: 20px; font-size: 14px; line-height: 20px; }
+.dui-list li { padding: 3px 0; }
+.dui-unit { font-size: 12px; }
 
 .dui-chart { margin: 16px 0; max-width: var(--dui-measure); }
 .dui-chart-plot { display: block; width: 100%; height: 140px; }
@@ -2629,8 +2687,8 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
 .dui-chart-swatch.dui-chart-bar-3 { background: var(--accent-amber); }
 .dui-chart-swatch { background: var(--bucket-run); }
 .dui-chart-categories { display: flex; margin-top: 5px; }
-.dui-chart-label { flex: 1 1 0; font-size: 10px; text-align: center; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
-.dui-chart-legend { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 9px; font-size: 11.5px; color: var(--text-dim); }
+.dui-chart-label { flex: 1 1 0; font-size: 12px; line-height: 16px; text-align: center; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.dui-chart-legend { display: flex; flex-wrap: wrap; gap: 16px; margin-top: 10px; font-size: 13px; line-height: 18px; color: var(--text-dim); }
 .dui-chart-key { display: inline-flex; align-items: center; gap: 6px; }
 .dui-chart-swatch { width: 9px; height: 9px; border-radius: 2px; }
 /* The chart's numbers stay in the page for a screen reader, out of sight. */
@@ -2638,9 +2696,9 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
 
 /* The shell owns the arrangement: cards take a comfortable minimum and the
    row fills with as many as fit. */
-.dui-cards { list-style: none; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px; margin: 12px 0; }
+.dui-cards { list-style: none; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; margin: 16px 0; }
 .dui-cards .dui-card { margin: 0; }
-.dui-gallery-grid { list-style: none; margin: 10px 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 12px; }
+.dui-gallery-grid { list-style: none; margin: 12px 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 16px; }
 .dui-gallery-item { display: block; }
 .dui-gallery .dui-image { margin: 0; }
 
@@ -2649,60 +2707,106 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
    the values without knowing what they are. */
 @media (max-width: 720px) {
   .dui-columns { flex-direction: column; }
-  .dui-table { font-size: 12px; }
+  .dui-table { min-width: 560px; font-size: 13px; }
   .dui-table :is(th, td) { padding-right: 16px; }
   /* Times and figures ride one line; prose wraps, so a long sentence no
      longer decides how far the table scrolls. */
   .dui-table .mono { white-space: nowrap; }
 }
-.dui-table-caption { text-align: left; caption-side: top; margin: 18px 0 8px; }
+.dui-table-caption { text-align: left; caption-side: top; margin: 20px 0 10px; padding: 0; }
 .dui-chart-mark { stroke: none; }
 
 /* ---- Druks UI: forms and actions ---------------------------- */
-.dui-form { margin: 14px 0; max-width: 520px; }
-.dui-form-desc { font-size: 12.5px; margin: 0 0 12px; }
-.dui-field { margin-bottom: 14px; }
-.dui-field-label { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-dim); margin-bottom: 5px; }
+.dui-form { margin: 16px 0; max-width: 520px; }
+.dui-form-desc { font-size: 13px; line-height: 18px; margin: 0 0 16px; }
+.dui-field { margin-bottom: 16px; }
+.dui-field-label { display: block; font-size: 12px; line-height: 16px; font-weight: 500; color: var(--text-mid); margin-bottom: 8px; }
 .dui-field-required { color: var(--decision-request-revision); }
-.dui-input { width: 100%; background: var(--surface-2); border: 1px solid var(--border-loud); border-radius: 6px; color: var(--text); padding: 8px 10px; font-size: 13px; font-family: inherit; }
-.dui-checkbox { width: 15px; height: 15px; }
+.dui-input { width: 100%; min-height: var(--dui-control-height); background: var(--surface-2); border: 1px solid var(--border-loud); border-radius: var(--dui-radius-control); color: var(--text); padding: 9px 12px; font-size: 14px; line-height: 20px; font-family: inherit; caret-color: var(--accent-violet); transition: background-color 160ms ease, border-color 160ms ease; }
+.dui-input:hover { border-color: var(--text-faint); }
+.dui-input::placeholder { color: var(--text-faint); opacity: 1; }
+.dui-input[aria-invalid='true'] { border-color: var(--outcome-failed); }
+.dui-checkbox { width: 18px; height: 18px; accent-color: var(--dui-primary); }
 .dui-upload { padding: 6px 8px; }
-.dui-upload::file-selector-button { margin-right: 10px; padding: 5px 10px; border: 1px solid var(--border-loud); border-radius: 5px; background: var(--surface-2); color: var(--text-mid); font-size: 12.5px; font-family: inherit; }
-.dui-upload::file-selector-button:hover { color: var(--text); border-color: var(--text-faint); }
-.dui-field-help { font-size: 11.5px; margin-top: 4px; }
-.dui-field-error { font-size: 11.5px; margin-top: 4px; color: var(--outcome-failed); }
-.dui-form-error { font-size: 12.5px; color: var(--outcome-failed); margin: 8px 0; }
-.dui-choices { display: flex; flex-wrap: wrap; gap: 12px; }
-.dui-choice { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; }
-.dui-form-submit { margin-top: 16px; }
+.dui-upload::file-selector-button { min-height: 32px; margin-right: 12px; padding: 0 12px; border: 1px solid var(--border-loud); border-radius: var(--dui-radius-control); background: var(--surface-2); color: var(--text-mid); font-size: 13px; font-weight: 500; font-family: inherit; transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease; }
+.dui-upload::file-selector-button:hover { background: var(--surface-3); color: var(--text); border-color: var(--text-faint); }
+.dui-field-help { font-size: 12px; line-height: 16px; margin-top: 6px; }
+.dui-field-error { font-size: 12px; line-height: 16px; margin-top: 6px; color: var(--outcome-failed); }
+.dui-form-error { font-size: 13px; line-height: 18px; color: var(--outcome-failed); margin: 10px 0; }
+.dui-choices { display: flex; flex-wrap: wrap; gap: 12px 16px; }
+.dui-choice { display: inline-flex; min-height: 32px; align-items: center; gap: 8px; font-size: 14px; line-height: 20px; }
+.dui-form-submit { margin-top: 20px; }
+.dui-form-submit { display: flex; flex-wrap: wrap; gap: 8px; }
+
+.dui-dialog {
+  width: min(480px, calc(100vw - 32px));
+  max-height: min(720px, calc(100vh - 48px));
+  overflow: auto;
+  padding: 24px;
+  border: 1px solid var(--border-loud);
+  border-radius: var(--dui-radius-large);
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 24px 64px rgb(0 0 0 / 0.5);
+}
+.dui-dialog::backdrop { background: rgb(3 5 9 / 0.7); }
+.dui-dialog-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; margin-bottom: 20px; }
+.dui-dialog-title { margin: 0; font-size: 20px; line-height: 28px; font-weight: 600; letter-spacing: -0.01em; }
+.dui-dialog-head .dui-form-desc { margin: 6px 0 0; }
+.dui-dialog-close {
+  display: inline-flex;
+  width: 40px;
+  height: 40px;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: var(--dui-radius-control);
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 22px;
+  line-height: 1;
+  transition: background-color 160ms ease, color 160ms ease;
+}
+.dui-dialog-close:hover:not(:disabled) { background: var(--surface-2); color: var(--text); }
+.dui-dialog-close:disabled { opacity: 0.5; cursor: not-allowed; }
+.dui-dialog .dui-form { max-width: none; margin: 0; }
+.dui-dialog-trigger { align-self: flex-start; }
 
 /* An action that asks does it in the page. */
 .dui-confirm { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 8px; }
-.dui-confirm-ask { font-size: 12.5px; color: var(--text-mid); }
+.dui-confirm-ask { font-size: 13px; line-height: 18px; color: var(--text-mid); }
 /* What an action says once it has happened; it clears itself. */
-.dui-action-note { font-size: 12.5px; color: var(--outcome-merged); margin: 0; }
+.dui-action-note { font-size: 13px; line-height: 18px; color: var(--outcome-merged); margin: 0; }
 .dui-action-note:empty { display: none; }
-.dui-action[aria-busy='true'] { opacity: 0.7; cursor: progress; }
+.dui-action[aria-busy='true'] { opacity: 0.75; cursor: progress; }
+.dui-action[aria-busy='true']::after { content: ''; width: 14px; height: 14px; margin-left: 8px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: dui-spin 720ms linear infinite; }
+@keyframes dui-spin { to { transform: rotate(360deg); } }
 
-.dui-action { padding: 7px 14px; border: 1px solid var(--border-loud); border-radius: 6px; background: var(--surface-2); color: var(--text-mid); font-size: 12.5px; font-family: inherit; }
-.dui-action:hover:not(:disabled) { color: var(--text); border-color: var(--text-faint); }
-.dui-action:disabled { opacity: 0.5; }
-.dui-action-primary { border-color: var(--bucket-run); color: var(--bucket-run); }
-.dui-action-danger { border-color: var(--outcome-failed); color: var(--outcome-failed); }
+.dui-action { display: inline-flex; min-height: var(--dui-control-height); align-items: center; justify-content: center; padding: 0 14px; border: 1px solid var(--border-loud); border-radius: var(--dui-radius-control); background: var(--surface-2); color: var(--text-mid); font-size: 14px; line-height: 20px; font-weight: 500; font-family: inherit; touch-action: manipulation; transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease; }
+.dui-action:hover:not(:disabled) { background: var(--surface-3); color: var(--text); border-color: var(--text-faint); }
+.dui-action:active:not(:disabled) { background: var(--surface); }
+.dui-action:disabled { opacity: 0.5; cursor: not-allowed; }
+.dui-action-primary { border-color: transparent; background: var(--dui-primary); color: var(--text); }
+.dui-action-primary:hover:not(:disabled) { border-color: transparent; background: var(--dui-primary-hover); color: var(--text); }
+.dui-action-primary:active:not(:disabled) { background: var(--dui-primary-active); }
+.dui-action-danger { border-color: color-mix(in oklch, var(--outcome-failed) 42%, var(--border)); background: color-mix(in oklch, var(--outcome-failed) 9%, var(--surface)); color: var(--outcome-failed); }
+.dui-action-danger:hover:not(:disabled) { border-color: color-mix(in oklch, var(--outcome-failed) 64%, var(--border)); background: color-mix(in oklch, var(--outcome-failed) 15%, var(--surface)); color: var(--outcome-failed); }
 .dui-action-broken { color: var(--text-faint); text-decoration: line-through; cursor: help; }
+.dui-table :is(.dui-action, .dui-link) { min-height: 32px; }
 
 .dui-value { display: inline-flex; flex-direction: column; gap: 2px; }
-.dui-value-desc { font-size: 11.5px; line-height: 1.45; }
+.dui-value-desc { font-size: 12px; line-height: 16px; }
 
 .dui-number-active { color: var(--bucket-run); }
 .dui-number-success { color: var(--outcome-merged); }
 .dui-number-warning { color: var(--decision-request-revision); }
 .dui-number-danger { color: var(--outcome-failed); }
 
-.dui-quote { font-size: 13.5px; line-height: 1.6; color: var(--text-mid); max-width: 68ch;
-  white-space: pre-wrap; margin: 0; padding-left: 12px; border-left: 2px solid var(--border); }
+.dui-quote { font-size: 14px; line-height: 22px; color: var(--text-mid); max-width: 68ch;
+  white-space: pre-wrap; margin: 0; padding-left: 16px; border-left: 1px solid var(--border-loud); }
 
-.dui-row-more { font-size: 11px; color: var(--text-faint); margin-left: 8px; text-underline-offset: 2px; }
+.dui-row-more { display: inline-flex; min-height: 32px; align-items: center; font-size: 12px; color: var(--text-faint); margin-left: 8px; text-underline-offset: 3px; }
 .dui-row-more:hover, .dui-row-more[aria-expanded='true'] { color: var(--text); text-decoration: underline; }
 .dui-table .dui-row-detail td { white-space: pre-wrap; color: var(--text-mid); font-size: 12px; line-height: 1.6; padding-top: 0; }
 
@@ -2711,23 +2815,23 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
 /* A block owns what is inside it; the container owns the space between
    blocks. Margins sum in these flex columns, so a block carries none and the
    rhythm is chosen once. */
-.dui-page > .page-shell-body > * { margin-top: 22px; margin-bottom: 0; }
+.dui-page > .page-shell-body > * { margin-top: 32px; margin-bottom: 0; }
 .dui-page > .page-shell-body > :first-child { margin-top: 0; }
 /* The title and its tabs read as one cluster, tighter than the page below. */
-.dui-page > .page-shell-body > .dui-title { margin-top: 14px; }
-.dui-page > .page-shell-body > .dui-description { margin-top: 6px; }
-.dui-page > .page-shell-body > .dui-tabs { margin-top: 16px; }
+.dui-page > .page-shell-body > .dui-parent + .dui-page-head { margin-top: 16px; }
+.dui-page > .page-shell-body > .dui-tabs { margin-top: 20px; }
 
 .dui-section, .dui-card, .dui-column { display: flex; flex-direction: column; }
-.dui-section { gap: 14px; }
-.dui-column { gap: 14px; }
-.dui-card { gap: 6px; }
+.dui-section { gap: 16px; }
+.dui-column { gap: 16px; }
+.dui-card { gap: 8px; }
 .dui-page :is(.dui-section, .dui-card, .dui-column, .dui-stack) > * { margin-top: 0; margin-bottom: 0; }
 
 /* A control is as wide as its label. Stretching is the flex default, which
    welds two buttons into one bar the width of the page. */
 .dui-page > .page-shell-body > :is(.dui-action, .dui-link, .dui-parent, .dui-retry),
-.dui-stack > :is(.dui-action, .dui-link) { align-self: flex-start; }
+.dui-stack > :is(.dui-action, .dui-link),
+.dui-section > :is(.dui-action, .dui-link) { align-self: flex-start; }
 .dui-page > .page-shell-body > :is(.dui-action, .dui-link) + :is(.dui-action, .dui-link) { margin-top: 10px; }
 
 /* A path, a URL or a repository name breaks rather than leaving its box. */
@@ -2735,17 +2839,18 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
 .dui-fact-value { overflow-wrap: anywhere; }
 
 :is(.dui-action, .dui-link, .dui-tab, .dui-retry, .dui-parent, .dui-checkbox,
-    .dui-choice input, .dui-input, .dui-gallery-item):focus-visible {
-  outline: 2px solid var(--accent);
+    .dui-choice input, .dui-input, .dui-gallery-item, .dui-dialog-close,
+    .dui-decision .review-btn):focus-visible {
+  outline: 2px solid var(--accent-violet);
   outline-offset: 2px;
-  border-radius: 2px;
 }
 
 /* A run's length is not a reason to animate at someone. The indeterminate bar
    has to give up its width too: frozen at 35% it reads as 35% done. */
 @media (prefers-reduced-motion: reduce) {
-  .dui-status-active,
-  .dui-progress-unknown .dui-progress-fill { animation: none; }
+  .dui-status-active::before,
+  .dui-progress-unknown .dui-progress-fill,
+  .dui-action[aria-busy='true']::after { animation: none; }
   .dui-progress-unknown .dui-progress-fill { width: 100% !important; opacity: 0.45; }
 }
 
