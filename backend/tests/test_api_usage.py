@@ -80,7 +80,12 @@ def test_get_usage_empty_returns_available_false(client) -> None:
     assert response.status_code == 200
     body = response.json()
     # One entry per registered harness, none available pre-first-poll.
-    assert {entry["name"] for entry in body["harnesses"]} == {"claude", "codex", "opencode"}
+    assert {entry["name"] for entry in body["harnesses"]} == {
+        "claude",
+        "codex",
+        "opencode",
+        "pi",
+    }
     assert all(entry["available"] is False for entry in body["harnesses"])
 
 
