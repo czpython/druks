@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Router } from 'wouter'
 import { memoryLocation } from 'wouter/memory-location'
@@ -118,6 +118,50 @@ describe('every V1 renderer', () => {
       control.focus()
       expect(document.activeElement).toBe(control)
     }
+  })
+
+  it('names a section collector, focuses its field, and returns focus on Escape', async () => {
+    renderBlocks([
+      {
+        block: 'section',
+        title: 'Notes',
+        name: 'notes',
+        action: {
+          block: 'action',
+          label: 'Write a note',
+          operation: 'write_note',
+          arguments: {},
+          fields: [
+            {
+              field: 'text',
+              name: 'body',
+              label: 'Note',
+              value: '',
+              placeholder: '',
+              helpText: '',
+              isRequired: true,
+            },
+          ],
+          tone: 'primary',
+          confirm: '',
+          refresh: 'page',
+          link: null,
+        },
+        follows: null,
+        blocks: [],
+      },
+    ])
+    const trigger = screen.getByRole('button', { name: 'Write a note' })
+
+    fireEvent.click(trigger)
+
+    const dialog = screen.getByRole('dialog', { name: 'Write a note' }) as HTMLDialogElement
+    expect(document.activeElement).toBe(screen.getByLabelText(/Note/))
+    const cancel = new Event('cancel', { cancelable: true })
+    fireEvent(dialog, cancel)
+    if (!cancel.defaultPrevented) dialog.close()
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Write a note' })).toBeNull())
+    await waitFor(() => expect(document.activeElement).toBe(trigger))
   })
 
   it('keeps two forms that share a field name apart', async () => {

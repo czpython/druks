@@ -57,7 +57,7 @@ export function Form({
           <button
             type="submit"
             className={`dui-action dui-action-${action.tone}`}
-            disabled={run.pending}
+            disabled={run.blocked}
             aria-busy={run.pending}
           >
             {action.label}
@@ -97,7 +97,7 @@ function ImmediateAction({ action }: { action: Action }) {
         <button
           type="button"
           className={`dui-action dui-action-${action.tone}`}
-          disabled={run.pending}
+          disabled={run.blocked}
           aria-busy={run.pending}
           onClick={() => void run.call({})}
         >
@@ -133,8 +133,7 @@ function FieldAction({ action }: { action: Action }) {
     if (!node) return
     if (open) {
       if (!node.open) {
-        if (typeof node.showModal === 'function') node.showModal()
-        else node.setAttribute('open', '')
+        node.showModal()
       }
       const firstField = node.querySelector<HTMLElement>(
         'input:not(:disabled), textarea:not(:disabled), select:not(:disabled)',
@@ -146,8 +145,7 @@ function FieldAction({ action }: { action: Action }) {
     }
     if (!wasOpen.current) return
     if (node.open) {
-      if (typeof node.close === 'function') node.close()
-      else node.removeAttribute('open')
+      node.close()
     }
     trigger.current?.focus()
     wasOpen.current = false
@@ -180,8 +178,15 @@ function FieldAction({ action }: { action: Action }) {
         onClose={() => {
           if (open) dismiss()
         }}
-        onMouseDown={(event) => {
-          if (event.target === event.currentTarget) dismiss()
+        onClick={(event) => {
+          if (event.target !== event.currentTarget) return
+          const bounds = event.currentTarget.getBoundingClientRect()
+          const outside =
+            event.clientX < bounds.left ||
+            event.clientX > bounds.right ||
+            event.clientY < bounds.top ||
+            event.clientY > bounds.bottom
+          if (outside) dismiss()
         }}
       >
         <div className="dui-dialog-head">
@@ -221,7 +226,7 @@ function FieldAction({ action }: { action: Action }) {
             <button
               type="submit"
               className={`dui-action dui-action-${action.tone}`}
-              disabled={run.pending}
+              disabled={run.blocked}
               aria-busy={run.pending}
             >
               {action.label}
@@ -273,13 +278,13 @@ function Confirm({ action, run }: { action: Action; run: ReturnType<typeof useAc
       <button
         type="button"
         className={`dui-action dui-action-${action.tone}`}
-        disabled={run.pending}
+        disabled={run.blocked}
         aria-busy={run.pending}
         onClick={() => void run.confirm()}
       >
         {action.label}
       </button>
-      <button type="button" className="dui-action" disabled={run.pending} onClick={run.back}>
+      <button type="button" className="dui-action" disabled={run.blocked} onClick={run.back}>
         Back
       </button>
     </span>
@@ -293,6 +298,7 @@ function useAction(action: Action, fields: Field[] = [], clear?: () => void) {
   const fieldNames = fields.map((one) => one.name)
   const secretNames = fields.filter((one) => one.field === 'secret').map((one) => one.name)
   const [pending, setPending] = useState(false)
+  const [saved, setSaved] = useState(false)
   const [problem, setProblem] = useState('')
   const [note, setNote] = useFlashNote<string>()
   // The payload an action is holding while it asks; null when it is not asking.
@@ -305,7 +311,7 @@ function useAction(action: Action, fields: Field[] = [], clear?: () => void) {
   const [, navigate] = useLocation()
 
   async function call(values: Payload) {
-    if (pending) return
+    if (pending || saved) return
     if (action.confirm) {
       setAsked(values)
       return
@@ -314,7 +320,7 @@ function useAction(action: Action, fields: Field[] = [], clear?: () => void) {
   }
 
   async function confirm() {
-    if (pending) return
+    if (pending || saved) return
     const values = asked ?? {}
     setAsked(null)
     await perform(values)
@@ -327,6 +333,7 @@ function useAction(action: Action, fields: Field[] = [], clear?: () => void) {
       return
     }
     setPending(true)
+    setSaved(false)
     setProblem('')
     setFieldErrors({})
     try {
@@ -352,14 +359,13 @@ function useAction(action: Action, fields: Field[] = [], clear?: () => void) {
       setPending(false)
       return
     }
-    // The write has happened. Whatever fails from here is a failure to show
-    // the result, so the control stays down: pressing it again would write
-    // twice.
+    setSaved(true)
+    setPending(false)
     try {
       await finish()
       clear?.()
       setNote(`${action.label} — done`)
-      setPending(false)
+      setSaved(false)
     } catch (error) {
       setProblem(`saved, but the page did not refresh: ${message(error)}`)
     }
@@ -410,7 +416,17 @@ function useAction(action: Action, fields: Field[] = [], clear?: () => void) {
     await queryClient.invalidateQueries({ queryKey: ['gate'] })
   }
 
-  return { pending, problem, note, fieldErrors, call, confirm, back: () => setAsked(null), confirming: asked !== null }
+  return {
+    pending,
+    blocked: pending || saved,
+    problem,
+    note,
+    fieldErrors,
+    call,
+    confirm,
+    back: () => setAsked(null),
+    confirming: asked !== null,
+  }
 }
 
 // The operation's path parameters come out of the payload; everything left is

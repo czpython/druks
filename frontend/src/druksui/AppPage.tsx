@@ -8,7 +8,6 @@ import { EmptyState } from '../components/EmptyState'
 import { Page } from '../components/Page'
 import { AppSurface } from './AppSurface'
 import { Blocks } from './Blocks'
-import { leadingFieldAction } from './blockLayout'
 import { followedSubjects, hrefUnder, isDetail, mergeRegions, PagesContext, parentOf, tabsFor } from './pages'
 import { SubjectStream } from './SubjectStream'
 
@@ -104,9 +103,6 @@ export function AppPage({ app, page }: { app: string; page: string }) {
     return appError(app, detail, () => snapshot.refetch())
   }
 
-  const pageAction = leadingFieldAction(snapshot.data.blocks)
-  const bodyBlocks = pageAction ? snapshot.data.blocks.slice(1) : snapshot.data.blocks
-
   return (
     <AppSurface
       fallback={(clear) =>
@@ -130,9 +126,9 @@ export function AppPage({ app, page }: { app: string; page: string }) {
             {...chrome}
             title={snapshot.data.title}
             description={snapshot.data.description}
-            action={pageAction && <Blocks blocks={[pageAction]} />}
+            action={snapshot.data.action && <Blocks blocks={[snapshot.data.action]} />}
           />
-          <Blocks blocks={bodyBlocks} />
+          <Blocks blocks={snapshot.data.blocks} />
         </Page>
       </PagesContext.Provider>
     </AppSurface>

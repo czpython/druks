@@ -158,6 +158,18 @@ def test_a_form_sends_each_value_once():
         )
 
 
+def test_a_form_keeps_all_fields_on_the_form():
+    with pytest.raises(ValueError, match="Put all form fields on the form"):
+        Form(
+            action=Action(
+                label="Save",
+                operation="write_note",
+                fields=[TextField(name="tag", label="Tag")],
+            ),
+            fields=[TextField(name="body", label="Body")],
+        )
+
+
 def check(page: Page) -> None:
     for action in page.iter_actions():
         action.check_operation("field_notes", OPERATIONS)
@@ -176,6 +188,7 @@ def test_a_get_route_can_never_be_an_action():
 def test_every_action_on_the_page_is_checked():
     page = Page(
         "x",
+        action=Action(label="Write", operation="write_note"),
         blocks=[
             Card(
                 blocks=[
@@ -194,6 +207,7 @@ def test_every_action_on_the_page_is_checked():
     )
 
     assert [action.operation for action in page.iter_actions()] == [
+        "write_note",
         "write_note",
         "write_note",
         "nowhere",
@@ -246,3 +260,29 @@ def test_a_named_section_is_a_region_an_action_can_refresh():
     )
 
     assert [action.label for action in page.iter_actions()] == ["Go"]
+
+
+def test_a_section_action_belongs_to_its_region():
+    action = Action(label="Go", operation="write_note", refresh="region")
+    page = Page(
+        "x",
+        blocks=[
+            Section(
+                name="decision",
+                action=action,
+                follows={"subject_type": "note", "subject_id": "1"},
+            )
+        ],
+    )
+
+    assert list(page.iter_actions()) == [action]
+    section = page.model_dump(by_alias=True, mode="json")["blocks"][0]
+    assert section["action"]["label"] == "Go"
+
+
+def test_a_page_action_cannot_refresh_a_region():
+    with pytest.raises(ValueError, match="refreshes its region, and it sits in none"):
+        Page(
+            "x",
+            action=Action(label="Go", operation="write_note", refresh="region"),
+        )

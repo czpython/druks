@@ -54,6 +54,7 @@ describe('the display core', () => {
         block: 'section',
         title: 'Recent',
         name: 'recent',
+        action: null,
         follows: null,
         blocks: [
           {

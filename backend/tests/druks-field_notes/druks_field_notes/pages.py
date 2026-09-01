@@ -9,21 +9,21 @@ async def notes():
     return ui.Page(
         "Notes",
         description="Every note this install captured.",
+        action=ui.Action(
+            label="Write a note",
+            operation="write_note",
+            tone="primary",
+            fields=[
+                ui.TextAreaField(
+                    name="body",
+                    label="Note",
+                    placeholder="Fan noise on rack 3.",
+                    is_required=True,
+                    rows=3,
+                )
+            ],
+        ),
         blocks=[
-            ui.Action(
-                label="Write a note",
-                operation="write_note",
-                tone="primary",
-                fields=[
-                    ui.TextAreaField(
-                        name="body",
-                        label="Note",
-                        placeholder="Fan noise on rack 3.",
-                        is_required=True,
-                        rows=3,
-                    )
-                ],
-            ),
             ui.Section(
                 name="recent",
                 blocks=[

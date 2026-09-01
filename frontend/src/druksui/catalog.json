@@ -1,6 +1,7 @@
 {
   "title": "Catalog",
   "description": "One of every block the contract carries.",
+  "action": null,
   "blocks": [
     {
       "block": "text",
@@ -290,6 +291,7 @@
       ],
       "title": "Section",
       "name": "catalog",
+      "action": null,
       "follows": null
     },
     {
@@ -302,6 +304,7 @@
       ],
       "title": "Decision",
       "name": "catalog_gate",
+      "action": null,
       "follows": {
         "subjectType": "note",
         "subjectId": "0"

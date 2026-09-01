@@ -50,6 +50,22 @@ class Follows(Schema):
 Watched = Annotated[Follows | None, BeforeValidator(_subject_identity)]
 
 
+def _check_field_names(*, owner: str, fields: list[FormField], arguments: dict[str, Any]) -> None:
+    names = [field.name for field in fields]
+    repeated = sorted({name for name in names if names.count(name) > 1})
+    if repeated:
+        raise ValueError(
+            f"{owner} has two fields named {repeated}; one would take the other's value. "
+            "Give each field its own name."
+        )
+    taken = sorted(set(names) & set(arguments))
+    if taken:
+        raise ValueError(
+            f"{owner} has fields named {taken}, which it already carries as arguments. "
+            "Send each value once."
+        )
+
+
 class PageBlock(Schema):
     """What every block shares. ``block`` names its kind on the wire, and
     ``check_placement`` is how a block refuses a spot it cannot work in."""
@@ -135,19 +151,11 @@ class Action(PageBlock):
 
     @model_validator(mode="after")
     def _one_name_for_each_value(self) -> "Action":
-        names = [one.name for one in self.fields]
-        repeated = sorted({name for name in names if names.count(name) > 1})
-        if repeated:
-            raise ValueError(
-                f"action {self.label!r} has two fields named {repeated}; one would take the "
-                "other's value. Give each field its own name."
-            )
-        taken = sorted(set(names) & set(self.arguments))
-        if taken:
-            raise ValueError(
-                f"action {self.label!r} has fields named {taken}, which it already carries as "
-                "arguments. Send each value once."
-            )
+        _check_field_names(
+            owner=f"action {self.label!r}",
+            fields=self.fields,
+            arguments=self.arguments,
+        )
         return self
 
     def iter_actions(self) -> "Iterable[Action]":
@@ -195,19 +203,15 @@ class Form(PageBlock):
 
     @model_validator(mode="after")
     def _one_name_for_each_value(self) -> "Form":
-        names = [one.name for one in self.fields]
-        repeated = sorted({name for name in names if names.count(name) > 1})
-        if repeated:
+        if self.action.fields:
             raise ValueError(
-                f"form {self.title!r} has two fields named {repeated}; one would take the "
-                "other's value. Give each field its own name."
+                f"form {self.title!r} has fields on its action. Put all form fields on the form."
             )
-        taken = sorted(set(names) & set(self.action.arguments))
-        if taken:
-            raise ValueError(
-                f"form {self.title!r} has fields named {taken}, which its action already "
-                "carries as arguments. Send each value once."
-            )
+        _check_field_names(
+            owner=f"form {self.title!r}",
+            fields=self.fields,
+            arguments=self.action.arguments,
+        )
         return self
 
 
@@ -629,6 +633,7 @@ class Section(BlockParent):
     block: Literal["section"] = "section"
     title: str = ""
     name: str = ""
+    action: Action | None = None
     follows: Watched = None
 
     def check_placement(self, *, followed: bool, regions: set[str], region: str = "") -> None:
@@ -639,11 +644,23 @@ class Section(BlockParent):
             )
         if self.name:
             regions.add(self.name)
+        inside = self.name or region
+        if self.action:
+            self.action.check_placement(
+                followed=followed or bool(self.follows),
+                regions=regions,
+                region=inside,
+            )
         super().check_placement(
             followed=followed or bool(self.follows),
             regions=regions,
-            region=self.name or region,
+            region=inside,
         )
+
+    def iter_actions(self) -> "Iterable[Action]":
+        if self.action:
+            yield self.action
+        yield from super().iter_actions()
 
     @model_validator(mode="after")
     def _named_when_followed(self) -> "Section":

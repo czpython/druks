@@ -331,7 +331,7 @@ interface FieldBase {
   isRequired: boolean
 }
 
-// One input inside a form. ``name`` is the key the shell sends.
+// One named input that the shell collects before an action runs.
 export type Field =
   | (FieldBase & { field: 'text'; value: string; placeholder: string })
   | (FieldBase & { field: 'text_area'; value: string; placeholder: string; rows: number })
@@ -374,7 +374,14 @@ export type Block =
   | { block: 'text'; text: string }
   | { block: 'markdown'; text: string }
   | { block: 'quote'; text: string }
-  | { block: 'section'; title: string; name: string; blocks: Block[]; follows: Follows | null }
+  | {
+      block: 'section'
+      title: string
+      name: string
+      action: Action | null
+      blocks: Block[]
+      follows: Follows | null
+    }
   | { block: 'gate_controls'; run: string }
   | { block: 'timeline'; title: string; items: TimelineItem[] }
   | {
@@ -440,6 +447,7 @@ export interface Follows {
 export interface PageSnapshot {
   title: string
   description: string
+  action: Action | null
   blocks: Block[]
   follows: Follows | null
 }

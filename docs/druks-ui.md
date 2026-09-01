@@ -27,7 +27,7 @@ The contract uses eight terms. Each one has one meaning.
 | `Page` | One screen. A page function returns it. |
 | `Block` | One piece of a page. Blocks nest. |
 | `Value` | One rendered datum inside a block. |
-| `Field` | One input inside a form. |
+| `Field` | One named input that the shell collects before an action runs. |
 | `Action` | A control that calls one of the app's operations. |
 | `Link` | A control that navigates. |
 | `operation` | The `operation_id` of an app route. |
@@ -632,6 +632,7 @@ class Section:
     block: Literal["section"] = "section"
     title: str = ""
     name: str = ""
+    action: Action | None = None
     blocks: list[Block] = []
     follows: Follows | None = None
 ```
@@ -641,10 +642,17 @@ class Section:
   "block": "section",
   "title": "Decision",
   "name": "decision",
+  "action": null,
   "blocks": [],
   "follows": {"subjectType": "peers", "subjectId": "42"}
 }
 ```
+
+A section action belongs to that section. The shell chooses where to show it.
+An action in `blocks` stays with the body content.
+
+The action of a followed section is inside the section region. A region refresh
+replaces the heading, action, and body together.
 
 ### Card
 
@@ -808,8 +816,9 @@ them unchanged. A route parameter keeps its Python spelling on the wire.
 An action with fields stays an action in the declaration and on the wire. The
 shell decides how to collect the fields.
 
-An action cannot set both `fields` and `confirm`. Druks refuses this action at
-boot because each option asks the operator before the action runs.
+An action cannot set both `fields` and `confirm`. When a page function builds
+this action, Druks refuses it. Each option asks the operator before the action
+runs.
 
 ### Form
 
@@ -829,6 +838,12 @@ ui.Form(
     action=ui.Action(label="Save", operation="write_note", tone="primary"),
 )
 ```
+
+Use a `Form` when the page exists to collect the values. Use an `Action` with
+`fields` when this collection is a short detour from another task.
+
+A form keeps all its fields on the form. When a form action also has fields,
+Druks refuses the form when the page function builds it.
 
 ```json
 {
@@ -1541,6 +1556,7 @@ class Follows:
 class Page:
     title: str
     description: str = ""
+    action: Action | None = None
     blocks: list[Block] = []
     follows: Follows | None = None
 ```
@@ -1549,9 +1565,25 @@ class Page:
 {
   "title": "peer-7",
   "description": "One peer and its last sweep.",
+  "action": null,
   "blocks": [{"block": "text", "text": "Healthy."}],
   "follows": {"subjectType": "peers", "subjectId": "7"}
 }
+```
+
+A page action belongs to that page. The shell chooses where to show it. An
+action in `blocks` stays with the body content.
+
+```python
+return ui.Page(
+    "Peers",
+    action=ui.Action(
+        label="Add a peer",
+        operation="add_peer",
+        fields=[ui.TextField(name="repo", label="Repository", is_required=True)],
+    ),
+    blocks=[ui.Table(...)],
+)
 ```
 
 ## Errors

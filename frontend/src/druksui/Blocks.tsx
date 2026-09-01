@@ -1,10 +1,11 @@
+import { useContext } from 'react'
+
 import type { Action, Block, Link } from '../api/types'
 import { Markdown } from '../components/Markdown'
 import { GateControls } from './GateControls'
 import { Chart, Facts, ImageGallery, LinkControl, List, Metrics, Table } from './DataBlocks'
 import { ActionButton, Form } from './Form'
 import { Files, Image, Progress, Timeline } from './RunBlocks'
-import { leadingFieldAction } from './blockLayout'
 import { RegionContext } from './pages'
 
 export function Blocks({ blocks }: { blocks: Block[] }) {
@@ -18,6 +19,8 @@ export function Blocks({ blocks }: { blocks: Block[] }) {
 }
 
 function BlockContent({ block }: { block: Block }) {
+  const enclosingRegion = useContext(RegionContext)
+
   switch (block.block) {
     case 'text':
       return <p className="dui-text">{block.text}</p>
@@ -150,25 +153,20 @@ function BlockContent({ block }: { block: Block }) {
       )
     }
     case 'section': {
-      const action = block.title ? leadingFieldAction(block.blocks) : undefined
-      const inside = action ? block.blocks.slice(1) : block.blocks
       const decision = block.blocks.some((insideBlock) => insideBlock.block === 'gate_controls')
       return (
         <section
           className={`dui-section${decision ? ' dui-decision' : ''}`}
           data-region={block.name || undefined}
         >
-          {/* The heading action and the body share the region they refresh. */}
-          <RegionContext.Provider value={block.name}>
-            {block.title && action ? (
+          <RegionContext.Provider value={block.name || enclosingRegion}>
+            {block.title || block.action ? (
               <div className="dui-section-head">
-                <h2 className="dui-section-title">{block.title}</h2>
-                <BlockContent block={action} />
+                {block.title && <h2 className="dui-section-title">{block.title}</h2>}
+                {block.action && <ActionButton action={block.action} />}
               </div>
-            ) : (
-              block.title && <h2 className="dui-section-title">{block.title}</h2>
-            )}
-            <Blocks blocks={inside} />
+            ) : null}
+            <Blocks blocks={block.blocks} />
           </RegionContext.Provider>
         </section>
       )

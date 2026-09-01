@@ -2707,8 +2707,10 @@ body[data-palette="mono"] .dui-page {
    the values without knowing what they are. */
 @media (max-width: 720px) {
   .dui-columns { flex-direction: column; }
-  .dui-table { min-width: 560px; font-size: 13px; }
-  .dui-table :is(th, td) { padding-right: 16px; }
+  .dui-table { font-size: 13px; }
+  .dui-table thead th { padding: 10px 12px; }
+  .dui-table :is(td, tbody th) { padding: 12px; }
+  .dui-table tr > :last-child { padding-right: 12px; }
   /* Times and figures ride one line; prose wraps, so a long sentence no
      longer decides how far the table scrolls. */
   .dui-table .mono { white-space: nowrap; }
