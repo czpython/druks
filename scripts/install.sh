@@ -238,9 +238,9 @@ Stack is up. Verify with:
   docker compose ps
   docker compose exec web druks doctor
 
-Then finish in the dashboard: Settings → Harnesses. Connect
-Claude and Codex (agent runs refuse to start on a harness that
-isn't connected) and connect the GitHub App druks acts as.
+Then finish in the dashboard. Connect a harness under
+Settings → Harnesses. Agent runs refuse to start on a harness
+that is not connected. Connect the GitHub App that druks uses.
 MSG
 
   if [ "$PROVIDER" = "docker" ]; then

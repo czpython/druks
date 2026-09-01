@@ -10,11 +10,19 @@ from druks.database import db_session
 from druks.harnesses.base import Harness
 from druks.harnesses.exceptions import ConnectError
 from druks.harnesses.models import HarnessConnection
-from druks.harnesses.registry import get_harness
+from druks.harnesses.registry import get_harness, get_harnesses
+from druks.harnesses.schemas import HarnessSummary
 from druks.user_settings.models import HarnessSettings, UserSettings
 from druks.user_settings.schemas import HarnessResponse
 
 router = APIRouter(prefix="/api/harnesses", tags=["harnesses"])
+
+
+@router.get("", response_model=list[HarnessSummary], response_model_by_alias=True)
+async def list_harnesses(
+    _account: Account | None = Depends(current_session_or_setup),
+) -> list[HarnessSummary]:
+    return [HarnessSummary.model_validate(harness) for harness in get_harnesses()]
 
 
 def _resolve_harness(name: str) -> type[Harness]:

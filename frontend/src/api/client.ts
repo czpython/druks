@@ -27,6 +27,7 @@ import type {
   PageSnapshot,
   McpServer,
   Service,
+  SetupHarness,
   Skill,
   SkillCollection,
   UserSettings,
@@ -264,6 +265,7 @@ export const api = {
   harnesses: () => getJSON<Harness[]>('/api/settings/harnesses'),
   updateHarness: (name: string, body: UpdateHarnessRequest) =>
     patchJSON<Harness>(`/api/settings/harnesses/${encodeURIComponent(name)}`, body),
+  setupHarnesses: () => getJSON<SetupHarness[]>('/api/harnesses'),
   // The harness connection flow — the capability connect (and, during setup,
   // what creates the operator account).
   startHarnessConnect: (name: string) =>

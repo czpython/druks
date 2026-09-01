@@ -5,13 +5,17 @@ from druks.accounts.dependencies import (
     current_session_account,
     current_session_or_setup,
 )
+from druks.accounts.models import Account
 from druks.api.server import app
+from druks.harnesses.claude import ClaudeHarness
+from druks.harnesses.registry import get_harnesses
 from fastapi.routing import APIRoute, _IncludedRouter
 
 # Every /api path allowed to skip the identity gate; additions are deliberate.
 EXEMPT_API_PATHS = {
     "/api/system/health",
     "/api/auth/me",
+    "/api/harnesses",
     "/api/harnesses/{name}/connection/start",
     "/api/harnesses/{name}/connection/complete",
     "/api/{path:path}",  # the JSON-404 catch-all
@@ -45,9 +49,10 @@ DUAL_GATED_API_PATHS = {
     "/api/oauth/connections/{connection_id}",
 }
 
-# The connection flow must answer during none/zero setup, before any account
-# exists.
+# Harness discovery and connection must answer during none/zero setup, before
+# any account exists.
 SETUP_CAPABLE_API_PATHS = {
+    "/api/harnesses",
     "/api/harnesses/{name}/connection/start",
     "/api/harnesses/{name}/connection/complete",
 }
@@ -114,7 +119,7 @@ def test_identity_bootstrap_is_the_only_setup_tolerant_read(api_routes):
             assert not _gated_by(route, current_account_or_setup), route.path
 
 
-def test_connection_setup_uses_only_the_session_or_setup_resolver(api_routes):
+def test_harness_setup_uses_only_the_session_or_setup_resolver(api_routes):
     listed = [route for route in api_routes if route.path in SETUP_CAPABLE_API_PATHS]
     assert {route.path for route in listed} == SETUP_CAPABLE_API_PATHS
     for route in listed:
@@ -123,6 +128,34 @@ def test_connection_setup_uses_only_the_session_or_setup_resolver(api_routes):
     for route in api_routes:
         if route.path not in SETUP_CAPABLE_API_PATHS:
             assert not _gated_by(route, current_session_or_setup), route.path
+
+
+async def test_harness_list_answers_before_an_account_exists(
+    druks_client,
+    monkeypatch,
+):
+    assert not await Account.list_non_system()
+    monkeypatch.setattr(
+        ClaudeHarness,
+        "login_kinds",
+        frozenset({"subscription", "api_key"}),
+    )
+
+    response = await druks_client.get("/api/harnesses")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert [item["name"] for item in body] == [harness.name for harness in get_harnesses()]
+    by_name = {item["name"]: item for item in body}
+    assert by_name["claude"] == {
+        "name": "claude",
+        "loginKinds": ["api_key", "subscription"],
+    }
+    assert by_name["codex"] == {
+        "name": "codex",
+        "loginKinds": ["subscription"],
+    }
+    assert not await Account.list_non_system()
 
 
 def test_capability_management_is_session_only(api_routes):

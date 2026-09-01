@@ -1,6 +1,7 @@
 import { useEffect, useState, type CSSProperties } from 'react'
 
 import { harnessColors } from '../lib/harnessColors'
+import { harnessLabel } from '../lib/harnessDisplay'
 import { usageTone, type UsageTone } from '../lib/usageHealth'
 import { useUsage, useUsageHistory, useUsageToday } from '../lib/useUsage'
 import type {
@@ -154,7 +155,7 @@ function ExhaustionAlert({ harnesses }: { harnesses: UsageHarnessSummary[] }) {
   const resetSeconds = secondsUntil(exhausted.resetsAt, now)
   const title = exhausted.model
     ? `${exhausted.model} ${exhausted.windowLabel} limit reached`
-    : `${capitalize(exhausted.harness)} ${exhausted.windowLabel} limit reached`
+    : `${harnessLabel(exhausted.harness)} ${exhausted.windowLabel} limit reached`
 
   return (
     <div className="us-alert" role="alert">
@@ -172,14 +173,14 @@ function ExhaustionAlert({ harnesses }: { harnesses: UsageHarnessSummary[] }) {
           {exhausted.model ? (
             <span>
               New {exhausted.harness} runs on {exhausted.model} will fail until the window resets.{' '}
-              <b>{capitalize(exhausted.harness)} still has capacity for other models.</b>
+              <b>{harnessLabel(exhausted.harness)} still has capacity for other models.</b>
             </span>
           ) : (
             <>
               New {exhausted.harness} runs will fail until the window resets.{' '}
               {alternative ? (
                 <span>
-                  <b>{capitalize(alternative.name)} has capacity</b> — route new work there to keep
+                  <b>{harnessLabel(alternative.name)} has capacity</b> — route new work there to keep
                   builds moving.
                 </span>
               ) : (
@@ -800,10 +801,6 @@ function currentHourIn(timeZone: string): number {
   } catch {
     return new Date().getUTCHours()
   }
-}
-
-function capitalize(s: string): string {
-  return s.charAt(0).toUpperCase() + s.slice(1)
 }
 
 function describeIdle(usage: UsageHarnessSummary): string {

@@ -502,6 +502,11 @@ export interface Harness {
   expiresAt: string | null
 }
 
+export interface SetupHarness {
+  name: string
+  loginKinds: string[]
+}
+
 export interface Account {
   id: string
   username: string
@@ -605,7 +610,7 @@ export interface AgentSetting {
   description: string
   model: string
   source: ModelSource
-  /** The declared family-token default (codex / claude) the model resolves to. */
+  /** The declared family-token default the model resolves to. */
   default: string
   effort: string
   effortSource: EffortSource
@@ -708,8 +713,7 @@ export interface UsageMetric {
 }
 
 export interface UsageHarnessSummary {
-  // A registered harness name ("claude", "codex", …) — panels, colors,
-  // and legends key off it.
+  // Panels, colors, and legends key off the registered harness name.
   name: string
   available: boolean
   /** The requesting account has its own connection; false renders a connect action. */
@@ -718,8 +722,7 @@ export interface UsageHarnessSummary {
   planTier: string | null
   fiveHour: UsageMetric | null
   weeks: UsageMetric[]
-  // Unmetered plan (e.g. Codex business). The window metrics are
-  // synthesized permanently-full buckets — render "unmetered" plus
+  // An unmetered plan has permanently-full window metrics. Render "unmetered" plus
   // actual consumption instead of a quota bar that never moves.
   unlimited: boolean
   scrapedAt: string | null

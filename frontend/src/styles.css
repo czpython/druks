@@ -579,11 +579,10 @@ button { background: none; border: none; color: inherit; cursor: pointer; font: 
   background: var(--bg);
 }
 
-/* Structured rendering of Claude's --output-format stream-json
- * transcript. Each row is one event from Claude's NDJSON stream;
- * the goal is for an operator scanning the pane to read what Claude
- * is doing without parsing JSON. Raw lines (non-JSON, e.g. Codex
- * transcripts or stderr leakage) still flow through legibly.
+/* Structured rendering of a harness stream transcript. Each row is one
+ * event; the goal is for an operator scanning the pane to read what the
+ * harness is doing without parsing JSON. Raw lines and stderr leakage
+ * still flow through legibly.
  */
 .stream-transcript {
   flex: 1; overflow: auto;
@@ -1428,11 +1427,11 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
 /* ---------------------------------------------------------------------------
  * Usage pill (appbar) + Usage panel (dashboard)
  *
- * Pill: two adjacent mini-pills (c / x for claude / codex). Color tier
+ * Pill: one mini-pill per registered harness. Color tier
  * matches the bar tier in the panel so the eye learns one mapping:
  * green = plenty left, amber = mind it, red = imminent reset trip.
  *
- * Panel: two columns (one per CLI), each with stacked horizontal bars.
+ * Panel: one column per harness, each with stacked horizontal bars.
  * Bar tier same as pill tier. Stale snapshots get a warning row above
  * the bars; parse failures hide the bars and surface a disclosure of
  * the raw /status output so the operator can update the regex without
@@ -1506,8 +1505,7 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
   box-shadow: 0 0 6px color-mix(in oklch, var(--bucket-dead) 50%, transparent);
 }
 
-/* Usage page (from the Claude Design handoff — Usage.html).
- * Rate-limit windows with burn rate + trend, spend/token totals by
+/* Usage page with rate-limit windows, burn rate, trend, and totals by
  * provider. The raw-output disclosure (.usage-raw, below) is shared
  * with the old panel vocabulary. */
 
@@ -1595,7 +1593,7 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
 
 /* provider grid */
 .us-grid {
-  display: grid; grid-template-columns: 1fr 1fr; gap: 16px;
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px;
   margin-bottom: 24px;
 }
 .us-prov {
@@ -1845,7 +1843,6 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
 .us-hours-axis { display: flex; justify-content: space-between; font-size: 9px; color: var(--text-faint); letter-spacing: 0.04em; }
 
 @media (max-width: 920px) {
-  .us-grid { grid-template-columns: 1fr; }
   .us-today { grid-template-columns: 1fr; }
   .us-alert { flex-wrap: wrap; }
 }
