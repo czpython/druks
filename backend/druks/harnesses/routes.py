@@ -133,7 +133,7 @@ async def connect_harness_key(
     connection = await HarnessConnection.connect(
         harness=harness.name,
         account=account,
-        payload={"apiKey": key},
+        payload={"api_key": key},
         expires_at=None,
         provider_email=account.username,
         kind="api_key",

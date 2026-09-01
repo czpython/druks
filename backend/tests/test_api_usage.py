@@ -80,7 +80,7 @@ def test_get_usage_empty_returns_available_false(client) -> None:
     assert response.status_code == 200
     body = response.json()
     # One entry per registered harness, none available pre-first-poll.
-    assert {entry["name"] for entry in body["harnesses"]} == {"claude", "codex"}
+    assert {entry["name"] for entry in body["harnesses"]} == {"claude", "codex", "opencode"}
     assert all(entry["available"] is False for entry in body["harnesses"])
 
 
@@ -359,7 +359,7 @@ async def test_refresh_skips_a_non_metered_connection(client, druks_db, monkeypa
     await HarnessConnection.connect(
         harness="claude",
         account=account,
-        payload={"apiKey": "key"},
+        payload={"api_key": "key"},
         expires_at=None,
         provider_email="op@example.com",
         kind="api_key",

@@ -93,6 +93,7 @@ class ClaudeHarness(Harness):
         extra_env: dict[str, str] | None = None,
         mcp_servers: tuple[McpServer, ...] = (),
         connection_id: str | None = None,
+        timeout: int = Harness.default_timeout,
     ) -> AgentInvocation:
         if not self.sandbox:
             raise exceptions.HarnessError(

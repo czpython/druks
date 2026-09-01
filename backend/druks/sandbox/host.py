@@ -337,6 +337,7 @@ class Host:
             extra_env=extra_env,
             mcp_servers=mcp_servers,
             connection_id=connection_id,
+            timeout=timeout,
         )
         result = await self._exec(
             invocation,
