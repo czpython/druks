@@ -49,24 +49,6 @@ _ARTIFACT_FILENAMES = ("stdout.jsonl", "stderr.log", "exit_code", "pid")
 STDOUT_BUFFER_LIMIT = 50 * 1024 * 1024
 STDERR_BUFFER_LIMIT = 10 * 1024 * 1024
 
-# Maximum window between exec start and the first output byte before we
-# consider the run wedged and kill it. Anthropic's Claude CLI streams its
-# first ``stream-json`` event within a couple of seconds normally; the
-# worst legitimate cold-start we've measured is well under 60s. 90s gives
-# a comfortable margin for slow MCP loads + auth refresh + long-prompt
-# assembly while still recovering the operation budget fast when the CLI
-# silently wedges.
-#
-# Pre-LLM wedges (Claude Code's ``--add-dir <cwd>`` event-loop hang,
-# upstream HTTP stalls that the CLI doesn't surface as errors) all share
-# the symptom "process alive, zero output bytes, forever." The full
-# per-operation timeout is in the tens of minutes, so without this guard
-# a wedged run blocks a worker slot for far longer than necessary. Pair
-# with ``--debug-file`` on the CLI side to get post-mortem context on
-# what the wedge was doing.
-FIRST_BYTE_KILL_SECONDS_DEFAULT = 90
-
-
 _CONNECT_TIMEOUT_SECONDS = 30.0
 _KEEPALIVE_INTERVAL_SECONDS = 15.0
 
@@ -361,6 +343,7 @@ class Host:
             run_id=run_id,
             artifact_dir=artifact_dir,
             timeout=timeout,
+            first_byte_kill_seconds=harness.first_byte_seconds,
         )
         return harness.parse(result, artifact_dir=artifact_dir, run_id=run_id)
 
@@ -371,7 +354,7 @@ class Host:
         run_id: str,
         artifact_dir: Path,
         timeout: int,
-        first_byte_kill_seconds: int | None = FIRST_BYTE_KILL_SECONDS_DEFAULT,
+        first_byte_kill_seconds: int | None = None,
     ) -> HarnessRunResult:
         """Execute a built invocation on this VM: tee stdout/stderr to the
         artifact dir, enforce the first-byte and overall timeouts, record
