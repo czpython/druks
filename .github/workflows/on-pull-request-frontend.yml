@@ -3,9 +3,6 @@ name: On Pull Request Frontend
 on:
   pull_request:
     branches: [main]
-    paths:
-      - ".github/workflows/on-pull-request-frontend.yml"
-      - "frontend/**"
 
 concurrency:
   group: on-pull-request-frontend-${{ github.event.pull_request.number }}
@@ -15,7 +12,7 @@ permissions:
   contents: read
 
 jobs:
-  checks:
+  frontend:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
