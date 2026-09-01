@@ -275,6 +275,8 @@ export const api = {
       code,
       connectionId,
     }),
+  connectHarnessKey: (name: string, key: string) =>
+    postJSON<Harness>(`/api/harnesses/${encodeURIComponent(name)}/connection`, { key }),
   disconnectHarness: (name: string) =>
     deleteJSON<Harness>(`/api/harnesses/${encodeURIComponent(name)}/connection`),
   // The appliance's own identities at external services — connect verifies the

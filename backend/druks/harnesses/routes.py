@@ -98,12 +98,48 @@ async def complete_connection(
         # Fresh picker right after connect; fetch failures are tagged inside.
         # The single-use flow is already spent, so trouble here — including a
         # database that vanished under the refresh — only logs.
-        await (await HarnessSettings.require(harness.name)).refresh_models(connection)
+        settings = await HarnessSettings.get_registered(harness.name)
+        await settings.refresh_models(connection)
     except Exception:
         logging.getLogger(__name__).exception("Model refresh after connect failed")
         with suppress(Exception):
             await db_session().rollback()
     return response
+
+
+@router.post(
+    "/{name}/connection",
+    response_model=HarnessResponse,
+    response_model_by_alias=True,
+)
+async def connect_harness_key(
+    name: str,
+    account: Account = Depends(current_session_account),
+    key: str = Body(..., embed=True),
+) -> HarnessResponse:
+    harness = _resolve_harness(name)
+    if "api_key" not in harness.login_kinds:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Harness {harness.name!r} does not accept API keys.",
+        )
+    key = key.strip()
+
+    if not key:
+        raise HTTPException(
+            status_code=422,
+            detail="The API key is empty. Paste a key.",
+        )
+    connection = await HarnessConnection.connect(
+        harness=harness.name,
+        account=account,
+        payload={"apiKey": key},
+        expires_at=None,
+        provider_email=account.username,
+        kind="api_key",
+    )
+    settings = await HarnessSettings.get_registered(harness.name)
+    return HarnessResponse.from_row(settings, connection, account)
 
 
 @router.delete("/{name}/connection", response_model=HarnessResponse, response_model_by_alias=True)
@@ -115,4 +151,5 @@ async def disconnect_harness(
     if connection:
         # Only the requesting account's own connection — never another's.
         await connection.delete()
-    return HarnessResponse.from_row(await HarnessSettings.require(harness.name), None, account)
+    settings = await HarnessSettings.get_registered(harness.name)
+    return HarnessResponse.from_row(settings, None, account)
