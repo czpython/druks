@@ -1,3 +1,5 @@
+import { useContext } from 'react'
+
 import type { Action, Block, Link } from '../api/types'
 import { Markdown } from '../components/Markdown'
 import { GateControls } from './GateControls'
@@ -17,6 +19,8 @@ export function Blocks({ blocks }: { blocks: Block[] }) {
 }
 
 function BlockContent({ block }: { block: Block }) {
+  const enclosingRegion = useContext(RegionContext)
+
   switch (block.block) {
     case 'text':
       return <p className="dui-text">{block.text}</p>
@@ -116,7 +120,7 @@ function BlockContent({ block }: { block: Block }) {
         <div className="dui-empty">
           <div className="dui-empty-title">{block.title}</div>
           {block.description && <div className="dui-empty-desc dim">{block.description}</div>}
-          <LinkRow links={block.actions} />
+          <Controls controls={block.controls} />
         </div>
       )
     case 'card':
@@ -125,7 +129,7 @@ function BlockContent({ block }: { block: Block }) {
           {block.title && <div className="dui-card-title">{block.title}</div>}
           {block.description && <div className="dui-card-desc dim">{block.description}</div>}
           <Blocks blocks={block.blocks} />
-          <LinkRow links={block.actions} />
+          <Controls controls={block.controls} />
         </div>
       )
     case 'cards': {
@@ -148,16 +152,25 @@ function BlockContent({ block }: { block: Block }) {
         </div>
       )
     }
-    case 'section':
+    case 'section': {
+      const decision = block.blocks.some((insideBlock) => insideBlock.block === 'gate_controls')
       return (
-        <section className="dui-section" data-region={block.name || undefined}>
-          {block.title && <h2 className="dui-section-title">{block.title}</h2>}
-          {/* An action inside reads this to know which region it refreshes. */}
-          <RegionContext.Provider value={block.name}>
+        <section
+          className={`dui-section${decision ? ' dui-decision' : ''}`}
+          data-region={block.name || undefined}
+        >
+          <RegionContext.Provider value={block.name || enclosingRegion}>
+            {block.title || block.controls.length ? (
+              <div className="dui-section-head">
+                {block.title && <h2 className="dui-section-title">{block.title}</h2>}
+                <Controls controls={block.controls} />
+              </div>
+            ) : null}
             <Blocks blocks={block.blocks} />
           </RegionContext.Provider>
         </section>
       )
+    }
     default:
       // An app on a newer Druks than this shell. Name the block and keep the
       // rest of the page.
@@ -169,11 +182,11 @@ function BlockContent({ block }: { block: Block }) {
   }
 }
 
-function LinkRow({ links }: { links: (Action | Link)[] }) {
-  if (links.length === 0) return null
+export function Controls({ controls }: { controls: (Action | Link)[] }) {
+  if (controls.length === 0) return null
   return (
     <div className="dui-links">
-      {links.map((control, index) =>
+      {controls.map((control, index) =>
         control.block === 'action' ? (
           <ActionButton key={index} action={control} />
         ) : (
@@ -183,4 +196,3 @@ function LinkRow({ links }: { links: (Action | Link)[] }) {
     </div>
   )
 }
-

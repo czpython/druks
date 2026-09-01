@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Router } from 'wouter'
 import { memoryLocation } from 'wouter/memory-location'
@@ -120,6 +120,52 @@ describe('every V1 renderer', () => {
     }
   })
 
+  it('names a section collector, focuses its field, and returns focus on Escape', async () => {
+    renderBlocks([
+      {
+        block: 'section',
+        title: 'Notes',
+        name: 'notes',
+        controls: [
+          {
+            block: 'action',
+            label: 'Write a note',
+            operation: 'write_note',
+            arguments: {},
+            fields: [
+              {
+                field: 'text',
+                name: 'body',
+                label: 'Note',
+                value: '',
+                placeholder: '',
+                helpText: '',
+                isRequired: true,
+              },
+            ],
+            tone: 'primary',
+            confirm: '',
+            refresh: 'page',
+            link: null,
+          }
+        ],
+        follows: null,
+        blocks: [],
+      },
+    ])
+    const trigger = screen.getByRole('button', { name: 'Write a note' })
+
+    fireEvent.click(trigger)
+
+    const dialog = screen.getByRole('dialog', { name: 'Write a note' }) as HTMLDialogElement
+    expect(document.activeElement).toBe(screen.getByLabelText(/Note/))
+    const cancel = new Event('cancel', { cancelable: true })
+    fireEvent(dialog, cancel)
+    if (!cancel.defaultPrevented) dialog.close()
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Write a note' })).toBeNull())
+    await waitFor(() => expect(document.activeElement).toBe(trigger))
+  })
+
   it('keeps two forms that share a field name apart', async () => {
     const form = (catalog as PageSnapshot).blocks.find((block) => block.block === 'form')
     const { container } = render(
@@ -186,33 +232,34 @@ describe('every V1 renderer', () => {
 
   it('points a field at its own help, and marks the one that failed', () => {
     renderBlocks([
-            {
-              block: 'form',
-              title: '',
-              description: '',
-              fields: [
-                {
-                  field: 'text',
-                  name: 'repo',
-                  label: 'Repository',
-                  value: '',
-                  isRequired: true,
-                  helpText: 'owner/name',
-                  placeholder: '',
-                },
-              ],
-              action: {
-                block: 'action',
-                label: 'Track',
-                operation: 'write_note',
-                tone: 'primary',
-                confirm: '',
-                refresh: 'page',
-                link: null,
-                arguments: {},
-              },
-            },
-          ])
+      {
+        block: 'form',
+        title: '',
+        description: '',
+        fields: [
+          {
+            field: 'text',
+            name: 'repo',
+            label: 'Repository',
+            value: '',
+            isRequired: true,
+            helpText: 'owner/name',
+            placeholder: '',
+          },
+        ],
+        action: {
+          block: 'action',
+          label: 'Track',
+          operation: 'write_note',
+          tone: 'primary',
+          confirm: '',
+          refresh: 'page',
+          link: null,
+          arguments: {},
+          fields: [],
+        },
+      },
+    ])
 
     const input = screen.getByLabelText(/Repository/)
     const help = screen.getByText('owner/name')
@@ -223,25 +270,26 @@ describe('every V1 renderer', () => {
   it('says so when an action has happened', async () => {
     vi.mocked(api.callOperation).mockResolvedValue(undefined)
     renderBlocks([
-            {
-              block: 'card',
-              title: '',
-              description: '',
-              blocks: [],
-              actions: [
-                {
-                  block: 'action',
-                  label: 'Rescout peer',
-                  operation: 'write_note',
-                  tone: 'primary',
-                  confirm: '',
-                  refresh: 'none',
-                  link: null,
-                  arguments: {},
-                },
-              ],
-            },
-          ])
+      {
+        block: 'card',
+        title: '',
+        description: '',
+        blocks: [],
+        controls: [
+          {
+            block: 'action',
+            label: 'Rescout peer',
+            operation: 'write_note',
+            tone: 'primary',
+            confirm: '',
+            refresh: 'none',
+            link: null,
+            arguments: {},
+            fields: [],
+          },
+        ],
+      },
+    ])
 
     screen.getByRole('button', { name: 'Rescout peer' }).click()
 

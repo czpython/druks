@@ -9,6 +9,24 @@ async def notes():
     return ui.Page(
         "Notes",
         description="Every note this install captured.",
+        controls=[
+            ui.Action(
+                label="Write a note",
+                operation="write_note",
+                tone="primary",
+                fields=[
+                    ui.TextAreaField(
+                        name="body",
+                        label="Note",
+                        placeholder="Fan noise on rack 3.",
+                        is_required=True,
+                        rows=3,
+                    )
+                ],
+            ),
+            # A header holds whatever a card holds: an action, a link, or both.
+            ui.Link("Everything at once", page="new_note"),
+        ],
         blocks=[
             ui.Section(
                 name="recent",
@@ -20,7 +38,7 @@ async def notes():
                                 title=f"Note {note.id}",
                                 description=note.gist or "Waiting for its gist.",
                                 blocks=[ui.Text(note.body)],
-                                actions=[
+                                controls=[
                                     ui.Link(
                                         "Open",
                                         page="note",
@@ -33,11 +51,11 @@ async def notes():
                         empty=ui.EmptyState(
                             "No notes yet",
                             description="Write one and its gist appears here.",
-                            actions=[ui.Link("Write a note", page="new_note")],
+                            controls=[ui.Link("Write a note", page="new_note")],
                         ),
                     )
                 ],
-            )
+            ),
         ],
     )
 
@@ -158,7 +176,7 @@ async def note(note_id: int):
                 ui.Card(
                     title="Gist",
                     description=found.gist or "Waiting for its gist.",
-                    actions=[
+                    controls=[
                         ui.Action(
                             label="Clear the gist",
                             operation="clear_gist",

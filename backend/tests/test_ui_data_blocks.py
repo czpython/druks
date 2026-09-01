@@ -160,8 +160,8 @@ def test_cards_finds_an_action_in_a_card_and_in_its_empty_state():
     """Boot checks every action against the app's operations, so an action the
     walk misses is one that ships naming a route nobody declares."""
     block = Cards(
-        cards=[Card(title="Peer 7", actions=[Action(label="Retire", operation="retire_peer")])],
-        empty=EmptyState("No peer yet", actions=[Action(label="Scan", operation="scan")]),
+        cards=[Card(title="Peer 7", controls=[Action(label="Retire", operation="retire_peer")])],
+        empty=EmptyState("No peer yet", controls=[Action(label="Scan", operation="scan")]),
     )
 
     assert [action.operation for action in block.iter_actions()] == ["retire_peer", "scan"]

@@ -14,6 +14,7 @@ from druks.ui import (
     TextField,
 )
 from druks.ui.fields import PageField
+from fastapi import APIRouter
 
 OPERATIONS = {
     "write_note": Operation(id="write_note", method="POST", path="/api/field_notes/notes"),
@@ -42,6 +43,7 @@ def test_an_action_carries_its_operation_and_what_happens_next():
         "label": "Archive",
         "operation": "write_note",
         "arguments": {"note_id": 7},
+        "fields": [],
         "tone": "danger",
         "confirm": "Archive this note?",
         "refresh": "page",
@@ -70,6 +72,46 @@ def test_a_form_carries_its_fields_and_the_action_that_sends_them():
         }
     ]
     assert block["action"]["operation"] == "write_note"
+    assert "presentation" not in block
+
+
+def test_an_action_can_collect_fields_before_it_runs():
+    (block,) = wire(
+        Action(
+            label="Write a note",
+            operation="write_note",
+            fields=[TextField(name="body", label="Note", is_required=True)],
+        )
+    )
+
+    assert block["label"] == "Write a note"
+    assert block["fields"][0]["name"] == "body"
+
+
+def test_an_action_cannot_collect_fields_and_ask_for_confirmation():
+    with pytest.raises(ValueError, match="gives both fields and confirm"):
+        Action(
+            label="Write a note",
+            operation="write_note",
+            fields=[TextField(name="body", label="Note")],
+            confirm="Write this note?",
+        )
+
+
+def test_an_action_sends_each_value_once():
+    with pytest.raises(ValueError, match="two fields named"):
+        Action(
+            label="Save",
+            operation="write_note",
+            fields=[TextField(name="body", label="A"), TextField(name="body", label="B")],
+        )
+    with pytest.raises(ValueError, match="already carries as arguments"):
+        Action(
+            label="Save",
+            operation="write_note",
+            arguments={"body": "x"},
+            fields=[TextField(name="body", label="A")],
+        )
 
 
 def test_a_secret_field_declares_no_value():
@@ -116,6 +158,18 @@ def test_a_form_sends_each_value_once():
         )
 
 
+def test_a_form_keeps_all_fields_on_the_form():
+    with pytest.raises(ValueError, match="Put all form fields on the form"):
+        Form(
+            action=Action(
+                label="Save",
+                operation="write_note",
+                fields=[TextField(name="tag", label="Tag")],
+            ),
+            fields=[TextField(name="body", label="Body")],
+        )
+
+
 def check(page: Page) -> None:
     for action in page.iter_actions():
         action.check_operation("field_notes", OPERATIONS)
@@ -134,6 +188,7 @@ def test_a_get_route_can_never_be_an_action():
 def test_every_action_on_the_page_is_checked():
     page = Page(
         "x",
+        controls=[Action(label="Write", operation="write_note")],
         blocks=[
             Card(
                 blocks=[
@@ -142,16 +197,17 @@ def test_every_action_on_the_page_is_checked():
                         fields=[TextField(name="body", label="B")],
                     )
                 ],
-                actions=[
+                controls=[
                     Action(label="Archive", operation="write_note"),
                     Link("Home", url="/"),
                 ],
             ),
-            EmptyState("none", actions=[Action(label="Add", operation="nowhere")]),
+            EmptyState("none", controls=[Action(label="Add", operation="nowhere")]),
         ],
     )
 
     assert [action.operation for action in page.iter_actions()] == [
+        "write_note",
         "write_note",
         "write_note",
         "nowhere",
@@ -172,8 +228,6 @@ def test_the_app_names_each_operation_once_with_its_method_and_path():
 
 
 def test_two_routes_cannot_share_one_operation(monkeypatch):
-    from fastapi import APIRouter
-
     async def stub() -> dict[str, str]:
         return {}
 
@@ -199,10 +253,37 @@ def test_a_named_section_is_a_region_an_action_can_refresh():
             Section(
                 name="decision",
                 blocks=[
-                    Card(actions=[Action(label="Go", operation="write_note", refresh="region")])
+                    Card(controls=[Action(label="Go", operation="write_note", refresh="region")])
                 ],
             )
         ],
     )
 
     assert [action.label for action in page.iter_actions()] == ["Go"]
+
+
+def test_a_section_action_belongs_to_its_region():
+    action = Action(label="Go", operation="write_note", refresh="region")
+    page = Page(
+        "x",
+        blocks=[
+            Section(
+                name="decision",
+                controls=[action],
+                follows={"subject_type": "note", "subject_id": "1"},
+            )
+        ],
+    )
+
+    assert list(page.iter_actions()) == [action]
+    section = page.model_dump(by_alias=True, mode="json")["blocks"][0]
+    (control,) = section["controls"]
+    assert control["label"] == "Go"
+
+
+def test_a_page_action_cannot_refresh_a_region():
+    with pytest.raises(ValueError, match="refreshes its region, and it sits in none"):
+        Page(
+            "x",
+            controls=[Action(label="Go", operation="write_note", refresh="region")],
+        )

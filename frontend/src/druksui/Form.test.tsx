@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Router } from 'wouter'
 import { memoryLocation } from 'wouter/memory-location'
@@ -57,6 +57,10 @@ function renderBlocks(blocks: Block[]) {
   return { ...rendered, queryClient, location }
 }
 
+function dialogAction(label: string) {
+  return within(screen.getByRole('dialog', { name: label })).getByRole('button', { name: label })
+}
+
 // The roster the page path reads its pages and operations from, so a form the
 // server declares resolves its own operation.
 const ROSTER: App[] = [
@@ -76,7 +80,7 @@ const ROSTER: App[] = [
 // A page whose only block is the form under test, so a refresh reads the page
 // again and hands the form a freshly declared value.
 function notePage(fields: Field[]): PageSnapshot {
-  return { title: 'New note', description: '', blocks: [form(fields)], follows: null }
+  return { title: 'New note', description: '', controls: [], blocks: [form(fields)], follows: null }
 }
 
 function renderPage() {
@@ -98,6 +102,7 @@ function action(overrides: Partial<Action> = {}): Action {
     label: 'Save',
     operation: 'write_note',
     arguments: {},
+    fields: [],
     tone: 'primary',
     confirm: '',
     refresh: 'page',
@@ -107,7 +112,13 @@ function action(overrides: Partial<Action> = {}): Action {
 }
 
 function form(fields: Field[], sends = action()): Block {
-  return { block: 'form', title: 'New note', description: 'What did you see?', fields, action: sends }
+  return {
+    block: 'form',
+    title: 'New note',
+    description: 'What did you see?',
+    fields,
+    action: sends,
+  }
 }
 
 const BODY: Field = {
@@ -224,6 +235,121 @@ describe('fields', () => {
 })
 
 describe('submitting a form', () => {
+  it('puts a section action in its heading', () => {
+    const { container } = renderBlocks([
+      {
+        block: 'section',
+        title: 'Notes',
+        name: 'notes',
+        controls: [action({ label: 'Write a note', fields: [BODY] })],
+        follows: null,
+        blocks: [{ block: 'text', text: 'One note.' }],
+      },
+    ])
+
+    expect(container.querySelector('.dui-section-head .dui-dialog-trigger')?.textContent).toBe(
+      'Write a note',
+    )
+    expect(screen.getByText('One note.')).toBeTruthy()
+  })
+
+  it('opens field collection from an action and returns focus after cancel', () => {
+    const showModal = vi.spyOn(HTMLDialogElement.prototype, 'showModal')
+    const close = vi.spyOn(HTMLDialogElement.prototype, 'close')
+    renderBlocks([action({ label: 'Write a note', fields: [BODY] })])
+    const trigger = screen.getByRole('button', { name: 'Write a note' })
+
+    fireEvent.click(trigger)
+
+    expect(showModal).toHaveBeenCalledOnce()
+    expect(screen.getByRole('dialog', { name: 'Write a note' })).toBeTruthy()
+    expect(document.activeElement).toBe(screen.getByLabelText(/Note/))
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(close).toHaveBeenCalledOnce()
+    expect(screen.queryByRole('dialog', { name: 'Write a note' })).toBeNull()
+    expect(document.activeElement).toBe(trigger)
+  })
+
+  it('keeps a padding press inside the collector and closes from the backdrop', () => {
+    renderBlocks([action({ label: 'Write a note', fields: [BODY] })])
+    fireEvent.click(screen.getByRole('button', { name: 'Write a note' }))
+    const dialog = screen.getByRole('dialog', { name: 'Write a note' }) as HTMLDialogElement
+    vi.spyOn(dialog, 'getBoundingClientRect').mockReturnValue({
+      left: 0,
+      top: 0,
+      right: 240,
+      bottom: 320,
+      width: 240,
+      height: 320,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    })
+
+    fireEvent.click(dialog, { clientX: 12, clientY: 12 })
+    expect(screen.getByRole('dialog', { name: 'Write a note' })).toBeTruthy()
+
+    fireEvent.click(dialog, { clientX: -1, clientY: -1 })
+    expect(screen.queryByRole('dialog', { name: 'Write a note' })).toBeNull()
+  })
+
+  it('closes field collection after a successful action', async () => {
+    renderBlocks([
+      action({
+        label: 'Write a note',
+        arguments: { source: 'dashboard' },
+        fields: [BODY],
+        refresh: 'none',
+      }),
+    ])
+    fireEvent.click(screen.getByRole('button', { name: 'Write a note' }))
+    fireEvent.change(screen.getByLabelText(/Note/), { target: { value: 'Fan noise.' } })
+
+    fireEvent.click(dialogAction('Write a note'))
+
+    await waitFor(() => expect(callOperation).toHaveBeenCalled())
+    expect(callOperation).toHaveBeenCalledWith('POST', '/api/field_notes/notes', {
+      source: 'dashboard',
+      body: 'Fan noise.',
+    })
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Write a note' })).toBeNull())
+  })
+
+  it('keeps action field errors in the dialog', async () => {
+    callOperation.mockRejectedValueOnce(
+      new ApiError('validation', 422, [{ loc: ['body', 'body'], msg: 'Field required' }]),
+    )
+    renderBlocks([action({ label: 'Write a note', fields: [BODY], refresh: 'none' })])
+    fireEvent.click(screen.getByRole('button', { name: 'Write a note' }))
+
+    fireEvent.click(dialogAction('Write a note'))
+
+    await waitFor(() => expect(screen.getByText('Field required')).toBeTruthy())
+    expect(screen.getByRole('dialog', { name: 'Write a note' })).toBeTruthy()
+  })
+
+  it('disables dialog dismissal while the action runs', async () => {
+    let release = () => {}
+    callOperation.mockReturnValueOnce(
+      new Promise((resolve) => {
+        release = () => resolve()
+      }),
+    )
+    renderBlocks([action({ label: 'Write a note', fields: [BODY], refresh: 'none' })])
+    fireEvent.click(screen.getByRole('button', { name: 'Write a note' }))
+
+    fireEvent.click(dialogAction('Write a note'))
+
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Cancel' }).hasAttribute('disabled')).toBe(true),
+    )
+    expect(
+      screen.getByRole('button', { name: 'Close Write a note' }).hasAttribute('disabled'),
+    ).toBe(true)
+    release()
+    await waitFor(() => expect(callOperation).toHaveBeenCalledTimes(1))
+  })
+
   it('calls the resolved operation with the arguments and the values as one object', async () => {
     renderBlocks([form([BODY], action({ arguments: { source: 'dashboard' }, refresh: 'none' }))])
 
@@ -309,6 +435,15 @@ describe('submitting a form', () => {
 })
 
 describe('what an action does next', () => {
+  it('runs an action without fields when the operator presses it', async () => {
+    renderBlocks([action({ label: 'Refresh', refresh: 'none' })])
+
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh' }))
+
+    await waitFor(() => expect(callOperation).toHaveBeenCalledTimes(1))
+    expect(screen.queryByRole('dialog')).toBeNull()
+  })
+
   it('reads the page again when it refreshes', async () => {
     const { queryClient } = renderBlocks([form([BODY], action({ refresh: 'page' }))])
     const invalidate = vi.spyOn(queryClient, 'invalidateQueries')
@@ -362,6 +497,7 @@ describe('what an action does next', () => {
       block: 'section',
       title: 'Decision',
       name: 'decision',
+      controls: [],
       follows: null,
       blocks: [
         {
@@ -369,12 +505,18 @@ describe('what an action does next', () => {
           title: '',
           description: '',
           blocks: [],
-          actions: [action({ label: 'Clear', refresh: 'region' })],
+          controls: [action({ label: 'Clear', refresh: 'region' })],
         },
       ],
     }
     const readPage = vi.mocked(api.readPage)
-    readPage.mockResolvedValue({ title: 'x', description: '', blocks: [region], follows: null })
+    readPage.mockResolvedValue({
+      title: 'x',
+      description: '',
+      controls: [],
+      blocks: [region],
+      follows: null,
+    })
     const { queryClient } = renderBlocks([region])
     const write = vi.spyOn(queryClient, 'setQueryData')
 
@@ -403,7 +545,7 @@ describe('what an action does next', () => {
         title: '',
         description: '',
         blocks: [],
-        actions: [action({ label: 'Clear the gist', confirm: 'Clear it?', tone: 'danger' })],
+        controls: [action({ label: 'Clear the gist', confirm: 'Clear it?', tone: 'danger' })],
       },
     ])
 
@@ -423,7 +565,7 @@ describe('what an action does next', () => {
         title: '',
         description: '',
         blocks: [],
-        actions: [action({ label: 'Clear the gist', confirm: 'Clear it?', tone: 'danger' })],
+        controls: [action({ label: 'Clear the gist', confirm: 'Clear it?', tone: 'danger' })],
       },
     ])
 
@@ -540,6 +682,7 @@ describe('what an action does next', () => {
       block: 'section',
       title: '',
       name: 'decision',
+      controls: [],
       follows: null,
       blocks: [
         {
@@ -547,7 +690,7 @@ describe('what an action does next', () => {
           title: '',
           description: '',
           blocks: [],
-          actions: [action({ label: 'Clear', refresh: 'region' })],
+          controls: [action({ label: 'Clear', refresh: 'region' })],
         },
       ],
     }
@@ -558,7 +701,39 @@ describe('what an action does next', () => {
     await waitFor(() => expect(screen.getByText(/saved, but the page did not refresh/)).toBeTruthy())
     // One write happened, and the control cannot make a second.
     expect(callOperation).toHaveBeenCalledTimes(1)
-    expect(screen.getByRole('button', { name: 'Clear' }).getAttribute('aria-busy')).toBe('true')
+    expect(screen.getByRole('button', { name: 'Clear' }).hasAttribute('disabled')).toBe(true)
+    expect(screen.getByRole('button', { name: 'Clear' }).getAttribute('aria-busy')).toBe('false')
+  })
+
+  it('lets the operator close after the write landed and the refresh failed', async () => {
+    vi.mocked(api.readPage).mockRejectedValue(new Error('page function raised'))
+    renderBlocks([
+      {
+        block: 'section',
+        title: 'Notes',
+        name: 'notes',
+        controls: [
+          action({
+            label: 'Write a note',
+            fields: [BODY],
+            refresh: 'region',
+          }),
+        ],
+        follows: null,
+        blocks: [],
+      },
+    ])
+    fireEvent.click(screen.getByRole('button', { name: 'Write a note' }))
+    fireEvent.click(dialogAction('Write a note'))
+
+    await waitFor(() => expect(screen.getByText(/saved, but the page did not refresh/)).toBeTruthy())
+    expect(dialogAction('Write a note').hasAttribute('disabled')).toBe(true)
+    const close = screen.getByRole('button', { name: 'Close Write a note' })
+    expect(close.hasAttribute('disabled')).toBe(false)
+
+    fireEvent.click(close)
+    expect(screen.queryByRole('dialog', { name: 'Write a note' })).toBeNull()
+    expect(callOperation).toHaveBeenCalledTimes(1)
   })
 
   it('shows a danger action as one', () => {
@@ -568,7 +743,7 @@ describe('what an action does next', () => {
         title: '',
         description: '',
         blocks: [],
-        actions: [action({ label: 'Clear the gist', tone: 'danger' })],
+        controls: [action({ label: 'Clear the gist', tone: 'danger' })],
       },
     ])
 
@@ -582,7 +757,7 @@ describe('what an action does next', () => {
         title: '',
         description: '',
         blocks: [],
-        actions: [action({ label: 'Ghost', operation: 'nowhere' })],
+        controls: [action({ label: 'Ghost', operation: 'nowhere' })],
       },
     ])
 

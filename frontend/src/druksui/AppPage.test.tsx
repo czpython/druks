@@ -26,7 +26,7 @@ const ROSTER = [
     subjectTypes: ['note'],
     hasFrontend: false,
     navigation: [['/field_notes', 'notes']],
-    operations: [],
+    operations: [{ id: 'write_note', method: 'POST', path: '/api/field_notes/notes' }],
     pages: [
       { name: 'notes', label: 'notes', path: '/field_notes', parent: '', order: 0 },
       { name: 'new_note', label: 'new note', path: '/field_notes/notes/new', parent: '', order: 2 },
@@ -73,6 +73,7 @@ function renderAt(location: string, page: string, snapshot: PageSnapshot) {
 const NOTES: PageSnapshot = {
   title: 'Notes',
   description: 'Every note this install captured.',
+  controls: [],
   blocks: [{ block: 'text', text: 'a jotted observation' }],
   follows: null,
 }
@@ -87,8 +88,52 @@ describe('a declared page', () => {
     expect(screen.getByText('a jotted observation')).toBeTruthy()
   })
 
+  it('puts the page action beside the page title', async () => {
+    const { container } = renderAt('/field_notes', 'notes', {
+      ...NOTES,
+      controls: [
+        {
+          block: 'action',
+          label: 'Write a note',
+          operation: 'write_note',
+          arguments: {},
+          fields: [
+            {
+              field: 'text',
+              name: 'body',
+              label: 'Note',
+              value: '',
+              placeholder: '',
+              helpText: '',
+              isRequired: true,
+            },
+          ],
+          tone: 'primary',
+          confirm: '',
+          refresh: 'page',
+          link: null,
+        },
+      ],
+      blocks: [{ block: 'text', text: 'a jotted observation' }],
+    })
+
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Write a note' })).toBeTruthy(),
+    )
+    expect(container.querySelector('.dui-page-head .dui-dialog-trigger')?.textContent).toBe(
+      'Write a note',
+    )
+    expect(screen.getByText('a jotted observation')).toBeTruthy()
+  })
+
   it('reads a detail page at its own location', async () => {
-    renderAt('/field_notes/notes/7', 'note', { title: 'Note 7', description: '', blocks: [], follows: null })
+    renderAt('/field_notes/notes/7', 'note', {
+      title: 'Note 7',
+      description: '',
+      controls: [],
+      blocks: [],
+      follows: null,
+    })
 
     await waitFor(() => expect(screen.getByText('Note 7')).toBeTruthy())
     expect(readPage).toHaveBeenCalledWith('field_notes', '/notes/7')
@@ -127,6 +172,7 @@ describe('tabs', () => {
     const { container } = renderAt('/field_notes/recent', 'recent_notes', {
       title: 'Recent notes',
       description: '',
+      controls: [],
       blocks: [],
       follows: null,
     })
@@ -140,6 +186,7 @@ describe('tabs', () => {
     const { container } = renderAt('/field_notes/notes/7', 'note', {
       title: 'Note 7',
       description: '',
+      controls: [],
       blocks: [],
       follows: null,
     })
@@ -155,6 +202,7 @@ describe('tabs', () => {
     const { container } = renderAt('/field_notes/notes/new', 'new_note', {
       title: 'Write a note',
       description: '',
+      controls: [],
       blocks: [],
       follows: null,
     })
@@ -166,7 +214,13 @@ describe('tabs', () => {
 
 describe('the parent link', () => {
   it('takes a parameterized detail page back to its longest declared prefix', async () => {
-    renderAt('/field_notes/notes/7', 'note', { title: 'Note 7', description: '', blocks: [], follows: null })
+    renderAt('/field_notes/notes/7', 'note', {
+      title: 'Note 7',
+      description: '',
+      controls: [],
+      blocks: [],
+      follows: null,
+    })
 
     await waitFor(() => expect(screen.getByRole('link', { name: 'notes' })).toBeTruthy())
     expect(screen.getByRole('link', { name: 'notes' }).getAttribute('href')).toBe('/field_notes')
@@ -176,6 +230,7 @@ describe('the parent link', () => {
     const { container } = renderAt('/field_notes/notes/7/runs/9', 'note_run', {
       title: 'Run 9',
       description: '',
+      controls: [],
       blocks: [],
       follows: null,
     })

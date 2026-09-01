@@ -27,7 +27,7 @@ The contract uses eight terms. Each one has one meaning.
 | `Page` | One screen. A page function returns it. |
 | `Block` | One piece of a page. Blocks nest. |
 | `Value` | One rendered datum inside a block. |
-| `Field` | One input inside a form. |
+| `Field` | One named input that the shell collects before an action runs. |
 | `Action` | A control that calls one of the app's operations. |
 | `Link` | A control that navigates. |
 | `operation` | The `operation_id` of an app route. |
@@ -376,6 +376,23 @@ An `Action` names an app-local operation:
 ui.Action(label="Archive", operation="archive_note", arguments={"note_id": note.id})
 ```
 
+An action can collect values before it runs:
+
+```python
+ui.Action(
+    label="Write a note",
+    operation="write_note",
+    tone="primary",
+    fields=[ui.TextAreaField(name="body", label="Note", is_required=True)],
+)
+```
+
+The shell shows the action as a control. When the action has fields, the shell
+collects the values before it runs the operation.
+
+Use a `Form` when field entry is the primary task of the page. Use an `Action`
+with fields when field entry is a detour from the page task.
+
 The `operation` is the `operation_id` of one of the app's own routes:
 
 ```python
@@ -432,9 +449,9 @@ App code never reads that table.
 
 ### Request shape
 
-The shell builds one JSON object. It takes the action `arguments` first, then
-the submitted field values. A field name that repeats an argument name is an
-error when Druks builds the page.
+The shell builds one JSON object. It takes the action `arguments` first. Then
+it adds the values from `Action.fields` or the enclosing `Form`. A field name
+that repeats an argument name is an error when Druks builds the page.
 
 The shell fills the operation's path parameters from that object. It sends
 every remaining key as the JSON request body. Authentication, authorization,
@@ -444,6 +461,7 @@ and request identity stay on the platform route.
 
 | Field | Effect |
 | --- | --- |
+| `fields` | The shell collects these values before it runs the action. |
 | `confirm` | Non-empty text. The shell asks before it sends. |
 | `tone: "danger"` | The shell shows a destructive presentation. |
 | `refresh: "page"` | The shell reads the whole page again. Default. |
@@ -478,7 +496,7 @@ shows a `Link` it cannot resolve as broken and names the page it wanted, and
 the rest of the page still renders.
 
 `Link` and `Action` are different public types. Both are blocks, so a page can
-hold one directly. `Card.actions` and `EmptyState.actions` hold either one.
+hold one directly. Every container's `controls` holds either one.
 
 ## How to read the model listings
 
@@ -614,6 +632,7 @@ class Section:
     block: Literal["section"] = "section"
     title: str = ""
     name: str = ""
+    controls: list[Action | Link] = []
     blocks: list[Block] = []
     follows: Follows | None = None
 ```
@@ -623,10 +642,17 @@ class Section:
   "block": "section",
   "title": "Decision",
   "name": "decision",
+  "controls": [],
   "blocks": [],
   "follows": {"subjectType": "peers", "subjectId": "42"}
 }
 ```
+
+A section's controls belong to that section. The shell chooses where to show
+them. An action in `blocks` stays with the body content.
+
+They sit inside the section region, so a region refresh replaces the heading,
+the controls, and the body together.
 
 ### Card
 
@@ -636,7 +662,7 @@ class Card:
     title: str = ""
     description: str = ""
     blocks: list[Block] = []
-    actions: list[Action | Link] = []
+    controls: list[Action | Link] = []
 ```
 
 ```json
@@ -645,7 +671,7 @@ class Card:
   "title": "peer-7",
   "description": "Last answered 4 minutes ago.",
   "blocks": [{"block": "text", "text": "Healthy."}],
-  "actions": [{"block": "link", "label": "Open", "page": "peer", "arguments": {"peer_id": "7"}, "url": ""}]
+  "controls": [{"block": "link", "label": "Open", "page": "peer", "arguments": {"peer_id": "7"}, "url": ""}]
 }
 ```
 
@@ -663,7 +689,7 @@ class Cards:
 {
   "block": "cards",
   "title": "Peers",
-  "cards": [{"block": "card", "title": "peer-7", "description": "", "blocks": [], "actions": []}],
+  "cards": [{"block": "card", "title": "peer-7", "description": "", "blocks": [], "controls": []}],
   "empty": null
 }
 ```
@@ -673,8 +699,8 @@ One card for each of a set of things.
 ```python
 ui.Cards(
     title="Peers",
-    cards=[ui.Card(title=peer.name, blocks=[...], actions=[...]) for peer in peers],
-    empty=ui.EmptyState("No peer yet", actions=[ui.Link("Add one", page="new_peer")]),
+    cards=[ui.Card(title=peer.name, blocks=[...], controls=[...]) for peer in peers],
+    empty=ui.EmptyState("No peer yet", controls=[ui.Link("Add one", page="new_peer")]),
 )
 ```
 
@@ -719,7 +745,7 @@ class EmptyState:
     block: Literal["empty_state"] = "empty_state"
     title: str
     description: str = ""
-    actions: list[Action | Link] = []
+    controls: list[Action | Link] = []
 ```
 
 ```json
@@ -727,7 +753,7 @@ class EmptyState:
   "block": "empty_state",
   "title": "No peers yet",
   "description": "Add the first peer to start a sweep.",
-  "actions": []
+  "controls": []
 }
 ```
 
@@ -763,6 +789,7 @@ class Action:
     label: str
     operation: str
     arguments: dict[str, Any] = {}
+    fields: list[Field] = []
     tone: Literal["default", "primary", "danger"] = "default"
     confirm: str = ""
     refresh: Literal["none", "page", "region"] = "page"
@@ -775,6 +802,7 @@ class Action:
   "label": "Archive",
   "operation": "archive_note",
   "arguments": {"note_id": 7},
+  "fields": [],
   "tone": "danger",
   "confirm": "Archive this note?",
   "refresh": "page",
@@ -784,6 +812,13 @@ class Action:
 
 `arguments` keys are the operation's own parameter names. Druks serializes
 them unchanged. A route parameter keeps its Python spelling on the wire.
+
+An action with fields stays an action in the declaration and on the wire. The
+shell decides how to collect the fields.
+
+An action cannot set both `fields` and `confirm`. When a page function builds
+this action, Druks refuses it. Each option asks the operator before the action
+runs.
 
 ### Form
 
@@ -803,6 +838,12 @@ ui.Form(
     action=ui.Action(label="Save", operation="write_note", tone="primary"),
 )
 ```
+
+Use a `Form` when the page exists to collect the values. Use an `Action` with
+`fields` when this collection is a short detour from another task.
+
+A form keeps all its fields on the form. When a form action also has fields,
+Druks refuses the form when the page function builds it.
 
 ```json
 {
@@ -825,6 +866,7 @@ ui.Form(
     "label": "Save",
     "operation": "write_note",
     "arguments": {},
+    "fields": [],
     "tone": "primary",
     "confirm": "",
     "refresh": "page",
@@ -1445,7 +1487,7 @@ class UploadField:
 One file, and no starting value: nothing the server sends could put a file back
 into a file input.
 
-`accept` goes straight into the file dialog's own filter, in its own syntax —
+`accept` goes straight into the file picker's own filter, in its own syntax —
 `"image/*"`, `".csv,.tsv"`. It narrows what the operator can pick. It is not a
 promise about the bytes, and the platform does not check it. An operation that
 needs certainty opens the file and looks.
@@ -1514,6 +1556,7 @@ class Follows:
 class Page:
     title: str
     description: str = ""
+    controls: list[Action | Link] = []
     blocks: list[Block] = []
     follows: Follows | None = None
 ```
@@ -1522,9 +1565,33 @@ class Page:
 {
   "title": "peer-7",
   "description": "One peer and its last sweep.",
+  "controls": [],
   "blocks": [{"block": "text", "text": "Healthy."}],
   "follows": {"subjectType": "peers", "subjectId": "7"}
 }
+```
+
+A page's controls belong to that page. The shell chooses where to show them. An
+action in `blocks` stays with the body content.
+
+`Page`, `Section`, `Card` and `EmptyState` all take `controls` the same way: a
+list of `Action` and `Link`, in the order the app wants them read. An `Action`
+calls one of the app's operations; a `Link` navigates. Both are things an
+operator presses, so they share the row.
+
+```python
+return ui.Page(
+    "Peers",
+    controls=[
+        ui.Action(
+            label="Add a peer",
+            operation="add_peer",
+            fields=[ui.TextField(name="repo", label="Repository", is_required=True)],
+        ),
+        ui.Link("What a peer is", url="https://docs.druks.ai/peers"),
+    ],
+    blocks=[ui.Table(...)],
+)
 ```
 
 ## Errors
@@ -1552,9 +1619,9 @@ needs it:
 
 ## Not in V1
 
-V1 has no `Tabs` block, no accordion, no modal, no inline reveal form, and no
-general client-state API. A table row folds its `detail` away, and that is the
-whole of it: the app declares the sentence, the shell owns whether it is open.
+V1 has no `Tabs` block, no accordion, no inline reveal form, and no general
+client-state API. A table row folds its `detail` away. An action can collect
+fields before it runs. In both cases, the shell owns the interface.
 
 Static child pages already give tabs, and the URL holds the current one. An
 app that needs a control the contract does not have ships an ESM frontend.

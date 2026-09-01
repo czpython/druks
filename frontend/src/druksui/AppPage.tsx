@@ -3,11 +3,11 @@ import { useCallback, useMemo, useRef, type ReactNode } from 'react'
 import { Link as RouteLink, useLocation } from 'wouter'
 
 import { api } from '../api/client'
-import type { Follows, PageEntry, PageSnapshot } from '../api/types'
+import type { Action, Follows, Link, PageEntry, PageSnapshot } from '../api/types'
 import { EmptyState } from '../components/EmptyState'
 import { Page } from '../components/Page'
 import { AppSurface } from './AppSurface'
-import { Blocks } from './Blocks'
+import { Blocks, Controls } from './Blocks'
 import { followedSubjects, hrefUnder, isDetail, mergeRegions, PagesContext, parentOf, tabsFor } from './pages'
 import { SubjectStream } from './SubjectStream'
 
@@ -126,6 +126,7 @@ export function AppPage({ app, page }: { app: string; page: string }) {
             {...chrome}
             title={snapshot.data.title}
             description={snapshot.data.description}
+            controls={snapshot.data.controls}
           />
           <Blocks blocks={snapshot.data.blocks} />
         </Page>
@@ -145,6 +146,7 @@ function PageChrome({
   tabs,
   title,
   description,
+  controls,
 }: {
   app: string
   page: string
@@ -154,6 +156,7 @@ function PageChrome({
   tabs: PageEntry[]
   title: ReactNode
   description?: string
+  controls?: (Action | Link)[]
 }) {
   return (
     <>
@@ -164,15 +167,24 @@ function PageChrome({
           {parent.label}
         </RouteLink>
       )}
-      <h1 className="dui-title">{title}</h1>
-      {description && <p className="dui-description dim">{description}</p>}
+      <div className="dui-page-head">
+        <div className="dui-page-head-copy">
+          <h1 className="dui-title">{title}</h1>
+          {description && <p className="dui-description dim">{description}</p>}
+        </div>
+        {controls?.length ? (
+          <div className="dui-page-actions">
+            <Controls controls={controls} />
+          </div>
+        ) : null}
+      </div>
       {tabs.length > 0 && root && (
         <nav className="dui-tabs" aria-label={`${app} page tabs`}>
           {tabs.map((tab) => (
             <RouteLink
               key={tab.name}
               href={hrefUnder(location, root) + tab.path.slice(root.path.length)}
-              className={`dui-tab mono ${tab.name === page ? 'dui-tab-active' : ''}`}
+              className={`dui-tab ${tab.name === page ? 'dui-tab-active' : ''}`}
               aria-current={tab.name === page ? 'page' : undefined}
             >
               {tab.label}
@@ -192,7 +204,7 @@ function appError(app: string, detail: string, retry: () => void): ReactNode {
         msg={`${app} could not render this page`}
         sub={detail || undefined}
         action={
-          <button type="button" className="dui-retry mono" onClick={retry}>
+          <button type="button" className="dui-retry" onClick={retry}>
             try again
           </button>
         }

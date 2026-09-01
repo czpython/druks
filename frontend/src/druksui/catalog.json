@@ -46,7 +46,7 @@
       "block": "empty_state",
       "title": "Nothing here",
       "description": "An empty state.",
-      "actions": []
+      "controls": []
     },
     {
       "block": "timeline",
@@ -254,7 +254,7 @@
       ],
       "title": "Card",
       "description": "",
-      "actions": []
+      "controls": []
     },
     {
       "block": "cards",
@@ -270,14 +270,14 @@
           ],
           "title": "Note 7",
           "description": "Fan noise on rack 3.",
-          "actions": []
+          "controls": []
         }
       ],
       "empty": {
         "block": "empty_state",
         "title": "No notes yet",
         "description": "Write one and its gist appears here.",
-        "actions": []
+        "controls": []
       }
     },
     {
@@ -290,7 +290,8 @@
       ],
       "title": "Section",
       "name": "catalog",
-      "follows": null
+      "follows": null,
+      "controls": []
     },
     {
       "block": "section",
@@ -305,7 +306,8 @@
       "follows": {
         "subjectType": "note",
         "subjectId": "0"
-      }
+      },
+      "controls": []
     },
     {
       "block": "form",
@@ -413,6 +415,7 @@
         "label": "Save",
         "operation": "write_note",
         "arguments": {},
+        "fields": [],
         "tone": "primary",
         "confirm": "",
         "refresh": "page",
@@ -424,11 +427,13 @@
       "label": "Write a note",
       "operation": "write_note",
       "arguments": {},
+      "fields": [],
       "tone": "default",
       "confirm": "",
       "refresh": "page",
       "link": null
     }
   ],
-  "follows": null
+  "follows": null,
+  "controls": []
 }

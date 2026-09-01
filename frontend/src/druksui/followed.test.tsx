@@ -51,13 +51,14 @@ function region(name: string, text: string, follows = NOTE_7): Block {
     block: 'section',
     title: 'Decision',
     name,
+    controls: [],
     follows,
     blocks: [{ block: 'text', text }],
   }
 }
 
 function snapshot(blocks: Block[], follows: PageSnapshot['follows'] = null): PageSnapshot {
-  return { title: 'Note 7', description: '', blocks, follows }
+  return { title: 'Note 7', description: '', controls: [], blocks, follows }
 }
 
 describe('followedSubjects', () => {
@@ -65,7 +66,7 @@ describe('followedSubjects', () => {
     const page = snapshot(
       [
         region('decision', 'waiting'),
-        { block: 'card', title: '', description: '', actions: [], blocks: [region('nested', 'also')] },
+        { block: 'card', title: '', description: '', controls: [], blocks: [region('nested', 'also')] },
         region('other', 'another', { subjectType: 'note', subjectId: '9' }),
       ],
       { subjectType: 'note', subjectId: '7' },
@@ -99,10 +100,10 @@ describe('mergeRegions', () => {
 
   it('replaces a region nested inside a card', () => {
     const previous = snapshot([
-      { block: 'card', title: 'Run', description: '', actions: [], blocks: [region('decision', 'waiting')] },
+      { block: 'card', title: 'Run', description: '', controls: [], blocks: [region('decision', 'waiting')] },
     ])
     const fresh = snapshot([
-      { block: 'card', title: 'Run', description: '', actions: [], blocks: [region('decision', 'answered')] },
+      { block: 'card', title: 'Run', description: '', controls: [], blocks: [region('decision', 'answered')] },
     ])
 
     const merged = mergeRegions(previous, fresh, NOTE_7)

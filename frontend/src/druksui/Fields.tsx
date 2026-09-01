@@ -96,6 +96,7 @@ function Input({
     // choosing in the second form would clear the first. The submitted payload
     // is keyed by the field's own name, not by this one.
     name: id,
+    autoComplete: 'off',
     required: field.isRequired,
     'aria-describedby': describedBy,
     'aria-invalid': isInvalid || undefined,

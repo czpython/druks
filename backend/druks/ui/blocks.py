@@ -50,6 +50,22 @@ class Follows(Schema):
 Watched = Annotated[Follows | None, BeforeValidator(_subject_identity)]
 
 
+def _check_field_names(*, owner: str, fields: list[FormField], arguments: dict[str, Any]) -> None:
+    names = [field.name for field in fields]
+    repeated = sorted({name for name in names if names.count(name) > 1})
+    if repeated:
+        raise ValueError(
+            f"{owner} has two fields named {repeated}; one would take the other's value. "
+            "Give each field its own name."
+        )
+    taken = sorted(set(names) & set(arguments))
+    if taken:
+        raise ValueError(
+            f"{owner} has fields named {taken}, which it already carries as arguments. "
+            "Send each value once."
+        )
+
+
 class PageBlock(Schema):
     """What every block shares. ``block`` names its kind on the wire, and
     ``check_placement`` is how a block refuses a spot it cannot work in."""
@@ -115,6 +131,7 @@ class Action(PageBlock):
     label: str
     operation: str
     arguments: dict[str, Any] = Field(default_factory=dict)
+    fields: list[FormField] = Field(default_factory=list)
     tone: Literal["default", "primary", "danger"] = "default"
     # Non-empty text asks the operator before the shell sends anything.
     confirm: str = ""
@@ -122,6 +139,24 @@ class Action(PageBlock):
     # ``refresh`` does not apply.
     refresh: Literal["none", "page", "region"] = "page"
     link: Link | None = None
+
+    @model_validator(mode="after")
+    def _one_shape(self) -> "Action":
+        if self.fields and self.confirm:
+            raise ValueError(
+                f"Action {self.label!r} gives both fields and confirm. Each asks the operator "
+                "before the action runs, so give one or the other."
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _one_name_for_each_value(self) -> "Action":
+        _check_field_names(
+            owner=f"action {self.label!r}",
+            fields=self.fields,
+            arguments=self.arguments,
+        )
+        return self
 
     def iter_actions(self) -> "Iterable[Action]":
         yield self
@@ -168,19 +203,15 @@ class Form(PageBlock):
 
     @model_validator(mode="after")
     def _one_name_for_each_value(self) -> "Form":
-        names = [one.name for one in self.fields]
-        repeated = sorted({name for name in names if names.count(name) > 1})
-        if repeated:
+        if self.action.fields:
             raise ValueError(
-                f"form {self.title!r} has two fields named {repeated}; one would take the "
-                "other's value. Give each field its own name."
+                f"form {self.title!r} has fields on its action. Put all form fields on the form."
             )
-        taken = sorted(set(names) & set(self.action.arguments))
-        if taken:
-            raise ValueError(
-                f"form {self.title!r} has fields named {taken}, which its action already "
-                "carries as arguments. Send each value once."
-            )
+        _check_field_names(
+            owner=f"form {self.title!r}",
+            fields=self.fields,
+            arguments=self.action.arguments,
+        )
         return self
 
 
@@ -234,14 +265,14 @@ class EmptyState(PageBlock):
     block: Literal["empty_state"] = "empty_state"
     title: str
     description: str = ""
-    actions: list[Action | Link] = Field(default_factory=list)
+    controls: list[Action | Link] = Field(default_factory=list)
 
     def iter_actions(self) -> "Iterable[Action]":
-        for control in self.actions:
+        for control in self.controls:
             yield from control.iter_actions()
 
     def check_placement(self, *, followed: bool, regions: set[str], region: str = "") -> None:
-        for control in self.actions:
+        for control in self.controls:
             control.check_placement(followed=followed, regions=regions, region=region)
 
     def __init__(self, title: str, **data):
@@ -560,16 +591,16 @@ class Card(BlockParent):
     block: Literal["card"] = "card"
     title: str = ""
     description: str = ""
-    actions: list[Action | Link] = Field(default_factory=list)
+    controls: list[Action | Link] = Field(default_factory=list)
 
     def iter_actions(self) -> "Iterable[Action]":
         yield from super().iter_actions()
-        for control in self.actions:
+        for control in self.controls:
             yield from control.iter_actions()
 
     def check_placement(self, *, followed: bool, regions: set[str], region: str = "") -> None:
         super().check_placement(followed=followed, regions=regions, region=region)
-        for control in self.actions:
+        for control in self.controls:
             control.check_placement(followed=followed, regions=regions, region=region)
 
 
@@ -602,6 +633,7 @@ class Section(BlockParent):
     block: Literal["section"] = "section"
     title: str = ""
     name: str = ""
+    controls: list[Action | Link] = Field(default_factory=list)
     follows: Watched = None
 
     def check_placement(self, *, followed: bool, regions: set[str], region: str = "") -> None:
@@ -612,11 +644,23 @@ class Section(BlockParent):
             )
         if self.name:
             regions.add(self.name)
+        inside = self.name or region
+        for control in self.controls:
+            control.check_placement(
+                followed=followed or bool(self.follows),
+                regions=regions,
+                region=inside,
+            )
         super().check_placement(
             followed=followed or bool(self.follows),
             regions=regions,
-            region=self.name or region,
+            region=inside,
         )
+
+    def iter_actions(self) -> "Iterable[Action]":
+        for control in self.controls:
+            yield from control.iter_actions()
+        yield from super().iter_actions()
 
     @model_validator(mode="after")
     def _named_when_followed(self) -> "Section":

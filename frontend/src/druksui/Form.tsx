@@ -1,5 +1,5 @@
 import { useQueryClient } from '@tanstack/react-query'
-import { useContext, useState } from 'react'
+import { useContext, useEffect, useId, useRef, useState } from 'react'
 import { useLocation } from 'wouter'
 
 import { ApiError, api } from '../api/client'
@@ -25,40 +25,25 @@ export function Form({
   fields: Field[]
   action: Action
 }) {
-  // A refresh can bring back a form of different fields at the same place, and
-  // React keeps this component. Start over when the fields themselves change,
-  // so a submission always carries the form on screen.
-  const shape = fields.map((one) => `${one.field}:${one.name}`).join('|')
-  const [known, setKnown] = useState(shape)
-  const [edits, setEdits] = useState<Payload | null>(null)
-  const [submits, setSubmits] = useState(0)
-  const declared = Object.fromEntries(fields.map(startingValue))
-  const values = edits ?? declared
-  if (known !== shape) {
-    setKnown(shape)
-    setEdits(null)
-  }
-  const run = useAction(action, fields, () => {
-    setEdits(null)
-    setSubmits((count) => count + 1)
-  })
+  const fieldState = useFieldState(fields)
+  const run = useAction(action, fields, fieldState.clear)
 
   return (
     <form
       className="dui-form"
       onSubmit={(event) => {
         event.preventDefault()
-        void run.call(values)
+        void run.call(fieldState.values)
       }}
     >
       {title && <h3 className="dui-block-title">{title}</h3>}
       {description && <p className="dui-form-desc dim">{description}</p>}
       <Fields
         fields={fields}
-        values={values}
+        values={fieldState.values}
         errors={run.fieldErrors}
-        resets={submits}
-        onChange={(name, value) => setEdits({ ...values, [name]: value })}
+        resets={fieldState.resets}
+        onChange={fieldState.change}
       />
       {run.problem && (
         <div className="dui-form-error" role="alert">
@@ -72,7 +57,7 @@ export function Form({
           <button
             type="submit"
             className={`dui-action dui-action-${action.tone}`}
-            disabled={run.pending}
+            disabled={run.blocked}
             aria-busy={run.pending}
           >
             {action.label}
@@ -88,7 +73,6 @@ export function Form({
 
 /** A control that calls one of the app's operations on its own. */
 export function ActionButton({ action }: { action: Action }) {
-  const run = useAction(action)
   const { operations } = useContext(PagesContext)
   const known = operations.some((one) => one.id === action.operation)
   if (!known) {
@@ -98,6 +82,13 @@ export function ActionButton({ action }: { action: Action }) {
       </span>
     )
   }
+  if (action.fields.length) return <FieldAction action={action} />
+  return <ImmediateAction action={action} />
+}
+
+function ImmediateAction({ action }: { action: Action }) {
+  const run = useAction(action)
+
   return (
     <>
       {run.confirming ? (
@@ -106,7 +97,7 @@ export function ActionButton({ action }: { action: Action }) {
         <button
           type="button"
           className={`dui-action dui-action-${action.tone}`}
-          disabled={run.pending}
+          disabled={run.blocked}
           aria-busy={run.pending}
           onClick={() => void run.call({})}
         >
@@ -125,6 +116,159 @@ export function ActionButton({ action }: { action: Action }) {
   )
 }
 
+function FieldAction({ action }: { action: Action }) {
+  const [open, setOpen] = useState(false)
+  const dialog = useRef<HTMLDialogElement>(null)
+  const trigger = useRef<HTMLButtonElement>(null)
+  const titleId = useId()
+  const wasOpen = useRef(false)
+  const fieldState = useFieldState(action.fields)
+  const run = useAction(action, action.fields, () => {
+    fieldState.clear()
+    setOpen(false)
+  })
+
+  useEffect(() => {
+    const node = dialog.current
+    if (!node) return
+    if (open) {
+      if (!node.open) {
+        node.showModal()
+      }
+      const firstField = node.querySelector<HTMLElement>(
+        'input:not(:disabled), textarea:not(:disabled), select:not(:disabled)',
+      )
+      const firstControl = firstField ?? node.querySelector<HTMLElement>('button:not(:disabled)')
+      firstControl?.focus()
+      wasOpen.current = true
+      return
+    }
+    if (!wasOpen.current) return
+    if (node.open) {
+      node.close()
+    }
+    trigger.current?.focus()
+    wasOpen.current = false
+  }, [open])
+
+  function dismiss() {
+    if (run.pending) return
+    run.back()
+    fieldState.clear()
+    setOpen(false)
+  }
+
+  return (
+    <>
+      <button
+        ref={trigger}
+        type="button"
+        className={`dui-action dui-action-${action.tone} dui-dialog-trigger`}
+        onClick={() => setOpen(true)}
+      >
+        {action.label}
+      </button>
+      <dialog
+        ref={dialog}
+        className="dui-dialog"
+        aria-labelledby={titleId}
+        onCancel={(event) => {
+          if (run.pending) event.preventDefault()
+        }}
+        onClose={() => {
+          if (open) dismiss()
+        }}
+        onClick={(event) => {
+          if (event.target !== event.currentTarget) return
+          const bounds = event.currentTarget.getBoundingClientRect()
+          const outside =
+            event.clientX < bounds.left ||
+            event.clientX > bounds.right ||
+            event.clientY < bounds.top ||
+            event.clientY > bounds.bottom
+          if (outside) dismiss()
+        }}
+      >
+        <div className="dui-dialog-head">
+          <h2 id={titleId} className="dui-dialog-title">
+            {action.label}
+          </h2>
+          <button
+            type="button"
+            className="dui-dialog-close"
+            aria-label={`Close ${action.label}`}
+            disabled={run.pending}
+            onClick={dismiss}
+          >
+            <span aria-hidden="true">×</span>
+          </button>
+        </div>
+        <form
+          className="dui-form"
+          onSubmit={(event) => {
+            event.preventDefault()
+            void run.call(fieldState.values)
+          }}
+        >
+          <Fields
+            fields={action.fields}
+            values={fieldState.values}
+            errors={run.fieldErrors}
+            resets={fieldState.resets}
+            onChange={fieldState.change}
+          />
+          {run.problem && (
+            <div className="dui-form-error" role="alert">
+              {run.problem}
+            </div>
+          )}
+          <div className="dui-form-submit">
+            <button
+              type="submit"
+              className={`dui-action dui-action-${action.tone}`}
+              disabled={run.blocked}
+              aria-busy={run.pending}
+            >
+              {action.label}
+            </button>
+            <button type="button" className="dui-action" disabled={run.pending} onClick={dismiss}>
+              Cancel
+            </button>
+          </div>
+        </form>
+      </dialog>
+      <span className="dui-action-note" role="status">
+        {run.note}
+      </span>
+    </>
+  )
+}
+
+function useFieldState(fields: Field[]) {
+  // A refresh can put different fields in the same React position. Reset the
+  // edits so the next operation carries the fields that are on screen.
+  const shape = fields.map((one) => `${one.field}:${one.name}`).join('|')
+  const [known, setKnown] = useState(shape)
+  const [edits, setEdits] = useState<Payload | null>(null)
+  const [resets, setResets] = useState(0)
+  const declared = Object.fromEntries(fields.map(startingValue))
+  const values = edits ?? declared
+  if (known !== shape) {
+    setKnown(shape)
+    setEdits(null)
+  }
+
+  return {
+    values,
+    resets,
+    change: (name: string, value: unknown) => setEdits({ ...values, [name]: value }),
+    clear: () => {
+      setEdits(null)
+      setResets((count) => count + 1)
+    },
+  }
+}
+
 // An action that asks first asks in the page, in the page's own type and
 // colour. The browser's own dialog is the one thing an author cannot restyle.
 function Confirm({ action, run }: { action: Action; run: ReturnType<typeof useAction> }) {
@@ -134,13 +278,13 @@ function Confirm({ action, run }: { action: Action; run: ReturnType<typeof useAc
       <button
         type="button"
         className={`dui-action dui-action-${action.tone}`}
-        disabled={run.pending}
+        disabled={run.blocked}
         aria-busy={run.pending}
         onClick={() => void run.confirm()}
       >
         {action.label}
       </button>
-      <button type="button" className="dui-action" disabled={run.pending} onClick={run.back}>
+      <button type="button" className="dui-action" disabled={run.blocked} onClick={run.back}>
         Back
       </button>
     </span>
@@ -154,6 +298,7 @@ function useAction(action: Action, fields: Field[] = [], clear?: () => void) {
   const fieldNames = fields.map((one) => one.name)
   const secretNames = fields.filter((one) => one.field === 'secret').map((one) => one.name)
   const [pending, setPending] = useState(false)
+  const [saved, setSaved] = useState(false)
   const [problem, setProblem] = useState('')
   const [note, setNote] = useFlashNote<string>()
   // The payload an action is holding while it asks; null when it is not asking.
@@ -166,7 +311,7 @@ function useAction(action: Action, fields: Field[] = [], clear?: () => void) {
   const [, navigate] = useLocation()
 
   async function call(values: Payload) {
-    if (pending) return
+    if (pending || saved) return
     if (action.confirm) {
       setAsked(values)
       return
@@ -175,7 +320,7 @@ function useAction(action: Action, fields: Field[] = [], clear?: () => void) {
   }
 
   async function confirm() {
-    if (pending) return
+    if (pending || saved) return
     const values = asked ?? {}
     setAsked(null)
     await perform(values)
@@ -188,6 +333,7 @@ function useAction(action: Action, fields: Field[] = [], clear?: () => void) {
       return
     }
     setPending(true)
+    setSaved(false)
     setProblem('')
     setFieldErrors({})
     try {
@@ -213,14 +359,13 @@ function useAction(action: Action, fields: Field[] = [], clear?: () => void) {
       setPending(false)
       return
     }
-    // The write has happened. Whatever fails from here is a failure to show
-    // the result, so the control stays down: pressing it again would write
-    // twice.
+    setSaved(true)
+    setPending(false)
     try {
       await finish()
       clear?.()
       setNote(`${action.label} — done`)
-      setPending(false)
+      setSaved(false)
     } catch (error) {
       setProblem(`saved, but the page did not refresh: ${message(error)}`)
     }
@@ -271,7 +416,17 @@ function useAction(action: Action, fields: Field[] = [], clear?: () => void) {
     await queryClient.invalidateQueries({ queryKey: ['gate'] })
   }
 
-  return { pending, problem, note, fieldErrors, call, confirm, back: () => setAsked(null), confirming: asked !== null }
+  return {
+    pending,
+    blocked: pending || saved,
+    problem,
+    note,
+    fieldErrors,
+    call,
+    confirm,
+    back: () => setAsked(null),
+    confirming: asked !== null,
+  }
 }
 
 // The operation's path parameters come out of the payload; everything left is

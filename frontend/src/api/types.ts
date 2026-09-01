@@ -294,14 +294,14 @@ export interface CardBlock {
   title: string
   description: string
   blocks: Block[]
-  actions: (Action | Link)[]
+  controls: (Action | Link)[]
 }
 
 export interface EmptyStateBlock {
   block: 'empty_state'
   title: string
   description: string
-  actions: (Action | Link)[]
+  controls: (Action | Link)[]
 }
 
 export interface ImageBlock {
@@ -331,7 +331,7 @@ interface FieldBase {
   isRequired: boolean
 }
 
-// One input inside a form. ``name`` is the key the shell sends.
+// One named input that the shell collects before an action runs.
 export type Field =
   | (FieldBase & { field: 'text'; value: string; placeholder: string })
   | (FieldBase & { field: 'text_area'; value: string; placeholder: string; rows: number })
@@ -356,6 +356,7 @@ export interface Action {
   label: string
   operation: string
   arguments: Record<string, unknown>
+  fields: Field[]
   tone: 'default' | 'primary' | 'danger'
   confirm: string
   refresh: 'none' | 'page' | 'region'
@@ -373,7 +374,14 @@ export type Block =
   | { block: 'text'; text: string }
   | { block: 'markdown'; text: string }
   | { block: 'quote'; text: string }
-  | { block: 'section'; title: string; name: string; blocks: Block[]; follows: Follows | null }
+  | {
+      block: 'section'
+      title: string
+      name: string
+      controls: (Action | Link)[]
+      blocks: Block[]
+      follows: Follows | null
+    }
   | { block: 'gate_controls'; run: string }
   | { block: 'timeline'; title: string; items: TimelineItem[] }
   | {
@@ -408,7 +416,13 @@ export type Block =
   | { block: 'stack'; gap: 'small' | 'medium' | 'large'; blocks: Block[] }
   | { block: 'columns'; blocks: Block[] }
   | Action
-  | { block: 'form'; title: string; description: string; fields: Field[]; action: Action }
+  | {
+      block: 'form'
+      title: string
+      description: string
+      fields: Field[]
+      action: Action
+    }
   | CardBlock
   | { block: 'cards'; title: string; cards: CardBlock[]; empty: EmptyStateBlock | null }
   | {
@@ -433,6 +447,7 @@ export interface Follows {
 export interface PageSnapshot {
   title: string
   description: string
+  controls: (Action | Link)[]
   blocks: Block[]
   follows: Follows | null
 }
