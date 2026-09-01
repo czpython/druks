@@ -83,6 +83,10 @@ describe('IdentityBootstrap', () => {
     let me = identity({ account: null, onboardingRequired: true })
     stubRoutes({
       '/api/auth/me': () => ({ status: 200, body: me }),
+      '/api/harnesses': () => ({
+        status: 200,
+        body: [{ name: 'claude', loginKinds: ['subscription'] }],
+      }),
       '/api/harnesses/claude/connection/start': () => ({
         status: 200,
         body: { authorizeUrl: 'https://x/auth', connectionId: 'C1' },

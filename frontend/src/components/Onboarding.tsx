@@ -1,8 +1,10 @@
-import type { CSSProperties } from 'react'
+import { useCallback, useEffect, useState, type CSSProperties } from 'react'
 
 import { ConnectSteps, useHarnessConnect } from './HarnessConnectFlow'
+import { api } from '../api/client'
 import { harnessColors } from '../lib/harnessColors'
-import type { Account } from '../api/types'
+import { harnessLabel } from '../lib/harnessDisplay'
+import type { Account, SetupHarness } from '../api/types'
 
 type OnboardingEntry = {
   title: string
@@ -15,16 +17,32 @@ type OnboardingEntry = {
 // are — druks just needs its first harness connection. Works before any
 // account exists (fresh none mode) and for a newly enrolled header identity.
 export function Onboarding({ onConnected }: { onConnected: (account: Account) => void }) {
-  const codex = useHarnessConnect('codex', onConnected)
-  const claude = useHarnessConnect('claude', onConnected)
-  // Accent slots follow registry enrolment order (claude, codex) so each
-  // harness keeps the colour it has everywhere in the app.
-  const color = harnessColors(['claude', 'codex'])
-  const entries: OnboardingEntry[] = [
-    { title: 'Codex', mark: 'Cx', fam: color.codex!, flow: codex },
-    { title: 'Claude', mark: 'Cl', fam: color.claude!, flow: claude },
-  ]
-  const active = entries.find((e) => e.flow.busy || e.flow.challenge)
+  const [harnesses, setHarnesses] = useState<SetupHarness[]>([])
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const [activeHarness, setActiveHarness] = useState<string | null>(null)
+
+  useEffect(() => {
+    let ignore = false
+    api.setupHarnesses().then(
+      (registered) => {
+        if (!ignore) setHarnesses(registered)
+      },
+      (error: unknown) => {
+        if (!ignore) setLoadError(error instanceof Error ? error.message : String(error))
+      },
+    )
+    return () => {
+      ignore = true
+    }
+  }, [])
+
+  const setHarnessActive = useCallback((name: string, active: boolean) => {
+    setActiveHarness((current) => {
+      if (active) return name
+      return current === name ? null : current
+    })
+  }, [])
+  const color = harnessColors(harnesses.map((harness) => harness.name))
 
   return (
     <div className="landing">
@@ -40,15 +58,51 @@ export function Onboarding({ onConnected }: { onConnected: (account: Account) =>
           </p>
         </div>
         <div className="landing-stage">
-          {active ? (
-            <ConnectPanel entry={active} />
+          {loadError ? (
+            <OnboardingError message={loadError} />
           ) : (
-            entries.map((entry) => <HarnessCard key={entry.title} entry={entry} />)
+            harnesses.map((harness) => (
+              <HarnessEntry
+                key={harness.name}
+                harness={harness}
+                fam={color[harness.name]!}
+                activeHarness={activeHarness}
+                onActive={setHarnessActive}
+                onConnected={onConnected}
+              />
+            ))
           )}
         </div>
       </div>
     </div>
   )
+}
+
+function HarnessEntry({
+  harness,
+  fam,
+  activeHarness,
+  onActive,
+  onConnected,
+}: {
+  harness: SetupHarness
+  fam: string
+  activeHarness: string | null
+  onActive: (name: string, active: boolean) => void
+  onConnected: (account: Account) => void
+}) {
+  const flow = useHarnessConnect(harness.name, onConnected)
+  const active = flow.busy || Boolean(flow.challenge)
+
+  useEffect(() => {
+    onActive(harness.name, active)
+  }, [active, harness.name, onActive])
+
+  if (activeHarness && activeHarness !== harness.name) return null
+
+  const title = harnessLabel(harness.name)
+  const entry = { title, mark: title.slice(0, 2), fam, flow }
+  return active ? <ConnectPanel entry={entry} /> : <HarnessCard entry={entry} />
 }
 
 function HarnessCard({ entry }: { entry: OnboardingEntry }) {
