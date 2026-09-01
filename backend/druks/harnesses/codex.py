@@ -22,7 +22,7 @@ from druks.skills.models import Skill
 
 from .artifacts import write_cost
 from .base import Harness, jwt_claims, jwt_expiry, post_token
-from .datastructures import CodexToken, ParsedMetric, ParsedModels, ParsedUsage
+from .datastructures import CodexToken, ParsedMetric, ParsedModels, ParsedUsage, ProviderRequest
 from .exceptions import (
     HarnessAuthError,
     HarnessError,
@@ -284,11 +284,6 @@ class CodexHarness(Harness):
     provider = "openai"
     models = ("gpt-5.5",)
     default_model = "gpt-5.5"
-    # ``client_version`` is required and lower-bounds the list (the server
-    # returns models with ``minimal_client_version <= client_version``); the
-    # high constant asks for the full catalog, and the empty-list guard
-    # catches it if the server ever starts rejecting unknown versions.
-    model_discovery_url = "https://chatgpt.com/backend-api/codex/models?client_version=99.99.99"
     command = "codex"
     credentials_path = ".codex/auth.json"
 
@@ -402,17 +397,22 @@ class CodexHarness(Harness):
         return jwt_expiry(access)
 
     @classmethod
-    def _usage_request(cls, token: CodexToken) -> tuple[str, dict]:
-        headers = {
-            "Authorization": f"Bearer {token.access_token}",
-            "User-Agent": _CODEX_USER_AGENT,
-        }
-        if token.account_id:
-            headers["ChatGPT-Account-Id"] = token.account_id
-        return _CODEX_USAGE_URL, headers
+    def _usage_request(cls, token: CodexToken) -> ProviderRequest:
+        return ProviderRequest(_CODEX_USAGE_URL, cls._chatgpt_headers(token))
 
     @classmethod
-    def get_model_discovery_headers(cls, token: CodexToken) -> dict:
+    def _model_discovery_request(cls, token: CodexToken) -> ProviderRequest:
+        # ``client_version`` is required and lower-bounds the list (the server
+        # returns models with ``minimal_client_version <= client_version``); the
+        # high constant asks for the full catalog, and the empty-list guard
+        # catches it if the server ever starts rejecting unknown versions.
+        return ProviderRequest(
+            "https://chatgpt.com/backend-api/codex/models?client_version=99.99.99",
+            cls._chatgpt_headers(token),
+        )
+
+    @classmethod
+    def _chatgpt_headers(cls, token: CodexToken) -> dict:
         headers = {
             "Authorization": f"Bearer {token.access_token}",
             "User-Agent": _CODEX_USER_AGENT,

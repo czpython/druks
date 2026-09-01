@@ -73,6 +73,14 @@ class ParsedMetric:
 
 
 @dataclass(frozen=True)
+class ProviderRequest:
+    """One authenticated GET the platform makes to the provider."""
+
+    url: str
+    headers: dict
+
+
+@dataclass(frozen=True)
 class ParsedUsage:
     ok: bool
     error: str | None = None

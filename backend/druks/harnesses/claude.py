@@ -21,7 +21,14 @@ from . import exceptions
 from .artifacts import call_dir, write_cost
 from .base import Harness, parse_epoch_expiry, post_token
 from .constants import CLAUDE_DISALLOWED_TOOLS
-from .datastructures import OAuthToken, ParsedMetric, ParsedModels, ParsedUsage, SandboxSettings
+from .datastructures import (
+    OAuthToken,
+    ParsedMetric,
+    ParsedModels,
+    ParsedUsage,
+    ProviderRequest,
+    SandboxSettings,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +47,6 @@ class ClaudeHarness(Harness):
     provider = "anthropic"
     models = ("claude-opus-4-7", "claude-sonnet-4-6", "claude-haiku-4-5")
     default_model = "claude-opus-4-7"
-    model_discovery_url = "https://api.anthropic.com/v1/models?limit=100"
     command = "claude"
     credentials_path = ".claude/.credentials.json"
 
@@ -301,17 +307,17 @@ class ClaudeHarness(Harness):
         return parse_epoch_expiry(block.get("expiresAt"))
 
     @classmethod
-    def _usage_request(cls, token: OAuthToken) -> tuple[str, dict]:
-        headers = {
-            "Authorization": f"Bearer {token.access_token}",
-            "anthropic-beta": _OAUTH_BETA,
-            "anthropic-version": _ANTHROPIC_VERSION,
-            "User-Agent": _CLAUDE_CODE_USER_AGENT,
-        }
-        return _USAGE_URL, headers
+    def _usage_request(cls, token: OAuthToken) -> ProviderRequest:
+        return ProviderRequest(_USAGE_URL, cls._oauth_headers(token))
 
     @classmethod
-    def get_model_discovery_headers(cls, token: OAuthToken) -> dict:
+    def _model_discovery_request(cls, token: OAuthToken) -> ProviderRequest:
+        return ProviderRequest(
+            "https://api.anthropic.com/v1/models?limit=100", cls._oauth_headers(token)
+        )
+
+    @classmethod
+    def _oauth_headers(cls, token: OAuthToken) -> dict:
         return {
             "Authorization": f"Bearer {token.access_token}",
             "anthropic-beta": _OAUTH_BETA,
