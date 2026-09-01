@@ -35,6 +35,7 @@ class HarnessResponse(Schema):
     # The requesting account's own connection; false until this account connects.
     connected: bool
     kind: str | None
+    login_kinds: list[str]
     account: str | None
     # The email the provider reported at connect — display, never authority.
     provider_email: str | None
@@ -60,6 +61,7 @@ class HarnessResponse(Schema):
             allowed_models=settings.allowed_models,
             connected=connected,
             kind=connection.kind if connection else None,
+            login_kinds=sorted(settings.harness.login_kinds),
             account=account.username if connection else None,
             provider_email=connection.provider_email if connection else None,
             expires_at=connection.expires_at if connection else None,

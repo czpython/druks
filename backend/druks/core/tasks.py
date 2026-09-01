@@ -40,7 +40,11 @@ async def refresh_models() -> None:
 
 async def _refresh() -> dict[str, object]:
     by_name = {harness.name: harness for harness in get_harnesses()}
-    connections = [c for c in await HarnessConnection.list_all() if c.harness in by_name]
+    connections = [
+        connection
+        for connection in await HarnessConnection.list_all()
+        if connection.supports_refresh and connection.harness in by_name
+    ]
 
     # A refresh 401s a VM mid-call holding the old token, so a due rotation
     # runs only while its connection is idle — busy defers to the next tick;

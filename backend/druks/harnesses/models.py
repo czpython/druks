@@ -96,6 +96,7 @@ class HarnessConnection(Base, Uuid7Pk):
         payload: dict,
         expires_at: datetime | None,
         provider_email: str,
+        kind: str = "subscription",
     ) -> "HarnessConnection":
         """Upsert ``account``'s connection for this harness — update its
         existing row or create one."""
@@ -104,11 +105,20 @@ class HarnessConnection(Base, Uuid7Pk):
         if not row:
             row = cls(harness=harness, account_id=account.id)
             session.add(row)
+        row.kind = kind
         row.payload = payload
         row.provider_email = provider_email
         row.expires_at = expires_at
         await session.flush()
         return row
+
+    @property
+    def supports_refresh(self) -> bool:
+        return self.kind == "subscription"
+
+    @property
+    def is_metered(self) -> bool:
+        return self.kind == "subscription"
 
     async def update_payload(self, payload: dict, *, expires_at: datetime | None) -> None:
         # Whole-value reassignment is the write path: the encrypted column

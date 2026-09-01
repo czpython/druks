@@ -1,5 +1,6 @@
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from unittest.mock import AsyncMock
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -351,6 +352,23 @@ async def test_refresh_scrapes_only_the_viewers_connections(client, druks_db, mo
     assert client.post("/api/usage/refresh").status_code == 200
     assert fetched == [viewer.account_id]
     assert (await UsageScrape.latest_for("claude", viewer.account_id)).five_hour_percent_left == 50
+
+
+async def test_refresh_skips_a_non_metered_connection(client, druks_db, monkeypatch) -> None:
+    account = await Account.get_or_create("op@example.com")
+    await HarnessConnection.connect(
+        harness="claude",
+        account=account,
+        payload={"apiKey": "key"},
+        expires_at=None,
+        provider_email="op@example.com",
+        kind="api_key",
+    )
+    poll_usage = AsyncMock()
+    monkeypatch.setattr(ClaudeHarness, "poll_usage", poll_usage)
+
+    assert client.post("/api/usage/refresh").status_code == 200
+    poll_usage.assert_not_awaited()
 
 
 async def test_refresh_floors_repeat_scrapes(client, druks_db, monkeypatch) -> None:
