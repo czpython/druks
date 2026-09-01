@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from dbos import DBOS, StepOptions
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, ValidationError
 
 from druks.apps.registry import agents
 from druks.database import db_session
@@ -17,7 +17,7 @@ from druks.durable.engine import _step_engine, step_session
 from druks.durable.exceptions import WorkflowError
 from druks.durable.models import AgentCall, Artifact
 from druks.files.datastructures import File
-from druks.harnesses.exceptions import HarnessError, Retry
+from druks.harnesses.exceptions import HarnessError, HarnessInvalidOutputError, Retry
 from druks.harnesses.models import HarnessConnection
 from druks.harnesses.registry import get_harness_for_model
 from druks.prompts import render_prompt
@@ -327,10 +327,16 @@ class Agent:
                     raise result.error
                 try:
                     workspace_files: list[File] = []
-                    output = self.contract.model_validate(
-                        result.output,
-                        context={"workspace_files": workspace_files},
-                    )
+                    try:
+                        output = self.contract.model_validate(
+                            result.output,
+                            context={"workspace_files": workspace_files},
+                        )
+                    except ValidationError as error:
+                        raise HarnessInvalidOutputError(
+                            f"agent {self.id!r} returned a payload that fails "
+                            f"{self.contract.__name__}: {error}"
+                        ) from error
                     if workspace_files:
                         await runner.save_files(
                             workspace_files,

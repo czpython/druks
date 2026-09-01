@@ -483,6 +483,27 @@ async def test_body_level_first_byte_retries_immediately_then_reraises(
     assert all(call.status == "failed" for call in calls)
 
 
+async def test_body_level_invalid_output_retries_once_then_reraises(
+    druks_db, tmp_path, monkeypatch, current_run, _inline_agent_steps
+):
+    from druks.harnesses.exceptions import HarnessInvalidOutputError
+
+    sandbox = _patch_runtime(monkeypatch, tmp_path, {"unexpected": True})
+    _patch_ephemeral(monkeypatch, sandbox)
+    current_run._reap_run = AsyncMock()
+    _, sleep = _inline_agent_steps
+
+    with pytest.raises(HarnessInvalidOutputError):
+        await DUMMY_AGENT()
+
+    assert sandbox.run_agent.await_count == 2
+    sleep.assert_awaited_once_with(0.0)
+    current_run._reap_run.assert_not_awaited()
+    calls = await AgentCall.list_for_run("wf-9")
+    assert len(calls) == 2
+    assert all(call.status == "failed" for call in calls)
+
+
 def _async_scrape(make):
     async def latest_for(_cls, _harness, _account_id):
         return make()

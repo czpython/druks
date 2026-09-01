@@ -51,6 +51,9 @@ class HarnessAuthError(HarnessError):
 
 class HarnessInvalidOutputError(HarnessError):
     code = "invalid_output"
+    retry = Retry.TRANSIENT
+    # Immediate: nothing throttled us, so waiting buys nothing.
+    retry_delays = (0,)
 
 
 class HarnessSandboxError(HarnessError):

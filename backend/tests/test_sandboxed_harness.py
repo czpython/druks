@@ -391,6 +391,22 @@ def test_check_returncode_stays_bare_without_a_terminal_event():
     assert excinfo.value.retry is Retry.NEVER
 
 
+def test_check_returncode_falls_back_to_the_last_non_empty_stderr_line():
+    result = HarnessRunResult(
+        returncode=2, stdout=b"not json\n", stderr=b"first detail\n\nlast detail\n"
+    )
+    with pytest.raises(HarnessError, match="last detail"):
+        ClaudeHarness.check_returncode(result)
+
+
+def test_check_returncode_classifies_the_stderr_detail():
+    result = HarnessRunResult(
+        returncode=1, stdout=b"not json\n", stderr=b"request failed\nrate limit exceeded\n"
+    )
+    with pytest.raises(HarnessRateLimitError):
+        ClaudeHarness.check_returncode(result)
+
+
 def _claude_result_event(text: str) -> bytes:
     payload = {"type": "result", "subtype": "success", "is_error": True, "result": text}
     return json.dumps(payload).encode() + b"\n"
