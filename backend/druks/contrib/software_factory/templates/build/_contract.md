@@ -52,19 +52,21 @@
 ## Human feedback
 
 {% for fb in build.journal.human_feedback %}
-### {{ fb.reviewer }}
+### {{ fb.reviewer }}{% if not fb.triage %} — PENDING, not yet triaged{% endif %}
 
-{% if fb.body %}
-**Body:** {{ fb.body }}
+{{ fb.body }}
+
+{% if fb.triage %}
+**Triage decision ({{ fb.triage.action }}):** {{ fb.triage.body }}
+
+{% if fb.triage.question %}
+**Question:** {{ fb.triage.question }}
 
 {% endif %}
-{% if fb.question %}
-**Question:** {{ fb.question }}
+{% if fb.triage.implementation_instructions %}
+**Implementation instructions:** {{ fb.triage.implementation_instructions }}
 
 {% endif %}
-{% if fb.implementation_instructions %}
-**Implementation instructions:** {{ fb.implementation_instructions }}
-
 {% endif %}
 {% endfor %}
 {% endif %}
