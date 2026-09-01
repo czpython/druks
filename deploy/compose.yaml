@@ -103,6 +103,21 @@ services:
         "--port",
         "8001",
       ]
+    # Ready means the API answers, not that the process exists. Then
+    # `up -d --wait` returns only when the stack serves, and a check that
+    # probes through the edge right after cannot race the bind.
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/api/system/health', timeout=2)",
+        ]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 30s
 
   drukbox:
     <<: *drukbox
