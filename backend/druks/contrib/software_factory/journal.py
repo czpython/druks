@@ -1,4 +1,5 @@
 from contextlib import suppress
+from typing import Any
 
 from druks.contrib.software_factory.contracts import (
     EvaluationOutput,
@@ -56,20 +57,19 @@ class BuildJournal(Journal):
         return
 
     @property
-    def human_feedback(self) -> list[dict[str, str]]:
-        # A triage digests the request_changes reply recorded just before it; the
-        # newest reply has no triage yet while its own triage agent renders this
-        # very projection, so it contributes no pair.
-        pairs = []
+    def human_feedback(self) -> list[dict[str, Any]]:
+        # Every request_changes reply, in order, with the triage that digested it.
+        # The newest reply has no triage yet while its own triage agent renders
+        # this very projection — it renders as the pending entry, so the triage
+        # agent reads the reviewer's actual words, never a stale digest.
+        entries = []
         for reply in self.filter(ReviewWork, action="request_changes"):
-            if triages := self.filter(TriageOutput, after=reply):
-                triage = triages[0]
-                pairs.append(
-                    {
-                        "reviewer": reply.reviewer or "(triage)",
-                        "body": triage.body,
-                        "question": triage.question,
-                        "implementation_instructions": triage.implementation_instructions,
-                    }
-                )
-        return pairs
+            triages = self.filter(TriageOutput, after=reply)
+            entries.append(
+                {
+                    "reviewer": reply.reviewer,
+                    "body": reply.body,
+                    "triage": triages[0] if triages else None,
+                }
+            )
+        return entries

@@ -74,35 +74,20 @@ def test_assignee_scan_falls_through_unresolved_revisions():
     assert _journal(PlanData()).assignee_github_login is None
 
 
-def test_human_feedback_pairs_each_request_changes_reply_with_its_triage():
+def test_human_feedback_lists_every_reply_and_marks_the_untriaged_one_pending():
+    first_triage = TriageOutput(
+        action=HumanFeedbackAction.CHANGE_REQUIRED,
+        body="rename the flag",
+        question="",
+        implementation_instructions="rename X to Y",
+    )
     journal = _journal(
-        ReviewWork(action="approve", reviewer="carol"),  # never triaged, never paired
+        ReviewWork(action="approve", reviewer="carol"),  # never triaged, never listed
         ReviewWork(action="request_changes", reviewer="alice", body="raw review text"),
-        TriageOutput(
-            action=HumanFeedbackAction.CHANGE_REQUIRED,
-            body="rename the flag",
-            question="",
-            implementation_instructions="rename X to Y",
-        ),
-        ReviewWork(action="request_changes", reviewer=None),
-        TriageOutput(
-            action=HumanFeedbackAction.QUESTION,
-            body="",
-            question="is the flag permanent?",
-            implementation_instructions="",
-        ),
+        first_triage,
+        ReviewWork(action="request_changes", reviewer="dana", body="second review"),
     )
     assert journal.human_feedback == [
-        {
-            "reviewer": "alice",
-            "body": "rename the flag",
-            "question": "",
-            "implementation_instructions": "rename X to Y",
-        },
-        {
-            "reviewer": "(triage)",
-            "body": "",
-            "question": "is the flag permanent?",
-            "implementation_instructions": "",
-        },
+        {"reviewer": "alice", "body": "raw review text", "triage": first_triage},
+        {"reviewer": "dana", "body": "second review", "triage": None},
     ]
