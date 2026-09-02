@@ -29,22 +29,22 @@ async def test_get_lazy_creates_row_with_default_timezone(session):
 
 async def test_harnesses_seeded_with_shipped_defaults(session):
     # init_db seeds one HarnessSettings row per registered harness.
-    claude = await HarnessSettings.require("claude")
+    claude = await HarnessSettings.get_registered("claude")
     assert (claude.model, claude.fast_mode, claude.effort, claude.timeout) == (
         "claude-opus-4-7",
         False,
         "high",
         1800,
     )
-    assert (await HarnessSettings.require("codex")).model == "gpt-5.5"
+    assert (await HarnessSettings.get_registered("codex")).model == "gpt-5.5"
     assert {harness.name for harness in await HarnessSettings.all()} == {"claude", "codex"}
 
 
 async def test_harness_update_persists(session):
-    claude = await HarnessSettings.require("claude")
+    claude = await HarnessSettings.get_registered("claude")
     await claude.update(model="claude-sonnet-4-6", fast_mode=True)
     await session.commit()
-    claude = await HarnessSettings.require("claude")
+    claude = await HarnessSettings.get_registered("claude")
     assert claude.model == "claude-sonnet-4-6"
     assert claude.fast_mode is True
 

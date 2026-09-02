@@ -511,6 +511,7 @@ export interface Harness {
   // The requesting account's own connection; false until this account connects.
   connected: boolean
   kind: string | null
+  loginKinds: string[]
   account: string | null
   /** The email the provider reported at connect — display, never authority. */
   providerEmail: string | null

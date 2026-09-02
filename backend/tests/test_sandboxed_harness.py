@@ -520,10 +520,12 @@ def _patch_harness_resolution(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr("druks.harnesses.registry.get_harness_for_model", _harness_stub)
 
-    async def require(name):
+    async def get_registered(name):
         return SimpleNamespace(effort="high", timeout=60, fast_mode=False)
 
-    monkeypatch.setattr("druks.user_settings.models.HarnessSettings.require", staticmethod(require))
+    monkeypatch.setattr(
+        "druks.user_settings.models.HarnessSettings.get_registered", staticmethod(get_registered)
+    )
 
 
 async def test_run_agent_carries_foreign_failures_as_harness_errors(

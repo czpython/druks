@@ -16,6 +16,7 @@ function harness(overrides: Partial<Harness> = {}): Harness {
     timeout: 1800,
     connected: false,
     kind: null,
+    loginKinds: ['subscription'],
     account: null,
     providerEmail: null,
     expiresAt: null,
@@ -46,6 +47,25 @@ async function flush() {
 }
 
 describe('HarnessConnect', () => {
+  it('shows each connect control only for its declared login kind', () => {
+    const subscription = renderCard(harness({ loginKinds: ['subscription'] }))
+
+    expect(screen.getByRole('button', { name: 'Connect' })).toBeTruthy()
+    expect(screen.queryByLabelText('API key')).toBeNull()
+    subscription.view.unmount()
+
+    const apiKey = renderCard(harness({ loginKinds: ['api_key'] }))
+
+    expect(screen.getByLabelText('API key')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Connect' })).toBeNull()
+    apiKey.view.unmount()
+
+    renderCard(harness({ loginKinds: ['subscription', 'api_key'] }))
+
+    expect(screen.getByRole('button', { name: 'Connect' })).toBeTruthy()
+    expect(screen.getByLabelText('API key')).toBeTruthy()
+  })
+
   it('shows each connected subscription identity instead of the operator account', () => {
     renderCard(
       harness({
@@ -107,5 +127,28 @@ describe('HarnessConnect', () => {
     // own identity is untouched, so /api/auth/me is never rechecked.
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ['harnesses'] })
     expect(fetchMock.mock.calls.some(([url]) => String(url) === '/api/auth/me')).toBe(false)
+  })
+
+  it('posts a pasted API key and refreshes the harness query', async () => {
+    const fetchMock = vi.fn<(url: string, init?: RequestInit) => Promise<Response>>(
+      async (url) =>
+        new Response(JSON.stringify(url.endsWith('/connection') ? harness() : {}), {
+          status: 200,
+        }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { invalidate } = renderCard(harness({ loginKinds: ['api_key'] }))
+    fireEvent.change(screen.getByLabelText('API key'), {
+      target: { value: 'the-api-key' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Connect with key' }))
+    await flush()
+
+    const connectCall = fetchMock.mock.calls.find(
+      ([url]) => url === '/api/harnesses/claude/connection',
+    )
+    expect(JSON.parse(String(connectCall?.[1]?.body))).toEqual({ key: 'the-api-key' })
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['harnesses'] })
   })
 })

@@ -215,6 +215,77 @@ async def test_none_zero_setup_flow_creates_the_operator(tmp_path, monkeypatch, 
     assert await HarnessConnection.get_for_account("claude", account.id)
 
 
+async def test_api_key_connect_stores_the_operator_identity(tmp_path, monkeypatch, druks_db):
+    monkeypatch.setattr(
+        ClaudeHarness,
+        "login_kinds",
+        frozenset({"subscription", "api_key"}),
+    )
+
+    with _header_client(tmp_path) as client:
+        response = client.post(
+            "/api/harnesses/claude/connection",
+            json={"key": "  api-key-value  "},
+            headers={HEADER: "operator@example.com"},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["kind"] == "api_key"
+    assert "api-key-value" not in response.text
+    account = await Account.get_for_username("operator@example.com")
+    connection = await HarnessConnection.get_for_account("claude", account.id)
+    assert connection.kind == "api_key"
+    assert connection.payload == {"apiKey": "api-key-value"}
+    assert connection.provider_email == account.username
+    assert not connection.expires_at
+
+
+async def test_api_key_connect_requires_a_declared_kind(tmp_path, druks_db):
+    with _header_client(tmp_path) as client:
+        response = client.post(
+            "/api/harnesses/claude/connection",
+            json={"key": "api-key-value"},
+            headers={HEADER: "operator@example.com"},
+        )
+
+    assert response.status_code == 422
+
+
+async def test_api_key_connect_rejects_an_empty_key(tmp_path, monkeypatch, druks_db):
+    monkeypatch.setattr(
+        ClaudeHarness,
+        "login_kinds",
+        frozenset({"subscription", "api_key"}),
+    )
+
+    with _header_client(tmp_path) as client:
+        response = client.post(
+            "/api/harnesses/claude/connection",
+            json={"key": "   "},
+            headers={HEADER: "operator@example.com"},
+        )
+
+    assert response.status_code == 422
+
+
+async def test_api_key_connect_refuses_setup_scope(tmp_path, monkeypatch, druks_db):
+    monkeypatch.setattr(
+        ClaudeHarness,
+        "login_kinds",
+        frozenset({"subscription", "api_key"}),
+    )
+
+    with _client(tmp_path) as client:
+        response = client.post(
+            "/api/harnesses/claude/connection",
+            json={"key": "api-key-value"},
+        )
+
+    assert response.status_code == 409
+    assert not await Account.list_non_system()
+    assert not await HarnessConnection.list_all()
+
+
 async def test_concurrent_setup_completions_with_one_email_converge(
     tmp_path, monkeypatch, druks_db
 ):

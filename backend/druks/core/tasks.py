@@ -34,7 +34,7 @@ async def refresh_models() -> None:
         if not connections:
             continue
         preferred = [c for c in connections if c.account_id == fallback_id]
-        settings = await HarnessSettings.require(harness.name)
+        settings = await HarnessSettings.get_registered(harness.name)
         await settings.refresh_models((preferred or connections)[0])
 
 
