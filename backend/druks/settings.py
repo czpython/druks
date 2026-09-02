@@ -221,8 +221,8 @@ class Settings(BaseSettings):
     # ``settings.json`` / ``CLAUDE.md`` + plugin state (plus ``.claude.json`` beside the dir),
     # Codex's ``config.toml`` / ``AGENTS.md`` / MCP ``.credentials.json``, and
     # each CLI's ``skills`` subdir when DRUKS_SKILLS_DIR is unset. Subscription
-    # auth never reads these — credentials live in the DB, written by the
-    # connect flow (Settings → Harnesses). Empty => carry no local config for
+    # auth never reads these — logins live in the DB, written by the
+    # connect flow (Settings → Providers). Empty => carry no local config for
     # that CLI.
     claude_config_dir: OptionalExpandedPath = Field(  # type: ignore[assignment]
         default=Path("~/.claude"),

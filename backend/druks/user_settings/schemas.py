@@ -144,7 +144,7 @@ class AppsSettingsResponse(Schema):
 
 
 class AppsSettingsUpdate(BaseModel):
-    # agent name -> model (null clears, i.e. inherit the family default).
+    # agent name -> model (null clears, i.e. inherit the operator default).
     agent_models: dict[str, str | None] = Field(
         default_factory=dict,
         validation_alias="agentModels",

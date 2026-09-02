@@ -11,7 +11,7 @@ type Phase =
 
 // Resolves who this browser is — the edge (or none-mode locality) asserts
 // identity; druks maps it — then mounts the app, or onboarding while the
-// identity has no harness connection yet. A failed resolution is an edge,
+// identity has no provider login yet. A failed resolution is an edge,
 // configuration, or network problem, never an invitation to onboard.
 export function IdentityBootstrap({
   children,
