@@ -127,7 +127,7 @@ def test_a_shapeless_authorization_header_is_challenged(tmp_path, druks_db, head
 
 @pytest.mark.parametrize("header", ["Bearer a b", "bearer lowercased", "BEARER nope"])
 async def test_any_scheme_case_reaches_authentication_and_fails_closed(tmp_path, druks_db, header):
-    # RFC 7235 schemes are case-insensitive: these parse as credentials and die
+    # RFC 7235 schemes are case-insensitive: these parse as logins and die
     # in authentication — a 401 either way, never a slide to the assertion.
     with _client(tmp_path) as client:
         response = client.get(
@@ -172,15 +172,15 @@ async def test_a_pat_cannot_manage_pats(tmp_path, druks_db):
         assert both.status_code == 401
 
 
-async def test_a_pat_cannot_disconnect_a_harness(tmp_path, druks_db):
+async def test_a_pat_cannot_disconnect_a_provider(tmp_path, druks_db):
     # Disconnect destroys a capability a bearer could never create — the same
     # session-only rule as token management.
     with _client(tmp_path) as client:
         _, token = await _mint("op@example.com")
-        alone = client.delete("/api/harnesses/claude/connection", headers=_bearer(token))
+        alone = client.delete("/api/providers/anthropic/connection", headers=_bearer(token))
         assert alone.status_code == 401
         beside = client.delete(
-            "/api/harnesses/claude/connection", headers={**OPERATOR, **_bearer(token)}
+            "/api/providers/anthropic/connection", headers={**OPERATOR, **_bearer(token)}
         )
         assert beside.status_code == 401
 

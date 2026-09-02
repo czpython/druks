@@ -4,14 +4,14 @@ from pathlib import Path
 
 import httpx
 import pytest
-from conftest import connect_harness
+from conftest import connect_provider
 from druks import database
 from druks.accounts.dependencies import resolve_single_operator
 from druks.accounts.exceptions import AuthConfigurationError
 from druks.accounts.models import Account, PersonalAccessToken
-from druks.harnesses import base as hbase
-from druks.harnesses.claude import ClaudeHarness
-from druks.harnesses.models import HarnessConnection
+from druks.harnesses import providers as pbase
+from druks.harnesses.models import ProviderLogin
+from druks.harnesses.providers import AnthropicProvider
 from druks.testing import configure_app_for_test, make_settings
 from druks.user_settings.models import HarnessSettings, UserSettings
 from fastapi.testclient import TestClient
@@ -45,7 +45,7 @@ def _mock_exchange(monkeypatch, grant: dict):
     async def fake_post(self, url, *, json=None, data=None, **_kwargs):
         return httpx.Response(200, text=_dumps(grant), request=httpx.Request("POST", url))
 
-    monkeypatch.setattr(hbase.httpx.AsyncClient, "post", fake_post)
+    monkeypatch.setattr(pbase.httpx.AsyncClient, "post", fake_post)
 
 
 def _dumps(value: dict) -> str:
@@ -56,18 +56,18 @@ def _connect(
     client: TestClient,
     monkeypatch,
     *,
-    harness: str = "claude",
+    provider: str = "anthropic",
     email: str = "me@example.com",
     headers: dict[str, str] | None = None,
 ):
-    start = client.post(f"/api/harnesses/{harness}/connection/start", headers=headers)
+    start = client.post(f"/api/providers/{provider}/connection/start", headers=headers)
     assert start.status_code == 200
-    if harness == "claude":
+    if provider == "anthropic":
         _mock_exchange(monkeypatch, _grant(email))
     else:
         _mock_exchange_codex(monkeypatch, email=email)
     return client.post(
-        f"/api/harnesses/{harness}/connection/complete",
+        f"/api/providers/{provider}/connection/complete",
         json={"code": "thecode", "connectionId": start.json()["connectionId"]},
         headers=headers,
     )
@@ -90,7 +90,7 @@ def _mock_exchange_codex(monkeypatch, *, email: str):
     async def fake_post(self, url, *, json=None, data=None, **_kwargs):
         return httpx.Response(200, text=_dumps(grant), request=httpx.Request("POST", url))
 
-    monkeypatch.setattr(hbase.httpx.AsyncClient, "post", fake_post)
+    monkeypatch.setattr(pbase.httpx.AsyncClient, "post", fake_post)
 
 
 # --- header mode -----------------------------------------------------------
@@ -151,7 +151,7 @@ async def test_a_valid_pat_wins_over_a_conflicting_header(tmp_path, druks_db):
 
 
 async def test_onboarding_clears_once_the_account_has_a_connection(tmp_path, druks_db):
-    await connect_harness(ClaudeHarness, {"claudeAiOauth": {"accessToken": "x"}})
+    await connect_provider(AnthropicProvider, {"claudeAiOauth": {"accessToken": "x"}})
     with _header_client(tmp_path) as client:
         body = client.get("/api/auth/me", headers={HEADER: "op@example.com"}).json()
     assert body["onboardingRequired"] is False
@@ -161,7 +161,7 @@ async def test_onboarding_clears_once_the_account_has_a_connection(tmp_path, dru
 
 
 async def test_none_mode_ignores_a_present_identity_header(tmp_path, druks_db):
-    await connect_harness(ClaudeHarness, {"claudeAiOauth": {"accessToken": "x"}})
+    await connect_provider(AnthropicProvider, {"claudeAiOauth": {"accessToken": "x"}})
     with _client(tmp_path) as client:
         body = client.get("/api/auth/me", headers={HEADER: "intruder@example.com"}).json()
     assert body["authMode"] == "none"
@@ -179,7 +179,7 @@ def test_none_zero_reads_as_setup(tmp_path, druks_db):
 
 
 async def test_none_one_resolves_the_operator(tmp_path, druks_db):
-    await connect_harness(ClaudeHarness, {"claudeAiOauth": {"accessToken": "x"}})
+    await connect_provider(AnthropicProvider, {"claudeAiOauth": {"accessToken": "x"}})
     with _client(tmp_path) as client:
         body = client.get("/api/auth/me").json()
         assert body["account"]["username"] == "op@example.com"
@@ -212,19 +212,13 @@ async def test_none_zero_setup_flow_creates_the_operator(tmp_path, monkeypatch, 
         assert body["onboardingRequired"] is False
     account = await Account.get_for_username("me@example.com")
     assert (await UserSettings.get()).fallback_account_id == account.id
-    assert await HarnessConnection.get_for_account("claude", account.id)
+    assert await ProviderLogin.get_for_account("anthropic", account.id)
 
 
-async def test_api_key_connect_stores_the_operator_identity(tmp_path, monkeypatch, druks_db):
-    monkeypatch.setattr(
-        ClaudeHarness,
-        "login_kinds",
-        frozenset({"subscription", "api_key"}),
-    )
-
+async def test_api_key_connect_stores_the_operator_identity(tmp_path, druks_db):
     with _header_client(tmp_path) as client:
         response = client.post(
-            "/api/harnesses/claude/connection",
+            "/api/providers/anthropic/connection",
             json={"key": "  api-key-value  "},
             headers={HEADER: "operator@example.com"},
         )
@@ -233,7 +227,7 @@ async def test_api_key_connect_stores_the_operator_identity(tmp_path, monkeypatc
     assert response.json()["kind"] == "api_key"
     assert "api-key-value" not in response.text
     account = await Account.get_for_username("operator@example.com")
-    connection = await HarnessConnection.get_for_account("claude", account.id)
+    connection = await ProviderLogin.get_for_account("anthropic", account.id)
     assert connection.kind == "api_key"
     assert connection.payload == {"api_key": "api-key-value"}
     assert connection.provider_email == account.username
@@ -243,7 +237,7 @@ async def test_api_key_connect_stores_the_operator_identity(tmp_path, monkeypatc
 async def test_api_key_connect_requires_a_declared_kind(tmp_path, druks_db):
     with _header_client(tmp_path) as client:
         response = client.post(
-            "/api/harnesses/claude/connection",
+            "/api/providers/openai-codex/connection",
             json={"key": "api-key-value"},
             headers={HEADER: "operator@example.com"},
         )
@@ -251,16 +245,10 @@ async def test_api_key_connect_requires_a_declared_kind(tmp_path, druks_db):
     assert response.status_code == 422
 
 
-async def test_api_key_connect_rejects_an_empty_key(tmp_path, monkeypatch, druks_db):
-    monkeypatch.setattr(
-        ClaudeHarness,
-        "login_kinds",
-        frozenset({"subscription", "api_key"}),
-    )
-
+async def test_api_key_connect_rejects_an_empty_key(tmp_path, druks_db):
     with _header_client(tmp_path) as client:
         response = client.post(
-            "/api/harnesses/claude/connection",
+            "/api/providers/anthropic/connection",
             json={"key": "   "},
             headers={HEADER: "operator@example.com"},
         )
@@ -268,22 +256,16 @@ async def test_api_key_connect_rejects_an_empty_key(tmp_path, monkeypatch, druks
     assert response.status_code == 422
 
 
-async def test_api_key_connect_refuses_setup_scope(tmp_path, monkeypatch, druks_db):
-    monkeypatch.setattr(
-        ClaudeHarness,
-        "login_kinds",
-        frozenset({"subscription", "api_key"}),
-    )
-
+async def test_api_key_connect_refuses_setup_scope(tmp_path, druks_db):
     with _client(tmp_path) as client:
         response = client.post(
-            "/api/harnesses/claude/connection",
+            "/api/providers/anthropic/connection",
             json={"key": "api-key-value"},
         )
 
     assert response.status_code == 409
     assert not await Account.list_non_system()
-    assert not await HarnessConnection.list_all()
+    assert not await ProviderLogin.list_all()
 
 
 async def test_concurrent_setup_completions_with_one_email_converge(
@@ -291,12 +273,12 @@ async def test_concurrent_setup_completions_with_one_email_converge(
 ):
     with _client(tmp_path) as client:
         # Both flows start while zero accounts exist — both unbound.
-        first = client.post("/api/harnesses/claude/connection/start")
-        second = client.post("/api/harnesses/codex/connection/start")
+        first = client.post("/api/providers/anthropic/connection/start")
+        second = client.post("/api/providers/openai-codex/connection/start")
         _mock_exchange(monkeypatch, _grant("me@example.com"))
         assert (
             client.post(
-                "/api/harnesses/claude/connection/complete",
+                "/api/providers/anthropic/connection/complete",
                 json={"code": "c1", "connectionId": first.json()["connectionId"]},
             ).status_code
             == 200
@@ -304,13 +286,13 @@ async def test_concurrent_setup_completions_with_one_email_converge(
         _mock_exchange_codex(monkeypatch, email="me@example.com")
         assert (
             client.post(
-                "/api/harnesses/codex/connection/complete",
+                "/api/providers/openai-codex/connection/complete",
                 json={"code": "c2", "connectionId": second.json()["connectionId"]},
             ).status_code
             == 200
         )
     assert len(await Account.list_non_system()) == 1
-    assert len(await HarnessConnection.list_all()) == 2
+    assert len(await ProviderLogin.list_all()) == 2
 
 
 async def test_a_stale_unbound_completion_attaches_to_the_operator(tmp_path, monkeypatch, druks_db):
@@ -319,16 +301,16 @@ async def test_a_stale_unbound_completion_attaches_to_the_operator(tmp_path, mon
         # creates the operator, so the second — a different provider email —
         # must attach to that operator instead of minting a rival account and
         # bricking none mode.
-        first = client.post("/api/harnesses/claude/connection/start")
-        second = client.post("/api/harnesses/codex/connection/start")
+        first = client.post("/api/providers/anthropic/connection/start")
+        second = client.post("/api/providers/openai-codex/connection/start")
         _mock_exchange(monkeypatch, _grant("a@example.com"))
         client.post(
-            "/api/harnesses/claude/connection/complete",
+            "/api/providers/anthropic/connection/complete",
             json={"code": "c1", "connectionId": first.json()["connectionId"]},
         )
         _mock_exchange_codex(monkeypatch, email="b@example.com")
         completed = client.post(
-            "/api/harnesses/codex/connection/complete",
+            "/api/providers/openai-codex/connection/complete",
             json={"code": "c2", "connectionId": second.json()["connectionId"]},
         )
         assert completed.status_code == 200
@@ -336,7 +318,7 @@ async def test_a_stale_unbound_completion_attaches_to_the_operator(tmp_path, mon
         assert client.get("/api/settings").status_code == 200
     operator = await Account.get_for_username("a@example.com")
     assert len(await Account.list_non_system()) == 1
-    codex_connection = await HarnessConnection.get_for_account("codex", operator.id)
+    codex_connection = await ProviderLogin.get_for_account("openai-codex", operator.id)
     # The capability keeps its own provider identity; it never rekeys the account.
     assert codex_connection.provider_email == "b@example.com"
 
@@ -345,14 +327,14 @@ async def test_a_connect_survives_a_failed_model_refresh(tmp_path, monkeypatch, 
     async def _refresh_boom(self, connection):
         raise RuntimeError("picker flush failed")
 
-    # The credential commits before the refresh runs; a refresh failure past
+    # The login commits before the refresh runs; a refresh failure past
     # that point must not turn the durable connect into a client-visible error.
     monkeypatch.setattr(HarnessSettings, "refresh_models", _refresh_boom)
     with _client(tmp_path) as client:
         response = _connect(client, monkeypatch, email="me@example.com")
         assert response.status_code == 200
     account = await Account.get_for_username("me@example.com")
-    assert await HarnessConnection.get_for_account("claude", account.id)
+    assert await ProviderLogin.get_for_account("anthropic", account.id)
 
 
 async def test_a_bound_connect_cannot_complete_under_another_operator(
@@ -360,17 +342,17 @@ async def test_a_bound_connect_cannot_complete_under_another_operator(
 ):
     with _header_client(tmp_path) as client:
         start = client.post(
-            "/api/harnesses/claude/connection/start", headers={HEADER: "alice@example.com"}
+            "/api/providers/anthropic/connection/start", headers={HEADER: "alice@example.com"}
         )
         _mock_exchange(monkeypatch, _grant("seat@corp.com"))
         response = client.post(
-            "/api/harnesses/claude/connection/complete",
+            "/api/providers/anthropic/connection/complete",
             json={"code": "thecode", "connectionId": start.json()["connectionId"]},
             headers={HEADER: "bob@example.com"},
         )
         assert response.status_code == 422
         assert "different operator" in response.json()["detail"]
-    assert not any(row.harness == "claude" for row in await HarnessConnection.list_all())
+    assert not any(row.provider == "anthropic" for row in await ProviderLogin.list_all())
 
 
 async def test_first_connection_claims_the_fallback_slot_once(tmp_path, monkeypatch, druks_db):
@@ -381,7 +363,7 @@ async def test_first_connection_claims_the_fallback_slot_once(tmp_path, monkeypa
         _connect(
             client,
             monkeypatch,
-            harness="codex",
+            provider="openai-codex",
             email="other-seat@corp.com",
             headers={HEADER: "second@example.com"},
         )
@@ -396,14 +378,14 @@ async def test_reconnect_records_provider_email_but_keeps_the_operator(
         response = _connect(
             client,
             monkeypatch,
-            harness="codex",
+            provider="openai-codex",
             email="corp-seat@corp.com",
             headers={HEADER: "me@example.com"},
         )
         assert response.status_code == 200
         assert response.json()["username"] == "me@example.com"
     account = await Account.get_for_username("me@example.com")
-    codex = await HarnessConnection.get_for_account("codex", account.id)
+    codex = await ProviderLogin.get_for_account("openai-codex", account.id)
     assert codex.provider_email == "corp-seat@corp.com"
 
 
@@ -412,7 +394,7 @@ async def test_connection_flow_rejects_a_bearer(tmp_path, druks_db):
     _, token = await PersonalAccessToken.create(account_id=agent.id, name="agent")
     with _client(tmp_path) as client:
         response = client.post(
-            "/api/harnesses/claude/connection/start",
+            "/api/providers/anthropic/connection/start",
             headers={"Authorization": f"Bearer {token}"},
         )
         assert response.status_code == 401

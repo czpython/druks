@@ -29,7 +29,7 @@ uv run druks init-db
 
 Settings reads `./druks.toml` from the current directory. The example uses
 `[identity].mode = "none"`. The loopback dashboard has no authentication and
-exactly one operator account. Your first harness connection creates this
+exactly one operator account. Your first provider connection creates this
 account.
 
 To use `header` mode with the development server, set

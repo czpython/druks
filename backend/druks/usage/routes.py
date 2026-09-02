@@ -6,17 +6,17 @@ from druks.accounts.dependencies import current_account
 from druks.accounts.models import Account
 from druks.core.utils.time import operator_local_day
 from druks.harnesses.artifacts import normalize_token_usage
-from druks.harnesses.models import HarnessConnection
-from druks.harnesses.registry import get_harnesses
+from druks.harnesses.models import ProviderLogin
+from druks.harnesses.providers import Provider, get_providers
 from druks.usage.models import UsageScrape
 from druks.usage.reads import list_finished_calls
 from druks.usage.schemas import (
-    UsageHarnessHistory,
-    UsageHarnessSummary,
-    UsageHarnessToday,
     UsageHistoryPoint,
     UsageHistoryResponse,
     UsageMetricSummary,
+    UsageProviderHistory,
+    UsageProviderSummary,
+    UsageProviderToday,
     UsageResponse,
     UsageTodayResponse,
     UsageWindowHistory,
@@ -26,7 +26,7 @@ from druks.user_settings.models import HarnessSettings, UserSettings
 
 router = APIRouter()
 
-# The /today bucket for calls whose model no current harness claims.
+# The /today bucket for calls whose model no current picker claims.
 UNATTRIBUTED = "unattributed"
 
 # An open tab must not hammer the providers.
@@ -50,30 +50,30 @@ _MAX_SPARK_POINTS = 72
 async def get_usage(account: Account = Depends(current_account)) -> UsageResponse:
     now = datetime.now(UTC)
     summaries = []
-    for harness in get_harnesses():
-        connection = await HarnessConnection.get_for_account(harness.name, account.id)
+    for provider in get_providers():
+        login = await ProviderLogin.get_for_account(provider.id, account.id)
         summaries.append(
             _summarize(
-                await UsageScrape.latest_for(harness.name, account.id),
-                name=harness.name,
+                await UsageScrape.latest_for(provider.id, account.id),
+                provider=provider,
                 now=now,
-                connected=bool(connection),
-                provider_email=connection.provider_email if connection else None,
-                is_metered=connection.is_metered if connection else True,
+                connected=bool(login),
+                provider_email=login.provider_email if login else None,
+                is_metered=login.is_metered if login else True,
             )
         )
-    return UsageResponse(harnesses=summaries)
+    return UsageResponse(providers=summaries)
 
 
 @router.post("/refresh")
 async def refresh_usage(account: Account = Depends(current_account)) -> None:
     now = datetime.now(UTC)
-    for harness in get_harnesses():
-        connection = await HarnessConnection.get_for_account(harness.name, account.id)
-        row = await UsageScrape.latest_for(harness.name, account.id)
+    for provider in get_providers():
+        login = await ProviderLogin.get_for_account(provider.id, account.id)
+        row = await UsageScrape.latest_for(provider.id, account.id)
         age = _age_seconds(row.scraped_at, now=now) if row else None
-        if connection and connection.is_metered and (age is None or age >= _REFRESH_FLOOR_SECONDS):
-            await harness.poll_usage(connection)
+        if login and login.is_metered and (age is None or age >= _REFRESH_FLOOR_SECONDS):
+            await provider.poll_usage(login)
 
 
 @router.get(
@@ -84,7 +84,10 @@ async def refresh_usage(account: Account = Depends(current_account)) -> None:
 async def get_usage_history(account: Account = Depends(current_account)) -> UsageHistoryResponse:
     now = datetime.now(UTC)
     return UsageHistoryResponse(
-        harnesses=[await _harness_history(h.name, account.id, now=now) for h in get_harnesses()],
+        providers=[
+            await _provider_history(provider.id, account.id, now=now)
+            for provider in get_providers()
+        ],
     )
 
 
@@ -108,18 +111,18 @@ async def get_usage_today(account: Account = Depends(current_account)) -> UsageT
     # outside the list, or an id that churned): money spent must not vanish from
     # the display, and the strip's total_run_spend_between counts them too.
     # Unclaimed calls land in an extra "unattributed" entry — the panel's
-    # per-harness cards look up by name and skip it, its grand total sums the
+    # per-provider cards look up by id and skip it, its grand total sums the
     # whole list.
-    harness_by_model = {
-        entry["id"]: settings.name
+    provider_by_model = {
+        entry["id"]: settings.harness.provider_for(entry["id"])
         for settings in await HarnessSettings.all()
         for entry in settings.allowed_models
     }
-    names = [h.name for h in get_harnesses()]
-    totals = {name: {"spend": 0.0, "tokens": 0, "runs": 0} for name in [*names, UNATTRIBUTED]}
-    hours: dict[str, list[float]] = {name: [0.0] * 24 for name in [*names, UNATTRIBUTED]}
+    ids = [provider.id for provider in get_providers()]
+    totals = {name: {"spend": 0.0, "tokens": 0, "runs": 0} for name in [*ids, UNATTRIBUTED]}
+    hours: dict[str, list[float]] = {name: [0.0] * 24 for name in [*ids, UNATTRIBUTED]}
     for model, cost_usd, cost_metadata, finished_at in rows:
-        name = harness_by_model.get(model, UNATTRIBUTED)
+        name = provider_by_model.get(model, UNATTRIBUTED)
         bucket = totals[name]
         bucket["runs"] += 1
         usage = normalize_token_usage(cost_metadata)
@@ -129,13 +132,13 @@ async def get_usage_today(account: Account = Depends(current_account)) -> UsageT
             bucket["spend"] += cost_usd
             hours[name][finished_at.astimezone(timezone).hour] += cost_usd
 
-    included = [*names, UNATTRIBUTED] if totals[UNATTRIBUTED]["runs"] else names
+    included = [*ids, UNATTRIBUTED] if totals[UNATTRIBUTED]["runs"] else ids
     return UsageTodayResponse(
         day=local_start.date().isoformat(),
         timezone=timezone_name,
-        harnesses=[
-            UsageHarnessToday(
-                name=name,
+        providers=[
+            UsageProviderToday(
+                id=name,
                 spend_usd=round(float(totals[name]["spend"]), 4),
                 tokens=int(totals[name]["tokens"]),
                 runs=int(totals[name]["runs"]),
@@ -146,8 +149,10 @@ async def get_usage_today(account: Account = Depends(current_account)) -> UsageT
     )
 
 
-async def _harness_history(name: str, account_id: str, *, now: datetime) -> UsageHarnessHistory:
-    rows = await UsageScrape.history_for(name, account_id, since=now - WEEK_RANGE)
+async def _provider_history(
+    provider_id: str, account_id: str, *, now: datetime
+) -> UsageProviderHistory:
+    rows = await UsageScrape.history_for(provider_id, account_id, since=now - WEEK_RANGE)
     five_hour_cutoff = now - FIVE_HOUR_RANGE
     five_hour = [
         UsageHistoryPoint(t=row.scraped_at, pct=row.five_hour_percent_left)
@@ -161,8 +166,8 @@ async def _harness_history(name: str, account_id: str, *, now: datetime) -> Usag
                 weekly_points.setdefault(week["model"], []).append(
                     UsageHistoryPoint(t=row.scraped_at, pct=week["percent_left"])
                 )
-    return UsageHarnessHistory(
-        name=name,
+    return UsageProviderHistory(
+        id=provider_id,
         five_hour=downsample(five_hour, cap=_MAX_SPARK_POINTS),
         weeks=[
             UsageWindowHistory(
@@ -177,23 +182,25 @@ async def _harness_history(name: str, account_id: str, *, now: datetime) -> Usag
 def _summarize(
     row: UsageScrape | None,
     *,
-    name: str,
+    provider: Provider,
     now: datetime,
     connected: bool,
     provider_email: str | None,
     is_metered: bool,
-) -> UsageHarnessSummary:
+) -> UsageProviderSummary:
     if connected and not is_metered:
-        return UsageHarnessSummary(
-            name=name,
+        return UsageProviderSummary(
+            id=provider.id,
+            label=provider.label,
             available=True,
             connected=True,
             provider_email=provider_email,
             unlimited=True,
         )
     if not row:
-        return UsageHarnessSummary(
-            name=name,
+        return UsageProviderSummary(
+            id=provider.id,
+            label=provider.label,
             available=False,
             connected=connected,
             provider_email=provider_email,
@@ -205,8 +212,9 @@ def _summarize(
             percent_left=row.five_hour_percent_left,
             resets_at=row.five_hour_resets_at,
         )
-    return UsageHarnessSummary(
-        name=name,
+    return UsageProviderSummary(
+        id=provider.id,
+        label=provider.label,
         available=row.parse_ok,
         connected=connected,
         provider_email=provider_email,

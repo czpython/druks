@@ -502,25 +502,34 @@ export interface AllowedModel {
  * harness's namespace runs. */
 export interface Harness {
   name: string
-  provider: string
+  /** The provider a subscription CLI is bound to; null for a key CLI. */
+  provider: string | null
+  loginKinds: string[]
   model: string
   allowedModels: AllowedModel[]
   fastMode: boolean
   effort: string
   timeout: number
-  // The requesting account's own connection; false until this account connects.
-  connected: boolean
-  kind: string | null
-  loginKinds: string[]
-  account: string | null
-  /** The email the provider reported at connect — display, never authority. */
-  providerEmail: string | null
-  expiresAt: string | null
 }
 
-export interface SetupHarness {
-  name: string
+/** One model provider — who answers and bills a request. An account holds at
+ * most one credential per provider, and every harness that drives the
+ * provider runs on it. */
+export interface Provider {
+  id: string
+  label: string
   loginKinds: string[]
+}
+
+/** One account's login at one provider. */
+export interface ProviderLogin {
+  provider: string
+  kind: string
+  /** The email the provider reported at connect — display, never authority. */
+  providerEmail: string
+  expiresAt: string | null
+  // False once the token has expired.
+  connected: boolean
 }
 
 export interface Account {
@@ -530,7 +539,7 @@ export interface Account {
 
 /** What /api/auth/me answers: how this deployment authenticates, who the
  * request resolved to (null in the none/zero setup state), and whether that
- * identity still needs its first harness connection. */
+ * identity still needs its first provider credential. */
 export interface Identity {
   authMode: 'none' | 'header' | 'jwt'
   account: Account | null
@@ -728,9 +737,10 @@ export interface UsageMetric {
   model: string | null
 }
 
-export interface UsageHarnessSummary {
-  // Panels, colors, and legends key off the registered harness name.
-  name: string
+export interface UsageProviderSummary {
+  // Panels, colors, and legends key off the registered provider id.
+  id: string
+  label: string
   available: boolean
   /** The requesting account has its own connection; false renders a connect action. */
   connected: boolean
@@ -749,7 +759,7 @@ export interface UsageHarnessSummary {
 }
 
 export interface UsageResponse {
-  harnesses: UsageHarnessSummary[]
+  providers: UsageProviderSummary[]
 }
 
 export interface UsageHistoryPoint {
@@ -762,18 +772,18 @@ export interface UsageWindowHistory {
   points: UsageHistoryPoint[]
 }
 
-export interface UsageHarnessHistory {
-  name: string
+export interface UsageProviderHistory {
+  id: string
   fiveHour: UsageHistoryPoint[]
   weeks: UsageWindowHistory[]
 }
 
 export interface UsageHistoryResponse {
-  harnesses: UsageHarnessHistory[]
+  providers: UsageProviderHistory[]
 }
 
-export interface UsageHarnessToday {
-  name: string
+export interface UsageProviderToday {
+  id: string
   spendUsd: number
   tokens: number
   runs: number
@@ -784,7 +794,7 @@ export interface UsageHarnessToday {
 export interface UsageTodayResponse {
   day: string
   timezone: string
-  harnesses: UsageHarnessToday[]
+  providers: UsageProviderToday[]
 }
 
 export const ALLOWED_EFFORTS: readonly AgentEffort[] = ['low', 'medium', 'high']

@@ -76,14 +76,14 @@ Success means the Compose services are up and the health endpoint returns
 
 ## 3. Connect agent harnesses
 
-Open **Settings → Harnesses** in the dashboard and connect Claude and Codex.
+Open **Settings → Providers** in the dashboard and connect Anthropic and ChatGPT.
 Druks stores those subscription credentials in Postgres and writes a fresh
 credential file into each sandbox. It does not use host CLI login files.
 The local profile uses `[identity].mode = "none"`. It has no browser
 authentication and exactly one operator account.
 
 A new installation shows its
-setup page until the first harness connection completes. That connection
+setup page until the first provider connection completes. That connection
 creates the operator account from the provider-verified email. Protect database
 access and backups as credential data. Harness payloads do not use the
 `[secrets].secrets_key` envelope that protects MCP tokens and OAuth grants.

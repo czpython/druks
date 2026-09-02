@@ -11,11 +11,11 @@ from druks.db import Base, db_session
 class UsageScrape(Base):
     __tablename__ = "usage_scrapes"
     __table_args__ = (
-        Index("usage_scrapes_account_harness_time_idx", "account_id", "harness", "scraped_at"),
+        Index("usage_scrapes_account_provider_time_idx", "account_id", "provider", "scraped_at"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    harness: Mapped[str]  # a registered harness name (get_harnesses())
+    provider: Mapped[str]  # a registered provider id (get_providers())
     # The account this snapshot describes.
     account_id: Mapped[str] = mapped_column(ForeignKey("accounts.id", ondelete="RESTRICT"))
     scraped_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
@@ -44,10 +44,10 @@ class UsageScrape(Base):
     unlimited: Mapped[bool] = mapped_column(default=False)
 
     @classmethod
-    async def latest_for(cls, harness: str, account_id: str) -> "UsageScrape | None":
+    async def latest_for(cls, provider_id: str, account_id: str) -> "UsageScrape | None":
         stmt = (
             select(cls)
-            .where(cls.harness == harness, cls.account_id == account_id)
+            .where(cls.provider == provider_id, cls.account_id == account_id)
             .order_by(cls.scraped_at.desc())
             .limit(1)
         )
@@ -55,14 +55,14 @@ class UsageScrape(Base):
 
     @classmethod
     async def history_for(
-        cls, harness: str, account_id: str, *, since: datetime
+        cls, provider_id: str, account_id: str, *, since: datetime
     ) -> list["UsageScrape"]:
-        """The account's successful scrapes for ``harness`` since ``since``,
+        """The account's successful scrapes for ``provider_id`` since ``since``,
         oldest first. Feeds the usage page's trend sparklines / burn-rate
         math, so failed scrapes (no percentages) are excluded."""
         stmt = (
             select(cls)
-            .where(cls.harness == harness, cls.account_id == account_id)
+            .where(cls.provider == provider_id, cls.account_id == account_id)
             .where(cls.scraped_at >= since)
             .where(cls.parse_ok.is_(True))
             .order_by(cls.scraped_at.asc())

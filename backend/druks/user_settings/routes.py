@@ -2,13 +2,11 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from druks.accounts.dependencies import current_account, current_session_account
-from druks.accounts.models import Account
+from druks.accounts.dependencies import current_session_account
 from druks.apps.loader import get_app, iter_apps
 from druks.apps.registry import workflows
 from druks.durable.engine import apply_schedules
 from druks.harnesses.exceptions import HarnessError
-from druks.harnesses.models import HarnessConnection
 from druks.harnesses.registry import get_harness_for_model, get_harnesses
 from druks.notifications.models import Destination
 
@@ -45,29 +43,18 @@ async def _resolve_harness(name: str) -> tuple[type, HarnessSettings]:
     raise HTTPException(status_code=404, detail=f"Unknown harness: {name!r}")
 
 
-async def _harness_response(settings: HarnessSettings, account: Account) -> HarnessResponse:
-    connection = await HarnessConnection.get_for_account(settings.name, account.id)
-    return HarnessResponse.from_row(settings, connection, account)
-
-
-# Connection state is the requesting operator's own connection —
-# connect/disconnect live on the /api/harnesses connection surface, not here.
 @router.get("/harnesses", response_model=list[HarnessResponse], response_model_by_alias=True)
-async def list_harness_settings(
-    account: Account = Depends(current_account),
-) -> list[HarnessResponse]:
+async def list_harness_settings() -> list[HarnessResponse]:
     registered = {harness.name for harness in get_harnesses()}
     return [
-        await _harness_response(row, account)
+        HarnessResponse.from_row(row)
         for row in await HarnessSettings.all()
         if row.name in registered
     ]
 
 
 @router.patch("/harnesses/{name}", response_model=HarnessResponse, response_model_by_alias=True)
-async def update_harness_settings(
-    name: str, body: HarnessUpdate, account: Account = Depends(current_account)
-) -> HarnessResponse:
+async def update_harness_settings(name: str, body: HarnessUpdate) -> HarnessResponse:
     harness, row = await _resolve_harness(name)
     updates = body.model_dump(exclude_unset=True, by_alias=False)
     if "model" in updates:
@@ -84,7 +71,7 @@ async def update_harness_settings(
     _validate_timeout(updates.get("timeout"))
     if updates:
         await row.update(**updates)
-    return await _harness_response(row, account)
+    return HarnessResponse.from_row(row)
 
 
 @router.get("", response_model=UserSettingsResponse, response_model_by_alias=True)

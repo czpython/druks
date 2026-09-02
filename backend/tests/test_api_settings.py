@@ -3,7 +3,6 @@ from pathlib import Path
 from druks.contrib.review.app import Review
 from druks.contrib.software_factory.app import SoftwareFactory
 from druks.database import db_session
-from druks.harnesses.claude import ClaudeHarness
 from druks.testing import configure_app_for_test, make_settings
 from druks.user_settings.models import SettingsOverride
 from fastapi.testclient import TestClient
@@ -31,113 +30,11 @@ def test_get_harnesses_lists_seeded_defaults(tmp_path: Path):
     assert harnesses["claude"]["model"] == "claude-opus-4-7"
     claude_model_ids = [m["id"] for m in harnesses["claude"]["allowedModels"]]
     assert "claude-sonnet-4-6" in claude_model_ids
-    assert harnesses["codex"]["provider"] == "openai"
+    assert harnesses["codex"]["provider"] == "openai-codex"
+    assert harnesses["pi"]["provider"] is None
+    assert harnesses["pi"]["loginKinds"] == ["api_key"]
     assert (harnesses["codex"]["effort"], harnesses["codex"]["timeout"]) == ("high", 1800)
-
-
-def test_harness_response_carries_sorted_login_kinds(tmp_path: Path, monkeypatch):
-    monkeypatch.setattr(
-        ClaudeHarness,
-        "login_kinds",
-        frozenset({"subscription", "api_key"}),
-    )
-
-    with _build_client(tmp_path) as client:
-        harnesses = {h["name"]: h for h in client.get("/api/settings/harnesses").json()}
-
-    assert harnesses["claude"]["loginKinds"] == ["api_key", "subscription"]
-    assert harnesses["codex"]["loginKinds"] == ["subscription"]
-
-
-def test_harness_response_carries_connection_state(tmp_path: Path):
-    with _build_client(tmp_path) as client:
-        claude = {h["name"]: h for h in client.get("/api/settings/harnesses").json()}["claude"]
-    assert claude["connected"] is False
-    assert not claude["account"]
-    assert not claude["providerEmail"]
-    assert "expiresAt" in claude
-
-
-async def test_harnesses_show_only_the_requesting_accounts_connection(tmp_path: Path, druks_db):
-    from conftest import connect_harness
-    from druks.harnesses.claude import ClaudeHarness
-
-    # The suite's identity gate stands in op@example.com; another account's
-    # connection never shows on this card.
-    await connect_harness(
-        ClaudeHarness,
-        {"claudeAiOauth": {"accessToken": "x"}},
-        provider_email="someone-else@example.com",
-    )
-    with _build_client(tmp_path) as client:
-        claude = {h["name"]: h for h in client.get("/api/settings/harnesses").json()}["claude"]
-    assert claude["connected"] is False
-
-
-async def test_harness_card_reports_identity(tmp_path: Path, druks_db):
-    from druks.accounts.models import Account
-    from druks.harnesses.models import HarnessConnection
-
-    # The provider identity is display, never authority.
-    await HarnessConnection.connect(
-        harness="claude",
-        account=await Account.get_or_create("op@example.com"),
-        payload={"claudeAiOauth": {"accessToken": "x"}},
-        expires_at=None,
-        provider_email="seat@corp.com",
-    )
-    with _build_client(tmp_path) as client:
-        claude = {h["name"]: h for h in client.get("/api/settings/harnesses").json()}["claude"]
-    assert claude["connected"] is True
-    assert claude["account"] == "op@example.com"
-    assert claude["providerEmail"] == "seat@corp.com"
-
-
-async def test_harness_card_reads_expired_token_as_not_connected(tmp_path: Path, druks_db):
-    from datetime import UTC, datetime, timedelta
-
-    from druks.accounts.models import Account
-    from druks.harnesses.models import HarnessConnection
-
-    await HarnessConnection.connect(
-        harness="claude",
-        account=await Account.get_or_create("op@example.com"),
-        payload={"claudeAiOauth": {"accessToken": "x"}},
-        expires_at=datetime.now(UTC) - timedelta(hours=1),
-        provider_email="seat@corp.com",
-    )
-    with _build_client(tmp_path) as client:
-        claude = {h["name"]: h for h in client.get("/api/settings/harnesses").json()}["claude"]
-    assert claude["connected"] is False
-
-
-async def test_disconnect_removes_only_the_requesting_accounts_connection(tmp_path: Path, druks_db):
-    from conftest import connect_harness
-    from druks.harnesses.claude import ClaudeHarness
-    from druks.harnesses.models import HarnessConnection
-
-    mine = await connect_harness(ClaudeHarness, {"claudeAiOauth": {"accessToken": "x"}})
-    other = await connect_harness(
-        ClaudeHarness,
-        {"claudeAiOauth": {"accessToken": "y"}},
-        provider_email="someone-else@example.com",
-    )
-    mine_id, other_id = mine.id, other.id
-    with _build_client(tmp_path) as client:
-        response = client.delete("/api/harnesses/claude/connection")
-    assert response.status_code == 200
-    assert response.json()["connected"] is False
-    # The request deleted in its own task-scoped session; read past this
-    # task's identity map for what actually persisted.
-    assert not await HarnessConnection.reload(mine_id)
-    assert await HarnessConnection.reload(other_id)
-
-
-def test_disconnect_without_a_connection_is_a_no_op(tmp_path: Path):
-    with _build_client(tmp_path) as client:
-        response = client.delete("/api/harnesses/claude/connection")
-    assert response.status_code == 200
-    assert response.json()["connected"] is False
+    assert "connected" not in harnesses["claude"]
 
 
 def test_patch_settings_persists_valid_iana_zone(tmp_path: Path, monkeypatch):

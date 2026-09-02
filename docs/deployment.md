@@ -110,7 +110,7 @@ docker compose ps
 curl -fsS http://127.0.0.1:8001/health
 ```
 
-Then connect Claude and Codex from **Settings → Harnesses → Connect**. Each card
+Then connect Anthropic and ChatGPT from **Settings → Providers → Connect**. Each card
 opens the provider authorization page. Paste the returned code into the card.
 Subscription tokens live in the database, not in a host CLI login. Agent runs
 do not start with a disconnected harness.

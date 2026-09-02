@@ -428,7 +428,7 @@ async def test_get_usage_is_a_bounded_pure_read(druks_db, account):
         )
     for tick in range(40):
         await UsageScrape(
-            harness="claude",
+            provider="anthropic",
             account_id=account.id,
             scraped_at=now - timedelta(minutes=5 * tick),
             plan_tier="max",
@@ -454,7 +454,7 @@ async def test_get_usage_is_a_bounded_pure_read(druks_db, account):
     assert usage.runs_today == 30
     assert usage.spend_today_usd == pytest.approx(15.0)
     assert usage.tokens_today == sum(100 + i for i in range(30))
-    claude = next(h for h in usage.harnesses if h.name == "claude")
+    claude = next(h for h in usage.providers if h.id == "anthropic")
     assert claude.plan_tier == "max"
     assert claude.five_hour_percent_left == 90
     assert claude.week_percent_left == 40

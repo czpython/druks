@@ -79,7 +79,7 @@ Distinguish the failure by what you see:
   the configuration. For signature or key errors, examine `identity.jwks_url`.
   For issuer or audience errors, examine the related claim setting. For expiry
   errors, compare the clocks of the edge and host.
-- If onboarding asks you to connect a harness, complete that connection.
+- If onboarding asks you to connect a provider, complete that connection.
 - If `none` mode returns 503, remove extra accounts or switch to `header` mode.
 - If a run refuses to start, connect its selected harness.
 
@@ -134,7 +134,7 @@ Examine the MCP path:
 
 ### Harness not connected or expired
 
-Open **Settings → Harnesses** and reconnect the selected Claude or Codex
+Open **Settings → Providers** and reconnect the selected Anthropic or ChatGPT
 harness. Host CLI logins do not count. Druks validates the database credential
 before provisioning a sandbox.
 

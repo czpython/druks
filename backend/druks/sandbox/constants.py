@@ -11,3 +11,22 @@ SANDBOX_HOST_ROTATE_BEFORE_SECONDS = MAX_AGENT_TIMEOUT_SECONDS + 10 * 60  # 75 m
 # a refresh runs, and the zset of active users scored by expiry.
 ROTATING_PREFIX = "druks:sandbox:rotating:"
 GATE_USERS_PREFIX = "druks:sandbox:gate:users:"
+
+# Tar excludes for every tree copied into a sandbox home. These never carry
+# value into the VM and dominate upload time when shipped naively:
+#
+# - ``.in_use`` — Claude's plugin cache writes a marker file per *host* PID
+#   to track which processes pin a plugin version. The VM has a fresh PID
+#   space, so our host's markers are meaningless noise — and there are
+#   thousands of them across the plugin tree.
+# - ``.git`` — marketplace plugin checkouts ship the full repo metadata.
+# - ``node_modules`` — some plugins (e.g. ones with TS tooling) ship deps
+#   that re-install fine inside the VM.
+# - ``__pycache__`` / ``*.pyc`` — Python bytecode is host-arch sensitive.
+DEFAULT_DIR_EXCLUDES: tuple[str, ...] = (
+    ".in_use",
+    ".git",
+    "node_modules",
+    "__pycache__",
+    "*.pyc",
+)

@@ -23,7 +23,8 @@ from .apps.loader import iter_apps
 from .apps.registry import _ROLES, agents, autodiscover, services, webhooks, workflows
 from .core.apis.github import get_github_client
 from .database import create_async_engine_from_url, create_engine_from_url, session_scope
-from .harnesses.models import HarnessConnection
+from .harnesses.models import ProviderLogin
+from .harnesses.providers import get_providers
 from .harnesses.registry import get_harnesses
 from .sandbox.client import sandbox_client
 from .sandbox.exceptions import TemplateNotFound
@@ -139,29 +140,27 @@ async def check_installations(settings: Settings) -> CheckResult:
     )
 
 
-def _harness_credential_check(
-    name: str, *, connected: bool, expires_at: datetime | None
-) -> CheckResult:
-    check_name = f"{name}_credentials"
+def _login_check(provider_id: str, *, connected: bool, expires_at: datetime | None) -> CheckResult:
+    check_name = f"{provider_id}_login"
     if not connected:
         return CheckResult(
             check_name,
             ok=False,
             pending=True,
-            detail=f"not connected — connect {name} in Settings.",
+            detail=f"not connected — connect {provider_id} in Settings.",
         )
     if expires_at and expires_at <= datetime.now(UTC):
         return CheckResult(
             check_name,
             ok=False,
-            detail=f"token expired {expires_at.isoformat()} — reconnect {name}.",
+            detail=f"token expired {expires_at.isoformat()} — reconnect {provider_id}.",
         )
     detail = f"connected; token expires {expires_at.isoformat()}" if expires_at else "connected"
     return CheckResult(check_name, ok=True, detail=detail)
 
 
-def check_harness_credentials(settings: Settings) -> list[CheckResult]:
-    # One result per registered harness, so a newly-registered one is covered
+def check_provider_logins(settings: Settings) -> list[CheckResult]:
+    # One result per registered provider, so a newly-registered one is covered
     # without editing doctor. Credentials live in the DB: this reports the row's
     # presence + expiry, not a host file. A plain session reads it directly —
     # doctor is a one-off, so it never binds the ambient db_session registry.
@@ -174,16 +173,16 @@ def check_harness_credentials(settings: Settings) -> list[CheckResult]:
                 )
             )
             results: list[CheckResult] = []
-            for harness in get_harnesses():
+            for provider in get_providers():
                 row = session.scalar(
-                    select(HarnessConnection).where(
-                        HarnessConnection.harness == harness.name,
-                        HarnessConnection.account_id == fallback_id,
+                    select(ProviderLogin).where(
+                        ProviderLogin.provider == provider.id,
+                        ProviderLogin.account_id == fallback_id,
                     )
                 )
                 results.append(
-                    _harness_credential_check(
-                        harness.name,
+                    _login_check(
+                        provider.id,
                         connected=bool(row),
                         expires_at=row.expires_at if row else None,
                     )
@@ -191,9 +190,7 @@ def check_harness_credentials(settings: Settings) -> list[CheckResult]:
             return results
     except Exception as error:  # noqa: BLE001 — a DB-read failure is one fail, not a doctor crash
         return [
-            CheckResult(
-                name="harness_credentials", ok=False, detail=f"cannot read credentials: {error}"
-            )
+            CheckResult(name="provider_logins", ok=False, detail=f"cannot read logins: {error}")
         ]
     finally:
         engine.dispose()
@@ -546,7 +543,7 @@ CHECKS = (
     check_webhook_ingress,
     check_service_identities,
     check_installations,
-    check_harness_credentials,
+    check_provider_logins,
     check_data_dir,
     check_database,
     check_redis,
@@ -558,8 +555,8 @@ CHECKS = (
 
 
 async def run_checks(settings: Settings, *, sandbox: bool = False) -> list[CheckResult]:
-    # A check yields one result, or several (check_harness_credentials fans out
-    # over the harness registry).
+    # A check yields one result, or several (check_provider_logins fans out
+    # over the provider registry).
     results: list[CheckResult] = []
     for check in CHECKS:
         outcome = check(settings)

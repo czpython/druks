@@ -6,9 +6,10 @@ import type { UsageHistoryResponse, UsageResponse, UsageTodayResponse } from '..
 import { UsagePanel } from './UsagePanel'
 
 const usage: UsageResponse = {
-  harnesses: [
+  providers: [
     {
-      name: 'claude',
+      id: 'anthropic',
+      label: 'Anthropic',
       available: true,
       connected: true,
       providerEmail: 'subscription@example.com',
@@ -29,9 +30,9 @@ const usage: UsageResponse = {
 }
 
 const history: UsageHistoryResponse = {
-  harnesses: [
+  providers: [
     {
-      name: 'claude',
+      id: 'anthropic',
       fiveHour: [],
       weeks: [
         {
@@ -49,7 +50,7 @@ const history: UsageHistoryResponse = {
 const today: UsageTodayResponse = {
   day: '2026-08-01',
   timezone: 'UTC',
-  harnesses: [],
+  providers: [],
 }
 
 function stubFetch(summary: UsageResponse = usage, usageHistory: UsageHistoryResponse = history) {
@@ -87,7 +88,7 @@ describe('UsagePanel', () => {
     expect(await screen.findByText('subscription@example.com')).toBeTruthy()
   })
 
-  it('pages model-scoped weekly capacity without exhausting the harness', async () => {
+  it('pages model-scoped weekly capacity without exhausting the provider', async () => {
     stubFetch()
     const { container } = renderPanel()
 
@@ -98,8 +99,8 @@ describe('UsagePanel', () => {
     expect(screen.getByText('0%')).toBeTruthy()
     expect(container.querySelector('.us-week-carousel .us-spark')).toBeTruthy()
     expect(container.querySelectorAll('.us-week-dot')).toHaveLength(2)
-    expect(screen.getByText(/New claude runs on Fable will fail until the window resets/)).toBeTruthy()
-    expect(screen.queryByText(/New claude runs will fail until the window resets/)).toBeNull()
+    expect(screen.getByText(/New Anthropic runs on Fable will fail until the window resets/)).toBeTruthy()
+    expect(screen.queryByText(/New Anthropic runs will fail until the window resets/)).toBeNull()
 
     fireEvent.click(screen.getByRole('button', { name: 'Next weekly window' }))
 
@@ -110,9 +111,9 @@ describe('UsagePanel', () => {
 
   it('pages between weekly windows with the same scope', async () => {
     const duplicateScopes: UsageResponse = {
-      harnesses: [
+      providers: [
         {
-          ...usage.harnesses[0]!,
+          ...usage.providers[0]!,
           weeks: [
             { percentLeft: 80, resetsAt: null, model: null },
             { percentLeft: 10, resetsAt: null, model: null },
@@ -121,9 +122,9 @@ describe('UsagePanel', () => {
       ],
     }
     const duplicateHistory: UsageHistoryResponse = {
-      harnesses: [
+      providers: [
         {
-          name: 'claude',
+          id: 'anthropic',
           fiveHour: [],
           weeks: [
             { model: null, points: [] },

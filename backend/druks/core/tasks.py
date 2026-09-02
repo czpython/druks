@@ -2,7 +2,8 @@ import logging
 
 from druks.files.storage import reap_deleted_file_bytes
 from druks.harnesses.datastructures import RotationResult
-from druks.harnesses.models import HarnessConnection
+from druks.harnesses.models import ProviderLogin
+from druks.harnesses.providers import get_provider
 from druks.harnesses.registry import get_harnesses
 from druks.sandbox import gate
 from druks.user_settings.models import HarnessSettings, UserSettings
@@ -29,56 +30,53 @@ async def refresh_tokens() -> None:
 @task(every="0 6 * * *")
 async def refresh_models() -> None:
     fallback_id = (await UserSettings.get()).fallback_account_id
+    logins = await ProviderLogin.list_all()
     for harness in get_harnesses():
-        connections = await HarnessConnection.list_for_harness(harness.name)
-        if not connections:
+        usable = [login for login in logins if harness.accepts(login)]
+        if not usable:
             continue
-        preferred = [c for c in connections if c.account_id == fallback_id]
+        preferred = [c for c in usable if c.account_id == fallback_id]
         settings = await HarnessSettings.get_registered(harness.name)
-        await settings.refresh_models((preferred or connections)[0])
+        await settings.refresh_models((preferred or usable)[0])
 
 
 async def _refresh() -> dict[str, object]:
-    by_name = {harness.name: harness for harness in get_harnesses()}
-    connections = [
-        connection
-        for connection in await HarnessConnection.list_all()
-        if connection.supports_refresh and connection.harness in by_name
-    ]
+    logins = [login for login in await ProviderLogin.list_all() if login.supports_refresh]
 
     # A refresh 401s a VM mid-call holding the old token, so a due rotation
-    # runs only while its connection is idle — busy defers to the next tick;
+    # runs only while its login is idle — busy defers to the next tick;
     # urgent rotates regardless. rotate_token no-ops rows outside their
     # margin. Snapshot plain values: each refresh commits and expires the
     # session's ORM objects mid-loop.
     rows = [
         (
-            connection.harness,
-            connection.id,
-            by_name[connection.harness].needs_refresh(connection),
-            by_name[connection.harness].refresh_is_urgent(connection),
+            login.provider,
+            login.id,
+            get_provider(login.provider).needs_refresh(login),
+            get_provider(login.provider).refresh_is_urgent(login),
         )
-        for connection in connections
+        for login in logins
     ]
 
     results: list[RotationResult] = []
-    for harness_name, connection_id, is_due, is_urgent in rows:
+    for provider_id, login_id, is_due, is_urgent in rows:
+        provider = get_provider(provider_id)
         if is_due:
-            async with gate.shut(connection_id) as is_idle:
+            async with gate.shut(login_id) as is_idle:
                 if is_idle or is_urgent:
-                    result = await by_name[harness_name].rotate_token(connection_id)
+                    result = await provider.rotate_token(login_id)
                 else:
-                    result = RotationResult(harness_name, "busy", connection_id=connection_id)
+                    result = RotationResult(provider_id, "busy", login_id=login_id)
         else:
-            result = await by_name[harness_name].rotate_token(connection_id)
+            result = await provider.rotate_token(login_id)
         _log_result(result)
         results.append(result)
 
     return {
         "results": [
             {
-                "harness": r.harness,
-                "connection_id": r.connection_id,
+                "provider": r.provider,
+                "login_id": r.login_id,
                 "action": r.action,
                 "error": r.error,
             }
@@ -90,13 +88,15 @@ async def _refresh() -> dict[str, object]:
 def _log_result(result: RotationResult) -> None:
     if result.action == "busy":
         logger.info(
-            "deferring %s rotation for login %s; calls active", result.harness, result.connection_id
+            "deferring %s rotation for login %s; calls active",
+            result.provider,
+            result.login_id,
         )
     elif result.action == "refreshed":
         logger.info(
             "refreshed %s token for login %s; expires_at=%s",
-            result.harness,
-            result.connection_id,
+            result.provider,
+            result.login_id,
             result.expires_at,
         )
     elif result.action == "failed" and result.error != "no_credentials":
@@ -104,14 +104,14 @@ def _log_result(result: RotationResult) -> None:
         # no_credentials is a row deleted mid-tick, not a failure — stay quiet.
         logger.warning(
             "token refresh failed for %s login %s: %s",
-            result.harness,
-            result.connection_id,
+            result.provider,
+            result.login_id,
             result.error,
         )
     elif result.action == "no_refresh_token":
         logger.warning(
             "%s login %s has no refresh token; cannot keep it alive",
-            result.harness,
-            result.connection_id,
+            result.provider,
+            result.login_id,
         )
     # "fresh" and "locked" (another worker owns this row's refresh) are quiet no-ops.

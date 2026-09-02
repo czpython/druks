@@ -1,13 +1,12 @@
 import { useEffect, useState, type CSSProperties } from 'react'
 
 import { harnessColors } from '../lib/harnessColors'
-import { harnessLabel } from '../lib/harnessDisplay'
 import { usageTone, type UsageTone } from '../lib/usageHealth'
 import { useUsage, useUsageHistory, useUsageToday } from '../lib/useUsage'
 import type {
-  UsageHarnessHistory,
-  UsageHarnessSummary,
-  UsageHarnessToday,
+  UsageProviderHistory,
+  UsageProviderSummary,
+  UsageProviderToday,
   UsageHistoryPoint,
   UsageMetric,
   UsageTodayResponse,
@@ -68,9 +67,9 @@ export function UsagePanel() {
     }
   }
 
-  const ages = data.harnesses.map((h) => h.ageSeconds).filter((v): v is number => v !== null)
+  const ages = data.providers.map((h) => h.ageSeconds).filter((v): v is number => v !== null)
   const updatedLabel = ages.length > 0 ? `updated ${formatAge(Math.min(...ages))} ago` : ''
-  const harnessColor = harnessColors(data.harnesses.map((h) => h.name))
+  const harnessColor = harnessColors(data.providers.map((h) => h.id))
 
   return (
     <section className="us-col">
@@ -90,16 +89,16 @@ export function UsagePanel() {
         </button>
       </header>
 
-      <ExhaustionAlert harnesses={data.harnesses} />
+      <ExhaustionAlert providers={data.providers} />
 
       <div className="us-grid">
-        {data.harnesses.map((usage) => (
+        {data.providers.map((usage) => (
           <ProviderPanel
-            key={usage.name}
+            key={usage.id}
             usage={usage}
-            color={harnessColor[usage.name]}
-            history={history?.harnesses.find((h) => h.name === usage.name)}
-            today={today?.harnesses.find((t) => t.name === usage.name)}
+            color={harnessColor[usage.id]}
+            history={history?.providers.find((h) => h.id === usage.id)}
+            today={today?.providers.find((t) => t.id === usage.id)}
           />
         ))}
       </div>
@@ -112,13 +111,14 @@ export function UsagePanel() {
 // ---- Exhaustion banner ------------------------------------------------------
 
 interface Exhausted {
-  harness: string
+  provider: string
+  label: string
   windowLabel: string
   resetsAt: string | null
   model: string | null
 }
 
-function findExhausted(usage: UsageHarnessSummary): Exhausted | null {
+function findExhausted(usage: UsageProviderSummary): Exhausted | null {
   if (!usage.available || usage.unlimited) return null
   const windows = usage.weeks.map((metric) => ({ label: 'weekly', metric }))
   if (usage.fiveHour) windows.unshift({ label: '5-hour', metric: usage.fiveHour })
@@ -127,14 +127,15 @@ function findExhausted(usage: UsageHarnessSummary): Exhausted | null {
   const exhausted = empty.find(({ metric }) => !metric.model) ?? empty[0]
   if (!exhausted) return null
   return {
-    harness: usage.name,
+    provider: usage.id,
+    label: usage.label,
     windowLabel: exhausted.label,
     resetsAt: exhausted.metric.resetsAt,
     model: exhausted.metric.model,
   }
 }
 
-function hasCapacity(usage: UsageHarnessSummary): boolean {
+function hasCapacity(usage: UsageProviderSummary): boolean {
   if (!usage.available) return false
   if (usage.unlimited) return true
   const windows = usage.fiveHour ? [usage.fiveHour, ...usage.weeks] : usage.weeks
@@ -143,19 +144,19 @@ function hasCapacity(usage: UsageHarnessSummary): boolean {
   return !unscopedExhausted && hasRoom
 }
 
-function ExhaustionAlert({ harnesses }: { harnesses: UsageHarnessSummary[] }) {
+function ExhaustionAlert({ providers }: { providers: UsageProviderSummary[] }) {
   const now = useNow(1000)
-  const exhaustedWindows = harnesses
+  const exhaustedWindows = providers
     .map(findExhausted)
     .filter((window): window is Exhausted => window !== null)
   const exhausted = exhaustedWindows.find((window) => !window.model) ?? exhaustedWindows[0] ?? null
   if (!exhausted) return null
 
-  const alternative = harnesses.find((h) => h.name !== exhausted.harness && hasCapacity(h))
+  const alternative = providers.find((h) => h.id !== exhausted.provider && hasCapacity(h))
   const resetSeconds = secondsUntil(exhausted.resetsAt, now)
   const title = exhausted.model
     ? `${exhausted.model} ${exhausted.windowLabel} limit reached`
-    : `${harnessLabel(exhausted.harness)} ${exhausted.windowLabel} limit reached`
+    : `${exhausted.label} ${exhausted.windowLabel} limit reached`
 
   return (
     <div className="us-alert" role="alert">
@@ -172,15 +173,15 @@ function ExhaustionAlert({ harnesses }: { harnesses: UsageHarnessSummary[] }) {
         <div className="us-alert-sub">
           {exhausted.model ? (
             <span>
-              New {exhausted.harness} runs on {exhausted.model} will fail until the window resets.{' '}
-              <b>{harnessLabel(exhausted.harness)} still has capacity for other models.</b>
+              New {exhausted.label} runs on {exhausted.model} will fail until the window resets.{' '}
+              <b>{exhausted.label} still has capacity for other models.</b>
             </span>
           ) : (
             <>
-              New {exhausted.harness} runs will fail until the window resets.{' '}
+              New {exhausted.label} runs will fail until the window resets.{' '}
               {alternative ? (
                 <span>
-                  <b>{harnessLabel(alternative.name)} has capacity</b> — route new work there to keep
+                  <b>{alternative.label} has capacity</b> — route new work there to keep
                   builds moving.
                 </span>
               ) : (
@@ -208,10 +209,10 @@ function ProviderPanel({
   history,
   today,
 }: {
-  usage: UsageHarnessSummary
+  usage: UsageProviderSummary
   color: string | undefined
-  history: UsageHarnessHistory | undefined
-  today: UsageHarnessToday | undefined
+  history: UsageProviderHistory | undefined
+  today: UsageProviderToday | undefined
 }) {
   const [rawOpen, setRawOpen] = useState(false)
 
@@ -220,7 +221,7 @@ function ProviderPanel({
       <header className="us-prov-head">
         <span className="us-prov-dot" />
         <span className="us-prov-name">
-          {usage.connected ? usage.providerEmail : usage.name}
+          {usage.connected ? usage.providerEmail : usage.label}
         </span>
         {usage.planTier && <span className="us-prov-plan mono">{usage.planTier}</span>}
         <span className="us-prov-spacer" />
@@ -241,12 +242,12 @@ function ProviderPanel({
                   metric={usage.fiveHour}
                   spark={history?.fiveHour}
                   sparkLabel="remaining · last 5h"
-                  sparkId={`${usage.name}-5h`}
+                  sparkId={`${usage.id}-5h`}
                   rateNoun="window"
                 />
               )}
               {usage.weeks.length > 0 && (
-                <WeeklyCarousel harness={usage.name} weeks={usage.weeks} history={history} />
+                <WeeklyCarousel provider={usage.id} weeks={usage.weeks} history={history} />
               )}
             </>
           )}
@@ -286,13 +287,13 @@ function indexOfBinding(weeks: UsageMetric[]): number {
 }
 
 function WeeklyCarousel({
-  harness,
+  provider,
   weeks,
   history,
 }: {
-  harness: string
+  provider: string
   weeks: UsageMetric[]
-  history: UsageHarnessHistory | undefined
+  history: UsageProviderHistory | undefined
 }) {
   const bindingIndex = indexOfBinding(weeks)
   const [selectedIndex, setSelectedIndex] = useState(bindingIndex)
@@ -310,7 +311,7 @@ function WeeklyCarousel({
         metric={metric}
         spark={spark}
         sparkLabel="remaining · this week"
-        sparkId={`${harness}-wk-${currentIndex}`}
+        sparkId={`${provider}-wk-${currentIndex}`}
         rateNoun="week"
       />
       {multiple && (
@@ -435,7 +436,7 @@ function WindowRow({
  * (capacity genuinely is always available) plus actual consumption
  * from run records — that's the number worth watching.
  */
-function UnmeteredWindow({ today }: { today: UsageHarnessToday | undefined }) {
+function UnmeteredWindow({ today }: { today: UsageProviderToday | undefined }) {
   return (
     <div className="us-win">
       <div className="us-win-top">
@@ -525,9 +526,9 @@ function Spark({ data, tone, id }: { data: number[]; tone: UsageTone; id: string
 // ---- Today section ----------------------------------------------------------
 
 function TodaySection({ today }: { today: UsageTodayResponse }) {
-  const totalSpend = today.harnesses.reduce((sum, h) => sum + h.spendUsd, 0)
-  const totalTokens = today.harnesses.reduce((sum, h) => sum + h.tokens, 0)
-  const harnessColor = harnessColors(today.harnesses.map((h) => h.name))
+  const totalSpend = today.providers.reduce((sum, h) => sum + h.spendUsd, 0)
+  const totalTokens = today.providers.reduce((sum, h) => sum + h.tokens, 0)
+  const harnessColor = harnessColors(today.providers.map((h) => h.id))
 
   return (
     <>
@@ -540,20 +541,20 @@ function TodaySection({ today }: { today: UsageTodayResponse }) {
         <SplitTile
           label="spend today"
           value={fmtUsd(totalSpend)}
-          entries={today.harnesses.map((h) => ({
-            name: h.name,
+          entries={today.providers.map((h) => ({
+            name: h.id,
             amount: h.spendUsd,
-            color: harnessColor[h.name],
+            color: harnessColor[h.id],
           }))}
           fmt={fmtUsd}
         />
         <SplitTile
           label="tokens today"
           value={fmtTokens(totalTokens)}
-          entries={today.harnesses.map((h) => ({
-            name: h.name,
+          entries={today.providers.map((h) => ({
+            name: h.id,
             amount: h.tokens,
-            color: harnessColor[h.name],
+            color: harnessColor[h.id],
           }))}
           fmt={fmtTokens}
         />
@@ -564,9 +565,9 @@ function TodaySection({ today }: { today: UsageTodayResponse }) {
 }
 
 function describeLoad(today: UsageTodayResponse): string {
-  const active = today.harnesses.filter((h) => h.spendUsd + h.tokens > 0)
+  const active = today.providers.filter((h) => h.spendUsd + h.tokens > 0)
   if (active.length === 0) return 'no finished runs today'
-  if (active.length === 1 && active[0]) return `all load on ${active[0].name} · others idle`
+  if (active.length === 1 && active[0]) return `all load on ${active[0].id} · others idle`
   return 'load split across providers'
 }
 
@@ -627,7 +628,7 @@ function HoursTile({
   total: string
 }) {
   const stacked = Array.from({ length: 24 }, (_, i) =>
-    today.harnesses.reduce((sum, h) => sum + (h.hours[i] ?? 0), 0),
+    today.providers.reduce((sum, h) => sum + (h.hours[i] ?? 0), 0),
   )
   const max = Math.max(...stacked, 0.01)
   const nowHour = currentHourIn(today.timezone)
@@ -647,13 +648,13 @@ function HoursTile({
             style={{ height: `${Math.max((v / max) * 100, v > 0 ? 6 : 2)}%` }}
             title={`${String(i).padStart(2, '0')}:00 — $${v.toFixed(2)}`}
           >
-            {today.harnesses.map((h) => {
+            {today.providers.map((h) => {
               const amount = h.hours[i] ?? 0
-              const color = harnessColor[h.name]
+              const color = harnessColor[h.id]
               return (
                 amount > 0 && (
                   <div
-                    key={h.name}
+                    key={h.id}
                     className="us-hour-seg"
                     style={{
                       height: `${(amount / v) * 100}%`,
@@ -803,9 +804,9 @@ function currentHourIn(timeZone: string): number {
   }
 }
 
-function describeIdle(usage: UsageHarnessSummary): string {
-  if (!usage.connected) return `connect ${usage.name} in Settings to see your quota`
-  if (usage.error === 'not_installed') return `${usage.name} not installed`
+function describeIdle(usage: UsageProviderSummary): string {
+  if (!usage.connected) return `connect ${usage.id} in Settings to see your quota`
+  if (usage.error === 'not_installed') return `${usage.id} not installed`
   if (usage.error === 'auth_required') return 'not signed in'
   if (usage.error === 'timeout') return 'scrape timed out — try refresh'
   if (usage.error === 'parse_failed') return 'could not parse /status output'

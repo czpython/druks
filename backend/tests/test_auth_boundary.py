@@ -7,17 +7,16 @@ from druks.accounts.dependencies import (
 )
 from druks.accounts.models import Account
 from druks.api.server import app
-from druks.harnesses.claude import ClaudeHarness
-from druks.harnesses.registry import get_harnesses
+from druks.harnesses.providers import get_providers
 from fastapi.routing import APIRoute, _IncludedRouter
 
 # Every /api path allowed to skip the identity gate; additions are deliberate.
 EXEMPT_API_PATHS = {
     "/api/system/health",
     "/api/auth/me",
-    "/api/harnesses",
-    "/api/harnesses/{name}/connection/start",
-    "/api/harnesses/{name}/connection/complete",
+    "/api/providers",
+    "/api/providers/{provider_id}/connection/start",
+    "/api/providers/{provider_id}/connection/complete",
     "/api/{path:path}",  # the JSON-404 catch-all
 }
 
@@ -31,8 +30,9 @@ SESSION_ONLY_API_ROUTES = {
     ("GET", "/api/auth/personal-tokens"),
     ("POST", "/api/auth/personal-tokens"),
     ("DELETE", "/api/auth/personal-tokens/{pat_id}"),
-    ("POST", "/api/harnesses/{name}/connection"),
-    ("DELETE", "/api/harnesses/{name}/connection"),
+    ("GET", "/api/providers/logins"),
+    ("POST", "/api/providers/{provider_id}/connection"),
+    ("DELETE", "/api/providers/{provider_id}/connection"),
     ("PATCH", "/api/settings/apps"),
     ("POST", "/api/services/{slug}"),
     ("GET", "/api/oauth/{slug}/connect"),
@@ -50,12 +50,12 @@ DUAL_GATED_API_PATHS = {
     "/api/oauth/connections/{connection_id}",
 }
 
-# Harness discovery and connection must answer during none/zero setup, before
+# Provider discovery and connection must answer during none/zero setup, before
 # any account exists.
 SETUP_CAPABLE_API_PATHS = {
-    "/api/harnesses",
-    "/api/harnesses/{name}/connection/start",
-    "/api/harnesses/{name}/connection/complete",
+    "/api/providers",
+    "/api/providers/{provider_id}/connection/start",
+    "/api/providers/{provider_id}/connection/complete",
 }
 
 
@@ -120,7 +120,7 @@ def test_identity_bootstrap_is_the_only_setup_tolerant_read(api_routes):
             assert not _gated_by(route, current_account_or_setup), route.path
 
 
-def test_harness_setup_uses_only_the_session_or_setup_resolver(api_routes):
+def test_provider_setup_uses_only_the_session_or_setup_resolver(api_routes):
     listed = [route for route in api_routes if route.path in SETUP_CAPABLE_API_PATHS]
     assert {route.path for route in listed} == SETUP_CAPABLE_API_PATHS
     for route in listed:
@@ -131,31 +131,17 @@ def test_harness_setup_uses_only_the_session_or_setup_resolver(api_routes):
             assert not _gated_by(route, current_session_or_setup), route.path
 
 
-async def test_harness_list_answers_before_an_account_exists(
-    druks_client,
-    monkeypatch,
-):
+async def test_provider_list_answers_before_an_account_exists(druks_client):
     assert not await Account.list_non_system()
-    monkeypatch.setattr(
-        ClaudeHarness,
-        "login_kinds",
-        frozenset({"subscription", "api_key"}),
-    )
 
-    response = await druks_client.get("/api/harnesses")
+    response = await druks_client.get("/api/providers")
 
     assert response.status_code == 200
     body = response.json()
-    assert [item["name"] for item in body] == [harness.name for harness in get_harnesses()]
-    by_name = {item["name"]: item for item in body}
-    assert by_name["claude"] == {
-        "name": "claude",
-        "loginKinds": ["api_key", "subscription"],
-    }
-    assert by_name["codex"] == {
-        "name": "codex",
-        "loginKinds": ["subscription"],
-    }
+    assert [item["id"] for item in body] == [provider.id for provider in get_providers()]
+    by_id = {item["id"]: item for item in body}
+    assert by_id["anthropic"]["loginKinds"] == ["api_key", "oauth"]
+    assert by_id["openai-codex"]["loginKinds"] == ["oauth"]
     assert not await Account.list_non_system()
 
 

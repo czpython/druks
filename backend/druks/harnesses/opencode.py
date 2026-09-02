@@ -16,9 +16,10 @@ from druks.sandbox.layout import get_runs_root, get_work_root
 
 from . import exceptions
 from .artifacts import call_dir, write_cost
-from .base import Harness, _error_tag
+from .base import Harness
 from .datastructures import ParsedModels
-from .models import HarnessConnection
+from .models import ProviderLogin
+from .providers import error_tag
 
 logger = logging.getLogger(__name__)
 
@@ -35,25 +36,18 @@ _ERROR_TYPES = {
 
 class OpenCodeHarness(Harness):
     name = "opencode"
-    provider = "opencode"
+    login_kinds = frozenset({"api_key"})
     models = ("anthropic/claude-sonnet-4-5",)
     default_model = "anthropic/claude-sonnet-4-5"
     command = "opencode"
-    login_kinds = frozenset({"api_key"})
     # The server writes nothing until the message POST completes; the wrapper
     # owns an earlier deadline so it can abort the OpenCode session cleanly.
     first_byte_seconds = None
 
     @classmethod
-    async def render_credentials_file(
-        cls,
-        connection_id: str | None = None,
-        *,
-        model: str | None = None,
-    ) -> str:
-        payload = json.loads(await super().render_credentials_file(connection_id))
-        provider, _, _ = (model or cls.default_model).partition("/")
-        return json.dumps({provider: {"type": "api", "key": payload["api_key"]}})
+    def auth_json(cls, login: ProviderLogin) -> str:
+        """The auth store opencode reads from OPENCODE_AUTH_CONTENT."""
+        return json.dumps({login.provider: {"type": "api", "key": login.payload["api_key"]}})
 
     async def build_invocation(
         self,
@@ -101,9 +95,7 @@ class OpenCodeHarness(Harness):
             credentials=Credentials(github_token=github_token),
             env={
                 **(extra_env or {}),
-                "OPENCODE_AUTH_CONTENT": await self.render_credentials_file(
-                    connection_id, model=self.model
-                ),
+                "OPENCODE_AUTH_CONTENT": self.auth_json(await self.login(connection_id)),
                 "DRUKS_RUN_DIR": f"{get_runs_root(ssh_username)}/{run_id}",
                 "OPENCODE_CONFIG_CONTENT": json.dumps(
                     {"$schema": "https://opencode.ai/config.json", "mcp": mcp},
@@ -135,7 +127,7 @@ class OpenCodeHarness(Harness):
             structured = info["structured"]
             tokens = info["tokens"]
             metadata = {
-                "provider": self.provider,
+                "provider": self.name,
                 "model": self.model,
                 "input_tokens": tokens["input"],
                 "output_tokens": tokens["output"],
@@ -160,7 +152,7 @@ class OpenCodeHarness(Harness):
         return structured
 
     @classmethod
-    async def fetch_models(cls, _connection: HarnessConnection) -> ParsedModels:
+    async def fetch_models(cls, _credential: ProviderLogin) -> ParsedModels:
         # opencode's catalog IS models.dev (same team; its docs say so), so the
         # picker reads the upstream directly — no opencode binary on the druks
         # host. Advisory either way: the CLI's own listing gates on key
@@ -180,7 +172,7 @@ class OpenCodeHarness(Harness):
                 cls.name,
                 response.text[:300],
             )
-            return ParsedModels(ok=False, error=_error_tag(response.status_code))
+            return ParsedModels(ok=False, error=error_tag(response.status_code))
 
         raw = response.text
         # The provider is the model namespace — the same rule the auth store

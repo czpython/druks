@@ -17,8 +17,12 @@ from druks.durable.engine import _step_engine, step_session
 from druks.durable.exceptions import WorkflowError
 from druks.durable.models import AgentCall, Artifact
 from druks.files.datastructures import File
-from druks.harnesses.exceptions import HarnessError, HarnessInvalidOutputError, Retry
-from druks.harnesses.models import HarnessConnection
+from druks.harnesses.exceptions import (
+    HarnessError,
+    HarnessInvalidOutputError,
+    Retry,
+)
+from druks.harnesses.models import ProviderLogin
 from druks.harnesses.registry import get_harness_for_model
 from druks.prompts import render_prompt
 from druks.sandbox import gate as sandbox_gate
@@ -48,7 +52,7 @@ async def _runner(
 ) -> AsyncIterator["Workspace"]:
     # The agent always runs in a Workspace. A warm run attaches the run's held VM; the
     # rest get a fresh ephemeral VM. Either way workflow.get_workspace() turns the VM into
-    # the runner — fresh per call, so nothing (connection or credential) is held across steps.
+    # the runner — fresh per call, so nothing (connection or login) is held across steps.
     if host_id:
         vm = sandbox_client.attach(host_id=host_id)
     else:
@@ -196,11 +200,12 @@ class Agent:
             # Runs as its own step: the body does no IO, and replay reuses the
             # recorded wait instead of re-reading the scrape.
             async with step_session():
-                harness = await get_harness_for_model(await self.get_model_name())
-                # The scrape belongs to the charged connection — its account
+                model = await self.get_model_name()
+                provider_id = (await get_harness_for_model(model)).provider_for(model)
+                # The scrape belongs to the charged login — its account
                 # differs from the run's on fallback.
-                connection = await HarnessConnection.lookup(harness.name, workflow.account_id)
-                scrape = await UsageScrape.latest_for(harness.name, connection.account_id)
+                login = await ProviderLogin.lookup(provider_id, workflow.account_id)
+                scrape = await UsageScrape.latest_for(provider_id, login.account_id)
                 if scrape:
                     now = datetime.now(UTC)
                     reset = scrape.soonest_reset_after(now)
@@ -267,9 +272,9 @@ class Agent:
         workflow = current_workflow.get()
         # Refusing an unservable call here beats provisioning a VM and
         # 401ing mid-run.
-        connection = await HarnessConnection.lookup(harness.name, workflow.account_id)
+        login = await ProviderLogin.lookup(harness.provider_for(model), workflow.account_id)
         # Plain snapshots: the commits below expire the ORM row mid-flight.
-        connection_id, charged_account_id = connection.id, connection.account_id
+        connection_id, charged_account_id = login.id, login.account_id
         # An agent call is a durability boundary — its effects don't roll back —
         # so commit here rather than hold the step's connection idle through the
         # minutes of provisioning and the run.

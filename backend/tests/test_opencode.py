@@ -62,11 +62,11 @@ def _mock_catalog(monkeypatch: pytest.MonkeyPatch, response: SimpleNamespace) ->
 def test_class_facts_and_registration() -> None:
     assert get_harness("opencode") is OpenCodeHarness
     assert OpenCodeHarness.command == "opencode"
-    assert OpenCodeHarness.login_kinds == frozenset({"api_key"})
+    assert OpenCodeHarness.provider is None
+    assert OpenCodeHarness.login_kinds == {"api_key"}
     assert OpenCodeHarness.first_byte_seconds is None
     assert OpenCodeHarness.failure_markers == {}
     assert OpenCodeHarness.default_model in OpenCodeHarness.models
-    assert not hasattr(OpenCodeHarness, "credentials_path")
     assert "_model_discovery_request" not in OpenCodeHarness.__dict__
     assert "_usage_request" not in OpenCodeHarness.__dict__
 
@@ -159,10 +159,10 @@ def _response(
 async def test_build_invocation_uses_server_schema_and_env_auth(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    async def credentials(cls: type[Harness]) -> dict[str, str]:
-        return {"api_key": _API_KEY}
+    async def login(self: Harness, _credential_id: str | None) -> SimpleNamespace:
+        return SimpleNamespace(provider="anthropic", payload={"api_key": _API_KEY})
 
-    monkeypatch.setattr(OpenCodeHarness, "get_credentials", classmethod(credentials))
+    monkeypatch.setattr(OpenCodeHarness, "login", login)
     server = McpServer(
         name="github",
         url="https://api.example.test/mcp",
@@ -196,7 +196,7 @@ async def test_build_invocation_uses_server_schema_and_env_auth(
     ):
         assert text in wrapper
     assert invocation.stdin == b"A large prompt stays on stdin."
-    assert invocation.credentials.files == ()
+    assert invocation.credentials.home == ()
     assert invocation.credentials.github_token == "github-token"
     env = invocation.env
     assert env is not None
@@ -228,15 +228,10 @@ async def test_build_invocation_uses_server_schema_and_env_auth(
     assert syntax.returncode == 0, syntax.stderr
 
 
-async def test_render_credentials_file_uses_model_provider(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    async def credentials(cls: type[Harness]) -> dict[str, str]:
-        return {"api_key": _API_KEY}
+def test_auth_json_keys_the_login_provider() -> None:
+    login = SimpleNamespace(provider="openai", payload={"api_key": _API_KEY})
 
-    monkeypatch.setattr(OpenCodeHarness, "get_credentials", classmethod(credentials))
-
-    rendered = await _harness().render_credentials_file(model="openai/gpt-5.4")
+    rendered = OpenCodeHarness.auth_json(login)
 
     assert json.loads(rendered) == {"openai": {"type": "api", "key": _API_KEY}}
 

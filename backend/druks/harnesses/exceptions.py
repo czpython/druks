@@ -75,11 +75,11 @@ class HarnessSandboxProvisioningError(HarnessSandboxError):
 
 
 class OAuthTokenError(Exception):
-    """No usable subscription credential is available.
+    """No usable subscription login is available.
 
     ``tag`` is a short, stable code surfaced on the usage snapshot's
     ``error`` column: ``no_credentials`` (harness not connected),
-    ``no_token`` (credential present, no access token), ``token_expired``
+    ``no_token`` (login present, no access token), ``token_expired``
     (past expiry; the refresh cron hasn't caught up).
     """
 
@@ -107,10 +107,8 @@ class ConnectError(Exception):
 
 
 class HarnessNotConnectedError(HarnessError):
-    """The harness has no stored subscription credential, so nothing that needs
-    auth can run. Connecting in Settings → Harnesses is the only credential
-    path — there is no host-file or baked-API-key fallback — which is what
-    makes "is this harness runnable" decidable before any VM work."""
+    """The run's provider holds no login for the account, so nothing that needs
+    auth can run. Settings → Providers is the only credential path."""
 
     code = "not_connected"
 

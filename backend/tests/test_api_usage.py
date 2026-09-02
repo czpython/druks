@@ -4,11 +4,11 @@ from unittest.mock import AsyncMock
 from zoneinfo import ZoneInfo
 
 import pytest
-from conftest import connect_harness
+from conftest import connect_provider
 from druks.accounts.models import Account
-from druks.harnesses.claude import ClaudeHarness
 from druks.harnesses.datastructures import ParsedMetric, ParsedUsage
-from druks.harnesses.models import HarnessConnection
+from druks.harnesses.models import ProviderLogin
+from druks.harnesses.providers import AnthropicProvider
 from druks.settings import Settings
 from druks.testing import configure_app_for_test, make_settings, seed_call, seed_run
 from druks.usage.models import UsageScrape
@@ -45,8 +45,8 @@ async def _seed(snapshots: list[UsageScrape]) -> None:
         await snap.save()
 
 
-def _harness(body: dict, name: str) -> dict:
-    return next(entry for entry in body["harnesses"] if entry["name"] == name)
+def _provider(body: dict, provider_id: str) -> dict:
+    return next(entry for entry in body["providers"] if entry["id"] == provider_id)
 
 
 async def _seed_agent_call(druks_db, *, model: str = "gpt-5.5"):
@@ -55,11 +55,9 @@ async def _seed_agent_call(druks_db, *, model: str = "gpt-5.5"):
     return await seed_call(druks_db, run, "summarize", status="running", model=model)
 
 
-async def test_usage_today_counts_calls_whose_model_isnt_a_current_harness(
-    client, druks_db
-) -> None:
+async def test_usage_today_counts_calls_whose_model_no_picker_claims(client, druks_db) -> None:
     # Model ids churn on deploys (opus-4-7 → 4-8), so a call finished earlier today
-    # can carry an id no harness claims any more. Money spent must not vanish from
+    # can carry an id no picker claims any more. Money spent must not vanish from
     # the display — the sys-strip's total_run_spend_between counts every call, and
     # the two surfaces must quote the same number. Unclaimed models land in the
     # "unattributed" bucket the panel's grand total sums.
@@ -70,7 +68,7 @@ async def test_usage_today_counts_calls_whose_model_isnt_a_current_harness(
     await druks_db.flush()
 
     body = client.get("/api/usage/today").json()
-    bucket = _harness(body, "unattributed")
+    bucket = _provider(body, "unattributed")
     assert bucket["runs"] == 1
     assert bucket["spendUsd"] == 2.5
 
@@ -79,27 +77,22 @@ def test_get_usage_empty_returns_available_false(client) -> None:
     response = client.get("/api/usage")
     assert response.status_code == 200
     body = response.json()
-    # One entry per registered harness, none available pre-first-poll.
-    assert {entry["name"] for entry in body["harnesses"]} == {
-        "claude",
-        "codex",
-        "opencode",
-        "pi",
-    }
-    assert all(entry["available"] is False for entry in body["harnesses"])
+    # One entry per registered provider, none available pre-first-poll.
+    assert {entry["id"] for entry in body["providers"]} == {"anthropic", "openai", "openai-codex"}
+    assert all(entry["available"] is False for entry in body["providers"])
 
 
 async def test_get_usage_presents_api_key_connection_as_unmetered(client, druks_db) -> None:
-    await HarnessConnection.connect(
-        harness="opencode",
+    await ProviderLogin.connect(
+        provider="openai",
         account=await Account.get_or_create("op@example.com"),
-        payload={"apiKey": "key"},
+        payload={"api_key": "key"},
         expires_at=None,
         provider_email="op@example.com",
         kind="api_key",
     )
 
-    summary = _harness(client.get("/api/usage").json(), "opencode")
+    summary = _provider(client.get("/api/usage").json(), "openai")
 
     assert summary["available"] is True
     assert summary["connected"] is True
@@ -108,13 +101,13 @@ async def test_get_usage_presents_api_key_connection_as_unmetered(client, druks_
     assert summary["weeks"] == []
 
 
-async def test_get_usage_serializes_latest_per_harness(client, app_settings) -> None:
-    # Plant a snapshot for claude only — codex should still report
+async def test_get_usage_serializes_latest_per_provider(client, app_settings) -> None:
+    # Plant a snapshot for anthropic only — openai-codex should still report
     # ``available=false`` rather than missing-key/404.
     await _seed(
         [
             UsageScrape(
-                harness="claude",
+                provider="anthropic",
                 parse_ok=True,
                 plan_tier="Max",
                 five_hour_percent_left=54,
@@ -132,7 +125,7 @@ async def test_get_usage_serializes_latest_per_harness(client, app_settings) -> 
     assert response.status_code == 200
     body = response.json()
 
-    claude = _harness(body, "claude")
+    claude = _provider(body, "anthropic")
     assert claude["available"] is True
     assert claude["planTier"] == "Max"
     assert claude["fiveHour"]["percentLeft"] == 54
@@ -144,14 +137,14 @@ async def test_get_usage_serializes_latest_per_harness(client, app_settings) -> 
     assert 30 <= claude["ageSeconds"] <= 90  # close to the planted 45s
     assert claude["stale"] is False
 
-    assert _harness(body, "codex")["available"] is False
+    assert _provider(body, "openai-codex")["available"] is False
 
 
 async def test_get_usage_flags_stale_after_24h(client, app_settings) -> None:
     await _seed(
         [
             UsageScrape(
-                harness="claude",
+                provider="anthropic",
                 parse_ok=True,
                 five_hour_percent_left=10,
                 scraped_at=datetime.now(UTC) - timedelta(hours=30),
@@ -160,17 +153,17 @@ async def test_get_usage_flags_stale_after_24h(client, app_settings) -> None:
     )
 
     body = client.get("/api/usage").json()
-    assert _harness(body, "claude")["stale"] is True
+    assert _provider(body, "anthropic")["stale"] is True
 
 
 async def test_get_usage_exposes_unlimited_flag(client, app_settings) -> None:
-    # Codex business plan: scraper synthesizes permanently-full buckets
+    # ChatGPT business plan: scraper synthesizes permanently-full buckets
     # and marks the row unmetered so the UI can render "unmetered"
     # instead of a quota bar that never moves.
     await _seed(
         [
             UsageScrape(
-                harness="codex",
+                provider="openai-codex",
                 parse_ok=True,
                 plan_tier="business",
                 five_hour_percent_left=100,
@@ -181,16 +174,16 @@ async def test_get_usage_exposes_unlimited_flag(client, app_settings) -> None:
     )
 
     body = client.get("/api/usage").json()
-    assert _harness(body, "codex")["unlimited"] is True
-    assert _harness(body, "codex")["fiveHour"]["percentLeft"] == 100
-    assert _harness(body, "claude")["unlimited"] is False
+    assert _provider(body, "openai-codex")["unlimited"] is True
+    assert _provider(body, "openai-codex")["fiveHour"]["percentLeft"] == 100
+    assert _provider(body, "anthropic")["unlimited"] is False
 
 
 async def test_usage_history_serializes_series_oldest_first(client, app_settings) -> None:
     now = datetime.now(UTC)
     snaps = [
         UsageScrape(
-            harness="claude",
+            provider="anthropic",
             parse_ok=True,
             five_hour_percent_left=pct,
             weeks=[
@@ -204,7 +197,7 @@ async def test_usage_history_serializes_series_oldest_first(client, app_settings
     # Outside the 6h five-hour range but inside the weekly range.
     snaps.append(
         UsageScrape(
-            harness="claude",
+            provider="anthropic",
             parse_ok=True,
             five_hour_percent_left=95,
             weeks=[
@@ -216,28 +209,28 @@ async def test_usage_history_serializes_series_oldest_first(client, app_settings
     )
     # Failed scrape — no percentages, must not appear in either series.
     snaps.append(
-        UsageScrape(harness="claude", parse_ok=False, scraped_at=now - timedelta(minutes=5))
+        UsageScrape(provider="anthropic", parse_ok=False, scraped_at=now - timedelta(minutes=5))
     )
     await _seed(snaps)
 
     body = client.get("/api/usage/history").json()
 
-    assert [p["pct"] for p in _harness(body, "claude")["fiveHour"]] == [60, 40, 20]
-    assert [series["model"] for series in _harness(body, "claude")["weeks"]] == [None, "Fable"]
-    assert [p["pct"] for p in _harness(body, "claude")["weeks"][0]["points"]] == [
+    assert [p["pct"] for p in _provider(body, "anthropic")["fiveHour"]] == [60, 40, 20]
+    assert [series["model"] for series in _provider(body, "anthropic")["weeks"]] == [None, "Fable"]
+    assert [p["pct"] for p in _provider(body, "anthropic")["weeks"][0]["points"]] == [
         99,
         88,
         89,
         90,
     ]
-    assert [p["pct"] for p in _harness(body, "claude")["weeks"][1]["points"]] == [
+    assert [p["pct"] for p in _provider(body, "anthropic")["weeks"][1]["points"]] == [
         49,
         38,
         39,
         40,
     ]
-    assert _harness(body, "codex")["fiveHour"] == []
-    assert _harness(body, "codex")["weeks"] == []
+    assert _provider(body, "openai-codex")["fiveHour"] == []
+    assert _provider(body, "openai-codex")["weeks"] == []
 
 
 async def test_usage_today_aggregates_spend_and_tokens_by_provider(
@@ -277,11 +270,11 @@ async def test_usage_today_aggregates_spend_and_tokens_by_provider(
 
     body = client.get("/api/usage/today").json()
 
-    codex = _harness(body, "codex")
+    codex = _provider(body, "openai-codex")
     assert codex["spendUsd"] == 1.25
     assert codex["tokens"] == 1250  # 1000 input + (200 + 50) output
     assert codex["runs"] == 1
-    claude = _harness(body, "claude")
+    claude = _provider(body, "anthropic")
     assert claude["spendUsd"] == 2.5
     assert claude["tokens"] == 250  # (100 + 50 + 25) input + 75 output
     assert claude["runs"] == 1
@@ -294,38 +287,40 @@ async def test_usage_today_aggregates_spend_and_tokens_by_provider(
 
 
 async def test_usage_excludes_another_accounts_scrape(client, druks_db) -> None:
-    snap = UsageScrape(harness="claude", parse_ok=True, five_hour_percent_left=54)
+    snap = UsageScrape(provider="anthropic", parse_ok=True, five_hour_percent_left=54)
     snap.account_id = (await Account.get_or_create("other@example.com")).id
     await snap.save()
 
     body = client.get("/api/usage").json()
-    assert _harness(body, "claude")["available"] is False
+    assert _provider(body, "anthropic")["available"] is False
     history = client.get("/api/usage/history").json()
-    assert _harness(history, "claude")["fiveHour"] == []
+    assert _provider(history, "anthropic")["fiveHour"] == []
 
 
-async def test_usage_reports_viewers_connection_identity(client, druks_db) -> None:
-    await HarnessConnection.connect(
-        harness="claude",
+async def test_usage_reports_viewers_login_identity(client, druks_db) -> None:
+    await ProviderLogin.connect(
+        provider="anthropic",
         account=await Account.get_or_create("other@example.com"),
         payload={"claudeAiOauth": {"accessToken": "other"}},
         expires_at=None,
         provider_email="other-seat@example.com",
+        kind="oauth",
     )
     body = client.get("/api/usage").json()
-    assert _harness(body, "claude")["connected"] is False
-    assert _harness(body, "claude")["providerEmail"] is None
+    assert _provider(body, "anthropic")["connected"] is False
+    assert _provider(body, "anthropic")["providerEmail"] is None
 
-    await HarnessConnection.connect(
-        harness="claude",
+    await ProviderLogin.connect(
+        provider="anthropic",
         account=await Account.get_or_create("op@example.com"),
         payload={"claudeAiOauth": {"accessToken": "mine"}},
         expires_at=None,
         provider_email="subscription@example.com",
+        kind="oauth",
     )
     body = client.get("/api/usage").json()
-    assert _harness(body, "claude")["connected"] is True
-    assert _harness(body, "claude")["providerEmail"] == "subscription@example.com"
+    assert _provider(body, "anthropic")["connected"] is True
+    assert _provider(body, "anthropic")["providerEmail"] == "subscription@example.com"
 
 
 async def test_usage_today_counts_only_the_viewers_calls(client, druks_db) -> None:
@@ -345,8 +340,8 @@ async def test_usage_today_counts_only_the_viewers_calls(client, druks_db) -> No
     await druks_db.flush()
 
     body = client.get("/api/usage/today").json()
-    assert _harness(body, "claude")["spendUsd"] == 2.0
-    assert _harness(body, "claude")["runs"] == 1
+    assert _provider(body, "anthropic")["spendUsd"] == 2.0
+    assert _provider(body, "anthropic")["runs"] == 1
 
 
 def _fake_fetch(fetched: list):
@@ -365,23 +360,27 @@ def _fake_fetch(fetched: list):
     return fake
 
 
-async def test_refresh_scrapes_only_the_viewers_connections(client, druks_db, monkeypatch) -> None:
-    viewer = await connect_harness(ClaudeHarness, {"claudeAiOauth": {"accessToken": "t"}})
-    await connect_harness(
-        ClaudeHarness, {"claudeAiOauth": {"accessToken": "t2"}}, provider_email="other@example.com"
+async def test_refresh_scrapes_only_the_viewers_logins(client, druks_db, monkeypatch) -> None:
+    viewer = await connect_provider(AnthropicProvider, {"claudeAiOauth": {"accessToken": "t"}})
+    await connect_provider(
+        AnthropicProvider,
+        {"claudeAiOauth": {"accessToken": "t2"}},
+        provider_email="other@example.com",
     )
     fetched: list[str] = []
-    monkeypatch.setattr(ClaudeHarness, "fetch_usage", _fake_fetch(fetched))
+    monkeypatch.setattr(AnthropicProvider, "fetch_usage", _fake_fetch(fetched))
 
     assert client.post("/api/usage/refresh").status_code == 200
     assert fetched == [viewer.account_id]
-    assert (await UsageScrape.latest_for("claude", viewer.account_id)).five_hour_percent_left == 50
+    assert (
+        await UsageScrape.latest_for("anthropic", viewer.account_id)
+    ).five_hour_percent_left == 50
 
 
-async def test_refresh_skips_a_non_metered_connection(client, druks_db, monkeypatch) -> None:
+async def test_refresh_skips_a_non_metered_login(client, druks_db, monkeypatch) -> None:
     account = await Account.get_or_create("op@example.com")
-    await HarnessConnection.connect(
-        harness="claude",
+    await ProviderLogin.connect(
+        provider="anthropic",
         account=account,
         payload={"api_key": "key"},
         expires_at=None,
@@ -389,16 +388,16 @@ async def test_refresh_skips_a_non_metered_connection(client, druks_db, monkeypa
         kind="api_key",
     )
     poll_usage = AsyncMock()
-    monkeypatch.setattr(ClaudeHarness, "poll_usage", poll_usage)
+    monkeypatch.setattr(AnthropicProvider, "poll_usage", poll_usage)
 
     assert client.post("/api/usage/refresh").status_code == 200
     poll_usage.assert_not_awaited()
 
 
 async def test_refresh_floors_repeat_scrapes(client, druks_db, monkeypatch) -> None:
-    await connect_harness(ClaudeHarness, {"claudeAiOauth": {"accessToken": "t"}})
+    await connect_provider(AnthropicProvider, {"claudeAiOauth": {"accessToken": "t"}})
     fetched: list[str] = []
-    monkeypatch.setattr(ClaudeHarness, "fetch_usage", _fake_fetch(fetched))
+    monkeypatch.setattr(AnthropicProvider, "fetch_usage", _fake_fetch(fetched))
 
     client.post("/api/usage/refresh")
     client.post("/api/usage/refresh")

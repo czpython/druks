@@ -8,6 +8,7 @@ from druks.sandbox.datastructures import (
     AgentInvocation,
     Credentials,
     HarnessRunResult,
+    HomeFile,
     McpServer,
 )
 from druks.sandbox.layout import get_runs_root
@@ -15,6 +16,7 @@ from druks.sandbox.layout import get_runs_root
 from . import exceptions
 from .artifacts import write_cost
 from .base import Harness
+from .models import ProviderLogin
 from .subprocess import read_result_json
 
 _DRUKS_OUTPUT_TEMPLATE = Path(__file__).parent / "druks-output.ts"
@@ -31,23 +33,15 @@ _STATUS_ERRORS = {
 
 class PiHarness(Harness):
     name = "pi"
-    provider = "pi"
     command = "pi"
-    credentials_path = ".pi/agent/auth.json"
     login_kinds = frozenset({"api_key"})
     models = ("openai/gpt-5.5",)
     default_model = "openai/gpt-5.5"
 
     @classmethod
-    async def render_credentials_file(
-        cls,
-        connection_id: str | None = None,
-        *,
-        model: str | None = None,
-    ) -> str:
-        payload = json.loads(await super().render_credentials_file(connection_id))
-        provider, _, _ = (model or cls.default_model).partition("/")
-        return json.dumps({provider: {"type": "api_key", "key": payload["api_key"]}})
+    def auth_file(cls, login: ProviderLogin) -> HomeFile:
+        auth = {login.provider: {"type": "api_key", "key": login.payload["api_key"]}}
+        return HomeFile(".pi/agent/auth.json", json.dumps(auth))
 
     async def build_invocation(
         self,
@@ -128,18 +122,12 @@ class PiHarness(Harness):
         command_line = " ".join(shlex.quote(argument) for argument in command)
         wrapper = " && ".join((*writes, command_line))
 
-        rendered_credentials = await self.render_credentials_file(
-            connection_id,
-            model=self.model,
-        )
+        auth_file = self.auth_file(await self.login(connection_id))
         return AgentInvocation(
             name=self.name,
             args=("sh", "-c", wrapper),
             stdin=prompt.encode("utf-8"),
-            credentials=Credentials(
-                files=((self.credentials_path, rendered_credentials),),
-                github_token=github_token,
-            ),
+            credentials=Credentials(home=(auth_file,), github_token=github_token),
             env={
                 **(extra_env or {}),
                 "DRUKS_SCHEMA_PATH": in_vm_schema,
@@ -187,6 +175,6 @@ class PiHarness(Harness):
         write_cost(
             call_dir,
             cost_usd=cost_usd,
-            metadata={"provider": self.provider, "model": self.model, **tokens},
+            metadata={"provider": self.name, "model": self.model, **tokens},
         )
         return payload

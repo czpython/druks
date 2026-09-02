@@ -37,7 +37,7 @@ async def test_passing_app_check_reports_under_the_app(
     installed, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A satisfied precondition passes and its result is namespaced under the app
-    name — the API-key check with the credential set."""
+    name — the API-key check with the login set."""
     monkeypatch.setenv("FIELD_NOTES_API_KEY", "sk-test")
     settings = make_settings(tmp_path)
 
@@ -48,7 +48,7 @@ async def test_passing_app_check_reports_under_the_app(
 
 
 async def test_failing_app_check_reports_under_the_app(installed, tmp_path: Path) -> None:
-    """The app's API-key check fails when the credential is unset, reported
+    """The app's API-key check fails when the login is unset, reported
     under the app name so the operator knows which app is broken."""
     settings = make_settings(tmp_path)
 
@@ -163,7 +163,7 @@ async def test_raising_settings_clean_is_contained(
 
 async def test_app_checks_are_wired_into_the_check_battery(installed, tmp_path: Path) -> None:
     """``run_checks`` runs the app checks: ``check_apps`` is one of the
-    battery's entries and, like ``check_harness_credentials``, fans its several
+    battery's entries and, like ``check_provider_logins``, fans its several
     results into the run — so the app's checks reach the report beside core's."""
     settings = make_settings(tmp_path)
 

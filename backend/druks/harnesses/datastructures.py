@@ -44,12 +44,12 @@ class CompletedConnect:
 
 @dataclass(frozen=True)
 class RotationResult:
-    harness: str
+    provider: str
     # "refreshed" | "fresh" | "busy" | "locked" | "no_refresh_token" | "failed"
     action: str
     error: str | None = None
     expires_at: datetime | None = None
-    connection_id: str | None = None
+    login_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -111,7 +111,7 @@ class SandboxSettings:
     service_timeout: float
     image: str
     # Local CLI config dirs the push anchors config/plugin/skills paths on; the
-    # OAuth credential itself is synthesized from the DB at push time, never
+    # OAuth login itself is synthesized from the DB at push time, never
     # read from under these. None — no local config for that CLI on this host —
     # carries nothing, so a CLI's local config never sprays into a sandbox
     # uninvited.

@@ -2,16 +2,15 @@ import contextlib
 import json
 import logging
 import shlex
-from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlencode
 
-from druks.core.utils.time import ensure_utc
 from druks.sandbox.datastructures import (
     AgentInvocation,
     Credentials,
     HarnessRunResult,
+    HomeCopy,
+    HomeFile,
     McpServer,
 )
 from druks.sandbox.layout import get_runs_root
@@ -19,47 +18,24 @@ from druks.skills.models import Skill
 
 from . import exceptions
 from .artifacts import call_dir, write_cost
-from .base import Harness, parse_epoch_expiry, post_token
+from .base import Harness
 from .constants import CLAUDE_DISALLOWED_TOOLS
-from .datastructures import (
-    OAuthToken,
-    ParsedMetric,
-    ParsedModels,
-    ParsedUsage,
-    ProviderRequest,
-    SandboxSettings,
-)
+from .datastructures import OAuthToken, ParsedModels, ProviderRequest, SandboxSettings
+from .models import ProviderLogin
+from .providers import AnthropicProvider
 
 logger = logging.getLogger(__name__)
-
-
-_USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
-# Beta flag the Claude CLI sends for OAuth-scoped endpoints.
-_OAUTH_BETA = "oauth-2025-04-20"
-_ANTHROPIC_VERSION = "2023-06-01"
-_CLAUDE_CODE_USER_AGENT = "claude-code/2.1.0"
 
 
 class ClaudeHarness(Harness):
     # Claude streams its rollout as JSONL on stdout
     # (``--output-format stream-json``), so the transcript is the stdout.
     name = "claude"
-    provider = "anthropic"
+    provider = AnthropicProvider.id
+    login_kinds = frozenset({"oauth"})
     models = ("claude-opus-4-7", "claude-sonnet-4-6", "claude-haiku-4-5")
     default_model = "claude-opus-4-7"
     command = "claude"
-    credentials_path = ".claude/.credentials.json"
-
-    # OAuth refresh config (consumed by the Harness templates).
-    REFRESH_MARGIN = timedelta(hours=2)
-    _TOKEN_URL = "https://console.anthropic.com/v1/oauth/token"
-    # Public Claude-Code OAuth client id.
-    _CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
-
-    # Connect-flow (PKCE code-paste): authorize on claude.ai, land on the
-    # console.anthropic.com code page, exchange JSON with the state echoed in the
-    # body.
-    redirect_uri = "https://console.anthropic.com/oauth/code/callback"
 
     # The CLI dies with the raw API error in the result text ("API Error: 529
     # {…overloaded_error…}"), so "api error: 5" covers 529 and every 5xx; 429
@@ -153,7 +129,7 @@ class ClaudeHarness(Harness):
                 github_token=github_token,
                 include_plugins=include_plugins,
                 skills=skills,
-                connection_id=connection_id,
+                login=await self.login(connection_id),
             ),
             env=extra_env,
             extra_artifact_filenames=("debug.log", "session.jsonl"),
@@ -209,6 +185,10 @@ class ClaudeHarness(Harness):
             entries[server.name] = entry
         return ("--mcp-config", json.dumps({"mcpServers": entries}))
 
+    @classmethod
+    def auth_file(cls, login: ProviderLogin) -> HomeFile:
+        return HomeFile(".claude/.credentials.json", json.dumps(dict(login.payload)))
+
     def _command_args(self) -> tuple[str, ...]:
         args = (self.command,)
         if self.model:
@@ -220,125 +200,10 @@ class ClaudeHarness(Harness):
         return args
 
     @classmethod
-    def _token_from_credentials(cls, data: dict) -> OAuthToken:
-        block = _oauth_block(data)
-        access = block.get("accessToken") or block.get("access_token")
-        if not access:
-            raise exceptions.OAuthTokenError("no_token", "credentials file has no access token")
-        return OAuthToken(
-            access_token=access,
-            expires_at=parse_epoch_expiry(block.get("expiresAt")),
-            scopes=tuple(block.get("scopes") or ()),
-            subscription_type=block.get("subscriptionType"),
-        )
-
-    @classmethod
-    def _refresh_state(cls, data: dict) -> tuple[str | None, datetime | None]:
-        block = _oauth_block(data)
-        refresh = block.get("refreshToken") or block.get("refresh_token")
-        return refresh, parse_epoch_expiry(block.get("expiresAt"))
-
-    @classmethod
-    def _grant_body(cls, refresh_token: str) -> dict:
-        return {
-            "grant_type": "refresh_token",
-            "refresh_token": refresh_token,
-            "client_id": cls._CLIENT_ID,
-        }
-
-    @classmethod
-    def authorize_url(cls, *, verifier: str, challenge: str) -> tuple[str, str]:
-        # Anthropic's console flow echoes the PKCE verifier back as the OAuth
-        # state, so that's what connect_complete checks.
-        params = {
-            "code": "true",
-            "client_id": cls._CLIENT_ID,
-            "response_type": "code",
-            "redirect_uri": cls.redirect_uri,
-            "scope": (
-                "org:create_api_key user:profile user:inference "
-                "user:sessions:claude_code user:mcp_servers user:file_upload"
-            ),
-            "code_challenge": challenge,
-            "code_challenge_method": "S256",
-            "state": verifier,
-        }
-        return f"https://claude.ai/oauth/authorize?{urlencode(params)}", verifier
-
-    @classmethod
-    async def exchange(cls, *, code: str, verifier: str) -> tuple[dict, str | None]:
-        grant = await post_token(
-            cls._TOKEN_URL,
-            {
-                "grant_type": "authorization_code",
-                "client_id": cls._CLIENT_ID,
-                "code": code,
-                "state": verifier,
-                "redirect_uri": cls.redirect_uri,
-                "code_verifier": verifier,
-            },
-            form=False,
-        )
-        block: dict[str, object] = {
-            "accessToken": grant["access_token"],
-            "refreshToken": grant["refresh_token"],
-            "scopes": (grant.get("scope") or "").split(),
-        }
-        expires_in = grant.get("expires_in")
-        if expires_in:
-            expiry = datetime.now(UTC) + timedelta(seconds=expires_in)
-            block["expiresAt"] = int(expiry.timestamp() * 1000)
-        account = (grant.get("account") or {}).get("email_address")
-        return {"claudeAiOauth": block}, account
-
-    @classmethod
-    def _apply_refresh(cls, data: dict, grant: dict, now: datetime) -> datetime | None:
-        block = data["claudeAiOauth"] if isinstance(data.get("claudeAiOauth"), dict) else data
-        access = grant.get("access_token")
-        if not access:
-            raise ValueError("refresh response had no access_token")
-        block["accessToken"] = access
-        if grant.get("refresh_token"):
-            block["refreshToken"] = grant["refresh_token"]
-        expires_in = grant.get("expires_in")
-        if isinstance(expires_in, (int, float)):
-            new_expiry = now + timedelta(seconds=expires_in)
-            block["expiresAt"] = int(new_expiry.timestamp() * 1000)
-            return new_expiry
-        return parse_epoch_expiry(block.get("expiresAt"))
-
-    @classmethod
-    def _usage_request(cls, token: OAuthToken) -> ProviderRequest:
-        return ProviderRequest(_USAGE_URL, cls._oauth_headers(token))
-
-    @classmethod
     def _model_discovery_request(cls, token: OAuthToken) -> ProviderRequest:
         return ProviderRequest(
-            "https://api.anthropic.com/v1/models?limit=100", cls._oauth_headers(token)
+            "https://api.anthropic.com/v1/models?limit=100", AnthropicProvider.oauth_headers(token)
         )
-
-    @classmethod
-    def _oauth_headers(cls, token: OAuthToken) -> dict:
-        return {
-            "Authorization": f"Bearer {token.access_token}",
-            "anthropic-beta": _OAUTH_BETA,
-            "anthropic-version": _ANTHROPIC_VERSION,
-            "User-Agent": _CLAUDE_CODE_USER_AGENT,
-        }
-
-    @classmethod
-    def _parse_usage(cls, raw: str) -> ParsedUsage:
-        try:
-            data = json.loads(raw)
-        except (json.JSONDecodeError, TypeError):
-            return ParsedUsage(ok=False, error="unparseable", raw=raw)
-        if not isinstance(data, dict) or not any(k in data for k in ("five_hour", "seven_day")):
-            return ParsedUsage(ok=False, error="unexpected_payload", raw=raw)
-        try:
-            five_hour, weeks = _claude_windows(data)
-        except (KeyError, TypeError, ValueError):
-            return ParsedUsage(ok=False, error="unexpected_payload", raw=raw)
-        return ParsedUsage(ok=True, five_hour=five_hour, weeks=weeks, raw=raw)
 
     @classmethod
     def _parse_models(cls, raw: str) -> ParsedModels:
@@ -359,121 +224,46 @@ class ClaudeHarness(Harness):
         return ParsedModels(ok=True, models=models, raw=raw)
 
 
-def _oauth_block(data: dict) -> dict:
-    """Claude nests the OAuth fields under ``claudeAiOauth``; tolerate a
-    flat shape too."""
-    block = data.get("claudeAiOauth") if isinstance(data, dict) else None
-    return block if isinstance(block, dict) else data
-
-
-def _claude_windows(data: dict) -> tuple[ParsedMetric | None, tuple[ParsedMetric, ...]]:
-    """The binding five-hour window and every weekly window in provider order."""
-    five_hour, weekly = [], []
-    for limit in data.get("limits") or []:
-        # A limit can be scoped to something other than a model, which leaves
-        # it counting toward the quota but with no model to name.
-        scope = limit["scope"] or {}
-        window = ParsedMetric(
-            percent_left=max(0, min(100, round(100 - limit["percent"]))),
-            resets_at=_parse_iso(limit.get("resets_at")),
-            model=(scope.get("model") or {}).get("display_name"),
-        )
-        if limit["group"] == "weekly":
-            weekly.append(window)
-        elif limit["group"] == "session":
-            five_hour.append(window)
-    if not weekly and (fallback_week := _claude_metric(data.get("seven_day"))):
-        weekly.append(fallback_week)
-    binding_five_hour = ParsedMetric.binding(five_hour) or _claude_metric(data.get("five_hour"))
-    weekly_windows = tuple(weekly)
-    return binding_five_hour, weekly_windows
-
-
-def _claude_metric(block: object) -> ParsedMetric | None:
-    if not isinstance(block, dict):
-        return None
-    utilization = block.get("utilization")
-    percent_left = None
-    if isinstance(utilization, (int, float)):
-        percent_left = max(0, min(100, int(round(100 - utilization))))
-    resets_at = _parse_iso(block.get("resets_at"))
-    if percent_left is None and resets_at is None:
-        return None
-    return ParsedMetric(percent_left=percent_left, resets_at=resets_at)
-
-
-def _parse_iso(value: object) -> datetime | None:
-    if not isinstance(value, str) or not value:
-        return None
-    try:
-        parsed = datetime.fromisoformat(value)
-    except ValueError:
-        return None
-    return ensure_utc(parsed)
-
-
 async def _get_credentials(
     sandbox: SandboxSettings,
     *,
     github_token: str | None,
     include_plugins: bool = True,
     skills: tuple[str, ...] = (),
-    connection_id: str | None = None,
+    login: ProviderLogin,
 ) -> Credentials:
-    """Build the Credentials bundle the runner SFTP-pushes into the sandbox.
-    The credential file is synthesized from the DB row (raises when claude
-    isn't connected); the local config dir only adds config carry on top.
-
-    ``include_plugins=False`` skips uploading the operator's local plugin
-    state — ``installed_plugins.json``, ``known_marketplaces.json``, and
-    the ``plugins/marketplaces`` / ``plugins/cache`` dirs. Used by callers
-    (currently scout) whose claude prompt doesn't talk to any MCP server
-    and would otherwise crash on operator-side plugin misconfiguration —
-    e.g. a github MCP plugin that requires ``GITHUB_PERSONAL_ACCESS_TOKEN``
-    and dies mid-call when it isn't set. ``.claude.json``, ``settings.json``
-    and the skills tree are kept either way; those aren't plugins.
-    """
+    """The Credentials bundle the runner pushes into the sandbox: the rendered
+    credentials file, plus any local config, plugins, and skills.
+    ``include_plugins=False`` skips the operator's plugin state, for prompts
+    that use no MCP server and would otherwise die on a misconfigured plugin."""
     config_dir = sandbox.claude_config_dir
-    config_files: tuple[tuple[Path, str], ...] = ()
-    dirs: tuple[tuple[Path, str], ...] = ()
+    home: list[HomeFile | HomeCopy] = [ClaudeHarness.auth_file(login)]
     if config_dir:
-        config_files = (
-            (config_dir.parent / ".claude.json", ".claude.json"),
-            (config_dir / "settings.json", ".claude/settings.json"),
-            (config_dir / "CLAUDE.md", ".claude/CLAUDE.md"),
-        )
+        home += [
+            HomeCopy(".claude.json", config_dir.parent / ".claude.json"),
+            HomeCopy(".claude/settings.json", config_dir / "settings.json"),
+            HomeCopy(".claude/CLAUDE.md", config_dir / "CLAUDE.md"),
+        ]
         if include_plugins:
-            config_files += (
-                (
-                    config_dir / "plugins" / "installed_plugins.json",
-                    ".claude/plugins/installed_plugins.json",
+            plugins = config_dir / "plugins"
+            home += [
+                HomeCopy(
+                    ".claude/plugins/installed_plugins.json", plugins / "installed_plugins.json"
                 ),
-                (
-                    config_dir / "plugins" / "known_marketplaces.json",
-                    ".claude/plugins/known_marketplaces.json",
+                HomeCopy(
+                    ".claude/plugins/known_marketplaces.json", plugins / "known_marketplaces.json"
                 ),
-            )
-            dirs = (
-                (config_dir / "plugins" / "marketplaces", ".claude/plugins/marketplaces"),
-                (config_dir / "plugins" / "cache", ".claude/plugins/cache"),
-            )
+                HomeCopy(".claude/plugins/marketplaces", plugins / "marketplaces"),
+                HomeCopy(".claude/plugins/cache", plugins / "cache"),
+            ]
     # Skills come from the canonical shared dir (DRUKS_SKILLS_DIR) when set;
     # otherwise fall back to the per-CLI skills subdir.
     skills_src = sandbox.skills_dir or (config_dir / "skills" if config_dir else None)
     if skills_src:
-        dirs += ((skills_src, ".claude/skills"),)
-    return Credentials(
-        files=(
-            (
-                ClaudeHarness.credentials_path,
-                await ClaudeHarness.render_credentials_file(connection_id),
-            ),
-        ),
-        github_token=github_token,
-        extra_config_files=config_files,
-        extra_config_dirs=dirs,
-        extra_dir_excludes={".claude/skills": await Skill.delivery_excludes(skills)},
-    )
+        home.append(
+            HomeCopy(".claude/skills", skills_src, excludes=await Skill.delivery_excludes(skills))
+        )
+    return Credentials(home=tuple(home), github_token=github_token)
 
 
 def collapse_claude_stream(stdout: bytes) -> dict[str, Any]:
