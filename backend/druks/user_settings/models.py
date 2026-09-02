@@ -96,7 +96,7 @@ class HarnessSettings(Base):
         return await db_session().get(cls, name)
 
     @classmethod
-    async def require(cls, name: str) -> "HarnessSettings":
+    async def get_registered(cls, name: str) -> "HarnessSettings":
         # The resolution paths (effort/timeout, the harness factory) only pass a
         # ``get_harness_for_model`` name, which is always registered and so always
         # seeded — a miss means ``seed_harnesses`` didn't run before serving.
@@ -196,7 +196,7 @@ class SettingsOverride(Base):
             return ResolvedEffort(override, "agent")
         if declared is not None:
             return ResolvedEffort(declared, "declared")
-        return ResolvedEffort((await HarnessSettings.require(harness)).effort, "harness")
+        return ResolvedEffort((await HarnessSettings.get_registered(harness)).effort, "harness")
 
     @classmethod
     async def set_agent_effort(cls, name: str, value: str | None) -> None:
@@ -209,7 +209,7 @@ class SettingsOverride(Base):
             return ResolvedTimeout(override, "agent")
         if declared is not None:
             return ResolvedTimeout(declared, "declared")
-        return ResolvedTimeout((await HarnessSettings.require(harness)).timeout, "harness")
+        return ResolvedTimeout((await HarnessSettings.get_registered(harness)).timeout, "harness")
 
     @classmethod
     async def set_agent_timeout(cls, name: str, value: int | None) -> None:

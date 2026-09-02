@@ -31,6 +31,7 @@ SESSION_ONLY_API_ROUTES = {
     ("GET", "/api/auth/personal-tokens"),
     ("POST", "/api/auth/personal-tokens"),
     ("DELETE", "/api/auth/personal-tokens/{pat_id}"),
+    ("POST", "/api/harnesses/{name}/connection"),
     ("DELETE", "/api/harnesses/{name}/connection"),
     ("PATCH", "/api/settings/apps"),
     ("POST", "/api/services/{slug}"),

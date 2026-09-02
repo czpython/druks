@@ -16,7 +16,7 @@ async def test_shipped_tuple_fallback_routes_shipped_models(druks_db):
 
 
 async def test_fetched_list_routes_provider_models(druks_db):
-    (await HarnessSettings.require("claude")).models_fetched = [
+    (await HarnessSettings.get_registered("claude")).models_fetched = [
         {"id": "claude-fable-5", "label": "Claude Fable 5"}
     ]
     await druks_db.flush()
@@ -53,7 +53,7 @@ async def test_settings_reject_model_missing_from_lists_returns_422(druks_db):
 )
 async def test_settings_reject_invalid_model_returns_422(druks_db, model, detail):
     account = await Account.get_or_create("op@example.com")
-    settings = await HarnessSettings.require("claude")
+    settings = await HarnessSettings.get_registered("claude")
     original_model = settings.model
 
     with pytest.raises(HTTPException) as error:

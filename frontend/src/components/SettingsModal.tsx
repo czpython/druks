@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
+import { Fragment, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type ReactNode } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { ApiError, api } from '../api/client'
@@ -1293,11 +1293,14 @@ export function HarnessConnect({ harness }: { harness: Harness }) {
   const queryClient = useQueryClient()
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [key, setKey] = useState('')
 
   const refresh = () => queryClient.invalidateQueries({ queryKey: ['harnesses'] })
   const flow = useHarnessConnect(harness.name, async () => {
     await refresh()
   })
+  const acceptsSubscription = harness.loginKinds.includes('subscription')
+  const acceptsApiKey = harness.loginKinds.includes('api_key')
 
   const disconnect = () => {
     if (!window.confirm(`Disconnect ${harness.name}? Reconnect it before agents can run on it.`))
@@ -1307,6 +1310,20 @@ export function HarnessConnect({ harness }: { harness: Harness }) {
     void api
       .disconnectHarness(harness.name)
       .then(refresh)
+      .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+      .finally(() => setBusy(false))
+  }
+
+  const connectKey = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    setBusy(true)
+    setError(null)
+    void api
+      .connectHarnessKey(harness.name, key)
+      .then(() => {
+        setKey('')
+        return refresh()
+      })
       .catch((e) => setError(e instanceof Error ? e.message : String(e)))
       .finally(() => setBusy(false))
   }
@@ -1327,7 +1344,7 @@ export function HarnessConnect({ harness }: { harness: Harness }) {
               Disconnect
             </button>
           )}
-          {!flow.challenge && (
+          {acceptsSubscription && !flow.challenge && (
             <button
               className={'set-btn ' + (harness.connected ? 'ghost' : 'primary')}
               onClick={() => void flow.start()}
@@ -1338,7 +1355,31 @@ export function HarnessConnect({ harness }: { harness: Harness }) {
           )}
         </span>
       </div>
-      <ConnectSteps flow={flow} />
+      {acceptsSubscription && <ConnectSteps flow={flow} />}
+      {acceptsApiKey && (
+        <form className="hr-conn-flow" onSubmit={connectKey}>
+          <div className="hr-conn-step hr-conn-paste">
+            <input
+              aria-label="API key"
+              autoComplete="off"
+              className="hr-conn-input"
+              disabled={busy || flow.busy}
+              onChange={(event) => setKey(event.target.value)}
+              placeholder="Paste API key"
+              spellCheck={false}
+              type="password"
+              value={key}
+            />
+            <button
+              className="hr-conn-btn"
+              disabled={busy || flow.busy || !key.trim()}
+              type="submit"
+            >
+              {harness.kind === 'api_key' ? 'Replace key' : 'Connect with key'}
+            </button>
+          </div>
+        </form>
+      )}
       {(error ?? flow.error) && (
         <div className="hr-conn-error" role="alert">
           {error ?? flow.error}
