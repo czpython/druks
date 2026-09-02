@@ -28,7 +28,9 @@ async def _build(
 ) -> dict:
     # get_manifest never touches the live sandbox, so the harness builds
     # without sandbox settings — the same shape argv unit tests use.
-    harness = harness or ClaudeHarness(model="claude-opus-4-8", fast_mode=False, effort=None)
+    harness = harness or ClaudeHarness(
+        model="anthropic/claude-opus-4-8", fast_mode=False, effort=None
+    )
     return await harness.get_manifest(mcp_servers=mcp_servers, skills=skills, extra_env=extra_env)
 
 
@@ -70,7 +72,7 @@ async def test_manifest_records_the_delivered_capability_set(druks_db):
     )
 
     assert manifest["schema_version"] == 2
-    assert manifest["model"] == "claude-opus-4-8"
+    assert manifest["model"] == "anthropic/claude-opus-4-8"
     assert manifest["harness"] == "claude"
     assert manifest["skills_delivered"] == ["alpha"]
 
@@ -146,7 +148,7 @@ async def test_hash_is_stable_for_identical_capabilities(druks_db):
     assert (await _build(**with_token))["manifest_hash"] == baseline["manifest_hash"]
 
     different_model = await _build(
-        harness=ClaudeHarness(model="claude-sonnet-5", fast_mode=False, effort=None),
+        harness=ClaudeHarness(model="anthropic/claude-sonnet-5", fast_mode=False, effort=None),
         **with_token,
     )
     assert different_model["manifest_hash"] != baseline["manifest_hash"]

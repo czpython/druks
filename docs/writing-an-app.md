@@ -330,9 +330,10 @@ from replayed orchestration allows later edits to change an in-flight run.
 
 ## Add an agent
 
-An agent belongs to the app class. Its family default (`claude` or `codex`)
-uses the related operator harness setting. A full model id, written
-`provider/model` such as `anthropic/claude-opus-4-7`, fixes the default.
+An agent belongs to the app class. It runs on the operator's default model
+with that model's harness effort; the operator changes either per agent in
+Settings. `timeout` is the one declarable knob, because how long a step may
+take is a fact about the task.
 
 ```python
 from druks.agents import Agent, AgentOutput
@@ -345,7 +346,6 @@ class ReportOutput(AgentOutput):
 
 class NightWatch(App):
     report = Agent(
-        model="claude",
         prompt="night_watch/report.md",
         contract=ReportOutput,
         description="Turns findings into an operator report.",

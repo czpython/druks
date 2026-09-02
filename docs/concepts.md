@@ -142,7 +142,7 @@ These terms describe different ownership layers:
 
 | Layer | Responsibility |
 | --- | --- |
-| Agent | App-owned prompt, output contract, and default model/settings |
+| Agent | App-owned prompt, output contract, and run timeout |
 | Harness | Platform adapter that invokes the Claude or Codex CLI for a model |
 | Workspace | App customization of what a call receives, such as a cloned repository |
 | Sandbox | Drukbox-provisioned isolated host where the harness process runs |

@@ -165,7 +165,7 @@ function stubFetch(
         return new Response('[]', { status: 200 })
       }
       if (path === '/api/settings') {
-        return new Response(JSON.stringify({ timezone: 'UTC', updatedAt: '2026-08-01T00:00:00Z' }), {
+        return new Response(JSON.stringify({ timezone: 'UTC', defaultModel: 'anthropic/claude-opus-4-7', updatedAt: '2026-08-01T00:00:00Z' }), {
           status: 200,
         })
       }

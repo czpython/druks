@@ -1,5 +1,5 @@
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import ForeignKey, String, UniqueConstraint, select
 from sqlalchemy.dialects.postgresql import CITEXT, JSONB
@@ -13,7 +13,10 @@ from druks.models import Base
 from druks.secrets.fields import EncryptedJsonField
 from druks.user_settings.models import UserSettings
 
-from .exceptions import HarnessNotConnectedError
+from .exceptions import HarnessNotConnectedError, UnknownModelError
+
+if TYPE_CHECKING:
+    from .base import Harness
 
 
 class ProviderLogin(Base, Uuid7Pk):
@@ -39,10 +42,18 @@ class ProviderLogin(Base, Uuid7Pk):
         return await db_session().get(cls, login_id)
 
     @classmethod
-    async def lookup(cls, provider_id: str, account_id: str | None) -> "ProviderLogin":
-        """The login a call runs with: the account's own, else the
-        fallback account's — which carries unmatched work so automation keeps
-        moving."""
+    async def lookup(
+        cls, provider_id: str, account_id: str | None, *, login_id: str | None = None
+    ) -> "ProviderLogin":
+        """The login a call runs with: the selected row, read fresh so a vanished
+        one fails the call; else the account's own; else the fallback account's,
+        which carries unmatched work so automation keeps moving."""
+        if login_id:
+            if row := await cls.get(login_id):
+                return row
+            raise HarnessNotConnectedError(
+                "the selected login was removed — reconnect it in Settings → Providers."
+            )
         if account_id:
             own = await cls.get_for_account(provider_id, account_id)
             if own:
@@ -113,6 +124,17 @@ class ProviderLogin(Base, Uuid7Pk):
         row.expires_at = expires_at
         await session.flush()
         return row
+
+    def get_harness(self) -> "type[Harness]":
+        """The first registered harness that runs on this login; a miss raises."""
+        from .registry import get_harnesses  # cycle: registry → base → models
+
+        for harness in get_harnesses():
+            if harness.accepts(self):
+                return harness
+        raise UnknownModelError(
+            f"No installed harness runs {self.provider} on a {self.kind} login."
+        )
 
     @property
     def is_connected(self) -> bool:

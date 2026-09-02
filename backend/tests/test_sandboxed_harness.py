@@ -307,10 +307,6 @@ async def test_sandbox_unreachable_translates_to_harness_error(
     assert downloads == []
 
 
-def _harness_stub(model):
-    return ClaudeHarness
-
-
 async def test_run_prompt_builds_executes_and_parses(
     ctx: SimpleNamespace,
 ):
@@ -361,6 +357,7 @@ async def test_run_prompt_builds_executes_and_parses(
         artifact_dir=ctx.artifact_dir,
         timeout=60,
         call_id="call-7",
+        login=SimpleNamespace(provider="anthropic"),
         extra_env={"GITHUB_MCP_TOKEN": "ghs_x"},
     )
 
@@ -523,17 +520,19 @@ def test_agent_result_names_the_agent_in_its_failure():
 
 
 def _patch_harness_resolution(monkeypatch: pytest.MonkeyPatch) -> None:
-    # run_agent resolves the harness + its settings from the DB; these tests
-    # are about the failure boundary, not resolution.
-
-    monkeypatch.setattr("druks.harnesses.registry.get_harness_for_model", _harness_stub)
+    # run_agent reads the harness settings from the DB; these tests are about
+    # the failure boundary, not resolution.
 
     async def get_registered(name):
         return SimpleNamespace(effort="high", timeout=60, fast_mode=False)
 
+    async def lookup(provider, account_id, *, login_id=None):
+        return SimpleNamespace(id="login-1", account_id="acc", get_harness=lambda: ClaudeHarness)
+
     monkeypatch.setattr(
         "druks.user_settings.models.HarnessSettings.get_registered", staticmethod(get_registered)
     )
+    monkeypatch.setattr("druks.harnesses.models.ProviderLogin.lookup", staticmethod(lookup))
 
 
 async def test_run_agent_carries_foreign_failures_as_harness_errors(

@@ -30,13 +30,8 @@ async def test_get_lazy_creates_row_with_default_timezone(session):
 async def test_harnesses_seeded_with_shipped_defaults(session):
     # init_db seeds one HarnessSettings row per registered harness.
     claude = await HarnessSettings.get_registered("claude")
-    assert (claude.model, claude.fast_mode, claude.effort, claude.timeout) == (
-        "anthropic/claude-opus-4-7",
-        False,
-        "high",
-        1800,
-    )
-    assert (await HarnessSettings.get_registered("codex")).model == "openai-codex/gpt-5.5"
+    assert (claude.fast_mode, claude.effort, claude.timeout) == (False, "high", 1800)
+    assert (await UserSettings.get()).default_model == "anthropic/claude-opus-4-7"
     assert {harness.name for harness in await HarnessSettings.all()} == {
         "claude",
         "codex",
@@ -47,10 +42,9 @@ async def test_harnesses_seeded_with_shipped_defaults(session):
 
 async def test_harness_update_persists(session):
     claude = await HarnessSettings.get_registered("claude")
-    await claude.update(model="anthropic/claude-sonnet-4-6", fast_mode=True)
+    await claude.update(fast_mode=True)
     await session.commit()
     claude = await HarnessSettings.get_registered("claude")
-    assert claude.model == "anthropic/claude-sonnet-4-6"
     assert claude.fast_mode is True
 
 

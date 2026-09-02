@@ -51,10 +51,8 @@ async def list_harness_settings() -> list[HarnessResponse]:
 
 @router.patch("/harnesses/{name}", response_model=HarnessResponse, response_model_by_alias=True)
 async def update_harness_settings(name: str, body: HarnessUpdate) -> HarnessResponse:
-    harness, row = await _resolve_harness(name)
+    _, row = await _resolve_harness(name)
     updates = body.model_dump(exclude_unset=True, by_alias=False)
-    if (model := updates.get("model")) and get_harness_for_model(model) is not harness:
-        raise HTTPException(status_code=422, detail=f"{model!r} is not a {harness.name} model.")
     if updates:
         await row.update(**updates)
     return HarnessResponse.model_validate(row)
@@ -77,6 +75,9 @@ async def update_user_settings(
             # Crons are evaluated in this timezone — repoint them now, not at
             # the next launch.
             await apply_schedules()
+    if body.default_model:
+        get_harness_for_model(body.default_model)
+        await row.update_profile(default_model=body.default_model)
     if "gate_park_destination_id" in body.model_fields_set:
         destination_id = body.gate_park_destination_id
         if destination_id and not await Destination.get(destination_id):

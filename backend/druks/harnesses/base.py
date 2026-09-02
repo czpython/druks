@@ -108,18 +108,6 @@ class Harness(ABC):
         """The model as the CLI names it, without the provider namespace."""
         return self.model.partition("/")[2]
 
-    async def login(self, login_id: str | None) -> ProviderLogin:
-        """The selected login, read fresh at push time; with none
-        selected, the fallback account's for this model's provider. A vanished
-        row fails the call rather than render another account's."""
-        if login_id:
-            if row := await ProviderLogin.get(login_id):
-                return row
-            raise exceptions.HarnessNotConnectedError(
-                "the selected login was removed — reconnect it in Settings → Providers."
-            )
-        return await ProviderLogin.lookup(self.model.partition("/")[0], None)
-
     async def get_manifest(
         self,
         *,

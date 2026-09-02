@@ -55,5 +55,4 @@ class Review(App):
         description="reads a pull request and writes the review",
         prompt="review/review_pull_request.md",
         contract=ReviewReport,
-        model="claude",
     )

@@ -4,7 +4,6 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from druks.harnesses.base import Harness
 from druks.harnesses.datastructures import SandboxSettings
 from druks.harnesses.exceptions import (
     HarnessError,
@@ -86,10 +85,6 @@ def _response(
 async def test_build_invocation_uses_server_schema_and_env_auth(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    async def login(self: Harness, _credential_id: str | None) -> SimpleNamespace:
-        return SimpleNamespace(provider="anthropic", payload={"api_key": _API_KEY})
-
-    monkeypatch.setattr(OpenCodeHarness, "login", login)
     server = McpServer(
         name="github",
         url="https://api.example.test/mcp",
@@ -97,6 +92,7 @@ async def test_build_invocation_uses_server_schema_and_env_auth(
         env_headers={"X-Trace-Key": "MCP_TRACE_KEY"},
     )
     invocation = await _harness().build_invocation(
+        login=SimpleNamespace(provider="anthropic", payload={"api_key": _API_KEY}),
         prompt="A large prompt stays on stdin.",
         schema={"type": "object", "properties": {"answer": {"type": "string"}}},
         run_id="run-1",

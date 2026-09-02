@@ -12,6 +12,7 @@ from druks.database import db_session
 from druks.models import Base
 from druks.secrets.fields import EncryptedTextField
 
+from .constants import DEFAULT_MODEL
 from .datastructures import (
     ResolvedEffort,
     ResolvedModel,
@@ -29,6 +30,8 @@ class UserSettings(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     timezone: Mapped[str] = mapped_column(String, default="UTC")
+    # The model every agent runs unless it carries a per-agent override.
+    default_model: Mapped[str] = mapped_column(String, default=DEFAULT_MODEL)
     # The designated gate-park notification destination; unset — or the
     # destination deleted (SET NULL) — turns gate-park notifications off.
     gate_park_destination_id: Mapped[str | None] = mapped_column(
@@ -54,9 +57,17 @@ class UserSettings(Base):
             row = await session.get_one(cls, cls.SINGLETON_ID)
         return row
 
-    async def update_profile(self, *, timezone: str | None = None) -> None:
+    @classmethod
+    async def get_default_model(cls) -> str:
+        return (await cls.get()).default_model
+
+    async def update_profile(
+        self, *, timezone: str | None = None, default_model: str | None = None
+    ) -> None:
         if timezone:
             self.timezone = timezone
+        if default_model:
+            self.default_model = default_model
         self.updated_at = Base.utc_now()
         await db_session().flush()
 
@@ -75,12 +86,11 @@ class UserSettings(Base):
 class HarnessSettings(Base):
     # One row per registered harness (claude, codex, …), seeded from the
     # registry on install and tuned by the operator. An agent inherits its
-    # harness's model / effort / timeout / fast_mode unless it declares its own
-    # or carries a per-agent override.
+    # harness's effort / timeout / fast_mode unless it carries a per-agent
+    # override.
     __tablename__ = "harnesses"
 
     name: Mapped[str] = mapped_column(String, primary_key=True)
-    model: Mapped[str] = mapped_column(String)
     fast_mode: Mapped[bool] = mapped_column(default=False)
     effort: Mapped[str] = mapped_column(String, default="high")
     timeout: Mapped[int] = mapped_column(default=1800)
@@ -152,26 +162,21 @@ class SettingsOverride(Base):
         await session.flush()
 
     @classmethod
-    async def agent_model(cls, name: str, default: str) -> ResolvedModel:
+    async def agent_model(cls, name: str) -> ResolvedModel:
         override = await cls.read(f"agent_model:{name}")
         if override is not None:
             return ResolvedModel(override, "agent")
-        # ``default`` is a harness name (claude/codex) → that harness's model,
-        # or a pinned model string when it names no harness.
-        harness = await HarnessSettings.get(default)
-        return ResolvedModel(harness.model if harness else default, "default")
+        return ResolvedModel(await UserSettings.get_default_model(), "default")
 
     @classmethod
     async def set_agent_model(cls, name: str, model: str | None) -> None:
         await cls.write(f"agent_model:{name}", model)
 
     @classmethod
-    async def agent_effort(cls, name: str, declared: str | None, harness: str) -> ResolvedEffort:
+    async def agent_effort(cls, name: str, harness: str) -> ResolvedEffort:
         override = await cls.read(f"agent_effort:{name}")
         if override is not None:
             return ResolvedEffort(override, "agent")
-        if declared is not None:
-            return ResolvedEffort(declared, "declared")
         return ResolvedEffort((await HarnessSettings.get_registered(harness)).effort, "harness")
 
     @classmethod

@@ -55,7 +55,7 @@ class OpenCodeHarness(Harness):
         skills: tuple[str, ...] = (),
         extra_env: dict[str, str] | None = None,
         mcp_servers: tuple[McpServer, ...] = (),
-        connection_id: str | None = None,
+        login: ProviderLogin,
         timeout: int = Harness.default_timeout,
     ) -> AgentInvocation:
         if not self.sandbox:
@@ -88,7 +88,7 @@ class OpenCodeHarness(Harness):
             credentials=Credentials(github_token=github_token),
             env={
                 **(extra_env or {}),
-                "OPENCODE_AUTH_CONTENT": self.auth_json(await self.login(connection_id)),
+                "OPENCODE_AUTH_CONTENT": self.auth_json(login),
                 "DRUKS_RUN_DIR": f"{get_runs_root(ssh_username)}/{run_id}",
                 "OPENCODE_CONFIG_CONTENT": json.dumps(
                     {"$schema": "https://opencode.ai/config.json", "mcp": mcp},
