@@ -195,7 +195,7 @@ def make_agent_result(output, *, agent="agent", error=None, cost_usd=None, cost_
         output=output,
         run_id="run-test",
         sandbox_host_id="host-test",
-        model="claude-opus-4-7",
+        model="anthropic/claude-opus-4-7",
         agent=agent,
         status=AgentCallStatus.FAILED if error else AgentCallStatus.SUCCEEDED,
         started_at=datetime.now(UTC),
@@ -234,7 +234,9 @@ async def seed_note_run(session, *, note=None, state: str = "running", **kwargs)
     return await seed_run(session, kind=Summarize.kind, subject=subject, state=state, **kwargs)
 
 
-async def seed_note_agent_run(*, agent: str = "implement", model: str = "gpt-5.5", **kwargs):
+async def seed_note_agent_run(
+    *, agent: str = "implement", model: str = "openai-codex/gpt-5.5", **kwargs
+):
     """A run on a fresh note with one agent call on it — the call is what the caller wants."""
     from druks.database import db_session
     from druks.testing import seed_call

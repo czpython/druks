@@ -20,7 +20,7 @@ from . import exceptions
 from .artifacts import call_dir, write_cost
 from .base import Harness
 from .constants import CLAUDE_DISALLOWED_TOOLS
-from .datastructures import OAuthToken, ParsedModels, ProviderRequest, SandboxSettings
+from .datastructures import SandboxSettings
 from .models import ProviderLogin
 from .providers import AnthropicProvider
 
@@ -33,8 +33,7 @@ class ClaudeHarness(Harness):
     name = "claude"
     provider = AnthropicProvider.id
     login_kinds = frozenset({"oauth"})
-    models = ("claude-opus-4-7", "claude-sonnet-4-6", "claude-haiku-4-5")
-    default_model = "claude-opus-4-7"
+    default_model = "anthropic/claude-opus-4-7"
     command = "claude"
 
     # The CLI dies with the raw API error in the result text ("API Error: 529
@@ -192,36 +191,12 @@ class ClaudeHarness(Harness):
     def _command_args(self) -> tuple[str, ...]:
         args = (self.command,)
         if self.model:
-            args = (*args, "--model", self.model)
+            args = (*args, "--model", self.model_id)
         if self.fast_mode:
             args = (*args, "--settings", json.dumps({"fastMode": True}))
         if self.effort:
             args = (*args, "--effort", self.effort)
         return args
-
-    @classmethod
-    def _model_discovery_request(cls, token: OAuthToken) -> ProviderRequest:
-        return ProviderRequest(
-            "https://api.anthropic.com/v1/models?limit=100", AnthropicProvider.oauth_headers(token)
-        )
-
-    @classmethod
-    def _parse_models(cls, raw: str) -> ParsedModels:
-        try:
-            data = json.loads(raw)
-        except (json.JSONDecodeError, TypeError):
-            return ParsedModels(ok=False, error="unparseable", raw=raw)
-        listed = data.get("data") if isinstance(data, dict) else None
-        if not isinstance(listed, list):
-            return ParsedModels(ok=False, error="unexpected_payload", raw=raw)
-        models = tuple(
-            {"id": model["id"], "label": model.get("display_name") or model["id"]}
-            for model in listed
-            if isinstance(model, dict) and model.get("id")
-        )
-        if not models:
-            return ParsedModels(ok=False, error="empty_list", raw=raw)
-        return ParsedModels(ok=True, models=models, raw=raw)
 
 
 async def _get_credentials(

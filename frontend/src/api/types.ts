@@ -491,22 +491,20 @@ export interface DashboardHealth {
 export type AgentEffort = 'low' | 'medium' | 'high'
 
 /** One picker entry — the provider's model id and its display label. */
-export interface AllowedModel {
+export interface CatalogModel {
   id: string
   label: string
 }
 
 /** One coding-agent harness's operator config — a DB record seeded from the
- * registry. `allowedModels` are the harness's picker entries, fetched from the
- * provider (seed tuple until then) — advisory, not a gate; any model in the
- * harness's namespace runs. */
+ * registry. Model ids are `provider/model`; the models a harness can run are
+ * the catalogs of the providers it drives. */
 export interface Harness {
   name: string
   /** The provider a subscription CLI is bound to; null for a key CLI. */
   provider: string | null
   loginKinds: string[]
   model: string
-  allowedModels: AllowedModel[]
   fastMode: boolean
   effort: string
   timeout: number
@@ -519,6 +517,13 @@ export interface Provider {
   id: string
   label: string
   loginKinds: string[]
+}
+
+/** The models one provider offers, fetched over a login. */
+export interface ProviderCatalog {
+  provider: string
+  models: CatalogModel[]
+  fetchedAt: string
 }
 
 /** One account's login at one provider. */

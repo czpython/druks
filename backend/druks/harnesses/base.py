@@ -7,8 +7,6 @@ from collections.abc import Collection
 from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar
 
-import httpx
-
 from druks.mcp import models as mcp_models
 from druks.mcp.helpers import get_bearer_token_env_var
 from druks.skills.models import Skill
@@ -17,20 +15,15 @@ from . import exceptions
 from .datastructures import (
     AgentInvocation,
     HarnessRunResult,
-    ParsedModels,
-    ProviderRequest,
     SandboxSettings,
 )
-from .exceptions import OAuthTokenError
 from .models import ProviderLogin
-from .providers import Token, error_tag, get_provider
+from .providers import Provider
 
 if TYPE_CHECKING:
     from druks.sandbox.datastructures import McpServer
 
 logger = logging.getLogger(__name__)
-
-_DISCOVERY_TIMEOUT_SECONDS = 20.0
 
 # The capability manifest is a plain JSON dict written per AgentCall. Bump when
 # the recorded shape changes so a reader can tell manifests apart across
@@ -47,8 +40,7 @@ class Harness(ABC):
     # The one provider a subscription CLI is bound to. None for a key CLI,
     # which runs whichever provider the model names.
     provider: ClassVar[str | None] = None
-    # Suggested models for the settings picker and the ``default_model`` seed.
-    models: ClassVar[tuple[str, ...]]
+    # The seed for this harness's settings row, ``provider/model``.
     default_model: ClassVar[str]
     # This CLI's terminal-error vocabulary: phrase → the failure it names, the
     # first phrase found in a death's text winning in declaration order; no
@@ -99,21 +91,22 @@ class Harness(ABC):
             raise exceptions.HarnessError(message)
 
     @classmethod
-    def provider_for(cls, model: str) -> str:
-        """The provider whose login ``model`` spends: its namespace, else the
-        provider this CLI is bound to."""
-        provider, separator, _ = model.partition("/")
-        if separator:
-            return provider
-        if cls.provider:
-            return cls.provider
-        raise exceptions.HarnessError(f"{cls.name} needs a provider namespace on model {model!r}.")
-
-    @classmethod
     def accepts(cls, login: ProviderLogin) -> bool:
         """Whether this CLI runs on ``login``."""
         bound = not cls.provider or cls.provider == login.provider
         return bound and login.kind in cls.login_kinds
+
+    @classmethod
+    def has_provider(cls, provider: Provider) -> bool:
+        """The one this CLI is bound to, or any that issues a login kind it consumes."""
+        if cls.provider:
+            return cls.provider == provider.id
+        return bool(cls.login_kinds & provider.login_kinds)
+
+    @property
+    def model_id(self) -> str:
+        """The model as the CLI names it, without the provider namespace."""
+        return self.model.partition("/")[2]
 
     async def login(self, login_id: str | None) -> ProviderLogin:
         """The selected login, read fresh at push time; with none
@@ -125,7 +118,7 @@ class Harness(ABC):
             raise exceptions.HarnessNotConnectedError(
                 "the selected login was removed — reconnect it in Settings → Providers."
             )
-        return await ProviderLogin.lookup(self.provider_for(self.model), None)
+        return await ProviderLogin.lookup(self.model.partition("/")[0], None)
 
     async def get_manifest(
         self,
@@ -198,50 +191,6 @@ class Harness(ABC):
         for one-shot callers without parent state.
         """
         return call_id or str(uuid.uuid4())
-
-    @classmethod
-    async def fetch_models(cls, login: ProviderLogin) -> ParsedModels:
-        """Fetch + parse the provider's selectable-model list for the settings
-        picker. Auth/HTTP failures collapse to a ``ParsedModels(ok=False,
-        error=<tag>)`` so they never look like 'no models' — the stored list
-        only ever advances, it is never wiped by a bad fetch."""
-        try:
-            token = get_provider(login.provider).load_token(login)
-            request = cls._model_discovery_request(token)
-        except OAuthTokenError as exc:
-            return ParsedModels(ok=False, error=exc.tag)
-        except NotImplementedError:
-            return ParsedModels(ok=False, error="unsupported")
-        try:
-            async with httpx.AsyncClient(timeout=_DISCOVERY_TIMEOUT_SECONDS) as client:
-                response = await client.get(request.url, headers=request.headers)
-        except httpx.TimeoutException:
-            return ParsedModels(ok=False, error="timeout")
-        except httpx.HTTPError as exc:
-            logger.warning("models request failed for %s: %s", cls.name, exc, exc_info=True)
-            return ParsedModels(ok=False, error="network")
-
-        if response.status_code == 200:
-            return cls._parse_models(response.text)
-        tag = error_tag(response.status_code)
-        logger.warning(
-            "models endpoint %s for %s: %s",
-            response.status_code,
-            cls.name,
-            response.text[:300],
-        )
-        return ParsedModels(ok=False, error=tag)
-
-    @classmethod
-    def _model_discovery_request(cls, token: Token) -> ProviderRequest:
-        """The authenticated request for the model-discovery endpoint."""
-        raise NotImplementedError
-
-    @classmethod
-    def _parse_models(cls, raw: str) -> ParsedModels:
-        """Map the model-list endpoint's JSON body into :class:`ParsedModels`.
-        A payload offering nothing is a tagged error, never an ok-empty."""
-        return ParsedModels(ok=False, error="unsupported")
 
 
 def _terminal_detail(result: HarnessRunResult) -> str:

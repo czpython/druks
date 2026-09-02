@@ -22,11 +22,11 @@ from druks.usage.schemas import (
     UsageWindowHistory,
 )
 from druks.usage.trends import FIVE_HOUR_RANGE, WEEK_RANGE, downsample
-from druks.user_settings.models import HarnessSettings, UserSettings
+from druks.user_settings.models import UserSettings
 
 router = APIRouter()
 
-# The /today bucket for calls whose model no current picker claims.
+# The /today bucket for calls whose model names no registered provider.
 UNATTRIBUTED = "unattributed"
 
 # An open tab must not hammer the providers.
@@ -107,22 +107,18 @@ async def get_usage_today(account: Account = Depends(current_account)) -> UsageT
     )
     timezone_name = str(timezone)
 
-    # Every call counts, even one whose model no picker list claims (pinned
-    # outside the list, or an id that churned): money spent must not vanish from
-    # the display, and the strip's total_run_spend_between counts them too.
+    # Every call counts, even one whose model names no provider (a pre-namespace
+    # id): money spent must not vanish from the display, and the strip's
+    # total_run_spend_between counts them too.
     # Unclaimed calls land in an extra "unattributed" entry — the panel's
     # per-provider cards look up by id and skip it, its grand total sums the
     # whole list.
-    provider_by_model = {
-        entry["id"]: settings.harness.provider_for(entry["id"])
-        for settings in await HarnessSettings.all()
-        for entry in settings.allowed_models
-    }
     ids = [provider.id for provider in get_providers()]
     totals = {name: {"spend": 0.0, "tokens": 0, "runs": 0} for name in [*ids, UNATTRIBUTED]}
     hours: dict[str, list[float]] = {name: [0.0] * 24 for name in [*ids, UNATTRIBUTED]}
     for model, cost_usd, cost_metadata, finished_at in rows:
-        name = provider_by_model.get(model, UNATTRIBUTED)
+        provider = model.partition("/")[0]
+        name = provider if provider in totals else UNATTRIBUTED
         bucket = totals[name]
         bucket["runs"] += 1
         usage = normalize_token_usage(cost_metadata)

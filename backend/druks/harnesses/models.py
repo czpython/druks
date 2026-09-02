@@ -1,7 +1,8 @@
 from datetime import UTC, datetime
+from typing import Any
 
 from sqlalchemy import ForeignKey, String, UniqueConstraint, select
-from sqlalchemy.dialects.postgresql import CITEXT
+from sqlalchemy.dialects.postgresql import CITEXT, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.orm.attributes import flag_modified
 
@@ -136,4 +137,30 @@ class ProviderLogin(Base, Uuid7Pk):
     async def delete(self) -> None:
         session = db_session()
         await session.delete(self)
+        await session.flush()
+
+
+class ProviderCatalog(Base):
+    """The models a provider offers, ``{"id", "label"}`` each with ids
+    namespaced ``provider/model``. Fetched over one of its logins."""
+
+    __tablename__ = "provider_catalogs"
+
+    provider: Mapped[str] = mapped_column(String, primary_key=True)
+    models: Mapped[Any] = mapped_column(JSONB)
+    fetched_at: Mapped[datetime] = mapped_column(default=Base.utc_now, onupdate=Base.utc_now)
+
+    @classmethod
+    async def list_all(cls) -> list["ProviderCatalog"]:
+        return list(await db_session().scalars(select(cls).order_by(cls.provider)))
+
+    @classmethod
+    async def store(cls, provider: str, models: list[dict]) -> None:
+        session = db_session()
+        row = await session.get(cls, provider)
+        if row:
+            row.models = models
+            row.fetched_at = Base.utc_now()
+        else:
+            session.add(cls(provider=provider, models=models))
         await session.flush()

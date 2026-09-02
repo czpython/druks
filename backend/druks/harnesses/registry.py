@@ -1,5 +1,6 @@
 from .base import Harness
-from .exceptions import HarnessError
+from .exceptions import UnknownModelError
+from .providers import get_provider
 
 
 def get_harnesses() -> tuple[type[Harness], ...]:
@@ -16,15 +17,16 @@ def get_harness(name: str) -> type[Harness] | None:
             return harness
 
 
-async def get_harness_for_model(model: str) -> type[Harness]:
-    """The harness that runs ``model`` from its fetched-or-shipped model list.
-
-    A miss raises loudly; namespace-shaped models do not route until a fetch
-    stores them on the harness settings row.
-    """
-    from druks.user_settings.models import HarnessSettings
-
-    for row in await HarnessSettings.all():
-        if model == row.name or any(m["id"] == model for m in row.allowed_models):
-            return row.harness
-    raise HarnessError(f"no harness runs model {model!r}")
+def get_harness_for_model(model: str) -> type[Harness]:
+    """The first registered harness whose providers include the one ``model``
+    names; a miss raises."""
+    try:
+        provider = get_provider(model.partition("/")[0])
+    except KeyError as exc:
+        raise UnknownModelError(
+            f"No installed harness runs model {model!r}; a model id is 'provider/model'."
+        ) from exc
+    for harness in get_harnesses():
+        if harness.has_provider(provider):
+            return harness
+    raise UnknownModelError(f"No installed harness runs model {model!r}.")

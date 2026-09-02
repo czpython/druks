@@ -49,7 +49,7 @@ def _provider(body: dict, provider_id: str) -> dict:
     return next(entry for entry in body["providers"] if entry["id"] == provider_id)
 
 
-async def _seed_agent_call(druks_db, *, model: str = "gpt-5.5"):
+async def _seed_agent_call(druks_db, *, model: str = "openai-codex/gpt-5.5"):
     note = await Note.create(body="usage accounting")
     run = await seed_run(druks_db, kind=Summarize.kind, subject=note)
     return await seed_call(druks_db, run, "summarize", status="running", model=model)
@@ -236,7 +236,7 @@ async def test_usage_history_serializes_series_oldest_first(client, app_settings
 async def test_usage_today_aggregates_spend_and_tokens_by_provider(
     client, app_settings, druks_db
 ) -> None:
-    codex_run = await _seed_agent_call(druks_db, model="gpt-5.5")
+    codex_run = await _seed_agent_call(druks_db, model="openai-codex/gpt-5.5")
     codex_run.account_id = await _account_id()
     codex_run.cost_usd = 1.25
     codex_run.cost_metadata = {
@@ -247,7 +247,7 @@ async def test_usage_today_aggregates_spend_and_tokens_by_provider(
     }
     codex_run.finished_at = datetime.now(UTC)
 
-    claude_run = await _seed_agent_call(druks_db, model="claude-opus-4-7")
+    claude_run = await _seed_agent_call(druks_db, model="anthropic/claude-opus-4-7")
     claude_run.account_id = await _account_id()
     claude_run.cost_usd = 2.5
     claude_run.cost_metadata = {
@@ -260,12 +260,12 @@ async def test_usage_today_aggregates_spend_and_tokens_by_provider(
     claude_run.finished_at = datetime.now(UTC)
 
     # Finished yesterday — outside today's boundary, must not count.
-    old_run = await _seed_agent_call(druks_db, model="gpt-5.5")
+    old_run = await _seed_agent_call(druks_db, model="openai-codex/gpt-5.5")
     old_run.cost_usd = 99.0
     old_run.finished_at = datetime.now(UTC) - timedelta(days=2)
 
     # Still running — no cost yet, counted nowhere.
-    await _seed_agent_call(druks_db, model="gpt-5.5")
+    await _seed_agent_call(druks_db, model="openai-codex/gpt-5.5")
     await druks_db.flush()
 
     body = client.get("/api/usage/today").json()
@@ -324,17 +324,17 @@ async def test_usage_reports_viewers_login_identity(client, druks_db) -> None:
 
 
 async def test_usage_today_counts_only_the_viewers_calls(client, druks_db) -> None:
-    mine = await _seed_agent_call(druks_db, model="claude-opus-4-7")
+    mine = await _seed_agent_call(druks_db, model="anthropic/claude-opus-4-7")
     mine.account_id = await _account_id()
     mine.cost_usd = 2.0
     mine.finished_at = datetime.now(UTC)
 
-    other = await _seed_agent_call(druks_db, model="claude-opus-4-7")
+    other = await _seed_agent_call(druks_db, model="anthropic/claude-opus-4-7")
     other.account_id = (await Account.get_or_create("other@example.com")).id
     other.cost_usd = 5.0
     other.finished_at = datetime.now(UTC)
 
-    background = await _seed_agent_call(druks_db, model="claude-opus-4-7")
+    background = await _seed_agent_call(druks_db, model="anthropic/claude-opus-4-7")
     background.cost_usd = 9.0
     background.finished_at = datetime.now(UTC)
     await druks_db.flush()

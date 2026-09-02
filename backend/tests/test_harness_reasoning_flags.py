@@ -4,7 +4,7 @@ from druks.harnesses.claude import ClaudeHarness
 from druks.harnesses.codex import CodexHarness
 from druks.harnesses.providers import AnthropicProvider, OpenAiCodexProvider
 
-_CODEX_MODEL = CodexHarness.models[0]
+_CODEX_MODEL = CodexHarness.default_model
 
 
 @pytest.fixture(autouse=True)
@@ -40,7 +40,7 @@ async def test_claude_build_invocation_carries_every_flag():
     schema = {"type": "object"}
     server = McpServer(name="github", url="https://api.example/mcp/", bearer_token_env_var="TOK")
     inv = await ClaudeHarness(
-        model="claude-x",
+        model="anthropic/claude-x",
         fast_mode=True,
         effort="high",
         sandbox=_sandbox_config(),
@@ -115,7 +115,7 @@ async def test_codex_build_invocation_carries_every_flag():
     wrapper = inv.args[2]
     for token in (
         "codex exec",
-        f"--model {_CODEX_MODEL}",
+        "--model gpt-5.5",
         "features.fast_mode=true",
         "model_reasoning_summary=auto",
         "model_reasoning_effort=high",
@@ -152,10 +152,14 @@ async def test_codex_build_invocation_carries_every_flag():
 
 
 def test_claude_forwards_effort_value_only():
-    with_effort = ClaudeHarness(model="claude-x", fast_mode=False, effort="high")._command_args()
+    with_effort = ClaudeHarness(
+        model="anthropic/claude-x", fast_mode=False, effort="high"
+    )._command_args()
     assert with_effort[with_effort.index("--effort") + 1] == "high"
 
-    no_effort = ClaudeHarness(model="claude-x", fast_mode=False, effort=None)._command_args()
+    no_effort = ClaudeHarness(
+        model="anthropic/claude-x", fast_mode=False, effort=None
+    )._command_args()
     assert "--effort" not in no_effort
 
 
@@ -187,7 +191,9 @@ def test_claude_mcp_flags_emit_env_ref_header_not_literal_token():
     from druks.sandbox.datastructures import McpServer
 
     server = McpServer(name="github", url="https://api.example/mcp/", bearer_token_env_var="GH_TOK")
-    flags = ClaudeHarness(model="claude-x", fast_mode=False, effort=None)._mcp_flags((server,))
+    flags = ClaudeHarness(model="anthropic/claude-x", fast_mode=False, effort=None)._mcp_flags(
+        (server,)
+    )
     assert flags[0] == "--mcp-config"
     cfg = json.loads(flags[1])["mcpServers"]["github"]
     assert cfg["url"] == "https://api.example/mcp/"

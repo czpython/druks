@@ -140,11 +140,11 @@ class Agent:
         return (await SettingsOverride.agent_model(self.id, self.model)).value
 
     async def get_effort(self) -> str:
-        harness = (await get_harness_for_model(await self.get_model_name())).name
+        harness = (get_harness_for_model(await self.get_model_name())).name
         return (await SettingsOverride.agent_effort(self.id, self.effort, harness)).value
 
     async def get_timeout(self) -> int:
-        harness = (await get_harness_for_model(await self.get_model_name())).name
+        harness = (get_harness_for_model(await self.get_model_name())).name
         resolved = (await SettingsOverride.agent_timeout(self.id, self.timeout, harness)).value
         # Capped so a single call always fits inside a fresh sandbox lease.
         return min(resolved, MAX_AGENT_TIMEOUT_SECONDS)
@@ -201,7 +201,7 @@ class Agent:
             # recorded wait instead of re-reading the scrape.
             async with step_session():
                 model = await self.get_model_name()
-                provider_id = (await get_harness_for_model(model)).provider_for(model)
+                provider_id = model.partition("/")[0]
                 # The scrape belongs to the charged login — its account
                 # differs from the run's on fallback.
                 login = await ProviderLogin.lookup(provider_id, workflow.account_id)
@@ -268,11 +268,11 @@ class Agent:
         if not self.prompt:
             raise WorkflowError(f"agent {self.id!r} has no prompt template to render")
         model = await self.get_model_name()
-        harness = await get_harness_for_model(model)
+        harness = get_harness_for_model(model)
         workflow = current_workflow.get()
         # Refusing an unservable call here beats provisioning a VM and
         # 401ing mid-run.
-        login = await ProviderLogin.lookup(harness.provider_for(model), workflow.account_id)
+        login = await ProviderLogin.lookup(model.partition("/")[0], workflow.account_id)
         # Plain snapshots: the commits below expire the ORM row mid-flight.
         connection_id, charged_account_id = login.id, login.account_id
         # An agent call is a durability boundary — its effects don't roll back —

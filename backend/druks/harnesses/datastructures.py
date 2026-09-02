@@ -95,16 +95,6 @@ class ParsedUsage:
 
 
 @dataclass(frozen=True)
-class ParsedModels:
-    ok: bool
-    error: str | None = None
-    # ``{"id", "label"}`` each; codex adds ``"efforts"`` and
-    # ``"minimal_client_version"``.
-    models: tuple[dict, ...] = ()
-    raw: str = field(default="", repr=False)
-
-
-@dataclass(frozen=True)
 class SandboxSettings:
     service_url: str
     service_token: str

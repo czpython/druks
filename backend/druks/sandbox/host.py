@@ -235,7 +235,7 @@ class Host:
 
         settings = load_settings()
         # Effort/timeout fall back to the model's harness defaults.
-        harness_class = await get_harness_for_model(model)
+        harness_class = get_harness_for_model(model)
         harness_settings = await HarnessSettings.get_registered(harness_class.name)
         effort = effort or harness_settings.effort
         timeout = timeout if timeout is not None else harness_settings.timeout

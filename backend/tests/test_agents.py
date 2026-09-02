@@ -19,7 +19,7 @@ DUMMY_AGENT = agents.Agent(
     id="dummy",
     prompt="dummy/agent.md",
     contract=DummyOutput,
-    model="claude-haiku-4-5",
+    model="anthropic/claude-haiku-4-5",
 )
 
 
@@ -31,7 +31,7 @@ FILE_AGENT = agents.Agent(
     id="file",
     prompt="dummy/agent.md",
     contract=FileOutput,
-    model="claude-haiku-4-5",
+    model="anthropic/claude-haiku-4-5",
 )
 
 
@@ -43,14 +43,14 @@ async def test_get_timeout_caps_at_the_sandbox_lease_max(druks_db):
         id="over",
         prompt="dummy/agent.md",
         contract=DummyOutput,
-        model="claude-haiku-4-5",
+        model="anthropic/claude-haiku-4-5",
         timeout=MAX_AGENT_TIMEOUT_SECONDS * 2,
     )
     under = agents.Agent(
         id="under",
         prompt="dummy/agent.md",
         contract=DummyOutput,
-        model="claude-haiku-4-5",
+        model="anthropic/claude-haiku-4-5",
         timeout=600,
     )
 
@@ -178,7 +178,7 @@ async def test_declaration_drives_run_agent_call(druks_db, tmp_path, monkeypatch
 
     assert result == DummyOutput(ok=True)
     kwargs = sandbox.run_agent.await_args.kwargs
-    assert kwargs["model"] == "claude-haiku-4-5"
+    assert kwargs["model"] == "anthropic/claude-haiku-4-5"
     assert kwargs["agent"] == "dummy"
     assert kwargs["schema"] == DummyOutput.model_json_schema()
     assert kwargs["prompt"] == "PROMPT:dummy/agent.md:repo=acme/widget"
@@ -192,7 +192,7 @@ async def test_declared_timeout_is_forwarded(druks_db, tmp_path, monkeypatch, cu
         id="timeout_probe",
         prompt="dummy/agent.md",
         contract=DummyOutput,
-        model="claude-opus-4-7",
+        model="anthropic/claude-opus-4-7",
         timeout=900,
         include_plugins=False,
     )

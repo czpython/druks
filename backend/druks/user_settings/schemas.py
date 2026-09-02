@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, PositiveInt
 from pydantic.fields import FieldInfo
 
 from druks.apps.settings import (
@@ -11,47 +11,33 @@ from druks.apps.settings import (
     field_section,
     field_visibility,
 )
+from druks.harnesses.schemas import SortedNames
 from druks.schemas import Schema
 
+from .datastructures import Effort
+
 if TYPE_CHECKING:
-    from druks.user_settings.models import HarnessSettings
-
-
-class AllowedModel(Schema):
-    id: str
-    label: str
+    pass
 
 
 class HarnessResponse(Schema):
+    model_config = ConfigDict(from_attributes=True)
+
     name: str
     # The provider a subscription CLI is bound to; None for a key CLI.
     provider: str | None
-    login_kinds: list[str]
+    login_kinds: SortedNames
     model: str
     effort: str
     timeout: int
     fast_mode: bool
-    allowed_models: list[AllowedModel]
-
-    @classmethod
-    def from_row(cls, settings: "HarnessSettings") -> "HarnessResponse":
-        return cls(
-            name=settings.name,
-            provider=settings.harness.provider,
-            login_kinds=sorted(settings.harness.login_kinds),
-            model=settings.model,
-            effort=settings.effort,
-            timeout=settings.timeout,
-            fast_mode=settings.fast_mode,
-            allowed_models=settings.allowed_models,
-        )
 
 
 class HarnessUpdate(BaseModel):
     model: str | None = None
     fast_mode: bool | None = Field(default=None, validation_alias="fastMode")
-    effort: str | None = None
-    timeout: int | None = None
+    effort: Effort | None = None
+    timeout: PositiveInt | None = None
 
 
 class UserSettingsResponse(Schema):
@@ -166,12 +152,12 @@ class AppsSettingsUpdate(BaseModel):
         validation_alias="agentModels",
     )
     # agent name -> effort (null clears, i.e. inherit the harness default).
-    agent_efforts: dict[str, str | None] = Field(
+    agent_efforts: dict[str, Effort | None] = Field(
         default_factory=dict,
         validation_alias="agentEfforts",
     )
     # agent name -> timeout seconds (null clears, i.e. inherit the harness default).
-    agent_timeouts: dict[str, int | None] = Field(
+    agent_timeouts: dict[str, PositiveInt | None] = Field(
         default_factory=dict,
         validation_alias="agentTimeouts",
     )

@@ -4,8 +4,6 @@ import urllib.parse
 from pathlib import Path
 from typing import Any
 
-import httpx
-
 from druks.sandbox.datastructures import (
     AgentInvocation,
     Credentials,
@@ -17,15 +15,11 @@ from druks.sandbox.layout import get_runs_root, get_work_root
 from . import exceptions
 from .artifacts import call_dir, write_cost
 from .base import Harness
-from .datastructures import ParsedModels
 from .models import ProviderLogin
-from .providers import error_tag
 
 logger = logging.getLogger(__name__)
 
 _ABORT_MARGIN_SECONDS = 5
-_CATALOG_URL = "https://models.dev/api.json"
-_DISCOVERY_TIMEOUT_SECONDS = 10.0
 _WRAPPER = (Path(__file__).parent / "opencode_wrapper.sh").read_text()
 _ERROR_TYPES = {
     "ProviderAuthError": exceptions.HarnessNotConnectedError,
@@ -37,7 +31,6 @@ _ERROR_TYPES = {
 class OpenCodeHarness(Harness):
     name = "opencode"
     login_kinds = frozenset({"api_key"})
-    models = ("anthropic/claude-sonnet-4-5",)
     default_model = "anthropic/claude-sonnet-4-5"
     command = "opencode"
     # The server writes nothing until the message POST completes; the wrapper
@@ -150,41 +143,3 @@ class OpenCodeHarness(Harness):
         (output_dir / "output.json").write_text(json.dumps(structured, indent=2, sort_keys=True))
         write_cost(output_dir, cost_usd=cost_usd, metadata=metadata)
         return structured
-
-    @classmethod
-    async def fetch_models(cls, _credential: ProviderLogin) -> ParsedModels:
-        # opencode's catalog IS models.dev (same team; its docs say so), so the
-        # picker reads the upstream directly — no opencode binary on the druks
-        # host. Advisory either way: the CLI's own listing gates on key
-        # presence, not validity.
-        try:
-            async with httpx.AsyncClient(timeout=_DISCOVERY_TIMEOUT_SECONDS) as client:
-                response = await client.get(_CATALOG_URL)
-        except httpx.TimeoutException:
-            return ParsedModels(ok=False, error="timeout")
-        except httpx.HTTPError as error:
-            logger.warning("models request failed for %s: %s", cls.name, error, exc_info=True)
-            return ParsedModels(ok=False, error="network")
-        if response.status_code != 200:
-            logger.warning(
-                "models endpoint %s for %s: %s",
-                response.status_code,
-                cls.name,
-                response.text[:300],
-            )
-            return ParsedModels(ok=False, error=error_tag(response.status_code))
-
-        raw = response.text
-        # The provider is the model namespace — the same rule the auth store
-        # rendering uses.
-        provider, _, _ = cls.default_model.partition("/")
-        try:
-            models = tuple(
-                {"id": f"{provider}/{model['id']}", "label": model["name"]}
-                for model in json.loads(raw)[provider]["models"].values()
-            )
-        except (ValueError, KeyError, TypeError, AttributeError):
-            return ParsedModels(ok=False, error="unexpected_payload", raw=raw)
-        if not models:
-            return ParsedModels(ok=False, error="empty_list", raw=raw)
-        return ParsedModels(ok=True, models=models, raw=raw)

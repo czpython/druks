@@ -3,7 +3,7 @@ from pathlib import Path
 
 from conftest import connect_provider
 from druks.accounts.models import Account
-from druks.harnesses.models import ProviderLogin
+from druks.harnesses.models import ProviderCatalog, ProviderLogin
 from druks.harnesses.providers import AnthropicProvider
 from druks.testing import configure_app_for_test, make_settings
 from fastapi.testclient import TestClient
@@ -102,3 +102,15 @@ def test_disconnect_without_a_login_is_a_no_op(tmp_path: Path):
 def test_unknown_provider_is_404(tmp_path: Path):
     with _build_client(tmp_path) as client:
         assert client.delete("/api/providers/nope/connection").status_code == 404
+
+
+async def test_catalogs_list_what_each_provider_offers(tmp_path: Path, druks_db):
+    await ProviderCatalog.store(
+        "anthropic", [{"id": "anthropic/claude-fable-5", "label": "Claude Fable 5", "efforts": []}]
+    )
+    await druks_db.commit()
+    with _build_client(tmp_path) as client:
+        [catalog] = client.get("/api/providers/catalogs").json()
+    assert catalog["provider"] == "anthropic"
+    assert catalog["models"] == [{"id": "anthropic/claude-fable-5", "label": "Claude Fable 5"}]
+    assert catalog["fetchedAt"]

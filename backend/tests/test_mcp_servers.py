@@ -208,7 +208,10 @@ async def test_enabled_server_reaches_both_harness_configs_without_token(druks_d
 
     codex_config = " ".join(
         CodexHarness(
-            model=CodexHarness.models[0], fast_mode=False, effort=None, sandbox=_sandbox_config()
+            model=CodexHarness.default_model,
+            fast_mode=False,
+            effort=None,
+            sandbox=_sandbox_config(),
         )._mcp_flags(servers)
     )
     assert _LINEAR_URL in codex_config
@@ -281,7 +284,10 @@ async def test_two_header_server_emits_both_headers_in_each_harness_config(druks
 
     codex_config = " ".join(
         CodexHarness(
-            model=CodexHarness.models[0], fast_mode=False, effort=None, sandbox=_sandbox_config()
+            model=CodexHarness.default_model,
+            fast_mode=False,
+            effort=None,
+            sandbox=_sandbox_config(),
         )._mcp_flags(servers)
     )
     assert 'http_headers."X-Grafana-URL"="https://acme.grafana.net"' in codex_config
