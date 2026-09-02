@@ -22,60 +22,11 @@ _DRUKS_OUTPUT_TEMPLATE = Path(__file__).parent / "druks-output.ts"
 # deploy/sandbox/Dockerfile installs pi-mcp-adapter globally and asserts this path.
 _PI_MCP_ADAPTER_PATH = "/usr/lib/node_modules/pi-mcp-adapter/index.ts"
 _PROVIDER_ERROR_STATUS = re.compile(r" API error \((\d{3})\):")
-
-
-def _assistant_messages(stdout: bytes) -> list[dict]:
-    messages = []
-    for line in stdout.splitlines():
-        try:
-            event = json.loads(line)
-        except (json.JSONDecodeError, UnicodeDecodeError):
-            continue
-        if isinstance(event, dict) and event.get("type") == "message_end":
-            message = event.get("message")
-            if isinstance(message, dict) and message.get("role") == "assistant":
-                messages.append(message)
-    return messages
-
-
-def _provider_error(message: dict) -> exceptions.HarnessError:
-    """pi exits zero on a runtime provider failure, so the HTTP status carried in
-    ``errorMessage`` is what classifies it."""
-    error_message = message.get("errorMessage")
-    if not isinstance(error_message, str):
-        return exceptions.HarnessError("pi reported an error with no message")
-    status_match = _PROVIDER_ERROR_STATUS.search(error_message)
-    if status_match:
-        status = int(status_match.group(1))
-        if status in {401, 403}:
-            return exceptions.HarnessAuthError(error_message)
-        if status == 429:
-            return exceptions.HarnessRateLimitError(error_message)
-        if status >= 500:
-            return exceptions.HarnessOverloadedError(error_message)
-    return exceptions.HarnessError(error_message)
-
-
-def _spend(messages: list[dict]) -> tuple[float, dict[str, int]]:
-    """The run's summed cost and token counts, keyed as the cost sidecar reads them."""
-    cost_usd = 0.0
-    tokens = {
-        "input_tokens": 0,
-        "output_tokens": 0,
-        "cached_input_tokens": 0,
-        "cache_creation_tokens": 0,
-    }
-    for message in messages:
-        usage = message.get("usage")
-        if isinstance(usage, dict):
-            tokens["input_tokens"] += usage.get("input", 0)
-            tokens["output_tokens"] += usage.get("output", 0)
-            tokens["cached_input_tokens"] += usage.get("cacheRead", 0)
-            tokens["cache_creation_tokens"] += usage.get("cacheWrite", 0)
-            cost = usage.get("cost")
-            if isinstance(cost, dict):
-                cost_usd += cost.get("total", 0)
-    return cost_usd, tokens
+_STATUS_ERRORS = {
+    401: exceptions.HarnessAuthError,
+    403: exceptions.HarnessAuthError,
+    429: exceptions.HarnessRateLimitError,
+}
 
 
 class PiHarness(Harness):
@@ -95,7 +46,7 @@ class PiHarness(Harness):
         model: str | None = None,
     ) -> str:
         payload = json.loads(await super().render_credentials_file(connection_id))
-        provider, _ = cls._model_parts(model or cls.default_model)
+        provider, _, _ = (model or cls.default_model).partition("/")
         return json.dumps({provider: {"type": "api_key", "key": payload["apiKey"]}})
 
     async def build_invocation(
@@ -123,7 +74,7 @@ class PiHarness(Harness):
                 "sandbox.service_url and related TOML settings.",
             )
 
-        provider, model = self._model_parts(self.model)
+        provider, _, model = self.model.partition("/")
         in_vm_run_dir = f"{get_runs_root(ssh_username)}/{run_id}"
         in_vm_schema = f"{in_vm_run_dir}/schema.json"
         in_vm_extension = f"{in_vm_run_dir}/druks-output.ts"
@@ -199,30 +150,43 @@ class PiHarness(Harness):
 
     def parse(self, result: HarnessRunResult, *, artifact_dir: Path, run_id: str) -> Any:
         self.check_returncode(result)
-
-        messages = _assistant_messages(result.stdout)
-        for message in messages:
-            if message.get("stopReason") == "error":
-                raise _provider_error(message)
+        try:
+            events = [json.loads(line) for line in result.stdout.splitlines()]
+            # pi repeats an assistant message on turn_end and agent_end;
+            # message_end is the one place each appears once.
+            messages = [
+                event["message"]
+                for event in events
+                if event["type"] == "message_end" and event["message"]["role"] == "assistant"
+            ]
+            for message in messages:
+                # A runtime provider failure exits zero, so the HTTP status in
+                # ``errorMessage`` is what classifies it.
+                if message["stopReason"] == "error":
+                    detail = message["errorMessage"]
+                    status = _PROVIDER_ERROR_STATUS.search(detail)
+                    code = int(status.group(1)) if status else 0
+                    if code >= 500:
+                        raise exceptions.HarnessOverloadedError(detail)
+                    raise _STATUS_ERRORS.get(code, exceptions.HarnessError)(detail)
+            usage = [message["usage"] for message in messages]
+            cost_usd = sum(entry["cost"]["total"] for entry in usage)
+            tokens = {
+                "input_tokens": sum(entry["input"] for entry in usage),
+                "output_tokens": sum(entry["output"] for entry in usage),
+                "cached_input_tokens": sum(entry["cacheRead"] for entry in usage),
+                "cache_creation_tokens": sum(entry["cacheWrite"] for entry in usage),
+            }
+        except (ValueError, KeyError, TypeError) as error:
+            raise exceptions.HarnessInvalidOutputError("pi wrote no usable stream.") from error
 
         call_dir = artifact_dir / run_id
         output_path = call_dir / "output.json"
         payload = read_result_json(output_path, name=self.name)
         output_path.write_text(json.dumps(payload, indent=2, sort_keys=True))
-
-        cost_usd, tokens = _spend(messages)
         write_cost(
             call_dir,
             cost_usd=cost_usd,
             metadata={"provider": self.provider, "model": self.model, **tokens},
         )
         return payload
-
-    @staticmethod
-    def _model_parts(model_id: str | None) -> tuple[str, str]:
-        provider, separator, model = (model_id or "").partition("/")
-        if not separator or not provider or not model:
-            raise exceptions.HarnessError(
-                f"pi model must use provider/model form, got {model_id!r}.",
-            )
-        return provider, model

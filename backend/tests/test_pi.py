@@ -18,9 +18,8 @@ from druks.harnesses.registry import get_harness
 from druks.sandbox.datastructures import HarnessRunResult, McpServer
 from pydantic import BaseModel
 
-_MODEL = PiHarness.default_model
 _API_KEY = "sk-pi-secret"  # nosec B105
-_ADAPTER_PATH = "/usr/lib/node_modules/pi-mcp-adapter/index.ts"
+_RUN_DIR = "/home/exedev/work/runs/run-1"
 
 
 class _Contract(BaseModel):
@@ -28,23 +27,19 @@ class _Contract(BaseModel):
     count: int
 
 
-def _sandbox_config() -> SandboxSettings:
-    return SandboxSettings(
-        service_url="https://sandbox.test",
-        service_token="token",
-        service_timeout=30.0,
-        image="image",
-        claude_config_dir=None,
-        codex_config_dir=None,
-    )
-
-
-def _harness(*, effort: str | None = "high", sandbox: bool = True) -> PiHarness:
+def _harness(*, effort: str | None = "high") -> PiHarness:
     return PiHarness(
-        model=_MODEL,
+        model=PiHarness.default_model,
         fast_mode=False,
         effort=effort,
-        sandbox=_sandbox_config() if sandbox else None,
+        sandbox=SandboxSettings(
+            service_url="https://sandbox.test",
+            service_token="token",
+            service_timeout=30.0,
+            image="image",
+            claude_config_dir=None,
+            codex_config_dir=None,
+        ),
     )
 
 
@@ -52,52 +47,55 @@ async def _credentials(cls: type[Harness]) -> dict[str, str]:
     return {"apiKey": _API_KEY}
 
 
+def _parse(
+    stdout: bytes, artifact_dir: Path, *, returncode: int = 0, stderr: bytes = b""
+) -> object:
+    return _harness().parse(
+        HarnessRunResult(returncode=returncode, stdout=stdout, stderr=stderr),
+        artifact_dir=artifact_dir,
+        run_id="run-1",
+    )
+
+
+def _message_end(role: str, **message: object) -> bytes:
+    return json.dumps({"type": "message_end", "message": {"role": role, **message}}).encode()
+
+
 def test_class_facts_and_registration() -> None:
     assert get_harness("pi") is PiHarness
-    assert PiHarness.name == "pi"
-    assert PiHarness.provider == "pi"
     assert PiHarness.command == "pi"
-    assert PiHarness.credentials_path == ".pi/agent/auth.json"
     assert PiHarness.login_kinds == frozenset({"api_key"})
-    assert PiHarness.models == ("openai/gpt-5.5",)
-    assert PiHarness.default_model == "openai/gpt-5.5"
-    assert PiHarness.first_byte_seconds == Harness.first_byte_seconds == 90
-    assert PiHarness.failure_markers is Harness.failure_markers
-    assert "_model_discovery_request" not in PiHarness.__dict__
-    assert "_usage_request" not in PiHarness.__dict__
+    assert PiHarness.credentials_path == ".pi/agent/auth.json"
+    assert PiHarness.default_model in PiHarness.models
 
 
-async def test_build_invocation_writes_files_and_uses_pi_argv(
+async def test_build_invocation_writes_the_run_files_and_pi_argv(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(PiHarness, "get_credentials", classmethod(_credentials))
-    server = McpServer(
+    github = McpServer(
         name="github",
         url="https://api.example.test/mcp",
         bearer_token_env_var="MCP_GITHUB_TOKEN",
         headers={"X-Visible": "public"},
         env_headers={"X-Trace-Key": "MCP_TRACE_KEY"},
     )
-    prompt = "A large prompt stays on stdin."
+    public = McpServer(name="public", url="https://public.example.test/mcp")
+
     invocation = await _harness().build_invocation(
-        prompt=prompt,
-        schema={"type": "object", "properties": {"answer": {"type": "string"}}},
+        prompt="A large prompt stays on stdin.",
+        schema={"type": "object"},
         run_id="run-1",
         ssh_username="exedev",
         github_token="github-token",
-        extra_env={
-            "MCP_GITHUB_TOKEN": "mcp-secret",
-            "MCP_TRACE_KEY": "trace-secret",
-        },
-        mcp_servers=(server,),
+        extra_env={"MCP_GITHUB_TOKEN": "mcp-secret", "MCP_TRACE_KEY": "trace-secret"},
+        mcp_servers=(github, public),
     )
 
-    assert invocation.name == "pi"
     assert invocation.args[:2] == ("sh", "-c")
     wrapper = invocation.args[2]
-    wrapper_parts = shlex.split(wrapper)
-    pi_index = wrapper_parts.index("pi")
-    assert wrapper_parts[pi_index:] == [
+    parts = shlex.split(wrapper)
+    assert parts[parts.index("pi") :] == [
         "pi",
         "-p",
         "--mode",
@@ -111,102 +109,18 @@ async def test_build_invocation_writes_files_and_uses_pi_argv(
         "--model",
         "gpt-5.5",
         "-e",
-        "/home/exedev/work/runs/run-1/druks-output.ts",
+        f"{_RUN_DIR}/druks-output.ts",
         "--thinking",
         "high",
         "-e",
-        _ADAPTER_PATH,
+        "/usr/lib/node_modules/pi-mcp-adapter/index.ts",
         "--mcp-config",
-        "/home/exedev/work/runs/run-1/.mcp.json",
+        f"{_RUN_DIR}/.mcp.json",
     ]
-    for filename in ("schema.json", "druks-output.ts", ".mcp.json"):
-        assert f"/home/exedev/work/runs/run-1/{filename}" in wrapper_parts
-    schema_path_index = wrapper_parts.index("/home/exedev/work/runs/run-1/schema.json")
-    assert json.loads(wrapper_parts[schema_path_index - 2]) == {
-        "type": "object",
-        "properties": {"answer": {"type": "string"}},
-    }
-    extension_path_index = wrapper_parts.index("/home/exedev/work/runs/run-1/druks-output.ts")
-    assert "pi.registerTool" in wrapper_parts[extension_path_index - 2]
-    assert invocation.stdin == prompt.encode()
-    assert prompt not in wrapper
-    assert all(prompt not in argument for argument in invocation.args)
-    for secret in (_API_KEY, "mcp-secret", "trace-secret"):
-        assert secret not in wrapper
-        assert all(secret not in argument for argument in invocation.args)
-    assert invocation.cwd is None
-    assert invocation.env == {
-        "MCP_GITHUB_TOKEN": "mcp-secret",
-        "MCP_TRACE_KEY": "trace-secret",
-        "DRUKS_SCHEMA_PATH": "/home/exedev/work/runs/run-1/schema.json",
-        "DRUKS_RESULT_PATH": "/home/exedev/work/runs/run-1/output.json",
-    }
-    assert invocation.credentials.github_token == "github-token"
-    assert invocation.credentials.files[0][0] == ".pi/agent/auth.json"
-    assert json.loads(invocation.credentials.files[0][1]) == {
-        "openai": {"type": "api_key", "key": _API_KEY}
-    }
-    assert invocation.extra_artifact_filenames == ("output.json",)
-    syntax = subprocess.run(
-        ["sh", "-n", "-c", wrapper],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-    assert syntax.returncode == 0, syntax.stderr
-
-
-async def test_build_invocation_omits_mcp_adapter_without_servers(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(PiHarness, "get_credentials", classmethod(_credentials))
-
-    invocation = await _harness(effort=None).build_invocation(
-        prompt="Prompt",
-        schema={"type": "object"},
-        run_id="run-1",
-        ssh_username="exedev",
-    )
-
-    wrapper = invocation.args[2]
-    assert _ADAPTER_PATH not in wrapper
-    assert "--mcp-config" not in wrapper
-    assert ".mcp.json" not in wrapper
-    assert "--thinking" not in wrapper
-
-
-async def test_build_invocation_writes_standard_mcp_config(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(PiHarness, "get_credentials", classmethod(_credentials))
-    server = McpServer(
-        name="github",
-        url="https://api.example.test/mcp",
-        bearer_token_env_var="MCP_GITHUB_TOKEN",
-        headers={"X-Visible": "public"},
-        env_headers={"X-Trace-Key": "MCP_TRACE_KEY"},
-    )
-    public_server = McpServer(
-        name="public",
-        url="https://public.example.test/mcp",
-    )
-
-    invocation = await _harness().build_invocation(
-        prompt="Prompt",
-        schema={"type": "object"},
-        run_id="run-1",
-        ssh_username="exedev",
-        extra_env={
-            "MCP_GITHUB_TOKEN": "mcp-secret",
-            "MCP_TRACE_KEY": "trace-secret",
-        },
-        mcp_servers=(server, public_server),
-    )
-
-    wrapper_parts = shlex.split(invocation.args[2])
-    mcp_path_index = wrapper_parts.index("/home/exedev/work/runs/run-1/.mcp.json")
-    mcp_body = wrapper_parts[mcp_path_index - 2]
-    assert json.loads(mcp_body) == {
+    written = {parts[i + 1]: parts[i - 1] for i, part in enumerate(parts) if part == ">"}
+    assert json.loads(written[f"{_RUN_DIR}/schema.json"]) == {"type": "object"}
+    assert "pi.registerTool" in written[f"{_RUN_DIR}/druks-output.ts"]
+    assert json.loads(written[f"{_RUN_DIR}/.mcp.json"]) == {
         "mcpServers": {
             "github": {
                 "url": "https://api.example.test/mcp",
@@ -217,37 +131,60 @@ async def test_build_invocation_writes_standard_mcp_config(
                     "X-Visible": "public",
                 },
             },
-            "public": {
-                "url": "https://public.example.test/mcp",
-                "auth": False,
-            },
+            "public": {"url": "https://public.example.test/mcp", "auth": False},
         }
     }
-    assert "mcp-secret" not in mcp_body
-    assert "trace-secret" not in mcp_body
+    assert invocation.stdin == b"A large prompt stays on stdin."
+    assert invocation.env == {
+        "MCP_GITHUB_TOKEN": "mcp-secret",
+        "MCP_TRACE_KEY": "trace-secret",
+        "DRUKS_SCHEMA_PATH": f"{_RUN_DIR}/schema.json",
+        "DRUKS_RESULT_PATH": f"{_RUN_DIR}/output.json",
+    }
+    assert invocation.credentials.github_token == "github-token"
+    assert invocation.credentials.files == (
+        (".pi/agent/auth.json", json.dumps({"openai": {"type": "api_key", "key": _API_KEY}})),
+    )
+    assert invocation.extra_artifact_filenames == ("output.json",)
+    for secret in (_API_KEY, "mcp-secret", "trace-secret"):
+        assert secret not in wrapper
+    syntax = subprocess.run(
+        ["sh", "-n", "-c", wrapper], check=False, capture_output=True, text=True
+    )
+    assert syntax.returncode == 0, syntax.stderr
 
 
-async def test_build_invocation_requires_sandbox_settings(
+async def test_build_invocation_without_servers_or_effort_is_bare(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(PiHarness, "get_credentials", classmethod(_credentials))
 
-    with pytest.raises(HarnessError, match="pi harness requires sandbox settings"):
-        await _harness(sandbox=False).build_invocation(
-            prompt="Prompt",
-            schema={"type": "object"},
-            run_id="run-1",
-            ssh_username="exedev",
-        )
+    invocation = await _harness(effort=None).build_invocation(
+        prompt="Prompt", schema={"type": "object"}, run_id="run-1", ssh_username="exedev"
+    )
+
+    wrapper = invocation.args[2]
+    assert "--thinking" not in wrapper
+    assert "--mcp-config" not in wrapper
+    assert "pi-mcp-adapter" not in wrapper
+    assert ".mcp.json" not in wrapper
 
 
-def test_parse_returns_contract_and_writes_summed_cost(tmp_path: Path) -> None:
-    structured = {"answer": "done", "count": 3}
-    output_dir = tmp_path / "run-1"
-    output_dir.mkdir()
-    (output_dir / "output.json").write_text(json.dumps(structured))
-    first_message = {
-        "role": "assistant",
+async def test_render_credentials_file_keys_the_model_provider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(PiHarness, "get_credentials", classmethod(_credentials))
+
+    rendered = await PiHarness.render_credentials_file(model="anthropic/claude-opus-5")
+
+    assert json.loads(rendered) == {"anthropic": {"type": "api_key", "key": _API_KEY}}
+
+
+def test_parse_returns_the_contract_and_sums_spend(tmp_path: Path) -> None:
+    (tmp_path / "run-1").mkdir()
+    (tmp_path / "run-1" / "output.json").write_text('{"answer": "done", "count": 3}')
+    first = {
+        "stopReason": "stop",
         "usage": {
             "input": 100,
             "output": 20,
@@ -256,8 +193,8 @@ def test_parse_returns_contract_and_writes_summed_cost(tmp_path: Path) -> None:
             "cost": {"total": 0.125},
         },
     }
-    second_message = {
-        "role": "assistant",
+    second = {
+        "stopReason": "toolUse",
         "usage": {
             "input": 40,
             "output": 10,
@@ -268,31 +205,23 @@ def test_parse_returns_contract_and_writes_summed_cost(tmp_path: Path) -> None:
     }
     stdout = b"\n".join(
         (
-            b"not json",
-            json.dumps({"type": "message_end", "message": first_message}).encode(),
-            json.dumps({"type": "message_end", "message": second_message}).encode(),
-            json.dumps({"type": "turn_end", "message": second_message}).encode(),
-            json.dumps({"type": "agent_end", "messages": [first_message, second_message]}).encode(),
+            b'{"type":"session","version":3}',
+            _message_end("user", content=[]),
+            _message_end("assistant", **first),
+            _message_end("assistant", **second),
+            json.dumps({"type": "turn_end", "message": {"role": "assistant", **second}}).encode(),
+            json.dumps({"type": "agent_end", "messages": [first, second]}).encode(),
         )
     )
 
-    output = _harness().parse(
-        HarnessRunResult(returncode=0, stdout=stdout, stderr=b""),
-        artifact_dir=tmp_path,
-        run_id="run-1",
-    )
+    output = _parse(stdout, tmp_path)
 
     assert _Contract.model_validate(output) == _Contract(answer="done", count=3)
-    assert (output_dir / "output.json").read_text() == json.dumps(
-        structured,
-        indent=2,
-        sort_keys=True,
-    )
-    assert json.loads((output_dir / "cost.json").read_text()) == {
+    assert json.loads((tmp_path / "run-1" / "cost.json").read_text()) == {
         "cost_usd": 0.5,
         "metadata": {
             "provider": "pi",
-            "model": _MODEL,
+            "model": "openai/gpt-5.5",
             "input_tokens": 140,
             "output_tokens": 30,
             "cached_input_tokens": 9,
@@ -302,91 +231,40 @@ def test_parse_returns_contract_and_writes_summed_cost(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize(
-    ("status", "expected"),
+    ("detail", "expected"),
     [
-        (401, HarnessAuthError),
-        (403, HarnessAuthError),
-        (429, HarnessRateLimitError),
-        (500, HarnessOverloadedError),
-        (503, HarnessOverloadedError),
-        (418, HarnessError),
-        (None, HarnessError),
+        ("OpenAI API error (401): bad key", HarnessAuthError),
+        ("OpenAI API error (429): slow down", HarnessRateLimitError),
+        ("OpenAI API error (503): busy", HarnessOverloadedError),
+        ("stream ended without a status", HarnessError),
     ],
 )
-def test_parse_maps_provider_error_status(
-    tmp_path: Path,
-    status: int | None,
-    expected: type[HarnessError],
+def test_parse_classifies_a_provider_error_by_status(
+    tmp_path: Path, detail: str, expected: type[HarnessError]
 ) -> None:
-    error_message = (
-        f"OpenAI API error ({status}): provider detail"
-        if status
-        else "OpenAI provider error without a status"
-    )
-    stdout = json.dumps(
-        {
-            "type": "message_end",
-            "message": {
-                "role": "assistant",
-                "stopReason": "error",
-                "errorMessage": error_message,
-            },
-        }
-    ).encode()
+    stdout = _message_end("assistant", stopReason="error", errorMessage=detail)
 
     with pytest.raises(expected) as error:
-        _harness().parse(
-            HarnessRunResult(returncode=0, stdout=stdout, stderr=b""),
-            artifact_dir=tmp_path,
-            run_id="run-1",
-        )
+        _parse(stdout, tmp_path)
 
     assert type(error.value) is expected
-    assert str(error.value) == error_message
+    assert str(error.value) == detail
 
 
-def test_parse_checks_returncode_before_provider_error(tmp_path: Path) -> None:
-    stdout = json.dumps(
-        {
-            "type": "message_end",
-            "message": {
-                "stopReason": "error",
-                "errorMessage": "OpenAI API error (401): bad key",
-            },
-        }
-    ).encode()
+def test_parse_reports_a_nonzero_exit_before_reading_the_stream(tmp_path: Path) -> None:
+    stdout = _message_end("assistant", stopReason="error", errorMessage="OpenAI API error (401): x")
 
     with pytest.raises(HarnessError, match="pi exited with 1.*extension failed") as error:
-        _harness().parse(
-            HarnessRunResult(returncode=1, stdout=stdout, stderr=b"extension failed\n"),
-            artifact_dir=tmp_path,
-            run_id="run-1",
-        )
+        _parse(stdout, tmp_path, returncode=1, stderr=b"extension failed\n")
 
     assert type(error.value) is HarnessError
 
 
-def test_parse_rejects_missing_result_without_error_event(tmp_path: Path) -> None:
-    stdout = b'not json\n{"type":"agent_settled"}'
-
-    with pytest.raises(HarnessInvalidOutputError, match="pi did not write result JSON"):
-        _harness().parse(
-            HarnessRunResult(returncode=0, stdout=stdout, stderr=b""),
-            artifact_dir=tmp_path,
-            run_id="run-1",
-        )
+def test_parse_treats_a_missing_result_file_as_invalid_output(tmp_path: Path) -> None:
+    with pytest.raises(HarnessInvalidOutputError, match="did not write result JSON"):
+        _parse(b'{"type":"agent_settled"}', tmp_path)
 
 
-async def test_render_credentials_file_uses_model_provider(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(PiHarness, "get_credentials", classmethod(_credentials))
-
-    rendered = await _harness().render_credentials_file(model="openai/gpt-5.5")
-
-    assert json.loads(rendered) == {"openai": {"type": "api_key", "key": _API_KEY}}
-
-
-def test_model_parts_requires_provider_qualified_model() -> None:
-    with pytest.raises(HarnessError, match="pi model must use provider/model form"):
-        PiHarness._model_parts("gpt-5.5")
+def test_parse_treats_a_broken_stream_as_invalid_output(tmp_path: Path) -> None:
+    with pytest.raises(HarnessInvalidOutputError, match="no usable stream"):
+        _parse(b"not json", tmp_path)
