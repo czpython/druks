@@ -6,7 +6,6 @@ from druks.accounts.dependencies import current_session_account
 from druks.apps.loader import get_app, iter_apps
 from druks.apps.registry import workflows
 from druks.durable.engine import apply_schedules
-from druks.harnesses.exceptions import HarnessError
 from druks.harnesses.registry import get_harness_for_model, get_harnesses
 from druks.notifications.models import Destination
 
@@ -46,32 +45,19 @@ async def _resolve_harness(name: str) -> tuple[type, HarnessSettings]:
 @router.get("/harnesses", response_model=list[HarnessResponse], response_model_by_alias=True)
 async def list_harness_settings() -> list[HarnessResponse]:
     registered = {harness.name for harness in get_harnesses()}
-    return [
-        HarnessResponse.from_row(row)
-        for row in await HarnessSettings.all()
-        if row.name in registered
-    ]
+    rows = await HarnessSettings.all()
+    return [HarnessResponse.model_validate(row) for row in rows if row.name in registered]
 
 
 @router.patch("/harnesses/{name}", response_model=HarnessResponse, response_model_by_alias=True)
 async def update_harness_settings(name: str, body: HarnessUpdate) -> HarnessResponse:
     harness, row = await _resolve_harness(name)
     updates = body.model_dump(exclude_unset=True, by_alias=False)
-    if "model" in updates:
-        try:
-            resolved = await get_harness_for_model(updates["model"])
-            if resolved.name != harness.name:
-                raise HarnessError
-        except HarnessError as exc:
-            raise HTTPException(
-                status_code=422,
-                detail=f"{updates['model']!r} is not a {harness.name} model.",
-            ) from exc
-    _validate_effort(updates.get("effort"))
-    _validate_timeout(updates.get("timeout"))
+    if (model := updates.get("model")) and get_harness_for_model(model) is not harness:
+        raise HTTPException(status_code=422, detail=f"{model!r} is not a {harness.name} model.")
     if updates:
         await row.update(**updates)
-    return HarnessResponse.from_row(row)
+    return HarnessResponse.model_validate(row)
 
 
 @router.get("", response_model=UserSettingsResponse, response_model_by_alias=True)
@@ -108,36 +94,6 @@ async def get_app_settings() -> AppsSettingsResponse:
     )
 
 
-# An agent's model override is client data — reject a model no installed harness
-# lists.
-async def _validate_model(value: str | None) -> None:
-    if value is None:
-        return
-    try:
-        await get_harness_for_model(value)
-    except HarnessError as exc:
-        raise HTTPException(
-            status_code=422,
-            detail=f"No installed harness runs model {value!r}.",
-        ) from exc
-
-
-def _validate_effort(value: str | None) -> None:
-    if value is not None and value not in ALLOWED_EFFORTS:
-        raise HTTPException(
-            status_code=422,
-            detail=f"Unknown effort {value!r}. Allowed: {list(ALLOWED_EFFORTS)}",
-        )
-
-
-def _validate_timeout(value: int | None) -> None:
-    if value is not None and value <= 0:
-        raise HTTPException(
-            status_code=422,
-            detail=f"Timeout must be a positive number of seconds, got {value!r}.",
-        )
-
-
 @router.patch(
     "/apps",
     response_model=AppsSettingsResponse,
@@ -146,15 +102,14 @@ def _validate_timeout(value: int | None) -> None:
 )
 async def update_app_settings(body: AppsSettingsUpdate) -> AppsSettingsResponse:
     for name, model in body.agent_models.items():
-        await _validate_model(model)
+        if model:
+            get_harness_for_model(model)
         await SettingsOverride.set_agent_model(name, model)
 
     for name, effort in body.agent_efforts.items():
-        _validate_effort(effort)
         await SettingsOverride.set_agent_effort(name, effort)
 
     for name, timeout in body.agent_timeouts.items():
-        _validate_timeout(timeout)
         await SettingsOverride.set_agent_timeout(name, timeout)
 
     changed_apps = []

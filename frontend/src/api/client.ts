@@ -28,6 +28,7 @@ import type {
   McpServer,
   Service,
   Provider,
+  ProviderCatalog,
   ProviderLogin,
   Skill,
   SkillCollection,
@@ -268,6 +269,7 @@ export const api = {
     patchJSON<Harness>(`/api/settings/harnesses/${encodeURIComponent(name)}`, body),
   providers: () => getJSON<Provider[]>('/api/providers'),
   providerLogins: () => getJSON<ProviderLogin[]>('/api/providers/logins'),
+  providerCatalogs: () => getJSON<ProviderCatalog[]>('/api/providers/catalogs'),
   startProviderConnect: (id: string) =>
     postJSON<ConnectChallenge>(`/api/providers/${encodeURIComponent(id)}/connection/start`, {}),
   completeProviderConnect: (id: string, code: string, connectionId: string) =>

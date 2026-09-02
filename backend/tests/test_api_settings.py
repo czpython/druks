@@ -27,9 +27,7 @@ def test_get_harnesses_lists_seeded_defaults(tmp_path: Path):
     with _build_client(tmp_path) as client:
         harnesses = {h["name"]: h for h in client.get("/api/settings/harnesses").json()}
     assert harnesses["claude"]["provider"] == "anthropic"
-    assert harnesses["claude"]["model"] == "claude-opus-4-7"
-    claude_model_ids = [m["id"] for m in harnesses["claude"]["allowedModels"]]
-    assert "claude-sonnet-4-6" in claude_model_ids
+    assert harnesses["claude"]["model"] == "anthropic/claude-opus-4-7"
     assert harnesses["codex"]["provider"] == "openai-codex"
     assert harnesses["pi"]["provider"] is None
     assert harnesses["pi"]["loginKinds"] == ["api_key"]
@@ -84,24 +82,26 @@ def test_patch_harness_updates_model_and_fast_mode(tmp_path: Path):
     with _build_client(tmp_path) as client:
         patch = client.patch(
             "/api/settings/harnesses/claude",
-            json={"model": "claude-sonnet-4-6", "fastMode": True},
+            json={"model": "anthropic/claude-sonnet-4-6", "fastMode": True},
         )
         assert patch.status_code == 200
         body = patch.json()
-        assert body["model"] == "claude-sonnet-4-6"
+        assert body["model"] == "anthropic/claude-sonnet-4-6"
         assert body["fastMode"] is True
         listed = {h["name"]: h for h in client.get("/api/settings/harnesses").json()}
-        assert listed["claude"]["model"] == "claude-sonnet-4-6"
+        assert listed["claude"]["model"] == "anthropic/claude-sonnet-4-6"
         # The other harness is untouched.
-        assert listed["codex"]["model"] == "gpt-5.5"
+        assert listed["codex"]["model"] == "openai-codex/gpt-5.5"
 
 
 def test_patch_harness_rejects_model_from_another_harness(tmp_path: Path):
     with _build_client(tmp_path) as client:
         # gpt-5.5 belongs to codex, not claude.
-        response = client.patch("/api/settings/harnesses/claude", json={"model": "gpt-5.5"})
+        response = client.patch(
+            "/api/settings/harnesses/claude", json={"model": "openai-codex/gpt-5.5"}
+        )
     assert response.status_code == 422
-    assert "gpt-5.5" in response.json()["detail"]
+    assert "openai-codex/gpt-5.5" in response.json()["detail"]
 
 
 def test_patch_unknown_harness_is_404(tmp_path: Path):
@@ -151,7 +151,7 @@ def test_apps_surface_build_agents_and_workflow_defaults(tmp_path: Path):
     assert agents["generate_plan"] == {
         "name": "generate_plan",
         "description": "ticket → implementation plan",
-        "model": "gpt-5.5",
+        "model": "openai-codex/gpt-5.5",
         "source": "default",
         "default": "codex",
         "effort": "high",
@@ -159,7 +159,7 @@ def test_apps_surface_build_agents_and_workflow_defaults(tmp_path: Path):
         "timeout": 1800,
         "timeoutSource": "harness",
     }
-    assert agents["implement"]["model"] == "claude-opus-4-7"
+    assert agents["implement"]["model"] == "anthropic/claude-opus-4-7"
     assert agents["implement"]["default"] == "claude"
     # evaluate declares medium effort; the rest inherit the global default.
     assert agents["evaluate_implementation"]["effort"] == "medium"
@@ -325,7 +325,7 @@ def test_incoherent_app_save_is_rejected_and_rolled_back_before_schedules(
         response = client.patch(
             "/api/settings/apps",
             json={
-                "agentModels": {"generate_plan": "claude-opus-4-7"},
+                "agentModels": {"generate_plan": "anthropic/claude-opus-4-7"},
                 "appSettings": {"review": {"app_id": "42"}},
             },
         )
@@ -337,7 +337,7 @@ def test_incoherent_app_save_is_rejected_and_rolled_back_before_schedules(
         assert not reconciled
         assert _review_settings_fields(client)["app_id"]["secretSet"] is False
         agents = {agent["name"]: agent for agent in _software_factory_app(client)["agents"]}
-        assert agents["generate_plan"]["model"] == "gpt-5.5"
+        assert agents["generate_plan"]["model"] == "openai-codex/gpt-5.5"
 
 
 async def test_clearing_the_identity_deletes_its_overrides_and_stays_coherent(tmp_path: Path):
@@ -379,12 +379,12 @@ def test_apps_override_agent_model_persists(tmp_path: Path):
     with _build_client(tmp_path) as client:
         patch = client.patch(
             "/api/settings/apps",
-            json={"agentModels": {"implement": "gpt-5.5"}},
+            json={"agentModels": {"implement": "openai-codex/gpt-5.5"}},
         )
         assert patch.status_code == 200
         agents = {a["name"]: a for a in _software_factory_app(client)["agents"]}
 
-    assert agents["implement"]["model"] == "gpt-5.5"
+    assert agents["implement"]["model"] == "openai-codex/gpt-5.5"
     assert agents["implement"]["source"] == "agent"
 
 
@@ -413,7 +413,7 @@ def test_apps_reject_unknown_effort(tmp_path: Path):
             json={"agentEfforts": {"implement": "turbo"}},
         )
     assert response.status_code == 422
-    assert "turbo" in response.json()["detail"]
+    assert "agentEfforts" in str(response.json()["detail"])
 
 
 def test_apps_harness_timeout_and_per_agent_timeout_override(tmp_path: Path):
@@ -464,16 +464,17 @@ def test_build_review_code_is_a_workflow_setting(tmp_path: Path):
 def test_apps_clearing_an_override_reverts_to_the_family_default(tmp_path: Path):
     with _build_client(tmp_path) as client:
         client.patch(
-            "/api/settings/apps", json={"agentModels": {"generate_plan": "claude-opus-4-7"}}
+            "/api/settings/apps",
+            json={"agentModels": {"generate_plan": "anthropic/claude-opus-4-7"}},
         )
         agents = {a["name"]: a for a in _software_factory_app(client)["agents"]}
-        assert agents["generate_plan"]["model"] == "claude-opus-4-7"
+        assert agents["generate_plan"]["model"] == "anthropic/claude-opus-4-7"
         assert agents["generate_plan"]["source"] == "agent"
 
         # Null clears the override; the agent falls back to its family default.
         client.patch("/api/settings/apps", json={"agentModels": {"generate_plan": None}})
         agents = {a["name"]: a for a in _software_factory_app(client)["agents"]}
-        assert agents["generate_plan"]["model"] == "gpt-5.5"
+        assert agents["generate_plan"]["model"] == "openai-codex/gpt-5.5"
         assert agents["generate_plan"]["source"] == "default"
 
 

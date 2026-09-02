@@ -24,7 +24,7 @@ if TYPE_CHECKING:
 
 async def get_agent_setting(agent: "Agent") -> AgentSettingResponse:
     model = await SettingsOverride.agent_model(agent.id, agent.model)
-    harness = (await get_harness_for_model(model.value)).name
+    harness = (get_harness_for_model(model.value)).name
     effort = await SettingsOverride.agent_effort(agent.id, agent.effort, harness)
     timeout = await SettingsOverride.agent_timeout(agent.id, agent.timeout, harness)
     return AgentSettingResponse(

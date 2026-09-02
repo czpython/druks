@@ -77,7 +77,6 @@ def test_class_facts_and_registration() -> None:
     assert PiHarness.command == "pi"
     assert PiHarness.provider is None
     assert PiHarness.login_kinds == {"api_key"}
-    assert PiHarness.default_model in PiHarness.models
 
 
 async def test_build_invocation_writes_the_run_files_and_pi_argv(

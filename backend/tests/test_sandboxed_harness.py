@@ -307,7 +307,7 @@ async def test_sandbox_unreachable_translates_to_harness_error(
     assert downloads == []
 
 
-async def _harness_stub(model):
+def _harness_stub(model):
     return ClaudeHarness
 
 
@@ -554,7 +554,7 @@ async def test_run_agent_carries_foreign_failures_as_harness_errors(
     sandbox.run_prompt = run_prompt
     result = await Host.run_agent(
         sandbox,
-        model="claude-opus-4-7",
+        model="anthropic/claude-opus-4-7",
         prompt="p",
         schema={"type": "object"},
         agent="evaluate",
@@ -583,7 +583,7 @@ async def test_run_agent_carries_a_taxonomy_failure_as_itself(
     sandbox.run_prompt = run_prompt
     result = await Host.run_agent(
         sandbox,
-        model="claude-opus-4-7",
+        model="anthropic/claude-opus-4-7",
         prompt="p",
         schema={"type": "object"},
         agent="evaluate",

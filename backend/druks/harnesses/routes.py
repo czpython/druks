@@ -7,13 +7,12 @@ from druks.accounts.dependencies import current_session_account, current_session
 from druks.accounts.models import Account
 from druks.accounts.schemas import AccountResponse
 from druks.database import db_session
-from druks.user_settings.models import HarnessSettings, UserSettings
+from druks.user_settings.models import UserSettings
 
 from .exceptions import ConnectError
-from .models import ProviderLogin
+from .models import ProviderCatalog, ProviderLogin
 from .providers import Provider, get_provider, get_providers
-from .registry import get_harnesses
-from .schemas import ProviderLoginResponse, ProviderResponse
+from .schemas import ProviderCatalogResponse, ProviderLoginResponse, ProviderResponse
 
 router = APIRouter(prefix="/api/providers", tags=["providers"])
 
@@ -34,6 +33,16 @@ async def list_logins(
 ) -> list[ProviderLoginResponse]:
     logins = await ProviderLogin.list_for_account(account.id)
     return [ProviderLoginResponse.model_validate(login) for login in logins]
+
+
+@router.get(
+    "/catalogs",
+    response_model=list[ProviderCatalogResponse],
+    response_model_by_alias=True,
+    dependencies=[Depends(current_session_account)],
+)
+async def list_catalogs() -> list[ProviderCatalogResponse]:
+    return [ProviderCatalogResponse.model_validate(row) for row in await ProviderCatalog.list_all()]
 
 
 def _resolve_provider(provider_id: str) -> Provider:
@@ -107,16 +116,12 @@ async def complete_connection(
     response = AccountResponse.model_validate(resolved)
     await db_session().commit()
     try:
-        # Fresh pickers right after connect for every harness this login
-        # serves; fetch failures are tagged inside. The single-use flow is
-        # already spent, so trouble here — including a database that vanished
-        # under the refresh — only logs.
-        for harness in get_harnesses():
-            if harness.accepts(login):
-                settings = await HarnessSettings.get_registered(harness.name)
-                await settings.refresh_models(login)
+        # A fresh picker right after connect; fetch failures are tagged inside.
+        # The single-use flow is already spent, so trouble here — including a
+        # database that vanished under the refresh — only logs.
+        await provider.refresh_catalog(login)
     except Exception:
-        logging.getLogger(__name__).exception("Model refresh after connect failed")
+        logging.getLogger(__name__).exception("Catalog refresh after connect failed")
         with suppress(Exception):
             await db_session().rollback()
     return response
@@ -147,6 +152,7 @@ async def connect_key(
             provider_email=account.username,
             kind="api_key",
         )
+        await provider.refresh_catalog(login)
         return ProviderLoginResponse.model_validate(login)
     raise HTTPException(status_code=422, detail="The API key is empty. Paste a key.")
 

@@ -35,7 +35,6 @@ class PiHarness(Harness):
     name = "pi"
     command = "pi"
     login_kinds = frozenset({"api_key"})
-    models = ("openai/gpt-5.5",)
     default_model = "openai/gpt-5.5"
 
     @classmethod

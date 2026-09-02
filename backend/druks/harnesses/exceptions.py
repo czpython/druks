@@ -130,3 +130,17 @@ class HarnessFirstByteTimeoutError(HarnessError):
     # Two immediate retries: the failed attempt cost 90 seconds, not minutes,
     # and the wedge is CLI-local — waiting buys nothing.
     retry_delays = (0, 0)
+
+
+class CatalogError(Exception):
+    """A provider's model list could not be read. ``tag`` names why:
+    ``network``, ``timeout``, ``unparseable``, ``unexpected_payload``,
+    ``empty_list``, or ``http_<status>``."""
+
+    def __init__(self, tag: str) -> None:
+        super().__init__(tag)
+        self.tag = tag
+
+
+class UnknownModelError(HarnessError):
+    """No installed harness runs the model; the API answers it as a 422."""

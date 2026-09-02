@@ -14,7 +14,9 @@ import {
   type McpRegistryCandidate,
   type McpServer,
   type Pat,
+  type CatalogModel,
   type Provider,
+  type ProviderCatalog,
   type ProviderLogin,
   type Connection,
   type Service,
@@ -28,11 +30,28 @@ import { appLabel } from '../apps/registry'
 import { absTime, relTimeFromIso } from '../lib/format'
 import { harnessColors } from '../lib/harnessColors'
 
-// The harness a model runs on, resolved from the registry — each harness lists
-// its allowedModels — never a name-prefix guess, so a newly-installed harness and
-// its models resolve correctly with no frontend change.
-const harnessOfModel = (model: string, harnesses: Harness[]): string =>
-  harnesses.find((h) => h.allowedModels.some((m) => m.id === model))?.name ?? ''
+// The models the operator can pick, joined from three lists: a harness has the
+// provider it is bound to, or any provider issuing a login kind it consumes.
+interface Catalog {
+  modelsOf: (harness: Harness) => CatalogModel[]
+  harnessOf: (model: string) => string
+}
+
+function buildCatalog(harnesses: Harness[], providers: Provider[], catalogs: ProviderCatalog[]): Catalog {
+  const hasProvider = (harness: Harness, provider: Provider) =>
+    harness.provider ? harness.provider === provider.id : harness.loginKinds.some((k) => provider.loginKinds.includes(k))
+  const modelsByProvider = Object.fromEntries(catalogs.map((c) => [c.provider, c.models]))
+  return {
+    modelsOf: (harness) => {
+      const models = providers.filter((p) => hasProvider(harness, p)).flatMap((p) => modelsByProvider[p.id] ?? [])
+      return models.length > 0 ? models : [{ id: harness.model, label: harness.model }]
+    },
+    harnessOf: (model) => {
+      const provider = providers.find((p) => p.id === model.split('/')[0])
+      return (provider && harnesses.find((h) => hasProvider(h, provider))?.name) ?? ''
+    },
+  }
+}
 
 const TIMEOUTS = [600, 900, 1800, 3600]
 
@@ -138,6 +157,12 @@ export function SettingsModal({ open, onClose }: Props) {
     queryKey: ['providerLogins'],
     queryFn: () => api.providerLogins(),
     enabled: open,
+  })
+  const providerCatalogsQuery = useQuery({
+    queryKey: ['providerCatalogs'],
+    queryFn: () => api.providerCatalogs(),
+    enabled: open,
+    staleTime: 60_000,
   })
   const [timezone, setTimezone] = useState<string>('UTC')
   // Pending per-app setting overrides — a sparse UpdateAppsSettingsRequest the
@@ -281,6 +306,7 @@ export function SettingsModal({ open, onClose }: Props) {
   const harnesses = harnessesQuery.data ?? []
   const providers = providersQuery.data ?? []
   const providerLogins = providerLoginsQuery.data ?? []
+  const catalog = buildCatalog(harnesses, providers, providerCatalogsQuery.data ?? [])
   const harnessByName: Record<string, Harness> = Object.fromEntries(
     harnesses.map((h) => [h.name, h]),
   )
@@ -408,6 +434,7 @@ export function SettingsModal({ open, onClose }: Props) {
                   edits={harnessEdits}
                   onField={setHarnessField}
                   harnessColor={harnessColor}
+                  catalog={catalog}
                   busy={busy}
                 />
               ) : (
@@ -427,6 +454,7 @@ export function SettingsModal({ open, onClose }: Props) {
                 edits={appEdits}
                 fieldErrors={appProblems[appSection.name] ?? {}}
                 harnessColor={harnessColor}
+                catalog={catalog}
                 harnessByName={harnessByName}
                 allowedEfforts={allowedEfforts}
                 onAgentModel={setAgentModel}
@@ -634,6 +662,7 @@ function InheritCell({
   inheritLabel,
   harnesses,
   harnessColor,
+  catalog,
   allowedEfforts,
   onPick,
   disabled,
@@ -644,6 +673,7 @@ function InheritCell({
   inheritLabel: string
   harnesses: Harness[]
   harnessColor: Record<string, string>
+  catalog: Catalog
   allowedEfforts: string[]
   onPick: (v: CellValue) => void
   disabled: boolean
@@ -666,7 +696,7 @@ function InheritCell({
           {harnesses.map((h) => (
             <Fragment key={h.name}>
               <div className="menu-group">{h.name}</div>
-              {h.allowedModels.map((m) => (
+              {catalog.modelsOf(h).map((m) => (
                 <Opt key={m.id} sel={value === m.id} famColor={harnessColor[h.name]} main={m.label} onClick={() => pick(m.id)} />
               ))}
             </Fragment>
@@ -781,6 +811,7 @@ function HarnessesPane({
   edits,
   onField,
   harnessColor,
+  catalog,
   busy,
 }: {
   harnesses: Harness[]
@@ -789,6 +820,7 @@ function HarnessesPane({
   edits: Record<string, UpdateHarnessRequest>
   onField: (name: string, patch: UpdateHarnessRequest) => void
   harnessColor: Record<string, string>
+  catalog: Catalog
   busy: boolean
 }) {
   const fieldId = useId()
@@ -797,7 +829,7 @@ function HarnessesPane({
   // agent's model is overridden across harnesses.
   const agentCount = (name: string) =>
     apps.reduce(
-      (count, app) => count + app.agents.filter((a) => harnessOfModel(a.model, harnesses) === name).length,
+      (count, app) => count + app.agents.filter((a) => catalog.harnessOf(a.model) === name).length,
       0,
     )
 
@@ -834,7 +866,7 @@ function HarnessesPane({
                     Default model
                   </label>
                   <select id={id('model')} className="set-select" value={h.model} onChange={(e) => onField(harness.name, { model: e.target.value })} disabled={busy}>
-                    {harness.allowedModels.map((m) => (
+                    {catalog.modelsOf(harness).map((m) => (
                       <option key={m.id} value={m.id}>
                         {m.label}
                       </option>
@@ -2358,6 +2390,7 @@ function AppPane({
   fieldErrors,
   harnessByName,
   harnessColor,
+  catalog,
   allowedEfforts,
   onAgentModel,
   onAgentEffort,
@@ -2371,6 +2404,7 @@ function AppPane({
   fieldErrors: Record<string, string>
   harnessByName: Record<string, Harness>
   harnessColor: Record<string, string>
+  catalog: Catalog
   allowedEfforts: string[]
   onAgentModel: (name: string, model: string | null) => void
   onAgentEffort: (name: string, effort: string | null) => void
@@ -2523,6 +2557,7 @@ function AppPane({
             edits={edits}
             harnessByName={harnessByName}
             harnessColor={harnessColor}
+            catalog={catalog}
             allowedEfforts={allowedEfforts}
             onAgentModel={onAgentModel}
             onAgentEffort={onAgentEffort}
@@ -2540,6 +2575,7 @@ function AgentTable({
   edits,
   harnessByName,
   harnessColor,
+  catalog,
   allowedEfforts,
   onAgentModel,
   onAgentEffort,
@@ -2550,6 +2586,7 @@ function AgentTable({
   edits: UpdateAppsSettingsRequest
   harnessByName: Record<string, Harness>
   harnessColor: Record<string, string>
+  catalog: Catalog
   allowedEfforts: string[]
   onAgentModel: (name: string, model: string | null) => void
   onAgentEffort: (name: string, effort: string | null) => void
@@ -2577,7 +2614,7 @@ function AgentTable({
               : null
         const model = modelOver ?? famModel
         // Effort/timeout inherit from the harness of the agent's resolved model.
-        const harness = harnessOfModel(model, harnesses)
+        const harness = catalog.harnessOf(model)
         const harnessEffort = harnessByName[harness]?.effort ?? a.effort
         const harnessTimeout = harnessByName[harness]?.timeout ?? a.timeout
         const effortOver: string | null =
@@ -2608,6 +2645,7 @@ function AgentTable({
                 inheritLabel={a.default + ' · ' + famModel}
                 harnesses={harnesses}
                 harnessColor={harnessColor}
+                catalog={catalog}
                 allowedEfforts={allowedEfforts}
                 onPick={(v) => onAgentModel(a.name, (v as string | null) ?? null)}
                 disabled={busy}
@@ -2621,6 +2659,7 @@ function AgentTable({
                 inheritLabel={harness + ' · ' + harnessEffort}
                 harnesses={harnesses}
                 harnessColor={harnessColor}
+                catalog={catalog}
                 allowedEfforts={allowedEfforts}
                 onPick={(v) => onAgentEffort(a.name, (v as string | null) ?? null)}
                 disabled={busy}
@@ -2634,6 +2673,7 @@ function AgentTable({
                 inheritLabel={harness + ' · ' + harnessTimeout + 's'}
                 harnesses={harnesses}
                 harnessColor={harnessColor}
+                catalog={catalog}
                 allowedEfforts={allowedEfforts}
                 onPick={(v) => onAgentTimeout(a.name, (v as number | null) ?? null)}
                 disabled={busy}

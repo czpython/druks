@@ -3,10 +3,9 @@ import logging
 from druks.files.storage import reap_deleted_file_bytes
 from druks.harnesses.datastructures import RotationResult
 from druks.harnesses.models import ProviderLogin
-from druks.harnesses.providers import get_provider
-from druks.harnesses.registry import get_harnesses
+from druks.harnesses.providers import get_provider, get_providers
 from druks.sandbox import gate
-from druks.user_settings.models import HarnessSettings, UserSettings
+from druks.user_settings.models import UserSettings
 from druks.workflows import task
 
 logger = logging.getLogger(__name__)
@@ -28,16 +27,14 @@ async def refresh_tokens() -> None:
 
 
 @task(every="0 6 * * *")
-async def refresh_models() -> None:
+async def refresh_catalogs() -> None:
     fallback_id = (await UserSettings.get()).fallback_account_id
     logins = await ProviderLogin.list_all()
-    for harness in get_harnesses():
-        usable = [login for login in logins if harness.accepts(login)]
-        if not usable:
-            continue
-        preferred = [c for c in usable if c.account_id == fallback_id]
-        settings = await HarnessSettings.get_registered(harness.name)
-        await settings.refresh_models((preferred or usable)[0])
+    for provider in get_providers():
+        usable = [login for login in logins if login.provider == provider.id]
+        if usable:
+            preferred = [login for login in usable if login.account_id == fallback_id]
+            await provider.refresh_catalog((preferred or usable)[0])
 
 
 async def _refresh() -> dict[str, object]:

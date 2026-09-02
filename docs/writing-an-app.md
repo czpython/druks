@@ -331,7 +331,8 @@ from replayed orchestration allows later edits to change an in-flight run.
 ## Add an agent
 
 An agent belongs to the app class. Its family default (`claude` or `codex`)
-uses the related operator harness setting. A full model name fixes the default.
+uses the related operator harness setting. A full model id, written
+`provider/model` such as `anthropic/claude-opus-4-7`, fixes the default.
 
 ```python
 from druks.agents import Agent, AgentOutput

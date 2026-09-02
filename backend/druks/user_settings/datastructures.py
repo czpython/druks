@@ -1,6 +1,7 @@
-from typing import Literal, NamedTuple
+from typing import Literal, NamedTuple, get_args
 
-ALLOWED_EFFORTS: tuple[str, ...] = ("low", "medium", "high")
+Effort = Literal["low", "medium", "high"]
+ALLOWED_EFFORTS: tuple[str, ...] = get_args(Effort)
 
 # agent: per-agent override; declared: the agent's own field; harness: the
 # agent's harness default (claude/codex effort + timeout).

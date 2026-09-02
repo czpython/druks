@@ -1,8 +1,12 @@
 from datetime import datetime
+from typing import Annotated
 
-from pydantic import ConfigDict, Field, field_validator
+from pydantic import BeforeValidator, ConfigDict, Field
 
 from druks.schemas import Schema
+
+# A set of names on the wire, in a stable order.
+SortedNames = Annotated[list[str], BeforeValidator(sorted)]
 
 
 class ProviderResponse(Schema):
@@ -10,12 +14,7 @@ class ProviderResponse(Schema):
 
     id: str
     label: str
-    login_kinds: list[str]
-
-    @field_validator("login_kinds", mode="before")
-    @classmethod
-    def _sorted(cls, kinds: frozenset[str]) -> list[str]:
-        return sorted(kinds)
+    login_kinds: SortedNames
 
 
 class ProviderLoginResponse(Schema):
@@ -27,3 +26,16 @@ class ProviderLoginResponse(Schema):
     provider_email: str
     expires_at: datetime | None
     connected: bool = Field(validation_alias="is_connected")
+
+
+class CatalogModel(Schema):
+    id: str
+    label: str
+
+
+class ProviderCatalogResponse(Schema):
+    model_config = ConfigDict(from_attributes=True)
+
+    provider: str
+    models: list[CatalogModel]
+    fetched_at: datetime

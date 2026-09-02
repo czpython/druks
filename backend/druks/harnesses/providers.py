@@ -28,12 +28,14 @@ from .datastructures import (
     ProviderRequest,
     RotationResult,
 )
-from .models import ProviderLogin
+from .models import ProviderCatalog, ProviderLogin
 
 logger = logging.getLogger(__name__)
 
 _GRANT_TIMEOUT_SECONDS = 30.0
 _USAGE_TIMEOUT_SECONDS = 20.0
+_CATALOG_TIMEOUT_SECONDS = 20.0
+_MODELS_DEV_URL = "https://models.dev/api.json"
 # The connect-flow pending state (PKCE verifier + state) lives in Redis this
 # long — enough to authorize and paste, short enough that an abandoned attempt
 # clears.
@@ -338,6 +340,43 @@ class Provider:
         """Map the usage endpoint's JSON body into :class:`ParsedUsage`."""
         return ParsedUsage(ok=False, error="unsupported")
 
+    @classmethod
+    async def fetch_catalog(cls, login: ProviderLogin) -> tuple[dict, ...]:
+        """The models this provider offers, ``{"id", "label"}`` each with ids
+        namespaced ``provider/model``. Raises :class:`CatalogError`."""
+        request = cls._catalog_request(login)
+        try:
+            async with httpx.AsyncClient(timeout=_CATALOG_TIMEOUT_SECONDS) as client:
+                response = await client.get(request.url, headers=request.headers)
+        except httpx.TimeoutException as exc:
+            raise exceptions.CatalogError("timeout") from exc
+        except httpx.HTTPError as exc:
+            raise exceptions.CatalogError("network") from exc
+        if response.status_code != 200:
+            raise exceptions.CatalogError(error_tag(response.status_code))
+        return cls._parse_catalog(response.text)
+
+    @classmethod
+    async def refresh_catalog(cls, login: ProviderLogin) -> None:
+        """Store a fresh catalog. A failed fetch logs and keeps the stored one."""
+        try:
+            models = await cls.fetch_catalog(login)
+        except (exceptions.CatalogError, exceptions.OAuthTokenError) as exc:
+            logger.warning("catalog refresh for %s failed: %s", cls.id, exc.tag)
+        else:
+            await ProviderCatalog.store(cls.id, list(models))
+
+    @classmethod
+    def _catalog_request(cls, login: ProviderLogin) -> ProviderRequest:
+        """The request for this provider's model list, authenticated by ``login``."""
+        raise NotImplementedError
+
+    @classmethod
+    def _parse_catalog(cls, raw: str) -> tuple[dict, ...]:
+        """Namespaced ``{"id", "label"}`` entries from the model-list body;
+        raises :class:`CatalogError` on a body offering nothing."""
+        raise NotImplementedError
+
 
 def get_providers() -> tuple[Provider, ...]:
     """The registry: one of every ``Provider`` subclass, sorted by id for a
@@ -607,6 +646,32 @@ class AnthropicProvider(Provider):
             return ParsedUsage(ok=False, error="unexpected_payload", raw=raw)
         return ParsedUsage(ok=True, five_hour=five_hour, weeks=weeks, raw=raw)
 
+    @classmethod
+    def _catalog_request(cls, login: ProviderLogin) -> ProviderRequest:
+        if login.kind == "oauth":
+            headers = cls.oauth_headers(cls.load_token(login))
+        else:
+            headers = {
+                "x-api-key": login.payload["api_key"],
+                "anthropic-version": _ANTHROPIC_VERSION,
+            }
+        return ProviderRequest("https://api.anthropic.com/v1/models?limit=100", headers)
+
+    @classmethod
+    def _parse_catalog(cls, raw: str) -> tuple[dict, ...]:
+        try:
+            models = tuple(
+                {"id": f"{cls.id}/{model['id']}", "label": model.get("display_name") or model["id"]}
+                for model in json.loads(raw)["data"]
+            )
+        except json.JSONDecodeError as exc:
+            raise exceptions.CatalogError("unparseable") from exc
+        except (KeyError, TypeError, AttributeError) as exc:
+            raise exceptions.CatalogError("unexpected_payload") from exc
+        if models:
+            return models
+        raise exceptions.CatalogError("empty_list")
+
 
 def _oauth_block(data: dict) -> dict:
     """Claude nests the OAuth fields under ``claudeAiOauth``; tolerate a
@@ -835,6 +900,42 @@ class OpenAiCodexProvider(Provider):
             raw=raw,
         )
 
+    @classmethod
+    def _catalog_request(cls, login: ProviderLogin) -> ProviderRequest:
+        # ``client_version`` is required and lower-bounds the list (the server
+        # returns models with ``minimal_client_version <= client_version``); the
+        # high constant asks for the full catalog, and the empty-list guard
+        # catches it if the server ever starts rejecting unknown versions.
+        return ProviderRequest(
+            "https://chatgpt.com/backend-api/codex/models?client_version=99.99.99",
+            cls.chatgpt_headers(cls.load_token(login)),
+        )
+
+    @classmethod
+    def _parse_catalog(cls, raw: str) -> tuple[dict, ...]:
+        try:
+            models = tuple(
+                {
+                    "id": f"{cls.id}/{model['slug']}",
+                    "label": model.get("display_name") or model["slug"],
+                    "efforts": [
+                        level["effort"] for level in model.get("supported_reasoning_levels") or []
+                    ],
+                    "minimal_client_version": model.get("minimal_client_version"),
+                }
+                for model in json.loads(raw)["models"]
+                if model.get("visibility") == "list"
+            )
+        except json.JSONDecodeError as exc:
+            raise exceptions.CatalogError("unparseable") from exc
+        except (KeyError, TypeError, AttributeError) as exc:
+            raise exceptions.CatalogError("unexpected_payload") from exc
+        if models:
+            return models
+        # A 200 with nothing selectable is what a stale-low client_version
+        # produces — never let it read as "no models".
+        raise exceptions.CatalogError("empty_list")
+
 
 def _codex_windows(usage: dict) -> tuple[ParsedMetric | None, tuple[ParsedMetric, ...]]:
     """The binding five-hour window and every weekly window in provider order.
@@ -869,3 +970,22 @@ class OpenAiProvider(Provider):
     id = "openai"
     label = "OpenAI"
     login_kinds = frozenset({"api_key"})
+
+    @classmethod
+    def _catalog_request(cls, _login: ProviderLogin) -> ProviderRequest:
+        return ProviderRequest(_MODELS_DEV_URL, {})
+
+    @classmethod
+    def _parse_catalog(cls, raw: str) -> tuple[dict, ...]:
+        try:
+            models = tuple(
+                {"id": f"{cls.id}/{model['id']}", "label": model["name"]}
+                for model in json.loads(raw)[cls.id]["models"].values()
+            )
+        except json.JSONDecodeError as exc:
+            raise exceptions.CatalogError("unparseable") from exc
+        except (KeyError, TypeError, AttributeError) as exc:
+            raise exceptions.CatalogError("unexpected_payload") from exc
+        if models:
+            return models
+        raise exceptions.CatalogError("empty_list")

@@ -22,7 +22,6 @@ from druks.skills.models import Skill
 
 from .artifacts import write_cost
 from .base import Harness
-from .datastructures import CodexToken, ParsedModels, ProviderRequest
 from .exceptions import (
     HarnessAuthError,
     HarnessError,
@@ -268,8 +267,7 @@ class CodexHarness(Harness):
     name = "codex"
     provider = OpenAiCodexProvider.id
     login_kinds = frozenset({"oauth"})
-    models = ("gpt-5.5",)
-    default_model = "gpt-5.5"
+    default_model = "openai-codex/gpt-5.5"
     command = "codex"
 
     # The CLI's terminal {"type":"error"} event carries prose, not status
@@ -285,46 +283,6 @@ class CodexHarness(Harness):
         "overloaded": HarnessOverloadedError,
         "internal server error": HarnessOverloadedError,
     }
-
-    @classmethod
-    def _model_discovery_request(cls, token: CodexToken) -> ProviderRequest:
-        # ``client_version`` is required and lower-bounds the list (the server
-        # returns models with ``minimal_client_version <= client_version``); the
-        # high constant asks for the full catalog, and the empty-list guard
-        # catches it if the server ever starts rejecting unknown versions.
-        return ProviderRequest(
-            "https://chatgpt.com/backend-api/codex/models?client_version=99.99.99",
-            OpenAiCodexProvider.chatgpt_headers(token),
-        )
-
-    @classmethod
-    def _parse_models(cls, raw: str) -> ParsedModels:
-        try:
-            data = json.loads(raw)
-        except (json.JSONDecodeError, TypeError):
-            return ParsedModels(ok=False, error="unparseable", raw=raw)
-        listed = data.get("models") if isinstance(data, dict) else None
-        if not isinstance(listed, list):
-            return ParsedModels(ok=False, error="unexpected_payload", raw=raw)
-        models = tuple(
-            {
-                "id": model["slug"],
-                "label": model.get("display_name") or model["slug"],
-                "efforts": [
-                    level["effort"]
-                    for level in model.get("supported_reasoning_levels") or []
-                    if isinstance(level, dict) and level.get("effort")
-                ],
-                "minimal_client_version": model.get("minimal_client_version"),
-            }
-            for model in listed
-            if isinstance(model, dict) and model.get("slug") and model.get("visibility") == "list"
-        )
-        if not models:
-            # A 200 with nothing selectable is what a stale-low client_version
-            # produces — never let it read as "no models".
-            return ParsedModels(ok=False, error="empty_list", raw=raw)
-        return ParsedModels(ok=True, models=models, raw=raw)
 
     def _build_codex_wrapper(
         self,
@@ -459,7 +417,7 @@ class CodexHarness(Harness):
         )
         cost_usd, cost_metadata = read_codex_cost_from_jsonl(
             call_dir / "session.jsonl",
-            model=self.model,
+            model=self.model_id,
         )
         write_cost(call_dir, cost_usd=cost_usd, metadata=cost_metadata)
         return payload
@@ -499,7 +457,7 @@ class CodexHarness(Harness):
         args = (self.command, "exec")
 
         if self.model:
-            args = (*args, "--model", self.model)
+            args = (*args, "--model", self.model_id)
         if self.fast_mode:
             args = (*args, "-c", "features.fast_mode=true", "-c", 'service_tier="fast"')
         # Emit a human-readable reasoning summary. Codex encrypts the raw

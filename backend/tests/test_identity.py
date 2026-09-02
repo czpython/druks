@@ -13,7 +13,7 @@ from druks.harnesses import providers as pbase
 from druks.harnesses.models import ProviderLogin
 from druks.harnesses.providers import AnthropicProvider
 from druks.testing import configure_app_for_test, make_settings
-from druks.user_settings.models import HarnessSettings, UserSettings
+from druks.user_settings.models import UserSettings
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
@@ -323,13 +323,13 @@ async def test_a_stale_unbound_completion_attaches_to_the_operator(tmp_path, mon
     assert codex_connection.provider_email == "b@example.com"
 
 
-async def test_a_connect_survives_a_failed_model_refresh(tmp_path, monkeypatch, druks_db):
-    async def _refresh_boom(self, connection):
+async def test_a_connect_survives_a_failed_catalog_refresh(tmp_path, monkeypatch, druks_db):
+    async def _refresh_boom(cls, login):
         raise RuntimeError("picker flush failed")
 
     # The login commits before the refresh runs; a refresh failure past
     # that point must not turn the durable connect into a client-visible error.
-    monkeypatch.setattr(HarnessSettings, "refresh_models", _refresh_boom)
+    monkeypatch.setattr(AnthropicProvider, "refresh_catalog", classmethod(_refresh_boom))
     with _client(tmp_path) as client:
         response = _connect(client, monkeypatch, email="me@example.com")
         assert response.status_code == 200
