@@ -41,6 +41,7 @@ async def test_harnesses_seeded_with_shipped_defaults(session):
         "claude",
         "codex",
         "opencode",
+        "pi",
     }
 
 
