@@ -1,10 +1,12 @@
 import json
 import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
+from druks.harnesses import opencode as opencode_module
 from druks.harnesses.base import Harness
-from druks.harnesses.datastructures import SandboxSettings
+from druks.harnesses.datastructures import ParsedModels, SandboxSettings
 from druks.harnesses.exceptions import (
     HarnessError,
     HarnessInvalidOutputError,
@@ -46,6 +48,17 @@ def _harness() -> OpenCodeHarness:
     )
 
 
+def _mock_catalog(monkeypatch: pytest.MonkeyPatch, response: SimpleNamespace) -> list[str]:
+    calls: list[str] = []
+
+    async def fake_get(self, url: str, **_kwargs: object) -> SimpleNamespace:
+        calls.append(url)
+        return response
+
+    monkeypatch.setattr(opencode_module.httpx.AsyncClient, "get", fake_get)
+    return calls
+
+
 def test_class_facts_and_registration() -> None:
     assert get_harness("opencode") is OpenCodeHarness
     assert OpenCodeHarness.command == "opencode"
@@ -56,6 +69,66 @@ def test_class_facts_and_registration() -> None:
     assert not hasattr(OpenCodeHarness, "credentials_path")
     assert "_model_discovery_request" not in OpenCodeHarness.__dict__
     assert "_usage_request" not in OpenCodeHarness.__dict__
+
+
+async def test_fetch_models_reads_the_providers_catalog(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    catalog = {
+        "anthropic": {
+            "id": "anthropic",
+            "name": "Anthropic",
+            "models": {
+                "claude-fable-5": {"id": "claude-fable-5", "name": "Claude Fable 5"},
+                "claude-sonnet-4-5": {"id": "claude-sonnet-4-5", "name": "Claude Sonnet 4.5"},
+            },
+        },
+        "openai": {"id": "openai", "name": "OpenAI", "models": {}},
+    }
+    raw = json.dumps(catalog)
+    calls = _mock_catalog(monkeypatch, SimpleNamespace(status_code=200, text=raw))
+
+    parsed = await OpenCodeHarness.fetch_models(SimpleNamespace(id="connection-1"))
+
+    assert parsed == ParsedModels(
+        ok=True,
+        models=(
+            {"id": "anthropic/claude-fable-5", "label": "Claude Fable 5"},
+            {"id": "anthropic/claude-sonnet-4-5", "label": "Claude Sonnet 4.5"},
+        ),
+        raw=raw,
+    )
+    assert calls == ["https://models.dev/api.json"]
+
+
+async def test_fetch_models_tags_a_catalog_without_the_provider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    raw = json.dumps({"openai": {"id": "openai", "models": {}}})
+    _mock_catalog(monkeypatch, SimpleNamespace(status_code=200, text=raw))
+
+    parsed = await OpenCodeHarness.fetch_models(SimpleNamespace(id="connection-1"))
+
+    assert parsed == ParsedModels(ok=False, error="unexpected_payload", raw=raw)
+
+
+async def test_fetch_models_tags_a_provider_without_models(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    raw = json.dumps({"anthropic": {"id": "anthropic", "models": {}}})
+    _mock_catalog(monkeypatch, SimpleNamespace(status_code=200, text=raw))
+
+    parsed = await OpenCodeHarness.fetch_models(SimpleNamespace(id="connection-1"))
+
+    assert parsed == ParsedModels(ok=False, error="empty_list", raw=raw)
+
+
+async def test_fetch_models_tags_a_catalog_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    _mock_catalog(monkeypatch, SimpleNamespace(status_code=503, text="down"))
+
+    parsed = await OpenCodeHarness.fetch_models(SimpleNamespace(id="connection-1"))
+
+    assert parsed == ParsedModels(ok=False, error="http_503")
 
 
 def _response(
@@ -111,10 +184,10 @@ async def test_build_invocation_uses_server_schema_and_env_auth(
     assert invocation.args[:2] == ("sh", "-c")
     wrapper = invocation.args[2]
     for text in (
-        "opencode.json",
-        "OPENCODE_CONFIG=",
         "opencode serve",
-        "--hostname 127.0.0.1 --port 4096",
+        "--port 0",
+        "listening on",
+        "--hostname 127.0.0.1 --port 0",
         "/session?directory=",
         "/message",
         "json_schema",
@@ -138,14 +211,14 @@ async def test_build_invocation_uses_server_schema_and_env_auth(
         "type": "object",
         "properties": {"answer": {"type": "string"}},
     }
-    config = json.loads(env["DRUKS_OPENCODE_CONFIG"])
+    config = json.loads(env["OPENCODE_CONFIG_CONTENT"])
     assert config["mcp"]["github"]["headers"] == {
         "Authorization": "Bearer {env:MCP_GITHUB_TOKEN}",
         "X-Trace-Key": "{env:MCP_TRACE_KEY}",
     }
     assert _API_KEY not in wrapper
-    assert "mcp-secret" not in env["DRUKS_OPENCODE_CONFIG"]
-    assert "trace-secret" not in env["DRUKS_OPENCODE_CONFIG"]
+    assert "mcp-secret" not in env["OPENCODE_CONFIG_CONTENT"]
+    assert "trace-secret" not in env["OPENCODE_CONFIG_CONTENT"]
     syntax = subprocess.run(
         ["sh", "-n", "-c", wrapper],
         check=False,

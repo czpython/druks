@@ -59,6 +59,7 @@ async def get_usage(account: Account = Depends(current_account)) -> UsageRespons
                 now=now,
                 connected=bool(connection),
                 provider_email=connection.provider_email if connection else None,
+                is_metered=connection.is_metered if connection else True,
             )
         )
     return UsageResponse(harnesses=summaries)
@@ -180,7 +181,16 @@ def _summarize(
     now: datetime,
     connected: bool,
     provider_email: str | None,
+    is_metered: bool,
 ) -> UsageHarnessSummary:
+    if connected and not is_metered:
+        return UsageHarnessSummary(
+            name=name,
+            available=True,
+            connected=True,
+            provider_email=provider_email,
+            unlimited=True,
+        )
     if not row:
         return UsageHarnessSummary(
             name=name,

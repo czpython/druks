@@ -84,6 +84,25 @@ def test_get_usage_empty_returns_available_false(client) -> None:
     assert all(entry["available"] is False for entry in body["harnesses"])
 
 
+async def test_get_usage_presents_api_key_connection_as_unmetered(client, druks_db) -> None:
+    await HarnessConnection.connect(
+        harness="opencode",
+        account=await Account.get_or_create("op@example.com"),
+        payload={"apiKey": "key"},
+        expires_at=None,
+        provider_email="op@example.com",
+        kind="api_key",
+    )
+
+    summary = _harness(client.get("/api/usage").json(), "opencode")
+
+    assert summary["available"] is True
+    assert summary["connected"] is True
+    assert summary["unlimited"] is True
+    assert summary["fiveHour"] is None
+    assert summary["weeks"] == []
+
+
 async def test_get_usage_serializes_latest_per_harness(client, app_settings) -> None:
     # Plant a snapshot for claude only — codex should still report
     # ``available=false`` rather than missing-key/404.
