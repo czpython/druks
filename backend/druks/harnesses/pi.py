@@ -47,7 +47,7 @@ class PiHarness(Harness):
     ) -> str:
         payload = json.loads(await super().render_credentials_file(connection_id))
         provider, _, _ = (model or cls.default_model).partition("/")
-        return json.dumps({provider: {"type": "api_key", "key": payload["apiKey"]}})
+        return json.dumps({provider: {"type": "api_key", "key": payload["api_key"]}})
 
     async def build_invocation(
         self,
