@@ -330,9 +330,16 @@ async def test_run_prompt_builds_executes_and_parses(
         name = "claude"
         model = "claude-opus-4-8"
         first_byte_seconds = 17
-        # The real manifest method on the stubbed build/parse seam, so the
-        # test exercises what run_prompt actually writes.
-        get_manifest = Harness.get_manifest
+
+        async def get_manifest(self, **_kwargs: Any) -> dict[str, Any]:
+            return {
+                "manifest_hash": "hash",
+                "schema_version": 2,
+                "model": self.model,
+                "harness": self.name,
+                "mcp_servers": [],
+                "skills_delivered": [],
+            }
 
         @staticmethod
         def mint_run_id(call_id: str | None) -> str:
@@ -361,6 +368,7 @@ async def test_run_prompt_builds_executes_and_parses(
     # The harness planned from values, not the live sandbox.
     assert seen["build"]["ssh_username"] == "root"
     assert seen["build"]["extra_env"] == {"GITHUB_MCP_TOKEN": "ghs_x"}
+    assert seen["build"]["timeout"] == 60
     assert seen["exec"]["first_byte_kill_seconds"] == 17
     # The prompt was persisted to the artifact dir before exec.
     assert (ctx.artifact_dir / "call-7" / "prompt.md").read_text() == "do the thing"

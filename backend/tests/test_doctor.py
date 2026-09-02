@@ -486,6 +486,7 @@ async def test_sandbox_e2e_exercises_dial_and_reattach(
         "sandbox_e2e",
         "sandbox_binary:claude",
         "sandbox_binary:codex",
+        "sandbox_binary:opencode",
     ]
     assert all(result.ok for result in results)
     assert calls == [
@@ -493,6 +494,7 @@ async def test_sandbox_e2e_exercises_dial_and_reattach(
         ("acquire", ["echo", "doctor"], 30.0),
         ("acquire", ["sh", "-c", "command -v claude"], 30.0),
         ("acquire", ["sh", "-c", "command -v codex"], 30.0),
+        ("acquire", ["sh", "-c", "command -v opencode"], 30.0),
         "attach:host-doc",
         ("reattach", ["echo", "doctor"], 30.0),
         "release:host-doc",

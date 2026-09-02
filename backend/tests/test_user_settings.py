@@ -37,7 +37,11 @@ async def test_harnesses_seeded_with_shipped_defaults(session):
         1800,
     )
     assert (await HarnessSettings.get_registered("codex")).model == "gpt-5.5"
-    assert {harness.name for harness in await HarnessSettings.all()} == {"claude", "codex"}
+    assert {harness.name for harness in await HarnessSettings.all()} == {
+        "claude",
+        "codex",
+        "opencode",
+    }
 
 
 async def test_harness_update_persists(session):

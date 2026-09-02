@@ -235,7 +235,7 @@ async def test_api_key_connect_stores_the_operator_identity(tmp_path, monkeypatc
     account = await Account.get_for_username("operator@example.com")
     connection = await HarnessConnection.get_for_account("claude", account.id)
     assert connection.kind == "api_key"
-    assert connection.payload == {"apiKey": "api-key-value"}
+    assert connection.payload == {"api_key": "api-key-value"}
     assert connection.provider_email == account.username
     assert not connection.expires_at
 
