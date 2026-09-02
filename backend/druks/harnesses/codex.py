@@ -369,7 +369,7 @@ class CodexHarness(Harness):
         skills: tuple[str, ...] = (),
         extra_env: dict[str, str] | None = None,
         mcp_servers: tuple[McpServer, ...] = (),
-        connection_id: str | None = None,
+        login: ProviderLogin,
         timeout: int = Harness.default_timeout,
     ) -> AgentInvocation:
         if not self.sandbox:
@@ -398,7 +398,7 @@ class CodexHarness(Harness):
             credentials=await self._get_credentials(
                 github_token=github_token,
                 skills=skills,
-                login=await self.login(connection_id),
+                login=login,
             ),
             env=extra_env,
             extra_artifact_filenames=("output.json", "session.jsonl"),

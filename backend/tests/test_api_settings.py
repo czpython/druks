@@ -27,7 +27,6 @@ def test_get_harnesses_lists_seeded_defaults(tmp_path: Path):
     with _build_client(tmp_path) as client:
         harnesses = {h["name"]: h for h in client.get("/api/settings/harnesses").json()}
     assert harnesses["claude"]["provider"] == "anthropic"
-    assert harnesses["claude"]["model"] == "anthropic/claude-opus-4-7"
     assert harnesses["codex"]["provider"] == "openai-codex"
     assert harnesses["pi"]["provider"] is None
     assert harnesses["pi"]["loginKinds"] == ["api_key"]
@@ -78,30 +77,32 @@ def test_timezone_change_reconciles_schedules(tmp_path: Path, monkeypatch):
         assert len(reconciled) == 1
 
 
-def test_patch_harness_updates_model_and_fast_mode(tmp_path: Path):
+def test_patch_harness_updates_fast_mode(tmp_path: Path):
     with _build_client(tmp_path) as client:
-        patch = client.patch(
-            "/api/settings/harnesses/claude",
-            json={"model": "anthropic/claude-sonnet-4-6", "fastMode": True},
-        )
+        patch = client.patch("/api/settings/harnesses/claude", json={"fastMode": True})
         assert patch.status_code == 200
-        body = patch.json()
-        assert body["model"] == "anthropic/claude-sonnet-4-6"
-        assert body["fastMode"] is True
+        assert patch.json()["fastMode"] is True
         listed = {h["name"]: h for h in client.get("/api/settings/harnesses").json()}
-        assert listed["claude"]["model"] == "anthropic/claude-sonnet-4-6"
-        # The other harness is untouched.
-        assert listed["codex"]["model"] == "openai-codex/gpt-5.5"
+        assert listed["claude"]["fastMode"] is True
+        assert listed["codex"]["fastMode"] is False
 
 
-def test_patch_harness_rejects_model_from_another_harness(tmp_path: Path):
+def test_patch_settings_updates_the_default_model_every_agent_inherits(tmp_path: Path):
     with _build_client(tmp_path) as client:
-        # gpt-5.5 belongs to codex, not claude.
-        response = client.patch(
-            "/api/settings/harnesses/claude", json={"model": "openai-codex/gpt-5.5"}
-        )
+        assert client.get("/api/settings").json()["defaultModel"] == "anthropic/claude-opus-4-7"
+        patch = client.patch("/api/settings", json={"defaultModel": "openai-codex/gpt-5.5"})
+        assert patch.status_code == 200
+        assert patch.json()["defaultModel"] == "openai-codex/gpt-5.5"
+        agents = {a["name"]: a for a in _software_factory_app(client)["agents"]}
+    assert agents["implement"]["model"] == "openai-codex/gpt-5.5"
+    assert agents["implement"]["source"] == "default"
+
+
+def test_patch_settings_rejects_a_model_no_harness_runs(tmp_path: Path):
+    with _build_client(tmp_path) as client:
+        response = client.patch("/api/settings", json={"defaultModel": "gpt-5.5"})
     assert response.status_code == 422
-    assert "openai-codex/gpt-5.5" in response.json()["detail"]
+    assert "gpt-5.5" in response.json()["detail"]
 
 
 def test_patch_unknown_harness_is_404(tmp_path: Path):
@@ -145,25 +146,20 @@ def test_apps_surface_build_agents_and_workflow_defaults(tmp_path: Path):
         build = _software_factory_app(client)
 
     agents = {a["name"]: a for a in build["agents"]}
-    # An agent's family-token default resolves to the family's model; effort
-    # and timeout inherit the global defaults ("high", 1800s) when the agent
-    # declares neither and the operator set no override.
+    # Every agent runs the operator's default model; effort and timeout inherit
+    # its harness's defaults ("high", 1800s) when the operator set no override.
     assert agents["generate_plan"] == {
         "name": "generate_plan",
         "description": "ticket → implementation plan",
-        "model": "openai-codex/gpt-5.5",
+        "model": "anthropic/claude-opus-4-7",
         "source": "default",
-        "default": "codex",
         "effort": "high",
         "effortSource": "harness",
         "timeout": 1800,
         "timeoutSource": "harness",
     }
     assert agents["implement"]["model"] == "anthropic/claude-opus-4-7"
-    assert agents["implement"]["default"] == "claude"
-    # evaluate declares medium effort; the rest inherit the global default.
-    assert agents["evaluate_implementation"]["effort"] == "medium"
-    assert agents["evaluate_implementation"]["effortSource"] == "declared"
+    assert agents["evaluate_implementation"]["effortSource"] == "harness"
     # The workflow's settings surface alongside its agents.
     fields = {f["name"]: f for f in build["workflows"][0]["fields"]}
     assert fields["max_implementation_revisions"]["value"] == 5
@@ -337,7 +333,7 @@ def test_incoherent_app_save_is_rejected_and_rolled_back_before_schedules(
         assert not reconciled
         assert _review_settings_fields(client)["app_id"]["secretSet"] is False
         agents = {agent["name"]: agent for agent in _software_factory_app(client)["agents"]}
-        assert agents["generate_plan"]["model"] == "openai-codex/gpt-5.5"
+        assert agents["generate_plan"]["model"] == "anthropic/claude-opus-4-7"
 
 
 async def test_clearing_the_identity_deletes_its_overrides_and_stays_coherent(tmp_path: Path):
@@ -391,15 +387,15 @@ def test_apps_override_agent_model_persists(tmp_path: Path):
 def test_apps_harness_effort_and_per_agent_effort_override(tmp_path: Path):
     with _build_client(tmp_path) as client:
         agents = {a["name"]: a for a in _software_factory_app(client)["agents"]}
-        # generate_plan runs on codex and inherits the codex harness effort.
+        # The default model runs on claude, so every agent inherits its effort.
         assert agents["generate_plan"]["effort"] == "high"
         assert agents["generate_plan"]["effortSource"] == "harness"
 
-        # Retune the codex harness effort + override one agent.
-        client.patch("/api/settings/harnesses/codex", json={"effort": "low"})
+        # Retune the claude harness effort + override one agent.
+        client.patch("/api/settings/harnesses/claude", json={"effort": "low"})
         client.patch("/api/settings/apps", json={"agentEfforts": {"generate_plan": "high"}})
         agents = {a["name"]: a for a in _software_factory_app(client)["agents"]}
-        # generate_plan overridden; revise_contract (also codex) inherits "low".
+        # generate_plan overridden; revise_contract inherits "low".
         assert agents["generate_plan"]["effort"] == "high"
         assert agents["generate_plan"]["effortSource"] == "agent"
         assert agents["revise_contract"]["effort"] == "low"
@@ -461,7 +457,7 @@ def test_build_review_code_is_a_workflow_setting(tmp_path: Path):
         assert fields["review_code"]["overridden"] is True
 
 
-def test_apps_clearing_an_override_reverts_to_the_family_default(tmp_path: Path):
+def test_apps_clearing_an_override_reverts_to_the_operator_default(tmp_path: Path):
     with _build_client(tmp_path) as client:
         client.patch(
             "/api/settings/apps",
@@ -471,10 +467,10 @@ def test_apps_clearing_an_override_reverts_to_the_family_default(tmp_path: Path)
         assert agents["generate_plan"]["model"] == "anthropic/claude-opus-4-7"
         assert agents["generate_plan"]["source"] == "agent"
 
-        # Null clears the override; the agent falls back to its family default.
+        # Null clears the override; the agent falls back to the operator default.
         client.patch("/api/settings/apps", json={"agentModels": {"generate_plan": None}})
         agents = {a["name"]: a for a in _software_factory_app(client)["agents"]}
-        assert agents["generate_plan"]["model"] == "openai-codex/gpt-5.5"
+        assert agents["generate_plan"]["model"] == "anthropic/claude-opus-4-7"
         assert agents["generate_plan"]["source"] == "default"
 
 

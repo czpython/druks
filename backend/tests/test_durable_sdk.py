@@ -113,7 +113,7 @@ def _build_units():
                 raise FatalError("closed at review")
 
     class AgentFlow(Workflow):
-        DECIDER = Agent(id="decider", contract=Decision, model="claude", prompt="t")
+        DECIDER = Agent(id="decider", contract=Decision, prompt="t")
 
         async def run(self, repo: str) -> None:
             decision = await self.DECIDER(body="x")

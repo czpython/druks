@@ -42,10 +42,8 @@ function buildCatalog(harnesses: Harness[], providers: Provider[], catalogs: Pro
     harness.provider ? harness.provider === provider.id : harness.loginKinds.some((k) => provider.loginKinds.includes(k))
   const modelsByProvider = Object.fromEntries(catalogs.map((c) => [c.provider, c.models]))
   return {
-    modelsOf: (harness) => {
-      const models = providers.filter((p) => hasProvider(harness, p)).flatMap((p) => modelsByProvider[p.id] ?? [])
-      return models.length > 0 ? models : [{ id: harness.model, label: harness.model }]
-    },
+    modelsOf: (harness) =>
+      providers.filter((p) => hasProvider(harness, p)).flatMap((p) => modelsByProvider[p.id] ?? []),
     harnessOf: (model) => {
       const provider = providers.find((p) => p.id === model.split('/')[0])
       return (provider && harnesses.find((h) => hasProvider(h, provider))?.name) ?? ''
@@ -165,6 +163,7 @@ export function SettingsModal({ open, onClose }: Props) {
     staleTime: 60_000,
   })
   const [timezone, setTimezone] = useState<string>('UTC')
+  const [defaultModel, setDefaultModel] = useState<string>('')
   // Pending per-app setting overrides — a sparse UpdateAppsSettingsRequest the
   // app tabs (and the Druks tab's built-in agents) edit and submit() flushes.
   // Distinct from ``knobs`` (the column-backed settings) because app settings
@@ -192,6 +191,7 @@ export function SettingsModal({ open, onClose }: Props) {
     }
     if (!initialised.current && settingsQuery.data) {
       setTimezone(settingsQuery.data.timezone)
+      setDefaultModel(settingsQuery.data.defaultModel)
       setAppEdits({})
       setAppProblems({})
       setHarnessEdits({})
@@ -263,6 +263,9 @@ export function SettingsModal({ open, onClose }: Props) {
       if (settingsQuery.data?.timezone !== timezone) {
         body.timezone = timezone
       }
+      if (settingsQuery.data?.defaultModel !== defaultModel) {
+        body.defaultModel = defaultModel
+      }
       if (Object.keys(body).length > 0) {
         await api.updateSettings(body)
         await queryClient.invalidateQueries({ queryKey: ['settings'] })
@@ -296,9 +299,11 @@ export function SettingsModal({ open, onClose }: Props) {
 
   const savedTz = settingsQuery.data?.timezone
   const tzDirty = savedTz !== undefined && savedTz !== timezone
+  const savedModel = settingsQuery.data?.defaultModel
+  const modelDirty = savedModel !== undefined && savedModel !== defaultModel
   const appsDirty = _areAppEditsDirty(appEdits)
   const harnessesDirty = Object.values(harnessEdits).some((patch) => Object.keys(patch).length > 0)
-  const dirty = tzDirty || appsDirty || harnessesDirty
+  const dirty = tzDirty || modelDirty || appsDirty || harnessesDirty
 
   const data = appSettingsQuery.data
   const allApps = data?.apps ?? []
@@ -418,6 +423,10 @@ export function SettingsModal({ open, onClose }: Props) {
             {section === 'general' && (
               <GeneralPane
                 timezone={timezone}
+                model={defaultModel}
+                setModel={setDefaultModel}
+                harnesses={harnesses}
+                catalog={catalog}
                 setTimezone={setTimezone}
                 timezones={timezones}
                 clock={preview}
@@ -456,6 +465,7 @@ export function SettingsModal({ open, onClose }: Props) {
                 harnessColor={harnessColor}
                 catalog={catalog}
                 harnessByName={harnessByName}
+                defaultModel={defaultModel}
                 allowedEfforts={allowedEfforts}
                 onAgentModel={setAgentModel}
                 onAgentEffort={setAgentEffort}
@@ -766,12 +776,20 @@ function GeneralPane({
   timezone,
   setTimezone,
   timezones,
+  model,
+  setModel,
+  harnesses,
+  catalog,
   clock,
   busy,
 }: {
   timezone: string
   setTimezone: (v: string) => void
   timezones: string[]
+  model: string
+  setModel: (v: string) => void
+  harnesses: Harness[]
+  catalog: Catalog
   clock: string
   busy: boolean
 }) {
@@ -779,6 +797,25 @@ function GeneralPane({
     <div className="set-pane">
       <div className="set-pane-head">
         <div className="set-pane-sub">Account-wide preferences.</div>
+      </div>
+      <div className="set-group">
+        <div className="set-group-label">default model</div>
+        <div className="set-field" style={{ maxWidth: 320 }}>
+          <select className="set-select" value={model} onChange={(e) => setModel(e.target.value)} disabled={busy}>
+            {!harnesses.some((h) => catalog.modelsOf(h).some((m) => m.id === model)) && (
+              <option value={model}>{model}</option>
+            )}
+            {harnesses.map((h) => (
+              <optgroup key={h.name} label={h.name}>
+                {catalog.modelsOf(h).map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.label}
+                  </option>
+                ))}
+              </optgroup>
+            ))}
+          </select>
+        </div>
       </div>
       <div className="set-group">
         <div className="set-group-label">timezone</div>
@@ -861,18 +898,6 @@ function HarnessesPane({
                 </span>
               </div>
               <div className="hr-controls">
-                <div className="mcp-field">
-                  <label className="mcp-label" htmlFor={id('model')}>
-                    Default model
-                  </label>
-                  <select id={id('model')} className="set-select" value={h.model} onChange={(e) => onField(harness.name, { model: e.target.value })} disabled={busy}>
-                    {catalog.modelsOf(harness).map((m) => (
-                      <option key={m.id} value={m.id}>
-                        {m.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
                 <div className="mcp-field">
                   <label className="mcp-label" htmlFor={id('effort')}>
                     Effort
@@ -2389,6 +2414,7 @@ function AppPane({
   edits,
   fieldErrors,
   harnessByName,
+  defaultModel,
   harnessColor,
   catalog,
   allowedEfforts,
@@ -2403,6 +2429,7 @@ function AppPane({
   edits: UpdateAppsSettingsRequest
   fieldErrors: Record<string, string>
   harnessByName: Record<string, Harness>
+  defaultModel: string
   harnessColor: Record<string, string>
   catalog: Catalog
   allowedEfforts: string[]
@@ -2556,6 +2583,7 @@ function AppPane({
             app={app}
             edits={edits}
             harnessByName={harnessByName}
+            defaultModel={defaultModel}
             harnessColor={harnessColor}
             catalog={catalog}
             allowedEfforts={allowedEfforts}
@@ -2574,6 +2602,7 @@ function AgentTable({
   app,
   edits,
   harnessByName,
+  defaultModel,
   harnessColor,
   catalog,
   allowedEfforts,
@@ -2585,6 +2614,7 @@ function AgentTable({
   app: AppSettings
   edits: UpdateAppsSettingsRequest
   harnessByName: Record<string, Harness>
+  defaultModel: string
   harnessColor: Record<string, string>
   catalog: Catalog
   allowedEfforts: string[]
@@ -2604,8 +2634,8 @@ function AgentTable({
         <div>harness</div>
       </div>
       {app.agents.map((a) => {
-        // The agent's declared harness supplies its inherited model.
-        const famModel = harnessByName[a.default]?.model ?? a.model
+        // Without an override an agent runs the operator's default model.
+        const famModel = defaultModel
         const modelOver: string | null =
           edits.agentModels && a.name in edits.agentModels
             ? (edits.agentModels[a.name] ?? null)
@@ -2642,7 +2672,7 @@ function AgentTable({
                 kind="model"
                 value={modelOver}
                 resolvedLabel={model}
-                inheritLabel={a.default + ' · ' + famModel}
+                inheritLabel={'default · ' + famModel}
                 harnesses={harnesses}
                 harnessColor={harnessColor}
                 catalog={catalog}

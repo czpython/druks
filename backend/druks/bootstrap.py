@@ -26,7 +26,6 @@ def seed_harnesses(engine) -> None:
                 session.add(
                     HarnessSettings(
                         name=harness.name,
-                        model=harness.default_model,
                         effort=harness.default_effort,
                         timeout=harness.default_timeout,
                     )

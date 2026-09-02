@@ -2,6 +2,7 @@ import pytest
 from conftest import connect_provider
 from druks.harnesses.claude import ClaudeHarness
 from druks.harnesses.codex import CodexHarness
+from druks.harnesses.models import ProviderLogin
 from druks.harnesses.providers import AnthropicProvider, OpenAiCodexProvider
 
 _CODEX_MODEL = CodexHarness.default_model
@@ -45,6 +46,7 @@ async def test_claude_build_invocation_carries_every_flag():
         effort="high",
         sandbox=_sandbox_config(),
     ).build_invocation(
+        login=await ProviderLogin.lookup("anthropic", None),
         prompt="hello",
         schema=schema,
         run_id="run-1",
@@ -102,6 +104,7 @@ async def test_codex_build_invocation_carries_every_flag():
         effort="high",
         sandbox=_sandbox_config(),
     ).build_invocation(
+        login=await ProviderLogin.lookup("openai-codex", None),
         prompt="hello",
         schema={"type": "object"},
         run_id="run-1",

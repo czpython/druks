@@ -4,7 +4,7 @@ Effort = Literal["low", "medium", "high"]
 ALLOWED_EFFORTS: tuple[str, ...] = get_args(Effort)
 
 # agent: per-agent override; declared: the agent's own field; harness: the
-# agent's harness default (claude/codex effort + timeout).
+# harness default; default: the operator's one default model.
 _SettingSource = Literal["agent", "declared", "harness"]
 
 
@@ -15,7 +15,7 @@ class ResolvedModel(NamedTuple):
 
 class ResolvedEffort(NamedTuple):
     value: str
-    source: _SettingSource
+    source: Literal["agent", "harness"]
 
 
 class ResolvedTimeout(NamedTuple):

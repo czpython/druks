@@ -504,7 +504,6 @@ export interface Harness {
   /** The provider a subscription CLI is bound to; null for a key CLI. */
   provider: string | null
   loginKinds: string[]
-  model: string
   fastMode: boolean
   effort: string
   timeout: number
@@ -559,7 +558,6 @@ export interface ConnectChallenge {
 }
 
 export interface UpdateHarnessRequest {
-  model?: string
   fastMode?: boolean
   effort?: string
   timeout?: number
@@ -605,11 +603,14 @@ export interface Service {
 
 export interface UserSettings {
   timezone: string
+  /** The model every agent runs unless it carries a per-agent override. */
+  defaultModel: string
   updatedAt: string
 }
 
 export interface UpdateUserSettingsRequest {
   timezone?: string
+  defaultModel?: string
 }
 
 export type BrowserSessionStatus = 'needs_login' | 'ready' | 'stale' | 'anonymous'
@@ -640,8 +641,6 @@ export interface AgentSetting {
   description: string
   model: string
   source: ModelSource
-  /** The declared family-token default the model resolves to. */
-  default: string
   effort: string
   effortSource: EffortSource
   /** Run timeout in seconds. */

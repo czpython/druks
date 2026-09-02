@@ -135,22 +135,24 @@ async def test_no_config_dir_ships_credential_only(druks_db):
 async def test_credential_without_a_selection_reads_the_fallback_account(druks_db):
     fallback = await _seed_claude(access="fallback", provider_email="a@example.com")
 
-    assert (await _harness().login(None)).id == fallback.id
+    assert (await ProviderLogin.lookup("anthropic", None)).id == fallback.id
 
 
 async def test_credential_without_any_row_raises(druks_db):
     with pytest.raises(HarnessNotConnectedError, match="anthropic is not connected"):
-        await _harness().login(None)
+        await ProviderLogin.lookup("anthropic", None)
 
 
 async def test_credential_renders_only_the_selected_row(druks_db):
     mine = await _seed_claude(access="mine-token", provider_email="a@example.com")
     other = await _seed_claude(access="other-token", provider_email="b@example.com")
 
-    rendered = json.loads(ClaudeHarness.auth_file(await _harness().login(other.id)).content)
+    selected = await ProviderLogin.lookup("anthropic", None, login_id=other.id)
+    rendered = json.loads(ClaudeHarness.auth_file(selected).content)
     assert rendered["claudeAiOauth"]["accessToken"] == "other-token"
     assert "mine-token" not in json.dumps(rendered)
-    rendered = json.loads(ClaudeHarness.auth_file(await _harness().login(mine.id)).content)
+    selected = await ProviderLogin.lookup("anthropic", None, login_id=mine.id)
+    rendered = json.loads(ClaudeHarness.auth_file(selected).content)
     assert rendered["claudeAiOauth"]["accessToken"] == "mine-token"
 
 
@@ -162,4 +164,4 @@ async def test_credential_for_a_deleted_row_raises(druks_db):
     # A disconnect between selection and push fails the call — it must never
     # fall through to another account's payload.
     with pytest.raises(HarnessNotConnectedError, match="removed"):
-        await _harness().login(gone_id)
+        await ProviderLogin.lookup("anthropic", None, login_id=gone_id)

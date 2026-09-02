@@ -93,7 +93,6 @@ class FieldNotes(App):
         description="reads a note and writes its one-line gist",
         prompt="field_notes/summarize.md",
         contract=GistOutput,
-        model="claude",
     )
 
     # The app's own precondition, reported by `druks doctor` beside the

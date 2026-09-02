@@ -27,14 +27,12 @@ class HarnessResponse(Schema):
     # The provider a subscription CLI is bound to; None for a key CLI.
     provider: str | None
     login_kinds: SortedNames
-    model: str
     effort: str
     timeout: int
     fast_mode: bool
 
 
 class HarnessUpdate(BaseModel):
-    model: str | None = None
     fast_mode: bool | None = Field(default=None, validation_alias="fastMode")
     effort: Effort | None = None
     timeout: PositiveInt | None = None
@@ -44,12 +42,14 @@ class UserSettingsResponse(Schema):
     model_config = ConfigDict(from_attributes=True)
 
     timezone: str
+    default_model: str
     gate_park_destination_id: str | None
     updated_at: datetime
 
 
 class UpdateUserSettingsRequest(BaseModel):
     timezone: str | None = None
+    default_model: str | None = Field(default=None, validation_alias="defaultModel")
     # Tri-state: absent = unchanged, null = clear (off), value = designate.
     gate_park_destination_id: str | None = Field(
         default=None, validation_alias="gateParkDestinationId"
@@ -61,10 +61,8 @@ class AgentSettingResponse(Schema):
     description: str
     model: str
     source: Literal["agent", "default"]
-    # The declared default — a family token (codex/claude) the model resolves to.
-    default: str
     effort: str
-    effort_source: Literal["agent", "declared", "harness"]
+    effort_source: Literal["agent", "harness"]
     timeout: int
     timeout_source: Literal["agent", "declared", "harness"]
 

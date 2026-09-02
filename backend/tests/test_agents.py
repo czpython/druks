@@ -7,6 +7,7 @@ from conftest import make_agent_result
 from druks import agents
 from druks.durable import AgentCall, WorkflowError
 from druks.files import File
+from druks.harnesses.claude import ClaudeHarness
 from druks.sandbox.exceptions import SandboxDownloadError
 from druks.usage.models import UsageScrape
 
@@ -19,7 +20,6 @@ DUMMY_AGENT = agents.Agent(
     id="dummy",
     prompt="dummy/agent.md",
     contract=DummyOutput,
-    model="anthropic/claude-haiku-4-5",
 )
 
 
@@ -31,7 +31,6 @@ FILE_AGENT = agents.Agent(
     id="file",
     prompt="dummy/agent.md",
     contract=FileOutput,
-    model="anthropic/claude-haiku-4-5",
 )
 
 
@@ -43,19 +42,17 @@ async def test_get_timeout_caps_at_the_sandbox_lease_max(druks_db):
         id="over",
         prompt="dummy/agent.md",
         contract=DummyOutput,
-        model="anthropic/claude-haiku-4-5",
         timeout=MAX_AGENT_TIMEOUT_SECONDS * 2,
     )
     under = agents.Agent(
         id="under",
         prompt="dummy/agent.md",
         contract=DummyOutput,
-        model="anthropic/claude-haiku-4-5",
         timeout=600,
     )
 
-    assert await over.get_timeout() == MAX_AGENT_TIMEOUT_SECONDS
-    assert await under.get_timeout() == 600
+    assert await over.get_timeout(ClaudeHarness) == MAX_AGENT_TIMEOUT_SECONDS
+    assert await under.get_timeout(ClaudeHarness) == 600
 
 
 @pytest.fixture(autouse=True)
@@ -143,7 +140,7 @@ async def test_run_outside_workflow_raises():
 async def test_run_refuses_an_agent_with_no_id():
     # Built loose — never assigned to an App, never given an explicit id — so
     # the call it would record would name nobody.
-    loose = agents.Agent(prompt="dummy/agent.md", contract=DummyOutput, model="claude")
+    loose = agents.Agent(prompt="dummy/agent.md", contract=DummyOutput)
     with pytest.raises(WorkflowError, match="runs under its own id"):
         await loose(repo="acme/widget")
 
@@ -169,8 +166,8 @@ async def test_run_refuses_unconnected_harness(druks_db, tmp_path, monkeypatch, 
 
 
 async def test_declaration_drives_run_agent_call(druks_db, tmp_path, monkeypatch, current_run):
-    # The declaration drives what run_agent sees (model/operation/schema/artifact
-    # dir/default timeout); run() returns the validated contract model.
+    # The declaration and the operator default drive what run_agent sees
+    # (model/schema/artifact dir/timeout); run() returns the validated contract.
     sandbox = _patch_runtime(monkeypatch, tmp_path, {"ok": True})
     _patch_ephemeral(monkeypatch, sandbox)
 
@@ -178,7 +175,7 @@ async def test_declaration_drives_run_agent_call(druks_db, tmp_path, monkeypatch
 
     assert result == DummyOutput(ok=True)
     kwargs = sandbox.run_agent.await_args.kwargs
-    assert kwargs["model"] == "anthropic/claude-haiku-4-5"
+    assert kwargs["model"] == "anthropic/claude-opus-4-7"
     assert kwargs["agent"] == "dummy"
     assert kwargs["schema"] == DummyOutput.model_json_schema()
     assert kwargs["prompt"] == "PROMPT:dummy/agent.md:repo=acme/widget"
@@ -192,7 +189,6 @@ async def test_declared_timeout_is_forwarded(druks_db, tmp_path, monkeypatch, cu
         id="timeout_probe",
         prompt="dummy/agent.md",
         contract=DummyOutput,
-        model="anthropic/claude-opus-4-7",
         timeout=900,
         include_plugins=False,
     )

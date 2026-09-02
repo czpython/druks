@@ -58,7 +58,7 @@ class PiHarness(Harness):
         skills: tuple[str, ...] = (),
         extra_env: dict[str, str] | None = None,
         mcp_servers: tuple[McpServer, ...] = (),
-        connection_id: str | None = None,
+        login: ProviderLogin,
         timeout: int = Harness.default_timeout,
     ) -> AgentInvocation:
         if not self.sandbox:
@@ -121,7 +121,7 @@ class PiHarness(Harness):
         command_line = " ".join(shlex.quote(argument) for argument in command)
         wrapper = " && ".join((*writes, command_line))
 
-        auth_file = self.auth_file(await self.login(connection_id))
+        auth_file = self.auth_file(login)
         return AgentInvocation(
             name=self.name,
             args=("sh", "-c", wrapper),

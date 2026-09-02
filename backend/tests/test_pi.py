@@ -6,7 +6,6 @@ from types import SimpleNamespace
 
 import pytest
 from druks.accounts.models import Account
-from druks.harnesses.base import Harness
 from druks.harnesses.datastructures import SandboxSettings
 from druks.harnesses.exceptions import (
     HarnessAuthError,
@@ -48,8 +47,7 @@ def _harness(*, effort: str | None = "high") -> PiHarness:
     )
 
 
-async def _login(self: Harness, _login_id: str | None) -> SimpleNamespace:
-    return SimpleNamespace(provider="openai", payload={"api_key": _API_KEY})
+_LOGIN = SimpleNamespace(provider="openai", payload={"api_key": _API_KEY})
 
 
 @pytest.fixture
@@ -82,7 +80,6 @@ def test_class_facts_and_registration() -> None:
 async def test_build_invocation_writes_the_run_files_and_pi_argv(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(PiHarness, "login", _login)
     github = McpServer(
         name="github",
         url="https://api.example.test/mcp",
@@ -93,6 +90,7 @@ async def test_build_invocation_writes_the_run_files_and_pi_argv(
     public = McpServer(name="public", url="https://public.example.test/mcp")
 
     invocation = await _harness().build_invocation(
+        login=_LOGIN,
         prompt="A large prompt stays on stdin.",
         schema={"type": "object"},
         run_id="run-1",
@@ -169,10 +167,12 @@ async def test_build_invocation_writes_the_run_files_and_pi_argv(
 async def test_build_invocation_without_servers_or_effort_is_bare(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(PiHarness, "login", _login)
-
     invocation = await _harness(effort=None).build_invocation(
-        prompt="Prompt", schema={"type": "object"}, run_id="run-1", ssh_username="exedev"
+        login=_LOGIN,
+        prompt="Prompt",
+        schema={"type": "object"},
+        run_id="run-1",
+        ssh_username="exedev",
     )
 
     wrapper = invocation.args[2]

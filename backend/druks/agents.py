@@ -23,7 +23,6 @@ from druks.harnesses.exceptions import (
     Retry,
 )
 from druks.harnesses.models import ProviderLogin
-from druks.harnesses.registry import get_harness_for_model
 from druks.prompts import render_prompt
 from druks.sandbox import gate as sandbox_gate
 from druks.sandbox.client import sandbox_client
@@ -35,6 +34,7 @@ from druks.user_settings.models import SettingsOverride
 from druks.workflows import _in_step, current_workflow
 
 if TYPE_CHECKING:
+    from druks.harnesses.base import Harness
     from druks.sandbox.datastructures import AgentResult
     from druks.workflows import Workflow
     from druks.workspaces import Workspace
@@ -95,10 +95,6 @@ class AgentOutput(BaseModel):
 @dataclass(frozen=True)
 class Agent:
     contract: type[AgentOutput]
-    # Operator-tunable declared default: the model the agent runs unless it is
-    # overridden (per agent or globally) in settings. A family token
-    # (codex/claude) resolves to that family's operator-tunable model.
-    model: str
     # Display label for the settings UI; ``id`` is shown when it's None.
     name: str | None = None
     # Short human-friendly blurb of what the agent does, shown in the settings UI.
@@ -107,9 +103,9 @@ class Agent:
     # prompt inline and drive the harness themselves (planning) instead of
     # going through ``run``.
     prompt: str | None = None
-    # Operator-tunable declared defaults, overridable per agent or globally.
-    # None inherits the global default (effort; timeout in seconds).
-    effort: str | None = None
+    # Declared run timeout in seconds, overridable per agent; None inherits the
+    # harness default. How long a step may take is a fact about the task; the
+    # model and the effort are the operator's, set in Settings.
     timeout: int | None = None
     # ``include_plugins=False`` skips the operator's plugin state for prompts
     # that hit no MCP server.
@@ -136,16 +132,14 @@ class Agent:
     # override → the agent's declared value → the operator's global default.
     # ``run`` uses these; callers that drive the harness themselves call them
     # directly.
-    async def get_model_name(self) -> str:
-        return (await SettingsOverride.agent_model(self.id, self.model)).value
+    async def get_model(self) -> str:
+        return (await SettingsOverride.agent_model(self.id)).value
 
-    async def get_effort(self) -> str:
-        harness = (get_harness_for_model(await self.get_model_name())).name
-        return (await SettingsOverride.agent_effort(self.id, self.effort, harness)).value
+    async def get_effort(self, harness: "type[Harness]") -> str:
+        return (await SettingsOverride.agent_effort(self.id, harness.name)).value
 
-    async def get_timeout(self) -> int:
-        harness = (get_harness_for_model(await self.get_model_name())).name
-        resolved = (await SettingsOverride.agent_timeout(self.id, self.timeout, harness)).value
+    async def get_timeout(self, harness: "type[Harness]") -> int:
+        resolved = (await SettingsOverride.agent_timeout(self.id, self.timeout, harness.name)).value
         # Capped so a single call always fits inside a fresh sandbox lease.
         return min(resolved, MAX_AGENT_TIMEOUT_SECONDS)
 
@@ -200,7 +194,7 @@ class Agent:
             # Runs as its own step: the body does no IO, and replay reuses the
             # recorded wait instead of re-reading the scrape.
             async with step_session():
-                model = await self.get_model_name()
+                model = await self.get_model()
                 provider_id = model.partition("/")[0]
                 # The scrape belongs to the charged login — its account
                 # differs from the run's on fallback.
@@ -267,14 +261,14 @@ class Agent:
         the harness. ``__call__`` handles the durable wrapping + nesting."""
         if not self.prompt:
             raise WorkflowError(f"agent {self.id!r} has no prompt template to render")
-        model = await self.get_model_name()
-        harness = get_harness_for_model(model)
+        model = await self.get_model()
         workflow = current_workflow.get()
         # Refusing an unservable call here beats provisioning a VM and
         # 401ing mid-run.
         login = await ProviderLogin.lookup(model.partition("/")[0], workflow.account_id)
+        harness = login.get_harness()
         # Plain snapshots: the commits below expire the ORM row mid-flight.
-        connection_id, charged_account_id = login.id, login.account_id
+        login_id, charged_account_id = login.id, login.account_id
         # An agent call is a durability boundary — its effects don't roll back —
         # so commit here rather than hold the step's connection idle through the
         # minutes of provisioning and the run.
@@ -285,9 +279,9 @@ class Agent:
         engine = _step_engine()
         call_id = harness.mint_run_id(None)
 
-        # Registered for provisioning through execution — this connection's
+        # Registered for provisioning through execution — this login's
         # rotation defers around it.
-        async with sandbox_gate.use(connection_id, call_id):
+        async with sandbox_gate.use(login_id, call_id):
             await set_run_phase("provisioning_vm")
             host_id = await workflow._lease_host()
 
@@ -321,7 +315,8 @@ class Agent:
                         prompt,
                         artifact_dir,
                         call_id,
-                        connection_id,
+                        login_id,
+                        harness=harness,
                         account_id=workflow.account_id,
                     )
                 except BaseException as error:
@@ -364,8 +359,9 @@ class Agent:
         prompt: str,
         artifact_dir: Path,
         call_id: str,
-        connection_id: str,
+        login_id: str,
         *,
+        harness: "type[Harness]",
         account_id: str | None,
     ) -> "AgentResult":
         schema = self.contract.model_json_schema()
@@ -375,10 +371,10 @@ class Agent:
             prompt=prompt,
             schema=schema,
             agent=self.id,
-            effort=await self.get_effort(),
-            timeout=await self.get_timeout(),
+            effort=await self.get_effort(harness),
+            timeout=await self.get_timeout(harness),
             artifact_dir=artifact_dir,
             call_id=call_id,
             include_plugins=self.include_plugins,
-            connection_id=connection_id,
+            login_id=login_id,
         )

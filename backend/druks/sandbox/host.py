@@ -36,6 +36,7 @@ from .layout import get_helper_script_path, get_work_root
 
 if TYPE_CHECKING:
     from druks.harnesses.base import Harness
+    from druks.harnesses.models import ProviderLogin
 
     from .runner import Exec
 
@@ -213,7 +214,7 @@ class Host:
         skills: tuple[str, ...] = (),
         extra_env: dict[str, Any] | None = None,
         mcp_servers: tuple[McpServer, ...] = (),
-        connection_id: str | None = None,
+        login_id: str | None = None,
     ) -> AgentResult:
         """Run the harness and return a pure ``AgentResult`` — no database write.
         A failure is carried on the result's ``error``, not raised, so the call
@@ -230,12 +231,13 @@ class Host:
         # that we keep it out of module init either way.
         from druks.durable.enums import AgentCallStatus
         from druks.harnesses.datastructures import SandboxSettings
-        from druks.harnesses.registry import get_harness_for_model
+        from druks.harnesses.models import ProviderLogin
         from druks.user_settings.models import HarnessSettings
 
         settings = load_settings()
-        # Effort/timeout fall back to the model's harness defaults.
-        harness_class = get_harness_for_model(model)
+        login = await ProviderLogin.lookup(model.partition("/")[0], None, login_id=login_id)
+        harness_class = login.get_harness()
+        # Effort/timeout fall back to the harness defaults.
         harness_settings = await HarnessSettings.get_registered(harness_class.name)
         effort = effort or harness_settings.effort
         timeout = timeout if timeout is not None else harness_settings.timeout
@@ -267,7 +269,7 @@ class Host:
                 extra_env=extra_env,
                 mcp_servers=mcp_servers,
                 call_id=run_id,
-                connection_id=connection_id,
+                login=login,
             )
         except HarnessError as exc:
             error = exc
@@ -306,12 +308,16 @@ class Host:
         extra_env: dict[str, str] | None = None,
         mcp_servers: tuple[McpServer, ...] = (),
         call_id: str | None = None,
-        connection_id: str | None = None,
+        login: "ProviderLogin | None" = None,
     ) -> Any:
         """Drive one prompt through ``harness`` on this VM: the harness
         builds the invocation and parses the result; this sandbox executes it.
         One-shot callers with a hand-built harness use this directly;
         ``run_agent`` adds the harness factory + cost capture on top."""
+        # A one-shot caller with a hand-built harness pushes the fallback login.
+        from druks.harnesses.models import ProviderLogin
+
+        login = login or await ProviderLogin.lookup(harness.model.partition("/")[0], None)
         run_id = harness.mint_run_id(call_id)
         artifact_dir.mkdir(parents=True, exist_ok=True)
         persist_prompt(artifact_dir, call_id=run_id, prompt=prompt)
@@ -336,7 +342,7 @@ class Host:
             skills=skills,
             extra_env=extra_env,
             mcp_servers=mcp_servers,
-            connection_id=connection_id,
+            login=login,
             timeout=timeout,
         )
         result = await self._exec(

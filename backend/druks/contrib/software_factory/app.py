@@ -143,44 +143,36 @@ class SoftwareFactory(App):
         description="ticket → implementation plan",
         prompt="software_factory/build/generate_plan.md",
         contract=PlanOutput,
-        model="codex",
     )
     review_plan = Agent(
         description="critiques the plan before any work starts",
         prompt="software_factory/build/review_plan.md",
         contract=ReviewOutput,
-        model="claude",
     )
     revise_contract = Agent(
         description="revises the plan contract on feedback",
         prompt="software_factory/build/revise_contract.md",
         contract=ContractRevisionOutput,
-        model="codex",
     )
     implement = Agent(
         description="plan → diff, in a drukbox",
         prompt="software_factory/build/implement.md",
         contract=ImplementationOutput,
-        model="claude",
     )
     evaluate_implementation = Agent(
         description="verification + code review of the diff, one verdict",
         prompt="software_factory/build/evaluate_implementation.md",
         contract=EvaluationOutput,
-        model="codex",
-        effort="medium",
     )
     triage_human_feedback = Agent(
         description="routes a human's PR feedback back into the workflow",
         prompt="software_factory/build/triage_human_feedback.md",
         contract=TriageOutput,
-        model="codex",
     )
     repo_profiler = Agent(
         description="reads a repo once and reports its stack, verification commands, and skills",
         prompt="software_factory/profile/repo_profiler.md",
         contract=RepoProfilerOutput,
-        model="codex",
     )
 
     @classmethod
