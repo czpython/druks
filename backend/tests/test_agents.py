@@ -71,10 +71,10 @@ async def _seed_run_for_record(druks_db):
 async def _connected_claude(druks_db):
     # A run refuses to dispatch on an unconnected harness; the runtime tests
     # here resolve to claude models, so connect it once.
-    from conftest import connect_harness
-    from druks.harnesses.claude import ClaudeHarness
+    from conftest import connect_provider
+    from druks.harnesses.providers import AnthropicProvider
 
-    await connect_harness(ClaudeHarness, {"claudeAiOauth": {"accessToken": "test-token"}})
+    await connect_provider(AnthropicProvider, {"claudeAiOauth": {"accessToken": "test-token"}})
 
 
 def _patch_runtime(monkeypatch, tmp_path, payload):
@@ -152,11 +152,11 @@ async def test_run_refuses_unconnected_harness(druks_db, tmp_path, monkeypatch, 
     # The precondition fires where the harness is resolved — before any VM work.
     from druks.accounts.models import Account
     from druks.harnesses.exceptions import HarnessNotConnectedError
-    from druks.harnesses.models import HarnessConnection
+    from druks.harnesses.models import ProviderLogin
 
     await (
-        await HarnessConnection.get_for_account(
-            "claude", (await Account.get_for_username("op@example.com")).id
+        await ProviderLogin.get_for_account(
+            "anthropic", (await Account.get_for_username("op@example.com")).id
         )
     ).delete()
     sandbox = _patch_runtime(monkeypatch, tmp_path, {"ok": True})

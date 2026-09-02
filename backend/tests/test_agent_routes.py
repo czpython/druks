@@ -717,7 +717,7 @@ async def test_usage_agent_route_matches_the_service(client: TestClient, druks_d
     assert len(response.content) <= 4 * 1024
 
     today = client.get("/api/usage/today").json()
-    assert sum(h["spendUsd"] for h in today["harnesses"]) == pytest.approx(body["spendTodayUsd"])
-    assert sum(h["runs"] for h in today["harnesses"]) == body["runsToday"]
-    assert sum(h["tokens"] for h in today["harnesses"]) == body["tokensToday"]
+    assert sum(h["spendUsd"] for h in today["providers"]) == pytest.approx(body["spendTodayUsd"])
+    assert sum(h["runs"] for h in today["providers"]) == body["runsToday"]
+    assert sum(h["tokens"] for h in today["providers"]) == body["tokensToday"]
     assert today["day"] == body["day"]

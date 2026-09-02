@@ -9,11 +9,14 @@ from pydantic import BaseModel, Field
 
 from druks.apps import loader
 
+from .constants import DEFAULT_DIR_EXCLUDES
 from .exceptions import SetupScriptError
 
 if TYPE_CHECKING:
     from druks.durable.enums import AgentCallStatus
     from druks.harnesses.exceptions import HarnessError
+
+    from .host import Host
 
 
 class Profile(BaseModel):
@@ -23,6 +26,10 @@ class Profile(BaseModel):
 
     image: str | None = None
     env: dict[str, str] = Field(default_factory=dict)
+
+
+if TYPE_CHECKING:
+    from .host import Host
 
 
 @dataclass(frozen=True)
@@ -158,28 +165,40 @@ class RequiredMcpServer:
 
 
 @dataclass(frozen=True)
+class HomeFile:
+    """Rendered content written at a home-relative path, never staged on the host."""
+
+    path: str
+    content: str
+
+    async def push(self, host: "Host", home: str) -> None:
+        await host.write_secret(secret=self.content, remote=f"{home}/{self.path}")
+
+
+@dataclass(frozen=True)
+class HomeCopy:
+    """A host file or tree copied to a home-relative path. What the host lacks
+    is skipped: config is optional, and the CLIs mint their own defaults."""
+
+    path: str
+    source: Path
+    excludes: tuple[str, ...] = ()
+
+    async def push(self, host: "Host", home: str) -> None:
+        remote = f"{home}/{self.path}"
+        # A Docker bind mount whose host file never existed leaves a directory
+        # at a file's path; is_file() keeps that out.
+        if self.source.is_file():
+            await host.upload_file(local=self.source, remote=remote)
+        elif self.source.is_dir():
+            await host.upload_dir(
+                local=self.source, remote=remote, excludes=DEFAULT_DIR_EXCLUDES + self.excludes
+            )
+
+
+@dataclass(frozen=True)
 class Credentials:
-    # Home-relative paths and rendered content for files written as VM secrets.
-    files: tuple[tuple[str, str], ...] = ()
+    """What lands in the sandbox home before the CLI runs."""
+
+    home: tuple[HomeFile | HomeCopy, ...] = ()
     github_token: str | None = None
-    # Extra config files to carry into the VM, as
-    # ``(local_path, home_relative_dest)`` pairs. This is how the
-    # agents' MCP / plugin config travels — e.g.
-    # ``(~/.codex/config.toml, ".codex/config.toml")`` brings the
-    # curated remote plugins (linear / notion / figma) along, and the
-    # sibling ``.credentials.json`` carries their auth. Each is pushed
-    # under the agent user's in-VM home (so ``.codex/config.toml`` ->
-    # ``/home/<user>/.codex/config.toml``) and **skipped if the local
-    # file is absent** — config is optional, missing it isn't fatal.
-    extra_config_files: tuple[tuple[Path, str], ...] = ()
-    # Directory trees to carry into the VM, same
-    # ``(local_path, home_relative_dest)`` shape, copied recursively.
-    # This is how Claude's managed-plugin trees travel
-    # (``~/.claude/plugins/marketplaces`` + ``.../cache``) since those
-    # are directories, not flat files. Skipped if the local dir is
-    # absent.
-    extra_config_dirs: tuple[tuple[Path, str], ...] = ()
-    # Per-destination extra tar excludes, keyed by the same home-relative dest
-    # as ``extra_config_dirs``, merged with ``DEFAULT_DIR_EXCLUDES`` at push.
-    # The skills projection uses this to drop disabled skills from the upload.
-    extra_dir_excludes: dict[str, tuple[str, ...]] = field(default_factory=dict)

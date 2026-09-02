@@ -262,12 +262,12 @@ async def rt():
     configure_engine(engine)
     configure_session(engine)
 
-    # An agent run checks the resolved harness is connected before any VM work;
-    # AgentFlow's decider resolves to claude, so connect it for the module —
+    # An agent run checks the resolved provider is connected before any VM work;
+    # AgentFlow's decider resolves to claude, so connect anthropic for the module —
     # and mark the account as the execution fallback, the way the first
-    # harness connection would.
+    # login would.
     from druks.accounts.models import Account
-    from druks.harnesses.models import HarnessConnection
+    from druks.harnesses.models import ProviderLogin
     from druks.user_settings.models import UserSettings
 
     session = get_session(engine)
@@ -280,10 +280,11 @@ async def rt():
             for subject_id in (7, 4242, 636363, 424242, 515151, 878787, 909090, 313131)
         )
         session.add(
-            HarnessConnection(
-                harness="claude",
+            ProviderLogin(
+                provider="anthropic",
                 account_id=account.id,
                 provider_email=account.username,
+                kind="oauth",
                 payload={"claudeAiOauth": {"accessToken": "t"}},
             )
         )

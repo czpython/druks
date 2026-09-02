@@ -56,9 +56,9 @@ class AgentCallDetailResponse(Schema):
     artifact: ArtifactContent | None = None
 
 
-class AgentHarnessUsage(Schema):
+class AgentProviderUsage(Schema):
     # *_history: percent-left trend samples, oldest first.
-    name: str
+    id: str
     is_connected: bool = False
     plan_tier: str | None = None
     five_hour_percent_left: int | None = None
@@ -77,4 +77,4 @@ class AgentUsageResponse(Schema):
     spend_today_usd: float
     tokens_today: int
     runs_today: int
-    harnesses: list[AgentHarnessUsage] = Field(default_factory=list)
+    providers: list[AgentProviderUsage] = Field(default_factory=list)

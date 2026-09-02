@@ -152,6 +152,12 @@ function stubFetch(
       if (path === '/api/settings/harnesses') {
         return new Response('[]', { status: 200 })
       }
+      if (path === '/api/providers/logins') {
+        return new Response('[]', { status: 200 })
+      }
+      if (path === '/api/providers') {
+        return new Response('[]', { status: 200 })
+      }
       if (path === '/api/browser-sessions') {
         return new Response('[]', { status: 200 })
       }

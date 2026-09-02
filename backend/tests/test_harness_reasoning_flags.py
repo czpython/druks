@@ -1,17 +1,18 @@
 import pytest
-from conftest import connect_harness
+from conftest import connect_provider
 from druks.harnesses.claude import ClaudeHarness
 from druks.harnesses.codex import CodexHarness
+from druks.harnesses.providers import AnthropicProvider, OpenAiCodexProvider
 
 _CODEX_MODEL = CodexHarness.models[0]
 
 
 @pytest.fixture(autouse=True)
 async def _connected_harnesses(druks_db):
-    # build_invocation renders each credential bundle from the DB row and
+    # build_invocation renders each login bundle from the DB row and
     # raises when that harness isn't connected.
-    await connect_harness(ClaudeHarness, {"claudeAiOauth": {"accessToken": "t"}})
-    await connect_harness(CodexHarness, {"tokens": {"access_token": "t"}})
+    await connect_provider(AnthropicProvider, {"claudeAiOauth": {"accessToken": "t"}})
+    await connect_provider(OpenAiCodexProvider, {"tokens": {"access_token": "t"}})
 
 
 def _sandbox_config():

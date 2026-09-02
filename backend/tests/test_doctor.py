@@ -293,8 +293,9 @@ async def test_run_checks_covers_all_check_names(tmp_path: Path) -> None:
         "installations",
         "software_factory:settings",
         "review:settings",
-        "claude_credentials",
-        "codex_credentials",
+        "anthropic_login",
+        "openai_login",
+        "openai-codex_login",
         "data_dir",
         "database",
         "redis",
@@ -303,29 +304,29 @@ async def test_run_checks_covers_all_check_names(tmp_path: Path) -> None:
     }
 
 
-def test_harness_credentials_pending_when_not_connected(tmp_path: Path) -> None:
-    # No credential rows committed => both harnesses read as not connected.
+def test_logins_pending_when_not_connected(tmp_path: Path) -> None:
+    # No login rows committed => every provider reads as not connected.
     settings = make_settings(tmp_path)
 
-    result = _named(doctor.check_harness_credentials(settings), "codex_credentials")
+    result = _named(doctor.check_provider_logins(settings), "openai-codex_login")
 
     assert not result.ok
     assert result.pending
     assert "not connected" in result.detail
 
 
-def test_harness_credential_check_expired() -> None:
+def test_login_check_expired() -> None:
     # An expired token is a genuine fault (runs would fail), not pending setup.
     past = datetime.now(UTC) - timedelta(hours=1)
-    result = doctor._harness_credential_check("claude", connected=True, expires_at=past)
+    result = doctor._login_check("anthropic", connected=True, expires_at=past)
     assert not result.ok
     assert not result.pending
     assert "expired" in result.detail
 
 
-def test_harness_credential_check_connected() -> None:
+def test_login_check_connected() -> None:
     future = datetime.now(UTC) + timedelta(hours=6)
-    result = doctor._harness_credential_check("claude", connected=True, expires_at=future)
+    result = doctor._login_check("anthropic", connected=True, expires_at=future)
     assert result.ok
     assert "connected" in result.detail
 
@@ -387,9 +388,7 @@ def test_print_results_pending_does_not_fail(capsys) -> None:
     # are pending operator setup — the command still exits 0.
     results = [
         doctor.CheckResult(name="database", ok=True, detail="reachable"),
-        doctor.CheckResult(
-            name="claude_credentials", ok=False, pending=True, detail="not connected"
-        ),
+        doctor.CheckResult(name="claude_login", ok=False, pending=True, detail="not connected"),
     ]
 
     exit_code = doctor.print_results(results)
@@ -403,9 +402,7 @@ def test_print_results_pending_does_not_fail(capsys) -> None:
 def test_print_results_fails_on_a_genuine_fault_alongside_pending(capsys) -> None:
     results = [
         doctor.CheckResult(name="database", ok=False, detail="unreachable"),
-        doctor.CheckResult(
-            name="claude_credentials", ok=False, pending=True, detail="not connected"
-        ),
+        doctor.CheckResult(name="claude_login", ok=False, pending=True, detail="not connected"),
     ]
 
     exit_code = doctor.print_results(results)

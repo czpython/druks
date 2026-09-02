@@ -1,31 +1,32 @@
 import { useCallback, useEffect, useState, type CSSProperties } from 'react'
 
-import { ConnectSteps, useHarnessConnect } from './HarnessConnectFlow'
+import { ConnectSteps, useProviderConnect } from './ProviderConnectFlow'
 import { api } from '../api/client'
 import { harnessColors } from '../lib/harnessColors'
-import { harnessLabel } from '../lib/harnessDisplay'
-import type { Account, SetupHarness } from '../api/types'
+import type { Account, Provider } from '../api/types'
 
 type OnboardingEntry = {
   title: string
   mark: string
   fam: string
-  flow: ReturnType<typeof useHarnessConnect>
+  flow: ReturnType<typeof useProviderConnect>
 }
 
 // The setup door: the edge (or none-mode locality) already decided who you
-// are — druks just needs its first harness connection. Works before any
+// are — druks just needs its first provider credential. Works before any
 // account exists (fresh none mode) and for a newly enrolled header identity.
+// Only a subscription login can create the operator, so key-only providers
+// wait for Settings.
 export function Onboarding({ onConnected }: { onConnected: (account: Account) => void }) {
-  const [harnesses, setHarnesses] = useState<SetupHarness[]>([])
+  const [providers, setProviders] = useState<Provider[]>([])
   const [loadError, setLoadError] = useState<string | null>(null)
-  const [activeHarness, setActiveHarness] = useState<string | null>(null)
+  const [activeProvider, setActiveProvider] = useState<string | null>(null)
 
   useEffect(() => {
     let ignore = false
-    api.setupHarnesses().then(
+    api.providers().then(
       (registered) => {
-        if (!ignore) setHarnesses(registered)
+        if (!ignore) setProviders(registered.filter((p) => p.loginKinds.includes('oauth')))
       },
       (error: unknown) => {
         if (!ignore) setLoadError(error instanceof Error ? error.message : String(error))
@@ -36,13 +37,13 @@ export function Onboarding({ onConnected }: { onConnected: (account: Account) =>
     }
   }, [])
 
-  const setHarnessActive = useCallback((name: string, active: boolean) => {
-    setActiveHarness((current) => {
-      if (active) return name
-      return current === name ? null : current
+  const setProviderActive = useCallback((id: string, active: boolean) => {
+    setActiveProvider((current) => {
+      if (active) return id
+      return current === id ? null : current
     })
   }, [])
-  const color = harnessColors(harnesses.map((harness) => harness.name))
+  const color = harnessColors(providers.map((provider) => provider.id))
 
   return (
     <div className="landing">
@@ -52,7 +53,7 @@ export function Onboarding({ onConnected }: { onConnected: (account: Account) =>
         </div>
         <div className="landing-tag">home for durable agent apps</div>
         <div className="landing-head">
-          <h1>Connect a harness to finish setup</h1>
+          <h1>Connect a provider to finish setup</h1>
           <p>
             druks runs agents on your own coding subscription. <b>Connecting one finishes setup</b>.
           </p>
@@ -61,13 +62,13 @@ export function Onboarding({ onConnected }: { onConnected: (account: Account) =>
           {loadError ? (
             <OnboardingError message={loadError} />
           ) : (
-            harnesses.map((harness) => (
-              <HarnessEntry
-                key={harness.name}
-                harness={harness}
-                fam={color[harness.name]!}
-                activeHarness={activeHarness}
-                onActive={setHarnessActive}
+            providers.map((provider) => (
+              <ProviderEntry
+                key={provider.id}
+                provider={provider}
+                fam={color[provider.id]!}
+                activeProvider={activeProvider}
+                onActive={setProviderActive}
                 onConnected={onConnected}
               />
             ))
@@ -78,34 +79,34 @@ export function Onboarding({ onConnected }: { onConnected: (account: Account) =>
   )
 }
 
-function HarnessEntry({
-  harness,
+function ProviderEntry({
+  provider,
   fam,
-  activeHarness,
+  activeProvider,
   onActive,
   onConnected,
 }: {
-  harness: SetupHarness
+  provider: Provider
   fam: string
-  activeHarness: string | null
-  onActive: (name: string, active: boolean) => void
+  activeProvider: string | null
+  onActive: (id: string, active: boolean) => void
   onConnected: (account: Account) => void
 }) {
-  const flow = useHarnessConnect(harness.name, onConnected)
+  const flow = useProviderConnect(provider.id, onConnected)
   const active = flow.busy || Boolean(flow.challenge)
 
   useEffect(() => {
-    onActive(harness.name, active)
-  }, [active, harness.name, onActive])
+    onActive(provider.id, active)
+  }, [active, provider.id, onActive])
 
-  if (activeHarness && activeHarness !== harness.name) return null
+  if (activeProvider && activeProvider !== provider.id) return null
 
-  const title = harnessLabel(harness.name)
+  const title = provider.label
   const entry = { title, mark: title.slice(0, 2), fam, flow }
-  return active ? <ConnectPanel entry={entry} /> : <HarnessCard entry={entry} />
+  return active ? <ConnectPanel entry={entry} /> : <ProviderCard entry={entry} />
 }
 
-function HarnessCard({ entry }: { entry: OnboardingEntry }) {
+function ProviderCard({ entry }: { entry: OnboardingEntry }) {
   return (
     <div className="landing-choice" style={{ '--fam': entry.fam } as CSSProperties}>
       <button className="landing-card" onClick={() => void entry.flow.start()}>

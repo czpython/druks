@@ -2,34 +2,24 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import type { Harness } from '../api/types'
-import { HarnessConnect } from './SettingsModal'
+import type { Provider, ProviderLogin } from '../api/types'
+import { ProviderConnect } from './SettingsModal'
 
-function harness(overrides: Partial<Harness> = {}): Harness {
+function provider(overrides: Partial<Provider> = {}): Provider {
   return {
-    name: 'claude',
-    provider: 'anthropic',
-    model: 'claude-opus-4-7',
-    allowedModels: [{ id: 'claude-opus-4-7', label: 'Claude Opus 4.7' }],
-    fastMode: false,
-    effort: 'high',
-    timeout: 1800,
-    connected: false,
-    kind: null,
-    loginKinds: ['subscription'],
-    account: null,
-    providerEmail: null,
-    expiresAt: null,
+    id: 'anthropic',
+    label: 'Anthropic',
+    loginKinds: ['oauth'],
     ...overrides,
   }
 }
 
-function renderCard(value: Harness) {
+function renderCard(value: Provider, login: ProviderLogin | null = null) {
   const queryClient = new QueryClient()
   const invalidate = vi.spyOn(queryClient, 'invalidateQueries')
   const view = render(
     <QueryClientProvider client={queryClient}>
-      <HarnessConnect harness={value} />
+      <ProviderConnect provider={value} login={login} />
     </QueryClientProvider>,
   )
   return { view, invalidate }
@@ -46,42 +36,41 @@ async function flush() {
   })
 }
 
-describe('HarnessConnect', () => {
+describe('ProviderConnect', () => {
   it('shows each connect control only for its declared login kind', () => {
-    const subscription = renderCard(harness({ loginKinds: ['subscription'] }))
+    const subscription = renderCard(provider({ loginKinds: ['oauth'] }))
 
     expect(screen.getByRole('button', { name: 'Connect' })).toBeTruthy()
     expect(screen.queryByLabelText('API key')).toBeNull()
     subscription.view.unmount()
 
-    const apiKey = renderCard(harness({ loginKinds: ['api_key'] }))
+    const apiKey = renderCard(provider({ loginKinds: ['api_key'] }))
 
     expect(screen.getByLabelText('API key')).toBeTruthy()
     expect(screen.queryByRole('button', { name: 'Connect' })).toBeNull()
     apiKey.view.unmount()
 
-    renderCard(harness({ loginKinds: ['subscription', 'api_key'] }))
+    renderCard(provider({ loginKinds: ['oauth', 'api_key'] }))
 
     expect(screen.getByRole('button', { name: 'Connect' })).toBeTruthy()
     expect(screen.getByLabelText('API key')).toBeTruthy()
   })
 
   it('shows each connected subscription identity instead of the operator account', () => {
-    renderCard(
-      harness({
-        connected: true,
-        account: 'ops@corp.com',
-        providerEmail: 'claude-seat@corp.com',
-      }),
-    )
-    renderCard(
-      harness({
-        name: 'codex',
-        connected: true,
-        account: 'ops@corp.com',
-        providerEmail: 'codex-seat@corp.com',
-      }),
-    )
+    renderCard(provider(), {
+      provider: 'anthropic',
+      kind: 'oauth',
+      connected: true,
+      providerEmail: 'claude-seat@corp.com',
+      expiresAt: null,
+    })
+    renderCard(provider({ id: 'openai-codex', label: 'ChatGPT' }), {
+      provider: 'openai-codex',
+      kind: 'oauth',
+      connected: true,
+      providerEmail: 'codex-seat@corp.com',
+      expiresAt: null,
+    })
 
     expect(screen.getAllByText('Connected')).toHaveLength(2)
     expect(screen.getByText('claude-seat@corp.com')).toBeTruthy()
@@ -89,13 +78,13 @@ describe('HarnessConnect', () => {
     expect(screen.queryByText('ops@corp.com')).toBeNull()
   })
 
-  it('drives the connection flow end to end and refreshes only the harness query', async () => {
+  it('drives the connection flow end to end and refreshes only the providers query', async () => {
     const responses: Record<string, unknown> = {
-      '/api/harnesses/claude/connection/start': {
+      '/api/providers/anthropic/connection/start': {
         authorizeUrl: 'https://x/auth',
         connectionId: 'C1',
       },
-      '/api/harnesses/claude/connection/complete': { id: 'a1', username: 'me@example.com' },
+      '/api/providers/anthropic/connection/complete': { id: 'a1', username: 'me@example.com' },
     }
     const fetchMock = vi.fn<(url: string, init?: RequestInit) => Promise<Response>>(
       async (url) => {
@@ -105,7 +94,7 @@ describe('HarnessConnect', () => {
     )
     vi.stubGlobal('fetch', fetchMock)
 
-    const { invalidate } = renderCard(harness())
+    const { invalidate } = renderCard(provider())
     fireEvent.click(screen.getByText('Connect'))
     await flush()
 
@@ -117,28 +106,28 @@ describe('HarnessConnect', () => {
     await flush()
 
     const completeCall = fetchMock.mock.calls.find(
-      ([url]) => url === '/api/harnesses/claude/connection/complete',
+      ([url]) => url === '/api/providers/anthropic/connection/complete',
     )
     expect(JSON.parse(String(completeCall?.[1]?.body))).toEqual({
       code: 'the-code',
       connectionId: 'C1',
     })
-    // Completion refreshes the harness card — and only that: the browser's
+    // Completion refreshes the provider card — and only that: the browser's
     // own identity is untouched, so /api/auth/me is never rechecked.
-    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['harnesses'] })
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['providerLogins'] })
     expect(fetchMock.mock.calls.some(([url]) => String(url) === '/api/auth/me')).toBe(false)
   })
 
-  it('posts a pasted API key and refreshes the harness query', async () => {
+  it('posts a pasted API key and refreshes the providers query', async () => {
     const fetchMock = vi.fn<(url: string, init?: RequestInit) => Promise<Response>>(
       async (url) =>
-        new Response(JSON.stringify(url.endsWith('/connection') ? harness() : {}), {
+        new Response(JSON.stringify(url.endsWith('/connection') ? provider() : {}), {
           status: 200,
         }),
     )
     vi.stubGlobal('fetch', fetchMock)
 
-    const { invalidate } = renderCard(harness({ loginKinds: ['api_key'] }))
+    const { invalidate } = renderCard(provider({ loginKinds: ['api_key'] }))
     fireEvent.change(screen.getByLabelText('API key'), {
       target: { value: 'the-api-key' },
     })
@@ -146,9 +135,9 @@ describe('HarnessConnect', () => {
     await flush()
 
     const connectCall = fetchMock.mock.calls.find(
-      ([url]) => url === '/api/harnesses/claude/connection',
+      ([url]) => url === '/api/providers/anthropic/connection',
     )
     expect(JSON.parse(String(connectCall?.[1]?.body))).toEqual({ key: 'the-api-key' })
-    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['harnesses'] })
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['providerLogins'] })
   })
 })

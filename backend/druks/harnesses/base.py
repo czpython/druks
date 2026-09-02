@@ -1,78 +1,52 @@
-import base64
 import hashlib
 import json
 import logging
-import secrets
-import urllib.parse
 import uuid
 from abc import ABC, abstractmethod
 from collections.abc import Collection
-from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar
 
 import httpx
-from pydantic import TypeAdapter
 
-from druks.database import db_session
 from druks.mcp import models as mcp_models
 from druks.mcp.helpers import get_bearer_token_env_var
-from druks.redis import get_client
-from druks.sandbox.constants import MAX_AGENT_TIMEOUT_SECONDS
 from druks.skills.models import Skill
-from druks.usage.models import UsageScrape
 
 from . import exceptions
-from .constants import CONNECT_PENDING_PREFIX, REFRESH_LOCK_PREFIX
 from .datastructures import (
     AgentInvocation,
-    CodexToken,
-    CompletedConnect,
     HarnessRunResult,
-    OAuthToken,
-    ParsedMetric,
     ParsedModels,
-    ParsedUsage,
     ProviderRequest,
-    RotationResult,
     SandboxSettings,
 )
-from .models import HarnessConnection
+from .exceptions import OAuthTokenError
+from .models import ProviderLogin
+from .providers import Token, error_tag, get_provider
 
 if TYPE_CHECKING:
     from druks.sandbox.datastructures import McpServer
 
 logger = logging.getLogger(__name__)
 
-_GRANT_TIMEOUT_SECONDS = 30.0
-_USAGE_TIMEOUT_SECONDS = 20.0
-# The connect-flow pending state (PKCE verifier + state) lives in Redis this
-# long — enough to authorize and paste, short enough that an abandoned attempt
-# clears.
-_CONNECT_PENDING_TTL_SECONDS = 600
-# Per-row refresh lock: five minutes outlives the provider grant timeout and
-# expires before the next 15-minute cron tick if the holder dies mid-refresh.
-_REFRESH_LOCK_TTL_SECONDS = 300
+_DISCOVERY_TIMEOUT_SECONDS = 20.0
 
 # The capability manifest is a plain JSON dict written per AgentCall. Bump when
 # the recorded shape changes so a reader can tell manifests apart across
 # versions; the value is part of the hash, so a bump reshuffles the buckets.
 MANIFEST_SCHEMA_VERSION = 2
 
-Token = OAuthToken | CodexToken
-
-_WEEKLY_WINDOWS = TypeAdapter(tuple[ParsedMetric, ...])
-
 
 class Harness(ABC):
     name: str
     command: ClassVar[str]
-    login_kinds: ClassVar[frozenset[str]] = frozenset({"subscription"})
-    credentials_path: ClassVar[str]
-    # Harness identity + shipped config, the seed source for the per-harness
-    # ``HarnessSettings`` row the operator then tunes. Subclasses set provider,
-    # models and default_model; effort/timeout default to the shipped values.
-    provider: ClassVar[str]
+    # The login kinds this CLI consumes: "oauth" for a subscription CLI,
+    # "api_key" for one that runs on a pasted key.
+    login_kinds: ClassVar[frozenset[str]]
+    # The one provider a subscription CLI is bound to. None for a key CLI,
+    # which runs whichever provider the model names.
+    provider: ClassVar[str | None] = None
     # Suggested models for the settings picker and the ``default_model`` seed.
     models: ClassVar[tuple[str, ...]]
     default_model: ClassVar[str]
@@ -86,10 +60,6 @@ class Harness(ABC):
     # Claude's slowest measured cold start is under 60 seconds. This margin
     # covers slow MCP loads, token refresh, and prompt assembly.
     first_byte_seconds: ClassVar[int | None] = 90
-    # Per-CLI OAuth refresh config (set by subclasses).
-    REFRESH_MARGIN: timedelta
-    _TOKEN_URL: str
-    _CLIENT_ID: str
 
     def __init__(
         self,
@@ -127,6 +97,35 @@ class Harness(ABC):
                 if marker in lowered:
                     raise error(message)
             raise exceptions.HarnessError(message)
+
+    @classmethod
+    def provider_for(cls, model: str) -> str:
+        """The provider whose login ``model`` spends: its namespace, else the
+        provider this CLI is bound to."""
+        provider, separator, _ = model.partition("/")
+        if separator:
+            return provider
+        if cls.provider:
+            return cls.provider
+        raise exceptions.HarnessError(f"{cls.name} needs a provider namespace on model {model!r}.")
+
+    @classmethod
+    def accepts(cls, login: ProviderLogin) -> bool:
+        """Whether this CLI runs on ``login``."""
+        bound = not cls.provider or cls.provider == login.provider
+        return bound and login.kind in cls.login_kinds
+
+    async def login(self, login_id: str | None) -> ProviderLogin:
+        """The selected login, read fresh at push time; with none
+        selected, the fallback account's for this model's provider. A vanished
+        row fails the call rather than render another account's."""
+        if login_id:
+            if row := await ProviderLogin.get(login_id):
+                return row
+            raise exceptions.HarnessNotConnectedError(
+                "the selected login was removed — reconnect it in Settings → Providers."
+            )
+        return await ProviderLogin.lookup(self.provider_for(self.model), None)
 
     async def get_manifest(
         self,
@@ -201,347 +200,20 @@ class Harness(ABC):
         return call_id or str(uuid.uuid4())
 
     @classmethod
-    async def get_credentials(cls) -> dict:
-        """The fallback account's credential dict — for callers with no
-        selection."""
-        row = await HarnessConnection.get_for_account(cls.name, fallback=True)
-        data = dict(row.payload) if row else None
-        if data:
-            return data
-        raise exceptions.HarnessNotConnectedError(
-            f"{cls.name} is not connected — connect it in Settings → Harnesses."
-        )
-
-    @classmethod
-    async def render_credentials_file(cls, connection_id: str | None = None) -> str:
-        """The selected connection's payload, read fresh at push time; a
-        vanished row fails the call rather than render another account's."""
-        if not connection_id:
-            return json.dumps(await cls.get_credentials())
-        row = await HarnessConnection.get(connection_id)
-        if row:
-            return json.dumps(dict(row.payload))
-        raise exceptions.HarnessNotConnectedError(
-            f"the selected {cls.name} connection was removed — reconnect it in "
-            "Settings → Harnesses."
-        )
-
-    @classmethod
-    async def connect_start(cls, *, account_id: str | None = None) -> tuple[str, str]:
-        """Mint PKCE state under a single-use flow id; return (authorize URL,
-        flow id). A flow started by a resolved operator binds ``account_id``."""
-        verifier = _b64url(secrets.token_bytes(64))
-        challenge = _b64url(hashlib.sha256(verifier.encode()).digest())
-        url, state = cls.authorize_url(verifier=verifier, challenge=challenge)
-        flow_id = secrets.token_urlsafe(24)
-        pending = json.dumps(
-            {
-                "verifier": verifier,
-                "state": state,
-                "account_id": account_id,
-            }
-        )
-        await get_client().set(
-            f"{CONNECT_PENDING_PREFIX}{flow_id}", pending, ex=_CONNECT_PENDING_TTL_SECONDS
-        )
-        return url, flow_id
-
-    @classmethod
-    async def connect_complete(cls, *, flow_id: str, pasted: str) -> CompletedConnect:
-        """Pop the flow's single-use state, parse the paste, exchange the code.
-        Raises :class:`ConnectError` on failure; the state is gone either way,
-        so a retry re-starts cleanly."""
-        pending = await get_client().getdel(f"{CONNECT_PENDING_PREFIX}{flow_id}")  # single-use
-        if not pending:
-            raise exceptions.ConnectError("This connect attempt expired — start it again.")
-        expected = json.loads(pending)
-
-        code, pasted_state = _parse_pasted(pasted)
-        if not code:
-            raise exceptions.ConnectError("Couldn't find an authorization code in what you pasted.")
-        if pasted_state and pasted_state != expected["state"]:
-            raise exceptions.ConnectError(
-                "That code is from a different connect attempt — start it again."
-            )
-
-        payload, provider_email = await cls.exchange(code=code, verifier=expected["verifier"])
-        if not provider_email:
-            raise exceptions.ConnectError(
-                "The provider returned no account email — authorize with an account "
-                "that has one and try again."
-            )
-        _, expires_at = cls._refresh_state(payload)
-        return CompletedConnect(
-            payload=payload,
-            provider_email=provider_email,
-            expires_at=expires_at,
-            account_id=expected["account_id"],
-        )
-
-    @classmethod
-    def authorize_url(cls, *, verifier: str, challenge: str) -> tuple[str, str]:
-        """Build this provider's PKCE authorize URL; return (url, state), where
-        ``state`` is what the provider echoes back so connect_complete can
-        verify the round-trip."""
-        raise NotImplementedError
-
-    @classmethod
-    async def exchange(cls, *, code: str, verifier: str) -> tuple[dict, str | None]:
-        """Exchange the authorization code for tokens; return (credential-file
-        payload, provider-reported account email)."""
-        raise NotImplementedError
-
-    @classmethod
-    def load_token(cls, connection: HarnessConnection, *, now: datetime | None = None) -> Token:
-        """Read + validate ``connection``'s access token, or raise
-        :class:`OAuthTokenError`. Read-only; never refreshes."""
-        token = cls._token_from_credentials(dict(connection.payload))
-        moment = now or _utc_now()
-        if token.expires_at and token.expires_at <= moment:
-            raise exceptions.OAuthTokenError(
-                "token_expired", f"access token expired at {token.expires_at.isoformat()}"
-            )
-        return token
-
-    @classmethod
-    def _token_from_credentials(cls, data: dict) -> Token:
-        """Extract the token object from the parsed credential file;
-        raise ``OAuthTokenError('no_token')`` if absent."""
-        raise NotImplementedError
-
-    @classmethod
-    async def rotate_token(
-        cls,
-        connection_id: str,
-        *,
-        now: datetime | None = None,
-        margin: timedelta | None = None,
-    ) -> RotationResult:
-        """Refresh one connection row's token if it's within the expiry margin,
-        persisting the new token back to that row. Addressed by row id and
-        read fresh — the caller's tick may span other rows' commits. One
-        refresher per row: a Redis lock elects the winner, and the loser
-        reports ``locked`` without touching the provider — two concurrent
-        grants on one refresh lineage trip the provider's reuse detection."""
-        moment = now or _utc_now()
-        row = await HarnessConnection.reload(connection_id)
-        if not row:
-            return RotationResult(
-                cls.name, "failed", error="no_credentials", connection_id=connection_id
-            )
-        data = dict(row.payload)
-        refresh_token, expires_at = cls._refresh_state(data)
-        if not refresh_token:
-            return RotationResult(cls.name, "no_refresh_token", connection_id=connection_id)
-
-        limit = margin if margin is not None else cls.REFRESH_MARGIN
-        if expires_at and expires_at - moment > limit:
-            return RotationResult(
-                cls.name, "fresh", expires_at=expires_at, connection_id=connection_id
-            )
-
-        redis = get_client()
-        lock_key = f"{REFRESH_LOCK_PREFIX}{connection_id}"
-        if not await redis.set(lock_key, "1", nx=True, ex=_REFRESH_LOCK_TTL_SECONDS):
-            return RotationResult(cls.name, "locked", connection_id=connection_id)
-        try:
-            # Re-read after winning the lock: the previous holder may have
-            # advanced this lineage (or deleted the row) after our first read.
-            row = await HarnessConnection.reload(connection_id)
-            if not row:
-                return RotationResult(
-                    cls.name, "failed", error="no_credentials", connection_id=connection_id
-                )
-            data = dict(row.payload)
-            refresh_token, expires_at = cls._refresh_state(data)
-            if not refresh_token:
-                return RotationResult(cls.name, "no_refresh_token", connection_id=row.id)
-            if expires_at and expires_at - moment > limit:
-                return RotationResult(
-                    cls.name, "fresh", expires_at=expires_at, connection_id=row.id
-                )
-
-            try:
-                grant = await _post_grant(cls._TOKEN_URL, cls._grant_body(refresh_token))
-                new_expiry = cls._apply_refresh(data, grant, moment)
-            except exceptions.GrantError as exc:
-                if exc.tag == "invalid_grant":
-                    # The provider revoked this row's refresh lineage;
-                    # presenting it again can never succeed. Drop only this
-                    # credential so the connection reads as disconnected — the
-                    # UI shows Reconnect and the next tick has no row to hammer.
-                    await row.delete()
-                    await db_session().commit()
-                    logger.warning(
-                        "%s connection %s auto-disconnected after invalid_grant; "
-                        "reconnect to restore",
-                        cls.name,
-                        row.id,
-                    )
-                return RotationResult(cls.name, "failed", error=exc.tag, connection_id=row.id)
-            except ValueError:
-                return RotationResult(
-                    cls.name, "failed", error="bad_response", connection_id=row.id
-                )
-
-            await row.update_payload(data, expires_at=new_expiry)
-            # The grant is externally anchored — the provider may have killed
-            # the old refresh token the moment it issued this one — so the new
-            # lineage must be committed before the lock releases; deferring to
-            # the step's own commit would let a concurrent refresher take the
-            # freed lock and re-present the superseded token.
-            await db_session().commit()
-            return RotationResult(
-                cls.name, "refreshed", expires_at=new_expiry, connection_id=row.id
-            )
-        finally:
-            await redis.delete(lock_key)
-
-    @classmethod
-    def refresh_is_urgent(cls, connection: HarnessConnection) -> bool:
-        """Expiry inside the call horizon: a mid-run 401 is unavoidable."""
-        _, expires_at = cls._refresh_state(dict(connection.payload))
-        if not expires_at:
-            return False
-        return expires_at - _utc_now() < timedelta(seconds=MAX_AGENT_TIMEOUT_SECONDS)
-
-    @classmethod
-    def needs_refresh(cls, connection: HarnessConnection) -> bool:
-        """Whether the access token is inside its refresh margin. Unreadable
-        or expired reads False: nothing live to protect, rotate ungated."""
-        try:
-            token = cls._token_from_credentials(dict(connection.payload))
-        except exceptions.OAuthTokenError:
-            return False
-        if not token.expires_at:
-            return False
-        now = _utc_now()
-        if token.expires_at <= now:
-            return False
-        return token.expires_at - now <= cls.REFRESH_MARGIN
-
-    @classmethod
-    def _refresh_state(cls, data: dict) -> tuple[str | None, datetime | None]:
-        """Return (refresh_token, current_expiry) from the credential file."""
-        raise NotImplementedError
-
-    @classmethod
-    def _grant_body(cls, refresh_token: str) -> dict:
-        """The JSON body for this CLI's refresh grant."""
-        raise NotImplementedError
-
-    @classmethod
-    def _apply_refresh(cls, data: dict, grant: dict, now: datetime) -> datetime | None:
-        """Merge the grant response into ``data`` in place; return the new
-        expiry. Raise ``ValueError`` if the response is unusable."""
-        raise NotImplementedError
-
-    @classmethod
-    async def fetch_usage(
-        cls, connection: HarnessConnection, *, now: datetime | None = None
-    ) -> ParsedUsage:
-        """Fetch + parse the connection's remaining-quota snapshot from its
-        subscription endpoint. Auth/HTTP failures collapse to a
-        ``ParsedUsage(ok=False, error=<tag>)`` so they never look like
-        '0 metrics'."""
-        try:
-            token = cls.load_token(connection, now=now)
-            request = cls._usage_request(token)
-        except exceptions.OAuthTokenError as exc:
-            return ParsedUsage(ok=False, error=exc.tag)
-        except NotImplementedError:
-            return ParsedUsage(ok=False, error="unsupported")
-        try:
-            async with httpx.AsyncClient(timeout=_USAGE_TIMEOUT_SECONDS) as client:
-                response = await client.get(request.url, headers=request.headers)
-        except httpx.TimeoutException:
-            return ParsedUsage(ok=False, error="timeout")
-        except httpx.HTTPError as exc:
-            logger.warning("usage request failed for %s: %s", cls.name, exc, exc_info=True)
-            return ParsedUsage(ok=False, error="network")
-
-        if response.status_code == 200:
-            return cls._parse_usage(response.text)
-        tag = _error_tag(response.status_code)
-        logger.warning(
-            "usage endpoint %s for %s: %s",
-            response.status_code,
-            cls.name,
-            response.text[:300],
-        )
-        return ParsedUsage(ok=False, error=tag)
-
-    @classmethod
-    async def poll_usage(cls, connection: HarnessConnection) -> dict[str, object]:
-        """Fetch the connection's quota snapshot and persist it as that
-        account's UsageScrape row."""
-        account_id = connection.account_id
-        try:
-            parsed = await cls.fetch_usage(connection)
-        except Exception:  # noqa: BLE001 — a crashed scrape records an error row, not a failed refresh
-            logger.warning("usage fetch crashed for %s", cls.name, exc_info=True)
-            await UsageScrape(
-                harness=cls.name,
-                account_id=account_id,
-                parse_ok=False,
-                raw_output=None,
-                error="crashed",
-            ).save()
-            return {
-                "harness": cls.name,
-                "account_id": account_id,
-                "status": "errored",
-                "parse_ok": False,
-                "error": "crashed",
-            }
-
-        snapshot = UsageScrape(
-            harness=cls.name,
-            account_id=account_id,
-            parse_ok=parsed.ok,
-            raw_output=parsed.raw[-8000:] if parsed.raw else None,  # cap to avoid bloat
-            error=parsed.error if not parsed.ok else None,
-            plan_tier=parsed.plan_tier,
-            unlimited=parsed.unlimited,
-        )
-        if parsed.five_hour:
-            snapshot.five_hour_percent_left = parsed.five_hour.percent_left
-            snapshot.five_hour_resets_at = parsed.five_hour.resets_at
-        snapshot.weeks = _WEEKLY_WINDOWS.dump_python(parsed.weeks, mode="json")
-        await snapshot.save()
-        return {
-            "harness": cls.name,
-            "account_id": account_id,
-            "status": "recorded",
-            "parse_ok": parsed.ok,
-            "error": parsed.error if not parsed.ok else None,
-        }
-
-    @classmethod
-    def _usage_request(cls, token: Token) -> ProviderRequest:
-        """The authenticated request for the usage endpoint."""
-        raise NotImplementedError
-
-    @classmethod
-    def _parse_usage(cls, raw: str) -> ParsedUsage:
-        """Map the usage endpoint's JSON body into :class:`ParsedUsage`."""
-        return ParsedUsage(ok=False, error="unsupported")
-
-    @classmethod
-    async def fetch_models(cls, connection: HarnessConnection) -> ParsedModels:
+    async def fetch_models(cls, login: ProviderLogin) -> ParsedModels:
         """Fetch + parse the provider's selectable-model list for the settings
         picker. Auth/HTTP failures collapse to a ``ParsedModels(ok=False,
         error=<tag>)`` so they never look like 'no models' — the stored list
         only ever advances, it is never wiped by a bad fetch."""
         try:
-            token = cls.load_token(connection)
+            token = get_provider(login.provider).load_token(login)
             request = cls._model_discovery_request(token)
-        except exceptions.OAuthTokenError as exc:
+        except OAuthTokenError as exc:
             return ParsedModels(ok=False, error=exc.tag)
         except NotImplementedError:
             return ParsedModels(ok=False, error="unsupported")
         try:
-            async with httpx.AsyncClient(timeout=_USAGE_TIMEOUT_SECONDS) as client:
+            async with httpx.AsyncClient(timeout=_DISCOVERY_TIMEOUT_SECONDS) as client:
                 response = await client.get(request.url, headers=request.headers)
         except httpx.TimeoutException:
             return ParsedModels(ok=False, error="timeout")
@@ -551,7 +223,7 @@ class Harness(ABC):
 
         if response.status_code == 200:
             return cls._parse_models(response.text)
-        tag = _error_tag(response.status_code)
+        tag = error_tag(response.status_code)
         logger.warning(
             "models endpoint %s for %s: %s",
             response.status_code,
@@ -570,126 +242,6 @@ class Harness(ABC):
         """Map the model-list endpoint's JSON body into :class:`ParsedModels`.
         A payload offering nothing is a tagged error, never an ok-empty."""
         return ParsedModels(ok=False, error="unsupported")
-
-
-def _utc_now() -> datetime:
-    return datetime.now(UTC)
-
-
-def jwt_claims(token: str) -> dict | None:
-    """Best-effort read of a JWT's claims (no signature check)."""
-    try:
-        payload = token.split(".")[1]
-        payload += "=" * (-len(payload) % 4)
-        claims = json.loads(base64.urlsafe_b64decode(payload))
-    except (IndexError, ValueError, json.JSONDecodeError):
-        return None
-    return claims if isinstance(claims, dict) else None
-
-
-def jwt_expiry(token: str) -> datetime | None:
-    """Best-effort read of a JWT's ``exp`` claim (no signature check)."""
-    claims = jwt_claims(token) or {}
-    try:
-        return datetime.fromtimestamp(claims["exp"], tz=UTC)
-    except (KeyError, TypeError, OverflowError, OSError, ValueError):
-        return None
-
-
-def parse_epoch_expiry(value: object) -> datetime | None:
-    """Claude stores ``expiresAt`` as epoch millis; tolerate seconds."""
-    if not isinstance(value, (int, float)):
-        return None
-    seconds = value / 1000 if value > 1e12 else value
-    try:
-        return datetime.fromtimestamp(seconds, tz=UTC)
-    except (OverflowError, OSError, ValueError):
-        return None
-
-
-def _error_tag(status_code: int) -> str:
-    return {
-        401: "unauthorized",
-        403: "forbidden_scope",
-        429: "rate_limited",
-    }.get(status_code, f"http_{status_code}")
-
-
-async def _post_grant(url: str, body: dict) -> dict:
-    """POST a refresh grant and return the parsed grant dict. Raises
-    :class:`GrantError` tagged with why no usable grant came back."""
-    try:
-        async with httpx.AsyncClient(timeout=_GRANT_TIMEOUT_SECONDS) as client:
-            response = await client.post(url, json=body)
-    except httpx.HTTPError as exc:
-        logger.warning("token refresh request failed (%s): %s", url, exc, exc_info=True)
-        raise exceptions.GrantError("network") from exc
-    if response.status_code != 200:
-        logger.warning(
-            "token refresh returned %s (%s): %s",
-            response.status_code,
-            url,
-            response.text[:300],
-        )
-        if "invalid_grant" in response.text:
-            tag = "invalid_grant"
-        else:
-            tag = f"http_{response.status_code}"
-        raise exceptions.GrantError(tag)
-    try:
-        return response.json()
-    except ValueError as exc:
-        raise exceptions.GrantError("bad_response") from exc
-
-
-def _b64url(raw: bytes) -> str:
-    return base64.urlsafe_b64encode(raw).rstrip(b"=").decode()
-
-
-def _parse_pasted(raw: str) -> tuple[str | None, str | None]:
-    """Pull (code, state) out of whatever the operator pasted — a bare code, a
-    ``code#state`` pair, a raw query string, or a full redirect URL."""
-    value = raw.strip().strip("'\"")
-    if not value:
-        return None, None
-    if "://" in value:
-        query = dict(urllib.parse.parse_qsl(urllib.parse.urlparse(value).query))
-        return query.get("code"), query.get("state")
-    if "#" in value:
-        code, _, state = value.partition("#")
-        return code, state
-    if "code=" in value:
-        query = dict(urllib.parse.parse_qsl(value))
-        return query.get("code"), query.get("state")
-    return value, None
-
-
-async def post_token(url: str, body: dict, *, form: bool) -> dict:
-    """POST an authorization-code exchange (form- or JSON-encoded) and return the
-    parsed grant. Raises :class:`ConnectError` with the provider's error text on
-    any failure, so the operator sees why the connect didn't take."""
-    try:
-        async with httpx.AsyncClient(timeout=_GRANT_TIMEOUT_SECONDS) as client:
-            if form:
-                response = await client.post(url, data=body)
-            else:
-                response = await client.post(url, json=body)
-    except httpx.HTTPError as exc:
-        logger.warning("token exchange request failed (%s): %s", url, exc, exc_info=True)
-        raise exceptions.ConnectError("The request to the provider failed — try again.") from exc
-    if response.status_code != 200:
-        logger.warning(
-            "token exchange returned %s (%s): %s",
-            response.status_code,
-            url,
-            response.text[:300],
-        )
-        detail = response.text.strip()[:300] or f"HTTP {response.status_code}"
-        raise exceptions.ConnectError(f"The provider rejected the connect: {detail}")
-    try:
-        return response.json()
-    except ValueError as exc:
-        raise exceptions.ConnectError("The provider returned an unreadable response.") from exc
 
 
 def _terminal_detail(result: HarnessRunResult) -> str:

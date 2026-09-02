@@ -1,5 +1,4 @@
 import pytest
-from druks.accounts.models import Account
 from druks.harnesses.claude import ClaudeHarness
 from druks.harnesses.codex import CodexHarness
 from druks.harnesses.exceptions import HarnessError
@@ -52,16 +51,11 @@ async def test_settings_reject_model_missing_from_lists_returns_422(druks_db):
     ],
 )
 async def test_settings_reject_invalid_model_returns_422(druks_db, model, detail):
-    account = await Account.get_or_create("op@example.com")
     settings = await HarnessSettings.get_registered("claude")
     original_model = settings.model
 
     with pytest.raises(HTTPException) as error:
-        await update_harness_settings(
-            name="claude",
-            body=HarnessUpdate(model=model),
-            account=account,
-        )
+        await update_harness_settings(name="claude", body=HarnessUpdate(model=model))
 
     assert error.value.status_code == 422
     assert error.value.detail == detail

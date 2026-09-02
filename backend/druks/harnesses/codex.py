@@ -1,57 +1,42 @@
 import json
 import logging
 import os
-import secrets
 import shlex
 from collections.abc import Iterator
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlencode
 
 from druks.sandbox.datastructures import (
     AgentInvocation,
     Credentials,
     HarnessRunResult,
+    HomeCopy,
+    HomeFile,
     McpServer,
 )
 from druks.sandbox.layout import get_runs_root, get_work_root
 from druks.skills.models import Skill
 
 from .artifacts import write_cost
-from .base import Harness, jwt_claims, jwt_expiry, post_token
-from .datastructures import CodexToken, ParsedMetric, ParsedModels, ParsedUsage, ProviderRequest
+from .base import Harness
+from .datastructures import CodexToken, ParsedModels, ProviderRequest
 from .exceptions import (
     HarnessAuthError,
     HarnessError,
     HarnessOverloadedError,
     HarnessRateLimitError,
     HarnessUsageLimitError,
-    OAuthTokenError,
 )
+from .models import ProviderLogin
+from .providers import OpenAiCodexProvider
 from .subprocess import read_result_json
 
 logger = logging.getLogger(__name__)
 
-
-# Namespaced claims OpenAI packs into the Codex access-token JWT.
-_OPENAI_AUTH_CLAIM = "https://api.openai.com/auth"
-_OPENAI_PROFILE_CLAIM = "https://api.openai.com/profile"
-
-
 _TOKEN_COUNT_MARKERS = ('"type":"token_count"', '"type": "token_count"')
-
-# Codex (ChatGPT subscription) usage endpoint — the standalone fetch the
-# `codex` CLI's account/rateLimits/read RPC uses for the `chatgpt` auth
-# app. Returns the same numbers /status shows without a completion.
-_CODEX_USAGE_URL = "https://chatgpt.com/backend-api/wham/usage"
-_CODEX_USER_AGENT = "codex-cli"
-
-# A quota window is named by its declared length, not the slot it arrives in:
-# a plan whose only quota is weekly reports it as the primary window.
-_WEEKLY_WINDOW_MINIMUM_SECONDS = 24 * 3600
 
 
 @dataclass(frozen=True)
@@ -281,11 +266,11 @@ class CodexHarness(Harness):
     # messages) to stdout as it runs — so stdout.jsonl is the live transcript,
     # symmetric with claude. session.jsonl is still snapshotted for cost.
     name = "codex"
-    provider = "openai"
+    provider = OpenAiCodexProvider.id
+    login_kinds = frozenset({"oauth"})
     models = ("gpt-5.5",)
     default_model = "gpt-5.5"
     command = "codex"
-    credentials_path = ".codex/auth.json"
 
     # The CLI's terminal {"type":"error"} event carries prose, not status
     # shapes: stream drops after its internal retries, usage windows, 429s.
@@ -301,105 +286,6 @@ class CodexHarness(Harness):
         "internal server error": HarnessOverloadedError,
     }
 
-    # OAuth refresh config (consumed by the Harness templates).
-    REFRESH_MARGIN = timedelta(hours=24)
-    _TOKEN_URL = "https://auth.openai.com/oauth/token"
-    _CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
-
-    # Connect-flow (PKCE): authorize on auth.openai.com; the operator pastes the
-    # failed localhost redirect URL back.
-    redirect_uri = "http://localhost:1455/auth/callback"
-
-    @classmethod
-    def _token_from_credentials(cls, data: dict) -> CodexToken:
-        tokens = data.get("tokens") if isinstance(data.get("tokens"), dict) else {}
-        access = tokens.get("access_token")
-        if not access:
-            raise OAuthTokenError("no_token", "codex auth file has no access token")
-        return CodexToken(
-            access_token=access,
-            expires_at=jwt_expiry(access),
-            account_id=tokens.get("account_id"),
-        )
-
-    @classmethod
-    def _refresh_state(cls, data: dict) -> tuple[str | None, datetime | None]:
-        tokens = data.get("tokens") if isinstance(data.get("tokens"), dict) else {}
-        return tokens.get("refresh_token"), jwt_expiry(tokens.get("access_token") or "")
-
-    @classmethod
-    def _grant_body(cls, refresh_token: str) -> dict:
-        return {
-            "client_id": cls._CLIENT_ID,
-            "grant_type": "refresh_token",
-            "refresh_token": refresh_token,
-        }
-
-    @classmethod
-    def authorize_url(cls, *, verifier: str, challenge: str) -> tuple[str, str]:
-        state = secrets.token_hex(16)
-        params = {
-            "id_token_add_organizations": "true",
-            "codex_cli_simplified_flow": "true",
-            "originator": "pi",  # the only value verified against the live exchange
-            "client_id": cls._CLIENT_ID,
-            "response_type": "code",
-            "redirect_uri": cls.redirect_uri,
-            "scope": "openid profile email offline_access",
-            "code_challenge": challenge,
-            "code_challenge_method": "S256",
-            "state": state,
-        }
-        return f"https://auth.openai.com/oauth/authorize?{urlencode(params)}", state
-
-    @classmethod
-    async def exchange(cls, *, code: str, verifier: str) -> tuple[dict, str | None]:
-        grant = await post_token(
-            cls._TOKEN_URL,
-            {
-                "grant_type": "authorization_code",
-                "client_id": cls._CLIENT_ID,
-                "code": code,
-                "code_verifier": verifier,
-                "redirect_uri": cls.redirect_uri,
-            },
-            form=True,
-        )
-        access = grant["access_token"]
-        claims = jwt_claims(access) or {}
-        auth = claims.get(_OPENAI_AUTH_CLAIM) or {}
-        profile = claims.get(_OPENAI_PROFILE_CLAIM) or {}
-        payload = {
-            "OPENAI_API_KEY": None,
-            "tokens": {
-                "access_token": access,
-                "refresh_token": grant["refresh_token"],
-                "id_token": grant.get("id_token"),
-                "account_id": auth.get("chatgpt_account_id"),
-            },
-            "last_refresh": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
-        }
-        return payload, profile.get("email")
-
-    @classmethod
-    def _apply_refresh(cls, data: dict, grant: dict, now: datetime) -> datetime | None:
-        access = grant.get("access_token")
-        if not access:
-            raise ValueError("refresh response had no access_token")
-        tokens = data["tokens"]
-        tokens["access_token"] = access
-
-        if grant.get("refresh_token"):
-            tokens["refresh_token"] = grant["refresh_token"]
-        if grant.get("id_token"):
-            tokens["id_token"] = grant["id_token"]
-        data["last_refresh"] = now.astimezone(UTC).isoformat().replace("+00:00", "Z")
-        return jwt_expiry(access)
-
-    @classmethod
-    def _usage_request(cls, token: CodexToken) -> ProviderRequest:
-        return ProviderRequest(_CODEX_USAGE_URL, cls._chatgpt_headers(token))
-
     @classmethod
     def _model_discovery_request(cls, token: CodexToken) -> ProviderRequest:
         # ``client_version`` is required and lower-bounds the list (the server
@@ -408,64 +294,7 @@ class CodexHarness(Harness):
         # catches it if the server ever starts rejecting unknown versions.
         return ProviderRequest(
             "https://chatgpt.com/backend-api/codex/models?client_version=99.99.99",
-            cls._chatgpt_headers(token),
-        )
-
-    @classmethod
-    def _chatgpt_headers(cls, token: CodexToken) -> dict:
-        headers = {
-            "Authorization": f"Bearer {token.access_token}",
-            "User-Agent": _CODEX_USER_AGENT,
-        }
-        if token.account_id:
-            headers["ChatGPT-Account-Id"] = token.account_id
-        return headers
-
-    @classmethod
-    def _parse_usage(cls, raw: str) -> ParsedUsage:
-        try:
-            data = json.loads(raw)
-        except (json.JSONDecodeError, TypeError):
-            return ParsedUsage(ok=False, error="unparseable", raw=raw)
-        if not isinstance(data, dict) or "rate_limit" not in data:
-            return ParsedUsage(ok=False, error="unexpected_payload", raw=raw)
-        plan = data.get("plan_type") if isinstance(data.get("plan_type"), str) else None
-        try:
-            five_hour, weeks = _codex_windows(data)
-            spend = (data.get("spend_control") or {}).get("individual_limit")
-            if not five_hour and not weeks and spend:
-                # Group-based spend controls replace the rate-limit windows;
-                # their weeks-long quota cycle makes it a weekly window.
-                weeks = (
-                    ParsedMetric(
-                        percent_left=max(0, min(100, round(100 - spend["used_percent"]))),
-                        resets_at=datetime.fromtimestamp(spend["reset_at"], tz=UTC),
-                    ),
-                )
-        except (AttributeError, KeyError, TypeError, ValueError):
-            return ParsedUsage(ok=False, error="unexpected_payload", plan_tier=plan, raw=raw)
-        if not five_hour and not weeks:
-            # Business/enterprise accounts with unlimited credits carry
-            # ``rate_limit: null`` — no windows is the expected shape, not
-            # a parse failure. Report permanently-full buckets.
-            credits = data.get("credits")
-            if isinstance(credits, dict) and credits.get("unlimited"):
-                full = ParsedMetric(percent_left=100, resets_at=None)
-                return ParsedUsage(
-                    ok=True,
-                    plan_tier=plan,
-                    five_hour=full,
-                    weeks=(full,),
-                    unlimited=True,
-                    raw=raw,
-                )
-            return ParsedUsage(ok=False, error="parse_failed", plan_tier=plan, raw=raw)
-        return ParsedUsage(
-            ok=True,
-            plan_tier=plan,
-            five_hour=five_hour,
-            weeks=weeks,
-            raw=raw,
+            OpenAiCodexProvider.chatgpt_headers(token),
         )
 
     @classmethod
@@ -611,7 +440,7 @@ class CodexHarness(Harness):
             credentials=await self._get_credentials(
                 github_token=github_token,
                 skills=skills,
-                connection_id=connection_id,
+                login=await self.login(connection_id),
             ),
             env=extra_env,
             extra_artifact_filenames=("output.json", "session.jsonl"),
@@ -691,57 +520,29 @@ class CodexHarness(Harness):
         *,
         github_token: str | None,
         skills: tuple[str, ...] = (),
-        connection_id: str | None = None,
+        login: ProviderLogin,
     ) -> Credentials:
-        # The credential file is synthesized from the DB row (raises when codex
-        # isn't connected); the local config dir only adds config carry on top.
         assert self.sandbox is not None  # callers guard
         config_dir = self.sandbox.codex_config_dir
-        config_files: tuple[tuple[Path, str], ...] = ()
+        home: list[HomeFile | HomeCopy] = [self.auth_file(login)]
         if config_dir:
-            config_files = (
-                (config_dir / "config.toml", ".codex/config.toml"),
-                (config_dir / ".credentials.json", ".codex/.credentials.json"),
-                (config_dir / "AGENTS.md", ".codex/AGENTS.md"),
-            )
+            home += [
+                HomeCopy(".codex/config.toml", config_dir / "config.toml"),
+                HomeCopy(".codex/.credentials.json", config_dir / ".credentials.json"),
+                HomeCopy(".codex/AGENTS.md", config_dir / "AGENTS.md"),
+            ]
         # Skills from the canonical shared dir (DRUKS_SKILLS_DIR) when set — the
         # same set pushed to ~/.claude/skills — else the per-CLI fallback. Must
         # be real dirs (tar follows symlinks).
         skills_src = self.sandbox.skills_dir or (config_dir / "skills" if config_dir else None)
-        dirs: tuple[tuple[Path, str], ...] = ()
         if skills_src:
-            dirs = ((skills_src, ".codex/skills"),)
-        return Credentials(
-            files=((self.credentials_path, await self.render_credentials_file(connection_id)),),
-            github_token=github_token,
-            extra_config_files=config_files,
-            extra_config_dirs=dirs,
-            extra_dir_excludes={".codex/skills": await Skill.delivery_excludes(skills)},
-        )
-
-
-def _codex_windows(usage: dict) -> tuple[ParsedMetric | None, tuple[ParsedMetric, ...]]:
-    """The binding five-hour window and every weekly window in provider order.
-
-    A window's declared length names it, not the slot it arrives in.
-    """
-    rate_limits = [(None, usage["rate_limit"] or {})]
-    for metered in usage.get("additional_rate_limits") or []:
-        rate_limits.append((metered["limit_name"], metered["rate_limit"] or {}))
-
-    five_hour, weekly = [], []
-    for model, rate_limit in rate_limits:
-        for slot in ("primary_window", "secondary_window"):
-            block = rate_limit.get(slot)
-            if not block:
-                continue
-            window = ParsedMetric(
-                percent_left=max(0, min(100, round(100 - block["used_percent"]))),
-                resets_at=datetime.fromtimestamp(block["reset_at"], tz=UTC),
-                model=model,
+            home.append(
+                HomeCopy(
+                    ".codex/skills", skills_src, excludes=await Skill.delivery_excludes(skills)
+                )
             )
-            if block["limit_window_seconds"] >= _WEEKLY_WINDOW_MINIMUM_SECONDS:
-                weekly.append(window)
-            else:
-                five_hour.append(window)
-    return ParsedMetric.binding(five_hour), tuple(weekly)
+        return Credentials(home=tuple(home), github_token=github_token)
+
+    @classmethod
+    def auth_file(cls, login: ProviderLogin) -> HomeFile:
+        return HomeFile(".codex/auth.json", json.dumps(dict(login.payload)))

@@ -42,9 +42,9 @@ The health response is:
 
 Open the dashboard at [http://127.0.0.1:8001](http://127.0.0.1:8001).
 
-## Connect a harness
+## Connect a provider
 
-Open **Settings → Harnesses** and connect Claude or Codex. The provider validates
+Open **Settings → Providers** and connect Anthropic or ChatGPT. The provider validates
 the subscription. Druks stores the connection in Postgres. The first harness
 connection completes the setup of a new local installation.
 

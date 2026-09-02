@@ -90,7 +90,7 @@ async def require_operator(websocket: WebSocket) -> Account:
     if not account:
         raise HTTPException(
             status_code=409,
-            detail="No operator account exists yet — connect a harness to finish setup.",
+            detail="No operator account exists yet — connect a provider to finish setup.",
         )
     return account
 
@@ -108,7 +108,7 @@ async def current_account(
         if not account:
             raise HTTPException(
                 status_code=409,
-                detail="No operator account exists yet — connect a harness to finish setup.",
+                detail="No operator account exists yet — connect a provider to finish setup.",
             )
     token = current_account_id.set(account.id)
     try:
@@ -126,7 +126,7 @@ async def current_session_account(request: Request) -> AsyncIterator[Account]:
     if not account:
         raise HTTPException(
             status_code=409,
-            detail="No operator account exists yet — connect a harness to finish setup.",
+            detail="No operator account exists yet — connect a provider to finish setup.",
         )
     token = current_account_id.set(account.id)
     try:

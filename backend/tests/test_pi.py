@@ -2,6 +2,7 @@ import json
 import shlex
 import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from druks.accounts.models import Account
@@ -14,10 +15,10 @@ from druks.harnesses.exceptions import (
     HarnessOverloadedError,
     HarnessRateLimitError,
 )
-from druks.harnesses.models import HarnessConnection
+from druks.harnesses.models import ProviderLogin
 from druks.harnesses.pi import PiHarness
 from druks.harnesses.registry import get_harness
-from druks.sandbox.datastructures import HarnessRunResult, McpServer
+from druks.sandbox.datastructures import HarnessRunResult, HomeFile, McpServer
 from druks.testing import configure_app_for_test, make_settings
 from fastapi.testclient import TestClient
 from pydantic import BaseModel
@@ -47,8 +48,8 @@ def _harness(*, effort: str | None = "high") -> PiHarness:
     )
 
 
-async def _credentials(cls: type[Harness]) -> dict[str, str]:
-    return {"api_key": _API_KEY}
+async def _login(self: Harness, _login_id: str | None) -> SimpleNamespace:
+    return SimpleNamespace(provider="openai", payload={"api_key": _API_KEY})
 
 
 @pytest.fixture
@@ -74,15 +75,15 @@ def _message_end(role: str, **message: object) -> bytes:
 def test_class_facts_and_registration() -> None:
     assert get_harness("pi") is PiHarness
     assert PiHarness.command == "pi"
-    assert PiHarness.login_kinds == frozenset({"api_key"})
-    assert PiHarness.credentials_path == ".pi/agent/auth.json"
+    assert PiHarness.provider is None
+    assert PiHarness.login_kinds == {"api_key"}
     assert PiHarness.default_model in PiHarness.models
 
 
 async def test_build_invocation_writes_the_run_files_and_pi_argv(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(PiHarness, "get_credentials", classmethod(_credentials))
+    monkeypatch.setattr(PiHarness, "login", _login)
     github = McpServer(
         name="github",
         url="https://api.example.test/mcp",
@@ -152,8 +153,10 @@ async def test_build_invocation_writes_the_run_files_and_pi_argv(
         "DRUKS_RESULT_PATH": f"{_RUN_DIR}/output.json",
     }
     assert invocation.credentials.github_token == "github-token"
-    assert invocation.credentials.files == (
-        (".pi/agent/auth.json", json.dumps({"openai": {"type": "api_key", "key": _API_KEY}})),
+    assert invocation.credentials.home == (
+        HomeFile(
+            ".pi/agent/auth.json", json.dumps({"openai": {"type": "api_key", "key": _API_KEY}})
+        ),
     )
     assert invocation.extra_artifact_filenames == ("output.json",)
     for secret in (_API_KEY, "mcp-secret", "trace-secret"):
@@ -167,7 +170,7 @@ async def test_build_invocation_writes_the_run_files_and_pi_argv(
 async def test_build_invocation_without_servers_or_effort_is_bare(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(PiHarness, "get_credentials", classmethod(_credentials))
+    monkeypatch.setattr(PiHarness, "login", _login)
 
     invocation = await _harness(effort=None).build_invocation(
         prompt="Prompt", schema={"type": "object"}, run_id="run-1", ssh_username="exedev"
@@ -180,14 +183,13 @@ async def test_build_invocation_without_servers_or_effort_is_bare(
     assert ".mcp.json" not in wrapper
 
 
-async def test_render_credentials_file_keys_the_model_provider(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(PiHarness, "get_credentials", classmethod(_credentials))
+def test_auth_file_keys_the_login_provider() -> None:
+    login = SimpleNamespace(provider="anthropic", payload={"api_key": _API_KEY})
 
-    rendered = await PiHarness.render_credentials_file(model="anthropic/claude-opus-5")
+    auth = PiHarness.auth_file(login)
 
-    assert json.loads(rendered) == {"anthropic": {"type": "api_key", "key": _API_KEY}}
+    assert auth.path == ".pi/agent/auth.json"
+    assert json.loads(auth.content) == {"anthropic": {"type": "api_key", "key": _API_KEY}}
 
 
 def test_parse_returns_the_contract_and_sums_spend(tmp_path: Path) -> None:
@@ -280,13 +282,14 @@ def test_parse_treats_a_broken_stream_as_invalid_output(tmp_path: Path) -> None:
         _parse(b"not json", tmp_path)
 
 
-async def test_a_pasted_key_renders_under_the_picked_models_provider(client, druks_db) -> None:
-    assert client.post("/api/harnesses/pi/connection", json={"key": _API_KEY}).status_code == 200
-    account = await Account.get_or_create("op@example.com")
-    connection = await HarnessConnection.get_for_account("pi", account.id)
-
-    rendered = await PiHarness.render_credentials_file(
-        connection.id, model="anthropic/claude-opus-5"
+async def test_a_pasted_key_renders_under_its_provider(client, druks_db) -> None:
+    assert (
+        client.post("/api/providers/openai/connection", json={"key": _API_KEY}).status_code == 200
     )
+    account = await Account.get_or_create("op@example.com")
+    login = await ProviderLogin.get_for_account("openai", account.id)
 
-    assert json.loads(rendered) == {"anthropic": {"type": "api_key", "key": _API_KEY}}
+    auth = PiHarness.auth_file(login)
+
+    assert auth.path == ".pi/agent/auth.json"
+    assert json.loads(auth.content) == {"openai": {"type": "api_key", "key": _API_KEY}}

@@ -16,7 +16,7 @@ from druks.sandbox import credentials as creds_module
 from druks.sandbox import layout, repo
 from druks.sandbox.client import sandbox_client
 from druks.sandbox.constants import SANDBOX_HOST_LEASE_SECONDS
-from druks.sandbox.datastructures import Credentials
+from druks.sandbox.datastructures import Credentials, HomeCopy, HomeFile
 from druks.sandbox.exceptions import ExecFailed, HostGone, SandboxUnreachable
 from druks.sandbox.host import ExecResult
 
@@ -166,7 +166,7 @@ async def test_push_writes_one_credential_file():
 
     await creds_module.push(
         sandbox,  # type: ignore[arg-type]
-        Credentials(files=((".claude/.credentials.json", "{}"),)),
+        Credentials(home=(HomeFile(".claude/.credentials.json", "{}"),)),
     )
 
     assert sandbox.uploads == []
@@ -179,9 +179,9 @@ async def test_push_writes_all_three_when_supplied():
     await creds_module.push(
         sandbox,  # type: ignore[arg-type]
         Credentials(
-            files=(
-                (".claude/.credentials.json", '{"claude": 1}'),
-                (".codex/auth.json", '{"codex": 1}'),
+            home=(
+                HomeFile(".claude/.credentials.json", '{"claude": 1}'),
+                HomeFile(".codex/auth.json", '{"codex": 1}'),
             ),
             github_token="gho_xxx",
         ),
@@ -195,7 +195,7 @@ async def test_push_writes_all_three_when_supplied():
     }
 
 
-async def test_push_uploads_extra_config_files_under_user_home(tmp_path: Path):
+async def test_push_copies_a_host_file_under_user_home(tmp_path: Path):
     sandbox = _FakeSandbox()
     sandbox.ssh_username = "exedev"  # non-root → /home/exedev
     config = tmp_path / "config.toml"
@@ -203,28 +203,24 @@ async def test_push_uploads_extra_config_files_under_user_home(tmp_path: Path):
 
     await creds_module.push(
         sandbox,  # type: ignore[arg-type]
-        Credentials(
-            extra_config_files=((config, ".codex/config.toml"),),
-        ),
+        Credentials(home=(HomeCopy(".codex/config.toml", config),)),
     )
 
     assert sandbox.uploads[0].remote == "/home/exedev/.codex/config.toml"
 
 
-async def test_push_skips_missing_extra_config_files(tmp_path: Path):
+async def test_push_skips_a_host_file_that_is_absent(tmp_path: Path):
     sandbox = _FakeSandbox()
 
     await creds_module.push(
         sandbox,  # type: ignore[arg-type]
-        Credentials(
-            extra_config_files=((tmp_path / "does-not-exist.toml", ".codex/config.toml"),),
-        ),
+        Credentials(home=(HomeCopy(".codex/config.toml", tmp_path / "does-not-exist.toml"),)),
     )
 
     assert sandbox.uploads == []
 
 
-async def test_push_uploads_extra_config_dirs_recursively(tmp_path: Path):
+async def test_push_copies_a_host_tree_recursively(tmp_path: Path):
     sandbox = _FakeSandbox()
     sandbox.ssh_username = "exedev"
     plugins = tmp_path / "plugins" / "cache"
@@ -234,9 +230,9 @@ async def test_push_uploads_extra_config_dirs_recursively(tmp_path: Path):
     await creds_module.push(
         sandbox,  # type: ignore[arg-type]
         Credentials(
-            extra_config_dirs=(
-                (plugins, ".claude/plugins/cache"),
-                (tmp_path / "missing", ".claude/plugins/marketplaces"),  # skipped
+            home=(
+                HomeCopy(".claude/plugins/cache", plugins),
+                HomeCopy(".claude/plugins/marketplaces", tmp_path / "missing"),  # skipped
             ),
         ),
     )

@@ -27,7 +27,8 @@ import type {
   PageSnapshot,
   McpServer,
   Service,
-  SetupHarness,
+  Provider,
+  ProviderLogin,
   Skill,
   SkillCollection,
   UserSettings,
@@ -265,20 +266,19 @@ export const api = {
   harnesses: () => getJSON<Harness[]>('/api/settings/harnesses'),
   updateHarness: (name: string, body: UpdateHarnessRequest) =>
     patchJSON<Harness>(`/api/settings/harnesses/${encodeURIComponent(name)}`, body),
-  setupHarnesses: () => getJSON<SetupHarness[]>('/api/harnesses'),
-  // The harness connection flow — the capability connect (and, during setup,
-  // what creates the operator account).
-  startHarnessConnect: (name: string) =>
-    postJSON<ConnectChallenge>(`/api/harnesses/${encodeURIComponent(name)}/connection/start`, {}),
-  completeHarnessConnect: (name: string, code: string, connectionId: string) =>
-    postJSON<Account>(`/api/harnesses/${encodeURIComponent(name)}/connection/complete`, {
+  providers: () => getJSON<Provider[]>('/api/providers'),
+  providerLogins: () => getJSON<ProviderLogin[]>('/api/providers/logins'),
+  startProviderConnect: (id: string) =>
+    postJSON<ConnectChallenge>(`/api/providers/${encodeURIComponent(id)}/connection/start`, {}),
+  completeProviderConnect: (id: string, code: string, connectionId: string) =>
+    postJSON<Account>(`/api/providers/${encodeURIComponent(id)}/connection/complete`, {
       code,
       connectionId,
     }),
-  connectHarnessKey: (name: string, key: string) =>
-    postJSON<Harness>(`/api/harnesses/${encodeURIComponent(name)}/connection`, { key }),
-  disconnectHarness: (name: string) =>
-    deleteJSON<Harness>(`/api/harnesses/${encodeURIComponent(name)}/connection`),
+  connectProviderKey: (id: string, key: string) =>
+    postJSON<ProviderLogin>(`/api/providers/${encodeURIComponent(id)}/connection`, { key }),
+  disconnectProvider: (id: string) =>
+    deleteRequest(`/api/providers/${encodeURIComponent(id)}/connection`),
   // The appliance's own identities at external services — connect verifies the
   // pasted credentials against the provider before anything replaces a working
   // identity. Field names come from each entry's spec.

@@ -222,7 +222,7 @@ header. Druks maps this email to an account. The edge controls access, so this
 mode permits account creation at first access.
 
 In `none` mode, Druks has no authentication and exactly one operator account.
-The first completed harness connection creates this account. Public
+The first completed provider connection creates this account. Public
 `/_external` routes stay outside the identity gate. These routes include
 webhooks and the token-authenticated notification response.
 

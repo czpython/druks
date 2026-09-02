@@ -2,12 +2,12 @@ import { Link } from 'wouter'
 
 import { usageTone } from '../lib/usageHealth'
 import { useUsage } from '../lib/useUsage'
-import type { UsageHarnessSummary } from '../api/types'
+import type { UsageProviderSummary } from '../api/types'
 
 /**
- * Compact appbar pill showing remaining-quota % per harness.
+ * Compact appbar pill showing remaining-quota % per provider.
  *
- * Adjacent mini-pills, one per registered harness:
+ * Adjacent mini-pills, one per registered provider:
  *
  *   ◯ c 82%   ◯ x 36%
  *
@@ -26,8 +26,8 @@ import type { UsageHarnessSummary } from '../api/types'
  * operator's choice, not nag.
  */
 
-// One-letter pill labels; unknown harnesses fall back to their first letter.
-const SHORT_LABELS: Record<string, string> = { claude: 'c', codex: 'x' }
+// One-letter pill labels; unknown providers fall back to their first letter.
+const SHORT_LABELS: Record<string, string> = { anthropic: 'a', 'openai-codex': 'x', openai: 'o' }
 
 export function UsagePill() {
   const { data, isLoading, isError } = useUsage()
@@ -36,21 +36,21 @@ export function UsagePill() {
 
   return (
     <Link href="/usage" className="usage-pill mono dim" aria-label="subscription quota — open details">
-      {data.harnesses.map((usage) => (
-        <MiniPill key={usage.name} usage={usage} short={SHORT_LABELS[usage.name] ?? usage.name.charAt(0)} />
+      {data.providers.map((usage) => (
+        <MiniPill key={usage.id} usage={usage} short={SHORT_LABELS[usage.id] ?? usage.label.charAt(0).toLowerCase()} />
       ))}
     </Link>
   )
 }
 
-function MiniPill({ usage, short }: { usage: UsageHarnessSummary; short: string }) {
+function MiniPill({ usage, short }: { usage: UsageProviderSummary; short: string }) {
   const headline = headlineMetric(usage)
   if (headline === null) {
     return (
       <span
         className="usage-mini usage-tier-idle"
         title={buildTooltip(usage)}
-        aria-label={`${usage.name}: ${describeIdle(usage)}`}
+        aria-label={`${usage.label}: ${describeIdle(usage)}`}
       >
         <span className="usage-mini-dot" />
         <span className="usage-mini-label">{short}</span>
@@ -63,7 +63,7 @@ function MiniPill({ usage, short }: { usage: UsageHarnessSummary; short: string 
     <span
       className={`usage-mini usage-tier-${tone}`}
       title={buildTooltip(usage)}
-      aria-label={`${usage.name}: ${headline}% left`}
+      aria-label={`${usage.label}: ${headline}% left`}
     >
       <span className="usage-mini-dot" />
       <span className="usage-mini-label">{short}</span>
@@ -75,7 +75,7 @@ function MiniPill({ usage, short }: { usage: UsageHarnessSummary; short: string 
 
 // "Headline" metric — the smallest reported window is the one most
 // likely to bite you next; the panel identifies its scope.
-function headlineMetric(usage: UsageHarnessSummary): number | null {
+function headlineMetric(usage: UsageProviderSummary): number | null {
   if (!usage.available) return null
   const candidates: number[] = []
   if (usage.fiveHour && usage.fiveHour.percentLeft !== null) candidates.push(usage.fiveHour.percentLeft)
@@ -86,7 +86,7 @@ function headlineMetric(usage: UsageHarnessSummary): number | null {
   return Math.min(...candidates)
 }
 
-function ageSuffix(usage: UsageHarnessSummary) {
+function ageSuffix(usage: UsageProviderSummary) {
   if (usage.stale) {
     return <span className="usage-mini-age usage-mini-stale">stale</span>
   }
@@ -96,7 +96,7 @@ function ageSuffix(usage: UsageHarnessSummary) {
   return <span className="usage-mini-age">·{text}</span>
 }
 
-function describeIdle(usage: UsageHarnessSummary): string {
+function describeIdle(usage: UsageProviderSummary): string {
   if (!usage.connected) return 'not connected — connect in Settings'
   if (usage.error === 'not_installed') return 'CLI not installed'
   if (usage.error === 'auth_required') return 'not signed in'
@@ -106,9 +106,9 @@ function describeIdle(usage: UsageHarnessSummary): string {
   return 'no scrape yet'
 }
 
-function buildTooltip(usage: UsageHarnessSummary): string {
+function buildTooltip(usage: UsageProviderSummary): string {
   const lines = [
-    `${usage.name}${usage.planTier ? ` (${usage.planTier})` : ''}`,
+    `${usage.label}${usage.planTier ? ` (${usage.planTier})` : ''}`,
   ]
   if (usage.fiveHour && usage.fiveHour.percentLeft !== null) {
     lines.push(`  5h: ${usage.fiveHour.percentLeft}% left${formatResets(usage.fiveHour.resetsAt)}`)

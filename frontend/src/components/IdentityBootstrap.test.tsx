@@ -76,22 +76,28 @@ describe('IdentityBootstrap', () => {
     renderBootstrap()
     await flush()
     expect(screen.queryByTestId('app')).toBeNull()
-    expect(screen.getByText('Connect a harness to finish setup')).toBeTruthy()
+    expect(screen.getByText('Connect a provider to finish setup')).toBeTruthy()
   })
 
   it('completing onboarding remounts with the created account', async () => {
     let me = identity({ account: null, onboardingRequired: true })
     stubRoutes({
       '/api/auth/me': () => ({ status: 200, body: me }),
-      '/api/harnesses': () => ({
+      '/api/providers': () => ({
         status: 200,
-        body: [{ name: 'claude', loginKinds: ['subscription'] }],
+        body: [
+          {
+            id: 'anthropic',
+            label: 'Anthropic',
+            loginKinds: ['oauth'],
+          },
+        ],
       }),
-      '/api/harnesses/claude/connection/start': () => ({
+      '/api/providers/anthropic/connection/start': () => ({
         status: 200,
         body: { authorizeUrl: 'https://x/auth', connectionId: 'C1' },
       }),
-      '/api/harnesses/claude/connection/complete': () => {
+      '/api/providers/anthropic/connection/complete': () => {
         // The completed connection created the operator; /me now resolves it.
         me = identity()
         return { status: 200, body: { id: 'a1', username: 'me@example.com' } }
@@ -100,7 +106,7 @@ describe('IdentityBootstrap', () => {
     renderBootstrap()
     await flush()
 
-    fireEvent.click(screen.getByText('Connect Claude'))
+    fireEvent.click(screen.getByText('Connect Anthropic'))
     await flush()
     fireEvent.change(screen.getByPlaceholderText('Paste the code or redirect URL'), {
       target: { value: 'the-code' },
@@ -121,7 +127,7 @@ describe('IdentityBootstrap', () => {
     renderBootstrap()
     await flush()
     expect(screen.queryByTestId('app')).toBeNull()
-    expect(screen.queryByText('Connect a harness to finish setup')).toBeNull()
+    expect(screen.queryByText('Connect a provider to finish setup')).toBeNull()
     expect(screen.getByText("Couldn't resolve your identity")).toBeTruthy()
     expect(screen.getByText('The edge asserted no identity.')).toBeTruthy()
   })

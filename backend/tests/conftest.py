@@ -162,23 +162,24 @@ def bind_ambient_session(session) -> None:
     db_session.registry.set(session)
 
 
-async def connect_harness(harness_cls, payload: dict, *, provider_email: str = "op@example.com"):
-    """Seed the HarnessConnection row a finished connect flow would leave."""
+async def connect_provider(provider_cls, payload: dict, *, provider_email: str = "op@example.com"):
+    """Seed the ProviderLogin row a finished OAuth connect flow would leave."""
     from druks.accounts.models import Account
-    from druks.harnesses.models import HarnessConnection
+    from druks.harnesses.models import ProviderLogin
     from druks.user_settings.models import UserSettings
 
     account = await Account.get_or_create(provider_email)
     settings = await UserSettings.get()
     if not settings.fallback_account_id:
         await settings.set_fallback_account(account.id)
-    _, expires_at = harness_cls._refresh_state(payload)
-    return await HarnessConnection.connect(
-        harness=harness_cls.name,
+    _, expires_at = provider_cls._refresh_state(payload)
+    return await ProviderLogin.connect(
+        provider=provider_cls.id,
         account=account,
         payload=payload,
         expires_at=expires_at,
         provider_email=provider_email,
+        kind="oauth",
     )
 
 

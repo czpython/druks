@@ -5,8 +5,8 @@ import type { Account, ConnectChallenge } from '../api/types'
 
 // The one PKCE paste-back connect flow, shared by onboarding and Settings.
 // eslint-disable-next-line react-refresh/only-export-components -- hook co-located with its steps UI
-export function useHarnessConnect(
-  name: string,
+export function useProviderConnect(
+  id: string,
   onDone: (account: Account) => void | Promise<void>,
 ) {
   const [challenge, setChallenge] = useState<ConnectChallenge | null>(null)
@@ -26,12 +26,12 @@ export function useHarnessConnect(
     }
   }
 
-  const start = () => run(async () => setChallenge(await api.startHarnessConnect(name)))
+  const start = () => run(async () => setChallenge(await api.startProviderConnect(id)))
 
   const finish = () =>
     run(async () => {
       if (!challenge) return
-      const account = await api.completeHarnessConnect(name, code.trim(), challenge.connectionId)
+      const account = await api.completeProviderConnect(id, code.trim(), challenge.connectionId)
       setChallenge(null)
       setCode('')
       await onDone(account)
@@ -49,7 +49,7 @@ export function useHarnessConnect(
 export function ConnectSteps({
   flow,
 }: {
-  flow: ReturnType<typeof useHarnessConnect>
+  flow: ReturnType<typeof useProviderConnect>
 }) {
   if (!flow.challenge) return null
   return (

@@ -13,16 +13,17 @@ class UsageMetricSummary(Schema):
     model: str | None = None
 
 
-class UsageHarnessSummary(Schema):
-    # A registered harness name (get_harnesses()) — the UI keys panels,
+class UsageProviderSummary(Schema):
+    # A registered provider id (get_providers()) — the UI keys panels,
     # colors, and legends off it.
-    name: str
+    id: str
+    label: str
     # True when we have any usable percentage. False covers both "no
     # snapshot yet" (fresh install pre-first-poll) and "all parses
     # failed in the last snapshot".
     available: bool
-    # False renders the connect action — the account has no connection
-    # for this harness.
+    # False renders the connect action — the account holds no login
+    # for this provider.
     connected: bool
     provider_email: str | None
     plan_tier: str | None = None
@@ -51,8 +52,8 @@ class UsageHarnessSummary(Schema):
 
 
 class UsageResponse(Schema):
-    # One summary per registered harness, in registry order.
-    harnesses: list[UsageHarnessSummary]
+    # One summary per registered provider, in registry order.
+    providers: list[UsageProviderSummary]
 
 
 class UsageHistoryPoint(Schema):
@@ -65,22 +66,22 @@ class UsageWindowHistory(Schema):
     points: list[UsageHistoryPoint] = Field(default_factory=list)
 
 
-class UsageHarnessHistory(Schema):
-    name: str
+class UsageProviderHistory(Schema):
+    id: str
     # Percent-left samples, oldest first. ``five_hour`` covers the last
     # ~6h (one full 5h window plus headroom); ``weeks`` covers the last
     # 7 days as one downsampled series per weekly window. Either list is
-    # empty when the harness never reported that window.
+    # empty when the provider never reported that window.
     five_hour: list[UsageHistoryPoint] = Field(default_factory=list)
     weeks: list[UsageWindowHistory] = Field(default_factory=list)
 
 
 class UsageHistoryResponse(Schema):
-    harnesses: list[UsageHarnessHistory]
+    providers: list[UsageProviderHistory]
 
 
-class UsageHarnessToday(Schema):
-    name: str
+class UsageProviderToday(Schema):
+    id: str
     spend_usd: float
     tokens: int
     runs: int
@@ -93,4 +94,4 @@ class UsageTodayResponse(Schema):
     # spend-today figure (operator timezone, finished_at attribution).
     day: str
     timezone: str
-    harnesses: list[UsageHarnessToday]
+    providers: list[UsageProviderToday]

@@ -10,8 +10,8 @@ from druks.durable.models import AgentCall, Artifact, Run
 from druks.durable.reads import read_slice
 from druks.durable.schemas import AgentCallResponse
 from druks.harnesses.artifacts import normalize_token_usage
-from druks.harnesses.models import HarnessConnection
-from druks.harnesses.registry import get_harnesses
+from druks.harnesses.models import ProviderLogin
+from druks.harnesses.providers import get_providers
 from druks.mcp.gateway import exceptions, schemas
 from druks.notifications.exceptions import InvalidChoiceError
 from druks.notifications.services import validate_in_app_answer
@@ -123,16 +123,18 @@ async def get_usage(account: Account) -> schemas.AgentUsageResponse:
         spend_today_usd=round(spend, 4),
         tokens_today=tokens,
         runs_today=len(rows),
-        harnesses=[await _harness_usage(h.name, account.id, now=now) for h in get_harnesses()],
+        providers=[await _provider_usage(p.id, account.id, now=now) for p in get_providers()],
     )
 
 
-async def _harness_usage(name: str, account_id: str, *, now: datetime) -> schemas.AgentHarnessUsage:
-    is_connected = bool(await HarnessConnection.get_for_account(name, account_id))
-    row = await UsageScrape.latest_for(name, account_id)
+async def _provider_usage(
+    provider_id: str, account_id: str, *, now: datetime
+) -> schemas.AgentProviderUsage:
+    is_connected = bool(await ProviderLogin.get_for_account(provider_id, account_id))
+    row = await UsageScrape.latest_for(provider_id, account_id)
     if not row:
-        return schemas.AgentHarnessUsage(name=name, is_connected=is_connected)
-    history = await UsageScrape.history_for(name, account_id, since=now - WEEK_RANGE)
+        return schemas.AgentProviderUsage(id=provider_id, is_connected=is_connected)
+    history = await UsageScrape.history_for(provider_id, account_id, since=now - WEEK_RANGE)
     five_hour_cutoff = now - FIVE_HOUR_RANGE
     five_hour = [
         UsageHistoryPoint(t=point.scraped_at, pct=point.five_hour_percent_left)
@@ -145,8 +147,8 @@ async def _harness_usage(name: str, account_id: str, *, now: datetime) -> schema
         if (binding := point.binding_week())
     ]
     binding_week = row.binding_week() or {}
-    return schemas.AgentHarnessUsage(
-        name=name,
+    return schemas.AgentProviderUsage(
+        id=provider_id,
         is_connected=is_connected,
         plan_tier=row.plan_tier,
         five_hour_percent_left=row.five_hour_percent_left,

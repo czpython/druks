@@ -1,12 +1,12 @@
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import type { SetupHarness } from '../api/types'
+import type { Provider } from '../api/types'
 import { Onboarding } from './Onboarding'
 
-const REGISTERED_HARNESSES: SetupHarness[] = [
-  { name: 'claude', loginKinds: ['subscription'] },
-  { name: 'codex', loginKinds: ['subscription'] },
+const REGISTERED_PROVIDERS: Provider[] = [
+  { id: 'anthropic', label: 'Anthropic', loginKinds: ['api_key', 'oauth'] },
+  { id: 'openai-codex', label: 'ChatGPT', loginKinds: ['oauth'] },
 ]
 
 afterEach(() => {
@@ -20,36 +20,36 @@ async function flush() {
   })
 }
 
-function harnessListResponse(harnesses: SetupHarness[]) {
-  return new Response(JSON.stringify(harnesses), { status: 200 })
+function providerListResponse(providers: Provider[]) {
+  return new Response(JSON.stringify(providers), { status: 200 })
 }
 
-function stubHarnessList(harnesses = REGISTERED_HARNESSES) {
+function stubProviderList(providers = REGISTERED_PROVIDERS) {
   vi.stubGlobal(
     'fetch',
     vi.fn(async (url: string | URL | Request) => {
-      expect(String(url)).toBe('/api/harnesses')
-      return harnessListResponse(harnesses)
+      expect(String(url)).toBe('/api/providers')
+      return providerListResponse(providers)
     }),
   )
 }
 
 describe('Onboarding', () => {
   it('frames the door as finishing setup, never as signing in', async () => {
-    stubHarnessList()
+    stubProviderList()
     render(<Onboarding onConnected={() => undefined} />)
-    await screen.findByText('Connect Claude')
-    expect(screen.getByText('Connect a harness to finish setup')).toBeTruthy()
+    await screen.findByText('Connect Anthropic')
+    expect(screen.getByText('Connect a provider to finish setup')).toBeTruthy()
     expect(screen.queryByText(/sign in/i)).toBeNull()
   })
 
-  it('an active flow takes over the stage; cancel restores the harness cards', async () => {
+  it('an active flow takes over the stage; cancel restores the provider cards', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async (url: string | URL | Request) => {
         const path = String(url)
-        if (path === '/api/harnesses') return harnessListResponse(REGISTERED_HARNESSES)
-        expect(path).toBe('/api/harnesses/codex/connection/start')
+        if (path === '/api/providers') return providerListResponse(REGISTERED_PROVIDERS)
+        expect(path).toBe('/api/providers/openai-codex/connection/start')
         return new Response(
           JSON.stringify({ authorizeUrl: 'https://x/auth', connectionId: 'C1' }),
           { status: 200 },
@@ -58,27 +58,28 @@ describe('Onboarding', () => {
     )
 
     render(<Onboarding onConnected={() => undefined} />)
-    fireEvent.click(await screen.findByText('Connect Codex'))
+    fireEvent.click(await screen.findByText('Connect ChatGPT'))
     await flush()
 
     // The challenge panel replaces both cards, not just its own.
     expect(screen.getByText('Open the authorization page')).toBeTruthy()
-    expect(screen.queryByText('Connect Claude')).toBeNull()
+    expect(screen.queryByText('Connect Anthropic')).toBeNull()
 
     fireEvent.click(screen.getByText('Cancel'))
     expect(screen.queryByText('Open the authorization page')).toBeNull()
-    expect(await screen.findByText('Connect Claude')).toBeTruthy()
+    expect(await screen.findByText('Connect Anthropic')).toBeTruthy()
   })
 
-  it('renders one card for each harness returned by setup', async () => {
-    stubHarnessList([
-      ...REGISTERED_HARNESSES,
-      { name: 'opencode', loginKinds: ['subscription'] },
+  it('renders one card per subscription provider; a key-only provider waits for Settings', async () => {
+    stubProviderList([
+      ...REGISTERED_PROVIDERS,
+      { id: 'openai', label: 'OpenAI', loginKinds: ['api_key'] },
     ])
 
     render(<Onboarding onConnected={() => undefined} />)
 
-    await screen.findByText('Connect Opencode')
-    expect(screen.getAllByRole('button')).toHaveLength(3)
+    await screen.findByText('Connect ChatGPT')
+    expect(screen.queryByText('Connect OpenAI')).toBeNull()
+    expect(screen.getAllByRole('button')).toHaveLength(2)
   })
 })

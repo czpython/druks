@@ -58,7 +58,7 @@ the error.
 ## 5. Hand back to the operator
 
 Report that the installation succeeded. Tell the operator to open
-<http://127.0.0.1:8001>. Connect a harness under **Settings → Harnesses**.
+<http://127.0.0.1:8001>. Connect a provider under **Settings → Providers**.
 Agent runs do not start with a disconnected harness. Then connect the GitHub
 App that Druks uses. Run `docker compose exec web druks doctor --sandbox` to
 prove the full sandbox path with a real container.

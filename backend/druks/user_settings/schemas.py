@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -14,8 +14,6 @@ from druks.apps.settings import (
 from druks.schemas import Schema
 
 if TYPE_CHECKING:
-    from druks.accounts.models import Account
-    from druks.harnesses.models import HarnessConnection
     from druks.user_settings.models import HarnessSettings
 
 
@@ -26,45 +24,26 @@ class AllowedModel(Schema):
 
 class HarnessResponse(Schema):
     name: str
-    provider: str
+    # The provider a subscription CLI is bound to; None for a key CLI.
+    provider: str | None
+    login_kinds: list[str]
     model: str
     effort: str
     timeout: int
     fast_mode: bool
     allowed_models: list[AllowedModel]
-    # The requesting account's own connection; false until this account connects.
-    connected: bool
-    kind: str | None
-    login_kinds: list[str]
-    account: str | None
-    # The email the provider reported at connect — display, never authority.
-    provider_email: str | None
-    expires_at: datetime | None
 
     @classmethod
-    def from_row(
-        cls,
-        settings: "HarnessSettings",
-        connection: "HarnessConnection | None",
-        account: "Account",
-    ) -> "HarnessResponse":
-        connected = bool(connection) and (
-            not connection.expires_at or connection.expires_at > datetime.now(UTC)
-        )
+    def from_row(cls, settings: "HarnessSettings") -> "HarnessResponse":
         return cls(
             name=settings.name,
-            provider=settings.provider,
+            provider=settings.harness.provider,
+            login_kinds=sorted(settings.harness.login_kinds),
             model=settings.model,
             effort=settings.effort,
             timeout=settings.timeout,
             fast_mode=settings.fast_mode,
             allowed_models=settings.allowed_models,
-            connected=connected,
-            kind=connection.kind if connection else None,
-            login_kinds=sorted(settings.harness.login_kinds),
-            account=account.username if connection else None,
-            provider_email=connection.provider_email if connection else None,
-            expires_at=connection.expires_at if connection else None,
         )
 
 

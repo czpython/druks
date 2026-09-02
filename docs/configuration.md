@@ -125,7 +125,7 @@ order:
    profile and does not negotiate it.
 4. **No-authentication mode (`none`).** This mode has no authentication or identity edge. Druks
    resolves the only non-system account. Zero accounts is the setup state. The
-   first completed harness connection creates the operator account from the
+   first completed provider connection creates the operator account from the
    provider-validated email.
 
    More than one non-system account is configuration
@@ -264,7 +264,7 @@ optional. It reports pending setup if the selected tracker lacks a connection.
 
 ## Harnesses
 
-Claude and Codex subscription credentials connect from **Settings → Harnesses**.
+Anthropic and ChatGPT subscription credentials connect from **Settings → Providers**.
 The connection flow stores each credential in Postgres. Druks refreshes the
 credential on a schedule. It creates the CLI credential file inside each
 sandbox. It does not copy a host login. This is a capability connection for

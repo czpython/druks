@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlalchemy import ForeignKey, String, UniqueConstraint, select
 from sqlalchemy.dialects.postgresql import CITEXT
@@ -8,102 +8,103 @@ from sqlalchemy.orm.attributes import flag_modified
 from druks.accounts.models import Account
 from druks.core.models import Uuid7Pk
 from druks.database import db_session
-from druks.harnesses.exceptions import HarnessNotConnectedError
 from druks.models import Base
 from druks.secrets.fields import EncryptedJsonField
 from druks.user_settings.models import UserSettings
 
+from .exceptions import HarnessNotConnectedError
 
-class HarnessConnection(Base, Uuid7Pk):
-    __tablename__ = "harness_logins"
-    __table_args__ = (UniqueConstraint("harness", "account_id"),)
 
-    harness: Mapped[str]
+class ProviderLogin(Base, Uuid7Pk):
+    """One account's grant to one provider: an API key or an OAuth token set.
+    Every harness that drives the provider runs on this row."""
+
+    __tablename__ = "provider_logins"
+    __table_args__ = (UniqueConstraint("provider", "account_id"),)
+
+    provider: Mapped[str]
     account_id: Mapped[str] = mapped_column(ForeignKey("accounts.id", ondelete="RESTRICT"))
-    # The email the provider reported at the token exchange (citext — matched
-    # case-insensitively). Required as a connect-time snapshot because Claude
-    # states it once and its stored payload carries no identity at all. It can
-    # go stale if the account is renamed upstream and refreshes on the next
-    # connect.
+    # The email the provider reported at connect. Snapshotted because an OAuth
+    # payload carries no identity; a later connect refreshes it.
     provider_email: Mapped[str] = mapped_column(CITEXT)
-    kind: Mapped[str] = mapped_column(String, default="subscription")
+    # "oauth" | "api_key"
+    kind: Mapped[str] = mapped_column(String)
     payload = EncryptedJsonField()
     expires_at: Mapped[datetime | None]
     updated_at: Mapped[datetime] = mapped_column(default=Base.utc_now, onupdate=Base.utc_now)
 
     @classmethod
-    async def get(cls, connection_id: str) -> "HarnessConnection | None":
-        return await db_session().get(cls, connection_id)
+    async def get(cls, login_id: str) -> "ProviderLogin | None":
+        return await db_session().get(cls, login_id)
 
     @classmethod
-    async def lookup(cls, harness: str, account_id: str | None) -> "HarnessConnection":
-        """The connection a call runs with: the account's own, else the
+    async def lookup(cls, provider_id: str, account_id: str | None) -> "ProviderLogin":
+        """The login a call runs with: the account's own, else the
         fallback account's — which carries unmatched work so automation keeps
         moving."""
         if account_id:
-            own = await cls.get_for_account(harness, account_id)
+            own = await cls.get_for_account(provider_id, account_id)
             if own:
                 return own
-        fallback = await cls.get_for_account(harness, fallback=True)
+        fallback = await cls.get_for_account(provider_id, fallback=True)
         if fallback:
             return fallback
         raise HarnessNotConnectedError(
-            f"{harness} is not connected for the fallback account — connect it in "
-            "Settings → Harnesses."
+            f"{provider_id} is not connected for the fallback account — connect it in "
+            "Settings → Providers."
         )
 
     @classmethod
     async def get_for_account(
-        cls, harness: str, account_id: str | None = None, *, fallback: bool = False
-    ) -> "HarnessConnection | None":
-        """``fallback=True`` resolves the fallback account's connection — what
+        cls, provider_id: str, account_id: str | None = None, *, fallback: bool = False
+    ) -> "ProviderLogin | None":
+        """``fallback=True`` resolves the fallback account's login — what
         actor-less execution runs as."""
         if fallback:
             account_id = (await UserSettings.get()).fallback_account_id
         return await db_session().scalar(
-            select(cls).where(cls.harness == harness, cls.account_id == account_id)
+            select(cls).where(cls.provider == provider_id, cls.account_id == account_id)
         )
 
     @classmethod
-    async def list_all(cls) -> list["HarnessConnection"]:
-        return list(await db_session().scalars(select(cls).order_by(cls.harness, cls.id)))
+    async def list_all(cls) -> list["ProviderLogin"]:
+        return list(await db_session().scalars(select(cls).order_by(cls.provider, cls.id)))
 
     @classmethod
-    async def list_for_account(cls, account_id: str) -> list["HarnessConnection"]:
-        stmt = select(cls).where(cls.account_id == account_id).order_by(cls.harness)
+    async def list_for_account(cls, account_id: str) -> list["ProviderLogin"]:
+        stmt = select(cls).where(cls.account_id == account_id).order_by(cls.provider)
         return list(await db_session().scalars(stmt))
 
     @classmethod
-    async def list_for_harness(cls, harness: str) -> list["HarnessConnection"]:
-        stmt = select(cls).where(cls.harness == harness).order_by(cls.id)
+    async def list_for_provider(cls, provider_id: str) -> list["ProviderLogin"]:
+        stmt = select(cls).where(cls.provider == provider_id).order_by(cls.id)
         return list(await db_session().scalars(stmt))
 
     @classmethod
-    async def reload(cls, connection_id: str) -> "HarnessConnection | None":
-        """Fresh-from-DB read of one row, past the identity map's cached state
-        — the post-lock re-read that keeps a refresher from re-presenting a
-        refresh token a concurrent winner already advanced."""
+    async def reload(cls, login_id: str) -> "ProviderLogin | None":
+        """Read one row past the identity map — what a refresher does after it
+        wins the lock, so it never re-presents a token a peer already advanced."""
         return await db_session().scalar(
-            select(cls).where(cls.id == connection_id).execution_options(populate_existing=True)
+            select(cls).where(cls.id == login_id).execution_options(populate_existing=True)
         )
 
     @classmethod
     async def connect(
         cls,
         *,
-        harness: str,
+        provider: str,
         account: Account,
         payload: dict,
         expires_at: datetime | None,
         provider_email: str,
-        kind: str = "subscription",
-    ) -> "HarnessConnection":
-        """Upsert ``account``'s connection for this harness — update its
+        kind: str,
+    ) -> "ProviderLogin":
+        """Upsert ``account``'s login for this provider — update its
         existing row or create one."""
         session = db_session()
-        row = await cls.get_for_account(harness, account.id)
+        row = await cls.get_for_account(provider, account.id)
         if not row:
-            row = cls(harness=harness, account_id=account.id)
+            row = cls(provider=provider, account_id=account.id)
             session.add(row)
         row.kind = kind
         row.payload = payload
@@ -113,20 +114,20 @@ class HarnessConnection(Base, Uuid7Pk):
         return row
 
     @property
+    def is_connected(self) -> bool:
+        return not self.expires_at or self.expires_at > datetime.now(UTC)
+
+    @property
     def supports_refresh(self) -> bool:
-        return self.kind == "subscription"
+        return self.kind == "oauth"
 
     @property
     def is_metered(self) -> bool:
-        return self.kind == "subscription"
+        return self.kind == "oauth"
 
     async def update_payload(self, payload: dict, *, expires_at: datetime | None) -> None:
-        # Whole-value reassignment is the write path: the encrypted column
-        # re-encrypts what it's handed. The caller's dict may alias the live
-        # mapping's nested blocks (a dict() copy is shallow), making old and
-        # new compare content-equal at flush and the UPDATE get skipped —
-        # force the write; this is a secrets store, not somewhere to lose a
-        # token.
+        # A shallow copy aliases the live nested blocks, so old and new compare
+        # equal at flush and the UPDATE is skipped; force the write.
         self.payload = payload
         flag_modified(self, "payload")
         self.expires_at = expires_at

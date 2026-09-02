@@ -6,7 +6,7 @@ import { BrowserSessionsPane } from './BrowserSessionsPane'
 import { TextInput } from './Control'
 import { SettingField } from './SettingField'
 import { AppGlyph } from './AppGlyph'
-import { ConnectSteps, useHarnessConnect } from './HarnessConnectFlow'
+import { ConnectSteps, useProviderConnect } from './ProviderConnectFlow'
 import {
   type Harness,
   type AppSettings,
@@ -14,6 +14,8 @@ import {
   type McpRegistryCandidate,
   type McpServer,
   type Pat,
+  type Provider,
+  type ProviderLogin,
   type Connection,
   type Service,
   type SkillCollection,
@@ -125,6 +127,18 @@ export function SettingsModal({ open, onClose }: Props) {
     enabled: open,
     staleTime: 60_000,
   })
+  // A provider credential persists immediately outside Save, like a harness.
+  const providersQuery = useQuery({
+    queryKey: ['providers'],
+    queryFn: () => api.providers(),
+    enabled: open,
+    staleTime: 60_000,
+  })
+  const providerLoginsQuery = useQuery({
+    queryKey: ['providerLogins'],
+    queryFn: () => api.providerLogins(),
+    enabled: open,
+  })
   const [timezone, setTimezone] = useState<string>('UTC')
   // Pending per-app setting overrides — a sparse UpdateAppsSettingsRequest the
   // app tabs (and the Druks tab's built-in agents) edit and submit() flushes.
@@ -134,7 +148,7 @@ export function SettingsModal({ open, onClose }: Props) {
   // Pending per-harness edits (name -> sparse UpdateHarnessRequest), flushed by
   // submit() — same dirty/save flow as the app and general settings.
   const [harnessEdits, setHarnessEdits] = useState<Record<string, UpdateHarnessRequest>>({})
-  // 'general' | 'harnesses' | 'browser-sessions' | 'skills' | 'mcp' |
+  // 'general' | 'providers' | 'harnesses' | 'browser-sessions' | 'skills' | 'mcp' |
   // 'agent-access' | <app name>
   const [section, setSection] = useState<string>('general')
   const [busy, setBusy] = useState(false)
@@ -265,6 +279,8 @@ export function SettingsModal({ open, onClose }: Props) {
   const allApps = data?.apps ?? []
   const allowedEfforts = data?.allowedEfforts ?? []
   const harnesses = harnessesQuery.data ?? []
+  const providers = providersQuery.data ?? []
+  const providerLogins = providerLoginsQuery.data ?? []
   const harnessByName: Record<string, Harness> = Object.fromEntries(
     harnesses.map((h) => [h.name, h]),
   )
@@ -349,6 +365,7 @@ export function SettingsModal({ open, onClose }: Props) {
         <div className="set-grid">
           <nav className="set-rail">
             <RailItem icon="general" label="General" active={section === 'general'} onClick={() => setSection('general')} />
+            <RailItem icon="services" label="Providers" active={section === 'providers'} onClick={() => setSection('providers')} />
             <RailItem icon="harnesses" label="Harnesses" active={section === 'harnesses'} onClick={() => setSection('harnesses')} />
             <RailItem icon="services" label="Services" active={section === 'services'} onClick={() => setSection('services')} />
             <RailItem icon="services" label="Connections" active={section === 'connections'} onClick={() => setSection('connections')} />
@@ -381,6 +398,7 @@ export function SettingsModal({ open, onClose }: Props) {
                 busy={busy}
               />
             )}
+            {section === 'providers' && <ProvidersPane providers={providers} logins={providerLogins} />}
             {section === 'harnesses' &&
               (harnesses.length > 0 ? (
                 <HarnessesPane
@@ -805,7 +823,7 @@ function HarnessesPane({
               <div className="hr-ident">
                 <span className="hr-ident-dot" />
                 <span className="hr-name">{harness.name}</span>
-                <span className="hr-provider">{harness.provider}</span>
+                <span className="hr-provider">{harness.provider ?? 'API key'}</span>
                 <span className="hr-count">
                   <b>{agentCount(harness.name)}</b> agents
                 </span>
@@ -862,7 +880,6 @@ function HarnessesPane({
                   </span>
                 </div>
               </div>
-              <HarnessConnect harness={harness} />
             </div>
           )
         })}
@@ -1287,28 +1304,58 @@ export function ConnectionsPane() {
   )
 }
 
+// Providers — who answers and bills a model request. One credential per
+// provider per account; every harness that drives the provider runs on it.
+// Connection state persists immediately, outside the modal's Save.
+function ProvidersPane({ providers, logins }: { providers: Provider[]; logins: ProviderLogin[] }) {
+  const providerColor = harnessColors(providers.map((p) => p.id))
+  return (
+    <div className="set-pane mcp-pane hrs-pane">
+      <header className="mcp-pane-head">
+        <h2 className="mcp-pane-title">Providers</h2>
+        <p className="mcp-pane-sub">
+          Your subscription or API key at each model provider. Every harness that can drive a
+          provider runs on the credential you connect here.
+        </p>
+      </header>
+      <div className="hrs-list">
+        {providers.map((provider) => (
+          <div key={provider.id} className="set-card hr-card" style={{ '--fam': providerColor[provider.id] } as CSSProperties}>
+            <div className="hr-ident">
+              <span className="hr-ident-dot" />
+              <span className="hr-name">{provider.label}</span>
+              <span className="hr-provider">{provider.id}</span>
+            </div>
+            <ProviderConnect provider={provider} login={logins.find((l) => l.provider === provider.id) ?? null} />
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 // Connection state persists immediately, outside the modal's Save, so this
-// manages its own busy/error and refetches the harnesses query on change.
-export function HarnessConnect({ harness }: { harness: Harness }) {
+// manages its own busy/error and refetches the logins query on change.
+export function ProviderConnect({ provider, login }: { provider: Provider; login: ProviderLogin | null }) {
   const queryClient = useQueryClient()
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [key, setKey] = useState('')
 
-  const refresh = () => queryClient.invalidateQueries({ queryKey: ['harnesses'] })
-  const flow = useHarnessConnect(harness.name, async () => {
+  const refresh = () => queryClient.invalidateQueries({ queryKey: ['providerLogins'] })
+  const flow = useProviderConnect(provider.id, async () => {
     await refresh()
   })
-  const acceptsSubscription = harness.loginKinds.includes('subscription')
-  const acceptsApiKey = harness.loginKinds.includes('api_key')
+  const acceptsOauth = provider.loginKinds.includes('oauth')
+  const acceptsApiKey = provider.loginKinds.includes('api_key')
 
   const disconnect = () => {
-    if (!window.confirm(`Disconnect ${harness.name}? Reconnect it before agents can run on it.`))
+    if (!window.confirm(`Disconnect ${provider.label}? Reconnect it before agents can run on it.`))
       return
     setBusy(true)
     setError(null)
     void api
-      .disconnectHarness(harness.name)
+      .disconnectProvider(provider.id)
       .then(refresh)
       .catch((e) => setError(e instanceof Error ? e.message : String(e)))
       .finally(() => setBusy(false))
@@ -1319,7 +1366,7 @@ export function HarnessConnect({ harness }: { harness: Harness }) {
     setBusy(true)
     setError(null)
     void api
-      .connectHarnessKey(harness.name, key)
+      .connectProviderKey(provider.id, key)
       .then(() => {
         setKey('')
         return refresh()
@@ -1328,34 +1375,33 @@ export function HarnessConnect({ harness }: { harness: Harness }) {
       .finally(() => setBusy(false))
   }
 
+  const connected = Boolean(login?.connected)
   return (
     <div className="hr-connect">
       <div className="hr-conn-status">
-        <ServiceStatus connected={harness.connected} />
-        {harness.connected && harness.providerEmail && (
-          <span className="hr-conn-id">{harness.providerEmail}</span>
-        )}
-        {harness.connected && harness.expiresAt && (
-          <span className="hr-conn-exp">token expires {new Date(harness.expiresAt).toLocaleString()}</span>
+        <ServiceStatus connected={connected} />
+        {login?.connected && <span className="hr-conn-id">{login.providerEmail}</span>}
+        {login?.connected && login.expiresAt && (
+          <span className="hr-conn-exp">token expires {new Date(login.expiresAt).toLocaleString()}</span>
         )}
         <span className="hr-conn-actions">
-          {harness.connected && (
+          {connected && (
             <button className="set-btn danger quiet" onClick={disconnect} disabled={busy || flow.busy}>
               Disconnect
             </button>
           )}
-          {acceptsSubscription && !flow.challenge && (
+          {acceptsOauth && !flow.challenge && (
             <button
-              className={'set-btn ' + (harness.connected ? 'ghost' : 'primary')}
+              className={'set-btn ' + (connected ? 'ghost' : 'primary')}
               onClick={() => void flow.start()}
               disabled={busy || flow.busy}
             >
-              {harness.connected ? 'Reconnect' : 'Connect'}
+              {connected ? 'Reconnect' : 'Connect'}
             </button>
           )}
         </span>
       </div>
-      {acceptsSubscription && <ConnectSteps flow={flow} />}
+      {acceptsOauth && <ConnectSteps flow={flow} />}
       {acceptsApiKey && (
         <form className="hr-conn-flow" onSubmit={connectKey}>
           <div className="hr-conn-step hr-conn-paste">
@@ -1375,7 +1421,7 @@ export function HarnessConnect({ harness }: { harness: Harness }) {
               disabled={busy || flow.busy || !key.trim()}
               type="submit"
             >
-              {harness.kind === 'api_key' ? 'Replace key' : 'Connect with key'}
+              {login?.kind === 'api_key' ? 'Replace key' : 'Connect with key'}
             </button>
           </div>
         </form>

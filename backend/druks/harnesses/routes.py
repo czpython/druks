@@ -7,56 +7,67 @@ from druks.accounts.dependencies import current_session_account, current_session
 from druks.accounts.models import Account
 from druks.accounts.schemas import AccountResponse
 from druks.database import db_session
-from druks.harnesses.base import Harness
-from druks.harnesses.exceptions import ConnectError
-from druks.harnesses.models import HarnessConnection
-from druks.harnesses.registry import get_harness, get_harnesses
-from druks.harnesses.schemas import HarnessSummary
 from druks.user_settings.models import HarnessSettings, UserSettings
-from druks.user_settings.schemas import HarnessResponse
 
-router = APIRouter(prefix="/api/harnesses", tags=["harnesses"])
+from .exceptions import ConnectError
+from .models import ProviderLogin
+from .providers import Provider, get_provider, get_providers
+from .registry import get_harnesses
+from .schemas import ProviderLoginResponse, ProviderResponse
 
-
-@router.get("", response_model=list[HarnessSummary], response_model_by_alias=True)
-async def list_harnesses(
-    _account: Account | None = Depends(current_session_or_setup),
-) -> list[HarnessSummary]:
-    return [HarnessSummary.model_validate(harness) for harness in get_harnesses()]
+router = APIRouter(prefix="/api/providers", tags=["providers"])
 
 
-def _resolve_harness(name: str) -> type[Harness]:
-    harness = get_harness(name)
-    if harness:
-        return harness
-    raise HTTPException(status_code=404, detail=f"Unknown harness: {name!r}")
+@router.get(
+    "",
+    response_model=list[ProviderResponse],
+    response_model_by_alias=True,
+    dependencies=[Depends(current_session_or_setup)],
+)
+async def list_providers() -> list[ProviderResponse]:
+    return [ProviderResponse.model_validate(provider) for provider in get_providers()]
 
 
-@router.post("/{name}/connection/start")
+@router.get("/logins", response_model=list[ProviderLoginResponse], response_model_by_alias=True)
+async def list_logins(
+    account: Account = Depends(current_session_account),
+) -> list[ProviderLoginResponse]:
+    logins = await ProviderLogin.list_for_account(account.id)
+    return [ProviderLoginResponse.model_validate(login) for login in logins]
+
+
+def _resolve_provider(provider_id: str) -> Provider:
+    try:
+        return get_provider(provider_id)
+    except KeyError as error:
+        raise HTTPException(status_code=404, detail=f"Unknown provider: {provider_id!r}") from error
+
+
+@router.post("/{provider_id}/connection/start")
 async def start_connection(
-    name: str, account: Account | None = Depends(current_session_or_setup)
+    provider_id: str, account: Account | None = Depends(current_session_or_setup)
 ) -> dict[str, str]:
-    harness = _resolve_harness(name)
+    provider = _resolve_provider(provider_id)
     # A resolved operator binds the flow; none/zero starts the unbound setup
     # flow whose completion creates the operator.
-    url, connection_id = await harness.connect_start(account_id=account.id if account else None)
-    return {"authorizeUrl": url, "connectionId": connection_id}
+    url, flow_id = await provider.connect_start(account_id=account.id if account else None)
+    return {"authorizeUrl": url, "connectionId": flow_id}
 
 
 @router.post(
-    "/{name}/connection/complete",
+    "/{provider_id}/connection/complete",
     response_model=AccountResponse,
     response_model_by_alias=True,
 )
 async def complete_connection(
-    name: str,
+    provider_id: str,
     account: Account | None = Depends(current_session_or_setup),
     code: str = Body(..., embed=True),
-    connection_id: str = Body(..., embed=True, alias="connectionId"),
+    flow_id: str = Body(..., embed=True, alias="connectionId"),
 ) -> AccountResponse:
-    harness = _resolve_harness(name)
+    provider = _resolve_provider(provider_id)
     try:
-        completed = await harness.connect_complete(flow_id=connection_id, pasted=code)
+        completed = await provider.connect_complete(flow_id=flow_id, pasted=code)
     except ConnectError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     if completed.account_id:
@@ -81,25 +92,29 @@ async def complete_connection(
     settings = await UserSettings.get()
     if not settings.fallback_account_id:
         await settings.set_fallback_account(resolved.id)
-    connection = await HarnessConnection.connect(
-        harness=harness.name,
+    login = await ProviderLogin.connect(
+        provider=provider.id,
         account=resolved,
         payload=completed.payload,
         expires_at=completed.expires_at,
         provider_email=completed.provider_email,
+        kind="oauth",
     )
-    # Materialize the reply, then land the credential before any provider I/O —
+    # Materialize the reply, then land the login before any provider I/O —
     # an await while flushed rows still hold their locks can stall every other
     # writer on this event loop, and nothing past the point of durability may
     # depend on another database read.
     response = AccountResponse.model_validate(resolved)
     await db_session().commit()
     try:
-        # Fresh picker right after connect; fetch failures are tagged inside.
-        # The single-use flow is already spent, so trouble here — including a
-        # database that vanished under the refresh — only logs.
-        settings = await HarnessSettings.get_registered(harness.name)
-        await settings.refresh_models(connection)
+        # Fresh pickers right after connect for every harness this login
+        # serves; fetch failures are tagged inside. The single-use flow is
+        # already spent, so trouble here — including a database that vanished
+        # under the refresh — only logs.
+        for harness in get_harnesses():
+            if harness.accepts(login):
+                settings = await HarnessSettings.get_registered(harness.name)
+                await settings.refresh_models(login)
     except Exception:
         logging.getLogger(__name__).exception("Model refresh after connect failed")
         with suppress(Exception):
@@ -108,48 +123,38 @@ async def complete_connection(
 
 
 @router.post(
-    "/{name}/connection",
-    response_model=HarnessResponse,
+    "/{provider_id}/connection",
+    response_model=ProviderLoginResponse,
     response_model_by_alias=True,
 )
-async def connect_harness_key(
-    name: str,
+async def connect_key(
+    provider_id: str,
     account: Account = Depends(current_session_account),
     key: str = Body(..., embed=True),
-) -> HarnessResponse:
-    harness = _resolve_harness(name)
-    if "api_key" not in harness.login_kinds:
+) -> ProviderLoginResponse:
+    provider = _resolve_provider(provider_id)
+    if "api_key" not in provider.login_kinds:
         raise HTTPException(
             status_code=422,
-            detail=f"Harness {harness.name!r} does not accept API keys.",
+            detail=f"{provider.label} does not accept API keys.",
         )
-    key = key.strip()
-
-    if not key:
-        raise HTTPException(
-            status_code=422,
-            detail="The API key is empty. Paste a key.",
+    if key := key.strip():
+        login = await ProviderLogin.connect(
+            provider=provider.id,
+            account=account,
+            payload={"api_key": key},
+            expires_at=None,
+            provider_email=account.username,
+            kind="api_key",
         )
-    connection = await HarnessConnection.connect(
-        harness=harness.name,
-        account=account,
-        payload={"api_key": key},
-        expires_at=None,
-        provider_email=account.username,
-        kind="api_key",
-    )
-    settings = await HarnessSettings.get_registered(harness.name)
-    return HarnessResponse.from_row(settings, connection, account)
+        return ProviderLoginResponse.model_validate(login)
+    raise HTTPException(status_code=422, detail="The API key is empty. Paste a key.")
 
 
-@router.delete("/{name}/connection", response_model=HarnessResponse, response_model_by_alias=True)
-async def disconnect_harness(
-    name: str, account: Account = Depends(current_session_account)
-) -> HarnessResponse:
-    harness = _resolve_harness(name)
-    connection = await HarnessConnection.get_for_account(harness.name, account.id)
-    if connection:
-        # Only the requesting account's own connection — never another's.
-        await connection.delete()
-    settings = await HarnessSettings.get_registered(harness.name)
-    return HarnessResponse.from_row(settings, None, account)
+@router.delete("/{provider_id}/connection", status_code=204)
+async def disconnect(provider_id: str, account: Account = Depends(current_session_account)) -> None:
+    provider = _resolve_provider(provider_id)
+    login = await ProviderLogin.get_for_account(provider.id, account.id)
+    if login:
+        # Only the requesting account's own login — never another's.
+        await login.delete()
