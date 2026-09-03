@@ -235,6 +235,23 @@ class Client:
         ) as host:
             return host
 
+    async def set_expiry(self, *, host_id: str, expires_at: datetime) -> None:
+        """Move a host's lease to ``expires_at`` without touching the VM.
+
+        Clipping the expiry down is how an idle hold ends: the host keeps
+        running until the new expiry, and drukbox's janitor reaps it then,
+        so druks needs no reconciler of its own. ``release`` remains the
+        hard delete for callers that want the VM gone now.
+
+        A host the control plane no longer knows about raises the SDK's
+        ``SandboxNotFoundError`` — it is not swallowed here.
+        """
+        api = self._api()
+        try:
+            await api.renew_host(host_id, expires_at=expires_at)
+        finally:
+            await api.aclose()
+
     async def release(self, *, host_id: str) -> None:
         """Terminate the VM. Idempotent and infallible — already-gone hosts
         no-op silently; any other failure is logged but not surfaced so
