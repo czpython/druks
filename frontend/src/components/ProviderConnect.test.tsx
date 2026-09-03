@@ -78,6 +78,23 @@ describe('ProviderConnect', () => {
     expect(screen.queryByText('ops@corp.com')).toBeNull()
   })
 
+  it('an expired login keeps its identity and asks for a Reconnect', () => {
+    renderCard(provider(), {
+      provider: 'anthropic',
+      kind: 'oauth',
+      connected: false,
+      providerEmail: 'claude-seat@corp.com',
+      expiresAt: '2026-08-01T00:00:00Z',
+    })
+
+    expect(screen.getByText('Expired')).toBeTruthy()
+    expect(screen.getByText('claude-seat@corp.com')).toBeTruthy()
+    expect(screen.getByText(/token expired/)).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Reconnect' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Disconnect' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Connect' })).toBeNull()
+  })
+
   it('drives the connection flow end to end and refreshes only the providers query', async () => {
     const responses: Record<string, unknown> = {
       '/api/providers/anthropic/connection/start': {
