@@ -112,7 +112,7 @@ def browser_session_declarations():
 _OWN_DATABASE_MODULES = {
     "test_durable_sdk",
     "test_notifications_durable",
-    "test_harness_login_persistence",
+    "test_provider_login_persistence",
     "test_app_migrations",
     "test_proof_app_migration",
 }
