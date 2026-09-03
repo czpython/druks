@@ -115,7 +115,6 @@ _OWN_DATABASE_MODULES = {
     "test_provider_login_persistence",
     "test_app_migrations",
     "test_proof_app_migration",
-    "test_provider_logins_migration",
 }
 
 
