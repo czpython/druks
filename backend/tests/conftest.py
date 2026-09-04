@@ -163,6 +163,7 @@ _OWN_DATABASE_MODULES = {
     "test_provider_subscription_persistence",
     "test_app_migrations",
     "test_proof_app_migration",
+    "test_chat_migration",
 }
 
 
