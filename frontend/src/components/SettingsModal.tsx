@@ -35,7 +35,7 @@ import {
   type WorkflowSettingField,
 } from '../api/types'
 import { appLabel } from '../apps/registry'
-import { absTime, money, relTimeFromIso } from '../lib/format'
+import { absTime, money, relTimeFromIso, timeAway } from '../lib/format'
 import { useUsageToday } from '../lib/useUsage'
 import { Bar } from './UsagePanel'
 import { harnessColors } from '../lib/harnessColors'
@@ -1667,7 +1667,7 @@ export function ProviderConnect({
               ))}
               {subscription.expiresAt && (
                 <span className="hr-conn-exp">
-                  token {expired ? 'expired' : 'expires'} {relTimeFromIso(subscription.expiresAt)}
+                  token {expired ? 'expired' : 'expires'} {timeAway(subscription.expiresAt)}
                 </span>
               )}
             </>

@@ -270,8 +270,27 @@ class Provider:
     async def fetch_usage(
         cls, subscription: ProviderSubscription, *, now: datetime | None = None
     ) -> ParsedUsage:
-        """Fetch + parse the subscription's remaining-quota snapshot from its
-        subscription endpoint. Auth/HTTP failures collapse to a
+        """Fetch + parse the subscription's remaining-quota snapshot, refreshing
+        the token once on a 401. A provider can revoke an access token
+        server-side while its JWT ``exp`` is still days out (a subscription
+        change does exactly this), so the 401 — not the stored expiry — is what
+        says the token is dead."""
+        parsed = await cls._usage_snapshot(subscription, now=now)
+        if parsed.error != "unauthorized":
+            return parsed
+        # rotate_token drops the row when the refresh lineage is also revoked,
+        # so the account then reads disconnected and the card asks for a Reconnect.
+        result = await cls.rotate_token(subscription.id, margin=timedelta.max)
+        refreshed = await ProviderSubscription.reload(subscription.id)
+        if result.action != "refreshed" or not refreshed:
+            return ParsedUsage(ok=False, error="auth_required")
+        return await cls._usage_snapshot(refreshed, now=now)
+
+    @classmethod
+    async def _usage_snapshot(
+        cls, subscription: ProviderSubscription, *, now: datetime | None = None
+    ) -> ParsedUsage:
+        """One fetch of the usage endpoint. Auth/HTTP failures collapse to a
         ``ParsedUsage(ok=False, error=<tag>)`` so they never look like
         '0 metrics'."""
         try:
