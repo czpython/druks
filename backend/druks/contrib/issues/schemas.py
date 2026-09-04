@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
 
 from druks.contrib.issues.enums import Priority, Status
 from druks.workflows import SubjectSummary
@@ -61,3 +61,12 @@ class TicketEdit(BaseModel):
     description: str | None = None
     priority: Priority | None = None
     assignee_id: str | None = None
+    project_id: int | None = None
+
+    @field_validator("assignee_id", mode="before")
+    @classmethod
+    def _blank_is_nobody(cls, value: str | None) -> str | None:
+        # An assignee select with nobody picked submits "", and the shell sends
+        # every field the form shows. Blank means unassign, not an account id to
+        # look up — the field still counts as given, so it still unassigns.
+        return value or None

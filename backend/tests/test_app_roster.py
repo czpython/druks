@@ -21,6 +21,7 @@ def test_roster_lists_installed_apps_with_subject_types(tmp_path: Path):
     assert issues["icon"] == "layers"
     # No workflow yet — subjects follow from workflows, not from StoredSubject alone.
     assert issues["subjectTypes"] == []
+    assert issues["navigation"] == [["/issues", "board"], ["/issues/list", "list"]]
 
     field_notes = roster["field_notes"]
     assert field_notes["subjectTypes"] == ["note"]
