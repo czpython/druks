@@ -69,8 +69,9 @@ class SoftwareFactory(App):
             title="Tracker",
             description=(
                 "Which ticket tracker this installation uses. "
-                "Issues is this appliance — no credentials."
+                "Druks is this appliance — no credentials."
             ),
+            json_schema_extra={"choice_labels": {"issues": "druks"}},
         )
         # The tracker status names that drive build's funnel. They're operator
         # knobs — the names an operator's Linear/Jira workflow actually uses — so

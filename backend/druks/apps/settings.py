@@ -53,6 +53,17 @@ def field_choices(field: FieldInfo) -> list[str] | None:
     return [str(member) for member in members]
 
 
+def field_choice_labels(field: FieldInfo) -> dict[str, str]:
+    # Display wording for a subset of ``field_choices``. Omitted members render
+    # as the stored value. Empty when the field has no labels.
+    metadata = field.json_schema_extra
+    if isinstance(metadata, dict):
+        labels = metadata.get("choice_labels")
+        if isinstance(labels, dict):
+            return {str(key): str(value) for key, value in labels.items()}
+    return {}
+
+
 def field_section(field: FieldInfo) -> str:
     # The heading a field groups under; empty when it is ungrouped.
     metadata = field.json_schema_extra
@@ -107,6 +118,7 @@ def validate_settings_declaration(model: type[BaseModel]) -> None:
                 f"shape (found {nested.__name__}); declare scalar, SecretStr, or Literal fields"
             )
         _validate_visible_when(model, name, field)
+        _validate_choice_labels(name, field)
 
 
 def _validate_visible_when(model: type[BaseModel], name: str, field: FieldInfo) -> None:
@@ -138,6 +150,28 @@ def _validate_visible_when(model: type[BaseModel], name: str, field: FieldInfo) 
         raise SettingsDeclarationError(
             f"settings field {name!r}: visible_when target {target!r} is not a member of "
             f"{controller_name!r}"
+        )
+
+
+def _validate_choice_labels(name: str, field: FieldInfo) -> None:
+    metadata = field.json_schema_extra
+    if not isinstance(metadata, dict) or "choice_labels" not in metadata:
+        return
+    labels = metadata["choice_labels"]
+    if not isinstance(labels, dict):
+        raise SettingsDeclarationError(
+            f"settings field {name!r}: choice_labels must be a dict of member to label"
+        )
+    members = _literal_members(field.annotation)
+    if not members:
+        raise SettingsDeclarationError(
+            f"settings field {name!r}: choice_labels is only valid on a Literal field"
+        )
+    allowed = {str(member) for member in members}
+    unknown = sorted(str(key) for key in labels if str(key) not in allowed)
+    if unknown:
+        raise SettingsDeclarationError(
+            f"settings field {name!r}: choice_labels keys {unknown} are not members of the Literal"
         )
 
 

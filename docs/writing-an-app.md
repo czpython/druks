@@ -1079,7 +1079,9 @@ keeps newlines. Storage, redaction, and write-only behavior do not change.
 `section` is a plain heading that Druks renders in first-declaration order, with
 unsectioned fields first. `visible_when` takes one same-model `{field: value}`
 equality condition. Its controller must be non-secret and unconditional, and a
-`Literal` controller requires one of its declared members.
+`Literal` controller requires one of its declared members. `choice_labels` maps
+a subset of a `Literal` field's stored values to the words the select shows;
+omitted members render as the value.
 
 Hidden fields keep their stored values. Read the resolved model with
 `NightWatch.settings()`. The settings form runs `clean()` against the

@@ -104,6 +104,7 @@ def test_enum_field_exposes_its_choices():
     projected = _field("choice", value="b")
     assert projected["type"] == "enum"
     assert projected["choices"] == ["a", "b", "c"]
+    assert projected["choiceLabels"] == {}
     assert projected["value"] == "b"
 
 
@@ -225,6 +226,16 @@ def test_visible_when_rejects_a_controller_with_its_own_condition():
         dependent: str = Field(json_schema_extra={"visible_when": {"controller": "shown"}})
 
     with pytest.raises(SettingsDeclarationError, match="controller.*itself.*visible_when"):
+        validate_settings_declaration(_Settings)
+
+
+def test_choice_labels_must_name_literal_members():
+    class _Settings(BaseModel):
+        choice: Literal["a", "b"] = Field(
+            default="a", json_schema_extra={"choice_labels": {"c": "see"}}
+        )
+
+    with pytest.raises(SettingsDeclarationError, match="choice_labels keys"):
         validate_settings_declaration(_Settings)
 
 

@@ -2,7 +2,7 @@ import json
 
 import httpx
 import pytest
-from druks.apps.settings import field_choices, field_visibility
+from druks.apps.settings import field_choice_labels, field_choices, field_visibility
 from druks.contrib.issues.tracker import IssuesTracker
 from druks.contrib.software_factory.app import SoftwareFactory, check_tracker_identity
 from druks.contrib.software_factory.ticketing.enums import TicketStatus
@@ -222,6 +222,7 @@ async def test_tracker_check_accepts_issues_without_a_service(monkeypatch):
 def test_issues_is_a_tracker_choice_and_hides_the_name_knobs():
     fields = SoftwareFactory.Settings.model_fields
     assert field_choices(fields["tracker"]) == ["none", "linear", "jira", "issues"]
+    assert field_choice_labels(fields["tracker"]) == {"issues": "druks"}
     assert SoftwareFactory.Settings(tracker="issues").trigger_status == "Ready for Agent"
     assert field_visibility(fields["linear_trigger_status"]) == ("tracker", "linear")
     assert field_visibility(fields["linear_resting_status"]) == ("tracker", "linear")

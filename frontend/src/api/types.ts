@@ -661,6 +661,8 @@ export interface WorkflowSettingField {
   default: unknown
   /** An enum field's allowed values; null for every other kind. */
   choices: string[] | null
+  /** Display wording for a subset of ``choices``. Omitted members render as the stored value. */
+  choiceLabels?: Record<string, string>
   /** The heading this field groups under; empty for an ungrouped one. */
   section: string
   /** The sibling field this one is shown for, and the value that field must hold.

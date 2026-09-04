@@ -10,6 +10,7 @@ interface SettingFieldProps {
   // toggle is a row, not a labelled control, so the panes pull those out.
   type: string
   choices?: string[] | null
+  choiceLabels?: Record<string, string>
   multiline?: boolean
   // Whether a secret is already stored; the value itself never leaves the server.
   secretSet?: boolean | null
@@ -33,6 +34,7 @@ function FieldControl({
   label,
   type,
   choices,
+  choiceLabels,
   multiline = false,
   secretSet,
   value,
@@ -48,7 +50,7 @@ function FieldControl({
       <Select value={value} onChange={(e) => onChange(e.target.value)} disabled={disabled}>
         {choices.map((choice) => (
           <option key={choice} value={choice}>
-            {choice}
+            {choiceLabels?.[choice] ?? choice}
           </option>
         ))}
       </Select>

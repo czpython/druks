@@ -52,4 +52,20 @@ describe('SettingField', () => {
     expect(screen.getByText('Effort declares no choices')).toBeTruthy()
     expect(screen.queryByLabelText('Effort')).toBeNull()
   })
+
+  it('labels an enum choice when the declaration supplies a label', () => {
+    render(
+      <SettingField
+        label="Tracker"
+        type="enum"
+        choices={['none', 'linear', 'jira', 'issues']}
+        choiceLabels={{ issues: 'druks' }}
+        value="issues"
+        onChange={vi.fn()}
+      />,
+    )
+    const select = screen.getByRole('combobox') as HTMLSelectElement
+    expect(select.value).toBe('issues')
+    expect(screen.getByRole('option', { name: 'druks' })).toBeTruthy()
+  })
 })

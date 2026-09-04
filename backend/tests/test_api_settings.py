@@ -178,6 +178,7 @@ def test_apps_surface_build_agents_and_workflow_defaults(tmp_path: Path):
         "value": "human",
         "default": "human",
         "choices": ["human", "machine", "machine_then_human", "adaptive"],
+        "choiceLabels": {},
         "section": "",
         "visibleWhenField": "",
         "visibleWhenValue": None,
