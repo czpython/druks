@@ -131,6 +131,9 @@ async def create_ticket(
     title = required_text(title, "title")
     if not await Project.get(project_id):
         raise HTTPException(http_status.HTTP_404_NOT_FOUND, f"no project {project_id}")
+    # An assignee select with nobody picked submits "", and the shell sends
+    # every field the form shows. Blank is nobody, not an account id to look up.
+    assignee_id = assignee_id or None
     if assignee_id is not None:
         await require_assignee(assignee_id)
     ticket = await Ticket.create(
