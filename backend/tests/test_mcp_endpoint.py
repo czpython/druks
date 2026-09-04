@@ -6,7 +6,7 @@ from datetime import UTC, datetime, timedelta
 import httpx
 import pytest
 from conftest import finish_agent_run, make_test_note, seed_note_agent_run, seed_note_run
-from druks.accounts.models import Account, PersonalAccessToken
+from druks.accounts.models import Account, OperatorToken, PersonalAccessToken
 from druks.api.server import mcp_app
 from druks.contrib.software_factory.app import SoftwareFactory
 from druks.core.apis.exceptions import UnknownTicketError
@@ -18,6 +18,7 @@ from druks.usage.models import UsageScrape
 from fastapi import APIRouter, FastAPI
 from fastmcp.client import Client
 from fastmcp.client.transports import StreamableHttpTransport
+from pydantic import BaseModel
 from starlette.routing import Route
 
 _IN_APP_ASK = {
@@ -261,6 +262,43 @@ def test_derived_operation_id_collision_stops_boot():
 
     with pytest.raises(InvalidAgentToolError, match="collides with existing operation id"):
         create_mcp_app(api)
+
+
+class _Issued(BaseModel):
+    identifier: str
+
+
+def _create_shaped_app() -> FastAPI:
+    # A 201 whose model requires identifier — the confirm stub does not have one.
+    held: dict[str, object] = {}
+
+    @asynccontextmanager
+    async def lifespan(scope_app):
+        async with held["mcp"].lifespan(scope_app):
+            yield
+
+    api = FastAPI(lifespan=lifespan)
+    router = APIRouter()
+
+    async def mint_ticket() -> _Issued:
+        """Write a ticket down."""
+        return _Issued(identifier="BOX-1")
+
+    router.add_api_route(
+        "/tickets",
+        mint_ticket,
+        methods=["POST"],
+        status_code=201,
+        operation_id="mint_ticket",
+        tags=["agent"],
+    )
+    api.include_router(router, prefix="/api/review", tags=["review"])
+    mcp = create_mcp_app(api)
+    held["mcp"] = mcp
+    api.router.routes.append(
+        Route("/mcp", mcp, methods=["POST", "DELETE"], include_in_schema=False)
+    )
+    return api
 
 
 def _agent_route_app(operation_id: str) -> FastAPI:
@@ -545,3 +583,158 @@ async def test_mcp_server_registry_routes_stay_untouched(tmp_path, druks_db, mon
     assert listed.status_code == 200
     # The inbound endpoint never joins the outbound server registry.
     assert "druks" not in {server["name"] for server in listed.json()}
+
+
+async def _operator_token(account, *, writes: str, run_id: str = "run-op"):
+    return await OperatorToken.mint(
+        account_id=account.id,
+        agent_call_id=f"call-{writes}",
+        run_id=run_id,
+        writes=writes,
+    )
+
+
+async def test_propose_cannot_hit_answer_gate(app, account, druks_db, resume_spy):
+    item = await make_test_note()
+    run = await seed_note_run(
+        druks_db,
+        note=item,
+        state="parked",
+        input_gate="review",
+        input_request=dict(_IN_APP_ASK),
+    )
+    run.input_requested_at = datetime.now(UTC)
+    await druks_db.flush()
+    token = await _operator_token(account, writes="deny")
+
+    async with live(app), _client(app, token) as client:
+        tools = {tool.name for tool in await client.list_tools()}
+        assert "list_open_subjects" in tools
+        assert "get_gate" in tools
+        assert "get_agent_call" in tools
+        assert "get_usage" in tools
+        assert "answer_gate" not in tools
+        assert "cancel_run" not in tools
+        result = await client.call_tool(
+            "answer_gate",
+            {"run": run.id, "parkedAt": run.input_requested_at.isoformat(), "control": "approve"},
+            raise_on_error=False,
+        )
+
+    assert result.is_error
+    assert resume_spy == []
+
+
+async def test_confirm_defers_answer_gate_until_play(app, account, druks_db, resume_spy):
+    item = await make_test_note()
+    run = await seed_note_run(
+        druks_db,
+        note=item,
+        state="parked",
+        input_gate="review",
+        input_request=dict(_IN_APP_ASK),
+    )
+    run.input_requested_at = datetime.now(UTC)
+    await druks_db.flush()
+    token = await _operator_token(account, writes="defer", run_id="run-confirm")
+
+    async with live(app), _client(app, token) as client:
+        tools = {tool.name for tool in await client.list_tools()}
+        assert "answer_gate" in tools
+        parked_at = run.input_requested_at.isoformat()
+        await client.call_tool(
+            "answer_gate",
+            {"run": run.id, "parkedAt": parked_at, "control": "approve"},
+            raise_on_error=False,
+        )
+
+    assert resume_spy == []
+    writes = await OperatorToken.take_deferred("run-confirm")
+    assert writes[0]["method"] == "POST"
+    await OperatorToken.play_deferred(account.id, writes)
+    assert resume_spy == [{"id": run.id, "action": "approve", "answers": {}, "note": ""}]
+
+
+async def test_mutating_agent_tools_omit_output_schema(app, pat_token):
+    async with live(app), _client(app, pat_token) as client:
+        tools = {tool.name: tool for tool in await client.list_tools()}
+    assert tools["get_gate"].outputSchema
+    assert tools["answer_gate"].outputSchema is None
+    assert tools["cancel_run"].outputSchema is None
+
+
+async def test_confirm_defers_a_create_shaped_write(account):
+    token = await _operator_token(account, writes="defer", run_id="run-confirm-create")
+    api = _create_shaped_app()
+
+    async with live(api), _client(api, token) as client:
+        result = await client.call_tool("review_mint_ticket", {}, raise_on_error=False)
+
+    if result.is_error:
+        raise AssertionError(result.content[0].text)
+    assert result.structured_content["result"] == "deferred"
+    writes = await OperatorToken.take_deferred("run-confirm-create")
+    assert writes[0]["method"] == "POST"
+    assert writes[0]["path"] == "/api/review/tickets"
+
+
+async def test_full_answer_gate_runs_as_the_token_account(app, account, druks_db, resume_spy):
+    item = await make_test_note()
+    run = await seed_note_run(
+        druks_db,
+        note=item,
+        state="parked",
+        input_gate="review",
+        input_request=dict(_IN_APP_ASK),
+    )
+    run.input_requested_at = datetime.now(UTC)
+    await druks_db.flush()
+    token = await _operator_token(account, writes="allow")
+
+    async with live(app), _client(app, token) as client:
+        gate = (await client.call_tool("get_gate", {"run": run.id})).structured_content
+        answered = (
+            await client.call_tool(
+                "answer_gate",
+                {"run": run.id, "parkedAt": gate["parkedAt"], "control": "approve"},
+            )
+        ).structured_content
+
+    assert answered["result"] == "answered"
+    assert resume_spy == [{"id": run.id, "action": "approve", "answers": {}, "note": ""}]
+
+
+async def test_operator_token_cannot_act_as_another_account(app, druks_db):
+    mine = await Account.get_or_create("op@example.com")
+    theirs = await Account.get_or_create("peer@example.com")
+    druks_db.add(
+        UsageScrape(
+            provider="openai-codex",
+            account_id=theirs.id,
+            scraped_at=datetime.now(UTC),
+            five_hour_percent_left=42,
+        )
+    )
+    await druks_db.flush()
+    token = await _operator_token(mine, writes="allow")
+
+    async with live(app), _client(app, token) as client:
+        usage = (await client.call_tool("get_usage", {})).structured_content
+    codex = next(h for h in usage["providers"] if h["id"] == "openai-codex")
+    assert codex["fiveHourPercentLeft"] is None
+
+
+async def test_operator_token_is_gone_after_the_call(app, account):
+    token = await _operator_token(account, writes="allow", run_id="run-gone")
+    assert (await OperatorToken.lookup(token)).account_id == account.id
+    await OperatorToken.revoke("call-allow")
+    assert await OperatorToken.lookup(token) is None
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://druks.test"
+    ) as wire:
+        gone = await wire.post(
+            "/mcp",
+            json=_INIT,
+            headers={**_WIRE_HEADERS, "Authorization": f"Bearer {token}"},
+        )
+    assert gone.status_code == 401

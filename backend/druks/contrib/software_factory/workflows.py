@@ -55,7 +55,7 @@ class BuildWorkspace(RepoWorkspace):
     def workspace_root(self) -> str:
         return get_work_root(self.host.ssh_username)
 
-    def get_required_mcp_servers(self) -> tuple[RequiredMcpServer, ...]:
+    async def get_required_mcp_servers(self, **kwargs: Any) -> tuple[RequiredMcpServer, ...]:
         return (RequiredMcpServer(name=GITHUB_MCP_NAME, url=GITHUB_MCP_URL, token=self.mcp_token),)
 
     def get_agent_run_kwargs(self, **kwargs: Any) -> dict[str, Any]:

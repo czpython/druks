@@ -3,21 +3,24 @@
 # operation's single declaration — schema, docstring, operation_id — and a
 # tagged app route joins the surface the same way.
 import inspect
-from collections.abc import Generator
+from collections.abc import Generator, Sequence
 
 import httpx
 from fastapi import FastAPI
 from fastapi.routing import APIRoute, iter_route_contexts
 from fastmcp import FastMCP
 from fastmcp.server.auth import AccessToken, TokenVerifier
-from fastmcp.server.dependencies import get_http_request
+from fastmcp.server.dependencies import get_access_token, get_http_request
 from fastmcp.server.http import StarletteWithLifespan
 from fastmcp.server.providers.openapi import MCPType, OpenAPIProvider, OpenAPITool, RouteMap
+from fastmcp.server.transforms import GetToolNext, Transform
+from fastmcp.tools.base import Tool
 from fastmcp.utilities.openapi import HTTPRoute
+from fastmcp.utilities.versions import VersionSpec
 from mcp.types import ToolAnnotations
 
 from druks.accounts.exceptions import InvalidPatError
-from druks.accounts.models import PersonalAccessToken
+from druks.accounts.models import OperatorToken, PersonalAccessToken
 from druks.apps.loader import iter_apps
 from druks.database import db_session
 from druks.mcp.exceptions import InvalidAgentToolError
@@ -41,14 +44,28 @@ surface.
 class PatTokenVerifier(TokenVerifier):
     async def verify_token(self, token: str) -> AccessToken | None:
         # Auth middleware runs outside the request session boundary, so this
-        # owns one — authenticate stamps last_used_at.
+        # owns one — authenticate stamps last_used_at on a PAT; a call token
+        # is Redis-only and needs no commit.
         try:
+            operator = await OperatorToken.lookup(token)
+            if operator:
+                return AccessToken(
+                    token=token,
+                    client_id=operator.agent_call_id,
+                    scopes=[],
+                    claims={
+                        "account_id": operator.account_id,
+                        "agent_call_id": operator.agent_call_id,
+                        "run_id": operator.run_id,
+                        "writes": operator.writes,
+                    },
+                )
             pat = await PersonalAccessToken.authenticate(token)
             access = AccessToken(
                 token=token,
                 client_id=pat.token_prefix,
                 scopes=[],
-                claims={"account_id": pat.account_id, "pat_id": pat.id},
+                claims={"account_id": pat.account_id, "pat_id": pat.id, "writes": "allow"},
             )
             await db_session().commit()
             return access
@@ -71,6 +88,87 @@ class CallerPat(httpx.Auth):
         if bearer:
             request.headers["Authorization"] = bearer
         yield request
+
+
+def _writes_claim() -> str:
+    token = get_access_token()
+    if token:
+        return token.claims.get("writes", "allow")
+    return "allow"
+
+
+def _is_read_tool(tool: Tool) -> bool:
+    return bool(tool.annotations and tool.annotations.readOnlyHint)
+
+
+class OperatorWritesFilter(Transform):
+    """Propose (writes=deny) lists only GET-derived tools. Confirm and full
+    keep the live catalog; mutating calls are intercepted on the HTTP hop."""
+
+    async def list_tools(self, tools: Sequence[Tool]) -> Sequence[Tool]:
+        if _writes_claim() == "deny":
+            return [tool for tool in tools if _is_read_tool(tool)]
+        return tools
+
+    async def get_tool(
+        self, name: str, call_next: GetToolNext, *, version: VersionSpec | None = None
+    ) -> Tool | None:
+        tool = await call_next(name, version=version)
+        if tool and _writes_claim() == "deny" and not _is_read_tool(tool):
+            return
+        return tool
+
+
+def _bearer_credential(header: str | None) -> str:
+    if header:
+        scheme, _, credential = header.partition(" ")
+        if scheme.lower() == "bearer" and credential:
+            return credential
+    return ""
+
+
+class OperatorWritesTransport(httpx.AsyncBaseTransport):
+    """Mutating OpenAPI hops: deny 403s, defer stashes, allow passes through."""
+
+    def __init__(self, inner: httpx.AsyncBaseTransport):
+        self._inner = inner
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        if request.method.upper() != "GET":
+            operator = await OperatorToken.lookup(
+                _bearer_credential(request.headers.get("authorization"))
+            )
+            if operator and operator.writes == "deny":
+                return httpx.Response(
+                    403,
+                    json={
+                        "code": "AUTONOMY_READ_ONLY",
+                        "message": (
+                            "This conversation's autonomy is propose; mutating tools do not run."
+                        ),
+                        "retryable": False,
+                    },
+                    request=request,
+                )
+            if operator and operator.writes == "defer":
+                await OperatorToken.defer_write(
+                    operator.run_id,
+                    {
+                        "method": request.method,
+                        "path": request.url.path,
+                        "body": request.content.decode() if request.content else "",
+                        "content_type": request.headers.get("content-type") or "application/json",
+                    },
+                )
+                return httpx.Response(
+                    200,
+                    json={
+                        "result": "deferred",
+                        "message": "Proposed. The operator must confirm before this runs.",
+                    },
+                    request=request,
+                )
+        return await self._inner.handle_async_request(request)
 
 
 def _validate_agent_tools(api: FastAPI) -> None:
@@ -158,6 +256,11 @@ def _annotate(route: HTTPRoute, component: object) -> None:
             destructiveHint=not is_read and route.extensions.get("x-destructive", True),
             idempotentHint=route.extensions.get("x-idempotent", False),
         )
+        # Confirm (writes=defer) intercepts mutating hops with a deferred stub,
+        # not the route's 201 model. Advertising that model as outputSchema
+        # makes MCP reject the stub (`identifier` required on create_ticket).
+        if not is_read:
+            component.output_schema = None
 
 
 def create_mcp_app(api: FastAPI) -> StarletteWithLifespan:
@@ -167,7 +270,7 @@ def create_mcp_app(api: FastAPI) -> StarletteWithLifespan:
     # raise_app_exceptions=False makes an app crash reach the tool as the
     # app's sanitized 500, so no masking is needed and the taxonomy travels.
     client = httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=api, raise_app_exceptions=False),
+        transport=OperatorWritesTransport(httpx.ASGITransport(app=api, raise_app_exceptions=False)),
         base_url="http://druks",
         auth=CallerPat(),
     )
@@ -183,6 +286,7 @@ def create_mcp_app(api: FastAPI) -> StarletteWithLifespan:
     server = FastMCP(
         name="druks",
         providers=[provider],
+        transforms=[OperatorWritesFilter()],
         instructions=_INSTRUCTIONS,
         auth=PatTokenVerifier(),
     )

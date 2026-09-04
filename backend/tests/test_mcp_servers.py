@@ -51,7 +51,7 @@ def _requiring_workspace(*servers: RequiredMcpServer) -> Workspace:
     # A workspace declaring the servers it requires and credentials itself,
     # as SoftwareFactory does.
     class _Requiring(Workspace):
-        def get_required_mcp_servers(self) -> tuple[RequiredMcpServer, ...]:
+        async def get_required_mcp_servers(self, **kwargs) -> tuple[RequiredMcpServer, ...]:
             return servers
 
     return _Requiring(host=_FakeSandbox())  # type: ignore[arg-type]
