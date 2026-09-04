@@ -431,6 +431,46 @@ async def test_codex_fetch_usage_success(monkeypatch, druks_db):
     assert calls[0]["headers"]["ChatGPT-Account-Id"] == "acc-7"
 
 
+async def test_codex_usage_forces_a_refresh_on_401_then_retries(monkeypatch, druks_db):
+    # The stored access token's JWT ``exp`` is days out, so the refresh loop
+    # never touches it — but the provider 401s it server-side. fetch_usage must
+    # trust the 401, refresh, and retry once.
+    connection = await _seed_codex(account_id="acc-7")
+    fresh = _jwt(int((_NOW + timedelta(days=9)).timestamp()))
+    _mock_post(monkeypatch, _resp(200, {"access_token": fresh, "refresh_token": "R1"}))
+    body = {
+        "plan_type": "pro",
+        "rate_limit": {
+            "primary_window": {"used_percent": 39, "limit_window_seconds": 18000, "reset_at": 1},
+            "secondary_window": {"used_percent": 39, "limit_window_seconds": 604800, "reset_at": 2},
+        },
+    }
+    responses = [_resp(401, {"detail": {"code": "token_expired"}}), _resp(200, body)]
+    gets = []
+
+    async def fake_get(self, url, *, headers=None, **_kwargs):
+        gets.append(headers)
+        return responses[min(len(gets) - 1, len(responses) - 1)]
+
+    monkeypatch.setattr(pbase.httpx.AsyncClient, "get", fake_get)
+    parsed = await OpenAiProvider.fetch_usage(connection, now=_NOW)
+    assert parsed.ok is True
+    assert parsed.plan_tier == "pro"
+    assert len(gets) == 2  # 401, then the post-refresh retry
+
+
+async def test_codex_usage_reports_auth_required_when_the_refresh_is_revoked(monkeypatch, druks_db):
+    # The subscription changed: both the access token and its refresh lineage
+    # are revoked. The forced refresh gets invalid_grant, so we surface
+    # auth_required rather than looping on the dead token.
+    connection = await _seed_codex(account_id="acc-7")
+    _mock_post(monkeypatch, _resp(400, {"error": "invalid_grant"}))
+    _mock_get(monkeypatch, _resp(401, {"detail": {"code": "token_expired"}}))
+    parsed = await OpenAiProvider.fetch_usage(connection, now=_NOW)
+    assert parsed.ok is False
+    assert parsed.error == "auth_required"
+
+
 async def test_lookup_reads_only_the_accounts_own_subscription(druks_db):
     own = await _seed_claude(provider_email="a@example.com")
     other = await _seed_claude(provider_email="b@example.com")
