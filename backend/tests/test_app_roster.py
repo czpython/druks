@@ -20,6 +20,7 @@ def test_roster_lists_installed_apps_with_subject_types(tmp_path: Path):
     assert chat["hasFrontend"] is False
     assert chat["icon"] == "message-square"
     assert chat["subjectTypes"] == ["conversation"]
+    assert chat["navigation"] == [["/chat", "Conversations"]]
 
     field_notes = roster["field_notes"]
     assert field_notes["subjectTypes"] == ["note"]
