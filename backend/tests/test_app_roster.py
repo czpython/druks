@@ -15,6 +15,13 @@ def test_roster_lists_installed_apps_with_subject_types(tmp_path: Path):
     # Software Factory's pages are React, so its tabs live in its frontend.
     assert software_factory["navigation"] == []
     assert software_factory["icon"]
+    chat = roster["chat"]
+    assert chat["builtin"] is False
+    assert chat["hasFrontend"] is False
+    assert chat["icon"] == "message-square"
+    # No workflow yet — subjects follow from workflows, not from StoredSubject alone.
+    assert chat["subjectTypes"] == []
+
     field_notes = roster["field_notes"]
     assert field_notes["subjectTypes"] == ["note"]
     # Derived from the landing page the app declares, labelled by that page.
