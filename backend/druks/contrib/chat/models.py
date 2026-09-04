@@ -39,6 +39,17 @@ class Conversation(StoredSubject):
         return await db_session().get(cls, conversation_id)
 
     @classmethod
+    async def get_for_account(
+        cls, conversation_id: int, account_id: str | None
+    ) -> "Conversation | None":
+        """This account's thread, or nothing. Another operator's id is a miss,
+        not a leak."""
+        conversation = await cls.get(conversation_id)
+        if conversation and conversation.account_id == account_id:
+            return conversation
+        return
+
+    @classmethod
     async def list_for_account(cls, account_id: str) -> list["Conversation"]:
         """This account's threads, newest first. A conversation belongs to one
         operator; another account's list never includes it."""
@@ -51,6 +62,10 @@ class Conversation(StoredSubject):
 
     async def add_message(self, *, role: Role, body: str) -> "Message":
         return await Message.create(conversation_id=self.id, role=role, body=body)
+
+    async def save_autonomy(self, autonomy: Autonomy) -> None:
+        self.autonomy = autonomy
+        await db_session().flush()
 
     async def list_messages(self) -> list["Message"]:
         return await Message.list_for_conversation(self.id)
