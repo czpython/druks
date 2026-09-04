@@ -26,8 +26,8 @@ class ChatTurn(Gate):
     would offer approve/request_changes on a chat turn."""
 
     name = "chat_turn"
-    text: str
-    stop: bool = False
+    action: Literal["send", "stop"]
+    note: str = ""
 
 
 class ConfirmTool(Gate):
@@ -78,12 +78,13 @@ class Talk(Workflow):
     async def run_multistep(self) -> None:
         while True:
             conversation = await self.subject
-            messages = await conversation.list_messages()
+            messages = await conversation.list_prompt_messages()
             result = await Chat.reply(
                 autonomy=conversation.autonomy,
                 messages=[{"role": message.role, "body": message.body} for message in messages],
             )
             await self.record_message(Role.ASSISTANT, result.text)
+            await self.name_thread()
             deferred = await self.deferred_writes()
             if deferred:
                 decision = await ConfirmTool.wait(
@@ -91,18 +92,24 @@ class Talk(Workflow):
                         "presentation": "in_app",
                         "label": "Confirm the proposed action",
                         "controls": ["approve", "reject"],
+                        "questions": [],
                     },
                     hold_sandbox=self.sandbox_hold,
                 )
                 if decision.action == "approve":
                     await self.apply_deferred_writes(deferred)
             reply = await ChatTurn.wait(
-                input_request={"presentation": "in_app", "label": "Chat turn"},
+                input_request={
+                    "presentation": "in_app",
+                    "label": "Message",
+                    "controls": ["send", "stop"],
+                    "questions": [],
+                },
                 hold_sandbox=self.sandbox_hold,
             )
-            if reply.stop:
+            if reply.action == "stop":
                 return
-            await self.record_message(Role.USER, reply.text)
+            await self.record_message(Role.USER, reply.note)
 
     async def get_workspace_kwargs(self, host: "Host") -> dict[str, Any]:
         conversation = await self.subject
@@ -119,6 +126,11 @@ class Talk(Workflow):
     async def record_message(self, role: Role, body: str) -> None:
         conversation = await self.subject
         await conversation.add_message(role=role, body=body)
+
+    @step
+    async def name_thread(self) -> None:
+        conversation = await self.subject
+        await conversation.name_from_first_line()
 
     @step
     async def deferred_writes(self) -> list[dict[str, str]]:

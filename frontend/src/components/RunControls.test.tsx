@@ -87,6 +87,14 @@ describe('InAppReview', () => {
 
     expect(screen.getByText('A note is sent to the agent as feedback.')).toBeTruthy()
   })
+
+  it('labels send and stop', () => {
+    stubFetch()
+    renderReview({ presentation: 'in_app', controls: ['send', 'stop'], questions: [] })
+
+    expect(screen.getByText('Send')).toBeTruthy()
+    expect(screen.getByText('Stop')).toBeTruthy()
+  })
 })
 
 describe('the lent run controls', () => {

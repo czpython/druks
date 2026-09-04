@@ -1,3 +1,4 @@
+from collections.abc import Sequence
 from datetime import datetime
 
 from sqlalchemy import ForeignKey, select
@@ -6,6 +7,10 @@ from sqlalchemy.orm import Mapped, mapped_column
 from druks.contrib.chat.enums import Autonomy, Role
 from druks.contrib.chat.schemas import ConversationSummary
 from druks.db import Base, StoredSubject, db_session
+
+_PROMPT_MESSAGES = 40
+_PROMPT_CHARS = 16_000
+_TITLE_CHARS = 80
 
 
 class Conversation(StoredSubject):
@@ -67,8 +72,30 @@ class Conversation(StoredSubject):
         self.autonomy = autonomy
         await db_session().flush()
 
+    async def name_from_first_line(self) -> None:
+        """Fill an empty title from the first user line. A title the operator
+        already set, or a prior call, is left alone."""
+        if self.title:
+            return
+        first = next(
+            (message for message in await self.list_messages() if message.role == Role.USER),
+            None,
+        )
+        if not first:
+            return
+        line = next(
+            (" ".join(raw.split()) for raw in first.body.splitlines() if raw.strip()),
+            "",
+        )
+        if line:
+            self.title = line[:_TITLE_CHARS]
+            await db_session().flush()
+
     async def list_messages(self) -> list["Message"]:
         return await Message.list_for_conversation(self.id)
+
+    async def list_prompt_messages(self) -> list["Message"]:
+        return Message.bound_recent(await self.list_messages())
 
     def get_summary(self) -> ConversationSummary:
         return ConversationSummary.model_validate(self)
@@ -115,3 +142,19 @@ class Message(Base):
             .order_by(cls.created_at, cls.id)
         )
         return list(await db_session().scalars(statement))
+
+    @classmethod
+    def bound_recent(cls, messages: Sequence["Message"]) -> list["Message"]:
+        """Newest lines that fit the prompt. Older lines drop first. One
+        oversize last line still goes in — truncating it would hide the turn
+        the operator just sent."""
+        chosen: list[Message] = []
+        chars = 0
+        for message in reversed(messages):
+            size = len(message.body)
+            if chosen and (len(chosen) >= _PROMPT_MESSAGES or chars + size > _PROMPT_CHARS):
+                break
+            chosen.append(message)
+            chars += size
+        chosen.reverse()
+        return chosen
