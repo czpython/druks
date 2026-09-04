@@ -302,9 +302,12 @@ read-only at `/harnesses`. Each harness reads one directory:
 ```
 
 Missing files are optional. Provider credentials do not belong in this root.
-Harness defaults and per-agent model, effort, and timeout overrides live in
-dashboard settings. A call refuses before provisioning a VM if its selected
-harness lacks a connection.
+The default harness, model, billing, effort, and timeout live in
+**Settings → Agents**. Each agent can override any of them on its app's page.
+**Unattended runs
+(webhooks, schedules) run as** names the account whose subscription an
+unattended run bills. A call refuses before provisioning a VM if its selected
+credential is missing.
 
 ## Sandboxes
 

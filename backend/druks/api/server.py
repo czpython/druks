@@ -33,7 +33,7 @@ from druks.durable.engine import init_dbos, launch, shutdown
 from druks.durable.exceptions import AgentCallNotFound
 from druks.events.routes import router as events_router
 from druks.files.routes import router as files_router
-from druks.harnesses.exceptions import UnknownModelError
+from druks.harnesses.exceptions import ExecutionSettingsError
 from druks.harnesses.routes import router as providers_router
 from druks.mcp.catalog import load_mcp_catalog
 from druks.mcp.gateway import exceptions as gate_errors
@@ -48,6 +48,7 @@ from druks.services.routes import router as service_identities_router
 from druks.settings import Settings, ensure_data_dirs, load_settings, setup_logging
 from druks.skills.routes import router as skills_router
 from druks.ui.exceptions import PageReadError
+from druks.user_settings.routes import agents_router
 from druks.user_settings.routes import router as settings_router
 from druks.webhooks import router as webhooks_router
 
@@ -217,8 +218,10 @@ async def _oauth_page_error_handler(request: Request, exc: OauthPageError) -> HT
     return render_page("service_oauth_error.html", message=str(exc), status_code=exc.status_code)
 
 
-@app.exception_handler(UnknownModelError)
-async def _unknown_model_handler(request: Request, exc: UnknownModelError) -> JSONResponse:
+@app.exception_handler(ExecutionSettingsError)
+async def _execution_settings_handler(
+    request: Request, exc: ExecutionSettingsError
+) -> JSONResponse:
     return JSONResponse(status_code=422, content={"error": "HTTP_422", "detail": str(exc)})
 
 
@@ -289,6 +292,7 @@ app.include_router(auth_router)
 app.include_router(providers_router)
 app.include_router(browser_sessions_router)
 app.include_router(settings_router, dependencies=_identity_gate)
+app.include_router(agents_router, dependencies=_identity_gate)
 app.include_router(apps_router, dependencies=_identity_gate)
 app.include_router(service_identities_router, dependencies=_identity_gate)
 app.include_router(oauth_router, dependencies=_identity_gate)

@@ -333,10 +333,11 @@ from replayed orchestration allows later edits to change an in-flight run.
 
 ## Add an agent
 
-An agent belongs to the app class. It runs on the operator's default model
-with that model's harness effort; the operator changes either per agent in
-Settings. `timeout` is the one declarable knob, because how long a step may
-take is a fact about the task.
+An agent belongs to the app class. Which CLI runs it, which model, which
+login it bills, and at what effort are the operator's choices: defaults in
+**Settings → Agents**, overridden per agent on the app's own page. `timeout`
+is the one declarable knob, because how long a step may take is a fact about
+the task.
 
 ```python
 from druks.agents import Agent, AgentOutput
@@ -362,8 +363,10 @@ result = await NightWatch.report(repo=repo, findings=findings)
 ```
 
 Druks renders the prompt with the current workflow, workspace, and supplied
-context. The selected harness provisions or attaches a sandbox, executes the
-CLI, validates the structured output, and records the call. Override
+context. It resolves the agent's harness, model, and login in one place,
+refuses before any sandbox work when the login is missing, then provisions or
+attaches a sandbox, executes the CLI, validates the structured output, and
+records the call. Override
 `AgentOutput.to_result()` to map the strict agent contract to a domain value.
 Override `get_artifact()` to publish a reviewable artifact.
 

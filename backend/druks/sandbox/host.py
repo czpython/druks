@@ -200,25 +200,23 @@ class Host:
     async def run_agent(
         self,
         *,
-        model: str,
+        agent: str,
+        account_id: str | None,
         prompt: str,
         schema: dict[str, Any],
-        agent: str,
         artifact_dir: Path,
         call_id: str | None = None,
-        effort: str | None = None,
-        timeout: int | None = None,
         github_token: str | None = None,
         include_plugins: bool = True,
         add_dirs: tuple[str, ...] = (),
         skills: tuple[str, ...] = (),
         extra_env: dict[str, Any] | None = None,
         mcp_servers: tuple[McpServer, ...] = (),
-        subscription_id: str | None = None,
     ) -> AgentResult:
-        """Run the harness and return a pure ``AgentResult`` — no database write.
-        A failure is carried on the result's ``error``, not raised, so the call
-        still records what it cost before the agent call re-raises it.
+        """Run ``agent`` as ``account_id`` and return a pure ``AgentResult`` —
+        no database write. A failure is carried on the result's ``error``, not
+        raised, so the call still records what it cost before the agent call
+        re-raises it.
 
         The repo is a *precondition*, not an input: callers that need one clone
         it into the VM first (see Software Factory's workspace).
@@ -227,27 +225,18 @@ class Host:
         """
         # cycle: the harnesses package eagerly imports claude/codex, which
         # import this package's siblings — so the factory can't load while
-        # druks.sandbox is mid-init. user_settings is heavy enough
-        # that we keep it out of module init either way.
+        # druks.sandbox is mid-init.
         from druks.durable.enums import AgentCallStatus
         from druks.harnesses.datastructures import SandboxSettings
-        from druks.harnesses.models import ProviderSubscription
-        from druks.user_settings.models import HarnessSettings, UserSettings
+        from druks.harnesses.execution import resolve_execution
 
         settings = load_settings()
-        fallback_id = (await UserSettings.get()).fallback_account_id
-        subscription = await ProviderSubscription.lookup(
-            model.partition("/")[0], fallback_id, subscription_id=subscription_id
-        )
-        harness_class = subscription.get_harness()
-        # Effort/timeout fall back to the harness defaults.
-        harness_settings = await HarnessSettings.get_registered(harness_class.name)
-        effort = effort or harness_settings.effort
-        timeout = timeout if timeout is not None else harness_settings.timeout
-        harness = harness_class(
+        execution = await resolve_execution(agent, account_id)
+        model, timeout = execution.model, execution.timeout
+        harness = execution.harness_class(
             model=model,
-            fast_mode=harness_settings.fast_mode,
-            effort=effort,
+            fast_mode=execution.fast_mode,
+            effort=execution.effort,
             sandbox=SandboxSettings.maybe_from_settings(settings),
         )
 
@@ -272,7 +261,8 @@ class Host:
                 extra_env=extra_env,
                 mcp_servers=mcp_servers,
                 call_id=run_id,
-                subscription=subscription,
+                subscription=execution.subscription,
+                key=execution.key,
             )
         except HarnessError as exc:
             error = exc
@@ -312,16 +302,18 @@ class Host:
         mcp_servers: tuple[McpServer, ...] = (),
         call_id: str | None = None,
         subscription: "ProviderSubscription | None" = None,
+        key: str | None = None,
     ) -> Any:
         """Drive one prompt through ``harness`` on this VM: the harness
         builds the invocation and parses the result; this sandbox executes it.
         One-shot callers with a hand-built harness use this directly;
         ``run_agent`` adds the harness factory + cost capture on top."""
-        # A one-shot caller with a hand-built harness pushes the fallback subscription.
+        # A one-shot caller with a hand-built harness runs on the fallback
+        # account's subscription.
         from druks.harnesses.models import ProviderSubscription
         from druks.user_settings.models import UserSettings
 
-        if not subscription:
+        if not (subscription or key):
             fallback_id = (await UserSettings.get()).fallback_account_id
             subscription = await ProviderSubscription.lookup(
                 harness.model.partition("/")[0], fallback_id
@@ -351,6 +343,7 @@ class Host:
             extra_env=extra_env,
             mcp_servers=mcp_servers,
             subscription=subscription,
+            key=key,
             timeout=timeout,
         )
         result = await self._exec(
