@@ -112,19 +112,21 @@ docker compose ps
 curl -fsS http://127.0.0.1:8001/health
 ```
 
-Then connect Anthropic and ChatGPT from **Settings → Providers → Connect**. Each card
-opens the provider authorization page. Paste the returned code into the card.
-Subscription tokens live in the database, not in a host CLI login. Agent runs
-do not start with a disconnected harness.
+Then connect the providers for your selected harnesses from
+**Settings → Providers**. Use a subscription or API key, as each provider
+supports. A subscription connection opens the provider authorization page.
+Paste the returned code into the card. Credentials live in the database, not
+in a host CLI login. Agent runs do not start when the selected harness has no
+connected provider.
 
-After both connections:
+After you connect the required providers:
 
 ```bash
 docker compose exec web druks doctor
 ```
 
 Each configured check must pass. You can run the command before you connect the
-harnesses. In that state, both harness credential checks report errors.
+harnesses. In that state, each disconnected harness reports a credential error.
 
 ### 4. Expose the public surfaces
 

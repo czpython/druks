@@ -189,9 +189,12 @@ resolved account, and `start()` inherits it. A route does not require more
 attribution code. If the dispatcher has a better account, pass `account_id`.
 For example, a webhook can resolve the ticket assignee.
 
-Each agent call uses the connection of the run account. If that connection is
-absent, the call uses the installation fallback account. The call records the
-charged account. Thus, you can see fallback use.
+Each agent call uses the subscription of the run account. A run with no
+account uses the installation fallback account's subscription. A missing
+subscription refuses the call; Druks never falls through to another account
+or to an API key. An API key is the installation's, owned by no account, so a
+call billed to it records the system account as the charged account. The call
+records the charged account. Thus, you can see fallback use.
 
 A cron or background run
 without an account uses the system account. A parked run keeps its original

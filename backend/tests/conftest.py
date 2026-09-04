@@ -163,9 +163,9 @@ def bind_ambient_session(session) -> None:
 
 
 async def connect_provider(provider_cls, payload: dict, *, provider_email: str = "op@example.com"):
-    """Seed the ProviderLogin row a finished OAuth connect flow would leave."""
+    """Seed the ProviderSubscription row a finished OAuth connect flow would leave."""
     from druks.accounts.models import Account
-    from druks.harnesses.models import ProviderLogin
+    from druks.harnesses.models import ProviderSubscription
     from druks.user_settings.models import UserSettings
 
     account = await Account.get_or_create(provider_email)
@@ -173,13 +173,12 @@ async def connect_provider(provider_cls, payload: dict, *, provider_email: str =
     if not settings.fallback_account_id:
         await settings.set_fallback_account(account.id)
     _, expires_at = provider_cls._refresh_state(payload)
-    return await ProviderLogin.connect(
+    return await ProviderSubscription.connect(
         provider=provider_cls.id,
         account=account,
         payload=payload,
         expires_at=expires_at,
         provider_email=provider_email,
-        kind="oauth",
     )
 
 
@@ -234,9 +233,7 @@ async def seed_note_run(session, *, note=None, state: str = "running", **kwargs)
     return await seed_run(session, kind=Summarize.kind, subject=subject, state=state, **kwargs)
 
 
-async def seed_note_agent_run(
-    *, agent: str = "implement", model: str = "openai-codex/gpt-5.5", **kwargs
-):
+async def seed_note_agent_run(*, agent: str = "implement", model: str = "openai/gpt-5.5", **kwargs):
     """A run on a fresh note with one agent call on it — the call is what the caller wants."""
     from druks.database import db_session
     from druks.testing import seed_call

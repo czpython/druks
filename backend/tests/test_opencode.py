@@ -1,7 +1,6 @@
 import json
 import subprocess
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 from druks.harnesses.datastructures import SandboxSettings
@@ -91,7 +90,7 @@ async def test_build_invocation_uses_server_schema_and_env_auth(
         env_headers={"X-Trace-Key": "MCP_TRACE_KEY"},
     )
     invocation = await _harness().build_invocation(
-        login=SimpleNamespace(provider="anthropic", payload={"api_key": _API_KEY}),
+        key=_API_KEY,
         prompt="A large prompt stays on stdin.",
         schema={"type": "object", "properties": {"answer": {"type": "string"}}},
         run_id="run-1",
@@ -150,10 +149,8 @@ async def test_build_invocation_uses_server_schema_and_env_auth(
     assert syntax.returncode == 0, syntax.stderr
 
 
-def test_auth_json_keys_the_login_provider() -> None:
-    login = SimpleNamespace(provider="openai", payload={"api_key": _API_KEY})
-
-    rendered = OpenCodeHarness.auth_json(login)
+def test_auth_json_keys_the_provider() -> None:
+    rendered = OpenCodeHarness.auth_json("openai", _API_KEY)
 
     assert json.loads(rendered) == {"openai": {"type": "api", "key": _API_KEY}}
 

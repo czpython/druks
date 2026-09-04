@@ -6,7 +6,7 @@ from pydantic.fields import FieldInfo
 
 from druks.apps.settings import field_kind
 from druks.database import db_session
-from druks.harnesses.models import ProviderLogin
+from druks.harnesses.models import ProviderSubscription
 from druks.harnesses.registry import get_harness_for_model
 
 from .models import SettingsOverride
@@ -26,9 +26,13 @@ if TYPE_CHECKING:
 async def get_agent_setting(agent: "Agent") -> AgentSettingResponse:
     model = await SettingsOverride.agent_model(agent.id)
     # The harness an actor-less run would land on: the one that accepts the
-    # fallback account's login kind, else the first that drives the provider.
-    login = await ProviderLogin.get_for_account(model.value.partition("/")[0], fallback=True)
-    harness = (login.get_harness() if login else get_harness_for_model(model.value)).name
+    # fallback account's subscription kind, else the first that drives the provider.
+    subscription = await ProviderSubscription.get_for_account(
+        model.value.partition("/")[0], fallback=True
+    )
+    harness = (
+        subscription.get_harness() if subscription else get_harness_for_model(model.value)
+    ).name
     effort = await SettingsOverride.agent_effort(agent.id, harness)
     timeout = await SettingsOverride.agent_timeout(agent.id, agent.timeout, harness)
     return AgentSettingResponse(

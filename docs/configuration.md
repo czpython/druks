@@ -132,6 +132,11 @@ order:
    More than one non-system account is configuration
    drift. Druks refuses requests and startup in this state.
 
+A subscription is always one person's. An API key is the installation's:
+one per provider, owned by no account, and visible to every account in
+**Settings → Providers** with the name of the person who last pasted it. A
+paste from any account replaces it.
+
 Before you enable `jwt` mode, make sure that the edge uses the configured header,
 claims, and rotation process.
 
@@ -265,13 +270,19 @@ optional. It reports pending setup if the selected tracker lacks a connection.
 
 ## Harnesses
 
-Anthropic and ChatGPT subscription credentials connect from **Settings → Providers**.
-The connection flow stores each credential in Postgres. Druks refreshes the
-credential on a schedule. It creates the CLI credential file inside each
-sandbox. It does not copy a host login. This is a capability connection for
+Druks registers two providers, `anthropic` and `openai`. Each accepts a
+subscription (Claude or ChatGPT) and an API key. Both connect from
+**Settings → Providers**. The connection flow stores each credential in
+Postgres. Druks refreshes a subscription token on a schedule. It creates the
+CLI credential file inside each sandbox, or passes the key in the CLI
+environment. It does not copy a host login. This is a capability connection for
 the requesting account — in a fresh `none`-mode install the first completed
-connection also creates the operator account (see
+subscription connection also creates the operator account (see
 [access control](#public-urls-and-access-control)).
+
+The `claude` and `codex` CLIs run on their own vendor's subscription or key.
+`opencode` and `pi` run on an API key only. A model id is `provider/model`
+on either kind, for example `openai/gpt-5.5`.
 
 `paths.harness_config_root` points at optional CLI configuration that Druks
 carries into sandboxes. The installer creates the root. Compose mounts it
@@ -290,7 +301,7 @@ read-only at `/harnesses`. Each harness reads one directory:
     └── config.toml
 ```
 
-Missing files are optional. Provider login files do not belong in this root.
+Missing files are optional. Provider credentials do not belong in this root.
 Harness defaults and per-agent model, effort, and timeout overrides live in
 dashboard settings. A call refuses before provisioning a VM if its selected
 harness lacks a connection.
@@ -404,9 +415,9 @@ is one of:
 - A token from a named process environment variable
 - An OAuth connection, which requires `urls.endpoint`.
 
-Druks delivers enabled servers to both harnesses unless an app workspace
-owns a required server with the same name. Tokens enter the agent environment
-under a derived variable and are never returned by the API.
+Druks delivers enabled servers through the selected harness unless an app
+workspace owns a required server with the same name. Tokens enter the agent
+environment under a derived variable and are never returned by the API.
 
 ## Skills
 

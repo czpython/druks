@@ -13,16 +13,16 @@ from .constants import GATE_USERS_PREFIX, MAX_AGENT_TIMEOUT_SECONDS, ROTATING_PR
 _RUN_HORIZON = MAX_AGENT_TIMEOUT_SECONDS  # a sandbox run never outlives this; caps every wait
 _POLL = 2.0
 # The gate is only shut for the seconds a refresh takes; a short TTL means a
-# crashed holder frees the login fast instead of blocking it for the horizon.
+# crashed holder frees the subscription fast instead of blocking it for the horizon.
 _SHUT_TTL_SECONDS = 60
 
 
 @asynccontextmanager
-async def use(login_id: str, call_id: str) -> AsyncIterator[None]:
+async def use(subscription_id: str, call_id: str) -> AsyncIterator[None]:
     """Register the call as an active user of its connection for its span."""
     client = get_client()
-    rotating = f"{ROTATING_PREFIX}{login_id}"
-    users = f"{GATE_USERS_PREFIX}{login_id}"
+    rotating = f"{ROTATING_PREFIX}{subscription_id}"
+    users = f"{GATE_USERS_PREFIX}{subscription_id}"
     while True:
         waited = 0.0
         while waited < _RUN_HORIZON and await client.exists(rotating):
@@ -41,12 +41,12 @@ async def use(login_id: str, call_id: str) -> AsyncIterator[None]:
 
 
 @asynccontextmanager
-async def shut(login_id: str) -> AsyncIterator[bool]:
+async def shut(subscription_id: str) -> AsyncIterator[bool]:
     """Shut the connection's gate; yield True when idle — rotate now — else
     defer to the next tick. Reopens on exit either way."""
     client = get_client()
-    rotating = f"{ROTATING_PREFIX}{login_id}"
-    users = f"{GATE_USERS_PREFIX}{login_id}"
+    rotating = f"{ROTATING_PREFIX}{subscription_id}"
+    users = f"{GATE_USERS_PREFIX}{subscription_id}"
     await client.set(rotating, "1", ex=_SHUT_TTL_SECONDS)
     try:
         await client.zremrangebyscore(users, "-inf", time.time())

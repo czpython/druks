@@ -155,7 +155,7 @@ function stubFetch(
       if (path === '/api/providers/catalogs') {
         return new Response('[]', { status: 200 })
       }
-      if (path === '/api/providers/logins') {
+      if (path === '/api/providers/subscriptions') {
         return new Response('[]', { status: 200 })
       }
       if (path === '/api/providers') {

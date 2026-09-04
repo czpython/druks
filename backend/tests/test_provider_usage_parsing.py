@@ -1,7 +1,7 @@
 import json
 from datetime import UTC, datetime
 
-from druks.harnesses.providers import AnthropicProvider, OpenAiCodexProvider
+from druks.harnesses.providers import AnthropicProvider, OpenAiProvider
 
 
 def test_claude_parse_keeps_every_weekly_limit_in_provider_order() -> None:
@@ -69,7 +69,7 @@ def test_claude_parse_falls_back_to_seven_day_without_limits() -> None:
 
 
 def test_codex_parse_keeps_every_weekly_limit_in_provider_order() -> None:
-    parsed = OpenAiCodexProvider._parse_usage(
+    parsed = OpenAiProvider._parse_usage(
         json.dumps(
             {
                 "plan_type": "prolite",
@@ -116,7 +116,7 @@ def test_codex_parse_treats_unlimited_credits_as_full_buckets() -> None:
         }
     )
 
-    parsed = OpenAiCodexProvider._parse_usage(payload)
+    parsed = OpenAiProvider._parse_usage(payload)
 
     assert parsed.ok
     assert parsed.plan_tier == "business"
@@ -128,7 +128,7 @@ def test_codex_parse_treats_unlimited_credits_as_full_buckets() -> None:
 def test_codex_parse_reads_a_group_spend_control_as_a_weekly_window() -> None:
     """Under group-based spend controls a business account carries no windows —
     the spend quota is the metered limit, on a cycle that runs weeks."""
-    parsed = OpenAiCodexProvider._parse_usage(
+    parsed = OpenAiProvider._parse_usage(
         json.dumps(
             {
                 "plan_type": "business",
@@ -161,7 +161,7 @@ def test_codex_parse_reads_a_group_spend_control_as_a_weekly_window() -> None:
 
 def test_codex_parse_places_a_weekly_only_plan_in_the_week_window() -> None:
     """A plan whose only quota is weekly reports it as the primary window."""
-    parsed = OpenAiCodexProvider._parse_usage(
+    parsed = OpenAiProvider._parse_usage(
         json.dumps(
             {
                 "plan_type": "prolite",
@@ -183,7 +183,7 @@ def test_codex_parse_places_a_weekly_only_plan_in_the_week_window() -> None:
 
 
 def test_codex_parse_rejects_an_unreadable_window() -> None:
-    parsed = OpenAiCodexProvider._parse_usage(
+    parsed = OpenAiProvider._parse_usage(
         json.dumps(
             {
                 "plan_type": "pro",
@@ -203,7 +203,7 @@ def test_codex_parse_rejects_an_unreadable_window() -> None:
 
 
 def test_codex_parse_still_fails_without_windows_or_unlimited() -> None:
-    parsed = OpenAiCodexProvider._parse_usage(
+    parsed = OpenAiProvider._parse_usage(
         json.dumps({"plan_type": "plus", "rate_limit": None, "credits": {"unlimited": False}})
     )
 

@@ -10,9 +10,14 @@ from druks.database import db_session
 from druks.user_settings.models import UserSettings
 
 from .exceptions import ConnectError
-from .models import ProviderCatalog, ProviderLogin
+from .models import ProviderCatalog, ProviderKey, ProviderSubscription
 from .providers import Provider, get_provider, get_providers
-from .schemas import ProviderCatalogResponse, ProviderLoginResponse, ProviderResponse
+from .schemas import (
+    ProviderCatalogResponse,
+    ProviderKeyResponse,
+    ProviderResponse,
+    ProviderSubscriptionResponse,
+)
 
 router = APIRouter(prefix="/api/providers", tags=["providers"])
 
@@ -23,16 +28,29 @@ router = APIRouter(prefix="/api/providers", tags=["providers"])
     response_model_by_alias=True,
     dependencies=[Depends(current_session_or_setup)],
 )
-async def list_providers() -> list[ProviderResponse]:
-    return [ProviderResponse.model_validate(provider) for provider in get_providers()]
+async def list_providers() -> tuple[Provider, ...]:
+    return get_providers()
 
 
-@router.get("/logins", response_model=list[ProviderLoginResponse], response_model_by_alias=True)
-async def list_logins(
+@router.get(
+    "/subscriptions",
+    response_model=list[ProviderSubscriptionResponse],
+    response_model_by_alias=True,
+)
+async def list_subscriptions(
     account: Account = Depends(current_session_account),
-) -> list[ProviderLoginResponse]:
-    logins = await ProviderLogin.list_for_account(account.id)
-    return [ProviderLoginResponse.model_validate(login) for login in logins]
+) -> list[ProviderSubscription]:
+    return await ProviderSubscription.list_for_account(account.id)
+
+
+@router.get(
+    "/keys",
+    response_model=list[ProviderKeyResponse],
+    response_model_by_alias=True,
+    dependencies=[Depends(current_session_account)],
+)
+async def list_keys() -> list[ProviderKey]:
+    return await ProviderKey.list_all()
 
 
 @router.get(
@@ -41,8 +59,8 @@ async def list_logins(
     response_model_by_alias=True,
     dependencies=[Depends(current_session_account)],
 )
-async def list_catalogs() -> list[ProviderCatalogResponse]:
-    return [ProviderCatalogResponse.model_validate(row) for row in await ProviderCatalog.list_all()]
+async def list_catalogs() -> list[ProviderCatalog]:
+    return await ProviderCatalog.list_all()
 
 
 def _resolve_provider(provider_id: str) -> Provider:
@@ -101,15 +119,14 @@ async def complete_connection(
     settings = await UserSettings.get()
     if not settings.fallback_account_id:
         await settings.set_fallback_account(resolved.id)
-    login = await ProviderLogin.connect(
+    await ProviderSubscription.connect(
         provider=provider.id,
         account=resolved,
         payload=completed.payload,
         expires_at=completed.expires_at,
         provider_email=completed.provider_email,
-        kind="oauth",
     )
-    # Materialize the reply, then land the login before any provider I/O —
+    # Materialize the reply, then land the subscription before any provider I/O —
     # an await while flushed rows still hold their locks can stall every other
     # writer on this event loop, and nothing past the point of durability may
     # depend on another database read.
@@ -119,7 +136,7 @@ async def complete_connection(
         # A fresh picker right after connect; fetch failures are tagged inside.
         # The single-use flow is already spent, so trouble here — including a
         # database that vanished under the refresh — only logs.
-        await provider.refresh_catalog(login)
+        await provider.refresh_catalog()
     except Exception:
         logging.getLogger(__name__).exception("Catalog refresh after connect failed")
         with suppress(Exception):
@@ -128,15 +145,15 @@ async def complete_connection(
 
 
 @router.post(
-    "/{provider_id}/connection",
-    response_model=ProviderLoginResponse,
+    "/{provider_id}/key",
+    response_model=ProviderKeyResponse,
     response_model_by_alias=True,
 )
-async def connect_key(
+async def create_key(
     provider_id: str,
     account: Account = Depends(current_session_account),
     key: str = Body(..., embed=True),
-) -> ProviderLoginResponse:
+) -> ProviderKey:
     provider = _resolve_provider(provider_id)
     if "api_key" not in provider.login_kinds:
         raise HTTPException(
@@ -144,23 +161,26 @@ async def connect_key(
             detail=f"{provider.label} does not accept API keys.",
         )
     if key := key.strip():
-        login = await ProviderLogin.connect(
-            provider=provider.id,
-            account=account,
-            payload={"api_key": key},
-            expires_at=None,
-            provider_email=account.username,
-            kind="api_key",
-        )
-        await provider.refresh_catalog(login)
-        return ProviderLoginResponse.model_validate(login)
+        row = await ProviderKey.create(provider=provider.id, key=key, account=account)
+        await provider.refresh_catalog()
+        return row
     raise HTTPException(status_code=422, detail="The API key is empty. Paste a key.")
+
+
+@router.delete(
+    "/{provider_id}/key", status_code=204, dependencies=[Depends(current_session_account)]
+)
+async def remove_key(provider_id: str) -> None:
+    provider = _resolve_provider(provider_id)
+    row = await ProviderKey.get(provider.id)
+    if row:
+        await row.delete()
 
 
 @router.delete("/{provider_id}/connection", status_code=204)
 async def disconnect(provider_id: str, account: Account = Depends(current_session_account)) -> None:
     provider = _resolve_provider(provider_id)
-    login = await ProviderLogin.get_for_account(provider.id, account.id)
-    if login:
-        # Only the requesting account's own login — never another's.
-        await login.delete()
+    subscription = await ProviderSubscription.get_for_account(provider.id, account.id)
+    if subscription:
+        # Only the requesting account's own subscription — never another's.
+        await subscription.delete()

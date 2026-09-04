@@ -30,8 +30,8 @@ from .exceptions import (
     HarnessRateLimitError,
     HarnessUsageLimitError,
 )
-from .models import ProviderLogin
-from .providers import OpenAiCodexProvider
+from .models import ProviderSubscription
+from .providers import OpenAiProvider
 from .subprocess import read_result_json
 
 logger = logging.getLogger(__name__)
@@ -60,10 +60,8 @@ class _Rate:
 # Public OpenAI/Codex rates as of the last update. Override via env when prices
 # change. Cached-input defaults to ~10% of input (OpenAI's typical discount).
 _DEFAULT_RATES: dict[str, _Rate] = {
-    # gpt-5.5 is the only Codex model callable on a ChatGPT-subscription
-    # auth (which is how we run). Assumed-equal to gpt-5's rate until
-    # OpenAI publishes specific gpt-5.5 pricing — override via
-    # DRUKS_CODEX_PRICES_JSON when that lands.
+    # Assumed-equal to gpt-5's rate until OpenAI publishes specific gpt-5.5
+    # pricing — override via DRUKS_CODEX_PRICES_JSON when that lands.
     "gpt-5.5": _Rate(input=1.25, cached_input=0.125, output=10.0),
     "gpt-5": _Rate(input=1.25, cached_input=0.125, output=10.0),
     "gpt-5-codex": _Rate(input=1.25, cached_input=0.125, output=10.0),
@@ -177,8 +175,6 @@ def _parse_token_count_events(
             if not isinstance(usage_raw, dict):
                 continue
             usage = _normalize_usage(usage_raw)
-            if usage is None:
-                continue
             model = info.get("model") or info.get("model_name")
             yield {
                 "timestamp": ts,
@@ -187,7 +183,7 @@ def _parse_token_count_events(
             }
 
 
-def _normalize_usage(raw: dict[str, Any]) -> _Usage | None:
+def _normalize_usage(raw: dict[str, Any]) -> _Usage:
     def _num(value: Any) -> int:
         # ``bool`` is a subclass of ``int`` in Python; exclude it explicitly so
         # a stray ``true`` in the JSONL doesn't coerce to 1.
@@ -266,9 +262,9 @@ class CodexHarness(Harness):
     # messages) to stdout as it runs — so stdout.jsonl is the live transcript,
     # symmetric with claude. session.jsonl is still snapshotted for cost.
     name = "codex"
-    provider = OpenAiCodexProvider.id
-    login_kinds = frozenset({"oauth"})
-    default_model = "openai-codex/gpt-5.5"
+    provider = OpenAiProvider.id
+    login_kinds = frozenset({"oauth", "api_key"})
+    default_model = "openai/gpt-5.5"
     command = "codex"
 
     # The CLI's terminal {"type":"error"} event carries prose, not status
@@ -370,7 +366,8 @@ class CodexHarness(Harness):
         skills: tuple[str, ...] = (),
         extra_env: dict[str, str] | None = None,
         mcp_servers: tuple[McpServer, ...] = (),
-        login: ProviderLogin,
+        subscription: ProviderSubscription | None = None,
+        key: str | None = None,
         timeout: int = Harness.default_timeout,
     ) -> AgentInvocation:
         sandbox = self.sandbox
@@ -401,7 +398,8 @@ class CodexHarness(Harness):
                 sandbox,
                 github_token=github_token,
                 skills=skills,
-                login=login,
+                subscription=subscription,
+                key=key,
             ),
             env=extra_env,
             extra_artifact_filenames=("output.json", "session.jsonl"),
@@ -482,11 +480,12 @@ class CodexHarness(Harness):
         *,
         github_token: str | None,
         skills: tuple[str, ...] = (),
-        login: ProviderLogin,
+        subscription: ProviderSubscription | None,
+        key: str | None,
     ) -> Credentials:
         config_dir = sandbox.harness_config_root / self.name
         home: list[HomeFile | HomeCopy] = [
-            self.auth_file(login),
+            self.auth_file(subscription, key=key),
             HomeCopy(".codex/config.toml", config_dir / "config.toml"),
             HomeCopy(".codex/.credentials.json", config_dir / ".credentials.json"),
             HomeCopy(".codex/AGENTS.md", config_dir / "AGENTS.md"),
@@ -498,5 +497,11 @@ class CodexHarness(Harness):
         return Credentials(home=tuple(home), github_token=github_token)
 
     @classmethod
-    def auth_file(cls, login: ProviderLogin) -> HomeFile:
-        return HomeFile(".codex/auth.json", json.dumps(dict(login.payload)))
+    def auth_file(
+        cls, subscription: ProviderSubscription | None, *, key: str | None = None
+    ) -> HomeFile:
+        if subscription:
+            auth = dict(subscription.payload)
+        else:
+            auth = {"OPENAI_API_KEY": key}
+        return HomeFile(".codex/auth.json", json.dumps(auth))

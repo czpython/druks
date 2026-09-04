@@ -12,10 +12,9 @@
 > before version 1.0. `main` and `latest` contain edge builds. They are not
 > stable releases.
 
-Druks is a self-hosted **home for durable agent apps**. It runs agents with the
-Claude and Codex subscriptions that you already use. Druks includes Software
-Factory. This app automates software delivery from a ticket to a reviewed pull
-request.
+Druks is a self-hosted **home for durable agent apps**. It runs agents through
+connected harnesses. The included Software Factory app automates software
+delivery from a ticket to a reviewed pull request.
 
 An ordinary agent script loses its place when the process dies. A Druks
 workflow records the result of each completed durable operation in Postgres.
@@ -79,7 +78,7 @@ prerequisites, access control, verification, and rollback.
 ```text
 trigger ──> app workflow ──> durable step ──> agent ──> sandbox
                  │                     │              │
-                 │                     │              └─ Claude or Codex harness
+                 │                     │              └─ harness CLI
                  │                     └─ result checkpointed in Postgres
                  ├─ event ──> feed / app reaction
                  └─ gate  ──> wait for human or external system ──> resume
@@ -91,7 +90,7 @@ Druks owns the execution and operating substrate:
 
 - DBOS workflows and queues that use Postgres
 - Typed human gates, cancellation, schedules, and observable run state
-- Claude and Codex harness dispatch through isolated Drukbox sandboxes
+- Agent harness dispatch through isolated Drukbox sandboxes
 - Append-only events, live feeds, webhooks, notifications, MCP servers, and skills
 - Validated operator settings, encrypted MCP and OAuth secrets, and the dashboard shell
 - App discovery, API namespaces, and independent migration histories.

@@ -17,7 +17,7 @@ from .datastructures import (
     HarnessRunResult,
     SandboxSettings,
 )
-from .models import ProviderLogin
+from .models import ProviderSubscription
 from .providers import Provider
 
 if TYPE_CHECKING:
@@ -34,7 +34,7 @@ MANIFEST_SCHEMA_VERSION = 2
 class Harness(ABC):
     name: str
     command: ClassVar[str]
-    # The login kinds this CLI consumes: "oauth" for a subscription CLI,
+    # The subscription kinds this CLI consumes: "oauth" for a subscription CLI,
     # "api_key" for one that runs on a pasted key.
     login_kinds: ClassVar[frozenset[str]]
     # The one provider a subscription CLI is bound to. None for a key CLI,
@@ -91,14 +91,14 @@ class Harness(ABC):
             raise exceptions.HarnessError(message)
 
     @classmethod
-    def accepts(cls, login: ProviderLogin) -> bool:
-        """Whether this CLI runs on ``login``."""
-        bound = not cls.provider or cls.provider == login.provider
-        return bound and login.kind in cls.login_kinds
+    def accepts(cls, subscription: ProviderSubscription) -> bool:
+        """Whether this CLI runs on the subscription ``subscription``."""
+        bound = not cls.provider or cls.provider == subscription.provider
+        return bound and "oauth" in cls.login_kinds
 
     @classmethod
     def has_provider(cls, provider: Provider) -> bool:
-        """The one this CLI is bound to, or any that issues a login kind it consumes."""
+        """The one this CLI is bound to, or any that issues a subscription kind it consumes."""
         if cls.provider:
             return cls.provider == provider.id
         return bool(cls.login_kinds & provider.login_kinds)

@@ -1,52 +1,37 @@
 import base64
 import json
-from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
 from conftest import connect_provider
+from druks.accounts.models import Account
 from druks.harnesses.claude import ClaudeHarness, _get_credentials
 from druks.harnesses.codex import CodexHarness
 from druks.harnesses.datastructures import SandboxSettings
 from druks.harnesses.exceptions import HarnessNotConnectedError
-from druks.harnesses.models import ProviderLogin
-from druks.harnesses.providers import AnthropicProvider, OpenAiCodexProvider
+from druks.harnesses.models import ProviderSubscription
+from druks.harnesses.providers import AnthropicProvider, OpenAiProvider
 from druks.sandbox.datastructures import HomeCopy
 
 
-def _jwt(exp: int) -> str:
-    header = base64.urlsafe_b64encode(b'{"alg":"none"}').rstrip(b"=").decode()
-    payload = base64.urlsafe_b64encode(json.dumps({"exp": exp}).encode()).rstrip(b"=").decode()
-    return f"{header}.{payload}.sig"
-
-
-def _claude_payload(*, access="A0", refresh="R0", expires_at=None) -> dict:
+async def _seed_claude(
+    *,
+    provider_email="op@example.com",
+    access="A0",
+    refresh="R0",
+) -> ProviderSubscription:
     block = {"accessToken": access, "scopes": ["user:profile"], "subscriptionType": "max"}
-    if refresh is not None:
+    if refresh:
         block["refreshToken"] = refresh
-    if expires_at is not None:
-        block["expiresAt"] = int(expires_at.timestamp() * 1000)
-    return {"claudeAiOauth": block}
-
-
-async def _seed_claude(*, provider_email="op@example.com", **kwargs) -> ProviderLogin:
     return await connect_provider(
-        AnthropicProvider, _claude_payload(**kwargs), provider_email=provider_email
-    )
-
-
-async def _seed_codex(*, provider_email="op@example.com", account_id="acc-1") -> ProviderLogin:
-    access = _jwt(int((datetime.now(UTC) + timedelta(days=9)).timestamp()))
-    tokens = {"access_token": access, "refresh_token": "R0", "account_id": account_id}
-    return await connect_provider(
-        OpenAiCodexProvider,
-        {"auth_mode": "chatgpt", "OPENAI_API_KEY": None, "tokens": tokens},
+        AnthropicProvider,
+        {"claudeAiOauth": block},
         provider_email=provider_email,
     )
 
 
 async def test_claude_builder_puts_db_credentials_on_the_bundle(druks_db):
-    login = await _seed_claude(access="live", refresh="R0")
+    subscription = await _seed_claude(access="live", refresh="R0")
     sandbox = SandboxSettings(
         service_url="x",
         service_token="x",
@@ -54,15 +39,33 @@ async def test_claude_builder_puts_db_credentials_on_the_bundle(druks_db):
         image="x",
         harness_config_root=Path("/harnesses"),
     )
-    bundle = await _get_credentials(sandbox, github_token=None, login=login)
+    bundle = await _get_credentials(sandbox, github_token=None, subscription=subscription)
     auth = bundle.home[0]
     assert auth.path == ".claude/.credentials.json"
     assert json.loads(auth.content)["claudeAiOauth"]["accessToken"] == "live"
 
 
 async def test_credentials_builders_read_their_harness_config_directories(druks_db):
-    claude_login = await _seed_claude()
-    codex_login = await _seed_codex()
+    claude_subscription = await _seed_claude()
+    far_future_expiration = 4_102_444_800
+    jwt_header = base64.urlsafe_b64encode(b'{"alg":"none"}').rstrip(b"=").decode()
+    jwt_payload = (
+        base64.urlsafe_b64encode(json.dumps({"exp": far_future_expiration}).encode())
+        .rstrip(b"=")
+        .decode()
+    )
+    codex_subscription = await connect_provider(
+        OpenAiProvider,
+        {
+            "auth_mode": "chatgpt",
+            "OPENAI_API_KEY": None,
+            "tokens": {
+                "access_token": f"{jwt_header}.{jwt_payload}.sig",
+                "refresh_token": "R0",
+                "account_id": "acc-1",
+            },
+        },
+    )
     config_root = Path("/harnesses")
     sandbox = SandboxSettings(
         service_url="x",
@@ -72,13 +75,22 @@ async def test_credentials_builders_read_their_harness_config_directories(druks_
         harness_config_root=config_root,
     )
 
-    claude_bundle = await _get_credentials(sandbox, github_token=None, login=claude_login)
+    claude_bundle = await _get_credentials(
+        sandbox,
+        github_token=None,
+        subscription=claude_subscription,
+    )
     codex_bundle = await CodexHarness(
         model=CodexHarness.default_model,
         fast_mode=False,
         effort=None,
         sandbox=sandbox,
-    )._get_credentials(sandbox, github_token=None, login=codex_login)
+    )._get_credentials(
+        sandbox,
+        github_token=None,
+        subscription=codex_subscription,
+        key=None,
+    )
 
     assert claude_bundle.home[0].path == ".claude/.credentials.json"
     assert codex_bundle.home[0].path == ".codex/auth.json"
@@ -119,7 +131,7 @@ async def test_credentials_builders_read_their_harness_config_directories(druks_
 
 
 async def test_missing_config_root_keeps_the_db_credential(druks_db, tmp_path):
-    login = await _seed_claude(access="live")
+    subscription = await _seed_claude(access="live")
     sandbox = SandboxSettings(
         service_url="x",
         service_token="x",
@@ -127,32 +139,33 @@ async def test_missing_config_root_keeps_the_db_credential(druks_db, tmp_path):
         image="x",
         harness_config_root=tmp_path / "missing",
     )
-    bundle = await _get_credentials(sandbox, github_token="gh", login=login)
+    bundle = await _get_credentials(sandbox, github_token="gh", subscription=subscription)
     auth = bundle.home[0]
     assert json.loads(auth.content)["claudeAiOauth"]["accessToken"] == "live"
     assert bundle.github_token == "gh"
 
 
-async def test_credential_without_a_selection_reads_the_fallback_account(druks_db):
-    fallback = await _seed_claude(access="fallback", provider_email="a@example.com")
+async def test_credential_without_a_selection_reads_the_accounts_row(druks_db):
+    own = await _seed_claude(access="own", provider_email="a@example.com")
 
-    assert (await ProviderLogin.lookup("anthropic", None)).id == fallback.id
+    assert (await ProviderSubscription.lookup("anthropic", own.account_id)).id == own.id
 
 
 async def test_credential_without_any_row_raises(druks_db):
-    with pytest.raises(HarnessNotConnectedError, match="anthropic is not connected"):
-        await ProviderLogin.lookup("anthropic", None)
+    account = await Account.get_or_create("a@example.com")
+    with pytest.raises(HarnessNotConnectedError, match="connect your Anthropic subscription"):
+        await ProviderSubscription.lookup("anthropic", account.id)
 
 
 async def test_credential_renders_only_the_selected_row(druks_db):
     mine = await _seed_claude(access="mine-token", provider_email="a@example.com")
     other = await _seed_claude(access="other-token", provider_email="b@example.com")
 
-    selected = await ProviderLogin.lookup("anthropic", None, login_id=other.id)
+    selected = await ProviderSubscription.lookup("anthropic", None, subscription_id=other.id)
     rendered = json.loads(ClaudeHarness.auth_file(selected).content)
     assert rendered["claudeAiOauth"]["accessToken"] == "other-token"
     assert "mine-token" not in json.dumps(rendered)
-    selected = await ProviderLogin.lookup("anthropic", None, login_id=mine.id)
+    selected = await ProviderSubscription.lookup("anthropic", None, subscription_id=mine.id)
     rendered = json.loads(ClaudeHarness.auth_file(selected).content)
     assert rendered["claudeAiOauth"]["accessToken"] == "mine-token"
 
@@ -165,4 +178,4 @@ async def test_credential_for_a_deleted_row_raises(druks_db):
     # A disconnect between selection and push fails the call — it must never
     # fall through to another account's payload.
     with pytest.raises(HarnessNotConnectedError, match="removed"):
-        await ProviderLogin.lookup("anthropic", None, login_id=gone_id)
+        await ProviderSubscription.lookup("anthropic", None, subscription_id=gone_id)

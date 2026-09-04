@@ -27,7 +27,7 @@ import type { UsageProviderSummary } from '../api/types'
  */
 
 // One-letter pill labels; unknown providers fall back to their first letter.
-const SHORT_LABELS: Record<string, string> = { anthropic: 'a', 'openai-codex': 'x', openai: 'o' }
+const SHORT_LABELS: Record<string, string> = { anthropic: 'a', openai: 'o' }
 
 export function UsagePill() {
   const { data, isLoading, isError } = useUsage()

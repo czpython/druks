@@ -21,7 +21,7 @@ from .artifacts import call_dir, write_cost
 from .base import Harness
 from .constants import CLAUDE_DISALLOWED_TOOLS
 from .datastructures import SandboxSettings
-from .models import ProviderLogin
+from .models import ProviderSubscription
 from .providers import AnthropicProvider
 
 logger = logging.getLogger(__name__)
@@ -32,7 +32,7 @@ class ClaudeHarness(Harness):
     # (``--output-format stream-json``), so the transcript is the stdout.
     name = "claude"
     provider = AnthropicProvider.id
-    login_kinds = frozenset({"oauth"})
+    login_kinds = frozenset({"oauth", "api_key"})
     default_model = "anthropic/claude-opus-4-7"
     command = "claude"
 
@@ -67,7 +67,8 @@ class ClaudeHarness(Harness):
         skills: tuple[str, ...] = (),
         extra_env: dict[str, str] | None = None,
         mcp_servers: tuple[McpServer, ...] = (),
-        login: ProviderLogin,
+        subscription: ProviderSubscription | None = None,
+        key: str | None = None,
         timeout: int = Harness.default_timeout,
     ) -> AgentInvocation:
         if not self.sandbox:
@@ -119,6 +120,9 @@ class ClaudeHarness(Harness):
             f'if [ -n "$sf" ]; then cp "$sf" {session_q}; fi; '
             "exit $ec"
         )
+        env = dict(extra_env or {})
+        if key:
+            env["ANTHROPIC_API_KEY"] = key
         return AgentInvocation(
             name="claude",
             args=("sh", "-c", wrapper),
@@ -128,9 +132,9 @@ class ClaudeHarness(Harness):
                 github_token=github_token,
                 include_plugins=include_plugins,
                 skills=skills,
-                login=login,
+                subscription=subscription,
             ),
-            env=extra_env,
+            env=env,
             extra_artifact_filenames=("debug.log", "session.jsonl"),
         )
 
@@ -185,8 +189,8 @@ class ClaudeHarness(Harness):
         return ("--mcp-config", json.dumps({"mcpServers": entries}))
 
     @classmethod
-    def auth_file(cls, login: ProviderLogin) -> HomeFile:
-        return HomeFile(".claude/.credentials.json", json.dumps(dict(login.payload)))
+    def auth_file(cls, subscription: ProviderSubscription) -> HomeFile:
+        return HomeFile(".claude/.credentials.json", json.dumps(dict(subscription.payload)))
 
     def _command_args(self) -> tuple[str, ...]:
         args = (self.command,)
@@ -205,15 +209,17 @@ async def _get_credentials(
     github_token: str | None,
     include_plugins: bool = True,
     skills: tuple[str, ...] = (),
-    login: ProviderLogin,
+    subscription: ProviderSubscription | None,
 ) -> Credentials:
     """The Credentials bundle the runner pushes into the sandbox: the rendered
     credentials file, plus any local config, plugins, and skills.
     ``include_plugins=False`` skips the operator's plugin state, for prompts
     that use no MCP server and would otherwise die on a misconfigured plugin."""
     config_dir = sandbox.harness_config_root / ClaudeHarness.name
-    home: list[HomeFile | HomeCopy] = [
-        ClaudeHarness.auth_file(login),
+    home: list[HomeFile | HomeCopy] = []
+    if subscription:
+        home.append(ClaudeHarness.auth_file(subscription))
+    home += [
         HomeCopy(".claude.json", config_dir / ".claude.json"),
         HomeCopy(".claude/settings.json", config_dir / "settings.json"),
         HomeCopy(".claude/CLAUDE.md", config_dir / "CLAUDE.md"),

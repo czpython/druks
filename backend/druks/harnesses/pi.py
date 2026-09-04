@@ -16,7 +16,8 @@ from druks.sandbox.layout import get_runs_root
 from . import exceptions
 from .artifacts import write_cost
 from .base import Harness
-from .models import ProviderLogin
+from .models import ProviderSubscription
+from .providers import jwt_expiry
 from .subprocess import read_result_json
 
 _DRUKS_OUTPUT_TEMPLATE = Path(__file__).parent / "druks-output.ts"
@@ -38,9 +39,25 @@ class PiHarness(Harness):
     default_model = "openai/gpt-5.5"
 
     @classmethod
-    def auth_file(cls, login: ProviderLogin) -> HomeFile:
-        auth = {login.provider: {"type": "api_key", "key": login.payload["api_key"]}}
-        return HomeFile(".pi/agent/auth.json", json.dumps(auth))
+    def auth_file(
+        cls,
+        provider: str,
+        *,
+        subscription: ProviderSubscription | None = None,
+        key: str | None = None,
+    ) -> HomeFile:
+        if subscription:
+            tokens = subscription.payload["tokens"]
+            entry = {
+                "type": "oauth",
+                "access": tokens["access_token"],
+                "refresh": tokens["refresh_token"],
+                "expires": int(jwt_expiry(tokens["access_token"]).timestamp() * 1000),
+                "accountId": tokens["account_id"],
+            }
+        else:
+            entry = {"type": "api_key", "key": key}
+        return HomeFile(".pi/agent/auth.json", json.dumps({provider: entry}))
 
     async def build_invocation(
         self,
@@ -58,7 +75,8 @@ class PiHarness(Harness):
         skills: tuple[str, ...] = (),
         extra_env: dict[str, str] | None = None,
         mcp_servers: tuple[McpServer, ...] = (),
-        login: ProviderLogin,
+        subscription: ProviderSubscription | None = None,
+        key: str | None = None,
         timeout: int = Harness.default_timeout,
     ) -> AgentInvocation:
         if not self.sandbox:
@@ -67,7 +85,9 @@ class PiHarness(Harness):
                 "sandbox.service_url and related TOML settings.",
             )
 
-        provider, _, model = self.model.partition("/")
+        model = self.model_id
+        # pi keeps the ChatGPT backend as its own provider name.
+        provider = "openai-codex" if subscription else self.model.partition("/")[0]
         in_vm_run_dir = f"{get_runs_root(ssh_username)}/{run_id}"
         in_vm_schema = f"{in_vm_run_dir}/schema.json"
         in_vm_extension = f"{in_vm_run_dir}/druks-output.ts"
@@ -121,7 +141,7 @@ class PiHarness(Harness):
         command_line = " ".join(shlex.quote(argument) for argument in command)
         wrapper = " && ".join((*writes, command_line))
 
-        auth_file = self.auth_file(login)
+        auth_file = self.auth_file(provider, subscription=subscription, key=key)
         return AgentInvocation(
             name=self.name,
             args=("sh", "-c", wrapper),

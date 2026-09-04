@@ -357,7 +357,7 @@ async def test_run_prompt_builds_executes_and_parses(
         artifact_dir=ctx.artifact_dir,
         timeout=60,
         call_id="call-7",
-        login=SimpleNamespace(provider="anthropic"),
+        subscription=SimpleNamespace(provider="anthropic"),
         extra_env={"GITHUB_MCP_TOKEN": "ghs_x"},
     )
 
@@ -526,13 +526,15 @@ def _patch_harness_resolution(monkeypatch: pytest.MonkeyPatch) -> None:
     async def get_registered(name):
         return SimpleNamespace(effort="high", timeout=60, fast_mode=False)
 
-    async def lookup(provider, account_id, *, login_id=None):
-        return SimpleNamespace(id="login-1", account_id="acc", get_harness=lambda: ClaudeHarness)
+    async def lookup(provider, account_id, *, subscription_id=None):
+        return SimpleNamespace(
+            id="subscription-1", account_id="acc", get_harness=lambda: ClaudeHarness
+        )
 
     monkeypatch.setattr(
         "druks.user_settings.models.HarnessSettings.get_registered", staticmethod(get_registered)
     )
-    monkeypatch.setattr("druks.harnesses.models.ProviderLogin.lookup", staticmethod(lookup))
+    monkeypatch.setattr("druks.harnesses.models.ProviderSubscription.lookup", staticmethod(lookup))
 
 
 async def test_run_agent_carries_foreign_failures_as_harness_errors(

@@ -29,7 +29,8 @@ import type {
   Service,
   Provider,
   ProviderCatalog,
-  ProviderLogin,
+  ProviderKey,
+  ProviderSubscription,
   Skill,
   SkillCollection,
   UserSettings,
@@ -268,7 +269,8 @@ export const api = {
   updateHarness: (name: string, body: UpdateHarnessRequest) =>
     patchJSON<Harness>(`/api/settings/harnesses/${encodeURIComponent(name)}`, body),
   providers: () => getJSON<Provider[]>('/api/providers'),
-  providerLogins: () => getJSON<ProviderLogin[]>('/api/providers/logins'),
+  providerSubscriptions: () => getJSON<ProviderSubscription[]>('/api/providers/subscriptions'),
+  providerKeys: () => getJSON<ProviderKey[]>('/api/providers/keys'),
   providerCatalogs: () => getJSON<ProviderCatalog[]>('/api/providers/catalogs'),
   startProviderConnect: (id: string) =>
     postJSON<ConnectChallenge>(`/api/providers/${encodeURIComponent(id)}/connection/start`, {}),
@@ -277,8 +279,9 @@ export const api = {
       code,
       connectionId,
     }),
-  connectProviderKey: (id: string, key: string) =>
-    postJSON<ProviderLogin>(`/api/providers/${encodeURIComponent(id)}/connection`, { key }),
+  createProviderKey: (id: string, key: string) =>
+    postJSON<ProviderKey>(`/api/providers/${encodeURIComponent(id)}/key`, { key }),
+  removeProviderKey: (id: string) => deleteRequest(`/api/providers/${encodeURIComponent(id)}/key`),
   disconnectProvider: (id: string) =>
     deleteRequest(`/api/providers/${encodeURIComponent(id)}/connection`),
   // The appliance's own identities at external services — connect verifies the

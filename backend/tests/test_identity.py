@@ -10,8 +10,8 @@ from druks.accounts.dependencies import resolve_single_operator
 from druks.accounts.exceptions import AuthConfigurationError
 from druks.accounts.models import Account, PersonalAccessToken
 from druks.harnesses import providers as pbase
-from druks.harnesses.models import ProviderLogin
-from druks.harnesses.providers import AnthropicProvider
+from druks.harnesses.models import ProviderKey, ProviderSubscription
+from druks.harnesses.providers import AnthropicProvider, OpenAiProvider
 from druks.testing import configure_app_for_test, make_settings
 from druks.user_settings.models import UserSettings
 from fastapi.testclient import TestClient
@@ -212,32 +212,59 @@ async def test_none_zero_setup_flow_creates_the_operator(tmp_path, monkeypatch, 
         assert body["onboardingRequired"] is False
     account = await Account.get_for_username("me@example.com")
     assert (await UserSettings.get()).fallback_account_id == account.id
-    assert await ProviderLogin.get_for_account("anthropic", account.id)
+    assert await ProviderSubscription.get_for_account("anthropic", account.id)
 
 
-async def test_api_key_connect_stores_the_operator_identity(tmp_path, druks_db):
+async def test_a_pasted_key_is_the_providers_and_names_its_paster(tmp_path, druks_db):
     with _header_client(tmp_path) as client:
         response = client.post(
-            "/api/providers/anthropic/connection",
+            "/api/providers/anthropic/key",
             json={"key": "  api-key-value  "},
             headers={HEADER: "operator@example.com"},
         )
 
     assert response.status_code == 200
-    assert response.json()["kind"] == "api_key"
+    assert response.json()["keyTail"] == "alue"
+    assert response.json()["updatedBy"]["username"] == "operator@example.com"
     assert "api-key-value" not in response.text
+    # The key is the installation's; the paster holds no subscription of their own.
     account = await Account.get_for_username("operator@example.com")
-    connection = await ProviderLogin.get_for_account("anthropic", account.id)
-    assert connection.kind == "api_key"
-    assert connection.payload == {"api_key": "api-key-value"}
-    assert connection.provider_email == account.username
-    assert not connection.expires_at
+    assert not await ProviderSubscription.get_for_account("anthropic", account.id)
+    stored = await ProviderKey.get("anthropic")
+    assert stored.value.decrypt() == "api-key-value"
+    assert stored.updated_by_account_id == account.id
 
 
-async def test_api_key_connect_requires_a_declared_kind(tmp_path, druks_db):
+async def test_a_key_alone_finishes_onboarding(tmp_path, druks_db):
+    # A key-only operator (one whose key row the migration moved out of the
+    # subscriptions) must reach Settings, not the subscription-only door.
+    with _header_client(tmp_path) as client:
+        headers = {HEADER: "operator@example.com"}
+        assert client.get("/api/auth/me", headers=headers).json()["onboardingRequired"] is True
+        client.post("/api/providers/anthropic/key", json={"key": "sk"}, headers=headers)
+        assert client.get("/api/auth/me", headers=headers).json()["onboardingRequired"] is False
+
+
+async def test_a_second_pasted_key_replaces_the_first(tmp_path, druks_db):
+    with _header_client(tmp_path) as client:
+        for who, key in (("first@example.com", "key-one"), ("second@example.com", "key-two")):
+            response = client.post(
+                "/api/providers/anthropic/key",
+                json={"key": key},
+                headers={HEADER: who},
+            )
+            assert response.status_code == 200
+
+    [stored] = await ProviderKey.list_all()
+    assert stored.value.decrypt() == "key-two"
+    assert stored.updated_by.username == "second@example.com"
+
+
+async def test_api_key_connect_requires_a_declared_kind(tmp_path, druks_db, monkeypatch):
+    monkeypatch.setattr(OpenAiProvider, "login_kinds", frozenset({"oauth"}))
     with _header_client(tmp_path) as client:
         response = client.post(
-            "/api/providers/openai-codex/connection",
+            "/api/providers/openai/key",
             json={"key": "api-key-value"},
             headers={HEADER: "operator@example.com"},
         )
@@ -248,7 +275,7 @@ async def test_api_key_connect_requires_a_declared_kind(tmp_path, druks_db):
 async def test_api_key_connect_rejects_an_empty_key(tmp_path, druks_db):
     with _header_client(tmp_path) as client:
         response = client.post(
-            "/api/providers/anthropic/connection",
+            "/api/providers/anthropic/key",
             json={"key": "   "},
             headers={HEADER: "operator@example.com"},
         )
@@ -259,13 +286,13 @@ async def test_api_key_connect_rejects_an_empty_key(tmp_path, druks_db):
 async def test_api_key_connect_refuses_setup_scope(tmp_path, druks_db):
     with _client(tmp_path) as client:
         response = client.post(
-            "/api/providers/anthropic/connection",
+            "/api/providers/anthropic/key",
             json={"key": "api-key-value"},
         )
 
     assert response.status_code == 409
     assert not await Account.list_non_system()
-    assert not await ProviderLogin.list_all()
+    assert not await ProviderSubscription.list_all()
 
 
 async def test_concurrent_setup_completions_with_one_email_converge(
@@ -274,7 +301,7 @@ async def test_concurrent_setup_completions_with_one_email_converge(
     with _client(tmp_path) as client:
         # Both flows start while zero accounts exist — both unbound.
         first = client.post("/api/providers/anthropic/connection/start")
-        second = client.post("/api/providers/openai-codex/connection/start")
+        second = client.post("/api/providers/openai/connection/start")
         _mock_exchange(monkeypatch, _grant("me@example.com"))
         assert (
             client.post(
@@ -286,13 +313,13 @@ async def test_concurrent_setup_completions_with_one_email_converge(
         _mock_exchange_codex(monkeypatch, email="me@example.com")
         assert (
             client.post(
-                "/api/providers/openai-codex/connection/complete",
+                "/api/providers/openai/connection/complete",
                 json={"code": "c2", "connectionId": second.json()["connectionId"]},
             ).status_code
             == 200
         )
     assert len(await Account.list_non_system()) == 1
-    assert len(await ProviderLogin.list_all()) == 2
+    assert len(await ProviderSubscription.list_all()) == 2
 
 
 async def test_a_stale_unbound_completion_attaches_to_the_operator(tmp_path, monkeypatch, druks_db):
@@ -302,7 +329,7 @@ async def test_a_stale_unbound_completion_attaches_to_the_operator(tmp_path, mon
         # must attach to that operator instead of minting a rival account and
         # bricking none mode.
         first = client.post("/api/providers/anthropic/connection/start")
-        second = client.post("/api/providers/openai-codex/connection/start")
+        second = client.post("/api/providers/openai/connection/start")
         _mock_exchange(monkeypatch, _grant("a@example.com"))
         client.post(
             "/api/providers/anthropic/connection/complete",
@@ -310,7 +337,7 @@ async def test_a_stale_unbound_completion_attaches_to_the_operator(tmp_path, mon
         )
         _mock_exchange_codex(monkeypatch, email="b@example.com")
         completed = client.post(
-            "/api/providers/openai-codex/connection/complete",
+            "/api/providers/openai/connection/complete",
             json={"code": "c2", "connectionId": second.json()["connectionId"]},
         )
         assert completed.status_code == 200
@@ -318,23 +345,23 @@ async def test_a_stale_unbound_completion_attaches_to_the_operator(tmp_path, mon
         assert client.get("/api/settings").status_code == 200
     operator = await Account.get_for_username("a@example.com")
     assert len(await Account.list_non_system()) == 1
-    codex_connection = await ProviderLogin.get_for_account("openai-codex", operator.id)
+    codex_connection = await ProviderSubscription.get_for_account("openai", operator.id)
     # The capability keeps its own provider identity; it never rekeys the account.
     assert codex_connection.provider_email == "b@example.com"
 
 
 async def test_a_connect_survives_a_failed_catalog_refresh(tmp_path, monkeypatch, druks_db):
-    async def _refresh_boom(cls, login):
+    async def _refresh_boom(cls):
         raise RuntimeError("picker flush failed")
 
-    # The login commits before the refresh runs; a refresh failure past
+    # The subscription commits before the refresh runs; a refresh failure past
     # that point must not turn the durable connect into a client-visible error.
     monkeypatch.setattr(AnthropicProvider, "refresh_catalog", classmethod(_refresh_boom))
     with _client(tmp_path) as client:
         response = _connect(client, monkeypatch, email="me@example.com")
         assert response.status_code == 200
     account = await Account.get_for_username("me@example.com")
-    assert await ProviderLogin.get_for_account("anthropic", account.id)
+    assert await ProviderSubscription.get_for_account("anthropic", account.id)
 
 
 async def test_a_bound_connect_cannot_complete_under_another_operator(
@@ -352,7 +379,7 @@ async def test_a_bound_connect_cannot_complete_under_another_operator(
         )
         assert response.status_code == 422
         assert "different operator" in response.json()["detail"]
-    assert not any(row.provider == "anthropic" for row in await ProviderLogin.list_all())
+    assert not any(row.provider == "anthropic" for row in await ProviderSubscription.list_all())
 
 
 async def test_first_connection_claims_the_fallback_slot_once(tmp_path, monkeypatch, druks_db):
@@ -363,7 +390,7 @@ async def test_first_connection_claims_the_fallback_slot_once(tmp_path, monkeypa
         _connect(
             client,
             monkeypatch,
-            provider="openai-codex",
+            provider="openai",
             email="other-seat@corp.com",
             headers={HEADER: "second@example.com"},
         )
@@ -378,14 +405,14 @@ async def test_reconnect_records_provider_email_but_keeps_the_operator(
         response = _connect(
             client,
             monkeypatch,
-            provider="openai-codex",
+            provider="openai",
             email="corp-seat@corp.com",
             headers={HEADER: "me@example.com"},
         )
         assert response.status_code == 200
         assert response.json()["username"] == "me@example.com"
     account = await Account.get_for_username("me@example.com")
-    codex = await ProviderLogin.get_for_account("openai-codex", account.id)
+    codex = await ProviderSubscription.get_for_account("openai", account.id)
     assert codex.provider_email == "corp-seat@corp.com"
 
 

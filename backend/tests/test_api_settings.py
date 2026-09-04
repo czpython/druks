@@ -27,7 +27,8 @@ def test_get_harnesses_lists_seeded_defaults(tmp_path: Path):
     with _build_client(tmp_path) as client:
         harnesses = {h["name"]: h for h in client.get("/api/settings/harnesses").json()}
     assert harnesses["claude"]["provider"] == "anthropic"
-    assert harnesses["codex"]["provider"] == "openai-codex"
+    assert harnesses["codex"]["provider"] == "openai"
+    assert harnesses["codex"]["loginKinds"] == ["api_key", "oauth"]
     assert harnesses["pi"]["provider"] is None
     assert harnesses["pi"]["loginKinds"] == ["api_key"]
     assert (harnesses["codex"]["effort"], harnesses["codex"]["timeout"]) == ("high", 1800)
@@ -90,11 +91,11 @@ def test_patch_harness_updates_fast_mode(tmp_path: Path):
 def test_patch_settings_updates_the_default_model_every_agent_inherits(tmp_path: Path):
     with _build_client(tmp_path) as client:
         assert client.get("/api/settings").json()["defaultModel"] == "anthropic/claude-opus-4-7"
-        patch = client.patch("/api/settings", json={"defaultModel": "openai-codex/gpt-5.5"})
+        patch = client.patch("/api/settings", json={"defaultModel": "openai/gpt-5.5"})
         assert patch.status_code == 200
-        assert patch.json()["defaultModel"] == "openai-codex/gpt-5.5"
+        assert patch.json()["defaultModel"] == "openai/gpt-5.5"
         agents = {a["name"]: a for a in _software_factory_app(client)["agents"]}
-    assert agents["implement"]["model"] == "openai-codex/gpt-5.5"
+    assert agents["implement"]["model"] == "openai/gpt-5.5"
     assert agents["implement"]["source"] == "default"
 
 
@@ -375,12 +376,12 @@ def test_apps_override_agent_model_persists(tmp_path: Path):
     with _build_client(tmp_path) as client:
         patch = client.patch(
             "/api/settings/apps",
-            json={"agentModels": {"implement": "openai-codex/gpt-5.5"}},
+            json={"agentModels": {"implement": "openai/gpt-5.5"}},
         )
         assert patch.status_code == 200
         agents = {a["name"]: a for a in _software_factory_app(client)["agents"]}
 
-    assert agents["implement"]["model"] == "openai-codex/gpt-5.5"
+    assert agents["implement"]["model"] == "openai/gpt-5.5"
     assert agents["implement"]["source"] == "agent"
 
 

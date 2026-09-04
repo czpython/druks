@@ -17,21 +17,27 @@ import {
   type CatalogModel,
   type Provider,
   type ProviderCatalog,
-  type ProviderLogin,
+  type ProviderKey,
+  type ProviderSubscription,
   type Connection,
   type Service,
   type SkillCollection,
   type UpdateHarnessRequest,
   type UpdateAppsSettingsRequest,
   type UpdateUserSettingsRequest,
+  type UsageMetric,
+  type UsageProviderSummary,
+  type UsageResponse,
   type WorkflowSettingField,
 } from '../api/types'
 import { appLabel } from '../apps/registry'
-import { absTime, relTimeFromIso } from '../lib/format'
+import { absTime, money, relTimeFromIso } from '../lib/format'
+import { useUsageToday } from '../lib/useUsage'
+import { Bar } from './UsagePanel'
 import { harnessColors } from '../lib/harnessColors'
 
 // The models the operator can pick, joined from three lists: a harness has the
-// provider it is bound to, or any provider issuing a login kind it consumes.
+// provider it is bound to, or any provider issuing a subscription kind it consumes.
 interface Catalog {
   modelsOf: (harness: Harness) => CatalogModel[]
   harnessOf: (model: string) => string
@@ -151,9 +157,14 @@ export function SettingsModal({ open, onClose }: Props) {
     enabled: open,
     staleTime: 60_000,
   })
-  const providerLoginsQuery = useQuery({
-    queryKey: ['providerLogins'],
-    queryFn: () => api.providerLogins(),
+  const providerSubscriptionsQuery = useQuery({
+    queryKey: ['providerSubscriptions'],
+    queryFn: () => api.providerSubscriptions(),
+    enabled: open,
+  })
+  const providerKeysQuery = useQuery({
+    queryKey: ['providerKeys'],
+    queryFn: () => api.providerKeys(),
     enabled: open,
   })
   const providerCatalogsQuery = useQuery({
@@ -310,7 +321,8 @@ export function SettingsModal({ open, onClose }: Props) {
   const allowedEfforts = data?.allowedEfforts ?? []
   const harnesses = harnessesQuery.data ?? []
   const providers = providersQuery.data ?? []
-  const providerLogins = providerLoginsQuery.data ?? []
+  const providerSubscriptions = providerSubscriptionsQuery.data ?? []
+  const providerKeys = providerKeysQuery.data ?? []
   const catalog = buildCatalog(harnesses, providers, providerCatalogsQuery.data ?? [])
   const harnessByName: Record<string, Harness> = Object.fromEntries(
     harnesses.map((h) => [h.name, h]),
@@ -433,7 +445,7 @@ export function SettingsModal({ open, onClose }: Props) {
                 busy={busy}
               />
             )}
-            {section === 'providers' && <ProvidersPane providers={providers} logins={providerLogins} />}
+            {section === 'providers' && <ProvidersPane providers={providers} subscriptions={providerSubscriptions} keys={providerKeys} />}
             {section === 'harnesses' &&
               (harnesses.length > 0 ? (
                 <HarnessesPane
@@ -1179,7 +1191,7 @@ function ServiceDetail({ service, onBack }: { service: Service; onBack: () => vo
 
 function connectionIdentity(connection: Connection): string | null {
   const identity = connection.identity
-  return identity.email ?? identity.username ?? identity.login ?? identity.name ?? null
+  return identity.email ?? identity.username ?? identity.subscription ?? identity.name ?? null
 }
 
 const revokeReasonCopy: Record<string, string> = {
@@ -1361,18 +1373,29 @@ export function ConnectionsPane() {
   )
 }
 
-// Providers — who answers and bills a model request. One credential per
-// provider per account; every harness that drives the provider runs on it.
+// Providers — who answers and bills a model request. One card per vendor: the
+// requester's own subscription and the installation's one API key.
 // Connection state persists immediately, outside the modal's Save.
-function ProvidersPane({ providers, logins }: { providers: Provider[]; logins: ProviderLogin[] }) {
+function ProvidersPane({
+  providers,
+  subscriptions,
+  keys,
+}: {
+  providers: Provider[]
+  subscriptions: ProviderSubscription[]
+  keys: ProviderKey[]
+}) {
   const providerColor = harnessColors(providers.map((p) => p.id))
+  // The quota bars read the same snapshot the appbar pill polls; this pane
+  // only reads it, so the pill stays the one nudging scrapes.
+  const usageQuery = useQuery<UsageResponse>({ queryKey: ['usage'], queryFn: () => api.usage(), retry: 1 })
+  const todayQuery = useUsageToday()
   return (
     <div className="set-pane mcp-pane hrs-pane">
       <header className="mcp-pane-head">
         <h2 className="mcp-pane-title">Providers</h2>
         <p className="mcp-pane-sub">
-          Your subscription or API key at each model provider. Every harness that can drive a
-          provider runs on the credential you connect here.
+          Your subscription at each model provider, and the installation&apos;s API key.
         </p>
       </header>
       <div className="hrs-list">
@@ -1383,7 +1406,13 @@ function ProvidersPane({ providers, logins }: { providers: Provider[]; logins: P
               <span className="hr-name">{provider.label}</span>
               <span className="hr-provider">{provider.id}</span>
             </div>
-            <ProviderConnect provider={provider} login={logins.find((l) => l.provider === provider.id) ?? null} />
+            <ProviderConnect
+              provider={provider}
+              subscription={subscriptions.find((l) => l.provider === provider.id) ?? null}
+              apiKey={keys.find((k) => k.provider === provider.id) ?? null}
+              usage={usageQuery.data?.providers.find((u) => u.id === provider.id) ?? null}
+              keySpendToday={todayQuery.data?.providers.find((t) => t.id === provider.id)?.keySpendUsd ?? null}
+            />
           </div>
         ))}
       </div>
@@ -1391,108 +1420,179 @@ function ProvidersPane({ providers, logins }: { providers: Provider[]; logins: P
   )
 }
 
-// Connection state persists immediately, outside the modal's Save, so this
-// manages its own busy/error and refetches the logins query on change.
-export function ProviderConnect({ provider, login }: { provider: Provider; login: ProviderLogin | null }) {
+export function ProviderConnect({
+  provider,
+  subscription,
+  apiKey,
+  usage = null,
+  keySpendToday = null,
+}: {
+  provider: Provider
+  subscription: ProviderSubscription | null
+  apiKey: ProviderKey | null
+  usage?: UsageProviderSummary | null
+  keySpendToday?: number | null
+}) {
   const queryClient = useQueryClient()
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [key, setKey] = useState('')
+  const [replacing, setReplacing] = useState(false)
 
-  const refresh = () => queryClient.invalidateQueries({ queryKey: ['providerLogins'] })
+  const refresh = () => queryClient.invalidateQueries({ queryKey: ['providerSubscriptions'] })
+  const refreshKeys = () => queryClient.invalidateQueries({ queryKey: ['providerKeys'] })
   const flow = useProviderConnect(provider.id, async () => {
     await refresh()
   })
   const acceptsOauth = provider.loginKinds.includes('oauth')
   const acceptsApiKey = provider.loginKinds.includes('api_key')
 
+  const run = (action: () => Promise<unknown>, after: () => Promise<unknown>) => {
+    setBusy(true)
+    setError(null)
+    void action()
+      .then(after)
+      .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+      .finally(() => setBusy(false))
+  }
+
   const disconnect = () => {
     if (!window.confirm(`Disconnect ${provider.label}? Reconnect it before agents can run on it.`))
       return
-    setBusy(true)
-    setError(null)
-    void api
-      .disconnectProvider(provider.id)
-      .then(refresh)
-      .catch((e) => setError(e instanceof Error ? e.message : String(e)))
-      .finally(() => setBusy(false))
+    run(() => api.disconnectProvider(provider.id), refresh)
   }
 
-  const connectKey = (event: FormEvent<HTMLFormElement>) => {
+  const removeKey = () => {
+    if (!window.confirm(`Remove the ${provider.label} API key? Agents billed to it stop running.`))
+      return
+    run(() => api.removeProviderKey(provider.id), refreshKeys)
+  }
+
+  const createKey = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    setBusy(true)
-    setError(null)
-    void api
-      .connectProviderKey(provider.id, key)
-      .then(() => {
-        setKey('')
-        return refresh()
-      })
-      .catch((e) => setError(e instanceof Error ? e.message : String(e)))
-      .finally(() => setBusy(false))
+    run(async () => {
+      await api.createProviderKey(provider.id, key)
+      setKey('')
+      setReplacing(false)
+    }, refreshKeys)
   }
 
-  const connected = Boolean(login?.connected)
-  // An expired login is still a login: keep its identity and Disconnect
-  // visible and ask for a Reconnect, not a first-time Connect.
-  const expired = Boolean(login) && !connected
+  const connected = Boolean(subscription?.connected)
+  // An expired subscription is still a subscription: keep its identity and Disconnect
+  // visible and ask for a Reconnect, not a first-time sign-in.
+  const expired = Boolean(subscription) && !connected
+  const showKeyForm = acceptsApiKey && (!apiKey || replacing)
   return (
     <div className="hr-connect">
-      <div className="hr-conn-status">
-        <ServiceStatus connected={connected} label={expired ? 'Expired' : undefined} />
-        {login && <span className="hr-conn-id">{login.providerEmail}</span>}
-        {login?.expiresAt && (
-          <span className="hr-conn-exp">
-            token {expired ? 'expired' : 'expires'} {new Date(login.expiresAt).toLocaleString()}
-          </span>
-        )}
-        <span className="hr-conn-actions">
-          {login && (
-            <button className="set-btn danger quiet" onClick={disconnect} disabled={busy || flow.busy}>
-              Disconnect
-            </button>
+      {acceptsOauth && (
+        <section className="hr-block">
+          <div className="hr-block-title">Subscription</div>
+          {subscription ? (
+            <>
+              <div className="hr-conn-status">
+                <ServiceStatus connected={connected} label={expired ? 'Expired' : undefined} />
+                <span className="hr-conn-id">
+                  {usage?.planTier ? `${usage.planTier} · ` : ''}
+                  {subscription.providerEmail}
+                </span>
+                <span className="hr-conn-actions">
+                  {!flow.challenge && (
+                    <button className="set-btn ghost" onClick={() => void flow.start()} disabled={busy || flow.busy}>
+                      Reconnect
+                    </button>
+                  )}
+                  <button className="set-btn danger quiet" onClick={disconnect} disabled={busy || flow.busy}>
+                    Disconnect
+                  </button>
+                </span>
+              </div>
+              {usage?.fiveHour && <QuotaRow label="5h" metric={usage.fiveHour} />}
+              {usage?.weeks.map((week, index) => (
+                <QuotaRow key={index} label="week" metric={week} />
+              ))}
+              {subscription.expiresAt && (
+                <span className="hr-conn-exp">
+                  token {expired ? 'expired' : 'expires'} {relTimeFromIso(subscription.expiresAt)}
+                </span>
+              )}
+            </>
+          ) : (
+            !flow.challenge && (
+              <div>
+                <button className="set-btn primary" onClick={() => void flow.start()} disabled={busy || flow.busy}>
+                  Sign in with {provider.label}
+                </button>
+              </div>
+            )
           )}
-          {acceptsOauth && !flow.challenge && (
-            <button
-              className={'set-btn ' + (connected ? 'ghost' : 'primary')}
-              onClick={() => void flow.start()}
-              disabled={busy || flow.busy}
-            >
-              {login ? 'Reconnect' : 'Connect'}
-            </button>
-          )}
-        </span>
-      </div>
-      {acceptsOauth && <ConnectSteps flow={flow} />}
+          <ConnectSteps flow={flow} />
+        </section>
+      )}
       {acceptsApiKey && (
-        <form className="hr-conn-flow" onSubmit={connectKey}>
-          <div className="hr-conn-step hr-conn-paste">
-            <input
-              aria-label="API key"
-              autoComplete="off"
-              className="hr-conn-input"
-              disabled={busy || flow.busy}
-              onChange={(event) => setKey(event.target.value)}
-              placeholder="Paste API key"
-              spellCheck={false}
-              type="password"
-              value={key}
-            />
-            <button
-              className="hr-conn-btn"
-              disabled={busy || flow.busy || !key.trim()}
-              type="submit"
-            >
-              {login?.kind === 'api_key' ? 'Replace key' : 'Connect with key'}
-            </button>
-          </div>
-        </form>
+        <section className="hr-block">
+          <div className="hr-block-title">API key</div>
+          {apiKey && (
+            <div className="hr-conn-status">
+              <span className="hr-conn-id">…{apiKey.keyTail}</span>
+              <span className="hr-conn-exp">
+                set by {apiKey.updatedBy.username} · {relTimeFromIso(apiKey.updatedAt)}
+                {keySpendToday !== null && ` · ${money(keySpendToday)} today`}
+              </span>
+              <span className="hr-conn-actions">
+                <button className="set-btn ghost" onClick={() => setReplacing((value) => !value)} disabled={busy}>
+                  {replacing ? 'Keep' : 'Replace'}
+                </button>
+                <button className="set-btn danger quiet" onClick={removeKey} disabled={busy}>
+                  Remove
+                </button>
+              </span>
+            </div>
+          )}
+          {showKeyForm && (
+            <form className="hr-conn-flow" onSubmit={createKey}>
+              <div className="hr-conn-step hr-conn-paste">
+                <input
+                  aria-label="API key"
+                  autoComplete="off"
+                  className="hr-conn-input"
+                  disabled={busy || flow.busy}
+                  onChange={(event) => setKey(event.target.value)}
+                  placeholder="Paste API key"
+                  spellCheck={false}
+                  type="password"
+                  value={key}
+                />
+                <button className="hr-conn-btn" disabled={busy || flow.busy || !key.trim()} type="submit">
+                  {apiKey ? 'Replace key' : 'Add key'}
+                </button>
+              </div>
+            </form>
+          )}
+        </section>
       )}
       {(error ?? flow.error) && (
         <div className="hr-conn-error" role="alert">
           {error ?? flow.error}
         </div>
       )}
+    </div>
+  )
+}
+
+function QuotaRow({ label, metric }: { label: string; metric: UsageMetric }) {
+  if (metric.percentLeft === null) return null
+  const resets = metric.resetsAt
+    ? new Date(metric.resetsAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    : null
+  return (
+    <div className="hr-quota">
+      <span className="hr-quota-label mono">
+        {label}
+        {metric.model ? ` · ${metric.model}` : ''}
+      </span>
+      <Bar pctLeft={metric.percentLeft} />
+      <span className="hr-quota-pct mono">{metric.percentLeft}%</span>
+      <span className="hr-conn-exp">{resets ? `resets ${resets}` : ''}</span>
     </div>
   )
 }

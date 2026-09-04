@@ -75,11 +75,11 @@ class HarnessSandboxProvisioningError(HarnessSandboxError):
 
 
 class OAuthTokenError(Exception):
-    """No usable subscription login is available.
+    """No usable subscription is available.
 
     ``tag`` is a short, stable code surfaced on the usage snapshot's
     ``error`` column: ``no_credentials`` (harness not connected),
-    ``no_token`` (login present, no access token), ``token_expired``
+    ``no_token`` (subscription present, no access token), ``token_expired``
     (past expiry; the refresh cron hasn't caught up).
     """
 
@@ -107,7 +107,7 @@ class ConnectError(Exception):
 
 
 class HarnessNotConnectedError(HarnessError):
-    """The run's provider holds no login for the account, so nothing that needs
+    """The run's provider holds no subscription for the account, so nothing that needs
     auth can run. Settings → Providers is the only credential path."""
 
     code = "not_connected"

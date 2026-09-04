@@ -74,7 +74,7 @@ contains the built SPA and serves it from FastAPI.
 | `backend/druks/ui/` | Page declarations, the block/value/field catalog, the page API |
 | `backend/druks/events/`, `signals.py` | Event log, feed, and reactions |
 | `backend/druks/webhooks/` | Authenticated delivery framework and deduplication |
-| `backend/druks/harnesses/` | Claude/Codex invocation, auth, usage, capability manifests |
+| `backend/druks/harnesses/` | Harness invocation, authentication, usage, and capability manifests |
 | `backend/druks/sandbox/` | Drukbox lifecycle, SSH execution, workspace delivery |
 | `backend/druks/api/` | FastAPI composition and platform routes |
 | `backend/druks/{mcp,skills,notifications,user_settings}/` | Shared operator services |

@@ -134,9 +134,10 @@ Examine the MCP path:
 
 ### Harness not connected or expired
 
-Open **Settings → Providers** and reconnect the selected Anthropic or ChatGPT
-harness. Host CLI logins do not count. Druks validates the database credential
-before provisioning a sandbox.
+Open **Settings → Providers** and reconnect the Anthropic or OpenAI
+subscription, or add the API key, that the model's provider needs. Host CLI
+logins do not count. Druks validates the database credential before
+provisioning a sandbox.
 
 ### Model has no harness
 

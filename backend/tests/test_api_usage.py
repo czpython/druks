@@ -5,9 +5,10 @@ from zoneinfo import ZoneInfo
 
 import pytest
 from conftest import connect_provider
+from druks.accounts.constants import SYSTEM_ACCOUNT_ID
 from druks.accounts.models import Account
 from druks.harnesses.datastructures import ParsedMetric, ParsedUsage
-from druks.harnesses.models import ProviderLogin
+from druks.harnesses.models import ProviderKey, ProviderSubscription
 from druks.harnesses.providers import AnthropicProvider
 from druks.settings import Settings
 from druks.testing import configure_app_for_test, make_settings, seed_call, seed_run
@@ -49,7 +50,7 @@ def _provider(body: dict, provider_id: str) -> dict:
     return next(entry for entry in body["providers"] if entry["id"] == provider_id)
 
 
-async def _seed_agent_call(druks_db, *, model: str = "openai-codex/gpt-5.5"):
+async def _seed_agent_call(druks_db, *, model: str = "openai/gpt-5.5"):
     note = await Note.create(body="usage accounting")
     run = await seed_run(druks_db, kind=Summarize.kind, subject=note)
     return await seed_call(druks_db, run, "summarize", status="running", model=model)
@@ -73,36 +74,37 @@ async def test_usage_today_counts_calls_whose_model_no_picker_claims(client, dru
     assert bucket["spendUsd"] == 2.5
 
 
+async def test_usage_today_splits_the_shared_keys_spend_from_the_viewers(client, druks_db) -> None:
+    # A key is the system account's subscription, so a run billed to it is charged
+    # there; the card shows that spend beside the viewer's own.
+    mine = await _seed_agent_call(druks_db, model="anthropic/claude-opus-4-7")
+    mine.account_id = await _account_id()
+    mine.finished_at = datetime.now(UTC)
+    mine.cost_usd = 1.5
+    keyed = await _seed_agent_call(druks_db, model="anthropic/claude-opus-4-7")
+    keyed.account_id = SYSTEM_ACCOUNT_ID
+    keyed.finished_at = datetime.now(UTC)
+    keyed.cost_usd = 4.0
+    await druks_db.flush()
+
+    body = client.get("/api/usage/today").json()
+    anthropic = _provider(body, "anthropic")
+    assert anthropic["spendUsd"] == 1.5
+    assert anthropic["keySpendUsd"] == 4.0
+    assert _provider(body, "openai")["keySpendUsd"] == 0.0
+
+
 def test_get_usage_empty_returns_available_false(client) -> None:
     response = client.get("/api/usage")
     assert response.status_code == 200
     body = response.json()
     # One entry per registered provider, none available pre-first-poll.
-    assert {entry["id"] for entry in body["providers"]} == {"anthropic", "openai", "openai-codex"}
+    assert {entry["id"] for entry in body["providers"]} == {"anthropic", "openai"}
     assert all(entry["available"] is False for entry in body["providers"])
 
 
-async def test_get_usage_presents_api_key_connection_as_unmetered(client, druks_db) -> None:
-    await ProviderLogin.connect(
-        provider="openai",
-        account=await Account.get_or_create("op@example.com"),
-        payload={"api_key": "key"},
-        expires_at=None,
-        provider_email="op@example.com",
-        kind="api_key",
-    )
-
-    summary = _provider(client.get("/api/usage").json(), "openai")
-
-    assert summary["available"] is True
-    assert summary["connected"] is True
-    assert summary["unlimited"] is True
-    assert summary["fiveHour"] is None
-    assert summary["weeks"] == []
-
-
 async def test_get_usage_serializes_latest_per_provider(client, app_settings) -> None:
-    # Plant a snapshot for anthropic only — openai-codex should still report
+    # Plant a snapshot for anthropic only — openai should still report
     # ``available=false`` rather than missing-key/404.
     await _seed(
         [
@@ -137,7 +139,7 @@ async def test_get_usage_serializes_latest_per_provider(client, app_settings) ->
     assert 30 <= claude["ageSeconds"] <= 90  # close to the planted 45s
     assert claude["stale"] is False
 
-    assert _provider(body, "openai-codex")["available"] is False
+    assert _provider(body, "openai")["available"] is False
 
 
 async def test_get_usage_flags_stale_after_24h(client, app_settings) -> None:
@@ -163,7 +165,7 @@ async def test_get_usage_exposes_unlimited_flag(client, app_settings) -> None:
     await _seed(
         [
             UsageScrape(
-                provider="openai-codex",
+                provider="openai",
                 parse_ok=True,
                 plan_tier="business",
                 five_hour_percent_left=100,
@@ -174,8 +176,8 @@ async def test_get_usage_exposes_unlimited_flag(client, app_settings) -> None:
     )
 
     body = client.get("/api/usage").json()
-    assert _provider(body, "openai-codex")["unlimited"] is True
-    assert _provider(body, "openai-codex")["fiveHour"]["percentLeft"] == 100
+    assert _provider(body, "openai")["unlimited"] is True
+    assert _provider(body, "openai")["fiveHour"]["percentLeft"] == 100
     assert _provider(body, "anthropic")["unlimited"] is False
 
 
@@ -229,14 +231,14 @@ async def test_usage_history_serializes_series_oldest_first(client, app_settings
         39,
         40,
     ]
-    assert _provider(body, "openai-codex")["fiveHour"] == []
-    assert _provider(body, "openai-codex")["weeks"] == []
+    assert _provider(body, "openai")["fiveHour"] == []
+    assert _provider(body, "openai")["weeks"] == []
 
 
 async def test_usage_today_aggregates_spend_and_tokens_by_provider(
     client, app_settings, druks_db
 ) -> None:
-    codex_run = await _seed_agent_call(druks_db, model="openai-codex/gpt-5.5")
+    codex_run = await _seed_agent_call(druks_db, model="openai/gpt-5.5")
     codex_run.account_id = await _account_id()
     codex_run.cost_usd = 1.25
     codex_run.cost_metadata = {
@@ -260,17 +262,17 @@ async def test_usage_today_aggregates_spend_and_tokens_by_provider(
     claude_run.finished_at = datetime.now(UTC)
 
     # Finished yesterday — outside today's boundary, must not count.
-    old_run = await _seed_agent_call(druks_db, model="openai-codex/gpt-5.5")
+    old_run = await _seed_agent_call(druks_db, model="openai/gpt-5.5")
     old_run.cost_usd = 99.0
     old_run.finished_at = datetime.now(UTC) - timedelta(days=2)
 
     # Still running — no cost yet, counted nowhere.
-    await _seed_agent_call(druks_db, model="openai-codex/gpt-5.5")
+    await _seed_agent_call(druks_db, model="openai/gpt-5.5")
     await druks_db.flush()
 
     body = client.get("/api/usage/today").json()
 
-    codex = _provider(body, "openai-codex")
+    codex = _provider(body, "openai")
     assert codex["spendUsd"] == 1.25
     assert codex["tokens"] == 1250  # 1000 input + (200 + 50) output
     assert codex["runs"] == 1
@@ -297,26 +299,24 @@ async def test_usage_excludes_another_accounts_scrape(client, druks_db) -> None:
     assert _provider(history, "anthropic")["fiveHour"] == []
 
 
-async def test_usage_reports_viewers_login_identity(client, druks_db) -> None:
-    await ProviderLogin.connect(
+async def test_usage_reports_viewers_subscription_identity(client, druks_db) -> None:
+    await ProviderSubscription.connect(
         provider="anthropic",
         account=await Account.get_or_create("other@example.com"),
         payload={"claudeAiOauth": {"accessToken": "other"}},
         expires_at=None,
         provider_email="other-seat@example.com",
-        kind="oauth",
     )
     body = client.get("/api/usage").json()
     assert _provider(body, "anthropic")["connected"] is False
     assert _provider(body, "anthropic")["providerEmail"] is None
 
-    await ProviderLogin.connect(
+    await ProviderSubscription.connect(
         provider="anthropic",
         account=await Account.get_or_create("op@example.com"),
         payload={"claudeAiOauth": {"accessToken": "mine"}},
         expires_at=None,
         provider_email="subscription@example.com",
-        kind="oauth",
     )
     body = client.get("/api/usage").json()
     assert _provider(body, "anthropic")["connected"] is True
@@ -377,15 +377,10 @@ async def test_refresh_scrapes_only_the_viewers_logins(client, druks_db, monkeyp
     ).five_hour_percent_left == 50
 
 
-async def test_refresh_skips_a_non_metered_login(client, druks_db, monkeypatch) -> None:
-    account = await Account.get_or_create("op@example.com")
-    await ProviderLogin.connect(
-        provider="anthropic",
-        account=account,
-        payload={"api_key": "key"},
-        expires_at=None,
-        provider_email="op@example.com",
-        kind="api_key",
+async def test_refresh_never_scrapes_a_key(client, druks_db, monkeypatch) -> None:
+    # A key has no quota; only a subscription is polled.
+    await ProviderKey.create(
+        provider="anthropic", key="sk", account=await Account.get_or_create("op@example.com")
     )
     poll_usage = AsyncMock()
     monkeypatch.setattr(AnthropicProvider, "poll_usage", poll_usage)

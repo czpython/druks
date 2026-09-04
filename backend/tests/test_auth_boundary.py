@@ -31,8 +31,10 @@ SESSION_ONLY_API_ROUTES = {
     ("POST", "/api/auth/personal-tokens"),
     ("DELETE", "/api/auth/personal-tokens/{pat_id}"),
     ("GET", "/api/providers/catalogs"),
-    ("GET", "/api/providers/logins"),
-    ("POST", "/api/providers/{provider_id}/connection"),
+    ("GET", "/api/providers/subscriptions"),
+    ("GET", "/api/providers/keys"),
+    ("POST", "/api/providers/{provider_id}/key"),
+    ("DELETE", "/api/providers/{provider_id}/key"),
     ("DELETE", "/api/providers/{provider_id}/connection"),
     ("PATCH", "/api/settings/apps"),
     ("POST", "/api/services/{slug}"),
@@ -142,7 +144,7 @@ async def test_provider_list_answers_before_an_account_exists(druks_client):
     assert [item["id"] for item in body] == [provider.id for provider in get_providers()]
     by_id = {item["id"]: item for item in body}
     assert by_id["anthropic"]["loginKinds"] == ["api_key", "oauth"]
-    assert by_id["openai-codex"]["loginKinds"] == ["oauth"]
+    assert by_id["openai"]["loginKinds"] == ["api_key", "oauth"]
     assert not await Account.list_non_system()
 
 
