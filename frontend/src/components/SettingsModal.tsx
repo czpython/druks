@@ -1016,11 +1016,11 @@ export function ServicesPane() {
   )
 }
 
-function ServiceStatus({ connected }: { connected: boolean }) {
+function ServiceStatus({ connected, label }: { connected: boolean; label?: string }) {
   return (
     <span className={'mcp-conn' + (connected ? ' is-live' : '')}>
       <span className="mcp-conn-dot" />
-      {connected ? 'Connected' : 'Not connected'}
+      {label ?? (connected ? 'Connected' : 'Not connected')}
     </span>
   )
 }
@@ -1433,16 +1433,21 @@ export function ProviderConnect({ provider, login }: { provider: Provider; login
   }
 
   const connected = Boolean(login?.connected)
+  // An expired login is still a login: keep its identity and Disconnect
+  // visible and ask for a Reconnect, not a first-time Connect.
+  const expired = Boolean(login) && !connected
   return (
     <div className="hr-connect">
       <div className="hr-conn-status">
-        <ServiceStatus connected={connected} />
-        {login?.connected && <span className="hr-conn-id">{login.providerEmail}</span>}
-        {login?.connected && login.expiresAt && (
-          <span className="hr-conn-exp">token expires {new Date(login.expiresAt).toLocaleString()}</span>
+        <ServiceStatus connected={connected} label={expired ? 'Expired' : undefined} />
+        {login && <span className="hr-conn-id">{login.providerEmail}</span>}
+        {login?.expiresAt && (
+          <span className="hr-conn-exp">
+            token {expired ? 'expired' : 'expires'} {new Date(login.expiresAt).toLocaleString()}
+          </span>
         )}
         <span className="hr-conn-actions">
-          {connected && (
+          {login && (
             <button className="set-btn danger quiet" onClick={disconnect} disabled={busy || flow.busy}>
               Disconnect
             </button>
@@ -1453,7 +1458,7 @@ export function ProviderConnect({ provider, login }: { provider: Provider; login
               onClick={() => void flow.start()}
               disabled={busy || flow.busy}
             >
-              {connected ? 'Reconnect' : 'Connect'}
+              {login ? 'Reconnect' : 'Connect'}
             </button>
           )}
         </span>
