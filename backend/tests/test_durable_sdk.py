@@ -265,9 +265,9 @@ async def rt():
     # An agent run checks the resolved provider is connected before any VM work;
     # AgentFlow's decider resolves to claude, so connect anthropic for the module —
     # and mark the account as the execution fallback, the way the first
-    # login would.
+    # subscription would.
     from druks.accounts.models import Account
-    from druks.harnesses.models import ProviderLogin
+    from druks.harnesses.models import ProviderSubscription
     from druks.user_settings.models import UserSettings
 
     session = get_session(engine)
@@ -280,11 +280,10 @@ async def rt():
             for subject_id in (7, 4242, 636363, 424242, 515151, 878787, 909090, 313131)
         )
         session.add(
-            ProviderLogin(
+            ProviderSubscription(
                 provider="anthropic",
                 account_id=account.id,
                 provider_email=account.username,
-                kind="oauth",
                 payload={"claudeAiOauth": {"accessToken": "t"}},
             )
         )

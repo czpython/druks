@@ -15,7 +15,7 @@ class AccountResponse(Schema):
 class IdentityResponse(Schema):
     # What /api/auth/me answers: how this deployment authenticates, who the
     # request resolved to (null in the none/zero setup state), and whether that
-    # identity still needs its first provider login.
+    # identity still needs its first provider subscription.
     auth_mode: str
     account: AccountResponse | None
     onboarding_required: bool

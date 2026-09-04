@@ -6,7 +6,6 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from druks.accounts.models import Account
 from druks.harnesses.datastructures import SandboxSettings
 from druks.harnesses.exceptions import (
     HarnessAuthError,
@@ -15,7 +14,7 @@ from druks.harnesses.exceptions import (
     HarnessOverloadedError,
     HarnessRateLimitError,
 )
-from druks.harnesses.models import ProviderLogin
+from druks.harnesses.models import ProviderKey
 from druks.harnesses.pi import PiHarness
 from druks.harnesses.registry import get_harness
 from druks.sandbox.datastructures import HarnessRunResult, HomeFile, McpServer
@@ -48,9 +47,6 @@ def _harness(*, effort: str | None = "high") -> PiHarness:
     )
 
 
-_LOGIN = SimpleNamespace(provider="openai", kind="api_key", payload={"api_key": _API_KEY})
-
-
 @pytest.fixture
 def client(tmp_path: Path):
     with TestClient(configure_app_for_test(settings=make_settings(tmp_path))) as c:
@@ -79,21 +75,16 @@ def test_class_facts_and_registration() -> None:
 
 
 def test_auth_file_renders_a_key_under_the_vendor() -> None:
-    rendered = PiHarness.auth_file(
-        SimpleNamespace(provider="anthropic", kind="api_key", payload={"api_key": _API_KEY})
-    )
+    rendered = PiHarness.auth_file("anthropic", key=_API_KEY)
     assert rendered.path == ".pi/agent/auth.json"
     assert json.loads(rendered.content) == {"anthropic": {"type": "api_key", "key": _API_KEY}}
 
 
 def test_auth_file_renders_an_openai_subscription_as_pis_openai_codex() -> None:
-    # pi keeps the ChatGPT backend as its own provider name; the login's kind
-    # says which one it is, not the druks provider id.
+    # pi keeps the ChatGPT backend as its own provider name.
     header = base64.urlsafe_b64encode(b'{"alg":"none"}').rstrip(b"=").decode()
     claims = base64.urlsafe_b64encode(b'{"exp": 1800000000}').rstrip(b"=").decode()
-    login = SimpleNamespace(
-        provider="openai",
-        kind="oauth",
+    subscription = SimpleNamespace(
         payload={
             "tokens": {
                 "access_token": f"{header}.{claims}.sig",
@@ -102,7 +93,7 @@ def test_auth_file_renders_an_openai_subscription_as_pis_openai_codex() -> None:
             }
         },
     )
-    assert json.loads(PiHarness.auth_file(login).content) == {
+    assert json.loads(PiHarness.auth_file("openai-codex", subscription=subscription).content) == {
         "openai-codex": {
             "type": "oauth",
             "access": f"{header}.{claims}.sig",
@@ -111,7 +102,6 @@ def test_auth_file_renders_an_openai_subscription_as_pis_openai_codex() -> None:
             "accountId": "acc-1",
         }
     }
-    assert PiHarness.provider_name(login) == "openai-codex"
 
 
 async def test_build_invocation_writes_the_run_files_and_pi_argv(
@@ -127,7 +117,7 @@ async def test_build_invocation_writes_the_run_files_and_pi_argv(
     public = McpServer(name="public", url="https://public.example.test/mcp")
 
     invocation = await _harness().build_invocation(
-        login=_LOGIN,
+        key=_API_KEY,
         prompt="A large prompt stays on stdin.",
         schema={"type": "object"},
         run_id="run-1",
@@ -205,7 +195,7 @@ async def test_build_invocation_without_servers_or_effort_is_bare(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     invocation = await _harness(effort=None).build_invocation(
-        login=_LOGIN,
+        key=_API_KEY,
         prompt="Prompt",
         schema={"type": "object"},
         run_id="run-1",
@@ -217,15 +207,6 @@ async def test_build_invocation_without_servers_or_effort_is_bare(
     assert "--mcp-config" not in wrapper
     assert "pi-mcp-adapter" not in wrapper
     assert ".mcp.json" not in wrapper
-
-
-def test_auth_file_keys_the_login_provider() -> None:
-    login = SimpleNamespace(provider="anthropic", kind="api_key", payload={"api_key": _API_KEY})
-
-    auth = PiHarness.auth_file(login)
-
-    assert auth.path == ".pi/agent/auth.json"
-    assert json.loads(auth.content) == {"anthropic": {"type": "api_key", "key": _API_KEY}}
 
 
 def test_parse_returns_the_contract_and_sums_spend(tmp_path: Path) -> None:
@@ -319,13 +300,10 @@ def test_parse_treats_a_broken_stream_as_invalid_output(tmp_path: Path) -> None:
 
 
 async def test_a_pasted_key_renders_under_its_provider(client, druks_db) -> None:
-    assert (
-        client.post("/api/providers/openai/connection", json={"key": _API_KEY}).status_code == 200
-    )
-    account = await Account.get_or_create("op@example.com")
-    login = await ProviderLogin.get_for_account("openai", account.id)
+    assert client.post("/api/providers/openai/key", json={"key": _API_KEY}).status_code == 200
+    stored = await ProviderKey.get("openai")
 
-    auth = PiHarness.auth_file(login)
+    auth = PiHarness.auth_file("openai", key=stored.value.decrypt())
 
     assert auth.path == ".pi/agent/auth.json"
     assert json.loads(auth.content) == {"openai": {"type": "api_key", "key": _API_KEY}}

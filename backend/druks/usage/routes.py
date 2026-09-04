@@ -2,11 +2,12 @@ from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends
 
+from druks.accounts.constants import SYSTEM_ACCOUNT_ID
 from druks.accounts.dependencies import current_account
 from druks.accounts.models import Account
 from druks.core.utils.time import operator_local_day
 from druks.harnesses.artifacts import normalize_token_usage
-from druks.harnesses.models import ProviderLogin
+from druks.harnesses.models import ProviderSubscription
 from druks.harnesses.providers import Provider, get_providers
 from druks.usage.models import UsageScrape
 from druks.usage.reads import list_finished_calls
@@ -51,15 +52,14 @@ async def get_usage(account: Account = Depends(current_account)) -> UsageRespons
     now = datetime.now(UTC)
     summaries = []
     for provider in get_providers():
-        login = await ProviderLogin.get_for_account(provider.id, account.id)
+        subscription = await ProviderSubscription.get_for_account(provider.id, account.id)
         summaries.append(
             _summarize(
                 await UsageScrape.latest_for(provider.id, account.id),
                 provider=provider,
                 now=now,
-                connected=bool(login),
-                provider_email=login.provider_email if login else None,
-                is_metered=login.is_metered if login else True,
+                connected=bool(subscription),
+                provider_email=subscription.provider_email if subscription else None,
             )
         )
     return UsageResponse(providers=summaries)
@@ -69,11 +69,11 @@ async def get_usage(account: Account = Depends(current_account)) -> UsageRespons
 async def refresh_usage(account: Account = Depends(current_account)) -> None:
     now = datetime.now(UTC)
     for provider in get_providers():
-        login = await ProviderLogin.get_for_account(provider.id, account.id)
+        subscription = await ProviderSubscription.get_for_account(provider.id, account.id)
         row = await UsageScrape.latest_for(provider.id, account.id)
         age = _age_seconds(row.scraped_at, now=now) if row else None
-        if login and login.is_metered and (age is None or age >= _REFRESH_FLOOR_SECONDS):
-            await provider.poll_usage(login)
+        if subscription and (age is None or age >= _REFRESH_FLOOR_SECONDS):
+            await provider.poll_usage(subscription)
 
 
 @router.get(
@@ -128,6 +128,15 @@ async def get_usage_today(account: Account = Depends(current_account)) -> UsageT
             bucket["spend"] += cost_usd
             hours[name][finished_at.astimezone(timezone).hour] += cost_usd
 
+    # A call billed to the API key is charged to the system account.
+    key_spend = dict.fromkeys(ids, 0.0)
+    for model, cost_usd, _metadata, _finished_at in await list_finished_calls(
+        SYSTEM_ACCOUNT_ID, since=local_start, until=local_start + timedelta(days=1)
+    ):
+        provider = model.partition("/")[0]
+        if provider in key_spend and cost_usd is not None:
+            key_spend[provider] += cost_usd
+
     included = [*ids, UNATTRIBUTED] if totals[UNATTRIBUTED]["runs"] else ids
     return UsageTodayResponse(
         day=local_start.date().isoformat(),
@@ -136,6 +145,7 @@ async def get_usage_today(account: Account = Depends(current_account)) -> UsageT
             UsageProviderToday(
                 id=name,
                 spend_usd=round(float(totals[name]["spend"]), 4),
+                key_spend_usd=round(key_spend.get(name, 0.0), 4),
                 tokens=int(totals[name]["tokens"]),
                 runs=int(totals[name]["runs"]),
                 hours=[round(v, 4) for v in hours[name]],
@@ -182,17 +192,7 @@ def _summarize(
     now: datetime,
     connected: bool,
     provider_email: str | None,
-    is_metered: bool,
 ) -> UsageProviderSummary:
-    if connected and not is_metered:
-        return UsageProviderSummary(
-            id=provider.id,
-            label=provider.label,
-            available=True,
-            connected=True,
-            provider_email=provider_email,
-            unlimited=True,
-        )
     if not row:
         return UsageProviderSummary(
             id=provider.id,

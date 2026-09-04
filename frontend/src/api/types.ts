@@ -518,22 +518,31 @@ export interface Provider {
   loginKinds: string[]
 }
 
-/** The models one provider offers, fetched over a login. */
+/** The models one provider offers, fetched over a subscription. */
 export interface ProviderCatalog {
   provider: string
   models: CatalogModel[]
   fetchedAt: string
 }
 
-/** One account's login at one provider. */
-export interface ProviderLogin {
+/** One account's subscription at one provider. */
+/** The requester's subscription at a provider. */
+export interface ProviderSubscription {
   provider: string
-  kind: string
   /** The email the provider reported at connect — display, never authority. */
   providerEmail: string
   expiresAt: string | null
+  updatedAt: string
   // False once the token has expired.
   connected: boolean
+}
+
+/** The installation's API key at a provider. */
+export interface ProviderKey {
+  provider: string
+  keyTail: string
+  updatedBy: Account
+  updatedAt: string
 }
 
 export interface Account {
@@ -788,7 +797,10 @@ export interface UsageHistoryResponse {
 
 export interface UsageProviderToday {
   id: string
+  /** The viewer's own runs, billed to their subscription. */
   spendUsd: number
+  /** Runs anyone billed to the installation's API key. */
+  keySpendUsd: number
   tokens: number
   runs: number
   // Spend per local hour (24 buckets) for the histogram.

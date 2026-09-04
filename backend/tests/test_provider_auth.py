@@ -12,7 +12,7 @@ from druks.database import db_session
 from druks.harnesses import providers as pbase
 from druks.harnesses.datastructures import ParsedUsage
 from druks.harnesses.exceptions import HarnessNotConnectedError, OAuthTokenError
-from druks.harnesses.models import ProviderLogin
+from druks.harnesses.models import ProviderKey, ProviderSubscription
 from druks.harnesses.providers import AnthropicProvider, OpenAiProvider
 from druks.user_settings.models import UserSettings
 
@@ -36,7 +36,7 @@ def _claude_payload(*, access="A0", refresh="R0", expires_at=None, extra=None) -
     return {"claudeAiOauth": block}
 
 
-async def _seed_claude(*, provider_email="op@example.com", **kwargs) -> ProviderLogin:
+async def _seed_claude(*, provider_email="op@example.com", **kwargs) -> ProviderSubscription:
     return await connect_provider(
         AnthropicProvider, _claude_payload(**kwargs), provider_email=provider_email
     )
@@ -50,7 +50,7 @@ def _codex_payload(*, access=None, refresh="R0", account_id="acc-1", id_token="i
     return {"auth_mode": "chatgpt", "OPENAI_API_KEY": None, "tokens": tokens}
 
 
-async def _seed_codex(*, provider_email="op@example.com", **kwargs) -> ProviderLogin:
+async def _seed_codex(*, provider_email="op@example.com", **kwargs) -> ProviderSubscription:
     return await connect_provider(
         OpenAiProvider, _codex_payload(**kwargs), provider_email=provider_email
     )
@@ -58,7 +58,7 @@ async def _seed_codex(*, provider_email="op@example.com", **kwargs) -> ProviderL
 
 async def _payload(provider_id: str) -> dict:
     # Rotation commits in its own session; refresh past this session's identity map.
-    row = await ProviderLogin.lookup(provider_id, None)
+    row = await ProviderSubscription.get_for_account(provider_id, fallback=True)
     await db_session().refresh(row)
     return row.payload
 
@@ -137,7 +137,7 @@ async def test_claude_fresh_not_refreshed(monkeypatch, druks_db):
     calls = _mock_post(monkeypatch, _resp(200, {}))
     result = await AnthropicProvider.rotate_token(connection.id, now=_NOW)
     assert result.action == "fresh"
-    assert result.login_id == connection.id
+    assert result.subscription_id == connection.id
     assert calls == []
 
 
@@ -160,15 +160,16 @@ async def test_claude_stale_refreshes_and_persists(monkeypatch, druks_db):
 
 async def test_claude_invalid_grant_drops_row(monkeypatch, druks_db):
     connection = await _seed_claude(access="old", expires_at=_NOW - timedelta(minutes=1))
+    account_id = connection.account_id
     _mock_post(monkeypatch, _resp(400, {"error": "invalid_grant"}))
     result = await AnthropicProvider.rotate_token(connection.id, now=_NOW)
     assert result.action == "failed"
     assert result.error == "invalid_grant"
     # A revoked lineage self-disconnects and commits inside the rotation — the
     # deletion never rides (or rolls back with) the tick's later commit.
-    assert not await ProviderLogin.list_all()
+    assert not await ProviderSubscription.list_all()
     with pytest.raises(HarnessNotConnectedError):
-        await ProviderLogin.lookup("anthropic", None)
+        await ProviderSubscription.lookup("anthropic", account_id)
 
 
 async def test_claude_network_error_keeps_row(monkeypatch, druks_db):
@@ -275,10 +276,12 @@ async def test_rotation_touches_only_the_addressed_row(monkeypatch, druks_db):
     result = await AnthropicProvider.rotate_token(stale_id, now=_NOW)
     assert result.action == "refreshed"
     assert (
-        dict((await ProviderLogin.get(stale_id)).payload)["claudeAiOauth"]["accessToken"] == "new"
+        dict((await ProviderSubscription.get(stale_id)).payload)["claudeAiOauth"]["accessToken"]
+        == "new"
     )
     assert (
-        dict((await ProviderLogin.get(other_id)).payload)["claudeAiOauth"]["accessToken"] == "keep"
+        dict((await ProviderSubscription.get(other_id)).payload)["claudeAiOauth"]["accessToken"]
+        == "keep"
     )
 
 
@@ -290,8 +293,8 @@ async def test_invalid_grant_drops_only_the_addressed_row(monkeypatch, druks_db)
     kept_id, other_id = kept.id, other.id
     _mock_post(monkeypatch, _resp(400, {"error": "invalid_grant"}))
     await AnthropicProvider.rotate_token(other_id, now=_NOW)
-    assert not await ProviderLogin.get(other_id)
-    assert await ProviderLogin.get(kept_id)
+    assert not await ProviderSubscription.get(other_id)
+    assert await ProviderSubscription.get(kept_id)
 
 
 async def test_rotation_stands_down_while_the_lock_is_held(monkeypatch, druks_db):
@@ -326,22 +329,23 @@ async def test_disconnect_removes_only_the_addressed_login(druks_db):
 
     await mine.delete()
 
-    assert await ProviderLogin.get(other.id)
-    # The fallback account (the first) has no anthropic login left; another
-    # account's login never leaks into execution.
+    assert await ProviderSubscription.get(other.id)
+    # The fallback account (the first) has no anthropic subscription left; another
+    # account's subscription never leaks into execution.
     with pytest.raises(HarnessNotConnectedError):
-        await ProviderLogin.lookup("anthropic", None)
+        await ProviderSubscription.lookup("anthropic", mine.account_id)
 
 
 async def test_reconnect_restores_execution(druks_db):
     mine = await _seed_claude(provider_email="a@example.com")
+    account_id = mine.account_id
     await mine.delete()
     with pytest.raises(HarnessNotConnectedError):
-        await ProviderLogin.lookup("anthropic", None)
+        await ProviderSubscription.lookup("anthropic", account_id)
 
     await _seed_claude(access="fresh", provider_email="a@example.com")
-    fallback = await ProviderLogin.lookup("anthropic", None)
-    assert dict(fallback.payload)["claudeAiOauth"]["accessToken"] == "fresh"
+    restored = await ProviderSubscription.lookup("anthropic", account_id)
+    assert dict(restored.payload)["claudeAiOauth"]["accessToken"] == "fresh"
 
 
 async def test_connect_scopes_rows_by_provider_and_account(druks_db):
@@ -427,27 +431,39 @@ async def test_codex_fetch_usage_success(monkeypatch, druks_db):
     assert calls[0]["headers"]["ChatGPT-Account-Id"] == "acc-7"
 
 
-async def test_lookup_prefers_the_accounts_own_connection(druks_db):
-    fallback = await _seed_claude(provider_email="a@example.com")  # a@ adopts the fallback
-    own = await _seed_claude(provider_email="b@example.com")
+async def test_lookup_reads_only_the_accounts_own_subscription(druks_db):
+    own = await _seed_claude(provider_email="a@example.com")
+    other = await _seed_claude(provider_email="b@example.com")
 
-    assert (await ProviderLogin.lookup("anthropic", own.account_id)).id == own.id
-    assert (await ProviderLogin.lookup("anthropic", fallback.account_id)).id == fallback.id
-
-
-async def test_lookup_falls_back(druks_db):
-    fallback = await _seed_claude(provider_email="a@example.com")
-    codex_only = await _seed_codex(provider_email="b@example.com")
-
-    # An account with no anthropic login, and no account at all.
-    assert (await ProviderLogin.lookup("anthropic", codex_only.account_id)).id == fallback.id
-    assert (await ProviderLogin.lookup("anthropic", None)).id == fallback.id
+    assert (await ProviderSubscription.lookup("anthropic", own.account_id)).id == own.id
+    assert (await ProviderSubscription.lookup("anthropic", other.account_id)).id == other.id
 
 
-async def test_lookup_without_any_connection_raises(druks_db):
-    await _seed_codex(provider_email="a@example.com")  # the fallback account has openai only
-    with pytest.raises(HarnessNotConnectedError, match="connect it in Settings"):
-        await ProviderLogin.lookup("anthropic", None)
+async def test_lookup_never_falls_through_to_another_account_or_the_key(druks_db):
+    # Another account's subscription and the installation's key both exist;
+    # neither stands in, and the miss names the fix.
+    await _seed_claude(provider_email="a@example.com")
+    unsubscribed = await Account.get_or_create("b@example.com")
+    await ProviderKey.create(provider="anthropic", key="sk-shared", account=unsubscribed)
+
+    with pytest.raises(HarnessNotConnectedError, match="connect your Anthropic subscription"):
+        await ProviderSubscription.lookup("anthropic", unsubscribed.id)
+    with pytest.raises(HarnessNotConnectedError, match="connect your Anthropic subscription"):
+        await ProviderSubscription.lookup("anthropic", None)
+
+
+async def test_a_providers_key_is_one_row_replaced_by_the_next_paste(druks_db):
+    first = await Account.get_or_create("a@example.com")
+    second = await Account.get_or_create("b@example.com")
+    assert await ProviderKey.get("anthropic") is None
+
+    await ProviderKey.create(provider="anthropic", key="sk-one", account=first)
+    await ProviderKey.create(provider="anthropic", key="sk-two", account=second)
+
+    [stored] = await ProviderKey.list_all()
+    assert stored.value.decrypt() == "sk-two"
+    assert stored.key_tail == "-two"
+    assert stored.updated_by.username == "b@example.com"
 
 
 async def test_minimal_provider_reports_unsupported_usage(monkeypatch):
@@ -456,8 +472,10 @@ async def test_minimal_provider_reports_unsupported_usage(monkeypatch):
         label = "Minimal"
         login_kinds = frozenset({"api_key"})
 
-    login = SimpleNamespace(payload={})
+    subscription = SimpleNamespace(payload={})
     calls = _mock_get(monkeypatch, _resp(200, {}))
 
-    assert await MinimalProvider.fetch_usage(login) == ParsedUsage(ok=False, error="unsupported")
+    assert await MinimalProvider.fetch_usage(subscription) == ParsedUsage(
+        ok=False, error="unsupported"
+    )
     assert calls == []

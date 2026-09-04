@@ -2,7 +2,7 @@ import logging
 
 from druks.files.storage import reap_deleted_file_bytes
 from druks.harnesses.datastructures import RotationResult
-from druks.harnesses.models import ProviderLogin
+from druks.harnesses.models import ProviderSubscription
 from druks.harnesses.providers import get_provider, get_providers
 from druks.sandbox import gate
 from druks.workflows import task
@@ -32,34 +32,34 @@ async def refresh_catalogs() -> None:
 
 
 async def _refresh() -> dict[str, object]:
-    logins = [login for login in await ProviderLogin.list_all() if login.supports_refresh]
+    subscriptions = await ProviderSubscription.list_all()
 
     # A refresh 401s a VM mid-call holding the old token, so a due rotation
-    # runs only while its login is idle — busy defers to the next tick;
+    # runs only while its subscription is idle — busy defers to the next tick;
     # urgent rotates regardless. rotate_token no-ops rows outside their
     # margin. Snapshot plain values: each refresh commits and expires the
     # session's ORM objects mid-loop.
     rows = [
         (
-            login.provider,
-            login.id,
-            get_provider(login.provider).needs_refresh(login),
-            get_provider(login.provider).refresh_is_urgent(login),
+            subscription.provider,
+            subscription.id,
+            get_provider(subscription.provider).needs_refresh(subscription),
+            get_provider(subscription.provider).refresh_is_urgent(subscription),
         )
-        for login in logins
+        for subscription in subscriptions
     ]
 
     results: list[RotationResult] = []
-    for provider_id, login_id, is_due, is_urgent in rows:
+    for provider_id, subscription_id, is_due, is_urgent in rows:
         provider = get_provider(provider_id)
         if is_due:
-            async with gate.shut(login_id) as is_idle:
+            async with gate.shut(subscription_id) as is_idle:
                 if is_idle or is_urgent:
-                    result = await provider.rotate_token(login_id)
+                    result = await provider.rotate_token(subscription_id)
                 else:
-                    result = RotationResult(provider_id, "busy", login_id=login_id)
+                    result = RotationResult(provider_id, "busy", subscription_id=subscription_id)
         else:
-            result = await provider.rotate_token(login_id)
+            result = await provider.rotate_token(subscription_id)
         _log_result(result)
         results.append(result)
 
@@ -67,7 +67,7 @@ async def _refresh() -> dict[str, object]:
         "results": [
             {
                 "provider": r.provider,
-                "login_id": r.login_id,
+                "subscription_id": r.subscription_id,
                 "action": r.action,
                 "error": r.error,
             }
@@ -79,30 +79,30 @@ async def _refresh() -> dict[str, object]:
 def _log_result(result: RotationResult) -> None:
     if result.action == "busy":
         logger.info(
-            "deferring %s rotation for login %s; calls active",
+            "deferring %s rotation for subscription %s; calls active",
             result.provider,
-            result.login_id,
+            result.subscription_id,
         )
     elif result.action == "refreshed":
         logger.info(
-            "refreshed %s token for login %s; expires_at=%s",
+            "refreshed %s token for subscription %s; expires_at=%s",
             result.provider,
-            result.login_id,
+            result.subscription_id,
             result.expires_at,
         )
     elif result.action == "failed" and result.error != "no_credentials":
-        # invalid_grant => that login must reconnect; network/http_* => transient.
+        # invalid_grant => that subscription must reconnect; network/http_* => transient.
         # no_credentials is a row deleted mid-tick, not a failure — stay quiet.
         logger.warning(
-            "token refresh failed for %s login %s: %s",
+            "token refresh failed for %s subscription %s: %s",
             result.provider,
-            result.login_id,
+            result.subscription_id,
             result.error,
         )
     elif result.action == "no_refresh_token":
         logger.warning(
-            "%s login %s has no refresh token; cannot keep it alive",
+            "%s subscription %s has no refresh token; cannot keep it alive",
             result.provider,
-            result.login_id,
+            result.subscription_id,
         )
     # "fresh" and "locked" (another worker owns this row's refresh) are quiet no-ops.

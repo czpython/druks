@@ -22,7 +22,7 @@ class UsageProviderSummary(Schema):
     # snapshot yet" (fresh install pre-first-poll) and "all parses
     # failed in the last snapshot".
     available: bool
-    # False renders the connect action — the account holds no login
+    # False renders the connect action — the account holds no subscription
     # for this provider.
     connected: bool
     provider_email: str | None
@@ -82,7 +82,10 @@ class UsageHistoryResponse(Schema):
 
 class UsageProviderToday(Schema):
     id: str
+    # The viewer's own runs, billed to their subscription.
     spend_usd: float
+    # Runs anyone billed to the installation's API key.
+    key_spend_usd: float = 0.0
     tokens: int
     runs: int
     # Spend per local hour (24 buckets) for the histogram.

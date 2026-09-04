@@ -293,8 +293,8 @@ async def test_run_checks_covers_all_check_names(tmp_path: Path) -> None:
         "installations",
         "software_factory:settings",
         "review:settings",
-        "anthropic_login",
-        "openai_login",
+        "anthropic_credentials",
+        "openai_credentials",
         "data_dir",
         "database",
         "redis",
@@ -304,10 +304,10 @@ async def test_run_checks_covers_all_check_names(tmp_path: Path) -> None:
 
 
 def test_logins_pending_when_not_connected(tmp_path: Path) -> None:
-    # No login rows committed => every provider reads as not connected.
+    # No subscription rows committed => every provider reads as not connected.
     settings = make_settings(tmp_path)
 
-    result = _named(doctor.check_provider_logins(settings), "openai_login")
+    result = _named(doctor.check_provider_credentials(settings), "openai_credentials")
 
     assert not result.ok
     assert result.pending
@@ -317,15 +317,30 @@ def test_logins_pending_when_not_connected(tmp_path: Path) -> None:
 def test_login_check_expired() -> None:
     # An expired token is a genuine fault (runs would fail), not pending setup.
     past = datetime.now(UTC) - timedelta(hours=1)
-    result = doctor._login_check("anthropic", connected=True, expires_at=past)
+    result = doctor._credentials_check("anthropic", connected=True, expires_at=past)
     assert not result.ok
     assert not result.pending
     assert "expired" in result.detail
 
 
+def test_login_check_reports_the_shared_key_as_shared() -> None:
+    # A key alone is enough to run on; with a subscription it is noted beside it.
+    key_only = doctor._credentials_check(
+        "anthropic", connected=False, expires_at=None, key_set_by="ops@example.com"
+    )
+    assert key_only.ok
+    assert not key_only.pending
+    assert key_only.detail == "no subscription; API key set by ops@example.com"
+
+    both = doctor._credentials_check(
+        "anthropic", connected=True, expires_at=None, key_set_by="ops@example.com"
+    )
+    assert both.detail == "connected; API key set by ops@example.com"
+
+
 def test_login_check_connected() -> None:
     future = datetime.now(UTC) + timedelta(hours=6)
-    result = doctor._login_check("anthropic", connected=True, expires_at=future)
+    result = doctor._credentials_check("anthropic", connected=True, expires_at=future)
     assert result.ok
     assert "connected" in result.detail
 
@@ -387,7 +402,9 @@ def test_print_results_pending_does_not_fail(capsys) -> None:
     # are pending operator setup — the command still exits 0.
     results = [
         doctor.CheckResult(name="database", ok=True, detail="reachable"),
-        doctor.CheckResult(name="claude_login", ok=False, pending=True, detail="not connected"),
+        doctor.CheckResult(
+            name="claude_credentials", ok=False, pending=True, detail="not connected"
+        ),
     ]
 
     exit_code = doctor.print_results(results)
@@ -401,7 +418,9 @@ def test_print_results_pending_does_not_fail(capsys) -> None:
 def test_print_results_fails_on_a_genuine_fault_alongside_pending(capsys) -> None:
     results = [
         doctor.CheckResult(name="database", ok=False, detail="unreachable"),
-        doctor.CheckResult(name="claude_login", ok=False, pending=True, detail="not connected"),
+        doctor.CheckResult(
+            name="claude_credentials", ok=False, pending=True, detail="not connected"
+        ),
     ]
 
     exit_code = doctor.print_results(results)

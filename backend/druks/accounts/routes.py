@@ -4,7 +4,7 @@ from druks.accounts.constants import PAT_NAME_LENGTH
 from druks.accounts.dependencies import current_account_or_setup, current_session_account
 from druks.accounts.models import Account, PersonalAccessToken
 from druks.accounts.schemas import AccountResponse, IdentityResponse, PatResponse
-from druks.harnesses.models import ProviderLogin
+from druks.harnesses.models import ProviderKey, ProviderSubscription
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -16,9 +16,16 @@ async def get_identity(
     return IdentityResponse(
         auth_mode=request.app.state.settings.identity.mode,
         account=AccountResponse.model_validate(account) if account else None,
-        # An account needs onboarding exactly while it holds no provider
-        # login; none/zero is onboarding before the account exists.
-        onboarding_required=not (account and await ProviderLogin.list_for_account(account.id)),
+        # An account needs onboarding while it holds no subscription and the
+        # installation holds no key; none/zero is onboarding before the account
+        # exists.
+        onboarding_required=not (
+            account
+            and (
+                await ProviderSubscription.list_for_account(account.id)
+                or await ProviderKey.list_all()
+            )
+        ),
     )
 
 
