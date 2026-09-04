@@ -2,7 +2,7 @@ import inspect
 from collections.abc import Awaitable, Callable
 from contextlib import nullcontext, suppress
 from contextvars import ContextVar
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from functools import partial
 from typing import (
     TYPE_CHECKING,
@@ -292,13 +292,19 @@ class Gate(BaseModel):
 
     @classmethod
     async def wait(
-        cls, *, input_request: dict[str, Any] | None = None, ttl_seconds: float = GATE_TTL_SECONDS
+        cls,
+        *,
+        input_request: dict[str, Any] | None = None,
+        ttl_seconds: float = GATE_TTL_SECONDS,
+        hold_sandbox: bool | timedelta | None = False,
     ) -> Self:
         # Suspend the running workflow until its gate is answered. A gate is a
         # run-level state — the read surfaces "needs you" straight off the parked run.
         # ``input_request`` is the plain-dict ask (at least a ``label`` and
         # ``presentation``), stored on the run beside ``input_gate`` and cleared on
         # resume — so an app declares the ask here, beside on_wait, not at read time.
+        # ``hold_sandbox`` keeps the warm VM across the park (True / a timedelta);
+        # the default reaps, and review() calls _park directly so it never holds.
         workflow = current_workflow.get()
         if not workflow._subject and cls.on_wait.__func__ is Gate.on_wait.__func__:
             # No subject means no feed surface; if on_wait wasn't overridden
@@ -313,7 +319,9 @@ class Gate(BaseModel):
                 await cls.on_wait(workflow)
 
         await DBOS.run_step_async(StepOptions(name=f"{cls.name}._on_wait"), _on_wait)
-        payload = await _park(workflow, cls.name, input_request, ttl_seconds)
+        payload = await _park(
+            workflow, cls.name, input_request, ttl_seconds, hold_sandbox=hold_sandbox
+        )
         reply = cls.model_validate(payload)
         workflow.journal.add(reply)
         return reply
@@ -335,10 +343,14 @@ async def _park(
     gate: str,
     input_request: dict[str, Any] | None,
     ttl_seconds: float,
+    *,
+    hold_sandbox: bool | timedelta | None = False,
 ) -> dict[str, Any]:
-    # Shared park core: a park lasts days, so reap the warm VM, then suspend on the
-    # gate's channel until Run.resume answers it.
-    await workflow._reap_run()
+    # Shared park core: a park lasts days, so reap the warm VM unless the gate
+    # asked to hold it, then suspend on the gate's channel until Run.resume
+    # answers it. review() omits hold, so it still reaps.
+    if not hold_sandbox:
+        await workflow._reap_run()
     await _emit_run_event(
         workflow.workflow_id,
         RunState.PARKED,
