@@ -139,7 +139,7 @@ class Workspace:
         # with_mcp_servers is the run's last DB read; commit so the step's
         # connection isn't held idle through the minutes the agent runs.
         await db_session().commit()
-        return await self.host.run_agent(**run_kwargs)
+        return await self.host.run_agent(account_id=account_id, **run_kwargs)
 
     async def with_mcp_servers(self, account_id: str | None, **kwargs: Any) -> dict[str, Any]:
         # Fold every MCP server into this call — the workspace's required

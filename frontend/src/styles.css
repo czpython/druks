@@ -1059,7 +1059,18 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
 .set-app-toggle .mt-desc { font-size: 11.5px; color: var(--text-dim); line-height: 1.4; }
 
 .set-table { border: 1px solid var(--border); border-radius: 7px; overflow: hidden; }
-.set-thead, .set-trow { display: grid; align-items: center; grid-template-columns: minmax(132px, 1.4fr) minmax(120px, 1.2fr) 86px 86px 72px; gap: 8px; padding: 0 12px; }
+.set-thead, .set-trow { display: grid; align-items: center; grid-template-columns: minmax(132px, 1.4fr) 96px minmax(120px, 1.2fr) 104px 86px 86px; gap: 8px; padding: 0 12px; }
+.agents-table .set-thead, .agents-table .set-trow { grid-template-columns: minmax(132px, 1.4fr) 96px minmax(120px, 1.2fr) 104px 72px 72px; }
+.agents-app { display: flex; align-items: center; gap: 8px; min-height: 34px; padding: 0 12px; background: var(--surface); border-bottom: 1px solid var(--border-soft); font-family: var(--font-mono); font-size: 11px; color: var(--text-mid); }
+.agents-app-link { margin-left: auto; background: none; border: none; color: var(--text-dim); font-family: var(--font-mono); font-size: 12px; cursor: pointer; }
+.agents-app-link:hover { color: var(--text); }
+.agents-agent { padding-left: 24px; }
+.agents-cell { display: inline-flex; align-items: center; gap: 5px; font-family: var(--font-mono); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.agents-cell .ov-dot { flex-shrink: 0; }
+.agents-locked { color: var(--text-faint); }
+.agents-legend { display: flex; gap: 18px; font-family: var(--font-mono); font-size: 10.5px; color: var(--text-dim); }
+.agents-legend .ov-dot { display: inline-block; vertical-align: middle; margin-right: 4px; }
+.set-defaults { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
 .set-thead { height: 32px; background: var(--surface); border-bottom: 1px solid var(--border); font-family: var(--font-mono); font-size: 9.5px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-dim); }
 .set-trow { min-height: 46px; border-bottom: 1px solid var(--border-soft); background: var(--surface-2); transition: background 90ms; }
 .set-trow:last-child { border-bottom: none; }

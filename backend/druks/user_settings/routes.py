@@ -3,25 +3,39 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from fastapi import APIRouter, Depends, HTTPException
 
 from druks.accounts.dependencies import current_session_account
+from druks.accounts.models import Account
 from druks.apps.loader import get_app, iter_apps
-from druks.apps.registry import workflows
+from druks.apps.registry import agents, workflows
 from druks.durable.engine import apply_schedules
-from druks.harnesses.registry import get_harness_for_model, get_harnesses
+from druks.harnesses.base import Harness
+from druks.harnesses.execution import check_execution
+from druks.harnesses.registry import get_harnesses
 from druks.notifications.models import Destination
 
 from . import reads
 from .datastructures import ALLOWED_EFFORTS
-from .models import HarnessSettings, SettingsOverride, UserSettings
+from .models import SettingsOverride, UserSettings
 from .schemas import (
+    AgentsAppResponse,
+    AgentsResponse,
     AppsSettingsResponse,
     AppsSettingsUpdate,
     HarnessResponse,
-    HarnessUpdate,
     UpdateUserSettingsRequest,
     UserSettingsResponse,
 )
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
+agents_router = APIRouter(prefix="/api/agents", tags=["settings"])
+
+_EXECUTION_DEFAULTS = (
+    "default_harness",
+    "default_model",
+    "default_billing",
+    "default_effort",
+    "fast_mode",
+    "default_timeout",
+)
 
 
 def _validate_timezone(value: str) -> str:
@@ -35,27 +49,21 @@ def _validate_timezone(value: str) -> str:
     return value
 
 
-async def _resolve_harness(name: str) -> tuple[type, HarnessSettings]:
-    row = await HarnessSettings.get(name)
-    if row:
-        return row.harness, row
-    raise HTTPException(status_code=404, detail=f"Unknown harness: {name!r}")
-
-
 @router.get("/harnesses", response_model=list[HarnessResponse], response_model_by_alias=True)
-async def list_harness_settings() -> list[HarnessResponse]:
-    registered = {harness.name for harness in get_harnesses()}
-    rows = await HarnessSettings.all()
-    return [HarnessResponse.model_validate(row) for row in rows if row.name in registered]
+async def list_harnesses() -> tuple[type[Harness], ...]:
+    return get_harnesses()
 
 
-@router.patch("/harnesses/{name}", response_model=HarnessResponse, response_model_by_alias=True)
-async def update_harness_settings(name: str, body: HarnessUpdate) -> HarnessResponse:
-    _, row = await _resolve_harness(name)
-    updates = body.model_dump(exclude_unset=True, by_alias=False)
-    if updates:
-        await row.update(**updates)
-    return HarnessResponse.model_validate(row)
+@agents_router.get("", response_model=AgentsResponse, response_model_by_alias=True)
+async def list_agents() -> AgentsResponse:
+    projected = [
+        AgentsAppResponse(
+            name=app.name,
+            agents=[await reads.get_agent_setting(agent) for agent in app.agents()],
+        )
+        for app in iter_apps()
+    ]
+    return AgentsResponse(apps=[app for app in projected if app.agents])
 
 
 @router.get("", response_model=UserSettingsResponse, response_model_by_alias=True)
@@ -68,16 +76,31 @@ async def update_user_settings(
     body: UpdateUserSettingsRequest,
 ) -> UserSettings:
     row = await UserSettings.get()
-    if body.timezone is not None:
+    if body.timezone:
         tz = _validate_timezone(body.timezone)
         if tz != row.timezone:
             await row.update_profile(timezone=tz)
             # Crons are evaluated in this timezone — repoint them now, not at
             # the next launch.
             await apply_schedules()
-    if body.default_model:
-        get_harness_for_model(body.default_model)
-        await row.update_profile(default_model=body.default_model)
+    defaults = {
+        field: value
+        for field, value in body.model_dump(exclude_unset=True, exclude_none=True).items()
+        if field in _EXECUTION_DEFAULTS
+    }
+    if defaults:
+        check_execution(
+            defaults.get("default_harness", row.default_harness),
+            defaults.get("default_model", row.default_model),
+            defaults.get("default_billing", row.default_billing),
+        )
+        await row.update_profile(**defaults)
+    if body.fallback_account_id:
+        if not await Account.get(body.fallback_account_id, exclude_system=True):
+            raise HTTPException(
+                status_code=422, detail=f"Unknown account {body.fallback_account_id!r}"
+            )
+        await row.set_fallback_account(body.fallback_account_id)
     if "gate_park_destination_id" in body.model_fields_set:
         destination_id = body.gate_park_destination_id
         if destination_id and not await Destination.get(destination_id):
@@ -102,10 +125,22 @@ async def get_app_settings() -> AppsSettingsResponse:
     dependencies=[Depends(current_session_account)],
 )
 async def update_app_settings(body: AppsSettingsUpdate) -> AppsSettingsResponse:
+    for name, harness in body.agent_harnesses.items():
+        await SettingsOverride.set_agent_harness(name, harness)
     for name, model in body.agent_models.items():
-        if model:
-            get_harness_for_model(model)
         await SettingsOverride.set_agent_model(name, model)
+    for name, billing in body.agent_billings.items():
+        await SettingsOverride.set_agent_billing(name, billing)
+    # A cell set alone must still fit the two it inherits, so the check reads
+    # the stored triple; a rejection rolls the writes back.
+    for name in {*body.agent_harnesses, *body.agent_models, *body.agent_billings}:
+        if name not in agents:
+            raise HTTPException(status_code=422, detail=f"Unknown agent {name!r}")
+        check_execution(
+            (await SettingsOverride.agent_harness(name)).value,
+            (await SettingsOverride.agent_model(name)).value,
+            (await SettingsOverride.agent_billing(name)).value,
+        )
 
     for name, effort in body.agent_efforts.items():
         await SettingsOverride.set_agent_effort(name, effort)

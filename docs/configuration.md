@@ -285,10 +285,12 @@ on either kind, for example `openai/gpt-5.5`.
 
 Process settings such as `DRUKS_CLAUDE_CONFIG_DIR` and
 `DRUKS_CODEX_CONFIG_DIR` point at optional non-auth CLI configuration to carry
-into sandboxes. The Compose deployment mounts these read-only. Harness defaults
-and per-agent model, effort, and timeout overrides live in dashboard settings.
-A call refuses before provisioning a VM if its selected harness lacks a
-connection.
+into sandboxes. The Compose deployment mounts these read-only. The default
+harness, model, billing, effort, and timeout live in **Settings → Agents**;
+each agent can override any of them on its app's page. **Unattended runs
+(webhooks, schedules) run as** names the account whose subscription an
+unattended run bills. A call refuses before provisioning a VM if the login it
+bills is missing.
 
 ## Sandboxes
 

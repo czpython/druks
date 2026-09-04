@@ -9,7 +9,12 @@ import { AppGlyph } from './AppGlyph'
 import { ConnectSteps, useProviderConnect } from './ProviderConnectFlow'
 import {
   type Harness,
+  type UserSettings,
+  type Account,
+  type AgentSetting,
+  type AgentsResponse,
   type AppSettings,
+  type Billing,
   type AppSettingsProblems,
   type McpRegistryCandidate,
   type McpServer,
@@ -22,7 +27,6 @@ import {
   type Connection,
   type Service,
   type SkillCollection,
-  type UpdateHarnessRequest,
   type UpdateAppsSettingsRequest,
   type UpdateUserSettingsRequest,
   type UsageMetric,
@@ -36,11 +40,8 @@ import { useUsageToday } from '../lib/useUsage'
 import { Bar } from './UsagePanel'
 import { harnessColors } from '../lib/harnessColors'
 
-// The models the operator can pick, joined from three lists: a harness has the
-// provider it is bound to, or any provider issuing a subscription kind it consumes.
 interface Catalog {
-  modelsOf: (harness: Harness) => CatalogModel[]
-  harnessOf: (model: string) => string
+  modelsOf: (harness: string) => CatalogModel[]
 }
 
 function buildCatalog(harnesses: Harness[], providers: Provider[], catalogs: ProviderCatalog[]): Catalog {
@@ -48,14 +49,34 @@ function buildCatalog(harnesses: Harness[], providers: Provider[], catalogs: Pro
     harness.provider ? harness.provider === provider.id : harness.loginKinds.some((k) => provider.loginKinds.includes(k))
   const modelsByProvider = Object.fromEntries(catalogs.map((c) => [c.provider, c.models]))
   return {
-    modelsOf: (harness) =>
-      providers.filter((p) => hasProvider(harness, p)).flatMap((p) => modelsByProvider[p.id] ?? []),
-    harnessOf: (model) => {
-      const provider = providers.find((p) => p.id === model.split('/')[0])
-      return (provider && harnesses.find((h) => hasProvider(h, provider))?.name) ?? ''
+    modelsOf: (name) => {
+      const harness = harnesses.find((h) => h.name === name)
+      if (!harness) return []
+      return providers.filter((p) => hasProvider(harness, p)).flatMap((p) => modelsByProvider[p.id] ?? [])
     },
   }
 }
+
+const keyOnly = (harness: Harness | undefined) =>
+  Boolean(harness) && !harness!.loginKinds.includes('oauth')
+
+const BILLINGS: Billing[] = ['subscription', 'api_key']
+const billingLabel = (billing: string) => (billing === 'api_key' ? 'API key' : 'subscription')
+
+type Defaults = Pick<
+  UserSettings,
+  'defaultHarness' | 'defaultModel' | 'defaultBilling' | 'defaultEffort' | 'fastMode' | 'defaultTimeout'
+> & { fallbackAccountId: string | null }
+
+const defaultsOf = (settings: UserSettings): Defaults => ({
+  defaultHarness: settings.defaultHarness,
+  defaultModel: settings.defaultModel,
+  defaultBilling: settings.defaultBilling,
+  defaultEffort: settings.defaultEffort,
+  fastMode: settings.fastMode,
+  defaultTimeout: settings.defaultTimeout,
+  fallbackAccountId: settings.fallbackAccountId,
+})
 
 const TIMEOUTS = [600, 900, 1800, 3600]
 
@@ -142,15 +163,25 @@ export function SettingsModal({ open, onClose }: Props) {
     enabled: open,
     staleTime: 60_000,
   })
-  // Harnesses are their own resource, edited inline (immediate PATCH), not via
-  // the save button — so they live in a query, not pending form state.
   const harnessesQuery = useQuery({
     queryKey: ['harnesses'],
     queryFn: () => api.harnesses(),
     enabled: open,
     staleTime: 60_000,
   })
-  // A provider credential persists immediately outside Save, like a harness.
+  const agentsQuery = useQuery({
+    queryKey: ['agents'],
+    queryFn: () => api.agents(),
+    enabled: open,
+    staleTime: 60_000,
+  })
+  const accountsQuery = useQuery({
+    queryKey: ['accounts'],
+    queryFn: () => api.accounts(),
+    enabled: open,
+    staleTime: 60_000,
+  })
+  // A provider credential persists immediately outside Save.
   const providersQuery = useQuery({
     queryKey: ['providers'],
     queryFn: () => api.providers(),
@@ -174,16 +205,13 @@ export function SettingsModal({ open, onClose }: Props) {
     staleTime: 60_000,
   })
   const [timezone, setTimezone] = useState<string>('UTC')
-  const [defaultModel, setDefaultModel] = useState<string>('')
+  const [defaults, setDefaults] = useState<Defaults | null>(null)
   // Pending per-app setting overrides — a sparse UpdateAppsSettingsRequest the
   // app tabs (and the Druks tab's built-in agents) edit and submit() flushes.
   // Distinct from ``knobs`` (the column-backed settings) because app settings
   // hit a different endpoint.
   const [appEdits, setAppEdits] = useState<UpdateAppsSettingsRequest>({})
-  // Pending per-harness edits (name -> sparse UpdateHarnessRequest), flushed by
-  // submit() — same dirty/save flow as the app and general settings.
-  const [harnessEdits, setHarnessEdits] = useState<Record<string, UpdateHarnessRequest>>({})
-  // 'general' | 'providers' | 'harnesses' | 'browser-sessions' | 'skills' | 'mcp' |
+  // 'general' | 'providers' | 'agents' | 'browser-sessions' | 'skills' | 'mcp' |
   // 'agent-access' | <app name>
   const [section, setSection] = useState<string>('general')
   const [busy, setBusy] = useState(false)
@@ -202,10 +230,9 @@ export function SettingsModal({ open, onClose }: Props) {
     }
     if (!initialised.current && settingsQuery.data) {
       setTimezone(settingsQuery.data.timezone)
-      setDefaultModel(settingsQuery.data.defaultModel)
+      setDefaults(defaultsOf(settingsQuery.data))
       setAppEdits({})
       setAppProblems({})
-      setHarnessEdits({})
       initialised.current = true
     }
   }, [open, settingsQuery.data])
@@ -231,7 +258,7 @@ export function SettingsModal({ open, onClose }: Props) {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, busy, timezone, appEdits, harnessEdits, onClose])
+  }, [open, busy, timezone, appEdits, defaults, onClose])
 
   const timezones = useMemo(() => _listTimezones(), [])
   const preview = useMemo(() => {
@@ -274,21 +301,23 @@ export function SettingsModal({ open, onClose }: Props) {
       if (settingsQuery.data?.timezone !== timezone) {
         body.timezone = timezone
       }
-      if (settingsQuery.data?.defaultModel !== defaultModel) {
-        body.defaultModel = defaultModel
+      if (settingsQuery.data && defaults) {
+        const saved = defaultsOf(settingsQuery.data)
+        for (const key of Object.keys(defaults) as (keyof Defaults)[]) {
+          if (defaults[key] !== saved[key] && defaults[key] !== null) {
+            Object.assign(body, { [key]: defaults[key] })
+          }
+        }
       }
       if (Object.keys(body).length > 0) {
         await api.updateSettings(body)
         await queryClient.invalidateQueries({ queryKey: ['settings'] })
+        await queryClient.invalidateQueries({ queryKey: ['agents'] })
       }
       if (_areAppEditsDirty(submittedAppEdits)) {
         await api.updateAppSettings(submittedAppEdits)
         await queryClient.invalidateQueries({ queryKey: ['appSettings'] })
-      }
-      const harnessChanges = Object.entries(harnessEdits).filter(([, patch]) => Object.keys(patch).length > 0)
-      if (harnessChanges.length > 0) {
-        for (const [name, patch] of harnessChanges) await api.updateHarness(name, patch)
-        await queryClient.invalidateQueries({ queryKey: ['harnesses'] })
+        await queryClient.invalidateQueries({ queryKey: ['agents'] })
       }
       onClose()
     } catch (caught) {
@@ -310,11 +339,12 @@ export function SettingsModal({ open, onClose }: Props) {
 
   const savedTz = settingsQuery.data?.timezone
   const tzDirty = savedTz !== undefined && savedTz !== timezone
-  const savedModel = settingsQuery.data?.defaultModel
-  const modelDirty = savedModel !== undefined && savedModel !== defaultModel
+  const defaultsDirty =
+    settingsQuery.data !== undefined &&
+    defaults !== null &&
+    JSON.stringify(defaults) !== JSON.stringify(defaultsOf(settingsQuery.data))
   const appsDirty = _areAppEditsDirty(appEdits)
-  const harnessesDirty = Object.values(harnessEdits).some((patch) => Object.keys(patch).length > 0)
-  const dirty = tzDirty || modelDirty || appsDirty || harnessesDirty
+  const dirty = tzDirty || defaultsDirty || appsDirty
 
   const data = appSettingsQuery.data
   const allApps = data?.apps ?? []
@@ -330,10 +360,24 @@ export function SettingsModal({ open, onClose }: Props) {
   const harnessColor = harnessColors(harnesses.map((h) => h.name))
   const appSection = allApps.find((app) => app.name === section)
 
+  function setAgentHarness(name: string, harness: string | null) {
+    setAppEdits((prev) => ({
+      ...prev,
+      agentHarnesses: { ...prev.agentHarnesses, [name]: harness },
+    }))
+  }
+
   function setAgentModel(name: string, model: string | null) {
     setAppEdits((prev) => ({
       ...prev,
       agentModels: { ...prev.agentModels, [name]: model },
+    }))
+  }
+
+  function setAgentBilling(name: string, billing: Billing | null) {
+    setAppEdits((prev) => ({
+      ...prev,
+      agentBillings: { ...prev.agentBillings, [name]: billing },
     }))
   }
 
@@ -364,10 +408,6 @@ export function SettingsModal({ open, onClose }: Props) {
       delete remaining[field]
       return { ...prev, [app]: remaining }
     })
-  }
-
-  function setHarnessField(name: string, patch: UpdateHarnessRequest) {
-    setHarnessEdits((prev) => ({ ...prev, [name]: { ...prev[name], ...patch } }))
   }
 
   function setWorkflowField(kind: string, field: string, value: unknown) {
@@ -409,7 +449,7 @@ export function SettingsModal({ open, onClose }: Props) {
           <nav className="set-rail">
             <RailItem icon="general" label="General" active={section === 'general'} onClick={() => setSection('general')} />
             <RailItem icon="services" label="Providers" active={section === 'providers'} onClick={() => setSection('providers')} />
-            <RailItem icon="harnesses" label="Harnesses" active={section === 'harnesses'} onClick={() => setSection('harnesses')} />
+            <RailItem icon="harnesses" label="Agents" active={section === 'agents'} onClick={() => setSection('agents')} />
             <RailItem icon="services" label="Services" active={section === 'services'} onClick={() => setSection('services')} />
             <RailItem icon="services" label="Connections" active={section === 'connections'} onClick={() => setSection('connections')} />
             <RailItem icon="browser-sessions" label="Browser" active={section === 'browser-sessions'} onClick={() => setSection('browser-sessions')} />
@@ -435,10 +475,6 @@ export function SettingsModal({ open, onClose }: Props) {
             {section === 'general' && (
               <GeneralPane
                 timezone={timezone}
-                model={defaultModel}
-                setModel={setDefaultModel}
-                harnesses={harnesses}
-                catalog={catalog}
                 setTimezone={setTimezone}
                 timezones={timezones}
                 clock={preview}
@@ -446,16 +482,18 @@ export function SettingsModal({ open, onClose }: Props) {
               />
             )}
             {section === 'providers' && <ProvidersPane providers={providers} subscriptions={providerSubscriptions} keys={providerKeys} />}
-            {section === 'harnesses' &&
-              (harnesses.length > 0 ? (
-                <HarnessesPane
-                  harnesses={harnesses}
-                  apps={allApps}
-                  allowedEfforts={allowedEfforts}
-                  edits={harnessEdits}
-                  onField={setHarnessField}
+            {section === 'agents' &&
+              (defaults ? (
+                <AgentsPane
+                  defaults={defaults}
+                  onDefaults={setDefaults}
+                  accounts={accountsQuery.data ?? []}
+                  resolved={agentsQuery.data ?? { apps: [] }}
+                  harnessByName={harnessByName}
                   harnessColor={harnessColor}
                   catalog={catalog}
+                  allowedEfforts={allowedEfforts}
+                  onOpenApp={setSection}
                   busy={busy}
                 />
               ) : (
@@ -477,9 +515,11 @@ export function SettingsModal({ open, onClose }: Props) {
                 harnessColor={harnessColor}
                 catalog={catalog}
                 harnessByName={harnessByName}
-                defaultModel={defaultModel}
+                defaults={defaults}
                 allowedEfforts={allowedEfforts}
+                onAgentHarness={setAgentHarness}
                 onAgentModel={setAgentModel}
+                onAgentBilling={setAgentBilling}
                 onAgentEffort={setAgentEffort}
                 onAgentTimeout={setAgentTimeout}
                 onWorkflowField={setWorkflowField}
@@ -682,6 +722,7 @@ function InheritCell({
   value,
   resolvedLabel,
   inheritLabel,
+  harness,
   harnesses,
   harnessColor,
   catalog,
@@ -689,10 +730,11 @@ function InheritCell({
   onPick,
   disabled,
 }: {
-  kind: 'model' | 'effort' | 'timeout'
+  kind: 'harness' | 'model' | 'billing' | 'effort' | 'timeout'
   value: CellValue
   resolvedLabel: string
   inheritLabel: string
+  harness: string
   harnesses: Harness[]
   harnessColor: Record<string, string>
   catalog: Catalog
@@ -709,19 +751,36 @@ function InheritCell({
     setAnchor(null)
   }
   const menu = () => {
+    if (kind === 'harness') {
+      return (
+        <>
+          <Opt sel={!isOverride} main="inherit" sub={'· ' + inheritLabel} onClick={() => pick(null)} />
+          <div className="menu-div" />
+          {harnesses.map((h) => (
+            <Opt key={h.name} sel={value === h.name} famColor={harnessColor[h.name]} main={h.name} onClick={() => pick(h.name)} />
+          ))}
+        </>
+      )
+    }
     if (kind === 'model') {
       return (
         <>
           <Opt sel={!isOverride} main="inherit" sub={'· ' + inheritLabel} onClick={() => pick(null)} />
-          <div className="menu-inherit-note">follows the harness default</div>
+          <div className="menu-inherit-note">the models {harness} runs</div>
           <div className="menu-div" />
-          {harnesses.map((h) => (
-            <Fragment key={h.name}>
-              <div className="menu-group">{h.name}</div>
-              {catalog.modelsOf(h).map((m) => (
-                <Opt key={m.id} sel={value === m.id} famColor={harnessColor[h.name]} main={m.label} onClick={() => pick(m.id)} />
-              ))}
-            </Fragment>
+          {catalog.modelsOf(harness).map((m) => (
+            <Opt key={m.id} sel={value === m.id} famColor={harnessColor[harness]} main={m.label} onClick={() => pick(m.id)} />
+          ))}
+        </>
+      )
+    }
+    if (kind === 'billing') {
+      return (
+        <>
+          <Opt sel={!isOverride} main="inherit" sub={'· ' + inheritLabel} onClick={() => pick(null)} />
+          <div className="menu-div" />
+          {BILLINGS.map((b) => (
+            <Opt key={b} sel={value === b} main={billingLabel(b)} onClick={() => pick(b)} />
           ))}
         </>
       )
@@ -788,20 +847,12 @@ function GeneralPane({
   timezone,
   setTimezone,
   timezones,
-  model,
-  setModel,
-  harnesses,
-  catalog,
   clock,
   busy,
 }: {
   timezone: string
   setTimezone: (v: string) => void
   timezones: string[]
-  model: string
-  setModel: (v: string) => void
-  harnesses: Harness[]
-  catalog: Catalog
   clock: string
   busy: boolean
 }) {
@@ -809,25 +860,6 @@ function GeneralPane({
     <div className="set-pane">
       <div className="set-pane-head">
         <div className="set-pane-sub">Account-wide preferences.</div>
-      </div>
-      <div className="set-group">
-        <div className="set-group-label">default model</div>
-        <div className="set-field" style={{ maxWidth: 320 }}>
-          <select className="set-select" value={model} onChange={(e) => setModel(e.target.value)} disabled={busy}>
-            {!harnesses.some((h) => catalog.modelsOf(h).some((m) => m.id === model)) && (
-              <option value={model}>{model}</option>
-            )}
-            {harnesses.map((h) => (
-              <optgroup key={h.name} label={h.name}>
-                {catalog.modelsOf(h).map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.label}
-                  </option>
-                ))}
-              </optgroup>
-            ))}
-          </select>
-        </div>
       </div>
       <div className="set-group">
         <div className="set-group-label">timezone</div>
@@ -849,110 +881,233 @@ function GeneralPane({
 }
 
 // ---------------------------------------------------------------------------
-// Harnesses — one card per registered harness (data-driven from the registry).
-// Edits are pending and flushed by the modal's Save button (like apps).
+// Agents — the defaults, the unattended-runs account, and every agent resolved
+// (read only: the app's own page is the editor). Edits are pending until Save.
 // ---------------------------------------------------------------------------
 
-function HarnessesPane({
-  harnesses,
-  apps,
-  allowedEfforts,
-  edits,
-  onField,
+export function AgentsPane({
+  defaults,
+  onDefaults,
+  accounts,
+  resolved,
+  harnessByName,
   harnessColor,
   catalog,
+  allowedEfforts,
+  onOpenApp,
   busy,
 }: {
-  harnesses: Harness[]
-  apps: AppSettings[]
-  allowedEfforts: string[]
-  edits: Record<string, UpdateHarnessRequest>
-  onField: (name: string, patch: UpdateHarnessRequest) => void
+  defaults: Defaults
+  onDefaults: (next: Defaults) => void
+  accounts: Account[]
+  resolved: AgentsResponse
+  harnessByName: Record<string, Harness>
   harnessColor: Record<string, string>
   catalog: Catalog
+  allowedEfforts: string[]
+  onOpenApp: (app: string) => void
   busy: boolean
 }) {
   const fieldId = useId()
-  // Agents whose effective harness is this one — the same resolution the agent
-  // rows' harness chip shows, so the card count and the chips agree even when an
-  // agent's model is overridden across harnesses.
-  const agentCount = (name: string) =>
-    apps.reduce(
-      (count, app) => count + app.agents.filter((a) => catalog.harnessOf(a.model) === name).length,
-      0,
-    )
+  const id = (field: string) => `${fieldId}-${field}`
+  const harnesses = Object.values(harnessByName)
+  const models = catalog.modelsOf(defaults.defaultHarness)
+  const defaultKeyOnly = keyOnly(harnessByName[defaults.defaultHarness])
+  const timeouts = TIMEOUTS.includes(defaults.defaultTimeout)
+    ? TIMEOUTS
+    : [...TIMEOUTS, defaults.defaultTimeout].sort((a, b) => a - b)
+  const set = (patch: Partial<Defaults>) => onDefaults({ ...defaults, ...patch })
+  const setHarness = (name: string) =>
+    set({ defaultHarness: name, ...(keyOnly(harnessByName[name]) ? { defaultBilling: 'api_key' } : {}) })
 
   return (
-    <div className="set-pane mcp-pane hrs-pane">
+    <div className="set-pane mcp-pane">
       <header className="mcp-pane-head">
-        <h2 className="mcp-pane-title">Harnesses</h2>
+        <h2 className="mcp-pane-title">Agents</h2>
         <p className="mcp-pane-sub">
-          The default model, effort, and timeout for each coding agent. Agents follow their
-          harness unless overridden on their own row.
+          How every agent runs unless its app&apos;s page says otherwise: the CLI, the model,
+          which credential it bills, the effort, and the timeout.
         </p>
       </header>
-      <div className="hrs-list">
-        {harnesses.map((harness) => {
-          // Effective values: saved harness overlaid with this session's pending edits.
-          const h = { ...harness, ...edits[harness.name] }
-          const timeouts = TIMEOUTS.includes(h.timeout)
-            ? TIMEOUTS
-            : [...TIMEOUTS, h.timeout].sort((a, b) => a - b)
-          const id = (field: string) => `${fieldId}-${harness.name}-${field}`
-          return (
-            <div key={harness.name} className="set-card hr-card" style={{ '--fam': harnessColor[harness.name] } as CSSProperties}>
-              <div className="hr-ident">
-                <span className="hr-ident-dot" />
-                <span className="hr-name">{harness.name}</span>
-                <span className="hr-provider">{harness.provider ?? 'API key'}</span>
-                <span className="hr-count">
-                  <b>{agentCount(harness.name)}</b> agents
-                </span>
-              </div>
-              <div className="hr-controls">
-                <div className="mcp-field">
-                  <label className="mcp-label" htmlFor={id('effort')}>
-                    Effort
-                  </label>
-                  <select id={id('effort')} className="set-select" value={h.effort} onChange={(e) => onField(harness.name, { effort: e.target.value })} disabled={busy}>
-                    {allowedEfforts.map((e) => (
-                      <option key={e} value={e}>
-                        {e}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="mcp-field">
-                  <label className="mcp-label" htmlFor={id('timeout')}>
-                    Timeout
-                  </label>
-                  <select id={id('timeout')} className="set-select" value={String(h.timeout)} onChange={(e) => onField(harness.name, { timeout: Number(e.target.value) })} disabled={busy}>
-                    {timeouts.map((t) => (
-                      <option key={t} value={t}>
-                        {t}s
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="mcp-field">
-                  <label className="mcp-label" htmlFor={id('fast')}>
-                    Fast app
-                  </label>
-                  <span className="hr-fast">
-                    <Switch
-                      id={id('fast')}
-                      on={h.fastMode}
-                      onClick={() => onField(harness.name, { fastMode: !h.fastMode })}
-                      disabled={busy}
-                      label={`Fast app (${harness.name})`}
-                    />
-                  </span>
-                </div>
-              </div>
-            </div>
-          )
-        })}
+
+      <div className="set-group">
+        <div className="set-group-label">defaults</div>
+        <div className="set-defaults">
+          <div className="mcp-field">
+            <label className="mcp-label" htmlFor={id('harness')}>
+              Harness
+            </label>
+            <select id={id('harness')} className="set-select" value={defaults.defaultHarness} onChange={(e) => setHarness(e.target.value)} disabled={busy}>
+              {harnesses.map((h) => (
+                <option key={h.name} value={h.name}>
+                  {h.name}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="mcp-field">
+            <label className="mcp-label" htmlFor={id('model')}>
+              Model
+            </label>
+            <select id={id('model')} className="set-select" value={defaults.defaultModel} onChange={(e) => set({ defaultModel: e.target.value })} disabled={busy}>
+              {!models.some((m) => m.id === defaults.defaultModel) && (
+                <option value={defaults.defaultModel}>{defaults.defaultModel}</option>
+              )}
+              {models.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="mcp-field">
+            <label className="mcp-label" htmlFor={id('billing')}>
+              Billing
+            </label>
+            <select
+              id={id('billing')}
+              className="set-select"
+              value={defaults.defaultBilling}
+              onChange={(e) => set({ defaultBilling: e.target.value as Billing })}
+              disabled={busy || defaultKeyOnly}
+            >
+              {BILLINGS.map((b) => (
+                <option key={b} value={b}>
+                  {billingLabel(b)}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="mcp-field">
+            <label className="mcp-label" htmlFor={id('effort')}>
+              Effort
+            </label>
+            <select id={id('effort')} className="set-select" value={defaults.defaultEffort} onChange={(e) => set({ defaultEffort: e.target.value })} disabled={busy}>
+              {allowedEfforts.map((e) => (
+                <option key={e} value={e}>
+                  {e}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="mcp-field">
+            <label className="mcp-label" htmlFor={id('fast')}>
+              Fast mode
+            </label>
+            <span className="hr-fast">
+              <Switch id={id('fast')} on={defaults.fastMode} onClick={() => set({ fastMode: !defaults.fastMode })} disabled={busy} label="Fast mode" />
+            </span>
+          </div>
+          <div className="mcp-field">
+            <label className="mcp-label" htmlFor={id('timeout')}>
+              Timeout
+            </label>
+            <select id={id('timeout')} className="set-select" value={String(defaults.defaultTimeout)} onChange={(e) => set({ defaultTimeout: Number(e.target.value) })} disabled={busy}>
+              {timeouts.map((t) => (
+                <option key={t} value={t}>
+                  {t}s
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
       </div>
+
+      <div className="set-group">
+        <div className="set-group-label">unattended runs (webhooks, schedules) run as</div>
+        <div className="set-field" style={{ maxWidth: 320 }}>
+          <select
+            className="set-select"
+            aria-label="Unattended runs run as"
+            value={defaults.fallbackAccountId ?? ''}
+            onChange={(e) => set({ fallbackAccountId: e.target.value || null })}
+            disabled={busy}
+          >
+            {!defaults.fallbackAccountId && <option value="">no account yet</option>}
+            {accounts.map((account) => (
+              <option key={account.id} value={account.id}>
+                {account.username}
+              </option>
+            ))}
+          </select>
+          <span className="set-field-help">Only matters for agents billed to a subscription.</span>
+        </div>
+      </div>
+
+      <div className="set-group">
+        <div className="set-group-label">every agent, as it resolves</div>
+        <div className="set-table agents-table">
+          <div className="set-thead">
+            <div>agent</div>
+            <div>harness</div>
+            <div>model</div>
+            <div>billing</div>
+            <div>effort</div>
+            <div>timeout</div>
+          </div>
+          {resolved.apps.map((app) => (
+            <Fragment key={app.name}>
+              <div className="agents-app">
+                <span>{appLabel(app.name)}</span>
+                <button type="button" className="agents-app-link" onClick={() => onOpenApp(app.name)} aria-label={`Open ${appLabel(app.name)}`}>
+                  ›
+                </button>
+              </div>
+              {app.agents.map((a) => (
+                <ResolvedAgentRow key={a.name} agent={a} harnessByName={harnessByName} harnessColor={harnessColor} />
+              ))}
+            </Fragment>
+          ))}
+        </div>
+        <div className="agents-legend">
+          <span>
+            <span className="ov-dot" /> overridden on the app&apos;s page
+          </span>
+          <span>⚬ fixed: this harness takes keys only</span>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function ResolvedAgentRow({
+  agent,
+  harnessByName,
+  harnessColor,
+}: {
+  agent: AgentSetting
+  harnessByName: Record<string, Harness>
+  harnessColor: Record<string, string>
+}) {
+  const locked = keyOnly(harnessByName[agent.harness])
+  const cell = (value: string, overridden: boolean) => (
+    <span className="agents-cell">
+      {overridden && <span className="ov-dot" />}
+      {value}
+    </span>
+  )
+  return (
+    <div className="set-trow">
+      <div className="agent-cell agents-agent">
+        <span className="agent-name">{agent.name}</span>
+        <span className="agent-desc">{agent.description}</span>
+      </div>
+      <div>
+        <span className="agents-cell" style={{ '--fam': harnessColor[agent.harness] } as CSSProperties}>
+          {agent.harnessSource === 'agent' && <span className="ov-dot" />}
+          {agent.harness}
+        </span>
+      </div>
+      <div>{cell(agent.model, agent.source === 'agent')}</div>
+      <div>
+        <span className={'agents-cell' + (locked ? ' agents-locked' : '')}>
+          {agent.billingSource === 'agent' && !locked && <span className="ov-dot" />}
+          {billingLabel(agent.billing)}
+          {locked && ' ⚬'}
+        </span>
+      </div>
+      <div>{cell(agent.effort, agent.effortSource === 'agent')}</div>
+      <div>{cell(agent.timeout + 's', agent.timeoutSource === 'agent')}</div>
     </div>
   )
 }
@@ -2519,11 +2674,13 @@ function AppPane({
   edits,
   fieldErrors,
   harnessByName,
-  defaultModel,
+  defaults,
   harnessColor,
   catalog,
   allowedEfforts,
+  onAgentHarness,
   onAgentModel,
+  onAgentBilling,
   onAgentEffort,
   onAgentTimeout,
   onWorkflowField,
@@ -2534,11 +2691,13 @@ function AppPane({
   edits: UpdateAppsSettingsRequest
   fieldErrors: Record<string, string>
   harnessByName: Record<string, Harness>
-  defaultModel: string
+  defaults: Defaults | null
   harnessColor: Record<string, string>
   catalog: Catalog
   allowedEfforts: string[]
+  onAgentHarness: (name: string, harness: string | null) => void
   onAgentModel: (name: string, model: string | null) => void
+  onAgentBilling: (name: string, billing: Billing | null) => void
   onAgentEffort: (name: string, effort: string | null) => void
   onAgentTimeout: (name: string, timeout: number | null) => void
   onWorkflowField: (kind: string, field: string, value: unknown) => void
@@ -2598,7 +2757,7 @@ function AppPane({
     <div className="set-pane">
       <div className="set-pane-head">
         <div className="set-pane-sub">
-          {app.description || 'Each stage runs as its own agent — set a default once per harness, override only where it matters.'}
+          {app.description || 'Each stage runs as its own agent — set the defaults once under Agents, override only where it matters.'}
         </div>
       </div>
 
@@ -2681,18 +2840,20 @@ function AppPane({
         </div>
       )}
 
-      {app.agents.length > 0 && (
+      {app.agents.length > 0 && defaults && (
         <div className="set-group">
           <div className="set-group-label">agents</div>
           <AgentTable
             app={app}
             edits={edits}
             harnessByName={harnessByName}
-            defaultModel={defaultModel}
+            defaults={defaults}
             harnessColor={harnessColor}
             catalog={catalog}
             allowedEfforts={allowedEfforts}
+            onAgentHarness={onAgentHarness}
             onAgentModel={onAgentModel}
+            onAgentBilling={onAgentBilling}
             onAgentEffort={onAgentEffort}
             onAgentTimeout={onAgentTimeout}
             busy={busy}
@@ -2707,11 +2868,13 @@ function AgentTable({
   app,
   edits,
   harnessByName,
-  defaultModel,
+  defaults,
   harnessColor,
   catalog,
   allowedEfforts,
+  onAgentHarness,
   onAgentModel,
+  onAgentBilling,
   onAgentEffort,
   onAgentTimeout,
   busy,
@@ -2719,53 +2882,49 @@ function AgentTable({
   app: AppSettings
   edits: UpdateAppsSettingsRequest
   harnessByName: Record<string, Harness>
-  defaultModel: string
+  defaults: Defaults
   harnessColor: Record<string, string>
   catalog: Catalog
   allowedEfforts: string[]
+  onAgentHarness: (name: string, harness: string | null) => void
   onAgentModel: (name: string, model: string | null) => void
+  onAgentBilling: (name: string, billing: Billing | null) => void
   onAgentEffort: (name: string, effort: string | null) => void
   onAgentTimeout: (name: string, timeout: number | null) => void
   busy: boolean
 }) {
   const harnesses = Object.values(harnessByName)
+  const override = <T,>(pending: Record<string, T | null> | undefined, name: string, saved: T | null) =>
+    pending && name in pending ? (pending[name] ?? null) : saved
   return (
     <div className="set-table">
       <div className="set-thead">
         <div>agent</div>
+        <div>harness</div>
         <div>model</div>
+        <div>billing</div>
         <div>effort</div>
         <div>timeout</div>
-        <div>harness</div>
       </div>
       {app.agents.map((a) => {
-        // Without an override an agent runs the operator's default model.
-        const famModel = defaultModel
-        const modelOver: string | null =
-          edits.agentModels && a.name in edits.agentModels
-            ? (edits.agentModels[a.name] ?? null)
-            : a.source === 'agent'
-              ? a.model
-              : null
-        const model = modelOver ?? famModel
-        // Effort/timeout inherit from the harness of the agent's resolved model.
-        const harness = catalog.harnessOf(model)
-        const harnessEffort = harnessByName[harness]?.effort ?? a.effort
-        const harnessTimeout = harnessByName[harness]?.timeout ?? a.timeout
-        const effortOver: string | null =
-          edits.agentEfforts && a.name in edits.agentEfforts
-            ? (edits.agentEfforts[a.name] ?? null)
-            : a.effortSource === 'agent'
-              ? a.effort
-              : null
-        const effort = effortOver ?? harnessEffort
-        const timeoutOver: number | null =
-          edits.agentTimeouts && a.name in edits.agentTimeouts
-            ? (edits.agentTimeouts[a.name] ?? null)
-            : a.timeoutSource === 'agent'
-              ? a.timeout
-              : null
-        const timeout = timeoutOver ?? harnessTimeout
+        const harnessOver = override(edits.agentHarnesses, a.name, a.harnessSource === 'agent' ? a.harness : null)
+        const harness = harnessOver ?? defaults.defaultHarness
+        const modelOver = override(edits.agentModels, a.name, a.source === 'agent' ? a.model : null)
+        const model = modelOver ?? defaults.defaultModel
+        const locked = keyOnly(harnessByName[harness])
+        const billingOver = override(edits.agentBillings, a.name, a.billingSource === 'agent' ? a.billing : null)
+        const billing: Billing = locked ? 'api_key' : (billingOver ?? defaults.defaultBilling)
+        const effortOver = override(edits.agentEfforts, a.name, a.effortSource === 'agent' ? a.effort : null)
+        const effort = effortOver ?? defaults.defaultEffort
+        const timeoutOver = override(edits.agentTimeouts, a.name, a.timeoutSource === 'agent' ? a.timeout : null)
+        const timeout = timeoutOver ?? (a.timeoutSource === 'declared' ? a.timeout : defaults.defaultTimeout)
+        const timeoutInherit = a.timeoutSource === 'declared' ? 'declared · ' + a.timeout + 's' : 'default · ' + defaults.defaultTimeout + 's'
+        const pickHarness = (v: CellValue) => {
+          const name = (v as string | null) ?? null
+          onAgentHarness(a.name, name)
+          if (name && keyOnly(harnessByName[name])) onAgentBilling(a.name, 'api_key')
+        }
+        const shared = { harness, harnesses, harnessColor, catalog, allowedEfforts, disabled: busy }
         return (
           <div key={a.name} className="set-trow">
             <div className="agent-cell">
@@ -2773,52 +2932,27 @@ function AgentTable({
               <span className="agent-desc">{a.description}</span>
             </div>
             <div>
-              <InheritCell
-                kind="model"
-                value={modelOver}
-                resolvedLabel={model}
-                inheritLabel={'default · ' + famModel}
-                harnesses={harnesses}
-                harnessColor={harnessColor}
-                catalog={catalog}
-                allowedEfforts={allowedEfforts}
-                onPick={(v) => onAgentModel(a.name, (v as string | null) ?? null)}
-                disabled={busy}
-              />
+              <InheritCell kind="harness" value={harnessOver} resolvedLabel={harness} inheritLabel={'default · ' + defaults.defaultHarness} onPick={pickHarness} {...shared} />
+            </div>
+            <div>
+              <InheritCell kind="model" value={modelOver} resolvedLabel={model} inheritLabel={'default · ' + defaults.defaultModel} onPick={(v) => onAgentModel(a.name, (v as string | null) ?? null)} {...shared} />
             </div>
             <div>
               <InheritCell
-                kind="effort"
-                value={effortOver}
-                resolvedLabel={effort}
-                inheritLabel={harness + ' · ' + harnessEffort}
-                harnesses={harnesses}
-                harnessColor={harnessColor}
-                catalog={catalog}
-                allowedEfforts={allowedEfforts}
-                onPick={(v) => onAgentEffort(a.name, (v as string | null) ?? null)}
-                disabled={busy}
+                kind="billing"
+                value={locked ? null : billingOver}
+                resolvedLabel={billingLabel(billing) + (locked ? ' ⚬' : '')}
+                inheritLabel={'default · ' + billingLabel(defaults.defaultBilling)}
+                onPick={(v) => onAgentBilling(a.name, (v as Billing | null) ?? null)}
+                {...shared}
+                disabled={busy || locked}
               />
             </div>
             <div>
-              <InheritCell
-                kind="timeout"
-                value={timeoutOver}
-                resolvedLabel={timeout + 's'}
-                inheritLabel={harness + ' · ' + harnessTimeout + 's'}
-                harnesses={harnesses}
-                harnessColor={harnessColor}
-                catalog={catalog}
-                allowedEfforts={allowedEfforts}
-                onPick={(v) => onAgentTimeout(a.name, (v as number | null) ?? null)}
-                disabled={busy}
-              />
+              <InheritCell kind="effort" value={effortOver} resolvedLabel={effort} inheritLabel={'default · ' + defaults.defaultEffort} onPick={(v) => onAgentEffort(a.name, (v as string | null) ?? null)} {...shared} />
             </div>
             <div>
-              <span className="harness-chip" style={{ '--fam': harnessColor[harness] } as CSSProperties}>
-                <span className="hd" />
-                {harness}
-              </span>
+              <InheritCell kind="timeout" value={timeoutOver} resolvedLabel={timeout + 's'} inheritLabel={timeoutInherit} onPick={(v) => onAgentTimeout(a.name, (v as number | null) ?? null)} {...shared} />
             </div>
           </div>
         )

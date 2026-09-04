@@ -7,7 +7,6 @@ from conftest import make_agent_result
 from druks import agents
 from druks.durable import AgentCall, WorkflowError
 from druks.files import File
-from druks.harnesses.claude import ClaudeHarness
 from druks.sandbox.exceptions import SandboxDownloadError
 from druks.usage.models import UsageScrape
 
@@ -32,27 +31,6 @@ FILE_AGENT = agents.Agent(
     prompt="dummy/agent.md",
     contract=FileOutput,
 )
-
-
-async def test_get_timeout_caps_at_the_sandbox_lease_max(druks_db):
-    """A resolved timeout over the sandbox-lease max is clamped; a shorter one passes through."""
-    from druks.sandbox.constants import MAX_AGENT_TIMEOUT_SECONDS
-
-    over = agents.Agent(
-        id="over",
-        prompt="dummy/agent.md",
-        contract=DummyOutput,
-        timeout=MAX_AGENT_TIMEOUT_SECONDS * 2,
-    )
-    under = agents.Agent(
-        id="under",
-        prompt="dummy/agent.md",
-        contract=DummyOutput,
-        timeout=600,
-    )
-
-    assert await over.get_timeout(ClaudeHarness) == MAX_AGENT_TIMEOUT_SECONDS
-    assert await under.get_timeout(ClaudeHarness) == 600
 
 
 @pytest.fixture(autouse=True)
@@ -174,22 +152,23 @@ async def test_declaration_drives_run_agent_call(druks_db, tmp_path, monkeypatch
     result = await DUMMY_AGENT._run(workflow_id="wf-9", repo="acme/widget")
 
     assert result == DummyOutput(ok=True)
+    # The sandbox resolves harness, model, credential, effort, and timeout itself
+    # from the agent's name and the run's account.
     kwargs = sandbox.run_agent.await_args.kwargs
-    assert kwargs["model"] == "anthropic/claude-opus-4-7"
     assert kwargs["agent"] == "dummy"
+    assert kwargs["account_id"] is None
     assert kwargs["schema"] == DummyOutput.model_json_schema()
     assert kwargs["prompt"] == "PROMPT:dummy/agent.md:repo=acme/widget"
     assert kwargs["artifact_dir"] == tmp_path / "run-wf-9"
-    assert kwargs["timeout"] == 1800
     assert kwargs["include_plugins"] is True
+    assert "model" not in kwargs
 
 
-async def test_declared_timeout_is_forwarded(druks_db, tmp_path, monkeypatch, current_run):
+async def test_declared_plugin_choice_is_forwarded(druks_db, tmp_path, monkeypatch, current_run):
     agent = agents.Agent(
-        id="timeout_probe",
+        id="plugin_probe",
         prompt="dummy/agent.md",
         contract=DummyOutput,
-        timeout=900,
         include_plugins=False,
     )
     sandbox = _patch_runtime(monkeypatch, tmp_path, {"ok": True})
@@ -197,9 +176,7 @@ async def test_declared_timeout_is_forwarded(druks_db, tmp_path, monkeypatch, cu
 
     await agent._run(workflow_id="wf-9")
 
-    kwargs = sandbox.run_agent.await_args.kwargs
-    assert kwargs["timeout"] == 900
-    assert kwargs["include_plugins"] is False
+    assert sandbox.run_agent.await_args.kwargs["include_plugins"] is False
 
 
 async def test_runner_comes_from_workflow_workspace_factory(

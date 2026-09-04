@@ -142,5 +142,5 @@ class CatalogError(Exception):
         self.tag = tag
 
 
-class UnknownModelError(HarnessError):
-    """No installed harness runs the model; the API answers it as a 422."""
+class ExecutionSettingsError(HarnessError):
+    """A (harness, model, billing) triple no installed harness runs; a 422."""

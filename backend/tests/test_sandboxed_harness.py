@@ -520,21 +520,22 @@ def test_agent_result_names_the_agent_in_its_failure():
 
 
 def _patch_harness_resolution(monkeypatch: pytest.MonkeyPatch) -> None:
-    # run_agent reads the harness settings from the DB; these tests are about
-    # the failure boundary, not resolution.
+    # run_agent resolves the call through the one resolver; these tests are
+    # about the failure boundary, not resolution.
+    from druks.harnesses.execution import Execution
 
-    async def get_registered(name):
-        return SimpleNamespace(effort="high", timeout=60, fast_mode=False)
-
-    async def lookup(provider, account_id, *, subscription_id=None):
-        return SimpleNamespace(
-            id="subscription-1", account_id="acc", get_harness=lambda: ClaudeHarness
+    async def resolve_execution(agent, account_id):
+        return Execution(
+            harness_class=ClaudeHarness,
+            model="anthropic/claude-opus-4-7",
+            subscription=SimpleNamespace(id="subscription-1", account_id="acc"),
+            key=None,
+            effort="high",
+            timeout=60,
+            fast_mode=False,
         )
 
-    monkeypatch.setattr(
-        "druks.user_settings.models.HarnessSettings.get_registered", staticmethod(get_registered)
-    )
-    monkeypatch.setattr("druks.harnesses.models.ProviderSubscription.lookup", staticmethod(lookup))
+    monkeypatch.setattr("druks.harnesses.execution.resolve_execution", resolve_execution)
 
 
 async def test_run_agent_carries_foreign_failures_as_harness_errors(
@@ -555,10 +556,10 @@ async def test_run_agent_carries_foreign_failures_as_harness_errors(
     sandbox.run_prompt = run_prompt
     result = await Host.run_agent(
         sandbox,
-        model="anthropic/claude-opus-4-7",
+        agent="evaluate",
+        account_id=None,
         prompt="p",
         schema={"type": "object"},
-        agent="evaluate",
         artifact_dir=ctx.artifact_dir,
     )
 
@@ -584,10 +585,10 @@ async def test_run_agent_carries_a_taxonomy_failure_as_itself(
     sandbox.run_prompt = run_prompt
     result = await Host.run_agent(
         sandbox,
-        model="anthropic/claude-opus-4-7",
+        agent="evaluate",
+        account_id=None,
         prompt="p",
         schema={"type": "object"},
-        agent="evaluate",
         artifact_dir=ctx.artifact_dir,
     )
 

@@ -4,15 +4,74 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { SettingsModal } from './SettingsModal'
 
+const harnesses = [
+  { name: 'claude', provider: 'anthropic', loginKinds: ['api_key', 'oauth'] },
+  { name: 'codex', provider: 'openai', loginKinds: ['api_key', 'oauth'] },
+  { name: 'opencode', provider: null, loginKinds: ['api_key'] },
+]
+
+const userSettings = {
+  timezone: 'UTC',
+  defaultHarness: 'claude',
+  defaultModel: 'anthropic/claude-opus-4-7',
+  defaultBilling: 'subscription',
+  defaultEffort: 'high',
+  fastMode: false,
+  defaultTimeout: 1800,
+  fallbackAccountId: 'acc-1',
+  gateParkDestinationId: null,
+  updatedAt: '2026-08-01T00:00:00Z',
+}
+
+const coder = {
+  name: 'coder',
+  description: 'writes the change',
+  harness: 'codex',
+  harnessSource: 'agent',
+  model: 'openai/gpt-5.5',
+  source: 'agent',
+  billing: 'subscription',
+  billingSource: 'default',
+  effort: 'high',
+  effortSource: 'default',
+  timeout: 1800,
+  timeoutSource: 'default',
+}
+
+const critic = {
+  name: 'critic',
+  description: 'reviews the change',
+  harness: 'opencode',
+  harnessSource: 'agent',
+  model: 'anthropic/claude-sonnet-5',
+  source: 'agent',
+  billing: 'api_key',
+  billingSource: 'agent',
+  effort: 'high',
+  effortSource: 'default',
+  timeout: 1800,
+  timeoutSource: 'default',
+}
+
+const resolvedAgents = {
+  apps: [
+    { name: 'software_factory', agents: [coder] },
+    { name: 'review', agents: [critic] },
+  ],
+}
+
+// PATCH /api/settings bodies, in order.
+const patched: Record<string, unknown>[] = []
+
 const appSettings = {
-  allowedEfforts: [],
+  allowedEfforts: ['low', 'medium', 'high'],
   apps: [
     {
       name: 'software_factory',
       description: 'Software Factory settings',
       icon: 'factory',
       builtin: false,
-      agents: [],
+      agents: [coder],
       workflows: [],
       settings: [
         {
@@ -150,7 +209,17 @@ function stubFetch(
         return new Response(JSON.stringify(appSettings), { status: 200 })
       }
       if (path === '/api/settings/harnesses') {
-        return new Response('[]', { status: 200 })
+        return new Response(JSON.stringify(harnesses), { status: 200 })
+      }
+      if (path === '/api/agents') {
+        return new Response(JSON.stringify(resolvedAgents), { status: 200 })
+      }
+      if (path === '/api/auth/accounts') {
+        return new Response(JSON.stringify([{ id: 'acc-1', username: 'paulo@example.com' }]), { status: 200 })
+      }
+      if (path === '/api/settings' && init?.method === 'PATCH') {
+        patched.push(JSON.parse(String(init.body)))
+        return new Response(JSON.stringify({ ...userSettings, ...JSON.parse(String(init.body)) }), { status: 200 })
       }
       if (path === '/api/providers/catalogs') {
         return new Response('[]', { status: 200 })
@@ -165,9 +234,7 @@ function stubFetch(
         return new Response('[]', { status: 200 })
       }
       if (path === '/api/settings') {
-        return new Response(JSON.stringify({ timezone: 'UTC', defaultModel: 'anthropic/claude-opus-4-7', updatedAt: '2026-08-01T00:00:00Z' }), {
-          status: 200,
-        })
+        return new Response(JSON.stringify(userSettings), { status: 200 })
       }
       return new Response('{}', { status: 404 })
     }),
@@ -187,6 +254,7 @@ function renderModal(onClose = vi.fn()) {
 afterEach(() => {
   cleanup()
   vi.unstubAllGlobals()
+  patched.length = 0
 })
 
 describe('SettingsModal app fields', () => {
@@ -308,5 +376,68 @@ describe('SettingsModal app fields', () => {
     expect(
       await screen.findByText('Linear trigger status: Not a Linear status name.'),
     ).toBeTruthy()
+  })
+})
+
+describe('SettingsModal agents', () => {
+  it('the rail offers Agents in place of Harnesses and General has no model picker', async () => {
+    stubFetch()
+    renderModal()
+
+    expect(await screen.findByRole('button', { name: 'Agents' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Harnesses' })).toBeNull()
+    expect(screen.queryByText('default model')).toBeNull()
+  })
+
+  it('renders the defaults, the unattended-runs account, and every agent resolved', async () => {
+    stubFetch()
+    renderModal()
+    fireEvent.click(await screen.findByRole('button', { name: 'Agents' }))
+
+    expect(await screen.findByRole('heading', { name: 'Agents' })).toBeTruthy()
+    expect((screen.getByLabelText('Harness') as HTMLSelectElement).value).toBe('claude')
+    expect((screen.getByLabelText('Billing') as HTMLSelectElement).value).toBe('subscription')
+    expect((screen.getByLabelText('Unattended runs run as') as HTMLSelectElement).value).toBe('acc-1')
+    expect(screen.getByText('Only matters for agents billed to a subscription.')).toBeTruthy()
+    // The resolved table, grouped by app, with the override and locked marks.
+    expect(await screen.findByText('coder')).toBeTruthy()
+    expect(screen.getByText('critic')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Open software factory' })).toBeTruthy()
+    expect(screen.getByText('API key ⚬')).toBeTruthy()
+    expect(screen.getByText('openai/gpt-5.5')).toBeTruthy()
+  })
+
+  it('a key-only default harness locks billing to API key and Save sends the changed defaults', async () => {
+    stubFetch()
+    renderModal()
+    fireEvent.click(await screen.findByRole('button', { name: 'Agents' }))
+    await screen.findByRole('heading', { name: 'Agents' })
+
+    fireEvent.change(screen.getByLabelText('Harness'), { target: { value: 'opencode' } })
+    const billing = screen.getByLabelText('Billing') as HTMLSelectElement
+    expect(billing.value).toBe('api_key')
+    expect(billing.disabled).toBe(true)
+    fireEvent.change(screen.getByLabelText('Effort'), { target: { value: 'low' } })
+
+    fireEvent.click(screen.getByRole('button', { name: 'save' }))
+    await waitFor(() => expect(patched).toHaveLength(1))
+    expect(patched[0]).toEqual({ defaultHarness: 'opencode', defaultBilling: 'api_key', defaultEffort: 'low' })
+  })
+
+  it('the app page carries harness and billing cells that follow the chosen harness', async () => {
+    stubFetch()
+    renderModal()
+    fireEvent.click(await screen.findByRole('button', { name: 'software factory' }))
+    await screen.findByText('coder')
+
+    // The saved override shows on the harness cell with its reset.
+    const harnessCell = screen.getByText('codex').closest('button')!
+    expect(harnessCell.className).toContain('override')
+    fireEvent.click(harnessCell)
+    fireEvent.click(await screen.findByText('opencode'))
+
+    // A key-only harness locks billing to API key on the row.
+    expect(screen.getByText('API key ⚬')).toBeTruthy()
+    expect(screen.getByText('API key ⚬').closest('button')!.hasAttribute('disabled')).toBe(true)
   })
 })

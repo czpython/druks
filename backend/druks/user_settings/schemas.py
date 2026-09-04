@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, PositiveInt
 from pydantic.fields import FieldInfo
@@ -14,57 +14,72 @@ from druks.apps.settings import (
 from druks.harnesses.schemas import SortedNames
 from druks.schemas import Schema
 
-from .datastructures import Effort
-
-if TYPE_CHECKING:
-    pass
+from .datastructures import Billing, Effort
 
 
 class HarnessResponse(Schema):
     model_config = ConfigDict(from_attributes=True)
 
     name: str
-    # The provider a subscription CLI is bound to; None for a key CLI.
     provider: str | None
     login_kinds: SortedNames
-    effort: str
-    timeout: int
-    fast_mode: bool
-
-
-class HarnessUpdate(BaseModel):
-    fast_mode: bool | None = Field(default=None, validation_alias="fastMode")
-    effort: Effort | None = None
-    timeout: PositiveInt | None = None
 
 
 class UserSettingsResponse(Schema):
     model_config = ConfigDict(from_attributes=True)
 
     timezone: str
+    default_harness: str
     default_model: str
+    default_billing: str
+    default_effort: str
+    fast_mode: bool
+    default_timeout: int
+    fallback_account_id: str | None
     gate_park_destination_id: str | None
     updated_at: datetime
 
 
 class UpdateUserSettingsRequest(BaseModel):
     timezone: str | None = None
+    default_harness: str | None = Field(default=None, validation_alias="defaultHarness")
     default_model: str | None = Field(default=None, validation_alias="defaultModel")
+    default_billing: Billing | None = Field(default=None, validation_alias="defaultBilling")
+    default_effort: Effort | None = Field(default=None, validation_alias="defaultEffort")
+    fast_mode: bool | None = Field(default=None, validation_alias="fastMode")
+    default_timeout: PositiveInt | None = Field(default=None, validation_alias="defaultTimeout")
+    fallback_account_id: str | None = Field(default=None, validation_alias="fallbackAccountId")
     # Tri-state: absent = unchanged, null = clear (off), value = designate.
     gate_park_destination_id: str | None = Field(
         default=None, validation_alias="gateParkDestinationId"
     )
 
 
+Source = Literal["agent", "default"]
+
+
 class AgentSettingResponse(Schema):
     name: str
     description: str
+    harness: str
+    harness_source: Source
     model: str
-    source: Literal["agent", "default"]
+    source: Source
+    billing: str
+    billing_source: Source
     effort: str
-    effort_source: Literal["agent", "harness"]
+    effort_source: Source
     timeout: int
-    timeout_source: Literal["agent", "declared", "harness"]
+    timeout_source: Literal["agent", "declared", "default"]
+
+
+class AgentsAppResponse(Schema):
+    name: str
+    agents: list[AgentSettingResponse]
+
+
+class AgentsResponse(Schema):
+    apps: list[AgentsAppResponse]
 
 
 class SettingsFieldResponse(Schema):
@@ -144,17 +159,23 @@ class AppsSettingsResponse(Schema):
 
 
 class AppsSettingsUpdate(BaseModel):
-    # agent name -> model (null clears, i.e. inherit the operator default).
+    # Each map is agent name -> value; null clears, i.e. inherit the operator default.
+    agent_harnesses: dict[str, str | None] = Field(
+        default_factory=dict,
+        validation_alias="agentHarnesses",
+    )
     agent_models: dict[str, str | None] = Field(
         default_factory=dict,
         validation_alias="agentModels",
     )
-    # agent name -> effort (null clears, i.e. inherit the harness default).
+    agent_billings: dict[str, Billing | None] = Field(
+        default_factory=dict,
+        validation_alias="agentBillings",
+    )
     agent_efforts: dict[str, Effort | None] = Field(
         default_factory=dict,
         validation_alias="agentEfforts",
     )
-    # agent name -> timeout seconds (null clears, i.e. inherit the harness default).
     agent_timeouts: dict[str, PositiveInt | None] = Field(
         default_factory=dict,
         validation_alias="agentTimeouts",
