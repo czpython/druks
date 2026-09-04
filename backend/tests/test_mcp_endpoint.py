@@ -8,6 +8,7 @@ import pytest
 from conftest import finish_agent_run, make_test_note, seed_note_agent_run, seed_note_run
 from druks.accounts.models import Account, PersonalAccessToken
 from druks.api.server import mcp_app
+from druks.contrib.issues.models import Project, Ticket
 from druks.contrib.software_factory.app import SoftwareFactory
 from druks.core.apis.exceptions import UnknownTicketError
 from druks.durable.models import Artifact, Run
@@ -219,6 +220,37 @@ async def test_tools_list_pins_platform_and_app_tools(app, pat_token):
     assert "list_open_subjects" in tools["software_factory_start"].description
     assert not tools["list_open_subjects"].inputSchema.get("required")
     assert not tools["get_usage"].inputSchema.get("required")
+
+
+async def test_issues_ticket_tools_read_and_comment_as_the_pat_account(app, account, pat_token):
+    project = await Project.create(name="widget", prefix="WID")
+    ticket = await Ticket.create(
+        project_id=project.id, title="Add an endpoint", description="do the thing"
+    )
+
+    async with live(app), _client(app, pat_token) as client:
+        names = {tool.name for tool in await client.list_tools()}
+        fetched = (
+            await client.call_tool("issues_get_ticket", {"identifier": ticket.identifier})
+        ).structured_content
+        commented = (
+            await client.call_tool(
+                "issues_add_comment",
+                {"identifier": ticket.identifier, "body": "first plan"},
+            )
+        ).structured_content
+        reread = (
+            await client.call_tool("issues_get_ticket", {"identifier": ticket.identifier})
+        ).structured_content
+
+    assert "issues_get_ticket" in names
+    assert "issues_add_comment" in names
+    assert fetched["description"] == "do the thing"
+    assert fetched["comments"] == []
+    assert commented["author"] == account.username
+    assert commented["body"] == "first plan"
+    assert [line["body"] for line in reread["comments"]] == ["first plan"]
+    assert reread["comments"][0]["author"] == account.username
 
 
 @pytest.mark.parametrize(

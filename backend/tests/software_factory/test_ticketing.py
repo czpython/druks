@@ -1,10 +1,15 @@
 import json
+from types import SimpleNamespace
 
 import httpx
 import pytest
 from druks.apps.settings import field_choices, field_visibility
 from druks.contrib.issues.tracker import IssuesTracker
-from druks.contrib.software_factory.app import SoftwareFactory, check_tracker_identity
+from druks.contrib.software_factory.app import (
+    SoftwareFactory,
+    check_issues_mcp,
+    check_tracker_identity,
+)
 from druks.contrib.software_factory.ticketing.enums import TicketStatus
 from druks.contrib.software_factory.ticketing.jira import Jira
 from druks.contrib.software_factory.ticketing.linear import Linear
@@ -236,6 +241,48 @@ async def test_tracker_builds_issues_without_credentials(druks_db, monkeypatch):
 
     assert isinstance(tracker, IssuesTracker)
     assert await SoftwareFactory.get_tracker("linear") is None
+
+
+async def test_issues_mcp_check_skips_when_tracker_is_not_issues(monkeypatch):
+    _pin_software_factory_settings(monkeypatch, tracker="linear")
+
+    result = await check_issues_mcp()
+
+    assert result.ok
+    assert result.detail == "not required"
+
+
+async def test_issues_mcp_check_pends_without_an_endpoint(monkeypatch):
+    _pin_software_factory_settings(monkeypatch, tracker="issues")
+    monkeypatch.setattr(
+        "druks.contrib.software_factory.app.load_settings",
+        lambda: SimpleNamespace(urls=SimpleNamespace(endpoint="")),
+    )
+
+    result = await check_issues_mcp()
+
+    assert not result.ok
+    assert result.pending
+    assert "/mcp" in result.detail
+
+
+async def test_issues_mcp_check_names_an_unreachable_url(monkeypatch):
+    _pin_software_factory_settings(monkeypatch, tracker="issues")
+    monkeypatch.setattr(
+        "druks.contrib.software_factory.app.load_settings",
+        lambda: SimpleNamespace(urls=SimpleNamespace(endpoint="http://druks.test:8001")),
+    )
+
+    async def fake_get(self, url):
+        raise httpx.ConnectError("connection refused", request=httpx.Request("GET", url))
+
+    monkeypatch.setattr(httpx.AsyncClient, "get", fake_get)
+
+    result = await check_issues_mcp()
+
+    assert not result.ok
+    assert not result.pending
+    assert "http://druks.test:8001/mcp" in result.detail
 
 
 # --- Linear provider --------------------------------------------------------

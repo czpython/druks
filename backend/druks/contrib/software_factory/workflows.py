@@ -1,10 +1,12 @@
 import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
+from urllib.parse import urlsplit, urlunsplit
 
 from pydantic import BaseModel, Field
 
-from druks.accounts.models import Account
+from druks.accounts.constants import SYSTEM_ACCOUNT_ID
+from druks.accounts.models import Account, PersonalAccessToken
 from druks.contrib.review.github import get_review_actor
 from druks.contrib.software_factory.contracts import ImplementationOutput, ReviewWork
 from druks.contrib.software_factory.enums import (
@@ -30,7 +32,7 @@ from druks.workflows import FatalError, Workflow, step
 from druks.workspaces import RepoWorkspace
 
 from .app import SoftwareFactory
-from .constants import GITHUB_MCP_NAME, GITHUB_MCP_URL
+from .constants import GITHUB_MCP_NAME, GITHUB_MCP_URL, ISSUES_MCP_NAME
 from .journal import BuildJournal
 from .policy import PlanGate, RepoPolicy
 from .prompt_context import BuildPromptContext
@@ -39,6 +41,26 @@ if TYPE_CHECKING:
     from druks.sandbox.host import Host
 
 logger = logging.getLogger(__name__)
+
+_LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
+
+
+def issues_mcp_url() -> str:
+    """The appliance /mcp as a sandbox reaches this process. Loopback is this
+    host, not the VM, so it becomes the Docker host gateway."""
+    endpoint = load_settings().urls.endpoint.rstrip("/")
+    if not endpoint:
+        raise FatalError(
+            "urls.endpoint is unset; the issues tracker tools need /mcp reachable from the sandbox."
+        )
+    parts = urlsplit(endpoint)
+    host = parts.hostname or ""
+    if host in _LOOPBACK_HOSTS:
+        port = f":{parts.port}" if parts.port else ""
+        endpoint = urlunsplit(
+            (parts.scheme, f"host.docker.internal{port}", parts.path, "", "")
+        ).rstrip("/")
+    return f"{endpoint}/mcp"
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -50,13 +72,28 @@ class BuildWorkspace(RepoWorkspace):
     # Installation token for build's github MCP server, minted per repo from
     # the identity reviews act as. Required — there is no build without github.
     mcp_token: str
+    # Appliance /mcp, set only when the tracker is issues. Empty otherwise —
+    # Linear and Jira do not take this server.
+    issues_mcp_url: str = ""
+    issues_mcp_token: str = ""
 
     @property
     def workspace_root(self) -> str:
         return get_work_root(self.host.ssh_username)
 
     def get_required_mcp_servers(self) -> tuple[RequiredMcpServer, ...]:
-        return (RequiredMcpServer(name=GITHUB_MCP_NAME, url=GITHUB_MCP_URL, token=self.mcp_token),)
+        servers = (
+            RequiredMcpServer(name=GITHUB_MCP_NAME, url=GITHUB_MCP_URL, token=self.mcp_token),
+        )
+        if self.issues_mcp_url:
+            servers += (
+                RequiredMcpServer(
+                    name=ISSUES_MCP_NAME,
+                    url=self.issues_mcp_url,
+                    token=self.issues_mcp_token,
+                ),
+            )
+        return servers
 
     def get_agent_run_kwargs(self, **kwargs: Any) -> dict[str, Any]:
         # Agents clone related repos on demand under get_related_root; grant file-tool
@@ -201,7 +238,7 @@ class Build(Workflow):
                 f"Could not mint the GitHub token for {repo}; build requires it "
                 "for its github MCP server."
             ) from error
-        return {
+        kwargs = {
             **await super().get_workspace_kwargs(host),
             "repo": repo,
             "branch": branch,
@@ -209,6 +246,27 @@ class Build(Workflow):
             "mcp_token": mcp_token,
             "skills": tuple(self._profile.get("recommended_skills", [])),
         }
+        if (await SoftwareFactory.settings()).tracker == "issues":
+            kwargs["issues_mcp_url"] = issues_mcp_url()
+            account_id = self.account_id
+            if account_id and account_id != SYSTEM_ACCOUNT_ID:
+                account = await Account.get(account_id, exclude_system=True)
+                if not account:
+                    raise FatalError(
+                        f"issues tracker tools need account {account_id} to mint the /mcp PAT."
+                    )
+            else:
+                accounts = await Account.list_non_system()
+                if len(accounts) != 1:
+                    raise FatalError(
+                        "issues tracker tools need a run account or exactly one "
+                        "operator account to mint the /mcp PAT."
+                    )
+                account = accounts[0]
+            _, kwargs["issues_mcp_token"] = await PersonalAccessToken.create(
+                account_id=account.id, name="issues sandbox"
+            )
+        return kwargs
 
     async def get_prompt_context(self, **context: Any) -> dict[str, Any]:
         work_item = await self.subject
