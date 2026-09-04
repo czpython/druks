@@ -130,6 +130,48 @@ async def test_update_ticket_never_publishes_and_cannot_set_status(druks_client,
     assert events == []
 
 
+async def test_blank_assignee_is_nobody(druks_client):
+    project = await _open_project(druks_client)
+    created = await druks_client.post(
+        "/api/issues/tickets",
+        json={"title": "unheld", "project_id": project["id"], "assignee_id": ""},
+    )
+
+    assert created.status_code == 201
+    assert created.json()["assignee_id"] is None
+
+    ticket = created.json()
+    assigned = await Account.get_or_create("dev@example.com")
+    held = await druks_client.patch(
+        f"/api/issues/tickets/{ticket['identifier']}",
+        json={"assignee_id": assigned.id},
+    )
+    assert held.status_code == 200
+    assert held.json()["assignee_id"] == assigned.id
+
+    cleared = await druks_client.patch(
+        f"/api/issues/tickets/{ticket['identifier']}",
+        json={"assignee_id": ""},
+    )
+    assert cleared.status_code == 200
+    assert cleared.json()["assignee_id"] is None
+
+
+async def test_update_can_move_a_ticket_to_another_project(druks_client):
+    first = await _open_project(druks_client, name="alpha", prefix="alp")
+    second = await _open_project(druks_client, name="beta", prefix="bet")
+    ticket = await _open_ticket(druks_client, first["id"])
+
+    moved = await druks_client.patch(
+        f"/api/issues/tickets/{ticket['identifier']}",
+        json={"project_id": second["id"]},
+    )
+
+    assert moved.status_code == 200
+    assert moved.json()["project_id"] == second["id"]
+    assert moved.json()["identifier"] == "ALP-1"
+
+
 async def test_add_comment_authors_from_the_request_account(druks_client):
     account = await Account.get_or_create("op@example.com")
     project = await _open_project(druks_client)

@@ -131,6 +131,9 @@ async def create_ticket(
     title = required_text(title, "title")
     if not await Project.get(project_id):
         raise HTTPException(http_status.HTTP_404_NOT_FOUND, f"no project {project_id}")
+    # An assignee select with nobody picked submits "", and the shell sends
+    # every field the form shows. Blank is nobody, not an account id to look up.
+    assignee_id = assignee_id or None
     if assignee_id is not None:
         await require_assignee(assignee_id)
     ticket = await Ticket.create(
@@ -146,13 +149,15 @@ async def create_ticket(
 
 @router.patch("/tickets/{identifier}", operation_id="issues_update_ticket", tags=["agent"])
 async def update_ticket(identifier: str, edit: TicketEdit) -> TicketDetail:
-    """Edit what a ticket says — title, description, priority, assignee. What
-    you leave out stays as it was, and a title cannot be edited away. Status is
-    not here: a title edit is not a state transition, and ``set_status`` is the
+    """Edit what a ticket says — title, description, priority, assignee, project.
+    What you leave out stays as it was, and a title cannot be edited away. Status
+    is not here: a title edit is not a state transition, and ``set_status`` is the
     one door that moves a ticket."""
     ticket = await require_ticket(identifier)
     if edit.assignee_id is not None:
         await require_assignee(edit.assignee_id)
+    if edit.project_id is not None and not await Project.get(edit.project_id):
+        raise HTTPException(http_status.HTTP_404_NOT_FOUND, f"no project {edit.project_id}")
 
     if edit.title is not None:
         ticket.title = required_text(edit.title, "title")
@@ -169,6 +174,10 @@ async def update_ticket(identifier: str, edit: TicketEdit) -> TicketDetail:
     # set of fields rather than the value: omitted keeps whoever holds it.
     if "assignee_id" in edit.model_fields_set:
         await ticket.assign(edit.assignee_id)
+    if edit.project_id is not None and ticket.project_id != edit.project_id:
+        ticket.project_id = edit.project_id
+        ticket.updated_at = Base.utc_now()
+        await db_session().flush()
     return await ticket_detail(ticket)
 
 
