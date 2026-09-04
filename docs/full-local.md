@@ -76,14 +76,15 @@ Success means the Compose services are up and the health endpoint returns
 
 ## 3. Connect agent harnesses
 
-Open **Settings → Providers** in the dashboard and connect Anthropic and ChatGPT.
-Druks stores those subscription credentials in Postgres and writes a fresh
-credential file into each sandbox. It does not use host CLI login files.
+Open **Settings → Providers** in the dashboard. Connect the providers for your
+selected harnesses with a subscription or API key, as each provider supports.
+Druks stores the credentials in Postgres and sends fresh credentials to each
+sandbox. It does not use host CLI login files.
 The local profile uses `[identity].mode = "none"`. It has no browser
 authentication and exactly one operator account.
 
 A new installation shows its
-setup page until the first provider connection completes. That connection
+setup page until the first subscription connection completes. That connection
 creates the operator account from the provider-verified email. Protect database
 access and backups as credential data. Harness payloads do not use the
 `[secrets].secrets_key` envelope that protects MCP tokens and OAuth grants.
@@ -100,7 +101,8 @@ docker compose exec web druks doctor
 ```
 
 Each configured check must be green. You can run this command before you connect
-the harnesses. The Claude and Codex credential checks will fail in that state.
+the harnesses. In that state, each disconnected harness reports a credential
+error.
 
 To prove the full sandbox path rather than only Drukbox's control-plane health:
 
@@ -152,7 +154,7 @@ development Druks environment and invoke its documented trigger or
 
 `[sandbox].image` selects the image Drukbox starts. The shipped
 `ghcr.io/czpython/druks/sandbox:latest` image contains the non-root `druks`
-user plus Git, GitHub CLI, Node, Claude, and Codex.
+user plus Git, GitHub CLI, Node, and the supported agent CLIs.
 
 If you change the sandbox, build the image from the repository:
 

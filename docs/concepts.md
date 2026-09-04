@@ -39,7 +39,7 @@ name must match `App.name`. The same name scopes:
 ### Druks owns
 
 - Durable execution, queues, schedules, run state, cancellation, and gates
-- Agent descriptors, Claude and Codex harness dispatch, and sandbox access
+- Agent descriptors, harness dispatch, and sandbox access
 - Subject timelines, the event feed, signals, webhook dispatch, and notifications
 - MCP and skill delivery, settings, MCP secret encryption, and diagnostics
 - The FastAPI server, shared dashboard shell, and app loading.
@@ -143,7 +143,7 @@ These terms describe different ownership layers:
 | Layer | Responsibility |
 | --- | --- |
 | Agent | App-owned prompt, output contract, and run timeout |
-| Harness | Platform adapter that invokes the Claude or Codex CLI for a model |
+| Harness | Platform adapter that invokes an agent CLI for a model |
 | Workspace | App customization of what a call receives, such as a cloned repository |
 | Sandbox | Drukbox-provisioned isolated host where the harness process runs |
 | Provider | A Drukbox backend name that supplies the host. `docker` and `exe` select install shapes |
@@ -197,9 +197,9 @@ Harness subscription payloads and notification webhook URLs do not use that
 encryption envelope. They are standard Postgres fields. The API withholds or
 masks their values. Thus, database and backup access is credential access.
 
-Druks injects enabled MCP servers through both harnesses. A call receives the
-enabled skills it requests, or every enabled skill when it requests none. A
-workspace can also require an MCP server and supply its credentials.
+Druks injects enabled MCP servers through the selected harness. A call receives
+the enabled skills it requests, or every enabled skill when it requests none.
+A workspace can also require an MCP server and supply its credentials.
 Each agent call records its declarations and delivery so later evaluation can
 distinguish capability sets without storing the tokens.
 
@@ -228,7 +228,7 @@ webhooks and the token-authenticated notification response.
 
 The PAT-authenticated
 `/mcp` endpoint also stays outside the gate. Each route keeps its own
-authentication. A Claude or Codex connection adds a capability to the current
+authentication. A harness connection adds a capability to the current
 account. It is not a login. See
 [configuration](configuration.md#public-urls-and-access-control) for the
 trust requirements. The edge must remove client-supplied copies of the identity
