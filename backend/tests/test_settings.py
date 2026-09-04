@@ -1,4 +1,5 @@
 import re
+from pathlib import Path
 
 import pytest
 from druks.settings import Settings, ensure_data_dirs
@@ -120,6 +121,20 @@ secrets_key = "{_SECRETS_KEY}"
     settings = Settings()
 
     assert settings.identity.jwt_identity_claim == "email"
+
+
+def test_harness_config_root_expands_the_environment_path(tmp_path, monkeypatch):
+    monkeypatch.setenv("DRUKS_HARNESS_CONFIG_ROOT", "~/harness-config")
+
+    settings = make_settings(tmp_path)
+
+    assert settings.harness_config_root == Path.home() / "harness-config"
+
+
+def test_harness_config_root_defaults_to_the_druks_config_directory(tmp_path):
+    settings = make_settings(tmp_path)
+
+    assert settings.harness_config_root == Path.home() / ".config/druks/harnesses"
 
 
 def test_missing_explicit_config_refuses_construction(tmp_path, monkeypatch):

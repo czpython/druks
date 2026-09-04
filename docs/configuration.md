@@ -71,6 +71,7 @@ recover an installation, preserve `[secrets]`. Use repeatable
 | `DRUKS_TEST_REDIS_URL` | `redis://127.0.0.1:6379/15` | What the shipped pytest fixtures flush |
 | `DRUKS_REDIS_URL` | `redis://127.0.0.1:6379/0` | Short-lived coordination and caches |
 | `DRUKS_DATA_DIR` | `/var/lib/druks` | Logs, artifacts, installed skills |
+| `DRUKS_HARNESS_CONFIG_ROOT` | `~/.config/druks/harnesses` | Optional harness configuration copied into sandboxes |
 | `DRUKS_LOG_LEVEL` | `INFO` | Python and DBOS log level |
 
 Postgres stores durable state. Redis does not store workflow state. It supports
@@ -299,14 +300,31 @@ The `claude` and `codex` CLIs run on their own vendor's subscription or key.
 Models.dev provider after its key is stored. A model ID is `provider/model`
 for each harness, for example `openai/gpt-5.5`.
 
-Process settings such as `DRUKS_CLAUDE_CONFIG_DIR` and
-`DRUKS_CODEX_CONFIG_DIR` point at optional non-auth CLI configuration to carry
-into sandboxes. The Compose deployment mounts these read-only. The default
-harness, model, billing, effort, and timeout live in **Settings → Agents**;
-each agent can override any of them on its app's page. **Unattended runs
+`paths.harness_config_root` points at optional CLI configuration that Druks
+carries into sandboxes. The installer creates the root. Compose mounts it
+read-only at `/harnesses`. Claude and Codex each read their named directory:
+
+```text
+~/.config/druks/harnesses/
+├── claude/
+│   ├── .claude.json
+│   ├── CLAUDE.md
+│   ├── settings.json
+│   └── plugins/
+└── codex/
+    ├── .credentials.json
+    ├── AGENTS.md
+    └── config.toml
+```
+
+Missing files are optional. Codex uses `.credentials.json` for MCP credentials.
+Provider credentials do not belong in this root. OpenCode and Pi do not read it.
+The default harness, model, billing, effort, and timeout live in
+**Settings → Agents**. Each agent can override any of them on its app's page.
+**Unattended runs
 (webhooks, schedules) run as** names the account whose subscription an
-unattended run bills. A call refuses before provisioning a VM if the
-credential it bills is missing.
+unattended run bills. A call refuses before provisioning a VM if its selected
+credential is missing.
 
 ## Sandboxes
 

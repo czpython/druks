@@ -49,6 +49,8 @@ def test_fresh_exe_render_matches_the_deployment_contract(tmp_path):
     assert values["DRUKS_AUTH_HEADER"] == "X-ExeDev-Email"
     assert values["SERVICE_TOKENS"] == config["sandbox"]["service_token"]
     assert values["DRUKS_DATA_DIR"] == "/home/op/druks-data"
+    assert values["DRUKS_HARNESS_CONFIG_ROOT"] == "/home/op/.config/druks/harnesses"
+    assert config["paths"]["harness_config_root"] == values["DRUKS_HARNESS_CONFIG_ROOT"]
     assert "EXE_API_TOKEN" not in values
     assert "TAILSCALE_TAILNET" not in values
     for key in ("EXE_IMAGE_REGISTRY", "EXE_REGISTRY_USERNAME", "EXE_REGISTRY_PASSWORD"):
@@ -72,6 +74,24 @@ def test_fresh_docker_run_is_boot_ready(tmp_path):
 
     assert rc == 0
     assert "is complete" in "\n".join(printed)
+
+
+def test_custom_harness_config_root_survives_rerender(tmp_path):
+    env_path = tmp_path / ".env"
+    config_root = "/srv/druks/harness config"
+
+    assert (
+        _run(
+            env_path,
+            provider="docker",
+            set_values=(f"paths.harness_config_root={config_root}",),
+        )
+        == 0
+    )
+    assert _run(env_path) == 0
+
+    assert read_env(env_path)["DRUKS_HARNESS_CONFIG_ROOT"] == config_root
+    assert _read_toml(tmp_path / "druks.toml")["paths"]["harness_config_root"] == config_root
 
 
 @pytest.mark.parametrize(
