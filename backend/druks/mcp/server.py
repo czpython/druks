@@ -256,6 +256,11 @@ def _annotate(route: HTTPRoute, component: object) -> None:
             destructiveHint=not is_read and route.extensions.get("x-destructive", True),
             idempotentHint=route.extensions.get("x-idempotent", False),
         )
+        # Confirm (writes=defer) intercepts mutating hops with a deferred stub,
+        # not the route's 201 model. Advertising that model as outputSchema
+        # makes MCP reject the stub (`identifier` required on create_ticket).
+        if not is_read:
+            component.output_schema = None
 
 
 def create_mcp_app(api: FastAPI) -> StarletteWithLifespan:
