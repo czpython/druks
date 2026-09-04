@@ -1,7 +1,11 @@
 from fastapi import APIRouter, Body, Depends, HTTPException, Request
 
 from druks.accounts.constants import PAT_NAME_LENGTH
-from druks.accounts.dependencies import current_account_or_setup, current_session_account
+from druks.accounts.dependencies import (
+    current_account,
+    current_account_or_setup,
+    current_session_account,
+)
 from druks.accounts.models import Account, PersonalAccessToken
 from druks.accounts.schemas import AccountResponse, IdentityResponse, PatResponse
 from druks.harnesses.models import ProviderKey, ProviderSubscription
@@ -27,6 +31,16 @@ async def get_identity(
             )
         ),
     )
+
+
+@router.get(
+    "/accounts",
+    response_model=list[AccountResponse],
+    response_model_by_alias=True,
+    dependencies=[Depends(current_account)],
+)
+async def list_accounts() -> list[Account]:
+    return await Account.list_non_system()
 
 
 @router.get("/personal-tokens", response_model=list[PatResponse], response_model_by_alias=True)

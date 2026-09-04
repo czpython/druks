@@ -1,5 +1,5 @@
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from sqlalchemy import ForeignKey, String, UniqueConstraint, select
 from sqlalchemy.dialects.postgresql import CITEXT, JSONB
@@ -13,10 +13,7 @@ from druks.models import Base
 from druks.secrets.fields import EncryptedJsonField, EncryptedTextField
 from druks.user_settings.models import UserSettings
 
-from .exceptions import HarnessNotConnectedError, UnknownModelError
-
-if TYPE_CHECKING:
-    from .base import Harness
+from .exceptions import HarnessNotConnectedError
 
 
 class ProviderSubscription(Base, Uuid7Pk):
@@ -116,15 +113,6 @@ class ProviderSubscription(Base, Uuid7Pk):
         row.expires_at = expires_at
         await session.flush()
         return row
-
-    def get_harness(self) -> "type[Harness]":
-        """The first registered harness that runs on this subscription; a miss raises."""
-        from .registry import get_harnesses  # cycle: registry → base → models
-
-        for harness in get_harnesses():
-            if harness.accepts(self):
-                return harness
-        raise UnknownModelError(f"No installed harness runs a {self.provider} subscription.")
 
     @property
     def is_connected(self) -> bool:

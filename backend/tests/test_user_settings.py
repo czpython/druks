@@ -8,7 +8,7 @@ from druks.apps.settings import (
     validate_setting_override,
     validate_settings_declaration,
 )
-from druks.user_settings.models import HarnessSettings, UserSettings
+from druks.user_settings.models import UserSettings
 from druks.user_settings.schemas import SettingsFieldResponse
 from druks.workflows import Workflow
 from pydantic import BaseModel, Field, SecretStr, field_validator
@@ -16,36 +16,28 @@ from pydantic import BaseModel, Field, SecretStr, field_validator
 
 @pytest.fixture
 def session(druks_db):
-    # The per-test connection session (rolled back at teardown); reference rows
-    # (the seeded harnesses) come from the session-scoped schema build.
+    # The per-test connection session (rolled back at teardown).
     return druks_db
 
 
-async def test_get_lazy_creates_row_with_default_timezone(session):
+async def test_get_lazy_creates_row_with_the_shipped_defaults(session):
     row = await UserSettings.get()
     await session.commit()
     assert row.timezone == "UTC"
-
-
-async def test_harnesses_seeded_with_shipped_defaults(session):
-    # init_db seeds one HarnessSettings row per registered harness.
-    claude = await HarnessSettings.get_registered("claude")
-    assert (claude.fast_mode, claude.effort, claude.timeout) == (False, "high", 1800)
-    assert (await UserSettings.get()).default_model == "anthropic/claude-opus-4-7"
-    assert {harness.name for harness in await HarnessSettings.all()} == {
+    assert (row.default_harness, row.default_model, row.default_billing) == (
         "claude",
-        "codex",
-        "opencode",
-        "pi",
-    }
+        "anthropic/claude-opus-4-7",
+        "subscription",
+    )
+    assert (row.default_effort, row.fast_mode, row.default_timeout) == ("high", False, 1800)
 
 
-async def test_harness_update_persists(session):
-    claude = await HarnessSettings.get_registered("claude")
-    await claude.update(fast_mode=True)
+async def test_update_profile_persists_the_defaults(session):
+    row = await UserSettings.get()
+    await row.update_profile(default_harness="codex", fast_mode=True)
     await session.commit()
-    claude = await HarnessSettings.get_registered("claude")
-    assert claude.fast_mode is True
+    row = await UserSettings.get()
+    assert (row.default_harness, row.fast_mode) == ("codex", True)
 
 
 class _Declared(BaseModel):

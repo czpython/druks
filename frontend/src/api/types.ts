@@ -501,12 +501,9 @@ export interface CatalogModel {
  * the catalogs of the providers it drives. */
 export interface Harness {
   name: string
-  /** The provider a subscription CLI is bound to; null for a key CLI. */
+  /** Null for a key-only CLI. */
   provider: string | null
   loginKinds: string[]
-  fastMode: boolean
-  effort: string
-  timeout: number
 }
 
 /** One model provider — who answers and bills a request. An account holds at
@@ -566,12 +563,6 @@ export interface ConnectChallenge {
   connectionId: string
 }
 
-export interface UpdateHarnessRequest {
-  fastMode?: boolean
-  effort?: string
-  timeout?: number
-}
-
 export interface ServiceField {
   name: string
   label: string
@@ -610,16 +601,29 @@ export interface Service {
 
 // --- Settings --------------------------------------------------------------
 
+export type Billing = 'subscription' | 'api_key'
+
 export interface UserSettings {
   timezone: string
-  /** The model every agent runs unless it carries a per-agent override. */
+  defaultHarness: string
   defaultModel: string
+  defaultBilling: Billing
+  defaultEffort: string
+  fastMode: boolean
+  defaultTimeout: number
+  fallbackAccountId: string | null
   updatedAt: string
 }
 
 export interface UpdateUserSettingsRequest {
   timezone?: string
+  defaultHarness?: string
   defaultModel?: string
+  defaultBilling?: Billing
+  defaultEffort?: string
+  fastMode?: boolean
+  defaultTimeout?: number
+  fallbackAccountId?: string
 }
 
 export type BrowserSessionStatus = 'needs_login' | 'ready' | 'stale' | 'anonymous'
@@ -639,22 +643,34 @@ export interface BrowserSession {
   lastUsedAt: string | null
 }
 
-/** Where an agent's resolved model came from: its own override, or the
- * family-token default. */
-export type ModelSource = 'agent' | 'default'
-export type EffortSource = 'agent' | 'declared' | 'harness'
+/** A timeout can also be the agent's declared value. */
+export type Source = 'agent' | 'default'
+export type TimeoutSource = 'agent' | 'declared' | 'default'
 
 export interface AgentSetting {
   name: string
   /** Short human-friendly blurb of what the agent does. */
   description: string
+  harness: string
+  harnessSource: Source
   model: string
-  source: ModelSource
+  source: Source
+  billing: Billing
+  billingSource: Source
   effort: string
-  effortSource: EffortSource
+  effortSource: Source
   /** Run timeout in seconds. */
   timeout: number
-  timeoutSource: EffortSource
+  timeoutSource: TimeoutSource
+}
+
+export interface AgentsApp {
+  name: string
+  agents: AgentSetting[]
+}
+
+export interface AgentsResponse {
+  apps: AgentsApp[]
 }
 
 // --- Per-app settings (declaration-driven) --------------------------------
@@ -709,7 +725,9 @@ export interface AppsSettingsResponse {
 export type AppSettingsProblems = Record<string, Record<string, string>>
 
 export interface UpdateAppsSettingsRequest {
+  agentHarnesses?: Record<string, string | null>
   agentModels?: Record<string, string | null>
+  agentBillings?: Record<string, Billing | null>
   agentEfforts?: Record<string, string | null>
   agentTimeouts?: Record<string, number | null>
   /** Keyed by workflow kind. */

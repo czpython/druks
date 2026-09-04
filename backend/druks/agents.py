@@ -4,7 +4,6 @@ import random
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from dbos import DBOS, StepOptions
@@ -22,20 +21,16 @@ from druks.harnesses.exceptions import (
     HarnessInvalidOutputError,
     Retry,
 )
-from druks.harnesses.models import ProviderSubscription
+from druks.harnesses.execution import resolve_execution
 from druks.prompts import render_prompt
 from druks.sandbox import gate as sandbox_gate
 from druks.sandbox.client import sandbox_client
-from druks.sandbox.constants import MAX_AGENT_TIMEOUT_SECONDS
 from druks.sandbox.templates import get_template_id
 from druks.settings import load_settings
 from druks.usage.models import UsageScrape
-from druks.user_settings.models import SettingsOverride, UserSettings
 from druks.workflows import _in_step, current_workflow
 
 if TYPE_CHECKING:
-    from druks.harnesses.base import Harness
-    from druks.sandbox.datastructures import AgentResult
     from druks.workflows import Workflow
     from druks.workspaces import Workspace
 
@@ -52,7 +47,7 @@ async def _runner(
 ) -> AsyncIterator["Workspace"]:
     # The agent always runs in a Workspace. A warm run attaches the run's held VM; the
     # rest get a fresh ephemeral VM. Either way workflow.get_workspace() turns the VM into
-    # the runner — fresh per call, so nothing (connection or subscription) is held across steps.
+    # the runner — fresh per call, so nothing (connection or credential) is held across steps.
     if host_id:
         vm = sandbox_client.attach(host_id=host_id)
     else:
@@ -128,21 +123,6 @@ class Agent:
         object.__setattr__(self, "app", owner.name)
         agents.register(self)
 
-    # The effective settings, resolved through the override store: per-agent
-    # override → the agent's declared value → the operator's global default.
-    # ``run`` uses these; callers that drive the harness themselves call them
-    # directly.
-    async def get_model(self) -> str:
-        return (await SettingsOverride.agent_model(self.id)).value
-
-    async def get_effort(self, harness: "type[Harness]") -> str:
-        return (await SettingsOverride.agent_effort(self.id, harness.name)).value
-
-    async def get_timeout(self, harness: "type[Harness]") -> int:
-        resolved = (await SettingsOverride.agent_timeout(self.id, self.timeout, harness.name)).value
-        # Capped so a single call always fits inside a fresh sandbox lease.
-        return min(resolved, MAX_AGENT_TIMEOUT_SECONDS)
-
     async def __call__(self, **context: object) -> Any:
         """Run the agent — ``await SoftwareFactory.implement(...)`` — as a durable step in the
         current workflow and return its parsed output. An agent run is always memoized —
@@ -194,13 +174,11 @@ class Agent:
             # Runs as its own step: the body does no IO, and replay reuses the
             # recorded wait instead of re-reading the scrape.
             async with step_session():
-                model = await self.get_model()
-                provider_id = model.partition("/")[0]
-                # The scrape belongs to the charged subscription — its account
-                # differs from the run's on fallback.
-                account_id = workflow.account_id or (await UserSettings.get()).fallback_account_id
-                subscription = await ProviderSubscription.lookup(provider_id, account_id)
-                scrape = await UsageScrape.latest_for(provider_id, subscription.account_id)
+                # The scrape belongs to the charged account — it differs from
+                # the run's on fallback.
+                execution = await resolve_execution(self.id, workflow.account_id)
+                provider_id = execution.model.partition("/")[0]
+                scrape = await UsageScrape.latest_for(provider_id, execution.charged_account_id)
                 if scrape:
                     now = datetime.now(UTC)
                     reset = scrape.soonest_reset_after(now)
@@ -262,15 +240,13 @@ class Agent:
         the harness. ``__call__`` handles the durable wrapping + nesting."""
         if not self.prompt:
             raise WorkflowError(f"agent {self.id!r} has no prompt template to render")
-        model = await self.get_model()
         workflow = current_workflow.get()
         # Refusing an unservable call here beats provisioning a VM and
-        # 401ing mid-run. A run with no actor runs as the fallback account.
-        account_id = workflow.account_id or (await UserSettings.get()).fallback_account_id
-        subscription = await ProviderSubscription.lookup(model.partition("/")[0], account_id)
-        harness = subscription.get_harness()
+        # 401ing mid-run.
+        execution = await resolve_execution(self.id, workflow.account_id)
         # Plain snapshots: the commits below expire the ORM row mid-flight.
-        subscription_id, charged_account_id = subscription.id, subscription.account_id
+        model, charged_account_id = execution.model, execution.charged_account_id
+        subscription_id = execution.subscription.id if execution.subscription else None
         # An agent call is a durability boundary — its effects don't roll back —
         # so commit here rather than hold the step's connection idle through the
         # minutes of provisioning and the run.
@@ -279,11 +255,16 @@ class Agent:
         artifact_dir = settings.artifacts_dir / f"run-{workflow_id}"
 
         engine = _step_engine()
-        call_id = harness.mint_run_id(None)
+        call_id = execution.harness_class.mint_run_id(None)
 
-        # Registered for provisioning through execution — this subscription's
-        # rotation defers around it.
-        async with sandbox_gate.use(subscription_id, call_id):
+        # Registered for provisioning through execution — the subscription's
+        # rotation defers around it. A key never rotates.
+        gate = (
+            sandbox_gate.use(subscription_id, call_id)
+            if subscription_id
+            else contextlib.nullcontext()
+        )
+        async with gate:
             await set_run_phase("provisioning_vm")
             host_id = await workflow._lease_host()
 
@@ -311,15 +292,14 @@ class Agent:
                     account_id=charged_account_id,
                 )
                 try:
-                    result = await self._execute(
-                        runner,
-                        model,
-                        prompt,
-                        artifact_dir,
-                        call_id,
-                        subscription_id,
-                        harness=harness,
+                    result = await runner.run_agent(
                         account_id=workflow.account_id,
+                        agent=self.id,
+                        prompt=prompt,
+                        schema=self.contract.model_json_schema(),
+                        artifact_dir=artifact_dir,
+                        call_id=call_id,
+                        include_plugins=self.include_plugins,
                     )
                 except BaseException as error:
                     await AgentCall.fail(engine, call_id=call_id, error=error)
@@ -353,30 +333,3 @@ class Agent:
         if spec := output.get_artifact():
             await Artifact.record(call_dir=artifact_dir / call_id, call_id=call_id, **spec)
         return output.to_result()
-
-    async def _execute(
-        self,
-        runner: "Workspace",
-        model: str,
-        prompt: str,
-        artifact_dir: Path,
-        call_id: str,
-        subscription_id: str,
-        *,
-        harness: "type[Harness]",
-        account_id: str | None,
-    ) -> "AgentResult":
-        schema = self.contract.model_json_schema()
-        return await runner.run_agent(
-            account_id=account_id,
-            model=model,
-            prompt=prompt,
-            schema=schema,
-            agent=self.id,
-            effort=await self.get_effort(harness),
-            timeout=await self.get_timeout(harness),
-            artifact_dir=artifact_dir,
-            call_id=call_id,
-            include_plugins=self.include_plugins,
-            subscription_id=subscription_id,
-        )

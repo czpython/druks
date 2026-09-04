@@ -1,5 +1,6 @@
 import type {
   Account,
+  AgentsResponse,
   AgentCallFiles,
   ArtifactContent,
   BrowserSession,
@@ -15,7 +16,6 @@ import type {
   Pat,
   SubjectResponse,
   SubjectSummary,
-  UpdateHarnessRequest,
   UpdateAppsSettingsRequest,
   UpdateUserSettingsRequest,
   UsageHistoryResponse,
@@ -266,8 +266,8 @@ export const api = {
   updateSettings: (body: UpdateUserSettingsRequest) =>
     patchJSON<UserSettings>('/api/settings', body),
   harnesses: () => getJSON<Harness[]>('/api/settings/harnesses'),
-  updateHarness: (name: string, body: UpdateHarnessRequest) =>
-    patchJSON<Harness>(`/api/settings/harnesses/${encodeURIComponent(name)}`, body),
+  agents: () => getJSON<AgentsResponse>('/api/agents'),
+  accounts: () => getJSON<Account[]>('/api/auth/accounts'),
   providers: () => getJSON<Provider[]>('/api/providers'),
   providerSubscriptions: () => getJSON<ProviderSubscription[]>('/api/providers/subscriptions'),
   providerKeys: () => getJSON<ProviderKey[]>('/api/providers/keys'),

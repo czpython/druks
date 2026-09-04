@@ -23,16 +23,70 @@ def test_get_settings_returns_default_utc_when_no_row_exists(tmp_path: Path):
     assert "updatedAt" in body
 
 
-def test_get_harnesses_lists_seeded_defaults(tmp_path: Path):
+def test_get_harnesses_lists_the_registry(tmp_path: Path):
     with _build_client(tmp_path) as client:
         harnesses = {h["name"]: h for h in client.get("/api/settings/harnesses").json()}
-    assert harnesses["claude"]["provider"] == "anthropic"
+    assert list(harnesses) == ["claude", "codex", "opencode", "pi"]
+    assert harnesses["claude"] == {
+        "name": "claude",
+        "provider": "anthropic",
+        "loginKinds": ["api_key", "oauth"],
+    }
     assert harnesses["codex"]["provider"] == "openai"
-    assert harnesses["codex"]["loginKinds"] == ["api_key", "oauth"]
-    assert harnesses["pi"]["provider"] is None
-    assert harnesses["pi"]["loginKinds"] == ["api_key"]
-    assert (harnesses["codex"]["effort"], harnesses["codex"]["timeout"]) == ("high", 1800)
-    assert "connected" not in harnesses["claude"]
+    assert harnesses["pi"] == {"name": "pi", "provider": None, "loginKinds": ["api_key"]}
+
+
+def test_get_settings_carries_the_execution_defaults(tmp_path: Path):
+    with _build_client(tmp_path) as client:
+        body = client.get("/api/settings").json()
+    assert body["defaultHarness"] == "claude"
+    assert body["defaultModel"] == "anthropic/claude-opus-4-7"
+    assert body["defaultBilling"] == "subscription"
+    assert (body["defaultEffort"], body["fastMode"], body["defaultTimeout"]) == (
+        "high",
+        False,
+        1800,
+    )
+    assert body["fallbackAccountId"] is None
+
+
+def test_patch_settings_judges_the_default_triple_together(tmp_path: Path):
+    with _build_client(tmp_path) as client:
+        # opencode takes keys only: the harness alone does not fit the
+        # subscription default it would inherit.
+        alone = client.patch("/api/settings", json={"defaultHarness": "opencode"})
+        assert alone.status_code == 422
+        assert "API key only" in alone.json()["detail"]
+        together = client.patch(
+            "/api/settings", json={"defaultHarness": "opencode", "defaultBilling": "api_key"}
+        )
+        assert together.status_code == 200
+        assert (together.json()["defaultHarness"], together.json()["defaultBilling"]) == (
+            "opencode",
+            "api_key",
+        )
+        outside = client.patch("/api/settings", json={"defaultModel": "openai/gpt-5.5"})
+        assert outside.status_code == 200  # opencode runs any key vendor
+        codex = client.patch("/api/settings", json={"defaultHarness": "claude"})
+        assert codex.status_code == 422
+        assert "does not run OpenAI" in codex.json()["detail"]
+
+
+async def test_patch_settings_sets_the_account_unattended_runs_run_as(tmp_path: Path, druks_db):
+    from druks.accounts.models import Account
+
+    account = await Account.get_or_create("ops@example.com")
+    with _build_client(tmp_path) as client:
+        assert {"id": account.id, "username": "ops@example.com"} in client.get(
+            "/api/auth/accounts"
+        ).json()
+        patch = client.patch("/api/settings", json={"fallbackAccountId": account.id})
+        assert patch.status_code == 200
+        assert patch.json()["fallbackAccountId"] == account.id
+        assert client.patch("/api/settings", json={"fallbackAccountId": "ghost"}).status_code == 422
+        assert (
+            client.patch("/api/settings", json={"fallbackAccountId": "system"}).status_code == 422
+        )
 
 
 def test_patch_settings_persists_valid_iana_zone(tmp_path: Path, monkeypatch):
@@ -78,23 +132,17 @@ def test_timezone_change_reconciles_schedules(tmp_path: Path, monkeypatch):
         assert len(reconciled) == 1
 
 
-def test_patch_harness_updates_fast_mode(tmp_path: Path):
+def test_patch_settings_updates_the_defaults_every_agent_inherits(tmp_path: Path):
     with _build_client(tmp_path) as client:
-        patch = client.patch("/api/settings/harnesses/claude", json={"fastMode": True})
-        assert patch.status_code == 200
-        assert patch.json()["fastMode"] is True
-        listed = {h["name"]: h for h in client.get("/api/settings/harnesses").json()}
-        assert listed["claude"]["fastMode"] is True
-        assert listed["codex"]["fastMode"] is False
-
-
-def test_patch_settings_updates_the_default_model_every_agent_inherits(tmp_path: Path):
-    with _build_client(tmp_path) as client:
-        assert client.get("/api/settings").json()["defaultModel"] == "anthropic/claude-opus-4-7"
-        patch = client.patch("/api/settings", json={"defaultModel": "openai/gpt-5.5"})
+        patch = client.patch(
+            "/api/settings",
+            json={"defaultHarness": "codex", "defaultModel": "openai/gpt-5.5", "fastMode": True},
+        )
         assert patch.status_code == 200
         assert patch.json()["defaultModel"] == "openai/gpt-5.5"
         agents = {a["name"]: a for a in _software_factory_app(client)["agents"]}
+    assert agents["implement"]["harness"] == "codex"
+    assert agents["implement"]["harnessSource"] == "default"
     assert agents["implement"]["model"] == "openai/gpt-5.5"
     assert agents["implement"]["source"] == "default"
 
@@ -106,10 +154,71 @@ def test_patch_settings_rejects_a_model_no_harness_runs(tmp_path: Path):
     assert "gpt-5.5" in response.json()["detail"]
 
 
-def test_patch_unknown_harness_is_404(tmp_path: Path):
+def test_agents_lists_every_apps_agents_as_they_resolve(tmp_path: Path):
     with _build_client(tmp_path) as client:
-        response = client.patch("/api/settings/harnesses/grok", json={"effort": "low"})
-    assert response.status_code == 404
+        client.patch(
+            "/api/settings/apps",
+            json={
+                "agentHarnesses": {"implement": "codex"},
+                "agentModels": {"implement": "openai/gpt-5.5"},
+            },
+        )
+        body = client.get("/api/agents").json()
+    apps = {app["name"]: app for app in body["apps"]}
+    assert "software_factory" in apps
+    assert "field_notes" in apps
+    agents = {a["name"]: a for a in apps["software_factory"]["agents"]}
+    assert agents["implement"]["harness"] == "codex"
+    assert agents["implement"]["harnessSource"] == "agent"
+    assert agents["implement"]["model"] == "openai/gpt-5.5"
+    assert agents["implement"]["source"] == "agent"
+    assert agents["implement"]["billing"] == "subscription"
+    assert agents["implement"]["billingSource"] == "default"
+    assert agents["generate_plan"]["harnessSource"] == "default"
+    assert set(agents["generate_plan"]) == {
+        "name",
+        "description",
+        "harness",
+        "harnessSource",
+        "model",
+        "source",
+        "billing",
+        "billingSource",
+        "effort",
+        "effortSource",
+        "timeout",
+        "timeoutSource",
+    }
+
+
+def test_apps_judge_an_agents_triple_as_it_resolves(tmp_path: Path):
+    with _build_client(tmp_path) as client:
+        # A key-only harness with the inherited subscription billing.
+        response = client.patch("/api/settings/apps", json={"agentHarnesses": {"implement": "pi"}})
+        assert response.status_code == 422
+        assert "API key only" in response.json()["detail"]
+        # A model outside the inherited harness's vendor.
+        response = client.patch(
+            "/api/settings/apps", json={"agentModels": {"implement": "openai/gpt-5.5"}}
+        )
+        assert response.status_code == 422
+        assert "does not run OpenAI" in response.json()["detail"]
+        # The rejected writes never landed.
+        agents = {a["name"]: a for a in _software_factory_app(client)["agents"]}
+        assert agents["implement"]["harnessSource"] == "default"
+        assert agents["implement"]["source"] == "default"
+        # Both cells together fit.
+        response = client.patch(
+            "/api/settings/apps",
+            json={"agentHarnesses": {"implement": "pi"}, "agentBillings": {"implement": "api_key"}},
+        )
+        assert response.status_code == 200
+        agents = {a["name"]: a for a in _software_factory_app(client)["agents"]}
+        assert (agents["implement"]["harness"], agents["implement"]["billing"]) == ("pi", "api_key")
+        assert agents["implement"]["billingSource"] == "agent"
+        # An agent nobody registered.
+        response = client.patch("/api/settings/apps", json={"agentBillings": {"ghost": "api_key"}})
+        assert response.status_code == 422
 
 
 def _software_factory_app(client: TestClient) -> dict:
@@ -147,20 +256,23 @@ def test_apps_surface_build_agents_and_workflow_defaults(tmp_path: Path):
         build = _software_factory_app(client)
 
     agents = {a["name"]: a for a in build["agents"]}
-    # Every agent runs the operator's default model; effort and timeout inherit
-    # its harness's defaults ("high", 1800s) when the operator set no override.
+    # Every cell inherits the operator's defaults when no override is set.
     assert agents["generate_plan"] == {
         "name": "generate_plan",
         "description": "ticket → implementation plan",
+        "harness": "claude",
+        "harnessSource": "default",
         "model": "anthropic/claude-opus-4-7",
         "source": "default",
+        "billing": "subscription",
+        "billingSource": "default",
         "effort": "high",
-        "effortSource": "harness",
+        "effortSource": "default",
         "timeout": 1800,
-        "timeoutSource": "harness",
+        "timeoutSource": "default",
     }
     assert agents["implement"]["model"] == "anthropic/claude-opus-4-7"
-    assert agents["evaluate_implementation"]["effortSource"] == "harness"
+    assert agents["evaluate_implementation"]["effortSource"] == "default"
     # The workflow's settings surface alongside its agents.
     fields = {f["name"]: f for f in build["workflows"][0]["fields"]}
     assert fields["max_implementation_revisions"]["value"] == 5
@@ -376,7 +488,10 @@ def test_apps_override_agent_model_persists(tmp_path: Path):
     with _build_client(tmp_path) as client:
         patch = client.patch(
             "/api/settings/apps",
-            json={"agentModels": {"implement": "openai/gpt-5.5"}},
+            json={
+                "agentHarnesses": {"implement": "codex"},
+                "agentModels": {"implement": "openai/gpt-5.5"},
+            },
         )
         assert patch.status_code == 200
         agents = {a["name"]: a for a in _software_factory_app(client)["agents"]}
@@ -385,22 +500,21 @@ def test_apps_override_agent_model_persists(tmp_path: Path):
     assert agents["implement"]["source"] == "agent"
 
 
-def test_apps_harness_effort_and_per_agent_effort_override(tmp_path: Path):
+def test_apps_default_effort_and_per_agent_effort_override(tmp_path: Path):
     with _build_client(tmp_path) as client:
         agents = {a["name"]: a for a in _software_factory_app(client)["agents"]}
-        # The default model runs on claude, so every agent inherits its effort.
         assert agents["generate_plan"]["effort"] == "high"
-        assert agents["generate_plan"]["effortSource"] == "harness"
+        assert agents["generate_plan"]["effortSource"] == "default"
 
-        # Retune the claude harness effort + override one agent.
-        client.patch("/api/settings/harnesses/claude", json={"effort": "low"})
+        # Retune the default effort + override one agent.
+        client.patch("/api/settings", json={"defaultEffort": "low"})
         client.patch("/api/settings/apps", json={"agentEfforts": {"generate_plan": "high"}})
         agents = {a["name"]: a for a in _software_factory_app(client)["agents"]}
         # generate_plan overridden; revise_contract inherits "low".
         assert agents["generate_plan"]["effort"] == "high"
         assert agents["generate_plan"]["effortSource"] == "agent"
         assert agents["revise_contract"]["effort"] == "low"
-        assert agents["revise_contract"]["effortSource"] == "harness"
+        assert agents["revise_contract"]["effortSource"] == "default"
 
 
 def test_apps_reject_unknown_effort(tmp_path: Path):
@@ -413,22 +527,21 @@ def test_apps_reject_unknown_effort(tmp_path: Path):
     assert "agentEfforts" in str(response.json()["detail"])
 
 
-def test_apps_harness_timeout_and_per_agent_timeout_override(tmp_path: Path):
+def test_apps_default_timeout_and_per_agent_timeout_override(tmp_path: Path):
     with _build_client(tmp_path) as client:
         agents = {a["name"]: a for a in _software_factory_app(client)["agents"]}
-        # implement runs on claude and inherits the claude harness timeout.
         assert agents["implement"]["timeout"] == 1800
-        assert agents["implement"]["timeoutSource"] == "harness"
+        assert agents["implement"]["timeoutSource"] == "default"
 
-        # Retune the claude harness timeout + override one agent.
-        client.patch("/api/settings/harnesses/claude", json={"timeout": 1200})
+        # Retune the default timeout + override one agent.
+        client.patch("/api/settings", json={"defaultTimeout": 1200})
         client.patch("/api/settings/apps", json={"agentTimeouts": {"implement": 3600}})
         agents = {a["name"]: a for a in _software_factory_app(client)["agents"]}
-        # implement overridden; review_plan (also claude) inherits 1200.
+        # implement overridden; review_plan inherits 1200.
         assert agents["implement"]["timeout"] == 3600
         assert agents["implement"]["timeoutSource"] == "agent"
         assert agents["review_plan"]["timeout"] == 1200
-        assert agents["review_plan"]["timeoutSource"] == "harness"
+        assert agents["review_plan"]["timeoutSource"] == "default"
 
 
 def test_apps_reject_non_positive_timeout(tmp_path: Path):

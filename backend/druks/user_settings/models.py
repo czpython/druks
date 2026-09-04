@@ -1,8 +1,7 @@
-import logging
 from datetime import datetime
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
-from sqlalchemy import ForeignKey, select
+from sqlalchemy import ForeignKey
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Mapped, mapped_column
@@ -12,17 +11,14 @@ from druks.database import db_session
 from druks.models import Base
 from druks.secrets.fields import EncryptedTextField
 
-from .constants import DEFAULT_MODEL
-from .datastructures import (
-    ResolvedEffort,
-    ResolvedModel,
-    ResolvedTimeout,
+from .constants import (
+    DEFAULT_BILLING,
+    DEFAULT_EFFORT,
+    DEFAULT_HARNESS,
+    DEFAULT_MODEL,
+    DEFAULT_TIMEOUT,
 )
-
-if TYPE_CHECKING:
-    from druks.harnesses.base import Harness
-
-logger = logging.getLogger(__name__)
+from .datastructures import ResolvedChoice, ResolvedTimeout
 
 
 class UserSettings(Base):
@@ -30,15 +26,19 @@ class UserSettings(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     timezone: Mapped[str] = mapped_column(String, default="UTC")
-    # The model every agent runs unless it carries a per-agent override.
+    default_harness: Mapped[str] = mapped_column(String, default=DEFAULT_HARNESS)
     default_model: Mapped[str] = mapped_column(String, default=DEFAULT_MODEL)
+    default_billing: Mapped[str] = mapped_column(String, default=DEFAULT_BILLING)
+    default_effort: Mapped[str] = mapped_column(String, default=DEFAULT_EFFORT)
+    fast_mode: Mapped[bool] = mapped_column(default=False)
+    default_timeout: Mapped[int] = mapped_column(default=DEFAULT_TIMEOUT)
     # The designated gate-park notification destination; unset — or the
     # destination deleted (SET NULL) — turns gate-park notifications off.
     gate_park_destination_id: Mapped[str | None] = mapped_column(
         ForeignKey("notification_destinations.id", ondelete="SET NULL"), default=None
     )
-    # The account actor-less runs (webhooks, schedules) run as, until runs are
-    # account-attributed; the very first subscription sets it.
+    # Who an unattended run (a webhook, a schedule) runs as; the first
+    # subscription sets it.
     fallback_account_id: Mapped[str | None] = mapped_column(
         ForeignKey("accounts.id", ondelete="SET NULL"), default=None
     )
@@ -57,17 +57,9 @@ class UserSettings(Base):
             row = await session.get_one(cls, cls.SINGLETON_ID)
         return row
 
-    @classmethod
-    async def get_default_model(cls) -> str:
-        return (await cls.get()).default_model
-
-    async def update_profile(
-        self, *, timezone: str | None = None, default_model: str | None = None
-    ) -> None:
-        if timezone:
-            self.timezone = timezone
-        if default_model:
-            self.default_model = default_model
+    async def update_profile(self, **fields: object) -> None:
+        for field, value in fields.items():
+            setattr(self, field, value)
         self.updated_at = Base.utc_now()
         await db_session().flush()
 
@@ -79,59 +71,6 @@ class UserSettings(Base):
     async def set_gate_park_destination(self, destination_id: str | None) -> None:
         # None is the off-switch, so this is a set-or-clear, not a skip-on-None.
         self.gate_park_destination_id = destination_id
-        self.updated_at = Base.utc_now()
-        await db_session().flush()
-
-
-class HarnessSettings(Base):
-    # One row per registered harness (claude, codex, …), seeded from the
-    # registry on install and tuned by the operator. An agent inherits its
-    # harness's effort / timeout / fast_mode unless it carries a per-agent
-    # override.
-    __tablename__ = "harnesses"
-
-    name: Mapped[str] = mapped_column(String, primary_key=True)
-    fast_mode: Mapped[bool] = mapped_column(default=False)
-    effort: Mapped[str] = mapped_column(String, default="high")
-    timeout: Mapped[int] = mapped_column(default=1800)
-    updated_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
-
-    @classmethod
-    async def get(cls, name: str) -> "HarnessSettings | None":
-        return await db_session().get(cls, name)
-
-    @classmethod
-    async def get_registered(cls, name: str) -> "HarnessSettings":
-        # The resolution paths (effort/timeout, the harness factory) only pass a
-        # ``get_harness_for_model`` name, which is always registered and so always
-        # seeded — a miss means ``seed_harnesses`` didn't run before serving.
-        if not (config := await cls.get(name)):
-            raise KeyError(f"no harness settings for {name!r}; seed_harnesses missed it")
-        return config
-
-    @classmethod
-    async def all(cls) -> list["HarnessSettings"]:
-        return list((await db_session().execute(select(cls).order_by(cls.name))).scalars())
-
-    @property
-    def harness(self) -> "type[Harness]":
-        from druks.harnesses.registry import get_harness
-
-        return get_harness(self.name)
-
-    @property
-    def provider(self) -> str | None:
-        return self.harness.provider
-
-    @property
-    def login_kinds(self) -> frozenset[str]:
-        return self.harness.login_kinds
-
-    async def update(self, **fields: object) -> None:
-        # Callers pass column names only — the route's ``HarnessUpdate`` schema is
-        # the trust boundary, so no field-name validation here.
-        for field, value in fields.items():
-            setattr(self, field, value)
         self.updated_at = Base.utc_now()
         await db_session().flush()
 
@@ -162,35 +101,57 @@ class SettingsOverride(Base):
         await session.flush()
 
     @classmethod
-    async def agent_model(cls, name: str) -> ResolvedModel:
+    async def agent_harness(cls, name: str) -> ResolvedChoice:
+        override = await cls.read(f"agent_harness:{name}")
+        if override:
+            return ResolvedChoice(override, "agent")
+        return ResolvedChoice((await UserSettings.get()).default_harness, "default")
+
+    @classmethod
+    async def set_agent_harness(cls, name: str, harness: str | None) -> None:
+        await cls.write(f"agent_harness:{name}", harness)
+
+    @classmethod
+    async def agent_model(cls, name: str) -> ResolvedChoice:
         override = await cls.read(f"agent_model:{name}")
-        if override is not None:
-            return ResolvedModel(override, "agent")
-        return ResolvedModel(await UserSettings.get_default_model(), "default")
+        if override:
+            return ResolvedChoice(override, "agent")
+        return ResolvedChoice((await UserSettings.get()).default_model, "default")
 
     @classmethod
     async def set_agent_model(cls, name: str, model: str | None) -> None:
         await cls.write(f"agent_model:{name}", model)
 
     @classmethod
-    async def agent_effort(cls, name: str, harness: str) -> ResolvedEffort:
+    async def agent_billing(cls, name: str) -> ResolvedChoice:
+        override = await cls.read(f"agent_billing:{name}")
+        if override:
+            return ResolvedChoice(override, "agent")
+        return ResolvedChoice((await UserSettings.get()).default_billing, "default")
+
+    @classmethod
+    async def set_agent_billing(cls, name: str, billing: str | None) -> None:
+        await cls.write(f"agent_billing:{name}", billing)
+
+    @classmethod
+    async def agent_effort(cls, name: str) -> ResolvedChoice:
         override = await cls.read(f"agent_effort:{name}")
-        if override is not None:
-            return ResolvedEffort(override, "agent")
-        return ResolvedEffort((await HarnessSettings.get_registered(harness)).effort, "harness")
+        if override:
+            return ResolvedChoice(override, "agent")
+        return ResolvedChoice((await UserSettings.get()).default_effort, "default")
 
     @classmethod
     async def set_agent_effort(cls, name: str, value: str | None) -> None:
         await cls.write(f"agent_effort:{name}", value)
 
     @classmethod
-    async def agent_timeout(cls, name: str, declared: int | None, harness: str) -> ResolvedTimeout:
+    async def agent_timeout(cls, name: str, declared: int | None) -> ResolvedTimeout:
         override = await cls.read(f"agent_timeout:{name}")
-        if override is not None:
+        if override:
             return ResolvedTimeout(override, "agent")
-        if declared is not None:
+        if declared:
             return ResolvedTimeout(declared, "declared")
-        return ResolvedTimeout((await HarnessSettings.get_registered(harness)).timeout, "harness")
+        return ResolvedTimeout((await UserSettings.get()).default_timeout, "default")
 
     @classmethod
     async def set_agent_timeout(cls, name: str, value: int | None) -> None:
