@@ -19,8 +19,7 @@ def test_roster_lists_installed_apps_with_subject_types(tmp_path: Path):
     assert chat["builtin"] is False
     assert chat["hasFrontend"] is False
     assert chat["icon"] == "message-square"
-    # No workflow yet — subjects follow from workflows, not from StoredSubject alone.
-    assert chat["subjectTypes"] == []
+    assert chat["subjectTypes"] == ["conversation"]
 
     field_notes = roster["field_notes"]
     assert field_notes["subjectTypes"] == ["note"]
