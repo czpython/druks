@@ -4,18 +4,26 @@ from druks.harnesses.codex import CodexHarness
 from druks.harnesses.exceptions import UnknownModelError
 from druks.harnesses.models import ProviderLogin
 from druks.harnesses.opencode import OpenCodeHarness
+from druks.harnesses.pi import PiHarness
 from druks.harnesses.registry import get_harness_for_model
 
 
 def test_the_namespace_selects_the_first_harness_with_its_provider():
     assert get_harness_for_model("anthropic/claude-opus-4-7") is ClaudeHarness
-    assert get_harness_for_model("openai-codex/gpt-5.5") is CodexHarness
-    assert get_harness_for_model("openai/gpt-5.5") is OpenCodeHarness
+    assert get_harness_for_model("openai/gpt-5.5") is CodexHarness
 
 
 def test_a_login_selects_among_the_harnesses_with_its_provider():
+    # The vendor's own CLI takes either kind of its provider's login; a
+    # key-only CLI is reached only by a provider no vendor CLI is bound to.
     assert ProviderLogin(provider="anthropic", kind="oauth").get_harness() is ClaudeHarness
-    assert ProviderLogin(provider="anthropic", kind="api_key").get_harness() is OpenCodeHarness
+    assert ProviderLogin(provider="anthropic", kind="api_key").get_harness() is ClaudeHarness
+    assert ProviderLogin(provider="openai", kind="oauth").get_harness() is CodexHarness
+    assert ProviderLogin(provider="openai", kind="api_key").get_harness() is CodexHarness
+    assert not any(
+        harness.accepts(ProviderLogin(provider="anthropic", kind="oauth"))
+        for harness in (OpenCodeHarness, PiHarness)
+    )
     with pytest.raises(UnknownModelError, match="anthropic on a device login"):
         ProviderLogin(provider="anthropic", kind="device").get_harness()
 

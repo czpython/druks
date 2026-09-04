@@ -64,8 +64,8 @@ describe('ProviderConnect', () => {
       providerEmail: 'claude-seat@corp.com',
       expiresAt: null,
     })
-    renderCard(provider({ id: 'openai-codex', label: 'ChatGPT' }), {
-      provider: 'openai-codex',
+    renderCard(provider({ id: 'openai', label: 'OpenAI' }), {
+      provider: 'openai',
       kind: 'oauth',
       connected: true,
       providerEmail: 'codex-seat@corp.com',

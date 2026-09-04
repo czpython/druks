@@ -7,7 +7,7 @@ import httpx
 import pytest
 from druks.harnesses import providers as pbase
 from druks.harnesses.exceptions import ConnectError
-from druks.harnesses.providers import AnthropicProvider, OpenAiCodexProvider
+from druks.harnesses.providers import AnthropicProvider, OpenAiProvider
 
 
 def _jwt(claims: dict) -> str:
@@ -113,7 +113,7 @@ async def test_connect_complete_without_provider_email_raises(monkeypatch, druks
 
 
 async def test_codex_connect_complete_is_form_encoded_and_reads_jwt(monkeypatch, druks_db):
-    _, flow_id = await OpenAiCodexProvider.connect_start()
+    _, flow_id = await OpenAiProvider.connect_start()
     pending = await _pending(flow_id)
     access = _jwt(
         {
@@ -125,7 +125,7 @@ async def test_codex_connect_complete_is_form_encoded_and_reads_jwt(monkeypatch,
     calls = _mock_post(
         monkeypatch, _resp(200, {"access_token": access, "refresh_token": "RT", "id_token": "ID"})
     )
-    completed = await OpenAiCodexProvider.connect_complete(
+    completed = await OpenAiProvider.connect_complete(
         flow_id=flow_id,
         pasted=f"http://localhost:1455/auth/callback?code=thecode&state={pending['state']}",
     )

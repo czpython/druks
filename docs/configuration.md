@@ -264,13 +264,19 @@ optional. It reports pending setup if the selected tracker lacks a connection.
 
 ## Harnesses
 
-Anthropic and ChatGPT subscription credentials connect from **Settings → Providers**.
-The connection flow stores each credential in Postgres. Druks refreshes the
-credential on a schedule. It creates the CLI credential file inside each
-sandbox. It does not copy a host login. This is a capability connection for
+Druks registers two providers, `anthropic` and `openai`. Each accepts a
+subscription login (Claude or ChatGPT) and an API key. Both connect from
+**Settings → Providers**. The connection flow stores each credential in
+Postgres. Druks refreshes a subscription token on a schedule. It creates the
+CLI credential file inside each sandbox, or passes the key in the CLI
+environment. It does not copy a host login. This is a capability connection for
 the requesting account — in a fresh `none`-mode install the first completed
-connection also creates the operator account (see
+subscription connection also creates the operator account (see
 [access control](#public-urls-and-access-control)).
+
+The `claude` and `codex` CLIs run on either login kind of their own vendor.
+`opencode` and `pi` run on an API key only. A model id is `provider/model`
+on either kind, for example `openai/gpt-5.5`.
 
 Process settings such as `DRUKS_CLAUDE_CONFIG_DIR` and
 `DRUKS_CODEX_CONFIG_DIR` point at optional non-auth CLI configuration to carry

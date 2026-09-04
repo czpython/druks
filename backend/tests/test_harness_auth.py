@@ -14,7 +14,7 @@ from druks.harnesses.datastructures import (
 )
 from druks.harnesses.exceptions import HarnessNotConnectedError
 from druks.harnesses.models import ProviderLogin
-from druks.harnesses.providers import AnthropicProvider, OpenAiCodexProvider
+from druks.harnesses.providers import AnthropicProvider, OpenAiProvider
 from druks.sandbox.datastructures import HomeCopy
 
 
@@ -43,7 +43,7 @@ async def _seed_codex(*, provider_email="op@example.com", account_id="acc-1") ->
     access = _jwt(int((datetime.now(UTC) + timedelta(days=9)).timestamp()))
     tokens = {"access_token": access, "refresh_token": "R0", "account_id": account_id}
     return await connect_provider(
-        OpenAiCodexProvider,
+        OpenAiProvider,
         {"auth_mode": "chatgpt", "OPENAI_API_KEY": None, "tokens": tokens},
         provider_email=provider_email,
     )

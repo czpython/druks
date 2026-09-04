@@ -332,7 +332,7 @@ async def test_claims_resolve_the_calling_account(app, druks_db):
     _, their_token = await PersonalAccessToken.create(account_id=theirs.id, name="theirs")
     druks_db.add(
         UsageScrape(
-            provider="openai-codex",
+            provider="openai",
             account_id=mine.id,
             scraped_at=datetime.now(UTC),
             five_hour_percent_left=42,
@@ -342,12 +342,12 @@ async def test_claims_resolve_the_calling_account(app, druks_db):
 
     async with live(app), _client(app, my_token) as client:
         usage = (await client.call_tool("get_usage", {})).structured_content
-    codex = next(h for h in usage["providers"] if h["id"] == "openai-codex")
+    codex = next(h for h in usage["providers"] if h["id"] == "openai")
     assert codex["fiveHourPercentLeft"] == 42
 
     async with live(app), _client(app, their_token) as client:
         usage = (await client.call_tool("get_usage", {})).structured_content
-    codex = next(h for h in usage["providers"] if h["id"] == "openai-codex")
+    codex = next(h for h in usage["providers"] if h["id"] == "openai")
     assert codex["fiveHourPercentLeft"] is None
 
 

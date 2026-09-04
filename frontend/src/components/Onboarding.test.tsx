@@ -6,7 +6,7 @@ import { Onboarding } from './Onboarding'
 
 const REGISTERED_PROVIDERS: Provider[] = [
   { id: 'anthropic', label: 'Anthropic', loginKinds: ['api_key', 'oauth'] },
-  { id: 'openai-codex', label: 'ChatGPT', loginKinds: ['oauth'] },
+  { id: 'openai', label: 'OpenAI', loginKinds: ['api_key', 'oauth'] },
 ]
 
 afterEach(() => {
@@ -49,7 +49,7 @@ describe('Onboarding', () => {
       vi.fn(async (url: string | URL | Request) => {
         const path = String(url)
         if (path === '/api/providers') return providerListResponse(REGISTERED_PROVIDERS)
-        expect(path).toBe('/api/providers/openai-codex/connection/start')
+        expect(path).toBe('/api/providers/openai/connection/start')
         return new Response(
           JSON.stringify({ authorizeUrl: 'https://x/auth', connectionId: 'C1' }),
           { status: 200 },
@@ -58,7 +58,7 @@ describe('Onboarding', () => {
     )
 
     render(<Onboarding onConnected={() => undefined} />)
-    fireEvent.click(await screen.findByText('Connect ChatGPT'))
+    fireEvent.click(await screen.findByText('Connect OpenAI'))
     await flush()
 
     // The challenge panel replaces both cards, not just its own.
@@ -71,15 +71,12 @@ describe('Onboarding', () => {
   })
 
   it('renders one card per subscription provider; a key-only provider waits for Settings', async () => {
-    stubProviderList([
-      ...REGISTERED_PROVIDERS,
-      { id: 'openai', label: 'OpenAI', loginKinds: ['api_key'] },
-    ])
+    stubProviderList([...REGISTERED_PROVIDERS, { id: 'xai', label: 'xAI', loginKinds: ['api_key'] }])
 
     render(<Onboarding onConnected={() => undefined} />)
 
-    await screen.findByText('Connect ChatGPT')
-    expect(screen.queryByText('Connect OpenAI')).toBeNull()
+    await screen.findByText('Connect OpenAI')
+    expect(screen.queryByText('Connect xAI')).toBeNull()
     expect(screen.getAllByRole('button')).toHaveLength(2)
   })
 })

@@ -5,7 +5,6 @@ from druks.harnesses.datastructures import RotationResult
 from druks.harnesses.models import ProviderLogin
 from druks.harnesses.providers import get_provider, get_providers
 from druks.sandbox import gate
-from druks.user_settings.models import UserSettings
 from druks.workflows import task
 
 logger = logging.getLogger(__name__)
@@ -28,13 +27,8 @@ async def refresh_tokens() -> None:
 
 @task(every="0 6 * * *")
 async def refresh_catalogs() -> None:
-    fallback_id = (await UserSettings.get()).fallback_account_id
-    logins = await ProviderLogin.list_all()
     for provider in get_providers():
-        usable = [login for login in logins if login.provider == provider.id]
-        if usable:
-            preferred = [login for login in usable if login.account_id == fallback_id]
-            await provider.refresh_catalog((preferred or usable)[0])
+        await provider.refresh_catalog()
 
 
 async def _refresh() -> dict[str, object]:

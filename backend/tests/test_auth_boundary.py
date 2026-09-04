@@ -142,7 +142,7 @@ async def test_provider_list_answers_before_an_account_exists(druks_client):
     assert [item["id"] for item in body] == [provider.id for provider in get_providers()]
     by_id = {item["id"]: item for item in body}
     assert by_id["anthropic"]["loginKinds"] == ["api_key", "oauth"]
-    assert by_id["openai-codex"]["loginKinds"] == ["oauth"]
+    assert by_id["openai"]["loginKinds"] == ["api_key", "oauth"]
     assert not await Account.list_non_system()
 
 
