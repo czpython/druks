@@ -9,7 +9,7 @@ function provider(overrides: Partial<Provider> = {}): Provider {
   return {
     id: 'anthropic',
     label: 'Anthropic',
-    loginKinds: ['api_key', 'oauth'],
+    billingOptions: ['api_key', 'subscription'],
     ...overrides,
   }
 }
@@ -85,7 +85,7 @@ describe('ProviderConnect', () => {
   })
 
   it('a key-only vendor shows only the key block', () => {
-    renderCard(provider({ id: 'xai', label: 'xAI', loginKinds: ['api_key'] }))
+    renderCard(provider({ id: 'xai', label: 'xAI', billingOptions: ['api_key'] }))
 
     expect(screen.getByLabelText('API key')).toBeTruthy()
     expect(screen.queryByText('Subscription')).toBeNull()
@@ -214,7 +214,7 @@ describe('ProviderConnect', () => {
     )
     vi.stubGlobal('fetch', fetchMock)
 
-    const { invalidate } = renderCard(provider({ loginKinds: ['api_key'] }))
+    const { invalidate } = renderCard(provider({ billingOptions: ['api_key'] }))
     fireEvent.change(screen.getByLabelText('API key'), {
       target: { value: 'the-api-key' },
     })

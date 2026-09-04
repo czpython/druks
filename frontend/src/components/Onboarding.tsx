@@ -26,7 +26,7 @@ export function Onboarding({ onConnected }: { onConnected: (account: Account) =>
     let ignore = false
     api.providers().then(
       (registered) => {
-        if (!ignore) setProviders(registered.filter((p) => p.loginKinds.includes('oauth')))
+        if (!ignore) setProviders(registered.filter((p) => p.billingOptions.includes('subscription')))
       },
       (error: unknown) => {
         if (!ignore) setLoadError(error instanceof Error ? error.message : String(error))

@@ -503,7 +503,7 @@ export interface Harness {
   name: string
   /** Null for a key-only CLI. */
   provider: string | null
-  loginKinds: string[]
+  billingOptions: string[]
 }
 
 /** One model provider — who answers and bills a request. An account holds at
@@ -512,7 +512,7 @@ export interface Harness {
 export interface Provider {
   id: string
   label: string
-  loginKinds: string[]
+  billingOptions: string[]
 }
 
 /** The models one provider offers, fetched over a subscription. */

@@ -2,7 +2,6 @@ from dataclasses import dataclass
 
 from druks.accounts.constants import SYSTEM_ACCOUNT_ID
 from druks.sandbox.constants import MAX_AGENT_TIMEOUT_SECONDS
-from druks.user_settings.constants import BILLING_LOGIN_KINDS
 from druks.user_settings.models import SettingsOverride, UserSettings
 
 from .base import Harness
@@ -41,7 +40,7 @@ def check_execution(harness_name: str, model: str, billing: str) -> type[Harness
         ) from error
     if not harness.has_provider(provider):
         raise ExecutionSettingsError(f"{harness_name} does not run {provider.label} models.")
-    if BILLING_LOGIN_KINDS[billing] not in harness.login_kinds:
+    if billing not in harness.billing_options:
         raise ExecutionSettingsError(
             f"{harness_name} runs on an API key only; set billing to api_key."
         )

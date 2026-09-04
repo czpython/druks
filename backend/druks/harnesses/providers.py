@@ -55,9 +55,9 @@ class Provider:
 
     id: ClassVar[str]
     label: ClassVar[str]
-    # "oauth" for a subscription subscription, "api_key" for a pasted key.
-    login_kinds: ClassVar[frozenset[str]]
-    # OAuth refresh config (set by providers with an "oauth" subscription kind).
+    # What this provider bills: "subscription", "api_key", or both.
+    billing_options: ClassVar[frozenset[str]]
+    # OAuth refresh config (set by providers that offer a subscription).
     REFRESH_MARGIN: ClassVar[timedelta]
     _TOKEN_URL: ClassVar[str]
     _CLIENT_ID: ClassVar[str]
@@ -392,7 +392,9 @@ class Provider:
             raise exceptions.CatalogError("network") from exc
         if response.status_code != 200:
             raise exceptions.CatalogError(error_tag(response.status_code))
-        return cls._parse_catalog(response.text, kind="oauth" if subscription else "api_key")
+        return cls._parse_catalog(
+            response.text, billing="subscription" if subscription else "api_key"
+        )
 
     @classmethod
     async def refresh_catalog(cls) -> None:
@@ -422,10 +424,10 @@ class Provider:
         raise NotImplementedError
 
     @classmethod
-    def _parse_catalog(cls, raw: str, *, kind: str) -> tuple[dict, ...]:
+    def _parse_catalog(cls, raw: str, *, billing: str) -> tuple[dict, ...]:
         """Namespaced ``{"id", "label"}`` entries from the model-list body
-        fetched over a ``kind`` subscription; raises :class:`CatalogError` on a body
-        offering nothing."""
+        fetched on ``billing``; raises :class:`CatalogError` on a body offering
+        nothing."""
         raise NotImplementedError
 
 
@@ -573,7 +575,7 @@ _CLAUDE_CODE_USER_AGENT = "claude-code/2.1.0"
 class AnthropicProvider(Provider):
     id = "anthropic"
     label = "Anthropic"
-    login_kinds = frozenset({"oauth", "api_key"})
+    billing_options = frozenset({"subscription", "api_key"})
 
     REFRESH_MARGIN = timedelta(hours=2)
     _TOKEN_URL = "https://console.anthropic.com/v1/oauth/token"
@@ -708,7 +710,7 @@ class AnthropicProvider(Provider):
         return ProviderRequest("https://api.anthropic.com/v1/models?limit=100", headers)
 
     @classmethod
-    def _parse_catalog(cls, raw: str, *, kind: str) -> tuple[dict, ...]:
+    def _parse_catalog(cls, raw: str, *, billing: str) -> tuple[dict, ...]:
         try:
             models = tuple(
                 {"id": f"{cls.id}/{model['id']}", "label": model.get("display_name") or model["id"]}
@@ -798,7 +800,7 @@ class OpenAiProvider(Provider):
 
     id = "openai"
     label = "OpenAI"
-    login_kinds = frozenset({"oauth", "api_key"})
+    billing_options = frozenset({"subscription", "api_key"})
 
     REFRESH_MARGIN = timedelta(hours=24)
     _TOKEN_URL = "https://auth.openai.com/oauth/token"
@@ -967,9 +969,9 @@ class OpenAiProvider(Provider):
         )
 
     @classmethod
-    def _parse_catalog(cls, raw: str, *, kind: str) -> tuple[dict, ...]:
+    def _parse_catalog(cls, raw: str, *, billing: str) -> tuple[dict, ...]:
         try:
-            if kind == "api_key":
+            if billing == "api_key":
                 models = tuple(
                     {"id": f"{cls.id}/{model['id']}", "label": model["name"]}
                     for model in json.loads(raw)[cls.id]["models"].values()

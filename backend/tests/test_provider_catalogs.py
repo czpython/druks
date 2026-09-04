@@ -46,7 +46,7 @@ def test_anthropic_parse_namespaces_ids_and_keeps_labels() -> None:
         }
     )
 
-    assert AnthropicProvider._parse_catalog(payload, kind="oauth") == (
+    assert AnthropicProvider._parse_catalog(payload, billing="subscription") == (
         {"id": "anthropic/claude-fable-5", "label": "Claude Fable 5"},
         {"id": "anthropic/claude-opus-4-8", "label": "claude-opus-4-8"},
     )
@@ -62,7 +62,7 @@ def test_anthropic_parse_namespaces_ids_and_keeps_labels() -> None:
 )
 def test_anthropic_parse_names_why_a_body_offers_nothing(body, tag) -> None:
     with pytest.raises(CatalogError) as error:
-        AnthropicProvider._parse_catalog(body, kind="oauth")
+        AnthropicProvider._parse_catalog(body, billing="subscription")
     assert error.value.tag == tag
 
 
@@ -86,7 +86,7 @@ def test_codex_parse_keeps_only_listed_models() -> None:
         }
     )
 
-    assert OpenAiProvider._parse_catalog(payload, kind="oauth") == (
+    assert OpenAiProvider._parse_catalog(payload, billing="subscription") == (
         {
             "id": "openai/gpt-5.6-sol",
             "label": "GPT-5.6-Sol",
@@ -100,7 +100,7 @@ def test_codex_parse_empty_catalog_is_an_error() -> None:
     """A stale-low ``client_version`` yields ``200 {"models": []}`` — that must
     never read as "no models" and wipe the stored list."""
     with pytest.raises(CatalogError, match="empty_list"):
-        OpenAiProvider._parse_catalog(json.dumps({"models": []}), kind="oauth")
+        OpenAiProvider._parse_catalog(json.dumps({"models": []}), billing="subscription")
 
 
 def test_openai_parse_reads_its_models_dev_section() -> None:
@@ -111,13 +111,13 @@ def test_openai_parse_reads_its_models_dev_section() -> None:
         }
     )
 
-    assert OpenAiProvider._parse_catalog(raw, kind="api_key") == (
+    assert OpenAiProvider._parse_catalog(raw, billing="api_key") == (
         {"id": "openai/gpt-5.5", "label": "GPT-5.5"},
     )
     with pytest.raises(CatalogError, match="unexpected_payload"):
-        OpenAiProvider._parse_catalog(json.dumps({"anthropic": {}}), kind="api_key")
+        OpenAiProvider._parse_catalog(json.dumps({"anthropic": {}}), billing="api_key")
     with pytest.raises(CatalogError, match="empty_list"):
-        OpenAiProvider._parse_catalog(json.dumps({"openai": {"models": {}}}), kind="api_key")
+        OpenAiProvider._parse_catalog(json.dumps({"openai": {"models": {}}}), billing="api_key")
 
 
 async def test_anthropic_fetch_uses_the_oauth_token(monkeypatch, druks_db):

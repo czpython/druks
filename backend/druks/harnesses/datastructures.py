@@ -2,7 +2,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Self
+from typing import Literal, Self
 
 # Execution-side types live with the executor; re-exported here
 # because the harness API speaks them.
@@ -11,6 +11,8 @@ from druks.sandbox.datastructures import (  # noqa: F401
     HarnessRunResult,
 )
 from druks.settings import Settings
+
+Billing = Literal["subscription", "api_key"]
 
 
 @dataclass(frozen=True)

@@ -46,7 +46,7 @@ interface Catalog {
 
 function buildCatalog(harnesses: Harness[], providers: Provider[], catalogs: ProviderCatalog[]): Catalog {
   const hasProvider = (harness: Harness, provider: Provider) =>
-    harness.provider ? harness.provider === provider.id : harness.loginKinds.some((k) => provider.loginKinds.includes(k))
+    harness.provider ? harness.provider === provider.id : harness.billingOptions.some((k) => provider.billingOptions.includes(k))
   const modelsByProvider = Object.fromEntries(catalogs.map((c) => [c.provider, c.models]))
   return {
     modelsOf: (name) => {
@@ -58,7 +58,7 @@ function buildCatalog(harnesses: Harness[], providers: Provider[], catalogs: Pro
 }
 
 const keyOnly = (harness: Harness | undefined) =>
-  Boolean(harness) && !harness!.loginKinds.includes('oauth')
+  Boolean(harness) && !harness!.billingOptions.includes('subscription')
 
 const BILLINGS: Billing[] = ['subscription', 'api_key']
 const billingLabel = (billing: string) => (billing === 'api_key' ? 'API key' : 'subscription')
@@ -1599,8 +1599,8 @@ export function ProviderConnect({
   const flow = useProviderConnect(provider.id, async () => {
     await refresh()
   })
-  const acceptsOauth = provider.loginKinds.includes('oauth')
-  const acceptsApiKey = provider.loginKinds.includes('api_key')
+  const acceptsSubscription = provider.billingOptions.includes('subscription')
+  const acceptsApiKey = provider.billingOptions.includes('api_key')
 
   const run = (action: () => Promise<unknown>, after: () => Promise<unknown>) => {
     setBusy(true)
@@ -1639,7 +1639,7 @@ export function ProviderConnect({
   const showKeyForm = acceptsApiKey && (!apiKey || replacing)
   return (
     <div className="hr-connect">
-      {acceptsOauth && (
+      {acceptsSubscription && (
         <section className="hr-block">
           <div className="hr-block-title">Subscription</div>
           {subscription ? (

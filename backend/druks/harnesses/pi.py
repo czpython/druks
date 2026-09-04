@@ -35,7 +35,7 @@ _STATUS_ERRORS = {
 class PiHarness(Harness):
     name = "pi"
     command = "pi"
-    login_kinds = frozenset({"api_key"})
+    billing_options = frozenset({"api_key"})
     default_model = "openai/gpt-5.5"
 
     @classmethod

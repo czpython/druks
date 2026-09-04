@@ -15,7 +15,7 @@ class ProviderResponse(Schema):
 
     id: str
     label: str
-    login_kinds: SortedNames
+    billing_options: SortedNames
 
 
 class ProviderSubscriptionResponse(Schema):

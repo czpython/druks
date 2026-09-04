@@ -32,7 +32,7 @@ class ClaudeHarness(Harness):
     # (``--output-format stream-json``), so the transcript is the stdout.
     name = "claude"
     provider = AnthropicProvider.id
-    login_kinds = frozenset({"oauth", "api_key"})
+    billing_options = frozenset({"subscription", "api_key"})
     default_model = "anthropic/claude-opus-4-7"
     command = "claude"
 

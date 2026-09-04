@@ -34,10 +34,9 @@ MANIFEST_SCHEMA_VERSION = 2
 class Harness(ABC):
     name: str
     command: ClassVar[str]
-    # The subscription kinds this CLI consumes: "oauth" for a subscription CLI,
-    # "api_key" for one that runs on a pasted key.
-    login_kinds: ClassVar[frozenset[str]]
-    # The one provider a subscription CLI is bound to. None for a key CLI,
+    # What this CLI runs on: "subscription", "api_key", or both.
+    billing_options: ClassVar[frozenset[str]]
+    # The one provider a vendor's CLI is bound to. None for a key-only CLI,
     # which runs whichever provider the model names.
     provider: ClassVar[str | None] = None
     # The seed for this harness's settings row, ``provider/model``.
@@ -94,14 +93,14 @@ class Harness(ABC):
     def accepts(cls, subscription: ProviderSubscription) -> bool:
         """Whether this CLI runs on the subscription ``subscription``."""
         bound = not cls.provider or cls.provider == subscription.provider
-        return bound and "oauth" in cls.login_kinds
+        return bound and "subscription" in cls.billing_options
 
     @classmethod
     def has_provider(cls, provider: Provider) -> bool:
         """The one this CLI is bound to, or any that issues a subscription kind it consumes."""
         if cls.provider:
             return cls.provider == provider.id
-        return bool(cls.login_kinds & provider.login_kinds)
+        return bool(cls.billing_options & provider.billing_options)
 
     @property
     def model_id(self) -> str:
