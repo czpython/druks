@@ -1,14 +1,23 @@
 import base64
 import hashlib
 import hmac
+import json
 import secrets
+from dataclasses import dataclass
 from datetime import datetime
+from typing import Any
 
+import httpx
 from sqlalchemy import ForeignKey, Index, LargeBinary, String, select
 from sqlalchemy.dialects.postgresql import CITEXT, insert
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from druks.accounts.constants import (
+    OPERATOR_DEFERRED_PREFIX,
+    OPERATOR_TOKEN_CALL_PREFIX,
+    OPERATOR_TOKEN_PREFIX,
+    OPERATOR_TOKEN_TAG,
+    OPERATOR_WRITES,
     PAT_LAST_USED_RESOLUTION,
     PAT_LIFETIME,
     PAT_NAME_LENGTH,
@@ -19,9 +28,11 @@ from druks.accounts.constants import (
     SYSTEM_ACCOUNT_ID,
 )
 from druks.accounts.exceptions import InvalidPatError
-from druks.core.models import Uuid7Pk
+from druks.core.models import Uuid7Pk, uuid7_str
 from druks.database import db_session
 from druks.models import Base
+from druks.redis import get_client
+from druks.sandbox.constants import MAX_AGENT_TIMEOUT_SECONDS
 
 
 class Account(Base, Uuid7Pk):
@@ -169,3 +180,127 @@ class PersonalAccessToken(Base, Uuid7Pk):
         # Keep the first revocation instant — a repeat revoke changes nothing.
         self.revoked_at = self.revoked_at or Base.utc_now()
         await db_session().flush()
+
+
+def _hash_operator_token(token: str) -> str:
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
+_operator_api = None
+
+
+@dataclass(frozen=True)
+class OperatorToken:
+    """A call-scoped bearer with PAT authority. Redis holds it for the agent
+    call; Settings never does. ``writes`` is deny (read tools only), defer
+    (stash mutating calls), or allow (execute as ``account_id``)."""
+
+    account_id: str
+    agent_call_id: str
+    run_id: str
+    writes: str
+
+    @classmethod
+    def bind_api(cls, api: Any) -> None:
+        global _operator_api
+        _operator_api = api
+
+    @classmethod
+    async def mint(
+        cls,
+        *,
+        account_id: str,
+        agent_call_id: str,
+        run_id: str,
+        writes: str,
+    ) -> str:
+        if writes not in OPERATOR_WRITES:
+            raise ValueError(
+                f"operator token writes must be one of {sorted(OPERATOR_WRITES)}, not {writes!r}"
+            )
+        token = f"{OPERATOR_TOKEN_TAG}_{secrets.token_urlsafe(32)}"
+        payload = json.dumps(
+            {
+                "account_id": account_id,
+                "agent_call_id": agent_call_id,
+                "run_id": run_id,
+                "writes": writes,
+            }
+        )
+        digest = _hash_operator_token(token)
+        redis = get_client()
+        await redis.set(f"{OPERATOR_TOKEN_PREFIX}{digest}", payload, ex=MAX_AGENT_TIMEOUT_SECONDS)
+        await redis.set(
+            f"{OPERATOR_TOKEN_CALL_PREFIX}{agent_call_id}", digest, ex=MAX_AGENT_TIMEOUT_SECONDS
+        )
+        return token
+
+    @classmethod
+    async def lookup(cls, credential: str) -> "OperatorToken | None":
+        if not credential.startswith(f"{OPERATOR_TOKEN_TAG}_"):
+            return
+        raw = await get_client().get(f"{OPERATOR_TOKEN_PREFIX}{_hash_operator_token(credential)}")
+        if raw:
+            return cls(**json.loads(raw))
+        return
+
+    @classmethod
+    async def authenticate(cls, credential: str) -> "OperatorToken":
+        found = await cls.lookup(credential)
+        if found:
+            return found
+        raise InvalidPatError("Not a recognized operator token.")
+
+    @classmethod
+    async def revoke(cls, agent_call_id: str) -> None:
+        redis = get_client()
+        call_key = f"{OPERATOR_TOKEN_CALL_PREFIX}{agent_call_id}"
+        digest = await redis.get(call_key)
+        if digest:
+            await redis.delete(f"{OPERATOR_TOKEN_PREFIX}{digest.decode()}", call_key)
+
+    @classmethod
+    async def defer_write(cls, run_id: str, write: dict[str, str]) -> None:
+        redis = get_client()
+        key = f"{OPERATOR_DEFERRED_PREFIX}{run_id}"
+        await redis.rpush(key, json.dumps(write))
+        await redis.expire(key, MAX_AGENT_TIMEOUT_SECONDS)
+
+    @classmethod
+    async def take_deferred(cls, run_id: str) -> list[dict[str, str]]:
+        redis = get_client()
+        key = f"{OPERATOR_DEFERRED_PREFIX}{run_id}"
+        items = await redis.lrange(key, 0, -1)
+        await redis.delete(key)
+        return [json.loads(item) for item in items]
+
+    @classmethod
+    async def play_deferred(cls, account_id: str, writes: list[dict[str, str]]) -> None:
+        if not _operator_api:
+            raise RuntimeError("operator token replay needs the API bound at MCP boot")
+        call_id = uuid7_str()
+        token = await cls.mint(
+            account_id=account_id, agent_call_id=call_id, run_id=call_id, writes="allow"
+        )
+        try:
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=_operator_api, raise_app_exceptions=False),
+                base_url="http://druks",
+            ) as client:
+                for write in writes:
+                    response = await client.request(
+                        write["method"],
+                        write["path"],
+                        content=write["body"] or None,
+                        headers={
+                            "Authorization": f"Bearer {token}",
+                            "Content-Type": write["content_type"],
+                        },
+                    )
+                    if response.status_code >= 400:
+                        raise RuntimeError(
+                            f"deferred {write['method']} {write['path']} failed: "
+                            f"{response.status_code} {response.text}"
+                        )
+        finally:
+            await cls.revoke(call_id)

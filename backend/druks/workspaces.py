@@ -6,6 +6,7 @@ import shlex
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
+from urllib.parse import urlparse, urlunparse
 
 from druks.accounts.models import Account
 from druks.core.apis.github import get_github_client
@@ -25,10 +26,29 @@ from druks.mcp.helpers import get_bearer_token_env_var, get_grant_account
 from druks.sandbox.datastructures import AgentResult, McpServer, RequiredMcpServer
 from druks.sandbox.exceptions import ExecFailed
 from druks.sandbox.layout import get_repo_root, get_work_root
+from druks.settings import load_settings
 from druks.user_settings.models import UserSettings
 
 if TYPE_CHECKING:
     from druks.sandbox.host import Host
+
+
+def this_appliance_mcp_url(host: "Host") -> str:
+    """The /mcp hop a sandbox uses to reach this process.
+
+    Docker sibling containers cannot use the host loopback; the engine
+    publishes that address as host.docker.internal:8001. An exe VM is a
+    different machine and uses the dashboard URL (urls.endpoint), never
+    webhook_host.
+    """
+    base = (load_settings().urls.endpoint or "http://127.0.0.1:8001").rstrip("/")
+    parsed = urlparse(base)
+    if host.record.provider == "docker" and parsed.hostname in {"127.0.0.1", "localhost", "::1"}:
+        port = parsed.port
+        if not port:
+            port = 8001 if parsed.scheme == "http" else 443
+        base = urlunparse(parsed._replace(netloc=f"host.docker.internal:{port}")).rstrip("/")
+    return f"{base}/mcp"
 
 
 @dataclass(frozen=True)
@@ -47,9 +67,10 @@ class Workspace:
         # add_dirs). Base: pass the run's kwargs through untouched.
         return kwargs
 
-    def get_required_mcp_servers(self) -> tuple[RequiredMcpServer, ...]:
+    async def get_required_mcp_servers(self, **kwargs: Any) -> tuple[RequiredMcpServer, ...]:
         # Override to declare the servers this workspace requires and
-        # credentials itself. Base: none.
+        # credentials itself. Base: none. ``kwargs`` are the agent run's
+        # (call_id among them) so a token can mint per call.
         return ()
 
     async def prepare_context(
@@ -146,7 +167,7 @@ class Workspace:
         # servers, then the operator registry's enabled entries. Each becomes a
         # wire shape on ``mcp_servers`` (url + derived env var, never the
         # token); each token rides ``extra_env`` under that var.
-        required = self.get_required_mcp_servers()
+        required = await self.get_required_mcp_servers(**kwargs)
         required_names = {server.name for server in required}
         if len(required_names) != len(required):
             # One config key per name in the emitted harness config — a dupe

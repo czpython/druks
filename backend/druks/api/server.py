@@ -13,6 +13,7 @@ from starlette.routing import Route
 
 from druks.accounts.dependencies import current_account, resolve_single_operator
 from druks.accounts.exceptions import AuthConfigurationError
+from druks.accounts.models import OperatorToken
 from druks.accounts.routes import router as auth_router
 from druks.api.artifacts import router as artifacts_router
 from druks.api.exceptions import AgentApiError
@@ -310,6 +311,7 @@ from druks.mcp.server import create_mcp_app  # noqa: E402
 # A bare Route at exactly /mcp (a Mount would 307 the no-slash path); PATs
 # authenticate it, so it sits outside the identity gate.
 mcp_app = create_mcp_app(app)
+OperatorToken.bind_api(app)
 app.router.routes.append(
     Route("/mcp", mcp_app, methods=["POST", "DELETE"], include_in_schema=False)
 )
