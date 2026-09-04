@@ -20,6 +20,7 @@ from druks.usage.models import UsageScrape
 from fastapi import APIRouter, FastAPI
 from fastmcp.client import Client
 from fastmcp.client.transports import StreamableHttpTransport
+from pydantic import BaseModel
 from starlette.routing import Route
 
 _IN_APP_ASK = {
@@ -270,6 +271,43 @@ def test_derived_operation_id_collision_stops_boot():
 
     with pytest.raises(InvalidAgentToolError, match="collides with existing operation id"):
         create_mcp_app(api)
+
+
+class _Issued(BaseModel):
+    identifier: str
+
+
+def _create_shaped_app() -> FastAPI:
+    # A 201 whose model requires identifier — the confirm stub does not have one.
+    held: dict[str, object] = {}
+
+    @asynccontextmanager
+    async def lifespan(scope_app):
+        async with held["mcp"].lifespan(scope_app):
+            yield
+
+    api = FastAPI(lifespan=lifespan)
+    router = APIRouter()
+
+    async def mint_ticket() -> _Issued:
+        """Write a ticket down."""
+        return _Issued(identifier="BOX-1")
+
+    router.add_api_route(
+        "/tickets",
+        mint_ticket,
+        methods=["POST"],
+        status_code=201,
+        operation_id="mint_ticket",
+        tags=["agent"],
+    )
+    api.include_router(router, prefix="/api/software_factory", tags=["software_factory"])
+    mcp = create_mcp_app(api)
+    held["mcp"] = mcp
+    api.router.routes.append(
+        Route("/mcp", mcp, methods=["POST", "DELETE"], include_in_schema=False)
+    )
+    return api
 
 
 def _agent_route_app(operation_id: str) -> FastAPI:
@@ -627,6 +665,29 @@ async def test_confirm_defers_answer_gate_until_play(app, account, druks_db, res
     assert resume_spy == [{"id": run.id, "action": "approve", "answers": {}, "note": ""}]
 
 
+async def test_mutating_agent_tools_omit_output_schema(app, pat_token):
+    async with live(app), _client(app, pat_token) as client:
+        tools = {tool.name: tool for tool in await client.list_tools()}
+    assert tools["get_gate"].output_schema
+    assert tools["answer_gate"].output_schema is None
+    assert tools["cancel_run"].output_schema is None
+
+
+async def test_confirm_defers_a_create_shaped_write(account):
+    token = await _operator_token(account, writes="defer", run_id="run-confirm-create")
+    api = _create_shaped_app()
+
+    async with live(api), _client(api, token) as client:
+        result = await client.call_tool("software_factory_mint_ticket", {}, raise_on_error=False)
+
+    if result.is_error:
+        raise AssertionError(result.content[0].text)
+    assert result.structured_content["result"] == "deferred"
+    writes = await OperatorToken.take_deferred("run-confirm-create")
+    assert writes[0]["method"] == "POST"
+    assert writes[0]["path"] == "/api/software_factory/tickets"
+
+
 async def test_full_answer_gate_runs_as_the_token_account(app, account, druks_db, resume_spy):
     item = await make_test_note()
     run = await seed_note_run(
@@ -658,7 +719,7 @@ async def test_operator_token_cannot_act_as_another_account(app, druks_db):
     theirs = await Account.get_or_create("peer@example.com")
     druks_db.add(
         UsageScrape(
-            provider="openai-codex",
+            provider="openai",
             account_id=theirs.id,
             scraped_at=datetime.now(UTC),
             five_hour_percent_left=42,
@@ -669,7 +730,7 @@ async def test_operator_token_cannot_act_as_another_account(app, druks_db):
 
     async with live(app), _client(app, token) as client:
         usage = (await client.call_tool("get_usage", {})).structured_content
-    codex = next(h for h in usage["providers"] if h["id"] == "openai-codex")
+    codex = next(h for h in usage["providers"] if h["id"] == "openai")
     assert codex["fiveHourPercentLeft"] is None
 
 

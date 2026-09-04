@@ -58,9 +58,7 @@ class TalkWorkspace(Workspace):
         )
         variable = get_bearer_token_env_var(THIS_APPLIANCE)
         servers = [
-            server
-            for server in kwargs.get("mcp_servers") or ()
-            if server.name != THIS_APPLIANCE
+            server for server in kwargs.get("mcp_servers") or () if server.name != THIS_APPLIANCE
         ]
         servers.append(
             McpServer(

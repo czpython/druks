@@ -100,7 +100,7 @@ def _writes_claim() -> str:
 
 
 def _is_read_tool(tool: Tool) -> bool:
-    return bool(tool.annotations and tool.annotations.readOnlyHint)
+    return bool(tool.annotations and tool.annotations.read_only_hint)
 
 
 class OperatorWritesFilter(Transform):
@@ -258,6 +258,11 @@ def _annotate(route: HTTPRoute, component: object) -> None:
             destructive_hint=not is_read and route.extensions.get("x-destructive", True),
             idempotent_hint=route.extensions.get("x-idempotent", False),
         )
+        # Confirm (writes=defer) intercepts mutating hops with a deferred stub,
+        # not the route's 201 model. Advertising that model as outputSchema
+        # makes MCP reject the stub (`identifier` required on create_ticket).
+        if not is_read:
+            component.output_schema = None
 
 
 def create_mcp_app(api: FastAPI) -> StarletteWithLifespan:
