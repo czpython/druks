@@ -12,7 +12,7 @@ not require public ingress.
 
 - Docker with the Compose plugin
 - Sufficient Docker capacity for the stack and short-lived sandbox containers
-- A Claude or Codex subscription to run an agent.
+- A subscription or API key for a supported agent harness.
 
 ## Install
 
@@ -24,7 +24,7 @@ curl -fsSL https://druks.ai/install.sh | bash
 
 The installer creates `~/druks` and generates the local secrets. Then it applies
 database migrations, pulls the images, and starts the stack. It does not read
-or reuse Claude or Codex credentials from your host.
+or reuse agent harness credentials from your host.
 
 Make sure that the services and API operate:
 
@@ -44,9 +44,10 @@ Open the dashboard at [http://127.0.0.1:8001](http://127.0.0.1:8001).
 
 ## Connect a provider
 
-Open **Settings → Providers** and connect Anthropic or ChatGPT. The provider validates
-the subscription. Druks stores the connection in Postgres. The first harness
-connection completes the setup of a new local installation.
+Open **Settings → Providers** and connect a provider for your selected harness.
+Use a subscription or API key, as the provider supports. Druks stores the
+connection in Postgres. The first subscription connection completes the setup
+of a new local installation.
 
 Run the platform preflight:
 

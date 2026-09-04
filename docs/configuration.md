@@ -394,9 +394,9 @@ is one of:
 - A token from a named process environment variable
 - An OAuth connection, which requires `urls.endpoint`.
 
-Druks delivers enabled servers to both harnesses unless an app workspace
-owns a required server with the same name. Tokens enter the agent environment
-under a derived variable and are never returned by the API.
+Druks delivers enabled servers through the selected harness unless an app
+workspace owns a required server with the same name. Tokens enter the agent
+environment under a derived variable and are never returned by the API.
 
 ## Skills
 
