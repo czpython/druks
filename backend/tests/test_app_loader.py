@@ -11,6 +11,7 @@ def test_import_app_models_registers_software_factory_via_generic_discovery():
     from druks.models import Base
 
     assert get_app("software_factory").prefix_tables is False
+    assert get_app("issues").prefix_tables is True
     import_app_models()  # idempotent; raises if the unprefixed tables aren't exempt
     assert {"projects", "work_items", "project_repos"} <= set(Base.metadata.tables)
 
