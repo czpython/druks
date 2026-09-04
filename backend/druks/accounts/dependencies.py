@@ -11,7 +11,7 @@ from druks.accounts.exceptions import (
     InvalidPatError,
 )
 from druks.accounts.jwt import verify_assertion
-from druks.accounts.models import Account, PersonalAccessToken
+from druks.accounts.models import Account, OperatorToken, PersonalAccessToken
 
 _BEARER_CHALLENGE = 'Bearer realm="druks"'
 # auto_error=False: absence and malformed both come back None — presence is
@@ -24,7 +24,7 @@ async def resolve_pat_account(credentials: HTTPAuthorizationCredentials | None) 
     """A present Authorization must authenticate — never a fall-through."""
     if credentials:
         try:
-            return (await PersonalAccessToken.authenticate(credentials.credentials)).account
+            return await resolve_bearer_account(credentials.credentials)
         except InvalidPatError as error:
             raise HTTPException(
                 status_code=401,
@@ -36,6 +36,17 @@ async def resolve_pat_account(credentials: HTTPAuthorizationCredentials | None) 
         detail="Authorization must be: Bearer <token>.",
         headers={"WWW-Authenticate": _BEARER_CHALLENGE},
     )
+
+
+async def resolve_bearer_account(credential: str) -> Account:
+    """The one bearer door: a live call-scoped operator token, else a PAT."""
+    operator = await OperatorToken.lookup(credential)
+    if operator:
+        account = await Account.get(operator.account_id)
+        if account:
+            return account
+        raise InvalidPatError("Not a recognized operator token.")
+    return (await PersonalAccessToken.authenticate(credential)).account
 
 
 async def resolve_single_operator() -> Account | None:
