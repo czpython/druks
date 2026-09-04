@@ -205,9 +205,8 @@ class WorkItem(StoredSubject):
         ForeignKey("projects.id"),
     )
     project: Mapped[Project] = relationship(lazy="joined")
-    # Which remote tracker the ticket lives in: ``linear`` / ``github`` /
-    # future ``jira``. Combined with ``ticket_key`` to uniquely identify
-    # a ticket.
+    # Which tracker the ticket lives in: ``linear`` / ``github`` / ``jira`` /
+    # ``issues``. Combined with ``ticket_key`` to uniquely identify a ticket.
     source: Mapped[str] = mapped_column(default="github")
     title: Mapped[str] = mapped_column(default="")
     # Human-readable issue key in the source: ``ACME-270`` / ``#42`` /

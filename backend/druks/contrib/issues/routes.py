@@ -4,13 +4,11 @@ from sqlalchemy import select
 
 from druks.accounts.dependencies import current_account
 from druks.accounts.models import Account
-from druks.contrib.issues.app import Issues
 from druks.contrib.issues.enums import Priority, Status
 from druks.contrib.issues.exceptions import InvalidPrefix
 from druks.contrib.issues.models import Project, Ticket
 from druks.contrib.issues.schemas import CommentRead, ProjectRead, TicketDetail, TicketEdit
 from druks.db import Base, db_session
-from druks.signals import publish
 
 # The operations own the facts: pages call these doors, and so do the dashboard
 # and the sandbox — the same doors, joined to druks ``/mcp`` as ``issues_*``.
@@ -186,40 +184,11 @@ async def set_status(
     identifier: str,
     status: Status = Body(..., embed=True),
 ) -> TicketDetail:
-    """Move a ticket. This is the only door that moves one, and the only one
-    that publishes ``ticket.transitioned`` — Software Factory's funnel reads
-    that signal, so a move into the trigger status is what opens a build."""
+    """Move a ticket. The transition publishes ``ticket.transitioned`` —
+    Software Factory's funnel reads that signal, so a move into the trigger
+    status is what opens a build."""
     ticket = await require_ticket(identifier)
-    if ticket.status == status:
-        # Already there: a repeat is not a transition, and re-firing would
-        # dispatch a second build for one move.
-        return await ticket_detail(ticket)
-
-    await ticket.set_status(status)
-    project = await Project.get(ticket.project_id)
-    assignee = await Account.get(ticket.assignee_id) if ticket.assignee_id else None
-    await publish(
-        "ticket.transitioned",
-        payload={
-            "source": "issues",
-            "identifier": ticket.identifier,
-            # The display label, the way Linear and Jira publish their state
-            # names: the funnel's trigger status is spelled as a human reads it.
-            "status": status.label,
-            "title": ticket.title,
-            # The shell serves an app's pages under the app's own name, so this
-            # is the path a link in a build or a notification opens.
-            "url": f"/{Issues.name}/tickets/{ticket.identifier}",
-            "project_name": project.name if project else None,
-            "labels": [],
-            # An account is a username and nothing else — no display name to
-            # tell apart from the address, so both keys carry the one name.
-            "assignee_email": assignee.username if assignee else None,
-            "assignee_name": assignee.username if assignee else None,
-            "completed": status.completed,
-            "terminal": status.terminal,
-        },
-    )
+    await ticket.transition(status)
     return await ticket_detail(ticket)
 
 
