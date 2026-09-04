@@ -6,7 +6,13 @@ from typing import Any
 
 import pytest
 from druks import workspaces as workspace_mod
-from druks.contrib.software_factory.constants import GITHUB_MCP_NAME, GITHUB_MCP_URL
+from druks.accounts.models import Account
+from druks.contrib.software_factory.app import SoftwareFactory
+from druks.contrib.software_factory.constants import (
+    GITHUB_MCP_NAME,
+    GITHUB_MCP_URL,
+    ISSUES_MCP_NAME,
+)
 from druks.contrib.software_factory.workflows import Build, BuildWorkspace
 from druks.mcp.helpers import get_bearer_token_env_var
 from druks.sandbox import host as host_mod
@@ -60,6 +66,35 @@ async def test_build_workspace_declares_its_github_mcp(druks_db):
     github = next(s for s in kwargs["mcp_servers"] if s.name == GITHUB_MCP_NAME)
     assert github.url == GITHUB_MCP_URL
     assert "ghs_review" not in repr(github)
+    assert ISSUES_MCP_NAME not in {s.name for s in kwargs["mcp_servers"]}
+
+
+async def test_issues_tracker_requires_appliance_mcp():
+    workspace = BuildWorkspace(
+        host=_FakeSandbox(),  # type: ignore[arg-type]
+        repo="o/main",
+        branch="b",
+        github_token="t",
+        mcp_token="ghs_review",
+        skills=("python-house-rules",),
+        issues_mcp_url="http://host.docker.internal:8001/mcp",
+        issues_mcp_token="druks_pat_test",
+    )
+    kwargs = await workspace.with_mcp_servers(None, **workspace.get_agent_run_kwargs())
+
+    issues = next(s for s in kwargs["mcp_servers"] if s.name == ISSUES_MCP_NAME)
+    assert issues.url == "http://host.docker.internal:8001/mcp"
+    assert kwargs["extra_env"][get_bearer_token_env_var(ISSUES_MCP_NAME)] == "druks_pat_test"
+    assert "druks_pat_test" not in repr(issues)
+
+
+def _pin_tracker(monkeypatch: pytest.MonkeyPatch, tracker: str) -> None:
+    settings = SoftwareFactory.Settings(tracker=tracker)
+
+    async def _settings(cls):
+        return settings
+
+    monkeypatch.setattr(SoftwareFactory, "settings", classmethod(_settings))
 
 
 def _workspace_kwargs_stubs(monkeypatch: pytest.MonkeyPatch, *, review_actor):
@@ -97,7 +132,7 @@ def _workspace_kwargs_stubs(monkeypatch: pytest.MonkeyPatch, *, review_actor):
 
 
 @pytest.mark.asyncio
-async def test_get_workspace_kwargs_clones_primary_only(monkeypatch: pytest.MonkeyPatch):
+async def test_get_workspace_kwargs_clones_primary_only(druks_db, monkeypatch: pytest.MonkeyPatch):
     # Only the primary repo is provisioned; related repos are the agents' job.
     # get_related_root is mkdir'd so Claude's --add-dir target exists before the
     # first on-demand clone.
@@ -127,6 +162,7 @@ async def test_get_workspace_kwargs_clones_primary_only(monkeypatch: pytest.Monk
 
 @pytest.mark.asyncio
 async def test_get_workspace_kwargs_fails_loudly_when_the_token_wont_mint(
+    druks_db,
     monkeypatch: pytest.MonkeyPatch,
 ):
     # There is no build without github: a run that can't mint its MCP token
@@ -149,6 +185,110 @@ async def test_get_workspace_kwargs_fails_loudly_when_the_token_wont_mint(
 
     with pytest.raises(FatalError, match="github MCP server"):
         await workflow.get_workspace_kwargs(sandbox)
+
+
+def _issues_workspace(monkeypatch: pytest.MonkeyPatch) -> tuple[Build, Any]:
+    async def _review_token(_repo: str) -> str:
+        return "ghs_review"
+
+    _pin_tracker(monkeypatch, "issues")
+    monkeypatch.setattr(
+        "druks.contrib.software_factory.workflows.load_settings",
+        lambda: SimpleNamespace(urls=SimpleNamespace(endpoint="http://127.0.0.1:8001")),
+    )
+    _workspace_kwargs_stubs(
+        monkeypatch,
+        review_actor=lambda: SimpleNamespace(
+            client=SimpleNamespace(token_for_repo=_review_token),
+            mode="approve",
+        ),
+    )
+    sandbox = host_mod.Host(record=SimpleNamespace(id="h1", ssh_username="exedev"))  # type: ignore[arg-type]
+    workflow = Build()
+    workflow.input = Build._run_input_model()
+    workflow.subject = SimpleNamespace(repo="o/app")
+    workflow._profile = {"recommended_skills": ["python-house-rules"]}
+    workflow.account_id = None
+    return workflow, sandbox
+
+
+async def test_get_workspace_kwargs_mints_a_pat_for_the_run_account(druks_db, monkeypatch):
+    account = await Account.get_or_create("op@example.com")
+    await Account.get_or_create("other@example.com")
+    workflow, sandbox = _issues_workspace(monkeypatch)
+    workflow.account_id = account.id
+
+    kwargs = await workflow.get_workspace_kwargs(sandbox)
+
+    assert kwargs["issues_mcp_url"] == "http://host.docker.internal:8001/mcp"
+    assert kwargs["issues_mcp_token"].startswith("druks_pat_")
+    workspace = BuildWorkspace(**kwargs)
+    assert ISSUES_MCP_NAME in {server.name for server in workspace.get_required_mcp_servers()}
+
+
+async def test_get_workspace_kwargs_uses_the_sole_operator_when_unassigned(druks_db, monkeypatch):
+    await Account.get_or_create("op@example.com")
+    workflow, sandbox = _issues_workspace(monkeypatch)
+
+    kwargs = await workflow.get_workspace_kwargs(sandbox)
+
+    assert kwargs["issues_mcp_token"].startswith("druks_pat_")
+
+
+async def test_get_workspace_kwargs_keeps_a_public_mcp_endpoint(druks_db, monkeypatch):
+    await Account.get_or_create("op@example.com")
+    workflow, sandbox = _issues_workspace(monkeypatch)
+    monkeypatch.setattr(
+        "druks.contrib.software_factory.workflows.load_settings",
+        lambda: SimpleNamespace(urls=SimpleNamespace(endpoint="https://druks.example.com")),
+    )
+
+    kwargs = await workflow.get_workspace_kwargs(sandbox)
+
+    assert kwargs["issues_mcp_url"] == "https://druks.example.com/mcp"
+
+
+async def test_get_workspace_kwargs_fails_without_an_operator_account(druks_db, monkeypatch):
+    workflow, sandbox = _issues_workspace(monkeypatch)
+
+    with pytest.raises(FatalError, match="/mcp PAT"):
+        await workflow.get_workspace_kwargs(sandbox)
+
+
+async def test_get_workspace_kwargs_fails_when_endpoint_is_unset(druks_db, monkeypatch):
+    await Account.get_or_create("op@example.com")
+    workflow, sandbox = _issues_workspace(monkeypatch)
+    monkeypatch.setattr(
+        "druks.contrib.software_factory.workflows.load_settings",
+        lambda: SimpleNamespace(urls=SimpleNamespace(endpoint="")),
+    )
+
+    with pytest.raises(FatalError, match="/mcp"):
+        await workflow.get_workspace_kwargs(sandbox)
+
+
+async def test_linear_tracker_does_not_require_issues_mcp(druks_db, monkeypatch):
+    async def _review_token(_repo: str) -> str:
+        return "ghs_review"
+
+    _workspace_kwargs_stubs(
+        monkeypatch,
+        review_actor=lambda: SimpleNamespace(
+            client=SimpleNamespace(token_for_repo=_review_token),
+            mode="approve",
+        ),
+    )
+    sandbox = host_mod.Host(record=SimpleNamespace(id="h1", ssh_username="exedev"))  # type: ignore[arg-type]
+    workflow = Build()
+    workflow.input = Build._run_input_model()
+    workflow.subject = SimpleNamespace(repo="o/app")
+    workflow._profile = {"recommended_skills": ["python-house-rules"]}
+
+    kwargs = await workflow.get_workspace_kwargs(sandbox)
+    workspace = BuildWorkspace(**kwargs)
+
+    assert "issues_mcp_url" not in kwargs
+    assert ISSUES_MCP_NAME not in {server.name for server in workspace.get_required_mcp_servers()}
 
 
 class _IdentitySandbox:
