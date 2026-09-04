@@ -2,7 +2,7 @@ import inspect
 from collections.abc import Awaitable, Callable
 from contextlib import nullcontext, suppress
 from contextvars import ContextVar
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from functools import partial
 from typing import (
     TYPE_CHECKING,
@@ -292,13 +292,20 @@ class Gate(BaseModel):
 
     @classmethod
     async def wait(
-        cls, *, input_request: dict[str, Any] | None = None, ttl_seconds: float = GATE_TTL_SECONDS
+        cls,
+        *,
+        input_request: dict[str, Any] | None = None,
+        ttl_seconds: float = GATE_TTL_SECONDS,
+        hold_sandbox: bool | timedelta | None = False,
     ) -> Self:
         # Suspend the running workflow until its gate is answered. A gate is a
         # run-level state — the read surfaces "needs you" straight off the parked run.
         # ``input_request`` is the plain-dict ask (at least a ``label`` and
         # ``presentation``), stored on the run beside ``input_gate`` and cleared on
         # resume — so an app declares the ask here, beside on_wait, not at read time.
+        # ``hold_sandbox`` keeps the warm VM across the park (see ``_hold_host``):
+        # ``True`` holds it for as long as its lease could still cover one more
+        # worst-case agent call, a timedelta for at most that long.
         workflow = current_workflow.get()
         if not workflow._subject and cls.on_wait.__func__ is Gate.on_wait.__func__:
             # No subject means no feed surface; if on_wait wasn't overridden
@@ -313,7 +320,9 @@ class Gate(BaseModel):
                 await cls.on_wait(workflow)
 
         await DBOS.run_step_async(StepOptions(name=f"{cls.name}._on_wait"), _on_wait)
-        payload = await _park(workflow, cls.name, input_request, ttl_seconds)
+        payload = await _park(
+            workflow, cls.name, input_request, ttl_seconds, hold_sandbox=hold_sandbox
+        )
         reply = cls.model_validate(payload)
         workflow.journal.add(reply)
         return reply
@@ -335,10 +344,15 @@ async def _park(
     gate: str,
     input_request: dict[str, Any] | None,
     ttl_seconds: float,
+    hold_sandbox: bool | timedelta | None = False,
 ) -> dict[str, Any]:
     # Shared park core: a park lasts days, so reap the warm VM, then suspend on the
-    # gate's channel until Run.resume answers it.
-    await workflow._reap_run()
+    # gate's channel until Run.resume answers it. A caller that expects a quick
+    # answer can hold the VM instead — the clipped lease is what ends the hold.
+    if hold_sandbox:
+        await workflow._hold_host(hold_sandbox)
+    else:
+        await workflow._reap_run()
     await _emit_run_event(
         workflow.workflow_id,
         RunState.PARKED,
@@ -861,6 +875,25 @@ class Workflow:
             return
         host, self._host = self._host, None
         await sandbox_client.release(host_id=host.id)
+
+    async def _hold_host(self, hold: bool | timedelta) -> None:
+        # Keep the warm VM across a park instead of reaping it, by clipping its lease
+        # down: drukbox reaps at the new expiry, so a hold nobody ever answers still
+        # frees the VM with no druks-side sweep. ``True`` holds it for as long as the
+        # lease could still cover one more worst-case call — past that the next call
+        # would rotate anyway. Never extends: the lease drukbox already granted is the
+        # ceiling. A run with no warm host has nothing to hold.
+        if not self._host:
+            return
+        span = (
+            hold
+            if isinstance(hold, timedelta)
+            else timedelta(seconds=SANDBOX_HOST_ROTATE_BEFORE_SECONDS)
+        )
+        expires_at = datetime.now(UTC) + span
+        if self._host.expires_at:
+            expires_at = min(self._host.expires_at, expires_at)
+        await sandbox_client.set_expiry(host_id=self._host.id, expires_at=expires_at)
 
     @property
     def workflow_id(self) -> str:
