@@ -5,6 +5,7 @@ from pydantic import BaseModel, ConfigDict, Field, PositiveInt
 from pydantic.fields import FieldInfo
 
 from druks.apps.settings import (
+    field_choice_labels,
     field_choices,
     field_kind,
     field_multiline,
@@ -79,6 +80,9 @@ class SettingsFieldResponse(Schema):
     default: Any
     # An enum field's allowed values; None for every other kind.
     choices: list[str] | None
+    # Display wording for a subset of ``choices``. Omitted members render as
+    # the stored value. Empty when the field has no labels.
+    choice_labels: dict[str, str] = Field(default_factory=dict)
     # The heading this field groups under; empty for an ungrouped one.
     section: str
     # The sibling field this one is shown for, and the value that field must hold. The
@@ -109,6 +113,7 @@ class SettingsFieldResponse(Schema):
             value=None if secret else value,
             default=None if secret else field.default,
             choices=field_choices(field),
+            choice_labels=field_choice_labels(field),
             section=field_section(field),
             visible_when_field=controller,
             visible_when_value=target,

@@ -5,10 +5,13 @@ import sqlalchemy as sa
 from sqlalchemy import ForeignKey, String, select
 from sqlalchemy.orm import Mapped, mapped_column, validates
 
+from druks.accounts.models import Account
+from druks.contrib.issues.app import Issues
 from druks.contrib.issues.enums import Priority, Status
 from druks.contrib.issues.exceptions import InvalidPrefix, PrefixLocked, ProjectNotFound
 from druks.contrib.issues.schemas import TicketSummary
 from druks.db import Base, StoredSubject, db_session
+from druks.signals import publish
 
 # A project's prefix is the identifier namespace — Linear's team key. Short
 # enough to read at a glance, long enough to stay distinct.
@@ -193,6 +196,33 @@ class Ticket(StoredSubject):
         self.status = status
         self.updated_at = Base.utc_now()
         await db_session().flush()
+
+    async def transition(self, status: Status) -> None:
+        """Write a new status and tell the funnel. Already-there is a no-op so
+        a repeat cannot dispatch a second build."""
+        if self.status == status:
+            return
+        await self.set_status(status)
+        project = await Project.get(self.project_id)
+        assignee = await Account.get(self.assignee_id) if self.assignee_id else None
+        await publish(
+            "ticket.transitioned",
+            payload={
+                "source": Issues.name,
+                "identifier": self.identifier,
+                # Display label, the way Linear and Jira publish state names:
+                # the funnel's trigger status is spelled as a human reads it.
+                "status": status.label,
+                "title": self.title,
+                "url": f"/{Issues.name}/tickets/{self.identifier}",
+                "project_name": project.name if project else None,
+                "labels": [],
+                "assignee_email": assignee.username if assignee else None,
+                "assignee_name": assignee.username if assignee else None,
+                "completed": status.completed,
+                "terminal": status.terminal,
+            },
+        )
 
     async def set_priority(self, priority: Priority) -> None:
         self.priority = priority

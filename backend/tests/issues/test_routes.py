@@ -10,7 +10,7 @@ def _published(monkeypatch):
     async def emit(name, **kwargs):
         events.append((name, kwargs["payload"]))
 
-    monkeypatch.setattr("druks.contrib.issues.routes.publish", emit)
+    monkeypatch.setattr("druks.contrib.issues.models.publish", emit)
     return events
 
 

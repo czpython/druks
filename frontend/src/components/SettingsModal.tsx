@@ -2551,6 +2551,7 @@ function AppPane({
                             help={o.f.help}
                             type={o.f.type}
                             choices={o.f.choices}
+                            choiceLabels={o.f.choiceLabels}
                             multiline={o.f.multiline}
                             secretSet={o.f.secretSet}
                             // A secret's stored value never reaches the client, so its
