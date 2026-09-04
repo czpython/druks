@@ -70,6 +70,7 @@ druks = "druks.testing"
 core = "druks.core.app:Core"
 review = "druks.contrib.review.app:Review"
 software_factory = "druks.contrib.software_factory.app:SoftwareFactory"
+issues = "druks.contrib.issues.app:Issues"
 usage = "druks.usage.app:Usage"
 
 [build-system]
