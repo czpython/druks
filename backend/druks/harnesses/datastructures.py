@@ -100,13 +100,9 @@ class SandboxSettings:
     service_token: str
     service_timeout: float
     image: str
-    # Local CLI config dirs the push anchors config/plugin/skills paths on; the
-    # OAuth login itself is synthesized from the DB at push time, never
-    # read from under these. None — no local config for that CLI on this host —
-    # carries nothing, so a CLI's local config never sprays into a sandbox
-    # uninvited.
-    claude_config_dir: Path | None
-    codex_config_dir: Path | None
+    # Each harness owns one directory under this root. Missing files are not
+    # copied into the sandbox.
+    harness_config_root: Path
     # Canonical shared-skills dir pushed into both ~/.claude/skills and
     # ~/.codex/skills in the VM. ``None`` => per-CLI fallback (the skills
     # subdir of each home).
@@ -119,8 +115,7 @@ class SandboxSettings:
             service_token=settings.sandbox.service_token,
             service_timeout=settings.sandbox.timeout,
             image=settings.sandbox.image,
-            claude_config_dir=settings.claude_config_dir,
-            codex_config_dir=settings.codex_config_dir,
+            harness_config_root=settings.harness_config_root,
             skills_dir=settings.skills_dir,
         )
 

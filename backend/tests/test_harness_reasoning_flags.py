@@ -1,9 +1,15 @@
+import json
+import shlex
+from pathlib import Path
+
 import pytest
 from conftest import connect_provider
 from druks.harnesses.claude import ClaudeHarness
 from druks.harnesses.codex import CodexHarness
+from druks.harnesses.datastructures import SandboxSettings
 from druks.harnesses.models import ProviderLogin
 from druks.harnesses.providers import AnthropicProvider, OpenAiCodexProvider
+from druks.sandbox.datastructures import McpServer
 
 _CODEX_MODEL = CodexHarness.default_model
 
@@ -17,27 +23,17 @@ async def _connected_harnesses(druks_db):
 
 
 def _sandbox_config():
-    from pathlib import Path
-
-    from druks.harnesses.datastructures import SandboxSettings
-
     return SandboxSettings(
         service_url="https://sb.test",
         service_token="t",
         service_timeout=30.0,
         image="img",
-        claude_config_dir=Path("/home/agent/.claude"),
-        codex_config_dir=Path("/home/agent/.codex"),
+        harness_config_root=Path("/harnesses"),
     )
 
 
 async def test_claude_build_invocation_carries_every_flag():
-    """Flag-drop guard: moving argv construction is exactly how
-    CLI flags got silently lost before — assert the full surface."""
-    import shlex
-
-    from druks.sandbox.datastructures import McpServer
-
+    """The Claude invocation carries the complete supported flag set."""
     schema = {"type": "object"}
     server = McpServer(name="github", url="https://api.example/mcp/", bearer_token_env_var="TOK")
     inv = await ClaudeHarness(
@@ -69,7 +65,7 @@ async def test_claude_build_invocation_carries_every_flag():
         "--output-format stream-json",
         "--verbose",
         "--json-schema",
-        shlex.quote(__import__("json").dumps(schema)),
+        shlex.quote(json.dumps(schema)),
         "--permission-mode bypassPermissions",
         "--debug-file",
         "/work/runs/run-1/debug.log",
@@ -94,9 +90,7 @@ async def test_claude_build_invocation_carries_every_flag():
 
 
 async def test_codex_build_invocation_carries_every_flag():
-    """Flag-drop guard, codex side."""
-    from druks.sandbox.datastructures import McpServer
-
+    """The Codex invocation carries the complete supported flag set."""
     server = McpServer(name="github", url="https://api.example/mcp/", bearer_token_env_var="TOK")
     inv = await CodexHarness(
         model=_CODEX_MODEL,
@@ -129,9 +123,7 @@ async def test_codex_build_invocation_carries_every_flag():
         "--output-schema",
         "--output-last-message",
         "/home/exedev/work/runs/run-1/output.json",
-        # MCP registration + marker-based session capture. No CODEX_HOME
-        # override: codex runs against its real ~/.codex (auth, config,
-        # skills all live there), and the session is found by marker.
+        # Codex uses its sandbox home for auth, config, skills, and session data.
         "mcp_servers.github.url",
         "mcp_servers.github.bearer_token_env_var",
         "touch /home/exedev/work/runs/run-1/session.marker",
@@ -147,8 +139,6 @@ async def test_codex_build_invocation_carries_every_flag():
     stdin = (inv.stdin or b"").decode()
     assert stdin.startswith("hello")
     assert "Do not send interim assistant messages" in stdin
-    # The per-run home override must never come back silently — it re-homed
-    # every piece of codex state (auth, then skills) one regression at a time.
     assert "CODEX_HOME" not in wrapper
     assert inv.env == {"TOK": "secret"}
     assert inv.extra_artifact_filenames == ("output.json", "session.jsonl")
@@ -178,8 +168,6 @@ def test_codex_emits_summary_effort_and_json_stream():
 
 
 def test_codex_mcp_flags_register_server_with_env_var_token():
-    from druks.sandbox.datastructures import McpServer
-
     server = McpServer(name="github", url="https://api.example/mcp/", bearer_token_env_var="GH_TOK")
     flags = CodexHarness(model=_CODEX_MODEL, fast_mode=False, effort=None)._mcp_flags((server,))
     assert 'mcp_servers.github.url="https://api.example/mcp/"' in flags
@@ -189,10 +177,6 @@ def test_codex_mcp_flags_register_server_with_env_var_token():
 
 
 def test_claude_mcp_flags_emit_env_ref_header_not_literal_token():
-    import json
-
-    from druks.sandbox.datastructures import McpServer
-
     server = McpServer(name="github", url="https://api.example/mcp/", bearer_token_env_var="GH_TOK")
     flags = ClaudeHarness(model="anthropic/claude-x", fast_mode=False, effort=None)._mcp_flags(
         (server,)
@@ -206,7 +190,3 @@ def test_claude_mcp_flags_emit_env_ref_header_not_literal_token():
     # No servers → no flags, on both harnesses.
     assert ClaudeHarness(model="x", fast_mode=False, effort=None)._mcp_flags(()) == ()
     assert CodexHarness(model=_CODEX_MODEL, fast_mode=False, effort=None)._mcp_flags(()) == ()
-
-
-# Workspace scaffolding tests (add_dirs dedup, GitHub MCP injection) live in
-# test_build_workspace.py — that behavior is BuildWorkspace's, not the base sandbox's.

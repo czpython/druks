@@ -8,10 +8,8 @@
 
 x-druks: &druks
   image: ghcr.io/czpython/druks:${DRUKS_TAG:-latest}
-  # Run as the deploy user (who owns the mounted ~/.claude, ~/.codex, and data
-  # dir), not root, so everything written under the data mount stays owned by
-  # (and writable to) the deploy user. install.sh writes DRUKS_UID/DRUKS_GID
-  # into .env from `id -u` / `id -g`.
+  # Run as the deploy user, not root. This user owns the data and harness-config
+  # roots. install.sh writes DRUKS_UID/DRUKS_GID into .env from `id -u` / `id -g`.
   user: "${DRUKS_UID:?set DRUKS_UID in .env — run install.sh}:${DRUKS_GID:?set DRUKS_GID in .env — run install.sh}"
   restart: unless-stopped
   network_mode: host
@@ -22,10 +20,7 @@ x-druks: &druks
     DRUKS_REDIS_URL: ${DRUKS_REDIS_URL:-redis://127.0.0.1:6379/0}
     DRUKS_DATABASE_URL: ${DRUKS_DATABASE_URL:-postgresql+psycopg://${DRUKS_POSTGRES_USER:-druks}:${DRUKS_POSTGRES_PASSWORD}@127.0.0.1:5432/${DRUKS_POSTGRES_DB:-druks}}
     DRUKS_DATA_DIR: /app/data
-    # Container view of the CLI config mounts below. Subscription credentials
-    # live in the DB (dashboard connect flow) — these carry config only.
-    DRUKS_CLAUDE_CONFIG_DIR: /harnesses/claude
-    DRUKS_CODEX_CONFIG_DIR: /harnesses/codex
+    DRUKS_HARNESS_CONFIG_ROOT: /harnesses
     # Operator-installed skills live in the (writable) data volume — the
     # settings UI installs collections here and druks pushes them into every
     # VM at both ~/.claude/skills and ~/.codex/skills.
@@ -34,12 +29,8 @@ x-druks: &druks
   volumes:
     - ./druks.toml:/app/druks.toml:ro
     - ${DRUKS_DATA_HOST_DIR:-${DRUKS_DATA_DIR:-${HOME}/druks-data}}:/app/data
-    # claude/codex config dirs (settings.json/plugins, config.toml/AGENTS.md),
-    # carried into each sandbox at push time. Auth never reads them — tokens
-    # live in the DB and rotate there — so the mounts are read-only.
-    - ${DRUKS_CLAUDE_HOME:-${HOME}/.claude}:/harnesses/claude:ro
-    - ${DRUKS_CODEX_HOME:-${HOME}/.codex}:/harnesses/codex:ro
-    - ${DRUKS_CLAUDE_JSON:-${HOME}/.claude.json}:/harnesses/.claude.json:ro
+    # Each harness owns one directory here. Provider logins stay in the DB.
+    - ${DRUKS_HARNESS_CONFIG_ROOT:-${HOME}/.config/druks/harnesses}:/harnesses:ro
     # Shared so a reattaching worker reads the key the acquirer wrote.
     - druks_sandbox_keys:/app/sandbox-keys
   depends_on:

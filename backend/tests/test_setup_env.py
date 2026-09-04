@@ -49,6 +49,8 @@ def test_fresh_exe_render_matches_the_deployment_contract(tmp_path):
     assert values["DRUKS_AUTH_HEADER"] == "X-ExeDev-Email"
     assert values["SERVICE_TOKENS"] == config["sandbox"]["service_token"]
     assert values["DRUKS_DATA_DIR"] == "/home/op/druks-data"
+    assert values["DRUKS_HARNESS_CONFIG_ROOT"] == "/home/op/.config/druks/harnesses"
+    assert config["paths"]["harness_config_root"] == values["DRUKS_HARNESS_CONFIG_ROOT"]
     assert "EXE_API_TOKEN" not in values
     assert "TAILSCALE_TAILNET" not in values
     assert len(config["secrets"]["postgres_password"]) == 64

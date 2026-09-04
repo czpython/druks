@@ -75,6 +75,8 @@ It creates `~/druks/.env` and exits if required values are missing.
 The output identifies each missing value. Edit `druks.toml`. For a generic
 remote shape, fill `[sandbox.<provider>]` from the Drukbox
 [configuration reference](https://github.com/czpython/drukbox).
+The installer also creates `paths.harness_config_root`. Put optional CLI
+configuration in the harness directory under that root.
 
 After boot, connect the GitHub App that Druks uses from **Settings → Services**.
 Use the permission table in [Configuration](configuration.md#github).

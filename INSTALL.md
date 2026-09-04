@@ -27,7 +27,7 @@ curl -fsSL https://druks.ai/install.sh | bash
 
 Verification: the command exits with status 0. Its final output includes
 `docker compose up -d` and a message that the stack is up. `~/druks` contains
-`druks.toml`, `.env`, and `compose.yaml`.
+`druks.toml`, `.env`, and `compose.yaml`. The configured harness root exists.
 
 ## 3. Services are up
 

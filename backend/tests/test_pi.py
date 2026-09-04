@@ -41,8 +41,7 @@ def _harness(*, effort: str | None = "high") -> PiHarness:
             service_token="token",
             service_timeout=30.0,
             image="image",
-            claude_config_dir=None,
-            codex_config_dir=None,
+            harness_config_root=Path("/harnesses"),
         ),
     )
 

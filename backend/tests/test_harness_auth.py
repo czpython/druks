@@ -3,15 +3,11 @@ import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-import httpx
 import pytest
 from conftest import connect_provider
-from druks.harnesses import base as hbase
 from druks.harnesses.claude import ClaudeHarness, _get_credentials
 from druks.harnesses.codex import CodexHarness
-from druks.harnesses.datastructures import (
-    SandboxSettings,
-)
+from druks.harnesses.datastructures import SandboxSettings
 from druks.harnesses.exceptions import HarnessNotConnectedError
 from druks.harnesses.models import ProviderLogin
 from druks.harnesses.providers import AnthropicProvider, OpenAiCodexProvider
@@ -49,26 +45,6 @@ async def _seed_codex(*, provider_email="op@example.com", account_id="acc-1") ->
     )
 
 
-def _resp(status: int, body: object) -> httpx.Response:
-    text = body if isinstance(body, str) else json.dumps(body)
-    return httpx.Response(status, text=text, request=httpx.Request("GET", "https://x"))
-
-
-def _mock_get(monkeypatch, response):
-    calls = []
-
-    async def fake_get(self, url, *, headers=None, **_kwargs):
-        calls.append({"url": url, "headers": headers})
-        return response
-
-    monkeypatch.setattr(hbase.httpx.AsyncClient, "get", fake_get)
-    return calls
-
-
-def _harness() -> ClaudeHarness:
-    return ClaudeHarness(model=ClaudeHarness.default_model, fast_mode=False, effort=None)
-
-
 async def test_claude_builder_puts_db_credentials_on_the_bundle(druks_db):
     login = await _seed_claude(access="live", refresh="R0")
     sandbox = SandboxSettings(
@@ -76,8 +52,7 @@ async def test_claude_builder_puts_db_credentials_on_the_bundle(druks_db):
         service_token="x",
         service_timeout=30.0,
         image="x",
-        claude_config_dir=Path("/home/agent/.claude"),
-        codex_config_dir=Path("/home/agent/.codex"),
+        harness_config_root=Path("/harnesses"),
     )
     bundle = await _get_credentials(sandbox, github_token=None, login=login)
     auth = bundle.home[0]
@@ -85,18 +60,16 @@ async def test_claude_builder_puts_db_credentials_on_the_bundle(druks_db):
     assert json.loads(auth.content)["claudeAiOauth"]["accessToken"] == "live"
 
 
-async def test_credentials_builders_carry_global_instructions(druks_db):
+async def test_credentials_builders_read_their_harness_config_directories(druks_db):
     claude_login = await _seed_claude()
     codex_login = await _seed_codex()
-    claude_config_dir = Path("/home/agent/.claude")
-    codex_config_dir = Path("/home/agent/.codex")
+    config_root = Path("/harnesses")
     sandbox = SandboxSettings(
         service_url="x",
         service_token="x",
         service_timeout=30.0,
         image="x",
-        claude_config_dir=claude_config_dir,
-        codex_config_dir=codex_config_dir,
+        harness_config_root=config_root,
     )
 
     claude_bundle = await _get_credentials(sandbox, github_token=None, login=claude_login)
@@ -105,29 +78,57 @@ async def test_credentials_builders_carry_global_instructions(druks_db):
         fast_mode=False,
         effort=None,
         sandbox=sandbox,
-    )._get_credentials(github_token=None, login=codex_login)
+    )._get_credentials(sandbox, github_token=None, login=codex_login)
 
     assert claude_bundle.home[0].path == ".claude/.credentials.json"
     assert codex_bundle.home[0].path == ".codex/auth.json"
-    assert HomeCopy(".claude/CLAUDE.md", claude_config_dir / "CLAUDE.md") in claude_bundle.home
-    assert HomeCopy(".codex/AGENTS.md", codex_config_dir / "AGENTS.md") in codex_bundle.home
+    assert HomeCopy(".claude/settings.json", config_root / "claude/settings.json") in (
+        claude_bundle.home
+    )
+    assert HomeCopy(".claude/CLAUDE.md", config_root / "claude/CLAUDE.md") in claude_bundle.home
+    assert HomeCopy(".claude.json", config_root / "claude/.claude.json") in claude_bundle.home
+    assert (
+        HomeCopy(
+            ".claude/plugins/installed_plugins.json",
+            config_root / "claude/plugins/installed_plugins.json",
+        )
+        in claude_bundle.home
+    )
+    assert (
+        HomeCopy(
+            ".claude/plugins/known_marketplaces.json",
+            config_root / "claude/plugins/known_marketplaces.json",
+        )
+        in claude_bundle.home
+    )
+    assert (
+        HomeCopy(".claude/plugins/marketplaces", config_root / "claude/plugins/marketplaces")
+        in claude_bundle.home
+    )
+    assert HomeCopy(".claude/plugins/cache", config_root / "claude/plugins/cache") in (
+        claude_bundle.home
+    )
+    assert claude_bundle.home[-1].source == config_root / "claude/skills"
+    assert HomeCopy(".codex/config.toml", config_root / "codex/config.toml") in codex_bundle.home
+    assert (
+        HomeCopy(".codex/.credentials.json", config_root / "codex/.credentials.json")
+        in codex_bundle.home
+    )
+    assert HomeCopy(".codex/AGENTS.md", config_root / "codex/AGENTS.md") in codex_bundle.home
+    assert codex_bundle.home[-1].source == config_root / "codex/skills"
 
 
-async def test_no_config_dir_ships_credential_only(druks_db):
-    # No local config dir for the CLI => nothing of the host's config/plugins
-    # reaches the sandbox — but the DB login still ships: the login
-    # row alone decides whether a harness can run.
+async def test_missing_config_root_keeps_the_db_credential(druks_db, tmp_path):
     login = await _seed_claude(access="live")
     sandbox = SandboxSettings(
         service_url="x",
         service_token="x",
         service_timeout=30.0,
         image="x",
-        claude_config_dir=None,
-        codex_config_dir=None,
+        harness_config_root=tmp_path / "missing",
     )
     bundle = await _get_credentials(sandbox, github_token="gh", login=login)
-    [auth] = bundle.home
+    auth = bundle.home[0]
     assert json.loads(auth.content)["claudeAiOauth"]["accessToken"] == "live"
     assert bundle.github_token == "gh"
 

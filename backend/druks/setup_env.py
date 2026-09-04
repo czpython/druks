@@ -31,9 +31,7 @@ _OWNED_ENV_KEYS = frozenset(
         "DRUKS_POSTGRES_PASSWORD",
         "DRUKS_DATA_DIR",
         "DRUKS_UPSTREAM",
-        "DRUKS_CLAUDE_HOME",
-        "DRUKS_CODEX_HOME",
-        "DRUKS_CLAUDE_JSON",
+        "DRUKS_HARNESS_CONFIG_ROOT",
         "DRUKS_WEBHOOK_HOST",
         "DATABASE_URL",
         "REDIS_URL",
@@ -66,7 +64,7 @@ _KNOWN_TOML_KEYS = {
         "postgres_password",
         "secrets_key",
     ),
-    "paths": ("data_dir", "claude_home", "codex_home", "claude_json"),
+    "paths": ("data_dir", "harness_config_root"),
     "sandbox": (
         "provider",
         "service_url",
@@ -174,9 +172,7 @@ secrets_key = ""
 # Host paths.
 [paths]
 data_dir = ""
-claude_home = ""
-codex_home = ""
-claude_json = ""
+harness_config_root = ""
 
 # Any drukbox provider name; docker and exe select install shapes.
 [sandbox]
@@ -246,9 +242,7 @@ def _fresh_values(*, provider: str, home: str) -> tuple[tuple[tuple[str, ...], s
         (("secrets", "postgres_password"), _hex_secret()),
         (("secrets", "secrets_key"), _secrets_key()),
         (("paths", "data_dir"), f"{home.rstrip('/')}/druks-data"),
-        (("paths", "claude_home"), f"{home.rstrip('/')}/.claude"),
-        (("paths", "codex_home"), f"{home.rstrip('/')}/.codex"),
-        (("paths", "claude_json"), f"{home.rstrip('/')}/.claude.json"),
+        (("paths", "harness_config_root"), f"{home.rstrip('/')}/.config/druks/harnesses"),
         *shape,
     )
 
@@ -370,10 +364,11 @@ def _render_env(
             "DEPLOYMENT DEFAULTS",
             (
                 ("DRUKS_DATA_DIR", _get_string(config, ("paths", "data_dir"))),
+                (
+                    "DRUKS_HARNESS_CONFIG_ROOT",
+                    _get_string(config, ("paths", "harness_config_root")),
+                ),
                 ("DRUKS_UPSTREAM", "127.0.0.1:8001"),
-                ("DRUKS_CLAUDE_HOME", _get_string(config, ("paths", "claude_home"))),
-                ("DRUKS_CODEX_HOME", _get_string(config, ("paths", "codex_home"))),
-                ("DRUKS_CLAUDE_JSON", _get_string(config, ("paths", "claude_json"))),
                 ("DRUKS_WEBHOOK_HOST", _get_string(config, ("urls", "webhook_host"))),
                 ("DATABASE_URL", "sqlite+aiosqlite:////data/drukbox.db"),
                 ("REDIS_URL", "redis://127.0.0.1:6379/2"),

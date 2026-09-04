@@ -40,6 +40,7 @@ The local shape needs no authored values, so the first run goes all the way:
 
 - The installer writes `~/druks/druks.toml` with `[sandbox].provider = "docker"`.
 - It creates `~/druks/.env` with `DEFAULT_HOST_PROVIDER=docker`.
+- It creates `~/.config/druks/harnesses` for optional harness configuration.
 - It generates the database password and the stored-secret key.
 - It pulls images and applies migrations.
 - It starts Druks, Postgres, Redis, and Drukbox on `127.0.0.1:8780`.

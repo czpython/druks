@@ -211,33 +211,27 @@ async def _get_credentials(
     credentials file, plus any local config, plugins, and skills.
     ``include_plugins=False`` skips the operator's plugin state, for prompts
     that use no MCP server and would otherwise die on a misconfigured plugin."""
-    config_dir = sandbox.claude_config_dir
-    home: list[HomeFile | HomeCopy] = [ClaudeHarness.auth_file(login)]
-    if config_dir:
+    config_dir = sandbox.harness_config_root / ClaudeHarness.name
+    home: list[HomeFile | HomeCopy] = [
+        ClaudeHarness.auth_file(login),
+        HomeCopy(".claude.json", config_dir / ".claude.json"),
+        HomeCopy(".claude/settings.json", config_dir / "settings.json"),
+        HomeCopy(".claude/CLAUDE.md", config_dir / "CLAUDE.md"),
+    ]
+    if include_plugins:
+        plugins = config_dir / "plugins"
         home += [
-            HomeCopy(".claude.json", config_dir.parent / ".claude.json"),
-            HomeCopy(".claude/settings.json", config_dir / "settings.json"),
-            HomeCopy(".claude/CLAUDE.md", config_dir / "CLAUDE.md"),
+            HomeCopy(".claude/plugins/installed_plugins.json", plugins / "installed_plugins.json"),
+            HomeCopy(
+                ".claude/plugins/known_marketplaces.json", plugins / "known_marketplaces.json"
+            ),
+            HomeCopy(".claude/plugins/marketplaces", plugins / "marketplaces"),
+            HomeCopy(".claude/plugins/cache", plugins / "cache"),
         ]
-        if include_plugins:
-            plugins = config_dir / "plugins"
-            home += [
-                HomeCopy(
-                    ".claude/plugins/installed_plugins.json", plugins / "installed_plugins.json"
-                ),
-                HomeCopy(
-                    ".claude/plugins/known_marketplaces.json", plugins / "known_marketplaces.json"
-                ),
-                HomeCopy(".claude/plugins/marketplaces", plugins / "marketplaces"),
-                HomeCopy(".claude/plugins/cache", plugins / "cache"),
-            ]
-    # Skills come from the canonical shared dir (DRUKS_SKILLS_DIR) when set;
-    # otherwise fall back to the per-CLI skills subdir.
-    skills_src = sandbox.skills_dir or (config_dir / "skills" if config_dir else None)
-    if skills_src:
-        home.append(
-            HomeCopy(".claude/skills", skills_src, excludes=await Skill.delivery_excludes(skills))
-        )
+    skills_dir = sandbox.skills_dir or config_dir / "skills"
+    home.append(
+        HomeCopy(".claude/skills", skills_dir, excludes=await Skill.delivery_excludes(skills))
+    )
     return Credentials(home=tuple(home), github_token=github_token)
 
 
