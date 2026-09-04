@@ -17,6 +17,7 @@ from . import exceptions
 from .artifacts import write_cost
 from .base import Harness
 from .models import ProviderLogin
+from .providers import OpenAiProvider, jwt_expiry
 from .subprocess import read_result_json
 
 _DRUKS_OUTPUT_TEMPLATE = Path(__file__).parent / "druks-output.ts"
@@ -38,9 +39,28 @@ class PiHarness(Harness):
     default_model = "openai/gpt-5.5"
 
     @classmethod
+    def provider_name(cls, login: ProviderLogin) -> str:
+        """The provider as pi names it. pi keeps the ChatGPT backend as its own
+        ``openai-codex`` provider, so an OpenAI subscription renders under
+        that name; every key renders under the vendor's."""
+        if login.kind == "oauth" and login.provider == OpenAiProvider.id:
+            return "openai-codex"
+        return login.provider
+
+    @classmethod
     def auth_file(cls, login: ProviderLogin) -> HomeFile:
-        auth = {login.provider: {"type": "api_key", "key": login.payload["api_key"]}}
-        return HomeFile(".pi/agent/auth.json", json.dumps(auth))
+        if login.kind == "oauth":
+            tokens = login.payload["tokens"]
+            entry = {
+                "type": "oauth",
+                "access": tokens["access_token"],
+                "refresh": tokens["refresh_token"],
+                "expires": int(jwt_expiry(tokens["access_token"]).timestamp() * 1000),
+                "accountId": tokens["account_id"],
+            }
+        else:
+            entry = {"type": "api_key", "key": login.payload["api_key"]}
+        return HomeFile(".pi/agent/auth.json", json.dumps({cls.provider_name(login): entry}))
 
     async def build_invocation(
         self,
@@ -67,7 +87,8 @@ class PiHarness(Harness):
                 "sandbox.service_url and related TOML settings.",
             )
 
-        provider, _, model = self.model.partition("/")
+        model = self.model_id
+        provider = self.provider_name(login)
         in_vm_run_dir = f"{get_runs_root(ssh_username)}/{run_id}"
         in_vm_schema = f"{in_vm_run_dir}/schema.json"
         in_vm_extension = f"{in_vm_run_dir}/druks-output.ts"

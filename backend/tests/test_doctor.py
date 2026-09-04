@@ -295,7 +295,6 @@ async def test_run_checks_covers_all_check_names(tmp_path: Path) -> None:
         "review:settings",
         "anthropic_login",
         "openai_login",
-        "openai-codex_login",
         "data_dir",
         "database",
         "redis",
@@ -308,7 +307,7 @@ def test_logins_pending_when_not_connected(tmp_path: Path) -> None:
     # No login rows committed => every provider reads as not connected.
     settings = make_settings(tmp_path)
 
-    result = _named(doctor.check_provider_logins(settings), "openai-codex_login")
+    result = _named(doctor.check_provider_logins(settings), "openai_login")
 
     assert not result.ok
     assert result.pending

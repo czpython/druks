@@ -8,7 +8,7 @@ from druks.accounts.models import Account
 from druks.harnesses import providers as pbase
 from druks.harnesses.exceptions import CatalogError
 from druks.harnesses.models import ProviderCatalog, ProviderLogin
-from druks.harnesses.providers import AnthropicProvider, OpenAiCodexProvider, OpenAiProvider
+from druks.harnesses.providers import AnthropicProvider, OpenAiProvider
 
 
 def _resp(status: int, body: object) -> httpx.Response:
@@ -46,7 +46,7 @@ def test_anthropic_parse_namespaces_ids_and_keeps_labels() -> None:
         }
     )
 
-    assert AnthropicProvider._parse_catalog(payload) == (
+    assert AnthropicProvider._parse_catalog(payload, kind="oauth") == (
         {"id": "anthropic/claude-fable-5", "label": "Claude Fable 5"},
         {"id": "anthropic/claude-opus-4-8", "label": "claude-opus-4-8"},
     )
@@ -62,7 +62,7 @@ def test_anthropic_parse_namespaces_ids_and_keeps_labels() -> None:
 )
 def test_anthropic_parse_names_why_a_body_offers_nothing(body, tag) -> None:
     with pytest.raises(CatalogError) as error:
-        AnthropicProvider._parse_catalog(body)
+        AnthropicProvider._parse_catalog(body, kind="oauth")
     assert error.value.tag == tag
 
 
@@ -86,9 +86,9 @@ def test_codex_parse_keeps_only_listed_models() -> None:
         }
     )
 
-    assert OpenAiCodexProvider._parse_catalog(payload) == (
+    assert OpenAiProvider._parse_catalog(payload, kind="oauth") == (
         {
-            "id": "openai-codex/gpt-5.6-sol",
+            "id": "openai/gpt-5.6-sol",
             "label": "GPT-5.6-Sol",
             "efforts": ["low", "xhigh"],
             "minimal_client_version": "0.144.0",
@@ -100,7 +100,7 @@ def test_codex_parse_empty_catalog_is_an_error() -> None:
     """A stale-low ``client_version`` yields ``200 {"models": []}`` — that must
     never read as "no models" and wipe the stored list."""
     with pytest.raises(CatalogError, match="empty_list"):
-        OpenAiCodexProvider._parse_catalog(json.dumps({"models": []}))
+        OpenAiProvider._parse_catalog(json.dumps({"models": []}), kind="oauth")
 
 
 def test_openai_parse_reads_its_models_dev_section() -> None:
@@ -111,11 +111,13 @@ def test_openai_parse_reads_its_models_dev_section() -> None:
         }
     )
 
-    assert OpenAiProvider._parse_catalog(raw) == ({"id": "openai/gpt-5.5", "label": "GPT-5.5"},)
+    assert OpenAiProvider._parse_catalog(raw, kind="api_key") == (
+        {"id": "openai/gpt-5.5", "label": "GPT-5.5"},
+    )
     with pytest.raises(CatalogError, match="unexpected_payload"):
-        OpenAiProvider._parse_catalog(json.dumps({"anthropic": {}}))
+        OpenAiProvider._parse_catalog(json.dumps({"anthropic": {}}), kind="api_key")
     with pytest.raises(CatalogError, match="empty_list"):
-        OpenAiProvider._parse_catalog(json.dumps({"openai": {"models": {}}}))
+        OpenAiProvider._parse_catalog(json.dumps({"openai": {"models": {}}}), kind="api_key")
 
 
 async def test_anthropic_fetch_uses_the_oauth_token(monkeypatch, druks_db):
@@ -149,11 +151,11 @@ async def test_anthropic_fetch_uses_the_api_key(monkeypatch, druks_db):
 
 async def test_codex_fetch_sends_the_account_header(monkeypatch, druks_db):
     tokens = {"access_token": "a.b.c", "account_id": "acc-7"}
-    login = await connect_provider(OpenAiCodexProvider, {"tokens": tokens})
+    login = await connect_provider(OpenAiProvider, {"tokens": tokens})
     calls = _mock_get(monkeypatch, _resp(200, {"models": []}))
 
     with pytest.raises(CatalogError, match="empty_list"):
-        await OpenAiCodexProvider.fetch_catalog(login)
+        await OpenAiProvider.fetch_catalog(login)
     assert calls[0]["url"] == "https://chatgpt.com/backend-api/codex/models?client_version=99.99.99"
     assert calls[0]["headers"]["ChatGPT-Account-Id"] == "acc-7"
 
@@ -167,14 +169,57 @@ async def test_fetch_names_an_http_failure(monkeypatch, druks_db):
 
 
 async def test_refresh_stores_the_catalog_and_keeps_it_on_failure(monkeypatch, druks_db):
-    login = await _claude_login()
+    await _claude_login()
     _mock_get(monkeypatch, _resp(200, {"data": [{"id": "claude-fable-5"}]}))
-    await AnthropicProvider.refresh_catalog(login)
+    await AnthropicProvider.refresh_catalog()
     [stored] = await ProviderCatalog.list_all()
     assert stored.provider == "anthropic"
     assert stored.models == [{"id": "anthropic/claude-fable-5", "label": "claude-fable-5"}]
 
     _mock_get(monkeypatch, _resp(200, {"data": []}))
-    await AnthropicProvider.refresh_catalog(login)
+    await AnthropicProvider.refresh_catalog()
     [kept] = await ProviderCatalog.list_all()
     assert kept.models == stored.models
+
+
+async def test_refresh_without_a_login_stores_nothing(monkeypatch, druks_db):
+    calls = _mock_get(monkeypatch, _resp(200, {"data": [{"id": "claude-fable-5"}]}))
+    await AnthropicProvider.refresh_catalog()
+    assert calls == []
+    assert await ProviderCatalog.list_all() == []
+
+
+async def test_openai_refresh_reads_the_subscription_over_the_key(monkeypatch, druks_db):
+    # A key alone reads models.dev; once a subscription exists its endpoint
+    # lists what the codex CLI runs, and that catalog wins.
+    account = await Account.get_or_create("op@example.com")
+    await ProviderLogin.connect(
+        provider="openai",
+        account=account,
+        payload={"api_key": "sk-openai"},
+        expires_at=None,
+        provider_email="op@example.com",
+        kind="api_key",
+    )
+    calls = _mock_get(
+        monkeypatch,
+        _resp(200, {"openai": {"models": {"gpt-5.5": {"id": "gpt-5.5", "name": "GPT-5.5"}}}}),
+    )
+    await OpenAiProvider.refresh_catalog()
+    assert calls[0]["url"] == "https://models.dev/api.json"
+    [stored] = await ProviderCatalog.list_all()
+    assert stored.models == [{"id": "openai/gpt-5.5", "label": "GPT-5.5"}]
+
+    await connect_provider(
+        OpenAiProvider,
+        {"tokens": {"access_token": "a.b.c", "account_id": "acc-7"}},
+        provider_email="seat@example.com",
+    )
+    calls = _mock_get(
+        monkeypatch,
+        _resp(200, {"models": [{"slug": "gpt-5.6", "visibility": "list"}]}),
+    )
+    await OpenAiProvider.refresh_catalog()
+    assert calls[0]["url"].startswith("https://chatgpt.com/backend-api/codex/models")
+    [stored] = await ProviderCatalog.list_all()
+    assert [model["id"] for model in stored.models] == ["openai/gpt-5.6"]

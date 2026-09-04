@@ -11,7 +11,7 @@ from druks.accounts.exceptions import AuthConfigurationError
 from druks.accounts.models import Account, PersonalAccessToken
 from druks.harnesses import providers as pbase
 from druks.harnesses.models import ProviderLogin
-from druks.harnesses.providers import AnthropicProvider
+from druks.harnesses.providers import AnthropicProvider, OpenAiProvider
 from druks.testing import configure_app_for_test, make_settings
 from druks.user_settings.models import UserSettings
 from fastapi.testclient import TestClient
@@ -234,10 +234,11 @@ async def test_api_key_connect_stores_the_operator_identity(tmp_path, druks_db):
     assert not connection.expires_at
 
 
-async def test_api_key_connect_requires_a_declared_kind(tmp_path, druks_db):
+async def test_api_key_connect_requires_a_declared_kind(tmp_path, druks_db, monkeypatch):
+    monkeypatch.setattr(OpenAiProvider, "login_kinds", frozenset({"oauth"}))
     with _header_client(tmp_path) as client:
         response = client.post(
-            "/api/providers/openai-codex/connection",
+            "/api/providers/openai/connection",
             json={"key": "api-key-value"},
             headers={HEADER: "operator@example.com"},
         )
@@ -274,7 +275,7 @@ async def test_concurrent_setup_completions_with_one_email_converge(
     with _client(tmp_path) as client:
         # Both flows start while zero accounts exist — both unbound.
         first = client.post("/api/providers/anthropic/connection/start")
-        second = client.post("/api/providers/openai-codex/connection/start")
+        second = client.post("/api/providers/openai/connection/start")
         _mock_exchange(monkeypatch, _grant("me@example.com"))
         assert (
             client.post(
@@ -286,7 +287,7 @@ async def test_concurrent_setup_completions_with_one_email_converge(
         _mock_exchange_codex(monkeypatch, email="me@example.com")
         assert (
             client.post(
-                "/api/providers/openai-codex/connection/complete",
+                "/api/providers/openai/connection/complete",
                 json={"code": "c2", "connectionId": second.json()["connectionId"]},
             ).status_code
             == 200
@@ -302,7 +303,7 @@ async def test_a_stale_unbound_completion_attaches_to_the_operator(tmp_path, mon
         # must attach to that operator instead of minting a rival account and
         # bricking none mode.
         first = client.post("/api/providers/anthropic/connection/start")
-        second = client.post("/api/providers/openai-codex/connection/start")
+        second = client.post("/api/providers/openai/connection/start")
         _mock_exchange(monkeypatch, _grant("a@example.com"))
         client.post(
             "/api/providers/anthropic/connection/complete",
@@ -310,7 +311,7 @@ async def test_a_stale_unbound_completion_attaches_to_the_operator(tmp_path, mon
         )
         _mock_exchange_codex(monkeypatch, email="b@example.com")
         completed = client.post(
-            "/api/providers/openai-codex/connection/complete",
+            "/api/providers/openai/connection/complete",
             json={"code": "c2", "connectionId": second.json()["connectionId"]},
         )
         assert completed.status_code == 200
@@ -318,13 +319,13 @@ async def test_a_stale_unbound_completion_attaches_to_the_operator(tmp_path, mon
         assert client.get("/api/settings").status_code == 200
     operator = await Account.get_for_username("a@example.com")
     assert len(await Account.list_non_system()) == 1
-    codex_connection = await ProviderLogin.get_for_account("openai-codex", operator.id)
+    codex_connection = await ProviderLogin.get_for_account("openai", operator.id)
     # The capability keeps its own provider identity; it never rekeys the account.
     assert codex_connection.provider_email == "b@example.com"
 
 
 async def test_a_connect_survives_a_failed_catalog_refresh(tmp_path, monkeypatch, druks_db):
-    async def _refresh_boom(cls, login):
+    async def _refresh_boom(cls):
         raise RuntimeError("picker flush failed")
 
     # The login commits before the refresh runs; a refresh failure past
@@ -363,7 +364,7 @@ async def test_first_connection_claims_the_fallback_slot_once(tmp_path, monkeypa
         _connect(
             client,
             monkeypatch,
-            provider="openai-codex",
+            provider="openai",
             email="other-seat@corp.com",
             headers={HEADER: "second@example.com"},
         )
@@ -378,14 +379,14 @@ async def test_reconnect_records_provider_email_but_keeps_the_operator(
         response = _connect(
             client,
             monkeypatch,
-            provider="openai-codex",
+            provider="openai",
             email="corp-seat@corp.com",
             headers={HEADER: "me@example.com"},
         )
         assert response.status_code == 200
         assert response.json()["username"] == "me@example.com"
     account = await Account.get_for_username("me@example.com")
-    codex = await ProviderLogin.get_for_account("openai-codex", account.id)
+    codex = await ProviderLogin.get_for_account("openai", account.id)
     assert codex.provider_email == "corp-seat@corp.com"
 
 

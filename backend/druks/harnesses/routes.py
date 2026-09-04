@@ -101,7 +101,7 @@ async def complete_connection(
     settings = await UserSettings.get()
     if not settings.fallback_account_id:
         await settings.set_fallback_account(resolved.id)
-    login = await ProviderLogin.connect(
+    await ProviderLogin.connect(
         provider=provider.id,
         account=resolved,
         payload=completed.payload,
@@ -119,7 +119,7 @@ async def complete_connection(
         # A fresh picker right after connect; fetch failures are tagged inside.
         # The single-use flow is already spent, so trouble here — including a
         # database that vanished under the refresh — only logs.
-        await provider.refresh_catalog(login)
+        await provider.refresh_catalog()
     except Exception:
         logging.getLogger(__name__).exception("Catalog refresh after connect failed")
         with suppress(Exception):
@@ -152,7 +152,7 @@ async def connect_key(
             provider_email=account.username,
             kind="api_key",
         )
-        await provider.refresh_catalog(login)
+        await provider.refresh_catalog()
         return ProviderLoginResponse.model_validate(login)
     raise HTTPException(status_code=422, detail="The API key is empty. Paste a key.")
 

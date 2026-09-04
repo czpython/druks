@@ -1,3 +1,4 @@
+import base64
 import json
 import shlex
 import subprocess
@@ -47,7 +48,7 @@ def _harness(*, effort: str | None = "high") -> PiHarness:
     )
 
 
-_LOGIN = SimpleNamespace(provider="openai", payload={"api_key": _API_KEY})
+_LOGIN = SimpleNamespace(provider="openai", kind="api_key", payload={"api_key": _API_KEY})
 
 
 @pytest.fixture
@@ -75,6 +76,42 @@ def test_class_facts_and_registration() -> None:
     assert PiHarness.command == "pi"
     assert PiHarness.provider is None
     assert PiHarness.login_kinds == {"api_key"}
+
+
+def test_auth_file_renders_a_key_under_the_vendor() -> None:
+    rendered = PiHarness.auth_file(
+        SimpleNamespace(provider="anthropic", kind="api_key", payload={"api_key": _API_KEY})
+    )
+    assert rendered.path == ".pi/agent/auth.json"
+    assert json.loads(rendered.content) == {"anthropic": {"type": "api_key", "key": _API_KEY}}
+
+
+def test_auth_file_renders_an_openai_subscription_as_pis_openai_codex() -> None:
+    # pi keeps the ChatGPT backend as its own provider name; the login's kind
+    # says which one it is, not the druks provider id.
+    header = base64.urlsafe_b64encode(b'{"alg":"none"}').rstrip(b"=").decode()
+    claims = base64.urlsafe_b64encode(b'{"exp": 1800000000}').rstrip(b"=").decode()
+    login = SimpleNamespace(
+        provider="openai",
+        kind="oauth",
+        payload={
+            "tokens": {
+                "access_token": f"{header}.{claims}.sig",
+                "refresh_token": "R0",
+                "account_id": "acc-1",
+            }
+        },
+    )
+    assert json.loads(PiHarness.auth_file(login).content) == {
+        "openai-codex": {
+            "type": "oauth",
+            "access": f"{header}.{claims}.sig",
+            "refresh": "R0",
+            "expires": 1800000000000,
+            "accountId": "acc-1",
+        }
+    }
+    assert PiHarness.provider_name(login) == "openai-codex"
 
 
 async def test_build_invocation_writes_the_run_files_and_pi_argv(
@@ -183,7 +220,7 @@ async def test_build_invocation_without_servers_or_effort_is_bare(
 
 
 def test_auth_file_keys_the_login_provider() -> None:
-    login = SimpleNamespace(provider="anthropic", payload={"api_key": _API_KEY})
+    login = SimpleNamespace(provider="anthropic", kind="api_key", payload={"api_key": _API_KEY})
 
     auth = PiHarness.auth_file(login)
 

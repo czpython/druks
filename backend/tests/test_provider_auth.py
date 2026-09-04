@@ -13,7 +13,7 @@ from druks.harnesses import providers as pbase
 from druks.harnesses.datastructures import ParsedUsage
 from druks.harnesses.exceptions import HarnessNotConnectedError, OAuthTokenError
 from druks.harnesses.models import ProviderLogin
-from druks.harnesses.providers import AnthropicProvider, OpenAiCodexProvider
+from druks.harnesses.providers import AnthropicProvider, OpenAiProvider
 from druks.user_settings.models import UserSettings
 
 _NOW = datetime(2026, 6, 4, 20, 0, tzinfo=UTC)
@@ -52,7 +52,7 @@ def _codex_payload(*, access=None, refresh="R0", account_id="acc-1", id_token="i
 
 async def _seed_codex(*, provider_email="op@example.com", **kwargs) -> ProviderLogin:
     return await connect_provider(
-        OpenAiCodexProvider, _codex_payload(**kwargs), provider_email=provider_email
+        OpenAiProvider, _codex_payload(**kwargs), provider_email=provider_email
     )
 
 
@@ -120,7 +120,7 @@ async def test_claude_load_token_no_access(druks_db):
 
 async def test_codex_load_token(druks_db):
     connection = await _seed_codex()
-    token = OpenAiCodexProvider.load_token(connection, now=_NOW)
+    token = OpenAiProvider.load_token(connection, now=_NOW)
     assert "." in token.access_token
     assert token.account_id == "acc-1"
 
@@ -128,7 +128,7 @@ async def test_codex_load_token(druks_db):
 async def test_codex_load_token_expired(druks_db):
     connection = await _seed_codex(access=_jwt(int((_NOW - timedelta(hours=1)).timestamp())))
     with pytest.raises(OAuthTokenError) as e:
-        OpenAiCodexProvider.load_token(connection, now=_NOW)
+        OpenAiProvider.load_token(connection, now=_NOW)
     assert e.value.tag == "token_expired"
 
 
@@ -225,10 +225,10 @@ async def test_codex_stale_refreshes_and_preserves(monkeypatch, druks_db):
     calls = _mock_post(
         monkeypatch, _resp(200, {"access_token": fresh, "refresh_token": "R1", "id_token": "id-1"})
     )
-    result = await OpenAiCodexProvider.rotate_token(connection.id, now=_NOW)
+    result = await OpenAiProvider.rotate_token(connection.id, now=_NOW)
     assert result.action == "refreshed"
     assert calls[0]["json"]["client_id"] == "app_EMoamEEZ73f0CkXaXp7hrann"
-    data = await _payload("openai-codex")
+    data = await _payload("openai")
     assert data["tokens"]["access_token"] == fresh
     assert data["tokens"]["refresh_token"] == "R1"
     assert data["tokens"]["id_token"] == "id-1"
@@ -242,15 +242,15 @@ async def test_codex_keeps_refresh_when_omitted(monkeypatch, druks_db):
     fresh = _jwt(int((_NOW + timedelta(days=10)).timestamp()))
     connection = await _seed_codex(access=stale, refresh="KEEP")
     _mock_post(monkeypatch, _resp(200, {"access_token": fresh}))
-    await OpenAiCodexProvider.rotate_token(connection.id, now=_NOW)
-    assert (await _payload("openai-codex"))["tokens"]["refresh_token"] == "KEEP"
+    await OpenAiProvider.rotate_token(connection.id, now=_NOW)
+    assert (await _payload("openai"))["tokens"]["refresh_token"] == "KEEP"
 
 
 async def test_codex_no_refresh_token(monkeypatch, druks_db):
     stale = _jwt(int((_NOW + timedelta(hours=1)).timestamp()))
     connection = await _seed_codex(refresh=None, access=stale)
     calls = _mock_post(monkeypatch, _resp(200, {}))
-    result = await OpenAiCodexProvider.rotate_token(connection.id, now=_NOW)
+    result = await OpenAiProvider.rotate_token(connection.id, now=_NOW)
     assert result.action == "no_refresh_token"
     assert calls == []
 
@@ -419,7 +419,7 @@ async def test_codex_fetch_usage_success(monkeypatch, druks_db):
         },
     }
     calls = _mock_get(monkeypatch, _resp(200, body))
-    parsed = await OpenAiCodexProvider.fetch_usage(connection, now=_NOW)
+    parsed = await OpenAiProvider.fetch_usage(connection, now=_NOW)
     assert parsed.ok is True
     assert parsed.plan_tier == "pro"
     assert parsed.five_hour.percent_left == 61
@@ -445,7 +445,7 @@ async def test_lookup_falls_back(druks_db):
 
 
 async def test_lookup_without_any_connection_raises(druks_db):
-    await _seed_codex(provider_email="a@example.com")  # the fallback account has openai-codex only
+    await _seed_codex(provider_email="a@example.com")  # the fallback account has openai only
     with pytest.raises(HarnessNotConnectedError, match="connect it in Settings"):
         await ProviderLogin.lookup("anthropic", None)
 

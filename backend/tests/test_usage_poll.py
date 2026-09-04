@@ -71,7 +71,7 @@ async def test_successful_fetch_persists_per_provider(druks_db) -> None:
     results = await _poll(
         _provider("anthropic", lambda: _usage(five=_metric(84), weeks=(_metric(52),))),
         _provider(
-            "openai-codex",
+            "openai",
             lambda: _usage(plan_tier="prolite", five=_metric(61), weeks=(_metric(61),)),
         ),
     )
@@ -87,7 +87,7 @@ async def test_successful_fetch_persists_per_provider(druks_db) -> None:
         {"percent_left": 52, "resets_at": None, "model": None},
     ]
 
-    codex_row = await UsageScrape.latest_for("openai-codex", (await _connection()).account_id)
+    codex_row = await UsageScrape.latest_for("openai", (await _connection()).account_id)
     assert codex_row is not None
     assert codex_row.plan_tier == "prolite"
     assert codex_row.weeks[0]["percent_left"] == 61
@@ -125,7 +125,7 @@ async def test_claude_weekly_windows_survive_parse_and_poll_in_order(druks_db) -
 async def test_credential_error_records_error_snapshot(druks_db) -> None:
     results = await _poll(
         _provider("anthropic", lambda: _usage(ok=False, error="token_expired")),
-        _provider("openai-codex", lambda: _usage(ok=False, error="no_credentials")),
+        _provider("openai", lambda: _usage(ok=False, error="no_credentials")),
     )
     await druks_db.flush()
     assert all(r["status"] == "recorded" for r in results)
@@ -142,7 +142,7 @@ async def test_fetch_crash_writes_crash_snapshot(druks_db) -> None:
     def boom() -> ParsedUsage:
         raise RuntimeError("boom")
 
-    results = await _poll(_provider("anthropic", boom), _provider("openai-codex", boom))
+    results = await _poll(_provider("anthropic", boom), _provider("openai", boom))
     await druks_db.flush()
     assert all(r["status"] == "errored" and r["error"] == "crashed" for r in results)
 
@@ -154,7 +154,7 @@ async def test_fetch_crash_writes_crash_snapshot(druks_db) -> None:
 async def test_snapshot_persists_unlimited_flag(druks_db) -> None:
     await _poll(
         _provider(
-            "openai-codex",
+            "openai",
             lambda: _usage(
                 plan_tier="business",
                 five=_metric(100),
@@ -165,7 +165,7 @@ async def test_snapshot_persists_unlimited_flag(druks_db) -> None:
     )
     await druks_db.flush()
 
-    row = await UsageScrape.latest_for("openai-codex", (await _connection()).account_id)
+    row = await UsageScrape.latest_for("openai", (await _connection()).account_id)
     assert row is not None
     assert row.unlimited is True
 

@@ -32,7 +32,7 @@ class ClaudeHarness(Harness):
     # (``--output-format stream-json``), so the transcript is the stdout.
     name = "claude"
     provider = AnthropicProvider.id
-    login_kinds = frozenset({"oauth"})
+    login_kinds = frozenset({"oauth", "api_key"})
     default_model = "anthropic/claude-opus-4-7"
     command = "claude"
 
@@ -119,6 +119,10 @@ class ClaudeHarness(Harness):
             f'if [ -n "$sf" ]; then cp "$sf" {session_q}; fi; '
             "exit $ec"
         )
+        env = dict(extra_env or {})
+        if login.kind == "api_key":
+            # The CLI bills a key from its environment; no credentials file.
+            env["ANTHROPIC_API_KEY"] = login.payload["api_key"]
         return AgentInvocation(
             name="claude",
             args=("sh", "-c", wrapper),
@@ -130,7 +134,7 @@ class ClaudeHarness(Harness):
                 skills=skills,
                 login=login,
             ),
-            env=extra_env,
+            env=env,
             extra_artifact_filenames=("debug.log", "session.jsonl"),
         )
 
@@ -208,11 +212,14 @@ async def _get_credentials(
     login: ProviderLogin,
 ) -> Credentials:
     """The Credentials bundle the runner pushes into the sandbox: the rendered
-    credentials file, plus any local config, plugins, and skills.
-    ``include_plugins=False`` skips the operator's plugin state, for prompts
-    that use no MCP server and would otherwise die on a misconfigured plugin."""
+    credentials file of a subscription login, plus any local config, plugins,
+    and skills. ``include_plugins=False`` skips the operator's plugin state,
+    for prompts that use no MCP server and would otherwise die on a
+    misconfigured plugin."""
     config_dir = sandbox.claude_config_dir
-    home: list[HomeFile | HomeCopy] = [ClaudeHarness.auth_file(login)]
+    home: list[HomeFile | HomeCopy] = []
+    if login.kind == "oauth":
+        home.append(ClaudeHarness.auth_file(login))
     if config_dir:
         home += [
             HomeCopy(".claude.json", config_dir.parent / ".claude.json"),

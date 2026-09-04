@@ -30,7 +30,7 @@ from .exceptions import (
     HarnessUsageLimitError,
 )
 from .models import ProviderLogin
-from .providers import OpenAiCodexProvider
+from .providers import OpenAiProvider
 from .subprocess import read_result_json
 
 logger = logging.getLogger(__name__)
@@ -59,10 +59,8 @@ class _Rate:
 # Public OpenAI/Codex rates as of the last update. Override via env when prices
 # change. Cached-input defaults to ~10% of input (OpenAI's typical discount).
 _DEFAULT_RATES: dict[str, _Rate] = {
-    # gpt-5.5 is the only Codex model callable on a ChatGPT-subscription
-    # auth (which is how we run). Assumed-equal to gpt-5's rate until
-    # OpenAI publishes specific gpt-5.5 pricing — override via
-    # DRUKS_CODEX_PRICES_JSON when that lands.
+    # Assumed-equal to gpt-5's rate until OpenAI publishes specific gpt-5.5
+    # pricing — override via DRUKS_CODEX_PRICES_JSON when that lands.
     "gpt-5.5": _Rate(input=1.25, cached_input=0.125, output=10.0),
     "gpt-5": _Rate(input=1.25, cached_input=0.125, output=10.0),
     "gpt-5-codex": _Rate(input=1.25, cached_input=0.125, output=10.0),
@@ -265,9 +263,9 @@ class CodexHarness(Harness):
     # messages) to stdout as it runs — so stdout.jsonl is the live transcript,
     # symmetric with claude. session.jsonl is still snapshotted for cost.
     name = "codex"
-    provider = OpenAiCodexProvider.id
-    login_kinds = frozenset({"oauth"})
-    default_model = "openai-codex/gpt-5.5"
+    provider = OpenAiProvider.id
+    login_kinds = frozenset({"oauth", "api_key"})
+    default_model = "openai/gpt-5.5"
     command = "codex"
 
     # The CLI's terminal {"type":"error"} event carries prose, not status
@@ -503,4 +501,10 @@ class CodexHarness(Harness):
 
     @classmethod
     def auth_file(cls, login: ProviderLogin) -> HomeFile:
-        return HomeFile(".codex/auth.json", json.dumps(dict(login.payload)))
+        """``auth.json`` as the CLI reads it: the ChatGPT token set of a
+        subscription, or the platform key it bills per token."""
+        if login.kind == "api_key":
+            auth = {"OPENAI_API_KEY": login.payload["api_key"]}
+        else:
+            auth = dict(login.payload)
+        return HomeFile(".codex/auth.json", json.dumps(auth))
