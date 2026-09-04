@@ -469,7 +469,7 @@ function UnmeteredWindow({ today }: { today: UsageProviderToday | undefined }) {
   )
 }
 
-function Bar({ pctLeft }: { pctLeft: number }) {
+export function Bar({ pctLeft }: { pctLeft: number }) {
   const tone = usageTone(pctLeft)
   const empty = pctLeft <= 0
   return (

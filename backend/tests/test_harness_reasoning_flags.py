@@ -4,7 +4,7 @@ import pytest
 from conftest import connect_provider
 from druks.harnesses.claude import ClaudeHarness
 from druks.harnesses.codex import CodexHarness
-from druks.harnesses.models import ProviderLogin
+from druks.harnesses.models import ProviderSubscription
 from druks.harnesses.providers import AnthropicProvider, OpenAiProvider
 
 _CODEX_MODEL = CodexHarness.default_model
@@ -12,7 +12,7 @@ _CODEX_MODEL = CodexHarness.default_model
 
 @pytest.fixture(autouse=True)
 async def _connected_harnesses(druks_db):
-    # build_invocation renders each login bundle from the DB row and
+    # build_invocation renders each subscription bundle from the DB row and
     # raises when that harness isn't connected.
     await connect_provider(AnthropicProvider, {"claudeAiOauth": {"accessToken": "t"}})
     await connect_provider(OpenAiProvider, {"tokens": {"access_token": "t"}})
@@ -48,7 +48,7 @@ async def test_claude_build_invocation_carries_every_flag():
         effort="high",
         sandbox=_sandbox_config(),
     ).build_invocation(
-        login=await ProviderLogin.lookup("anthropic", None),
+        subscription=await ProviderSubscription.get_for_account("anthropic", fallback=True),
         prompt="hello",
         schema=schema,
         run_id="run-1",
@@ -106,7 +106,7 @@ async def test_codex_build_invocation_carries_every_flag():
         effort="high",
         sandbox=_sandbox_config(),
     ).build_invocation(
-        login=await ProviderLogin.lookup("openai", None),
+        subscription=await ProviderSubscription.get_for_account("openai", fallback=True),
         prompt="hello",
         schema={"type": "object"},
         run_id="run-1",
@@ -156,16 +156,12 @@ async def test_codex_build_invocation_carries_every_flag():
     assert inv.extra_artifact_filenames == ("output.json", "session.jsonl")
 
 
-def _key_login(provider: str) -> ProviderLogin:
-    return ProviderLogin(provider=provider, kind="api_key", payload={"api_key": "sk-secret"})
-
-
-async def test_claude_runs_a_key_login_from_the_environment():
+async def test_claude_runs_a_key_from_the_environment():
     # A key ships as ANTHROPIC_API_KEY; no credentials file lands in the home.
     inv = await ClaudeHarness(
         model="anthropic/claude-x", fast_mode=False, effort=None, sandbox=_sandbox_config()
     ).build_invocation(
-        login=_key_login("anthropic"),
+        key="sk-secret",
         prompt="hello",
         schema={"type": "object"},
         run_id="run-1",
@@ -177,12 +173,12 @@ async def test_claude_runs_a_key_login_from_the_environment():
     assert "sk-secret" not in inv.args[2]
 
 
-async def test_codex_runs_a_key_login_from_auth_json():
+async def test_codex_runs_a_key_from_auth_json():
     # The CLI reads OPENAI_API_KEY from auth.json for usage-based billing.
     inv = await CodexHarness(
         model=_CODEX_MODEL, fast_mode=False, effort=None, sandbox=_sandbox_config()
     ).build_invocation(
-        login=_key_login("openai"),
+        key="sk-secret",
         prompt="hello",
         schema={"type": "object"},
         run_id="run-1",

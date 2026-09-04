@@ -18,12 +18,13 @@ from drukbox_sdk import SandboxAPI
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
+from .accounts.models import Account
 from .agents import Agent
 from .apps.loader import iter_apps
 from .apps.registry import _ROLES, agents, autodiscover, services, webhooks, workflows
 from .core.apis.github import get_github_client
 from .database import create_async_engine_from_url, create_engine_from_url, session_scope
-from .harnesses.models import ProviderLogin
+from .harnesses.models import ProviderKey, ProviderSubscription
 from .harnesses.providers import get_providers
 from .harnesses.registry import get_harnesses
 from .sandbox.client import sandbox_client
@@ -140,9 +141,20 @@ async def check_installations(settings: Settings) -> CheckResult:
     )
 
 
-def _login_check(provider_id: str, *, connected: bool, expires_at: datetime | None) -> CheckResult:
-    check_name = f"{provider_id}_login"
+def _credentials_check(
+    provider_id: str,
+    *,
+    connected: bool,
+    expires_at: datetime | None,
+    key_set_by: str | None = None,
+) -> CheckResult:
+    """``connected`` is the fallback account's subscription; ``key_set_by``
+    names who pasted the provider's API key, when one exists."""
+    check_name = f"{provider_id}_credentials"
+    key_note = f"API key set by {key_set_by}" if key_set_by else ""
     if not connected:
+        if key_note:
+            return CheckResult(check_name, ok=True, detail=f"no subscription; {key_note}")
         return CheckResult(
             check_name,
             ok=False,
@@ -156,10 +168,12 @@ def _login_check(provider_id: str, *, connected: bool, expires_at: datetime | No
             detail=f"token expired {expires_at.isoformat()} — reconnect {provider_id}.",
         )
     detail = f"connected; token expires {expires_at.isoformat()}" if expires_at else "connected"
+    if key_note:
+        detail = f"{detail}; {key_note}"
     return CheckResult(check_name, ok=True, detail=detail)
 
 
-def check_provider_logins(settings: Settings) -> list[CheckResult]:
+def check_provider_credentials(settings: Settings) -> list[CheckResult]:
     # One result per registered provider, so a newly-registered one is covered
     # without editing doctor. Credentials live in the DB: this reports the row's
     # presence + expiry, not a host file. A plain session reads it directly —
@@ -175,22 +189,32 @@ def check_provider_logins(settings: Settings) -> list[CheckResult]:
             results: list[CheckResult] = []
             for provider in get_providers():
                 row = session.scalar(
-                    select(ProviderLogin).where(
-                        ProviderLogin.provider == provider.id,
-                        ProviderLogin.account_id == fallback_id,
+                    select(ProviderSubscription).where(
+                        ProviderSubscription.provider == provider.id,
+                        ProviderSubscription.account_id == fallback_id,
                     )
                 )
+                key_set_by = session.scalar(
+                    select(Account.username)
+                    .join(ProviderKey, ProviderKey.updated_by_account_id == Account.id)
+                    .where(ProviderKey.provider == provider.id)
+                )
                 results.append(
-                    _login_check(
+                    _credentials_check(
                         provider.id,
                         connected=bool(row),
                         expires_at=row.expires_at if row else None,
+                        key_set_by=key_set_by,
                     )
                 )
             return results
     except Exception as error:  # noqa: BLE001 — a DB-read failure is one fail, not a doctor crash
         return [
-            CheckResult(name="provider_logins", ok=False, detail=f"cannot read logins: {error}")
+            CheckResult(
+                name="provider_credentials",
+                ok=False,
+                detail=f"cannot read credentials: {error}",
+            )
         ]
     finally:
         engine.dispose()
@@ -543,7 +567,7 @@ CHECKS = (
     check_webhook_ingress,
     check_service_identities,
     check_installations,
-    check_provider_logins,
+    check_provider_credentials,
     check_data_dir,
     check_database,
     check_redis,
@@ -555,7 +579,7 @@ CHECKS = (
 
 
 async def run_checks(settings: Settings, *, sandbox: bool = False) -> list[CheckResult]:
-    # A check yields one result, or several (check_provider_logins fans out
+    # A check yields one result, or several (check_provider_credentials fans out
     # over the provider registry).
     results: list[CheckResult] = []
     for check in CHECKS:

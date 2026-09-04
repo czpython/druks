@@ -131,6 +131,11 @@ order:
    More than one non-system account is configuration
    drift. Druks refuses requests and startup in this state.
 
+A subscription is always one person's. An API key is the installation's:
+one per provider, owned by no account, and visible to every account in
+**Settings → Providers** with the name of the person who last pasted it. A
+paste from any account replaces it.
+
 Before you enable `jwt` mode, make sure that the edge uses the configured header,
 claims, and rotation process.
 
@@ -265,7 +270,7 @@ optional. It reports pending setup if the selected tracker lacks a connection.
 ## Harnesses
 
 Druks registers two providers, `anthropic` and `openai`. Each accepts a
-subscription login (Claude or ChatGPT) and an API key. Both connect from
+subscription (Claude or ChatGPT) and an API key. Both connect from
 **Settings → Providers**. The connection flow stores each credential in
 Postgres. Druks refreshes a subscription token on a schedule. It creates the
 CLI credential file inside each sandbox, or passes the key in the CLI
@@ -274,7 +279,7 @@ the requesting account — in a fresh `none`-mode install the first completed
 subscription connection also creates the operator account (see
 [access control](#public-urls-and-access-control)).
 
-The `claude` and `codex` CLIs run on either login kind of their own vendor.
+The `claude` and `codex` CLIs run on their own vendor's subscription or key.
 `opencode` and `pi` run on an API key only. A model id is `provider/model`
 on either kind, for example `openai/gpt-5.5`.
 

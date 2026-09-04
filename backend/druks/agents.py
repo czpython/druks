@@ -22,7 +22,7 @@ from druks.harnesses.exceptions import (
     HarnessInvalidOutputError,
     Retry,
 )
-from druks.harnesses.models import ProviderLogin
+from druks.harnesses.models import ProviderSubscription
 from druks.prompts import render_prompt
 from druks.sandbox import gate as sandbox_gate
 from druks.sandbox.client import sandbox_client
@@ -30,7 +30,7 @@ from druks.sandbox.constants import MAX_AGENT_TIMEOUT_SECONDS
 from druks.sandbox.templates import get_template_id
 from druks.settings import load_settings
 from druks.usage.models import UsageScrape
-from druks.user_settings.models import SettingsOverride
+from druks.user_settings.models import SettingsOverride, UserSettings
 from druks.workflows import _in_step, current_workflow
 
 if TYPE_CHECKING:
@@ -52,7 +52,7 @@ async def _runner(
 ) -> AsyncIterator["Workspace"]:
     # The agent always runs in a Workspace. A warm run attaches the run's held VM; the
     # rest get a fresh ephemeral VM. Either way workflow.get_workspace() turns the VM into
-    # the runner — fresh per call, so nothing (connection or login) is held across steps.
+    # the runner — fresh per call, so nothing (connection or subscription) is held across steps.
     if host_id:
         vm = sandbox_client.attach(host_id=host_id)
     else:
@@ -196,10 +196,11 @@ class Agent:
             async with step_session():
                 model = await self.get_model()
                 provider_id = model.partition("/")[0]
-                # The scrape belongs to the charged login — its account
+                # The scrape belongs to the charged subscription — its account
                 # differs from the run's on fallback.
-                login = await ProviderLogin.lookup(provider_id, workflow.account_id)
-                scrape = await UsageScrape.latest_for(provider_id, login.account_id)
+                account_id = workflow.account_id or (await UserSettings.get()).fallback_account_id
+                subscription = await ProviderSubscription.lookup(provider_id, account_id)
+                scrape = await UsageScrape.latest_for(provider_id, subscription.account_id)
                 if scrape:
                     now = datetime.now(UTC)
                     reset = scrape.soonest_reset_after(now)
@@ -264,11 +265,12 @@ class Agent:
         model = await self.get_model()
         workflow = current_workflow.get()
         # Refusing an unservable call here beats provisioning a VM and
-        # 401ing mid-run.
-        login = await ProviderLogin.lookup(model.partition("/")[0], workflow.account_id)
-        harness = login.get_harness()
+        # 401ing mid-run. A run with no actor runs as the fallback account.
+        account_id = workflow.account_id or (await UserSettings.get()).fallback_account_id
+        subscription = await ProviderSubscription.lookup(model.partition("/")[0], account_id)
+        harness = subscription.get_harness()
         # Plain snapshots: the commits below expire the ORM row mid-flight.
-        login_id, charged_account_id = login.id, login.account_id
+        subscription_id, charged_account_id = subscription.id, subscription.account_id
         # An agent call is a durability boundary — its effects don't roll back —
         # so commit here rather than hold the step's connection idle through the
         # minutes of provisioning and the run.
@@ -279,9 +281,9 @@ class Agent:
         engine = _step_engine()
         call_id = harness.mint_run_id(None)
 
-        # Registered for provisioning through execution — this login's
+        # Registered for provisioning through execution — this subscription's
         # rotation defers around it.
-        async with sandbox_gate.use(login_id, call_id):
+        async with sandbox_gate.use(subscription_id, call_id):
             await set_run_phase("provisioning_vm")
             host_id = await workflow._lease_host()
 
@@ -315,7 +317,7 @@ class Agent:
                         prompt,
                         artifact_dir,
                         call_id,
-                        login_id,
+                        subscription_id,
                         harness=harness,
                         account_id=workflow.account_id,
                     )
@@ -359,7 +361,7 @@ class Agent:
         prompt: str,
         artifact_dir: Path,
         call_id: str,
-        login_id: str,
+        subscription_id: str,
         *,
         harness: "type[Harness]",
         account_id: str | None,
@@ -376,5 +378,5 @@ class Agent:
             artifact_dir=artifact_dir,
             call_id=call_id,
             include_plugins=self.include_plugins,
-            login_id=login_id,
+            subscription_id=subscription_id,
         )

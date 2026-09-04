@@ -2,7 +2,7 @@ import pytest
 from druks.harnesses.claude import ClaudeHarness
 from druks.harnesses.codex import CodexHarness
 from druks.harnesses.exceptions import UnknownModelError
-from druks.harnesses.models import ProviderLogin
+from druks.harnesses.models import ProviderSubscription
 from druks.harnesses.opencode import OpenCodeHarness
 from druks.harnesses.pi import PiHarness
 from druks.harnesses.registry import get_harness_for_model
@@ -13,19 +13,16 @@ def test_the_namespace_selects_the_first_harness_with_its_provider():
     assert get_harness_for_model("openai/gpt-5.5") is CodexHarness
 
 
-def test_a_login_selects_among_the_harnesses_with_its_provider():
-    # The vendor's own CLI takes either kind of its provider's login; a
-    # key-only CLI is reached only by a provider no vendor CLI is bound to.
-    assert ProviderLogin(provider="anthropic", kind="oauth").get_harness() is ClaudeHarness
-    assert ProviderLogin(provider="anthropic", kind="api_key").get_harness() is ClaudeHarness
-    assert ProviderLogin(provider="openai", kind="oauth").get_harness() is CodexHarness
-    assert ProviderLogin(provider="openai", kind="api_key").get_harness() is CodexHarness
+def test_a_subscription_selects_its_vendors_own_cli():
+    # Only the vendor's own CLI runs a subscription; a key-only CLI never does.
+    assert ProviderSubscription(provider="anthropic").get_harness() is ClaudeHarness
+    assert ProviderSubscription(provider="openai").get_harness() is CodexHarness
     assert not any(
-        harness.accepts(ProviderLogin(provider="anthropic", kind="oauth"))
+        harness.accepts(ProviderSubscription(provider="anthropic"))
         for harness in (OpenCodeHarness, PiHarness)
     )
-    with pytest.raises(UnknownModelError, match="anthropic on a device login"):
-        ProviderLogin(provider="anthropic", kind="device").get_harness()
+    with pytest.raises(UnknownModelError, match="No installed harness runs a xai subscription"):
+        ProviderSubscription(provider="xai").get_harness()
 
 
 @pytest.mark.parametrize(

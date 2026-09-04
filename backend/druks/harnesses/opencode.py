@@ -15,7 +15,7 @@ from druks.sandbox.layout import get_runs_root, get_work_root
 from . import exceptions
 from .artifacts import call_dir, write_cost
 from .base import Harness
-from .models import ProviderLogin
+from .models import ProviderSubscription
 
 logger = logging.getLogger(__name__)
 
@@ -38,9 +38,9 @@ class OpenCodeHarness(Harness):
     first_byte_seconds = None
 
     @classmethod
-    def auth_json(cls, login: ProviderLogin) -> str:
+    def auth_json(cls, provider: str, key: str) -> str:
         """The auth store opencode reads from OPENCODE_AUTH_CONTENT."""
-        return json.dumps({login.provider: {"type": "api", "key": login.payload["api_key"]}})
+        return json.dumps({provider: {"type": "api", "key": key}})
 
     async def build_invocation(
         self,
@@ -55,7 +55,8 @@ class OpenCodeHarness(Harness):
         skills: tuple[str, ...] = (),
         extra_env: dict[str, str] | None = None,
         mcp_servers: tuple[McpServer, ...] = (),
-        login: ProviderLogin,
+        subscription: ProviderSubscription | None = None,
+        key: str | None = None,
         timeout: int = Harness.default_timeout,
     ) -> AgentInvocation:
         if not self.sandbox:
@@ -88,7 +89,7 @@ class OpenCodeHarness(Harness):
             credentials=Credentials(github_token=github_token),
             env={
                 **(extra_env or {}),
-                "OPENCODE_AUTH_CONTENT": self.auth_json(login),
+                "OPENCODE_AUTH_CONTENT": self.auth_json(provider, key),
                 "DRUKS_RUN_DIR": f"{get_runs_root(ssh_username)}/{run_id}",
                 "OPENCODE_CONFIG_CONTENT": json.dumps(
                     {"$schema": "https://opencode.ai/config.json", "mcp": mcp},

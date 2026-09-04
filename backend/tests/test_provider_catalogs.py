@@ -7,7 +7,7 @@ from conftest import connect_provider
 from druks.accounts.models import Account
 from druks.harnesses import providers as pbase
 from druks.harnesses.exceptions import CatalogError
-from druks.harnesses.models import ProviderCatalog, ProviderLogin
+from druks.harnesses.models import ProviderCatalog, ProviderKey
 from druks.harnesses.providers import AnthropicProvider, OpenAiProvider
 
 
@@ -121,29 +121,21 @@ def test_openai_parse_reads_its_models_dev_section() -> None:
 
 
 async def test_anthropic_fetch_uses_the_oauth_token(monkeypatch, druks_db):
-    login = await _claude_login()
+    subscription = await _claude_login()
     body = {"data": [{"id": "claude-fable-5", "display_name": "Claude Fable 5"}]}
     calls = _mock_get(monkeypatch, _resp(200, body))
 
-    models = await AnthropicProvider.fetch_catalog(login)
+    models = await AnthropicProvider.fetch_catalog(subscription)
 
     assert models == ({"id": "anthropic/claude-fable-5", "label": "Claude Fable 5"},)
     assert calls[0]["url"] == "https://api.anthropic.com/v1/models?limit=100"
     assert calls[0]["headers"]["Authorization"] == "Bearer tok"
 
 
-async def test_anthropic_fetch_uses_the_api_key(monkeypatch, druks_db):
-    login = await ProviderLogin.connect(
-        provider="anthropic",
-        account=await Account.get_or_create("op@example.com"),
-        payload={"api_key": "sk-ant"},
-        expires_at=None,
-        provider_email="op@example.com",
-        kind="api_key",
-    )
+async def test_anthropic_fetch_uses_the_api_key(monkeypatch):
     calls = _mock_get(monkeypatch, _resp(200, {"data": [{"id": "claude-fable-5"}]}))
 
-    await AnthropicProvider.fetch_catalog(login)
+    await AnthropicProvider.fetch_catalog(key="sk-ant")
 
     assert calls[0]["headers"]["x-api-key"] == "sk-ant"
     assert "Authorization" not in calls[0]["headers"]
@@ -151,21 +143,21 @@ async def test_anthropic_fetch_uses_the_api_key(monkeypatch, druks_db):
 
 async def test_codex_fetch_sends_the_account_header(monkeypatch, druks_db):
     tokens = {"access_token": "a.b.c", "account_id": "acc-7"}
-    login = await connect_provider(OpenAiProvider, {"tokens": tokens})
+    subscription = await connect_provider(OpenAiProvider, {"tokens": tokens})
     calls = _mock_get(monkeypatch, _resp(200, {"models": []}))
 
     with pytest.raises(CatalogError, match="empty_list"):
-        await OpenAiProvider.fetch_catalog(login)
+        await OpenAiProvider.fetch_catalog(subscription)
     assert calls[0]["url"] == "https://chatgpt.com/backend-api/codex/models?client_version=99.99.99"
     assert calls[0]["headers"]["ChatGPT-Account-Id"] == "acc-7"
 
 
 async def test_fetch_names_an_http_failure(monkeypatch, druks_db):
-    login = await _claude_login()
+    subscription = await _claude_login()
     _mock_get(monkeypatch, _resp(503, "down"))
 
     with pytest.raises(CatalogError, match="http_503"):
-        await AnthropicProvider.fetch_catalog(login)
+        await AnthropicProvider.fetch_catalog(subscription)
 
 
 async def test_refresh_stores_the_catalog_and_keeps_it_on_failure(monkeypatch, druks_db):
@@ -193,14 +185,7 @@ async def test_openai_refresh_reads_the_subscription_over_the_key(monkeypatch, d
     # A key alone reads models.dev; once a subscription exists its endpoint
     # lists what the codex CLI runs, and that catalog wins.
     account = await Account.get_or_create("op@example.com")
-    await ProviderLogin.connect(
-        provider="openai",
-        account=account,
-        payload={"api_key": "sk-openai"},
-        expires_at=None,
-        provider_email="op@example.com",
-        kind="api_key",
-    )
+    await ProviderKey.create(provider="openai", key="sk-openai", account=account)
     calls = _mock_get(
         monkeypatch,
         _resp(200, {"openai": {"models": {"gpt-5.5": {"id": "gpt-5.5", "name": "GPT-5.5"}}}}),

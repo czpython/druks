@@ -49,7 +49,7 @@ class RotationResult:
     action: str
     error: str | None = None
     expires_at: datetime | None = None
-    login_id: str | None = None
+    subscription_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -101,7 +101,7 @@ class SandboxSettings:
     service_timeout: float
     image: str
     # Local CLI config dirs the push anchors config/plugin/skills paths on; the
-    # OAuth login itself is synthesized from the DB at push time, never
+    # subscription's token set itself is synthesized from the DB at push time, never
     # read from under these. None — no local config for that CLI on this host —
     # carries nothing, so a CLI's local config never sprays into a sandbox
     # uninvited.

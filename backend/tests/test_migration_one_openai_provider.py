@@ -5,7 +5,7 @@ import pytest
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
 from druks.accounts.models import Account
-from druks.harnesses.models import ProviderCatalog, ProviderLogin
+from druks.harnesses.models import ProviderCatalog, ProviderSubscription
 from druks.usage.models import UsageScrape
 from druks.user_settings.models import SettingsOverride, UserSettings
 from sqlalchemy import text
@@ -30,18 +30,20 @@ def _upgrade(connection) -> None:
 
 async def _run_upgrade(druks_db) -> None:
     await druks_db.flush()
+    # The rows were seeded through today's model; the migration ran when the
+    # table still carried its old name.
+    await druks_db.execute(text("ALTER TABLE provider_subscriptions RENAME TO provider_logins"))
     await (await druks_db.connection()).run_sync(_upgrade)
 
 
-async def _login(provider: str, email: str, *, kind: str) -> ProviderLogin:
+async def _login(provider: str, email: str) -> ProviderSubscription:
     account = await Account.get_or_create(email)
-    return await ProviderLogin.connect(
+    return await ProviderSubscription.connect(
         provider=provider,
         account=account,
-        payload={"tokens": {"access_token": "t"}} if kind == "oauth" else {"api_key": "sk"},
+        payload={"tokens": {"access_token": "t"}},
         expires_at=None,
         provider_email=email,
-        kind=kind,
     )
 
 
@@ -50,11 +52,11 @@ async def _column(druks_db, statement: str) -> list:
 
 
 async def test_openai_codex_rows_become_openai_everywhere(druks_db):
-    codex = await _login("openai-codex", "seat@example.com", kind="oauth")
-    await _login("openai", "key@example.com", kind="api_key")
+    codex = await _login("openai-codex", "seat@example.com")
+    await _login("openai", "key@example.com")
     await UsageScrape(provider="openai-codex", account_id=codex.account_id, raw_output=None).save()
-    await ProviderCatalog.store("openai-codex", [{"id": "openai-codex/gpt-5.5", "label": "sub"}])
-    await ProviderCatalog.store("openai", [{"id": "openai/gpt-5.5", "label": "key"}])
+    await ProviderCatalog.create("openai-codex", [{"id": "openai-codex/gpt-5.5", "label": "sub"}])
+    await ProviderCatalog.create("openai", [{"id": "openai/gpt-5.5", "label": "key"}])
     await (await UserSettings.get()).update_profile(default_model="openai-codex/gpt-5.5")
     await SettingsOverride.set_agent_model("implement", "openai-codex/gpt-5-mini")
     await SettingsOverride.set_agent_effort("implement", "openai-codex/keep")
@@ -77,15 +79,15 @@ async def test_openai_codex_rows_become_openai_everywhere(druks_db):
 
 
 async def test_an_account_holding_both_openai_logins_fails_by_name(druks_db):
-    await _login("openai-codex", "both@example.com", kind="oauth")
-    await _login("openai", "both@example.com", kind="api_key")
+    await _login("openai-codex", "both@example.com")
+    await _login("openai", "both@example.com")
 
     with pytest.raises(RuntimeError, match="both@example.com"):
         await _run_upgrade(druks_db)
 
 
 async def test_an_unknown_provider_fails(druks_db):
-    await _login("mistral", "op@example.com", kind="api_key")
+    await _login("mistral", "op@example.com")
 
     with pytest.raises(RuntimeError, match="mistral"):
         await _run_upgrade(druks_db)

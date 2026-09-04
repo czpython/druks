@@ -134,9 +134,10 @@ Examine the MCP path:
 
 ### Harness not connected or expired
 
-Open **Settings → Providers** and reconnect the Anthropic or OpenAI login the
-model's provider needs, a subscription or an API key. Host CLI logins do not
-count. Druks validates the database credential before provisioning a sandbox.
+Open **Settings → Providers** and reconnect the Anthropic or OpenAI
+subscription, or add the API key, that the model's provider needs. Host CLI
+logins do not count. Druks validates the database credential before
+provisioning a sandbox.
 
 ### Model has no harness
 

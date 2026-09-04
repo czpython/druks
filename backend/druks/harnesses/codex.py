@@ -29,7 +29,7 @@ from .exceptions import (
     HarnessRateLimitError,
     HarnessUsageLimitError,
 )
-from .models import ProviderLogin
+from .models import ProviderSubscription
 from .providers import OpenAiProvider
 from .subprocess import read_result_json
 
@@ -367,7 +367,8 @@ class CodexHarness(Harness):
         skills: tuple[str, ...] = (),
         extra_env: dict[str, str] | None = None,
         mcp_servers: tuple[McpServer, ...] = (),
-        login: ProviderLogin,
+        subscription: ProviderSubscription | None = None,
+        key: str | None = None,
         timeout: int = Harness.default_timeout,
     ) -> AgentInvocation:
         if not self.sandbox:
@@ -396,7 +397,8 @@ class CodexHarness(Harness):
             credentials=await self._get_credentials(
                 github_token=github_token,
                 skills=skills,
-                login=login,
+                subscription=subscription,
+                key=key,
             ),
             env=extra_env,
             extra_artifact_filenames=("output.json", "session.jsonl"),
@@ -476,11 +478,12 @@ class CodexHarness(Harness):
         *,
         github_token: str | None,
         skills: tuple[str, ...] = (),
-        login: ProviderLogin,
+        subscription: ProviderSubscription | None,
+        key: str | None,
     ) -> Credentials:
         assert self.sandbox is not None  # callers guard
         config_dir = self.sandbox.codex_config_dir
-        home: list[HomeFile | HomeCopy] = [self.auth_file(login)]
+        home: list[HomeFile | HomeCopy] = [self.auth_file(subscription, key=key)]
         if config_dir:
             home += [
                 HomeCopy(".codex/config.toml", config_dir / "config.toml"),
@@ -500,11 +503,11 @@ class CodexHarness(Harness):
         return Credentials(home=tuple(home), github_token=github_token)
 
     @classmethod
-    def auth_file(cls, login: ProviderLogin) -> HomeFile:
-        """``auth.json`` as the CLI reads it: the ChatGPT token set of a
-        subscription, or the platform key it bills per token."""
-        if login.kind == "api_key":
-            auth = {"OPENAI_API_KEY": login.payload["api_key"]}
+    def auth_file(
+        cls, subscription: ProviderSubscription | None, *, key: str | None = None
+    ) -> HomeFile:
+        if subscription:
+            auth = dict(subscription.payload)
         else:
-            auth = dict(login.payload)
+            auth = {"OPENAI_API_KEY": key}
         return HomeFile(".codex/auth.json", json.dumps(auth))

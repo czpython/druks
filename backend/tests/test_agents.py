@@ -149,17 +149,17 @@ async def test_run_refuses_unconnected_harness(druks_db, tmp_path, monkeypatch, 
     # The precondition fires where the harness is resolved — before any VM work.
     from druks.accounts.models import Account
     from druks.harnesses.exceptions import HarnessNotConnectedError
-    from druks.harnesses.models import ProviderLogin
+    from druks.harnesses.models import ProviderSubscription
 
     await (
-        await ProviderLogin.get_for_account(
+        await ProviderSubscription.get_for_account(
             "anthropic", (await Account.get_for_username("op@example.com")).id
         )
     ).delete()
     sandbox = _patch_runtime(monkeypatch, tmp_path, {"ok": True})
     _patch_ephemeral(monkeypatch, sandbox)
 
-    with pytest.raises(HarnessNotConnectedError, match="connect it in Settings"):
+    with pytest.raises(HarnessNotConnectedError, match="connect your Anthropic subscription"):
         await DUMMY_AGENT._run(workflow_id="wf-9")
 
     sandbox.run_agent.assert_not_awaited()

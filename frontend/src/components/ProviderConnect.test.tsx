@@ -2,24 +2,61 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import type { Provider, ProviderLogin } from '../api/types'
+import type { Provider, ProviderKey, ProviderSubscription, UsageProviderSummary } from '../api/types'
 import { ProviderConnect } from './SettingsModal'
 
 function provider(overrides: Partial<Provider> = {}): Provider {
   return {
     id: 'anthropic',
     label: 'Anthropic',
-    loginKinds: ['oauth'],
+    loginKinds: ['api_key', 'oauth'],
     ...overrides,
   }
 }
 
-function renderCard(value: Provider, login: ProviderLogin | null = null) {
+function subscription(overrides: Partial<ProviderSubscription> = {}): ProviderSubscription {
+  return {
+    provider: 'anthropic',
+    providerEmail: 'claude-seat@corp.com',
+    expiresAt: null,
+    updatedAt: '2026-09-01T00:00:00Z',
+    connected: true,
+    ...overrides,
+  }
+}
+
+const sharedKey: ProviderKey = {
+  provider: 'anthropic',
+  keyTail: '4f2a',
+  updatedBy: { id: 'acc-ops', username: 'ops@corp.com' },
+  updatedAt: '2026-09-01T00:00:00Z',
+}
+
+function renderCard(
+  value: Provider,
+  {
+    subscription = null,
+    apiKey = null,
+    usage = null,
+    keySpendToday = null,
+  }: {
+    subscription?: ProviderSubscription | null
+    apiKey?: ProviderKey | null
+    usage?: UsageProviderSummary | null
+    keySpendToday?: number | null
+  } = {},
+) {
   const queryClient = new QueryClient()
   const invalidate = vi.spyOn(queryClient, 'invalidateQueries')
   const view = render(
     <QueryClientProvider client={queryClient}>
-      <ProviderConnect provider={value} login={login} />
+      <ProviderConnect
+        provider={value}
+        subscription={subscription}
+        apiKey={apiKey}
+        usage={usage}
+        keySpendToday={keySpendToday}
+      />
     </QueryClientProvider>,
   )
   return { view, invalidate }
@@ -37,54 +74,87 @@ async function flush() {
 }
 
 describe('ProviderConnect', () => {
-  it('shows each connect control only for its declared login kind', () => {
-    const subscription = renderCard(provider({ loginKinds: ['oauth'] }))
+  it('a card with nothing connected offers a sign-in above the key field', () => {
+    renderCard(provider())
 
-    expect(screen.getByRole('button', { name: 'Connect' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Sign in with Anthropic' })).toBeTruthy()
+    expect(screen.getByLabelText('API key')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Add key' })).toBeTruthy()
+    expect(screen.queryByText('Disconnect')).toBeNull()
+    expect(screen.queryByText('Remove')).toBeNull()
+  })
+
+  it('a key-only vendor shows only the key block', () => {
+    renderCard(provider({ id: 'xai', label: 'xAI', loginKinds: ['api_key'] }))
+
+    expect(screen.getByLabelText('API key')).toBeTruthy()
+    expect(screen.queryByText('Subscription')).toBeNull()
+    expect(screen.queryByRole('button', { name: /Sign in/ })).toBeNull()
+  })
+
+  it('a subscription shows its plan, identity, quota, and expiry with Reconnect and Disconnect', () => {
+    renderCard(provider(), {
+      subscription: subscription({ expiresAt: '2099-01-01T00:00:00Z' }),
+      usage: {
+        id: 'anthropic',
+        label: 'Anthropic',
+        available: true,
+        connected: true,
+        providerEmail: 'claude-seat@corp.com',
+        planTier: 'Claude Max',
+        fiveHour: { percentLeft: 82, resetsAt: null, model: null },
+        weeks: [{ percentLeft: 41, resetsAt: null, model: null }],
+        unlimited: false,
+        scrapedAt: null,
+        ageSeconds: null,
+        stale: false,
+        error: null,
+        rawOutput: null,
+      },
+    })
+
+    expect(screen.getByText('Connected')).toBeTruthy()
+    expect(screen.getByText('Claude Max · claude-seat@corp.com')).toBeTruthy()
+    expect(screen.getByText('82%')).toBeTruthy()
+    expect(screen.getByText('41%')).toBeTruthy()
+    expect(screen.getByText(/token expires/)).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Reconnect' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Disconnect' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /Sign in/ })).toBeNull()
+    // No key yet: the field is there, the key facts are not.
+    expect(screen.getByLabelText('API key')).toBeTruthy()
+    expect(screen.queryByText('Remove')).toBeNull()
+  })
+
+  it('a shared key shows its tail, who set it, spend today, Replace and Remove', () => {
+    renderCard(provider(), { apiKey: sharedKey, keySpendToday: 12.4 })
+
+    expect(screen.getByText('…4f2a')).toBeTruthy()
+    expect(screen.getByText(/set by ops@corp.com/)).toBeTruthy()
+    expect(screen.getByText(/\$12\.40 today/)).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Remove' })).toBeTruthy()
     expect(screen.queryByLabelText('API key')).toBeNull()
-    subscription.view.unmount()
+    // The subscription block still invites a sign-in.
+    expect(screen.getByRole('button', { name: 'Sign in with Anthropic' })).toBeTruthy()
 
-    const apiKey = renderCard(provider({ loginKinds: ['api_key'] }))
-
+    fireEvent.click(screen.getByRole('button', { name: 'Replace' }))
     expect(screen.getByLabelText('API key')).toBeTruthy()
-    expect(screen.queryByRole('button', { name: 'Connect' })).toBeNull()
-    apiKey.view.unmount()
-
-    renderCard(provider({ loginKinds: ['oauth', 'api_key'] }))
-
-    expect(screen.getByRole('button', { name: 'Connect' })).toBeTruthy()
-    expect(screen.getByLabelText('API key')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Replace key' })).toBeTruthy()
   })
 
-  it('shows each connected subscription identity instead of the operator account', () => {
-    renderCard(provider(), {
-      provider: 'anthropic',
-      kind: 'oauth',
-      connected: true,
-      providerEmail: 'claude-seat@corp.com',
-      expiresAt: null,
-    })
-    renderCard(provider({ id: 'openai', label: 'OpenAI' }), {
-      provider: 'openai',
-      kind: 'oauth',
-      connected: true,
-      providerEmail: 'codex-seat@corp.com',
-      expiresAt: null,
-    })
+  it('both connected shows both blocks and never the operator account', () => {
+    renderCard(provider(), { subscription: subscription(), apiKey: sharedKey })
 
-    expect(screen.getAllByText('Connected')).toHaveLength(2)
     expect(screen.getByText('claude-seat@corp.com')).toBeTruthy()
-    expect(screen.getByText('codex-seat@corp.com')).toBeTruthy()
-    expect(screen.queryByText('ops@corp.com')).toBeNull()
+    expect(screen.getByText('…4f2a')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Disconnect' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Remove' })).toBeTruthy()
+    expect(screen.queryByText('op@example.com')).toBeNull()
   })
 
-  it('an expired login keeps its identity and asks for a Reconnect', () => {
+  it('an expired subscription keeps its identity and asks for a Reconnect', () => {
     renderCard(provider(), {
-      provider: 'anthropic',
-      kind: 'oauth',
-      connected: false,
-      providerEmail: 'claude-seat@corp.com',
-      expiresAt: '2026-08-01T00:00:00Z',
+      subscription: subscription({ connected: false, expiresAt: '2026-08-01T00:00:00Z' }),
     })
 
     expect(screen.getByText('Expired')).toBeTruthy()
@@ -92,7 +162,7 @@ describe('ProviderConnect', () => {
     expect(screen.getByText(/token expired/)).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Reconnect' })).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Disconnect' })).toBeTruthy()
-    expect(screen.queryByRole('button', { name: 'Connect' })).toBeNull()
+    expect(screen.queryByRole('button', { name: /Sign in/ })).toBeNull()
   })
 
   it('drives the connection flow end to end and refreshes only the providers query', async () => {
@@ -112,7 +182,7 @@ describe('ProviderConnect', () => {
     vi.stubGlobal('fetch', fetchMock)
 
     const { invalidate } = renderCard(provider())
-    fireEvent.click(screen.getByText('Connect'))
+    fireEvent.click(screen.getByText('Sign in with Anthropic'))
     await flush()
 
     expect(screen.getByText('Open the authorization page')).toBeTruthy()
@@ -131,14 +201,14 @@ describe('ProviderConnect', () => {
     })
     // Completion refreshes the provider card — and only that: the browser's
     // own identity is untouched, so /api/auth/me is never rechecked.
-    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['providerLogins'] })
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['providerSubscriptions'] })
     expect(fetchMock.mock.calls.some(([url]) => String(url) === '/api/auth/me')).toBe(false)
   })
 
-  it('posts a pasted API key and refreshes the providers query', async () => {
+  it('posts a pasted API key and refreshes the keys query', async () => {
     const fetchMock = vi.fn<(url: string, init?: RequestInit) => Promise<Response>>(
       async (url) =>
-        new Response(JSON.stringify(url.endsWith('/connection') ? provider() : {}), {
+        new Response(JSON.stringify(url.endsWith('/key') ? sharedKey : {}), {
           status: 200,
         }),
     )
@@ -148,13 +218,30 @@ describe('ProviderConnect', () => {
     fireEvent.change(screen.getByLabelText('API key'), {
       target: { value: 'the-api-key' },
     })
-    fireEvent.click(screen.getByRole('button', { name: 'Connect with key' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Add key' }))
     await flush()
 
-    const connectCall = fetchMock.mock.calls.find(
-      ([url]) => url === '/api/providers/anthropic/connection',
+    const storeCall = fetchMock.mock.calls.find(
+      ([url]) => url === '/api/providers/anthropic/key',
     )
-    expect(JSON.parse(String(connectCall?.[1]?.body))).toEqual({ key: 'the-api-key' })
-    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['providerLogins'] })
+    expect(JSON.parse(String(storeCall?.[1]?.body))).toEqual({ key: 'the-api-key' })
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['providerKeys'] })
+  })
+
+  it('removing the key deletes it, never the subscription', async () => {
+    const fetchMock = vi.fn<(url: string, init?: RequestInit) => Promise<Response>>(
+      async () => new Response(null, { status: 204 }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+    vi.stubGlobal('confirm', () => true)
+
+    renderCard(provider(), { subscription: subscription(), apiKey: sharedKey })
+    fireEvent.click(screen.getByRole('button', { name: 'Remove' }))
+    await flush()
+
+    const [url, init] = fetchMock.mock.calls[0]!
+    expect(url).toBe('/api/providers/anthropic/key')
+    expect(init?.method).toBe('DELETE')
+    expect(fetchMock.mock.calls).toHaveLength(1)
   })
 })

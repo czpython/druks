@@ -38,7 +38,7 @@ class UserSettings(Base):
         ForeignKey("notification_destinations.id", ondelete="SET NULL"), default=None
     )
     # The account actor-less runs (webhooks, schedules) run as, until runs are
-    # account-attributed; the very first login sets it.
+    # account-attributed; the very first subscription sets it.
     fallback_account_id: Mapped[str | None] = mapped_column(
         ForeignKey("accounts.id", ondelete="SET NULL"), default=None
     )

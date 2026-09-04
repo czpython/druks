@@ -21,7 +21,7 @@ from .artifacts import call_dir, write_cost
 from .base import Harness
 from .constants import CLAUDE_DISALLOWED_TOOLS
 from .datastructures import SandboxSettings
-from .models import ProviderLogin
+from .models import ProviderSubscription
 from .providers import AnthropicProvider
 
 logger = logging.getLogger(__name__)
@@ -67,7 +67,8 @@ class ClaudeHarness(Harness):
         skills: tuple[str, ...] = (),
         extra_env: dict[str, str] | None = None,
         mcp_servers: tuple[McpServer, ...] = (),
-        login: ProviderLogin,
+        subscription: ProviderSubscription | None = None,
+        key: str | None = None,
         timeout: int = Harness.default_timeout,
     ) -> AgentInvocation:
         if not self.sandbox:
@@ -120,9 +121,8 @@ class ClaudeHarness(Harness):
             "exit $ec"
         )
         env = dict(extra_env or {})
-        if login.kind == "api_key":
-            # The CLI bills a key from its environment; no credentials file.
-            env["ANTHROPIC_API_KEY"] = login.payload["api_key"]
+        if key:
+            env["ANTHROPIC_API_KEY"] = key
         return AgentInvocation(
             name="claude",
             args=("sh", "-c", wrapper),
@@ -132,7 +132,7 @@ class ClaudeHarness(Harness):
                 github_token=github_token,
                 include_plugins=include_plugins,
                 skills=skills,
-                login=login,
+                subscription=subscription,
             ),
             env=env,
             extra_artifact_filenames=("debug.log", "session.jsonl"),
@@ -189,8 +189,8 @@ class ClaudeHarness(Harness):
         return ("--mcp-config", json.dumps({"mcpServers": entries}))
 
     @classmethod
-    def auth_file(cls, login: ProviderLogin) -> HomeFile:
-        return HomeFile(".claude/.credentials.json", json.dumps(dict(login.payload)))
+    def auth_file(cls, subscription: ProviderSubscription) -> HomeFile:
+        return HomeFile(".claude/.credentials.json", json.dumps(dict(subscription.payload)))
 
     def _command_args(self) -> tuple[str, ...]:
         args = (self.command,)
@@ -209,17 +209,16 @@ async def _get_credentials(
     github_token: str | None,
     include_plugins: bool = True,
     skills: tuple[str, ...] = (),
-    login: ProviderLogin,
+    subscription: ProviderSubscription | None,
 ) -> Credentials:
     """The Credentials bundle the runner pushes into the sandbox: the rendered
-    credentials file of a subscription login, plus any local config, plugins,
-    and skills. ``include_plugins=False`` skips the operator's plugin state,
-    for prompts that use no MCP server and would otherwise die on a
-    misconfigured plugin."""
+    credentials file, plus any local config, plugins, and skills.
+    ``include_plugins=False`` skips the operator's plugin state, for prompts
+    that use no MCP server and would otherwise die on a misconfigured plugin."""
     config_dir = sandbox.claude_config_dir
     home: list[HomeFile | HomeCopy] = []
-    if login.kind == "oauth":
-        home.append(ClaudeHarness.auth_file(login))
+    if subscription:
+        home.append(ClaudeHarness.auth_file(subscription))
     if config_dir:
         home += [
             HomeCopy(".claude.json", config_dir.parent / ".claude.json"),

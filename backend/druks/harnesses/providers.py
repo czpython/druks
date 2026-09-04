@@ -28,7 +28,7 @@ from .datastructures import (
     ProviderRequest,
     RotationResult,
 )
-from .models import ProviderCatalog, ProviderLogin
+from .models import ProviderCatalog, ProviderKey, ProviderSubscription
 
 logger = logging.getLogger(__name__)
 
@@ -50,14 +50,14 @@ _WEEKLY_WINDOWS = TypeAdapter(tuple[ParsedMetric, ...])
 
 
 class Provider:
-    """Who answers and bills a model request. A provider owns how its login
+    """Who answers and bills a model request. A provider owns how its subscription
     is granted, refreshed, and metered; every harness that drives it runs on that row."""
 
     id: ClassVar[str]
     label: ClassVar[str]
-    # "oauth" for a subscription login, "api_key" for a pasted key.
+    # "oauth" for a subscription subscription, "api_key" for a pasted key.
     login_kinds: ClassVar[frozenset[str]]
-    # OAuth refresh config (set by providers with an "oauth" login kind).
+    # OAuth refresh config (set by providers with an "oauth" subscription kind).
     REFRESH_MARGIN: ClassVar[timedelta]
     _TOKEN_URL: ClassVar[str]
     _CLIENT_ID: ClassVar[str]
@@ -123,15 +123,17 @@ class Provider:
 
     @classmethod
     async def exchange(cls, *, code: str, verifier: str) -> tuple[dict, str | None]:
-        """Exchange the authorization code for tokens; return (login
+        """Exchange the authorization code for tokens; return (subscription
         payload, provider-reported account email)."""
         raise NotImplementedError
 
     @classmethod
-    def load_token(cls, login: ProviderLogin, *, now: datetime | None = None) -> Token:
-        """Read + validate ``login``'s access token, or raise
+    def load_token(
+        cls, subscription: ProviderSubscription, *, now: datetime | None = None
+    ) -> Token:
+        """Read + validate ``subscription``'s access token, or raise
         :class:`OAuthTokenError`. Read-only; never refreshes."""
-        token = cls._token_from_credentials(dict(login.payload))
+        token = cls._token_from_credentials(dict(subscription.payload))
         moment = now or _utc_now()
         if token.expires_at and token.expires_at <= moment:
             raise exceptions.OAuthTokenError(
@@ -148,43 +150,51 @@ class Provider:
     @classmethod
     async def rotate_token(
         cls,
-        login_id: str,
+        subscription_id: str,
         *,
         now: datetime | None = None,
         margin: timedelta | None = None,
     ) -> RotationResult:
-        """Refresh one login's token when it is inside the expiry margin.
+        """Refresh one subscription's token when it is inside the expiry margin.
         A Redis lock elects one refresher per row; the loser reports ``locked``
         and never presents the refresh token a concurrent grant may have burned."""
         moment = now or _utc_now()
-        row = await ProviderLogin.reload(login_id)
+        row = await ProviderSubscription.reload(subscription_id)
         if not row:
-            return RotationResult(cls.id, "failed", error="no_credentials", login_id=login_id)
+            return RotationResult(
+                cls.id, "failed", error="no_credentials", subscription_id=subscription_id
+            )
         data = dict(row.payload)
         refresh_token, expires_at = cls._refresh_state(data)
         if not refresh_token:
-            return RotationResult(cls.id, "no_refresh_token", login_id=login_id)
+            return RotationResult(cls.id, "no_refresh_token", subscription_id=subscription_id)
 
         limit = margin if margin is not None else cls.REFRESH_MARGIN
         if expires_at and expires_at - moment > limit:
-            return RotationResult(cls.id, "fresh", expires_at=expires_at, login_id=login_id)
+            return RotationResult(
+                cls.id, "fresh", expires_at=expires_at, subscription_id=subscription_id
+            )
 
         redis = get_client()
-        lock_key = f"{REFRESH_LOCK_PREFIX}{login_id}"
+        lock_key = f"{REFRESH_LOCK_PREFIX}{subscription_id}"
         if not await redis.set(lock_key, "1", nx=True, ex=_REFRESH_LOCK_TTL_SECONDS):
-            return RotationResult(cls.id, "locked", login_id=login_id)
+            return RotationResult(cls.id, "locked", subscription_id=subscription_id)
         try:
             # Re-read after winning the lock: the previous holder may have
             # advanced this lineage (or deleted the row) after our first read.
-            row = await ProviderLogin.reload(login_id)
+            row = await ProviderSubscription.reload(subscription_id)
             if not row:
-                return RotationResult(cls.id, "failed", error="no_credentials", login_id=login_id)
+                return RotationResult(
+                    cls.id, "failed", error="no_credentials", subscription_id=subscription_id
+                )
             data = dict(row.payload)
             refresh_token, expires_at = cls._refresh_state(data)
             if not refresh_token:
-                return RotationResult(cls.id, "no_refresh_token", login_id=row.id)
+                return RotationResult(cls.id, "no_refresh_token", subscription_id=row.id)
             if expires_at and expires_at - moment > limit:
-                return RotationResult(cls.id, "fresh", expires_at=expires_at, login_id=row.id)
+                return RotationResult(
+                    cls.id, "fresh", expires_at=expires_at, subscription_id=row.id
+                )
 
             try:
                 grant = await _post_grant(cls._TOKEN_URL, cls._grant_body(refresh_token))
@@ -193,18 +203,21 @@ class Provider:
                 if exc.tag == "invalid_grant":
                     # The provider revoked this row's refresh lineage;
                     # presenting it again can never succeed. Drop only this
-                    # login so the provider reads as disconnected — the
+                    # subscription so the provider reads as disconnected — the
                     # UI shows Reconnect and the next tick has no row to hammer.
                     await row.delete()
                     await db_session().commit()
                     logger.warning(
-                        "%s login %s auto-disconnected after invalid_grant; reconnect to restore",
+                        "%s subscription %s auto-disconnected after invalid_grant; "
+                        "reconnect to restore",
                         cls.id,
                         row.id,
                     )
-                return RotationResult(cls.id, "failed", error=exc.tag, login_id=row.id)
+                return RotationResult(cls.id, "failed", error=exc.tag, subscription_id=row.id)
             except ValueError:
-                return RotationResult(cls.id, "failed", error="bad_response", login_id=row.id)
+                return RotationResult(
+                    cls.id, "failed", error="bad_response", subscription_id=row.id
+                )
 
             await row.update_payload(data, expires_at=new_expiry)
             # The grant is externally anchored — the provider may have killed
@@ -213,23 +226,25 @@ class Provider:
             # the step's own commit would let a concurrent refresher take the
             # freed lock and re-present the superseded token.
             await db_session().commit()
-            return RotationResult(cls.id, "refreshed", expires_at=new_expiry, login_id=row.id)
+            return RotationResult(
+                cls.id, "refreshed", expires_at=new_expiry, subscription_id=row.id
+            )
         finally:
             await redis.delete(lock_key)
 
     @classmethod
-    def refresh_is_urgent(cls, login: ProviderLogin) -> bool:
+    def refresh_is_urgent(cls, subscription: ProviderSubscription) -> bool:
         """Expiry inside the call horizon: a mid-run 401 is unavoidable."""
-        _, expires_at = cls._refresh_state(dict(login.payload))
+        _, expires_at = cls._refresh_state(dict(subscription.payload))
         horizon = timedelta(seconds=MAX_AGENT_TIMEOUT_SECONDS)
         return bool(expires_at) and expires_at - _utc_now() < horizon
 
     @classmethod
-    def needs_refresh(cls, login: ProviderLogin) -> bool:
+    def needs_refresh(cls, subscription: ProviderSubscription) -> bool:
         """Whether the access token is inside its refresh margin. Unreadable
         or expired reads False: nothing live to protect, rotate ungated."""
         try:
-            token = cls._token_from_credentials(dict(login.payload))
+            token = cls._token_from_credentials(dict(subscription.payload))
         except exceptions.OAuthTokenError:
             return False
         now = _utc_now()
@@ -252,13 +267,15 @@ class Provider:
         raise NotImplementedError
 
     @classmethod
-    async def fetch_usage(cls, login: ProviderLogin, *, now: datetime | None = None) -> ParsedUsage:
-        """Fetch + parse the login's remaining-quota snapshot from its
+    async def fetch_usage(
+        cls, subscription: ProviderSubscription, *, now: datetime | None = None
+    ) -> ParsedUsage:
+        """Fetch + parse the subscription's remaining-quota snapshot from its
         subscription endpoint. Auth/HTTP failures collapse to a
         ``ParsedUsage(ok=False, error=<tag>)`` so they never look like
         '0 metrics'."""
         try:
-            token = cls.load_token(login, now=now)
+            token = cls.load_token(subscription, now=now)
             request = cls._usage_request(token)
         except exceptions.OAuthTokenError as exc:
             return ParsedUsage(ok=False, error=exc.tag)
@@ -285,12 +302,12 @@ class Provider:
         return ParsedUsage(ok=False, error=tag)
 
     @classmethod
-    async def poll_usage(cls, login: ProviderLogin) -> dict[str, object]:
-        """Fetch the login's quota snapshot and persist it as that
+    async def poll_usage(cls, subscription: ProviderSubscription) -> dict[str, object]:
+        """Fetch the subscription's quota snapshot and persist it as that
         account's UsageScrape row."""
-        account_id = login.account_id
+        account_id = subscription.account_id
         try:
-            parsed = await cls.fetch_usage(login)
+            parsed = await cls.fetch_usage(subscription)
         except Exception:  # noqa: BLE001 — a crashed scrape records an error row, not a failed refresh
             logger.warning("usage fetch crashed for %s", cls.id, exc_info=True)
             await UsageScrape(
@@ -341,10 +358,12 @@ class Provider:
         return ParsedUsage(ok=False, error="unsupported")
 
     @classmethod
-    async def fetch_catalog(cls, login: ProviderLogin) -> tuple[dict, ...]:
+    async def fetch_catalog(
+        cls, subscription: ProviderSubscription | None = None, *, key: str | None = None
+    ) -> tuple[dict, ...]:
         """The models this provider offers, ``{"id", "label"}`` each with ids
         namespaced ``provider/model``. Raises :class:`CatalogError`."""
-        request = cls._catalog_request(login)
+        request = cls._catalog_request(subscription, key)
         try:
             async with httpx.AsyncClient(timeout=_CATALOG_TIMEOUT_SECONDS) as client:
                 response = await client.get(request.url, headers=request.headers)
@@ -354,33 +373,39 @@ class Provider:
             raise exceptions.CatalogError("network") from exc
         if response.status_code != 200:
             raise exceptions.CatalogError(error_tag(response.status_code))
-        return cls._parse_catalog(response.text, kind=login.kind)
+        return cls._parse_catalog(response.text, kind="oauth" if subscription else "api_key")
 
     @classmethod
     async def refresh_catalog(cls) -> None:
-        """Store a fresh catalog over one of this provider's logins, a
-        subscription before a key: the subscription endpoint lists what the
-        vendor CLI runs. No login stores nothing. A failed fetch logs and
-        keeps the stored one."""
-        logins = await ProviderLogin.list_for_provider(cls.id)
-        if logins:
-            login = min(logins, key=lambda row: row.kind != "oauth")
-            try:
-                models = await cls.fetch_catalog(login)
-            except (exceptions.CatalogError, exceptions.OAuthTokenError) as exc:
-                logger.warning("catalog refresh for %s failed: %s", cls.id, exc.tag)
-            else:
-                await ProviderCatalog.store(cls.id, list(models))
+        """Store a fresh catalog, read over a subscription before the key. A
+        failed fetch logs and keeps the stored one."""
+        subscriptions = await ProviderSubscription.list_for_provider(cls.id)
+        key = await ProviderKey.get(cls.id)
+        if subscriptions:
+            fetch = cls.fetch_catalog(subscriptions[0])
+        elif key:
+            fetch = cls.fetch_catalog(key=key.value.decrypt())
+        else:
+            return
+        try:
+            models = await fetch
+        except (exceptions.CatalogError, exceptions.OAuthTokenError) as exc:
+            logger.warning("catalog refresh for %s failed: %s", cls.id, exc.tag)
+        else:
+            await ProviderCatalog.create(cls.id, list(models))
 
     @classmethod
-    def _catalog_request(cls, login: ProviderLogin) -> ProviderRequest:
-        """The request for this provider's model list, authenticated by ``login``."""
+    def _catalog_request(
+        cls, subscription: ProviderSubscription | None, key: str | None
+    ) -> ProviderRequest:
+        """The request for this provider's model list, authenticated by ``subscription``
+        or ``key``."""
         raise NotImplementedError
 
     @classmethod
     def _parse_catalog(cls, raw: str, *, kind: str) -> tuple[dict, ...]:
         """Namespaced ``{"id", "label"}`` entries from the model-list body
-        fetched over a ``kind`` login; raises :class:`CatalogError` on a body
+        fetched over a ``kind`` subscription; raises :class:`CatalogError` on a body
         offering nothing."""
         raise NotImplementedError
 
@@ -654,14 +679,13 @@ class AnthropicProvider(Provider):
         return ParsedUsage(ok=True, five_hour=five_hour, weeks=weeks, raw=raw)
 
     @classmethod
-    def _catalog_request(cls, login: ProviderLogin) -> ProviderRequest:
-        if login.kind == "oauth":
-            headers = cls.oauth_headers(cls.load_token(login))
+    def _catalog_request(
+        cls, subscription: ProviderSubscription | None, key: str | None
+    ) -> ProviderRequest:
+        if subscription:
+            headers = cls.oauth_headers(cls.load_token(subscription))
         else:
-            headers = {
-                "x-api-key": login.payload["api_key"],
-                "anthropic-version": _ANTHROPIC_VERSION,
-            }
+            headers = {"x-api-key": key, "anthropic-version": _ANTHROPIC_VERSION}
         return ProviderRequest("https://api.anthropic.com/v1/models?limit=100", headers)
 
     @classmethod
@@ -749,8 +773,8 @@ _WEEKLY_WINDOW_MINIMUM_SECONDS = 24 * 3600
 
 
 class OpenAiProvider(Provider):
-    """The OpenAI vendor. An ``oauth`` login is a ChatGPT subscription
-    (chatgpt.com/backend-api); an ``api_key`` login is the platform API
+    """The OpenAI vendor. An ``oauth`` subscription is a ChatGPT subscription
+    (chatgpt.com/backend-api); an ``api_key`` subscription is the platform API
     (api.openai.com), paid per token."""
 
     id = "openai"
@@ -909,8 +933,10 @@ class OpenAiProvider(Provider):
         )
 
     @classmethod
-    def _catalog_request(cls, login: ProviderLogin) -> ProviderRequest:
-        if login.kind == "api_key":
+    def _catalog_request(
+        cls, subscription: ProviderSubscription | None, key: str | None
+    ) -> ProviderRequest:
+        if not subscription:
             return ProviderRequest(_MODELS_DEV_URL, {})
         # ``client_version`` is required and lower-bounds the list (the server
         # returns models with ``minimal_client_version <= client_version``); the
@@ -918,7 +944,7 @@ class OpenAiProvider(Provider):
         # catches it if the server ever starts rejecting unknown versions.
         return ProviderRequest(
             "https://chatgpt.com/backend-api/codex/models?client_version=99.99.99",
-            cls.chatgpt_headers(cls.load_token(login)),
+            cls.chatgpt_headers(cls.load_token(subscription)),
         )
 
     @classmethod
