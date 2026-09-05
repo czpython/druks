@@ -5,8 +5,8 @@ import type { Provider } from '../api/types'
 import { Onboarding } from './Onboarding'
 
 const REGISTERED_PROVIDERS: Provider[] = [
-  { id: 'anthropic', label: 'Anthropic', loginKinds: ['api_key', 'oauth'] },
-  { id: 'openai', label: 'OpenAI', loginKinds: ['api_key', 'oauth'] },
+  { id: 'anthropic', label: 'Anthropic', billingOptions: ['api_key', 'subscription'] },
+  { id: 'openai', label: 'OpenAI', billingOptions: ['api_key', 'subscription'] },
 ]
 
 afterEach(() => {
@@ -71,7 +71,7 @@ describe('Onboarding', () => {
   })
 
   it('renders one card per subscription provider; a key-only provider waits for Settings', async () => {
-    stubProviderList([...REGISTERED_PROVIDERS, { id: 'xai', label: 'xAI', loginKinds: ['api_key'] }])
+    stubProviderList([...REGISTERED_PROVIDERS, { id: 'xai', label: 'xAI', billingOptions: ['api_key'] }])
 
     render(<Onboarding onConnected={() => undefined} />)
 

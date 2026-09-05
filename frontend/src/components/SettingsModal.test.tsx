@@ -5,9 +5,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { SettingsModal } from './SettingsModal'
 
 const harnesses = [
-  { name: 'claude', provider: 'anthropic', loginKinds: ['api_key', 'oauth'] },
-  { name: 'codex', provider: 'openai', loginKinds: ['api_key', 'oauth'] },
-  { name: 'opencode', provider: null, loginKinds: ['api_key'] },
+  { name: 'claude', provider: 'anthropic', billingOptions: ['api_key', 'subscription'] },
+  { name: 'codex', provider: 'openai', billingOptions: ['api_key', 'subscription'] },
+  { name: 'opencode', provider: null, billingOptions: ['api_key'] },
 ]
 
 const userSettings = {

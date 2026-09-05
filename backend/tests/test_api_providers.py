@@ -17,13 +17,13 @@ def _providers(client: TestClient) -> dict[str, dict]:
     return {p["id"]: p for p in client.get("/api/providers").json()}
 
 
-def test_list_carries_login_kinds_and_no_connection(tmp_path: Path):
+def test_list_carries_billing_options_and_no_connection(tmp_path: Path):
     # One card per vendor; each takes a subscription and an API key.
     with _build_client(tmp_path) as client:
         providers = _providers(client)
     assert list(providers) == ["anthropic", "openai"]
-    assert providers["anthropic"]["loginKinds"] == ["api_key", "oauth"]
-    assert providers["openai"]["loginKinds"] == ["api_key", "oauth"]
+    assert providers["anthropic"]["billingOptions"] == ["api_key", "subscription"]
+    assert providers["openai"]["billingOptions"] == ["api_key", "subscription"]
     assert providers["openai"]["label"] == "OpenAI"
 
 

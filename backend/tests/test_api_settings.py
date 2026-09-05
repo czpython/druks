@@ -30,10 +30,10 @@ def test_get_harnesses_lists_the_registry(tmp_path: Path):
     assert harnesses["claude"] == {
         "name": "claude",
         "provider": "anthropic",
-        "loginKinds": ["api_key", "oauth"],
+        "billingOptions": ["api_key", "subscription"],
     }
     assert harnesses["codex"]["provider"] == "openai"
-    assert harnesses["pi"] == {"name": "pi", "provider": None, "loginKinds": ["api_key"]}
+    assert harnesses["pi"] == {"name": "pi", "provider": None, "billingOptions": ["api_key"]}
 
 
 def test_get_settings_carries_the_execution_defaults(tmp_path: Path):

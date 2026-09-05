@@ -261,7 +261,7 @@ async def test_a_second_pasted_key_replaces_the_first(tmp_path, druks_db):
 
 
 async def test_api_key_connect_requires_a_declared_kind(tmp_path, druks_db, monkeypatch):
-    monkeypatch.setattr(OpenAiProvider, "login_kinds", frozenset({"oauth"}))
+    monkeypatch.setattr(OpenAiProvider, "billing_options", frozenset({"subscription"}))
     with _header_client(tmp_path) as client:
         response = client.post(
             "/api/providers/openai/key",

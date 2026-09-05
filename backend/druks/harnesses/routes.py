@@ -155,7 +155,7 @@ async def create_key(
     key: str = Body(..., embed=True),
 ) -> ProviderKey:
     provider = _resolve_provider(provider_id)
-    if "api_key" not in provider.login_kinds:
+    if "api_key" not in provider.billing_options:
         raise HTTPException(
             status_code=422,
             detail=f"{provider.label} does not accept API keys.",

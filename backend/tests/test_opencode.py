@@ -49,7 +49,7 @@ def test_class_facts_and_registration() -> None:
     assert get_harness("opencode") is OpenCodeHarness
     assert OpenCodeHarness.command == "opencode"
     assert OpenCodeHarness.provider is None
-    assert OpenCodeHarness.login_kinds == {"api_key"}
+    assert OpenCodeHarness.billing_options == {"api_key"}
     assert OpenCodeHarness.first_byte_seconds is None
     assert OpenCodeHarness.failure_markers == {}
     assert "_model_discovery_request" not in OpenCodeHarness.__dict__

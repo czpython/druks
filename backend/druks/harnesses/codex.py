@@ -264,7 +264,7 @@ class CodexHarness(Harness):
     # symmetric with claude. session.jsonl is still snapshotted for cost.
     name = "codex"
     provider = OpenAiProvider.id
-    login_kinds = frozenset({"oauth", "api_key"})
+    billing_options = frozenset({"subscription", "api_key"})
     default_model = "openai/gpt-5.5"
     command = "codex"
 

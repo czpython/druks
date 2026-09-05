@@ -510,7 +510,7 @@ async def test_minimal_provider_reports_unsupported_usage(monkeypatch):
     class MinimalProvider(pbase.Provider):
         id = "minimal"
         label = "Minimal"
-        login_kinds = frozenset({"api_key"})
+        billing_options = frozenset({"api_key"})
 
     subscription = SimpleNamespace(payload={})
     calls = _mock_get(monkeypatch, _resp(200, {}))

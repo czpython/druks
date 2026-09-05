@@ -71,7 +71,7 @@ def test_class_facts_and_registration() -> None:
     assert get_harness("pi") is PiHarness
     assert PiHarness.command == "pi"
     assert PiHarness.provider is None
-    assert PiHarness.login_kinds == {"api_key"}
+    assert PiHarness.billing_options == {"api_key"}
 
 
 def test_auth_file_renders_a_key_under_the_vendor() -> None:

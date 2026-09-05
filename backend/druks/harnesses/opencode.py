@@ -30,7 +30,7 @@ _ERROR_TYPES = {
 
 class OpenCodeHarness(Harness):
     name = "opencode"
-    login_kinds = frozenset({"api_key"})
+    billing_options = frozenset({"api_key"})
     default_model = "anthropic/claude-sonnet-4-5"
     command = "opencode"
     # The server writes nothing until the message POST completes; the wrapper

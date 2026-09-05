@@ -11,10 +11,11 @@ from druks.apps.settings import (
     field_section,
     field_visibility,
 )
+from druks.harnesses.datastructures import Billing
 from druks.harnesses.schemas import SortedNames
 from druks.schemas import Schema
 
-from .datastructures import Billing, Effort
+from .datastructures import Effort
 
 
 class HarnessResponse(Schema):
@@ -22,7 +23,7 @@ class HarnessResponse(Schema):
 
     name: str
     provider: str | None
-    login_kinds: SortedNames
+    billing_options: SortedNames
 
 
 class UserSettingsResponse(Schema):
