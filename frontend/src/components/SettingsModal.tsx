@@ -1858,7 +1858,7 @@ function ProvidersPane({
           </div>
           <button
             type="button"
-            className="set-btn provider-add-button"
+            className="set-btn primary provider-add-button"
             aria-expanded={adding}
             aria-controls="provider-add-panel"
             onClick={() => setAdding((open) => !open)}
@@ -2053,7 +2053,7 @@ export function ProviderConnect({
                       Reconnect
                     </button>
                   )}
-                  <button className="set-btn ghost" aria-label={`Disconnect ${provider.label} subscription`} onClick={disconnect} disabled={busy || flow.busy}>
+                  <button className="set-btn danger" aria-label={`Disconnect ${provider.label} subscription`} onClick={disconnect} disabled={busy || flow.busy}>
                     Disconnect
                   </button>
                 </>
