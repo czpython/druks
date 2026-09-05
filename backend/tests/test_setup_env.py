@@ -51,6 +51,9 @@ def test_fresh_exe_render_matches_the_deployment_contract(tmp_path):
     assert values["DRUKS_DATA_DIR"] == "/home/op/druks-data"
     assert "EXE_API_TOKEN" not in values
     assert "TAILSCALE_TAILNET" not in values
+    for key in ("EXE_IMAGE_REGISTRY", "EXE_REGISTRY_USERNAME", "EXE_REGISTRY_PASSWORD"):
+        assert config["sandbox"]["exe"][key] == ""
+        assert key not in values
     assert len(config["secrets"]["postgres_password"]) == 64
     assert len(config["sandbox"]["service_token"]) == 64
     assert (tmp_path / ".gitignore").read_text().splitlines() == [
@@ -431,3 +434,37 @@ def test_setup_toml_is_the_settings_source(tmp_path, monkeypatch):
     assert settings.sandbox.service_url == config["sandbox"]["service_url"]
     assert settings.sandbox.image == config["sandbox"]["image"]
     assert settings.sandbox.timeout == float(config["sandbox"]["timeout"])
+
+
+@pytest.mark.parametrize("repository", ["ghcr.io/acme/templates", "docker.io/acme/templates"])
+def test_exe_template_registry_uses_existing_provider_contract(tmp_path, repository):
+    env_path = tmp_path / ".env"
+    printed = []
+    assert (
+        _run(
+            env_path,
+            print_fn=printed.append,
+            set_values=(
+                "sandbox.exe.EXE_API_TOKEN=exe-token",
+                "sandbox.exe.TAILSCALE_TAILNET=tail.ts.net",
+                f"sandbox.exe.EXE_IMAGE_REGISTRY={repository}",
+                "sandbox.exe.EXE_REGISTRY_USERNAME=builder",
+                "sandbox.exe.EXE_REGISTRY_PASSWORD=registry-token",
+            ),
+        )
+        == 0
+    )
+    values = read_env(env_path)
+    expected = {
+        "EXE_IMAGE_REGISTRY": repository,
+        "EXE_REGISTRY_USERNAME": "builder",
+        "EXE_REGISTRY_PASSWORD": "registry-token",
+    }
+    for key, value in expected.items():
+        assert values[key] == value
+        assert env_path.read_text().count(f"{key}=") == 1
+    assert "REGISTRY_HOST" not in values
+    assert "TEMPLATE_REPOSITORY" not in values
+    assert "registry-token" not in "\n".join(printed)
+    assert stat.S_IMODE(env_path.stat().st_mode) == 0o600
+    assert stat.S_IMODE((tmp_path / "druks.toml").stat().st_mode) == 0o600

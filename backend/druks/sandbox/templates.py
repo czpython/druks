@@ -1,4 +1,5 @@
 import asyncio
+from pathlib import PurePosixPath
 
 from druks.apps import loader
 from druks.durable.activity import set_run_phase
@@ -23,10 +24,12 @@ def get_declared_sandboxes() -> dict[str, Sandbox]:
 async def prepare_sandbox_templates() -> None:
     base_image = load_settings().sandbox.image
     for sandbox in get_declared_sandboxes().values():
+        app_name = loader.resolve_workflow_app(sandbox.module)
+        label = f"{app_name}-{PurePosixPath(sandbox.setup).stem}".replace("_", "-")
         await sandbox_client.create_template(
             setup_script=sandbox.read_setup_script().decode("utf-8"),
             base_image=base_image or None,
-            label=f"{loader.resolve_workflow_app(sandbox.module)}/{sandbox.setup}",
+            label=label,
         )
 
 
