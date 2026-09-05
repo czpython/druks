@@ -74,25 +74,28 @@ async function flush() {
 }
 
 describe('ProviderConnect', () => {
-  it('a card with nothing connected offers a sign-in above the key field', () => {
+  it('keeps the API-key input collapsed until the user asks for it', () => {
     renderCard(provider())
 
     expect(screen.getByRole('button', { name: 'Sign in with Anthropic' })).toBeTruthy()
+    expect(screen.queryByLabelText('API key')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Add API key' }))
     expect(screen.getByLabelText('API key')).toBeTruthy()
-    expect(screen.getByRole('button', { name: 'Add key' })).toBeTruthy()
-    expect(screen.queryByText('Disconnect')).toBeNull()
-    expect(screen.queryByText('Remove')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Save API key' })).toBeTruthy()
+    expect(screen.queryByText('Disconnect subscription')).toBeNull()
+    expect(screen.queryByText('Remove API key')).toBeNull()
   })
 
   it('a key-only vendor shows only the key block', () => {
     renderCard(provider({ id: 'xai', label: 'xAI', billingOptions: ['api_key'] }))
 
-    expect(screen.getByLabelText('API key')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Add API key' })).toBeTruthy()
+    expect(screen.queryByLabelText('API key')).toBeNull()
     expect(screen.queryByText('Subscription')).toBeNull()
     expect(screen.queryByRole('button', { name: /Sign in/ })).toBeNull()
   })
 
-  it('a subscription shows its plan, identity, quota, and expiry with Reconnect and Disconnect', () => {
+  it('a healthy subscription has no expired state or reconnect action', () => {
     renderCard(provider(), {
       subscription: subscription({ expiresAt: '2099-01-01T00:00:00Z' }),
       usage: {
@@ -115,15 +118,17 @@ describe('ProviderConnect', () => {
 
     expect(screen.getByText('Connected')).toBeTruthy()
     expect(screen.getByText('Claude Max · claude-seat@corp.com')).toBeTruthy()
-    expect(screen.getByText('82%')).toBeTruthy()
-    expect(screen.getByText('41%')).toBeTruthy()
-    expect(screen.getByText(/token expires/)).toBeTruthy()
-    expect(screen.getByRole('button', { name: 'Reconnect' })).toBeTruthy()
-    expect(screen.getByRole('button', { name: 'Disconnect' })).toBeTruthy()
+    expect(screen.getByText('82% remaining')).toBeTruthy()
+    expect(screen.getByText('41% remaining')).toBeTruthy()
+    expect(screen.getByText('5-hour')).toBeTruthy()
+    expect(screen.getByText('Weekly')).toBeTruthy()
+    expect(screen.getByText(/Token expires/)).toBeTruthy()
+    expect(screen.queryByText('Expired')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Reconnect' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Disconnect subscription' })).toBeTruthy()
     expect(screen.queryByRole('button', { name: /Sign in/ })).toBeNull()
-    // No key yet: the field is there, the key facts are not.
-    expect(screen.getByLabelText('API key')).toBeTruthy()
-    expect(screen.queryByText('Remove')).toBeNull()
+    expect(screen.queryByLabelText('API key')).toBeNull()
+    expect(screen.queryByText('Remove API key')).toBeNull()
   })
 
   it('a shared key shows its tail, who set it, spend today, Replace and Remove', () => {
@@ -132,7 +137,8 @@ describe('ProviderConnect', () => {
     expect(screen.getByText('…4f2a')).toBeTruthy()
     expect(screen.getByText(/set by ops@corp.com/)).toBeTruthy()
     expect(screen.getByText(/\$12\.40 today/)).toBeTruthy()
-    expect(screen.getByRole('button', { name: 'Remove' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Remove API key' })).toBeTruthy()
+    expect(screen.getByLabelText('More Anthropic API key actions')).toBeTruthy()
     expect(screen.queryByLabelText('API key')).toBeNull()
     // The subscription block still invites a sign-in.
     expect(screen.getByRole('button', { name: 'Sign in with Anthropic' })).toBeTruthy()
@@ -147,8 +153,8 @@ describe('ProviderConnect', () => {
 
     expect(screen.getByText('claude-seat@corp.com')).toBeTruthy()
     expect(screen.getByText('…4f2a')).toBeTruthy()
-    expect(screen.getByRole('button', { name: 'Disconnect' })).toBeTruthy()
-    expect(screen.getByRole('button', { name: 'Remove' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Disconnect subscription' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Remove API key' })).toBeTruthy()
     expect(screen.queryByText('op@example.com')).toBeNull()
   })
 
@@ -159,9 +165,9 @@ describe('ProviderConnect', () => {
 
     expect(screen.getByText('Expired')).toBeTruthy()
     expect(screen.getByText('claude-seat@corp.com')).toBeTruthy()
-    expect(screen.getByText(/token expired/)).toBeTruthy()
+    expect(screen.getByText(/Token expired/)).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Reconnect' })).toBeTruthy()
-    expect(screen.getByRole('button', { name: 'Disconnect' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Disconnect subscription' })).toBeTruthy()
     expect(screen.queryByRole('button', { name: /Sign in/ })).toBeNull()
   })
 
@@ -215,10 +221,11 @@ describe('ProviderConnect', () => {
     vi.stubGlobal('fetch', fetchMock)
 
     const { invalidate } = renderCard(provider({ billingOptions: ['api_key'] }))
+    fireEvent.click(screen.getByRole('button', { name: 'Add API key' }))
     fireEvent.change(screen.getByLabelText('API key'), {
       target: { value: 'the-api-key' },
     })
-    fireEvent.click(screen.getByRole('button', { name: 'Add key' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save API key' }))
     await flush()
 
     const storeCall = fetchMock.mock.calls.find(
@@ -236,7 +243,7 @@ describe('ProviderConnect', () => {
     vi.stubGlobal('confirm', () => true)
 
     renderCard(provider(), { subscription: subscription(), apiKey: sharedKey })
-    fireEvent.click(screen.getByRole('button', { name: 'Remove' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Remove API key' }))
     await flush()
 
     const [url, init] = fetchMock.mock.calls[0]!

@@ -89,12 +89,19 @@ async def update_user_settings(
         if field in _EXECUTION_DEFAULTS
     }
     if defaults:
-        check_execution(
+        await check_execution(
             defaults.get("default_harness", row.default_harness),
             defaults.get("default_model", row.default_model),
             defaults.get("default_billing", row.default_billing),
         )
         await row.update_profile(**defaults)
+        for agent in agents.all():
+            name = agent.id
+            await check_execution(
+                (await SettingsOverride.agent_harness(name)).value,
+                (await SettingsOverride.agent_model(name)).value,
+                (await SettingsOverride.agent_billing(name)).value,
+            )
     if body.fallback_account_id:
         if not await Account.get(body.fallback_account_id, exclude_system=True):
             raise HTTPException(
@@ -136,7 +143,7 @@ async def update_app_settings(body: AppsSettingsUpdate) -> AppsSettingsResponse:
     for name in {*body.agent_harnesses, *body.agent_models, *body.agent_billings}:
         if name not in agents:
             raise HTTPException(status_code=422, detail=f"Unknown agent {name!r}")
-        check_execution(
+        await check_execution(
             (await SettingsOverride.agent_harness(name)).value,
             (await SettingsOverride.agent_model(name)).value,
             (await SettingsOverride.agent_billing(name)).value,

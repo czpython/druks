@@ -55,8 +55,12 @@ async def test_openai_codex_rows_become_openai_everywhere(druks_db):
     codex = await _login("openai-codex", "seat@example.com")
     await _login("openai", "key@example.com")
     await UsageScrape(provider="openai-codex", account_id=codex.account_id, raw_output=None).save()
-    await ProviderCatalog.create("openai-codex", [{"id": "openai-codex/gpt-5.5", "label": "sub"}])
-    await ProviderCatalog.create("openai", [{"id": "openai/gpt-5.5", "label": "key"}])
+    await ProviderCatalog.create(
+        "openai-codex", [{"id": "openai-codex/gpt-5.5", "label": "sub"}], label="OpenAI"
+    )
+    await ProviderCatalog.create(
+        "openai", [{"id": "openai/gpt-5.5", "label": "key"}], label="OpenAI"
+    )
     await (await UserSettings.get()).update_profile(default_model="openai-codex/gpt-5.5")
     await SettingsOverride.set_agent_model("implement", "openai-codex/gpt-5-mini")
     await SettingsOverride.set_agent_effort("implement", "openai-codex/keep")

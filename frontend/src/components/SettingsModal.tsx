@@ -35,24 +35,69 @@ import {
   type WorkflowSettingField,
 } from '../api/types'
 import { appLabel } from '../apps/registry'
-import { absTime, money, relTimeFromIso, timeAway } from '../lib/format'
+import { absTime, money, relTimeFromIso } from '../lib/format'
 import { useUsageToday } from '../lib/useUsage'
 import { Bar } from './UsagePanel'
 import { harnessColors } from '../lib/harnessColors'
 
-interface Catalog {
-  modelsOf: (harness: string) => CatalogModel[]
+interface CatalogChoice extends CatalogModel {
+  provider: string
+  providerLabel: string
+  enabled: boolean
+  unavailableReason?: string
 }
 
-function buildCatalog(harnesses: Harness[], providers: Provider[], catalogs: ProviderCatalog[]): Catalog {
-  const hasProvider = (harness: Harness, provider: Provider) =>
-    harness.provider ? harness.provider === provider.id : harness.billingOptions.some((k) => provider.billingOptions.includes(k))
-  const modelsByProvider = Object.fromEntries(catalogs.map((c) => [c.provider, c.models]))
+interface Catalog {
+  modelsOf: (harness: string, billing: Billing) => CatalogChoice[]
+  modelsForProvider: (provider: string) => CatalogChoice[]
+}
+
+const addedProvider = (id: string, label: string): Provider => ({ id, label, billingOptions: ['api_key'] })
+
+function knownProviders(providers: Provider[], catalogs: ProviderCatalog[]): Provider[] {
+  const added = catalogs
+    .filter((catalog) => !providers.some((provider) => provider.id === catalog.provider))
+    .map((catalog) => addedProvider(catalog.provider, catalog.label))
+  return [...providers, ...added].sort((left, right) => left.label.localeCompare(right.label))
+}
+
+function buildCatalog(
+  harnesses: Harness[],
+  providers: Provider[],
+  catalogs: ProviderCatalog[],
+  subscriptions: ProviderSubscription[],
+  keys: ProviderKey[],
+): Catalog {
+  const providersById = new Map(providers.map((provider) => [provider.id, provider]))
+  const connected = new Set(subscriptions.filter((row) => row.connected).map((row) => row.provider))
+  const keyed = new Set(keys.map((row) => row.provider))
+  const choicesFor = (catalog: ProviderCatalog, billing: Billing): CatalogChoice[] => {
+    const enabled = billing === 'api_key' ? keyed.has(catalog.provider) : connected.has(catalog.provider)
+    const unavailableReason = billing === 'api_key'
+      ? `Add ${catalog.label} API key`
+      : `Connect ${catalog.label} subscription`
+    return catalog.models.map((model) => ({
+      ...model,
+      provider: catalog.provider,
+      providerLabel: catalog.label,
+      enabled,
+      unavailableReason: enabled ? undefined : unavailableReason,
+    }))
+  }
   return {
-    modelsOf: (name) => {
-      const harness = harnesses.find((h) => h.name === name)
+    modelsOf: (name, billing) => {
+      const harness = harnesses.find((entry) => entry.name === name)
       if (!harness) return []
-      return providers.filter((p) => hasProvider(harness, p)).flatMap((p) => modelsByProvider[p.id] ?? [])
+      return catalogs
+        .filter((catalog) => !harness.provider || harness.provider === catalog.provider)
+        .filter((catalog) => providersById.get(catalog.provider)?.billingOptions.includes(billing))
+        .flatMap((catalog) => choicesFor(catalog, billing))
+    },
+    modelsForProvider: (provider) => {
+      const billing: Billing = connected.has(provider) && !keyed.has(provider) ? 'subscription' : 'api_key'
+      return catalogs
+        .filter((catalog) => catalog.provider === provider)
+        .flatMap((catalog) => choicesFor(catalog, billing))
     },
   }
 }
@@ -203,6 +248,7 @@ export function SettingsModal({ open, onClose }: Props) {
     queryFn: () => api.providerCatalogs(),
     enabled: open,
     staleTime: 60_000,
+    retry: 1,
   })
   const [timezone, setTimezone] = useState<string>('UTC')
   const [defaults, setDefaults] = useState<Defaults | null>(null)
@@ -214,6 +260,7 @@ export function SettingsModal({ open, onClose }: Props) {
   // 'general' | 'providers' | 'agents' | 'browser-sessions' | 'skills' | 'mcp' |
   // 'agent-access' | <app name>
   const [section, setSection] = useState<string>('general')
+  const [modelBrowseProvider, setModelBrowseProvider] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [appProblems, setAppProblems] = useState<AppSettingsProblems>({})
@@ -350,10 +397,32 @@ export function SettingsModal({ open, onClose }: Props) {
   const allApps = data?.apps ?? []
   const allowedEfforts = data?.allowedEfforts ?? []
   const harnesses = harnessesQuery.data ?? []
-  const providers = providersQuery.data ?? []
+  const providerCatalogs = providerCatalogsQuery.data ?? []
+  const providers = knownProviders(providersQuery.data ?? [], providerCatalogs)
   const providerSubscriptions = providerSubscriptionsQuery.data ?? []
   const providerKeys = providerKeysQuery.data ?? []
-  const catalog = buildCatalog(harnesses, providers, providerCatalogsQuery.data ?? [])
+  const catalog = buildCatalog(
+    harnesses,
+    providers,
+    providerCatalogs,
+    providerSubscriptions,
+    providerKeys,
+  )
+  const savedDefaults = settingsQuery.data ? defaultsOf(settingsQuery.data) : null
+  const executionDefaultsDirty = Boolean(
+    defaults &&
+      savedDefaults &&
+      (defaults.defaultHarness !== savedDefaults.defaultHarness ||
+        defaults.defaultModel !== savedDefaults.defaultModel ||
+        defaults.defaultBilling !== savedDefaults.defaultBilling),
+  )
+  const defaultsExecutionInvalid = Boolean(
+    executionDefaultsDirty &&
+      defaults &&
+      !catalog
+        .modelsOf(defaults.defaultHarness, defaults.defaultBilling)
+        .some((model) => model.id === defaults.defaultModel && model.enabled),
+  )
   const harnessByName: Record<string, Harness> = Object.fromEntries(
     harnesses.map((h) => [h.name, h]),
   )
@@ -481,7 +550,29 @@ export function SettingsModal({ open, onClose }: Props) {
                 busy={busy}
               />
             )}
-            {section === 'providers' && <ProvidersPane providers={providers} subscriptions={providerSubscriptions} keys={providerKeys} />}
+            {section === 'providers' && (
+              <ProvidersPane
+                providers={providers}
+                subscriptions={providerSubscriptions}
+                keys={providerKeys}
+                catalogs={providerCatalogs}
+                loading={
+                  providersQuery.isLoading ||
+                  providerSubscriptionsQuery.isLoading ||
+                  providerKeysQuery.isLoading ||
+                  providerCatalogsQuery.isLoading
+                }
+                requestError={
+                  providerCatalogsQuery.error instanceof Error
+                    ? providerCatalogsQuery.error.message
+                    : null
+                }
+                onViewModels={(providerId) => {
+                  setModelBrowseProvider(providerId)
+                  setSection('agents')
+                }}
+              />
+            )}
             {section === 'agents' &&
               (defaults ? (
                 <AgentsPane
@@ -494,6 +585,9 @@ export function SettingsModal({ open, onClose }: Props) {
                   catalog={catalog}
                   allowedEfforts={allowedEfforts}
                   onOpenApp={setSection}
+                  onAddProvider={() => setSection('providers')}
+                  browseProvider={modelBrowseProvider}
+                  onBrowseOpened={() => setModelBrowseProvider(null)}
                   busy={busy}
                 />
               ) : (
@@ -522,6 +616,7 @@ export function SettingsModal({ open, onClose }: Props) {
                 onAgentBilling={setAgentBilling}
                 onAgentEffort={setAgentEffort}
                 onAgentTimeout={setAgentTimeout}
+                onAddProvider={() => setSection('providers')}
                 onWorkflowField={setWorkflowField}
                 onAppSetting={setAppSetting}
                 busy={busy}
@@ -533,13 +628,19 @@ export function SettingsModal({ open, onClose }: Props) {
         <div className="set-foot">
           <div className={'set-status ' + (dirty ? 'dirty' : 'saved')}>
             <span className="sd" />
-            {error ? error : dirty ? 'unsaved changes' : 'saved'}
+            {error
+              ? error
+              : defaultsExecutionInvalid
+                ? 'choose a connected model'
+                : dirty
+                  ? 'unsaved changes'
+                  : 'saved'}
           </div>
           <div className="set-foot-actions">
             <button className="set-btn ghost" onClick={onClose} disabled={busy}>
               cancel
             </button>
-            <button className="set-btn primary" onClick={() => void submit()} disabled={busy || !dirty}>
+            <button className="set-btn primary" onClick={() => void submit()} disabled={busy || !dirty || defaultsExecutionInvalid}>
               {busy ? 'saving…' : 'save'}
             </button>
           </div>
@@ -682,7 +783,11 @@ function Menu({ anchor, children, onClose }: { anchor: HTMLElement | null; child
       if (ref.current && !ref.current.contains(e.target as Node) && anchor && !anchor.contains(e.target as Node)) onClose()
     }
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        e.stopPropagation()
+        onClose()
+      }
     }
     document.addEventListener('mousedown', onDown)
     document.addEventListener('keydown', onKey)
@@ -711,6 +816,152 @@ function Opt({ sel, famColor, main, sub, onClick }: { sel: boolean; famColor?: s
   )
 }
 
+function ModelChooser({
+  id,
+  value,
+  displayValue,
+  choices,
+  onPick,
+  disabled,
+  label,
+  inheritLabel,
+  isOverride = false,
+  onAddProvider,
+  browseProvider,
+  onBrowseOpened,
+  onBrowseClosed,
+}: {
+  id?: string
+  value: string | null
+  displayValue: string
+  choices: CatalogChoice[]
+  onPick: (value: string | null) => void
+  disabled: boolean
+  label: string
+  inheritLabel?: string
+  isOverride?: boolean
+  onAddProvider: () => void
+  browseProvider?: string | null
+  onBrowseOpened?: () => void
+  onBrowseClosed?: () => void
+}) {
+  const buttonRef = useRef<HTMLButtonElement>(null)
+  const [anchor, setAnchor] = useState<HTMLButtonElement | null>(null)
+  const [search, setSearch] = useState('')
+  const selected = choices.find((choice) => choice.id === value)
+
+  useEffect(() => {
+    if (!browseProvider || !buttonRef.current) return
+    setSearch(browseProvider)
+    setAnchor(buttonRef.current)
+    onBrowseOpened?.()
+  }, [browseProvider, onBrowseOpened])
+
+  const query = search.trim().toLocaleLowerCase()
+  const visible = choices.filter((choice) =>
+    [choice.label, choice.id, choice.providerLabel, choice.provider].some((term) =>
+      term.toLocaleLowerCase().includes(query),
+    ),
+  )
+  const grouped = visible.reduce((groups, choice) => {
+    const models = groups.get(choice.provider) ?? []
+    models.push(choice)
+    groups.set(choice.provider, models)
+    return groups
+  }, new Map<string, CatalogChoice[]>())
+  const hasRunnable = choices.some((choice) => choice.enabled)
+  const close = () => {
+    setAnchor(null)
+    setSearch('')
+    onBrowseClosed?.()
+  }
+  const pick = (next: string | null) => {
+    onPick(next)
+    close()
+  }
+  return (
+    <>
+      <button
+        ref={buttonRef}
+        id={id}
+        type="button"
+        className={
+          inheritLabel
+            ? `set-cell ${isOverride ? 'override' : 'inherit'}`
+            : 'set-select model-chooser-trigger'
+        }
+        aria-label={label}
+        aria-haspopup="listbox"
+        aria-expanded={Boolean(anchor)}
+        disabled={disabled}
+        onClick={(event) => setAnchor((current) => (current ? null : event.currentTarget))}
+      >
+        {inheritLabel &&
+          (isOverride ? <span className="ov-dot" /> : <span className="inh-glyph">↳</span>)}
+        <span className="cell-val">{selected?.label ?? displayValue}</span>
+        <span className="cell-arrow" aria-hidden="true">▾</span>
+      </button>
+      {anchor && (
+        <Menu anchor={anchor} onClose={close}>
+          <div className="model-chooser" role="listbox" aria-label={`${label} choices`}>
+            <input
+              autoFocus
+              className="model-chooser-search"
+              aria-label="Search models"
+              placeholder="Search models or providers"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+            />
+            {inheritLabel && (
+              <button
+                type="button"
+                role="option"
+                aria-selected={!isOverride}
+                className="model-chooser-option"
+                onClick={() => pick(null)}
+              >
+                <span>Inherit</span>
+                <small>{inheritLabel}</small>
+              </button>
+            )}
+            {[...grouped.entries()].map(([providerId, models]) => (
+              <div className="model-chooser-group" key={providerId}>
+                <div className="model-chooser-provider">
+                  <span>{models[0]?.providerLabel}</span>
+                  <code>{providerId}</code>
+                </div>
+                {models.map((model) => (
+                  <button
+                    type="button"
+                    role="option"
+                    aria-selected={value === model.id}
+                    aria-disabled={!model.enabled}
+                    className="model-chooser-option"
+                    disabled={!model.enabled}
+                    key={model.id}
+                    onClick={() => pick(model.id)}
+                  >
+                    <span>{model.label}</span>
+                    <small>{model.enabled ? model.id : model.unavailableReason}</small>
+                  </button>
+                ))}
+              </div>
+            ))}
+            {visible.length === 0 && (
+              <p className="model-chooser-empty">No model matches this search.</p>
+            )}
+            {!hasRunnable && choices.some((choice) => choice.unavailableReason?.startsWith('Add ')) && (
+              <button type="button" className="model-chooser-setup" onClick={onAddProvider}>
+                Add a provider key
+              </button>
+            )}
+          </div>
+        </Menu>
+      )}
+    </>
+  )
+}
+
 // ---------------------------------------------------------------------------
 // InheritCell — inherited (ghosted ↳) vs override (bright ● + reset)
 // ---------------------------------------------------------------------------
@@ -723,11 +974,13 @@ function InheritCell({
   resolvedLabel,
   inheritLabel,
   harness,
+  billing,
   harnesses,
   harnessColor,
   catalog,
   allowedEfforts,
   onPick,
+  onAddProvider,
   disabled,
 }: {
   kind: 'harness' | 'model' | 'billing' | 'effort' | 'timeout'
@@ -735,11 +988,13 @@ function InheritCell({
   resolvedLabel: string
   inheritLabel: string
   harness: string
+  billing: Billing
   harnesses: Harness[]
   harnessColor: Record<string, string>
   catalog: Catalog
   allowedEfforts: string[]
   onPick: (v: CellValue) => void
+  onAddProvider: () => void
   disabled: boolean
 }) {
   // Anchor the menu off the clicked element (state, not a ref) so nothing reads
@@ -750,6 +1005,21 @@ function InheritCell({
     onPick(v)
     setAnchor(null)
   }
+  if (kind === 'model') {
+    return (
+      <ModelChooser
+        value={typeof value === 'string' ? value : null}
+        displayValue={resolvedLabel}
+        choices={catalog.modelsOf(harness, billing)}
+        onPick={onPick}
+        disabled={disabled}
+        label={`Model for ${harness}`}
+        inheritLabel={inheritLabel}
+        isOverride={isOverride}
+        onAddProvider={onAddProvider}
+      />
+    )
+  }
   const menu = () => {
     if (kind === 'harness') {
       return (
@@ -758,18 +1028,6 @@ function InheritCell({
           <div className="menu-div" />
           {harnesses.map((h) => (
             <Opt key={h.name} sel={value === h.name} famColor={harnessColor[h.name]} main={h.name} onClick={() => pick(h.name)} />
-          ))}
-        </>
-      )
-    }
-    if (kind === 'model') {
-      return (
-        <>
-          <Opt sel={!isOverride} main="inherit" sub={'· ' + inheritLabel} onClick={() => pick(null)} />
-          <div className="menu-inherit-note">the models {harness} runs</div>
-          <div className="menu-div" />
-          {catalog.modelsOf(harness).map((m) => (
-            <Opt key={m.id} sel={value === m.id} famColor={harnessColor[harness]} main={m.label} onClick={() => pick(m.id)} />
           ))}
         </>
       )
@@ -895,6 +1153,9 @@ export function AgentsPane({
   catalog,
   allowedEfforts,
   onOpenApp,
+  onAddProvider,
+  browseProvider,
+  onBrowseOpened,
   busy,
 }: {
   defaults: Defaults
@@ -906,19 +1167,53 @@ export function AgentsPane({
   catalog: Catalog
   allowedEfforts: string[]
   onOpenApp: (app: string) => void
+  onAddProvider: () => void
+  browseProvider: string | null
+  onBrowseOpened: () => void
   busy: boolean
 }) {
   const fieldId = useId()
   const id = (field: string) => `${fieldId}-${field}`
   const harnesses = Object.values(harnessByName)
-  const models = catalog.modelsOf(defaults.defaultHarness)
+  const executionModels = catalog.modelsOf(defaults.defaultHarness, defaults.defaultBilling)
+  const [browsingProvider, setBrowsingProvider] = useState<string | null>(null)
+  const providerToBrowse = browseProvider ?? browsingProvider
+  const models = providerToBrowse
+    ? catalog.modelsForProvider(providerToBrowse).map((choice) => {
+        const compatible = executionModels.find(
+          (candidate) => candidate.id === choice.id && candidate.provider === choice.provider,
+        )
+        return {
+          ...choice,
+          enabled: Boolean(compatible?.enabled),
+          unavailableReason: compatible
+            ? compatible.unavailableReason
+            : choice.enabled
+              ? 'Select a compatible harness and billing method'
+              : choice.unavailableReason,
+        }
+      })
+    : executionModels
   const defaultKeyOnly = keyOnly(harnessByName[defaults.defaultHarness])
   const timeouts = TIMEOUTS.includes(defaults.defaultTimeout)
     ? TIMEOUTS
     : [...TIMEOUTS, defaults.defaultTimeout].sort((a, b) => a - b)
   const set = (patch: Partial<Defaults>) => onDefaults({ ...defaults, ...patch })
+  const setTriple = (harness: string, billing: Billing) => {
+    const choices = catalog.modelsOf(harness, billing)
+    const currentIsRunnable = choices.some(
+      (choice) => choice.id === defaults.defaultModel && choice.enabled,
+    )
+    set({
+      defaultHarness: harness,
+      defaultBilling: billing,
+      defaultModel: currentIsRunnable
+        ? defaults.defaultModel
+        : (choices.find((choice) => choice.enabled)?.id ?? defaults.defaultModel),
+    })
+  }
   const setHarness = (name: string) =>
-    set({ defaultHarness: name, ...(keyOnly(harnessByName[name]) ? { defaultBilling: 'api_key' } : {}) })
+    setTriple(name, keyOnly(harnessByName[name]) ? 'api_key' : defaults.defaultBilling)
 
   return (
     <div className="set-pane mcp-pane">
@@ -949,16 +1244,22 @@ export function AgentsPane({
             <label className="mcp-label" htmlFor={id('model')}>
               Model
             </label>
-            <select id={id('model')} className="set-select" value={defaults.defaultModel} onChange={(e) => set({ defaultModel: e.target.value })} disabled={busy}>
-              {!models.some((m) => m.id === defaults.defaultModel) && (
-                <option value={defaults.defaultModel}>{defaults.defaultModel}</option>
-              )}
-              {models.map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.label}
-                </option>
-              ))}
-            </select>
+            <ModelChooser
+              id={id('model')}
+              value={defaults.defaultModel}
+              displayValue={defaults.defaultModel}
+              choices={models}
+              onPick={(model) => model && set({ defaultModel: model })}
+              disabled={busy}
+              label="Model"
+              onAddProvider={onAddProvider}
+              browseProvider={browseProvider}
+              onBrowseOpened={() => {
+                setBrowsingProvider(browseProvider)
+                onBrowseOpened()
+              }}
+              onBrowseClosed={() => setBrowsingProvider(null)}
+            />
           </div>
           <div className="mcp-field">
             <label className="mcp-label" htmlFor={id('billing')}>
@@ -968,7 +1269,7 @@ export function AgentsPane({
               id={id('billing')}
               className="set-select"
               value={defaults.defaultBilling}
-              onChange={(e) => set({ defaultBilling: e.target.value as Billing })}
+              onChange={(e) => setTriple(defaults.defaultHarness, e.target.value as Billing)}
               disabled={busy || defaultKeyOnly}
             >
               {BILLINGS.map((b) => (
@@ -1011,6 +1312,11 @@ export function AgentsPane({
             </select>
           </div>
         </div>
+        {!models.some((model) => model.id === defaults.defaultModel && model.enabled) && (
+          <div className="model-chooser-warning" role="status">
+            Choose a model with a connected credential before you save these defaults.
+          </div>
+        )}
       </div>
 
       <div className="set-group">
@@ -1535,41 +1841,185 @@ function ProvidersPane({
   providers,
   subscriptions,
   keys,
+  catalogs,
+  loading,
+  requestError,
+  onViewModels,
 }: {
   providers: Provider[]
   subscriptions: ProviderSubscription[]
   keys: ProviderKey[]
+  catalogs: ProviderCatalog[]
+  loading: boolean
+  requestError: string | null
+  onViewModels: (providerId: string) => void
 }) {
-  const providerColor = harnessColors(providers.map((p) => p.id))
+  const [adding, setAdding] = useState(false)
+  const [search, setSearch] = useState('')
+  const [pendingProviders, setPendingProviders] = useState<Provider[]>([])
+  const [openedAt] = useState(() => Date.now())
+  // The directory is only the search box's source, read when it opens.
+  const directoryQuery = useQuery({
+    queryKey: ['providerDirectory'],
+    queryFn: () => api.providerDirectory(),
+    enabled: adding,
+    staleTime: 60_000,
+    retry: 1,
+  })
   // The quota bars read the same snapshot the appbar pill polls; this pane
   // only reads it, so the pill stays the one nudging scrapes.
   const usageQuery = useQuery<UsageResponse>({ queryKey: ['usage'], queryFn: () => api.usage(), retry: 1 })
   const todayQuery = useUsageToday()
+  const configuredIds = new Set([
+    ...subscriptions.map((row) => row.provider),
+    ...keys.map((row) => row.provider),
+    ...pendingProviders.map((provider) => provider.id),
+  ])
+  const configured = [
+    ...providers,
+    ...pendingProviders.filter((pending) => !providers.some((known) => known.id === pending.id)),
+  ].filter((provider) => configuredIds.has(provider.id))
+  const providerColor = harnessColors(configured.map((provider) => provider.id))
+  const query = search.trim().toLocaleLowerCase()
+  const candidates = [
+    ...providers.map((provider) => ({
+      provider: provider.id,
+      label: provider.label,
+      models: catalogs.find((catalog) => catalog.provider === provider.id)?.models ?? [],
+    })),
+    ...(directoryQuery.data ?? []),
+  ]
+    .filter((entry) => !configuredIds.has(entry.provider))
+    .filter((entry) =>
+      [entry.label, entry.provider, ...entry.models.flatMap((model) => [model.label, model.id])].some(
+        (text) => text.toLocaleLowerCase().includes(query),
+      ),
+    )
   return (
     <div className="set-pane mcp-pane hrs-pane">
       <header className="mcp-pane-head">
         <h2 className="mcp-pane-title">Providers</h2>
         <p className="mcp-pane-sub">
-          Your subscription at each model provider, and the installation&apos;s API key.
+          Manage credentials and billing methods. Credential changes save immediately.
         </p>
       </header>
+      {loading && <div className="provider-state" role="status">Loading providers…</div>}
+      {requestError && <div className="mcp-error" role="alert">{requestError}</div>}
+      {!loading && configured.length === 0 && (
+        <div className="provider-empty">
+          <strong>No provider is configured.</strong>
+          <span>Add one to make models available to agents.</span>
+        </div>
+      )}
       <div className="hrs-list">
-        {providers.map((provider) => (
-          <div key={provider.id} className="set-card hr-card" style={{ '--fam': providerColor[provider.id] } as CSSProperties}>
-            <div className="hr-ident">
-              <span className="hr-ident-dot" />
-              <span className="hr-name">{provider.label}</span>
-              <span className="hr-provider">{provider.id}</span>
+        {configured.map((provider) => {
+          const subscription = subscriptions.find((row) => row.provider === provider.id) ?? null
+          const apiKey = keys.find((row) => row.provider === provider.id) ?? null
+          const catalog = catalogs.find((entry) => entry.provider === provider.id)
+          const modelCount = catalog?.models.length ?? 0
+          const catalogIsStale = Boolean(
+            catalog && openedAt - new Date(catalog.fetchedAt).getTime() > 24 * 60 * 60 * 1000,
+          )
+          const connection = subscription?.connected
+            ? apiKey
+              ? 'Subscription and API key configured'
+              : 'Subscription connected'
+            : subscription
+              ? 'Subscription needs reconnect'
+              : apiKey
+                ? 'API key configured'
+                : 'Not configured'
+          return (
+            <article key={provider.id} className="set-card hr-card" style={{ '--fam': providerColor[provider.id] } as CSSProperties}>
+              <header className="hr-ident">
+                <span className="hr-ident-dot" aria-hidden="true" />
+                <span className="hr-identity-copy">
+                  <span className="hr-name">{provider.label}</span>
+                  <code className="hr-provider">{provider.id}</code>
+                </span>
+                <span className="hr-card-state" role="status">{connection}</span>
+                <span className="hr-count"><b>{modelCount}</b> models</span>
+              </header>
+              <ProviderConnect
+                provider={provider}
+                subscription={subscription}
+                apiKey={apiKey}
+                usage={usageQuery.data?.providers.find((row) => row.id === provider.id) ?? null}
+                keySpendToday={todayQuery.data?.providers.find((row) => row.id === provider.id)?.keySpendUsd ?? null}
+              />
+              <div className="provider-models-row">
+                <span>
+                  <strong>{modelCount} models available</strong>
+                  {catalog ? (
+                    <small>
+                      {catalogIsStale ? 'Catalog is stale' : 'Catalog updated'}{' '}
+                      {relTimeFromIso(catalog.fetchedAt)}
+                    </small>
+                  ) : (
+                    <small>No catalog is available yet.</small>
+                  )}
+                </span>
+                <button type="button" className="set-btn ghost" onClick={() => onViewModels(provider.id)}>
+                  View models in Agents
+                </button>
+              </div>
+            </article>
+          )
+        })}
+      </div>
+      <div className="provider-add">
+        {!adding ? (
+          <button type="button" className="set-btn ghost" onClick={() => setAdding(true)}>Add provider</button>
+        ) : (
+          <div className="set-card provider-add-panel">
+            <div className="provider-add-head">
+              <label htmlFor="provider-search">Add provider</label>
+              <button type="button" className="set-btn quiet" onClick={() => { setAdding(false); setSearch('') }}>Close</button>
             </div>
-            <ProviderConnect
-              provider={provider}
-              subscription={subscriptions.find((l) => l.provider === provider.id) ?? null}
-              apiKey={keys.find((k) => k.provider === provider.id) ?? null}
-              usage={usageQuery.data?.providers.find((u) => u.id === provider.id) ?? null}
-              keySpendToday={todayQuery.data?.providers.find((t) => t.id === provider.id)?.keySpendUsd ?? null}
+            <input
+              autoFocus
+              id="provider-search"
+              className="set-select"
+              type="search"
+              placeholder="Search providers or models"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
             />
+            <div className="provider-results" role="list" aria-label="Provider search results">
+              {candidates.slice(0, 30).map((entry) => {
+                const provider =
+                  providers.find((registered) => registered.id === entry.provider) ??
+                  addedProvider(entry.provider, entry.label)
+                return (
+                  <button
+                    type="button"
+                    className="provider-result"
+                    key={provider.id}
+                    onClick={() => {
+                      setPendingProviders((current) => [...current, provider])
+                      setAdding(false)
+                      setSearch('')
+                    }}
+                  >
+                    <span><strong>{provider.label}</strong><code>{provider.id}</code></span>
+                    <span><b>{entry.models.length}</b> models</span>
+                    <span>{provider.billingOptions.map(billingLabel).join(' or ')}</span>
+                    <span>Not configured</span>
+                  </button>
+                )
+              })}
+              {directoryQuery.isLoading && (
+                <p className="provider-state" role="status">Reading the Models.dev directory…</p>
+              )}
+              {directoryQuery.error instanceof Error && (
+                <p className="mcp-error" role="alert">{directoryQuery.error.message}</p>
+              )}
+              {!directoryQuery.isLoading && candidates.length === 0 && (
+                <p className="provider-state">No supported provider matches this search.</p>
+              )}
+            </div>
           </div>
-        ))}
+        )}
       </div>
     </div>
   )
@@ -1593,6 +2043,7 @@ export function ProviderConnect({
   const [error, setError] = useState<string | null>(null)
   const [key, setKey] = useState('')
   const [replacing, setReplacing] = useState(false)
+  const [keyFormOpen, setKeyFormOpen] = useState(false)
 
   const refresh = () => queryClient.invalidateQueries({ queryKey: ['providerSubscriptions'] })
   const refreshKeys = () => queryClient.invalidateQueries({ queryKey: ['providerKeys'] })
@@ -1629,6 +2080,7 @@ export function ProviderConnect({
       await api.createProviderKey(provider.id, key)
       setKey('')
       setReplacing(false)
+      setKeyFormOpen(false)
     }, refreshKeys)
   }
 
@@ -1636,9 +2088,14 @@ export function ProviderConnect({
   // An expired subscription is still a subscription: keep its identity and Disconnect
   // visible and ask for a Reconnect, not a first-time sign-in.
   const expired = Boolean(subscription) && !connected
-  const showKeyForm = acceptsApiKey && (!apiKey || replacing)
+  const showKeyForm = acceptsApiKey && (keyFormOpen || replacing)
   return (
     <div className="hr-connect">
+      {acceptsSubscription && acceptsApiKey && (
+        <p className="hr-billing-note">
+          Use either your provider subscription or the installation API key as the billing method.
+        </p>
+      )}
       {acceptsSubscription && (
         <section className="hr-block">
           <div className="hr-block-title">Subscription</div>
@@ -1651,23 +2108,30 @@ export function ProviderConnect({
                   {subscription.providerEmail}
                 </span>
                 <span className="hr-conn-actions">
-                  {!flow.challenge && (
-                    <button className="set-btn ghost" onClick={() => void flow.start()} disabled={busy || flow.busy}>
+                  {expired && !flow.challenge && (
+                    <button className="set-btn primary" onClick={() => void flow.start()} disabled={busy || flow.busy}>
                       Reconnect
                     </button>
                   )}
-                  <button className="set-btn danger quiet" onClick={disconnect} disabled={busy || flow.busy}>
-                    Disconnect
-                  </button>
+                  <details className="hr-more">
+                    <summary aria-label={`More ${provider.label} subscription actions`}>More</summary>
+                    <button className="set-btn danger quiet" onClick={disconnect} disabled={busy || flow.busy}>
+                      Disconnect subscription
+                    </button>
+                  </details>
                 </span>
               </div>
-              {usage?.fiveHour && <QuotaRow label="5h" metric={usage.fiveHour} />}
+              {usage?.fiveHour && <QuotaRow label="5-hour" metric={usage.fiveHour} />}
               {usage?.weeks.map((week, index) => (
-                <QuotaRow key={index} label="week" metric={week} />
+                <QuotaRow key={index} label="Weekly" metric={week} />
               ))}
               {subscription.expiresAt && (
                 <span className="hr-conn-exp">
-                  token {expired ? 'expired' : 'expires'} {timeAway(subscription.expiresAt)}
+                  Token {expired ? 'expired' : 'expires'}{' '}
+                  {new Date(subscription.expiresAt).toLocaleString([], {
+                    dateStyle: 'medium',
+                    timeStyle: 'long',
+                  })}
                 </span>
               )}
             </>
@@ -1697,11 +2161,19 @@ export function ProviderConnect({
                 <button className="set-btn ghost" onClick={() => setReplacing((value) => !value)} disabled={busy}>
                   {replacing ? 'Keep' : 'Replace'}
                 </button>
-                <button className="set-btn danger quiet" onClick={removeKey} disabled={busy}>
-                  Remove
-                </button>
+                <details className="hr-more">
+                  <summary aria-label={`More ${provider.label} API key actions`}>More</summary>
+                  <button className="set-btn danger quiet" onClick={removeKey} disabled={busy}>
+                    Remove API key
+                  </button>
+                </details>
               </span>
             </div>
+          )}
+          {!apiKey && !showKeyForm && (
+            <button className="set-btn ghost provider-key-add" type="button" onClick={() => setKeyFormOpen(true)}>
+              Add API key
+            </button>
           )}
           {showKeyForm && (
             <form className="hr-conn-flow" onSubmit={createKey}>
@@ -1718,8 +2190,13 @@ export function ProviderConnect({
                   value={key}
                 />
                 <button className="hr-conn-btn" disabled={busy || flow.busy || !key.trim()} type="submit">
-                  {apiKey ? 'Replace key' : 'Add key'}
+                  {apiKey ? 'Replace key' : 'Save API key'}
                 </button>
+                {!apiKey && (
+                  <button className="set-btn quiet" type="button" onClick={() => { setKey(''); setKeyFormOpen(false) }}>
+                    Cancel
+                  </button>
+                )}
               </div>
             </form>
           )}
@@ -1737,16 +2214,14 @@ export function ProviderConnect({
 function QuotaRow({ label, metric }: { label: string; metric: UsageMetric }) {
   if (metric.percentLeft === null) return null
   const resets = metric.resetsAt
-    ? new Date(metric.resetsAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    ? new Date(metric.resetsAt).toLocaleString([], { dateStyle: 'medium', timeStyle: 'long' })
     : null
   return (
     <div className="hr-quota">
-      <span className="hr-quota-label mono">
-        {label}
-        {metric.model ? ` · ${metric.model}` : ''}
-      </span>
+      <span className="hr-quota-label">{label}</span>
+      <span className="hr-quota-model mono">{metric.model ?? ''}</span>
       <Bar pctLeft={metric.percentLeft} />
-      <span className="hr-quota-pct mono">{metric.percentLeft}%</span>
+      <span className="hr-quota-pct mono">{metric.percentLeft}% remaining</span>
       <span className="hr-conn-exp">{resets ? `resets ${resets}` : ''}</span>
     </div>
   )
@@ -2683,6 +3158,7 @@ function AppPane({
   onAgentBilling,
   onAgentEffort,
   onAgentTimeout,
+  onAddProvider,
   onWorkflowField,
   onAppSetting,
   busy,
@@ -2700,6 +3176,7 @@ function AppPane({
   onAgentBilling: (name: string, billing: Billing | null) => void
   onAgentEffort: (name: string, effort: string | null) => void
   onAgentTimeout: (name: string, timeout: number | null) => void
+  onAddProvider: () => void
   onWorkflowField: (kind: string, field: string, value: unknown) => void
   onAppSetting: (app: string, field: string, value: unknown) => void
   busy: boolean
@@ -2856,6 +3333,7 @@ function AppPane({
             onAgentBilling={onAgentBilling}
             onAgentEffort={onAgentEffort}
             onAgentTimeout={onAgentTimeout}
+            onAddProvider={onAddProvider}
             busy={busy}
           />
         </div>
@@ -2877,6 +3355,7 @@ function AgentTable({
   onAgentBilling,
   onAgentEffort,
   onAgentTimeout,
+  onAddProvider,
   busy,
 }: {
   app: AppSettings
@@ -2891,6 +3370,7 @@ function AgentTable({
   onAgentBilling: (name: string, billing: Billing | null) => void
   onAgentEffort: (name: string, effort: string | null) => void
   onAgentTimeout: (name: string, timeout: number | null) => void
+  onAddProvider: () => void
   busy: boolean
 }) {
   const harnesses = Object.values(harnessByName)
@@ -2921,10 +3401,26 @@ function AgentTable({
         const timeoutInherit = a.timeoutSource === 'declared' ? 'declared · ' + a.timeout + 's' : 'default · ' + defaults.defaultTimeout + 's'
         const pickHarness = (v: CellValue) => {
           const name = (v as string | null) ?? null
+          const nextHarness = name ?? defaults.defaultHarness
+          const nextBilling = keyOnly(harnessByName[nextHarness]) ? 'api_key' : billing
           onAgentHarness(a.name, name)
-          if (name && keyOnly(harnessByName[name])) onAgentBilling(a.name, 'api_key')
+          if (nextBilling !== billing) onAgentBilling(a.name, nextBilling)
+          const choices = catalog.modelsOf(nextHarness, nextBilling)
+          if (!choices.some((choice) => choice.id === model && choice.enabled)) {
+            const first = choices.find((choice) => choice.enabled)
+            if (first) onAgentModel(a.name, first.id)
+          }
         }
-        const shared = { harness, harnesses, harnessColor, catalog, allowedEfforts, disabled: busy }
+        const pickBilling = (v: CellValue) => {
+          const nextBilling = ((v as Billing | null) ?? defaults.defaultBilling) as Billing
+          onAgentBilling(a.name, (v as Billing | null) ?? null)
+          const choices = catalog.modelsOf(harness, nextBilling)
+          if (!choices.some((choice) => choice.id === model && choice.enabled)) {
+            const first = choices.find((choice) => choice.enabled)
+            if (first) onAgentModel(a.name, first.id)
+          }
+        }
+        const shared = { harness, billing, harnesses, harnessColor, catalog, allowedEfforts, onAddProvider, disabled: busy }
         return (
           <div key={a.name} className="set-trow">
             <div className="agent-cell">
@@ -2943,7 +3439,7 @@ function AgentTable({
                 value={locked ? null : billingOver}
                 resolvedLabel={billingLabel(billing) + (locked ? ' ⚬' : '')}
                 inheritLabel={'default · ' + billingLabel(defaults.defaultBilling)}
-                onPick={(v) => onAgentBilling(a.name, (v as Billing | null) ?? null)}
+                onPick={pickBilling}
                 {...shared}
                 disabled={busy || locked}
               />

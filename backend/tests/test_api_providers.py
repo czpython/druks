@@ -3,6 +3,7 @@ from pathlib import Path
 
 from conftest import connect_provider
 from druks.accounts.models import Account
+from druks.harnesses import directory
 from druks.harnesses.models import ProviderCatalog, ProviderKey, ProviderSubscription
 from druks.harnesses.providers import AnthropicProvider
 from druks.testing import configure_app_for_test, make_settings
@@ -121,6 +122,42 @@ async def test_removing_the_key_leaves_every_subscription(tmp_path: Path, druks_
     assert await ProviderSubscription.reload(mine_id)
 
 
+_GROQ = {
+    "provider": "groq",
+    "label": "Groq",
+    "models": [{"id": "groq/llama-4", "label": "Llama 4"}],
+}
+
+
+def _stub_directory(monkeypatch, providers: list[dict]) -> None:
+    async def list_providers():
+        return providers
+
+    monkeypatch.setattr(directory, "list_providers", list_providers)
+
+
+async def test_a_key_for_a_directory_provider_adds_it(tmp_path: Path, druks_db, monkeypatch):
+    _stub_directory(monkeypatch, [_GROQ])
+    with _build_client(tmp_path) as client:
+        response = client.post("/api/providers/groq/key", json={"key": "gsk-secret"})
+        assert response.status_code == 200
+        assert response.json()["provider"] == "groq"
+        [catalog] = client.get("/api/providers/catalogs").json()
+        assert (catalog["provider"], catalog["label"]) == ("groq", "Groq")
+        assert client.post("/api/providers/nobody/key", json={"key": "x"}).status_code == 404
+
+        # Removing the key removes the provider with it.
+        assert client.delete("/api/providers/groq/key").status_code == 204
+        assert client.get("/api/providers/catalogs").json() == []
+    assert await ProviderKey.list_all() == []
+
+
+def test_directory_lists_only_providers_one_can_add(tmp_path: Path, monkeypatch):
+    _stub_directory(monkeypatch, [_GROQ, {"provider": "openai", "label": "OpenAI", "models": []}])
+    with _build_client(tmp_path) as client:
+        assert client.get("/api/providers/directory").json() == [_GROQ]
+
+
 def test_disconnect_without_a_login_is_a_no_op(tmp_path: Path):
     with _build_client(tmp_path) as client:
         response = client.delete("/api/providers/anthropic/connection")
@@ -135,11 +172,14 @@ def test_unknown_provider_is_404(tmp_path: Path):
 
 async def test_catalogs_list_what_each_provider_offers(tmp_path: Path, druks_db):
     await ProviderCatalog.create(
-        "anthropic", [{"id": "anthropic/claude-fable-5", "label": "Claude Fable 5", "efforts": []}]
+        "anthropic",
+        [{"id": "anthropic/claude-fable-5", "label": "Claude Fable 5", "efforts": []}],
+        label="Anthropic",
     )
     await druks_db.commit()
     with _build_client(tmp_path) as client:
         [catalog] = client.get("/api/providers/catalogs").json()
     assert catalog["provider"] == "anthropic"
+    assert catalog["label"] == "Anthropic"
     assert catalog["models"] == [{"id": "anthropic/claude-fable-5", "label": "Claude Fable 5"}]
     assert catalog["fetchedAt"]

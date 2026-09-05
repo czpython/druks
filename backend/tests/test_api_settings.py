@@ -147,6 +147,24 @@ def test_patch_settings_updates_the_defaults_every_agent_inherits(tmp_path: Path
     assert agents["implement"]["source"] == "default"
 
 
+def test_patch_settings_rejects_defaults_that_break_an_agent_override(tmp_path: Path):
+    with _build_client(tmp_path) as client:
+        override = client.patch(
+            "/api/settings/apps",
+            json={"agentModels": {"generate_plan": "anthropic/claude-opus-4-7"}},
+        )
+        assert override.status_code == 200
+
+        response = client.patch(
+            "/api/settings",
+            json={"defaultHarness": "codex", "defaultModel": "openai/gpt-5.5"},
+        )
+
+        assert response.status_code == 422
+        assert "does not run Anthropic" in response.json()["detail"]
+        assert client.get("/api/settings").json()["defaultHarness"] == "claude"
+
+
 def test_patch_settings_rejects_a_model_no_harness_runs(tmp_path: Path):
     with _build_client(tmp_path) as client:
         response = client.patch("/api/settings", json={"defaultModel": "gpt-5.5"})

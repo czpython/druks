@@ -2,6 +2,7 @@ import logging
 
 from druks.files.storage import reap_deleted_file_bytes
 from druks.harnesses.datastructures import RotationResult
+from druks.harnesses.directory import refresh_added_catalogs
 from druks.harnesses.models import ProviderSubscription
 from druks.harnesses.providers import get_provider, get_providers
 from druks.sandbox import gate
@@ -29,6 +30,7 @@ async def refresh_tokens() -> None:
 async def refresh_catalogs() -> None:
     for provider in get_providers():
         await provider.refresh_catalog()
+    await refresh_added_catalogs()
 
 
 async def _refresh() -> dict[str, object]:

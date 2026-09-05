@@ -9,11 +9,13 @@ from druks.accounts.schemas import AccountResponse
 from druks.database import db_session
 from druks.user_settings.models import UserSettings
 
+from . import directory
 from .exceptions import ConnectError
 from .models import ProviderCatalog, ProviderKey, ProviderSubscription
-from .providers import Provider, get_provider, get_providers
+from .providers import Provider, get_provider, get_providers, is_registered
 from .schemas import (
     ProviderCatalogResponse,
+    ProviderDirectoryResponse,
     ProviderKeyResponse,
     ProviderResponse,
     ProviderSubscriptionResponse,
@@ -61,6 +63,18 @@ async def list_keys() -> list[ProviderKey]:
 )
 async def list_catalogs() -> list[ProviderCatalog]:
     return await ProviderCatalog.list_all()
+
+
+@router.get(
+    "/directory",
+    response_model=list[ProviderDirectoryResponse],
+    response_model_by_alias=True,
+    dependencies=[Depends(current_session_account)],
+)
+async def list_directory() -> list[dict]:
+    """The providers an operator can add by key: the directory minus the registered ones."""
+    providers = await directory.list_providers()
+    return [provider for provider in providers if not is_registered(provider["provider"])]
 
 
 def _resolve_provider(provider_id: str) -> Provider:
@@ -154,27 +168,40 @@ async def create_key(
     account: Account = Depends(current_session_account),
     key: str = Body(..., embed=True),
 ) -> ProviderKey:
-    provider = _resolve_provider(provider_id)
-    if "api_key" not in provider.billing_options:
-        raise HTTPException(
-            status_code=422,
-            detail=f"{provider.label} does not accept API keys.",
-        )
-    if key := key.strip():
-        row = await ProviderKey.create(provider=provider.id, key=key, account=account)
+    """The installation's key at a provider. A provider from the directory
+    becomes one of the installation's when its key lands."""
+    if not (key := key.strip()):
+        raise HTTPException(status_code=422, detail="The API key is empty. Paste a key.")
+    if is_registered(provider_id):
+        provider = get_provider(provider_id)
+        if "api_key" not in provider.billing_options:
+            raise HTTPException(
+                status_code=422, detail=f"{provider.label} does not accept API keys."
+            )
+        stored = await ProviderKey.create(provider=provider.id, key=key, account=account)
         await provider.refresh_catalog()
-        return row
-    raise HTTPException(status_code=422, detail="The API key is empty. Paste a key.")
+        return stored
+    try:
+        await directory.add_provider(provider_id)
+    except KeyError as error:
+        raise HTTPException(status_code=404, detail=f"Unknown provider: {provider_id!r}") from error
+    return await ProviderKey.create(provider=provider_id, key=key, account=account)
 
 
 @router.delete(
     "/{provider_id}/key", status_code=204, dependencies=[Depends(current_session_account)]
 )
 async def remove_key(provider_id: str) -> None:
-    provider = _resolve_provider(provider_id)
-    row = await ProviderKey.get(provider.id)
-    if row:
-        await row.delete()
+    """A provider the operator added from the directory is gone with its key."""
+    stored = await ProviderKey.get(provider_id)
+    if stored:
+        await stored.delete()
+    if is_registered(provider_id):
+        return
+    catalog = await ProviderCatalog.get(provider_id)
+    if not catalog:
+        raise HTTPException(status_code=404, detail=f"Unknown provider: {provider_id!r}")
+    await catalog.delete()
 
 
 @router.delete("/{provider_id}/connection", status_code=204)

@@ -33,7 +33,7 @@ from druks.durable.engine import init_dbos, launch, shutdown
 from druks.durable.exceptions import AgentCallNotFound
 from druks.events.routes import router as events_router
 from druks.files.routes import router as files_router
-from druks.harnesses.exceptions import ExecutionSettingsError
+from druks.harnesses.exceptions import CatalogError, ExecutionSettingsError
 from druks.harnesses.routes import router as providers_router
 from druks.mcp.catalog import load_mcp_catalog
 from druks.mcp.gateway import exceptions as gate_errors
@@ -216,6 +216,12 @@ async def _service_not_connected_handler(
 @app.exception_handler(OauthPageError)
 async def _oauth_page_error_handler(request: Request, exc: OauthPageError) -> HTMLResponse:
     return render_page("service_oauth_error.html", message=str(exc), status_code=exc.status_code)
+
+
+@app.exception_handler(CatalogError)
+async def _catalog_error_handler(request: Request, exc: CatalogError) -> JSONResponse:
+    detail = f"The provider directory is unreachable: {exc.tag}."
+    return JSONResponse(status_code=503, content={"error": "HTTP_503", "detail": detail})
 
 
 @app.exception_handler(ExecutionSettingsError)

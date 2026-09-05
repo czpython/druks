@@ -6,8 +6,8 @@ from druks.user_settings.models import SettingsOverride, UserSettings
 
 from .base import Harness
 from .exceptions import ExecutionSettingsError, HarnessNotConnectedError
-from .models import ProviderKey, ProviderSubscription
-from .providers import get_provider
+from .models import ProviderCatalog, ProviderKey, ProviderSubscription
+from .providers import get_provider, is_registered, provider_label
 from .registry import get_harness
 
 
@@ -26,20 +26,26 @@ class Execution:
         return self.subscription.account_id if self.subscription else SYSTEM_ACCOUNT_ID
 
 
-def check_execution(harness_name: str, model: str, billing: str) -> type[Harness]:
+async def check_execution(harness_name: str, model: str, billing: str) -> type[Harness]:
     """The harness that runs the triple; a triple no harness runs raises."""
     harness = get_harness(harness_name)
     if not harness:
         raise ExecutionSettingsError(f"no installed harness is named {harness_name!r}.")
     provider_id = model.partition("/")[0]
-    try:
+    if is_registered(provider_id):
         provider = get_provider(provider_id)
-    except KeyError as error:
-        raise ExecutionSettingsError(
-            f"model {model!r} names no provider; a model id is 'provider/model'."
-        ) from error
-    if not harness.has_provider(provider):
-        raise ExecutionSettingsError(f"{harness_name} does not run {provider.label} models.")
+        if not harness.has_provider(provider):
+            raise ExecutionSettingsError(f"{harness_name} does not run {provider.label} models.")
+    else:
+        catalog = await ProviderCatalog.get(provider_id)
+        if not catalog:
+            raise ExecutionSettingsError(
+                f"model {model!r} names no provider; add one in Settings → Providers."
+            )
+        if harness.provider:
+            raise ExecutionSettingsError(f"{harness_name} does not run {catalog.label} models.")
+        if model not in {entry["id"] for entry in catalog.models}:
+            raise ExecutionSettingsError(f"{catalog.label} lists no model {model!r}.")
     if billing not in harness.billing_options:
         raise ExecutionSettingsError(
             f"{harness_name} runs on an API key only; set billing to api_key."
@@ -59,15 +65,15 @@ async def resolve_execution(agent_name: str, account_id: str | None) -> Executio
     harness_name = (await SettingsOverride.agent_harness(agent_name)).value
     model = (await SettingsOverride.agent_model(agent_name)).value
     billing = (await SettingsOverride.agent_billing(agent_name)).value
-    harness_class = check_execution(harness_name, model, billing)
+    harness_class = await check_execution(harness_name, model, billing)
     provider_id = model.partition("/")[0]
     subscription = None
     key = None
     if billing == "api_key":
         provider_key = await ProviderKey.get(provider_id)
         if not provider_key:
-            label = get_provider(provider_id).label
-            raise HarnessNotConnectedError(f"add an {label} API key in Settings → Providers.")
+            label = await provider_label(provider_id)
+            raise HarnessNotConnectedError(f"add the {label} API key in Settings → Providers.")
         key = provider_key.value.decrypt()
     else:
         subscription = await ProviderSubscription.lookup(

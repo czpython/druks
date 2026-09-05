@@ -156,6 +156,30 @@ def test_auth_json_keys_the_provider() -> None:
     assert json.loads(rendered) == {"openai": {"type": "api", "key": _API_KEY}}
 
 
+async def test_third_party_invocation_keeps_provider_key_and_model_namespace() -> None:
+    harness = OpenCodeHarness(
+        model="openrouter/anthropic/claude-sonnet-4",
+        fast_mode=False,
+        effort=None,
+        sandbox=_sandbox_config(),
+    )
+
+    invocation = await harness.build_invocation(
+        key="sk-openrouter",
+        prompt="Run it.",
+        schema={"type": "object"},
+        run_id="run-openrouter",
+        ssh_username="exedev",
+    )
+
+    assert invocation.env is not None
+    assert json.loads(invocation.env["OPENCODE_AUTH_CONTENT"]) == {
+        "openrouter": {"type": "api", "key": "sk-openrouter"}
+    }
+    assert invocation.env["DRUKS_PROVIDER"] == "openrouter"
+    assert invocation.env["DRUKS_MODEL"] == "anthropic/claude-sonnet-4"
+
+
 def test_parse_returns_contract_and_writes_cost_sidecars(tmp_path: Path) -> None:
     structured = {"answer": "done", "count": 3}
 

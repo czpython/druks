@@ -2,6 +2,7 @@ import base64
 import hashlib
 import json
 import logging
+import re
 import secrets
 import urllib.parse
 from datetime import UTC, datetime, timedelta
@@ -35,7 +36,19 @@ logger = logging.getLogger(__name__)
 _GRANT_TIMEOUT_SECONDS = 30.0
 _USAGE_TIMEOUT_SECONDS = 20.0
 _CATALOG_TIMEOUT_SECONDS = 20.0
-_MODELS_DEV_URL = "https://models.dev/api.json"
+_OPENAI_MODELS_URL = "https://api.openai.com/v1/models"
+# The platform lists every model on the account; only these run a coding agent.
+_OPENAI_CHAT_MODEL = re.compile(r"^(gpt-|o\d)")
+_OPENAI_NON_CHAT_MARKERS = (
+    "-realtime",
+    "-audio",
+    "-tts",
+    "-transcribe",
+    "-image",
+    "-search",
+    "-instruct",
+    "-embedding",
+)
 # The connect-flow pending state (PKCE verifier + state) lives in Redis this
 # long — enough to authorize and paste, short enough that an abandoned attempt
 # clears.
@@ -413,7 +426,7 @@ class Provider:
         except (exceptions.CatalogError, exceptions.OAuthTokenError) as exc:
             logger.warning("catalog refresh for %s failed: %s", cls.id, exc.tag)
         else:
-            await ProviderCatalog.create(cls.id, list(models))
+            await ProviderCatalog.create(cls.id, list(models), label=cls.label)
 
     @classmethod
     def _catalog_request(
@@ -443,6 +456,18 @@ def get_provider(provider_id: str) -> Provider:
         if provider.id == provider_id:
             return provider
     raise KeyError(provider_id)
+
+
+def is_registered(provider_id: str) -> bool:
+    return any(provider.id == provider_id for provider in get_providers())
+
+
+async def provider_label(provider_id: str) -> str:
+    """What to call a provider: the registry's name, or the one its catalog
+    carries for a provider the operator added by key."""
+    if is_registered(provider_id):
+        return get_provider(provider_id).label
+    return (await ProviderCatalog.get(provider_id)).label
 
 
 def _utc_now() -> datetime:
@@ -958,7 +983,7 @@ class OpenAiProvider(Provider):
         cls, subscription: ProviderSubscription | None, key: str | None
     ) -> ProviderRequest:
         if not subscription:
-            return ProviderRequest(_MODELS_DEV_URL, {})
+            return ProviderRequest(_OPENAI_MODELS_URL, {"Authorization": f"Bearer {key}"})
         # ``client_version`` is required and lower-bounds the list (the server
         # returns models with ``minimal_client_version <= client_version``); the
         # high constant asks for the full catalog, and the empty-list guard
@@ -973,8 +998,10 @@ class OpenAiProvider(Provider):
         try:
             if billing == "api_key":
                 models = tuple(
-                    {"id": f"{cls.id}/{model['id']}", "label": model["name"]}
-                    for model in json.loads(raw)[cls.id]["models"].values()
+                    {"id": f"{cls.id}/{model['id']}", "label": model["id"]}
+                    for model in json.loads(raw)["data"]
+                    if _OPENAI_CHAT_MODEL.match(model["id"])
+                    and not any(marker in model["id"] for marker in _OPENAI_NON_CHAT_MARKERS)
                 )
             else:
                 models = tuple(
