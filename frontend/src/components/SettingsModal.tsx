@@ -49,7 +49,6 @@ interface CatalogChoice extends CatalogModel {
 
 interface Catalog {
   modelsOf: (harness: string, billing: Billing) => CatalogChoice[]
-  modelsForProvider: (provider: string) => CatalogChoice[]
 }
 
 const addedProvider = (id: string, label: string): Provider => ({ id, label, billingOptions: ['api_key'] })
@@ -91,12 +90,6 @@ function buildCatalog(
       return catalogs
         .filter((catalog) => !harness.provider || harness.provider === catalog.provider)
         .filter((catalog) => providersById.get(catalog.provider)?.billingOptions.includes(billing))
-        .flatMap((catalog) => choicesFor(catalog, billing))
-    },
-    modelsForProvider: (provider) => {
-      const billing: Billing = connected.has(provider) && !keyed.has(provider) ? 'subscription' : 'api_key'
-      return catalogs
-        .filter((catalog) => catalog.provider === provider)
         .flatMap((catalog) => choicesFor(catalog, billing))
     },
   }
@@ -260,7 +253,6 @@ export function SettingsModal({ open, onClose }: Props) {
   // 'general' | 'providers' | 'agents' | 'browser-sessions' | 'skills' | 'mcp' |
   // 'agent-access' | <app name>
   const [section, setSection] = useState<string>('general')
-  const [modelBrowseProvider, setModelBrowseProvider] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [appProblems, setAppProblems] = useState<AppSettingsProblems>({})
@@ -567,10 +559,6 @@ export function SettingsModal({ open, onClose }: Props) {
                     ? providerCatalogsQuery.error.message
                     : null
                 }
-                onViewModels={(providerId) => {
-                  setModelBrowseProvider(providerId)
-                  setSection('agents')
-                }}
               />
             )}
             {section === 'agents' &&
@@ -586,8 +574,6 @@ export function SettingsModal({ open, onClose }: Props) {
                   allowedEfforts={allowedEfforts}
                   onOpenApp={setSection}
                   onAddProvider={() => setSection('providers')}
-                  browseProvider={modelBrowseProvider}
-                  onBrowseOpened={() => setModelBrowseProvider(null)}
                   busy={busy}
                 />
               ) : (
@@ -827,9 +813,6 @@ function ModelChooser({
   inheritLabel,
   isOverride = false,
   onAddProvider,
-  browseProvider,
-  onBrowseOpened,
-  onBrowseClosed,
 }: {
   id?: string
   value: string | null
@@ -841,21 +824,10 @@ function ModelChooser({
   inheritLabel?: string
   isOverride?: boolean
   onAddProvider: () => void
-  browseProvider?: string | null
-  onBrowseOpened?: () => void
-  onBrowseClosed?: () => void
 }) {
-  const buttonRef = useRef<HTMLButtonElement>(null)
   const [anchor, setAnchor] = useState<HTMLButtonElement | null>(null)
   const [search, setSearch] = useState('')
   const selected = choices.find((choice) => choice.id === value)
-
-  useEffect(() => {
-    if (!browseProvider || !buttonRef.current) return
-    setSearch(browseProvider)
-    setAnchor(buttonRef.current)
-    onBrowseOpened?.()
-  }, [browseProvider, onBrowseOpened])
 
   const query = search.trim().toLocaleLowerCase()
   const visible = choices.filter((choice) =>
@@ -873,7 +845,6 @@ function ModelChooser({
   const close = () => {
     setAnchor(null)
     setSearch('')
-    onBrowseClosed?.()
   }
   const pick = (next: string | null) => {
     onPick(next)
@@ -882,7 +853,6 @@ function ModelChooser({
   return (
     <>
       <button
-        ref={buttonRef}
         id={id}
         type="button"
         className={
@@ -1154,8 +1124,6 @@ export function AgentsPane({
   allowedEfforts,
   onOpenApp,
   onAddProvider,
-  browseProvider,
-  onBrowseOpened,
   busy,
 }: {
   defaults: Defaults
@@ -1168,32 +1136,12 @@ export function AgentsPane({
   allowedEfforts: string[]
   onOpenApp: (app: string) => void
   onAddProvider: () => void
-  browseProvider: string | null
-  onBrowseOpened: () => void
   busy: boolean
 }) {
   const fieldId = useId()
   const id = (field: string) => `${fieldId}-${field}`
   const harnesses = Object.values(harnessByName)
-  const executionModels = catalog.modelsOf(defaults.defaultHarness, defaults.defaultBilling)
-  const [browsingProvider, setBrowsingProvider] = useState<string | null>(null)
-  const providerToBrowse = browseProvider ?? browsingProvider
-  const models = providerToBrowse
-    ? catalog.modelsForProvider(providerToBrowse).map((choice) => {
-        const compatible = executionModels.find(
-          (candidate) => candidate.id === choice.id && candidate.provider === choice.provider,
-        )
-        return {
-          ...choice,
-          enabled: Boolean(compatible?.enabled),
-          unavailableReason: compatible
-            ? compatible.unavailableReason
-            : choice.enabled
-              ? 'Select a compatible harness and billing method'
-              : choice.unavailableReason,
-        }
-      })
-    : executionModels
+  const models = catalog.modelsOf(defaults.defaultHarness, defaults.defaultBilling)
   const defaultKeyOnly = keyOnly(harnessByName[defaults.defaultHarness])
   const timeouts = TIMEOUTS.includes(defaults.defaultTimeout)
     ? TIMEOUTS
@@ -1253,12 +1201,6 @@ export function AgentsPane({
               disabled={busy}
               label="Model"
               onAddProvider={onAddProvider}
-              browseProvider={browseProvider}
-              onBrowseOpened={() => {
-                setBrowsingProvider(browseProvider)
-                onBrowseOpened()
-              }}
-              onBrowseClosed={() => setBrowsingProvider(null)}
             />
           </div>
           <div className="mcp-field">
@@ -1844,7 +1786,6 @@ function ProvidersPane({
   catalogs,
   loading,
   requestError,
-  onViewModels,
 }: {
   providers: Provider[]
   subscriptions: ProviderSubscription[]
@@ -1852,7 +1793,6 @@ function ProvidersPane({
   catalogs: ProviderCatalog[]
   loading: boolean
   requestError: string | null
-  onViewModels: (providerId: string) => void
 }) {
   const [adding, setAdding] = useState(false)
   const [search, setSearch] = useState('')
@@ -1890,10 +1830,17 @@ function ProvidersPane({
     ...(directoryQuery.data ?? []),
   ]
     .filter((entry) => !configuredIds.has(entry.provider))
+    .map((entry) => ({
+      ...entry,
+      nameMatches: [entry.label, entry.provider].some((text) => text.toLocaleLowerCase().includes(query)),
+    }))
     .filter((entry) =>
-      [entry.label, entry.provider, ...entry.models.flatMap((model) => [model.label, model.id])].some(
-        (text) => text.toLocaleLowerCase().includes(query),
+      entry.nameMatches || entry.models.some((model) =>
+        [model.label, model.id].some((text) => text.toLocaleLowerCase().includes(query)),
       ),
+    )
+    .sort((left, right) =>
+      Number(right.nameMatches) - Number(left.nameMatches) || left.label.localeCompare(right.label),
     )
   return (
     <div className="set-pane mcp-pane hrs-pane">
@@ -1916,29 +1863,21 @@ function ProvidersPane({
           const subscription = subscriptions.find((row) => row.provider === provider.id) ?? null
           const apiKey = keys.find((row) => row.provider === provider.id) ?? null
           const catalog = catalogs.find((entry) => entry.provider === provider.id)
-          const modelCount = catalog?.models.length ?? 0
           const catalogIsStale = Boolean(
             catalog && openedAt - new Date(catalog.fetchedAt).getTime() > 24 * 60 * 60 * 1000,
           )
-          const connection = subscription?.connected
-            ? apiKey
-              ? 'Subscription and API key configured'
-              : 'Subscription connected'
-            : subscription
-              ? 'Subscription needs reconnect'
-              : apiKey
-                ? 'API key configured'
-                : 'Not configured'
           return (
             <article key={provider.id} className="set-card hr-card" style={{ '--fam': providerColor[provider.id] } as CSSProperties}>
               <header className="hr-ident">
                 <span className="hr-ident-dot" aria-hidden="true" />
                 <span className="hr-identity-copy">
                   <span className="hr-name">{provider.label}</span>
-                  <code className="hr-provider">{provider.id}</code>
                 </span>
-                <span className="hr-card-state" role="status">{connection}</span>
-                <span className="hr-count"><b>{modelCount}</b> models</span>
+                <span className="provider-catalog" title={catalog ? new Date(catalog.fetchedAt).toLocaleString() : undefined}>
+                  {catalog
+                    ? `${catalogIsStale ? 'Catalog is stale' : 'Catalog updated'} ${relTimeFromIso(catalog.fetchedAt)}`
+                    : 'No catalog yet'}
+                </span>
               </header>
               <ProviderConnect
                 provider={provider}
@@ -1947,22 +1886,6 @@ function ProvidersPane({
                 usage={usageQuery.data?.providers.find((row) => row.id === provider.id) ?? null}
                 keySpendToday={todayQuery.data?.providers.find((row) => row.id === provider.id)?.keySpendUsd ?? null}
               />
-              <div className="provider-models-row">
-                <span>
-                  <strong>{modelCount} models available</strong>
-                  {catalog ? (
-                    <small>
-                      {catalogIsStale ? 'Catalog is stale' : 'Catalog updated'}{' '}
-                      {relTimeFromIso(catalog.fetchedAt)}
-                    </small>
-                  ) : (
-                    <small>No catalog is available yet.</small>
-                  )}
-                </span>
-                <button type="button" className="set-btn ghost" onClick={() => onViewModels(provider.id)}>
-                  View models in Agents
-                </button>
-              </div>
             </article>
           )
         })}
@@ -1986,7 +1909,7 @@ function ProvidersPane({
               onChange={(event) => setSearch(event.target.value)}
             />
             <div className="provider-results" role="list" aria-label="Provider search results">
-              {candidates.slice(0, 30).map((entry) => {
+              {candidates.map((entry) => {
                 const provider =
                   providers.find((registered) => registered.id === entry.provider) ??
                   addedProvider(entry.provider, entry.label)
@@ -2002,9 +1925,7 @@ function ProvidersPane({
                     }}
                   >
                     <span><strong>{provider.label}</strong><code>{provider.id}</code></span>
-                    <span><b>{entry.models.length}</b> models</span>
                     <span>{provider.billingOptions.map(billingLabel).join(' or ')}</span>
-                    <span>Not configured</span>
                   </button>
                 )
               })}
@@ -2091,11 +2012,6 @@ export function ProviderConnect({
   const showKeyForm = acceptsApiKey && (keyFormOpen || replacing)
   return (
     <div className="hr-connect">
-      {acceptsSubscription && acceptsApiKey && (
-        <p className="hr-billing-note">
-          Use either your provider subscription or the installation API key as the billing method.
-        </p>
-      )}
       {acceptsSubscription && (
         <section className="hr-block">
           <div className="hr-block-title">Subscription</div>
@@ -2149,7 +2065,7 @@ export function ProviderConnect({
       )}
       {acceptsApiKey && (
         <section className="hr-block">
-          <div className="hr-block-title">API key</div>
+          {(apiKey || showKeyForm) && <div className="hr-block-title">API key</div>}
           {apiKey && (
             <div className="hr-conn-status">
               <span className="hr-conn-id">…{apiKey.keyTail}</span>
@@ -2171,33 +2087,31 @@ export function ProviderConnect({
             </div>
           )}
           {!apiKey && !showKeyForm && (
-            <button className="set-btn ghost provider-key-add" type="button" onClick={() => setKeyFormOpen(true)}>
+            <button className="set-btn quiet provider-key-add" type="button" onClick={() => setKeyFormOpen(true)}>
               Add API key
             </button>
           )}
           {showKeyForm && (
-            <form className="hr-conn-flow" onSubmit={createKey}>
-              <div className="hr-conn-step hr-conn-paste">
-                <input
-                  aria-label="API key"
-                  autoComplete="off"
-                  className="hr-conn-input"
-                  disabled={busy || flow.busy}
-                  onChange={(event) => setKey(event.target.value)}
-                  placeholder="Paste API key"
-                  spellCheck={false}
-                  type="password"
-                  value={key}
-                />
-                <button className="hr-conn-btn" disabled={busy || flow.busy || !key.trim()} type="submit">
-                  {apiKey ? 'Replace key' : 'Save API key'}
+            <form className="provider-key-form" onSubmit={createKey}>
+              <input
+                aria-label="API key"
+                autoComplete="off"
+                className="hr-conn-input"
+                disabled={busy || flow.busy}
+                onChange={(event) => setKey(event.target.value)}
+                placeholder="Paste API key"
+                spellCheck={false}
+                type="password"
+                value={key}
+              />
+              <button className="hr-conn-btn" disabled={busy || flow.busy || !key.trim()} type="submit">
+                {apiKey ? 'Replace key' : 'Save API key'}
+              </button>
+              {!apiKey && (
+                <button className="set-btn quiet" type="button" onClick={() => { setKey(''); setKeyFormOpen(false) }}>
+                  Cancel
                 </button>
-                {!apiKey && (
-                  <button className="set-btn quiet" type="button" onClick={() => { setKey(''); setKeyFormOpen(false) }}>
-                    Cancel
-                  </button>
-                )}
-              </div>
+              )}
             </form>
           )}
         </section>

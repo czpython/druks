@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { SettingsModal } from './SettingsModal'
@@ -76,6 +76,26 @@ const providerCatalogs = [
 ]
 
 const providerDirectory = [
+  ...Array.from({ length: 35 }, (_, index) => ({
+    provider: `gateway-${index}`,
+    label: `Gateway ${index}`,
+    models: [{ id: `gateway-${index}/moonshotai/kimi-k2`, label: 'Kimi K2' }],
+  })),
+  {
+    provider: 'kimi-for-coding',
+    label: 'Kimi For Coding',
+    models: [{ id: 'kimi-for-coding/kimi-k2', label: 'Kimi K2' }],
+  },
+  {
+    provider: 'moonshotai',
+    label: 'Moonshot AI',
+    models: [{ id: 'moonshotai/kimi-k2', label: 'Kimi K2' }],
+  },
+  {
+    provider: 'moonshotai-cn',
+    label: 'Moonshot AI (China)',
+    models: [{ id: 'moonshotai-cn/kimi-k2', label: 'Kimi K2' }],
+  },
   {
     provider: 'cerebras',
     label: 'Cerebras',
@@ -522,19 +542,38 @@ describe('SettingsModal agents', () => {
     expect(screen.getByRole('button', { name: 'Model' }).textContent).toContain('Llama 4')
   })
 
-  it('opens a configured provider catalog from the Providers pane', async () => {
+  it.each([
+    [' KIMI ', 'Kimi For Coding'],
+    ['moonshot', 'Moonshot AI'],
+  ])('prioritizes provider names and keeps all matches for %s', async (query, label) => {
+    stubFetch()
+    renderModal()
+    fireEvent.click(await screen.findByRole('button', { name: 'Providers' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Add provider' }))
+    fireEvent.change(screen.getByLabelText('Add provider'), { target: { value: query } })
+
+    const results = screen.getByRole('list', { name: 'Provider search results' })
+    await within(results).findByText(label)
+    const buttons = within(results).getAllByRole('button')
+    expect(buttons[0]!.textContent).toContain(label)
+    expect(buttons.length).toBeGreaterThan(30)
+    expect(within(results).getByText('Moonshot AI (China)')).toBeTruthy()
+    expect(within(results).queryByText(/\d+ models/)).toBeNull()
+
+    fireEvent.click(buttons[0]!)
+    const card = screen.getByText(label).closest('article')!
+    expect(within(card).getByRole('button', { name: 'Add API key' })).toBeTruthy()
+  })
+
+  it('keeps catalog freshness without model counts or a model navigation action', async () => {
     stubFetch()
     renderModal()
     fireEvent.click(await screen.findByRole('button', { name: 'Providers' }))
 
-    const groqCard = (await screen.findByText('Groq')).closest('article')
-    fireEvent.click(groqCard!.querySelector<HTMLButtonElement>('.provider-models-row button')!)
-
-    expect(await screen.findByRole('heading', { name: 'Agents' })).toBeTruthy()
-    expect((screen.getByLabelText('Search models') as HTMLInputElement).value).toBe('groq')
-    const llama = screen.getByRole('option', { name: /Llama 4/ }) as HTMLButtonElement
-    expect(llama.disabled).toBe(true)
-    expect(llama.textContent).toContain('Select a compatible harness and billing method')
+    const card = (await screen.findByText('Groq')).closest('article')!
+    expect(within(card).getByText(/Catalog (updated|is stale)/)).toBeTruthy()
+    expect(within(card).queryByText(/\d+ models/)).toBeNull()
+    expect(screen.queryByRole('button', { name: 'View models in Agents' })).toBeNull()
   })
 
   it('closes the model chooser with Escape without closing settings', async () => {
