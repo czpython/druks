@@ -144,6 +144,18 @@ const PHOTO: Field = {
   isRequired: false,
 }
 
+const PHOTOS: Field = {
+  field: 'multi_upload',
+  name: 'photos',
+  label: 'Photos',
+  accept: 'image/*',
+  helpText: 'Pictures of the shop.',
+  isRequired: false,
+}
+
+const SHOPFRONT = new File(['front'], 'shopfront.jpg', { type: 'image/jpeg' })
+const INTERIOR = new File(['inside'], 'interior.jpg', { type: 'image/jpeg' })
+
 const SECRET: Field = {
   field: 'secret',
   name: 'token',
@@ -964,5 +976,195 @@ describe('an upload field', () => {
     )
     expect(callOperation).not.toHaveBeenCalled()
     expect(container.querySelector('.dui-field-error')).toBeTruthy()
+  })
+})
+
+describe('a multi-upload field', () => {
+  beforeEach(() => {
+    upload.mockImplementation(async (_app, file) => ({
+      id: `id-${file.name}`,
+      name: file.name,
+      contentType: file.type,
+      size: file.size,
+      url: `/api/files/id-${file.name}`,
+    }))
+  })
+
+  it.each(['form', 'action'])('submits all file ids from a %s after every upload', async (owner) => {
+    const sends = action({ refresh: 'none' })
+    const { container } = renderBlocks([
+      owner === 'form' ? form([PHOTOS], sends) : { ...sends, fields: [PHOTOS] },
+    ])
+    if (owner === 'action') fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    const input = screen.getByLabelText('Photos') as HTMLInputElement
+    expect(input.multiple).toBe(true)
+    expect(input.accept).toBe('image/*')
+    fireEvent.change(input, { target: { files: [SHOPFRONT, INTERIOR] } })
+    expect(screen.getByText('shopfront.jpg')).toBeTruthy()
+    expect(screen.getByText('interior.jpg')).toBeTruthy()
+    expect(upload).not.toHaveBeenCalled()
+
+    fireEvent.submit(container.querySelector('form')!)
+
+    await waitFor(() =>
+      expect(callOperation).toHaveBeenCalledWith('POST', '/api/field_notes/notes', {
+        photos: ['id-shopfront.jpg', 'id-interior.jpg'],
+      }),
+    )
+    expect(upload).toHaveBeenNthCalledWith(1, 'field_notes', SHOPFRONT)
+    expect(upload).toHaveBeenNthCalledWith(2, 'field_notes', INTERIOR)
+    await waitFor(() => expect(screen.queryByText('shopfront.jpg')).toBeNull())
+    expect(screen.queryByText('interior.jpg')).toBeNull()
+    expect(container.querySelector<HTMLInputElement>('input[type="file"]')!.value).toBe('')
+    if (owner === 'action') expect(screen.queryByRole('dialog')).toBeNull()
+  })
+
+  it('removes one selected file before upload', async () => {
+    const { container } = renderBlocks([form([PHOTOS], action({ refresh: 'none' }))])
+    fireEvent.change(screen.getByLabelText('Photos'), { target: { files: [SHOPFRONT, INTERIOR] } })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Remove shopfront.jpg' }))
+    expect(screen.queryByText('shopfront.jpg')).toBeNull()
+    fireEvent.submit(container.querySelector('form')!)
+
+    await waitFor(() =>
+      expect(callOperation).toHaveBeenCalledWith('POST', '/api/field_notes/notes', {
+        photos: ['id-interior.jpg'],
+      }),
+    )
+    expect(upload).toHaveBeenCalledTimes(1)
+    expect(upload).toHaveBeenCalledWith('field_notes', INTERIOR)
+  })
+
+  it('submits an empty optional field as a list', async () => {
+    const { container } = renderBlocks([form([PHOTOS], action({ refresh: 'none' }))])
+
+    fireEvent.submit(container.querySelector('form')!)
+
+    await waitFor(() =>
+      expect(callOperation).toHaveBeenCalledWith('POST', '/api/field_notes/notes', {
+        photos: [],
+      }),
+    )
+    expect(upload).not.toHaveBeenCalled()
+  })
+
+  it('requires at least one file after the last selected file is removed', async () => {
+    const { container } = renderBlocks([form([{ ...PHOTOS, isRequired: true }])])
+    const input = screen.getByLabelText(/Photos/) as HTMLInputElement
+    expect(input.checkValidity()).toBe(false)
+    fireEvent.change(input, { target: { files: [SHOPFRONT] } })
+    expect(input.checkValidity()).toBe(true)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Remove shopfront.jpg' }))
+    expect(input.checkValidity()).toBe(false)
+    fireEvent.submit(container.querySelector('form')!)
+
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toBe('Choose at least one file.'))
+    expect(upload).not.toHaveBeenCalled()
+    expect(callOperation).not.toHaveBeenCalled()
+  })
+
+  it('keeps the selection on cancel and replaces it on another selection', () => {
+    renderBlocks([form([PHOTOS])])
+    const input = screen.getByLabelText('Photos')
+    fireEvent.change(input, { target: { files: [SHOPFRONT] } })
+    fireEvent.change(input, { target: { files: [] } })
+    expect(screen.getByText('shopfront.jpg')).toBeTruthy()
+
+    fireEvent.change(input, { target: { files: [INTERIOR] } })
+
+    expect(screen.queryByText('shopfront.jpg')).toBeNull()
+    expect(screen.getByText('interior.jpg')).toBeTruthy()
+  })
+
+  it.each(['form', 'action'])('blocks a partial list in a %s and permits correction', async (owner) => {
+    upload
+      .mockResolvedValueOnce({
+        id: 'id-shopfront.jpg',
+        name: SHOPFRONT.name,
+        contentType: SHOPFRONT.type,
+        size: SHOPFRONT.size,
+        url: '/api/files/id-shopfront.jpg',
+      })
+      .mockRejectedValueOnce(
+        new ApiError('That file is larger than 25 MB. Choose a smaller one.', 413, null),
+      )
+    const sends = action({ refresh: 'none' })
+    const { container } = renderBlocks([
+      owner === 'form' ? form([PHOTOS], sends) : { ...sends, fields: [PHOTOS] },
+    ])
+    if (owner === 'action') fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    const input = screen.getByLabelText('Photos')
+    fireEvent.change(input, { target: { files: [SHOPFRONT, INTERIOR] } })
+
+    fireEvent.submit(container.querySelector('form')!)
+
+    const error = await screen.findByRole('alert')
+    expect(error.textContent).toContain('larger than 25 MB')
+    expect(input.getAttribute('aria-invalid')).toBe('true')
+    expect(input.getAttribute('aria-describedby')?.split(' ')).toContain(error.id)
+    expect(callOperation).not.toHaveBeenCalled()
+    expect(screen.getByText('shopfront.jpg')).toBeTruthy()
+    expect(screen.getByText('interior.jpg')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Remove interior.jpg' }))
+    fireEvent.submit(container.querySelector('form')!)
+    await waitFor(() =>
+      expect(callOperation).toHaveBeenCalledWith('POST', '/api/field_notes/notes', {
+        photos: ['id-shopfront.jpg'],
+      }),
+    )
+  })
+
+  it('waits for the last upload before it calls the operation', async () => {
+    let finish = () => {}
+    upload
+      .mockResolvedValueOnce({
+        id: 'file-1',
+        name: SHOPFRONT.name,
+        contentType: SHOPFRONT.type,
+        size: SHOPFRONT.size,
+        url: '/api/files/file-1',
+      })
+      .mockImplementationOnce(() =>
+        new Promise((resolve) => {
+          finish = () => resolve({
+            id: 'file-2',
+            name: INTERIOR.name,
+            contentType: INTERIOR.type,
+            size: INTERIOR.size,
+            url: '/api/files/file-2',
+          })
+        }),
+      )
+    const { container } = renderBlocks([form([PHOTOS], action({ refresh: 'none' }))])
+    fireEvent.change(screen.getByLabelText('Photos'), { target: { files: [SHOPFRONT, INTERIOR] } })
+    fireEvent.submit(container.querySelector('form')!)
+    await waitFor(() => expect(upload).toHaveBeenCalledTimes(2))
+    expect(callOperation).not.toHaveBeenCalled()
+    expect((screen.getByRole('button', { name: 'Save' }) as HTMLButtonElement).disabled).toBe(true)
+
+    finish()
+
+    await waitFor(() =>
+      expect(callOperation).toHaveBeenCalledWith('POST', '/api/field_notes/notes', {
+        photos: ['file-1', 'file-2'],
+      }),
+    )
+  })
+
+  it('clears the native picker when an action dialog is canceled', () => {
+    renderBlocks([action({ fields: [PHOTOS] })])
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    fireEvent.change(screen.getByLabelText('Photos'), { target: { files: [SHOPFRONT, INTERIOR] } })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    expect(screen.queryByText('shopfront.jpg')).toBeNull()
+    expect(screen.queryByText('interior.jpg')).toBeNull()
+    expect((screen.getByLabelText('Photos') as HTMLInputElement).files).toHaveLength(0)
+    expect(upload).not.toHaveBeenCalled()
+    expect(callOperation).not.toHaveBeenCalled()
   })
 })

@@ -403,6 +403,14 @@
           "isRequired": false
         },
         {
+          "field": "multi_upload",
+          "name": "photos",
+          "label": "Photos",
+          "accept": "image/*",
+          "helpText": "Pictures of the shop.",
+          "isRequired": false
+        },
+        {
           "field": "secret",
           "name": "token",
           "label": "Access token",

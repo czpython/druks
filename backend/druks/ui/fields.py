@@ -81,6 +81,16 @@ class UploadField(PageField):
     accept: str = ""
 
 
+class MultiUploadField(PageField):
+    """Several files the operator picks. The shell stores each file and
+    submits their ids, so the operation takes a plain list of strings."""
+
+    field: Literal["multi_upload"] = "multi_upload"
+    # The file dialog uses this filter, for example "image/*" or ".csv,.tsv".
+    # It narrows the choices, but does not validate the bytes.
+    accept: str = ""
+
+
 class SecretField(PageField):
     """One secret the operator hands over: a token, a key. It has no ``value``,
     so a page cannot send a stored secret back to the browser."""
@@ -97,6 +107,7 @@ Field = Annotated[
     | RadioField
     | CheckboxField
     | UploadField
+    | MultiUploadField
     | SecretField,
     Discriminator("field"),
 ]

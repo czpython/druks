@@ -8,6 +8,7 @@ from druks.ui import (
     EmptyState,
     Form,
     Link,
+    MultiUploadField,
     Page,
     SecretField,
     Section,
@@ -96,6 +97,48 @@ def test_an_action_cannot_collect_fields_and_ask_for_confirmation():
             fields=[TextField(name="body", label="Note")],
             confirm="Write this note?",
         )
+
+
+@pytest.mark.parametrize("owner", ["action", "form"])
+def test_multi_upload_fields_round_trip_through_the_page(owner: str):
+    """Actions and forms preserve the list picker contract without a stored value."""
+    fields = [
+        MultiUploadField(
+            name="photos",
+            label="Photos",
+            accept="image/*",
+            help_text="Pictures of the shop.",
+            is_required=True,
+        )
+    ]
+    if owner == "action":
+        block = Action(label="Save", operation="write_note", fields=fields)
+    else:
+        block = Form(action=Action(label="Save", operation="write_note"), fields=fields)
+    page = Page("Photos", blocks=[block])
+    encoded = page.model_dump(by_alias=True, mode="json")
+    decoded = Page.model_validate(encoded)
+
+    assert decoded.model_dump(by_alias=True, mode="json") == encoded
+    assert encoded["blocks"][0]["fields"] == [
+        {
+            "field": "multi_upload",
+            "name": "photos",
+            "label": "Photos",
+            "accept": "image/*",
+            "helpText": "Pictures of the shop.",
+            "isRequired": True,
+        }
+    ]
+
+
+def test_a_multi_upload_field_starts_optional_without_a_value():
+    """The picker cannot send stored file ids back to the browser."""
+    field = MultiUploadField(name="photos", label="Photos")
+
+    assert field.accept == ""
+    assert not field.is_required
+    assert "value" not in MultiUploadField.model_fields
 
 
 def test_an_action_sends_each_value_once():

@@ -377,6 +377,23 @@ function useAction(action: Action, fields: Field[] = [], clear?: () => void) {
   async function store(values: Payload) {
     const payload: Payload = { ...values }
     const failures: Record<string, string> = {}
+    for (const field of fields) {
+      if (field.field !== 'multi_upload') continue
+      const files = values[field.name] as File[]
+      if (field.isRequired && files.length === 0) {
+        failures[field.name] = 'Choose at least one file.'
+        continue
+      }
+      try {
+        const ids: string[] = []
+        for (const file of files) {
+          ids.push((await api.upload(app, file)).id)
+        }
+        payload[field.name] = ids
+      } catch (error) {
+        failures[field.name] = message(error)
+      }
+    }
     for (const [name, value] of Object.entries(values)) {
       if (!(value instanceof File)) continue
       try {
@@ -503,6 +520,7 @@ function message(error: unknown): string {
 }
 
 function startingValue(field: Field): [string, unknown] {
+  if (field.field === 'multi_upload') return [field.name, []]
   // An upload starts empty. No value the server sends could put a file back
   // into a file input, and the browser would refuse it if it tried.
   if (field.field === 'upload') return [field.name, null]

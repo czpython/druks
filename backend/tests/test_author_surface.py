@@ -67,6 +67,7 @@ AUTHOR_SURFACE = {
         "Metric",
         "Metrics",
         "MultiSelectField",
+        "MultiUploadField",
         "NumberField",
         "NumberValue",
         "Option",

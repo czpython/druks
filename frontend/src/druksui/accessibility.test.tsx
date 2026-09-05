@@ -7,6 +7,7 @@ import { memoryLocation } from 'wouter/memory-location'
 import { api } from '../api/client'
 import type { Block, Operation, PageEntry, PageSnapshot } from '../api/types'
 import { Blocks } from './Blocks'
+import { Fields } from './Fields'
 import catalog from './catalog.json'
 import { PagesContext } from './pages'
 
@@ -92,6 +93,45 @@ describe('every V1 renderer', () => {
         input.closest('label')?.textContent
       expect(labelled?.trim()).toBeTruthy()
     }
+  })
+
+  it('names the multi-upload selection and connects its help and error to the input', () => {
+    const change = vi.fn()
+    const photos = [new File(['front'], 'shopfront.jpg'), new File(['inside'], 'interior.jpg')]
+    const { container } = render(
+      <Fields
+        fields={[
+          {
+            field: 'multi_upload',
+            name: 'photos',
+            label: 'Photos',
+            accept: 'image/*',
+            helpText: 'Pictures of the shop.',
+            isRequired: true,
+          },
+        ]}
+        values={{ photos }}
+        errors={{ photos: 'The upload failed. Try again.' }}
+        resets={0}
+        onChange={change}
+      />,
+    )
+    const input = screen.getByLabelText(/Photos/, { selector: 'input' }) as HTMLInputElement
+    fireEvent.change(input, { target: { files: photos } })
+    const help = screen.getByText('Pictures of the shop.')
+    const error = screen.getByRole('alert')
+
+    expect(input.getAttribute('aria-describedby')).toBe(`${help.id} ${error.id}`)
+    expect(input.getAttribute('aria-invalid')).toBe('true')
+    expect(input.getAttribute('aria-required')).toBe('true')
+    expect(screen.getByRole('list', { name: 'Photos selected files' })).toBeTruthy()
+    for (const control of Array.from(container.querySelectorAll<HTMLElement>('input, button'))) {
+      control.focus()
+      expect(document.activeElement).toBe(control)
+    }
+    fireEvent.click(screen.getByRole('button', { name: 'Remove shopfront.jpg' }))
+    expect(change).toHaveBeenCalledWith('photos', [expect.objectContaining({ name: 'interior.jpg' })])
+    expect(document.activeElement).toBe(input)
   })
 
   it('gives every control a name and takes focus in reading order', async () => {

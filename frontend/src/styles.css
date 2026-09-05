@@ -2819,6 +2819,10 @@ body[data-palette="mono"] .dui-page {
 .dui-input[aria-invalid='true'] { border-color: var(--outcome-failed); }
 .dui-checkbox { width: 18px; height: 18px; accent-color: var(--dui-primary); }
 .dui-upload { padding: 6px 8px; }
+.dui-upload-files { display: grid; gap: 8px; margin: 8px 0 0; padding: 0; list-style: none; }
+.dui-upload-files li { display: flex; align-items: center; gap: 12px; }
+.dui-upload-files li > span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.dui-upload-files .dui-action { flex-shrink: 0; }
 .dui-upload::file-selector-button { min-height: 32px; margin-right: 12px; padding: 0 12px; border: 1px solid var(--border-loud); border-radius: var(--dui-radius-control); background: var(--surface-2); color: var(--text-mid); font-size: 13px; font-weight: 500; font-family: inherit; transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease; }
 .dui-upload::file-selector-button:hover { background: var(--surface-3); color: var(--text); border-color: var(--text-faint); }
 .dui-field-help { font-size: 12px; line-height: 16px; margin-top: 6px; }
