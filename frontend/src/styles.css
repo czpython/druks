@@ -1085,8 +1085,7 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
 .provider-quotas .hr-quota-pct { font-family: var(--font-sans); font-variant-numeric: tabular-nums; }
 .provider-key-details { display: flex; flex-wrap: wrap; gap: 6px 12px; color: var(--text-mid); font-size: 12px; overflow-wrap: anywhere; }
 .provider-save-note { margin: 0; color: var(--text-dim); font-size: 12px; }
-.providers-pane .provider-add-button { display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; min-height: 32px; background: var(--text); color: var(--bg); border-color: var(--text); }
-.providers-pane .provider-add-button:hover { background: var(--text-mid); border-color: var(--text-mid); }
+.providers-pane .provider-add-button { display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; min-height: 32px; }
 .providers-pane .set-btn { min-height: 30px; }
 .hrs-pane .set-btn.ghost { border-color: var(--border-loud); background: var(--surface-2); }
 .hrs-pane .set-btn.ghost:hover:not(:disabled) { background: var(--surface-3); }
