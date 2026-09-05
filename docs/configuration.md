@@ -278,11 +278,21 @@ host login. This is a capability connection for the requesting account. In a
 fresh `none`-mode install, the first completed subscription connection also
 creates the operator account. See [access control](#public-urls-and-access-control).
 
-**Add provider** searches the Models.dev directory for a vendor that runs on
-one API key. Druks reads the directory when you open the search, keeps it in
-Redis for a day, and stores nothing until you paste a key. The key makes the
-vendor one of the installation's providers with its model list. Removing the
-key removes the vendor.
+**Add provider** searches Models.dev for providers that use one API key.
+Druks caches the directory in Redis for one day for search and provider details.
+**Save** stores the key and adds the provider and its model list.
+When you remove the key, Druks removes the provider.
+
+Provider details show documentation and API URLs from Models.dev.
+Druks does not verify provider identity or restrict requests to the listed endpoint.
+When an agent runs, OpenCode selects the endpoint.
+
+Before you save a key, check the provider documentation and domain.
+
+Cards show five-hour and general weekly limits with the time until reset.
+Tooltips show exact reset times. **Catalog status** shows each provider's last
+update. Anthropic and OpenAI fetch separate model lists. Added providers use
+the cached Models.dev directory.
 
 The `claude` and `codex` CLIs run on their own vendor's subscription or key.
 `opencode` and `pi` run on an API key only. OpenCode can run a supported

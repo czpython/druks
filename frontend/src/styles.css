@@ -1003,9 +1003,9 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
    defaults, and connection into three bands. Provider color survives only as
    the identity dot and the guided connect-flow accent. */
 .hrs-list { display: flex; flex-direction: column; gap: 10px; }
-.hrs-pane :is(.set-btn, .hr-conn-btn, .mcp-conn, .hr-more summary) { font-family: var(--font-sans); letter-spacing: 0; }
+.hrs-pane :is(.set-btn, .hr-conn-btn, .mcp-conn) { font-family: var(--font-sans); letter-spacing: 0; }
 .hr-card { display: flex; flex-direction: column; gap: 12px; padding: 13px 14px; }
-.hr-ident { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 9px 14px; }
+.hr-ident { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 9px 14px; }
 .hr-ident-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--fam, var(--border-loud)); flex-shrink: 0; }
 .hr-identity-copy { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
 .hr-name { font-size: 13.5px; font-weight: 600; color: var(--text); }
@@ -1040,21 +1040,14 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
 .hr-block { display: flex; flex-direction: column; gap: 9px; }
 .hr-block + .hr-block { border-top: 1px solid var(--border); padding-top: 12px; }
 .hr-block-title { font-size: 11px; font-weight: 600; color: var(--text-dim); }
-.hr-quota { display: grid; grid-template-columns: 70px minmax(0, 100px) minmax(120px, 1fr) 106px minmax(190px, auto); align-items: center; gap: 10px; font-size: 11.5px; }
+.hr-quota { display: grid; grid-template-columns: 55px minmax(80px, 1fr) 110px 100px; align-items: center; gap: 10px; font-size: 11.5px; }
 .hr-quota .us-bar { margin: 0; }
 .hr-quota-label { color: var(--text-mid); }
-.hr-quota-model { color: var(--text-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .hr-quota-pct { text-align: right; color: var(--text-mid); white-space: nowrap; }
 .provider-key-add { align-self: flex-start; padding-left: 0; }
 .provider-key-form { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
 .provider-key-form .hr-conn-input { min-width: 0; flex: 1 1 240px; }
 .provider-key-form .hr-conn-input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.provider-catalog { font-size: 10.5px; color: var(--text-dim); }
-.hr-more { position: relative; }
-.hr-more summary { list-style: none; cursor: pointer; color: var(--text-dim); font-size: 11.5px; padding: 6px 8px; border-radius: 4px; }
-.hr-more summary::-webkit-details-marker { display: none; }
-.hr-more summary:hover { color: var(--text); background: var(--surface-3); }
-.hr-more[open] > .set-btn { position: absolute; z-index: 4; top: calc(100% + 4px); right: 0; background: var(--surface-3); box-shadow: 0 12px 28px -10px rgba(0, 0, 0, 0.8); }
 .provider-state { font-size: 12px; color: var(--text-dim); }
 .provider-empty { display: flex; flex-direction: column; gap: 4px; padding: 18px 0 4px; color: var(--text-dim); font-size: 12px; }
 .provider-empty strong { color: var(--text); font-size: 13px; }
@@ -1063,11 +1056,25 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
 .provider-add-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .provider-add-head label { font-size: 13px; font-weight: 600; color: var(--text); }
 .provider-results { display: flex; flex-direction: column; max-height: 260px; overflow: auto; border-top: 1px solid var(--border); }
-.provider-result { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 12px; width: 100%; padding: 10px 4px; border-bottom: 1px solid var(--border-soft); color: var(--text-mid); text-align: left; font-size: 11.5px; }
-.provider-result:hover { background: var(--surface-3); color: var(--text); }
-.provider-result > span:first-child { display: flex; flex-direction: column; gap: 2px; }
-.provider-result strong { font-size: 12.5px; color: var(--text); }
-.provider-result code { font-family: var(--font-mono); font-size: 10.5px; color: var(--text-dim); font-weight: 400; }
+.provider-result { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 12px; width: 100%; padding: 0 4px; border-bottom: 1px solid var(--border-soft); color: var(--text-mid); text-align: left; font-size: 11.5px; }
+
+.hr-subscription { font-family: var(--font-sans); color: var(--text-dim); font-size: 11.5px; }
+.hr-quota-reset { color: var(--text-dim); font-size: 11px; }
+.provider-source { display: grid; gap: 5px; font-size: 11.5px; color: var(--text-dim); overflow-wrap: anywhere; }
+.provider-source p, .provider-directory-note { margin: 0; font-size: 11px; color: var(--text-dim); line-height: 1.5; }
+.provider-source a, .provider-directory-note a, .provider-result > a { color: var(--text-mid); text-decoration: underline; text-underline-offset: 3px; }
+.provider-source code { font-size: 11px; color: var(--text-mid); }
+.provider-result-select { display: flex; flex-direction: column; gap: 3px; align-items: flex-start; min-width: 0; text-align: left; padding: 11px 4px; color: var(--text); }
+.provider-result-select:hover { background: var(--surface-3); }
+.provider-result-select strong { font-size: 12.5px; }
+.provider-result-select code { font-size: 10.5px; color: var(--text-dim); overflow-wrap: anywhere; }
+.provider-catalogs { font-size: 11px; color: var(--text-dim); }
+.provider-catalogs summary { cursor: pointer; padding: 5px 0; }
+.provider-catalogs p { margin: 8px 0; }
+.provider-catalogs dl { display: grid; gap: 6px; margin: 0; }
+.provider-catalogs dl > div { display: flex; justify-content: space-between; gap: 12px; }
+.provider-catalogs dd { margin: 0; }
+.hrs-pane :is(a, summary, .provider-result-select):focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 @media (max-width: 600px) {
   .set-backdrop { padding: 0; }
@@ -1083,17 +1090,15 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
   .set-foot-actions { gap: 6px; }
   .set-btn { padding: 7px 11px; }
   .hr-ident { grid-template-columns: auto minmax(0, 1fr) auto; gap: 7px 9px; }
-  .provider-catalog { grid-column: 2 / -1; }
   .hr-identity-copy { flex-direction: column; align-items: flex-start; gap: 2px; }
   .hr-conn-status { align-items: flex-start; }
-  .hr-conn-id { width: calc(100% - 90px); }
-  .hr-conn-actions { width: 100%; margin-left: 0; }
-  .hr-quota { grid-template-columns: minmax(70px, auto) minmax(0, 1fr) auto; grid-template-areas: 'label model pct' 'bar bar bar' 'reset reset reset'; gap: 5px 8px; padding: 5px 0; }
+  .hr-conn-id { flex: 1 1 180px; white-space: normal; overflow-wrap: anywhere; }
+  .hr-conn-actions { flex-wrap: wrap; }
+  .hr-quota { grid-template-columns: minmax(70px, auto) minmax(0, 1fr) auto; grid-template-areas: 'label pct pct' 'bar bar bar' 'reset reset reset'; gap: 5px 8px; padding: 5px 0; }
   .hr-quota-label { grid-area: label; }
-  .hr-quota-model { grid-area: model; }
   .hr-quota .us-bar { grid-area: bar; }
   .hr-quota-pct { grid-area: pct; }
-  .hr-quota .hr-conn-exp { grid-area: reset; }
+  .hr-quota-reset { grid-area: reset; }
   .provider-result { grid-template-columns: 1fr auto; gap: 5px 12px; }
   .provider-add-panel { padding: 12px; }
   .model-chooser-option { align-items: flex-start; flex-direction: column; gap: 2px; }

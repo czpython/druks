@@ -65,6 +65,7 @@ function renderCard(
 afterEach(() => {
   cleanup()
   vi.unstubAllGlobals()
+  vi.useRealTimers()
 })
 
 async function flush() {
@@ -81,7 +82,7 @@ describe('ProviderConnect', () => {
     expect(screen.queryByLabelText('API key')).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'Add API key' }))
     expect(screen.getByLabelText('API key')).toBeTruthy()
-    expect(screen.getByRole('button', { name: 'Save API key' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Save' })).toBeTruthy()
     expect(screen.queryByText('Disconnect subscription')).toBeNull()
     expect(screen.queryByText('Remove API key')).toBeNull()
   })
@@ -95,7 +96,7 @@ describe('ProviderConnect', () => {
     expect(screen.queryByLabelText('API key')).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'Add API key' }))
     expect((screen.getByLabelText('API key') as HTMLInputElement).value).toBe('')
-    expect((screen.getByRole('button', { name: 'Save API key' }) as HTMLButtonElement).disabled).toBe(true)
+    expect((screen.getByRole('button', { name: 'Save' }) as HTMLButtonElement).disabled).toBe(true)
   })
 
   it('a key-only vendor shows only the key block', () => {
@@ -134,13 +135,46 @@ describe('ProviderConnect', () => {
     expect(screen.getByText('41% remaining')).toBeTruthy()
     expect(screen.getByText('5-hour')).toBeTruthy()
     expect(screen.getByText('Weekly')).toBeTruthy()
-    expect(screen.getByText(/Token expires/)).toBeTruthy()
+    expect(screen.queryByText(/Token expires/)).toBeNull()
     expect(screen.queryByText('Expired')).toBeNull()
     expect(screen.queryByRole('button', { name: 'Reconnect' })).toBeNull()
-    expect(screen.getByRole('button', { name: 'Disconnect subscription' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Disconnect Anthropic subscription' })).toBeTruthy()
     expect(screen.queryByRole('button', { name: /Sign in/ })).toBeNull()
     expect(screen.queryByLabelText('API key')).toBeNull()
     expect(screen.queryByText('Remove API key')).toBeNull()
+  })
+
+  it('shows only the general weekly quota and keeps reset times relative', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-09-05T10:00:00Z'))
+    renderCard(provider(), {
+      subscription: subscription(),
+      usage: {
+        id: 'anthropic', label: 'Anthropic', available: true, connected: true,
+        providerEmail: 'seat@example.com', planTier: null,
+        fiveHour: { percentLeft: 0, resetsAt: '2026-09-05T12:00:00Z', model: null },
+        weeks: [
+          { percentLeft: 69, resetsAt: null, model: 'Fable' },
+          { percentLeft: 83, resetsAt: '2026-09-11T10:00:00Z', model: null },
+          { percentLeft: 50, resetsAt: null, model: 'GPT reserve' },
+        ],
+        unlimited: false, scrapedAt: null, ageSeconds: null, stale: false, error: null, rawOutput: null,
+      },
+    })
+
+    expect(screen.getAllByText('Weekly')).toHaveLength(1)
+    expect(screen.getByText('83% remaining')).toBeTruthy()
+    expect(screen.queryByText('69% remaining')).toBeNull()
+    expect(screen.queryByText('50% remaining')).toBeNull()
+    expect(screen.queryByText('Fable')).toBeNull()
+    expect(screen.queryByText('GPT reserve')).toBeNull()
+    expect(screen.getByText('Resets in 6d')).toBeTruthy()
+    expect(screen.getByText('Resets in 2h').getAttribute('dateTime')).toBe('2026-09-05T12:00:00Z')
+    expect(screen.getByText('Resets in 2h').getAttribute('title')).toBeTruthy()
+    act(() => { vi.advanceTimersByTime(1000) })
+    expect(screen.getByText('Resets in 2h')).toBeTruthy()
+    act(() => { vi.advanceTimersByTime(2 * 60 * 60 * 1000) })
+    expect(screen.getByText('Reset due')).toBeTruthy()
   })
 
   it('a shared key shows its tail, who set it, spend today, Replace and Remove', () => {
@@ -149,15 +183,15 @@ describe('ProviderConnect', () => {
     expect(screen.getByText('…4f2a')).toBeTruthy()
     expect(screen.getByText(/set by ops@corp.com/)).toBeTruthy()
     expect(screen.getByText(/\$12\.40 today/)).toBeTruthy()
-    expect(screen.getByRole('button', { name: 'Remove API key' })).toBeTruthy()
-    expect(screen.getByLabelText('More Anthropic API key actions')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Remove Anthropic API key' })).toBeTruthy()
+    expect(screen.queryByText('More')).toBeNull()
     expect(screen.queryByLabelText('API key')).toBeNull()
     // The subscription block still invites a sign-in.
     expect(screen.getByRole('button', { name: 'Sign in with Anthropic' })).toBeTruthy()
 
     fireEvent.click(screen.getByRole('button', { name: 'Replace' }))
     expect(screen.getByLabelText('API key')).toBeTruthy()
-    expect(screen.getByRole('button', { name: 'Replace key' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Save' })).toBeTruthy()
   })
 
   it('both connected shows both blocks and never the operator account', () => {
@@ -165,8 +199,8 @@ describe('ProviderConnect', () => {
 
     expect(screen.getByText('claude-seat@corp.com')).toBeTruthy()
     expect(screen.getByText('…4f2a')).toBeTruthy()
-    expect(screen.getByRole('button', { name: 'Disconnect subscription' })).toBeTruthy()
-    expect(screen.getByRole('button', { name: 'Remove API key' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Disconnect Anthropic subscription' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Remove Anthropic API key' })).toBeTruthy()
     expect(screen.queryByText('op@example.com')).toBeNull()
   })
 
@@ -177,9 +211,9 @@ describe('ProviderConnect', () => {
 
     expect(screen.getByText('Expired')).toBeTruthy()
     expect(screen.getByText('claude-seat@corp.com')).toBeTruthy()
-    expect(screen.getByText(/Token expired/)).toBeTruthy()
+    expect(screen.queryByText(/Token expired/)).toBeNull()
     expect(screen.getByRole('button', { name: 'Reconnect' })).toBeTruthy()
-    expect(screen.getByRole('button', { name: 'Disconnect subscription' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Disconnect Anthropic subscription' })).toBeTruthy()
     expect(screen.queryByRole('button', { name: /Sign in/ })).toBeNull()
   })
 
@@ -237,7 +271,8 @@ describe('ProviderConnect', () => {
     fireEvent.change(screen.getByLabelText('API key'), {
       target: { value: 'the-api-key' },
     })
-    fireEvent.click(screen.getByRole('button', { name: 'Save API key' }))
+    expect(fetchMock).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
     await flush()
 
     const storeCall = fetchMock.mock.calls.find(
@@ -255,7 +290,7 @@ describe('ProviderConnect', () => {
     vi.stubGlobal('confirm', () => true)
 
     renderCard(provider(), { subscription: subscription(), apiKey: sharedKey })
-    fireEvent.click(screen.getByRole('button', { name: 'Remove API key' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Remove Anthropic API key' }))
     await flush()
 
     const [url, init] = fetchMock.mock.calls[0]!
