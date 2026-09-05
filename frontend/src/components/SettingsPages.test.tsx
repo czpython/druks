@@ -275,9 +275,10 @@ function stubFetch(
       private_key: 'Required once the review App ID is set.',
     },
   },
+  initialApps: AppsSettingsResponse = appSettings,
 ) {
   let savedSettings = { ...userSettings }
-  const savedApps = structuredClone(appSettings)
+  const savedApps = structuredClone(initialApps)
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
@@ -1101,6 +1102,135 @@ describe('canonical app settings', () => {
 })
 
 describe('settings resource read failures', () => {
+  it('uses a newly saved directory catalog in Agent defaults without remounting Settings', async () => {
+    stubFetch(false)
+    const originalFetch = fetch
+    let keySaved = false
+    const key = {
+      provider: 'cerebras',
+      keyTail: 'test',
+      updatedBy: { id: 'acc-1', username: 'test@example.invalid' },
+      updatedAt: '2026-09-05T08:00:00Z',
+    }
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+        const path = String(input)
+        if (path === '/api/providers/cerebras/key' && init?.method === 'POST') {
+          keySaved = true
+          return new Response(JSON.stringify(key), { status: 200 })
+        }
+        if (keySaved && path === '/api/providers/keys')
+          return new Response(JSON.stringify([key]), { status: 200 })
+        if (keySaved && path === '/api/providers/catalogs')
+          return new Response(
+            JSON.stringify([
+              ...providerCatalogs,
+              {
+                provider: 'cerebras',
+                label: 'Cerebras',
+                fetchedAt: '2026-09-05T09:00:00Z',
+                models: [{ id: 'cerebras/gpt-oss-120b', label: 'GPT OSS 120B' }],
+              },
+            ]),
+            { status: 200 },
+          )
+        return originalFetch(input, init)
+      }),
+    )
+    renderSettings('/settings/providers')
+    fireEvent.click(await screen.findByRole('button', { name: 'Add provider' }))
+    fireEvent.change(screen.getByLabelText('Add provider'), { target: { value: 'cerebras' } })
+    fireEvent.click(await screen.findByRole('button', { name: /^Cerebras/ }))
+    const resource = within(screen.getByRole('article', { name: 'Cerebras' }))
+    fireEvent.click(resource.getByRole('button', { name: 'Add API key' }))
+    fireEvent.change(resource.getByLabelText('API key'), { target: { value: 'local-test-key' } })
+    fireEvent.click(resource.getByRole('button', { name: 'Save' }))
+    await resource.findByText(/1 model · Catalog fetched/)
+    fireEvent.click(screen.getByRole('link', { name: 'Agent defaults' }))
+    fireEvent.change(await screen.findByLabelText('Harness'), { target: { value: 'opencode' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Model' }))
+    expect((await screen.findByRole('option', { name: /GPT OSS 120B/ }) as HTMLButtonElement).disabled).toBe(false)
+  })
+
+  it('lets an app integer be cleared, replaced, and saved as an integer', async () => {
+    const settings = structuredClone(appSettings)
+    const field = settings.apps.find((app) => app.name === 'field_notes')!.settings[0]!
+    Object.assign(field, {
+      name: 'board_size',
+      label: 'Board size',
+      type: 'int',
+      value: 50,
+      default: 50,
+    })
+    stubFetch(false, {}, settings)
+    renderSettings('/apps/field_notes/settings')
+    const input = (await screen.findByLabelText('Board size')) as HTMLInputElement
+    fireEvent.change(input, { target: { value: '' } })
+    expect(input.value).toBe('')
+    fireEvent.change(input, { target: { value: '53' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+    await waitFor(() => expect(screen.getByText('Saved')).toBeTruthy())
+    const request = vi
+      .mocked(fetch)
+      .mock.calls.find(
+        ([url, init]) => String(url) === '/api/settings/apps' && init?.method === 'PATCH',
+      )!
+    expect(JSON.parse(String(request[1]!.body))).toEqual({
+      appSettings: { field_notes: { board_size: 53 } },
+      workflowSettings: {},
+    })
+    expect(input.value).toBe('53')
+  })
+
+  it.each([
+    'providerCatalogs',
+    'providerSubscriptions',
+    'providerKeys',
+    'providers',
+    'harnesses',
+    'accounts',
+    'agents',
+  ] as const)(
+    'shows a failed %s read on Agent defaults and retries without false choices',
+    async (method) => {
+      stubFetch(false)
+      const original = api[method]
+      const request = vi
+        .spyOn(api, method)
+        .mockRejectedValueOnce(new Error('Offline'))
+        .mockImplementation(original)
+      renderSettings('/settings/agents')
+      const alert = await screen.findByRole('alert')
+      expect(alert.textContent).toContain('Could not load agent configuration.')
+      expect(screen.queryByText(/Choose a model with a connected credential/)).toBeNull()
+      expect(screen.queryByLabelText('Unattended runs use')).toBeNull()
+      fireEvent.click(within(alert).getByRole('button', { name: 'Try again' }))
+      await screen.findByText('Default execution')
+      expect(screen.queryByRole('alert')).toBeNull()
+      expect(request).toHaveBeenCalledTimes(2)
+    },
+  )
+
+  it('gates app Agents on failed model reads and retains its Options draft', async () => {
+    stubFetch(false)
+    vi.spyOn(api, 'providerCatalogs').mockRejectedValue(new Error('Offline'))
+    renderSettings('/apps/software_factory/settings')
+    fireEvent.change(await screen.findByLabelText('Linear trigger status'), {
+      target: { value: 'Draft Queue' },
+    })
+    fireEvent.click(screen.getByRole('link', { name: 'Agents' }))
+    expect(await screen.findByRole('alert')).toHaveProperty(
+      'textContent',
+      'Could not load agent configuration. Try again',
+    )
+    expect(screen.queryByText('coder')).toBeNull()
+    fireEvent.click(screen.getByRole('link', { name: 'Options' }))
+    expect((screen.getByLabelText('Linear trigger status') as HTMLInputElement).value).toBe(
+      'Draft Queue',
+    )
+  })
+
   it.each([
     ['connections', 'services', 'services'],
     ['connections', 'listConnections', 'connections'],
@@ -1121,9 +1251,10 @@ describe('settings resource read failures', () => {
       }
       const alert = await screen.findByRole('alert')
       expect(alert.textContent).toContain(`Could not load ${label}.`)
-      if (method === 'listConnections') expect(screen.queryByText('No connections yet.')).toBeNull()
+      if (method === 'listConnections')
+        expect(screen.queryByText('No connected accounts.')).toBeNull()
       if (method === 'skillCollections')
-        expect(screen.queryByText('No collections yet — import one above.')).toBeNull()
+        expect(screen.queryByText('No collections yet. Import one below.')).toBeNull()
       fireEvent.click(within(alert).getByRole('button', { name: 'Try again' }))
       await waitFor(() => expect(screen.queryByRole('alert')).toBeNull())
       expect(request).toHaveBeenCalledTimes(2)

@@ -844,7 +844,7 @@ export function ServicesPane() {
           <header className="mcp-pane-head">
             <h2 className="mcp-pane-title">Services</h2>
             <p className="mcp-pane-sub">
-              Connect the accounts druks uses to work with external services.
+              Configure the services your apps use. Manage account access in Accounts.
             </p>
           </header>
           <div className="svc-grid">
@@ -865,11 +865,8 @@ export function ServicesPane() {
                   </span>
                   <span className="svc-card-desc">{service.description}</span>
                   <span className="svc-card-foot">
-                    {identity ? (
-                      <span className="svc-card-id">{identity}</span>
-                    ) : (
-                      <span className="svc-card-cue">Configure</span>
-                    )}
+                    {identity && <span className="svc-card-id">{identity}</span>}
+                    <span className="svc-card-cue">Configure</span>
                     <span className="chev" aria-hidden="true" />
                   </span>
                 </button>
@@ -1075,11 +1072,17 @@ function ServiceAccess({ service }: { service: Service }) {
       `/api/oauth/${encodeURIComponent(service.slug)}/connect` +
         (connectionId ? `?connection=${encodeURIComponent(connectionId)}` : ''),
     )
-  const disconnect = (connectionId: string) => {
+  const disconnect = (connection: Connection) => {
+    if (
+      !window.confirm(
+        `Disconnect ${connectionIdentity(connection) ?? connection.provider} from ${service.title}?`,
+      )
+    )
+      return
     setBusy(true)
     setError(null)
     void api
-      .disconnectConnection(connectionId)
+      .disconnectConnection(connection.id)
       .then(() =>
         queryClient.invalidateQueries({
           predicate: (query) => ['services', 'connections'].includes(String(query.queryKey[0])),
@@ -1131,7 +1134,7 @@ function ServiceAccess({ service }: { service: Service }) {
             )}
             <button
               className="set-btn ghost"
-              onClick={() => disconnect(connection.id)}
+              onClick={() => disconnect(connection)}
               disabled={busy}
             >
               Disconnect
@@ -1166,7 +1169,7 @@ function ServiceAccess({ service }: { service: Service }) {
   )
 }
 
-export function ConnectionsPane() {
+export function ConnectionsPane({ revokedOnly = false }: { revokedOnly?: boolean }) {
   const queryClient = useQueryClient()
   const query = useQuery({
     queryKey: ['connections'],
@@ -1174,17 +1177,30 @@ export function ConnectionsPane() {
     staleTime: 60_000,
   })
   const [error, setError] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [notice, setNotice] = useState('')
 
-  const revoke = (connectionId: string) => {
-    setError(null)
-    void api
-      .disconnectConnection(connectionId)
-      .then(() =>
-        queryClient.invalidateQueries({
-          predicate: (query) => ['services', 'connections'].includes(String(query.queryKey[0])),
-        }),
+  const revoke = (connection: Connection) => {
+    const identity = connectionIdentity(connection) ?? connection.provider
+    if (
+      !window.confirm(
+        `Disconnect ${identity} from ${connection.provider}? Its access will be revoked.`,
       )
+    )
+      return
+    setBusy(true)
+    setError(null)
+    setNotice('')
+    void api
+      .disconnectConnection(connection.id)
+      .then(async () => {
+        await queryClient.invalidateQueries({
+          predicate: (query) => ['services', 'connections'].includes(String(query.queryKey[0])),
+        })
+        setNotice(`${identity} disconnected. Its record is in Revoked.`)
+      })
       .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+      .finally(() => setBusy(false))
   }
 
   const connections = query.data ?? []
@@ -1203,9 +1219,11 @@ export function ConnectionsPane() {
         </p>
       )}
       <header className="mcp-pane-head">
-        <h2 className="mcp-pane-title">Connections</h2>
+        <h2 className="mcp-pane-title">{revokedOnly ? 'Revoked accounts' : 'Accounts'}</h2>
         <p className="mcp-pane-sub">
-          The accounts you have signed in to. Revoke one here; revoked ones stay as history.
+          {revokedOnly
+            ? 'Account grants that no longer provide access.'
+            : 'Signed-in accounts and the access they grant. Configure new access through Services.'}
         </p>
       </header>
       {error && (
@@ -1213,33 +1231,45 @@ export function ConnectionsPane() {
           {error}
         </div>
       )}
-      {query.isSuccess && connections.length === 0 && (
-        <p className="mcp-pane-sub">No connections yet.</p>
+      {busy && <p role="status">Disconnecting account…</p>}
+      {notice && <p role="status">{notice}</p>}
+      {query.isSuccess && (revokedOnly ? revoked : live).length === 0 && (
+        <p className="mcp-pane-sub">
+          {revokedOnly ? 'No revoked accounts.' : 'No connected accounts.'}
+        </p>
       )}
       {connections.length > 0 && (
         <div className="set-card svc-facts">
-          {live.map((connection) => (
-            <div className="svc-fact" key={connection.id}>
-              <span className="svc-fact-key">{connection.provider}</span>
-              <span className="svc-fact-val">
-                {connectionIdentity(connection) ?? (connection.scopes.join(', ') || 'unlabeled')} ·{' '}
-                {new Date(connection.connectedAt).toLocaleDateString()}
-              </span>
-              <button className="set-btn ghost" onClick={() => revoke(connection.id)}>
-                Disconnect
-              </button>
-            </div>
-          ))}
-          {revoked.map((connection) => (
-            <div className="svc-fact svc-revoked" key={connection.id}>
-              <span className="svc-fact-key">{connection.provider}</span>
-              <span className="svc-fact-val">
-                {connectionIdentity(connection) ?? (connection.scopes.join(', ') || 'unlabeled')} ·
-                connected {new Date(connection.connectedAt).toLocaleDateString()} ·{' '}
-                {revokedCopy(connection)}
-              </span>
-            </div>
-          ))}
+          {!revokedOnly &&
+            live.map((connection) => (
+              <div className="svc-fact" key={connection.id}>
+                <span className="svc-fact-key">{connection.provider}</span>
+                <span className="svc-fact-val">
+                  {connectionIdentity(connection) ??
+                    (connection.scopes.join(', ') || 'unlabeled')}{' '}
+                  · {new Date(connection.connectedAt).toLocaleDateString()}
+                </span>
+                <button
+                  className="set-btn ghost"
+                  onClick={() => revoke(connection)}
+                  disabled={busy}
+                >
+                  Disconnect
+                </button>
+              </div>
+            ))}
+          {revokedOnly &&
+            revoked.map((connection) => (
+              <div className="svc-fact svc-revoked" key={connection.id}>
+                <span className="svc-fact-key">{connection.provider}</span>
+                <span className="svc-fact-val">
+                  {connectionIdentity(connection) ??
+                    (connection.scopes.join(', ') || 'unlabeled')}{' '}
+                  · connected {new Date(connection.connectedAt).toLocaleDateString()} ·{' '}
+                  {revokedCopy(connection)}
+                </span>
+              </div>
+            ))}
         </div>
       )}
     </div>
@@ -1264,6 +1294,7 @@ export function ProvidersPane({
   requestError: string | null
 }) {
   const [adding, setAdding] = useState(false)
+  const [managing, setManaging] = useState<string | null>(null)
   const [search, setSearch] = useState('')
   const [pendingProviders, setPendingProviders] = useState<Provider[]>([])
   const directoryQuery = useQuery({
@@ -1271,7 +1302,9 @@ export function ProvidersPane({
     queryFn: () => api.providerDirectory(),
     enabled:
       adding ||
-      providers.some((provider) => !registeredProviders.some((entry) => entry.id === provider.id)),
+      providers.some(
+        (provider) => !registeredProviders.some((entry) => entry.id === provider.id),
+      ),
     staleTime: 60_000,
     retry: 1,
   })
@@ -1288,7 +1321,9 @@ export function ProvidersPane({
   ])
   const configured = [
     ...providers,
-    ...pendingProviders.filter((pending) => !providers.some((known) => known.id === pending.id)),
+    ...pendingProviders.filter(
+      (pending) => !providers.some((known) => known.id === pending.id),
+    ),
   ].filter((provider) => configuredIds.has(provider.id))
   const providerColor = harnessColors(configured.map((provider) => provider.id))
   const query = search.trim().toLocaleLowerCase()
@@ -1326,7 +1361,6 @@ export function ProvidersPane({
       <header className="mcp-pane-head">
         <div className="provider-heading">
           <div>
-            <h2 className="mcp-pane-title">Providers</h2>
             <p className="mcp-pane-sub">Connect the accounts your agents use.</p>
           </div>
           <button
@@ -1391,6 +1425,7 @@ export function ProvidersPane({
                     className="provider-result-select"
                     onClick={() => {
                       setPendingProviders((current) => [...current, provider])
+                      setManaging(provider.id)
                       setAdding(false)
                       setSearch('')
                     }}
@@ -1447,7 +1482,12 @@ export function ProvidersPane({
         {configured.map((provider) => {
           const subscription = subscriptions.find((row) => row.provider === provider.id) ?? null
           const apiKey = keys.find((row) => row.provider === provider.id) ?? null
-          const isDirectoryProvider = !registeredProviders.some((entry) => entry.id === provider.id)
+          const usage = usageQuery.data?.providers.find((row) => row.id === provider.id)
+          const weekly = usage?.weeks.find((week) => week.model === null)
+          const catalog = catalogs.find((entry) => entry.provider === provider.id)
+          const isDirectoryProvider = !registeredProviders.some(
+            (entry) => entry.id === provider.id,
+          )
           const directoryEntry = directoryQuery.data?.find(
             (entry) => entry.provider === provider.id,
           )
@@ -1458,38 +1498,122 @@ export function ProvidersPane({
               className="provider-section"
               style={{ '--fam': providerColor[provider.id] } as CSSProperties}
             >
-              <header className="hr-ident">
-                <span className="hr-ident-dot" aria-hidden="true" />
-                <h3 className="hr-name">{provider.label}</h3>
-              </header>
-              {isDirectoryProvider && (
-                <div className="provider-source">
-                  {directoryEntry ? (
-                    <ProviderSource entry={directoryEntry} />
+              <div className="provider-summary">
+                <header className="hr-ident">
+                  <span className="hr-ident-dot" aria-hidden="true" />
+                  <div>
+                    <h3 className="hr-name">{provider.label}</h3>
+                    <p className="provider-account">
+                      {subscription?.providerEmail ||
+                        (apiKey ? `API key …${apiKey.keyTail}` : 'Setup incomplete')}
+                    </p>
+                  </div>
+                </header>
+                <div className="provider-access">
+                  {subscription && (
+                    <ServiceStatus
+                      connected={subscription.connected}
+                      label={
+                        subscription.connected
+                          ? 'Subscription connected'
+                          : 'Subscription expired'
+                      }
+                    />
+                  )}
+                  {apiKey && <span>API key set</span>}
+                  {!subscription && !apiKey && <span>No credentials</span>}
+                </div>
+                <div className="provider-summary-usage">
+                  {usage?.unlimited ? (
+                    <p>Quota: unmetered</p>
+                  ) : weekly ? (
+                    <QuotaRow label="Weekly" metric={weekly} />
                   ) : (
-                    <p className="provider-state" role="status">
-                      {directoryQuery.isLoading
-                        ? 'Loading provider details…'
-                        : 'Provider details are unavailable from Models.dev.'}
+                    <p>
+                      {usageQuery.isPending
+                        ? 'Loading quota…'
+                        : subscription
+                          ? 'Weekly quota unavailable'
+                          : 'API key billing · quota unavailable'}
                     </p>
                   )}
+                  {usage?.scrapedAt && (
+                    <p className={usage.stale ? 'provider-stale' : ''}>
+                      Usage {usage.stale ? 'stale · ' : ''}checked{' '}
+                      <time
+                        dateTime={usage.scrapedAt}
+                        title={new Date(usage.scrapedAt).toLocaleString()}
+                      >
+                        {relTimeFromIso(usage.scrapedAt)}
+                      </time>
+                    </p>
+                  )}
+                  {(usage?.error || usageQuery.isError) && (
+                    <p className="provider-stale">Usage refresh failed.</p>
+                  )}
                 </div>
-              )}
-              <ProviderConnect
-                provider={provider}
-                subscription={subscription}
-                apiKey={apiKey}
-                usage={usageQuery.data?.providers.find((row) => row.id === provider.id) ?? null}
-                keySpendToday={
-                  todayQuery.data?.providers.find((row) => row.id === provider.id)?.keySpendUsd ??
-                  null
-                }
-              />
+                <button
+                  className="set-btn ghost"
+                  aria-label={`${managing === provider.id ? 'Close' : 'Manage'} ${provider.label}`}
+                  aria-expanded={managing === provider.id}
+                  aria-controls={`provider-details-${provider.id}`}
+                  onClick={() => setManaging(managing === provider.id ? null : provider.id)}
+                >
+                  {managing === provider.id ? 'Close' : 'Manage'}
+                </button>
+              </div>
+              <div
+                id={`provider-details-${provider.id}`}
+                className="provider-details"
+                hidden={managing !== provider.id}
+              >
+                {isDirectoryProvider && (
+                  <div className="provider-source">
+                    {directoryEntry ? (
+                      <ProviderSource entry={directoryEntry} />
+                    ) : (
+                      <p className="provider-state" role="status">
+                        {directoryQuery.isLoading
+                          ? 'Loading provider details…'
+                          : 'Provider details are unavailable from Models.dev.'}
+                      </p>
+                    )}
+                  </div>
+                )}
+                <ProviderConnect
+                  provider={provider}
+                  subscription={subscription}
+                  apiKey={apiKey}
+                  usage={usage ?? null}
+                  keySpendToday={
+                    todayQuery.data?.providers.find((row) => row.id === provider.id)
+                      ?.keySpendUsd ?? null
+                  }
+                />
+                <p className="provider-catalog">
+                  {catalog ? (
+                    <>
+                      {catalog.models.length} {catalog.models.length === 1 ? 'model' : 'models'} ·
+                      Catalog fetched{' '}
+                      <time
+                        dateTime={catalog.fetchedAt}
+                        title={new Date(catalog.fetchedAt).toLocaleString()}
+                      >
+                        {relTimeFromIso(catalog.fetchedAt)}
+                      </time>
+                    </>
+                  ) : (
+                    'Model catalog unavailable'
+                  )}
+                </p>
+              </div>
             </article>
           )
         })}
       </div>
-      <p className="provider-save-note">Changes save automatically.</p>
+      <p className="provider-save-note">
+        Save keys in Manage. Connection and removal actions take effect immediately.
+      </p>
     </div>
   )
 }
@@ -1513,9 +1637,17 @@ export function ProviderConnect({
   const [key, setKey] = useState('')
   const [replacing, setReplacing] = useState(false)
   const [keyFormOpen, setKeyFormOpen] = useState(false)
+  const [notice, setNotice] = useState('')
 
-  const refresh = () => queryClient.invalidateQueries({ queryKey: ['providerSubscriptions'] })
-  const refreshKeys = () => queryClient.invalidateQueries({ queryKey: ['providerKeys'] })
+  const refresh = async () => {
+    await queryClient.invalidateQueries({ queryKey: ['providerSubscriptions'] })
+    await queryClient.invalidateQueries({ queryKey: ['providerCatalogs'] })
+    await queryClient.invalidateQueries({ queryKey: ['usage'] })
+  }
+  const refreshKeys = async () => {
+    await queryClient.invalidateQueries({ queryKey: ['providerKeys'] })
+    await queryClient.invalidateQueries({ queryKey: ['providerCatalogs'] })
+  }
   const flow = useProviderConnect(provider.id, async () => {
     await refresh()
   })
@@ -1525,20 +1657,28 @@ export function ProviderConnect({
   const run = (action: () => Promise<unknown>, after: () => Promise<unknown>) => {
     setBusy(true)
     setError(null)
+    setNotice('')
     void action()
       .then(after)
+      .then(() => setNotice('Saved.'))
       .catch((e) => setError(e instanceof Error ? e.message : String(e)))
       .finally(() => setBusy(false))
   }
 
   const disconnect = () => {
-    if (!window.confirm(`Disconnect ${provider.label}? Reconnect it before agents can run on it.`))
+    if (
+      !window.confirm(
+        `Disconnect the ${provider.label} subscription? Agents billed to it will need another subscription.`,
+      )
+    )
       return
     run(() => api.disconnectProvider(provider.id), refresh)
   }
 
   const removeKey = () => {
-    if (!window.confirm(`Remove the ${provider.label} API key? Agents billed to it stop running.`))
+    if (
+      !window.confirm(`Remove the ${provider.label} API key? Agents billed to it stop running.`)
+    )
       return
     run(() => api.removeProviderKey(provider.id), refreshKeys)
   }
@@ -1558,7 +1698,6 @@ export function ProviderConnect({
   // visible and ask for a Reconnect, not a first-time sign-in.
   const expired = Boolean(subscription) && !connected
   const showKeyForm = acceptsApiKey && (keyFormOpen || replacing)
-  const weekly = usage?.weeks.find((week) => week.model === null)
   return (
     <div className="hr-connect">
       {acceptsSubscription && (
@@ -1609,8 +1748,20 @@ export function ProviderConnect({
                 {subscription.providerEmail}
               </p>
               <div className="provider-quotas">
-                {usage?.fiveHour && <QuotaRow label="5-hour" metric={usage.fiveHour} />}
-                {weekly && <QuotaRow label="Weekly" metric={weekly} />}
+                {usage?.unlimited ? (
+                  <p>Quota: unmetered</p>
+                ) : (
+                  <>
+                    {usage?.fiveHour && <QuotaRow label="5-hour" metric={usage.fiveHour} />}
+                    {usage?.weeks.map((week) => (
+                      <QuotaRow
+                        key={week.model ?? 'all'}
+                        label={week.model ? `Weekly · ${week.model}` : 'Weekly'}
+                        metric={week}
+                      />
+                    ))}
+                  </>
+                )}
               </div>
             </>
           ) : (
@@ -1712,13 +1863,16 @@ export function ProviderConnect({
           {error ?? flow.error}
         </div>
       )}
+      {busy && <p role="status">Saving…</p>}
+      {notice && <p role="status">{notice}</p>}
     </div>
   )
 }
 
 function QuotaRow({ label, metric }: { label: string; metric: UsageMetric }) {
   useTicker(Boolean(metric.resetsAt))
-  if (metric.percentLeft === null) return null
+  if (metric.percentLeft === null)
+    return <p className="provider-state">{label} quota unavailable</p>
   const resets = metric.resetsAt
   const minutes = resets ? Math.max(0, Math.ceil(secondsUntil(resets) / 60)) : 0
   const remaining =
@@ -1881,6 +2035,29 @@ export function SkillsPane() {
       )}
 
       <section className="mcp-section">
+        <h3 className="mcp-h">
+          Collections <span className="gl-count">{collections.length}</span>
+        </h3>
+        {collectionsQuery.isSuccess && collections.length === 0 && (
+          <p className="mcp-help">No collections yet. Import one below.</p>
+        )}
+        {collections.length > 0 && (
+          <div className="skill-cols">
+            {collections.map((collection: SkillCollection) => (
+              <CollectionCard
+                key={collection.id}
+                collection={collection}
+                busy={busy}
+                onSync={sync}
+                onRemove={remove}
+                onToggle={toggle}
+              />
+            ))}
+          </div>
+        )}
+      </section>
+
+      <section className="mcp-section">
         <h3 className="mcp-h">Add a collection</h3>
         <p className="mcp-help">
           A GitHub repository druks scans for skills. Removing a collection removes its skills.
@@ -1914,29 +2091,6 @@ export function SkillsPane() {
             </button>
           </div>
         </div>
-      </section>
-
-      <section className="mcp-section">
-        <h3 className="mcp-h">
-          Collections <span className="gl-count">{collections.length}</span>
-        </h3>
-        {collectionsQuery.isSuccess && collections.length === 0 && (
-          <p className="mcp-help">No collections yet — import one above.</p>
-        )}
-        {collections.length > 0 && (
-          <div className="skill-cols">
-            {collections.map((collection: SkillCollection) => (
-              <CollectionCard
-                key={collection.id}
-                collection={collection}
-                busy={busy}
-                onSync={sync}
-                onRemove={remove}
-                onToggle={toggle}
-              />
-            ))}
-          </div>
-        )}
       </section>
     </div>
   )
@@ -2157,8 +2311,6 @@ export function McpServersPane() {
     setError(null)
     // Opened synchronously, while the click's activation is still live — a tab
     // opened after the await reads as an unsolicited popup and gets blocked.
-    // The grant lands via the provider's redirect to druks' callback; the list
-    // refetches on window focus when the operator returns from consent.
     const consentTab = window.open('', '_blank')
     try {
       const { authorizationUrl } = await api.connectMcpServer(name, identityMode)
@@ -2202,8 +2354,7 @@ export function McpServersPane() {
       )}
       <header className="mcp-pane-head">
         <p className="mcp-pane-sub">
-          Tools your agents can call. Enabled servers are carried into every sandbox VM; secrets
-          ride the run env and never land in emitted config.
+          Tools your agents can call. Enable installed servers or add one from the registry.
         </p>
       </header>
 
@@ -2213,11 +2364,33 @@ export function McpServersPane() {
         </div>
       )}
 
+      {servers.length > 0 && (
+        <section className="mcp-section">
+          <h3 className="mcp-h">
+            Servers<span className="gl-count">{servers.length}</span>
+          </h3>
+          <div className="mcp-servers">
+            {servers.map((server: McpServer) => (
+              <McpServerRow
+                key={server.name}
+                server={server}
+                busy={busy}
+                onToggle={toggle}
+                onRemove={remove}
+                onConnect={connect}
+                onDisconnect={disconnect}
+              />
+            ))}
+          </div>
+        </section>
+      )}
+      {serversQuery.isSuccess && servers.length === 0 && (
+        <p className="mcp-help">No MCP servers installed.</p>
+      )}
+
       <section className="mcp-section">
         <h3 className="mcp-h">Add from registry</h3>
-        <p className="mcp-help">
-          Search the official MCP registry — most servers install with no token at all.
-        </p>
+        <p className="mcp-help">Search the official MCP registry for a hosted server.</p>
         <div className="mcp-reg-search">
           <label className="mcp-sr-only" htmlFor={`${fieldId}-search`}>
             Search the MCP registry
@@ -2381,7 +2554,9 @@ export function McpServersPane() {
                 data-lpignore="true"
                 disabled={busy}
               />
-              <p className="mcp-help">Stored write-only — never returned or emitted in config.</p>
+              <p className="mcp-help">
+                Stored write-only — never returned or emitted in config.
+              </p>
             </div>
           </div>
           <div>
@@ -2396,27 +2571,6 @@ export function McpServersPane() {
           </div>
         </div>
       </details>
-
-      {servers.length > 0 && (
-        <section className="mcp-section">
-          <h3 className="mcp-h">
-            Servers<span className="gl-count">{servers.length}</span>
-          </h3>
-          <div className="mcp-servers">
-            {servers.map((server: McpServer) => (
-              <McpServerRow
-                key={server.name}
-                server={server}
-                busy={busy}
-                onToggle={toggle}
-                onRemove={remove}
-                onConnect={connect}
-                onDisconnect={disconnect}
-              />
-            ))}
-          </div>
-        </section>
-      )}
     </div>
   )
 }
@@ -2610,10 +2764,24 @@ export function AgentAccessPane() {
       )}
       <div className="set-pane-head">
         <div className="set-pane-sub">
-          Give an agent, script, or CLI a token to call druks as you — same account and permissions,
-          no browser needed. Revoke it any time to cut access instantly.
+          Give an agent, script, or CLI a token to call druks as you — same account and
+          permissions, no browser needed. Revoke it any time to cut access instantly.
         </div>
       </div>
+      {pats.length > 0 && (
+        <div className="set-group">
+          <div className="set-group-label">
+            tokens<span className="gl-count">{pats.length}</span>
+          </div>
+          <div className="mcp-servers">
+            {pats.map((pat) => (
+              <PatRow key={pat.id} pat={pat} busy={busy} onRevoke={revoke} />
+            ))}
+          </div>
+        </div>
+      )}
+      {patsQuery.isSuccess && pats.length === 0 && <p className="mcp-help">No API tokens.</p>}
+
       <div className="set-group">
         <label className="set-group-label" htmlFor={tokenNameId}>
           Token name
@@ -2662,20 +2830,8 @@ export function AgentAccessPane() {
             </button>
           </div>
           <div className="set-field-help">
-            Send it as <b>Authorization: Bearer &lt;token&gt;</b>. This is the only time druks shows
-            it — a hash is stored, not the token.
-          </div>
-        </div>
-      )}
-      {pats.length > 0 && (
-        <div className="set-group">
-          <div className="set-group-label">
-            tokens<span className="gl-count">{pats.length}</span>
-          </div>
-          <div className="mcp-servers">
-            {pats.map((pat) => (
-              <PatRow key={pat.id} pat={pat} busy={busy} onRevoke={revoke} />
-            ))}
+            Send it as <b>Authorization: Bearer &lt;token&gt;</b>. This is the only time druks
+            shows it — a hash is stored, not the token.
           </div>
         </div>
       )}
@@ -2805,13 +2961,11 @@ export function AppPane({
     option.scope === 'workflow'
       ? onWorkflowField(option.kind, option.field.name, value)
       : onAppSetting(option.kind, option.field.name, value)
-  // The control speaks strings; the override store keeps the declared type.
   // Clearing a secret's box leaves its stored value unchanged.
   const setTypedOption = (option: (typeof optionFields)[number], next: string) => {
     if (option.field.type === 'secret') return setOption(option, next || undefined)
     if (option.field.type !== 'int') return setOption(option, next)
-    const parsed = Number.parseInt(next, 10)
-    if (Number.isFinite(parsed)) setOption(option, parsed)
+    setOption(option, next.trim() && Number.isInteger(Number(next)) ? Number(next) : next)
   }
   return (
     <div className="set-pane">
