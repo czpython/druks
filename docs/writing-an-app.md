@@ -149,6 +149,14 @@ class BuildSite(Workflow):
     sandbox = Sandbox(setup="sandboxes/build.sh")
 ```
 
+Druks derives the template label from the app name and setup script stem.
+For example, app `site_builder` with `sandboxes/build.sh` sends
+`site-builder-build`. Labels describe purpose; they do not change template
+reuse. Declarations with the same setup content share a template for the
+same base image and provider. The label comes from one of those declarations.
+The operator configures [one shared registry](configuration.md#registry-access-and-sandbox-templates).
+Drukbox adds a unique build identifier to the tag and stores the published digest.
+
 Place the file at `site_builder/sandboxes/build.sh`. The path is relative to the
 app package.
 
