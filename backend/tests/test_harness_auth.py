@@ -1,75 +1,33 @@
 import base64
 import json
-from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-import httpx
 import pytest
 from conftest import connect_provider
 from druks.accounts.models import Account
-from druks.harnesses import base as hbase
 from druks.harnesses.claude import ClaudeHarness, _get_credentials
 from druks.harnesses.codex import CodexHarness
-from druks.harnesses.datastructures import (
-    SandboxSettings,
-)
+from druks.harnesses.datastructures import SandboxSettings
 from druks.harnesses.exceptions import HarnessNotConnectedError
 from druks.harnesses.models import ProviderSubscription
 from druks.harnesses.providers import AnthropicProvider, OpenAiProvider
 from druks.sandbox.datastructures import HomeCopy
 
 
-def _jwt(exp: int) -> str:
-    header = base64.urlsafe_b64encode(b'{"alg":"none"}').rstrip(b"=").decode()
-    payload = base64.urlsafe_b64encode(json.dumps({"exp": exp}).encode()).rstrip(b"=").decode()
-    return f"{header}.{payload}.sig"
-
-
-def _claude_payload(*, access="A0", refresh="R0", expires_at=None) -> dict:
-    block = {"accessToken": access, "scopes": ["user:profile"], "subscriptionType": "max"}
-    if refresh is not None:
-        block["refreshToken"] = refresh
-    if expires_at is not None:
-        block["expiresAt"] = int(expires_at.timestamp() * 1000)
-    return {"claudeAiOauth": block}
-
-
-async def _seed_claude(*, provider_email="op@example.com", **kwargs) -> ProviderSubscription:
-    return await connect_provider(
-        AnthropicProvider, _claude_payload(**kwargs), provider_email=provider_email
-    )
-
-
-async def _seed_codex(
-    *, provider_email="op@example.com", account_id="acc-1"
+async def _seed_claude(
+    *,
+    provider_email="op@example.com",
+    access="A0",
+    refresh="R0",
 ) -> ProviderSubscription:
-    access = _jwt(int((datetime.now(UTC) + timedelta(days=9)).timestamp()))
-    tokens = {"access_token": access, "refresh_token": "R0", "account_id": account_id}
+    block = {"accessToken": access, "scopes": ["user:profile"], "subscriptionType": "max"}
+    if refresh:
+        block["refreshToken"] = refresh
     return await connect_provider(
-        OpenAiProvider,
-        {"auth_mode": "chatgpt", "OPENAI_API_KEY": None, "tokens": tokens},
+        AnthropicProvider,
+        {"claudeAiOauth": block},
         provider_email=provider_email,
     )
-
-
-def _resp(status: int, body: object) -> httpx.Response:
-    text = body if isinstance(body, str) else json.dumps(body)
-    return httpx.Response(status, text=text, request=httpx.Request("GET", "https://x"))
-
-
-def _mock_get(monkeypatch, response):
-    calls = []
-
-    async def fake_get(self, url, *, headers=None, **_kwargs):
-        calls.append({"url": url, "headers": headers})
-        return response
-
-    monkeypatch.setattr(hbase.httpx.AsyncClient, "get", fake_get)
-    return calls
-
-
-def _harness() -> ClaudeHarness:
-    return ClaudeHarness(model=ClaudeHarness.default_model, fast_mode=False, effort=None)
 
 
 async def test_claude_builder_puts_db_credentials_on_the_bundle(druks_db):
@@ -79,8 +37,7 @@ async def test_claude_builder_puts_db_credentials_on_the_bundle(druks_db):
         service_token="x",
         service_timeout=30.0,
         image="x",
-        claude_config_dir=Path("/home/agent/.claude"),
-        codex_config_dir=Path("/home/agent/.codex"),
+        harness_config_root=Path("/harnesses"),
     )
     bundle = await _get_credentials(sandbox, github_token=None, subscription=subscription)
     auth = bundle.home[0]
@@ -88,49 +45,102 @@ async def test_claude_builder_puts_db_credentials_on_the_bundle(druks_db):
     assert json.loads(auth.content)["claudeAiOauth"]["accessToken"] == "live"
 
 
-async def test_credentials_builders_carry_global_instructions(druks_db):
-    claude_login = await _seed_claude()
-    codex_login = await _seed_codex()
-    claude_config_dir = Path("/home/agent/.claude")
-    codex_config_dir = Path("/home/agent/.codex")
+async def test_credentials_builders_read_their_harness_config_directories(druks_db):
+    claude_subscription = await _seed_claude()
+    far_future_expiration = 4_102_444_800
+    jwt_header = base64.urlsafe_b64encode(b'{"alg":"none"}').rstrip(b"=").decode()
+    jwt_payload = (
+        base64.urlsafe_b64encode(json.dumps({"exp": far_future_expiration}).encode())
+        .rstrip(b"=")
+        .decode()
+    )
+    codex_subscription = await connect_provider(
+        OpenAiProvider,
+        {
+            "auth_mode": "chatgpt",
+            "OPENAI_API_KEY": None,
+            "tokens": {
+                "access_token": f"{jwt_header}.{jwt_payload}.sig",
+                "refresh_token": "R0",
+                "account_id": "acc-1",
+            },
+        },
+    )
+    config_root = Path("/harnesses")
     sandbox = SandboxSettings(
         service_url="x",
         service_token="x",
         service_timeout=30.0,
         image="x",
-        claude_config_dir=claude_config_dir,
-        codex_config_dir=codex_config_dir,
+        harness_config_root=config_root,
     )
 
-    claude_bundle = await _get_credentials(sandbox, github_token=None, subscription=claude_login)
+    claude_bundle = await _get_credentials(
+        sandbox,
+        github_token=None,
+        subscription=claude_subscription,
+    )
     codex_bundle = await CodexHarness(
         model=CodexHarness.default_model,
         fast_mode=False,
         effort=None,
         sandbox=sandbox,
-    )._get_credentials(github_token=None, subscription=codex_login, key=None)
+    )._get_credentials(
+        sandbox,
+        github_token=None,
+        subscription=codex_subscription,
+        key=None,
+    )
 
     assert claude_bundle.home[0].path == ".claude/.credentials.json"
     assert codex_bundle.home[0].path == ".codex/auth.json"
-    assert HomeCopy(".claude/CLAUDE.md", claude_config_dir / "CLAUDE.md") in claude_bundle.home
-    assert HomeCopy(".codex/AGENTS.md", codex_config_dir / "AGENTS.md") in codex_bundle.home
+    assert HomeCopy(".claude/settings.json", config_root / "claude/settings.json") in (
+        claude_bundle.home
+    )
+    assert HomeCopy(".claude/CLAUDE.md", config_root / "claude/CLAUDE.md") in claude_bundle.home
+    assert HomeCopy(".claude.json", config_root / "claude/.claude.json") in claude_bundle.home
+    assert (
+        HomeCopy(
+            ".claude/plugins/installed_plugins.json",
+            config_root / "claude/plugins/installed_plugins.json",
+        )
+        in claude_bundle.home
+    )
+    assert (
+        HomeCopy(
+            ".claude/plugins/known_marketplaces.json",
+            config_root / "claude/plugins/known_marketplaces.json",
+        )
+        in claude_bundle.home
+    )
+    assert (
+        HomeCopy(".claude/plugins/marketplaces", config_root / "claude/plugins/marketplaces")
+        in claude_bundle.home
+    )
+    assert HomeCopy(".claude/plugins/cache", config_root / "claude/plugins/cache") in (
+        claude_bundle.home
+    )
+    assert claude_bundle.home[-1].source == config_root / "claude/skills"
+    assert HomeCopy(".codex/config.toml", config_root / "codex/config.toml") in codex_bundle.home
+    assert (
+        HomeCopy(".codex/.credentials.json", config_root / "codex/.credentials.json")
+        in codex_bundle.home
+    )
+    assert HomeCopy(".codex/AGENTS.md", config_root / "codex/AGENTS.md") in codex_bundle.home
+    assert codex_bundle.home[-1].source == config_root / "codex/skills"
 
 
-async def test_no_config_dir_ships_credential_only(druks_db):
-    # No local config dir for the CLI => nothing of the host's config/plugins
-    # reaches the sandbox — but the DB subscription still ships: the subscription
-    # row alone decides whether a harness can run.
+async def test_missing_config_root_keeps_the_db_credential(druks_db, tmp_path):
     subscription = await _seed_claude(access="live")
     sandbox = SandboxSettings(
         service_url="x",
         service_token="x",
         service_timeout=30.0,
         image="x",
-        claude_config_dir=None,
-        codex_config_dir=None,
+        harness_config_root=tmp_path / "missing",
     )
     bundle = await _get_credentials(sandbox, github_token="gh", subscription=subscription)
-    [auth] = bundle.home
+    auth = bundle.home[0]
     assert json.loads(auth.content)["claudeAiOauth"]["accessToken"] == "live"
     assert bundle.github_token == "gh"
 

@@ -22,6 +22,7 @@ from druks.skills.models import Skill
 
 from .artifacts import write_cost
 from .base import Harness
+from .datastructures import SandboxSettings
 from .exceptions import (
     HarnessAuthError,
     HarnessError,
@@ -174,8 +175,6 @@ def _parse_token_count_events(
             if not isinstance(usage_raw, dict):
                 continue
             usage = _normalize_usage(usage_raw)
-            if usage is None:
-                continue
             model = info.get("model") or info.get("model_name")
             yield {
                 "timestamp": ts,
@@ -184,7 +183,7 @@ def _parse_token_count_events(
             }
 
 
-def _normalize_usage(raw: dict[str, Any]) -> _Usage | None:
+def _normalize_usage(raw: dict[str, Any]) -> _Usage:
     def _num(value: Any) -> int:
         # ``bool`` is a subclass of ``int`` in Python; exclude it explicitly so
         # a stray ``true`` in the JSONL doesn't coerce to 1.
@@ -371,7 +370,8 @@ class CodexHarness(Harness):
         key: str | None = None,
         timeout: int = Harness.default_timeout,
     ) -> AgentInvocation:
-        if not self.sandbox:
+        sandbox = self.sandbox
+        if not sandbox:
             raise HarnessError(
                 f"{self.name} harness requires sandbox settings — set "
                 "sandbox.service_url and related TOML settings.",
@@ -395,6 +395,7 @@ class CodexHarness(Harness):
             args=tuple(cmd),
             stdin=_with_final_message_note(prompt).encode("utf-8"),
             credentials=await self._get_credentials(
+                sandbox,
                 github_token=github_token,
                 skills=skills,
                 subscription=subscription,
@@ -475,31 +476,24 @@ class CodexHarness(Harness):
 
     async def _get_credentials(
         self,
+        sandbox: SandboxSettings,
         *,
         github_token: str | None,
         skills: tuple[str, ...] = (),
         subscription: ProviderSubscription | None,
         key: str | None,
     ) -> Credentials:
-        assert self.sandbox is not None  # callers guard
-        config_dir = self.sandbox.codex_config_dir
-        home: list[HomeFile | HomeCopy] = [self.auth_file(subscription, key=key)]
-        if config_dir:
-            home += [
-                HomeCopy(".codex/config.toml", config_dir / "config.toml"),
-                HomeCopy(".codex/.credentials.json", config_dir / ".credentials.json"),
-                HomeCopy(".codex/AGENTS.md", config_dir / "AGENTS.md"),
-            ]
-        # Skills from the canonical shared dir (DRUKS_SKILLS_DIR) when set — the
-        # same set pushed to ~/.claude/skills — else the per-CLI fallback. Must
-        # be real dirs (tar follows symlinks).
-        skills_src = self.sandbox.skills_dir or (config_dir / "skills" if config_dir else None)
-        if skills_src:
-            home.append(
-                HomeCopy(
-                    ".codex/skills", skills_src, excludes=await Skill.delivery_excludes(skills)
-                )
-            )
+        config_dir = sandbox.harness_config_root / self.name
+        home: list[HomeFile | HomeCopy] = [
+            self.auth_file(subscription, key=key),
+            HomeCopy(".codex/config.toml", config_dir / "config.toml"),
+            HomeCopy(".codex/.credentials.json", config_dir / ".credentials.json"),
+            HomeCopy(".codex/AGENTS.md", config_dir / "AGENTS.md"),
+        ]
+        skills_dir = sandbox.skills_dir or config_dir / "skills"
+        home.append(
+            HomeCopy(".codex/skills", skills_dir, excludes=await Skill.delivery_excludes(skills))
+        )
         return Credentials(home=tuple(home), github_token=github_token)
 
     @classmethod

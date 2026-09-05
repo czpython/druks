@@ -217,20 +217,11 @@ class Settings(BaseSettings):
         default=DEFAULT_DATA_DIR / "sandbox-keys",
         alias="DRUKS_SANDBOX_KEYS_DIR",
     )
-    # Local CLI config each harness carries into a VM at push time: Claude's
-    # ``settings.json`` / ``CLAUDE.md`` + plugin state (plus ``.claude.json`` beside the dir),
-    # Codex's ``config.toml`` / ``AGENTS.md`` / MCP ``.credentials.json``, and
-    # each CLI's ``skills`` subdir when DRUKS_SKILLS_DIR is unset. Subscription
-    # auth never reads these — logins live in the DB, written by the
-    # connect flow (Settings → Providers). Empty => carry no local config for
-    # that CLI.
-    claude_config_dir: OptionalExpandedPath = Field(  # type: ignore[assignment]
-        default=Path("~/.claude"),
-        alias="DRUKS_CLAUDE_CONFIG_DIR",
-    )
-    codex_config_dir: OptionalExpandedPath = Field(  # type: ignore[assignment]
-        default=Path("~/.codex"),
-        alias="DRUKS_CODEX_CONFIG_DIR",
+    # Each harness owns one directory under this root. Druks copies only the
+    # files that harness declares. Provider logins come from the database.
+    harness_config_root: ExpandedPath = Field(
+        default=Path("~/.config/druks/harnesses"),
+        alias="DRUKS_HARNESS_CONFIG_ROOT",
     )
     # Canonical shared-skills directory Druks pushes into every VM, at both
     # ``~/.claude/skills`` and ``~/.codex/skills`` (the CLIs read their own

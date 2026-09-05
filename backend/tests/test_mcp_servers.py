@@ -34,8 +34,7 @@ def _sandbox_config() -> SandboxSettings:
         service_token="t",
         service_timeout=30.0,
         image="img",
-        claude_config_dir=Path("/home/agent/.claude"),
-        codex_config_dir=Path("/home/agent/.codex"),
+        harness_config_root=Path("/harnesses"),
     )
 
 

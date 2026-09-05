@@ -116,7 +116,11 @@ main() {
   if [ -z "$DATA_HOST_DIR" ]; then
     DATA_HOST_DIR=$(sed -n 's/^DRUKS_DATA_DIR=//p' .env)
   fi
-  mkdir -p "$DATA_HOST_DIR"
+  HARNESS_CONFIG_ROOT=$(sed -n 's/^DRUKS_HARNESS_CONFIG_ROOT=//p' .env)
+  if [ -z "$HARNESS_CONFIG_ROOT" ]; then
+    HARNESS_CONFIG_ROOT="$HOME/.config/druks/harnesses"
+  fi
+  mkdir -p "$DATA_HOST_DIR" "$HARNESS_CONFIG_ROOT"
 
   # Pin the deploy user's uid/gid → the backend containers run as them, not
   # root, so everything written under the mounted data dir stays owned by
