@@ -41,6 +41,7 @@ def test_sandbox_reads_package_bytes_and_hashes_the_script(monkeypatch, tmp_path
 
 def test_get_declared_sandboxes_deduplicates_by_content(monkeypatch):
     shared = Sandbox(setup="sandboxes/setup.sh")
+    other = Sandbox(setup="sandboxes/other.sh")
 
     class First:
         kind = "notes.first"
@@ -48,7 +49,7 @@ def test_get_declared_sandboxes_deduplicates_by_content(monkeypatch):
 
     class Second:
         kind = "notes.second"
-        sandbox = shared
+        sandbox = other
 
     app = SimpleNamespace(workflows=lambda: [First, Second])
     monkeypatch.setattr(templates, "loader", SimpleNamespace(iter_apps=lambda: [app]))
@@ -56,7 +57,7 @@ def test_get_declared_sandboxes_deduplicates_by_content(monkeypatch):
 
     declared = templates.get_declared_sandboxes()
 
-    assert declared == {hashlib.sha256(b"setup").hexdigest(): shared}
+    assert declared == {hashlib.sha256(b"setup").hexdigest(): other}
 
 
 def test_software_factory_maps_the_sandbox_building_phase():
@@ -95,8 +96,38 @@ async def test_prepare_sandbox_templates_requests_each_declaration(monkeypatch):
     create_template.assert_awaited_once_with(
         setup_script="setup",
         base_image="base",
-        label="notes/sandboxes/setup.sh",
+        label="notes-setup",
     )
+
+
+async def test_prepare_templates_labels_each_app_and_script(monkeypatch):
+    sandboxes = [Sandbox(setup="sandboxes/build.sh"), Sandbox(setup="sandboxes/preview.sh")]
+    for sandbox in sandboxes:
+        object.__setattr__(sandbox, "module", "site_builder.workflows")
+    create_template = AsyncMock()
+    monkeypatch.setattr(Sandbox, "read_setup_script", lambda self: self.setup.encode())
+    monkeypatch.setattr(
+        templates, "load_settings", lambda: SimpleNamespace(sandbox=SimpleNamespace(image=""))
+    )
+    monkeypatch.setattr(
+        templates, "loader", SimpleNamespace(resolve_workflow_app=lambda module: "site_builder")
+    )
+    monkeypatch.setattr(
+        templates,
+        "get_declared_sandboxes",
+        lambda: {sandbox.setup_script_hash: sandbox for sandbox in sandboxes},
+    )
+    monkeypatch.setattr(
+        templates, "sandbox_client", SimpleNamespace(create_template=create_template)
+    )
+
+    await templates.prepare_sandbox_templates()
+
+    assert [call.kwargs["label"] for call in create_template.await_args_list] == [
+        "site-builder-build",
+        "site-builder-preview",
+    ]
+    assert all(call.kwargs["base_image"] is None for call in create_template.await_args_list)
 
 
 async def test_get_template_id_uses_available_template(monkeypatch):
