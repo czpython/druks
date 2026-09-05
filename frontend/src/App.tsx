@@ -14,6 +14,7 @@ import { navigate as browserNavigate, useLocationProperty } from 'wouter/use-bro
 
 import { api } from './api/client'
 import type { Account } from './api/types'
+import type { UnsavedForm } from './components/settings'
 import { useScreenWakeLock } from './lib/useScreenWakeLock'
 import { useTimezone } from './lib/preferences'
 import { EmptyState } from './components/EmptyState'
@@ -33,7 +34,7 @@ import { appHome, appLabel, appOwning, getAppUI, registeredApps } from './apps/r
 const ROUTER_BASE = import.meta.env.BASE_URL.replace(/\/$/, '')
 
 export function App({ account }: { account: Account }) {
-  const leaveSettings = useRef<((proceed: () => void) => void) | null>(null)
+  const unsavedFormRef = useRef<UnsavedForm | null>(null)
   const position = useRef(window.history.state?.druksPosition ?? 0)
   const currentUrl = useRef(window.location.href)
   const workEntry = useRef(window.history.state?.druksWork)
@@ -57,15 +58,17 @@ export function App({ account }: { account: Account }) {
       )
         return
       const destination = event.state?.druksPosition ?? 0
-      const leavesSettings =
-        !window.location.pathname.startsWith(`${settingsPath}/`) &&
-        window.location.pathname !== settingsPath
-      if (leaveSettings.current && leavesSettings && !acceptedPop.current) {
+      const form = unsavedFormRef.current
+      const leavesForm =
+        form &&
+        window.location.pathname !== form.path &&
+        !window.location.pathname.startsWith(`${form.path}/`)
+      if (form && leavesForm && !acceptedPop.current) {
         event.stopImmediatePropagation()
         const distance = position.current - destination
         restoring.current = true
         window.history.go(distance)
-        leaveSettings.current(() => {
+        form.confirm(() => {
           acceptedPop.current = true
           window.history.go(-distance)
         })
@@ -118,8 +121,9 @@ export function App({ account }: { account: Account }) {
       })
       currentUrl.current = window.location.href
     }
-    if (leaveSettings.current && to !== settingsPath && !to.startsWith(`${settingsPath}/`)) {
-      leaveSettings.current(proceed)
+    const form = unsavedFormRef.current
+    if (form && to !== form.path && !to.startsWith(`${form.path}/`)) {
+      form.confirm(proceed)
     } else {
       proceed()
     }
@@ -127,18 +131,18 @@ export function App({ account }: { account: Account }) {
 
   return (
     <Router base={ROUTER_BASE} aroundNav={aroundNav}>
-      <AppContexts account={account} leaveSettings={leaveSettings} aroundNav={aroundNav} />
+      <AppContexts account={account} unsavedFormRef={unsavedFormRef} aroundNav={aroundNav} />
     </Router>
   )
 }
 
 function AppContexts({
   account,
-  leaveSettings,
+  unsavedFormRef,
   aroundNav,
 }: {
   account: Account
-  leaveSettings: RefObject<((proceed: () => void) => void) | null>
+  unsavedFormRef: RefObject<UnsavedForm | null>
   aroundNav: NonNullable<RouterProps['aroundNav']>
 }) {
   const [location] = useLocation()
@@ -179,25 +183,38 @@ function AppContexts({
   return (
     <>
       <Router base={ROUTER_BASE} hook={workLocation} searchHook={workQuery} aroundNav={aroundNav}>
-        <AppShell account={account} hidden={isSettings} />
+        <AppShell account={account} hidden={isSettings} unsavedFormRef={unsavedFormRef} />
       </Router>
       {isSettings && (
         <SettingsPages
           account={account}
           returnTo={`${workPath.slice(ROUTER_BASE.length)}${workSearch ? `?${workSearch}` : ''}${work.hash}`}
-          leaveSettings={leaveSettings}
+          unsavedFormRef={unsavedFormRef}
         />
       )}
     </>
   )
 }
 
-function AppShell({ account, hidden }: { account: Account; hidden: boolean }) {
+function AppShell({
+  account,
+  hidden,
+  unsavedFormRef,
+}: {
+  account: Account
+  hidden: boolean
+  unsavedFormRef: RefObject<UnsavedForm | null>
+}) {
   const [location, navigate] = useLocation()
   const timezone = useTimezone()
   const rosterQuery = useQuery({
     queryKey: ['apps'],
     queryFn: api.listApps,
+    staleTime: 60_000,
+  })
+  const settingsQuery = useQuery({
+    queryKey: ['appSettings'],
+    queryFn: api.getAppSettings,
     staleTime: 60_000,
   })
   const registered = useMemo(() => {
@@ -265,8 +282,25 @@ function AppShell({ account, hidden }: { account: Account; hidden: boolean }) {
     return () => window.removeEventListener('keydown', onKey)
   }, [location, app, navigate, defaultApp, hidden])
 
-  const navigation =
+  const declaredNavigation =
     ui?.navigation ?? rosterQuery.data?.find((entry) => entry.name === app)?.navigation
+  const appSettings = settingsQuery.data?.apps.find((entry) => entry.name === app)
+  const hasSettings = Boolean(
+    appSettings &&
+      (appSettings.settings.length ||
+        appSettings.agents.length ||
+        appSettings.workflows.some((workflow) => workflow.fields.length)),
+  )
+  const navigation: [string, string][] = urlApp
+    ? [
+        ...(declaredNavigation?.length
+          ? declaredNavigation
+          : hasSettings
+            ? [[appHome(urlApp), 'Home'] as [string, string]]
+            : []),
+        ...(hasSettings ? [[`/apps/${urlApp}/settings`, 'Settings'] as [string, string]] : []),
+      ]
+    : []
   const activeTab = navigation
     ?.map(([url]) => url)
     .filter((url) => location === url || location.startsWith(`${url}/`))
@@ -401,6 +435,17 @@ function AppShell({ account, hidden }: { account: Account; hidden: boolean }) {
           </p>
         )}
         <Switch>
+          <Route path="/apps/:name/settings/:tab?">
+            {(params) => (
+              <SettingsPages
+                account={account}
+                returnTo={appHome(params.name)}
+                unsavedFormRef={unsavedFormRef}
+                appName={params.name}
+                active={!hidden}
+              />
+            )}
+          </Route>
           <Route path="/usage">
             <UsagePage />
           </Route>

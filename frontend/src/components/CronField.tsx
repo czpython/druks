@@ -2,7 +2,6 @@ import { useState } from 'react'
 
 import { Select, TextInput } from './Control'
 
-// The cadences an operator actually picks from; anything else is "custom".
 const CRON_PRESETS: [cron: string, label: string][] = [
   ['*/5 * * * *', 'Every 5 minutes'],
   ['*/15 * * * *', 'Every 15 minutes'],
@@ -13,28 +12,29 @@ const CRON_PRESETS: [cron: string, label: string][] = [
 ]
 
 export function CronField({
+  label,
   value,
   onChange,
   disabled,
 }: {
+  label: string
   value: string
-  onChange: (v: string) => void
+  onChange: (value: string) => void
   disabled: boolean
 }) {
-  // A value outside the presets opens in the raw-cron input, so nothing an
-  // operator (or the API) stored is ever hidden or clobbered. The select
-  // stays visible as the mode switcher, so custom is never a one-way door.
-  const [custom, setCustom] = useState(() => !CRON_PRESETS.some(([cron]) => cron === value))
+  const [custom, setCustom] = useState(false)
+  const showCustom = custom || !CRON_PRESETS.some(([cron]) => cron === value)
   return (
     <>
       <Select
-        value={custom ? 'custom' : value}
-        onChange={(e) => {
-          if (e.target.value === 'custom') {
+        aria-label={label}
+        value={showCustom ? 'custom' : value}
+        onChange={(event) => {
+          if (event.target.value === 'custom') {
             setCustom(true)
           } else {
             setCustom(false)
-            onChange(e.target.value)
+            onChange(event.target.value)
           }
         }}
         disabled={disabled}
@@ -46,12 +46,13 @@ export function CronField({
         ))}
         <option value="custom">Custom cron…</option>
       </Select>
-      {custom && (
+      {showCustom && (
         <TextInput
           type="text"
+          aria-label={`${label} (cron)`}
           value={value}
           placeholder="cron, e.g. */15 * * * *"
-          onChange={(e) => onChange(e.target.value)}
+          onChange={(event) => onChange(event.target.value)}
           disabled={disabled}
         />
       )}

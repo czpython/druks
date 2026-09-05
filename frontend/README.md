@@ -42,12 +42,20 @@ navigation button opens a modal drawer. Escape closes the drawer and returns
 focus to the button.
 
 Shared settings use `/settings/<section>` routes. Search matches section names
-and field labels. General, Agent defaults, and app settings retain separate
+and field labels. General and Agent defaults retain separate
 drafts across settings pages. Save changes applies only the current page.
 Leaving Settings offers Save, Discard, and Stay. Save applies each dirty page;
 a failed request keeps the operator on that page with its draft. Resource
 actions, such as connecting a provider or minting an API token, apply at once.
 Back to Druks restores the previous work URL and keeps the work page mounted.
+
+App settings use `/apps/<name>/settings` in the work context. The app's page
+navigation and the central App settings index link to this same route.
+Options and Agents appear only when the app declares those controls. Both
+sections share one app draft. Leaving the app form offers Save, Discard, and
+Stay. An app without controls has no Settings destination. Backend app schemas
+supply these forms without a frontend module. Schedule controls use the
+existing workflow overrides.
 
 Normal interface text uses IBM Plex Sans at 15 px. Technical values use
 IBM Plex Mono. Phone inputs use at least 16 px.

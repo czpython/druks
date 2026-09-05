@@ -1,6 +1,6 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react'
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft, Search } from 'lucide-react'
+import { ArrowLeft, ArrowUpRight, Search } from 'lucide-react'
 import { Link, useLocation } from 'wouter'
 
 import { ApiError, api } from '../api/client'
@@ -27,7 +27,14 @@ import {
   ServicesPane,
   SkillsPane,
 } from './SettingsPanes'
-import { buildCatalog, defaultsOf, isFieldVisible, knownProviders, type Defaults } from './settings'
+import {
+  buildCatalog,
+  defaultsOf,
+  isFieldVisible,
+  knownProviders,
+  type Defaults,
+  type UnsavedForm,
+} from './settings'
 
 const SECTIONS = [
   {
@@ -93,14 +100,19 @@ function withField(
 export function SettingsPages({
   account,
   returnTo,
-  leaveSettings,
+  unsavedFormRef,
+  appName,
+  active = true,
 }: {
   account: Account
   returnTo: string
-  leaveSettings: RefObject<((proceed: () => void) => void) | null>
+  unsavedFormRef: RefObject<UnsavedForm | null>
+  appName?: string
+  active?: boolean
 }) {
   const [location, navigate] = useLocation()
-  const section = location.slice('/settings/'.length) || 'providers'
+  const section = appName ? `apps/${appName}` : location.slice('/settings/'.length) || 'providers'
+  const formPath = `${import.meta.env.BASE_URL.replace(/\/$/, '')}${appName ? `/apps/${appName}/settings` : '/settings'}`
   const queryClient = useQueryClient()
   const settingsQuery = useQuery({ queryKey: ['settings'], queryFn: api.getSettings })
   const appsQuery = useQuery({ queryKey: ['appSettings'], queryFn: api.getAppSettings })
@@ -114,7 +126,12 @@ export function SettingsPages({
   })
   const keysQuery = useQuery({ queryKey: ['providerKeys'], queryFn: api.providerKeys })
   const catalogsQuery = useQuery({ queryKey: ['providerCatalogs'], queryFn: api.providerCatalogs })
-  const apps = appsQuery.data?.apps ?? []
+  const apps = (appsQuery.data?.apps ?? []).filter(
+    (entry) =>
+      entry.settings.length > 0 ||
+      entry.agents.length > 0 ||
+      entry.workflows.some((workflow) => workflow.fields.length > 0),
+  )
   const harnesses = harnessesQuery.data ?? []
   const catalogs = catalogsQuery.data ?? []
   const providers = knownProviders(providersQuery.data ?? [], catalogs)
@@ -140,6 +157,7 @@ export function SettingsPages({
   if (!visited.includes(section)) setVisited([...visited, section])
   const tick = useTicker()
   const confirmation = useRef<HTMLDialogElement>(null)
+  const confirmationTitle = useId()
   const pending = useRef<(() => void) | null>(null)
   const leaving = useRef(false)
   const heading = useRef<HTMLHeadingElement>(null)
@@ -172,10 +190,20 @@ export function SettingsPages({
       .map(([name]) => `apps/${name}`),
   ]
   const dirty = dirtyPages.includes(section)
-  const app = apps.find((entry) => section === `apps/${entry.name}`)
+  const app = appName ? apps.find((entry) => entry.name === appName) : undefined
+  const appTab = location.endsWith('/agents') ? 'agents' : 'options'
+  const validAppPage =
+    !appName ||
+    location === `/apps/${appName}/settings` ||
+    Boolean(app?.agents.length && location === `/apps/${appName}/settings/agents`)
+  const hasOptions = Boolean(
+    app && (app.settings.length || app.workflows.some((workflow) => workflow.fields.length)),
+  )
+  const paneSection = app?.agents.length && !hasOptions ? 'agents' : appTab
+  const Content = appName ? 'section' : 'main'
   const title =
     SECTIONS.find((entry) => entry.id === section)?.label ?? (app ? appLabel(app.name) : 'Settings')
-  const formPage = section === 'general' || section === 'agents' || Boolean(app)
+  const formPage = section === 'general' || section === 'agents' || Boolean(app && validAppPage)
   const executionChanged =
     defaults &&
     savedDefaults &&
@@ -195,21 +223,25 @@ export function SettingsPages({
   }, [location, navigate])
 
   useLayoutEffect(() => {
-    heading.current?.focus()
-  }, [section])
+    if (active) heading.current?.focus({ preventScroll: true })
+  }, [section, active])
 
   useLayoutEffect(() => {
-    leaveSettings.current =
-      dirtyPages.length > 0
-        ? (proceed) => {
-            pending.current = proceed
-            confirmation.current?.showModal()
-          }
-        : null
-    return () => {
-      leaveSettings.current = null
+    const form: UnsavedForm = {
+      path: formPath,
+      confirm: (proceed) => {
+        pending.current = proceed
+        confirmation.current?.showModal()
+      },
     }
-  }, [dirtyPages.length, leaveSettings])
+    if (active && dirtyPages.length > 0) {
+      leaving.current = false
+      unsavedFormRef.current = form
+    }
+    return () => {
+      if (unsavedFormRef.current === form) unsavedFormRef.current = null
+    }
+  }, [dirtyPages.length, unsavedFormRef, formPath, active])
 
   useEffect(() => {
     function beforeUnload(event: BeforeUnloadEvent) {
@@ -245,7 +277,7 @@ export function SettingsPages({
 
   function finishLeaving() {
     leaving.current = true
-    leaveSettings.current = null
+    unsavedFormRef.current = null
     confirmation.current?.close()
     pending.current?.()
   }
@@ -321,6 +353,7 @@ export function SettingsPages({
       }
       proceed?.()
     } catch (caught) {
+      let message = caught instanceof Error ? caught.message : 'Could not save settings. Try again.'
       if (
         caught instanceof ApiError &&
         caught.status === 422 &&
@@ -329,14 +362,15 @@ export function SettingsPages({
         !Array.isArray(caught.detail)
       ) {
         setAppProblems(caught.detail as AppSettingsProblems)
+        message = 'Check the highlighted fields.'
       }
       setErrors((current) => ({
         ...current,
-        [page]: caught instanceof Error ? caught.message : 'Could not save settings. Try again.',
+        [page]: message,
       }))
       confirmation.current?.close()
       pending.current = null
-      navigate(`/settings/${page}`)
+      navigate(appName ? `/apps/${appName}/settings` : `/settings/${page}`)
       window.requestAnimationFrame(() => errorNotice.current?.focus())
     } finally {
       setSaving(false)
@@ -366,7 +400,7 @@ export function SettingsPages({
         ].map((label) => ({
           label,
           owner: appLabel(entry.name),
-          path: `/settings/apps/${entry.name}`,
+          path: `/apps/${entry.name}/settings`,
         })),
       ),
     )
@@ -376,7 +410,7 @@ export function SettingsPages({
 
   return (
     <div
-      className="command-center settings-context"
+      className={appName ? 'settings-context app-settings' : 'command-center settings-context'}
       onKeyDown={(event) => {
         if (
           (event.metaKey || event.ctrlKey) &&
@@ -400,10 +434,10 @@ export function SettingsPages({
           !event.shiftKey &&
           !event.altKey &&
           event.button === 0 &&
-          leaveSettings.current
+          unsavedFormRef.current
         ) {
           const target = new URL(anchor.href)
-          const settingsRoot = `${import.meta.env.BASE_URL.replace(/\/$/, '')}/settings`
+          const settingsRoot = formPath
           if (
             target.origin !== window.location.origin ||
             (target.pathname !== settingsRoot && !target.pathname.startsWith(`${settingsRoot}/`))
@@ -411,7 +445,7 @@ export function SettingsPages({
             event.preventDefault()
             event.stopPropagation()
             anchor.closest('dialog')?.close('navigation')
-            leaveSettings.current(() => {
+            unsavedFormRef.current.confirm(() => {
               if (target.origin === window.location.origin)
                 navigate(`~${target.pathname}${target.search}${target.hash}`)
               else window.location.assign(target.href)
@@ -420,64 +454,97 @@ export function SettingsPages({
         }
       }}
     >
-      <a className="skip-navigation" href="#settings-content">
-        Skip to content
-      </a>
-      <header className="command-header">
-        <Sidebar account={account} home={returnTo}>
-          <Link className="settings-back sidebar-link" href={returnTo}>
-            <ArrowLeft size={17} aria-hidden="true" />
-            Back to Druks
-          </Link>
-          <h2 className="settings-sidebar-title">Settings</h2>
-          <nav className="settings-navigation" aria-label="Settings">
-            {['AI execution', 'Tools & access', 'Personal', 'Apps'].map((group) => (
-              <div key={group}>
-                <div className="sidebar-group-title">{group}</div>
-                {SECTIONS.filter((entry) => entry.group === group).map((entry) => (
-                  <Link
-                    key={entry.id}
-                    aria-label={entry.label}
-                    aria-description={dirtyPages.includes(entry.id) ? 'Unsaved changes' : undefined}
-                    href={`/settings/${entry.id}`}
-                    className="sidebar-link"
-                    aria-current={
-                      section === entry.id || (entry.id === 'apps' && Boolean(app))
-                        ? 'page'
-                        : undefined
-                    }
-                  >
-                    {entry.label}
-                    {dirtyPages.includes(entry.id) && <span aria-hidden="true">•</span>}
-                  </Link>
+      {!appName && (
+        <>
+          <a className="skip-navigation" href="#settings-content">
+            Skip to content
+          </a>
+          <header className="command-header">
+            <Sidebar account={account} home={returnTo}>
+              <Link className="settings-back sidebar-link" href={returnTo}>
+                <ArrowLeft size={17} aria-hidden="true" />
+                Back to Druks
+              </Link>
+              <h2 className="settings-sidebar-title">Settings</h2>
+              <nav className="settings-navigation" aria-label="Settings">
+                {['AI execution', 'Tools & access', 'Personal', 'Apps'].map((group) => (
+                  <div key={group}>
+                    <div className="sidebar-group-title">{group}</div>
+                    {SECTIONS.filter((entry) => entry.group === group).map((entry) => (
+                      <Link
+                        key={entry.id}
+                        aria-label={entry.label}
+                        aria-description={
+                          dirtyPages.includes(entry.id) ? 'Unsaved changes' : undefined
+                        }
+                        href={`/settings/${entry.id}`}
+                        className="sidebar-link"
+                        aria-current={
+                          section === entry.id || (entry.id === 'apps' && Boolean(app))
+                            ? 'page'
+                            : undefined
+                        }
+                      >
+                        {entry.label}
+                        {dirtyPages.includes(entry.id) && <span aria-hidden="true">•</span>}
+                      </Link>
+                    ))}
+                  </div>
                 ))}
-              </div>
-            ))}
-          </nav>
-        </Sidebar>
-        <div className="command-breadcrumb">
-          <span>Settings /</span>
-          <strong>{title}</strong>
-        </div>
-      </header>
-      <main className="settings-main" id="settings-content" tabIndex={-1}>
+              </nav>
+            </Sidebar>
+            <div className="command-breadcrumb">
+              <span>Settings /</span>
+              <strong>{title}</strong>
+            </div>
+          </header>
+        </>
+      )}
+      <Content
+        className="settings-main"
+        id={appName ? 'app-settings-content' : 'settings-content'}
+        tabIndex={-1}
+      >
         <div className="settings-page-head">
           <div>
             <h1 tabIndex={-1} ref={heading}>
               {title}
             </h1>
           </div>
-          <label className="settings-search">
-            <Search size={17} aria-hidden="true" />
-            <input
-              type="search"
-              aria-label="Search settings"
-              placeholder="Search settings"
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-            />
-          </label>
+          {!appName && (
+            <label className="settings-search">
+              <Search size={17} aria-hidden="true" />
+              <input
+                type="search"
+                aria-label="Search settings"
+                placeholder="Search settings"
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+              />
+            </label>
+          )}
         </div>
+        {appName && app && (
+          <>
+            <p className="app-settings-description">{app.description}</p>
+            {hasOptions && app.agents.length > 0 && (
+              <nav className="settings-tabs" aria-label="App settings sections">
+                <Link
+                  href={`/apps/${app.name}/settings`}
+                  aria-current={paneSection === 'options' ? 'page' : undefined}
+                >
+                  Options
+                </Link>
+                <Link
+                  href={`/apps/${app.name}/settings/agents`}
+                  aria-current={paneSection === 'agents' ? 'page' : undefined}
+                >
+                  Agents
+                </Link>
+              </nav>
+            )}
+          </>
+        )}
         {search.trim() && (
           <div className="settings-search-results" aria-label="Settings search results">
             {searchResults.length === 0 ? (
@@ -501,19 +568,21 @@ export function SettingsPages({
             {errors[section]}
           </p>
         )}
-        {(settingsQuery.isError || appsQuery.isError) && (formPage || section === 'apps') && (
-          <p role="alert" className="settings-error">
-            Could not load settings.{' '}
-            <button
-              onClick={() => {
-                void settingsQuery.refetch()
-                void appsQuery.refetch()
-              }}
-            >
-              Try again
-            </button>
-          </p>
-        )}
+        {appName && appsQuery.isPending && <p role="status">Loading app settings…</p>}
+        {(settingsQuery.isError || appsQuery.isError) &&
+          (appName || formPage || section === 'apps') && (
+            <p role="alert" className="settings-error">
+              Could not load settings.{' '}
+              <button
+                onClick={() => {
+                  void settingsQuery.refetch()
+                  void appsQuery.refetch()
+                }}
+              >
+                Try again
+              </button>
+            </p>
+          )}
         {visited.map((page) => (
           <div key={page} hidden={page !== section} className="settings-pane">
             {page === 'general' && (
@@ -536,7 +605,7 @@ export function SettingsPages({
                   harnessColor={harnessColor}
                   catalog={catalog}
                   allowedEfforts={appsQuery.data?.allowedEfforts ?? []}
-                  onOpenApp={(name) => navigate(`/settings/apps/${name}`)}
+                  onOpenApp={(name) => navigate(`/apps/${name}/settings`)}
                   onAddProvider={() => navigate('/settings/providers')}
                   busy={saving}
                 />
@@ -594,27 +663,33 @@ export function SettingsPages({
             {page === 'skills' && <SkillsPane />}
             {page === 'browser-sessions' && <BrowserSessionsPane />}
             {page === 'api-tokens' && <AgentAccessPane />}
-            {page === 'apps' && (
+            {page === 'apps' && !search.trim() && (
               <div className="settings-app-index">
                 {apps.map((entry) => (
                   <Link
                     key={entry.name}
                     aria-label={appLabel(entry.name)}
-                    href={`/settings/apps/${entry.name}`}
+                    href={`/apps/${entry.name}/settings`}
                   >
                     <strong>{appLabel(entry.name)}</strong>
                     <span>{entry.description}</span>
                   </Link>
                 ))}
                 {appsQuery.isPending && <p role="status">Loading app settings…</p>}
+                {!appsQuery.isPending && !appsQuery.isError && apps.length === 0 && (
+                  <p>No installed app declares settings.</p>
+                )}
               </div>
             )}
             {apps
-              .filter((entry) => page === `apps/${entry.name}`)
+              .filter(
+                (entry) => validAppPage && appName === entry.name && page === `apps/${entry.name}`,
+              )
               .map((entry) => (
-                <div key={entry.name}>
+                <div key={entry.name} className="app-settings-layout">
                   <AppPane
                     app={entry}
+                    section={paneSection}
                     edits={appEdits[entry.name] ?? {}}
                     fieldErrors={appProblems[entry.name] ?? {}}
                     harnessColor={harnessColor}
@@ -678,14 +753,23 @@ export function SettingsPages({
                     }}
                     onAddProvider={() => navigate('/settings/providers')}
                   />
+                  <aside className="app-settings-owner">
+                    <h2>Owned by this app</h2>
+                    <p>These settings affect {appLabel(entry.name)}.</p>
+                    <p>Provider credentials and shared defaults remain in Settings.</p>
+                    <Link href="/settings/agents">
+                      Agent defaults <ArrowUpRight size={15} aria-hidden="true" />
+                    </Link>
+                  </aside>
                 </div>
               ))}
           </div>
         ))}
-        {!SECTIONS.some((entry) => entry.id === section) && !app && !appsQuery.isPending && (
-          <p>No settings page matches this address.</p>
-        )}
-      </main>
+        {appsQuery.isSuccess &&
+          (!validAppPage || (!SECTIONS.some((entry) => entry.id === section) && !app)) && (
+            <p>No settings page matches this address.</p>
+          )}
+      </Content>
       {formPage && (
         <footer className="settings-save-bar">
           <span role="status">{saving ? 'Saving…' : dirty ? 'Unsaved changes' : 'Saved'}</span>
@@ -716,7 +800,7 @@ export function SettingsPages({
       <dialog
         className="settings-leave-dialog"
         ref={confirmation}
-        aria-labelledby="leave-settings-title"
+        aria-labelledby={confirmationTitle}
         onCancel={(event) => {
           event.preventDefault()
           if (!saving) {
@@ -725,7 +809,7 @@ export function SettingsPages({
           }
         }}
       >
-        <h2 id="leave-settings-title">Save your changes?</h2>
+        <h2 id={confirmationTitle}>Save your changes?</h2>
         <p>
           You have unsaved changes in {dirtyPages.length} settings{' '}
           {dirtyPages.length === 1 ? 'page' : 'pages'}.

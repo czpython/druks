@@ -103,3 +103,8 @@ export function isFieldVisible(
   const current = edit !== undefined ? edit : controller.value
   return String(current) === String(field.visibleWhenValue)
 }
+
+export interface UnsavedForm {
+  path: string
+  confirm: (proceed: () => void) => void
+}

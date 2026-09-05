@@ -3,19 +3,10 @@ import react from '@vitejs/plugin-react'
 import { fileURLToPath } from 'node:url'
 
 // Repo-root dist/, where the backend serves the SPA from (app.frontend).
-const repoDist = fileURLToPath(
-  new URL('../dist/', import.meta.url),
-)
+const repoDist = fileURLToPath(new URL('../dist/', import.meta.url))
 
-// The modules the shell shares with installed dist apps, mapped to the
-// /src/runtime/* re-export shim that serves each. An app's bundle externalizes
-// these bare specifiers; this import map resolves them to the shims, so one
-// React instance — and one copy of the shell's components — serves the whole
-// document. In a build the shims are extra entries — hashed like any asset,
-// with their shared code in the common chunks — and the import map (regenerated
-// into index.html per build) carries the hashed names. In dev the Vite server
-// serves the shim sources directly. Values carry their extension: the React
-// shims are .js, @druks/ui is .ts because it re-exports .tsx.
+// Installed app bundles share the shell's React instance and UI components.
+// Production import maps resolve to fingerprinted entries.
 const SHARED_MODULES: Record<string, string> = {
   react: 'react.js',
   'react-dom': 'react-dom.js',
@@ -25,11 +16,9 @@ const SHARED_MODULES: Record<string, string> = {
 }
 
 const shimUrl = (file: string) => new URL(`./src/runtime/${file}`, import.meta.url)
-// The rollup entry name for a shim, and what transformIndexHtml matches on.
 const shimEntry = (file: string) => `runtime-${file.replace(/\.[jt]s$/, '')}`
 
-// Bundled apps import '@druks/ui' as an installed app does, so breaking
-// the lent surface reddens the shell's own build first. Exported for vitest.
+// Bundled apps exercise the same UI contract as separately installed apps.
 export const shellAlias = {
   '@druks/ui': fileURLToPath(shimUrl(SHARED_MODULES['@druks/ui']!)),
 }
@@ -37,11 +26,11 @@ export const shellAlias = {
 function shellImportMap(): Plugin {
   return {
     name: 'druks-shell-import-map',
-    transformIndexHtml(_html, ctx) {
+    transformIndexHtml(_html, context) {
       const entryFile = (file: string): string => {
-        if (!ctx.bundle) return `/src/runtime/${file}`
-        const chunk = Object.values(ctx.bundle).find(
-          (out) => out.type === 'chunk' && out.isEntry && out.name === shimEntry(file),
+        if (!context.bundle) return `/src/runtime/${file}`
+        const chunk = Object.values(context.bundle).find(
+          (output) => output.type === 'chunk' && output.isEntry && output.name === shimEntry(file),
         )
         if (!chunk) throw new Error(`runtime shim ${file} missing from the bundle`)
         return `/${chunk.fileName}`
@@ -61,20 +50,18 @@ function shellImportMap(): Plugin {
   }
 }
 
-// https://vite.dev/config/
 export default defineConfig({
   plugins: [react(), shellImportMap()],
   resolve: { alias: shellAlias },
   server: {
     port: 5173,
     proxy: {
-      // FastAPI serves the API (and installed app dists under /app);
-      // Vite proxies during dev so the SPA can hit both same-origin.
       '/api': {
         target: 'http://127.0.0.1:8001',
         changeOrigin: true,
       },
-      '/app': {
+      // Match /app/ exactly so shared routes under /apps/ stay in Vite.
+      '/app/': {
         target: 'http://127.0.0.1:8001',
         changeOrigin: true,
       },
@@ -84,8 +71,7 @@ export default defineConfig({
     outDir: repoDist,
     emptyOutDir: true,
     rollupOptions: {
-      // The runtime shims are entries whose exports ARE the product — without
-      // this, tree-shaking strips them down to bare side-effect imports.
+      // Installed apps import these exports, so tree-shaking must retain them.
       preserveEntrySignatures: 'exports-only',
       input: {
         main: fileURLToPath(new URL('./index.html', import.meta.url)),
@@ -97,32 +83,23 @@ export default defineConfig({
         ),
       },
       output: {
-        // Split rarely-changing vendor code out of the main app chunk
-        // so re-deploys (which mostly touch app code) don't bust the
-        // operator's cache for these. Also keeps the main bundle
-        // under the 500 KB warning threshold without raising the
-        // limit, which would just hide the signal.
-        //
-        // Markdown rendering is its own chunk because react-markdown
-        // + remark-gfm + their micromark deps pull in a sizable
-        // tokenizer that only a few detail pages actually need.
-        //
-        // Vite 8 / rolldown took the static-map form of ``manualChunks``
-        // away; the function form below is the supported equivalent.
+        // Vendor chunks retain their cache when app code changes.
+        // Markdown loads only on detail pages that need its tokenizer.
         manualChunks(id: string): string | undefined {
-          if (id.includes('node_modules/react-markdown') ||
-              id.includes('node_modules/remark-') ||
-              id.includes('node_modules/micromark') ||
-              id.includes('node_modules/mdast-') ||
-              id.includes('node_modules/unist-') ||
-              id.includes('node_modules/hast-')) {
+          if (
+            id.includes('node_modules/react-markdown') ||
+            id.includes('node_modules/remark-') ||
+            id.includes('node_modules/micromark') ||
+            id.includes('node_modules/mdast-') ||
+            id.includes('node_modules/unist-') ||
+            id.includes('node_modules/hast-')
+          ) {
             return 'markdown-vendor'
           }
           if (id.includes('node_modules/@tanstack/react-query')) {
             return 'query-vendor'
           }
-          if (id.includes('node_modules/react') ||
-              id.includes('node_modules/scheduler')) {
+          if (id.includes('node_modules/react') || id.includes('node_modules/scheduler')) {
             return 'react-vendor'
           }
           return undefined

@@ -9,7 +9,9 @@ import type { App as InstalledApp } from './api/types'
 import { registerAppUI } from './apps/registry'
 
 vi.mock('./apps', () => ({}))
-vi.mock('./api/client', () => ({ api: { listApps: vi.fn(), systemHealth: vi.fn() } }))
+vi.mock('./api/client', () => ({
+  api: { listApps: vi.fn(), systemHealth: vi.fn(), getAppSettings: vi.fn() },
+}))
 vi.mock('./components/SettingsPages', () => ({ SettingsPages: () => <h1>Settings form</h1> }))
 vi.mock('./pages/EventsPage', () => ({ EventsPage: () => <h1>Events feed</h1> }))
 vi.mock('./pages/UsagePage', () => ({ UsagePage: () => <h1>Usage report</h1> }))
@@ -95,6 +97,7 @@ afterEach(cleanup)
 
 beforeEach(() => {
   vi.mocked(api.listApps).mockResolvedValue(roster)
+  vi.mocked(api.getAppSettings).mockResolvedValue({ allowedEfforts: [], apps: [] })
   vi.stubGlobal(
     'matchMedia',
     vi.fn(() => ({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() })),
