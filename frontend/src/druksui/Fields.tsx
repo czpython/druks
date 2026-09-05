@@ -1,4 +1,4 @@
-import { useId } from 'react'
+import { useId, useRef } from 'react'
 
 import type { Field } from '../api/types'
 
@@ -90,6 +90,7 @@ function Input({
   isInvalid: boolean
   resets: number
 }) {
+  const picker = useRef<HTMLInputElement>(null)
   const shared = {
     id,
     // Scoped like the id: two radio groups sharing a name would become one, and
@@ -242,6 +243,53 @@ function Input({
           onChange={(event) => onChange(field.name, event.target.files?.[0] ?? null)}
         />
       )
+    case 'multi_upload': {
+      const files = value as File[]
+      return (
+        <>
+          <input
+            {...shared}
+            key={resets}
+            className="dui-input dui-upload"
+            type="file"
+            multiple
+            ref={picker}
+            accept={field.accept || undefined}
+            required={field.isRequired && files.length === 0}
+            aria-required={field.isRequired}
+            onChange={(event) => {
+              const chosen = Array.from(event.target.files!)
+              if (chosen.length) onChange(field.name, chosen)
+            }}
+          />
+          {files.length > 0 && (
+            <ul className="dui-upload-files" aria-label={`${field.label} selected files`}>
+              {files.map((file, index) => (
+                <li key={index}>
+                  <span>{file.name}</span>
+                  <button
+                    type="button"
+                    className="dui-action"
+                    aria-label={`Remove ${file.name}`}
+                    onClick={() => {
+                      const remaining = files.filter((_, one) => one !== index)
+                      // Keep the native file count aligned with the list.
+                      const selection = new DataTransfer()
+                      for (const file of remaining) selection.items.add(file)
+                      picker.current!.files = selection.files
+                      onChange(field.name, remaining)
+                      picker.current!.focus()
+                    }}
+                  >
+                    Remove
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </>
+      )
+    }
     default:
       return (
         <div className="dui-unknown mono" role="alert">

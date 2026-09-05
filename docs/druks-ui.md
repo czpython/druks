@@ -62,7 +62,7 @@ TextValue  NumberValue  StatusValue        values
 TimeValue
 Option  TextField  TextAreaField           fields
 NumberField  SelectField  MultiSelectField
-RadioField  CheckboxField  UploadField
+RadioField  CheckboxField  UploadField  MultiUploadField
 SecretField
 Block  Value  Field                        the three unions
 ```
@@ -540,7 +540,7 @@ Value = Annotated[TextValue | NumberValue | StatusValue | TimeValue, Discriminat
 
 Field = Annotated[
     TextField | TextAreaField | NumberField | SelectField | MultiSelectField
-    | RadioField | CheckboxField | UploadField | SecretField,
+    | RadioField | CheckboxField | UploadField | MultiUploadField | SecretField,
     Discriminator("field"),
 ]
 ```
@@ -1315,8 +1315,13 @@ time in the title attribute.
 ## Fields
 
 Every field carries a `field` discriminator, `name`, `label`, `help_text`, and
-`is_required`. `name` is the key the shell sends. Every field but `UploadField`
-and `SecretField` also has a `value`, which is what it starts on.
+`is_required`. `name` is the key the shell sends. `UploadField`,
+`MultiUploadField`, and `SecretField` have no starting `value`.
+
+| File field | Selection | Submitted value |
+| --- | --- | --- |
+| `UploadField` | One file | One file id, or `null` when empty |
+| `MultiUploadField` | Several files in one dialog | A list of file ids, or `[]` when empty |
 
 ### TextField
 
@@ -1510,6 +1515,52 @@ operator who sent it, both taken from the request rather than from the client.
 A file over the platform's upload cap is refused, and the shell puts the refusal
 on that field. A file whose form is never submitted stays stored with nothing
 pointing at it.
+
+### MultiUploadField
+
+```python
+class MultiUploadField:
+    field: Literal["multi_upload"] = "multi_upload"
+    name: str
+    label: str
+    accept: str = ""
+    help_text: str = ""
+    is_required: bool = False
+```
+
+```json
+{"field": "multi_upload", "name": "photos", "label": "Photos", "accept": "image/*", "helpText": "", "isRequired": false}
+```
+
+`MultiUploadField` lets the operator select several files in one native file
+dialog. The shell shows their names and a Remove button for each file before
+submit. Another selection replaces the list. The field has no `value`, so a
+page cannot put stored files into the picker.
+
+`accept` has the same file-dialog filter syntax as
+[`UploadField`](#uploadfield). It does not validate the bytes. `is_required=True`
+requires at least one selected file. An empty optional field submits `[]`.
+
+The field works in `Action.fields` and in `Form.fields`. For example, this
+action collects photos before it calls the operation:
+
+```python
+ui.Action(
+    label="Add photos",
+    operation="add_photos",
+    fields=[ui.MultiUploadField(name="photos", label="Photos", accept="image/*")],
+)
+```
+
+On submit, the shell uploads each file through `POST /api/<app>/uploads`.
+The existing `MAX_UPLOAD_BYTES` limit applies to each file. After all uploads
+succeed, the shell sends `{"photos": ["file-id-1", "file-id-2"]}` to the
+operation. Its parameter is `photos: Annotated[list[str], Body(embed=True)]`.
+
+If an upload fails, the shell marks the field in error and does not call the
+operation. It keeps the selected files for correction or another attempt.
+Files from successful uploads remain stored even if a later upload fails.
+After a successful submit, the shell clears the selection.
 
 ### SecretField
 

@@ -1,8 +1,11 @@
+from typing import Annotated
+
 import httpx
 import pytest
 from druks.files.constants import MAX_UPLOAD_BYTES
 from druks.files.models import FileRecord
 from druks.testing import asgi_client, configure_app_for_test, make_settings
+from fastapi import Body, FastAPI
 from sqlalchemy import func, select
 
 
@@ -41,6 +44,35 @@ async def test_the_name_types_the_file_whatever_the_browser_claims(
     )
 
     assert answer.json()["contentType"] == "text/plain"
+
+
+async def test_separate_uploads_supply_a_list_of_ids_to_an_operation(druks_db, tmp_path):
+    """The existing upload door supplies every id without a batch upload route."""
+    api = FastAPI()
+    received: list[str] = []
+
+    @api.post("/api/field_notes/photos", operation_id="add_photos")
+    async def add_photos(photos: Annotated[list[str], Body(embed=True)]) -> None:
+        received.extend(photos)
+
+    api.mount("/", configure_app_for_test(settings=make_settings(tmp_path)))
+
+    async with asgi_client(api) as client:
+        ids: list[str] = []
+
+        for name in ["shopfront.jpg", "interior.jpg"]:
+            answer = await client.post(
+                "/api/field_notes/uploads",
+                files={"file": (name, b"jpeg bytes", "image/jpeg")},
+            )
+            assert answer.status_code == 200
+            ids.append(answer.json()["id"])
+
+        answer = await client.post("/api/field_notes/photos", json={"photos": ids})
+
+    assert answer.status_code == 200
+    assert received == ids
+    assert len(set(received)) == 2
 
 
 async def test_an_oversized_file_is_refused_and_nothing_lands(
