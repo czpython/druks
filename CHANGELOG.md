@@ -3,6 +3,61 @@
 All notable changes to Druks. Versions follow [semantic versioning](https://semver.org);
 while Druks is pre-1.0, a minor bump may break compatibility.
 
+## [0.5.0] — 2026-09-05
+
+### Added
+
+- **An app page can be pure Python.** `druks.ui` adds pages, blocks, values, fields,
+  forms, and operation-backed actions: an app writes `@page` functions and the shell
+  renders them with no frontend build. Blocks cover text, markdown, cards, tables,
+  lists, facts, metrics, charts, image galleries, timelines, progress, transcripts,
+  files, and run controls; fields cover text, number, select, multi-select, radio,
+  checkbox, file, multi-file upload, and secret. A page or section can follow a
+  subject, or a whole subject type, and the shell replaces just that region when a
+  snapshot arrives, so scroll, focus, and half-filled inputs survive. `GateControls`
+  reads and answers a parked run's gate from inside the page. A scaffolded app now
+  gets a Python landing page and navigation entry by default; a JavaScript frontend
+  stays available as the escape hatch for an app that needs full control of its
+  screen. The full contract is documented at `docs/druks-ui.md`.
+- **A provider can be connected with an API key, not only a subscription.** Pasting a
+  key creates the provider and its model catalog on the spot; the Models.dev
+  directory is read on demand and cached for a day, only to populate the "add
+  provider" search box, not stored and refreshed on a cron for every listed vendor. A
+  key is the installation's credential, one per provider, held separately from a
+  person's OAuth subscription — an installation can hold both, and each shows its own
+  quota, spend, and Replace/Remove or Reconnect controls.
+- **Two more coding agents: OpenCode and Pi.** Both ship in the sandbox image
+  alongside Claude and Codex, connect through the same API-key or subscription flow,
+  and get their own per-harness command, first-byte timing window, and doctor probe.
+- **An exe deployment can pull its own sandbox image.** The exe image registry,
+  username, and password are configurable settings, and a sandbox template's label
+  now reads as `<app>-<script>` instead of a raw file path.
+
+### Changed
+
+- **A provider owns its login, quota, and catalog; a harness only runs on top of
+  one.** OpenAI is one provider again — a ChatGPT subscription and an API key are its
+  two billing options, not two separate providers — and every model id is namespaced
+  as `provider/model`. An agent now resolves to a harness, a model, and a billing
+  choice in one place: the Agents page lists every agent as it resolves, with an
+  override mark and a lock on a billing cell a key-only harness fixes. The separate
+  Harnesses pane is gone; its settings moved to the Agents page's defaults and the
+  per-app override cells.
+
+### Fixed
+
+- **A provider's connection status now trusts a 401 over the stored token expiry.** A
+  revoked subscription shows Reconnect within one poll cycle instead of reading as
+  connected for days while its JWT expiry has not caught up, and the expiry countdown
+  reads correctly in both directions instead of always showing "0s ago." An expired
+  login also keeps its account email and past expiry on screen and offers Reconnect,
+  instead of looking exactly like one that was never connected.
+- **An agent call retries once on an invalid response from the harness**, instead of
+  failing the run outright.
+- **software_factory's triage step reads the reviewer's own words instead of a stale
+  summary**, and each build step gets only the input it needs instead of the whole
+  conversation.
+
 ## [0.4.0] — 2026-08-29
 
 ### Added
