@@ -269,19 +269,25 @@ optional. It reports pending setup if the selected tracker lacks a connection.
 
 ## Harnesses
 
-Druks registers two providers, `anthropic` and `openai`. Each accepts a
-subscription (Claude or ChatGPT) and an API key. Both connect from
-**Settings → Providers**. The connection flow stores each credential in
-Postgres. Druks refreshes a subscription token on a schedule. It creates the
-CLI credential file inside each sandbox, or passes the key in the CLI
-environment. It does not copy a host login. This is a capability connection for
-the requesting account — in a fresh `none`-mode install the first completed
-subscription connection also creates the operator account (see
-[access control](#public-urls-and-access-control)).
+Druks registers two subscription providers, `anthropic` and `openai`. Each
+also accepts an API key. Both connect from **Settings → Providers**. The
+connection flow stores each credential in Postgres. Druks refreshes a
+subscription token on a schedule. It creates the CLI credential file inside
+each sandbox, or passes the key in the CLI environment. It does not copy a
+host login. This is a capability connection for the requesting account. In a
+fresh `none`-mode install, the first completed subscription connection also
+creates the operator account. See [access control](#public-urls-and-access-control).
+
+**Add provider** searches the Models.dev directory for a vendor that runs on
+one API key. Druks reads the directory when you open the search, keeps it in
+Redis for a day, and stores nothing until you paste a key. The key makes the
+vendor one of the installation's providers with its model list. Removing the
+key removes the vendor.
 
 The `claude` and `codex` CLIs run on their own vendor's subscription or key.
-`opencode` and `pi` run on an API key only. A model id is `provider/model`
-on either kind, for example `openai/gpt-5.5`.
+`opencode` and `pi` run on an API key only. OpenCode can run a supported
+Models.dev provider after its key is stored. A model ID is `provider/model`
+for each harness, for example `openai/gpt-5.5`.
 
 Process settings such as `DRUKS_CLAUDE_CONFIG_DIR` and
 `DRUKS_CODEX_CONFIG_DIR` point at optional non-auth CLI configuration to carry
@@ -289,8 +295,8 @@ into sandboxes. The Compose deployment mounts these read-only. The default
 harness, model, billing, effort, and timeout live in **Settings → Agents**;
 each agent can override any of them on its app's page. **Unattended runs
 (webhooks, schedules) run as** names the account whose subscription an
-unattended run bills. A call refuses before provisioning a VM if the login it
-bills is missing.
+unattended run bills. A call refuses before provisioning a VM if the
+credential it bills is missing.
 
 ## Sandboxes
 

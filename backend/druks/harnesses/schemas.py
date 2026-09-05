@@ -47,5 +47,12 @@ class ProviderCatalogResponse(Schema):
     model_config = ConfigDict(from_attributes=True)
 
     provider: str
+    label: str
     models: list[CatalogModel]
     fetched_at: datetime
+
+
+class ProviderDirectoryResponse(Schema):
+    provider: str
+    label: str
+    models: list[CatalogModel]

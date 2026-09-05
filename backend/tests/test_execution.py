@@ -6,7 +6,7 @@ from druks.accounts.models import Account
 from druks.harnesses.claude import ClaudeHarness
 from druks.harnesses.exceptions import ExecutionSettingsError, HarnessNotConnectedError
 from druks.harnesses.execution import check_execution, resolve_execution
-from druks.harnesses.models import ProviderKey, ProviderSubscription
+from druks.harnesses.models import ProviderCatalog, ProviderKey, ProviderSubscription
 from druks.harnesses.opencode import OpenCodeHarness
 from druks.harnesses.providers import AnthropicProvider
 from druks.sandbox.constants import MAX_AGENT_TIMEOUT_SECONDS
@@ -27,18 +27,23 @@ OVERSIZED = agents.Agent(
 )
 
 
-def test_check_judges_the_triple_together():
-    assert check_execution("claude", "anthropic/claude-opus-4-7", "subscription") is ClaudeHarness
-    assert check_execution("claude", "anthropic/claude-opus-4-7", "api_key") is ClaudeHarness
-    assert check_execution("opencode", "anthropic/claude-opus-4-7", "api_key") is OpenCodeHarness
+async def test_check_judges_the_triple_together(druks_db):
+    assert (
+        await check_execution("claude", "anthropic/claude-opus-4-7", "subscription")
+        is ClaudeHarness
+    )
+    assert await check_execution("claude", "anthropic/claude-opus-4-7", "api_key") is ClaudeHarness
+    assert (
+        await check_execution("opencode", "anthropic/claude-opus-4-7", "api_key") is OpenCodeHarness
+    )
     with pytest.raises(ExecutionSettingsError, match="claude does not run OpenAI models"):
-        check_execution("claude", "openai/gpt-5.5", "subscription")
+        await check_execution("claude", "openai/gpt-5.5", "subscription")
     with pytest.raises(ExecutionSettingsError, match="opencode runs on an API key only"):
-        check_execution("opencode", "anthropic/claude-opus-4-7", "subscription")
+        await check_execution("opencode", "anthropic/claude-opus-4-7", "subscription")
     with pytest.raises(ExecutionSettingsError, match="no installed harness is named 'grok'"):
-        check_execution("grok", "anthropic/claude-opus-4-7", "subscription")
-    with pytest.raises(ExecutionSettingsError, match="a model id is 'provider/model'"):
-        check_execution("claude", "claude-opus-4-7", "subscription")
+        await check_execution("grok", "anthropic/claude-opus-4-7", "subscription")
+    with pytest.raises(ExecutionSettingsError, match="names no provider"):
+        await check_execution("claude", "claude-opus-4-7", "subscription")
 
 
 async def _subscription(email: str) -> ProviderSubscription:
@@ -99,8 +104,52 @@ async def test_a_key_agent_refuses_without_the_key(druks_db):
     actor = await _subscription("a@example.com")
     await SettingsOverride.set_agent_billing(PROBE.id, "api_key")
 
-    with pytest.raises(HarnessNotConnectedError, match="add an Anthropic API key"):
+    with pytest.raises(HarnessNotConnectedError, match="add the Anthropic API key"):
         await resolve_execution(PROBE.id, actor.account_id)
+
+
+async def test_opencode_runs_an_added_provider_with_its_key_and_model(druks_db):
+    await ProviderCatalog.create(
+        "openrouter",
+        [{"id": "openrouter/anthropic/claude-sonnet-4", "label": "Claude Sonnet 4"}],
+        label="OpenRouter",
+    )
+    await ProviderKey.create(
+        provider="openrouter",
+        key="sk-openrouter",
+        account=await Account.get_or_create("ops@example.com"),
+    )
+    await SettingsOverride.set_agent_harness(PROBE.id, "opencode")
+    await SettingsOverride.set_agent_model(PROBE.id, "openrouter/anthropic/claude-sonnet-4")
+    await SettingsOverride.set_agent_billing(PROBE.id, "api_key")
+
+    execution = await resolve_execution(PROBE.id, None)
+
+    assert execution.harness_class is OpenCodeHarness
+    assert execution.model == "openrouter/anthropic/claude-sonnet-4"
+    assert execution.key == "sk-openrouter"
+
+
+async def test_an_added_provider_without_a_key_names_it(druks_db):
+    await ProviderCatalog.create("groq", [{"id": "groq/llama-4", "label": "Llama 4"}], label="Groq")
+    await SettingsOverride.set_agent_harness(PROBE.id, "opencode")
+    await SettingsOverride.set_agent_model(PROBE.id, "groq/llama-4")
+    await SettingsOverride.set_agent_billing(PROBE.id, "api_key")
+
+    with pytest.raises(HarnessNotConnectedError, match="add the Groq API key in Settings"):
+        await resolve_execution(PROBE.id, None)
+
+
+async def test_an_added_provider_runs_only_on_an_unbound_cli_and_its_own_models(druks_db):
+    await ProviderCatalog.create("groq", [{"id": "groq/llama-4", "label": "Llama 4"}], label="Groq")
+
+    with pytest.raises(ExecutionSettingsError, match="claude does not run Groq models"):
+        await check_execution("claude", "groq/llama-4", "api_key")
+    with pytest.raises(ExecutionSettingsError, match="Groq lists no model 'groq/llama-9'"):
+        await check_execution("opencode", "groq/llama-9", "api_key")
+    with pytest.raises(ExecutionSettingsError, match="names no provider; add one"):
+        await check_execution("opencode", "nobody/model", "api_key")
+    assert await check_execution("opencode", "groq/llama-4", "api_key") is OpenCodeHarness
 
 
 async def test_a_key_only_harness_bills_the_key(druks_db):

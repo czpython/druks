@@ -29,6 +29,7 @@ import type {
   Service,
   Provider,
   ProviderCatalog,
+  ProviderDirectoryEntry,
   ProviderKey,
   ProviderSubscription,
   Skill,
@@ -272,6 +273,7 @@ export const api = {
   providerSubscriptions: () => getJSON<ProviderSubscription[]>('/api/providers/subscriptions'),
   providerKeys: () => getJSON<ProviderKey[]>('/api/providers/keys'),
   providerCatalogs: () => getJSON<ProviderCatalog[]>('/api/providers/catalogs'),
+  providerDirectory: () => getJSON<ProviderDirectoryEntry[]>('/api/providers/directory'),
   startProviderConnect: (id: string) =>
     postJSON<ConnectChallenge>(`/api/providers/${encodeURIComponent(id)}/connection/start`, {}),
   completeProviderConnect: (id: string, code: string, connectionId: string) =>

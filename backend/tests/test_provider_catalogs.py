@@ -6,9 +6,20 @@ import pytest
 from conftest import connect_provider
 from druks.accounts.models import Account
 from druks.harnesses import providers as pbase
+from druks.harnesses.constants import DIRECTORY_CACHE_KEY
+from druks.harnesses.directory import (
+    add_provider,
+    list_providers,
+    parse_providers,
+    refresh_added_catalogs,
+)
 from druks.harnesses.exceptions import CatalogError
 from druks.harnesses.models import ProviderCatalog, ProviderKey
 from druks.harnesses.providers import AnthropicProvider, OpenAiProvider
+from druks.redis import get_client
+
+_LLAMA = {"id": "groq/llama-4", "label": "Llama 4"}
+_GROQ = {"name": "Groq", "env": ["GROQ_API_KEY"], "models": {"llama-4": {"name": "Llama 4"}}}
 
 
 def _resp(status: int, body: object) -> httpx.Response:
@@ -103,21 +114,66 @@ def test_codex_parse_empty_catalog_is_an_error() -> None:
         OpenAiProvider._parse_catalog(json.dumps({"models": []}), billing="subscription")
 
 
-def test_openai_parse_reads_its_models_dev_section() -> None:
+def test_openai_parse_keeps_the_chat_models_of_its_own_list() -> None:
     raw = json.dumps(
         {
-            "openai": {"id": "openai", "models": {"gpt-5.5": {"id": "gpt-5.5", "name": "GPT-5.5"}}},
-            "anthropic": {"id": "anthropic", "models": {}},
+            "data": [
+                {"id": "gpt-5.5", "object": "model"},
+                {"id": "o3-mini", "object": "model"},
+                {"id": "gpt-4o-realtime-preview", "object": "model"},
+                {"id": "whisper-1", "object": "model"},
+                {"id": "text-embedding-3-small", "object": "model"},
+            ]
         }
     )
 
     assert OpenAiProvider._parse_catalog(raw, billing="api_key") == (
-        {"id": "openai/gpt-5.5", "label": "GPT-5.5"},
+        {"id": "openai/gpt-5.5", "label": "gpt-5.5"},
+        {"id": "openai/o3-mini", "label": "o3-mini"},
     )
     with pytest.raises(CatalogError, match="unexpected_payload"):
-        OpenAiProvider._parse_catalog(json.dumps({"anthropic": {}}), billing="api_key")
+        OpenAiProvider._parse_catalog(json.dumps({"models": []}), billing="api_key")
     with pytest.raises(CatalogError, match="empty_list"):
-        OpenAiProvider._parse_catalog(json.dumps({"openai": {"models": {}}}), billing="api_key")
+        OpenAiProvider._parse_catalog(
+            json.dumps({"data": [{"id": "whisper-1"}]}), billing="api_key"
+        )
+
+
+def test_directory_keeps_one_key_providers_with_exact_ids() -> None:
+    providers = parse_providers(
+        json.dumps(
+            {
+                "openrouter": {
+                    "id": "different-nested-id",
+                    "name": "OpenRouter",
+                    "env": ["OPENROUTER_API_KEY"],
+                    "models": {
+                        "anthropic/claude-sonnet-4": {
+                            "id": "different-model-id",
+                            "name": "Claude Sonnet 4",
+                        }
+                    },
+                },
+                "amazon-bedrock": {
+                    "name": "Amazon Bedrock",
+                    "env": ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"],
+                    "models": {"nova": {"name": "Nova"}},
+                },
+            }
+        )
+    )
+
+    assert providers == [
+        {
+            "provider": "openrouter",
+            "label": "OpenRouter",
+            "models": [{"id": "openrouter/anthropic/claude-sonnet-4", "label": "Claude Sonnet 4"}],
+        }
+    ]
+    with pytest.raises(CatalogError, match="unparseable"):
+        parse_providers("<!doctype html>")
+    with pytest.raises(CatalogError, match="empty_list"):
+        parse_providers(json.dumps({"amazon-bedrock": {"env": ["A", "B"], "models": {}}}))
 
 
 async def test_anthropic_fetch_uses_the_oauth_token(monkeypatch, druks_db):
@@ -181,20 +237,18 @@ async def test_refresh_without_a_login_stores_nothing(monkeypatch, druks_db):
     assert await ProviderCatalog.list_all() == []
 
 
-async def test_openai_refresh_reads_the_subscription_over_the_key(monkeypatch, druks_db):
-    # A key alone reads models.dev; once a subscription exists its endpoint
-    # lists what the codex CLI runs, and that catalog wins.
+async def test_openai_refresh_reads_its_own_list_over_the_key(monkeypatch, druks_db):
     account = await Account.get_or_create("op@example.com")
     await ProviderKey.create(provider="openai", key="sk-openai", account=account)
-    calls = _mock_get(
-        monkeypatch,
-        _resp(200, {"openai": {"models": {"gpt-5.5": {"id": "gpt-5.5", "name": "GPT-5.5"}}}}),
-    )
+    calls = _mock_get(monkeypatch, _resp(200, {"data": [{"id": "gpt-5.5"}, {"id": "whisper-1"}]}))
     await OpenAiProvider.refresh_catalog()
-    assert calls[0]["url"] == "https://models.dev/api.json"
+    assert calls[0]["url"] == "https://api.openai.com/v1/models"
+    assert calls[0]["headers"] == {"Authorization": "Bearer sk-openai"}
     [stored] = await ProviderCatalog.list_all()
-    assert stored.models == [{"id": "openai/gpt-5.5", "label": "GPT-5.5"}]
+    assert stored.label == "OpenAI"
+    assert stored.models == [{"id": "openai/gpt-5.5", "label": "gpt-5.5"}]
 
+    # A subscription's endpoint wins once one exists.
     await connect_provider(
         OpenAiProvider,
         {"tokens": {"access_token": "a.b.c", "account_id": "acc-7"}},
@@ -208,3 +262,42 @@ async def test_openai_refresh_reads_the_subscription_over_the_key(monkeypatch, d
     assert calls[0]["url"].startswith("https://chatgpt.com/backend-api/codex/models")
     [stored] = await ProviderCatalog.list_all()
     assert [model["id"] for model in stored.models] == ["openai/gpt-5.6"]
+
+
+async def test_directory_is_fetched_once_and_read_from_redis(monkeypatch, druks_redis):
+    calls = _mock_get(monkeypatch, _resp(200, {"groq": _GROQ}))
+
+    first = await list_providers()
+    second = await list_providers()
+
+    assert first == second == [{"provider": "groq", "label": "Groq", "models": [_LLAMA]}]
+    assert [call["url"] for call in calls] == ["https://models.dev/api.json"]
+
+    _mock_get(monkeypatch, _resp(503, "down"))
+    await get_client().delete(DIRECTORY_CACHE_KEY)
+    with pytest.raises(CatalogError, match="http_503"):
+        await list_providers()
+
+
+async def test_adding_a_directory_provider_creates_its_catalog(monkeypatch, druks_db, druks_redis):
+    _mock_get(monkeypatch, _resp(200, {"groq": _GROQ}))
+
+    added = await add_provider("groq")
+
+    assert (added.provider, added.label, added.models) == ("groq", "Groq", [_LLAMA])
+    with pytest.raises(KeyError):
+        await add_provider("nobody")
+
+
+async def test_added_catalogs_refresh_from_the_directory(monkeypatch, druks_db, druks_redis):
+    account = await Account.get_or_create("op@example.com")
+    await ProviderKey.create(provider="groq", key="gsk", account=account)
+    await ProviderKey.create(provider="anthropic", key="sk-ant", account=account)
+    calls = _mock_get(monkeypatch, _resp(200, {"groq": _GROQ}))
+
+    await refresh_added_catalogs()
+
+    # Only the added provider reads the directory; anthropic is registered.
+    assert [call["url"] for call in calls] == ["https://models.dev/api.json"]
+    [stored] = await ProviderCatalog.list_all()
+    assert (stored.provider, stored.label) == ("groq", "Groq")

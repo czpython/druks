@@ -515,11 +515,19 @@ export interface Provider {
   billingOptions: string[]
 }
 
-/** The models one provider offers, fetched over a subscription. */
+/** One provider's model list; `label` names the provider. */
 export interface ProviderCatalog {
   provider: string
+  label: string
   models: CatalogModel[]
   fetchedAt: string
+}
+
+/** One Models.dev provider that runs on a single API key. */
+export interface ProviderDirectoryEntry {
+  provider: string
+  label: string
+  models: CatalogModel[]
 }
 
 /** One account's subscription at one provider. */

@@ -60,6 +60,29 @@ const resolvedAgents = {
   ],
 }
 
+const providerCatalogs = [
+  {
+    provider: 'anthropic',
+    label: 'Anthropic',
+    models: [{ id: 'anthropic/claude-opus-4-7', label: 'Claude Opus 4.7' }],
+    fetchedAt: '2026-09-05T08:00:00Z',
+  },
+  {
+    provider: 'groq',
+    label: 'Groq',
+    models: [{ id: 'groq/llama-4', label: 'Llama 4' }],
+    fetchedAt: '2026-09-05T08:00:00Z',
+  },
+]
+
+const providerDirectory = [
+  {
+    provider: 'cerebras',
+    label: 'Cerebras',
+    models: [{ id: 'cerebras/gpt-oss-120b', label: 'GPT OSS 120B' }],
+  },
+]
+
 // PATCH /api/settings bodies, in order.
 const patched: Record<string, unknown>[] = []
 
@@ -222,13 +245,37 @@ function stubFetch(
         return new Response(JSON.stringify({ ...userSettings, ...JSON.parse(String(init.body)) }), { status: 200 })
       }
       if (path === '/api/providers/catalogs') {
-        return new Response('[]', { status: 200 })
+        return new Response(JSON.stringify(providerCatalogs), { status: 200 })
+      }
+      if (path === '/api/providers/directory') {
+        return new Response(JSON.stringify(providerDirectory), { status: 200 })
       }
       if (path === '/api/providers/subscriptions') {
-        return new Response('[]', { status: 200 })
+        return new Response(JSON.stringify([
+          {
+            provider: 'anthropic',
+            providerEmail: 'seat@example.com',
+            expiresAt: null,
+            updatedAt: '2026-09-05T08:00:00Z',
+            connected: true,
+          },
+        ]), { status: 200 })
+      }
+      if (path === '/api/providers/keys') {
+        return new Response(JSON.stringify([
+          {
+            provider: 'groq',
+            keyTail: '4f2a',
+            updatedBy: { id: 'acc-1', username: 'paulo@example.com' },
+            updatedAt: '2026-09-05T08:00:00Z',
+          },
+        ]), { status: 200 })
       }
       if (path === '/api/providers') {
-        return new Response('[]', { status: 200 })
+        return new Response(JSON.stringify([
+          { id: 'anthropic', label: 'Anthropic', billingOptions: ['api_key', 'subscription'] },
+          { id: 'openai', label: 'OpenAI', billingOptions: ['api_key', 'subscription'] },
+        ]), { status: 200 })
       }
       if (path === '/api/browser-sessions') {
         return new Response('[]', { status: 200 })
@@ -421,7 +468,12 @@ describe('SettingsModal agents', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'save' }))
     await waitFor(() => expect(patched).toHaveLength(1))
-    expect(patched[0]).toEqual({ defaultHarness: 'opencode', defaultBilling: 'api_key', defaultEffort: 'low' })
+    expect(patched[0]).toEqual({
+      defaultHarness: 'opencode',
+      defaultModel: 'groq/llama-4',
+      defaultBilling: 'api_key',
+      defaultEffort: 'low',
+    })
   })
 
   it('the app page carries harness and billing cells that follow the chosen harness', async () => {
@@ -439,5 +491,63 @@ describe('SettingsModal agents', () => {
     // A key-only harness locks billing to API key on the row.
     expect(screen.getByText('API key ⚬')).toBeTruthy()
     expect(screen.getByText('API key ⚬').closest('button')!.hasAttribute('disabled')).toBe(true)
+  })
+
+  it('searches the Models.dev directory for an unconfigured provider', async () => {
+    stubFetch()
+    renderModal()
+    fireEvent.click(await screen.findByRole('button', { name: 'Providers' }))
+
+    expect(await screen.findByText('Anthropic')).toBeTruthy()
+    expect(screen.getByText('Groq')).toBeTruthy()
+    expect(screen.queryByText('OpenAI')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Add provider' }))
+    fireEvent.change(screen.getByLabelText('Add provider'), { target: { value: 'gpt oss' } })
+
+    expect(await screen.findByText('Cerebras')).toBeTruthy()
+    expect(screen.queryByText('OpenAI')).toBeNull()
+  })
+
+  it('selects a configured third-party OpenCode model', async () => {
+    stubFetch()
+    renderModal()
+    fireEvent.click(await screen.findByRole('button', { name: 'Agents' }))
+
+    fireEvent.change(screen.getByLabelText('Harness'), { target: { value: 'opencode' } })
+    fireEvent.click(await screen.findByRole('button', { name: 'Model' }))
+    const search = screen.getByLabelText('Search models')
+    fireEvent.change(search, { target: { value: 'groq' } })
+    expect(screen.getByRole('listbox', { name: 'Model choices' })).toBeTruthy()
+    fireEvent.click(screen.getByRole('option', { name: /Llama 4/ }))
+    expect(screen.getByRole('button', { name: 'Model' }).textContent).toContain('Llama 4')
+  })
+
+  it('opens a configured provider catalog from the Providers pane', async () => {
+    stubFetch()
+    renderModal()
+    fireEvent.click(await screen.findByRole('button', { name: 'Providers' }))
+
+    const groqCard = (await screen.findByText('Groq')).closest('article')
+    fireEvent.click(groqCard!.querySelector<HTMLButtonElement>('.provider-models-row button')!)
+
+    expect(await screen.findByRole('heading', { name: 'Agents' })).toBeTruthy()
+    expect((screen.getByLabelText('Search models') as HTMLInputElement).value).toBe('groq')
+    const llama = screen.getByRole('option', { name: /Llama 4/ }) as HTMLButtonElement
+    expect(llama.disabled).toBe(true)
+    expect(llama.textContent).toContain('Select a compatible harness and billing method')
+  })
+
+  it('closes the model chooser with Escape without closing settings', async () => {
+    const onClose = vi.fn()
+    stubFetch()
+    renderModal(onClose)
+    fireEvent.click(await screen.findByRole('button', { name: 'Agents' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Model' }))
+
+    const search = screen.getByLabelText('Search models')
+    fireEvent.keyDown(search, { key: 'Escape' })
+
+    expect(screen.queryByLabelText('Search models')).toBeNull()
+    expect(onClose).not.toHaveBeenCalled()
   })
 })
