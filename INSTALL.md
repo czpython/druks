@@ -60,7 +60,7 @@ the error.
 Report that the installation succeeded. Tell the operator to open
 <http://127.0.0.1:8001>. Connect a provider under **Settings → Providers**.
 Agent runs require the selected provider credential. Then connect the GitHub
-App under **Settings → Services**. Run `docker compose exec web druks doctor --sandbox` to
+App under **Settings → Connections → Services**. Run `docker compose exec web druks doctor --sandbox` to
 prove the full sandbox path with a real container.
 
 ## Local customizations

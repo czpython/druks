@@ -11,7 +11,7 @@ without replacing the process.
 | Plane | Examples | Stored in |
 | --- | --- | --- |
 | Deployment | identity, ingress, Drukbox, encryption key | `~/druks/druks.toml` |
-| Dashboard | timezone, the GitHub connection, harness and tracker credentials, workflow and agent overrides, notifications, MCP servers, skills | Postgres |
+| Dashboard | timezone, the GitHub connection, harness and tracker credentials, workflow and agent overrides, MCP servers, skills | Postgres |
 
 The installer creates the deployment `.env` from `druks.toml`. Compose, Druks,
 and Drukbox consume this build artifact. Do not edit `.env`. Edit `druks.toml`,
@@ -168,7 +168,7 @@ setup state.
 ## Personal access tokens
 
 Agents and other non-browser clients use personal access tokens for the
-internal API. Mint these tokens in Settings → Tokens. Send a token as
+internal API. Mint these tokens in Settings → API tokens. Send a token as
 `Authorization: Bearer <token>`. A token has the form
 `druks_pat_<prefix>_<secret>`. Druks stores only the SHA-256 hash of the full
 token. It shows the plaintext one time and expires the token after 365 days.
@@ -179,7 +179,7 @@ signed-in identity. It refuses requests that contain an `Authorization` header.
 Thus, a leaked token cannot mint or revoke tokens.
 
 If someone compromises a token, mint a replacement. Then revoke the old token in
-Settings → Tokens. Revocation is immediate. The list shows the prefix and last
+Settings → API tokens. Revocation is immediate. The list shows the prefix and last
 use of each token.
 
 Druks updates last use each hour. Agents consume the API
@@ -196,8 +196,8 @@ in Postgres. They do not come from TOML, the environment, or a PEM file.
 Until an operator connects GitHub, agent runs stop with a direct message.
 `druks doctor` reports that no GitHub connection exists.
 
-Connect it from **Settings → Services**. **Create GitHub App** starts the GitHub
-manifest flow. Enter a GitHub organization, or leave the field empty for a
+Connect it from **Settings → Connections → Services**. **Create GitHub App**
+starts the GitHub manifest flow. Enter a GitHub organization, or leave the field empty for a
 personal account. Accept the request on GitHub. Druks stores the credentials and
 opens the installation page. Install the GitHub App on the applicable
 repositories.
@@ -233,16 +233,16 @@ installation set defines where `software_factory` can act. Personal access
 tokens are not a supported substitute.
 
 **To upgrade an existing installation**, paste the credentials one time on each
-active host. Open Settings → Services. Connect GitHub with the existing operator
-GitHub App ID, private key, and webhook secret. Do not create a replacement
-GitHub App. The current webhook and installations continue to use the pasted
-credentials.
+active host. Open **Settings → Connections → Services**. Connect GitHub with the
+existing operator GitHub App ID, private key, and webhook secret. Do not create
+a replacement GitHub App. The current webhook and installations continue to use
+the pasted credentials.
 
 ### Review identity (optional)
 
 The bundled `review` app can post its verdict reviews as a second
 GitHub App, so GitHub accepts approvals on Druks-authored pull requests.
-Configure it in **Settings → Review**. Enter the review GitHub App ID and its PEM
+Configure it in **Review → Settings**. Enter the review GitHub App ID and its PEM
 private key, both stored encrypted and empty-as-unset. Leave the pair empty and
 reviews publish as operator comments. Set both values to publish separate
 approval reviews. The review GitHub App needs read access to metadata and
@@ -254,10 +254,10 @@ client at another compatible GitHub API endpoint.
 ## Ticketing integrations
 
 Tracker credentials are service identities. Connect Linear or Jira Cloud from
-**Settings → Services**. The Linear identity uses an API key and webhook secret.
-The Jira identity uses a base URL, email, API token, and webhook secret. Druks
+**Settings → Connections → Services**. The Linear identity uses an API key
+and webhook secret. The Jira identity uses a base URL, email, API token, and webhook secret. Druks
 validates the credentials before it stores them. Select the tracker and its
-workflow statuses in **Settings → Software Factory**.
+workflow statuses in **Software Factory → Settings**.
 
 Webhook URLs remain `/_external/linear/events/` and
 `/_external/jira/events/`. The Jira webhook uses a Jira Automation
@@ -290,10 +290,10 @@ When an agent runs, OpenCode selects the endpoint.
 
 Before you save a key, check the provider documentation and domain.
 
-Cards show five-hour and general weekly limits with the time until reset.
-Tooltips show exact reset times. **Catalog status** shows each provider's last
-update. Anthropic and OpenAI fetch separate model lists. Added providers use
-the cached Models.dev directory.
+Provider rows show access state and weekly quota when available. Open
+**Manage** for credential controls, detailed usage, exact reset times, and the
+model catalog timestamp. Anthropic and OpenAI fetch separate model lists.
+Added providers use the cached Models.dev directory.
 
 The `claude` and `codex` CLIs run on their own vendor's subscription or key.
 `opencode` and `pi` run on an API key only. OpenCode can run a supported
@@ -320,10 +320,9 @@ read-only at `/harnesses`. Claude and Codex each read their named directory:
 Missing files are optional. Codex uses `.credentials.json` for MCP credentials.
 Provider credentials do not belong in this root. OpenCode and Pi do not read it.
 The default harness, model, billing, effort, and timeout live in
-**Settings → Agents**. Each agent can override any of them on its app's page.
-**Unattended runs
-(webhooks, schedules) run as** names the account whose subscription an
-unattended run bills. A call refuses before provisioning a VM if its selected
+**Settings → Agent defaults**. Each agent can override any of them on its app's page.
+**Unattended runs use** names the account whose subscription an unattended
+run bills. A call refuses before provisioning a VM if its selected
 credential is missing.
 
 ## Sandboxes
@@ -393,13 +392,13 @@ topology.
 
 ## Notifications
 
-Manage destinations from the dashboard. The current destination type is a Slack
-incoming webhook. Actionable messages use Slack Block Kit. Other messages use
-the same URL through Apprise.
+The dashboard has no notifications page yet. Manage destinations through the
+API. The current destination type is a Slack incoming webhook. Actionable
+messages use Slack Block Kit. Other messages use the same URL through Apprise.
 `SLACK_SIGNING_SECRET` authenticates Slack interactivity callbacks.
 
-Choose one enabled destination as the gate-notification destination in
-Settings. A parked subjected run then produces a durable notification. Failure
+Select one enabled destination as the gate-notification destination through
+the API. A parked subjected run then produces a durable notification. Failure
 to deliver the notification does not unpark or fail the run.
 
 ## MCP servers

@@ -55,7 +55,7 @@ data store. If sandbox SSH is unreachable on macOS, enable host networking in
 the Docker Desktop settings.
 
 For the bundled `software_factory` app, connect its GitHub App after startup.
-Use **Settings → Services** in the dashboard. Create the app there, or paste the
+Use **Settings → Connections → Services** in the dashboard. Create the app there, or paste the
 credentials of an existing GitHub App. See
 [the GitHub connection](configuration.md#github).
 
@@ -177,7 +177,7 @@ value.
 
 GitHub, Linear, and Jira cannot connect to a loopback listener. Dashboard-initiated
 actions work locally, but provider-driven flows need an HTTPS tunnel forwarding
-to `127.0.0.1:8001`. Connect tracker credentials under **Settings → Services** and
+to `127.0.0.1:8001`. Connect tracker credentials under **Settings → Connections → Services** and
 keep the exact public paths:
 
 ```text
