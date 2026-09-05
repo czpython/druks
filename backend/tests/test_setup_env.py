@@ -51,9 +51,6 @@ def test_fresh_exe_render_matches_the_deployment_contract(tmp_path):
     assert values["DRUKS_DATA_DIR"] == "/home/op/druks-data"
     assert "EXE_API_TOKEN" not in values
     assert "TAILSCALE_TAILNET" not in values
-    for key in ("EXE_IMAGE_REGISTRY", "EXE_REGISTRY_USERNAME", "EXE_REGISTRY_PASSWORD"):
-        assert config["sandbox"]["exe"][key] == ""
-        assert key not in values
     assert len(config["secrets"]["postgres_password"]) == 64
     assert len(config["sandbox"]["service_token"]) == 64
     assert (tmp_path / ".gitignore").read_text().splitlines() == [
@@ -436,35 +433,64 @@ def test_setup_toml_is_the_settings_source(tmp_path, monkeypatch):
     assert settings.sandbox.timeout == float(config["sandbox"]["timeout"])
 
 
-@pytest.mark.parametrize("repository", ["ghcr.io/acme/templates", "docker.io/acme/templates"])
-def test_exe_template_registry_uses_existing_provider_contract(tmp_path, repository):
+@pytest.mark.parametrize("provider", ["docker", "exe", "exoscale"])
+def test_template_registry_renders_once_for_every_provider(tmp_path, provider):
+    env_path = tmp_path / ".env"
+    _run(
+        env_path,
+        provider=provider,
+        set_values=(
+            "registry.host=ghcr.io",
+            "templates.repository=acme/sandbox-templates",
+            "registry.username=builder",
+            "registry.password=registry-token",
+        ),
+    )
+    values = read_env(env_path)
+    assert values["TEMPLATE_REPOSITORY"] == "acme/sandbox-templates"
+    assert values["REGISTRY_HOST"] == "ghcr.io"
+    assert values["REGISTRY_USERNAME"] == "builder"
+    assert values["REGISTRY_PASSWORD"] == "registry-token"
+    assert env_path.read_text().count("TEMPLATE_REPOSITORY=") == 1
+    assert stat.S_IMODE(env_path.stat().st_mode) == 0o600
+
+
+def test_template_registry_cannot_be_overridden_by_provider_or_env(tmp_path):
     env_path = tmp_path / ".env"
     printed = []
+    _run(
+        env_path,
+        print_fn=printed.append,
+        set_values=(
+            "registry.host=ghcr.io",
+            "templates.repository=acme/sandbox-templates",
+            "sandbox.exe.TEMPLATE_REPOSITORY=ghcr.io/other/templates",
+            "env.REGISTRY_PASSWORD=wrong-secret",
+        ),
+    )
+    values = read_env(env_path)
+    assert values["TEMPLATE_REPOSITORY"] == "acme/sandbox-templates"
+    assert "REGISTRY_PASSWORD" not in values
+    assert "reserved by druks" in "\n".join(printed)
+    assert "wrong-secret" not in "\n".join(printed)
+
+
+def test_registry_access_renders_without_template_destination(tmp_path):
+    env_path = tmp_path / ".env"
     assert (
         _run(
             env_path,
-            print_fn=printed.append,
+            provider="docker",
             set_values=(
-                "sandbox.exe.EXE_API_TOKEN=exe-token",
-                "sandbox.exe.TAILSCALE_TAILNET=tail.ts.net",
-                f"sandbox.exe.EXE_IMAGE_REGISTRY={repository}",
-                "sandbox.exe.EXE_REGISTRY_USERNAME=builder",
-                "sandbox.exe.EXE_REGISTRY_PASSWORD=registry-token",
+                "registry.host=ghcr.io",
+                "registry.username=operator",
+                "registry.password=token",
             ),
         )
         == 0
     )
     values = read_env(env_path)
-    expected = {
-        "EXE_IMAGE_REGISTRY": repository,
-        "EXE_REGISTRY_USERNAME": "builder",
-        "EXE_REGISTRY_PASSWORD": "registry-token",
-    }
-    for key, value in expected.items():
-        assert values[key] == value
-        assert env_path.read_text().count(f"{key}=") == 1
-    assert "REGISTRY_HOST" not in values
+    assert values["REGISTRY_HOST"] == "ghcr.io"
+    assert values["REGISTRY_USERNAME"] == "operator"
+    assert values["REGISTRY_PASSWORD"] == "token"
     assert "TEMPLATE_REPOSITORY" not in values
-    assert "registry-token" not in "\n".join(printed)
-    assert stat.S_IMODE(env_path.stat().st_mode) == 0o600
-    assert stat.S_IMODE((tmp_path / "druks.toml").stat().st_mode) == 0o600

@@ -42,6 +42,8 @@ host-run development template for that environment plane.
 | `[paths]` | Host data and harness configuration paths |
 | `[sandbox]` | Drukbox provider, service URL, token behavior, and image override |
 | `[sandbox.<provider>]` | Provider environment passed through to the remote stack |
+| `[registry]` | Registry host and credentials for private image access |
+| `[templates]` | Shared repository path for sandbox template images |
 | `[env]` | Additional deployment environment settings rendered verbatim |
 
 A blank string means unset, and the renderer omits it from `.env`. Use `[env]` for settings
@@ -465,3 +467,62 @@ ordinary Postgres fields, although APIs withhold or mask their values. Treat
 access to Postgres and its backups as access to those credentials. GitHub App
 private keys — the operator identity's and the review app's — are
 database values under the envelope, no longer files mounted into the process.
+
+## Registry access and sandbox templates
+
+A Druks installation serves one operator or organization. Registry access and
+template publishing are separate settings in `druks.toml`:
+
+```toml
+[registry]
+host = "ghcr.io"
+username = "builder"
+password = "<registry-token>"
+
+[templates]
+repository = "acme/sandbox-templates"
+```
+
+For Docker Hub, set `registry.host = "docker.io"`. The host must have no URL
+scheme or path. The template repository is a path within that registry,
+with no tag or digest.
+
+`druks setup` renders `REGISTRY_HOST`, `REGISTRY_USERNAME`, `REGISTRY_PASSWORD`,
+and `TEMPLATE_REPOSITORY` for Drukbox. Do not duplicate these keys in
+`[sandbox.<provider>]` or `[env]`. These settings require a Drukbox release
+with separate registry access and template destination configuration.
+When adopting that release, replace `EXE_IMAGE_REGISTRY`,
+`EXE_REGISTRY_USERNAME`, and `EXE_REGISTRY_PASSWORD` in `[sandbox.exe]` with
+the tables above. Split the full repository into its host and repository path.
+
+Set all three registry values together. Registry access works without a
+template destination: exe can boot other private images on that registry.
+The registry's permissions determine which repositories the credential can
+access. To build and publish templates, also set `templates.repository` and
+use a credential with push permission. Leave the template repository blank
+for local Docker builds without publication.
+
+Druks sends labels such as `site-builder-build`. Drukbox creates tags such as
+`ghcr.io/acme/sandbox-templates:site-builder-build-<build-id>` and pins the
+published image by digest. App authors do not manage registry paths or
+credentials. Druks writes configuration files with mode `0600`.
+
+All template images share repository access and retention policy. Drukbox
+does not delete remote registry manifests. Retain images that active templates use.
+
+After editing `druks.toml`, render `.env` with the installation path and the
+deployment user's home directory:
+
+```bash
+druks setup /path/to/install/.env --home /home/operator
+```
+
+Then recreate the Drukbox service with a release that supports these settings.
+Use the installation's Compose files. A restart alone does not load a changed
+container environment. Druks writes both configuration files with mode `0600`.
+
+If a template already failed, use the authenticated Drukbox `GET /templates`
+API to find the failed record. Delete only that record with
+`DELETE /templates/{template_id}`, then run `druks doctor` in the Druks
+container to create it again. Creating the same template without deleting
+the failed record returns the existing failure.

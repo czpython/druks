@@ -39,6 +39,10 @@ _OWNED_ENV_KEYS = frozenset(
         "REDIS_URL",
         "DRUKS_AUTH_HEADER",
         "DEFAULT_HOST_PROVIDER",
+        "TEMPLATE_REPOSITORY",
+        "REGISTRY_HOST",
+        "REGISTRY_USERNAME",
+        "REGISTRY_PASSWORD",
         "SERVICE_TOKENS",
         "DRUKS_AUTH_MODE",
         "DRUKS_AUTH_JWKS_URL",
@@ -76,6 +80,8 @@ _KNOWN_TOML_KEYS = {
         "browser_login_tz",
         "timeout",
     ),
+    "registry": ("host", "username", "password"),
+    "templates": ("repository",),
     "env": (),
 }
 
@@ -200,6 +206,16 @@ timeout = 180
 # to remote stacks verbatim; the local docker shape renders no provider table.
 # Provider reference: https://github.com/czpython/drukbox (docs/deploy.md).
 
+# Shared access to private images in this installation.
+[registry]
+host = ""
+username = ""
+password = ""
+
+# Repository path within the registry for built sandbox templates.
+[templates]
+repository = ""
+
 # Raw environment for processes druks does not model (drukbox, Caddy, libraries
 # reading os.environ); keys render verbatim unless owned by druks.
 [env]
@@ -225,9 +241,6 @@ def _fresh_values(*, provider: str, home: str) -> tuple[tuple[tuple[str, ...], s
             (("sandbox", "service_url"), "http://127.0.0.1:8780"),
             (("sandbox", "service_token"), _hex_secret()),
             (("sandbox", "exe", "EXE_API_TOKEN"), ""),
-            (("sandbox", "exe", "EXE_IMAGE_REGISTRY"), ""),
-            (("sandbox", "exe", "EXE_REGISTRY_USERNAME"), ""),
-            (("sandbox", "exe", "EXE_REGISTRY_PASSWORD"), ""),
             (("sandbox", "exe", "TAILSCALE_TAILNET"), ""),
             (("sandbox", "exe", "TAILSCALE_OAUTH_CLIENT_ID"), ""),
             (("sandbox", "exe", "TAILSCALE_OAUTH_CLIENT_SECRET"), ""),
@@ -388,6 +401,19 @@ def _render_env(
             (
                 ("DEFAULT_HOST_PROVIDER", provider),
                 ("SERVICE_TOKENS", service_tokens),
+                ("REGISTRY_HOST", _get_string(config, ("registry", "host"))),
+                (
+                    "TEMPLATE_REPOSITORY",
+                    _get_string(config, ("templates", "repository")),
+                ),
+                (
+                    "REGISTRY_USERNAME",
+                    _get_string(config, ("registry", "username")),
+                ),
+                (
+                    "REGISTRY_PASSWORD",
+                    _get_string(config, ("registry", "password")),
+                ),
             ),
         ),
     )
