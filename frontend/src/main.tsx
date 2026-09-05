@@ -4,6 +4,7 @@ import { createRoot } from 'react-dom/client'
 import { AuthedApp } from './components/AuthedApp'
 import { IdentityBootstrap } from './components/IdentityBootstrap'
 import './styles.css'
+import './command-center.css'
 
 const rootElement = document.getElementById('root')
 if (!rootElement) throw new Error('Root element #root not found')
