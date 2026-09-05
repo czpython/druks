@@ -569,26 +569,6 @@ describe('SettingsModal agents', () => {
     expect(within(card).getByRole('button', { name: 'Add API key' })).toBeTruthy()
   })
 
-  it('keeps catalog freshness without model counts or a model navigation action', async () => {
-    stubFetch()
-    renderModal()
-    fireEvent.click(await screen.findByRole('button', { name: 'Providers' }))
-
-    const card = await screen.findByRole('article', { name: 'Groq' })
-    expect(within(card).queryByText(/Catalog/)).toBeNull()
-    const catalogButton = screen.getByRole('button', { name: 'Catalog status' })
-    expect(catalogButton.closest('header')?.contains(screen.getByRole('heading', { name: 'Providers' }))).toBe(true)
-    expect(catalogButton.getAttribute('aria-expanded')).toBe('false')
-    expect(screen.queryByText(/^(Updated |Stale · )/)).toBeNull()
-    fireEvent.click(catalogButton)
-    expect(catalogButton.getAttribute('aria-expanded')).toBe('true')
-    expect(screen.getAllByText(/^(Updated |Stale · )/)).toHaveLength(2)
-    fireEvent.click(catalogButton)
-    expect(screen.queryByText(/^(Updated |Stale · )/)).toBeNull()
-    expect(within(card).queryByText(/\d+ models/)).toBeNull()
-    expect(screen.queryByRole('button', { name: 'View models in Agents' })).toBeNull()
-  })
-
   it('shows the source, endpoint, and documentation before a directory key is entered', async () => {
     stubFetch()
     renderModal()

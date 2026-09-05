@@ -1,5 +1,6 @@
 import { Fragment, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type ReactNode } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { Plus } from 'lucide-react'
 
 import { ApiError, api } from '../api/client'
 import { BrowserSessionsPane } from './BrowserSessionsPane'
@@ -1779,7 +1780,7 @@ export function ConnectionsPane() {
   )
 }
 
-// Providers — who answers and bills a model request. One card per vendor: the
+// Providers — who answers and bills a model request. One section per vendor: the
 // requester's own subscription and the installation's one API key.
 // Connection state persists immediately, outside the modal's Save.
 function ProvidersPane({
@@ -1800,10 +1801,8 @@ function ProvidersPane({
   requestError: string | null
 }) {
   const [adding, setAdding] = useState(false)
-  const [catalogsOpen, setCatalogsOpen] = useState(false)
   const [search, setSearch] = useState('')
   const [pendingProviders, setPendingProviders] = useState<Provider[]>([])
-  const [openedAt] = useState(() => Date.now())
   const directoryQuery = useQuery({
     queryKey: ['providerDirectory'],
     queryFn: () => api.providerDirectory(),
@@ -1850,41 +1849,85 @@ function ProvidersPane({
       Number(right.nameMatches) - Number(left.nameMatches) || left.label.localeCompare(right.label),
     )
   return (
-    <div className="set-pane mcp-pane hrs-pane">
+    <div className="set-pane mcp-pane hrs-pane providers-pane">
       <header className="mcp-pane-head">
         <div className="provider-heading">
-          <h2 className="mcp-pane-title">Providers</h2>
-          {catalogs.length > 0 && (
-            <button
-              type="button"
-              className="set-btn ghost"
-              aria-expanded={catalogsOpen}
-              aria-controls="provider-catalog-status"
-              onClick={() => setCatalogsOpen((open) => !open)}
-            >
-              Catalog status
-            </button>
-          )}
-        </div>
-        <p className="mcp-pane-sub">
-          Manage credentials and billing methods. Credential changes save immediately.
-        </p>
-        {catalogsOpen && (
-          <div id="provider-catalog-status" className="provider-catalogs">
-            <dl>
-              {catalogs.map((catalog) => (
-                <div key={catalog.provider}>
-                  <dt>{catalog.label}</dt>
-                  <dd title={new Date(catalog.fetchedAt).toLocaleString()}>
-                    {openedAt - new Date(catalog.fetchedAt).getTime() > 24 * 60 * 60 * 1000 ? 'Stale · ' : 'Updated '}
-                    {relTimeFromIso(catalog.fetchedAt)}
-                  </dd>
-                </div>
-              ))}
-            </dl>
+          <div>
+            <h2 className="mcp-pane-title">Providers</h2>
+            <p className="mcp-pane-sub">Connect the accounts your agents use.</p>
           </div>
-        )}
+          <button
+            type="button"
+            className="set-btn provider-add-button"
+            aria-expanded={adding}
+            aria-controls="provider-add-panel"
+            onClick={() => setAdding((open) => !open)}
+          >
+            <Plus size={14} aria-hidden="true" />
+            Add provider
+          </button>
+        </div>
       </header>
+      {adding && (
+        <div id="provider-add-panel" className="set-card provider-add-panel">
+          <div className="provider-add-head">
+            <label htmlFor="provider-search">Add provider</label>
+            <button type="button" className="set-btn ghost" onClick={() => { setAdding(false); setSearch('') }}>Close</button>
+          </div>
+          <input
+            autoFocus
+            id="provider-search"
+            className="set-select"
+            type="search"
+            placeholder="Search providers or models"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+          />
+          <p className="provider-directory-note">
+            Listings from <a href="https://models.dev" target="_blank" rel="noopener noreferrer">Models.dev</a>.
+            {' '}Druks does not verify these providers. Check the endpoint and documentation before adding a key.
+          </p>
+          <div className="provider-results" role="list" aria-label="Provider search results">
+            {candidates.map((entry) => {
+              const provider =
+                providers.find((registered) => registered.id === entry.provider) ??
+                addedProvider(entry.provider, entry.label)
+              const endpoint = providerWebUrl(entry.apiUrl)
+              const documentation = providerWebUrl(entry.documentationUrl)
+              return (
+                <div className="provider-result" role="listitem" key={provider.id}>
+                  <button
+                    type="button"
+                    className="provider-result-select"
+                    onClick={() => {
+                      setPendingProviders((current) => [...current, provider])
+                      setAdding(false)
+                      setSearch('')
+                    }}
+                  >
+                    <strong>{provider.label}</strong>
+                    <code>{endpoint?.host ?? provider.id}</code>
+                  </button>
+                  {documentation && (
+                    <a href={documentation.href} target="_blank" rel="noopener noreferrer" aria-label={`Documentation for ${provider.label}`}>
+                      Docs
+                    </a>
+                  )}
+                </div>
+              )
+            })}
+            {directoryQuery.isLoading && (
+              <p className="provider-state" role="status">Reading the Models.dev directory…</p>
+            )}
+            {directoryQuery.error instanceof Error && (
+              <p className="mcp-error" role="alert">{directoryQuery.error.message}</p>
+            )}
+            {!directoryQuery.isLoading && candidates.length === 0 && (
+              <p className="provider-state">No supported provider matches this search.</p>
+            )}
+          </div>
+        </div>
+      )}
       {loading && <div className="provider-state" role="status">Loading providers…</div>}
       {requestError && <div className="mcp-error" role="alert">{requestError}</div>}
       {!loading && configured.length === 0 && (
@@ -1900,12 +1943,10 @@ function ProvidersPane({
           const isDirectoryProvider = !registeredProviders.some((entry) => entry.id === provider.id)
           const directoryEntry = directoryQuery.data?.find((entry) => entry.provider === provider.id)
           return (
-            <article key={provider.id} aria-label={provider.label} className="set-card hr-card" style={{ '--fam': providerColor[provider.id] } as CSSProperties}>
+            <article key={provider.id} aria-label={provider.label} className="provider-section" style={{ '--fam': providerColor[provider.id] } as CSSProperties}>
               <header className="hr-ident">
                 <span className="hr-ident-dot" aria-hidden="true" />
-                <span className="hr-identity-copy">
-                  <span className="hr-name">{provider.label}</span>
-                </span>
+                <h3 className="hr-name">{provider.label}</h3>
               </header>
               {isDirectoryProvider && (
                 <div className="provider-source">
@@ -1927,70 +1968,7 @@ function ProvidersPane({
           )
         })}
       </div>
-      <div className="provider-add">
-        {!adding ? (
-          <button type="button" className="set-btn ghost" onClick={() => setAdding(true)}>Add provider</button>
-        ) : (
-          <div className="set-card provider-add-panel">
-            <div className="provider-add-head">
-              <label htmlFor="provider-search">Add provider</label>
-              <button type="button" className="set-btn ghost" onClick={() => { setAdding(false); setSearch('') }}>Close</button>
-            </div>
-            <input
-              autoFocus
-              id="provider-search"
-              className="set-select"
-              type="search"
-              placeholder="Search providers or models"
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-            />
-            <p className="provider-directory-note">
-              Listings from <a href="https://models.dev" target="_blank" rel="noopener noreferrer">Models.dev</a>.
-              {' '}Druks does not verify these providers. Check the endpoint and documentation before adding a key.
-            </p>
-            <div className="provider-results" role="list" aria-label="Provider search results">
-              {candidates.map((entry) => {
-                const provider =
-                  providers.find((registered) => registered.id === entry.provider) ??
-                  addedProvider(entry.provider, entry.label)
-                const endpoint = providerWebUrl(entry.apiUrl)
-                const documentation = providerWebUrl(entry.documentationUrl)
-                return (
-                  <div className="provider-result" role="listitem" key={provider.id}>
-                    <button
-                      type="button"
-                      className="provider-result-select"
-                      onClick={() => {
-                        setPendingProviders((current) => [...current, provider])
-                        setAdding(false)
-                        setSearch('')
-                      }}
-                    >
-                      <strong>{provider.label}</strong>
-                      <code>{endpoint?.host ?? provider.id}</code>
-                    </button>
-                    {documentation && (
-                      <a href={documentation.href} target="_blank" rel="noopener noreferrer" aria-label={`Documentation for ${provider.label}`}>
-                        Docs
-                      </a>
-                    )}
-                  </div>
-                )
-              })}
-              {directoryQuery.isLoading && (
-                <p className="provider-state" role="status">Reading the Models.dev directory…</p>
-              )}
-              {directoryQuery.error instanceof Error && (
-                <p className="mcp-error" role="alert">{directoryQuery.error.message}</p>
-              )}
-              {!directoryQuery.isLoading && candidates.length === 0 && (
-                <p className="provider-state">No supported provider matches this search.</p>
-              )}
-            </div>
-          </div>
-        )}
-      </div>
+      <p className="provider-save-note">Changes save automatically.</p>
     </div>
   )
 }
@@ -2063,67 +2041,74 @@ export function ProviderConnect({
   return (
     <div className="hr-connect">
       {acceptsSubscription && (
-        <section className="hr-block">
-          {subscription ? (
-            <>
-              <div className="hr-conn-status">
-                <ServiceStatus connected={connected} label={expired ? 'Expired' : undefined} />
-                <span className="hr-conn-id">
-                  {usage?.planTier ? `${usage.planTier} · ` : ''}
-                  {subscription.providerEmail}
-                  <span className="hr-subscription"> · Subscription</span>
-                </span>
-                <span className="hr-conn-actions">
+        <section className="hr-block" aria-label={`${provider.label} subscription`}>
+          <div className="provider-method-head">
+            <h4 className="hr-block-title">Subscription</h4>
+            {subscription && <ServiceStatus connected={connected} label={expired ? 'Expired' : undefined} />}
+            <div className="hr-conn-actions">
+              {subscription ? (
+                <>
                   {expired && !flow.challenge && (
                     <button className="set-btn primary" onClick={() => void flow.start()} disabled={busy || flow.busy}>
                       Reconnect
                     </button>
                   )}
-                  <button className="set-btn danger" aria-label={`Disconnect ${provider.label} subscription`} onClick={disconnect} disabled={busy || flow.busy}>
+                  <button className="set-btn ghost" aria-label={`Disconnect ${provider.label} subscription`} onClick={disconnect} disabled={busy || flow.busy}>
                     Disconnect
                   </button>
-                </span>
-              </div>
-              {usage?.fiveHour && <QuotaRow label="5-hour" metric={usage.fiveHour} />}
-              {weekly && <QuotaRow label="Weekly" metric={weekly} />}
-            </>
-          ) : (
-            !flow.challenge && (
-              <div>
+                </>
+              ) : !flow.challenge && (
                 <button className="set-btn primary" onClick={() => void flow.start()} disabled={busy || flow.busy}>
                   Sign in with {provider.label}
                 </button>
+              )}
+            </div>
+          </div>
+          {subscription ? (
+            <>
+              <p className="provider-account">
+                {usage?.planTier ? `${usage.planTier} · ` : ''}
+                {subscription.providerEmail}
+              </p>
+              <div className="provider-quotas">
+                {usage?.fiveHour && <QuotaRow label="5-hour" metric={usage.fiveHour} />}
+                {weekly && <QuotaRow label="Weekly" metric={weekly} />}
               </div>
-            )
-          )}
+            </>
+          ) : <p className="provider-account">Not connected</p>}
           <ConnectSteps flow={flow} />
         </section>
       )}
       {acceptsApiKey && (
-        <section className="hr-block">
-          {(apiKey || showKeyForm) && <div className="hr-block-title">API key</div>}
-          {apiKey && (
-            <div className="hr-conn-status">
-              <span className="hr-conn-id">…{apiKey.keyTail}</span>
-              <span className="hr-conn-exp">
+        <section className="hr-block" aria-label={`${provider.label} API key`}>
+          <div className="provider-method-head">
+            <h4 className="hr-block-title">API key</h4>
+            <div className="hr-conn-actions">
+              {apiKey ? (
+                <>
+                  <button className="set-btn ghost" onClick={() => setReplacing((value) => !value)} disabled={busy}>
+                    {replacing ? 'Keep' : 'Replace'}
+                  </button>
+                  <button className="set-btn danger" aria-label={`Remove ${provider.label} API key`} onClick={removeKey} disabled={busy}>
+                    Remove
+                  </button>
+                </>
+              ) : !showKeyForm && (
+                <button className="set-btn ghost" type="button" aria-label="Add API key" onClick={() => setKeyFormOpen(true)}>
+                  Add key
+                </button>
+              )}
+            </div>
+          </div>
+          {apiKey ? (
+            <div className="provider-key-details">
+              <code>…{apiKey.keyTail}</code>
+              <span>
                 set by {apiKey.updatedBy.username} · {relTimeFromIso(apiKey.updatedAt)}
                 {keySpendToday !== null && ` · ${money(keySpendToday)} today`}
               </span>
-              <span className="hr-conn-actions">
-                <button className="set-btn ghost" onClick={() => setReplacing((value) => !value)} disabled={busy}>
-                  {replacing ? 'Keep' : 'Replace'}
-                </button>
-                <button className="set-btn danger" aria-label={`Remove ${provider.label} API key`} onClick={removeKey} disabled={busy}>
-                  Remove
-                </button>
-              </span>
             </div>
-          )}
-          {!apiKey && !showKeyForm && (
-            <button className="set-btn ghost provider-key-add" type="button" onClick={() => setKeyFormOpen(true)}>
-              Add API key
-            </button>
-          )}
+          ) : !showKeyForm && <p className="provider-account">Not configured</p>}
           {showKeyForm && (
             <form className="provider-key-form" aria-label={`${provider.label} API key`} onSubmit={createKey}>
               <input
@@ -2172,7 +2157,7 @@ function QuotaRow({ label, metric }: { label: string; metric: UsageMetric }) {
     <div className="hr-quota">
       <span className="hr-quota-label">{label}</span>
       <Bar pctLeft={metric.percentLeft} />
-      <span className="hr-quota-pct mono" aria-label={`${metric.percentLeft}% remaining`} title="Remaining">{metric.percentLeft}%</span>
+      <span className="hr-quota-pct mono" aria-label={`${metric.percentLeft}% remaining`} title="Remaining">{metric.percentLeft}% left</span>
       {resets && (
         <time className="hr-quota-reset" dateTime={resets} title={new Date(resets).toLocaleString()}>
           {minutes > 0 ? `Resets in ${remaining}` : 'Reset due'}
