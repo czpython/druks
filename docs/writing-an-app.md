@@ -370,6 +370,12 @@ records the call. Override
 `AgentOutput.to_result()` to map the strict agent contract to a domain value.
 Override `get_artifact()` to publish a reviewable artifact.
 
+Pass `contract=OutputType` on an agent call when its required output fields
+depend on the input. Druks uses that type for the harness schema, validation,
+artifact, and result conversion. The agent's declared contract stays unchanged;
+`contract` is not prompt context. Build dynamic types with Pydantic `create_model`
+and use `to_result()` to return a stable type for durable storage.
+
 If an agent produces a file, use [`File` and `FileField`](files.md).
 The contract declares the file, Druks transports and serves it, and the app can
 persist its stable reference on an app row.

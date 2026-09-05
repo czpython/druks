@@ -123,12 +123,15 @@ class Agent:
         object.__setattr__(self, "app", owner.name)
         agents.register(self)
 
-    async def __call__(self, **context: object) -> Any:
+    async def __call__(
+        self, *, contract: type[AgentOutput] | None = None, **context: object
+    ) -> Any:
         """Run the agent — ``await SoftwareFactory.implement(...)`` — as a durable step in the
         current workflow and return its parsed output. An agent run is always memoized —
         this picks which step does it: its own, or the @step it's already inside.
         workflow_id comes from the workflow context, not the caller; everything
-        else (repo, …) is prompt context."""
+        else (repo, …) is prompt context. ``contract`` overrides the output
+        contract for this call, including schema generation and validation."""
         if not self.id:
             # Built loose — never assigned to an App, never given an explicit
             # id — so its settings, its registry entry and the call it would record
@@ -145,7 +148,7 @@ class Agent:
             )
 
         async def _invoke() -> Any:
-            return await self._run(workflow_id=workflow.workflow_id, **context)
+            return await self._run(workflow_id=workflow.workflow_id, contract=contract, **context)
 
         if _in_step.get():
             transient_retry_index = 0
@@ -235,11 +238,18 @@ class Agent:
                 workflow.journal.add(result)
                 return result
 
-    async def _run(self, *, workflow_id: str, **context: Any) -> Any:
+    async def _run(
+        self,
+        *,
+        workflow_id: str,
+        contract: type[AgentOutput] | None = None,
+        **context: Any,
+    ) -> Any:
         """The raw execution: provision or attach a host, record the AgentCall, run
         the harness. ``__call__`` handles the durable wrapping + nesting."""
         if not self.prompt:
             raise WorkflowError(f"agent {self.id!r} has no prompt template to render")
+        contract = contract or self.contract
         workflow = current_workflow.get()
         # Refusing an unservable call here beats provisioning a VM and
         # 401ing mid-run.
@@ -296,7 +306,7 @@ class Agent:
                         account_id=workflow.account_id,
                         agent=self.id,
                         prompt=prompt,
-                        schema=self.contract.model_json_schema(),
+                        schema=contract.model_json_schema(),
                         artifact_dir=artifact_dir,
                         call_id=call_id,
                         include_plugins=self.include_plugins,
@@ -310,14 +320,14 @@ class Agent:
                 try:
                     workspace_files: list[File] = []
                     try:
-                        output = self.contract.model_validate(
+                        output = contract.model_validate(
                             result.output,
                             context={"workspace_files": workspace_files},
                         )
                     except ValidationError as error:
                         raise HarnessInvalidOutputError(
                             f"agent {self.id!r} returned a payload that fails "
-                            f"{self.contract.__name__}: {error}"
+                            f"{contract.__name__}: {error}"
                         ) from error
                     if workspace_files:
                         await runner.save_files(
