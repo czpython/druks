@@ -2,7 +2,7 @@ name: On Pull Request Backend
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, "codex/**"]
 
 concurrency:
   group: on-pull-request-backend-${{ github.event.pull_request.number }}
@@ -14,15 +14,9 @@ permissions:
 jobs:
   backend:
     runs-on: ubuntu-latest
-    # A hung await stalls forever, not loudly; the whole job normally takes
-    # ~3 minutes. Pairs with pytest's faulthandler below: the dump names the
-    # frame, this timeout does the killing.
+    # A stalled await must terminate before the runner limit.
     timeout-minutes: 15
-    # The suite talks to a real Postgres (the harness runs each test in a rolled-back
-    # transaction; the durable tests create their own databases) and a real Redis
-    # (flushed between tests). druks.testing carries its own defaults — the druks_test
-    # database and Redis index 15, never the application's — so this mirrors local dev
-    # (deploy/compose.dev.yaml) and needs no env wiring. Images track deploy/compose.yaml.
+    # Test services use druks.testing defaults and never the runtime database.
     services:
       postgres:
         image: postgres:16-alpine@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777
@@ -58,7 +52,4 @@ jobs:
       # The proof app is a standalone distribution that depends on druks;
       # it installs the way an author's would, so druks never depends on it.
       - run: uv pip install -e backend/tests/druks-field_notes
-      # Hang defense is pytest-timeout (pyproject): 180s per test, thread
-      # method — dump every thread's stack and exit from inside the process,
-      # so the step ends normally and the log keeps the dump.
       - run: uv run pytest backend/

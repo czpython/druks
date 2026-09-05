@@ -2,7 +2,7 @@ name: On Pull Request Frontend
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, "codex/**"]
 
 concurrency:
   group: on-pull-request-frontend-${{ github.event.pull_request.number }}

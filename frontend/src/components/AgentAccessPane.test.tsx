@@ -3,7 +3,7 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { Pat } from '../api/types'
-import { AgentAccessPane } from './SettingsModal'
+import { AgentAccessPane } from './SettingsPanes'
 
 function pat(overrides: Partial<Pat> = {}): Pat {
   return {
@@ -42,7 +42,9 @@ function stubFetch(routes: { list: () => Pat[]; created?: { token: string }; rev
 }
 
 function renderPane() {
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  })
   return render(
     <QueryClientProvider client={queryClient}>
       <AgentAccessPane />
@@ -80,7 +82,6 @@ describe('AgentAccessPane', () => {
     expect(screen.getByText(/AbCdEf123456…/)).toBeTruthy()
     expect(screen.getByText('active')).toBeTruthy()
     expect(screen.getByText('revoked')).toBeTruthy()
-    // A revoked token offers nothing to revoke.
     expect(screen.getAllByText('✕ revoke')).toHaveLength(1)
   })
 
@@ -93,17 +94,16 @@ describe('AgentAccessPane', () => {
     fireEvent.change(screen.getByPlaceholderText(/What will hold it/), {
       target: { value: 'laptop' },
     })
-    // The refetch after mint returns the new row; the banner must survive it.
     rows.push(pat({ id: 'p2', name: 'laptop' }))
     fireEvent.click(screen.getByText('mint'))
     await flush()
 
     const createCall = fetchMock.mock.calls.find(([, init]) => init?.method === 'POST')
-    expect(JSON.parse(String(createCall?.[1]?.body))).toEqual({ name: 'laptop' })
+    expect(JSON.parse(String(createCall?.[1]?.body))).toEqual({
+      name: 'laptop',
+    })
     const secretBox = screen.getByLabelText('personal access token') as HTMLInputElement
     expect(secretBox.value).toBe(MINTED.token)
-
-    // Dismissing is the only thing that clears it.
     fireEvent.click(screen.getByText('done'))
     expect(screen.queryByLabelText('personal access token')).toBeNull()
   })
