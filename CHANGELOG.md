@@ -36,22 +36,17 @@ while Druks is pre-1.0, a minor bump may break compatibility.
 ### Changed
 
 - **A provider owns its login, quota, and catalog; a harness only runs on top of
-  one.** OpenAI is one provider again — a ChatGPT subscription and an API key are its
-  two billing options, not two separate providers — and every model id is namespaced
-  as `provider/model`. An agent now resolves to a harness, a model, and a billing
-  choice in one place: the Agents page lists every agent as it resolves, with an
-  override mark and a lock on a billing cell a key-only harness fixes. The separate
-  Harnesses pane is gone; its settings moved to the Agents page's defaults and the
-  per-app override cells.
+  one.** Settings gains a Providers pane: connect Anthropic or OpenAI with a
+  subscription or an API key, and every model id is namespaced as `provider/model`.
+  An agent now resolves to a harness, a model, and a billing choice in one place: the
+  Agents page lists every agent as it resolves, with an override mark and a lock on a
+  billing cell a key-only harness fixes. The separate Harnesses pane is gone; its
+  settings moved to the Agents page's defaults and the per-app override cells.
 
 ### Fixed
 
-- **A provider's connection status now trusts a 401 over the stored token expiry.** A
-  revoked subscription shows Reconnect within one poll cycle instead of reading as
-  connected for days while its JWT expiry has not caught up, and the expiry countdown
-  reads correctly in both directions instead of always showing "0s ago." An expired
-  login also keeps its account email and past expiry on screen and offers Reconnect,
-  instead of looking exactly like one that was never connected.
+- **An expired login keeps its account email and past expiry on screen and offers
+  Reconnect**, instead of looking exactly like one that was never connected.
 - **An agent call retries once on an invalid response from the harness**, instead of
   failing the run outright.
 - **software_factory's triage step reads the reviewer's own words instead of a stale
