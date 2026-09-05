@@ -86,6 +86,18 @@ describe('ProviderConnect', () => {
     expect(screen.queryByText('Remove API key')).toBeNull()
   })
 
+  it('clears a canceled API key before the form opens again', () => {
+    renderCard(provider())
+    fireEvent.click(screen.getByRole('button', { name: 'Add API key' }))
+    fireEvent.change(screen.getByLabelText('API key'), { target: { value: 'discarded-key' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+
+    expect(screen.queryByLabelText('API key')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Add API key' }))
+    expect((screen.getByLabelText('API key') as HTMLInputElement).value).toBe('')
+    expect((screen.getByRole('button', { name: 'Save API key' }) as HTMLButtonElement).disabled).toBe(true)
+  })
+
   it('a key-only vendor shows only the key block', () => {
     renderCard(provider({ id: 'xai', label: 'xAI', billingOptions: ['api_key'] }))
 
