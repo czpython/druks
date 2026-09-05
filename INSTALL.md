@@ -27,7 +27,7 @@ curl -fsSL https://druks.ai/install.sh | bash
 
 Verification: the command exits with status 0. Its final output includes
 `docker compose up -d` and a message that the stack is up. `~/druks` contains
-`druks.toml`, `.env`, and `compose.yaml`.
+`druks.toml`, `.env`, and `compose.yaml`. The configured harness root exists.
 
 ## 3. Services are up
 
@@ -59,8 +59,8 @@ the error.
 
 Report that the installation succeeded. Tell the operator to open
 <http://127.0.0.1:8001>. Connect a provider under **Settings → Providers**.
-Agent runs do not start with a disconnected harness. Then connect the GitHub
-App that Druks uses. Run `docker compose exec web druks doctor --sandbox` to
+Agent runs require the selected provider credential. Then connect the GitHub
+App under **Settings → Services**. Run `docker compose exec web druks doctor --sandbox` to
 prove the full sandbox path with a real container.
 
 ## Local customizations

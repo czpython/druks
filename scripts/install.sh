@@ -116,7 +116,11 @@ main() {
   if [ -z "$DATA_HOST_DIR" ]; then
     DATA_HOST_DIR=$(sed -n 's/^DRUKS_DATA_DIR=//p' .env)
   fi
-  mkdir -p "$DATA_HOST_DIR"
+  HARNESS_CONFIG_ROOT=$(sed -n 's/^DRUKS_HARNESS_CONFIG_ROOT=//p' .env)
+  if [ -z "$HARNESS_CONFIG_ROOT" ]; then
+    HARNESS_CONFIG_ROOT="$HOME/.config/druks/harnesses"
+  fi
+  mkdir -p "$DATA_HOST_DIR" "$HARNESS_CONFIG_ROOT"
 
   # Pin the deploy user's uid/gid → the backend containers run as them, not
   # root, so everything written under the mounted data dir stays owned by
@@ -238,9 +242,9 @@ Stack is up. Verify with:
   docker compose ps
   docker compose exec web druks doctor
 
-Then finish in the dashboard. Connect a harness under
-Settings → Harnesses. Agent runs refuse to start on a harness
-that is not connected. Connect the GitHub App that druks uses.
+Then finish in the dashboard. Connect a provider under
+Settings → Providers. Agent runs require the selected provider credential.
+Connect the GitHub App that Druks uses under Settings → Services.
 MSG
 
   if [ "$PROVIDER" = "docker" ]; then
@@ -256,7 +260,7 @@ MSG
     cat <<MSG
 
 Public URLs (once exe.dev port-share is configured):
-  https://<your-host>/webhooks/{github,linear}
+  https://<your-host>/_external/{github,linear,jira}/events/
   https://<your-host>/
 ------------------------------------------------------------
 MSG
