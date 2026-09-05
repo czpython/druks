@@ -1800,6 +1800,7 @@ function ProvidersPane({
   requestError: string | null
 }) {
   const [adding, setAdding] = useState(false)
+  const [catalogsOpen, setCatalogsOpen] = useState(false)
   const [search, setSearch] = useState('')
   const [pendingProviders, setPendingProviders] = useState<Provider[]>([])
   const [openedAt] = useState(() => Date.now())
@@ -1851,10 +1852,38 @@ function ProvidersPane({
   return (
     <div className="set-pane mcp-pane hrs-pane">
       <header className="mcp-pane-head">
-        <h2 className="mcp-pane-title">Providers</h2>
+        <div className="provider-heading">
+          <h2 className="mcp-pane-title">Providers</h2>
+          {catalogs.length > 0 && (
+            <button
+              type="button"
+              className="set-btn ghost"
+              aria-expanded={catalogsOpen}
+              aria-controls="provider-catalog-status"
+              onClick={() => setCatalogsOpen((open) => !open)}
+            >
+              Catalog status
+            </button>
+          )}
+        </div>
         <p className="mcp-pane-sub">
           Manage credentials and billing methods. Credential changes save immediately.
         </p>
+        {catalogsOpen && (
+          <div id="provider-catalog-status" className="provider-catalogs">
+            <dl>
+              {catalogs.map((catalog) => (
+                <div key={catalog.provider}>
+                  <dt>{catalog.label}</dt>
+                  <dd title={new Date(catalog.fetchedAt).toLocaleString()}>
+                    {openedAt - new Date(catalog.fetchedAt).getTime() > 24 * 60 * 60 * 1000 ? 'Stale · ' : 'Updated '}
+                    {relTimeFromIso(catalog.fetchedAt)}
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          </div>
+        )}
       </header>
       {loading && <div className="provider-state" role="status">Loading providers…</div>}
       {requestError && <div className="mcp-error" role="alert">{requestError}</div>}
@@ -1898,23 +1927,6 @@ function ProvidersPane({
           )
         })}
       </div>
-      {catalogs.length > 0 && (
-        <details className="provider-catalogs">
-          <summary>Catalog status</summary>
-          <p>Providers update separately. Added providers use the Models.dev directory.</p>
-          <dl>
-            {catalogs.map((catalog) => (
-              <div key={catalog.provider}>
-                <dt>{catalog.label}</dt>
-                <dd title={new Date(catalog.fetchedAt).toLocaleString()}>
-                  {openedAt - new Date(catalog.fetchedAt).getTime() > 24 * 60 * 60 * 1000 ? 'Stale · ' : 'Updated '}
-                  {relTimeFromIso(catalog.fetchedAt)}
-                </dd>
-              </div>
-            ))}
-          </dl>
-        </details>
-      )}
       <div className="provider-add">
         {!adding ? (
           <button type="button" className="set-btn ghost" onClick={() => setAdding(true)}>Add provider</button>
@@ -1922,7 +1934,7 @@ function ProvidersPane({
           <div className="set-card provider-add-panel">
             <div className="provider-add-head">
               <label htmlFor="provider-search">Add provider</label>
-              <button type="button" className="set-btn quiet" onClick={() => { setAdding(false); setSearch('') }}>Close</button>
+              <button type="button" className="set-btn ghost" onClick={() => { setAdding(false); setSearch('') }}>Close</button>
             </div>
             <input
               autoFocus
@@ -2067,7 +2079,7 @@ export function ProviderConnect({
                       Reconnect
                     </button>
                   )}
-                  <button className="set-btn quiet" aria-label={`Disconnect ${provider.label} subscription`} onClick={disconnect} disabled={busy || flow.busy}>
+                  <button className="set-btn ghost" aria-label={`Disconnect ${provider.label} subscription`} onClick={disconnect} disabled={busy || flow.busy}>
                     Disconnect
                   </button>
                 </span>
@@ -2101,14 +2113,14 @@ export function ProviderConnect({
                 <button className="set-btn ghost" onClick={() => setReplacing((value) => !value)} disabled={busy}>
                   {replacing ? 'Keep' : 'Replace'}
                 </button>
-                <button className="set-btn quiet" aria-label={`Remove ${provider.label} API key`} onClick={removeKey} disabled={busy}>
+                <button className="set-btn ghost" aria-label={`Remove ${provider.label} API key`} onClick={removeKey} disabled={busy}>
                   Remove
                 </button>
               </span>
             </div>
           )}
           {!apiKey && !showKeyForm && (
-            <button className="set-btn quiet provider-key-add" type="button" onClick={() => setKeyFormOpen(true)}>
+            <button className="set-btn ghost provider-key-add" type="button" onClick={() => setKeyFormOpen(true)}>
               Add API key
             </button>
           )}
@@ -2129,7 +2141,7 @@ export function ProviderConnect({
                 {busy ? 'Saving…' : 'Save'}
               </button>
               {!apiKey && (
-                <button className="set-btn quiet" type="button" onClick={() => { setKey(''); setKeyFormOpen(false) }}>
+                <button className="set-btn ghost" type="button" onClick={() => { setKey(''); setKeyFormOpen(false) }}>
                   Cancel
                 </button>
               )}
@@ -2160,7 +2172,7 @@ function QuotaRow({ label, metric }: { label: string; metric: UsageMetric }) {
     <div className="hr-quota">
       <span className="hr-quota-label">{label}</span>
       <Bar pctLeft={metric.percentLeft} />
-      <span className="hr-quota-pct mono">{metric.percentLeft}% remaining</span>
+      <span className="hr-quota-pct mono" aria-label={`${metric.percentLeft}% remaining`} title="Remaining">{metric.percentLeft}%</span>
       {resets && (
         <time className="hr-quota-reset" dateTime={resets} title={new Date(resets).toLocaleString()}>
           {minutes > 0 ? `Resets in ${remaining}` : 'Reset due'}

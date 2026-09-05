@@ -131,8 +131,8 @@ describe('ProviderConnect', () => {
 
     expect(screen.getByText('Connected')).toBeTruthy()
     expect(screen.getByText('Claude Max · claude-seat@corp.com')).toBeTruthy()
-    expect(screen.getByText('82% remaining')).toBeTruthy()
-    expect(screen.getByText('41% remaining')).toBeTruthy()
+    expect(screen.getByLabelText('82% remaining')).toBeTruthy()
+    expect(screen.getByLabelText('41% remaining')).toBeTruthy()
     expect(screen.getByText('5-hour')).toBeTruthy()
     expect(screen.getByText('Weekly')).toBeTruthy()
     expect(screen.queryByText(/Token expires/)).toBeNull()
@@ -163,9 +163,9 @@ describe('ProviderConnect', () => {
     })
 
     expect(screen.getAllByText('Weekly')).toHaveLength(1)
-    expect(screen.getByText('83% remaining')).toBeTruthy()
-    expect(screen.queryByText('69% remaining')).toBeNull()
-    expect(screen.queryByText('50% remaining')).toBeNull()
+    expect(screen.getByLabelText('83% remaining').textContent).toBe('83%')
+    expect(screen.queryByLabelText('69% remaining')).toBeNull()
+    expect(screen.queryByLabelText('50% remaining')).toBeNull()
     expect(screen.queryByText('Fable')).toBeNull()
     expect(screen.queryByText('GPT reserve')).toBeNull()
     expect(screen.getByText('Resets in 6d')).toBeTruthy()
