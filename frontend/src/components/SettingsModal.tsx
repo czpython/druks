@@ -2079,7 +2079,7 @@ export function ProviderConnect({
                       Reconnect
                     </button>
                   )}
-                  <button className="set-btn ghost" aria-label={`Disconnect ${provider.label} subscription`} onClick={disconnect} disabled={busy || flow.busy}>
+                  <button className="set-btn danger" aria-label={`Disconnect ${provider.label} subscription`} onClick={disconnect} disabled={busy || flow.busy}>
                     Disconnect
                   </button>
                 </span>
@@ -2113,7 +2113,7 @@ export function ProviderConnect({
                 <button className="set-btn ghost" onClick={() => setReplacing((value) => !value)} disabled={busy}>
                   {replacing ? 'Keep' : 'Replace'}
                 </button>
-                <button className="set-btn ghost" aria-label={`Remove ${provider.label} API key`} onClick={removeKey} disabled={busy}>
+                <button className="set-btn danger" aria-label={`Remove ${provider.label} API key`} onClick={removeKey} disabled={busy}>
                   Remove
                 </button>
               </span>
