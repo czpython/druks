@@ -125,6 +125,8 @@ async def test_removing_the_key_leaves_every_subscription(tmp_path: Path, druks_
 _GROQ = {
     "provider": "groq",
     "label": "Groq",
+    "documentation_url": "https://console.groq.com/docs",
+    "api_url": "https://api.groq.com/openai/v1",
     "models": [{"id": "groq/llama-4", "label": "Llama 4"}],
 }
 
@@ -155,7 +157,15 @@ async def test_a_key_for_a_directory_provider_adds_it(tmp_path: Path, druks_db, 
 def test_directory_lists_only_providers_one_can_add(tmp_path: Path, monkeypatch):
     _stub_directory(monkeypatch, [_GROQ, {"provider": "openai", "label": "OpenAI", "models": []}])
     with _build_client(tmp_path) as client:
-        assert client.get("/api/providers/directory").json() == [_GROQ]
+        assert client.get("/api/providers/directory").json() == [
+            {
+                "provider": "groq",
+                "label": "Groq",
+                "models": _GROQ["models"],
+                "documentationUrl": "https://console.groq.com/docs",
+                "apiUrl": "https://api.groq.com/openai/v1",
+            }
+        ]
 
 
 def test_disconnect_without_a_login_is_a_no_op(tmp_path: Path):

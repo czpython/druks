@@ -22,6 +22,7 @@ import {
   type CatalogModel,
   type Provider,
   type ProviderCatalog,
+  type ProviderDirectoryEntry,
   type ProviderKey,
   type ProviderSubscription,
   type Connection,
@@ -35,8 +36,9 @@ import {
   type WorkflowSettingField,
 } from '../api/types'
 import { appLabel } from '../apps/registry'
-import { absTime, money, relTimeFromIso } from '../lib/format'
+import { absTime, money, relTimeFromIso, secondsUntil } from '../lib/format'
 import { useUsageToday } from '../lib/useUsage'
+import { useTicker } from '../lib/useTicker'
 import { Bar } from './UsagePanel'
 import { harnessColors } from '../lib/harnessColors'
 
@@ -545,6 +547,7 @@ export function SettingsModal({ open, onClose }: Props) {
             {section === 'providers' && (
               <ProvidersPane
                 providers={providers}
+                registeredProviders={providersQuery.data ?? []}
                 subscriptions={providerSubscriptions}
                 keys={providerKeys}
                 catalogs={providerCatalogs}
@@ -1781,6 +1784,7 @@ export function ConnectionsPane() {
 // Connection state persists immediately, outside the modal's Save.
 function ProvidersPane({
   providers,
+  registeredProviders,
   subscriptions,
   keys,
   catalogs,
@@ -1788,6 +1792,7 @@ function ProvidersPane({
   requestError,
 }: {
   providers: Provider[]
+  registeredProviders: Provider[]
   subscriptions: ProviderSubscription[]
   keys: ProviderKey[]
   catalogs: ProviderCatalog[]
@@ -1798,11 +1803,10 @@ function ProvidersPane({
   const [search, setSearch] = useState('')
   const [pendingProviders, setPendingProviders] = useState<Provider[]>([])
   const [openedAt] = useState(() => Date.now())
-  // The directory is only the search box's source, read when it opens.
   const directoryQuery = useQuery({
     queryKey: ['providerDirectory'],
     queryFn: () => api.providerDirectory(),
-    enabled: adding,
+    enabled: adding || providers.some((provider) => !registeredProviders.some((entry) => entry.id === provider.id)),
     staleTime: 60_000,
     retry: 1,
   })
@@ -1822,9 +1826,11 @@ function ProvidersPane({
   const providerColor = harnessColors(configured.map((provider) => provider.id))
   const query = search.trim().toLocaleLowerCase()
   const candidates = [
-    ...providers.map((provider) => ({
+    ...registeredProviders.map((provider) => ({
       provider: provider.id,
       label: provider.label,
+      documentationUrl: null,
+      apiUrl: null,
       models: catalogs.find((catalog) => catalog.provider === provider.id)?.models ?? [],
     })),
     ...(directoryQuery.data ?? []),
@@ -1862,23 +1868,25 @@ function ProvidersPane({
         {configured.map((provider) => {
           const subscription = subscriptions.find((row) => row.provider === provider.id) ?? null
           const apiKey = keys.find((row) => row.provider === provider.id) ?? null
-          const catalog = catalogs.find((entry) => entry.provider === provider.id)
-          const catalogIsStale = Boolean(
-            catalog && openedAt - new Date(catalog.fetchedAt).getTime() > 24 * 60 * 60 * 1000,
-          )
+          const isDirectoryProvider = !registeredProviders.some((entry) => entry.id === provider.id)
+          const directoryEntry = directoryQuery.data?.find((entry) => entry.provider === provider.id)
           return (
-            <article key={provider.id} className="set-card hr-card" style={{ '--fam': providerColor[provider.id] } as CSSProperties}>
+            <article key={provider.id} aria-label={provider.label} className="set-card hr-card" style={{ '--fam': providerColor[provider.id] } as CSSProperties}>
               <header className="hr-ident">
                 <span className="hr-ident-dot" aria-hidden="true" />
                 <span className="hr-identity-copy">
                   <span className="hr-name">{provider.label}</span>
                 </span>
-                <span className="provider-catalog" title={catalog ? new Date(catalog.fetchedAt).toLocaleString() : undefined}>
-                  {catalog
-                    ? `${catalogIsStale ? 'Catalog is stale' : 'Catalog updated'} ${relTimeFromIso(catalog.fetchedAt)}`
-                    : 'No catalog yet'}
-                </span>
               </header>
+              {isDirectoryProvider && (
+                <div className="provider-source">
+                  {directoryEntry ? <ProviderSource entry={directoryEntry} /> : (
+                    <p className="provider-state" role="status">
+                      {directoryQuery.isLoading ? 'Loading provider details…' : 'Provider details are unavailable from Models.dev.'}
+                    </p>
+                  )}
+                </div>
+              )}
               <ProviderConnect
                 provider={provider}
                 subscription={subscription}
@@ -1890,6 +1898,23 @@ function ProvidersPane({
           )
         })}
       </div>
+      {catalogs.length > 0 && (
+        <details className="provider-catalogs">
+          <summary>Catalog status</summary>
+          <p>Providers update separately. Added providers use the Models.dev directory.</p>
+          <dl>
+            {catalogs.map((catalog) => (
+              <div key={catalog.provider}>
+                <dt>{catalog.label}</dt>
+                <dd title={new Date(catalog.fetchedAt).toLocaleString()}>
+                  {openedAt - new Date(catalog.fetchedAt).getTime() > 24 * 60 * 60 * 1000 ? 'Stale · ' : 'Updated '}
+                  {relTimeFromIso(catalog.fetchedAt)}
+                </dd>
+              </div>
+            ))}
+          </dl>
+        </details>
+      )}
       <div className="provider-add">
         {!adding ? (
           <button type="button" className="set-btn ghost" onClick={() => setAdding(true)}>Add provider</button>
@@ -1908,25 +1933,37 @@ function ProvidersPane({
               value={search}
               onChange={(event) => setSearch(event.target.value)}
             />
+            <p className="provider-directory-note">
+              Listings from <a href="https://models.dev" target="_blank" rel="noopener noreferrer">Models.dev</a>.
+              {' '}Druks does not verify these providers. Check the endpoint and documentation before adding a key.
+            </p>
             <div className="provider-results" role="list" aria-label="Provider search results">
               {candidates.map((entry) => {
                 const provider =
                   providers.find((registered) => registered.id === entry.provider) ??
                   addedProvider(entry.provider, entry.label)
+                const endpoint = providerWebUrl(entry.apiUrl)
+                const documentation = providerWebUrl(entry.documentationUrl)
                 return (
-                  <button
-                    type="button"
-                    className="provider-result"
-                    key={provider.id}
-                    onClick={() => {
-                      setPendingProviders((current) => [...current, provider])
-                      setAdding(false)
-                      setSearch('')
-                    }}
-                  >
-                    <span><strong>{provider.label}</strong><code>{provider.id}</code></span>
-                    <span>{provider.billingOptions.map(billingLabel).join(' or ')}</span>
-                  </button>
+                  <div className="provider-result" role="listitem" key={provider.id}>
+                    <button
+                      type="button"
+                      className="provider-result-select"
+                      onClick={() => {
+                        setPendingProviders((current) => [...current, provider])
+                        setAdding(false)
+                        setSearch('')
+                      }}
+                    >
+                      <strong>{provider.label}</strong>
+                      <code>{endpoint?.host ?? provider.id}</code>
+                    </button>
+                    {documentation && (
+                      <a href={documentation.href} target="_blank" rel="noopener noreferrer" aria-label={`Documentation for ${provider.label}`}>
+                        Docs
+                      </a>
+                    )}
+                  </div>
                 )
               })}
               {directoryQuery.isLoading && (
@@ -2010,11 +2047,11 @@ export function ProviderConnect({
   // visible and ask for a Reconnect, not a first-time sign-in.
   const expired = Boolean(subscription) && !connected
   const showKeyForm = acceptsApiKey && (keyFormOpen || replacing)
+  const weekly = usage?.weeks.find((week) => week.model === null)
   return (
     <div className="hr-connect">
       {acceptsSubscription && (
         <section className="hr-block">
-          <div className="hr-block-title">Subscription</div>
           {subscription ? (
             <>
               <div className="hr-conn-status">
@@ -2022,6 +2059,7 @@ export function ProviderConnect({
                 <span className="hr-conn-id">
                   {usage?.planTier ? `${usage.planTier} · ` : ''}
                   {subscription.providerEmail}
+                  <span className="hr-subscription"> · Subscription</span>
                 </span>
                 <span className="hr-conn-actions">
                   {expired && !flow.challenge && (
@@ -2029,27 +2067,13 @@ export function ProviderConnect({
                       Reconnect
                     </button>
                   )}
-                  <details className="hr-more">
-                    <summary aria-label={`More ${provider.label} subscription actions`}>More</summary>
-                    <button className="set-btn danger quiet" onClick={disconnect} disabled={busy || flow.busy}>
-                      Disconnect subscription
-                    </button>
-                  </details>
+                  <button className="set-btn quiet" aria-label={`Disconnect ${provider.label} subscription`} onClick={disconnect} disabled={busy || flow.busy}>
+                    Disconnect
+                  </button>
                 </span>
               </div>
               {usage?.fiveHour && <QuotaRow label="5-hour" metric={usage.fiveHour} />}
-              {usage?.weeks.map((week, index) => (
-                <QuotaRow key={index} label="Weekly" metric={week} />
-              ))}
-              {subscription.expiresAt && (
-                <span className="hr-conn-exp">
-                  Token {expired ? 'expired' : 'expires'}{' '}
-                  {new Date(subscription.expiresAt).toLocaleString([], {
-                    dateStyle: 'medium',
-                    timeStyle: 'long',
-                  })}
-                </span>
-              )}
+              {weekly && <QuotaRow label="Weekly" metric={weekly} />}
             </>
           ) : (
             !flow.challenge && (
@@ -2077,12 +2101,9 @@ export function ProviderConnect({
                 <button className="set-btn ghost" onClick={() => setReplacing((value) => !value)} disabled={busy}>
                   {replacing ? 'Keep' : 'Replace'}
                 </button>
-                <details className="hr-more">
-                  <summary aria-label={`More ${provider.label} API key actions`}>More</summary>
-                  <button className="set-btn danger quiet" onClick={removeKey} disabled={busy}>
-                    Remove API key
-                  </button>
-                </details>
+                <button className="set-btn quiet" aria-label={`Remove ${provider.label} API key`} onClick={removeKey} disabled={busy}>
+                  Remove
+                </button>
               </span>
             </div>
           )}
@@ -2092,7 +2113,7 @@ export function ProviderConnect({
             </button>
           )}
           {showKeyForm && (
-            <form className="provider-key-form" onSubmit={createKey}>
+            <form className="provider-key-form" aria-label={`${provider.label} API key`} onSubmit={createKey}>
               <input
                 aria-label="API key"
                 autoComplete="off"
@@ -2105,7 +2126,7 @@ export function ProviderConnect({
                 value={key}
               />
               <button className="hr-conn-btn" disabled={busy || flow.busy || !key.trim()} type="submit">
-                {apiKey ? 'Replace key' : 'Save API key'}
+                {busy ? 'Saving…' : 'Save'}
               </button>
               {!apiKey && (
                 <button className="set-btn quiet" type="button" onClick={() => { setKey(''); setKeyFormOpen(false) }}>
@@ -2126,18 +2147,56 @@ export function ProviderConnect({
 }
 
 function QuotaRow({ label, metric }: { label: string; metric: UsageMetric }) {
+  useTicker(Boolean(metric.resetsAt))
   if (metric.percentLeft === null) return null
   const resets = metric.resetsAt
-    ? new Date(metric.resetsAt).toLocaleString([], { dateStyle: 'medium', timeStyle: 'long' })
-    : null
+  const minutes = resets ? Math.max(0, Math.ceil(secondsUntil(resets) / 60)) : 0
+  const remaining = minutes >= 1440
+    ? `${Math.ceil(minutes / 1440)}d`
+    : minutes >= 60
+      ? `${Math.floor(minutes / 60)}h${minutes % 60 ? ` ${minutes % 60}m` : ''}`
+      : `${minutes}m`
   return (
     <div className="hr-quota">
       <span className="hr-quota-label">{label}</span>
-      <span className="hr-quota-model mono">{metric.model ?? ''}</span>
       <Bar pctLeft={metric.percentLeft} />
       <span className="hr-quota-pct mono">{metric.percentLeft}% remaining</span>
-      <span className="hr-conn-exp">{resets ? `resets ${resets}` : ''}</span>
+      {resets && (
+        <time className="hr-quota-reset" dateTime={resets} title={new Date(resets).toLocaleString()}>
+          {minutes > 0 ? `Resets in ${remaining}` : 'Reset due'}
+        </time>
+      )}
     </div>
+  )
+}
+
+function providerWebUrl(value: string | null): URL | null {
+  if (!value) return null
+  try {
+    const url = new URL(value)
+    return url.protocol === 'https:' && !url.username && !url.password ? url : null
+  } catch {
+    return null
+  }
+}
+
+function ProviderSource({ entry }: { entry: ProviderDirectoryEntry }) {
+  const endpoint = providerWebUrl(entry.apiUrl)
+  const documentation = providerWebUrl(entry.documentationUrl)
+  return (
+    <>
+      <div>
+        Listed by <a href="https://models.dev" target="_blank" rel="noopener noreferrer">Models.dev</a>
+        {' · '}
+        {documentation ? (
+          <a href={documentation.href} target="_blank" rel="noopener noreferrer">
+            Documentation · {documentation.host}
+          </a>
+        ) : 'Documentation unavailable'}
+      </div>
+      <div>Listed API endpoint: {endpoint ? <code>{endpoint.href}</code> : 'Unavailable'}</div>
+      <p>Druks does not verify this provider.</p>
+    </>
   )
 }
 

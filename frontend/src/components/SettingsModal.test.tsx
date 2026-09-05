@@ -76,6 +76,8 @@ const providerCatalogs = [
 ]
 
 const providerDirectory = [
+  { provider: 'untrusted', label: 'Untrusted', documentationUrl: 'javascript:alert(1)', apiUrl: 'https://trusted.example@evil.example/v1', models: [] },
+  { provider: 'groq', label: 'Groq', documentationUrl: 'https://console.groq.com/docs', apiUrl: 'https://api.groq.com/openai/v1', models: [] },
   ...Array.from({ length: 35 }, (_, index) => ({
     provider: `gateway-${index}`,
     label: `Gateway ${index}`,
@@ -84,6 +86,8 @@ const providerDirectory = [
   {
     provider: 'kimi-for-coding',
     label: 'Kimi For Coding',
+    documentationUrl: 'https://www.kimi.com/code/docs/',
+    apiUrl: 'https://api.kimi.com/coding/v1',
     models: [{ id: 'kimi-for-coding/kimi-k2', label: 'Kimi K2' }],
   },
   {
@@ -518,8 +522,8 @@ describe('SettingsModal agents', () => {
     renderModal()
     fireEvent.click(await screen.findByRole('button', { name: 'Providers' }))
 
-    expect(await screen.findByText('Anthropic')).toBeTruthy()
-    expect(screen.getByText('Groq')).toBeTruthy()
+    expect(await screen.findByRole('article', { name: 'Anthropic' })).toBeTruthy()
+    expect(screen.getByRole('article', { name: 'Groq' })).toBeTruthy()
     expect(screen.queryByText('OpenAI')).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'Add provider' }))
     fireEvent.change(screen.getByLabelText('Add provider'), { target: { value: 'gpt oss' } })
@@ -570,10 +574,46 @@ describe('SettingsModal agents', () => {
     renderModal()
     fireEvent.click(await screen.findByRole('button', { name: 'Providers' }))
 
-    const card = (await screen.findByText('Groq')).closest('article')!
-    expect(within(card).getByText(/Catalog (updated|is stale)/)).toBeTruthy()
+    const card = await screen.findByRole('article', { name: 'Groq' })
+    expect(within(card).queryByText(/Catalog/)).toBeNull()
+    fireEvent.click(screen.getByText('Catalog status'))
+    expect(screen.getAllByText(/^(Updated |Stale · )/)).toHaveLength(2)
     expect(within(card).queryByText(/\d+ models/)).toBeNull()
     expect(screen.queryByRole('button', { name: 'View models in Agents' })).toBeNull()
+  })
+
+  it('shows the source, endpoint, and documentation before a directory key is entered', async () => {
+    stubFetch()
+    renderModal()
+    fireEvent.click(await screen.findByRole('button', { name: 'Providers' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Add provider' }))
+    fireEvent.change(screen.getByLabelText('Add provider'), { target: { value: 'kimi-for-coding' } })
+
+    const docs = await screen.findByRole('link', { name: 'Documentation for Kimi For Coding' })
+    expect(docs.getAttribute('href')).toBe('https://www.kimi.com/code/docs/')
+    expect(screen.getByText('api.kimi.com')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: /Kimi For Coding/ }))
+    const card = screen.getByText('Kimi For Coding').closest('article')!
+    expect(within(card).getByRole('link', { name: 'Models.dev' }).getAttribute('href')).toBe('https://models.dev')
+    expect(within(card).getByText('https://api.kimi.com/coding/v1')).toBeTruthy()
+    expect(within(card).getByText(/Druks does not verify this provider/)).toBeTruthy()
+    expect(within(card).queryByLabelText('API key')).toBeNull()
+    fireEvent.click(within(card).getByRole('button', { name: 'Add API key' }))
+    expect(within(card).getByRole('form', { name: 'Kimi For Coding API key' })).toBeTruthy()
+  })
+
+  it('does not link unsafe directory URLs or endpoints with embedded credentials', async () => {
+    stubFetch()
+    renderModal()
+    fireEvent.click(await screen.findByRole('button', { name: 'Providers' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Add provider' }))
+    fireEvent.change(screen.getByLabelText('Add provider'), { target: { value: 'untrusted' } })
+    fireEvent.click(await screen.findByRole('button', { name: /Untrusted/ }))
+
+    const card = screen.getByText('Untrusted').closest('article')!
+    expect(within(card).queryByRole('link', { name: /Documentation/ })).toBeNull()
+    expect(within(card).getByText(/Documentation unavailable/)).toBeTruthy()
+    expect(within(card).getByText('Listed API endpoint: Unavailable')).toBeTruthy()
   })
 
   it('closes the model chooser with Escape without closing settings', async () => {

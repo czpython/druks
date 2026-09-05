@@ -528,6 +528,8 @@ export interface ProviderCatalog {
 export interface ProviderDirectoryEntry {
   provider: string
   label: string
+  documentationUrl: string | null
+  apiUrl: string | null
   models: CatalogModel[]
 }
 

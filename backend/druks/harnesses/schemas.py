@@ -55,4 +55,6 @@ class ProviderCatalogResponse(Schema):
 class ProviderDirectoryResponse(Schema):
     provider: str
     label: str
+    documentation_url: str | None
+    api_url: str | None
     models: list[CatalogModel]

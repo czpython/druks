@@ -17,8 +17,7 @@ _TIMEOUT_SECONDS = 20.0
 
 
 async def list_providers() -> list[dict]:
-    """Every models.dev provider that runs on one API key, ``{"provider",
-    "label", "models"}`` each. Held in Redis for a day."""
+    """List Models.dev providers that use one API key. Cache the list for one day."""
     redis = get_client()
     cached = await redis.get(DIRECTORY_CACHE_KEY)
     if cached:
@@ -54,6 +53,8 @@ def parse_providers(raw: str) -> list[dict]:
                     {
                         "provider": provider_id,
                         "label": provider.get("name") or provider_id,
+                        "documentation_url": provider.get("doc"),
+                        "api_url": provider.get("api"),
                         "models": sorted(models, key=lambda model: model["label"]),
                     }
                 )

@@ -2,7 +2,7 @@
 # operator completes it, and the per-subscription SET NX lock that serializes refresh.
 CONNECT_PENDING_PREFIX = "druks:harness:connect:pending:"
 REFRESH_LOCK_PREFIX = "druks:harness:refresh:"
-# The models.dev directory, read when someone searches for a provider to add.
+# Provider search and details share the Models.dev cache.
 DIRECTORY_CACHE_KEY = "druks:harness:directory"
 DIRECTORY_CACHE_TTL_SECONDS = 24 * 3600
 

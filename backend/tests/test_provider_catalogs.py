@@ -146,6 +146,8 @@ def test_directory_keeps_one_key_providers_with_exact_ids() -> None:
                 "openrouter": {
                     "id": "different-nested-id",
                     "name": "OpenRouter",
+                    "doc": "https://openrouter.ai/docs",
+                    "api": "https://openrouter.ai/api/v1",
                     "env": ["OPENROUTER_API_KEY"],
                     "models": {
                         "anthropic/claude-sonnet-4": {
@@ -167,6 +169,8 @@ def test_directory_keeps_one_key_providers_with_exact_ids() -> None:
         {
             "provider": "openrouter",
             "label": "OpenRouter",
+            "documentation_url": "https://openrouter.ai/docs",
+            "api_url": "https://openrouter.ai/api/v1",
             "models": [{"id": "openrouter/anthropic/claude-sonnet-4", "label": "Claude Sonnet 4"}],
         }
     ]
@@ -270,7 +274,19 @@ async def test_directory_is_fetched_once_and_read_from_redis(monkeypatch, druks_
     first = await list_providers()
     second = await list_providers()
 
-    assert first == second == [{"provider": "groq", "label": "Groq", "models": [_LLAMA]}]
+    assert (
+        first
+        == second
+        == [
+            {
+                "provider": "groq",
+                "label": "Groq",
+                "models": [_LLAMA],
+                "documentation_url": None,
+                "api_url": None,
+            }
+        ]
+    )
     assert [call["url"] for call in calls] == ["https://models.dev/api.json"]
 
     _mock_get(monkeypatch, _resp(503, "down"))
