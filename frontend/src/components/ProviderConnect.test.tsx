@@ -163,7 +163,7 @@ describe('ProviderConnect', () => {
     })
 
     expect(screen.getAllByText('Weekly')).toHaveLength(1)
-    expect(screen.getByLabelText('83% remaining').textContent).toBe('83%')
+    expect(screen.getByLabelText('83% remaining').textContent).toBe('83% left')
     expect(screen.queryByLabelText('69% remaining')).toBeNull()
     expect(screen.queryByLabelText('50% remaining')).toBeNull()
     expect(screen.queryByText('Fable')).toBeNull()
