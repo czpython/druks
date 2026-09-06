@@ -59,7 +59,7 @@ function isLifecycle(event: FeedItem): boolean {
 }
 
 // "software_factory.build" → "build": the durable kind identifies the workflow, its tail names it.
-function localName(kind: string | null | undefined): string {
+export function localName(kind: string | null | undefined): string {
   return kind ? (kind.split('.').pop() ?? '') : ''
 }
 
