@@ -1,6 +1,6 @@
 from typing import Self
 
-from druks.contrib.review.schemas import ReviewSummary
+from druks.contrib.software_factory.schemas import ReviewSummary
 from druks.workflows import Subject
 
 

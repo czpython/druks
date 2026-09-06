@@ -861,10 +861,11 @@ Two spellings run through druks, and which one a segment wears says who owns it:
 | `snake_case` | an identity the platform serves — your app name, a subject type |
 | `kebab-case` | a resource you named — your route prefixes, your frontend paths |
 
-Thus, `/api/review/pull_request` is the subject board for review runs.
-`/api/review/reviews` is the resource that your POST creates. The platform
-matches `<subject_type>`, `transcripts`, and `pages` before your routers. A
-custom router cannot take a platform read, including through a catch-all.
+Thus, `/api/software_factory/pull_request` is the subject board for pull request
+review runs. `/api/software_factory/reviews` is the resource that your POST
+creates. The platform matches `<subject_type>`, `transcripts`, and `pages` before
+your routers. A custom router cannot take a platform read, including through a
+catch-all.
 `transcripts` and `pages` are reserved: a subject type or a router prefix that
 takes one fails the load. Name the router for its resource to prevent a
 conflict.

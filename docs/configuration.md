@@ -240,13 +240,14 @@ the pasted credentials.
 
 ### Review identity (optional)
 
-The bundled `review` app can post its verdict reviews as a second
+The bundled `software_factory` app can post its verdict reviews as a second
 GitHub App, so GitHub accepts approvals on Druks-authored pull requests.
-Configure it in **Review → Settings**. Enter the review GitHub App ID and its PEM
-private key, both stored encrypted and empty-as-unset. Leave the pair empty and
-reviews publish as operator comments. Set both values to publish separate
-approval reviews. The review GitHub App needs read access to metadata and
-contents, read/write access to pull requests, and no webhook.
+Configure it in **Software Factory → Settings**, under **Review identity**. Enter
+the review GitHub App ID and its PEM private key, both stored encrypted and
+empty-as-unset. Leave the pair empty and reviews publish as operator comments.
+Set both values to publish separate approval reviews. The review GitHub App needs
+read access to metadata and contents, read/write access to pull requests, and no
+webhook.
 
 `GITHUB_API_URL` defaults to `https://api.github.com` and can point every
 client at another compatible GitHub API endpoint.
@@ -480,5 +481,5 @@ The encryption envelope does **not** currently cover harness subscription
 payloads or notification webhook URLs. Postgres stores them as
 ordinary Postgres fields, although APIs withhold or mask their values. Treat
 access to Postgres and its backups as access to those credentials. GitHub App
-private keys — the operator identity's and the review app's — are
+private keys — the operator identity's and the review identity's — are
 database values under the envelope, no longer files mounted into the process.

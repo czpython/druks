@@ -164,7 +164,7 @@ async def test_tools_list_pins_platform_and_app_tools(app, pat_token):
         tools = {tool.name: tool for tool in await client.list_tools()}
 
     assert list(tools)[:7] == _TOOL_NAMES
-    assert list(tools)[7:] == ["review_request", "software_factory_start"]
+    assert list(tools)[7:] == ["software_factory_start", "software_factory_review"]
 
     expected_annotations = {
         "cancel_run": (False, True, True),
@@ -184,7 +184,7 @@ async def test_tools_list_pins_platform_and_app_tools(app, pat_token):
         ) == expected
         assert tools[name].description
 
-    for name in ("review_request", "software_factory_start"):
+    for name in ("software_factory_review", "software_factory_start"):
         app_tool = tools[name]
         assert (
             app_tool.annotations.readOnlyHint,
@@ -234,14 +234,14 @@ def test_invalid_app_agent_route_stops_boot(operation_id, docstring, message):
         operation_id=operation_id,
         tags=["agent"],
     )
-    api.include_router(router, prefix="/api/review", tags=["review"])
+    api.include_router(router, prefix="/api/software_factory", tags=["software_factory"])
 
     with pytest.raises(InvalidAgentToolError, match=message):
         create_mcp_app(api)
 
 
 def test_derived_operation_id_collision_stops_boot():
-    # The 'review' app's unprefixed 'scan' derives to 'review_scan', which
+    # software_factory's unprefixed 'scan' derives to 'software_factory_scan', which
     # another route already claims explicitly — the framework must reject the
     # clash rather than silently mint two operations sharing an id.
     api = FastAPI()
@@ -250,22 +250,26 @@ def test_derived_operation_id_collision_stops_boot():
     async def scan():
         """Scan the review target."""
 
-    async def review_scan():
+    async def software_factory_scan():
         """Re-run the review scan."""
 
     router.add_api_route("/scans", scan, methods=["POST"], operation_id="scan", tags=["agent"])
     router.add_api_route(
-        "/rescans", review_scan, methods=["POST"], operation_id="review_scan", tags=["agent"]
+        "/rescans",
+        software_factory_scan,
+        methods=["POST"],
+        operation_id="software_factory_scan",
+        tags=["agent"],
     )
-    api.include_router(router, prefix="/api/review", tags=["review"])
+    api.include_router(router, prefix="/api/software_factory", tags=["software_factory"])
 
     with pytest.raises(InvalidAgentToolError, match="collides with existing operation id"):
         create_mcp_app(api)
 
 
 def _agent_route_app(operation_id: str) -> FastAPI:
-    # A synthetic agent route owned by the installed 'review' app — the
-    # loader-stamped 'review' tag names the owner, exactly as a real router does.
+    # A synthetic agent route owned by the installed software_factory app — the
+    # loader-stamped app tag names the owner, exactly as a real router does.
     # The endpoint mounts the same /mcp Route and mcp lifespan as the real app so
     # tools/list resolves in-process.
     held: dict[str, object] = {}
@@ -284,7 +288,7 @@ def _agent_route_app(operation_id: str) -> FastAPI:
     router.add_api_route(
         "/scans", endpoint, methods=["POST"], operation_id=operation_id, tags=["agent"]
     )
-    api.include_router(router, prefix="/api/review", tags=["review"])
+    api.include_router(router, prefix="/api/software_factory", tags=["software_factory"])
 
     mcp = create_mcp_app(api)
     held["mcp"] = mcp
@@ -301,8 +305,9 @@ def _served_operation_id(schema: dict, path: str) -> str:
 @pytest.mark.parametrize(
     ("operation_id", "expected"),
     [
-        ("scan", "review_scan"),  # an unprefixed id gains its owner's prefix
-        ("review_scan", "review_scan"),  # an already-prefixed id passes through, never doubled
+        ("scan", "software_factory_scan"),  # an unprefixed id gains its owner's prefix
+        # an already-prefixed id passes through, never doubled
+        ("software_factory_scan", "software_factory_scan"),
     ],
 )
 async def test_app_agent_route_derives_the_namespaced_tool(
@@ -312,9 +317,9 @@ async def test_app_agent_route_derives_the_namespaced_tool(
 
     # The document the provider consumed and every later regeneration carry the
     # derived id, not the bare one the author declared.
-    assert _served_operation_id(api.openapi(), "/api/review/scans") == expected
+    assert _served_operation_id(api.openapi(), "/api/software_factory/scans") == expected
     api.openapi_schema = None
-    assert _served_operation_id(api.openapi(), "/api/review/scans") == expected
+    assert _served_operation_id(api.openapi(), "/api/software_factory/scans") == expected
 
     async with live(api), _client(api, pat_token) as client:
         tools = {tool.name for tool in await client.list_tools()}

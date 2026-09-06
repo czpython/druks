@@ -292,7 +292,7 @@ async def test_run_checks_covers_all_check_names(tmp_path: Path) -> None:
         "github_identity",
         "installations",
         "software_factory:settings",
-        "review:settings",
+        "software_factory:review_identity",
         "anthropic_credentials",
         "openai_credentials",
         "data_dir",
