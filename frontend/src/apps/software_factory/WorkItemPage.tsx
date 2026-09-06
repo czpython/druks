@@ -1,7 +1,7 @@
 import { Page } from '@druks/ui'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useCallback, useMemo, useState } from 'react'
-import { Link, useLocation, useRouter } from 'wouter'
+import { Link, useLocation } from 'wouter'
 
 import { useSSE } from '../../api/sse'
 import { buildApi } from './api'
@@ -21,6 +21,7 @@ import { RunTranscript } from '../../components/RunTranscript'
 import { computeElapsed, dur, formatTokenCount, relTime, secondsSince } from '../../lib/format'
 import { parkedLine, runSubLine, statusLine } from './statusLine'
 import { agentCallPath, workItemPath } from './slug'
+import { useRawLocation } from '../../lib/useRawLocation'
 import { useCanonicalPath } from '../../lib/useCanonicalPath'
 import { useTicker } from '../../lib/useTicker'
 
@@ -29,9 +30,7 @@ interface Props {
 }
 
 export function WorkItemPage({ workItemId }: Props) {
-  const router = useRouter()
-  const useSearch = router.searchHook
-  const search = useSearch(router)
+  const { search } = useRawLocation()
   const queryClient = useQueryClient()
   const query = useQuery({
     queryKey: ['work-item', workItemId],
@@ -151,9 +150,7 @@ function resolveSelection(runs: RunSummary[], selected: string | null): Selectio
 }
 
 function WorkItemView({ data }: { data: WorkItemDetail }) {
-  const router = useRouter()
-  const useSearch = router.searchHook
-  const search = useSearch(router)
+  const { search } = useRawLocation()
   const target = new URLSearchParams(search)
   const targetRun = target.get('run')
   const targetRound = target.get('parkedAt') ?? undefined

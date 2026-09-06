@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from druks.accounts.models import Account
 from druks.contrib.software_factory.app import SoftwareFactory
 from druks.database import db_session
 from druks.testing import configure_app_for_test, make_settings
@@ -72,8 +73,6 @@ def test_patch_settings_judges_the_default_triple_together(tmp_path: Path):
 
 
 async def test_patch_settings_sets_the_account_unattended_runs_run_as(tmp_path: Path, druks_db):
-    from druks.accounts.models import Account
-
     account = await Account.get_or_create("ops@example.com")
     with _build_client(tmp_path) as client:
         assert {"id": account.id, "username": "ops@example.com"} in client.get(
@@ -90,7 +89,7 @@ async def test_patch_settings_sets_the_account_unattended_runs_run_as(tmp_path: 
 
 def test_patch_settings_persists_valid_iana_zone(tmp_path: Path, monkeypatch):
     async def _noop_schedules():
-        return None
+        return
 
     monkeypatch.setattr("druks.user_settings.routes.apply_schedules", _noop_schedules)
     with _build_client(tmp_path) as client:
@@ -210,21 +209,17 @@ def test_agents_lists_every_apps_agents_as_they_resolve(tmp_path: Path):
 
 def test_apps_judge_an_agents_triple_as_it_resolves(tmp_path: Path):
     with _build_client(tmp_path) as client:
-        # A key-only harness with the inherited subscription billing.
         response = client.patch("/api/settings/apps", json={"agentHarnesses": {"implement": "pi"}})
         assert response.status_code == 422
         assert "API key only" in response.json()["detail"]
-        # A model outside the inherited harness's vendor.
         response = client.patch(
             "/api/settings/apps", json={"agentModels": {"implement": "openai/gpt-5.5"}}
         )
         assert response.status_code == 422
         assert "does not run OpenAI" in response.json()["detail"]
-        # The rejected writes never landed.
         agents = {a["name"]: a for a in _software_factory_app(client)["agents"]}
         assert agents["implement"]["harnessSource"] == "default"
         assert agents["implement"]["source"] == "default"
-        # Both cells together fit.
         response = client.patch(
             "/api/settings/apps",
             json={"agentHarnesses": {"implement": "pi"}, "agentBillings": {"implement": "api_key"}},
@@ -233,7 +228,6 @@ def test_apps_judge_an_agents_triple_as_it_resolves(tmp_path: Path):
         agents = {a["name"]: a for a in _software_factory_app(client)["agents"]}
         assert (agents["implement"]["harness"], agents["implement"]["billing"]) == ("pi", "api_key")
         assert agents["implement"]["billingSource"] == "agent"
-        # An agent nobody registered.
         response = client.patch("/api/settings/apps", json={"agentBillings": {"ghost": "api_key"}})
         assert response.status_code == 422
 
@@ -254,7 +248,6 @@ def test_apps_surface_build_agents(tmp_path: Path):
     apps = {m["name"]: m for m in body["apps"]}
 
     build_agents = {a["name"]: a for a in apps["software_factory"]["agents"]}
-    # The build pipeline's plan stage stays; the standalone Plan-tab agent is gone.
     assert "generate_plan" in build_agents
     assert "planning" not in build_agents
 
@@ -264,7 +257,6 @@ def test_apps_surface_build_agents_and_workflow_defaults(tmp_path: Path):
         build = _software_factory_app(client)
 
     agents = {a["name"]: a for a in build["agents"]}
-    # Every cell inherits the operator's defaults when no override is set.
     assert agents["generate_plan"] == {
         "name": "generate_plan",
         "description": "ticket → implementation plan",
@@ -281,20 +273,35 @@ def test_apps_surface_build_agents_and_workflow_defaults(tmp_path: Path):
     }
     assert agents["implement"]["model"] == "anthropic/claude-opus-4-7"
     assert agents["evaluate_implementation"]["effortSource"] == "default"
-    # The workflow's settings surface alongside its agents.
     fields = {f["name"]: f for f in build["workflows"][0]["fields"]}
     assert fields["max_implementation_revisions"]["value"] == 5
     assert fields["plan_gate"] == {
         "name": "plan_gate",
         "label": "Plan gate",
-        "help": (
-            "human — Operator reviews every plan; the machine reviewer never runs. "
-            "machine — The machine reviewer critiques once; the plan implements without "
-            "operator review. machine_then_human — The machine reviewer critiques once, "
-            "then the operator approves every plan. adaptive — The machine reviewer "
-            "critiques once; a high-confidence plan it approved implements directly, "
-            "anything less parks for the operator."
-        ),
+        "help": "Choose who approves the plan before implementation.",
+        "choiceDetails": {
+            "human": {
+                "label": "Human review",
+                "help": "You approve every plan. The machine reviewer does not run.",
+            },
+            "machine": {
+                "label": "Machine review",
+                "help": (
+                    "The machine reviewer checks once. Implementation starts without your approval."
+                ),
+            },
+            "machine_then_human": {
+                "label": "Machine then human",
+                "help": "The machine reviewer checks once. You then approve the plan.",
+            },
+            "adaptive": {
+                "label": "Adaptive review",
+                "help": (
+                    "An approved high-confidence plan starts directly. "
+                    "All other plans need your approval."
+                ),
+            },
+        },
         "type": "enum",
         "value": "human",
         "default": "human",
@@ -518,11 +525,9 @@ def test_apps_default_effort_and_per_agent_effort_override(tmp_path: Path):
         assert agents["generate_plan"]["effort"] == "high"
         assert agents["generate_plan"]["effortSource"] == "default"
 
-        # Retune the default effort + override one agent.
         client.patch("/api/settings", json={"defaultEffort": "low"})
         client.patch("/api/settings/apps", json={"agentEfforts": {"generate_plan": "high"}})
         agents = {a["name"]: a for a in _software_factory_app(client)["agents"]}
-        # generate_plan overridden; revise_contract inherits "low".
         assert agents["generate_plan"]["effort"] == "high"
         assert agents["generate_plan"]["effortSource"] == "agent"
         assert agents["revise_contract"]["effort"] == "low"
@@ -545,11 +550,9 @@ def test_apps_default_timeout_and_per_agent_timeout_override(tmp_path: Path):
         assert agents["implement"]["timeout"] == 1800
         assert agents["implement"]["timeoutSource"] == "default"
 
-        # Retune the default timeout + override one agent.
         client.patch("/api/settings", json={"defaultTimeout": 1200})
         client.patch("/api/settings/apps", json={"agentTimeouts": {"implement": 3600}})
         agents = {a["name"]: a for a in _software_factory_app(client)["agents"]}
-        # implement overridden; review_plan inherits 1200.
         assert agents["implement"]["timeout"] == 3600
         assert agents["implement"]["timeoutSource"] == "agent"
         assert agents["review_plan"]["timeout"] == 1200
@@ -593,7 +596,6 @@ def test_apps_clearing_an_override_reverts_to_the_operator_default(tmp_path: Pat
         assert agents["generate_plan"]["model"] == "anthropic/claude-opus-4-7"
         assert agents["generate_plan"]["source"] == "agent"
 
-        # Null clears the override; the agent falls back to the operator default.
         client.patch("/api/settings/apps", json={"agentModels": {"generate_plan": None}})
         agents = {a["name"]: a for a in _software_factory_app(client)["agents"]}
         assert agents["generate_plan"]["model"] == "anthropic/claude-opus-4-7"

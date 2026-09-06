@@ -42,7 +42,10 @@ export function Sidebar({
           {account.username.slice(0, 2).toUpperCase()}
         </span>
         <div>
-          <span className="sidebar-username">{account.username}</span>
+          <details className="sidebar-account-details">
+            <summary className="sidebar-username">{account.username.split('@')[0]}</summary>
+            <span>{account.username}</span>
+          </details>
           <span className="sidebar-account-label">Your account</span>
         </div>
       </div>

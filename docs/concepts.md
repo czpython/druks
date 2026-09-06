@@ -127,7 +127,8 @@ For each workflow kind and subject, the newest run counts. A newer successful
 run therefore removes an older failure from Problems. A run without a subject,
 including one whose DBOS record is missing, counts on its own until it is
 cancelled. The read returns the 200 most recently changed current runs with
-bounded labels and failure text, never transcripts or complete review content.
+labels and artifact titles of at most 240 characters, and failure text of at
+most 2,048 characters. It never carries transcripts or complete review content.
 
 Needs you lists parked runs that carry a request the operator can act on,
 oldest request first. Other parked work is Waiting. Active work is running and

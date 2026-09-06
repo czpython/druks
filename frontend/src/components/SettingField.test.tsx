@@ -53,3 +53,15 @@ describe('SettingField', () => {
     expect(screen.queryByLabelText('Effort')).toBeNull()
   })
 })
+
+it('shows human choice labels and only the selected policy help', () => {
+  const props = { label: 'Plan gate', type: 'enum', choices: ['human', 'machine_then_human'],
+    choiceDetails: { human: { label: 'Human review', help: 'You approve each plan.' }, machine_then_human: { label: 'Machine then human', help: 'The machine checks, then you approve.' } }, onChange: vi.fn() }
+  const { rerender } = render(<SettingField {...props} value="human" />)
+  expect(screen.getByRole('option', { name: 'Machine then human' }).getAttribute('value')).toBe('machine_then_human')
+  expect(screen.getByText('You approve each plan.')).toBeTruthy()
+  expect(screen.queryByText('The machine checks, then you approve.')).toBeNull()
+  rerender(<SettingField {...props} value="machine_then_human" />)
+  expect(screen.getByText('The machine checks, then you approve.')).toBeTruthy()
+  expect(screen.queryByText('You approve each plan.')).toBeNull()
+})

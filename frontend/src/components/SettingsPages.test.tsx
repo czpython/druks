@@ -1,9 +1,10 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 
 import { App } from '../App'
 import { api } from '../api/client'
+import { SETTINGS_FIELDS } from './settings'
 import type {
   AgentSetting,
   AppsSettingsResponse,
@@ -159,7 +160,7 @@ const appSettings: AppsSettingsResponse = {
           type: 'enum',
           value: 'linear',
           default: 'linear',
-          choices: ['none', 'linear', 'jira'],
+          choices: ['none', 'linear', 'jira'], choiceDetails: {},
           section: '',
           visibleWhenField: '',
           visibleWhenValue: null,
@@ -174,7 +175,7 @@ const appSettings: AppsSettingsResponse = {
           type: 'str',
           value: 'Ready for Agent',
           default: 'Ready for Agent',
-          choices: null,
+          choices: null, choiceDetails: {},
           section: 'Linear',
           visibleWhenField: 'tracker',
           visibleWhenValue: 'linear',
@@ -189,7 +190,7 @@ const appSettings: AppsSettingsResponse = {
           type: 'str',
           value: 'Ready for Agent',
           default: 'Ready for Agent',
-          choices: null,
+          choices: null, choiceDetails: {},
           section: 'Jira',
           visibleWhenField: 'tracker',
           visibleWhenValue: 'jira',
@@ -214,7 +215,7 @@ const appSettings: AppsSettingsResponse = {
           type: 'secret',
           value: null,
           default: null,
-          choices: null,
+          choices: null, choiceDetails: {},
           section: '',
           visibleWhenField: '',
           visibleWhenValue: null,
@@ -229,7 +230,7 @@ const appSettings: AppsSettingsResponse = {
           type: 'secret',
           value: null,
           default: null,
-          choices: null,
+          choices: null, choiceDetails: {},
           section: '',
           visibleWhenField: '',
           visibleWhenValue: null,
@@ -254,7 +255,7 @@ const appSettings: AppsSettingsResponse = {
           type: 'str',
           value: 'default',
           default: 'default',
-          choices: null,
+          choices: null, choiceDetails: {},
           section: '',
           visibleWhenField: '',
           visibleWhenValue: null,
@@ -622,8 +623,8 @@ describe('SettingsPages agents', () => {
     expect(harnessCell.className).toContain('override')
     fireEvent.click(harnessCell)
     fireEvent.click(await screen.findByText('opencode'))
-    expect(screen.getByText('API key ⚬')).toBeTruthy()
-    expect(screen.getByText('API key ⚬').closest('button')!.hasAttribute('disabled')).toBe(true)
+    expect(screen.getByText('API key')).toBeTruthy()
+    expect(screen.getByText('API key').closest('button')!.hasAttribute('disabled')).toBe(true)
   })
 
   it('searches the Models.dev directory for an unconfigured provider', async () => {
@@ -647,12 +648,12 @@ describe('SettingsPages agents', () => {
     fireEvent.click(await screen.findByRole('link', { name: 'Agent defaults' }))
 
     fireEvent.change(screen.getByLabelText('Harness'), { target: { value: 'opencode' } })
-    fireEvent.click(await screen.findByRole('button', { name: 'Model' }))
+    fireEvent.click(await screen.findByRole('button', { name: /^Model:/ }))
     const search = screen.getByLabelText('Search models')
     fireEvent.change(search, { target: { value: 'groq' } })
     expect(screen.getByRole('listbox', { name: 'Model choices' })).toBeTruthy()
     fireEvent.click(screen.getByRole('option', { name: /Llama 4/ }))
-    expect(screen.getByRole('button', { name: 'Model' }).textContent).toContain('Llama 4')
+    expect(screen.getByRole('button', { name: /^Model:/ }).textContent).toContain('Llama 4')
   })
 
   it.each([
@@ -720,7 +721,7 @@ describe('SettingsPages agents', () => {
     stubFetch()
     renderSettings()
     fireEvent.click(await screen.findByRole('link', { name: 'Agent defaults' }))
-    fireEvent.click(await screen.findByRole('button', { name: 'Model' }))
+    fireEvent.click(await screen.findByRole('button', { name: /^Model:/ }))
 
     const search = screen.getByLabelText('Search models')
     fireEvent.keyDown(search, { key: 'Escape' })
@@ -1003,7 +1004,7 @@ describe('canonical app settings', () => {
             type: 'cron',
             value: '0 0 * * *',
             default: '0 0 * * *',
-            choices: null,
+            choices: null, choiceDetails: {},
             section: '',
             visibleWhenField: '',
             visibleWhenValue: null,
@@ -1040,9 +1041,9 @@ describe('canonical app settings', () => {
     })
     const results = screen.getByLabelText('Settings search results')
     expect(within(results).getByRole('link', { name: /Notebook/ }).getAttribute('href')).toBe(
-      '/apps/field_notes/settings',
+      '/apps/field_notes/settings?field=app.field_notes.notebook',
     )
-    expect(within(results).getByText('field notes')).toBeTruthy()
+    expect(within(results).getByText('field notes · Field')).toBeTruthy()
     fireEvent.change(screen.getByLabelText('Search settings'), { target: { value: 'mcp' } })
     expect(within(results).getByRole('link', { name: /MCP servers/ }).getAttribute('href')).toBe(
       '/settings/mcp',
@@ -1208,7 +1209,7 @@ describe('settings resource read failures', () => {
     await resource.findByText(/1 model · Catalog fetched/)
     fireEvent.click(screen.getByRole('link', { name: 'Agent defaults' }))
     fireEvent.change(await screen.findByLabelText('Harness'), { target: { value: 'opencode' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Model' }))
+    fireEvent.click(screen.getByRole('button', { name: /^Model:/ }))
     expect((await screen.findByRole('option', { name: /GPT OSS 120B/ }) as HTMLButtonElement).disabled).toBe(false)
   })
 
@@ -1319,4 +1320,109 @@ describe('settings resource read failures', () => {
       expect(request).toHaveBeenCalledTimes(2)
     },
   )
+})
+
+
+function mockScroll() {
+  const previousScroll = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollIntoView')
+  const scroll = vi.fn()
+  Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { value: scroll, configurable: true })
+  onTestFinished(() => {
+    if (previousScroll) Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', previousScroll)
+    else delete (HTMLElement.prototype as Partial<HTMLElement>).scrollIntoView
+  })
+  return scroll
+}
+
+it('finds model defaults, app overrides, and timezone with working field focus', async () => {
+  stubFetch(false)
+  const scroll = mockScroll()
+  renderSettings('/settings/general')
+  const search = await screen.findByLabelText('Search settings')
+  fireEvent.change(search, { target: { value: 'model' } })
+  const results = screen.getByLabelText('Settings search results')
+  const defaultModel = within(results).getByRole('link', { name: 'Model Agent defaults · Field' })
+  expect(within(results).getAllByRole('link').some((link) => link.getAttribute('href')?.includes('/settings/agents?field=agent.'))).toBe(true)
+  fireEvent.click(defaultModel)
+  await waitFor(() => expect(document.activeElement?.getAttribute('aria-label')).toMatch(/^Model:/))
+  fireEvent.change(screen.getByLabelText('Search settings'), { target: { value: 'timezone' } })
+  fireEvent.click(screen.getByRole('link', { name: 'Timezone General · Field' }))
+  await waitFor(() => expect(document.activeElement?.id).toBe('settings-timezone'))
+  expect(scroll).toHaveBeenCalled()
+})
+
+
+it('closes an agent menu on surrounding scroll or resize, but keeps internal scroll', async () => {
+  stubFetch(false)
+  renderSettings('/apps/software_factory/settings/agents')
+  const harness = await screen.findByRole('button', { name: /^harness:/ })
+  fireEvent.click(harness)
+  const menu = screen.getByRole('button', { name: 'opencode' }).closest('.set-menu')!
+  fireEvent.scroll(menu)
+  expect(harness.getAttribute('aria-expanded')).toBe('true')
+  fireEvent.scroll(screen.getByRole('main'))
+  expect(harness.getAttribute('aria-expanded')).toBe('false')
+  fireEvent.click(harness)
+  fireEvent(window, new Event('resize'))
+  expect(harness.getAttribute('aria-expanded')).toBe('false')
+})
+
+
+it.each(Object.values(SETTINGS_FIELDS))('opens the shared $label field from search', async (field) => {
+  stubFetch(false)
+  mockScroll()
+  renderSettings('/settings/general')
+  fireEvent.change(await screen.findByLabelText('Search settings'), { target: { value: field.label } })
+  const owner = field.section === 'general' ? 'General' : 'Agent defaults'
+  fireEvent.click(await screen.findByRole('link', { name: `${field.label} ${owner} · Field` }))
+  await waitFor(() => expect(document.activeElement?.closest('[data-setting]')?.getAttribute('data-setting')).toBe(field.field))
+})
+
+it('keeps focus on another field after saving defaults reached through search', async () => {
+  stubFetch(false)
+  const scroll = mockScroll()
+  renderSettings('/settings/agents?field=model')
+  await waitFor(() => expect(document.activeElement?.getAttribute('aria-label')).toMatch(/^Model:/))
+  const effort = screen.getByRole('combobox', { name: 'Effort' })
+  fireEvent.change(effort, { target: { value: 'low' } })
+  effort.focus()
+  scroll.mockClear()
+  fireEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+  await waitFor(() => expect(vi.mocked(fetch).mock.calls.some(([path, init]) => String(path) === '/api/settings' && init?.method === 'PATCH')).toBe(true))
+  await waitFor(() => expect(screen.getByRole('status').textContent).toBe('Saved'))
+  expect(document.activeElement).toBe(effort)
+  expect(scroll).not.toHaveBeenCalled()
+})
+
+it('focuses the same search result on each click', async () => {
+  stubFetch(false)
+  const scroll = mockScroll()
+  renderSettings('/settings/general')
+  const search = await screen.findByLabelText('Search settings')
+  for (let click = 0; click < 2; click++) {
+    search.focus()
+    fireEvent.change(search, { target: { value: 'timezone' } })
+    expect(document.activeElement).toBe(search)
+    scroll.mockClear()
+    fireEvent.click(screen.getByRole('link', { name: 'Timezone General · Field' }))
+    await waitFor(() => expect(document.activeElement?.id).toBe('settings-timezone'))
+    expect(scroll).toHaveBeenCalledTimes(1)
+  }
+})
+
+it('keeps focus on another agent field after saving an app reached through search', async () => {
+  stubFetch(false)
+  const scroll = mockScroll()
+  renderSettings('/apps/software_factory/settings/agents?field=agent.coder.model')
+  await waitFor(() => expect(document.activeElement?.closest('[data-setting]')?.getAttribute('data-setting')).toBe('agent.coder.model'))
+  fireEvent.click(screen.getByRole('button', { name: /^effort:/ }))
+  fireEvent.click(screen.getByRole('button', { name: 'low' }))
+  const harness = screen.getByRole('button', { name: /^harness:/ })
+  harness.focus()
+  scroll.mockClear()
+  fireEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+  await waitFor(() => expect(vi.mocked(fetch).mock.calls.some(([path, init]) => String(path) === '/api/settings/apps' && init?.method === 'PATCH')).toBe(true))
+  await waitFor(() => expect(screen.getByRole('status').textContent).toBe('Saved'))
+  expect(document.activeElement).toBe(harness)
+  expect(scroll).not.toHaveBeenCalled()
 })

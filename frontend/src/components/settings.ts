@@ -10,6 +10,17 @@ import type {
   WorkflowSettingField,
 } from '../api/types'
 
+export const SETTINGS_FIELDS = {
+  timezone: { section: 'general', label: 'Timezone', field: 'timezone', terms: 'time zone clock' },
+  harness: { section: 'agents', label: 'Harness', field: 'harness', terms: 'execution' },
+  model: { section: 'agents', label: 'Model', field: 'model', terms: 'execution' },
+  billing: { section: 'agents', label: 'Billing', field: 'billing', terms: 'subscription API key' },
+  effort: { section: 'agents', label: 'Effort', field: 'effort', terms: 'execution' },
+  timeout: { section: 'agents', label: 'Timeout', field: 'timeout', terms: 'execution' },
+  unattendedAccount: { section: 'agents', label: 'Unattended account', field: 'unattended-account', terms: 'execution' },
+  fastMode: { section: 'agents', label: 'Fast mode', field: 'fast', terms: 'execution' },
+} as const
+
 export interface CatalogChoice extends CatalogModel {
   provider: string
   providerLabel: string

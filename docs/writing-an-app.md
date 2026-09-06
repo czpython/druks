@@ -384,7 +384,8 @@ persist its stable reference on an app row.
 
 An app that runs a CLI of its own inside the sandbox reads how a declared agent
 would run, and hands that to the CLI. Declare the agent and never call it; the
-operator configures it in **Settings → Agents** like any other:
+operator configures it in the app's **Settings → Agents**. Shared defaults
+are in **Settings → Agent defaults**:
 
 ```python
 profile = await NightWatch.auditor.get_profile()
@@ -1144,6 +1145,24 @@ Supported display shapes are scalar values, `Literal` choices, and
 It redacts secret values and submitted validation errors. Declare a secret
 field as `Secret`.
 
+A `Literal` field can give each value a label and description through
+`json_schema_extra`. `choice_details` maps each value to its `label` and `help`.
+Druks rejects a key outside the declared choices when it loads the declaration.
+The form shows only the selected value's help and saves the original value:
+
+```python
+review: Literal["human", "automatic"] = Field(
+    default="human",
+    title="Review policy",
+    json_schema_extra={
+        "choice_details": {
+            "human": {"label": "Human review", "help": "Wait for your approval."},
+            "automatic": {"label": "Automatic review", "help": "Continue after the automated checks pass."},
+        },
+    },
+)
+```
+
 An unset field is an empty, false `SecretStr`. Thus,
 `if self.service_token:` reads its state without a guard for
 `.get_secret_value()`. A multiline secret, such as a PEM private key, can use
@@ -1412,9 +1431,9 @@ parameters and a JSON body.
 
 ### What V1 leaves out
 
-V1 has no `Tabs` block, no accordion, no expandable table row, no modal, no
-inline reveal form, and no general client-state API. Static child pages already
-give tabs, and the URL holds the current one.
+V1 has no `Tabs` block, no accordion, no general modal block, no inline reveal
+form, and no general client-state API. Static child pages give tabs, and the URL
+holds the current one. Use `TableRow.detail` for expandable row text.
 
 `MoneyValue`, `PercentValue`, `DurationValue`, and date and time input fields
 are agreed and named. Druks adds each one when an app needs it. Ask instead of
@@ -1484,7 +1503,7 @@ Import from concern namespaces, not from `druks.durable` or internal modules:
 | `druks.workspaces` | `Workspace`, `RepoWorkspace` |
 | `druks.db` | `Base`, `StoredSubject`, `db_session` |
 | `druks.schemas` | `Schema` |
-| `druks.ui` | `Action`, `Block`, `Callout`, `Card`, `Cards`, `Chart`, `ChartSeries`, `CheckboxField`, `Columns`, `Divider`, `EmptyState`, `Fact`, `Facts`, `Field`, `FileSummary`, `Files`, `Follows`, `Form`, `GateControls`, `Image`, `ImageGallery`, `Link`, `List`, `Markdown`, `Metric`, `Metrics`, `MultiSelectField`, `NumberField`, `NumberValue`, `Option`, `Page`, `Progress`, `ProgressStep`, `RadioField`, `Section`, `SecretField`, `SelectField`, `Stack`, `StatusValue`, `Table`, `TableColumn`, `TableRow`, `Text`, `TextAreaField`, `TextField`, `TextValue`, `TimeValue`, `Timeline`, `TimelineItem`, `UploadField`, `Value`, `page` |
+| `druks.ui` | `Action`, `Block`, `Callout`, `Card`, `Cards`, `Chart`, `ChartSeries`, `CheckboxField`, `Columns`, `Divider`, `EmptyState`, `Fact`, `Facts`, `Field`, `FileSummary`, `Files`, `Follows`, `Form`, `GateControls`, `Image`, `ImageGallery`, `Link`, `List`, `Markdown`, `Metric`, `Metrics`, `MultiSelectField`, `MultiUploadField`, `NumberField`, `NumberValue`, `Option`, `Page`, `Progress`, `ProgressStep`, `Quote`, `RadioField`, `Section`, `SecretField`, `SelectField`, `Stack`, `StatusValue`, `Table`, `TableColumn`, `TableRow`, `Text`, `TextAreaField`, `TextField`, `TextValue`, `TimeValue`, `Timeline`, `TimelineItem`, `UploadField`, `Value`, `page` |
 | `druks.signals` | `subscribe` |
 | `druks.events` | `Event` |
 | `druks.files` | `File`, `FileField` |

@@ -1,7 +1,7 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowLeft, ArrowUpRight, Search } from 'lucide-react'
-import { Link, useLocation } from 'wouter'
+import { Link, useLocation, useSearch } from 'wouter'
 
 import { ApiError, api } from '../api/client'
 import type {
@@ -28,6 +28,7 @@ import {
   SkillsPane,
 } from './SettingsPanes'
 import {
+  SETTINGS_FIELDS,
   buildCatalog,
   defaultsOf,
   isFieldVisible,
@@ -73,6 +74,8 @@ export function SettingsPages({
   active?: boolean
 }) {
   const [location, navigate] = useLocation()
+  const fieldTarget = new URLSearchParams(useSearch()).get('field')
+  const content = useRef<HTMLElement>(null)
   const section = appName ? `apps/${appName}` : location.slice('/settings/'.length) || 'providers'
   const formPath = `${import.meta.env.BASE_URL.replace(/\/$/, '')}${appName ? `/apps/${appName}/settings` : '/settings'}`
   const queryClient = useQueryClient()
@@ -357,26 +360,45 @@ export function SettingsPages({
   }
 
   const searchResults = SECTIONS.map((entry) => ({
-    label: entry.label,
-    owner: entry.label,
+    label: entry.label, owner: entry.group, kind: 'Section', terms: '',
     path: `/settings/${entry.id}`,
-  }))
-    .concat(
-      apps.flatMap((entry) =>
-        [
-          appLabel(entry.name),
-          ...entry.settings.map((field) => field.label),
-          ...entry.workflows.flatMap((workflow) => workflow.fields.map((field) => field.label)),
-        ].map((label) => ({
-          label,
-          owner: appLabel(entry.name),
-          path: `/apps/${entry.name}/settings`,
-        })),
-      ),
-    )
-    .filter((entry) =>
-      `${entry.label} ${entry.owner}`.toLowerCase().includes(search.trim().toLowerCase()),
-    )
+  })).concat(Object.values(SETTINGS_FIELDS).map((field) => ({
+    label: field.label, owner: SECTIONS.find((entry) => entry.id === field.section)!.label,
+    kind: 'Field', terms: field.terms,
+    path: `/settings/${field.section}?field=${field.field}`,
+  })), apps.flatMap((entry) => [
+    { label: appLabel(entry.name), owner: 'App settings', kind: 'Section', terms: '', path: `/apps/${entry.name}/settings` },
+    ...[
+      ...entry.settings.map((field) => ({ field, fields: entry.settings, changes: appEdits[entry.name]?.appSettings?.[entry.name], scope: `app.${entry.name}` })),
+      ...entry.workflows.flatMap((workflow) => workflow.fields.map((field) => ({ field, fields: workflow.fields, changes: appEdits[entry.name]?.workflowSettings?.[workflow.kind], scope: `workflow.${workflow.kind}` }))),
+    ].map(({ field, fields, changes, scope }) => {
+      const visible = isFieldVisible(field, fields, changes)
+      const controller = fields.find((candidate) => candidate.name === field.visibleWhenField)
+      return {
+        label: visible ? field.label : `${field.label} · set ${controller!.label} to ${field.visibleWhenValue}`,
+        owner: appLabel(entry.name), kind: 'Field',
+        terms: `${field.name} ${field.help} ${field.section}`,
+        path: `/apps/${entry.name}/settings?field=${encodeURIComponent(`${scope}.${visible ? field.name : field.visibleWhenField}`)}`,
+      }
+    }),
+    ...entry.agents.flatMap((agent) => [SETTINGS_FIELDS.harness, SETTINGS_FIELDS.model, SETTINGS_FIELDS.billing, SETTINGS_FIELDS.effort, SETTINGS_FIELDS.timeout].map((field) => ({
+      label: `${field.label} · ${agent.name}`, owner: appLabel(entry.name), kind: 'Field',
+      terms: `agent override inheritance ${agent.description}`,
+      path: `/apps/${entry.name}/settings/agents?field=${encodeURIComponent(`agent.${agent.name}.${field.field}`)}`,
+    }))),
+  ])).filter((entry) => `${entry.label} ${entry.owner} ${entry.terms}`.toLowerCase().includes(search.trim().toLowerCase()))
+
+  useEffect(() => {
+    if (!active || !fieldTarget) return
+    const target = Array.from(content.current?.querySelectorAll<HTMLElement>('[data-setting]') ?? [])
+      .find((element) => element.dataset.setting === fieldTarget && !element.closest('[hidden]'))
+    if (target) {
+      target.scrollIntoView({ block: 'center' })
+      target.querySelector<HTMLElement>('input, select, textarea, button')?.focus({ preventScroll: true })
+      // Drop the query after the focus, so a data refresh does not focus again.
+      navigate(location, { replace: true })
+    }
+  }, [active, fieldTarget, location, navigate, executionReady, appsQuery.data, settingsQuery.data])
 
   return (
     <div
@@ -471,6 +493,7 @@ export function SettingsPages({
         </>
       )}
       <Content
+        ref={content}
         className="settings-main"
         id={appName ? 'app-settings-content' : 'settings-content'}
         tabIndex={-1}
@@ -526,8 +549,8 @@ export function SettingsPages({
                   href={entry.path}
                   onClick={() => setSearch('')}
                 >
-                  <span>{entry.label}</span>
-                  <small>{entry.owner}</small>
+                  <span>{entry.label}</span>{' '}
+                  <small>{entry.owner} · {entry.kind}</small>
                 </Link>
               ))
             )}
@@ -751,9 +774,7 @@ export function SettingsPages({
                     onAddProvider={() => navigate('/settings/providers')}
                   />
                   <aside className="app-settings-owner">
-                    <h2>Owned by this app</h2>
-                    <p>These settings affect {appLabel(entry.name)}.</p>
-                    <p>Provider credentials and shared defaults remain in Settings.</p>
+                    <p>Changes apply to {appLabel(entry.name)}. Unset agent fields inherit the shared defaults.</p>
                     <Link href="/settings/agents">
                       Agent defaults <ArrowUpRight size={15} aria-hidden="true" />
                     </Link>

@@ -31,7 +31,7 @@ export function eventLine(event: FeedItem): EventLine {
     subject: event.subjectLabel ?? '',
     source: localName(event.workflow) || event.app || 'druks',
     path: subjectPath(event),
-    bucket: isLifecycle(event) ? 'event-kind-agent' : 'event-kind-audit',
+    bucket: isLifecycle(event) ? `event-kind-${event.kind.slice('workflow.'.length)}` : 'event-kind-audit',
   }
 }
 

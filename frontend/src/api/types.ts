@@ -27,6 +27,7 @@ export interface DashboardRun {
   updatedAt: string
   parkedAt: string | null
   requestLabel: string | null
+  artifactTitle: string | null
   presentation: string | null
   requestUrl: string | null
   failure: string | null
@@ -228,6 +229,7 @@ export interface PageEntry {
   path: string
   parent: string
   order: number
+  subjectType: string
 }
 
 export interface Link {
@@ -691,6 +693,7 @@ export interface WorkflowSettingField {
   default: unknown
   /** An enum field's allowed values; null for every other kind. */
   choices: string[] | null
+  choiceDetails: Record<string, { label: string; help: string }>
   /** The heading this field groups under; empty for an ungrouped one. */
   section: string
   /** The sibling field this one is shown for, and the value that field must hold.

@@ -45,7 +45,7 @@ import { useUsageToday } from '../lib/useUsage'
 import { useTicker } from '../lib/useTicker'
 import { Bar } from './UsagePanel'
 import { harnessColors } from '../lib/harnessColors'
-import { isFieldVisible, type Catalog, type CatalogChoice, type Defaults } from './settings'
+import { SETTINGS_FIELDS, isFieldVisible, type Catalog, type CatalogChoice, type Defaults } from './settings'
 
 const keyOnly = (harness: Harness | undefined) =>
   Boolean(harness) && !harness!.billingOptions.includes('subscription')
@@ -126,9 +126,16 @@ function Menu({
         onClose()
       }
     }
+    const onScroll = (event: Event) => {
+      if (!menu.current?.contains(event.target as Node)) onClose()
+    }
+    document.addEventListener('scroll', onScroll, true)
+    window.addEventListener('resize', onClose)
     document.addEventListener('mousedown', onDown)
     document.addEventListener('keydown', onKey)
     return () => {
+      document.removeEventListener('scroll', onScroll, true)
+      window.removeEventListener('resize', onClose)
       document.removeEventListener('mousedown', onDown)
       document.removeEventListener('keydown', onKey)
     }
@@ -194,7 +201,7 @@ function ModelChooser({
 }) {
   const [anchor, setAnchor] = useState<HTMLButtonElement | null>(null)
   const [search, setSearch] = useState('')
-  const selected = choices.find((choice) => choice.id === value)
+  const selected = choices.find((choice) => choice.id === (value ?? displayValue))
 
   const query = search.trim().toLocaleLowerCase()
   const visible = choices.filter((choice) =>
@@ -224,19 +231,21 @@ function ModelChooser({
         type="button"
         className={
           inheritLabel
-            ? `set-cell ${isOverride ? 'override' : 'inherit'}`
+            ? `set-cell model-chooser-trigger ${isOverride ? 'override' : 'inherit'}`
             : 'set-select model-chooser-trigger'
         }
-        aria-label={label}
+        aria-label={`${label}: ${inheritLabel && !isOverride ? 'Inherit · ' : ''}${selected?.label ?? displayValue} · ${value ?? displayValue}`}
         title={selected?.label ?? displayValue}
         aria-haspopup="listbox"
         aria-expanded={Boolean(anchor)}
         disabled={disabled}
         onClick={(event) => setAnchor((current) => (current ? null : event.currentTarget))}
       >
-        {inheritLabel &&
-          (isOverride ? <span className="ov-dot" /> : <span className="inh-glyph">↳</span>)}
-        <span className="cell-val">{selected?.label ?? displayValue}</span>
+        <span className="cell-val">
+          {inheritLabel && !isOverride && <span className="cell-inherit">Inherit</span>}
+          <span>{selected?.label ?? displayValue}</span>
+          <code>{value ?? displayValue}</code>
+        </span>
         <span className="cell-arrow" aria-hidden="true">
           ▾
         </span>
@@ -319,6 +328,7 @@ function InheritCell({
   onPick,
   onAddProvider,
   disabled,
+  fixed = false,
 }: {
   kind: 'harness' | 'model' | 'billing' | 'effort' | 'timeout'
   value: CellValue
@@ -333,6 +343,7 @@ function InheritCell({
   onPick: (value: CellValue) => void
   onAddProvider: () => void
   disabled: boolean
+  fixed?: boolean
 }) {
   const [anchor, setAnchor] = useState<HTMLButtonElement | null>(null)
   const isOverride = value !== null && value !== undefined
@@ -445,24 +456,16 @@ function InheritCell({
       <button
         type="button"
         className={'set-cell ' + (isOverride ? 'override' : 'inherit')}
+        aria-label={`${kind}: ${fixed ? 'Fixed · ' : isOverride ? '' : 'Inherit · '}${resolvedLabel}`}
+        aria-expanded={Boolean(anchor)}
         onClick={(e) => setAnchor((a) => (a ? null : e.currentTarget))}
         disabled={disabled}
       >
-        {isOverride ? <span className="ov-dot" /> : <span className="inh-glyph">↳</span>}
-        <span className="cell-val">{resolvedLabel}</span>
+        <span className="cell-val">
+          {(fixed || !isOverride) && <span className="cell-inherit">{fixed ? 'Fixed' : 'Inherit'}</span>}
+          <span>{resolvedLabel}</span>
+        </span>
         <span className="cell-arrow">▾</span>
-        {isOverride && (
-          <span
-            className="cell-reset"
-            onClick={(e) => {
-              e.stopPropagation()
-              onPick(null)
-            }}
-            title="reset to inherited"
-          >
-            ×
-          </span>
-        )}
       </button>
       {anchor && (
         <Menu anchor={anchor} onClose={() => setAnchor(null)}>
@@ -491,7 +494,7 @@ export function GeneralPane({
       <div className="set-pane-head">
         <div className="set-pane-sub">Account-wide preferences.</div>
       </div>
-      <div className="set-group">
+      <div className="set-group" data-setting={SETTINGS_FIELDS.timezone.field}>
         <label className="set-group-label" htmlFor="settings-timezone">
           Timezone
         </label>
@@ -578,7 +581,7 @@ export function AgentsPane({
         <h2>Default execution</h2>
         <p>These defaults apply where an app uses inheritance.</p>
         <div className="set-defaults">
-          <div className="mcp-field">
+          <div className="mcp-field" data-setting={SETTINGS_FIELDS.harness.field}>
             <label className="mcp-label" htmlFor={id('harness')}>
               Harness
             </label>
@@ -596,7 +599,7 @@ export function AgentsPane({
               ))}
             </select>
           </div>
-          <div className="mcp-field">
+          <div className="mcp-field" data-setting={SETTINGS_FIELDS.model.field}>
             <label className="mcp-label" htmlFor={id('model')}>
               Model
             </label>
@@ -611,7 +614,7 @@ export function AgentsPane({
               onAddProvider={onAddProvider}
             />
           </div>
-          <div className="mcp-field">
+          <div className="mcp-field" data-setting={SETTINGS_FIELDS.billing.field}>
             <label className="mcp-label" htmlFor={id('billing')}>
               Billing
             </label>
@@ -629,7 +632,7 @@ export function AgentsPane({
               ))}
             </select>
           </div>
-          <div className="mcp-field">
+          <div className="mcp-field" data-setting={SETTINGS_FIELDS.effort.field}>
             <label className="mcp-label" htmlFor={id('effort')}>
               Effort
             </label>
@@ -647,7 +650,7 @@ export function AgentsPane({
               ))}
             </select>
           </div>
-          <div className="mcp-field">
+          <div className="mcp-field" data-setting={SETTINGS_FIELDS.timeout.field}>
             <label className="mcp-label" htmlFor={id('timeout')}>
               Timeout
             </label>
@@ -665,7 +668,7 @@ export function AgentsPane({
               ))}
             </select>
           </div>
-          <div className="mcp-field">
+          <div className="mcp-field" data-setting={SETTINGS_FIELDS.unattendedAccount.field}>
             <label className="mcp-label" htmlFor={id('unattended-account')}>
               Unattended runs use
             </label>
@@ -688,7 +691,7 @@ export function AgentsPane({
             </span>
           </div>
         </div>
-        <div className="settings-fast-mode">
+        <div className="settings-fast-mode" data-setting={SETTINGS_FIELDS.fastMode.field}>
           <div>
             <label className="mcp-label" htmlFor={id('fast')}>
               Fast mode
@@ -953,14 +956,17 @@ function ServiceDetail({ service, onBack }: { service: Service; onBack: () => vo
       )}
       {service.connected && (
         <section className="mcp-section">
-          <div className="set-card svc-facts">
+          <details className="set-card svc-facts">
+            <summary>Connection details</summary>
             {Object.entries(service.facts).map(([key, value]) => (
               <div className="svc-fact" key={key}>
-                <span className="svc-fact-key">{key}</span>
+                <span className="svc-fact-key">
+                  {key.replaceAll('_', ' ').replace(/\bid\b/gi, 'ID').replace(/^./, (letter) => letter.toUpperCase())}
+                </span>
                 <span className="svc-fact-val">{value}</span>
               </div>
             ))}
-          </div>
+          </details>
           {service.connectedAt && (
             <p className="svc-meta">Connected {new Date(service.connectedAt).toLocaleString()}</p>
           )}
@@ -1133,7 +1139,7 @@ function ServiceAccess({ service }: { service: Service }) {
               </button>
             )}
             <button
-              className="set-btn ghost"
+              className="set-btn danger"
               onClick={() => disconnect(connection)}
               disabled={busy}
             >
@@ -1250,7 +1256,7 @@ export function ConnectionsPane({ revokedOnly = false }: { revokedOnly?: boolean
                   · {new Date(connection.connectedAt).toLocaleDateString()}
                 </span>
                 <button
-                  className="set-btn ghost"
+                  className="set-btn danger"
                   onClick={() => revoke(connection)}
                   disabled={busy}
                 >
@@ -2147,7 +2153,7 @@ function CollectionCard({
             Sync now
           </button>
           <button
-            className="set-btn danger quiet"
+            className="set-btn danger"
             onClick={remove}
             disabled={busy}
             title="Remove the collection and its skills"
@@ -2356,8 +2362,7 @@ export function McpServersPane() {
       )}
       <header className="mcp-pane-head">
         <p className="mcp-pane-sub">
-          Tools your agents can call. Enabled servers are carried into every sandbox VM;
-          secrets ride the run env and never land in emitted config.
+          Connect tools for your agents. Enable a server to make its tools available on new runs.
         </p>
       </header>
 
@@ -2682,7 +2687,7 @@ function McpServerRow({
           {/* A built-in (catalog entry) is managed by druks: disable, never remove. */}
           {!server.builtin && (
             <button
-              className="set-btn danger quiet"
+              className="set-btn danger"
               onClick={() => void onRemove(server.name)}
               disabled={busy}
               title="Remove this server from every sandbox."
@@ -2866,12 +2871,12 @@ function PatRow({
       <span className={'hr-chip ' + (active ? 'hr-chip-on' : 'hr-chip-off')}>{pat.status}</span>
       {pat.status !== 'revoked' && (
         <button
-          className="sc-remove"
+          className="set-btn danger"
           onClick={() => void onRevoke(pat)}
           disabled={busy}
           title="revoke token"
         >
-          ✕ revoke
+          Revoke
         </button>
       )}
     </div>
@@ -2997,6 +3002,7 @@ export function AppPane({
                           <div
                             key={option.scope + '.' + option.kind + '.' + option.field.name}
                             className="set-app-toggle"
+                            data-setting={`${option.scope}.${option.kind}.${option.field.name}`}
                           >
                             <div className="mt-text">
                               <span className="mt-name">{option.field.label}</span>
@@ -3027,10 +3033,12 @@ export function AppPane({
                         return (
                           <SettingField
                             key={option.scope + '.' + option.kind + '.' + option.field.name}
+                            setting={`${option.scope}.${option.kind}.${option.field.name}`}
                             label={option.field.label}
                             help={option.field.help}
                             type={option.field.type}
                             choices={option.field.choices}
+                            choiceDetails={option.field.choiceDetails}
                             multiline={option.field.multiline}
                             secretSet={option.field.secretSet}
                             // A secret's stored value never reaches the client, so its
@@ -3059,7 +3067,7 @@ export function AppPane({
       {section === 'agents' && app.agents.length > 0 && defaults && (
         <div className="set-group">
           <div className="set-group-label">agents</div>
-          <AgentTable
+          <AgentRecords
             app={app}
             edits={edits}
             harnessByName={harnessByName}
@@ -3081,7 +3089,7 @@ export function AppPane({
   )
 }
 
-function AgentTable({
+function AgentRecords({
   app,
   edits,
   harnessByName,
@@ -3119,15 +3127,7 @@ function AgentTable({
     saved: T | null,
   ) => (pending && name in pending ? (pending[name] ?? null) : saved)
   return (
-    <div className="set-table">
-      <div className="set-thead">
-        <div>agent</div>
-        <div>harness</div>
-        <div>model</div>
-        <div>billing</div>
-        <div>effort</div>
-        <div>timeout</div>
-      </div>
+    <div className="agent-records">
       {app.agents.map((agent) => {
         const harnessOverride = override(
           edits.agentHarnesses,
@@ -3198,12 +3198,13 @@ function AgentTable({
           disabled: busy,
         }
         return (
-          <div key={agent.name} className="set-trow">
-            <div className="agent-cell">
-              <span className="agent-name">{agent.name}</span>
-              <span className="agent-desc">{agent.description}</span>
-            </div>
-            <div>
+          <section key={agent.name} className="agent-record" aria-label={agent.name}>
+            <header className="agent-identity">
+              <h3>{agent.name}</h3>
+              <p>{agent.description}</p>
+            </header>
+            <div className="agent-field agent-field-harness" role="group" aria-label="Harness" data-setting={`agent.${agent.name}.${SETTINGS_FIELDS.harness.field}`}>
+              <span className="agent-field-label">Harness</span>
               <InheritCell
                 kind="harness"
                 value={harnessOverride}
@@ -3213,7 +3214,8 @@ function AgentTable({
                 {...shared}
               />
             </div>
-            <div>
+            <div className="agent-field agent-field-model" role="group" aria-label="Model" data-setting={`agent.${agent.name}.${SETTINGS_FIELDS.model.field}`}>
+              <span className="agent-field-label">Model</span>
               <InheritCell
                 kind="model"
                 value={modelOverride}
@@ -3223,18 +3225,22 @@ function AgentTable({
                 {...shared}
               />
             </div>
-            <div>
+            <div className="agent-field agent-field-billing" role="group" aria-label="Billing" data-setting={`agent.${agent.name}.${SETTINGS_FIELDS.billing.field}`}>
+              <span className="agent-field-label">Billing</span>
               <InheritCell
                 kind="billing"
                 value={locked ? null : billingOverride}
-                resolvedLabel={billingLabel(billing) + (locked ? ' ⚬' : '')}
+                resolvedLabel={billingLabel(billing)}
                 inheritLabel={'default · ' + billingLabel(defaults.defaultBilling)}
                 onPick={pickBilling}
                 {...shared}
                 disabled={busy || locked}
+                fixed={locked}
               />
+              {locked && <span className="agent-field-help">This harness uses API keys only.</span>}
             </div>
-            <div>
+            <div className="agent-field agent-field-effort" role="group" aria-label="Effort" data-setting={`agent.${agent.name}.${SETTINGS_FIELDS.effort.field}`}>
+              <span className="agent-field-label">Effort</span>
               <InheritCell
                 kind="effort"
                 value={effortOverride}
@@ -3244,7 +3250,8 @@ function AgentTable({
                 {...shared}
               />
             </div>
-            <div>
+            <div className="agent-field agent-field-timeout" role="group" aria-label="Timeout" data-setting={`agent.${agent.name}.${SETTINGS_FIELDS.timeout.field}`}>
+              <span className="agent-field-label">Timeout</span>
               <InheritCell
                 kind="timeout"
                 value={timeoutOverride}
@@ -3254,7 +3261,7 @@ function AgentTable({
                 {...shared}
               />
             </div>
-          </div>
+          </section>
         )
       })}
     </div>

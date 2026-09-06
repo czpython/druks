@@ -74,7 +74,7 @@
 .sidebar-account { display: flex; flex: 0 0 auto; align-items: center; gap: 10px; padding: 16px 10px 0; }
 .sidebar-account > div { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .sidebar-avatar { display: grid; place-items: center; width: 32px; height: 32px; flex-shrink: 0; border-radius: 50%; background: var(--surface-3); font-size: 12px; }
-.sidebar-username { font-size: 13px; overflow-wrap: anywhere; }
+.sidebar-username { display: block; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sidebar-account-label { color: var(--text-dim); font-size: 13px; }
 .navigation-toggle, .navigation-close { display: none; align-items: center; justify-content: center; width: 44px; height: 44px; flex-shrink: 0; color: var(--text-mid); border-radius: 5px; }
 .sidebar-drawer { inset: 0 auto 0 0; width: min(300px, calc(100vw - 44px)); height: 100dvh; max-width: none; max-height: none; margin: 0; padding: 0; border: 0; background: var(--surface); }
@@ -116,8 +116,12 @@
   .active-page-head { flex-direction: column; align-items: stretch; gap: 16px; padding-inline: 20px; }
   .page-usage { width: 100%; padding-inline: 20px; }
   .us-head { flex-wrap: wrap; }
-  .back-to-app { min-height: 44px; }
   .command-center :is(input, select, textarea) { font-size: 16px; }
   .sidebar-search, .sidebar-search input { min-height: 44px; }
   :is(.sidebar button, .command-header button, .wic-op[role="button"], .wic-call[role="button"]) { min-height: 44px; }
 }
+
+.sidebar-account-details summary { cursor: pointer; list-style: none; min-height: 44px; padding: 12px 0; line-height: 20px; }
+.sidebar-account-details summary::-webkit-details-marker { display: none; }
+.sidebar-account-details > span { display: block; margin-top: 8px; overflow-wrap: anywhere; font-size: 13px; color: var(--text-mid); }
+.sidebar-account-details summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }

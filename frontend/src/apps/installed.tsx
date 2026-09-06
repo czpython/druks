@@ -64,9 +64,14 @@ function installedUI(info: App): AppUI {
   return {
     name,
     routes,
-    subjectPath: ({ type, id }, target) =>
-      info.subjectTypes.includes(type)
+    subjectPath: ({ type, id }, target) => {
+      const decisionPage = target?.parkedAt && info.pages.find((page) => page.subjectType === type)
+      if (decisionPage) {
+        return decisionPage.path.replace(/\{[^}]+\}/, () => encodeURIComponent(id)) + targetQuery(target)
+      }
+      return info.subjectTypes.includes(type)
         ? `/${name}/${encodeURIComponent(type)}/${encodeURIComponent(id)}${targetQuery(target)}`
-        : undefined,
+        : undefined
+    },
   }
 }

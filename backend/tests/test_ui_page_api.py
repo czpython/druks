@@ -33,6 +33,8 @@ async def test_the_roster_carries_the_page_table(druks_client: httpx.AsyncClient
     by_name = {page["name"]: page for page in pages}
     assert by_name["note_history"]["parent"] == "note"
     assert by_name["note"]["parent"] == ""
+    assert by_name["note"]["subjectType"] == "note"
+    assert by_name["notes"]["subjectType"] == ""
     assert by_name["note_history"]["label"] == "note history"
     # Declaration order, so a tab strip reads the app's own order.
     assert by_name["recent_notes"]["order"] < by_name["new_note"]["order"]
