@@ -12,7 +12,8 @@ import catalog from './catalog.json'
 import { PagesContext } from './pages'
 
 vi.mock('../components/RunTranscript', () => ({ RunTranscript: () => <pre /> }))
-vi.mock('../api/client', () => ({
+vi.mock('../api/client', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../api/client')>()),
   api: { getGate: vi.fn(), answerGate: vi.fn(), artifact: vi.fn(), callOperation: vi.fn(), readPage: vi.fn() },
 }))
 
@@ -32,8 +33,8 @@ const CATALOG: Block[] = [
   { block: 'gate_controls', run: 'run-6f0a' },
 ]
 
-vi.mocked(api.getGate).mockResolvedValue({
-  run: 'run-6f0a',
+vi.mocked(api.getGate).mockImplementation(async (run) => ({
+  run,
   gate: 'review',
   parkedAt: '2026-08-29T09:14:02Z',
   ask: {
@@ -44,7 +45,7 @@ vi.mocked(api.getGate).mockResolvedValue({
     ],
   },
   artifact: null,
-})
+}))
 
 function renderBlocks(blocks: Block[]) {
   const { hook } = memoryLocation({ path: '/field_notes' })
@@ -70,7 +71,7 @@ describe('every V1 renderer', () => {
   it('renders the wire snapshot without a single unknown block', async () => {
     renderCatalog()
 
-    await waitFor(() => expect(screen.getByText('Approve')).toBeTruthy())
+    await waitFor(() => expect(screen.getAllByText('Approve')).toHaveLength(2))
     expect(screen.queryAllByRole('alert')).toHaveLength(0)
   })
 
@@ -84,7 +85,7 @@ describe('every V1 renderer', () => {
 
   it('gives every input its own label', async () => {
     const { container } = renderCatalog()
-    await waitFor(() => expect(screen.getByText('Approve')).toBeTruthy())
+    await waitFor(() => expect(screen.getAllByText('Approve')).toHaveLength(2))
 
     for (const input of Array.from(container.querySelectorAll('input, textarea, select'))) {
       const labelled =
@@ -136,7 +137,7 @@ describe('every V1 renderer', () => {
 
   it('gives every control a name and takes focus in reading order', async () => {
     const { container } = renderCatalog()
-    await waitFor(() => expect(screen.getByText('Approve')).toBeTruthy())
+    await waitFor(() => expect(screen.getAllByText('Approve')).toHaveLength(2))
 
     const controls = Array.from(
       container.querySelectorAll<HTMLElement>('button, a[href], input, textarea, select'),
@@ -333,7 +334,6 @@ describe('every V1 renderer', () => {
 
     screen.getByRole('button', { name: 'Rescout peer' }).click()
 
-    // Success is announced; before this a reader heard nothing at all.
     await waitFor(() => expect(screen.getByRole('status').textContent).toContain('Rescout peer'))
   })
 })

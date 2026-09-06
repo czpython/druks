@@ -49,6 +49,39 @@ class OpenSubjectsResponse(Schema):
     subjects: list[OpenSubjectResponse]
 
 
+class OverviewRun(Schema):
+    app: str
+    run: str
+    kind: str
+    state: RunState
+    subject_type: str | None
+    subject_id: str | None
+    subject_label: str | None
+    updated_at: datetime
+    parked_at: datetime | None
+    request_label: str | None
+    presentation: str | None
+    request_url: str | None
+    failure: str | None
+
+
+class OverviewWork(Schema):
+    rows: list[OverviewRun]
+    has_more: bool
+
+
+class OverviewSchedule(Schema):
+    app: str
+    kind: str
+    cron: str | None
+    enabled: bool
+    timezone: str
+
+
+class OverviewSchedules(Schema):
+    rows: list[OverviewSchedule]
+
+
 class ArtifactContent(Schema):
     # A call's renderable output, served to the in-app review so it can show the
     # plan (or other markdown) beside its controls.

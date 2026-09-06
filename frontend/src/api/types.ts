@@ -1,19 +1,5 @@
-/**
- * Hand-written aliases for the API response shapes.
- *
- * Replace these with `openapi-typescript` output once the backend is running:
- *
- *     npm run types:openapi
- *
- * That generates `src/api/openapi.ts` from `/openapi.json`; re-export the
- * components you need from there. For now we keep these typed by hand so the
- * frontend compiles without a running backend.
- *
- * Build-domain shapes (work items, runs, scope, plan) live in
- * ``build.ts``; this file holds the shared types.
- */
+/** Shared API response shapes. App-specific types stay with their app. */
 
-// --- Platform: subjects, runs, agent calls ---------------------------------
 
 // Served by the platform layer (durable/schemas.py) for every app. An
 // app keys its board/detail on its own subject summary; SubjectRow and
@@ -29,6 +15,39 @@ export type RunState =
   | 'cancelled'
   // The run's DBOS workflow row is gone; it will never start.
   | 'orphaned'
+
+export interface OverviewRun {
+  app: string
+  run: string
+  kind: string
+  state: RunState
+  subjectType: string | null
+  subjectId: string | null
+  subjectLabel: string | null
+  updatedAt: string
+  parkedAt: string | null
+  requestLabel: string | null
+  presentation: string | null
+  requestUrl: string | null
+  failure: string | null
+}
+
+export interface OverviewWork {
+  rows: OverviewRun[]
+  hasMore: boolean
+}
+
+export interface OverviewSchedule {
+  app: string
+  kind: string
+  cron: string | null
+  enabled: boolean
+  timezone: string
+}
+
+export interface OverviewSchedules {
+  rows: OverviewSchedule[]
+}
 
 // The base every app's subject summary satisfies; ``id`` keys its status,
 // timeline, and detail URL.
@@ -124,8 +143,7 @@ export interface RunSummary {
   state: RunState
   failure?: string | null
   gate: string | null
-  // The structured ask while this run is parked on the operator. Presence means
-  // "needs you".
+  // A retained ask is current only while the run is parked.
   inputRequest?: InputRequest | null
   createdAt: string
   updatedAt: string
@@ -202,7 +220,6 @@ export interface App {
   operations: Operation[]
 }
 
-// --- Druks UI --------------------------------------------------------------
 // The app's Python page declarations, as the shell sees them. They mirror
 // docs/druks-ui.md, and arrive in route-match order.
 export interface PageEntry {
@@ -470,7 +487,6 @@ export interface GateAnswer {
   note: string
 }
 
-// --- System health ---------------------------------------------------------
 
 export interface WebhookSource {
   source: string
@@ -497,9 +513,7 @@ export interface CatalogModel {
   label: string
 }
 
-/** One coding-agent harness's operator config — a DB record seeded from the
- * registry. Model ids are `provider/model`; the models a harness can run are
- * the catalogs of the providers it drives. */
+/** A registered harness's provider and billing capabilities. */
 export interface Harness {
   name: string
   /** Null for a key-only CLI. */
@@ -533,7 +547,6 @@ export interface ProviderDirectoryEntry {
   models: CatalogModel[]
 }
 
-/** One account's subscription at one provider. */
 /** The requester's subscription at a provider. */
 export interface ProviderSubscription {
   provider: string
@@ -610,7 +623,6 @@ export interface Service {
   connections: Connection[]
 }
 
-// --- Settings --------------------------------------------------------------
 
 export type Billing = 'subscription' | 'api_key'
 
@@ -684,7 +696,6 @@ export interface AgentsResponse {
   apps: AgentsApp[]
 }
 
-// --- Per-app settings (declaration-driven) --------------------------------
 
 export interface WorkflowSettingField {
   name: string
@@ -720,7 +731,7 @@ export interface AppSettings {
   description: string
   /** Lucide icon name for the rail glyph (see APP_ICONS); falls back if unknown. */
   icon: string
-  /** Built-in (platform-core) apps render under the Druks tab, not their own. */
+  /** Platform apps are excluded from the installed app roster. */
   builtin: boolean
   agents: AgentSetting[]
   workflows: WorkflowSettings[]
@@ -747,7 +758,6 @@ export interface UpdateAppsSettingsRequest {
   appSettings?: Record<string, Record<string, unknown>>
 }
 
-// --- Activity feed ---------------------------------------------------------
 
 export interface FeedItem {
   id: string
@@ -771,7 +781,6 @@ export interface FeedResponse {
   nextCursor: string | null
 }
 
-// --- Usage tab -------------------------------------------------------------
 
 export interface UsageMetric {
   percentLeft: number | null

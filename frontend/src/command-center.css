@@ -93,6 +93,11 @@
 ::selection { background: var(--border-loud); color: var(--text); }
 input, textarea { caret-color: var(--bucket-run); }
 button.mono, label.mono { font-family: var(--font-sans); font-size: 15px; }
+.command-center :is(.review-question legend, .review-option, .review-note, .review-btn, .ins-needs-body) { font-family: var(--font-sans); font-size: 15px; }
+.command-center :is(.review-artifact-title, .review-helper, .review-error, .review-recommended) { font-family: var(--font-sans); font-size: 13px; }
+.command-center .review-option { min-height: 44px; }
+.command-center .subject-run { font-family: var(--font-sans); }
+.command-center :is(.wic-op, .wic-call)[role="button"]:focus-visible { outline: 2px solid var(--bucket-run); outline-offset: -2px; }
 
 @media (max-width: 1024px) {
   .command-header { padding-inline: 24px; }
@@ -118,5 +123,5 @@ button.mono, label.mono { font-family: var(--font-sans); font-size: 15px; }
   .back-to-app { min-height: 44px; }
   .command-center :is(input, select, textarea) { font-size: 16px; }
   .sidebar-search, .sidebar-search input { min-height: 44px; }
-  .command-center button { min-height: 44px; }
+  .command-center :is(button, .wic-op[role="button"], .wic-call[role="button"]) { min-height: 44px; }
 }

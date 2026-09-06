@@ -22,10 +22,26 @@ function roster(name: string, pages: App['pages']): App[] {
 }
 
 describe('page routes', () => {
+  it('keeps the run and request round on the generic subject page', () => {
+    registerInstalledApps(roster('target_app', []))
+    const target = { run: 'run-one', parkedAt: '2026-09-01T00:00:00.123456Z' }
+    const path = getAppUI('target_app')!.subjectPath!({ type: 'file', id: 'a%20b/c?#é' }, target)!
+    const url = new URL(path, 'https://example.invalid')
+    expect(url.pathname).toBe('/target_app/file/a%2520b%2Fc%3F%23%C3%A9')
+    expect(url.searchParams.get('run')).toBe('run-one')
+    expect(url.searchParams.get('parkedAt')).toBe(target.parkedAt)
+    expect(getAppUI('target_app')!.subjectPath!({ type: 'file', id: '1' })).toBe('/target_app/file/1')
+  })
   it('mounts one route per declared page, and the subject matcher last', () => {
     registerInstalledApps(
       roster('archive_app', [
-        { name: 'files', label: 'files', path: '/archive_app', parent: '', order: 0 },
+        {
+          name: 'files',
+          label: 'files',
+          path: '/archive_app',
+          parent: '',
+          order: 0,
+        },
         {
           name: 'one_file',
           label: 'one file',

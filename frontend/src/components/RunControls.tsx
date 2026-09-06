@@ -1,13 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useId, useState } from 'react'
 
 import { api } from '../api/client'
 import type { ArtifactContent, InputRequest } from '../api/types'
 import { Markdown } from './Markdown'
 
-// Cancel is a run-level action: end any active run, parked or running. A destructive
-// stop, so it confirms first and takes an optional reason (the recorded cancel note).
-// The detail stream re-emits the snapshot on the state flip, so this control unmounts
-// itself — no local success handling.
 export function CancelRun({ runId }: { runId: string }) {
   const [confirming, setConfirming] = useState(false)
   const [reason, setReason] = useState('')
@@ -35,6 +31,7 @@ export function CancelRun({ runId }: { runId: string }) {
   return (
     <span className="ins-cancel-confirm">
       <input
+        aria-label="Reason for cancellation"
         type="text"
         className="ins-cancel-reason mono"
         placeholder="reason (optional)"
@@ -83,24 +80,21 @@ export function RetryRun({ runId }: { runId: string }) {
   )
 }
 
-// Button label per control verb; the ask's controls are a fixed workflow vocabulary.
 const CONTROL_LABEL: Record<string, string> = {
   approve: 'Approve',
   request_changes: 'Request changes',
   revise_contract: 'Revise contract',
 }
 
-// The in-app review: the reviewed artifact, structured question options, one
-// note, and the workflow's controls. A click resumes the run with
-// {control, answers, note}; free text is content for the next agent prompt,
-// never a control.
 export function InAppReview({
   runId,
   ask,
   send,
+  disabled = false,
 }: {
   runId: string
   ask: InputRequest
+  disabled?: boolean
   // How the answer reaches the platform. A page's GateControls answers through
   // the gate route with the run's parkedAt; without one, this resumes the run.
   send?: (answer: {
@@ -109,41 +103,39 @@ export function InAppReview({
     note: string
   }) => Promise<unknown>
 }) {
+  const formId = useId()
   const [answers, setAnswers] = useState<Record<string, string>>({})
   const [note, setNote] = useState('')
   const [pending, setPending] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const critique = ask.context?.trim() ?? ''
 
-  // Fetched here rather than through react-query: an installed app borrows this
-  // component through the import map and mounts it outside the shell's tree,
-  // where there is no QueryClientProvider. One artifact, read once per ask.
-  // Held with the id it belongs to, so a new ask stops showing the old plan on
-  // the render that changes it rather than after its fetch lands.
+  // Installed apps can mount this component without a QueryClientProvider.
   const [fetched, setFetched] = useState<{ id: string; content: ArtifactContent } | null>(null)
   const artifact = fetched && fetched.id === ask.artifact_id ? fetched.content : null
+  const [attempt, setAttempt] = useState(0)
+  const [failedRead, setFailedRead] = useState<{ id: string; attempt: number } | null>(null)
+  const artifactFailed = failedRead?.id === ask.artifact_id && failedRead?.attempt === attempt
   useEffect(() => {
     const artifactId = ask.artifact_id
     if (!artifactId) return
     let live = true
-    // A missing artifact leaves the panel without it: the ask's own questions
-    // and controls are what the operator answers.
     api
       .artifact(artifactId)
       .then((content) => live && setFetched({ id: artifactId, content }))
-      .catch(() => {})
+      .catch(() => {
+        if (live) setFailedRead({ id: artifactId, attempt })
+      })
     return () => {
       live = false
     }
-  }, [ask.artifact_id])
+  }, [ask.artifact_id, attempt])
 
   async function choose(control: string) {
     setPending(control)
     setError(null)
     const answer = { control, answers, note: note.trim() }
     try {
-      // The run un-parks; the subject's SSE stream re-emits the snapshot and this
-      // banner clears itself.
       if (send) {
         await send(answer)
       } else {
@@ -157,6 +149,18 @@ export function InAppReview({
 
   return (
     <div className="ins-needs">
+      {ask.artifact_id &&
+        !artifact &&
+        (artifactFailed ? (
+          <div className="review-error" role="alert">
+            Could not load the review artifact.{' '}
+            <button className="set-btn ghost" onClick={() => setAttempt((current) => current + 1)}>
+              Retry
+            </button>
+          </div>
+        ) : (
+          <p role="status">Loading review artifact…</p>
+        ))}
       {critique && (
         <div className="review-artifact">
           <div className="review-artifact-title">Critique</div>
@@ -178,34 +182,28 @@ export function InAppReview({
               <label key={option.id} className="review-option">
                 <input
                   type="radio"
-                  name={question.id}
+                  name={`${formId}-${question.id}`}
                   checked={picked === option.id}
-                  onChange={() =>
-                    setAnswers((prev) => ({ ...prev, [question.id]: option.id }))
-                  }
+                  onChange={() => setAnswers((prev) => ({ ...prev, [question.id]: option.id }))}
                 />
                 {option.label}
-                {option.recommended && (
-                  <span className="review-recommended">recommended</span>
-                )}
+                {option.recommended && <span className="review-recommended">recommended</span>}
               </label>
             ))}
           </fieldset>
         )
       })}
-      <label className="review-note-label" htmlFor={`${runId}-note`}>
+      <label className="review-note-label" htmlFor={`${formId}-note`}>
         Your note
       </label>
       <textarea
-        id={`${runId}-note`}
+        id={`${formId}-note`}
         className="review-note"
         placeholder="optional note — what should change?"
         value={note}
         onChange={(e) => setNote(e.target.value)}
       />
-      <div className="review-helper">
-        A note is sent to the agent as feedback.
-      </div>
+      <div className="review-helper">A note is sent to the agent as feedback.</div>
       <div className="review-controls">
         {ask.controls?.map((control) => {
           const needsGuidance =
@@ -217,7 +215,12 @@ export function InAppReview({
             <button
               key={control}
               className={`review-btn review-btn-${control}`}
-              disabled={pending !== null || needsGuidance}
+              disabled={
+                disabled ||
+                pending !== null ||
+                needsGuidance ||
+                (control === 'approve' && Boolean(ask.artifact_id) && !artifact)
+              }
               title={needsGuidance ? 'add an answer or a note first' : undefined}
               onClick={() => choose(control)}
             >

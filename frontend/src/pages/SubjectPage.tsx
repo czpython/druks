@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { useCallback, useMemo, useState } from 'react'
-import { Link } from 'wouter'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Link, useRouter } from 'wouter'
 
 import { subjectApi } from '../api/client'
 import { useSSE } from '../api/sse'
@@ -9,26 +9,60 @@ import { EmptyState } from '../components/EmptyState'
 import { Fact, Facts } from '../components/Facts'
 import { Page } from '../components/Page'
 import { queryGate } from '../components/QueryGate'
-import { CancelRun, InAppReview, RetryRun } from '../components/RunControls'
+import { CancelRun, RetryRun } from '../components/RunControls'
+import { GateControls } from '../druksui/GateControls'
 import { RunTranscript } from '../components/RunTranscript'
 import { StatusGlyph } from '../components/StatusGlyph'
 import { relTimeFromIso } from '../lib/format'
 import { summaryEntries } from '../lib/summary'
 
-// The generic subject page any installed app gets without shipping UI: the
-// summary as facts, the run timeline, the newest run's transcript, and the gate
-// controls when a run parks on the operator.
-
-interface Props {
-  app: string
-  subjectType: string
-  subjectId: string
-}
-
 const isActiveRun = (run: RunSummary) =>
   run.state === 'running' || run.state === 'parked' || run.state === 'scheduled'
 
-export function SubjectPage({ app, subjectType, subjectId }: Props) {
+// wouter's decodeURI leaves an escaped slash in a subject id alone, so the page
+// decodes each part of the raw path once itself.
+export function SubjectPage({ app }: { app: string }) {
+  const router = useRouter()
+  const usePath = router.hook
+  const useSearch = router.searchHook
+  const [path] = usePath(router)
+  const search = useSearch(router)
+  const identity = path.slice(`${router.base}/${app}/`.length)
+  const slash = identity.indexOf('/')
+  let subjectType = ''
+  let subjectId = ''
+  let invalidAddress = slash < 1
+  try {
+    subjectType = decodeURIComponent(identity.slice(0, slash))
+    subjectId = decodeURIComponent(identity.slice(slash + 1))
+  } catch {
+    invalidAddress = true
+  }
+  if (!invalidAddress && subjectId)
+    return (
+      <SubjectDetail app={app} subjectType={subjectType} subjectId={subjectId} search={search} />
+    )
+  return (
+    <Page>
+      <p role="alert">This subject address is invalid. Return to Overview to open the work.</p>
+    </Page>
+  )
+}
+
+function SubjectDetail({
+  app,
+  subjectType,
+  subjectId,
+  search,
+}: {
+  app: string
+  subjectType: string
+  subjectId: string
+  search: string
+}) {
+  const target = new URLSearchParams(search)
+  const selectedRun = target.get('run')
+  const parkedAt = target.get('parkedAt') ?? undefined
   const queryClient = useQueryClient()
   const queryKey = useMemo(
     () => ['subject', app, subjectType, subjectId] as const,
@@ -39,11 +73,10 @@ export function SubjectPage({ app, subjectType, subjectId }: Props) {
     queryFn: () => subjectApi.read(app, subjectType, subjectId),
   })
 
-  // Push-driven cache, same as every detail page: the stream re-emits the whole
-  // snapshot on change; a dropped stream falls back to one refetch.
   const patchSnapshot = useCallback(
     (payload: unknown) => {
       queryClient.setQueryData<SubjectResponse>(queryKey, payload as SubjectResponse)
+      void queryClient.invalidateQueries({ queryKey: ['gate'] })
     },
     [queryClient, queryKey],
   )
@@ -59,7 +92,12 @@ export function SubjectPage({ app, subjectType, subjectId }: Props) {
     loadingMsg: `loading ${label}`,
     errorMsg: `could not load ${label} ${subjectId}`,
   })
-  if (gate) return <Page scroll="internal" className="ins">{gate}</Page>
+  if (gate)
+    return (
+      <Page scroll="internal" className="ins">
+        {gate}
+      </Page>
+    )
 
   const data = query.data!
   const runs = [...data.timeline].reverse()
@@ -82,11 +120,21 @@ export function SubjectPage({ app, subjectType, subjectId }: Props) {
         ))}
         {data.activity && <Fact k="now">{data.activity.label}</Fact>}
       </Facts>
+      {selectedRun && !runs.some((run) => run.id === selectedRun) && (
+        <p role="alert">This run does not belong to this subject or is no longer available.</p>
+      )}
       {runs.length === 0 ? (
         <EmptyState glyph="∅" msg="no runs yet" />
       ) : (
         runs.map((run, index) => (
-          <RunBlock key={run.id} app={app} run={run} defaultOpen={index === 0} />
+          <RunBlock
+            key={run.id}
+            app={app}
+            run={run}
+            defaultOpen={index === 0}
+            selected={run.id === selectedRun}
+            expected={run.id === selectedRun ? parkedAt : undefined}
+          />
         ))
       )}
     </Page>
@@ -97,32 +145,52 @@ function RunBlock({
   app,
   run,
   defaultOpen,
+  selected,
+  expected,
 }: {
   app: string
   run: RunSummary
   defaultOpen: boolean
+  selected: boolean
+  expected?: string
 }) {
   const ask = run.state === 'parked' ? run.inputRequest : null
   const call = run.agentCalls.at(-1)
-  const [open, setOpen] = useState(defaultOpen)
+  const [open, setOpen] = useState(defaultOpen || selected)
+  const block = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (selected) {
+      block.current?.focus({ preventScroll: true })
+      block.current?.scrollIntoView({ block: 'start' })
+    }
+  }, [selected])
   return (
-    <div className="subject-run mono">
+    <div
+      className="subject-run mono"
+      ref={block}
+      tabIndex={-1}
+      aria-label={`${run.label} run ${run.id}`}
+    >
       <div className="subject-run-head">
         <StatusGlyph state={run.state} />
         <span>{run.label}</span>
         <span className="dim">{run.state}</span>
         <span className="dim">{relTimeFromIso(run.updatedAt)}</span>
         {isActiveRun(run) && <CancelRun runId={run.id} />}
-        {(run.state === 'failed' || run.state === 'cancelled') && <RetryRun runId={run.id} />}
+        {run.state === 'failed' && <RetryRun runId={run.id} />}
       </div>
-      {ask?.presentation === 'in_app' && <InAppReview runId={run.id} ask={ask} />}
+      {(expected || ask?.presentation === 'in_app') && (
+        <GateControls run={run.id} expected={expected} />
+      )}
       {ask?.presentation === 'external' && (
         <div className="ins-needs">
           <div className="ins-needs-k">
             <span>◆</span> needs you
           </div>
           <div className="ins-needs-body">
-            {run.gate ? `Waiting on ${run.gate.replaceAll('_', ' ')}.` : 'This run is waiting on you.'}
+            {run.gate
+              ? `Waiting on ${run.gate.replaceAll('_', ' ')}.`
+              : 'This run is waiting on you.'}
           </div>
         </div>
       )}
@@ -139,7 +207,7 @@ function RunBlock({
           type="button"
           className="ins-run-link subject-run-more"
           aria-expanded={open}
-          onClick={() => setOpen((v) => !v)}
+          onClick={() => setOpen(!open)}
         >
           {open ? '▾' : '▸'} transcript
         </button>
