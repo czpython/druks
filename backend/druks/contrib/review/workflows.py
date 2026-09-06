@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from druks.accounts.models import Account
 from druks.contrib.review.app import Review
@@ -6,24 +6,27 @@ from druks.contrib.review.datastructures import PullRequest
 from druks.contrib.review.github import get_review_actor
 from druks.contrib.software_factory.models import ProjectRepo
 from druks.core.apis.github import GITHUB
-from druks.sandbox import repo as _repo
-from druks.sandbox.layout import get_github_token_remote_path, get_related_root, get_repo_root
+from druks.sandbox.layout import get_related_root
 from druks.services.models import ServiceIdentity
 from druks.workflows import Workflow
 from druks.workspaces import RepoWorkspace
 
-if TYPE_CHECKING:
-    from druks.sandbox.host import Host
-
 
 class ReviewWorkspace(RepoWorkspace):
-    # The target repo's checkout, plus room beside it for the siblings the reviewer
-    # decides to open. Claude scopes file access to cwd + add_dirs, so the related
-    # root is granted before anything is cloned into it.
+    # The default-branch checkout (the reviewer checks the PR out itself) plus room
+    # beside it for siblings; Claude's add_dirs grant needs the directory to exist.
 
     @property
     def related_root(self) -> str:
         return get_related_root(self.host.ssh_username)
+
+    async def get_github_token(self) -> str:
+        # The review is authored under the review actor's identity.
+        return await (await get_review_actor()).client.token_for_repo(self.get_repo())
+
+    async def run_agent(self, *, account_id: str | None, **kwargs: Any):
+        await self.host.exec(["mkdir", "-p", self.related_root], timeout=10.0)
+        return await super().run_agent(account_id=account_id, **kwargs)
 
     def get_agent_run_kwargs(self, **kwargs: Any) -> dict[str, Any]:
         kwargs = super().get_agent_run_kwargs(**kwargs)
@@ -55,29 +58,6 @@ class PullRequestReview(Workflow):
 
     async def run(self, requested_by: str) -> None:
         await Review.review_pull_request()
-
-    async def get_workspace_kwargs(self, host: "Host") -> dict[str, Any]:
-        # Cloned at the default branch — the reviewer checks the pull request out itself.
-        # The token is the review actor's: it authenticates the clone and ``gh``, so the
-        # review is authored under that identity. Siblings stay uncloned — the reviewer
-        # clones the ones it opens, into a directory that must exist for the grant to hold.
-        repo = (await self.subject).repo
-        github_token = await (await get_review_actor()).client.token_for_repo(repo)
-        await host.write_secret(
-            secret=github_token, remote=get_github_token_remote_path(host.ssh_username)
-        )
-        await _repo.ensure(
-            host,
-            repo_url=f"https://github.com/{repo}",
-            ref=None,
-            target_path=get_repo_root(host.ssh_username),
-        )
-        await host.exec(["mkdir", "-p", get_related_root(host.ssh_username)], timeout=10.0)
-        return {
-            **await super().get_workspace_kwargs(host),
-            "repo": repo,
-            "github_token": github_token,
-        }
 
     async def get_prompt_context(self, **context: Any) -> dict[str, Any]:
         target = await ProjectRepo.get_for_repo((await self.subject).repo, raise_on_missing=True)

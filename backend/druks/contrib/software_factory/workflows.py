@@ -14,14 +14,8 @@ from druks.contrib.software_factory.enums import (
 )
 from druks.contrib.software_factory.models import ProjectRepo, WorkItem
 from druks.core.apis.github import GITHUB, get_github_client
-from druks.sandbox import repo as _repo
 from druks.sandbox.datastructures import RequiredMcpServer
-from druks.sandbox.layout import (
-    get_github_token_remote_path,
-    get_related_root,
-    get_repo_root,
-    get_work_root,
-)
+from druks.sandbox.layout import get_related_root, get_work_root
 from druks.services.exceptions import ServiceNotConnectedError
 from druks.services.models import ServiceIdentity
 from druks.settings import load_settings
@@ -43,10 +37,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True, kw_only=True)
 class BuildWorkspace(RepoWorkspace):
-    # The base RepoWorkspace brings the cloned repo + token; a build run adds its
-    # curated skills, PR branch, and github MCP token.
     skills: tuple[str, ...]
-    branch: str | None = None
     # Installation token for build's github MCP server, minted per repo from
     # the identity reviews act as. Required — there is no build without github.
     mcp_token: str
@@ -58,11 +49,14 @@ class BuildWorkspace(RepoWorkspace):
     def get_required_mcp_servers(self) -> tuple[RequiredMcpServer, ...]:
         return (RequiredMcpServer(name=GITHUB_MCP_NAME, url=GITHUB_MCP_URL, token=self.mcp_token),)
 
+    async def run_agent(self, *, account_id: str | None, **kwargs: Any):
+        # Agents clone related repos on demand; Claude's --add-dir target must exist first.
+        related_root = get_related_root(self.host.ssh_username)
+        await self.host.exec(["mkdir", "-p", related_root], timeout=10.0)
+        return await super().run_agent(account_id=account_id, **kwargs)
+
     def get_agent_run_kwargs(self, **kwargs: Any) -> dict[str, Any]:
-        # Agents clone related repos on demand under get_related_root; grant file-tool
-        # access to the whole dir (Claude scopes file access to cwd + add_dirs;
-        # Codex has full FS access and ignores it). get_related_root is never the repo
-        # cwd — Claude wedges (no stdout, forever) on ``--add-dir <cwd>``.
+        # Never the repo cwd — Claude wedges (no stdout, forever) on ``--add-dir <cwd>``.
         kwargs = super().get_agent_run_kwargs(**kwargs)
         kwargs["add_dirs"] = (get_related_root(self.host.ssh_username),)
         kwargs["skills"] = self.skills
@@ -167,30 +161,8 @@ class Build(Workflow):
             await self._implement_phase()
 
     async def get_workspace_kwargs(self, host: "Host") -> dict[str, Any]:
-        # The BuildWorkspace fields: mint a fresh GitHub token, push it, and clone the
-        # primary repo (at branch) into the VM. Re-runs per agent call — the clone is
-        # idempotent (one test -d on a warm VM) so it's cheap, and the ~60min token
-        # mints fresh each time. Warm-host rotation depends on this per-call rebuild:
-        # never hoist the clone to a once-per-run step, or a rotated-in bare VM would
-        # have no working tree. Related repos are NOT pre-cloned: agents clone the
-        # ones they actually need under get_related_root (the prompt names them, the
-        # credential helper handles auth). The mkdir keeps Claude's --add-dir target
-        # valid before the first on-demand clone.
-        repo = (await self.subject).repo
-        # Planning agents run before the first implement provisions the branch — their
-        # VMs clone the default branch; every agent after delivery gets the PR branch.
-        branch = self.branch
-        github_token = await (await get_github_client()).token_for_repo(repo)
-        await host.write_secret(
-            secret=github_token, remote=get_github_token_remote_path(host.ssh_username)
-        )
-        await _repo.ensure(
-            host,
-            repo_url=f"https://github.com/{repo}",
-            ref=branch,
-            target_path=get_repo_root(host.ssh_username),
-        )
-        await host.exec(["mkdir", "-p", get_related_root(host.ssh_username)], timeout=10.0)
+        kwargs = await super().get_workspace_kwargs(host)
+        repo = kwargs["subject"].repo
         try:
             mcp_token = await (await get_review_actor()).client.token_for_repo(repo)
         except Exception as error:
@@ -202,10 +174,9 @@ class Build(Workflow):
                 "for its github MCP server."
             ) from error
         return {
-            **await super().get_workspace_kwargs(host),
-            "repo": repo,
-            "branch": branch,
-            "github_token": github_token,
+            **kwargs,
+            # None until the first implement provisions the PR branch.
+            "branch": self.branch,
             "mcp_token": mcp_token,
             "skills": tuple(self._profile.get("recommended_skills", [])),
         }
@@ -418,6 +389,11 @@ class Build(Workflow):
                 logger.warning("Could not set draft=%s on %s#%s.", draft, repo, self.pr_number)
 
 
+class ProfileWorkspace(RepoWorkspace):
+    def get_repo(self) -> str:
+        return self.subject.full_name
+
+
 class Profile(Workflow):
     """Profiles a repo once, when it joins a project: the repo_profiler agent
     reads the checkout and reports stack, verification commands, and recommended
@@ -426,7 +402,7 @@ class Profile(Workflow):
     the reaction to a .druks/software_factory/config.yml push."""
 
     subject = ProjectRepo
-    workspace_class = RepoWorkspace
+    workspace_class = ProfileWorkspace
 
     @classmethod
     async def dispatch(cls, repo: ProjectRepo, *, refresh_only: bool = False) -> str:
@@ -463,24 +439,6 @@ class Profile(Workflow):
                 detected=baseline.get("verification") or {}
             )
         await project_repo.set_profile(baseline=baseline, effective=effective)
-
-    async def get_workspace_kwargs(self, host: "Host") -> dict[str, Any]:
-        repo = (await ProjectRepo.get(self.input.repo_id)).full_name
-        github_token = await (await get_github_client()).token_for_repo(repo)
-        await host.write_secret(
-            secret=github_token, remote=get_github_token_remote_path(host.ssh_username)
-        )
-        await _repo.ensure(
-            host,
-            repo_url=f"https://github.com/{repo}",
-            ref=None,
-            target_path=get_repo_root(host.ssh_username),
-        )
-        return {
-            **await super().get_workspace_kwargs(host),
-            "repo": repo,
-            "github_token": github_token,
-        }
 
     async def get_prompt_context(self, **context: Any) -> dict[str, Any]:
         return {

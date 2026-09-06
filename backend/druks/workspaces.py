@@ -22,9 +22,10 @@ from druks.mcp.constants import TOKEN_ENV_PREFIX
 from druks.mcp.enums import TokenSource
 from druks.mcp.exceptions import MissingTokenError, SourceEnvVarUnsetError
 from druks.mcp.helpers import get_bearer_token_env_var, get_grant_account
+from druks.sandbox import repo as checkout
 from druks.sandbox.datastructures import AgentResult, McpServer, RequiredMcpServer
 from druks.sandbox.exceptions import ExecFailed
-from druks.sandbox.layout import get_repo_root, get_work_root
+from druks.sandbox.layout import get_github_token_remote_path, get_repo_root, get_work_root
 from druks.user_settings.models import UserSettings
 
 if TYPE_CHECKING:
@@ -33,18 +34,17 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class Workspace:
-    # What an agent runs in: the VM it abstracts. An app subclasses this and
-    # overrides get_agent_run_kwargs for its project scaffolding (repo token, dirs)
-    # and get_required_mcp_servers for MCP servers it credentials itself.
+    # What an agent runs in: the VM it abstracts.
     host: "Host"
+    # What the run is about; None for a workflow about nothing.
+    subject: Any = None
 
     @property
     def host_id(self) -> str:
         return self.host.id
 
     def get_agent_run_kwargs(self, **kwargs: Any) -> dict[str, Any]:
-        # Override to add what the agent's run needs on this workspace (github_token,
-        # add_dirs). Base: pass the run's kwargs through untouched.
+        # Override to add what the run needs on this workspace (add_dirs, skills).
         return kwargs
 
     def get_required_mcp_servers(self) -> tuple[RequiredMcpServer, ...]:
@@ -220,23 +220,37 @@ class Workspace:
 
 @dataclass(frozen=True)
 class RepoWorkspace(Workspace):
-    # A VM with the target repo cloned in and a short-lived token its agent
-    # pushes/reads through. Build's workspace extends this with the PR branch
-    # and the github MCP token; the profiler uses it as-is.
-    repo: str
-    github_token: str
+    """A VM with the subject's ``repo`` cloned at ``branch`` (default branch when
+    None), re-cloned and re-tokened before every agent call."""
+
+    branch: str | None = None
 
     @property
     def repo_path(self) -> str:
         return get_repo_root(self.host.ssh_username)
 
-    def get_agent_run_kwargs(self, **kwargs: Any) -> dict[str, Any]:
-        kwargs["github_token"] = self.github_token
-        return kwargs
+    def get_repo(self) -> str:
+        # Override when the subject names its ``owner/name`` differently.
+        return self.subject.repo
 
-    async def run_agent(self, *, account_id: str | None, **kwargs: Any):
+    async def get_github_token(self) -> str:
+        # Override to clone and act as another identity than the operator App.
+        return await (await get_github_client()).token_for_repo(self.get_repo())
+
+    async def run_agent(self, *, account_id: str | None, **kwargs: Any) -> AgentResult:
+        github_token = await self.get_github_token()
+        # The clone authenticates through the VM's credential helper, which reads this file.
+        await self.host.write_secret(
+            secret=github_token, remote=get_github_token_remote_path(self.host.ssh_username)
+        )
+        await checkout.ensure(
+            self.host,
+            repo_url=f"https://github.com/{self.get_repo()}",
+            ref=self.branch,
+            target_path=self.repo_path,
+        )
         await self.set_git_identity(account_id)
-        return await super().run_agent(account_id=account_id, **kwargs)
+        return await super().run_agent(account_id=account_id, github_token=github_token, **kwargs)
 
     async def set_git_identity(self, account_id: str | None) -> None:
         """Commits in the repo are authored as the operator's bot user, with a

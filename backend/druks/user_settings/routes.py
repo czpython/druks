@@ -8,7 +8,7 @@ from druks.apps.loader import get_app, iter_apps
 from druks.apps.registry import agents, workflows
 from druks.durable.engine import apply_schedules
 from druks.harnesses.base import Harness
-from druks.harnesses.execution import check_execution
+from druks.harnesses.profiles import check_profile
 from druks.harnesses.registry import get_harnesses
 from druks.notifications.models import Destination
 
@@ -28,7 +28,7 @@ from .schemas import (
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 agents_router = APIRouter(prefix="/api/agents", tags=["settings"])
 
-_EXECUTION_DEFAULTS = (
+_PROFILE_DEFAULTS = (
     "default_harness",
     "default_model",
     "default_billing",
@@ -86,10 +86,10 @@ async def update_user_settings(
     defaults = {
         field: value
         for field, value in body.model_dump(exclude_unset=True, exclude_none=True).items()
-        if field in _EXECUTION_DEFAULTS
+        if field in _PROFILE_DEFAULTS
     }
     if defaults:
-        await check_execution(
+        await check_profile(
             defaults.get("default_harness", row.default_harness),
             defaults.get("default_model", row.default_model),
             defaults.get("default_billing", row.default_billing),
@@ -97,7 +97,7 @@ async def update_user_settings(
         await row.update_profile(**defaults)
         for agent in agents.all():
             name = agent.id
-            await check_execution(
+            await check_profile(
                 (await SettingsOverride.agent_harness(name)).value,
                 (await SettingsOverride.agent_model(name)).value,
                 (await SettingsOverride.agent_billing(name)).value,
@@ -143,7 +143,7 @@ async def update_app_settings(body: AppsSettingsUpdate) -> AppsSettingsResponse:
     for name in {*body.agent_harnesses, *body.agent_models, *body.agent_billings}:
         if name not in agents:
             raise HTTPException(status_code=422, detail=f"Unknown agent {name!r}")
-        await check_execution(
+        await check_profile(
             (await SettingsOverride.agent_harness(name)).value,
             (await SettingsOverride.agent_model(name)).value,
             (await SettingsOverride.agent_billing(name)).value,

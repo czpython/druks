@@ -824,13 +824,11 @@ class Workflow:
         return dict(context)
 
     async def get_workspace_kwargs(self, host: "Host") -> dict[str, Any]:
-        # Extend via super() to add the fields workspace_class needs (an app clones + mints
-        # here). Base: just the VM.
-        return {"host": host}
+        # Extend via super() to add the fields workspace_class needs beyond these.
+        return {"host": host, "subject": await self.subject}
 
     async def get_workspace(self, host: "Host") -> Workspace:
-        # What an agent runs in on this run's VM, built per agent call from workspace_class
-        # + the app's kwargs — so short-lived tokens (git) mint fresh each call.
+        # Built per agent call, so nothing is held across steps.
         return self.workspace_class(**await self.get_workspace_kwargs(host))
 
     async def _lease_host(self) -> str | None:

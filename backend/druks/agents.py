@@ -21,7 +21,7 @@ from druks.harnesses.exceptions import (
     HarnessInvalidOutputError,
     Retry,
 )
-from druks.harnesses.execution import resolve_execution
+from druks.harnesses.profiles import Profile, get_profile
 from druks.prompts import render_prompt
 from druks.sandbox import gate as sandbox_gate
 from druks.sandbox.client import sandbox_client
@@ -123,6 +123,13 @@ class Agent:
         object.__setattr__(self, "app", owner.name)
         agents.register(self)
 
+    async def get_profile(self) -> Profile:
+        """How this agent runs for the current run's actor, read from settings now."""
+        workflow = current_workflow.get(None)
+        if not workflow:
+            raise WorkflowError(f"agent {self.id!r} reads its profile only inside a workflow")
+        return await get_profile(self.id, workflow.account_id)
+
     async def __call__(
         self, *, contract: type[AgentOutput] | None = None, **context: object
     ) -> Any:
@@ -179,9 +186,9 @@ class Agent:
             async with step_session():
                 # The scrape belongs to the charged account — it differs from
                 # the run's on fallback.
-                execution = await resolve_execution(self.id, workflow.account_id)
-                provider_id = execution.model.partition("/")[0]
-                scrape = await UsageScrape.latest_for(provider_id, execution.charged_account_id)
+                profile = await get_profile(self.id, workflow.account_id)
+                provider_id = profile.model.partition("/")[0]
+                scrape = await UsageScrape.latest_for(provider_id, profile.charged_account_id)
                 if scrape:
                     now = datetime.now(UTC)
                     reset = scrape.soonest_reset_after(now)
@@ -253,10 +260,10 @@ class Agent:
         workflow = current_workflow.get()
         # Refusing an unservable call here beats provisioning a VM and
         # 401ing mid-run.
-        execution = await resolve_execution(self.id, workflow.account_id)
+        profile = await get_profile(self.id, workflow.account_id)
         # Plain snapshots: the commits below expire the ORM row mid-flight.
-        model, charged_account_id = execution.model, execution.charged_account_id
-        subscription_id = execution.subscription.id if execution.subscription else None
+        model, charged_account_id = profile.model, profile.charged_account_id
+        subscription_id = profile.subscription.id if profile.subscription else None
         # An agent call is a durability boundary — its effects don't roll back —
         # so commit here rather than hold the step's connection idle through the
         # minutes of provisioning and the run.
@@ -265,7 +272,7 @@ class Agent:
         artifact_dir = settings.artifacts_dir / f"run-{workflow_id}"
 
         engine = _step_engine()
-        call_id = execution.harness_class.mint_run_id(None)
+        call_id = profile.harness_class.mint_run_id(None)
 
         # Registered for provisioning through execution — the subscription's
         # rotation defers around it. A key never rotates.
