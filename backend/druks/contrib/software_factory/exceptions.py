@@ -18,5 +18,5 @@ class TrackerNotConfigured(AgentApiError):
     def __init__(self) -> None:
         super().__init__(
             "No ticket tracker is configured — select Linear or Jira in the Software Factory "
-            "settings and connect its identity in Settings → Services."
+            "settings and connect its identity in Settings → Connections → Services."
         )

@@ -68,7 +68,7 @@ async def check_service_identities(settings: Settings) -> list[CheckResult]:
     for app in iter_apps():
         app.discover()
 
-    async def _read() -> list[CheckResult]:
+    try:
         async with _check_engine(settings) as engine, session_scope(engine):
             results: list[CheckResult] = []
             for service in services.all():
@@ -82,16 +82,13 @@ async def check_service_identities(settings: Settings) -> list[CheckResult]:
                             ok=not service.required,
                             pending=service.required,
                             detail=f"not connected — connect {service.title} in "
-                            "Settings → Services.",
+                            "Settings → Connections → Services.",
                         )
                     )
                     continue
                 facts = " ".join(f"{key}={value}" for key, value in row.identity.items())
                 results.append(CheckResult(name=name, ok=True, detail=f"connected; {facts}"))
             return results
-
-    try:
-        return await _read()
     except Exception as error:  # noqa: BLE001 — a DB-read failure is a fail, not a crash
         return [
             CheckResult(
@@ -106,20 +103,17 @@ async def check_installations(settings: Settings) -> CheckResult:
     factory reads the service-identity row, so a one-off Session is bound
     into the ambient ``db_session`` registry for the duration."""
 
-    async def _list_accounts() -> tuple[str, ...]:
+    try:
         async with _check_engine(settings) as engine:
             async with session_scope(engine):
                 client = await get_github_client()
-            return await client.list_installation_accounts()
-
-    try:
-        accounts = await _list_accounts()
+            accounts = await client.list_installation_accounts()
     except ServiceNotConnectedError:
         return CheckResult(
             name="installations",
             ok=False,
             pending=True,
-            detail="github is not connected — connect it in Settings → Services.",
+            detail="github is not connected — connect it in Settings → Connections → Services.",
         )
     except Exception as exc:  # noqa: BLE001 — doctor reports, never raises
         return CheckResult(
@@ -506,40 +500,37 @@ async def check_apps(settings: Settings) -> list[CheckResult]:
     """Each installed app's resolved settings and own checks, namespaced under it.
     Read off the class headlessly through the loader, so doctor never imports an
     app's private modules. A check or settings clean that raises is contained
-    under the app's name, and core checks remain separate ``CHECKS`` entries."""
+    under the app's name. Core checks remain separate from app checks."""
 
-    async def _read() -> list[CheckResult]:
-        async with _check_engine(settings) as engine, session_scope(engine):
-            results: list[CheckResult] = []
-            for app in iter_apps():
-                if settings_model := app.settings_model:
-                    try:
-                        problems = (await app.settings()).clean()
-                        detail = "; ".join(
-                            f"{settings_model.model_fields[field].title or field}: {message}"
-                            for field, message in problems.items()
+    async with _check_engine(settings) as engine, session_scope(engine):
+        results: list[CheckResult] = []
+        for app in iter_apps():
+            if settings_model := app.settings_model:
+                try:
+                    problems = (await app.settings()).clean()
+                    detail = "; ".join(
+                        f"{settings_model.model_fields[field].title or field}: {message}"
+                        for field, message in problems.items()
+                    )
+                except Exception as error:  # noqa: BLE001 — settings fail, doctor continues
+                    results.append(
+                        CheckResult(
+                            name=f"{app.name}:settings",
+                            ok=False,
+                            detail=f"check raised: {error}",
                         )
-                    except Exception as error:  # noqa: BLE001 — settings fail, doctor continues
-                        results.append(
-                            CheckResult(
-                                name=f"{app.name}:settings",
-                                ok=False,
-                                detail=f"check raised: {error}",
-                            )
+                    )
+                else:
+                    results.append(
+                        CheckResult(
+                            name=f"{app.name}:settings",
+                            ok=not problems,
+                            detail=detail or "coherent",
                         )
-                    else:
-                        results.append(
-                            CheckResult(
-                                name=f"{app.name}:settings",
-                                ok=not problems,
-                                detail=detail or "coherent",
-                            )
-                        )
-                for check in app.checks or ():
-                    results.append(await _run_app_check(app.name, check))
-            return results
-
-    return await _read()
+                    )
+            for check in app.checks or ():
+                results.append(await _run_app_check(app.name, check))
+        return results
 
 
 async def _run_app_check(app_name: str, check) -> CheckResult:

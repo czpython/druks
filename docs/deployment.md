@@ -78,7 +78,7 @@ remote shape, fill `[sandbox.<provider>]` from the Drukbox
 The installer also creates `paths.harness_config_root`. Put optional CLI
 configuration in the harness directory under that root.
 
-After boot, connect the GitHub App that Druks uses from **Settings → Services**.
+After boot, connect the GitHub App that Druks uses from **Settings → Connections → Services**.
 Use the permission table in [Configuration](configuration.md#github).
 
 The sandbox backend defaults to the local `docker` shape. On the first run, set
