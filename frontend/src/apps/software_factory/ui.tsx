@@ -11,14 +11,17 @@ import { WorkItemsPage } from './WorkItemsPage'
 registerAppUI({
   name: SOFTWARE_FACTORY,
   home: `/${SOFTWARE_FACTORY}`,
-  systemStrip: true,
   navigation: [
-    [`/${SOFTWARE_FACTORY}`, 'active'],
+    [`/${SOFTWARE_FACTORY}`, 'Overview'],
     [`/${SOFTWARE_FACTORY}/history`, 'history'],
     [`/${SOFTWARE_FACTORY}/projects`, 'projects'],
   ],
   // Software Factory's other subject, a project repo, has no page of its own — a row about one
   // stays unclickable rather than landing on the work item that shares its id.
+  parentPath: (location) => {
+    const workItem = /^(\/software_factory\/work-items\/[^/]+)/.exec(location)?.[1]
+    return workItem && (location.startsWith(`${workItem}/agent-calls/`) ? workItem : `/${SOFTWARE_FACTORY}`)
+  },
   subjectPath: ({ type, id }, target) =>
     type === 'work_item'
       ? `/${SOFTWARE_FACTORY}/work-items/${encodeURIComponent(id)}${targetQuery(target)}`

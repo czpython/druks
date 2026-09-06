@@ -3,20 +3,20 @@ import { CircleAlert, Clock3, RefreshCw } from 'lucide-react'
 import { Link, useLocation, useSearch } from 'wouter'
 
 import { api } from '../api/client'
-import type { OverviewRun } from '../api/types'
+import type { DashboardRun } from '../api/types'
 import { appHome, appLabel, getAppUI } from '../apps/registry'
 import { Page } from '../components/Page'
 import { relTimeFromIso } from '../lib/format'
-import '../overview.css'
+import '../dashboard.css'
 
-const isPending = (row: OverviewRun) =>
+const isPending = (row: DashboardRun) =>
   row.state === 'parked' && Boolean(row.parkedAt && row.presentation)
 
 const SECTIONS: {
   id: string
   title: string
   empty: string
-  select: (rows: OverviewRun[]) => OverviewRun[]
+  select: (rows: DashboardRun[]) => DashboardRun[]
 }[] = [
   {
     id: 'pending',
@@ -55,13 +55,13 @@ const STATE_LABEL: Record<string, string> = {
 
 const POLL = { refetchInterval: 30_000, refetchOnWindowFocus: true, retry: false } as const
 
-export function OverviewPage({ apps }: { apps: string[] }) {
+export function DashboardPage({ apps }: { apps: string[] }) {
   const [, navigate] = useLocation()
   const app = new URLSearchParams(useSearch()).get('app') ?? ''
-  const work = useQuery({ queryKey: ['overview', 'work'], queryFn: api.overviewWork, ...POLL })
+  const work = useQuery({ queryKey: ['dashboard', 'work'], queryFn: api.dashboardWork, ...POLL })
   const schedules = useQuery({
-    queryKey: ['overview', 'schedules'],
-    queryFn: api.overviewSchedules,
+    queryKey: ['dashboard', 'schedules'],
+    queryFn: api.dashboardSchedules,
     ...POLL,
   })
   const rows = (work.data?.rows ?? []).filter((row) => !app || row.app === app)
@@ -72,13 +72,13 @@ export function OverviewPage({ apps }: { apps: string[] }) {
   const failed = work.isError || schedules.isError
 
   return (
-    <Page className="overview">
-      <header className="overview-head">
+    <Page className="dashboard">
+      <header className="dashboard-head">
         <div>
-          <h1>Overview</h1>
+          <h1>Dashboard</h1>
           <p>Your apps, active work, and decisions in one place.</p>
         </div>
-        <label className="overview-filter">
+        <label className="dashboard-filter">
           <select
             aria-label="Filter by app"
             value={app}
@@ -96,7 +96,7 @@ export function OverviewPage({ apps }: { apps: string[] }) {
           </select>
         </label>
       </header>
-      <div className="overview-counts" aria-label="Current work counts">
+      <div className="dashboard-counts" aria-label="Current work counts">
         <span>
           <strong>{work.data ? pendingCount : '—'}</strong> {pendingCount === 1 ? 'needs' : 'need'}{' '}
           you
@@ -113,8 +113,8 @@ export function OverviewPage({ apps }: { apps: string[] }) {
         </span>
       </div>
       {failed && (
-        <p className="overview-alert" role="alert">
-          Could not refresh Overview.{' '}
+        <p className="dashboard-alert" role="alert">
+          Could not refresh Dashboard.{' '}
           {work.data ? 'The last successful read remains visible.' : 'No data is available.'}{' '}
           <button
             disabled={work.isFetching || schedules.isFetching}
@@ -132,15 +132,15 @@ export function OverviewPage({ apps }: { apps: string[] }) {
       {sections.map((section) => (
         <section
           key={section.id}
-          className="overview-section"
-          aria-labelledby={`overview-${section.id}`}
+          className="dashboard-section"
+          aria-labelledby={`dashboard-${section.id}`}
         >
           <header>
-            <h2 id={`overview-${section.id}`}>{section.title}</h2>
+            <h2 id={`dashboard-${section.id}`}>{section.title}</h2>
             {section.id === 'pending' && <span>Oldest first</span>}
           </header>
           {work.data && section.rows.length === 0 && (
-            <p className="overview-empty">{section.empty}</p>
+            <p className="dashboard-empty">{section.empty}</p>
           )}
           {section.rows.map((row) => (
             <WorkRow key={row.run} row={row} pending={section.id === 'pending'} />
@@ -148,42 +148,42 @@ export function OverviewPage({ apps }: { apps: string[] }) {
         </section>
       ))}
       {work.data?.hasMore && (
-        <p className="overview-more">
+        <p className="dashboard-more">
           Showing the 200 most recently changed runs. Older current work is not listed.
         </p>
       )}
-      <section className="overview-section" aria-labelledby="overview-schedules">
+      <section className="dashboard-section" aria-labelledby="dashboard-schedules">
         <header>
-          <h2 id="overview-schedules">Scheduled work</h2>
+          <h2 id="dashboard-schedules">Scheduled work</h2>
           <span>Configured cadence</span>
         </header>
         {schedules.data && scheduleRows.length === 0 && (
-          <p className="overview-empty">No app declares a workflow schedule.</p>
+          <p className="dashboard-empty">No app declares a workflow schedule.</p>
         )}
         {scheduleRows.map((schedule) => (
-          <div className="overview-row" key={schedule.kind}>
+          <div className="dashboard-row" key={schedule.kind}>
             <Clock3 size={17} aria-hidden="true" />
-            <div className="overview-identity">
+            <div className="dashboard-identity">
               <strong className="mono">{schedule.kind}</strong>
               <span className="app-name">{appLabel(schedule.app)}</span>
             </div>
-            <div className="overview-schedule">
+            <div className="dashboard-schedule">
               <span>{schedule.enabled ? 'Enabled' : 'Paused'}</span>
               <code>{schedule.cron ?? 'No cadence'}</code>
               <span>{schedule.timezone}</span>
             </div>
-            <Link className="overview-action" href={`/apps/${schedule.app}/settings`}>
+            <Link className="dashboard-action" href={`/apps/${schedule.app}/settings`}>
               Settings
             </Link>
           </div>
         ))}
       </section>
-      <p className="overview-access">Access health has not been checked.</p>
+      <p className="dashboard-access">Access health has not been checked.</p>
     </Page>
   )
 }
 
-function WorkRow({ row, pending }: { row: OverviewRun; pending: boolean }) {
+function WorkRow({ row, pending }: { row: DashboardRun; pending: boolean }) {
   const subject =
     row.subjectType && row.subjectId ? { type: row.subjectType, id: row.subjectId } : null
   const target = { run: row.run, parkedAt: pending ? (row.parkedAt ?? undefined) : undefined }
@@ -194,9 +194,9 @@ function WorkRow({ row, pending }: { row: OverviewRun; pending: boolean }) {
   const destination = external ? externalUrl : owner
   const label = pending ? row.requestLabel || 'Input requested' : row.subjectLabel || row.kind
   return (
-    <div className={`overview-row overview-${row.state}`}>
+    <div className={`dashboard-row dashboard-${row.state}`}>
       <CircleAlert size={17} aria-hidden="true" />
-      <div className="overview-identity">
+      <div className="dashboard-identity">
         <strong>{label}</strong>
         <span>
           <span className="app-name">{appLabel(row.app)}</span>
@@ -205,22 +205,22 @@ function WorkRow({ row, pending }: { row: OverviewRun; pending: boolean }) {
         {row.failure && <p>{row.failure}</p>}
         {row.state === 'orphaned' && <p>The workflow record is missing.</p>}
       </div>
-      <span className="overview-age" title={pending ? (row.parkedAt ?? undefined) : row.updatedAt}>
+      <span className="dashboard-age" title={pending ? (row.parkedAt ?? undefined) : row.updatedAt}>
         {STATE_LABEL[row.state]} ·{' '}
         {relTimeFromIso(pending ? row.parkedAt : row.updatedAt)}
       </span>
       {destination ? (
         external ? (
-          <a className="overview-action" href={destination} target="_blank" rel="noreferrer">
+          <a className="dashboard-action" href={destination} target="_blank" rel="noreferrer">
             Open request
           </a>
         ) : (
-          <Link className={`overview-action${pending ? ' primary' : ''}`} href={destination}>
+          <Link className={`dashboard-action${pending ? ' primary' : ''}`} href={destination}>
             {pending ? 'Review' : 'Open'}
           </Link>
         )
       ) : (
-        <div className="overview-unavailable">
+        <div className="dashboard-unavailable">
           <span>{pending ? 'Review destination unavailable' : 'Run destination unavailable'}</span>
           <Link href={appHome(row.app)}>Open app</Link>
         </div>

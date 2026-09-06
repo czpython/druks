@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Response
 from sqlalchemy import func, select
 
-from druks.api.schemas import OverviewRun, OverviewSchedule, OverviewSchedules, OverviewWork
+from druks.api.schemas import DashboardRun, DashboardSchedule, DashboardSchedules, DashboardWork
 from druks.apps.loader import iter_apps
 from druks.database import db_session
 from druks.durable.enums import OPEN_STATES, RunState
@@ -9,11 +9,11 @@ from druks.durable.models import Run
 from druks.user_settings.models import UserSettings
 
 PAGE_SIZE = 200
-router = APIRouter(prefix="/api/overview", tags=["overview"])
+router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
 
 
-@router.get("/work", response_model=OverviewWork)
-async def list_current_work(response: Response) -> OverviewWork:
+@router.get("/work", response_model=DashboardWork)
+async def list_current_work(response: Response) -> DashboardWork:
     response.headers["Cache-Control"] = "no-store"
     owners = {workflow.kind: owner.name for owner in iter_apps() for workflow in owner.workflows()}
     current = (
@@ -44,23 +44,23 @@ async def list_current_work(response: Response) -> OverviewWork:
         .limit(PAGE_SIZE + 1)
     )
     rows = (await db_session().execute(statement)).all()
-    return OverviewWork(
+    return DashboardWork(
         rows=[
-            OverviewRun.model_validate({**row._mapping, "app": owners[row.kind]})
+            DashboardRun.model_validate({**row._mapping, "app": owners[row.kind]})
             for row in rows[:PAGE_SIZE]
         ],
         has_more=len(rows) > PAGE_SIZE,
     )
 
 
-@router.get("/schedules", response_model=OverviewSchedules)
-async def list_current_schedules(response: Response) -> OverviewSchedules:
+@router.get("/schedules", response_model=DashboardSchedules)
+async def list_current_schedules(response: Response) -> DashboardSchedules:
     """Configured cadence, not scheduler health."""
     response.headers["Cache-Control"] = "no-store"
     timezone = (await UserSettings.get()).timezone
-    return OverviewSchedules(
+    return DashboardSchedules(
         rows=[
-            OverviewSchedule(
+            DashboardSchedule(
                 app=owner.name,
                 kind=workflow.kind,
                 cron=await workflow.get_schedule(),

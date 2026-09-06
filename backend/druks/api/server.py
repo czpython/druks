@@ -15,8 +15,8 @@ from druks.accounts.dependencies import current_account, resolve_single_operator
 from druks.accounts.exceptions import AuthConfigurationError
 from druks.accounts.routes import router as auth_router
 from druks.api.artifacts import router as artifacts_router
+from druks.api.dashboard import router as dashboard_router
 from druks.api.exceptions import AgentApiError
-from druks.api.overview import router as overview_router
 from druks.api.runs import router as runs_router
 from druks.api.subjects import router as subjects_router
 from druks.apps.loader import iter_apps, load
@@ -302,7 +302,7 @@ app.include_router(mcp_router, dependencies=_identity_gate)
 app.include_router(notifications_router, dependencies=_identity_gate)
 app.include_router(events_router, dependencies=_identity_gate)
 app.include_router(runs_router, dependencies=_identity_gate)
-app.include_router(overview_router, dependencies=_identity_gate)
+app.include_router(dashboard_router, dependencies=_identity_gate)
 app.include_router(subjects_router, dependencies=_identity_gate)
 app.include_router(gateway_router, dependencies=_identity_gate)
 app.include_router(artifacts_router, dependencies=_identity_gate)

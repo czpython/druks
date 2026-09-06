@@ -1284,6 +1284,7 @@ export function ProvidersPane({
   catalogs,
   loading,
   requestError,
+  onRetry,
 }: {
   providers: Provider[]
   registeredProviders: Provider[]
@@ -1292,6 +1293,7 @@ export function ProvidersPane({
   catalogs: ProviderCatalog[]
   loading: boolean
   requestError: string | null
+  onRetry: () => void
 }) {
   const [adding, setAdding] = useState(false)
   const [managing, setManaging] = useState<string | null>(null)
@@ -1469,7 +1471,10 @@ export function ProvidersPane({
       )}
       {requestError && (
         <div className="mcp-error" role="alert">
-          {requestError}
+          {requestError}{' '}
+          <button className="set-btn ghost" onClick={onRetry}>
+            Try again
+          </button>
         </div>
       )}
       {!loading && !requestError && configured.length === 0 && (
@@ -1653,14 +1658,15 @@ export function ProviderConnect({
   })
   const acceptsSubscription = provider.billingOptions.includes('subscription')
   const acceptsApiKey = provider.billingOptions.includes('api_key')
+  const weekly = usage?.weeks.find((week) => week.model === null)
 
-  const run = (action: () => Promise<unknown>, after: () => Promise<unknown>) => {
+  const run = (action: () => Promise<unknown>, after: () => Promise<unknown>, done: string) => {
     setBusy(true)
     setError(null)
     setNotice('')
     void action()
       .then(after)
-      .then(() => setNotice('Saved.'))
+      .then(() => setNotice(done))
       .catch((e) => setError(e instanceof Error ? e.message : String(e)))
       .finally(() => setBusy(false))
   }
@@ -1672,7 +1678,7 @@ export function ProviderConnect({
       )
     )
       return
-    run(() => api.disconnectProvider(provider.id), refresh)
+    run(() => api.disconnectProvider(provider.id), refresh, 'Subscription disconnected.')
   }
 
   const removeKey = () => {
@@ -1680,7 +1686,7 @@ export function ProviderConnect({
       !window.confirm(`Remove the ${provider.label} API key? Agents billed to it stop running.`)
     )
       return
-    run(() => api.removeProviderKey(provider.id), refreshKeys)
+    run(() => api.removeProviderKey(provider.id), refreshKeys, 'API key removed.')
   }
 
   const createKey = (event: FormEvent<HTMLFormElement>) => {
@@ -1690,7 +1696,7 @@ export function ProviderConnect({
       setKey('')
       setReplacing(false)
       setKeyFormOpen(false)
-    }, refreshKeys)
+    }, refreshKeys, 'API key saved.')
   }
 
   const connected = Boolean(subscription?.connected)
@@ -1753,13 +1759,7 @@ export function ProviderConnect({
                 ) : (
                   <>
                     {usage?.fiveHour && <QuotaRow label="5-hour" metric={usage.fiveHour} />}
-                    {usage?.weeks.map((week) => (
-                      <QuotaRow
-                        key={week.model ?? 'all'}
-                        label={week.model ? `Weekly · ${week.model}` : 'Weekly'}
-                        metric={week}
-                      />
-                    ))}
+                    {weekly && <QuotaRow label="Weekly" metric={weekly} />}
                   </>
                 )}
               </div>
@@ -2294,6 +2294,7 @@ export function McpServersPane() {
   }
 
   async function remove(name: string) {
+    if (!window.confirm(`Remove ${name} from every sandbox?`)) return
     setBusy(true)
     setError(null)
     try {
@@ -2325,6 +2326,7 @@ export function McpServersPane() {
   }
 
   async function disconnect(name: string) {
+    if (!window.confirm(`Disconnect ${name}? Agents lose its tools until it is connected again.`)) return
     setBusy(true)
     setError(null)
     try {
@@ -2354,7 +2356,8 @@ export function McpServersPane() {
       )}
       <header className="mcp-pane-head">
         <p className="mcp-pane-sub">
-          Tools your agents can call. Enable installed servers or add one from the registry.
+          Tools your agents can call. Enabled servers are carried into every sandbox VM;
+          secrets ride the run env and never land in emitted config.
         </p>
       </header>
 

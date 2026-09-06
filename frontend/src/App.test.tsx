@@ -10,9 +10,10 @@ import { registerAppUI } from './apps/registry'
 
 vi.mock('./apps', () => ({}))
 vi.mock('./api/client', () => ({
-  api: { listApps: vi.fn(), systemHealth: vi.fn(), getAppSettings: vi.fn() },
+  api: { listApps: vi.fn(), getAppSettings: vi.fn() },
 }))
 vi.mock('./components/SettingsPages', () => ({ SettingsPages: () => <h1>Settings form</h1> }))
+vi.mock('./pages/DashboardPage', () => ({ DashboardPage: () => <h1>Dashboard page</h1> }))
 vi.mock('./pages/EventsPage', () => ({ EventsPage: () => <h1>Events feed</h1> }))
 vi.mock('./pages/UsagePage', () => ({ UsagePage: () => <h1>Usage report</h1> }))
 vi.mock('./pages/AppHomePage', () => ({
@@ -181,6 +182,51 @@ describe('command center navigation', () => {
     await waitFor(() => expect(drawer.hasAttribute('open')).toBe(false))
     expect(screen.getByText('Settings form')).toBeTruthy()
     expect(window.location.pathname).toBe('/settings/providers')
+  })
+
+  it('opens the Dashboard at the root', async () => {
+    renderApp('/')
+    expect(await screen.findByRole('heading', { name: 'Dashboard page' })).toBeTruthy()
+    expect(screen.getByRole('link', { name: 'Dashboard' }).getAttribute('aria-current')).toBe('page')
+  })
+
+  it('leaves a shared page with Escape to where the operator came from', async () => {
+    renderApp('/notes')
+    await screen.findByRole('heading', { name: 'Notes home' })
+    fireEvent.click(screen.getByRole('link', { name: 'Events' }))
+    await screen.findByRole('heading', { name: 'Events feed' })
+    await act(async () => {
+      fireEvent.keyDown(window, { key: 'Escape' })
+    })
+    await screen.findByRole('heading', { name: 'Notes home' })
+  })
+
+  it('returns focus to the opener when the phone drawer closes', async () => {
+    renderApp()
+    const opener = screen.getByRole('button', { name: 'Open navigation' })
+    fireEvent.click(opener)
+    const drawer = screen.getByRole('dialog', { name: 'Druks navigation' })
+    fireEvent.click(within(drawer).getByRole('button', { name: 'Close navigation' }))
+    await waitFor(() => expect(drawer.hasAttribute('open')).toBe(false))
+    expect(document.activeElement).toBe(opener)
+  })
+
+  it('closes the phone drawer when the viewport grows to desktop', async () => {
+    const listeners: Array<() => void> = []
+    vi.stubGlobal(
+      'matchMedia',
+      vi.fn(() => ({
+        matches: true,
+        addEventListener: (_event: string, listener: () => void) => listeners.push(listener),
+        removeEventListener: vi.fn(),
+      })),
+    )
+    renderApp()
+    fireEvent.click(screen.getByRole('button', { name: 'Open navigation' }))
+    const drawer = screen.getByRole('dialog', { name: 'Druks navigation' })
+    expect(drawer.hasAttribute('open')).toBe(true)
+    act(() => listeners.forEach((listener) => listener()))
+    await waitFor(() => expect(drawer.hasAttribute('open')).toBe(false))
   })
 
   it('shows roster errors with a retry action', async () => {

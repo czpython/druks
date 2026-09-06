@@ -6,7 +6,6 @@ import type {
   BrowserSession,
   ConnectChallenge,
   Connection,
-  DashboardHealth,
   App,
   FeedResponse,
   FileSummary,
@@ -35,8 +34,8 @@ import type {
   Skill,
   SkillCollection,
   UserSettings,
-  OverviewSchedules,
-  OverviewWork,
+  DashboardSchedules,
+  DashboardWork,
 } from './types'
 
 // A 401 means the request's identity did not resolve: typed to branch on,
@@ -224,9 +223,8 @@ async function sendOperation(method: string, path: string, body: unknown): Promi
 }
 
 export const api = {
-  overviewWork: () => getJSON<OverviewWork>('/api/overview/work'),
-  overviewSchedules: () => getJSON<OverviewSchedules>('/api/overview/schedules'),
-  systemHealth: () => getJSON<DashboardHealth>('/api/system/health'),
+  dashboardWork: () => getJSON<DashboardWork>('/api/dashboard/work'),
+  dashboardSchedules: () => getJSON<DashboardSchedules>('/api/dashboard/schedules'),
   listApps: () => getJSON<App[]>('/api/apps'),
   // ``path`` is the location under the app's own root: "" for the landing
   // page, "/notes/7" for a detail page.

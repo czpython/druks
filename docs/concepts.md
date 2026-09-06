@@ -116,9 +116,9 @@ Subjected workflow starts use DBOS queue deduplication per workflow kind and
 subject. A duplicate start returns the active run's id. Druks does not impose
 that policy on subjectless background runs.
 
-## Current work in Overview
+## Current work on the Dashboard
 
-Overview reads current runs across the installed apps with the same identity
+The Dashboard reads current runs across the installed apps with the same identity
 gate as the shared run API. An authenticated operator sees installation-wide
 run facts. `Run.account_id` records attribution and does not restrict this
 read.
@@ -139,7 +139,7 @@ Review opens the owning app at the selected run and names the request round
 by its `parkedAt` timestamp. The owner reads the current gate. A different
 round shows a stale-link message, and an answer echoes the round it read, so
 the server rejects a stale one. An external request opens the app-declared
-HTTP or HTTPS address. Overview does not infer access health from
+HTTP or HTTPS address. The Dashboard does not infer access health from
 configuration.
 
 ## Waiting for people and systems

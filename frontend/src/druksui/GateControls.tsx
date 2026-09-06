@@ -36,7 +36,7 @@ export function GateControls({ run, expected }: { run: string; expected?: string
   if (expected && gate.data.parkedAt !== expected) {
     return (
       <p role="alert">
-        This input request has changed. Return to Overview to open the current request.
+        This input request has changed. Return to the Dashboard to open the current request.
       </p>
     )
   }

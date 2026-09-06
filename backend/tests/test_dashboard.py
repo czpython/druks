@@ -2,7 +2,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from druks.accounts.models import Account
-from druks.api import overview
+from druks.api import dashboard
 from druks.durable.dbos_state import workflow_status
 from druks.durable.models import Run
 from druks.testing import configure_app_for_test, make_settings, seed_run
@@ -21,7 +21,7 @@ def client(tmp_path, druks_db):
 
 
 def current_work(client):
-    response = client.get("/api/overview/work")
+    response = client.get("/api/dashboard/work")
     assert response.status_code == 200
     assert response.headers["cache-control"] == "no-store"
     return response.json()
@@ -101,7 +101,7 @@ async def test_changed_time_orders_current_work(client, druks_db):
 
 
 async def test_the_read_is_capped(client, druks_db, monkeypatch):
-    monkeypatch.setattr(overview, "PAGE_SIZE", 1)
+    monkeypatch.setattr(dashboard, "PAGE_SIZE", 1)
     for body in ("one", "two"):
         await seed_run(druks_db, kind=Summarize.kind, subject=await Note.create(body=body))
 
@@ -119,7 +119,7 @@ async def test_schedules_resolve_paused_override_and_operator_timezone(
     await SettingsOverride.set_workflow_setting(Summarize.kind, "schedule_enabled", False)
     await (await UserSettings.get()).update_profile(timezone="Europe/Madrid")
 
-    response = client.get("/api/overview/schedules")
+    response = client.get("/api/dashboard/schedules")
 
     assert response.status_code == 200
     assert {
@@ -131,11 +131,11 @@ async def test_schedules_resolve_paused_override_and_operator_timezone(
     } in response.json()["rows"]
 
 
-def test_overview_requires_the_existing_identity_gate(tmp_path, druks_db):
+def test_dashboard_requires_the_existing_identity_gate(tmp_path, druks_db):
     app = configure_app_for_test(
         settings=make_settings(tmp_path, identity={"mode": "header", "header": "X-Edge-Email"}),
         authenticated=False,
     )
     with TestClient(app) as anonymous:
-        assert anonymous.get("/api/overview/work").status_code == 401
-        assert anonymous.get("/api/overview/schedules").status_code == 401
+        assert anonymous.get("/api/dashboard/work").status_code == 401
+        assert anonymous.get("/api/dashboard/schedules").status_code == 401

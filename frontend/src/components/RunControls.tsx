@@ -215,12 +215,7 @@ export function InAppReview({
             <button
               key={control}
               className={`review-btn review-btn-${control}`}
-              disabled={
-                disabled ||
-                pending !== null ||
-                needsGuidance ||
-                (control === 'approve' && Boolean(ask.artifact_id) && !artifact)
-              }
+              disabled={disabled || pending !== null || needsGuidance}
               title={needsGuidance ? 'add an answer or a note first' : undefined}
               onClick={() => choose(control)}
             >

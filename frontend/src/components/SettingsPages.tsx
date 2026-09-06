@@ -37,53 +37,15 @@ import {
 } from './settings'
 
 const SECTIONS = [
-  {
-    id: 'providers',
-    label: 'Providers',
-    group: 'AI execution',
-    fields: ['Subscription', 'API key', 'Provider', 'Models'],
-  },
-  {
-    id: 'agents',
-    label: 'Agent defaults',
-    group: 'AI execution',
-    fields: [
-      'Harness',
-      'Model',
-      'Billing',
-      'Effort',
-      'Fast mode',
-      'Timeout',
-      'Unattended runs use',
-    ],
-  },
-  {
-    id: 'connections',
-    label: 'Connections',
-    group: 'Tools & access',
-    fields: ['Services', 'Accounts', 'Revoked', 'Credentials', 'Grants'],
-  },
-  {
-    id: 'mcp',
-    label: 'MCP servers',
-    group: 'Tools & access',
-    fields: ['Registry', 'Name', 'URL', 'Token'],
-  },
-  { id: 'skills', label: 'Skills', group: 'Tools & access', fields: ['Repository', 'Collection'] },
-  {
-    id: 'browser-sessions',
-    label: 'Browser sessions',
-    group: 'Tools & access',
-    fields: ['Session', 'Site', 'Login'],
-  },
-  { id: 'general', label: 'General', group: 'Personal', fields: ['Timezone'] },
-  {
-    id: 'api-tokens',
-    label: 'API tokens',
-    group: 'Personal',
-    fields: ['Token name', 'Personal API token'],
-  },
-  { id: 'apps', label: 'App settings', group: 'Apps', fields: [] },
+  { id: 'providers', label: 'Providers', group: 'AI execution' },
+  { id: 'agents', label: 'Agent defaults', group: 'AI execution' },
+  { id: 'connections', label: 'Connections', group: 'Tools & access' },
+  { id: 'mcp', label: 'MCP servers', group: 'Tools & access' },
+  { id: 'skills', label: 'Skills', group: 'Tools & access' },
+  { id: 'browser-sessions', label: 'Browser sessions', group: 'Tools & access' },
+  { id: 'general', label: 'General', group: 'Personal' },
+  { id: 'api-tokens', label: 'API tokens', group: 'Personal' },
+  { id: 'apps', label: 'App settings', group: 'Apps' },
 ]
 
 function withField(
@@ -138,12 +100,7 @@ export function SettingsPages({
   ]
   const executionReady = executionQueries.every((query) => query.isSuccess)
   const executionFailed = executionQueries.some((query) => query.isError)
-  const apps = (appsQuery.data?.apps ?? []).filter(
-    (entry) =>
-      entry.settings.length > 0 ||
-      entry.agents.length > 0 ||
-      entry.workflows.some((workflow) => workflow.fields.length > 0),
-  )
+  const apps = appsQuery.data?.apps ?? []
   const harnesses = harnessesQuery.data ?? []
   const catalogs = catalogsQuery.data ?? []
   const providers = knownProviders(providersQuery.data ?? [], catalogs)
@@ -233,6 +190,8 @@ export function SettingsPages({
 
   useEffect(() => {
     if (location === '/settings') navigate('/settings/providers', { replace: true })
+    const movedApp = /^\/settings\/apps\/([^/]+)/.exec(location)?.[1]
+    if (movedApp) navigate(`/apps/${movedApp}/settings`, { replace: true })
   }, [location, navigate])
 
   useLayoutEffect(() => {
@@ -383,7 +342,7 @@ export function SettingsPages({
       }))
       confirmation.current?.close()
       pending.current = null
-      navigate(appName ? `/apps/${appName}/settings` : `/settings/${page}`)
+      if (!appName && page !== section) navigate(`/settings/${page}`)
       window.requestAnimationFrame(() => errorNotice.current?.focus())
     } finally {
       setSaving(false)
@@ -397,13 +356,11 @@ export function SettingsPages({
     setAppEdits((current) => ({ ...current, [name]: change(current[name] ?? {}) }))
   }
 
-  const searchResults = SECTIONS.flatMap((entry) =>
-    [entry.label, ...entry.fields].map((label) => ({
-      label,
-      owner: entry.label,
-      path: `/settings/${entry.id}`,
-    })),
-  )
+  const searchResults = SECTIONS.map((entry) => ({
+    label: entry.label,
+    owner: entry.label,
+    path: `/settings/${entry.id}`,
+  }))
     .concat(
       apps.flatMap((entry) =>
         [
@@ -659,6 +616,9 @@ export function SettingsPages({
                     catalogsQuery.error,
                   ].find((error) => error)?.message ?? null
                 }
+                onRetry={() => {
+                  for (const query of executionQueries) if (query.isError) void query.refetch()
+                }}
               />
             )}
             {page === 'connections' && (

@@ -533,7 +533,7 @@ async def test_lifespan_composes_the_endpoint_once(app, monkeypatch):
 
     monkeypatch.setattr(mcp_app.router, "lifespan_context", counting)
     async with app.router.lifespan_context(app), asgi_client(app) as client:
-        assert (await client.get("/api/system/health")).status_code == 200
+        assert (await client.get("/health")).status_code == 200
     assert entered == [1]
 
 

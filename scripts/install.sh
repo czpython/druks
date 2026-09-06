@@ -244,7 +244,7 @@ Stack is up. Verify with:
 
 Then finish in the dashboard. Connect a provider under
 Settings → Providers. Agent runs require the selected provider credential.
-Connect the GitHub App that Druks uses under Settings → Services.
+Connect the GitHub App that Druks uses under Settings → Connections → Services.
 MSG
 
   if [ "$PROVIDER" = "docker" ]; then

@@ -126,7 +126,7 @@ describe('the lent run controls', () => {
     expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/artifacts/art-1')
   })
 
-  it('blocks approval after an artifact read fails and allows a retry', async () => {
+  it('keeps the gate answerable when the artifact read fails and offers a retry', async () => {
     const fetchMock = vi.fn(
       async () => new Response('nope', { status: 404, statusText: 'Not Found' }),
     )
@@ -141,7 +141,7 @@ describe('the lent run controls', () => {
       'Could not load the review artifact.',
     )
     expect((screen.getByRole('button', { name: 'Approve' }) as HTMLButtonElement).disabled).toBe(
-      true,
+      false,
     )
     fetchMock.mockImplementation(
       async () =>
