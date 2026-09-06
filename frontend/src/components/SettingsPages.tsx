@@ -14,7 +14,6 @@ import { appLabel } from '../apps/registry'
 import { useTicker } from '../lib/useTicker'
 import { absTime } from '../lib/format'
 import { harnessColors } from '../lib/harnessColors'
-import { localName } from '../lib/feed'
 import { Sidebar } from './Sidebar'
 import { BrowserSessionsPane } from './BrowserSessionsPane'
 import {
@@ -383,7 +382,7 @@ export function SettingsPages({
       }
     }),
     ...entry.agents.flatMap((agent) => [SETTINGS_FIELDS.harness, SETTINGS_FIELDS.model, SETTINGS_FIELDS.billing, SETTINGS_FIELDS.effort, SETTINGS_FIELDS.timeout].map((field) => ({
-      label: `${field.label} · ${localName(agent.name)}`, owner: appLabel(entry.name), kind: 'Field',
+      label: `${field.label} · ${agent.label}`, owner: appLabel(entry.name), kind: 'Field',
       terms: `agent override inheritance ${agent.description}`,
       path: `/apps/${entry.name}/settings/agents?field=${encodeURIComponent(`agent.${agent.name}.${field.field}`)}`,
     }))),

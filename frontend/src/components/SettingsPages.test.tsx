@@ -46,6 +46,7 @@ const userSettings = {
 
 const coder: AgentSetting = {
   name: 'software_factory.coder',
+  label: 'coder',
   description: 'writes the change',
   harness: 'codex',
   harnessSource: 'agent',
@@ -61,6 +62,7 @@ const coder: AgentSetting = {
 
 const critic: AgentSetting = {
   name: 'review.critic',
+  label: 'critic',
   description: 'reviews the change',
   harness: 'opencode',
   harnessSource: 'agent',

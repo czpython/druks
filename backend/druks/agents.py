@@ -90,7 +90,7 @@ class AgentOutput(BaseModel):
 @dataclass(frozen=True)
 class Agent:
     contract: type[AgentOutput]
-    # Display label for the settings UI; ``id`` is shown when it's None.
+    # Display label for the settings UI; the attribute name shows when it's None.
     name: str | None = None
     # Short human-friendly blurb of what the agent does, shown in the settings UI.
     description: str = ""

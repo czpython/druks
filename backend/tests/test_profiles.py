@@ -14,6 +14,7 @@ from druks.harnesses.opencode import OpenCodeHarness
 from druks.harnesses.profiles import check_profile, get_profile
 from druks.harnesses.providers import AnthropicProvider
 from druks.sandbox.constants import MAX_AGENT_TIMEOUT_SECONDS
+from druks.user_settings import reads
 from druks.user_settings.models import SettingsOverride, UserSettings
 from druks.workflows import WorkflowError, current_workflow
 
@@ -221,7 +222,9 @@ async def test_two_apps_declare_the_same_agent_name(druks_db):
 
     class BugHunter(App):
         name = "bug_hunter"
-        file_tickets = agents.Agent(prompt="probe.md", contract=_Output, timeout=300)
+        file_tickets = agents.Agent(
+            name="File tickets", prompt="probe.md", contract=_Output, timeout=300
+        )
 
     try:
         await _subscription("a@example.com")
@@ -229,6 +232,10 @@ async def test_two_apps_declare_the_same_agent_name(druks_db):
         declared = (Ticketing.agents(), BugHunter.agents())
         ticketing = await get_profile(Ticketing.file_tickets.id, None)
         bug_hunter = await get_profile(BugHunter.file_tickets.id, None)
+        settings = [
+            await reads.get_agent_setting(agent)
+            for agent in (Ticketing.file_tickets, BugHunter.file_tickets)
+        ]
     finally:
         for app in (Ticketing, BugHunter):
             agent_registry._items.pop(app.file_tickets.id)
@@ -240,3 +247,8 @@ async def test_two_apps_declare_the_same_agent_name(druks_db):
     assert declared == ([Ticketing.file_tickets], [BugHunter.file_tickets])
     assert (ticketing.effort, ticketing.timeout) == ("high", 1800)
     assert (bug_hunter.effort, bug_hunter.timeout) == ("low", 300)
+    # The settings wire keys on the id; the declared name is only its label.
+    assert [(setting.name, setting.label, setting.effort) for setting in settings] == [
+        ("ticketing.file_tickets", "file_tickets", "high"),
+        ("bug_hunter.file_tickets", "File tickets", "low"),
+    ]

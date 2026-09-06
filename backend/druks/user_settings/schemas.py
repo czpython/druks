@@ -62,6 +62,7 @@ Source = Literal["agent", "default"]
 
 class AgentSettingResponse(Schema):
     name: str
+    label: str
     description: str
     harness: str
     harness_source: Source

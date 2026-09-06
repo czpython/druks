@@ -193,6 +193,7 @@ def test_agents_lists_every_apps_agents_as_they_resolve(tmp_path: Path):
     assert agents["software_factory.generate_plan"]["harnessSource"] == "default"
     assert set(agents["software_factory.generate_plan"]) == {
         "name",
+        "label",
         "description",
         "harness",
         "harnessSource",
@@ -268,6 +269,7 @@ def test_apps_surface_build_agents_and_workflow_defaults(tmp_path: Path):
     agents = {a["name"]: a for a in build["agents"]}
     assert agents["software_factory.generate_plan"] == {
         "name": "software_factory.generate_plan",
+        "label": "generate_plan",
         "description": "ticket → implementation plan",
         "harness": "claude",
         "harnessSource": "default",
