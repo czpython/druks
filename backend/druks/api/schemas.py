@@ -49,7 +49,7 @@ class OpenSubjectsResponse(Schema):
     subjects: list[OpenSubjectResponse]
 
 
-class OverviewRun(Schema):
+class DashboardRun(Schema):
     app: str
     run: str
     kind: str
@@ -65,12 +65,12 @@ class OverviewRun(Schema):
     failure: str | None
 
 
-class OverviewWork(Schema):
-    rows: list[OverviewRun]
+class DashboardWork(Schema):
+    rows: list[DashboardRun]
     has_more: bool
 
 
-class OverviewSchedule(Schema):
+class DashboardSchedule(Schema):
     app: str
     kind: str
     cron: str | None
@@ -78,8 +78,8 @@ class OverviewSchedule(Schema):
     timezone: str
 
 
-class OverviewSchedules(Schema):
-    rows: list[OverviewSchedule]
+class DashboardSchedules(Schema):
+    rows: list[DashboardSchedule]
 
 
 class ArtifactContent(Schema):
@@ -88,21 +88,3 @@ class ArtifactContent(Schema):
     kind: str
     title: str
     content: str
-
-
-class WebhookSource(Schema):
-    source: str
-    last_at: datetime | None = None
-
-
-class WebhookFreshness(Schema):
-    # One entry per monitored webhook source, with its newest delivery timestamp;
-    # the strip labels a tile per source.
-    sources: list[WebhookSource] = Field(default_factory=list)
-
-
-class DashboardHealth(Schema):
-    web: Literal["ok", "degraded"]
-    webhook_freshness: WebhookFreshness
-    spend_today_usd: float | None
-    tokens_today: int

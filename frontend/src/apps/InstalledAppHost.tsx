@@ -66,7 +66,7 @@ export function InstalledAppHost({ name }: { name: string }) {
     document.head.appendChild(stylesheet)
 
     // The accent the shell assigned this app: the same registry-order
-    // palette the appbar reads, resolved here so the route needs no plumbing.
+    // palette the shell reads, resolved here so the route needs no plumbing.
     const names = registeredApps().map((ui) => ui.name)
     const ctx: ShellContext = {
       shellApi: SHELL_API,

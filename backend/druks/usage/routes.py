@@ -33,10 +33,8 @@ UNATTRIBUTED = "unattributed"
 # An open tab must not hammer the providers.
 _REFRESH_FLOOR_SECONDS = 60
 
-# When a snapshot crosses this age, the pill flips to a warning glyph
-# and the panel surfaces "scraper hasn't run in a while". Tunable but
-# 24h is a reasonable "yeah that's actually broken" threshold given the
-# default 5-min poll cadence.
+# When a snapshot crosses this age the Usage page reports the scraper as
+# stalled. 24h is "actually broken" given the default 5-minute poll cadence.
 _STALE_AFTER_SECONDS = 24 * 60 * 60
 
 # The dashboard sparklines keep this many points regardless of poll cadence.
@@ -108,8 +106,7 @@ async def get_usage_today(account: Account = Depends(current_account)) -> UsageT
     timezone_name = str(timezone)
 
     # Every call counts, even one whose model names no provider (a pre-namespace
-    # id): money spent must not vanish from the display, and the strip's
-    # total_run_spend_between counts them too.
+    # id): money spent must not vanish from the display.
     # Unclaimed calls land in an extra "unattributed" entry — the panel's
     # per-provider cards look up by id and skip it, its grand total sums the
     # whole list.

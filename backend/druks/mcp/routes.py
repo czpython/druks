@@ -225,7 +225,7 @@ async def oauth_callback(state: str = "", code: str = "", error: str = "") -> HT
     # connected-but-disabled server is a dead end nobody asks for.
     await McpServer.set_enabled(name, is_enabled=True)
     # druks opened this tab via window.open, so the page may close itself; the
-    # broadcast tells the settings modal to refetch before the tab goes. The
+    # broadcast tells the settings page to refetch before the tab goes. The
     # text stays for browsers that refuse the close.
     return render_page("mcp_oauth_callback.html", name=name)
 

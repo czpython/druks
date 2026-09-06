@@ -3,9 +3,7 @@ import { Page } from '../components/Page'
 import { UsagePanel } from '../components/UsagePanel'
 
 /**
- * Dedicated route for the usage detail view (formerly a panel on
- * /software_factory). The compact pill stays in the appbar; clicking it lands
- * here.
+ * Dedicated route for the usage detail view, opened from the sidebar.
  *
  * Thin shell — the actual layout, data fetching, refresh button,
  * and parse-failure disclosure all live in :class:`UsagePanel`, so

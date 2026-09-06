@@ -57,13 +57,13 @@
 .sidebar-link:visited { color: var(--text-mid); }
 .sidebar-link:hover { background: var(--surface-2); color: var(--text); }
 .sidebar-link[aria-current="page"] { color: var(--text); background: var(--surface-3); border-color: var(--border-loud); }
-.sidebar-link[aria-current="page"] > svg { color: var(--bucket-run); }
+.sidebar-link[aria-current="page"] > svg { color: var(--text); }
 .sidebar-link > svg { flex-shrink: 0; }
 .sidebar-link > span { min-width: 0; overflow-wrap: anywhere; }
 .sidebar-apps { display: flex; flex: 1; flex-direction: column; min-height: 0; margin-top: 16px; }
 .sidebar-group-title { display: flex; align-items: baseline; justify-content: space-between; padding: 0 10px 8px; color: var(--text-dim); font-size: 13px; }
 .sidebar-search { display: flex; flex: 0 0 auto; align-items: center; min-height: 40px; gap: 8px; padding: 0 10px; margin-bottom: 8px; border: 1px solid var(--border-loud); border-radius: 5px; background: var(--bg); color: var(--text-dim); }
-.sidebar-search:focus-within { outline: 2px solid var(--bucket-run); outline-offset: 2px; }
+.sidebar-search:focus-within { outline: 2px solid var(--text-mid); outline-offset: 2px; }
 .sidebar-search > svg { flex-shrink: 0; }
 .sidebar-search input { width: 100%; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--text); font: inherit; padding: 8px 0; }
 .sidebar-search input::placeholder { color: var(--text-dim); }
@@ -84,20 +84,16 @@
 .command-app-navigation { display: flex; flex: 0 0 auto; gap: 20px; padding: 0 40px; border-bottom: 1px solid var(--border); overflow-x: auto; scrollbar-width: thin; }
 .command-tab { display: inline-flex; align-items: center; min-height: 46px; padding: 8px 0; color: var(--text-dim); border-bottom: 2px solid transparent; text-decoration: none; text-transform: capitalize; white-space: nowrap; }
 .command-tab:hover, .command-tab[aria-current="page"] { color: var(--text); }
-.command-tab[aria-current="page"] { border-bottom-color: var(--bucket-run); }
-.command-health-error { margin: 0; padding: 10px 24px; color: var(--bucket-human); font-size: 13px; }
+.command-tab[aria-current="page"] { border-bottom-color: var(--text); }
 .skip-navigation { position: fixed; top: 8px; left: 8px; z-index: 100; transform: translateY(-200%); padding: 12px; background: var(--surface-3); color: var(--text); }
 .skip-navigation:focus { transform: none; }
-.command-center :is(a, button, input, select, textarea):focus-visible { outline: 2px solid var(--bucket-run); outline-offset: 3px; }
-.command-center .sidebar-search input:focus-visible { outline: none; }
-::selection { background: var(--border-loud); color: var(--text); }
-input, textarea { caret-color: var(--bucket-run); }
-button.mono, label.mono { font-family: var(--font-sans); font-size: 15px; }
+:is(.sidebar, .command-header, .command-app-navigation) :is(a, button, input):focus-visible { outline: 2px solid var(--text); outline-offset: 3px; }
+.sidebar-search input:focus-visible { outline: none; }
 .command-center :is(.review-question legend, .review-option, .review-note, .review-btn, .ins-needs-body) { font-family: var(--font-sans); font-size: 15px; }
 .command-center :is(.review-artifact-title, .review-helper, .review-error, .review-recommended) { font-family: var(--font-sans); font-size: 13px; }
 .command-center .review-option { min-height: 44px; }
 .command-center .subject-run { font-family: var(--font-sans); }
-.command-center :is(.wic-op, .wic-call)[role="button"]:focus-visible { outline: 2px solid var(--bucket-run); outline-offset: -2px; }
+.command-center :is(.wic-op, .wic-call)[role="button"]:focus-visible { outline: 2px solid var(--text); outline-offset: -2px; }
 
 @media (max-width: 1024px) {
   .command-header { padding-inline: 24px; }
@@ -123,5 +119,5 @@ button.mono, label.mono { font-family: var(--font-sans); font-size: 15px; }
   .back-to-app { min-height: 44px; }
   .command-center :is(input, select, textarea) { font-size: 16px; }
   .sidebar-search, .sidebar-search input { min-height: 44px; }
-  .command-center :is(button, .wic-op[role="button"], .wic-call[role="button"]) { min-height: 44px; }
+  :is(.sidebar button, .command-header button, .wic-op[role="button"], .wic-call[role="button"]) { min-height: 44px; }
 }

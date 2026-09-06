@@ -64,6 +64,7 @@ function renderProviders(snapshot: UsageProviderSummary = usage) {
         ]}
         loading={false}
         requestError={null}
+        onRetry={() => {}}
       />
     </QueryClientProvider>,
   )

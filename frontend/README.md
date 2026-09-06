@@ -25,8 +25,7 @@ runs lint, tests, and build for PRs into `main` and `codex/` stack branches.
 
 - The work sidebar and searchable installed app roster
 - Settings
-- Overview, Events, and Usage
-- The optional system-health strip
+- Dashboard, Events, and Usage
 - Shared routing and fallback behavior.
 
 Bundled app UI lives under `src/apps/<name>/`. Its module calls
@@ -35,14 +34,14 @@ declares the subnav tabs. The roster supplies these tabs to the frontend.
 Import the module one time from `src/apps/index.ts`. The shell finds the
 registration and does not hardcode the app name.
 
-The work sidebar keeps the same destinations across app pages. Overview opens
-at `/`. Events and Usage have shared routes. App-declared navigation appears below the page
+The work sidebar keeps the same destinations across app pages. The Dashboard
+opens at `/`. Events and Usage have shared routes. App-declared navigation appears below the page
 header. Settings opens from the bottom of the sidebar. Below 650 px, a
 navigation button opens a modal drawer. Escape closes the drawer and returns
 focus to the button.
 
 Shared settings use `/settings/<section>` routes. Search matches section names
-and field labels. General and Agent defaults retain separate
+and app field labels. General and Agent defaults retain separate
 drafts across settings pages. Save changes applies only the current page.
 Leaving Settings offers Save, Discard, and Stay. Save applies each dirty page;
 a failed request keeps the operator on that page with its draft. Resource
@@ -75,22 +74,22 @@ module exposes `mount(el, ctx)`. Druks serves the module under `/app/<name>`.
 The shell imports and mounts it below the chrome. An import map (`src/runtime/`)
 supplies one shared React instance. See the app-author guide.
 
-## Overview and owner links
+## Dashboard and owner links
 
-Overview makes one current-work read and one schedule read, refreshed every
+The Dashboard makes one current-work read and one schedule read, refreshed every
 30 seconds and on window focus, and sorts the rows into sections in the
 browser. A failed refresh keeps the last read visible and offers Retry. See
-[the current-work contract](../docs/concepts.md#current-work-in-overview) for
+[the current-work contract](../docs/concepts.md#current-work-on-the-dashboard) for
 selection, authorization, and limits.
 
 An app's `subjectPath(subject, target?)` returns its own destination. For
-Overview, `target` carries `run` and, for a decision, `parkedAt`. Build the
+the Dashboard, `target` carries `run` and, for a decision, `parkedAt`. Build the
 query with `targetQuery` from the registry. The owner selects that run and
 passes `parkedAt` to `GateControls`, which shows a stale-link message when the
 current round differs. Return `undefined` when the app has no destination.
 
 The generic Python-app subject page supports this target. An app's standalone
-JavaScript frontend must supply its own navigation before Overview can link to
+JavaScript frontend must supply its own navigation before the Dashboard can link to
 a specific run.
 
 Keep raw paths and queries in the retained work context. Wouter's public

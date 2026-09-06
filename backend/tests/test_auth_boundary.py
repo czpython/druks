@@ -12,7 +12,6 @@ from fastapi.routing import APIRoute, _IncludedRouter
 
 # Every /api path allowed to skip the identity gate; additions are deliberate.
 EXEMPT_API_PATHS = {
-    "/api/system/health",
     "/api/auth/me",
     "/api/providers",
     "/api/providers/{provider_id}/connection/start",

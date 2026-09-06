@@ -18,10 +18,7 @@ export interface AppUI {
   // Where a feed row about one of this app's subjects navigates. The shell knows
   // an app has subjects, never where its pages put them.
   subjectPath?: (subject: { type: string; id: string }, target?: SubjectTarget) => string | undefined
-  // Whether the persistent system-health strip (webhook + spend) rides above this
-  // app's list and detail surfaces. Opt-in — an app that doesn't track
-  // code hosts leaves it off and the band never renders.
-  systemStrip?: boolean
+  parentPath?: (location: string) => string | undefined
 }
 
 /** The run an owner link selects and, for a decision, its request round. */

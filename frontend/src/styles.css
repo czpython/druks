@@ -459,29 +459,6 @@ button { background: none; border: none; color: inherit; cursor: pointer; font: 
 
 .empty-action { margin-top: 12px; }
 
-.sys-strip {
-  display: flex; align-items: center; gap: 0;
-  height: 28px; padding: 0 16px;
-  background: var(--surface);
-  border-bottom: 1px solid var(--border);
-  font-size: 11px;
-  flex-shrink: 0;
-}
-.sys-item {
-  display: inline-flex; align-items: baseline; gap: 6px;
-  padding: 0 14px;
-  border-right: 1px solid var(--border-soft);
-  height: 100%;
-  align-items: center;
-}
-.sys-item:first-child { padding-left: 0; }
-.sys-item-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-dim); white-space: nowrap; }
-.sys-item-value { font-size: 11px; color: var(--text-mid); font-variant-numeric: tabular-nums; white-space: nowrap; }
-.sys-item-warn .sys-item-value { color: var(--decision-request-revision); }
-.sys-item-warn .sys-item-label { color: var(--decision-request-revision); }
-.sys-item-bad  .sys-item-value { color: var(--bucket-dead); }
-.sys-item-bad  .sys-item-label { color: var(--bucket-dead); }
-.sys-item-bad  { animation: pulse 2.4s ease-in-out infinite; }
 
 .panel-empty { padding: 16px; }
 
@@ -543,7 +520,6 @@ a.row-repo:hover { color: var(--bucket-run); text-decoration: underline; }
 .row-fin-what { font-size: 11px; white-space: nowrap; }
 
 @media (max-width: 1100px) {
-  .sys-strip { overflow-x: auto; }
 }
 
 .row-work-item {

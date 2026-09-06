@@ -44,7 +44,7 @@ export function SubjectPage({ app }: { app: string }) {
     )
   return (
     <Page>
-      <p role="alert">This subject address is invalid. Return to Overview to open the work.</p>
+      <p role="alert">This subject address is invalid. Return to the Dashboard to open the work.</p>
     </Page>
   )
 }

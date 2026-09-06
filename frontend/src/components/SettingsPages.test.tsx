@@ -978,16 +978,75 @@ describe('canonical app settings', () => {
     stubFetch(false)
     vi.spyOn(api, 'getAppSettings').mockResolvedValue({
       ...appSettings,
-      apps: [{ ...appSettings.apps[0]!, agents: [], settings: [], workflows: [] }],
+      apps: appSettings.apps.filter((entry) => entry.name !== 'software_factory'),
     })
     renderSettings('/settings/apps')
-    expect(await screen.findByText('No installed app declares settings.')).toBeTruthy()
+    expect(await screen.findByRole('link', { name: 'review' })).toBeTruthy()
     expect(screen.queryByRole('link', { name: 'software factory' })).toBeNull()
     fireEvent.click(screen.getByRole('link', { name: 'Back to Druks' }))
     const appLink = await screen.findByRole('link', { name: 'software factory' })
     fireEvent.click(appLink)
     await waitFor(() => expect(window.location.pathname).toBe('/software_factory'))
     expect(screen.queryByRole('navigation', { name: 'software factory pages' })).toBeNull()
+  })
+
+  it('saves a workflow cadence through the app settings route', async () => {
+    const settings = structuredClone(appSettings)
+    settings.apps.find((app) => app.name === 'field_notes')!.workflows = [
+      {
+        kind: 'field_notes.sweep',
+        fields: [
+          {
+            name: 'schedule',
+            label: 'Cadence',
+            help: '',
+            type: 'cron',
+            value: '0 0 * * *',
+            default: '0 0 * * *',
+            choices: null,
+            section: '',
+            visibleWhenField: '',
+            visibleWhenValue: null,
+            secretSet: null,
+            multiline: false,
+            overridden: false,
+          },
+        ],
+      },
+    ]
+    stubFetch(false, {}, settings)
+    renderSettings('/apps/field_notes/settings')
+    const cadence = (await screen.findByLabelText('Cadence')) as HTMLSelectElement
+    expect(cadence.value).toBe('0 0 * * *')
+    fireEvent.change(cadence, { target: { value: '0 * * * *' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+    await waitFor(() => expect(screen.getByText('Saved')).toBeTruthy())
+    const request = vi
+      .mocked(fetch)
+      .mock.calls.find(
+        ([url, init]) => String(url) === '/api/settings/apps' && init?.method === 'PATCH',
+      )!
+    expect(JSON.parse(String(request[1]!.body))).toEqual({
+      appSettings: {},
+      workflowSettings: { 'field_notes.sweep': { schedule: '0 * * * *' } },
+    })
+  })
+
+  it('finds a section and an app field by label', async () => {
+    stubFetch(false)
+    renderSettings('/settings/providers')
+    fireEvent.change(await screen.findByLabelText('Search settings'), {
+      target: { value: 'notebook' },
+    })
+    const results = screen.getByLabelText('Settings search results')
+    expect(within(results).getByRole('link', { name: /Notebook/ }).getAttribute('href')).toBe(
+      '/apps/field_notes/settings',
+    )
+    expect(within(results).getByText('field notes')).toBeTruthy()
+    fireEvent.change(screen.getByLabelText('Search settings'), { target: { value: 'mcp' } })
+    expect(within(results).getByRole('link', { name: /MCP servers/ }).getAttribute('href')).toBe(
+      '/settings/mcp',
+    )
   })
 
   it('does not show an empty Agents page for an app that only declares options', async () => {

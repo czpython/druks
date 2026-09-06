@@ -5,8 +5,8 @@ import { appHome } from '../apps/registry'
 /**
  * Inline back link for app-independent detail pages (/usage, /events).
  *
- * Those pages are reached from appbar pills and otherwise have no
- * obvious navigation back to an app dashboard — operators pressed
+ * Those pages are reached from the sidebar and otherwise have no
+ * obvious navigation back to an app — operators pressed
  * Esc, got nothing, hunted for a close button, gave up. The Esc
  * handler in ``AppShell`` now routes back via the global keymap;
  * this component is the visible counterpart for operators who don't

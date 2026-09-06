@@ -151,7 +151,7 @@ describe('ProviderConnect', () => {
     expect(screen.queryByText('Remove API key')).toBeNull()
   })
 
-  it('shows each quota window and keeps reset times relative', () => {
+  it('shows the 5-hour and general weekly quotas and keeps reset times relative', () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-09-05T10:00:00Z'))
     renderCard(provider(), {
@@ -184,10 +184,8 @@ describe('ProviderConnect', () => {
 
     expect(screen.getAllByText('Weekly')).toHaveLength(1)
     expect(screen.getByLabelText('83% remaining').textContent).toBe('83% left')
-    expect(screen.getByLabelText('69% remaining').textContent).toBe('69% left')
-    expect(screen.getByLabelText('50% remaining').textContent).toBe('50% left')
-    expect(screen.getByText('Weekly · Fable')).toBeTruthy()
-    expect(screen.getByText('Weekly · GPT reserve')).toBeTruthy()
+    expect(screen.queryByLabelText('69% remaining')).toBeNull()
+    expect(screen.queryByText('Weekly · Fable')).toBeNull()
     expect(screen.getByText('Resets in 6d')).toBeTruthy()
     expect(screen.getByText('Resets in 2h').getAttribute('dateTime')).toBe('2026-09-05T12:00:00Z')
     expect(screen.getByText('Resets in 2h').getAttribute('title')).toBeTruthy()

@@ -95,7 +95,7 @@ class App:
     icon: ClassVar[str] = "box"
     # One-line blurb shown in the settings pane when the app is selected.
     description: ClassVar[str] = ""
-    # The app's appbar subnav tabs, as page names in the order they show. Each
+    # The app's navigation tabs, as page names in the order they show. Each
     # names a static top-level page, and the tab wears that page's label, so an
     # app never spells a label twice. An app that ships its own frontend
     # declares its tabs there instead.

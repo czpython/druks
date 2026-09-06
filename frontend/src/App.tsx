@@ -23,9 +23,8 @@ import { Page } from './components/Page'
 import { SettingsPages } from './components/SettingsPages'
 import { Sidebar } from './components/Sidebar'
 import { EventsPage } from './pages/EventsPage'
-import { OverviewPage } from './pages/OverviewPage'
+import { DashboardPage } from './pages/DashboardPage'
 import { LoginWindowPage } from './pages/LoginWindowPage'
-import { SystemStrip } from './components/SystemStrip'
 import { UsagePage } from './pages/UsagePage'
 import { appAccent } from './lib/appColors'
 import './apps'
@@ -33,6 +32,7 @@ import { registerInstalledApps } from './apps/installed'
 import { appHome, appLabel, appOwning, getAppUI, registeredApps } from './apps/registry'
 
 const ROUTER_BASE = import.meta.env.BASE_URL.replace(/\/$/, '')
+const SHELL_PAGES: Record<string, string> = { '/': 'Dashboard', '/events': 'Events', '/usage': 'Usage' }
 
 export function App({ account }: { account: Account }) {
   const unsavedFormRef = useRef<UnsavedForm | null>(null)
@@ -228,13 +228,6 @@ function AppShell({
   const app = urlApp ?? lastApp ?? defaultApp
   const ui = app ? getAppUI(app) : undefined
   const [search, setSearch] = useState('')
-  const wantsHealth = Boolean(urlApp && ui?.systemStrip)
-  const healthQuery = useQuery({
-    queryKey: ['system-health'],
-    queryFn: api.systemHealth,
-    enabled: wantsHealth,
-    refetchInterval: wantsHealth ? 4000 : false,
-  })
   const navCount = useRef(-1)
   useEffect(() => {
     navCount.current += 1
@@ -254,43 +247,24 @@ function AppShell({
         return
       }
       if (event.key === 'Escape') {
-        const workItemPath = /^(\/software_factory\/work-items\/[^/]+)\/agent-calls\//.exec(
-          location,
-        )?.[1]
-        if (workItemPath) {
-          navigate(workItemPath)
-          return
-        }
-        if (
-          location.startsWith('/software_factory/work-items/') ||
-          location === '/usage' ||
-          location === '/events'
-        ) {
+        const sharedDetail = location === '/usage' || location === '/events'
+        const parent = ui?.parentPath?.(location) ?? (sharedDetail && app ? appHome(app) : undefined)
+        if (parent) {
           if (navCount.current > 0) window.history.back()
-          else if (app) navigate(appHome(app))
+          else navigate(parent)
         }
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [location, app, navigate, defaultApp, hidden])
+  }, [location, app, ui, navigate, defaultApp, hidden])
 
   const declaredNavigation =
     ui?.navigation ?? rosterQuery.data?.find((entry) => entry.name === app)?.navigation
-  const appSettings = settingsQuery.data?.apps.find((entry) => entry.name === app)
-  const hasSettings = Boolean(
-    appSettings &&
-    (appSettings.settings.length ||
-      appSettings.agents.length ||
-      appSettings.workflows.some((workflow) => workflow.fields.length)),
-  )
+  const hasSettings = Boolean(settingsQuery.data?.apps.some((entry) => entry.name === app))
   const navigation: [string, string][] = urlApp
     ? [
-        ...(declaredNavigation?.length
-          ? declaredNavigation
-          : hasSettings
-            ? [[appHome(urlApp), 'Home'] as [string, string]]
-            : []),
+        ...(declaredNavigation ?? []),
         ...(hasSettings ? [[`/apps/${urlApp}/settings`, 'Settings'] as [string, string]] : []),
       ]
     : []
@@ -301,16 +275,7 @@ function AppShell({
   const visibleApps = registered.filter((name) =>
     appLabel(name).toLowerCase().includes(search.toLowerCase().trim()),
   )
-  const title =
-    location === '/'
-      ? 'Overview'
-      : location === '/events'
-        ? 'Events'
-        : location === '/usage'
-          ? 'Usage'
-          : app
-            ? appLabel(app)
-            : 'Druks'
+  const title = SHELL_PAGES[location] ?? (app ? appLabel(app) : 'Druks')
 
   return (
     <div className="command-center" hidden={hidden}>
@@ -326,7 +291,7 @@ function AppShell({
               aria-current={location === '/' ? 'page' : undefined}
             >
               <LayoutGrid size={17} aria-hidden="true" />
-              Overview
+              Dashboard
             </Link>
             <Link
               href="/events"
@@ -431,15 +396,9 @@ function AppShell({
         </nav>
       )}
       <main id="main-content" tabIndex={-1} className="app-main" data-app={app ?? undefined}>
-        {wantsHealth && healthQuery.data && <SystemStrip health={healthQuery.data} />}
-        {wantsHealth && healthQuery.isError && (
-          <p className="command-health-error" role="status">
-            Health information is unavailable.
-          </p>
-        )}
         <Switch>
           <Route path="/">
-            <OverviewPage
+            <DashboardPage
               apps={
                 rosterQuery.data?.filter((entry) => !entry.builtin).map((entry) => entry.name) ?? []
               }

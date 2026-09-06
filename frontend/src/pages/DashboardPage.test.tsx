@@ -4,13 +4,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Router } from 'wouter'
 
 import { api } from '../api/client'
-import type { OverviewRun } from '../api/types'
+import type { DashboardRun } from '../api/types'
 import { registerAppUI, targetQuery } from '../apps/registry'
-import { OverviewPage } from './OverviewPage'
+import { DashboardPage } from './DashboardPage'
 
-vi.mock('../api/client', () => ({ api: { overviewWork: vi.fn(), overviewSchedules: vi.fn() } }))
+vi.mock('../api/client', () => ({ api: { dashboardWork: vi.fn(), dashboardSchedules: vi.fn() } }))
 
-const pending: OverviewRun = {
+const pending: DashboardRun = {
   app: 'notes',
   run: 'run-one',
   kind: 'summarize',
@@ -25,8 +25,8 @@ const pending: OverviewRun = {
   requestUrl: null,
   failure: null,
 }
-const work = vi.mocked(api.overviewWork)
-const schedules = vi.mocked(api.overviewSchedules)
+const work = vi.mocked(api.dashboardWork)
+const schedules = vi.mocked(api.dashboardSchedules)
 const href = (link: HTMLElement) => new URL(link.getAttribute('href')!, window.location.origin)
 
 function mount(apps: string[] = ['notes']) {
@@ -34,7 +34,7 @@ function mount(apps: string[] = ['notes']) {
   render(
     <QueryClientProvider client={client}>
       <Router>
-        <OverviewPage apps={apps} />
+        <DashboardPage apps={apps} />
       </Router>
     </QueryClientProvider>,
   )
@@ -56,7 +56,7 @@ afterEach(() => {
   vi.clearAllMocks()
 })
 
-describe('Overview', () => {
+describe('Dashboard', () => {
   it('sorts one read into sections and links a decision to its run and round', async () => {
     work.mockResolvedValue({
       rows: [
@@ -88,7 +88,7 @@ describe('Overview', () => {
     const client = mount()
     await screen.findByRole('link', { name: 'Review' })
     work.mockRejectedValue(new Error('Offline'))
-    await act(() => client.invalidateQueries({ queryKey: ['overview'] }))
+    await act(() => client.invalidateQueries({ queryKey: ['dashboard'] }))
     expect((await screen.findByRole('alert')).textContent).toContain(
       'last successful read remains visible',
     )

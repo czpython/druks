@@ -59,9 +59,8 @@ async def _seed_agent_call(druks_db, *, model: str = "openai/gpt-5.5"):
 async def test_usage_today_counts_calls_whose_model_no_picker_claims(client, druks_db) -> None:
     # Model ids churn on deploys (opus-4-7 → 4-8), so a call finished earlier today
     # can carry an id no picker claims any more. Money spent must not vanish from
-    # the display — the sys-strip's total_run_spend_between counts every call, and
-    # the two surfaces must quote the same number. Unclaimed models land in the
-    # "unattributed" bucket the panel's grand total sums.
+    # the display. Unclaimed models land in the "unattributed" bucket the panel's
+    # grand total sums.
     call = await _seed_agent_call(druks_db, model="claude-opus-4-5")
     call.account_id = await _account_id()
     call.finished_at = datetime.now(UTC)

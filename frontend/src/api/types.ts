@@ -16,7 +16,7 @@ export type RunState =
   // The run's DBOS workflow row is gone; it will never start.
   | 'orphaned'
 
-export interface OverviewRun {
+export interface DashboardRun {
   app: string
   run: string
   kind: string
@@ -32,12 +32,12 @@ export interface OverviewRun {
   failure: string | null
 }
 
-export interface OverviewWork {
-  rows: OverviewRun[]
+export interface DashboardWork {
+  rows: DashboardRun[]
   hasMore: boolean
 }
 
-export interface OverviewSchedule {
+export interface DashboardSchedule {
   app: string
   kind: string
   cron: string | null
@@ -45,8 +45,8 @@ export interface OverviewSchedule {
   timezone: string
 }
 
-export interface OverviewSchedules {
-  rows: OverviewSchedule[]
+export interface DashboardSchedules {
+  rows: DashboardSchedule[]
 }
 
 // The base every app's subject summary satisfies; ``id`` keys its status,
@@ -487,23 +487,6 @@ export interface GateAnswer {
   note: string
 }
 
-
-export interface WebhookSource {
-  source: string
-  lastAt?: string | null
-}
-
-export interface WebhookFreshness {
-  // One tile per active source (code host + configured tracker).
-  sources: WebhookSource[]
-}
-
-export interface DashboardHealth {
-  web: 'ok' | 'degraded'
-  webhookFreshness: WebhookFreshness
-  spendTodayUsd: number | null
-  tokensToday: number
-}
 
 export type AgentEffort = 'low' | 'medium' | 'high'
 

@@ -631,24 +631,6 @@ class AgentCall(Base, Uuid7Pk):
         )
         return list(await db_session().scalars(stmt))
 
-    @classmethod
-    async def total_run_spend_between(cls, *, start: datetime, end: datetime) -> tuple[float, int]:
-        stmt = (
-            select(cls.cost_usd, cls.cost_metadata)
-            .where(cls.finished_at.is_not(None))
-            .where(cls.finished_at >= start)
-            .where(cls.finished_at < end)
-        )
-        cost = 0.0
-        tokens = 0
-        for cost_usd, metadata in await db_session().execute(stmt):
-            if cost_usd is not None:
-                cost += float(cost_usd)
-            canonical = normalize_token_usage(metadata)
-            if canonical:
-                tokens += canonical["total_tokens"]
-        return cost, tokens
-
     async def record_cost(self, *, cost_usd: float | None, cost_metadata: dict | None) -> None:
         if cost_usd is None and not cost_metadata:
             return
