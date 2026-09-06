@@ -24,6 +24,16 @@ afterEach(() => {
 })
 
 describe('InAppReview', () => {
+  it('renders the artifact title and body without changing app prose', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({
+      kind: 'markdown', title: 'Reply with the date',
+      content: '## Proposed action\n\nReply with the date\n\n## Draft reply\n\nTuesday works.',
+    })))
+    renderReview({ presentation: 'in_app', controls: ['approve'], artifact_id: 'artifact' })
+    expect(await screen.findAllByText('Reply with the date')).toHaveLength(2)
+    expect(screen.getByText('Tuesday works.')).toBeTruthy()
+  })
+
   it('submits empty request changes when the ask carries critique context', async () => {
     const fetchMock = stubFetch()
     const ask: InputRequest = {

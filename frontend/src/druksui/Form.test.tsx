@@ -24,7 +24,14 @@ const readPage = vi.mocked(api.readPage)
 const listApps = vi.mocked(api.listApps)
 
 const PAGES: PageEntry[] = [
-  { name: 'notes', label: 'notes', path: '/field_notes', parent: '', order: 0 },
+  {
+    name: 'notes',
+    label: 'notes',
+    path: '/field_notes',
+    parent: '',
+    subjectType: '',
+    order: 0,
+  },
 ]
 const OPERATIONS: Operation[] = [
   { id: 'write_note', method: 'POST', path: '/api/field_notes/notes' },
@@ -61,8 +68,6 @@ function dialogAction(label: string) {
   return within(screen.getByRole('dialog', { name: label })).getByRole('button', { name: label })
 }
 
-// The roster the page path reads its pages and operations from, so a form the
-// server declares resolves its own operation.
 const ROSTER: App[] = [
   {
     name: 'field_notes',
@@ -72,13 +77,18 @@ const ROSTER: App[] = [
     subjectTypes: [],
     hasFrontend: false,
     navigation: [],
-    pages: [{ name: 'new_note', label: 'new note', path: '/field_notes/notes/new', parent: '', order: 0 }],
+    pages: [{
+      name: 'new_note',
+      label: 'new note',
+      path: '/field_notes/notes/new',
+      parent: '',
+      subjectType: '',
+      order: 0,
+    }],
     operations: OPERATIONS,
   },
 ]
 
-// A page whose only block is the form under test, so a refresh reads the page
-// again and hands the form a freshly declared value.
 function notePage(fields: Field[]): PageSnapshot {
   return { title: 'New note', description: '', controls: [], blocks: [form(fields)], follows: null }
 }
@@ -131,8 +141,6 @@ const BODY: Field = {
   isRequired: false,
 }
 
-// A required field the browser itself will not let past empty; the server's own
-// errors are what the rest of these tests exercise.
 const REQUIRED_BODY: Field = { ...BODY, isRequired: true }
 
 const PHOTO: Field = {
@@ -479,8 +487,6 @@ describe('what an action does next', () => {
     fireEvent.click(screen.getByText('Save'))
 
     await waitFor(() => expect(callOperation).toHaveBeenCalled())
-    // The refresh reads the page again, and the form takes the value the server
-    // now declares, not the one the operator typed nor the one it submitted.
     await waitFor(() =>
       expect((screen.getByLabelText(/Note/) as HTMLInputElement).value).toBe('server truth'),
     )
@@ -522,22 +528,28 @@ describe('what an action does next', () => {
       ],
     }
     const readPage = vi.mocked(api.readPage)
+    const refreshedRegion: Block = { ...region, blocks: [{ block: 'text', text: 'Cleared' }] }
     readPage.mockResolvedValue({
       title: 'x',
       description: '',
       controls: [],
-      blocks: [region],
+      blocks: [{ block: 'text', text: 'Fresh outside text' }, refreshedRegion],
       follows: null,
     })
-    const { queryClient } = renderBlocks([region])
-    const write = vi.spyOn(queryClient, 'setQueryData')
+    const outside: Block = { block: 'text', text: 'Original outside text' }
+    const { queryClient } = renderBlocks([outside, region])
+    const key = ['page', 'field_notes', '/notes/new']
+    const previous: PageSnapshot = {
+      title: 'Original page', description: '', controls: [], blocks: [outside, region], follows: null,
+    }
+    queryClient.setQueryData(key, previous)
 
     fireEvent.click(screen.getByText('Clear'))
 
-    await waitFor(() => expect(readPage).toHaveBeenCalled())
-    // The page is read again, and only the region is put back in.
-    expect(write).toHaveBeenCalled()
-    expect(vi.mocked(queryClient.invalidateQueries)).toBeDefined()
+    await waitFor(() => expect(queryClient.getQueryData(key)).toEqual({
+      ...previous, blocks: [outside, refreshedRegion],
+    }))
+    expect(readPage).toHaveBeenCalledWith('field_notes', '/notes/new')
   })
 
   it('stays put when it says to', async () => {
@@ -563,7 +575,6 @@ describe('what an action does next', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Clear the gist' }))
 
-    // The question is asked in the page, and going back sends nothing.
     expect(screen.getByText('Clear it?')).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: 'Back' }))
     expect(callOperation).not.toHaveBeenCalled()
@@ -582,7 +593,6 @@ describe('what an action does next', () => {
     ])
 
     fireEvent.click(screen.getByRole('button', { name: 'Clear the gist' }))
-    // The question replaces the control, so answering it presses the same name.
     fireEvent.click(screen.getByRole('button', { name: 'Clear the gist' }))
 
     await waitFor(() => expect(callOperation).toHaveBeenCalledTimes(1))
@@ -661,7 +671,6 @@ describe('what an action does next', () => {
       </QueryClientProvider>,
     )
 
-    // The shape did not change, so the operator's edit outlives the refresh.
     expect((screen.getByLabelText(/Note/) as HTMLInputElement).value).toBe('half typed')
   })
 
@@ -683,8 +692,6 @@ describe('what an action does next', () => {
       </QueryClientProvider>,
     )
 
-    // The submit had no refresh, so its reset already cleared the edit; the next
-    // same-shape declaration now shows through.
     expect((screen.getByLabelText(/Note/) as HTMLInputElement).value).toBe('background declared')
   })
 
@@ -711,7 +718,6 @@ describe('what an action does next', () => {
     fireEvent.click(screen.getByText('Clear'))
 
     await waitFor(() => expect(screen.getByText(/saved, but the page did not refresh/)).toBeTruthy())
-    // One write happened, and the control cannot make a second.
     expect(callOperation).toHaveBeenCalledTimes(1)
     expect(screen.getByRole('button', { name: 'Clear' }).hasAttribute('disabled')).toBe(true)
     expect(screen.getByRole('button', { name: 'Clear' }).getAttribute('aria-busy')).toBe('false')
@@ -787,7 +793,6 @@ describe('a secret field', () => {
     expect(input.getAttribute('autocomplete')).toBe('new-password')
     expect(input.getAttribute('data-1p-ignore')).toBe('')
     expect(input.getAttribute('data-lpignore')).toBe('true')
-    // Label, help, and required survive the same as any other field.
     expect(input.required).toBe(true)
     expect(screen.getByText('From your account settings.')).toBeTruthy()
   })
@@ -802,7 +807,6 @@ describe('a secret field', () => {
     expect(callOperation).toHaveBeenCalledWith('POST', '/api/field_notes/notes', {
       token: 'sk-live-abc123',
     })
-    // The successful-submit reset returns the no-value field to empty.
     await waitFor(() =>
       expect((screen.getByLabelText(/Access token/) as HTMLInputElement).value).toBe(''),
     )
@@ -936,7 +940,6 @@ describe('an upload field', () => {
 
     await waitFor(() => expect(callOperation).toHaveBeenCalled())
     expect(upload).toHaveBeenCalledWith('field_notes', chosen)
-    // The operation takes the id. The bytes never reach it.
     expect(callOperation).toHaveBeenCalledWith('POST', '/api/field_notes/notes', {
       photo: 'file-7',
     })

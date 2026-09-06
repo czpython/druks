@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Link, useRouter } from 'wouter'
+import { Link } from 'wouter'
 
 import { subjectApi } from '../api/client'
 import { useSSE } from '../api/sse'
@@ -8,6 +8,7 @@ import type { RunSummary, SubjectResponse } from '../api/types'
 import { EmptyState } from '../components/EmptyState'
 import { Fact, Facts } from '../components/Facts'
 import { Page } from '../components/Page'
+import { useRawLocation } from '../lib/useRawLocation'
 import { queryGate } from '../components/QueryGate'
 import { CancelRun, RetryRun } from '../components/RunControls'
 import { GateControls } from '../druksui/GateControls'
@@ -22,12 +23,8 @@ const isActiveRun = (run: RunSummary) =>
 // wouter's decodeURI leaves an escaped slash in a subject id alone, so the page
 // decodes each part of the raw path once itself.
 export function SubjectPage({ app }: { app: string }) {
-  const router = useRouter()
-  const usePath = router.hook
-  const useSearch = router.searchHook
-  const [path] = usePath(router)
-  const search = useSearch(router)
-  const identity = path.slice(`${router.base}/${app}/`.length)
+  const { path, search, base } = useRawLocation()
+  const identity = path.slice(`${base}/${app}/`.length)
   const slash = identity.indexOf('/')
   let subjectType = ''
   let subjectId = ''

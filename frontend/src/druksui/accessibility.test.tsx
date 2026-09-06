@@ -20,14 +20,19 @@ vi.mock('../api/client', async (importOriginal) => ({
 afterEach(cleanup)
 
 const PAGES: PageEntry[] = [
-  { name: 'notes', label: 'notes', path: '/field_notes', parent: '', order: 0 },
+  {
+    name: 'notes',
+    label: 'notes',
+    path: '/field_notes',
+    parent: '',
+    subjectType: '',
+    order: 0,
+  },
 ]
 const OPERATIONS: Operation[] = [
   { id: 'write_note', method: 'POST', path: '/api/field_notes/notes' },
 ]
 
-// One of every block on the wire, plus the gate controls a parked run adds,
-// so every renderer answers to the rules below.
 const CATALOG: Block[] = [
   ...(catalog as PageSnapshot).blocks,
   { block: 'gate_controls', run: 'run-6f0a' },
@@ -144,8 +149,6 @@ describe('every V1 renderer', () => {
     )
     expect(controls.length).toBeGreaterThan(10)
     for (const control of controls) {
-      // A control reads as its own words, as its label, or as the alternative
-      // text of the image inside it.
       const named =
         control.textContent?.trim() ||
         control.getAttribute('aria-label')?.trim() ||
@@ -153,8 +156,6 @@ describe('every V1 renderer', () => {
         container.querySelector(`label[for="${control.id}"]`)?.textContent?.trim() ||
         control.closest('label')?.textContent?.trim()
       expect(named).toBeTruthy()
-      // Nothing is taken out of the tab order, and every one of them takes
-      // focus in the order it is read.
       expect(control.getAttribute('tabindex')).not.toBe('-1')
       control.focus()
       expect(document.activeElement).toBe(control)
@@ -223,8 +224,6 @@ describe('every V1 renderer', () => {
       </QueryClientProvider>,
     )
 
-    // The grouped inputs take their name from the label around them; the rest
-    // carry an id their own label points at, and no two may share one.
     const ids = Array.from(
       container.querySelectorAll<HTMLElement>('input[id], textarea[id], select[id]'),
       (one) => one.id,
@@ -267,7 +266,6 @@ describe('every V1 renderer', () => {
   it('names every row as well as every column', () => {
     renderCatalog()
 
-    // A value read on its own says which column it is in and which row.
     expect(screen.getAllByRole('rowheader').length).toBeGreaterThan(0)
   })
 

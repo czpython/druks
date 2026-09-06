@@ -159,23 +159,48 @@
 .app-settings-description { margin: 0 0 24px; color: var(--text-mid); }
 .settings-tabs a { display: flex; align-items: center; min-height: 44px; color: var(--text-dim); text-decoration: none; border-bottom: 2px solid transparent; }
 .settings-tabs a[aria-current="page"] { color: var(--text); border-color: var(--text); }
-.app-settings-layout { display: grid; grid-template-columns: minmax(0, 880px) 220px; gap: 28px; }
+.app-settings-layout { display: flex; flex-direction: column; gap: 24px; max-width: 1100px; }
 .app-settings-layout > .set-pane { min-width: 0; padding: 0; }
 .app-settings-layout .set-group { padding: 24px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); }
 .app-settings-layout .set-group-label { font-size: 18px; margin-bottom: 20px; }
 .app-settings-layout .set-field-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; }
 .app-settings-layout .set-field { min-width: 0; }
-.app-settings-owner { padding-left: 20px; border-left: 1px solid var(--border); color: var(--text-mid); font-size: 13px; line-height: 1.5; }
-.app-settings-owner h2 { margin: 0 0 8px; color: var(--text); font-size: 15px; font-weight: 500; }
-.app-settings-owner p { margin: 0 0 16px; }
+.app-settings-owner { order: -1; color: var(--text-mid); font-size: 13px; line-height: 1.5; }
+.app-settings-owner p { display: inline; margin-right: 12px; }
 .app-settings-owner a { display: inline-flex; align-items: center; gap: 6px; color: var(--text); font-size: 15px; text-decoration: none; }
 .app-settings-owner a:hover { text-decoration: underline; }
 .app-settings .set-app-toggles { margin-bottom: 24px; }
-@media (max-width: 1100px) {
-  .app-settings-layout { grid-template-columns: minmax(0, 1fr); }
-  .app-settings-owner { padding: 0; border: 0; }
-}
 @media (max-width: 649px) {
   .app-settings-layout .set-group { padding: 20px; }
   .app-settings-layout .set-field-row { grid-template-columns: minmax(0, 1fr); gap: 20px; }
 }
+
+.agent-records { display: flex; flex-direction: column; }
+.agent-record { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 20px 16px; padding: 24px 0; border-top: 1px solid var(--border); }
+.agent-record:first-child { padding-top: 0; border-top: 0; }
+.agent-identity { grid-column: 1 / -1; min-width: 0; }
+.agent-identity h3 { margin: 0 0 6px; font-size: 15px; font-weight: 500; overflow-wrap: anywhere; }
+.agent-identity p { margin: 0; color: var(--text-mid); font-size: 14px; }
+.agent-field { min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.agent-field-help { color: var(--text-dim); font-size: 13px; }
+.agent-field-model { grid-column: 2 / -1; }
+.agent-field-label { font-size: 14px; color: var(--text-mid); }
+.settings-pane .agent-record .set-cell { height: auto; min-height: 44px; padding: 10px 12px; border: 1px solid var(--border-loud); border-radius: 5px; background: var(--bg); color: var(--text); font: 15px var(--font-sans); text-align: left; }
+.settings-pane .agent-record .cell-val, .settings-pane .model-chooser-trigger .cell-val { display: flex; flex-direction: column; gap: 4px; overflow: visible; white-space: normal; overflow-wrap: anywhere; }
+.model-chooser-trigger code { font: 13px var(--font-mono); color: var(--text-mid); }
+.cell-inherit { display: block; font: 13px var(--font-sans); color: var(--text-dim); }
+.settings-pane .agent-record .cell-arrow { margin-left: auto; flex-shrink: 0; }
+.settings-pane .set-menu { max-width: calc(100vw - 24px); }
+.settings-pane .menu-opt { min-height: 44px; font-size: 15px; }
+@media (max-width: 649px) {
+  .agent-record { grid-template-columns: minmax(0, 1fr); gap: 20px; }
+  .agent-field-model { grid-column: 1; }
+  .settings-pane .model-chooser-option { min-height: 44px; }
+}
+
+.settings-pane .model-chooser-trigger { height: auto; min-height: 44px; }
+.settings-pane .model-chooser { width: min(480px, calc(100vw - 36px)); max-width: 100%; }
+.settings-pane .model-chooser-option small { white-space: normal; overflow-wrap: anywhere; }
+.settings-pane .svc-facts > summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; font-size: 14px; }
+.settings-pane .set-btn.danger { color: var(--outcome-failed); border-color: color-mix(in oklch, var(--outcome-failed) 50%, var(--border)); background: transparent; }
+.settings-pane .set-btn.danger:hover:not(:disabled) { background: color-mix(in oklch, var(--outcome-failed) 12%, var(--surface)); }

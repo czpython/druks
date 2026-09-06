@@ -5,7 +5,7 @@ from druks.api.schemas import DashboardRun, DashboardSchedule, DashboardSchedule
 from druks.apps.loader import iter_apps
 from druks.database import db_session
 from druks.durable.enums import OPEN_STATES, RunState
-from druks.durable.models import Run
+from druks.durable.models import Artifact, Run
 from druks.user_settings.models import UserSettings
 
 PAGE_SIZE = 200
@@ -36,10 +36,12 @@ async def list_current_work(response: Response) -> DashboardWork:
             current.c.updated_at,
             current.c.input_requested_at.label("parked_at"),
             current.c.request_label,
+            func.left(Artifact.title, 240).label("artifact_title"),
             current.c.presentation,
             current.c.request_url,
-            func.left(current.c.failure, 512).label("failure"),
+            func.left(current.c.failure, 2048).label("failure"),
         )
+        .outerjoin(Artifact, Artifact.agent_call_id == current.c.latest_call_id)
         .order_by(current.c.updated_at.desc(), current.c.run_id.desc())
         .limit(PAGE_SIZE + 1)
     )

@@ -21,6 +21,7 @@ const pending: DashboardRun = {
   updatedAt: '2026-09-01T00:00:00Z',
   parkedAt: '2026-09-01T12:34:56.123456Z',
   requestLabel: 'Review this note',
+  artifactTitle: null,
   presentation: 'in_app',
   requestUrl: null,
   failure: null,
@@ -57,6 +58,28 @@ afterEach(() => {
 })
 
 describe('Dashboard', () => {
+  it('groups related failures with the latest occurrence and complete error details', async () => {
+    const failure = 'Connection failed. '.repeat(60)
+    work.mockResolvedValue({
+      rows: [
+        { ...pending, state: 'failed', run: 'older', subjectType: '', subjectId: '', updatedAt: '2026-09-01T00:00:00Z', failure: 'Earlier error' },
+        { ...pending, state: 'failed', run: 'latest', subjectType: '', subjectId: '', updatedAt: '2026-09-02T00:00:00Z', failure },
+        { ...pending, state: 'failed', run: 'separate', kind: 'other', failure: 'Separate workflow' },
+      ],
+      hasMore: false,
+    })
+    mount()
+    const problems = await screen.findByRole('region', { name: 'Problems' })
+    await within(problems).findByText(/2 failures/)
+    const details = problems.querySelectorAll('details')
+    expect(details).toHaveLength(2)
+    expect(details[0]!.textContent).toContain(failure)
+    expect(details[0]!.querySelectorAll('code')[0]!.textContent).toBe('latest')
+    expect(details[0]!.textContent).toContain('Earlier error')
+    expect(within(problems).getByRole('link', { name: 'Open events' }).getAttribute('href')).toBe('/events?app=notes')
+    expect(details[0]!.open).toBe(false)
+  })
+
   it('sorts one read into sections and links a decision to its run and round', async () => {
     work.mockResolvedValue({
       rows: [
@@ -145,4 +168,16 @@ describe('Dashboard', () => {
       'https://example.invalid/review',
     )
   })
+})
+
+it.each([
+  ['Explicit request', 'A proposal', 'Explicit request'],
+  [null, 'A proposal', 'Review: A proposal'],
+  [null, null, 'Review'],
+])('shows one request label for %s and %s', async (requestLabel, artifactTitle, label) => {
+  work.mockResolvedValue({ rows: [{ ...pending, requestLabel, artifactTitle }], hasMore: false })
+  schedules.mockResolvedValue({ rows: [] })
+  mount()
+  const section = await screen.findByRole('region', { name: 'Needs you' })
+  await waitFor(() => expect(section.querySelector('.dashboard-request')?.textContent).toBe(label))
 })

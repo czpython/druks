@@ -60,6 +60,7 @@ class DashboardRun(Schema):
     updated_at: datetime
     parked_at: datetime | None
     request_label: str | None
+    artifact_title: str | None
     presentation: str | None
     request_url: str | None
     failure: str | None

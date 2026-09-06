@@ -66,8 +66,8 @@ Backend and frontend app discovery are intentionally separate:
 
 An installed Python distribution cannot put JavaScript into an existing
 dashboard build. A backend-only app can still use the platform API, settings,
-events, and generic subject read-side. Custom pages require a dashboard build
-that contains the UI module.
+events, generic subject read-side, and declared Python pages. Custom React
+pages require a dashboard build that contains the UI module.
 
 A separate app package can ship a built ES module in `<package>/dist/`. This
 module exposes `mount(el, ctx)`. Druks serves the module under `/app/<name>`.
@@ -88,9 +88,12 @@ query with `targetQuery` from the registry. The owner selects that run and
 passes `parkedAt` to `GateControls`, which shows a stale-link message when the
 current round differs. Return `undefined` when the app has no destination.
 
-The generic Python-app subject page supports this target. An app's standalone
-JavaScript frontend must supply its own navigation before the Dashboard can link to
-a specific run.
+Python apps can select a decision page with
+[`@ui.page(..., subject=...)`](../docs/druks-ui.md#declare-pages).
+The roster exposes this declaration as `PageEntry.subjectType`. The shell fills
+the route parameter and keeps the exact target. Without this declaration, the
+generic subject page opens. An app's standalone JavaScript frontend supplies
+its own navigation to a specific run.
 
 Keep raw paths and queries in the retained work context. Wouter's public
 `useLocation` and `useSearch` decode URI escapes. Subject pages read the raw

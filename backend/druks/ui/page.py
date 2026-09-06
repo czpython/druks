@@ -2,11 +2,16 @@ import re
 from collections.abc import Awaitable, Callable
 from inspect import Parameter, signature
 from itertools import count
+from typing import TYPE_CHECKING
 
 from druks.apps.registry import pages
 
 from .exceptions import PageRouteError
 from .schemas import Page
+
+if TYPE_CHECKING:
+    from druks.durable.datastructures import Subject
+    from druks.models import StoredSubject
 
 PageFunction = Callable[..., Awaitable[Page]]
 
@@ -35,6 +40,7 @@ class PageRoute:
         *,
         label: str = "",
         parent: "PageRoute | None" = None,
+        subject: "type[Subject] | type[StoredSubject] | None" = None,
     ) -> None:
         self.path = path
         self.function = function
@@ -43,6 +49,7 @@ class PageRoute:
         self.module = function.__module__
         self.label = label or self.name.replace("_", " ")
         self.order = next(_declared)
+        self.subject = subject
 
     def child(self, path: str, *, label: str = "") -> Callable[[PageFunction], "PageRoute"]:
         """Declare a page under this one, at ``path`` relative to this route."""
@@ -95,7 +102,13 @@ class PageRoute:
                 "is not the last segment, so it would swallow every route under it. Put the "
                 "catch-all last."
             )
-        route_parameters = {name for name, _ in _PARAMETER.findall(self.route)}
+        parameters = _PARAMETER.findall(self.route)
+        route_parameters = {name for name, _ in parameters}
+        if self.subject and len(parameters) != 1:
+            raise PageRouteError(
+                f"page {self.name!r} declares a subject destination. "
+                "Use exactly one route parameter for its subject id."
+            )
         declared = signature(self.function).parameters
         by_name = {
             name for name, parameter in declared.items() if parameter.kind in _CALLABLE_BY_NAME
@@ -123,12 +136,18 @@ class PageRoute:
         return tuple(key)
 
 
-def page(path: str, *, label: str = "") -> Callable[[PageFunction], PageRoute]:
+def page(
+    path: str,
+    *,
+    label: str = "",
+    subject: "type[Subject] | type[StoredSubject] | None" = None,
+) -> Callable[[PageFunction], PageRoute]:
     """Declare a top-level page at ``path``. The label defaults to the function
-    name with its underscores as spaces."""
+    name with its underscores as spaces. ``subject`` selects this page for that
+    subject type's Dashboard decisions. Its route must have one ID parameter."""
 
     def declare(function: PageFunction) -> PageRoute:
-        return pages.register(PageRoute(path, function, label=label))
+        return pages.register(PageRoute(path, function, label=label, subject=subject))
 
     return declare
 
@@ -154,8 +173,17 @@ def list_pages_for_app(app_name: str, package: str) -> list[PageRoute]:
 
     by_name: dict[str, PageRoute] = {}
     by_shape: dict[str, PageRoute] = {}
+    by_subject: dict[str, PageRoute] = {}
     for page_route in declared:
         page_route.check(app_name)
+        if page_route.subject:
+            subject_type = page_route.subject.subject_type
+            if subject_type in by_subject:
+                raise PageRouteError(
+                    f"app {app_name!r} declares two destinations for {subject_type!r}. "
+                    "Declare one subject decision page."
+                )
+            by_subject[subject_type] = page_route
         clash = by_name.get(page_route.name)
         if clash:
             raise PageRouteError(

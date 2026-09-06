@@ -40,6 +40,7 @@ describe('page routes', () => {
           label: 'files',
           path: '/archive_app',
           parent: '',
+          subjectType: '',
           order: 0,
         },
         {
@@ -47,6 +48,7 @@ describe('page routes', () => {
           label: 'one file',
           path: '/archive_app/files/{name}',
           parent: '',
+          subjectType: '',
           order: 1,
         },
         {
@@ -54,6 +56,7 @@ describe('page routes', () => {
           label: 'any file',
           path: '/archive_app/raw/{rest:path}',
           parent: '',
+          subjectType: '',
           order: 2,
         },
       ]),
@@ -77,4 +80,20 @@ describe('page routes', () => {
       '/empty_app/:subjectType/*',
     ])
   })
+})
+
+it('uses the declared decision page and preserves encoded subject and request identifiers', () => {
+  registerInstalledApps(roster('decision_app', [{
+    name: 'review',
+    label: 'Review',
+    path: '/decision_app/review/{id}',
+    parent: '', order: 0, subjectType: 'file',
+  }]))
+  const ui = getAppUI('decision_app')!
+  const target = { run: 'run%?#é', parkedAt: '2026-09-06T00:00:00.123456Z' }
+  const url = new URL(ui.subjectPath!({ type: 'file', id: 'a%20b/c?#é' }, target)!, 'https://example.invalid')
+  expect(url.pathname).toBe('/decision_app/review/a%2520b%2Fc%3F%23%C3%A9')
+  expect(url.searchParams.get('run')).toBe(target.run)
+  expect(url.searchParams.get('parkedAt')).toBe(target.parkedAt)
+  expect(ui.subjectPath!({ type: 'file', id: '7' }, { run: 'run-one' })).toBe('/decision_app/file/7?run=run-one')
 })

@@ -10,6 +10,7 @@ from druks.apps.settings import (
     field_multiline,
     field_section,
     field_visibility,
+    validate_field_choice_details,
 )
 from druks.harnesses.datastructures import Billing
 from druks.harnesses.schemas import SortedNames
@@ -95,6 +96,7 @@ class SettingsFieldResponse(Schema):
     default: Any
     # An enum field's allowed values; None for every other kind.
     choices: list[str] | None
+    choice_details: dict[str, dict[str, str]] = {}
     # The heading this field groups under; empty for an ungrouped one.
     section: str
     # The sibling field this one is shown for, and the value that field must hold. The
@@ -125,6 +127,7 @@ class SettingsFieldResponse(Schema):
             value=None if secret else value,
             default=None if secret else field.default,
             choices=field_choices(field),
+            choice_details=validate_field_choice_details(field),
             section=field_section(field),
             visible_when_field=controller,
             visible_when_value=target,

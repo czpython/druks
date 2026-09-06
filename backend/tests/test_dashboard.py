@@ -4,8 +4,8 @@ import pytest
 from druks.accounts.models import Account
 from druks.api import dashboard
 from druks.durable.dbos_state import workflow_status
-from druks.durable.models import Run
-from druks.testing import configure_app_for_test, make_settings, seed_run
+from druks.durable.models import Artifact, Run
+from druks.testing import configure_app_for_test, make_settings, seed_call, seed_run
 from druks.user_settings.models import SettingsOverride, UserSettings
 from druks_field_notes.models import Note
 from druks_field_notes.workflows import Summarize
@@ -27,7 +27,7 @@ def current_work(client):
     return response.json()
 
 
-async def test_a_current_run_carries_request_facts_with_bounded_prose(client, druks_db):
+async def test_a_current_run_carries_bounded_labels_and_failure_details(client, druks_db):
     note = await Note.create(body="decision")
     run = await seed_run(
         druks_db,
@@ -36,7 +36,7 @@ async def test_a_current_run_carries_request_facts_with_bounded_prose(client, dr
         state="parked",
         input_gate="review",
         input_request={"presentation": "in_app", "label": "x" * 300, "questions": ["private"]},
-        failure="f" * 700,
+        failure="f" * 4000,
     )
     run.input_requested_at = datetime(2026, 1, 1, tzinfo=UTC)
     await druks_db.flush()
@@ -49,7 +49,7 @@ async def test_a_current_run_carries_request_facts_with_bounded_prose(client, dr
     assert row["parkedAt"] == "2026-01-01T00:00:00Z"
     assert row["presentation"] == "in_app"
     assert row["requestLabel"] == "x" * 240
-    assert row["failure"] == "f" * 512
+    assert row["failure"] == "f" * 2048
     assert "private" not in str(row)
 
 
@@ -139,3 +139,38 @@ def test_dashboard_requires_the_existing_identity_gate(tmp_path, druks_db):
     with TestClient(app) as anonymous:
         assert anonymous.get("/api/dashboard/work").status_code == 401
         assert anonymous.get("/api/dashboard/schedules").status_code == 401
+
+
+@pytest.mark.parametrize("has_artifact", [True, False])
+async def test_artifact_title_comes_from_the_latest_call(client, druks_db, has_artifact):
+    note = await Note.create(body="Confirm the delivery date")
+    run = await seed_run(
+        druks_db,
+        kind=Summarize.kind,
+        subject=note,
+        state="parked",
+        input_gate="review",
+        input_request={"presentation": "in_app", "controls": ["approve"]},
+    )
+    first_call = await seed_call(druks_db, run=run, agent="summarize")
+    druks_db.add(
+        Artifact(
+            agent_call_id=first_call.id, kind="markdown", title="Older proposal", path="old.md"
+        )
+    )
+    first_call.created_at = datetime(2026, 1, 1, tzinfo=UTC)
+    latest_call = await seed_call(druks_db, run=run, agent="summarize")
+    if has_artifact:
+        druks_db.add(
+            Artifact(
+                agent_call_id=latest_call.id,
+                kind="markdown",
+                title="Reply with the confirmed date",
+                path="artifact.md",
+            )
+        )
+    await druks_db.flush()
+
+    [row] = current_work(client)["rows"]
+    assert row["requestLabel"] is None
+    assert row["artifactTitle"] == ("Reply with the confirmed date" if has_artifact else None)

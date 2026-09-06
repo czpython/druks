@@ -49,3 +49,15 @@
   .dashboard-action, .dashboard-unavailable a, .dashboard-alert button { min-height: 44px; }
   .dashboard-section > header { flex-wrap: wrap; gap: 6px; }
 }
+
+.dashboard-section-empty { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 20px; margin-top: 20px; }
+.dashboard-section-empty .dashboard-empty { padding: 0; border: 0; font-size: 14px; }
+.dashboard-identity .dashboard-request { font-size: 15px; color: var(--text); }
+.dashboard-failure-details { font-size: 13px; color: var(--text-mid); }
+.dashboard-failure-details summary { cursor: pointer; display: flex; align-items: center; min-height: 40px; text-decoration: underline; text-underline-offset: 3px; }
+.dashboard-failure-details > div { margin-top: 12px; padding: 12px; border: 1px solid var(--border); border-radius: 4px; }
+.dashboard-failure-details p { margin: 8px 0; }
+.dashboard-failure-details code { font-size: 13px; }
+@media (max-width: 649px) {
+  .dashboard-failure-details summary { min-height: 44px; }
+}

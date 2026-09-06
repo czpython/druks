@@ -75,14 +75,33 @@ class Build(Workflow):
         plan_gate: PlanGate = Field(
             default="human",
             title="Plan gate",
-            description=(
-                "human — Operator reviews every plan; the machine reviewer never runs. "
-                "machine — The machine reviewer critiques once; the plan implements without "
-                "operator review. machine_then_human — The machine reviewer critiques once, "
-                "then the operator approves every plan. adaptive — The machine reviewer "
-                "critiques once; a high-confidence plan it approved implements directly, "
-                "anything less parks for the operator."
-            ),
+            description="Choose who approves the plan before implementation.",
+            json_schema_extra={
+                "choice_details": {
+                    "human": {
+                        "label": "Human review",
+                        "help": "You approve every plan. The machine reviewer does not run.",
+                    },
+                    "machine": {
+                        "label": "Machine review",
+                        "help": (
+                            "The machine reviewer checks once. "
+                            "Implementation starts without your approval."
+                        ),
+                    },
+                    "machine_then_human": {
+                        "label": "Machine then human",
+                        "help": "The machine reviewer checks once. You then approve the plan.",
+                    },
+                    "adaptive": {
+                        "label": "Adaptive review",
+                        "help": (
+                            "An approved high-confidence plan starts directly. "
+                            "All other plans need your approval."
+                        ),
+                    },
+                },
+            },
         )
         max_implementation_revisions: int = Field(
             default=5,
