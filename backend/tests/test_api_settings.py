@@ -1,6 +1,5 @@
 from pathlib import Path
 
-from druks.contrib.review.app import Review
 from druks.contrib.software_factory.app import SoftwareFactory
 from druks.database import db_session
 from druks.testing import configure_app_for_test, make_settings
@@ -248,15 +247,6 @@ def _software_factory_settings_fields(client: TestClient) -> dict:
     return {field["name"]: field for field in _software_factory_app(client)["settings"]}
 
 
-def _review_app(client: TestClient) -> dict:
-    body = client.get("/api/settings/apps").json()
-    return next(m for m in body["apps"] if m["name"] == "review")
-
-
-def _review_settings_fields(client: TestClient) -> dict:
-    return {field["name"]: field for field in _review_app(client)["settings"]}
-
-
 def test_apps_surface_build_agents(tmp_path: Path):
     """The build pipeline's agents all tune under the SoftwareFactory app."""
     with _build_client(tmp_path) as client:
@@ -321,15 +311,15 @@ def test_apps_surface_build_agents_and_workflow_defaults(tmp_path: Path):
 async def test_app_secret_round_trip_encrypts_at_rest(tmp_path: Path):
     secret = "review-pem-value"
     app_id = "42424242"
-    key = "app:review:private_key"
+    key = "app:software_factory:review_private_key"
     with _build_client(tmp_path) as client:
         written = client.patch(
             "/api/settings/apps",
             json={
                 "appSettings": {
-                    "review": {
-                        "app_id": app_id,
-                        "private_key": secret,
+                    "software_factory": {
+                        "review_app_id": app_id,
+                        "review_private_key": secret,
                     }
                 }
             },
@@ -344,7 +334,7 @@ async def test_app_secret_round_trip_encrypts_at_rest(tmp_path: Path):
             )
         ).one()
         read = client.get("/api/settings/apps")
-        resolved = (await Review.settings()).private_key
+        resolved = (await SoftwareFactory.settings()).review_private_key
 
     assert written.status_code == 200
     assert read.status_code == 200
@@ -357,32 +347,32 @@ async def test_app_secret_round_trip_encrypts_at_rest(tmp_path: Path):
     assert app_id not in written.text
     assert app_id not in read.text
     assert resolved and resolved.get_secret_value() == secret
-    review = next(app for app in read.json()["apps"] if app["name"] == "review")
-    fields = {field["name"]: field for field in review["settings"]}
-    assert fields["private_key"]["type"] == "secret"
-    assert fields["private_key"]["value"] is None
-    assert fields["private_key"]["default"] is None
-    assert fields["private_key"]["secretSet"] is True
-    assert fields["private_key"]["overridden"] is True
-    assert fields["app_id"]["secretSet"] is True
+    software_factory = next(app for app in read.json()["apps"] if app["name"] == "software_factory")
+    fields = {field["name"]: field for field in software_factory["settings"]}
+    assert fields["review_private_key"]["type"] == "secret"
+    assert fields["review_private_key"]["value"] is None
+    assert fields["review_private_key"]["default"] is None
+    assert fields["review_private_key"]["secretSet"] is True
+    assert fields["review_private_key"]["overridden"] is True
+    assert fields["review_app_id"]["secretSet"] is True
 
 
 async def test_app_secret_plaintext_row_is_unset_until_resaved(tmp_path: Path):
     secret = "legacy-plaintext-secret"
-    key = "app:review:private_key"
+    key = "app:software_factory:review_private_key"
     db_session().add(SettingsOverride(key=key, value=secret))
     await db_session().flush()
 
     with _build_client(tmp_path) as client:
-        initial = _review_app(client)
-        resolved_initial = (await Review.settings()).private_key
+        initial = _software_factory_app(client)
+        resolved_initial = (await SoftwareFactory.settings()).review_private_key
         saved = client.patch(
             "/api/settings/apps",
             json={
                 "appSettings": {
-                    "review": {
-                        "app_id": "42",
-                        "private_key": secret,
+                    "software_factory": {
+                        "review_app_id": "42",
+                        "review_private_key": secret,
                     }
                 }
             },
@@ -398,7 +388,7 @@ async def test_app_secret_plaintext_row_is_unset_until_resaved(tmp_path: Path):
         ).one()
 
     initial_field = next(
-        setting for setting in initial["settings"] if setting["name"] == "private_key"
+        setting for setting in initial["settings"] if setting["name"] == "review_private_key"
     )
     assert initial_field["secretSet"] is False
     assert not resolved_initial
@@ -453,38 +443,42 @@ def test_incoherent_app_save_is_rejected_and_rolled_back_before_schedules(
             "/api/settings/apps",
             json={
                 "agentModels": {"generate_plan": "anthropic/claude-opus-4-7"},
-                "appSettings": {"review": {"app_id": "42"}},
+                "appSettings": {"software_factory": {"review_app_id": "42"}},
             },
         )
 
         assert response.status_code == 422
         assert response.json()["detail"] == {
-            "review": {"private_key": "Required once the review App ID is set."}
+            "software_factory": {"review_private_key": "Required once the review App ID is set."}
         }
         assert not reconciled
-        assert _review_settings_fields(client)["app_id"]["secretSet"] is False
+        assert _software_factory_settings_fields(client)["review_app_id"]["secretSet"] is False
         agents = {agent["name"]: agent for agent in _software_factory_app(client)["agents"]}
         assert agents["generate_plan"]["model"] == "anthropic/claude-opus-4-7"
 
 
 async def test_clearing_the_identity_deletes_its_overrides_and_stays_coherent(tmp_path: Path):
-    key = "app:review:app_id"
+    key = "app:software_factory:review_app_id"
 
     with _build_client(tmp_path) as client:
         configured = client.patch(
             "/api/settings/apps",
             json={
                 "appSettings": {
-                    "review": {
-                        "app_id": "42",
-                        "private_key": "review-pem",
+                    "software_factory": {
+                        "review_app_id": "42",
+                        "review_private_key": "review-pem",
                     }
                 }
             },
         )
         cleared = client.patch(
             "/api/settings/apps",
-            json={"appSettings": {"review": {"app_id": None, "private_key": None}}},
+            json={
+                "appSettings": {
+                    "software_factory": {"review_app_id": None, "review_private_key": None}
+                }
+            },
         )
         stored = (
             await db_session().execute(
@@ -492,14 +486,14 @@ async def test_clearing_the_identity_deletes_its_overrides_and_stays_coherent(tm
                 {"key": key},
             )
         ).one_or_none()
-        fields = _review_settings_fields(client)
+        fields = _software_factory_settings_fields(client)
 
     assert configured.status_code == 200
     assert cleared.status_code == 200
     assert stored is None
-    assert not (await Review.settings()).app_id
-    assert fields["app_id"]["secretSet"] is False
-    assert fields["private_key"]["secretSet"] is False
+    assert not (await SoftwareFactory.settings()).review_app_id
+    assert fields["review_app_id"]["secretSet"] is False
+    assert fields["review_private_key"]["secretSet"] is False
 
 
 def test_apps_override_agent_model_persists(tmp_path: Path):

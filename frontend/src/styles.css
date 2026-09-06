@@ -532,15 +532,6 @@ a.row-repo:hover { color: var(--bucket-run); text-decoration: underline; }
 .wi-next { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .wi-updated { text-align: right; white-space: nowrap; font-size: 11px; }
 
-.row-review {
-  grid-template-columns: 16px minmax(0, 200px) 64px 1fr minmax(0, 120px) minmax(0, 140px);
-  gap: 14px; padding: 0 20px;
-  cursor: default;
-}
-.review-line { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.review-when { text-align: right; white-space: nowrap; font-size: 11px; }
-.review-asker { text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 11px; }
-
 .wi-group-head {
   padding: 10px 20px 4px;
   font-size: 10px; text-transform: uppercase; letter-spacing: 0.12em;

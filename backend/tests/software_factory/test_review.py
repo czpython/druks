@@ -3,11 +3,11 @@ from types import SimpleNamespace
 
 import pytest
 from druks.apps.settings import field_kind, field_multiline
-from druks.contrib.review import subscribers  # noqa: F401 — the import registers it
-from druks.contrib.review.app import Review, check_review_identity
-from druks.contrib.review.datastructures import PullRequest
-from druks.contrib.review.github import get_review_actor
-from druks.contrib.review.workflows import PullRequestReview
+from druks.contrib.software_factory import subscribers  # noqa: F401 — the import registers it
+from druks.contrib.software_factory.app import SoftwareFactory, check_review_identity
+from druks.contrib.software_factory.datastructures import PullRequest
+from druks.contrib.software_factory.github import get_review_actor
+from druks.contrib.software_factory.workflows import PullRequestReview
 from druks.prompts import render_prompt
 from druks.services.exceptions import ServiceNotConnectedError
 from druks.services.models import ServiceIdentity
@@ -56,14 +56,14 @@ async def test_the_pull_request_board_and_page_mount(client: TestClient, druks_d
     pull_request = PullRequest.get("acme/app", 7)
     await seed_run(druks_db, kind=PullRequestReview.kind, subject=pull_request, state="running")
 
-    (row,) = client.get("/api/review/pull_request").json()["rows"]
+    (row,) = client.get("/api/software_factory/pull_request").json()["rows"]
     assert row["summary"]["id"] == "acme/app#7"
     assert row["status"]["state"] == "running"
 
-    detail = client.get("/api/review/pull_request/acme/app%237").json()
+    detail = client.get("/api/software_factory/pull_request/acme/app%237").json()
     assert detail["summary"]["pullRequestUrl"] == "https://github.com/acme/app/pull/7"
     assert [entry["kind"] for entry in detail["timeline"]] == [PullRequestReview.kind]
-    assert client.get("/api/review/pull_request/acme/app").status_code == 404
+    assert client.get("/api/software_factory/pull_request/acme/app").status_code == 404
 
 
 def test_the_run_carries_the_pull_request_once():
@@ -97,7 +97,7 @@ async def test_the_reviewer_prompt_names_the_pull_request_it_is_about():
     )
 
     output = await render_prompt(
-        "review/review_pull_request.md",
+        "software_factory/review/review_pull_request.md",
         workflow=workflow,
         workspace=workspace,
         siblings=[],
@@ -121,7 +121,7 @@ async def test_comment_mode_reviews_publish_as_comments():
     )
 
     output = await render_prompt(
-        "review/review_pull_request.md",
+        "software_factory/review/review_pull_request.md",
         workflow=workflow,
         workspace=workspace,
         siblings=[],
@@ -140,12 +140,12 @@ async def _connect_operator() -> None:
 
 
 async def _set_review_setting(field: str, value: str) -> None:
-    await SettingsOverride.set_app_setting("review", field, value, is_secret=True)
+    await SettingsOverride.set_app_setting("software_factory", field, value, is_secret=True)
 
 
 async def test_a_configured_review_identity_approves(druks_db):
-    await _set_review_setting("app_id", "2")
-    await _set_review_setting("private_key", "review-pem\nline-two")
+    await _set_review_setting("review_app_id", "2")
+    await _set_review_setting("review_private_key", "review-pem\nline-two")
 
     actor = await get_review_actor()
 
@@ -166,7 +166,7 @@ async def test_a_half_configured_review_identity_still_borrows_the_operator(druk
     # Only a complete pair selects the distinct client; app_id alone is the
     # incoherent state clean() flags, not a mode switch.
     await _connect_operator()
-    await _set_review_setting("app_id", "2")
+    await _set_review_setting("review_app_id", "2")
 
     actor = await get_review_actor()
 
@@ -175,30 +175,31 @@ async def test_a_half_configured_review_identity_still_borrows_the_operator(druk
 
 
 def test_review_settings_reject_a_half_configured_pair():
-    assert Review.Settings(app_id="2").clean() == {
-        "private_key": "Required once the review App ID is set."
+    assert SoftwareFactory.Settings(review_app_id="2").clean() == {
+        "review_private_key": "Required once the review App ID is set."
     }
-    assert Review.Settings(private_key="review-pem").clean() == {
-        "app_id": "Required once the review App private key is set."
+    assert SoftwareFactory.Settings(review_private_key="review-pem").clean() == {
+        "review_app_id": "Required once the review App private key is set."
     }
-    assert Review.Settings().clean() == {}
-    assert Review.Settings(app_id="2", private_key="review-pem").clean() == {}
+    assert SoftwareFactory.Settings().clean() == {}
+    complete = SoftwareFactory.Settings(review_app_id="2", review_private_key="review-pem")
+    assert complete.clean() == {}
 
 
 def test_the_review_pem_declares_the_multiline_secret_presentation():
-    field = Review.Settings.model_fields["private_key"]
+    field = SoftwareFactory.Settings.model_fields["review_private_key"]
 
     assert field_kind(field) == "secret"
     assert field_multiline(field)
-    assert not field_multiline(Review.Settings.model_fields["app_id"])
+    assert not field_multiline(SoftwareFactory.Settings.model_fields["review_app_id"])
 
 
 async def test_review_identity_check_is_healthy_set_or_unset(druks_db):
     assert (await check_review_identity()).ok
     assert "unset" in (await check_review_identity()).detail
 
-    await _set_review_setting("app_id", "2")
-    await _set_review_setting("private_key", "review-pem")
+    await _set_review_setting("review_app_id", "2")
+    await _set_review_setting("review_private_key", "review-pem")
 
     result = await check_review_identity()
     assert result.ok

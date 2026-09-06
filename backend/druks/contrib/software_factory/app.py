@@ -3,7 +3,7 @@ from typing import Literal
 from pydantic import Field
 
 from druks.agents import Agent
-from druks.apps import App, AppSettings
+from druks.apps import App, AppSettings, Secret
 from druks.contrib.software_factory.contracts import (
     ContractRevisionOutput,
     EvaluationOutput,
@@ -11,6 +11,7 @@ from druks.contrib.software_factory.contracts import (
     PlanOutput,
     RepoProfilerOutput,
     ReviewOutput,
+    ReviewReport,
     TriageOutput,
 )
 from druks.contrib.software_factory.ticketing.base import Tracker
@@ -48,6 +49,19 @@ async def check_tracker_identity() -> CheckResult:
     )
 
 
+async def check_review_identity() -> CheckResult:
+    """Set or unset, both healthy: an empty pair is comment mode by design. A
+    half-configured pair fails the settings check, not this one."""
+    settings = await SoftwareFactory.settings()
+    if settings.review_app_id and settings.review_private_key:
+        return CheckResult(
+            name="review_identity", ok=True, detail="set — reviews approve as the distinct App"
+        )
+    return CheckResult(
+        name="review_identity", ok=True, detail="unset — reviews post as operator comments"
+    )
+
+
 class SoftwareFactory(App):
     name = "software_factory"
     # These tables (projects, work_items, ...) are already unprefixed in core's
@@ -56,7 +70,7 @@ class SoftwareFactory(App):
     icon = "factory"
     description = (
         "Turns a ticket into a pull request — it plans the change, builds it, and "
-        "gates on you before shipping."
+        "gates on you before shipping. Reviews a pull request when asked."
     )
 
     class Settings(AppSettings):
@@ -96,6 +110,19 @@ class SoftwareFactory(App):
             ),
             json_schema_extra={"section": "Jira", "visible_when": {"tracker": "jira"}},
         )
+        # The optional distinct review identity. An empty pair borrows the operator
+        # client in comment mode. A complete pair posts verdict reviews as this App.
+        # App-owned: a posting identity for one app is not a platform service identity.
+        review_app_id: Secret = Field(
+            title="Review App ID",
+            description="GitHub App ID of the distinct review identity; empty posts as comments.",
+            json_schema_extra={"section": "Review identity"},
+        )
+        review_private_key: Secret = Field(
+            title="Review App private key",
+            description="PEM private key of the review App, pasted as issued.",
+            json_schema_extra={"section": "Review identity", "multiline": True},
+        )
 
         @property
         def trigger_status(self) -> str:
@@ -106,7 +133,15 @@ class SoftwareFactory(App):
                 return self.jira_trigger_status
             return ""
 
-    checks = [check_tracker_identity]
+        def clean(self) -> dict[str, str]:
+            problems: dict[str, str] = {}
+            if self.review_app_id and not self.review_private_key:
+                problems["review_private_key"] = "Required once the review App ID is set."
+            if self.review_private_key and not self.review_app_id:
+                problems["review_app_id"] = "Required once the review App private key is set."
+            return problems
+
+    checks = [check_tracker_identity, check_review_identity]
 
     @classmethod
     async def get_tracker(cls, source: str | None = None) -> Tracker | None:
@@ -137,8 +172,8 @@ class SoftwareFactory(App):
         except ServiceNotConnectedError:
             return
 
-    # The build pipeline's agents — the app owns them; any of its workflows run
-    # them. The attribute name is each agent's id (its durable settings/timeline key).
+    # The app's agents — any of its workflows run them. The attribute name is each
+    # agent's id (its durable settings/timeline key).
     generate_plan = Agent(
         description="ticket → implementation plan",
         prompt="software_factory/build/generate_plan.md",
@@ -173,6 +208,11 @@ class SoftwareFactory(App):
         description="reads a repo once and reports its stack, verification commands, and skills",
         prompt="software_factory/profile/repo_profiler.md",
         contract=RepoProfilerOutput,
+    )
+    review_pull_request = Agent(
+        description="reads a pull request and writes the review",
+        prompt="software_factory/review/review_pull_request.md",
+        contract=ReviewReport,
     )
 
     @classmethod

@@ -4,11 +4,10 @@ from pathlib import Path
 import pytest
 from druks.accounts.models import Account, PersonalAccessToken
 from druks.api.server import app
-from druks.contrib.review.workflows import PullRequestReview
 from druks.contrib.software_factory.app import SoftwareFactory
 from druks.contrib.software_factory.models import Project, ProjectRepo, WorkItem
 from druks.contrib.software_factory.ticketing.enums import TicketStatus
-from druks.contrib.software_factory.workflows import Build
+from druks.contrib.software_factory.workflows import Build, PullRequestReview
 from druks.core.apis.exceptions import LinearAPIError, UnknownTicketError
 from druks.durable.dbos_state import workflow_status
 from druks.durable.models import AgentCall, Run
@@ -97,7 +96,8 @@ def test_openapi_pins_platform_and_app_agent_routes(client: TestClient):
         if "agent" in operation.get("tags", [])
     }
     assert {key: found[key]["operationId"] for key in _MCP_ROUTES} == _MCP_ROUTES
-    assert found[("post", "/api/review/reviews")]["operationId"] == "review_request"
+    review = found[("post", "/api/software_factory/reviews")]
+    assert review["operationId"] == "software_factory_review"
     assert (
         found[("post", "/api/software_factory/work-items/{ticket}/start")]["operationId"]
         == "software_factory_start"
@@ -119,7 +119,7 @@ def test_openapi_pins_platform_and_app_agent_routes(client: TestClient):
         ("get", "/api/open-subjects"): {},
         ("get", "/api/usage/summary"): {},
     }
-    assert not {name for name in found[("post", "/api/review/reviews")] if name.startswith("x-")}
+    assert not {name for name in review if name.startswith("x-")}
     assert not {
         name
         for name in found[("post", "/api/software_factory/work-items/{ticket}/start")]
@@ -144,7 +144,7 @@ async def test_review_request_returns_the_run_id_start_hands_back(
 
     responses = [
         client.post(
-            "/api/review/reviews",
+            "/api/software_factory/reviews",
             json={"repo": "acme/app", "prNumber": 7},
         )
         for _ in range(2)
@@ -286,7 +286,9 @@ async def test_review_request_refuses_when_github_is_not_connected(client: TestC
 
     monkeypatch.setattr(PullRequestReview, "start", classmethod(start))
 
-    response = client.post("/api/review/reviews", json={"repo": "acme/app", "prNumber": 7})
+    response = client.post(
+        "/api/software_factory/reviews", json={"repo": "acme/app", "prNumber": 7}
+    )
 
     assert response.status_code == 409
     assert "not connected" in response.json()["detail"]
