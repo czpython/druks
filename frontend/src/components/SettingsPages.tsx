@@ -126,6 +126,18 @@ export function SettingsPages({
   })
   const keysQuery = useQuery({ queryKey: ['providerKeys'], queryFn: api.providerKeys })
   const catalogsQuery = useQuery({ queryKey: ['providerCatalogs'], queryFn: api.providerCatalogs })
+  const executionQueries = [
+    settingsQuery,
+    appsQuery,
+    harnessesQuery,
+    providersQuery,
+    subscriptionsQuery,
+    keysQuery,
+    catalogsQuery,
+    ...(!appName ? [agentsQuery, accountsQuery] : []),
+  ]
+  const executionReady = executionQueries.every((query) => query.isSuccess)
+  const executionFailed = executionQueries.some((query) => query.isError)
   const apps = (appsQuery.data?.apps ?? []).filter(
     (entry) =>
       entry.settings.length > 0 ||
@@ -200,6 +212,7 @@ export function SettingsPages({
     app && (app.settings.length || app.workflows.some((workflow) => workflow.fields.length)),
   )
   const paneSection = app?.agents.length && !hasOptions ? 'agents' : appTab
+  const executionPage = section === 'agents' || Boolean(appName && paneSection === 'agents')
   const Content = appName ? 'section' : 'main'
   const title =
     SECTIONS.find((entry) => entry.id === section)?.label ?? (app ? appLabel(app.name) : 'Settings')
@@ -569,7 +582,23 @@ export function SettingsPages({
           </p>
         )}
         {appName && appsQuery.isPending && <p role="status">Loading app settings…</p>}
+        {executionPage && !executionReady &&
+          (executionFailed ? (
+            <p role="alert" className="settings-error">
+              Could not load agent configuration.{' '}
+              <button
+                onClick={() => {
+                  for (const query of executionQueries) if (query.isError) void query.refetch()
+                }}
+              >
+                Try again
+              </button>
+            </p>
+          ) : (
+            <p role="status">Loading agent configuration…</p>
+          ))}
         {(settingsQuery.isError || appsQuery.isError) &&
+          !executionPage &&
           (appName || formPage || section === 'apps') && (
             <p role="alert" className="settings-error">
               Could not load settings.{' '}
@@ -591,27 +620,24 @@ export function SettingsPages({
                 setTimezone={setTimezone}
                 timezones={timezones}
                 clock={clock}
-                busy={saving || settingsQuery.isPending}
+                busy={saving || !settingsQuery.isSuccess}
               />
             )}
-            {page === 'agents' &&
-              (effectiveDefaults ? (
-                <AgentsPane
-                  defaults={effectiveDefaults}
-                  onDefaults={setDefaults}
-                  accounts={accountsQuery.data ?? []}
-                  resolved={agentsQuery.data ?? { apps: [] }}
-                  harnessByName={harnessByName}
-                  harnessColor={harnessColor}
-                  catalog={catalog}
-                  allowedEfforts={appsQuery.data?.allowedEfforts ?? []}
-                  onOpenApp={(name) => navigate(`/apps/${name}/settings`)}
-                  onAddProvider={() => navigate('/settings/providers')}
-                  busy={saving}
-                />
-              ) : (
-                <p role="status">Loading agent defaults…</p>
-              ))}
+            {page === 'agents' && executionReady && effectiveDefaults && (
+              <AgentsPane
+                defaults={effectiveDefaults}
+                onDefaults={setDefaults}
+                accounts={accountsQuery.data ?? []}
+                resolved={agentsQuery.data ?? { apps: [] }}
+                harnessByName={harnessByName}
+                harnessColor={harnessColor}
+                catalog={catalog}
+                allowedEfforts={appsQuery.data?.allowedEfforts ?? []}
+                onOpenApp={(name) => navigate(`/apps/${name}/settings`)}
+                onAddProvider={() => navigate('/settings/providers')}
+                busy={saving}
+              />
+            )}
             {page === 'providers' && (
               <ProvidersPane
                 providers={providers}
@@ -650,12 +676,21 @@ export function SettingsPages({
                   >
                     Accounts
                   </button>
+                  <button
+                    onClick={() => setConnectionsTab('revoked')}
+                    aria-current={connectionsTab === 'revoked' ? 'page' : undefined}
+                  >
+                    Revoked
+                  </button>
                 </nav>
                 <div hidden={connectionsTab !== 'services'}>
                   <ServicesPane />
                 </div>
                 <div hidden={connectionsTab !== 'accounts'}>
                   <ConnectionsPane />
+                </div>
+                <div hidden={connectionsTab !== 'revoked'}>
+                  <ConnectionsPane revokedOnly />
                 </div>
               </>
             )}
@@ -683,7 +718,9 @@ export function SettingsPages({
             )}
             {apps
               .filter(
-                (entry) => validAppPage && appName === entry.name && page === `apps/${entry.name}`,
+                (entry) =>
+                  validAppPage && appName === entry.name && page === `apps/${entry.name}` &&
+                  (paneSection !== 'agents' || executionReady),
               )
               .map((entry) => (
                 <div key={entry.name} className="app-settings-layout">

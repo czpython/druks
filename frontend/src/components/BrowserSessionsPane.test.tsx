@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { BrowserSession } from '../api/types'
+import { api } from '../api/client'
 import { BrowserSessionsPane } from './BrowserSessionsPane'
 
 function browserSession(overrides: Partial<BrowserSession> = {}): BrowserSession {
@@ -51,9 +52,19 @@ afterEach(() => {
   cleanup()
   vi.unstubAllGlobals()
   vi.unstubAllEnvs()
+  vi.restoreAllMocks()
 })
 
 describe('BrowserSessionsPane', () => {
+  it('shows a failed read without a false empty state and retries', async () => {
+    vi.spyOn(api, 'browserSessions').mockRejectedValueOnce(new Error('unavailable')).mockResolvedValueOnce([])
+    renderPane()
+    expect(screen.getByRole('status').textContent).toBe('Loading browser sessions…')
+    expect(await screen.findByRole('alert')).toHaveProperty('textContent', 'Could not load browser sessions. Try again')
+    expect(screen.queryByText('No installed app declares a browser session.')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
+    expect(await screen.findByText('No installed app declares a browser session.')).toBeTruthy()
+  })
   it('lists status, base-aware login actions, and refresh timestamps', async () => {
     vi.stubEnv('BASE_URL', '/druks/')
     stubFetch([

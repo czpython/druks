@@ -151,7 +151,7 @@ describe('ProviderConnect', () => {
     expect(screen.queryByText('Remove API key')).toBeNull()
   })
 
-  it('shows only the general weekly quota and keeps reset times relative', () => {
+  it('shows each quota window and keeps reset times relative', () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-09-05T10:00:00Z'))
     renderCard(provider(), {
@@ -184,10 +184,10 @@ describe('ProviderConnect', () => {
 
     expect(screen.getAllByText('Weekly')).toHaveLength(1)
     expect(screen.getByLabelText('83% remaining').textContent).toBe('83% left')
-    expect(screen.queryByLabelText('69% remaining')).toBeNull()
-    expect(screen.queryByLabelText('50% remaining')).toBeNull()
-    expect(screen.queryByText('Fable')).toBeNull()
-    expect(screen.queryByText('GPT reserve')).toBeNull()
+    expect(screen.getByLabelText('69% remaining').textContent).toBe('69% left')
+    expect(screen.getByLabelText('50% remaining').textContent).toBe('50% left')
+    expect(screen.getByText('Weekly · Fable')).toBeTruthy()
+    expect(screen.getByText('Weekly · GPT reserve')).toBeTruthy()
     expect(screen.getByText('Resets in 6d')).toBeTruthy()
     expect(screen.getByText('Resets in 2h').getAttribute('dateTime')).toBe('2026-09-05T12:00:00Z')
     expect(screen.getByText('Resets in 2h').getAttribute('title')).toBeTruthy()
@@ -243,7 +243,7 @@ describe('ProviderConnect', () => {
     expect(screen.queryByRole('button', { name: /Sign in/ })).toBeNull()
   })
 
-  it('drives the connection flow end to end and refreshes only the providers query', async () => {
+  it('drives the connection flow and refreshes credentials, models, and usage', async () => {
     const responses: Record<string, unknown> = {
       '/api/providers/anthropic/connection/start': {
         authorizeUrl: 'https://x/auth',
@@ -283,10 +283,12 @@ describe('ProviderConnect', () => {
     expect(invalidate).toHaveBeenCalledWith({
       queryKey: ['providerSubscriptions'],
     })
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['providerCatalogs'] })
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['usage'] })
     expect(fetchMock.mock.calls.some(([url]) => String(url) === '/api/auth/me')).toBe(false)
   })
 
-  it('posts a pasted API key and refreshes the keys query', async () => {
+  it('posts a pasted API key and refreshes keys and model choices', async () => {
     const fetchMock = vi.fn<(url: string, init?: RequestInit) => Promise<Response>>(
       async (url) =>
         new Response(JSON.stringify(url.endsWith('/key') ? sharedKey : {}), {
@@ -309,6 +311,7 @@ describe('ProviderConnect', () => {
       key: 'the-api-key',
     })
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ['providerKeys'] })
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['providerCatalogs'] })
   })
 
   it('removing the key deletes it, never the subscription', async () => {

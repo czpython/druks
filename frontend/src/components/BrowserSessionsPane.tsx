@@ -21,7 +21,6 @@ const FORMAT_LABELS: Record<BrowserSessionPayloadFormat, string> = {
   profile_dir: 'Profile directory',
 }
 
-/* An anonymous session has no login action at all. */
 const LOGIN_ACTION_LABELS: Record<Exclude<BrowserSessionStatus, 'anonymous'>, string> = {
   needs_login: 'Log in',
   ready: 'Open window',
@@ -64,9 +63,18 @@ export function BrowserSessionsPane() {
         </p>
       </header>
 
-      {(error ?? (query.error instanceof Error ? query.error.message : null)) && (
+      {query.isPending && <p role="status">Loading browser sessions…</p>}
+      {query.isError && (
+        <p className="mcp-error" role="alert">
+          Could not load browser sessions.{' '}
+          <button className="set-btn ghost" onClick={() => void query.refetch()}>
+            Try again
+          </button>
+        </p>
+      )}
+      {error && (
         <div className="mcp-error" role="alert">
-          {error ?? (query.error instanceof Error ? query.error.message : '')}
+          {error}
         </div>
       )}
 
@@ -74,7 +82,7 @@ export function BrowserSessionsPane() {
         <h3 className="mcp-h">
           Sessions <span className="gl-count">{sessions.length}</span>
         </h3>
-        {!query.isLoading && sessions.length === 0 && (
+        {query.isSuccess && sessions.length === 0 && (
           <p className="mcp-help">No installed app declares a browser session.</p>
         )}
         {sessions.length > 0 && (
@@ -104,7 +112,6 @@ export function BrowserSessionsPane() {
                 <div className="browser-session-actions">
                   {session.isDeclared ? (
                     session.status !== 'anonymous' && (
-                      /* A full load dismisses Settings before the login window mounts. */
                       <a
                         className="set-btn primary"
                         href={`${import.meta.env.BASE_URL}browser-sessions/${encodeURIComponent(session.name)}/login`}
