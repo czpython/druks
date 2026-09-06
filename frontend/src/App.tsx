@@ -8,8 +8,8 @@ import {
   type RefObject,
 } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Activity, ChartNoAxesCombined, Search, Settings } from 'lucide-react'
-import { Link, Route, Router, Switch, useLocation, useSearch, type RouterProps } from 'wouter'
+import { Activity, ChartNoAxesCombined, LayoutGrid, Search, Settings } from 'lucide-react'
+import { Link, Route, Router, Switch, useLocation, type RouterProps } from 'wouter'
 import { navigate as browserNavigate, useLocationProperty } from 'wouter/use-browser-location'
 
 import { api } from './api/client'
@@ -23,6 +23,7 @@ import { Page } from './components/Page'
 import { SettingsPages } from './components/SettingsPages'
 import { Sidebar } from './components/Sidebar'
 import { EventsPage } from './pages/EventsPage'
+import { OverviewPage } from './pages/OverviewPage'
 import { LoginWindowPage } from './pages/LoginWindowPage'
 import { SystemStrip } from './components/SystemStrip'
 import { UsagePage } from './pages/UsagePage'
@@ -146,7 +147,8 @@ function AppContexts({
   aroundNav: NonNullable<RouterProps['aroundNav']>
 }) {
   const [location] = useLocation()
-  const search = useSearch()
+  const search = useLocationProperty(() => window.location.search.slice(1))
+  const rawPath = useLocationProperty(() => window.location.pathname)
   const hash = useLocationProperty(() => window.location.hash)
   const isSettings = location === '/settings' || location.startsWith('/settings/')
   const wasSettings = useRef(isSettings)
@@ -159,11 +161,8 @@ function AppContexts({
   const [work, setWork] = useState<{ path: string; search: string; hash: string }>(
     () => window.history.state?.druksWork ?? { path: `${ROUTER_BASE}/`, search: '', hash: '' },
   )
-  if (
-    !isSettings &&
-    (work.path !== `${ROUTER_BASE}${location}` || work.search !== search || work.hash !== hash)
-  )
-    setWork({ path: `${ROUTER_BASE}${location}`, search, hash })
+  if (!isSettings && (work.path !== rawPath || work.search !== search || work.hash !== hash))
+    setWork({ path: rawPath, search, hash })
   if (
     isSettings &&
     storedWork &&
@@ -229,7 +228,7 @@ function AppShell({
   const app = urlApp ?? lastApp ?? defaultApp
   const ui = app ? getAppUI(app) : undefined
   const [search, setSearch] = useState('')
-  const wantsHealth = Boolean(ui?.systemStrip)
+  const wantsHealth = Boolean(urlApp && ui?.systemStrip)
   const healthQuery = useQuery({
     queryKey: ['system-health'],
     queryFn: api.systemHealth,
@@ -240,12 +239,6 @@ function AppShell({
   useEffect(() => {
     navCount.current += 1
   }, [location])
-
-  useEffect(() => {
-    if (!hidden && (location === '' || location === '/') && defaultApp) {
-      navigate(appHome(defaultApp), { replace: true })
-    }
-  }, [location, navigate, defaultApp, hidden])
 
   useEffect(() => {
     if (app) document.body.dataset.app = app
@@ -287,9 +280,9 @@ function AppShell({
   const appSettings = settingsQuery.data?.apps.find((entry) => entry.name === app)
   const hasSettings = Boolean(
     appSettings &&
-      (appSettings.settings.length ||
-        appSettings.agents.length ||
-        appSettings.workflows.some((workflow) => workflow.fields.length)),
+    (appSettings.settings.length ||
+      appSettings.agents.length ||
+      appSettings.workflows.some((workflow) => workflow.fields.length)),
   )
   const navigation: [string, string][] = urlApp
     ? [
@@ -309,13 +302,15 @@ function AppShell({
     appLabel(name).toLowerCase().includes(search.toLowerCase().trim()),
   )
   const title =
-    location === '/events'
-      ? 'Events'
-      : location === '/usage'
-        ? 'Usage'
-        : app
-          ? appLabel(app)
-          : 'Druks'
+    location === '/'
+      ? 'Overview'
+      : location === '/events'
+        ? 'Events'
+        : location === '/usage'
+          ? 'Usage'
+          : app
+            ? appLabel(app)
+            : 'Druks'
 
   return (
     <div className="command-center" hidden={hidden}>
@@ -323,8 +318,16 @@ function AppShell({
         Skip to content
       </a>
       <header className="command-header">
-        <Sidebar account={account} home={defaultApp ? appHome(defaultApp) : '/'}>
+        <Sidebar account={account} home="/">
           <nav className="sidebar-work" aria-label="Work">
+            <Link
+              href="/"
+              className="sidebar-link"
+              aria-current={location === '/' ? 'page' : undefined}
+            >
+              <LayoutGrid size={17} aria-hidden="true" />
+              Overview
+            </Link>
             <Link
               href="/events"
               className="sidebar-link"
@@ -435,6 +438,13 @@ function AppShell({
           </p>
         )}
         <Switch>
+          <Route path="/">
+            <OverviewPage
+              apps={
+                rosterQuery.data?.filter((entry) => !entry.builtin).map((entry) => entry.name) ?? []
+              }
+            />
+          </Route>
           <Route path="/apps/:name/settings/:tab?">
             {(params) => (
               <SettingsPages

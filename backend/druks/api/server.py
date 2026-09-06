@@ -16,6 +16,7 @@ from druks.accounts.exceptions import AuthConfigurationError
 from druks.accounts.routes import router as auth_router
 from druks.api.artifacts import router as artifacts_router
 from druks.api.exceptions import AgentApiError
+from druks.api.overview import router as overview_router
 from druks.api.runs import router as runs_router
 from druks.api.subjects import router as subjects_router
 from druks.apps.loader import iter_apps, load
@@ -133,7 +134,7 @@ async def _release_db_session() -> AsyncIterator[None]:
         await session.commit()
     finally:
         await session.close()
-        if previous is not None:
+        if previous:
             db_session.registry.set(previous)
         else:
             db_session.registry.clear()
@@ -153,12 +154,6 @@ app = FastAPI(
 )
 
 
-# Exception handlers — uniform JSON envelope.
-#
-# All errors share the shape::
-#
-#     {"error": "<CODE>", "detail": <string-or-list>}
-#
 @app.exception_handler(HTTPException)
 async def _http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
     return JSONResponse(
@@ -307,6 +302,7 @@ app.include_router(mcp_router, dependencies=_identity_gate)
 app.include_router(notifications_router, dependencies=_identity_gate)
 app.include_router(events_router, dependencies=_identity_gate)
 app.include_router(runs_router, dependencies=_identity_gate)
+app.include_router(overview_router, dependencies=_identity_gate)
 app.include_router(subjects_router, dependencies=_identity_gate)
 app.include_router(gateway_router, dependencies=_identity_gate)
 app.include_router(artifacts_router, dependencies=_identity_gate)
@@ -325,10 +321,7 @@ app.router.routes.append(
 )
 
 
-# Unknown /api/* paths return a JSON 404 across every method instead of
-# falling through to the SPA index.html, which would mislead API consumers
-# with a 200 OK + HTML. We need to catch GET/POST/PATCH/PUT/DELETE — a
-# bare ``@app.get`` only caught GETs.
+# Unknown API paths must return JSON, never the SPA's index.html.
 @app.api_route(
     "/api/{path:path}",
     methods=["GET", "POST", "PATCH", "PUT", "DELETE"],

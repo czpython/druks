@@ -35,6 +35,8 @@ import type {
   Skill,
   SkillCollection,
   UserSettings,
+  OverviewSchedules,
+  OverviewWork,
 } from './types'
 
 // A 401 means the request's identity did not resolve: typed to branch on,
@@ -55,14 +57,13 @@ export class ApiError extends Error {
 
 export const IDENTITY_INVALIDATED_EVENT = 'druks:identity-invalidated'
 
-// FastAPI puts the human-readable message in ``detail``; throw that as the
-// Error message so consumers display it as-is. Non-JSON bodies (proxy pages,
-// validation arrays) fall back to the status line.
+// The API has FastAPI and gateway error envelopes. Both carry operator-facing prose.
 async function throwApiError(response: Response, path: string): Promise<never> {
   const body = await response.text().catch(() => '')
   let detail: unknown
   try {
-    detail = JSON.parse(body).detail
+    const error = JSON.parse(body)
+    detail = error.detail ?? error.message
   } catch {
     // not JSON — fall through to the status line
   }
@@ -195,7 +196,7 @@ export const identityApi = {
 // so an app keys these on its own subject type.
 export const subjectApi = {
   base: (app: string, subjectType: string, id: string | number) =>
-    `/api/${app}/${subjectType}/${id}`,
+    `/api/${encodeURIComponent(app)}/${encodeURIComponent(subjectType)}/${encodeURIComponent(id)}`,
   read: <S extends SubjectSummary>(app: string, subjectType: string, id: string | number) =>
     getJSON<SubjectResponse<S>>(subjectApi.base(app, subjectType, id)),
   boardStream: (app: string, subjectType: string) =>
@@ -223,6 +224,8 @@ async function sendOperation(method: string, path: string, body: unknown): Promi
 }
 
 export const api = {
+  overviewWork: () => getJSON<OverviewWork>('/api/overview/work'),
+  overviewSchedules: () => getJSON<OverviewSchedules>('/api/overview/schedules'),
   systemHealth: () => getJSON<DashboardHealth>('/api/system/health'),
   listApps: () => getJSON<App[]>('/api/apps'),
   // ``path`` is the location under the app's own root: "" for the landing

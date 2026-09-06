@@ -116,6 +116,32 @@ Subjected workflow starts use DBOS queue deduplication per workflow kind and
 subject. A duplicate start returns the active run's id. Druks does not impose
 that policy on subjectless background runs.
 
+## Current work in Overview
+
+Overview reads current runs across the installed apps with the same identity
+gate as the shared run API. An authenticated operator sees installation-wide
+run facts. `Run.account_id` records attribution and does not restrict this
+read.
+
+For each workflow kind and subject, the newest run counts. A newer successful
+run therefore removes an older failure from Problems. A run without a subject,
+including one whose DBOS record is missing, counts on its own until it is
+cancelled. The read returns the 200 most recently changed current runs with
+bounded labels and failure text, never transcripts or complete review content.
+
+Needs you lists parked runs that carry a request the operator can act on,
+oldest request first. Other parked work is Waiting. Active work is running and
+queued runs. Problems is failed and orphaned runs. Scheduled work lists
+declared schedules with resolved cadence, pause state, and operator timezone.
+These are configuration facts, not proof that a future run will succeed.
+
+Review opens the owning app at the selected run and names the request round
+by its `parkedAt` timestamp. The owner reads the current gate. A different
+round shows a stale-link message, and an answer echoes the round it read, so
+the server rejects a stale one. An external request opens the app-declared
+HTTP or HTTPS address. Overview does not infer access health from
+configuration.
+
 ## Waiting for people and systems
 
 A `Gate` defines a typed reply and a durable receive topic. When a workflow

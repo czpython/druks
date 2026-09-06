@@ -1,3 +1,4 @@
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -240,35 +241,50 @@ class Run(Base):
         )
 
     @classmethod
-    def get_open_subjects(cls) -> Select:
-        """Every open workflow — the newest run of each kind on each subject, still
-        going or failed — newest first across every installed app."""
+    def get_open_subjects(
+        cls,
+        *,
+        kinds: Sequence[str] | None = None,
+        states: Sequence[RunState] = OPEN_STATES,
+        include_subjectless: bool = False,
+    ) -> Select:
+        """Current runs per kind and subject, ranked before state filtering."""
         state = state_expression(cls.id, cls.input_gate, cls.created_at).label("state")
         attributes = workflow_status.c.attributes
         subject_type = attributes["subject_type"].as_string().label("subject_type")
         subject_id = attributes["subject_id"].as_string().label("subject_id")
         subject_label = attributes["subject_label"].as_string().label("subject_label")
-        driving = (
-            select(
-                subject_type,
-                subject_id,
-                subject_label,
-                cls.id.label("run_id"),
-                cls.kind,
-                cls.failure,
-                cls.created_at,
-                state,
-                func.row_number()
-                .over(
-                    partition_by=(cls.kind, subject_type, subject_id),
-                    order_by=(cls.created_at.desc(), cls.id.desc()),
-                )
-                .label("rank"),
+        driving = select(
+            subject_type,
+            subject_id,
+            subject_label,
+            cls.id.label("run_id"),
+            cls.kind,
+            cls.failure,
+            cls.created_at,
+            cls.updated_at.label("updated_at"),
+            cls.input_requested_at,
+            func.left(cls.input_request["label"].as_string(), 240).label("request_label"),
+            cls.input_request["presentation"].as_string().label("presentation"),
+            cls.input_request["url"].as_string().label("request_url"),
+            state,
+            func.row_number()
+            .over(
+                partition_by=(cls.kind, subject_type, func.coalesce(subject_id, cls.id)),
+                order_by=(cls.created_at.desc(), cls.id.desc()),
             )
-            .join_from(cls, workflow_status, workflow_status.c.workflow_uuid == cls.id)
-            .where(subject_id.is_not(None))
-            .subquery()
+            .label("rank"),
+        ).join_from(
+            cls,
+            workflow_status,
+            workflow_status.c.workflow_uuid == cls.id,
+            isouter=include_subjectless,
         )
+        if kinds is not None:
+            driving = driving.where(cls.kind.in_(kinds))
+        if not include_subjectless:
+            driving = driving.where(subject_id.is_not(None))
+        driving = driving.subquery()
         latest_call_id = (
             select(AgentCall.id)
             .where(AgentCall.run_id == driving.c.run_id)
@@ -281,7 +297,7 @@ class Run(Base):
             select(driving, latest_call_id)
             .where(
                 driving.c.rank == 1,
-                driving.c.state.in_([run_state.value for run_state in OPEN_STATES]),
+                driving.c.state.in_([run_state.value for run_state in states]),
             )
             .order_by(driving.c.created_at.desc(), driving.c.run_id.desc())
         )

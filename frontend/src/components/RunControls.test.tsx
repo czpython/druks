@@ -126,19 +126,38 @@ describe('the lent run controls', () => {
     expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/artifacts/art-1')
   })
 
-  it('renders the panel without the artifact when the read fails', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async () => new Response('nope', { status: 404, statusText: 'Not Found' })),
+  it('blocks approval after an artifact read fails and allows a retry', async () => {
+    const fetchMock = vi.fn(
+      async () => new Response('nope', { status: 404, statusText: 'Not Found' }),
     )
+    vi.stubGlobal('fetch', fetchMock)
     render(
       <InAppReview
         runId="run-123"
         ask={{ presentation: 'in_app', controls: ['approve'], artifact_id: 'gone' }}
       />,
     )
-    // The ask's own controls are what the operator answers; a missing artifact
-    // must not take the gate down with it.
-    expect(await screen.findByText('Approve')).toBeTruthy()
+    expect((await screen.findByRole('alert')).textContent).toContain(
+      'Could not load the review artifact.',
+    )
+    expect((screen.getByRole('button', { name: 'Approve' }) as HTMLButtonElement).disabled).toBe(
+      true,
+    )
+    fetchMock.mockImplementation(
+      async () =>
+        new Response(
+          JSON.stringify({
+            kind: 'plan',
+            title: 'Recovered plan',
+            content: 'Read before approval',
+          }),
+          { status: 200 },
+        ),
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+    expect(await screen.findByText('Recovered plan')).toBeTruthy()
+    expect((screen.getByRole('button', { name: 'Approve' }) as HTMLButtonElement).disabled).toBe(
+      false,
+    )
   })
 })

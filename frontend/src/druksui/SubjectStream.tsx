@@ -18,7 +18,7 @@ export function SubjectStream({
 }) {
   let path = subjectApi.boardStream(app, subject.subjectType)
   if (subject.subjectId) {
-    path = subjectApi.stream(app, subject.subjectType, encodeURIComponent(subject.subjectId))
+    path = subjectApi.stream(app, subject.subjectType, subject.subjectId)
   }
   useSSE(path, { handlers: { snapshot: () => onSnapshot(subject) } })
   return null
