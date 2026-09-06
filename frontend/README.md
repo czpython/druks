@@ -23,7 +23,7 @@ runs lint, tests, and build.
 
 `src/App.tsx` is the platform shell. It owns:
 
-- The app bar and app picker
+- The work sidebar and searchable installed app roster
 - Settings
 - The Events and Usage pages
 - The optional system-health strip
@@ -34,6 +34,15 @@ Bundled app UI lives under `src/apps/<name>/`. Its module calls
 declares the subnav tabs. The roster supplies these tabs to the frontend.
 Import the module one time from `src/apps/index.ts`. The shell finds the
 registration and does not hardcode the app name.
+
+The work sidebar keeps the same destinations across app pages. Events and
+Usage have shared routes. App-declared navigation appears below the page
+header. Settings opens from the bottom of the sidebar. Below 650 px, a
+navigation button opens a modal drawer. Escape closes the drawer and returns
+focus to the button.
+
+Normal interface text uses IBM Plex Sans at 15 px. Technical values use
+IBM Plex Mono. Phone inputs use at least 16 px.
 
 Backend and frontend app discovery are intentionally separate:
 

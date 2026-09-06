@@ -8,10 +8,10 @@ import { UserPreferencesProvider } from '../lib/preferences'
 // The query cache is keyed to the account: an identity change remounts it, so
 // nothing cached for one account can render for the next.
 export function AuthedApp({ account }: { account: Account }) {
-  return <QueryCacheMount key={account.id} />
+  return <QueryCacheMount key={account.id} account={account} />
 }
 
-function QueryCacheMount() {
+function QueryCacheMount({ account }: { account: Account }) {
   const [queryClient] = useState(
     () =>
       new QueryClient({
@@ -28,7 +28,7 @@ function QueryCacheMount() {
   return (
     <QueryClientProvider client={queryClient}>
       <UserPreferencesProvider>
-        <App />
+        <App account={account} />
       </UserPreferencesProvider>
     </QueryClientProvider>
   )

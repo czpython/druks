@@ -1,33 +1,23 @@
-/* ============================================================
-   druks dashboard — NOC-style operator UI
-   Dark app mandatory. Dense. Monospace where data matters.
-   ============================================================ */
 
 :root {
-  /* Surfaces */
-  --bg:           #0a0c12;     /* page */
-  --surface:      #0e1119;     /* panel */
-  --surface-2:    #131825;     /* panel inset / hover */
+
+  --bg:           #0a0c12;
+  --surface:      #0e1119;
+  --surface-2:    #131825;
   --surface-3:    #181d2d;
   --border:       #1c2030;
   --border-soft:  #161a26;
   --border-loud:  #2a3148;
 
-  /* Text */
   --text:         #f0f2f7;
-  /* The whole secondary tier is lifted: labels (dim) and their values
-     (mid) were the dominant chrome of the app yet sat at barely-readable
-     contrast. Hierarchy preserved: text > mid > dim > faint — but the
-     floor (faint) now sits where dim used to. */
-  --text-mid:     #b4bccd;
+    --text-mid:     #b4bccd;
   --text-dim:     #99a3b9;
   --text-faint:   #7e889d;
 
-  /* Status buckets — shape + color */
-  --bucket-run:    #4dd4f4;   /* cyan  — in-progress */
-  --bucket-human:  #f4ad63;   /* warm orange — waiting on human (loud) */
-  --bucket-dead:   #ef4f5b;   /* red   — blocked / dead */
-  --bucket-plan:   #5eead4;   /* teal  — plan app accent */
+  --bucket-run:    #4dd4f4;
+  --bucket-human:  #f4ad63;
+  --bucket-dead:   #ef4f5b;
+  --bucket-plan:   #5eead4;
 
   /* Decorative accent hues for non-status chrome (thinking rows, event
      kinds, target/queue chips, tab & settings accents). Their own tokens,
@@ -36,61 +26,37 @@
   --accent-amber:  #f5a85c;
   --accent-violet: #a78bfa;
 
-  /* Outcome colors (history). Abandoned is deliberately the most
-     muted outcome, but blue-gray vanished among the equally blue-gray
-     labels around it — a warm stone separates it by hue, not just
-     luminance, so "Cancelled" reads as a state rather than ambient dim
-     text. Keep it >= the --text-dim readability tier. */
   --outcome-merged:    #4ade80;
   --outcome-failed:    #ef4f5b;
   --outcome-abandoned: #beb8b3;
 
-  /* Warn-tier state color ("operator should look at this") — amber like a
-   * revision-requested review. */
   --decision-request-revision:    #f59e0b;
 
-  /* Type */
-  --font-sans: 'Geist', 'IBM Plex Sans', system-ui, sans-serif;
-  --font-mono: 'Geist Mono', 'IBM Plex Mono', ui-monospace, Menlo, monospace;
+  --font-sans: 'IBM Plex Sans', system-ui, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, Menlo, monospace;
 
-  /* Shared grid prefix for the unified dashboard rows (active / queued /
-   * finished / history). Four columns — kind pill, ticket, project, pr —
-   * after the status glyph, before the elastic title cell. Defined once
-   * so the four panels can't drift out of alignment if column widths are
-   * tweaked. The leading glyph (14 or 16px) and trailing cells stay
-   * inline because they differ per panel. */
-  --row-grid-item-prefix: 60px 110px 130px 60px;
-
-  /* Density (overridden via data-density). The default sits at a
-   * "compact but readable" 40px — every list across the app uses
-   * ``var(--row-h)`` for ``min-height`` so all pages render at the
-   * same vertical rhythm. Earlier the default was 28px and most
-   * row rules hardcoded their own 30-44px, which drifted apart
-   * page-by-page; consolidating on the token fixed that drift. */
-  --row-h:        40px;
+    --row-h:        40px;
   --row-pad:      8px;
   --gap:          10px;
   --pad:          14px;
-  --fs-body:      13.5px;
-  --fs-mono:      12.5px;
-  --fs-title:     13.5px;
-  --fs-section:   11px;
+  --fs-body:      15px;
+  --fs-mono:      13px;
+  --fs-section:   18px;
 }
 
 body[data-density="dense"] {
   --row-h: 40px; --row-pad: 8px; --gap: 10px; --pad: 14px;
-  --fs-body: 13.5px; --fs-mono: 12.5px;
+  --fs-body: 15px; --fs-mono: 13px;
 }
 body[data-density="normal"] {
   --row-h: 44px; --row-pad: 10px; --gap: 12px; --pad: 18px;
-  --fs-body: 14px; --fs-mono: 13px;
+  --fs-body: 15px; --fs-mono: 13px;
 }
 body[data-density="roomy"] {
   --row-h: 48px; --row-pad: 12px; --gap: 14px; --pad: 22px;
-  --fs-body: 14.5px; --fs-mono: 13px; --fs-title: 14px;
+  --fs-body: 15px; --fs-mono: 13px;
 }
 
-/* Desat palette: pulled chroma 50%, hue preserved */
 body[data-palette="desat"] {
   --bucket-run:    #6fb6c8;
   --bucket-human:  #d7b38e;
@@ -102,7 +68,7 @@ body[data-palette="desat"] {
 body[data-palette="mono"] {
   --bucket-run:    var(--text);
   --bucket-human:  var(--text);
-  --bucket-dead:   #ef4f5b;     /* keep red — only loud signal */
+  --bucket-dead:   #ef4f5b;
   --bucket-plan:   var(--text);
   --accent-amber:  #b6bdc9;
   --accent-violet: var(--text);
@@ -125,23 +91,6 @@ html, body, #root {
 
 button { background: none; border: none; color: inherit; cursor: pointer; font: inherit; padding: 0; }
 
-/* ============================================================
-   App shell — top nav
-   ============================================================ */
-.appbar {
-  display: flex; align-items: center; justify-content: space-between;
-  height: 44px; padding: 0 16px;
-  border-bottom: 1px solid var(--border);
-  background: var(--surface);
-  position: sticky; top: 0; z-index: 10;
-}
-.appbar-left  { display: flex; align-items: stretch; gap: 16px; height: 100%; }
-.appbar-right { display: flex; align-items: center; gap: 12px; }
-
-/* Screen wake-lock indicator — small "● awake" pill in the appbar
- * confirming the OS sleep timer is suspended while this tab is open.
- * Dims when the lock is released (tab hidden), so a glance tells you
- * whether to expect the laptop to sleep. */
 .wake-lock {
   display: inline-flex; align-items: center;
   color: var(--text-faint);
@@ -153,17 +102,6 @@ button { background: none; border: none; color: inherit; cursor: pointer; font: 
 .wake-lock-active .wake-lock-dot {
   background: var(--outcome-merged);
   box-shadow: 0 0 6px color-mix(in oklch, var(--outcome-merged) 60%, transparent);
-}
-/* Pin the brand to the bright neutral text color regardless of link
-   state — otherwise the wrapping <Link> drags the visited-purple onto
-   both the dragon and the wordmark and the brand looks unstable. */
-.appbar-brand,
-.appbar-brand:visited,
-.appbar-brand:hover {
-  display: inline-flex; align-items: center; gap: 8px;
-  font-size: 14px; letter-spacing: 0.02em;
-  font-weight: 500;
-  color: var(--text);
 }
 .brand-glyph {
   display: inline-block;
@@ -180,119 +118,12 @@ button { background: none; border: none; color: inherit; cursor: pointer; font: 
   -webkit-mask-position: center;
 }
 
-/* ---- App dropdown --------------------------------- */
-.appbar-sep { font-size: 14px; color: var(--text-faint); padding: 0 2px; align-self: center; }
-
-.app-dd { position: relative; align-self: center; }
-.app-dd-trigger {
-  display: inline-flex; align-items: center; gap: 8px;
-  height: 28px; padding: 0 10px;
-  font-size: 13px;
-  background: var(--bg);
-  color: var(--text);
-  border: 1px solid var(--border);
-  border-radius: 3px;
-  transition: all 100ms;
-  letter-spacing: 0.01em;
-}
-.app-dd-trigger:hover { border-color: var(--border-loud); background: var(--surface-2); }
-/* The trigger's accent left rule is set inline from the registry-order
-   palette (see lib/appColors) — no per-app-name rule. */
-.app-dd-glyph { font-size: 14px; opacity: 0.9; display: inline-flex; align-items: center; }
-.app-dd-label { font-weight: 500; }
-.app-dd-caret { font-size: 9px; opacity: 0.6; padding-left: 4px; }
-
-.app-dd-menu {
-  position: absolute; top: 100%; left: 0;
-  margin-top: 6px;
-  min-width: 280px;
-  background: var(--surface);
-  border: 1px solid var(--border-loud);
-  border-radius: 4px;
-  box-shadow: 0 12px 32px -8px rgba(0,0,0,0.5);
-  padding: 4px;
-  z-index: 20;
-  animation: ddIn 120ms ease-out;
-}
-@keyframes ddIn {
-  from { opacity: 0; transform: translateY(-3px); }
-  to   { opacity: 1; transform: translateY(0); }
-}
-.app-dd-item {
-  display: grid; align-items: center;
-  grid-template-columns: 22px 1fr auto;
-  gap: 10px;
-  width: 100%;
-  padding: 8px 10px;
-  border-radius: 2px;
-  text-align: left;
-  background: transparent;
-  transition: background 80ms;
-}
-.app-dd-item:hover { background: var(--surface-2); }
-.app-dd-item.active { background: var(--surface-3); }
-.app-dd-item-glyph { font-size: 14px; opacity: 0.85; text-align: center; display: inline-flex; align-items: center; justify-content: center; }
-/* The active item's accent is set inline from the registry-order palette. */
-.app-dd-item-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.app-dd-item-label { font-size: 13px; color: var(--text); letter-spacing: 0.01em; }
-.app-dd-item-desc  { font-size: 10.5px; line-height: 1.35; }
-.app-dd-item-kbd   { font-size: 10px; opacity: 0.6; }
-
-/* ---- Drill-down subnav ----------------------------------- */
-.appbar-subnav {
-  display: flex; align-items: stretch; gap: 2px;
-  margin-left: 4px;
-}
-.subnav-tab {
-  display: inline-flex; align-items: center;
-  padding: 0 10px;
-  font-size: 11px;
-  color: var(--text-dim);
-  border-bottom: 2px solid transparent;
-  margin-bottom: -1px;
-  letter-spacing: 0.02em;
-  transition: color 80ms, border-color 80ms;
-}
-.subnav-tab:hover  { color: var(--text-mid); }
-/* The active underline colour is set inline from the app's registry-order
-   accent; this is the fallback before it resolves. */
-.subnav-tab.active { color: var(--text); border-bottom-color: var(--text); }
-
-
-.settings-btn {
-  display: inline-flex; align-items: center; justify-content: center;
-  width: 28px; height: 28px;
-  font-size: 14px; line-height: 1;
-  background: transparent;
-  color: var(--text-dim);
-  border: 1px solid color-mix(in oklch, var(--text-dim) 25%, transparent);
-  border-radius: 2px;
-  transition: all 120ms;
-}
-.settings-btn:hover {
-  color: var(--text);
-  border-color: color-mix(in oklch, var(--text-dim) 55%, transparent);
-  background: color-mix(in oklch, var(--text-dim) 8%, var(--surface));
-}
-
-
-.app-main {
-  height: calc(100vh - 44px);
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-
-/* .installed-app — the container InstalledAppHost hands a mounted dist app.
-   The app owns everything inside; the shell only gives it the scrollable
-   band below the chrome. */
 .installed-app {
   flex: 1;
   min-height: 0;
   overflow: auto;
 }
 
-/* .page-shell — emitted by <Page> (components/Page.tsx) */
 .page-shell {
   display: flex;
   flex-direction: column;
@@ -309,7 +140,6 @@ button { background: none; border: none; color: inherit; cursor: pointer; font: 
   overflow: auto;
 }
 
-/* .detail-* — emitted by <DetailLayout> (components/DetailLayout.tsx) */
 .detail-body {
   display: grid;
   grid-template-columns: 384px 1fr;
@@ -348,9 +178,6 @@ button { background: none; border: none; color: inherit; cursor: pointer; font: 
   }
 }
 
-/* ============================================================
-   Section header (used everywhere)
-   ============================================================ */
 .section-head {
   display: flex; align-items: center; justify-content: space-between;
   padding: 6px 10px;
@@ -365,8 +192,9 @@ button { background: none; border: none; color: inherit; cursor: pointer; font: 
   display: inline-block;
 }
 .section-title {
+  font-family: var(--font-sans);
   font-size: var(--fs-section); font-weight: 600;
-  letter-spacing: 0.12em; text-transform: uppercase;
+  letter-spacing: 0; text-transform: none;
   color: var(--text-mid);
 }
 .section-count {
@@ -383,10 +211,6 @@ button { background: none; border: none; color: inherit; cursor: pointer; font: 
   animation: blink 2s ease-in-out infinite;
 }
 
-
-/* ============================================================
-   Rows (generic)
-   ============================================================ */
 .row {
   display: grid; align-items: center;
   gap: 10px; padding: 0 12px;
@@ -403,7 +227,6 @@ button { background: none; border: none; color: inherit; cursor: pointer; font: 
 .row-id    { color: var(--text-mid); white-space: nowrap; font-size: 11px; }
 .row-title { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-
 .outcome-tag {
   display: inline-block; width: 12px; text-align: center;
   font-size: 11px;
@@ -413,9 +236,6 @@ button { background: none; border: none; color: inherit; cursor: pointer; font: 
 .outcome-failed    { color: var(--outcome-failed); }
 .outcome-abandoned { color: var(--outcome-abandoned); }
 
-/* ============================================================
-   Empty states
-   ============================================================ */
 .empty-state {
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   padding: 48px 12px; flex: 1; gap: 6px;
@@ -425,9 +245,6 @@ button { background: none; border: none; color: inherit; cursor: pointer; font: 
 .empty-msg   { font-size: 13px; color: var(--text-mid); }
 .empty-sub   { font-size: 11px; }
 
-/* ============================================================
-   Kebab placeholder
-   ============================================================ */
 .kebab {
   width: 18px; height: 18px;
   display: inline-flex; align-items: center; justify-content: center;
@@ -439,7 +256,6 @@ button { background: none; border: none; color: inherit; cursor: pointer; font: 
 }
 .row:hover .kebab, .run-header:hover .kebab { opacity: 1; }
 .kebab:hover { color: var(--text); background: var(--surface-3); }
-
 
 .breadcrumb {
   font-size: 11px; color: var(--text-dim);
@@ -455,23 +271,14 @@ button { background: none; border: none; color: inherit; cursor: pointer; font: 
 .status-blocked { color: var(--bucket-dead);    border-color: var(--bucket-dead); }
 .status-running { color: var(--bucket-run);     border-color: var(--bucket-run); animation: pulse 1.6s ease-in-out infinite; }
 .status-abandoned { color: var(--outcome-abandoned); border-color: var(--outcome-abandoned); }
-/* Amber — reviewer outcome that's "approved but with notes" or "changes requested";
-   semantically not a failure, but the operator should look at it. */
+
 .status-warn    { color: var(--decision-request-revision); border-color: var(--decision-request-revision); }
-/* Verdict outcomes (approved / changes-requested / blocked / approved-with-notes)
- * fill the dot with the status color and use a white glyph, so the icon
- * stays legible at this size and the row reads as "this carried a
- * decision" vs the lighter "process succeeded, no verdict" ring. */
+
 .status-filled               { color: var(--bg); font-weight: 700; }
 .status-filled.status-done    { background: var(--outcome-merged); }
 .status-filled.status-blocked { background: var(--bucket-dead); }
 .status-filled.status-warn    { background: var(--decision-request-revision); }
 
-
-/* Token breakdown grid — label/value pairs for the detail pages.
- * Used inside ``wi-section`` blocks so it inherits the page's section
- * padding. Two-column flex rows so labels and abbreviated counts read
- * left-to-right; the total row is slightly louder so it anchors. */
 .token-breakdown {
   margin: 0;
   padding: 8px 20px 14px;
@@ -496,14 +303,8 @@ button { background: none; border: none; color: inherit; cursor: pointer; font: 
   color: var(--bucket-run);
 }
 
-
 .wi-section { padding-bottom: 8px; }
 .wi-section:not(:last-child) { border-bottom: 1px solid var(--border); }
-
-
-/* ============================================================
-   Run page
-   ============================================================ */
 
 .run-header {
   display: flex; align-items: center; justify-content: space-between;
@@ -579,11 +380,6 @@ button { background: none; border: none; color: inherit; cursor: pointer; font: 
   background: var(--bg);
 }
 
-/* Structured rendering of a harness stream transcript. Each row is one
- * event; the goal is for an operator scanning the pane to read what the
- * harness is doing without parsing JSON. Raw lines and stderr leakage
- * still flow through legibly.
- */
 .stream-transcript {
   flex: 1; overflow: auto;
   padding: 14px 20px 24px;
@@ -606,7 +402,7 @@ button { background: none; border: none; color: inherit; cursor: pointer; font: 
   white-space: pre-wrap;
 }
 .stream-row-thinking {
-  color: var(--accent-violet);  /* violet accent — reasoning, distinct from output */
+  color: var(--accent-violet);
   font-style: italic;
   white-space: pre-wrap;
 }
@@ -615,7 +411,7 @@ button { background: none; border: none; color: inherit; cursor: pointer; font: 
 .stream-row-tool .stream-glyph { color: var(--bucket-run); }
 .stream-tool-name { color: var(--bucket-run); font-weight: 600; }
 .stream-tool-arg { color: var(--text-mid); }
-.stream-row-result { padding-left: 22px; }   /* indent under the tool_use line */
+.stream-row-result { padding-left: 22px; }
 .stream-row-result .stream-glyph { color: var(--text-faint); }
 .stream-row-result-error { color: var(--bucket-dead); }
 .stream-row-result-error .stream-glyph { color: var(--bucket-dead); }
@@ -627,12 +423,6 @@ button { background: none; border: none; color: inherit; cursor: pointer; font: 
 .stream-row-done .stream-glyph { color: var(--outcome-merged); }
 .stream-row-unknown { color: var(--text-mid); }
 
-/* Harness result payloads — the verdict + body block the operator
- * cares about most when an evaluator / reviewer turn finishes. Renders
- * as a callout with the verdict tag pinned left and the body prose
- * flowing below. Pass / approve verdicts stay neutral; fail / blocked
- * / request_changes inherit the error colour via the shared modifier
- * class. */
 .stream-row-harness-result {
   padding: 8px 22px;
   border-left: 2px solid var(--border);
@@ -667,11 +457,8 @@ button { background: none; border: none; color: inherit; cursor: pointer; font: 
   font-family: var(--font-mono); font-size: 12px;
 }
 
-
 .empty-action { margin-top: 12px; }
 
-
-/* ---- System Strip (compact, secondary) --------------------- */
 .sys-strip {
   display: flex; align-items: center; gap: 0;
   height: 28px; padding: 0 16px;
@@ -696,10 +483,8 @@ button { background: none; border: none; color: inherit; cursor: pointer; font: 
 .sys-item-bad  .sys-item-label { color: var(--bucket-dead); }
 .sys-item-bad  { animation: pulse 2.4s ease-in-out infinite; }
 
-
 .panel-empty { padding: 16px; }
 
-/* ---- Table headers (column labels) ------------------------ */
 .table-head {
   display: grid; align-items: center;
   padding: 6px 20px;
@@ -709,20 +494,9 @@ button { background: none; border: none; color: inherit; cursor: pointer; font: 
   position: sticky; top: 0; z-index: 2;
   gap: 14px;
 }
-/* ---- Unified row + table-head sizing across the dashboard ---- */
 .table-head .th-right { text-align: right; }
 
 .table-head { font-size: 10px; }
-/* Each dashboard panel layout: <glyph> <shared item prefix> <title>
- * <panel-specific trailing cells>. The matching row class below must
- * use the same template — keep them in sync. */
-
-/* Needs-input shares the leading prefix (kind, ticket, project, pr)
- * with Active so the eye can scan straight down the columns; the
- * "waiting for" pill + age fill the same horizontal real-estate as
- * Active's stage/worker/elapsed cluster. */
-
-/* Unified ticket cell — kind pill sits left of the ticket ref. */
 
 .row-repo {
   font-size: 12px;
@@ -743,12 +517,9 @@ a.row-repo:hover { color: var(--bucket-run); text-decoration: underline; }
 .row-pr-cell .row-pr-num { color: var(--text-mid); text-decoration: none; }
 .row-pr-cell .row-pr-num:hover { color: var(--bucket-run); text-decoration: underline; }
 
-/* Ticket ref → Linear link. Inherits the row-id colour so it doesn't
- * stand out until hovered, matching the PR-number treatment. */
 .row-id .row-ticket-link { color: inherit; text-decoration: none; }
 .row-id .row-ticket-link:hover { color: var(--bucket-run); text-decoration: underline; }
 
-/* ---- Shared repo / pr cell -------------------------------- */
 .repo-pr {
   font-size: 11.5px;
   white-space: nowrap;
@@ -764,7 +535,6 @@ a.row-repo:hover { color: var(--bucket-run); text-decoration: underline; }
 }
 .repo-pr-pr:hover { border-bottom-color: var(--bucket-run); }
 
-
 .row-fin-dur {
   font-size: 11px;
   white-space: nowrap;
@@ -772,25 +542,12 @@ a.row-repo:hover { color: var(--bucket-run); text-decoration: underline; }
 }
 .row-fin-what { font-size: 11px; white-space: nowrap; }
 
-/* Responsive */
 @media (max-width: 1100px) {
   .sys-strip { overflow-x: auto; }
 }
 
-/* The old transcript-btn class is unused now but keep as safety */
-
-/* Ensure row-cost still right-aligns in active rows */
-
-/* ============================================================
-   Active research page (/active)
-   ============================================================ */
-
-/* Work-items tab — every work item, sorted by last movement. */
 .row-work-item {
-  /* Title is capped (long PR-style titles ellipsise instead of running
-     all the way to the right edge). A 1fr spacer column takes the
-     leftover space on wide viewports so the trailing repo / pr / state
-     / updated columns stay anchored at a comfortable offset. */
+
   grid-template-columns:
     16px minmax(0, 104px) minmax(0, 540px) 1fr 120px 64px minmax(0, 160px) 70px;
 }
@@ -798,7 +555,7 @@ a.row-repo:hover { color: var(--bucket-run); text-decoration: underline; }
 .row-work-item:hover { background: var(--surface-2); }
 .wi-next { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .wi-updated { text-align: right; white-space: nowrap; font-size: 11px; }
-/* One review per row: state, repo, PR, what it is doing, when, who asked. */
+
 .row-review {
   grid-template-columns: 16px minmax(0, 200px) 64px 1fr minmax(0, 120px) minmax(0, 140px);
   gap: 14px; padding: 0 20px;
@@ -808,15 +565,13 @@ a.row-repo:hover { color: var(--bucket-run); text-decoration: underline; }
 .review-when { text-align: right; white-space: nowrap; font-size: 11px; }
 .review-asker { text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 11px; }
 
-/* Active board groups — needs-you / in-flight. */
 .wi-group-head {
   padding: 10px 20px 4px;
   font-size: 10px; text-transform: uppercase; letter-spacing: 0.12em;
 }
 .wi-group + .wi-group .wi-group-head { border-top: 1px solid var(--border-soft); }
 .wi-group-count { opacity: 0.6; }
-/* Failed/stuck active rows — they sit in "needs you" (a failure still needs
-   you to retry or cancel) but read red so they don't blend with review asks. */
+
 .row-failed .wi-next { color: var(--outcome-failed); opacity: 1; }
 .active-page-head {
   display: flex; align-items: flex-end; justify-content: space-between;
@@ -828,18 +583,19 @@ a.row-repo:hover { color: var(--bucket-run); text-decoration: underline; }
 .active-page-title { display: flex; flex-direction: column; gap: 10px; }
 .dash-h1-main {
   display: inline-flex; align-items: baseline; gap: 8px;
-  font-family: var(--font-mono);
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
+  font-family: var(--font-sans);
+  letter-spacing: -0.02em;
+  text-transform: capitalize;
   margin: 0;
   font-weight: 500;
 }
 .dash-h1-eyebrow {
-  font-size: 12px;
+  font-size: 26px;
   color: var(--text);
 }
 .dash-h1-count {
-  font-size: 12px;
+  font-family: var(--font-mono);
+  font-size: 18px;
   color: var(--text-mid);
   letter-spacing: 0.02em;
   font-feature-settings: 'tnum';
@@ -850,7 +606,8 @@ a.row-repo:hover { color: var(--bucket-run); text-decoration: underline; }
 .page-history .active-page-title .dash-h1-eyebrow { color: var(--text); }
 .active-page-meta {
   display: flex; align-items: center; gap: 8px;
-  font-size: 11px;
+  font-family: var(--font-sans);
+  font-size: 13px;
 }
 .live-dot-inline {
   width: 6px; height: 6px; border-radius: 50%;
@@ -883,10 +640,6 @@ a.row-repo:hover { color: var(--bucket-run); text-decoration: underline; }
   border-color: color-mix(in oklch, var(--bucket-run) 45%, transparent);
 }
 
-
-/* ============================================================
-   History page (/history)
-   ============================================================ */
 .row-history {
   display: grid; align-items: center;
   grid-template-columns: 16px 110px minmax(0, 1fr) 130px 60px 84px minmax(0, 88px);
@@ -923,10 +676,6 @@ a.row-repo:hover { color: var(--bucket-run); text-decoration: underline; }
   border-color: var(--bucket-run);
 }
 
-
-/* ============================================================
-   Settings redesign — rail + per-app agent tables + inheritance
-   ============================================================ */
 .set-skill-error { color: var(--bucket-dead); font-size: 12px; font-family: var(--font-mono); }
 
 .set-backdrop {
@@ -989,19 +738,14 @@ a.row-repo:hover { color: var(--bucket-run); text-decoration: underline; }
 }
 .set-select:hover { border-color: var(--border-loud); }
 .set-select:focus { outline: none; border-color: var(--accent); }
-/* Text inputs share .set-select's frame but must not wear its dropdown chevron. */
+
 input.set-select { background-image: none; padding-right: 12px; }
-/* Multiline secrets (a pasted PEM): the same frame, grown into a textarea. */
+
 textarea.set-textarea { background-image: none; height: auto; min-height: 96px; padding: 8px 12px; line-height: 1.45; resize: vertical; white-space: pre; }
 
-/* Shared settings primitives — every pane's card rides .set-card and adds its
-   own layout; .chev is the one disclosure/drill-in glyph. */
 .set-card { border: 1px solid var(--border); border-radius: 7px; background: var(--surface-2); }
 .chev::before, .mcp-custom-summary::before { content: '›'; display: inline-block; font-family: var(--font-mono); font-size: 13px; color: var(--text-faint); transition: transform 120ms; }
 
-/* Harnesses — the MCP pane's measure and scale; each card separates identity,
-   defaults, and connection into three bands. Provider color survives only as
-   the identity dot and the guided connect-flow accent. */
 .hrs-list { display: flex; flex-direction: column; gap: 10px; }
 .hrs-pane :is(.set-btn, .hr-conn-btn, .mcp-conn) { font-family: var(--font-sans); letter-spacing: 0; }
 .hr-card { display: flex; flex-direction: column; gap: 12px; padding: 13px 14px; }
@@ -1016,7 +760,6 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
 @media (max-width: 720px) { .hr-controls { grid-template-columns: 1fr 1fr; } }
 @media (max-width: 460px) { .hr-controls { grid-template-columns: 1fr; } }
 
-/* Provider credentials — one compact alternative-billing surface. */
 .hr-connect { border-top: 1px solid var(--border); padding-top: 12px; display: flex; flex-direction: column; gap: 10px; }
 .hr-conn-status { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .hr-chip { display: inline-flex; align-items: center; padding: 2px 9px; border-radius: 3px; font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.04em; }
@@ -1222,7 +965,7 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
 .set-btn.primary:disabled { opacity: 0.45; cursor: default; box-shadow: none; }
 .set-btn.danger { color: var(--bucket-dead); border: 1px solid color-mix(in oklch, var(--bucket-dead) 38%, transparent); background: color-mix(in oklch, var(--bucket-dead) 8%, transparent); }
 .set-btn.danger:hover { background: color-mix(in oklch, var(--bucket-dead) 18%, var(--surface)); border-color: var(--bucket-dead); }
-/* Destructive but not the point of the row — it earns its red on hover. */
+
 .set-btn.danger.quiet { color: var(--text-dim); border-color: var(--border); background: none; }
 .set-btn.danger.quiet:hover { color: var(--bucket-dead); }
 
@@ -1232,7 +975,7 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
 .skill-col { overflow: hidden; }
 .skill-col-head { display: flex; align-items: center; gap: 10px; padding-right: 14px; border-bottom: 1px solid var(--border-soft); }
 .skill-col-head:last-child { border-bottom: none; }
-/* The summary is one expand/collapse button; Sync and Remove sit beside it. */
+
 .sc-toggle { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; padding: 11px 14px; background: none; border: none; font: inherit; color: inherit; text-align: left; cursor: pointer; }
 .sc-toggle:hover { background: var(--surface-3); }
 .sc-toggle:hover .chev::before { color: var(--text); }
@@ -1251,13 +994,9 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
 .sk-enable { display: inline-flex; align-items: center; gap: 8px; }
 .sk-enable label { font-size: 12px; color: var(--text-mid); cursor: pointer; }
 
-/* Tokens — the revoke affordance on a PAT row. */
 .sc-remove { display: inline-flex; align-items: center; gap: 6px; font-family: var(--font-mono); font-size: 11px; color: var(--text-dim); border: 1px solid var(--border); border-radius: 4px; padding: 5px 10px; flex-shrink: 0; cursor: pointer; background: none; }
 .sc-remove:hover { color: var(--bucket-dead); border-color: color-mix(in oklch, var(--bucket-dead) 45%, transparent); background: color-mix(in oklch, var(--bucket-dead) 10%, var(--surface)); }
 
-/* The agent-access pane reuses the row primitives (.mcp-row / .mcp-id /
-   .mcp-tok) for its token list, so everything the MCP pane redefines is
-   scoped under .mcp-pane. */
 .mcp-servers { display: flex; flex-direction: column; gap: 8px; }
 .mcp-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto auto; gap: 14px; align-items: center; padding: 10px 14px; }
 .mcp-row.is-off { opacity: 0.6; }
@@ -1266,7 +1005,6 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
 .mcp-url { font-family: var(--font-mono); font-size: 11.5px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .mcp-tok { font-family: var(--font-mono); font-size: 10px; padding: 2px 7px; border-radius: 4px; border: 1px solid var(--border); color: var(--text-dim); }
 
-/* One measure for every band, so search, form and server list share an edge. */
 .mcp-pane { gap: 24px; }
 .mcp-pane > * { max-width: 760px; }
 .mcp-pane-head { display: flex; flex-direction: column; gap: 6px; }
@@ -1300,7 +1038,6 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
 .mcp-reg-desc { font-size: 12px; color: var(--text-mid); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .mcp-reg-form { display: flex; flex-direction: column; gap: 13px; padding: 14px; border: 1px solid color-mix(in oklch, var(--accent) 50%, transparent); border-top: none; border-radius: 0 0 7px 7px; background: var(--surface); }
 
-/* Secondary by weight, not by hiding: one quiet control until it is wanted. */
 .mcp-custom-summary { display: flex; align-items: center; gap: 8px; padding: 11px 14px; border-radius: 7px; font-size: 13px; color: var(--text-mid); cursor: pointer; list-style: none; }
 .mcp-custom-summary::-webkit-details-marker { display: none; }
 .mcp-custom-summary:hover { color: var(--text); }
@@ -1310,15 +1047,11 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
 .mcp-form-grid { display: grid; grid-template-columns: minmax(160px, 1fr) minmax(200px, 1.4fr); gap: 14px; }
 .mcp-form-grid > .mcp-field:last-child { grid-column: 1 / -1; }
 
-/* Two tiers — identity + connection, then availability + actions. Placement is
-   explicit so no control can wrap into an orphaned position. */
 .mcp-pane .mcp-row { grid-template-columns: minmax(0, 1fr) auto; gap: 10px 14px; align-items: start; padding: 12px 14px; transition: border-color 120ms, background 120ms; }
 .mcp-pane .mcp-row:hover { border-color: var(--border-loud); }
 .mcp-pane .mcp-row.is-off { opacity: 1; background: var(--surface); }
 .mcp-pane .mcp-row.is-off :is(.mcp-id, .mcp-conn) { opacity: 0.5; }
-/* The one connection-status indicator: neutral when off, green when live.
-   Inside an MCP server row the off state stays attention-colored — a listed
-   server that isn't connected wants action. */
+
 .mcp-conn { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; font-weight: 500; color: var(--text-dim); white-space: nowrap; }
 .mcp-row .mcp-conn { justify-self: end; padding-top: 2px; }
 .mcp-row .mcp-conn:not(.is-live) { color: var(--decision-request-revision); }
@@ -1330,9 +1063,6 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
 .mcp-enable-label { font-size: 12.5px; color: var(--text-mid); }
 .mcp-actions { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px; }
 
-/* Services — an overview grid of provider cards, each opening a focused
-   detail view in the same pane. Shares the MCP pane's measure and type
-   scale; monospace is reserved for identity values. */
 .svc-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 .svc-card { display: flex; flex-direction: column; gap: 8px; min-width: 0; padding: 13px 14px; cursor: pointer; text-align: left; font: inherit; color: inherit; transition: border-color 120ms, background 120ms; }
 .svc-card:hover { border-color: var(--border-loud); background: var(--surface-3); }
@@ -1414,10 +1144,6 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
   .browser-session-times { flex-direction: column; gap: 5px; }
 }
 
-
-/* ============================================================
-   Animations
-   ============================================================ */
 @keyframes pulse {
   0%, 100% { opacity: 1; }
   50%      { opacity: 0.45; }
@@ -1427,38 +1153,13 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
   50%      { opacity: 0.3; }
 }
 
-/* Scrollbar — minimal */
 ::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-track { background: var(--bg); }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--border-loud); }
 
-/* ============================================================
-   Tweaks panel overrides — fit dark NOC style
-   ============================================================ */
 [class*="tweaks"] { font-family: var(--font-mono); }
 
-
-/* -----------------------------------------------------------------------
- * Research item detail page
- *
- * Composed of: TL;DR summary card, a list of findings, optional question
- * + risk lists, then review and publish sections. The visual hierarchy is:
- *
- *   summary  ─→  findings  ─→  side-quests (questions/risks)
- *                    ↓
- *   review        publish
- *
- * Confidence palette and review-decision palette are dedicated colors;
- * see :root above. The bucket/outcome palettes are not reused here so a
- * green chip can't accidentally mean two things across the app.
- * --------------------------------------------------------------------- */
-
-/* Markdown content rendered by react-markdown — for finding bodies,
- * review bodies, and result summaries. Scoped via .markdown-content so
- * we don't accidentally restyle the rest of the app. Generous prose
- * typography (line-height 1.65, ~72ch measure) because operators
- * spend minutes reading these, not seconds scanning rows. */
 .markdown-content {
   line-height: 1.65;
   max-width: 72ch;
@@ -1540,95 +1241,14 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
   margin: 1em 0;
 }
 
-
-/* ---------------------------------------------------------------------------
- * Usage pill (appbar) + Usage panel (dashboard)
- *
- * Pill: one mini-pill per registered harness. Color tier
- * matches the bar tier in the panel so the eye learns one mapping:
- * green = plenty left, amber = mind it, red = imminent reset trip.
- *
- * Panel: one column per harness, each with stacked horizontal bars.
- * Bar tier same as pill tier. Stale snapshots get a warning row above
- * the bars; parse failures hide the bars and surface a disclosure of
- * the raw /status output so the operator can update the regex without
- * re-running the scrape.
- * ------------------------------------------------------------------------- */
-
-.usage-pill {
-  display: inline-flex; align-items: center; gap: 6px;
-  text-decoration: none;
-  color: inherit;
-  cursor: pointer;
-}
-.usage-pill:hover .usage-mini { border-color: var(--border-loud); }
-
-/* Dedicated /usage page wraps the UsagePanel in a comfortable
- * max-width column so the provider panels aren't stretched
- * edge-to-edge on a wide screen. */
 .page-usage {
   max-width: 1400px;
   margin: 0 auto;
   padding: 24px 32px 64px;
 }
-.usage-mini {
-  display: inline-flex; align-items: center; gap: 4px;
-  font-size: 10px; letter-spacing: 0.04em;
-  padding: 2px 7px;
-  border: 1px solid var(--border);
-  border-radius: 2px;
-  cursor: default;
-}
-.usage-mini-dot {
-  width: 6px; height: 6px; border-radius: 50%;
-  background: var(--text-faint);
-}
-.usage-mini-label {
-  color: var(--text-dim);
-  text-transform: uppercase;
-}
-.usage-mini-pct {
-  font-variant-numeric: tabular-nums;
-}
-.usage-mini-age {
-  color: var(--text-faint);
-  margin-left: 2px;
-}
-.usage-mini-stale {
-  color: var(--bucket-dead);
-}
-.usage-tier-idle { color: var(--text-faint); }
-.usage-tier-ok {
-  color: var(--outcome-merged);
-  border-color: color-mix(in oklch, var(--outcome-merged) 30%, transparent);
-}
-.usage-tier-ok .usage-mini-dot {
-  background: var(--outcome-merged);
-  box-shadow: 0 0 4px color-mix(in oklch, var(--outcome-merged) 50%, transparent);
-}
-.usage-tier-warn {
-  color: var(--decision-request-revision);
-  border-color: color-mix(in oklch, var(--decision-request-revision) 35%, transparent);
-}
-.usage-tier-warn .usage-mini-dot {
-  background: var(--decision-request-revision);
-}
-.usage-tier-crit {
-  color: var(--bucket-dead);
-  border-color: color-mix(in oklch, var(--bucket-dead) 40%, transparent);
-}
-.usage-tier-crit .usage-mini-dot {
-  background: var(--bucket-dead);
-  box-shadow: 0 0 6px color-mix(in oklch, var(--bucket-dead) 50%, transparent);
-}
-
-/* Usage page with rate-limit windows, burn rate, trend, and totals by
- * provider. The raw-output disclosure (.usage-raw, below) is shared
- * with the old panel vocabulary. */
 
 .us-col { display: flex; flex-direction: column; }
 
-/* page header */
 .us-head {
   display: flex; align-items: center; gap: 14px;
   padding-bottom: 14px;
@@ -1636,8 +1256,8 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
   margin-bottom: 22px;
 }
 .us-head-title {
-  font-family: var(--font-mono); font-size: 14px; font-weight: 500;
-  letter-spacing: 0.04em; text-transform: uppercase; color: var(--text);
+  font-family: var(--font-sans); font-size: 26px; font-weight: 500;
+  letter-spacing: -0.02em; text-transform: capitalize; color: var(--text);
 }
 .us-head-poll {
   display: inline-flex; align-items: center; gap: 6px;
@@ -1662,7 +1282,6 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
 .us-refresh-glyph { font-size: 12px; transition: transform 400ms; }
 .us-refresh:hover:not(:disabled) .us-refresh-glyph { transform: rotate(180deg); }
 
-/* critical alert banner */
 .us-alert {
   display: flex; align-items: stretch; gap: 0;
   border: 1px solid color-mix(in oklch, var(--bucket-dead) 50%, var(--border));
@@ -1708,32 +1327,32 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
 .us-alert-count-label { font-size: 9.5px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--text-dim); }
 .us-alert-count { font-family: var(--font-mono); font-size: 26px; font-weight: 500; color: var(--bucket-dead); line-height: 1; font-variant-numeric: tabular-nums; }
 
-/* provider grid */
 .us-grid {
-  display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px;
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr)); gap: 16px;
   margin-bottom: 24px;
 }
 .us-prov {
+  min-width: 0;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 4px;
   display: flex; flex-direction: column;
 }
 .us-prov-head {
-  display: flex; align-items: center; gap: 10px;
+  display: flex; align-items: center; flex-wrap: wrap; gap: 10px;
   padding: 13px 18px;
   border-bottom: 1px solid var(--border);
 }
-/* provider dot: accent comes from the panel's --fam (set inline from the
-   registry-order palette, same as the settings harness cards) */
+
 .us-prov-dot {
   width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
   background: var(--fam, var(--text-dim));
   box-shadow: 0 0 7px color-mix(in oklch, var(--fam, var(--text-dim)) 55%, transparent);
 }
 .us-prov-name {
-  font-family: var(--font-mono); font-size: 13px; font-weight: 500;
-  letter-spacing: 0.08em; text-transform: uppercase; color: var(--text);
+  min-width: 0; overflow-wrap: anywhere;
+  font-family: var(--font-sans); font-size: 18px; font-weight: 500;
+  letter-spacing: 0; color: var(--text);
 }
 .us-prov-plan {
   font-size: 9.5px; letter-spacing: 0.1em; text-transform: uppercase;
@@ -1741,10 +1360,10 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
   border: 1px solid var(--border-loud); border-radius: 2px; padding: 1px 6px;
 }
 .us-prov-spacer { flex: 1; }
-.us-prov-scraped { font-size: 10.5px; color: var(--text-dim); white-space: nowrap; }
+.us-prov-scraped { font-family: var(--font-sans); font-size: 13px; color: var(--text-dim); overflow-wrap: anywhere; }
 .us-prov-windows { padding: 6px 18px 16px; display: flex; flex-direction: column; }
 .us-prov-empty {
-  font-size: 12px;
+  font-family: var(--font-sans); font-size: 15px;
   padding: 24px 18px;
   text-align: center;
 }
@@ -1759,7 +1378,6 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
 }
 .us-prov .usage-raw { padding: 0 18px 14px; }
 
-/* window block */
 .us-win { padding: 14px 0; border-bottom: 1px dashed var(--border-soft); }
 .us-win:last-child { border-bottom: none; }
 .us-win-top { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 9px; }
@@ -1805,12 +1423,10 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
 }
 .us-week-dot.is-current::after { background: var(--text-mid); }
 
-/* health coloring */
 .h-ok   { color: var(--outcome-merged); }
 .h-warn { color: var(--decision-request-revision); }
 .h-crit { color: var(--bucket-dead); }
 
-/* thick bar with quartile ticks */
 .us-bar {
   position: relative; height: 14px; border-radius: 7px;
   background:
@@ -1825,13 +1441,12 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
   position: absolute; left: 0; top: 0; bottom: 0;
   border-radius: 7px 0 0 7px;
   box-shadow: inset 0 1px 0 rgba(255,255,255,0.18);
-  transition: width 600ms cubic-bezier(.2,.7,.2,1);
 }
 .us-bar-fill.is-full { border-radius: 7px; }
 .fill-ok   { background: linear-gradient(180deg, color-mix(in oklch, var(--outcome-merged) 92%, white), var(--outcome-merged)); }
 .fill-warn { background: linear-gradient(180deg, color-mix(in oklch, var(--decision-request-revision) 92%, white), var(--decision-request-revision)); }
 .fill-crit { background: linear-gradient(180deg, color-mix(in oklch, var(--bucket-dead) 92%, white), var(--bucket-dead)); }
-/* depleted track treatment */
+
 .us-bar.is-empty {
   background:
     repeating-linear-gradient(-45deg,
@@ -1841,8 +1456,7 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
   border-color: color-mix(in oklch, var(--bucket-dead) 40%, var(--border));
   box-shadow: inset 0 0 14px color-mix(in oklch, var(--bucket-dead) 22%, transparent);
 }
-/* unmetered plan: full bar, calmer fill — capacity is a fact, not a
- * quota draining toward a reset */
+
 .us-bar.is-unmetered .us-bar-fill {
   background: linear-gradient(180deg,
     color-mix(in oklch, var(--outcome-merged) 40%, var(--surface-3)),
@@ -1850,7 +1464,6 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
   box-shadow: none;
 }
 
-/* window meta row: burn note + reset */
 .us-win-meta {
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
   margin-top: 9px;
@@ -1869,7 +1482,6 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
 .us-reset-val { color: var(--text); font-variant-numeric: tabular-nums; }
 .us-reset.is-hot .us-reset-val { color: var(--decision-request-revision); }
 
-/* unmetered used-today line */
 .us-unmetered-used {
   display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
   margin-top: 11px; padding: 8px 10px;
@@ -1884,7 +1496,6 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
 }
 .us-unmetered-used-val { color: var(--text); font-variant-numeric: tabular-nums; }
 
-/* sparkline */
 .us-spark-wrap { margin-top: 11px; }
 .us-spark-cap {
   display: flex; align-items: center; justify-content: space-between; gap: 8px;
@@ -1893,17 +1504,16 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
 }
 .us-spark { display: block; width: 100%; height: 34px; }
 
-/* today section */
 .us-section-head {
-  display: flex; align-items: center; gap: 10px;
+  display: flex; align-items: center; flex-wrap: wrap; gap: 10px;
   margin-bottom: 14px;
 }
 .us-section-rule { width: 3px; height: 13px; background: var(--bucket-run); border-radius: 1px; }
 .us-section-title {
-  font-size: 11px; font-weight: 500;
-  letter-spacing: 0.14em; text-transform: uppercase; color: var(--text-mid);
+  font-family: var(--font-sans); font-size: 18px; font-weight: 500;
+  letter-spacing: 0; color: var(--text);
 }
-.us-section-sub { font-size: 11px; color: var(--text-dim); }
+.us-section-sub { font-family: var(--font-sans); font-size: 13px; color: var(--text-dim); }
 
 .us-today { display: grid; grid-template-columns: 1fr 1fr 1.3fr; gap: 16px; }
 .us-tile {
@@ -1915,7 +1525,7 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
 }
 .us-tile-top { display: flex; align-items: baseline; justify-content: space-between; }
 .us-tile-label {
-  font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase;
+  font-family: var(--font-sans); font-size: 13px; letter-spacing: 0;
   color: var(--text-dim);
 }
 .us-tile-value {
@@ -1923,15 +1533,13 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
   line-height: 1; font-variant-numeric: tabular-nums;
 }
 
-/* stacked provider split bar */
 .us-split { display: flex; flex-direction: column; gap: 8px; }
 .us-split-bar {
   display: flex; height: 10px; border-radius: 5px; overflow: hidden;
   background: var(--surface-2); border: 1px solid var(--border);
 }
-/* segment/swatch accents are inline (registry-order palette); the neutral
-   background is only the fallback for a missing color */
-.us-split-seg { height: 100%; transition: width 600ms cubic-bezier(.2,.7,.2,1); background: var(--text-dim); }
+
+.us-split-seg { height: 100%; background: var(--text-dim); }
 .us-split-legend { display: flex; flex-direction: column; gap: 5px; }
 .us-split-row {
   display: grid; grid-template-columns: 10px 1fr auto; align-items: center; gap: 8px;
@@ -1942,7 +1550,6 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
 .us-split-amt { color: var(--text); font-variant-numeric: tabular-nums; }
 .us-split-amt.is-zero { color: var(--text-faint); }
 
-/* hourly spend histogram */
 .us-hours {
   background: var(--surface); border: 1px solid var(--border); border-radius: 4px;
   padding: 16px 18px; display: flex; flex-direction: column; gap: 14px;
@@ -1952,7 +1559,6 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
 .us-hour-bar {
   flex: 1; border-radius: 2px 2px 0 0; min-height: 2px;
   display: flex; flex-direction: column-reverse; overflow: hidden;
-  transition: height 500ms ease;
 }
 .us-hour-bar.is-empty { background: var(--surface-3); }
 .us-hour-bar.is-now { box-shadow: 0 0 8px color-mix(in oklch, var(--accent-amber) 50%, transparent); }
@@ -1986,57 +1592,25 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
   color: var(--text-dim);
 }
 
-/* ============================================================
-   Appbar — events link
-   ============================================================ */
-.appbar-events-link {
-  display: inline-flex; align-items: center; gap: 6px;
-  font-size: 11px;
-  letter-spacing: 0.04em;
-  text-decoration: none;
-  padding: 3px 8px;
-  border: 1px solid transparent;
-  border-radius: 2px;
-  transition: color 80ms, border-color 80ms;
-}
-.appbar-events-link:hover { color: var(--text-mid); }
-.appbar-events-link.active {
-  color: var(--bucket-plan);
-  border-color: color-mix(in oklch, var(--bucket-plan) 35%, transparent);
-}
-.appbar-events-glyph {
-  font-size: 13px;
-  color: var(--bucket-plan);
-}
-
-/* ============================================================
-   Events page (/events) — unified activity feed
-   ============================================================ */
-
-/* Proper page title — the shared ``dash-h1-eyebrow + dash-h1-count``
- * shape rendered both at 12px which looked like a label, not a
- * heading. ``events-h1`` gives the page a 22px title with the count
- * in the dashboard's run-bucket cyan so the operator sees activity
- * volume at a glance. */
 .events-h1 {
   display: inline-flex; align-items: baseline; gap: 12px;
   margin: 0;
-  font-family: var(--font-mono);
+  font-family: var(--font-sans);
   font-weight: 500;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  font-size: 22px;
+  letter-spacing: -0.02em;
+  text-transform: capitalize;
+  font-size: 26px;
 }
 .events-h1-label { color: var(--text); }
 .events-h1-count {
+  font-family: var(--font-mono);
+  font-size: 18px;
   color: var(--bucket-run);
   font-feature-settings: 'tnum';
   letter-spacing: 0.02em;
   text-transform: none;
 }
 
-/* App filter — one global log, so the pills narrow the view rather than
-   switch between feeds. Options come from the registry; no name lands here. */
 .events-filter {
   display: flex; flex-wrap: wrap; gap: 6px;
 }
@@ -2063,26 +1637,19 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
 }
 
 .events-feed {
-  /* Inner feed is a plain flex column of rows; scrolling is handled
-     by the .page-shell wrapper that <Page scroll="page"> emits. */
+
   display: flex; flex-direction: column;
   padding: 0;
 }
 .event-row {
   display: grid;
-  /* time · kind pill · source · summary
-   *
-   * Kind column widened to fit the longest event kinds we emit
-   * (``audit.implementation_finalized``, ``audit.linear_status_synced``)
-   * without truncation — anything narrower turned the pill into a
-   * cryptic ellipsis-suffixed prefix. Time column nudged up so
-   * longer relative times (``1h 23m ago``) don't clip. */
+
   grid-template-columns: 110px 240px 90px minmax(0, 1fr);
   gap: 18px;
   align-items: center;
   padding: 8px 28px;
   border-bottom: 1px solid var(--border-soft);
-  font-size: 12px;
+  font-size: 15px;
 }
 .event-row-clickable { cursor: pointer; }
 .event-row-clickable:hover { background: var(--surface-2); }
@@ -2117,10 +1684,6 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
   white-space: nowrap;
 }
 
-/* Color buckets reuse the dashboard palette so colors carry the
-   same meaning here as on /software_factory. Cyan = in-flight runs, teal =
-   planning/scope, amber = inbound webhook, magenta = human signal,
-   neutral = audit/jobs. */
 .event-kind-agent {
   color: var(--bucket-run);
   border-color: color-mix(in oklch, var(--bucket-run) 35%, transparent);
@@ -2130,12 +1693,9 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
   border-color: var(--border);
 }
 
-/* ============================================================
-   Back-to-app link — app-independent detail pages (/usage, /events)
-   ============================================================ */
 .back-to-app {
   display: inline-flex; align-items: center; gap: 4px;
-  font-size: 11px;
+  font-family: var(--font-sans); font-size: 15px;
   letter-spacing: 0.04em;
   text-decoration: none;
   padding: 4px 9px;
@@ -2150,23 +1710,12 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
   background: var(--surface-2);
 }
 
-/* Bar wrapping the back link on pages without their own header
- * (UsagePage delegates to UsagePanel). On pages that have a header
- * already (EventsPage), the link sits inside the existing
- * ``.active-page-head`` flex layout — no wrapper needed. */
 .page-back-bar {
   display: flex;
   justify-content: flex-start;
   padding-bottom: 12px;
 }
 
-
-/* ============================================================
-   DETAIL PAGE — reuses .wi-header / .wi-facts / rail / main families
-   ============================================================ */
-
-/* header facts line — self-contained copy of wi-detail.css families,
-   since this harness loads styles.css + watch-detail.css only */
 .wi-facts {
   display: flex; align-items: center; flex-wrap: wrap;
   gap: 0; margin-top: 2px;
@@ -2179,12 +1728,6 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
 .wi-fact-v { color: var(--text-mid); }
 .wi-stat-label { white-space: nowrap; }
 
-/* ============================================================
-   Timeline rows — a .wic-op* header per run, with its .wic-call*
-   agent-call rows nested under it, shared by the work-item
-   INSPECTOR (wi-inspector.css, below). Status node + kind +
-   sub-line/phase + duration/cost.
-   ============================================================ */
 :root {
   --wic-scheduled: var(--text-faint);
   --wic-running:   var(--bucket-run);
@@ -2232,7 +1775,6 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
 .wic-op-dur { font-family: var(--font-mono); font-size: 11px; color: var(--text-dim); font-variant-numeric: tabular-nums; }
 .wic-op-cost { font-family: var(--font-mono); font-size: 11px; color: var(--text-mid); font-variant-numeric: tabular-nums; }
 
-/* Agent-call rows nested under their run's header row. */
 .wic-call {
   display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; gap: 8px; align-items: center;
   padding: 5px 14px 5px 34px; cursor: pointer;
@@ -2248,13 +1790,6 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
 .wic-call-label { font-size: 12px; color: var(--text-mid); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .wic-call-ledger { display: flex; gap: 10px; white-space: nowrap; }
 
-/* ============================================================
-   Projects config surface (projects.css) — full-width column of
-   project cards: a primary app + sibling repos a build operates
-   on. Calm, dense, deliberate. (Appbar/strip chrome is the app's.)
-   ============================================================ */
-/* Full-width content inside the shared <Page> shell, matching the data pages'
-   ~20px inset — no bespoke max-width cap. */
 .pj-col { padding: 24px 20px 80px; }
 
 .pj-head {
@@ -2264,7 +1799,6 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
 .pj-head-title { font-family: var(--font-mono); font-size: 13px; font-weight: 500; letter-spacing: 0.28em; text-transform: uppercase; color: var(--text-mid); }
 .pj-head-count { font-family: var(--font-mono); font-size: 13px; color: var(--bucket-run); letter-spacing: 0.08em; }
 
-/* page-level transient toast — e.g. a project delete that failed */
 .pj-toast {
   margin-bottom: 16px; padding: 10px 14px; border-radius: 4px; font-size: 12px;
 }
@@ -2274,12 +1808,10 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
   background: color-mix(in oklch, var(--bucket-dead) 12%, transparent);
 }
 
-/* create-project row */
 .pj-create { display: flex; gap: 10px; }
 .pj-create input { flex: 1; }
 .pj-list > .pj-create { margin-bottom: 26px; }
 
-/* project card */
 .pj-card { border: 1px solid var(--border); border-radius: 4px; background: var(--surface); overflow: hidden; }
 .pj-card + .pj-card { margin-top: 16px; }
 .pj-card-head {
@@ -2316,7 +1848,6 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
 .pj-delete:hover { color: var(--bucket-dead); background: color-mix(in oklch, var(--bucket-dead) 12%, transparent); }
 .pj-delete:focus-visible { opacity: 1; outline: none; color: var(--bucket-dead); }
 
-/* repo rows */
 .pj-repos { padding: 4px 0; }
 .pj-repo {
   display: grid; align-items: baseline; grid-template-columns: minmax(260px, 420px) 1fr auto 24px; gap: 28px;
@@ -2335,7 +1866,6 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
 .pj-repo:hover .pj-repo-x { opacity: 1; }
 .pj-repo-x:hover { color: var(--bucket-dead); background: color-mix(in oklch, var(--bucket-dead) 12%, transparent); }
 
-/* repo profile — chip on the row, expandable findings panel below it */
 .pj-profile-chip {
   align-self: center; white-space: nowrap; font-size: 11px; letter-spacing: 0.03em;
   padding: 2px 9px; border-radius: 999px; border: 1px solid var(--border); color: var(--text-dim);
@@ -2364,7 +1894,6 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
 .pj-profile-rerun:hover:not(:disabled) { border-color: var(--text-dim); color: var(--text-mid); }
 .pj-profile-rerun:disabled { opacity: 0.55; cursor: default; }
 
-/* add-repo affordance */
 .pj-addrow { border-top: 1px solid var(--border-soft); margin-top: 4px; }
 .pj-add-btn {
   display: inline-flex; align-items: center; gap: 9px; width: 100%; padding: 12px 23px;
@@ -2376,20 +1905,11 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
 
 .pj-addform { border-top: 1px solid var(--border-soft); padding: 14px 22px 16px 23px; display: grid; gap: 12px; }
 .pj-addform-fields { display: grid; align-items: end; grid-template-columns: minmax(260px, 420px) 1fr 24px; gap: 28px; }
-/* inline purpose-edit on a repo row: the row is baseline-aligned for text,
-   so center the input box in its cell instead of riding the text baseline */
+
 .pj-addform-foot { display: flex; align-items: center; gap: 8px; margin-top: 2px; }
 
-/* empty state */
-/* The create row as the empty state's action: stacked over its error line. */
 .pj-empty-create { display: grid; gap: 8px; width: 100%; max-width: 440px; text-align: left; }
 
-/* ============================================================
-   Work item INSPECTOR (wi-inspector.css) — slim breadcrumb,
-   left rail (info + timeline panels), right pane (title hero +
-   step inspector: harness=transcript, scope=questions+brief,
-   merge=result). Reuses the .wic-op* timeline rows above.
-   ============================================================ */
 :root {
   --ins-scheduled: var(--text-faint);
   --ins-running:   var(--bucket-run);
@@ -2397,7 +1917,7 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
   --ins-failed:    var(--bucket-dead);
   --ins-human:     var(--bucket-human);
 }
-/* slim breadcrumb row */
+
 .ins-crumb {
   display: flex; align-items: center; gap: 10px;
   padding: 8px 18px; border-bottom: 1px solid var(--border); background: var(--surface);
@@ -2405,15 +1925,11 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
 .ins-crumb-back { font-family: var(--font-mono); font-size: 11px; color: var(--text-dim); white-space: nowrap; flex-shrink: 0; }
 .ins-crumb-back:hover { color: var(--text); }
 
-/* body: rail + pane */
-
-/* panel chrome (info + timeline) */
 .ins-panel { border-bottom: 1px solid var(--border); }
 .ins-panel-head { display: flex; align-items: center; justify-content: space-between; padding: 9px 14px 8px; position: sticky; top: 0; background: var(--surface); z-index: 1; }
 .ins-panel-title { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--text-dim); }
 .ins-panel-right { font-family: var(--font-mono); font-size: 10px; color: var(--text-faint); }
 
-/* INFO panel */
 .ins-info { padding: 2px 14px 14px; display: flex; flex-direction: column; gap: 11px; }
 .ins-status-row { display: flex; }
 .ins-status { display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; font-family: var(--font-mono); font-size: 11.5px; letter-spacing: 0.02em; }
@@ -2438,26 +1954,21 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
 .ins-stat-k { font-family: var(--font-mono); font-size: 9px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-dim); }
 .ins-stat-v { font-family: var(--font-mono); font-size: 13px; color: var(--text); font-variant-numeric: tabular-nums; }
 
-/* TIMELINE panel — reuses the .wic-op* rows */
 .ins-timeline { padding: 6px 0 10px; }
 
-/* RIGHT PANE */
 .ins-hero { padding: 16px 24px; border-bottom: 1px solid var(--border); background: var(--surface); position: sticky; top: 0; z-index: 4; }
 .ins-hero-line { font-size: 16px; line-height: 1.35; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ins-hero-key { font-family: var(--font-mono); color: var(--text); }
 .ins-hero-dash { color: var(--text); margin: 0 8px; }
 
-/* step inspector header (uniform metrics) */
 .ins-step-head { display: flex; align-items: center; flex-wrap: wrap; padding: 11px 24px; border-bottom: 1px solid var(--border); background: var(--bg); position: sticky; top: 53px; z-index: 3; }
 .ins-sh-meta { display: inline-flex; align-items: center; font-family: var(--font-mono); font-size: 11px; color: var(--text-dim); }
 .ins-sh-cell { padding: 0 13px; border-left: 1px solid var(--border); white-space: nowrap; }
 .ins-sh-cell:first-child { border-left: none; padding-left: 0; }
 .ins-sh-k { color: var(--text-faint); text-transform: uppercase; letter-spacing: 0.09em; font-size: 9.5px; }
 
-/* inspector body */
 .ins-step-body { padding: 18px 24px 32px; }
 
-/* transcript box (wraps the live RunTranscript) + fallback ins-stream */
 .ins-xscript { border: 1px solid var(--border); border-radius: 5px; padding: 14px 16px; background: color-mix(in oklch, var(--bg) 70%, #000); }
 /* The boxed transcript scrolls itself (stick-to-bottom lives in
    StreamTranscript); the full-run page leaves it uncapped and scrolls the
@@ -2472,25 +1983,23 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
 .ins-xscript-bar .ins-stream-meta { margin-bottom: 0; }
 .ins-run-link { display: inline-flex; align-items: center; gap: 6px; font-family: var(--font-mono); font-size: 11px; color: var(--text-dim); white-space: nowrap; cursor: pointer; }
 .ins-run-link:hover { color: var(--text); }
-/* In the sticky step header the run actions sit flush right of the metrics. */
+
 .ins-step-head .ins-sh-actions { margin-left: auto; display: inline-flex; align-items: center; gap: 16px; }
 .ins-run-link.ins-cancel { color: var(--outcome-abandoned); }
 .ins-cancel-confirm { display: inline-flex; align-items: center; gap: 10px; }
 .ins-cancel-reason { font-family: var(--font-mono); font-size: 11px; padding: 3px 8px; width: 190px; border: 1px solid var(--border); border-radius: 4px; background: var(--bg); color: var(--text); }
 .ins-live-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--bucket-run); box-shadow: 0 0 6px var(--bucket-run); animation: pulse 1.4s ease-in-out infinite; }
 
-/* provisioning notice */
 .ins-infra { display: flex; align-items: center; gap: 12px; border: 1px solid color-mix(in oklch, var(--bucket-run) 30%, transparent); border-left: 2px solid var(--bucket-run); background: color-mix(in oklch, var(--bucket-run) 7%, var(--bg)); border-radius: 5px; padding: 14px 16px; }
 .ins-infra-glyph { font-size: 18px; color: var(--bucket-run); animation: pulse 1.6s ease-in-out infinite; }
 .ins-infra-text { display: flex; flex-direction: column; gap: 3px; }
 .ins-infra-phrase { font-size: 13px; color: var(--text); }
 .ins-infra-sub { font-family: var(--font-mono); font-size: 11px; color: var(--text-dim); }
 
-/* failure callout */
 .ins-fail { margin-bottom: 16px; border: 1px solid color-mix(in oklch, var(--bucket-dead) 38%, transparent); border-left: 2px solid var(--bucket-dead); background: color-mix(in oklch, var(--bucket-dead) 8%, var(--bg)); border-radius: 5px; padding: 13px 16px; }
 .ins-fail-k { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--bucket-dead); margin-bottom: 6px; display: flex; align-items: center; gap: 7px; }
 .ins-fail-body { font-size: 13px; line-height: 1.55; color: var(--text-mid); max-width: 76ch; text-wrap: pretty; }
-/* review/transcript tabs — shown while a run parks on an in-app review */
+
 .ins-tabs { display: flex; align-items: center; gap: 4px; padding: 8px 24px 0; border-bottom: 1px solid var(--border); background: var(--bg); }
 .ins-tab { display: inline-flex; align-items: center; gap: 7px; font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-dim); padding: 6px 12px 8px; border-bottom: 2px solid transparent; margin-bottom: -1px; cursor: pointer; transition: color 100ms; }
 .ins-tab:hover { color: var(--text-mid); }
@@ -2520,12 +2029,9 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
 .review-btn-cancel { color: var(--outcome-failed); }
 .review-error { margin-top: 8px; font-size: 12px; color: var(--outcome-failed); }
 
-
 .ins .wic-op-sub { display: inline-flex; align-items: center; gap: 7px; }
 .ins .wic-op-sub-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--text-faint); box-shadow: none; flex-shrink: 0; }
 
-/* Landing shell — onboarding (connect a harness to finish setup) and the
-   identity-error panel share it. */
 .landing { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 40px 20px; position: relative; overflow: hidden; }
 .landing::before { content: ""; position: absolute; inset: 0; background-image: linear-gradient(var(--border) 1px, transparent 1px), linear-gradient(90deg, var(--border) 1px, transparent 1px); background-size: 56px 56px; opacity: 0.28; mask-image: radial-gradient(120% 100% at 50% 42%, #000 0%, transparent 70%); }
 .landing::after { content: ""; position: absolute; top: -20%; left: 50%; width: 70%; height: 70%; background: radial-gradient(circle, color-mix(in oklch, var(--accent-violet) 12%, transparent), transparent 66%); filter: blur(24px); animation: landing-drift 16s ease-in-out infinite alternate; }
@@ -2576,9 +2082,6 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
 .landing-panel .landing-err { margin-top: 14px; }
 @keyframes landing-shake { 0%, 100% { transform: translateX(0); } 20% { transform: translateX(-4px); } 40% { transform: translateX(4px); } 60% { transform: translateX(-2px); } 80% { transform: translateX(2px); } }
 
-/* ============================================================
-   GENERIC SUBJECT PAGES — the floor an installed app gets
-   ============================================================ */
 .subject-row { grid-template-columns: 14px minmax(60px, auto) 1fr auto; }
 .subject-row-meta { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11.5px; }
 .subject-board-empty { padding: 10px 12px; font-size: 12px; }
@@ -2587,14 +2090,6 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
 .subject-run-head { display: flex; align-items: center; gap: 10px; font-size: 12.5px; margin-bottom: 8px; }
 .subject-run-more { margin: 6px 0; }
 
-/* ============================================================
-   DRUKS UI — the shell renders an app's Python page declarations
-   ============================================================ */
-/* A declared page fills the screen, the way every other app page does. A block
-   that draws rather than reads takes the measure below: it grows with the page
-   and stops where more width stops helping. rem, so it follows the density the
-   operator chose; per cent, so it follows the page. Prose sets its own measure
-   in ch, which is the type size and not the screen. */
 .dui-page {
   --dui-measure: clamp(20rem, 68%, 70rem);
   --dui-radius-control: 6px;
@@ -2682,7 +2177,7 @@ body[data-palette="mono"] .dui-page {
 .dui-callout { border: 1px solid var(--border-loud); border-radius: var(--dui-radius-surface); padding: 14px 16px; font-size: 14px; line-height: 20px; max-width: 76ch; }
 .dui-callout-title { font-weight: 600; color: var(--text); margin-bottom: 3px; }
 .dui-callout-text { color: var(--text-mid); overflow-wrap: anywhere; }
-/* The tone reaches the whole box: a stripe alone reads as a grey panel. */
+
 .dui-callout-info { --dui-callout-tone: var(--bucket-run); }
 .dui-callout-success { --dui-callout-tone: var(--outcome-merged); }
 .dui-callout-warning { --dui-callout-tone: var(--decision-request-revision); }
@@ -2711,10 +2206,8 @@ body[data-palette="mono"] .dui-page {
   .dui-tabs { overflow-x: auto; }
 }
 
-/* ---- Druks UI: run and artifact blocks ---------------------- */
 .dui-block-title { font-size: 16px; line-height: 24px; color: var(--text); margin: 20px 0 8px; font-weight: 600; letter-spacing: -0.005em; text-wrap: balance; }
-/* The app writes the word; the tone is the paint. currentColor carries it, so
-   a tone rule sets colour alone and neutral keeps the muted default. */
+
 .dui-status { display: inline-flex; align-items: center; gap: 7px; color: var(--text-mid); font-size: 13px; line-height: 18px; white-space: nowrap; }
 .dui-status::before { content: ''; width: 7px; height: 7px; flex: none; border-radius: 50%; background: currentColor; }
 .dui-status-active { color: var(--bucket-run); }
@@ -2752,7 +2245,6 @@ body[data-palette="mono"] .dui-page {
 .dui-file-preview { width: 40px; height: 40px; object-fit: cover; border-radius: 4px; border: 1px solid var(--border); }
 .run-truncated { font-size: 11.5px; padding: 6px 10px; border-top: 1px solid var(--border); }
 
-/* ---- Druks UI: rich data and layout ------------------------- */
 .dui-stack { display: flex; flex-direction: column; }
 .dui-stack-small { gap: 8px; }
 .dui-stack-medium { gap: 16px; }
@@ -2767,8 +2259,6 @@ body[data-palette="mono"] .dui-page {
 .dui-metric-value .dui-number { font-size: inherit; }
 .dui-metric-desc { margin: 4px 0 0; font-size: 13px; line-height: 18px; }
 
-/* Both columns size to what they hold, so a fact list is as wide as its facts
-   and a label never drifts away from its value on a wide page. */
 .dui-fact-list { margin: 12px 0; display: grid; grid-template-columns: minmax(90px, max-content) minmax(0, max-content); gap: 8px 20px; }
 .dui-fact { display: contents; }
 .dui-fact-label { font-size: 13px; line-height: 18px; }
@@ -2781,7 +2271,7 @@ body[data-palette="mono"] .dui-page {
 .dui-table tbody tr:last-child > * { border-bottom: none; }
 .dui-table tbody tr:hover > * { background: var(--surface-2); }
 .dui-table [data-align='end'] { text-align: right; }
-/* Every column keeps its gutter, including an end-aligned last column. */
+
 .dui-table tr > :last-child { padding-right: 16px; }
 .dui-table-empty { font-size: 13px; line-height: 18px; padding: 24px 0; }
 .dui-table-empty:empty { display: none; }
@@ -2808,11 +2298,9 @@ body[data-palette="mono"] .dui-page {
 .dui-chart-legend { display: flex; flex-wrap: wrap; gap: 16px; margin-top: 10px; font-size: 13px; line-height: 18px; color: var(--text-dim); }
 .dui-chart-key { display: inline-flex; align-items: center; gap: 6px; }
 .dui-chart-swatch { width: 9px; height: 9px; border-radius: 2px; }
-/* The chart's numbers stay in the page for a screen reader, out of sight. */
+
 .dui-chart-data { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
-/* The shell owns the arrangement: cards take a comfortable minimum and the
-   row fills with as many as fit. */
 .dui-cards { list-style: none; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; margin: 16px 0; }
 .dui-cards .dui-card { margin: 0; }
 .dui-gallery-grid { list-style: none; margin: 12px 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 16px; }
@@ -2835,7 +2323,6 @@ body[data-palette="mono"] .dui-page {
 .dui-table-caption { text-align: left; caption-side: top; margin: 20px 0 10px; padding: 0; }
 .dui-chart-mark { stroke: none; }
 
-/* ---- Druks UI: forms and actions ---------------------------- */
 .dui-form { margin: 16px 0; max-width: 520px; }
 .dui-form-desc { font-size: 13px; line-height: 18px; margin: 0 0 16px; }
 .dui-field { margin-bottom: 16px; }
@@ -2896,10 +2383,9 @@ body[data-palette="mono"] .dui-page {
 .dui-dialog .dui-form { max-width: none; margin: 0; }
 .dui-dialog-trigger { align-self: flex-start; }
 
-/* An action that asks does it in the page. */
 .dui-confirm { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 8px; }
 .dui-confirm-ask { font-size: 13px; line-height: 18px; color: var(--text-mid); }
-/* What an action says once it has happened; it clears itself. */
+
 .dui-action-note { font-size: 13px; line-height: 18px; color: var(--outcome-merged); margin: 0; }
 .dui-action-note:empty { display: none; }
 .dui-action[aria-busy='true'] { opacity: 0.75; cursor: progress; }
@@ -2933,14 +2419,9 @@ body[data-palette="mono"] .dui-page {
 .dui-row-more:hover, .dui-row-more[aria-expanded='true'] { color: var(--text); text-decoration: underline; }
 .dui-table .dui-row-detail td { white-space: pre-wrap; color: var(--text-mid); font-size: 12px; line-height: 1.6; padding-top: 0; }
 
-/* ---- Druks UI: rhythm, reach and focus ---------------------- */
-
-/* A block owns what is inside it; the container owns the space between
-   blocks. Margins sum in these flex columns, so a block carries none and the
-   rhythm is chosen once. */
 .dui-page > .page-shell-body > * { margin-top: 32px; margin-bottom: 0; }
 .dui-page > .page-shell-body > :first-child { margin-top: 0; }
-/* The title and its tabs read as one cluster, tighter than the page below. */
+
 .dui-page > .page-shell-body > .dui-parent + .dui-page-head { margin-top: 16px; }
 .dui-page > .page-shell-body > .dui-tabs { margin-top: 20px; }
 
@@ -2957,7 +2438,6 @@ body[data-palette="mono"] .dui-page {
 .dui-section > :is(.dui-action, .dui-link) { align-self: flex-start; }
 .dui-page > .page-shell-body > :is(.dui-action, .dui-link) + :is(.dui-action, .dui-link) { margin-top: 10px; }
 
-/* A path, a URL or a repository name breaks rather than leaving its box. */
 .dui-page { overflow-wrap: break-word; }
 .dui-fact-value { overflow-wrap: anywhere; }
 
