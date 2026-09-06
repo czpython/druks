@@ -828,6 +828,15 @@ export function ServicesPane() {
 
   return (
     <div className="set-pane mcp-pane svc-pane">
+      {query.isPending && <p role="status">Loading services…</p>}
+      {query.isError && (
+        <p className="mcp-error" role="alert">
+          Could not load services.{' '}
+          <button className="set-btn ghost" onClick={() => void query.refetch()}>
+            Try again
+          </button>
+        </p>
+      )}
       {selected ? (
         <ServiceDetail service={selected} onBack={() => setSelectedSlug(null)} />
       ) : (
@@ -1184,6 +1193,15 @@ export function ConnectionsPane() {
 
   return (
     <div className="set-pane mcp-pane svc-pane">
+      {query.isPending && <p role="status">Loading connections…</p>}
+      {query.isError && (
+        <p className="mcp-error" role="alert">
+          Could not load connections.{' '}
+          <button className="set-btn ghost" onClick={() => void query.refetch()}>
+            Try again
+          </button>
+        </p>
+      )}
       <header className="mcp-pane-head">
         <h2 className="mcp-pane-title">Connections</h2>
         <p className="mcp-pane-sub">
@@ -1195,7 +1213,9 @@ export function ConnectionsPane() {
           {error}
         </div>
       )}
-      {connections.length === 0 && <p className="mcp-pane-sub">No connections yet.</p>}
+      {query.isSuccess && connections.length === 0 && (
+        <p className="mcp-pane-sub">No connections yet.</p>
+      )}
       {connections.length > 0 && (
         <div className="set-card svc-facts">
           {live.map((connection) => (
@@ -1401,7 +1421,7 @@ export function ProvidersPane({
                 {directoryQuery.error.message}
               </p>
             )}
-            {!directoryQuery.isLoading && candidates.length === 0 && (
+            {directoryQuery.isSuccess && candidates.length === 0 && (
               <p className="provider-state">No supported provider matches this search.</p>
             )}
           </div>
@@ -1417,7 +1437,7 @@ export function ProvidersPane({
           {requestError}
         </div>
       )}
-      {!loading && configured.length === 0 && (
+      {!loading && !requestError && configured.length === 0 && (
         <div className="provider-empty">
           <strong>No provider is configured.</strong>
           <span>Add one to make models available to agents.</span>
@@ -1838,6 +1858,15 @@ export function SkillsPane() {
 
   return (
     <div className="set-pane mcp-pane skills-pane">
+      {collectionsQuery.isPending && <p role="status">Loading skill collections…</p>}
+      {collectionsQuery.isError && (
+        <p className="mcp-error" role="alert">
+          Could not load skill collections.{' '}
+          <button className="set-btn ghost" onClick={() => void collectionsQuery.refetch()}>
+            Try again
+          </button>
+        </p>
+      )}
       <header className="mcp-pane-head">
         <p className="mcp-pane-sub">
           Import skill collections from GitHub. Enabled skills are available to agents in every
@@ -1891,7 +1920,7 @@ export function SkillsPane() {
         <h3 className="mcp-h">
           Collections <span className="gl-count">{collections.length}</span>
         </h3>
-        {collections.length === 0 && (
+        {collectionsQuery.isSuccess && collections.length === 0 && (
           <p className="mcp-help">No collections yet — import one above.</p>
         )}
         {collections.length > 0 && (
@@ -1992,7 +2021,7 @@ function CollectionCard({
                   on={skill.enabled}
                   onClick={() => void onToggle(collection.id, skill.name, !skill.enabled)}
                   disabled={busy}
-                  label={`Enable ${skill.name} skill`}
+                  label={`Enabled: ${skill.name} skill`}
                 />
                 <label htmlFor={`${switchId}-${skill.name}`}>Enabled</label>
               </span>
@@ -2162,6 +2191,15 @@ export function McpServersPane() {
 
   return (
     <div className="set-pane mcp-pane">
+      {serversQuery.isPending && <p role="status">Loading MCP servers…</p>}
+      {serversQuery.isError && (
+        <p className="mcp-error" role="alert">
+          Could not load MCP servers.{' '}
+          <button className="set-btn ghost" onClick={() => void serversQuery.refetch()}>
+            Try again
+          </button>
+        </p>
+      )}
       <header className="mcp-pane-head">
         <p className="mcp-pane-sub">
           Tools your agents can call. Enabled servers are carried into every sandbox VM; secrets
@@ -2561,6 +2599,15 @@ export function AgentAccessPane() {
 
   return (
     <div className="set-pane">
+      {patsQuery.isPending && <p role="status">Loading API tokens…</p>}
+      {patsQuery.isError && (
+        <p className="mcp-error" role="alert">
+          Could not load API tokens.{' '}
+          <button className="set-btn ghost" onClick={() => void patsQuery.refetch()}>
+            Try again
+          </button>
+        </p>
+      )}
       <div className="set-pane-head">
         <div className="set-pane-sub">
           Give an agent, script, or CLI a token to call druks as you — same account and permissions,
@@ -2674,6 +2721,7 @@ function PatRow({
 
 export function AppPane({
   app,
+  section,
   edits,
   fieldErrors,
   harnessByName,
@@ -2692,6 +2740,7 @@ export function AppPane({
   busy,
 }: {
   app: AppSettings
+  section: string
   edits: UpdateAppsSettingsRequest
   fieldErrors: Record<string, string>
   harnessByName: Record<string, Harness>
@@ -2757,9 +2806,7 @@ export function AppPane({
       ? onWorkflowField(option.kind, option.field.name, value)
       : onAppSetting(option.kind, option.field.name, value)
   // The control speaks strings; the override store keeps the declared type.
-  // Clearing a secret's box records no edit, so the stored secret stays. An integer
-  // mid-edit that does not parse records nothing, so the box can be emptied and
-  // retyped without writing a bad value.
+  // Clearing a secret's box leaves its stored value unchanged.
   const setTypedOption = (option: (typeof optionFields)[number], next: string) => {
     if (option.field.type === 'secret') return setOption(option, next || undefined)
     if (option.field.type !== 'int') return setOption(option, next)
@@ -2768,14 +2815,7 @@ export function AppPane({
   }
   return (
     <div className="set-pane">
-      <div className="set-pane-head">
-        <div className="set-pane-sub">
-          {app.description ||
-            'Each stage runs as its own agent — set the defaults once under Agents, override only where it matters.'}
-        </div>
-      </div>
-
-      {optionFields.length > 0 && (
+      {section === 'options' && optionFields.length > 0 && (
         <div className="set-group">
           <div className="set-group-label">{appLabel(app.name)} options</div>
           {sectionLabels
@@ -2820,7 +2860,7 @@ export function AppPane({
                     </div>
                   )}
                   {otherFields.length > 0 && (
-                    <div className="set-field-row" style={{ maxWidth: 440 }}>
+                    <div className="set-field-row">
                       {otherFields.map((option) => {
                         const override = optionEdit(option)
                         const currentValue = optionValue(option)
@@ -2859,7 +2899,7 @@ export function AppPane({
         </div>
       )}
 
-      {app.agents.length > 0 && defaults && (
+      {section === 'agents' && app.agents.length > 0 && defaults && (
         <div className="set-group">
           <div className="set-group-label">agents</div>
           <AgentTable

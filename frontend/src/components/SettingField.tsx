@@ -1,13 +1,10 @@
 import { CronField } from './CronField'
 import { Field, Select, Textarea, TextInput } from './Control'
 
-// One declared field, rendered from its kind — the settings panes and a
-// service's connect form both draw through here.
 interface SettingFieldProps {
   label: string
   help?: string
-  // str | int | bool | enum | secret | cron. ``bool`` is not drawn here: a
-  // toggle is a row, not a labelled control, so the panes pull those out.
+  /** A field kind. The pane renders boolean fields as toggle rows. */
   type: string
   choices?: string[] | null
   multiline?: boolean
@@ -40,12 +37,16 @@ function FieldControl({
   disabled,
 }: ControlProps) {
   if (type === 'enum') {
-    // A broken declaration, not a text field: say so rather than accept anything.
     if (!choices?.length) {
       return <span className="set-field-error">{label} declares no choices</span>
     }
     return (
-      <Select value={value} onChange={(e) => onChange(e.target.value)} disabled={disabled}>
+      <Select
+        aria-label={label}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        disabled={disabled}
+      >
         {choices.map((choice) => (
           <option key={choice} value={choice}>
             {choice}
@@ -56,7 +57,9 @@ function FieldControl({
   }
 
   if (type === 'cron') {
-    return <CronField value={value} onChange={onChange} disabled={disabled ?? false} />
+    return (
+      <CronField label={label} value={value} onChange={onChange} disabled={disabled ?? false} />
+    )
   }
 
   // The stored secret never reaches the client, so the box shows only whether
@@ -64,16 +67,13 @@ function FieldControl({
   const secret = type === 'secret'
   const placeholder = secret ? (secretSet ? '•••••••• (set)' : 'not set') : undefined
 
-  // multiline is declared independent of type (field_multiline in the backend
-  // reads a separate json_schema_extra key), so it governs textarea-vs-input
-  // for any kind, not only secrets — a pasted PEM and a pasted long
-  // description both need their newlines kept.
+  // Multiline is independent of the field kind; descriptions and secrets both need newlines.
   if (multiline) {
     return (
       <Textarea
         value={value}
         placeholder={placeholder}
-        onChange={(e) => onChange(e.target.value)}
+        onChange={(event) => onChange(event.target.value)}
         disabled={disabled}
         aria-label={label}
       />
@@ -85,7 +85,7 @@ function FieldControl({
       type={secret ? 'password' : type === 'int' ? 'number' : 'text'}
       value={value}
       placeholder={placeholder}
-      onChange={(e) => onChange(e.target.value)}
+      onChange={(event) => onChange(event.target.value)}
       disabled={disabled}
       aria-label={label}
     />
