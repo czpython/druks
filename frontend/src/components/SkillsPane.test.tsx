@@ -3,7 +3,7 @@ import { cleanup, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { SkillCollection } from '../api/types'
-import { SkillsPane } from './SettingsModal'
+import { SkillsPane } from './SettingsPanes'
 
 function collection(overrides: Partial<SkillCollection> = {}): SkillCollection {
   return {

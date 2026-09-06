@@ -1,0 +1,765 @@
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { ArrowLeft, Search } from 'lucide-react'
+import { Link, useLocation } from 'wouter'
+
+import { ApiError, api } from '../api/client'
+import type {
+  Account,
+  AppSettingsProblems,
+  UpdateAppsSettingsRequest,
+  UpdateUserSettingsRequest,
+} from '../api/types'
+import { appLabel } from '../apps/registry'
+import { useTicker } from '../lib/useTicker'
+import { absTime } from '../lib/format'
+import { harnessColors } from '../lib/harnessColors'
+import { Sidebar } from './Sidebar'
+import { BrowserSessionsPane } from './BrowserSessionsPane'
+import {
+  AgentAccessPane,
+  AgentsPane,
+  AppPane,
+  ConnectionsPane,
+  GeneralPane,
+  McpServersPane,
+  ProvidersPane,
+  ServicesPane,
+  SkillsPane,
+} from './SettingsPanes'
+import { buildCatalog, defaultsOf, isFieldVisible, knownProviders, type Defaults } from './settings'
+
+const SECTIONS = [
+  {
+    id: 'providers',
+    label: 'Providers',
+    group: 'AI execution',
+    fields: ['Subscription', 'API key', 'Provider', 'Models'],
+  },
+  {
+    id: 'agents',
+    label: 'Agent defaults',
+    group: 'AI execution',
+    fields: [
+      'Harness',
+      'Model',
+      'Billing',
+      'Effort',
+      'Fast mode',
+      'Timeout',
+      'Unattended runs use',
+    ],
+  },
+  {
+    id: 'connections',
+    label: 'Connections',
+    group: 'Tools & access',
+    fields: ['Services', 'Accounts', 'Revoked', 'Credentials', 'Grants'],
+  },
+  {
+    id: 'mcp',
+    label: 'MCP servers',
+    group: 'Tools & access',
+    fields: ['Registry', 'Name', 'URL', 'Token'],
+  },
+  { id: 'skills', label: 'Skills', group: 'Tools & access', fields: ['Repository', 'Collection'] },
+  {
+    id: 'browser-sessions',
+    label: 'Browser sessions',
+    group: 'Tools & access',
+    fields: ['Session', 'Site', 'Login'],
+  },
+  { id: 'general', label: 'General', group: 'Personal', fields: ['Timezone'] },
+  {
+    id: 'api-tokens',
+    label: 'API tokens',
+    group: 'Personal',
+    fields: ['Token name', 'Personal API token'],
+  },
+  { id: 'apps', label: 'App settings', group: 'Apps', fields: [] },
+]
+
+function withField(
+  current: Record<string, unknown> | undefined,
+  field: string,
+  value: unknown,
+): Record<string, unknown> {
+  const next = { ...current }
+  if (value === undefined) delete next[field]
+  else next[field] = value
+  return next
+}
+
+export function SettingsPages({
+  account,
+  returnTo,
+  leaveSettings,
+}: {
+  account: Account
+  returnTo: string
+  leaveSettings: RefObject<((proceed: () => void) => void) | null>
+}) {
+  const [location, navigate] = useLocation()
+  const section = location.slice('/settings/'.length) || 'providers'
+  const queryClient = useQueryClient()
+  const settingsQuery = useQuery({ queryKey: ['settings'], queryFn: api.getSettings })
+  const appsQuery = useQuery({ queryKey: ['appSettings'], queryFn: api.getAppSettings })
+  const harnessesQuery = useQuery({ queryKey: ['harnesses'], queryFn: api.harnesses })
+  const agentsQuery = useQuery({ queryKey: ['agents'], queryFn: api.agents })
+  const accountsQuery = useQuery({ queryKey: ['accounts'], queryFn: api.accounts })
+  const providersQuery = useQuery({ queryKey: ['providers'], queryFn: api.providers })
+  const subscriptionsQuery = useQuery({
+    queryKey: ['providerSubscriptions'],
+    queryFn: api.providerSubscriptions,
+  })
+  const keysQuery = useQuery({ queryKey: ['providerKeys'], queryFn: api.providerKeys })
+  const catalogsQuery = useQuery({ queryKey: ['providerCatalogs'], queryFn: api.providerCatalogs })
+  const apps = appsQuery.data?.apps ?? []
+  const harnesses = harnessesQuery.data ?? []
+  const catalogs = catalogsQuery.data ?? []
+  const providers = knownProviders(providersQuery.data ?? [], catalogs)
+  const catalog = buildCatalog(
+    harnesses,
+    providers,
+    catalogs,
+    subscriptionsQuery.data ?? [],
+    keysQuery.data ?? [],
+  )
+  const harnessByName = Object.fromEntries(harnesses.map((harness) => [harness.name, harness]))
+  const harnessColor = harnessColors(harnesses.map((harness) => harness.name))
+  const savedDefaults = settingsQuery.data ? defaultsOf(settingsQuery.data) : null
+  const [timezone, setTimezone] = useState<string | null>(null)
+  const [defaults, setDefaults] = useState<Defaults | null>(null)
+  const [appEdits, setAppEdits] = useState<Record<string, UpdateAppsSettingsRequest>>({})
+  const [appProblems, setAppProblems] = useState<AppSettingsProblems>({})
+  const [errors, setErrors] = useState<Record<string, string>>({})
+  const [saving, setSaving] = useState(false)
+  const [search, setSearch] = useState('')
+  const [connectionsTab, setConnectionsTab] = useState('services')
+  const [visited, setVisited] = useState([section])
+  if (!visited.includes(section)) setVisited([...visited, section])
+  const tick = useTicker()
+  const confirmation = useRef<HTMLDialogElement>(null)
+  const pending = useRef<(() => void) | null>(null)
+  const leaving = useRef(false)
+  const heading = useRef<HTMLHeadingElement>(null)
+  const errorNotice = useRef<HTMLParagraphElement>(null)
+  const effectiveTimezone = timezone ?? settingsQuery.data?.timezone ?? 'UTC'
+  const effectiveDefaults = defaults ?? savedDefaults
+  const timezones = useMemo(() => ['UTC', ...Intl.supportedValuesOf('timeZone')], [])
+  const clock = useMemo(() => {
+    void tick
+    return absTime(new Date().toISOString(), effectiveTimezone)
+  }, [tick, effectiveTimezone])
+  const dirtyPages = [
+    ...(timezone !== null && settingsQuery.data && timezone !== settingsQuery.data.timezone
+      ? ['general']
+      : []),
+    ...(defaults && savedDefaults && JSON.stringify(defaults) !== JSON.stringify(savedDefaults)
+      ? ['agents']
+      : []),
+    ...Object.entries(appEdits)
+      .filter(
+        ([, edits]) =>
+          ['agentHarnesses', 'agentModels', 'agentBillings', 'agentEfforts', 'agentTimeouts'].some(
+            (key) => Object.keys(edits[key as keyof UpdateAppsSettingsRequest] ?? {}).length > 0,
+          ) ||
+          Object.values(edits.workflowSettings ?? {}).some(
+            (fields) => Object.keys(fields).length > 0,
+          ) ||
+          Object.values(edits.appSettings ?? {}).some((fields) => Object.keys(fields).length > 0),
+      )
+      .map(([name]) => `apps/${name}`),
+  ]
+  const dirty = dirtyPages.includes(section)
+  const app = apps.find((entry) => section === `apps/${entry.name}`)
+  const title =
+    SECTIONS.find((entry) => entry.id === section)?.label ?? (app ? appLabel(app.name) : 'Settings')
+  const formPage = section === 'general' || section === 'agents' || Boolean(app)
+  const executionChanged =
+    defaults &&
+    savedDefaults &&
+    (defaults.defaultHarness !== savedDefaults.defaultHarness ||
+      defaults.defaultModel !== savedDefaults.defaultModel ||
+      defaults.defaultBilling !== savedDefaults.defaultBilling)
+  const executionInvalid = Boolean(
+    executionChanged &&
+      defaults &&
+      !catalog
+        .modelsOf(defaults.defaultHarness, defaults.defaultBilling)
+        .some((model) => model.id === defaults.defaultModel && model.enabled),
+  )
+
+  useEffect(() => {
+    if (location === '/settings') navigate('/settings/providers', { replace: true })
+  }, [location, navigate])
+
+  useLayoutEffect(() => {
+    heading.current?.focus()
+  }, [section])
+
+  useLayoutEffect(() => {
+    leaveSettings.current =
+      dirtyPages.length > 0
+        ? (proceed) => {
+            pending.current = proceed
+            confirmation.current?.showModal()
+          }
+        : null
+    return () => {
+      leaveSettings.current = null
+    }
+  }, [dirtyPages.length, leaveSettings])
+
+  useEffect(() => {
+    function beforeUnload(event: BeforeUnloadEvent) {
+      if (dirtyPages.length > 0 && !leaving.current) {
+        event.preventDefault()
+        event.returnValue = ''
+      }
+    }
+    window.addEventListener('beforeunload', beforeUnload)
+    return () => window.removeEventListener('beforeunload', beforeUnload)
+  }, [dirtyPages.length])
+
+  function discard(page: string) {
+    if (page === 'general') setTimezone(null)
+    else if (page === 'agents') setDefaults(null)
+    else
+      setAppEdits((current) => {
+        const next = { ...current }
+        delete next[page.slice(5)]
+        return next
+      })
+    setErrors((current) => {
+      const next = { ...current }
+      delete next[page]
+      return next
+    })
+    setAppProblems((current) => {
+      const next = { ...current }
+      delete next[page.slice(5)]
+      return next
+    })
+  }
+
+  function finishLeaving() {
+    leaving.current = true
+    leaveSettings.current = null
+    confirmation.current?.close()
+    pending.current?.()
+  }
+
+  async function save(pages: string[], proceed?: () => void) {
+    if (saving || !settingsQuery.data) return
+    setSaving(true)
+    let page = pages[0] ?? section
+    try {
+      for (const currentPage of pages) {
+        page = currentPage
+        setErrors((current) => {
+          const next = { ...current }
+          delete next[currentPage]
+          return next
+        })
+        if (page === 'general') {
+          const saved = await api.updateSettings({ timezone: effectiveTimezone })
+          queryClient.setQueryData(['settings'], saved)
+        } else if (page === 'agents' && defaults && savedDefaults) {
+          if (executionInvalid)
+            throw new Error('Choose a model with a connected credential before you save.')
+          const body: UpdateUserSettingsRequest = {}
+          for (const key of Object.keys(defaults) as (keyof Defaults)[]) {
+            if (defaults[key] !== savedDefaults[key] && defaults[key] !== null)
+              Object.assign(body, { [key]: defaults[key] })
+          }
+          const saved = await api.updateSettings(body)
+          queryClient.setQueryData(['settings'], saved)
+          await queryClient.invalidateQueries({ queryKey: ['agents'] })
+        } else {
+          const owner = apps.find((entry) => page === `apps/${entry.name}`)!
+          const edits = appEdits[owner.name]!
+          const submitted: UpdateAppsSettingsRequest = {
+            ...edits,
+            appSettings: Object.fromEntries(
+              Object.entries(edits.appSettings ?? {}).map(([name, changes]) => [
+                name,
+                Object.fromEntries(
+                  Object.entries(changes).filter(([field]) =>
+                    isFieldVisible(
+                      owner.settings.find((entry) => entry.name === field)!,
+                      owner.settings,
+                      changes,
+                    ),
+                  ),
+                ),
+              ]),
+            ),
+            workflowSettings: Object.fromEntries(
+              Object.entries(edits.workflowSettings ?? {}).map(([kind, changes]) => {
+                const fields = owner.workflows.find((workflow) => workflow.kind === kind)!.fields
+                return [
+                  kind,
+                  Object.fromEntries(
+                    Object.entries(changes).filter(([field]) =>
+                      isFieldVisible(
+                        fields.find((entry) => entry.name === field)!,
+                        fields,
+                        changes,
+                      ),
+                    ),
+                  ),
+                ]
+              }),
+            ),
+          }
+          await api.updateAppSettings(submitted)
+          await queryClient.invalidateQueries({ queryKey: ['appSettings'] })
+          await queryClient.invalidateQueries({ queryKey: ['agents'] })
+        }
+        discard(page)
+      }
+      proceed?.()
+    } catch (caught) {
+      if (
+        caught instanceof ApiError &&
+        caught.status === 422 &&
+        caught.detail &&
+        typeof caught.detail === 'object' &&
+        !Array.isArray(caught.detail)
+      ) {
+        setAppProblems(caught.detail as AppSettingsProblems)
+      }
+      setErrors((current) => ({
+        ...current,
+        [page]: caught instanceof Error ? caught.message : 'Could not save settings. Try again.',
+      }))
+      confirmation.current?.close()
+      pending.current = null
+      navigate(`/settings/${page}`)
+      window.requestAnimationFrame(() => errorNotice.current?.focus())
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  function editApp(
+    name: string,
+    change: (current: UpdateAppsSettingsRequest) => UpdateAppsSettingsRequest,
+  ) {
+    setAppEdits((current) => ({ ...current, [name]: change(current[name] ?? {}) }))
+  }
+
+  const searchResults = SECTIONS.flatMap((entry) =>
+    [entry.label, ...entry.fields].map((label) => ({
+      label,
+      owner: entry.label,
+      path: `/settings/${entry.id}`,
+    })),
+  )
+    .concat(
+      apps.flatMap((entry) =>
+        [
+          appLabel(entry.name),
+          ...entry.settings.map((field) => field.label),
+          ...entry.workflows.flatMap((workflow) => workflow.fields.map((field) => field.label)),
+        ].map((label) => ({
+          label,
+          owner: appLabel(entry.name),
+          path: `/settings/apps/${entry.name}`,
+        })),
+      ),
+    )
+    .filter((entry) =>
+      `${entry.label} ${entry.owner}`.toLowerCase().includes(search.trim().toLowerCase()),
+    )
+
+  return (
+    <div
+      className="command-center settings-context"
+      onKeyDown={(event) => {
+        if (
+          (event.metaKey || event.ctrlKey) &&
+          event.key === 'Enter' &&
+          dirty &&
+          !saving &&
+          !(section === 'agents' && executionInvalid) &&
+          !confirmation.current?.open
+        ) {
+          event.preventDefault()
+          void save([section])
+        }
+      }}
+      onClickCapture={(event) => {
+        const anchor = (event.target as Element).closest('a')
+        if (
+          anchor &&
+          !anchor.target &&
+          !event.metaKey &&
+          !event.ctrlKey &&
+          !event.shiftKey &&
+          !event.altKey &&
+          event.button === 0 &&
+          leaveSettings.current
+        ) {
+          const target = new URL(anchor.href)
+          const settingsRoot = `${import.meta.env.BASE_URL.replace(/\/$/, '')}/settings`
+          if (
+            target.origin !== window.location.origin ||
+            (target.pathname !== settingsRoot && !target.pathname.startsWith(`${settingsRoot}/`))
+          ) {
+            event.preventDefault()
+            event.stopPropagation()
+            anchor.closest('dialog')?.close('navigation')
+            leaveSettings.current(() => {
+              if (target.origin === window.location.origin)
+                navigate(`~${target.pathname}${target.search}${target.hash}`)
+              else window.location.assign(target.href)
+            })
+          }
+        }
+      }}
+    >
+      <a className="skip-navigation" href="#settings-content">
+        Skip to content
+      </a>
+      <header className="command-header">
+        <Sidebar account={account} home={returnTo}>
+          <Link className="settings-back sidebar-link" href={returnTo}>
+            <ArrowLeft size={17} aria-hidden="true" />
+            Back to Druks
+          </Link>
+          <h2 className="settings-sidebar-title">Settings</h2>
+          <nav className="settings-navigation" aria-label="Settings">
+            {['AI execution', 'Tools & access', 'Personal', 'Apps'].map((group) => (
+              <div key={group}>
+                <div className="sidebar-group-title">{group}</div>
+                {SECTIONS.filter((entry) => entry.group === group).map((entry) => (
+                  <Link
+                    key={entry.id}
+                    aria-label={entry.label}
+                    aria-description={dirtyPages.includes(entry.id) ? 'Unsaved changes' : undefined}
+                    href={`/settings/${entry.id}`}
+                    className="sidebar-link"
+                    aria-current={
+                      section === entry.id || (entry.id === 'apps' && Boolean(app))
+                        ? 'page'
+                        : undefined
+                    }
+                  >
+                    {entry.label}
+                    {dirtyPages.includes(entry.id) && <span aria-hidden="true">•</span>}
+                  </Link>
+                ))}
+              </div>
+            ))}
+          </nav>
+        </Sidebar>
+        <div className="command-breadcrumb">
+          <span>Settings /</span>
+          <strong>{title}</strong>
+        </div>
+      </header>
+      <main className="settings-main" id="settings-content" tabIndex={-1}>
+        <div className="settings-page-head">
+          <div>
+            <h1 tabIndex={-1} ref={heading}>
+              {title}
+            </h1>
+          </div>
+          <label className="settings-search">
+            <Search size={17} aria-hidden="true" />
+            <input
+              type="search"
+              aria-label="Search settings"
+              placeholder="Search settings"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+            />
+          </label>
+        </div>
+        {search.trim() && (
+          <div className="settings-search-results" aria-label="Settings search results">
+            {searchResults.length === 0 ? (
+              <p>No matching settings.</p>
+            ) : (
+              searchResults.map((entry, index) => (
+                <Link
+                  key={`${entry.path}:${entry.label}:${index}`}
+                  href={entry.path}
+                  onClick={() => setSearch('')}
+                >
+                  <span>{entry.label}</span>
+                  <small>{entry.owner}</small>
+                </Link>
+              ))
+            )}
+          </div>
+        )}
+        {errors[section] && (
+          <p ref={errorNotice} tabIndex={-1} role="alert" className="settings-error">
+            {errors[section]}
+          </p>
+        )}
+        {(settingsQuery.isError || appsQuery.isError) && (formPage || section === 'apps') && (
+          <p role="alert" className="settings-error">
+            Could not load settings.{' '}
+            <button
+              onClick={() => {
+                void settingsQuery.refetch()
+                void appsQuery.refetch()
+              }}
+            >
+              Try again
+            </button>
+          </p>
+        )}
+        {visited.map((page) => (
+          <div key={page} hidden={page !== section} className="settings-pane">
+            {page === 'general' && (
+              <GeneralPane
+                timezone={effectiveTimezone}
+                setTimezone={setTimezone}
+                timezones={timezones}
+                clock={clock}
+                busy={saving || settingsQuery.isPending}
+              />
+            )}
+            {page === 'agents' &&
+              (effectiveDefaults ? (
+                <AgentsPane
+                  defaults={effectiveDefaults}
+                  onDefaults={setDefaults}
+                  accounts={accountsQuery.data ?? []}
+                  resolved={agentsQuery.data ?? { apps: [] }}
+                  harnessByName={harnessByName}
+                  harnessColor={harnessColor}
+                  catalog={catalog}
+                  allowedEfforts={appsQuery.data?.allowedEfforts ?? []}
+                  onOpenApp={(name) => navigate(`/settings/apps/${name}`)}
+                  onAddProvider={() => navigate('/settings/providers')}
+                  busy={saving}
+                />
+              ) : (
+                <p role="status">Loading agent defaults…</p>
+              ))}
+            {page === 'providers' && (
+              <ProvidersPane
+                providers={providers}
+                registeredProviders={providersQuery.data ?? []}
+                subscriptions={subscriptionsQuery.data ?? []}
+                keys={keysQuery.data ?? []}
+                catalogs={catalogs}
+                loading={
+                  providersQuery.isPending ||
+                  subscriptionsQuery.isPending ||
+                  keysQuery.isPending ||
+                  catalogsQuery.isPending
+                }
+                requestError={
+                  [
+                    providersQuery.error,
+                    subscriptionsQuery.error,
+                    keysQuery.error,
+                    catalogsQuery.error,
+                  ].find((error) => error)?.message ?? null
+                }
+              />
+            )}
+            {page === 'connections' && (
+              <>
+                <nav className="settings-tabs" aria-label="Connections">
+                  <button
+                    onClick={() => setConnectionsTab('services')}
+                    aria-current={connectionsTab === 'services' ? 'page' : undefined}
+                  >
+                    Services
+                  </button>
+                  <button
+                    onClick={() => setConnectionsTab('accounts')}
+                    aria-current={connectionsTab === 'accounts' ? 'page' : undefined}
+                  >
+                    Accounts
+                  </button>
+                </nav>
+                <div hidden={connectionsTab !== 'services'}>
+                  <ServicesPane />
+                </div>
+                <div hidden={connectionsTab !== 'accounts'}>
+                  <ConnectionsPane />
+                </div>
+              </>
+            )}
+            {page === 'mcp' && <McpServersPane />}
+            {page === 'skills' && <SkillsPane />}
+            {page === 'browser-sessions' && <BrowserSessionsPane />}
+            {page === 'api-tokens' && <AgentAccessPane />}
+            {page === 'apps' && (
+              <div className="settings-app-index">
+                {apps.map((entry) => (
+                  <Link
+                    key={entry.name}
+                    aria-label={appLabel(entry.name)}
+                    href={`/settings/apps/${entry.name}`}
+                  >
+                    <strong>{appLabel(entry.name)}</strong>
+                    <span>{entry.description}</span>
+                  </Link>
+                ))}
+                {appsQuery.isPending && <p role="status">Loading app settings…</p>}
+              </div>
+            )}
+            {apps
+              .filter((entry) => page === `apps/${entry.name}`)
+              .map((entry) => (
+                <div key={entry.name}>
+                  <AppPane
+                    app={entry}
+                    edits={appEdits[entry.name] ?? {}}
+                    fieldErrors={appProblems[entry.name] ?? {}}
+                    harnessColor={harnessColor}
+                    catalog={catalog}
+                    harnessByName={harnessByName}
+                    defaults={savedDefaults}
+                    allowedEfforts={appsQuery.data?.allowedEfforts ?? []}
+                    busy={saving}
+                    onAgentHarness={(name, value) =>
+                      editApp(entry.name, (current) => ({
+                        ...current,
+                        agentHarnesses: { ...current.agentHarnesses, [name]: value },
+                      }))
+                    }
+                    onAgentModel={(name, value) =>
+                      editApp(entry.name, (current) => ({
+                        ...current,
+                        agentModels: { ...current.agentModels, [name]: value },
+                      }))
+                    }
+                    onAgentBilling={(name, value) =>
+                      editApp(entry.name, (current) => ({
+                        ...current,
+                        agentBillings: { ...current.agentBillings, [name]: value },
+                      }))
+                    }
+                    onAgentEffort={(name, value) =>
+                      editApp(entry.name, (current) => ({
+                        ...current,
+                        agentEfforts: { ...current.agentEfforts, [name]: value },
+                      }))
+                    }
+                    onAgentTimeout={(name, value) =>
+                      editApp(entry.name, (current) => ({
+                        ...current,
+                        agentTimeouts: { ...current.agentTimeouts, [name]: value },
+                      }))
+                    }
+                    onWorkflowField={(kind, field, value) =>
+                      editApp(entry.name, (current) => ({
+                        ...current,
+                        workflowSettings: {
+                          ...current.workflowSettings,
+                          [kind]: withField(current.workflowSettings?.[kind], field, value),
+                        },
+                      }))
+                    }
+                    onAppSetting={(name, field, value) => {
+                      editApp(entry.name, (current) => ({
+                        ...current,
+                        appSettings: {
+                          ...current.appSettings,
+                          [name]: withField(current.appSettings?.[name], field, value),
+                        },
+                      }))
+                      setAppProblems((current) => {
+                        const next = { ...current[name] }
+                        delete next[field]
+                        return { ...current, [name]: next }
+                      })
+                    }}
+                    onAddProvider={() => navigate('/settings/providers')}
+                  />
+                </div>
+              ))}
+          </div>
+        ))}
+        {!SECTIONS.some((entry) => entry.id === section) && !app && !appsQuery.isPending && (
+          <p>No settings page matches this address.</p>
+        )}
+      </main>
+      {formPage && (
+        <footer className="settings-save-bar">
+          <span role="status">{saving ? 'Saving…' : dirty ? 'Unsaved changes' : 'Saved'}</span>
+          <div>
+            <button
+              className="set-btn ghost"
+              onClick={() => discard(section)}
+              disabled={saving || !dirty}
+            >
+              Discard
+            </button>
+            <button
+              className="set-btn primary"
+              onClick={() => void save([section])}
+              disabled={
+                saving ||
+                !dirty ||
+                (section === 'agents' && executionInvalid) ||
+                settingsQuery.isPending ||
+                appsQuery.isPending
+              }
+            >
+              Save changes
+            </button>
+          </div>
+        </footer>
+      )}
+      <dialog
+        className="settings-leave-dialog"
+        ref={confirmation}
+        aria-labelledby="leave-settings-title"
+        onCancel={(event) => {
+          event.preventDefault()
+          if (!saving) {
+            pending.current = null
+            confirmation.current?.close()
+          }
+        }}
+      >
+        <h2 id="leave-settings-title">Save your changes?</h2>
+        <p>
+          You have unsaved changes in {dirtyPages.length} settings{' '}
+          {dirtyPages.length === 1 ? 'page' : 'pages'}.
+        </p>
+        <div>
+          <button
+            className="set-btn ghost"
+            disabled={saving}
+            onClick={() => {
+              pending.current = null
+              confirmation.current?.close()
+            }}
+          >
+            Stay
+          </button>
+          <button
+            className="set-btn ghost"
+            disabled={saving}
+            onClick={() => {
+              dirtyPages.forEach(discard)
+              finishLeaving()
+            }}
+          >
+            Discard
+          </button>
+          <button
+            className="set-btn primary"
+            disabled={saving}
+            onClick={() => void save(dirtyPages, finishLeaving)}
+          >
+            {saving ? 'Saving…' : 'Save'}
+          </button>
+        </div>
+      </dialog>
+    </div>
+  )
+}

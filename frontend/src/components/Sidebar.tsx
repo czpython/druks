@@ -18,7 +18,7 @@ export function Sidebar({
   const opener = useRef<HTMLButtonElement>(null)
 
   useEffect(() => {
-    drawer.current?.close()
+    if (drawer.current?.open) drawer.current.close('navigation')
   }, [location])
 
   useEffect(() => {
@@ -38,7 +38,9 @@ export function Sidebar({
       </Link>
       {children}
       <div className="sidebar-account">
-        <span className="sidebar-avatar" aria-hidden="true">{account.username.slice(0, 2).toUpperCase()}</span>
+        <span className="sidebar-avatar" aria-hidden="true">
+          {account.username.slice(0, 2).toUpperCase()}
+        </span>
         <div>
           <span className="sidebar-username">{account.username}</span>
           <span className="sidebar-account-label">Your account</span>
@@ -55,7 +57,10 @@ export function Sidebar({
         className="navigation-toggle"
         aria-label="Open navigation"
         aria-haspopup="dialog"
-        onClick={() => drawer.current?.showModal()}
+        onClick={() => {
+          drawer.current!.returnValue = ''
+          drawer.current!.showModal()
+        }}
       >
         <Menu size={20} aria-hidden="true" />
       </button>
@@ -67,14 +72,20 @@ export function Sidebar({
         className="sidebar-drawer"
         aria-label="Druks navigation"
         onCancel={(event) => event.stopPropagation()}
-        onClose={() => opener.current?.focus()}
+        onClose={() => {
+          if (drawer.current?.returnValue !== 'navigation' && !opener.current?.closest('[hidden]'))
+            opener.current?.focus()
+        }}
         onClick={(event) => {
           if (event.target === event.currentTarget) drawer.current?.close()
         }}
       >
-        <div className="sidebar" onClick={(event) => {
-          if ((event.target as Element).closest('a, [data-navigation]')) drawer.current?.close()
-        }}>
+        <div
+          className="sidebar"
+          onClick={(event) => {
+            if ((event.target as Element).closest('a')) drawer.current?.close('navigation')
+          }}
+        >
           <button
             type="button"
             className="navigation-close"

@@ -3,15 +3,27 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { Service } from '../api/types'
-import { ServicesPane } from './SettingsModal'
+import { ServicesPane } from './SettingsPanes'
 
 const PEM = '-----BEGIN RSA PRIVATE KEY-----\nline-one\nline-two\n-----END RSA PRIVATE KEY-----'
 const SECRET = 'hook-secret-value'
 
 const githubFields = [
   { name: 'app_id', label: 'App ID', help: '', type: 'str', multiline: false },
-  { name: 'private_key', label: 'Private key (PEM)', help: '', type: 'secret', multiline: true },
-  { name: 'webhook_secret', label: 'Webhook secret', help: '', type: 'secret', multiline: false },
+  {
+    name: 'private_key',
+    label: 'Private key (PEM)',
+    help: '',
+    type: 'secret',
+    multiline: true,
+  },
+  {
+    name: 'webhook_secret',
+    label: 'Webhook secret',
+    help: '',
+    type: 'secret',
+    multiline: false,
+  },
 ]
 
 const disconnected: Service = {
@@ -45,8 +57,20 @@ const pasteOnly: Service = {
   facts: {},
   connectedAt: null,
   fields: [
-    { name: 'client_id', label: 'Client ID', help: '', type: 'str', multiline: false },
-    { name: 'client_secret', label: 'Client secret', help: '', type: 'secret', multiline: false },
+    {
+      name: 'client_id',
+      label: 'Client ID',
+      help: '',
+      type: 'str',
+      multiline: false,
+    },
+    {
+      name: 'client_secret',
+      label: 'Client secret',
+      help: '',
+      type: 'secret',
+      multiline: false,
+    },
   ],
   isOauth: false,
   requiredScopes: [],
@@ -55,8 +79,6 @@ const pasteOnly: Service = {
 }
 
 function stubFetch(states: Service[][]) {
-  // GET serves the list states in order (post-connect refetch sees the next
-  // one); POST answers with the connected github entry.
   const gets = [...states]
   const fetchMock = vi.fn<(url: string, init?: RequestInit) => Promise<Response>>(
     async (url, init) => {
@@ -75,16 +97,15 @@ function stubFetch(states: Service[][]) {
 }
 
 function renderPane() {
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  })
   render(
     <QueryClientProvider client={queryClient}>
       <ServicesPane />
     </QueryClientProvider>,
   )
 }
-
-// Overview card → detail view, then the explicit action that reveals the
-// credential fields.
 async function openGithubForm() {
   fireEvent.click(await screen.findByText('GitHub'))
   fireEvent.click(await screen.findByText('Connect an existing GitHub App'))
@@ -142,8 +163,6 @@ describe('ServicesPane', () => {
     expect(screen.getByLabelText('App ID')).toBeTruthy()
     expect(screen.getByLabelText('Private key (PEM)')).toBeTruthy()
     expect(screen.getByLabelText('Webhook secret')).toBeTruthy()
-    // Nothing is connected yet, so the server genuinely holds no secret —
-    // unlike the Replace-connection case, "not set" is the true placeholder.
     expect(screen.getAllByPlaceholderText('not set')).toHaveLength(2)
   })
 
@@ -152,9 +171,15 @@ describe('ServicesPane', () => {
     renderPane()
 
     await openGithubForm()
-    fireEvent.change(screen.getByLabelText('App ID'), { target: { value: '12345' } })
-    fireEvent.change(screen.getByLabelText('Private key (PEM)'), { target: { value: PEM } })
-    fireEvent.change(screen.getByLabelText('Webhook secret'), { target: { value: SECRET } })
+    fireEvent.change(screen.getByLabelText('App ID'), {
+      target: { value: '12345' },
+    })
+    fireEvent.change(screen.getByLabelText('Private key (PEM)'), {
+      target: { value: PEM },
+    })
+    fireEvent.change(screen.getByLabelText('Webhook secret'), {
+      target: { value: SECRET },
+    })
     fireEvent.click(screen.getByText('Connect GitHub'))
     await flush()
     await flush()
@@ -167,9 +192,6 @@ describe('ServicesPane', () => {
       private_key: PEM,
       webhook_secret: SECRET,
     })
-
-    // The refreshed connected response renders identity facts only — the
-    // submitted secrets are nowhere in the connected UI.
     expect(await screen.findByText('Connected')).toBeTruthy()
     expect(screen.getByText('druks-operator')).toBeTruthy()
     expect(screen.getByText('12345')).toBeTruthy()
@@ -183,7 +205,10 @@ describe('ServicesPane', () => {
       async (url, init) => {
         if (url === '/api/services/github' && init?.method === 'POST') {
           return new Response(
-            JSON.stringify({ detail: 'GitHub did not accept these credentials — check the App ID and PEM private key.' }),
+            JSON.stringify({
+              detail:
+                'GitHub did not accept these credentials — check the App ID and PEM private key.',
+            }),
             { status: 422, statusText: 'Unprocessable Entity' },
           )
         }
@@ -194,9 +219,15 @@ describe('ServicesPane', () => {
     renderPane()
 
     await openGithubForm()
-    fireEvent.change(screen.getByLabelText('App ID'), { target: { value: 'bad' } })
-    fireEvent.change(screen.getByLabelText('Private key (PEM)'), { target: { value: 'bad-pem' } })
-    fireEvent.change(screen.getByLabelText('Webhook secret'), { target: { value: 'bad-secret' } })
+    fireEvent.change(screen.getByLabelText('App ID'), {
+      target: { value: 'bad' },
+    })
+    fireEvent.change(screen.getByLabelText('Private key (PEM)'), {
+      target: { value: 'bad-pem' },
+    })
+    fireEvent.change(screen.getByLabelText('Webhook secret'), {
+      target: { value: 'bad-secret' },
+    })
     fireEvent.click(screen.getByText('Connect GitHub'))
 
     expect(await screen.findByText(/did not accept these credentials/)).toBeTruthy()
@@ -213,12 +244,7 @@ describe('ServicesPane', () => {
     expect(screen.queryByLabelText('Private key (PEM)')).toBeNull()
 
     fireEvent.click(screen.getByText('Replace connection'))
-    // The box is blank — the paste form is write-only — but its placeholder
-    // must say what the server already has, since this is a connected
-    // service the operator is replacing, not connecting fresh.
     expect(screen.getByLabelText('Private key (PEM)')).toBeTruthy()
-    // Both private_key and webhook_secret are secret fields; a connected
-    // service has both stored, so both show the set-ness placeholder.
     expect(screen.getAllByPlaceholderText('•••••••• (set)')).toHaveLength(2)
     expect(screen.queryByPlaceholderText('not set')).toBeNull()
   })

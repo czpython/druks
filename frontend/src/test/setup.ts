@@ -19,7 +19,8 @@ beforeEach(() => {
     },
     close: {
       configurable: true,
-      value(this: HTMLDialogElement) {
+      value(this: HTMLDialogElement, returnValue?: string) {
+        if (returnValue !== undefined) this.returnValue = returnValue
         this.removeAttribute('open')
         this.dispatchEvent(new Event('close'))
       },

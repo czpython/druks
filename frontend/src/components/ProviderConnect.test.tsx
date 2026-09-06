@@ -2,8 +2,13 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import type { Provider, ProviderKey, ProviderSubscription, UsageProviderSummary } from '../api/types'
-import { ProviderConnect } from './SettingsModal'
+import type {
+  Provider,
+  ProviderKey,
+  ProviderSubscription,
+  UsageProviderSummary,
+} from '../api/types'
+import { ProviderConnect } from './SettingsPanes'
 
 function provider(overrides: Partial<Provider> = {}): Provider {
   return {
@@ -90,7 +95,9 @@ describe('ProviderConnect', () => {
   it('clears a canceled API key before the form opens again', () => {
     renderCard(provider())
     fireEvent.click(screen.getByRole('button', { name: 'Add API key' }))
-    fireEvent.change(screen.getByLabelText('API key'), { target: { value: 'discarded-key' } })
+    fireEvent.change(screen.getByLabelText('API key'), {
+      target: { value: 'discarded-key' },
+    })
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
 
     expect(screen.queryByLabelText('API key')).toBeNull()
@@ -150,15 +157,28 @@ describe('ProviderConnect', () => {
     renderCard(provider(), {
       subscription: subscription(),
       usage: {
-        id: 'anthropic', label: 'Anthropic', available: true, connected: true,
-        providerEmail: 'seat@example.com', planTier: null,
-        fiveHour: { percentLeft: 0, resetsAt: '2026-09-05T12:00:00Z', model: null },
+        id: 'anthropic',
+        label: 'Anthropic',
+        available: true,
+        connected: true,
+        providerEmail: 'seat@example.com',
+        planTier: null,
+        fiveHour: {
+          percentLeft: 0,
+          resetsAt: '2026-09-05T12:00:00Z',
+          model: null,
+        },
         weeks: [
           { percentLeft: 69, resetsAt: null, model: 'Fable' },
           { percentLeft: 83, resetsAt: '2026-09-11T10:00:00Z', model: null },
           { percentLeft: 50, resetsAt: null, model: 'GPT reserve' },
         ],
-        unlimited: false, scrapedAt: null, ageSeconds: null, stale: false, error: null, rawOutput: null,
+        unlimited: false,
+        scrapedAt: null,
+        ageSeconds: null,
+        stale: false,
+        error: null,
+        rawOutput: null,
       },
     })
 
@@ -171,9 +191,13 @@ describe('ProviderConnect', () => {
     expect(screen.getByText('Resets in 6d')).toBeTruthy()
     expect(screen.getByText('Resets in 2h').getAttribute('dateTime')).toBe('2026-09-05T12:00:00Z')
     expect(screen.getByText('Resets in 2h').getAttribute('title')).toBeTruthy()
-    act(() => { vi.advanceTimersByTime(1000) })
+    act(() => {
+      vi.advanceTimersByTime(1000)
+    })
     expect(screen.getByText('Resets in 2h')).toBeTruthy()
-    act(() => { vi.advanceTimersByTime(2 * 60 * 60 * 1000) })
+    act(() => {
+      vi.advanceTimersByTime(2 * 60 * 60 * 1000)
+    })
     expect(screen.getByText('Reset due')).toBeTruthy()
   })
 
@@ -186,7 +210,6 @@ describe('ProviderConnect', () => {
     expect(screen.getByRole('button', { name: 'Remove Anthropic API key' })).toBeTruthy()
     expect(screen.queryByText('More')).toBeNull()
     expect(screen.queryByLabelText('API key')).toBeNull()
-    // The subscription block still invites a sign-in.
     expect(screen.getByRole('button', { name: 'Sign in with Anthropic' })).toBeTruthy()
 
     fireEvent.click(screen.getByRole('button', { name: 'Replace' }))
@@ -206,7 +229,10 @@ describe('ProviderConnect', () => {
 
   it('an expired subscription keeps its identity and asks for a Reconnect', () => {
     renderCard(provider(), {
-      subscription: subscription({ connected: false, expiresAt: '2026-08-01T00:00:00Z' }),
+      subscription: subscription({
+        connected: false,
+        expiresAt: '2026-08-01T00:00:00Z',
+      }),
     })
 
     expect(screen.getByText('Expired')).toBeTruthy()
@@ -223,14 +249,17 @@ describe('ProviderConnect', () => {
         authorizeUrl: 'https://x/auth',
         connectionId: 'C1',
       },
-      '/api/providers/anthropic/connection/complete': { id: 'a1', username: 'me@example.com' },
-    }
-    const fetchMock = vi.fn<(url: string, init?: RequestInit) => Promise<Response>>(
-      async (url) => {
-        const body = responses[url]
-        return new Response(JSON.stringify(body ?? {}), { status: body ? 200 : 404 })
+      '/api/providers/anthropic/connection/complete': {
+        id: 'a1',
+        username: 'me@example.com',
       },
-    )
+    }
+    const fetchMock = vi.fn<(url: string, init?: RequestInit) => Promise<Response>>(async (url) => {
+      const body = responses[url]
+      return new Response(JSON.stringify(body ?? {}), {
+        status: body ? 200 : 404,
+      })
+    })
     vi.stubGlobal('fetch', fetchMock)
 
     const { invalidate } = renderCard(provider())
@@ -251,9 +280,9 @@ describe('ProviderConnect', () => {
       code: 'the-code',
       connectionId: 'C1',
     })
-    // Completion refreshes the provider card — and only that: the browser's
-    // own identity is untouched, so /api/auth/me is never rechecked.
-    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['providerSubscriptions'] })
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: ['providerSubscriptions'],
+    })
     expect(fetchMock.mock.calls.some(([url]) => String(url) === '/api/auth/me')).toBe(false)
   })
 
@@ -275,10 +304,10 @@ describe('ProviderConnect', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
     await flush()
 
-    const storeCall = fetchMock.mock.calls.find(
-      ([url]) => url === '/api/providers/anthropic/key',
-    )
-    expect(JSON.parse(String(storeCall?.[1]?.body))).toEqual({ key: 'the-api-key' })
+    const storeCall = fetchMock.mock.calls.find(([url]) => url === '/api/providers/anthropic/key')
+    expect(JSON.parse(String(storeCall?.[1]?.body))).toEqual({
+      key: 'the-api-key',
+    })
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ['providerKeys'] })
   })
 

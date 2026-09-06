@@ -17,7 +17,7 @@ npm --prefix frontend run build
 ```
 
 `build` runs TypeScript project compilation before Vite. CI uses Node 22 and
-runs lint, tests, and build.
+runs lint, tests, and build for PRs into `main` and `codex/` stack branches.
 
 ## Ownership
 
@@ -40,6 +40,14 @@ Usage have shared routes. App-declared navigation appears below the page
 header. Settings opens from the bottom of the sidebar. Below 650 px, a
 navigation button opens a modal drawer. Escape closes the drawer and returns
 focus to the button.
+
+Shared settings use `/settings/<section>` routes. Search matches section names
+and field labels. General, Agent defaults, and app settings retain separate
+drafts across settings pages. Save changes applies only the current page.
+Leaving Settings offers Save, Discard, and Stay. Save applies each dirty page;
+a failed request keeps the operator on that page with its draft. Resource
+actions, such as connecting a provider or minting an API token, apply at once.
+Back to Druks restores the previous work URL and keeps the work page mounted.
 
 Normal interface text uses IBM Plex Sans at 15 px. Technical values use
 IBM Plex Mono. Phone inputs use at least 16 px.
