@@ -90,7 +90,7 @@ class AgentOutput(BaseModel):
 @dataclass(frozen=True)
 class Agent:
     contract: type[AgentOutput]
-    # Display label for the settings UI; ``id`` is shown when it's None.
+    # Display label for the settings UI; the attribute name shows when it's None.
     name: str | None = None
     # Short human-friendly blurb of what the agent does, shown in the settings UI.
     description: str = ""
@@ -105,10 +105,11 @@ class Agent:
     # ``include_plugins=False`` skips the operator's plugin state for prompts
     # that hit no MCP server.
     include_plugins: bool = True
-    # ``id`` is the agent's durable key (settings, timeline, registry): the attribute
-    # name it's declared as, or an explicit ``id=`` for a standalone agent (a test, a
-    # one-off). ``app`` is the owning App's name, read from the class in
-    # __set_name__ to group the settings UI — blank for a standalone agent (no owner).
+    # ``id`` is the agent's durable key (settings, timeline, registry, step name):
+    # ``<app>.<attribute>`` for an agent declared on an App, or the explicit ``id=``
+    # of a standalone agent (a test, a one-off). ``app`` is the owning App's name,
+    # read from the class in __set_name__ to group the settings UI — blank for a
+    # standalone agent (no owner).
     id: str = field(default="", compare=False)
     app: str = field(init=False, compare=False, default="")
 
@@ -119,7 +120,7 @@ class Agent:
     def __set_name__(self, owner: type, attr: str) -> None:
         if self.id:  # explicit id: already registered in __post_init__
             return
-        object.__setattr__(self, "id", attr)
+        object.__setattr__(self, "id", f"{owner.name}.{attr}")
         object.__setattr__(self, "app", owner.name)
         agents.register(self)
 

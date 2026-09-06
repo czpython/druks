@@ -656,7 +656,10 @@ export type Source = 'agent' | 'default'
 export type TimeoutSource = 'agent' | 'declared' | 'default'
 
 export interface AgentSetting {
+  /** The agent's durable id, `<app>.<attribute>` — the key in an update's agent maps. */
   name: string
+  /** The declared display name, else the attribute name. */
+  label: string
   /** Short human-friendly blurb of what the agent does. */
   description: string
   harness: string

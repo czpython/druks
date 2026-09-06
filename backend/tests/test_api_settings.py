@@ -139,17 +139,17 @@ def test_patch_settings_updates_the_defaults_every_agent_inherits(tmp_path: Path
         assert patch.status_code == 200
         assert patch.json()["defaultModel"] == "openai/gpt-5.5"
         agents = {a["name"]: a for a in _software_factory_app(client)["agents"]}
-    assert agents["implement"]["harness"] == "codex"
-    assert agents["implement"]["harnessSource"] == "default"
-    assert agents["implement"]["model"] == "openai/gpt-5.5"
-    assert agents["implement"]["source"] == "default"
+    assert agents["software_factory.implement"]["harness"] == "codex"
+    assert agents["software_factory.implement"]["harnessSource"] == "default"
+    assert agents["software_factory.implement"]["model"] == "openai/gpt-5.5"
+    assert agents["software_factory.implement"]["source"] == "default"
 
 
 def test_patch_settings_rejects_defaults_that_break_an_agent_override(tmp_path: Path):
     with _build_client(tmp_path) as client:
         override = client.patch(
             "/api/settings/apps",
-            json={"agentModels": {"generate_plan": "anthropic/claude-opus-4-7"}},
+            json={"agentModels": {"software_factory.generate_plan": "anthropic/claude-opus-4-7"}},
         )
         assert override.status_code == 200
 
@@ -175,8 +175,8 @@ def test_agents_lists_every_apps_agents_as_they_resolve(tmp_path: Path):
         client.patch(
             "/api/settings/apps",
             json={
-                "agentHarnesses": {"implement": "codex"},
-                "agentModels": {"implement": "openai/gpt-5.5"},
+                "agentHarnesses": {"software_factory.implement": "codex"},
+                "agentModels": {"software_factory.implement": "openai/gpt-5.5"},
             },
         )
         body = client.get("/api/agents").json()
@@ -184,15 +184,16 @@ def test_agents_lists_every_apps_agents_as_they_resolve(tmp_path: Path):
     assert "software_factory" in apps
     assert "field_notes" in apps
     agents = {a["name"]: a for a in apps["software_factory"]["agents"]}
-    assert agents["implement"]["harness"] == "codex"
-    assert agents["implement"]["harnessSource"] == "agent"
-    assert agents["implement"]["model"] == "openai/gpt-5.5"
-    assert agents["implement"]["source"] == "agent"
-    assert agents["implement"]["billing"] == "subscription"
-    assert agents["implement"]["billingSource"] == "default"
-    assert agents["generate_plan"]["harnessSource"] == "default"
-    assert set(agents["generate_plan"]) == {
+    assert agents["software_factory.implement"]["harness"] == "codex"
+    assert agents["software_factory.implement"]["harnessSource"] == "agent"
+    assert agents["software_factory.implement"]["model"] == "openai/gpt-5.5"
+    assert agents["software_factory.implement"]["source"] == "agent"
+    assert agents["software_factory.implement"]["billing"] == "subscription"
+    assert agents["software_factory.implement"]["billingSource"] == "default"
+    assert agents["software_factory.generate_plan"]["harnessSource"] == "default"
+    assert set(agents["software_factory.generate_plan"]) == {
         "name",
+        "label",
         "description",
         "harness",
         "harnessSource",
@@ -209,25 +210,34 @@ def test_agents_lists_every_apps_agents_as_they_resolve(tmp_path: Path):
 
 def test_apps_judge_an_agents_triple_as_it_resolves(tmp_path: Path):
     with _build_client(tmp_path) as client:
-        response = client.patch("/api/settings/apps", json={"agentHarnesses": {"implement": "pi"}})
+        response = client.patch(
+            "/api/settings/apps", json={"agentHarnesses": {"software_factory.implement": "pi"}}
+        )
         assert response.status_code == 422
         assert "API key only" in response.json()["detail"]
         response = client.patch(
-            "/api/settings/apps", json={"agentModels": {"implement": "openai/gpt-5.5"}}
+            "/api/settings/apps",
+            json={"agentModels": {"software_factory.implement": "openai/gpt-5.5"}},
         )
         assert response.status_code == 422
         assert "does not run OpenAI" in response.json()["detail"]
         agents = {a["name"]: a for a in _software_factory_app(client)["agents"]}
-        assert agents["implement"]["harnessSource"] == "default"
-        assert agents["implement"]["source"] == "default"
+        assert agents["software_factory.implement"]["harnessSource"] == "default"
+        assert agents["software_factory.implement"]["source"] == "default"
         response = client.patch(
             "/api/settings/apps",
-            json={"agentHarnesses": {"implement": "pi"}, "agentBillings": {"implement": "api_key"}},
+            json={
+                "agentHarnesses": {"software_factory.implement": "pi"},
+                "agentBillings": {"software_factory.implement": "api_key"},
+            },
         )
         assert response.status_code == 200
         agents = {a["name"]: a for a in _software_factory_app(client)["agents"]}
-        assert (agents["implement"]["harness"], agents["implement"]["billing"]) == ("pi", "api_key")
-        assert agents["implement"]["billingSource"] == "agent"
+        assert (
+            agents["software_factory.implement"]["harness"],
+            agents["software_factory.implement"]["billing"],
+        ) == ("pi", "api_key")
+        assert agents["software_factory.implement"]["billingSource"] == "agent"
         response = client.patch("/api/settings/apps", json={"agentBillings": {"ghost": "api_key"}})
         assert response.status_code == 422
 
@@ -248,7 +258,7 @@ def test_apps_surface_build_agents(tmp_path: Path):
     apps = {m["name"]: m for m in body["apps"]}
 
     build_agents = {a["name"]: a for a in apps["software_factory"]["agents"]}
-    assert "generate_plan" in build_agents
+    assert "software_factory.generate_plan" in build_agents
     assert "planning" not in build_agents
 
 
@@ -257,8 +267,9 @@ def test_apps_surface_build_agents_and_workflow_defaults(tmp_path: Path):
         build = _software_factory_app(client)
 
     agents = {a["name"]: a for a in build["agents"]}
-    assert agents["generate_plan"] == {
-        "name": "generate_plan",
+    assert agents["software_factory.generate_plan"] == {
+        "name": "software_factory.generate_plan",
+        "label": "generate_plan",
         "description": "ticket → implementation plan",
         "harness": "claude",
         "harnessSource": "default",
@@ -271,8 +282,8 @@ def test_apps_surface_build_agents_and_workflow_defaults(tmp_path: Path):
         "timeout": 1800,
         "timeoutSource": "default",
     }
-    assert agents["implement"]["model"] == "anthropic/claude-opus-4-7"
-    assert agents["evaluate_implementation"]["effortSource"] == "default"
+    assert agents["software_factory.implement"]["model"] == "anthropic/claude-opus-4-7"
+    assert agents["software_factory.evaluate_implementation"]["effortSource"] == "default"
     fields = {f["name"]: f for f in build["workflows"][0]["fields"]}
     assert fields["max_implementation_revisions"]["value"] == 5
     assert fields["plan_gate"] == {
@@ -449,7 +460,7 @@ def test_incoherent_app_save_is_rejected_and_rolled_back_before_schedules(
         response = client.patch(
             "/api/settings/apps",
             json={
-                "agentModels": {"generate_plan": "anthropic/claude-opus-4-7"},
+                "agentModels": {"software_factory.generate_plan": "anthropic/claude-opus-4-7"},
                 "appSettings": {"software_factory": {"review_app_id": "42"}},
             },
         )
@@ -461,7 +472,7 @@ def test_incoherent_app_save_is_rejected_and_rolled_back_before_schedules(
         assert not reconciled
         assert _software_factory_settings_fields(client)["review_app_id"]["secretSet"] is False
         agents = {agent["name"]: agent for agent in _software_factory_app(client)["agents"]}
-        assert agents["generate_plan"]["model"] == "anthropic/claude-opus-4-7"
+        assert agents["software_factory.generate_plan"]["model"] == "anthropic/claude-opus-4-7"
 
 
 async def test_clearing_the_identity_deletes_its_overrides_and_stays_coherent(tmp_path: Path):
@@ -508,37 +519,39 @@ def test_apps_override_agent_model_persists(tmp_path: Path):
         patch = client.patch(
             "/api/settings/apps",
             json={
-                "agentHarnesses": {"implement": "codex"},
-                "agentModels": {"implement": "openai/gpt-5.5"},
+                "agentHarnesses": {"software_factory.implement": "codex"},
+                "agentModels": {"software_factory.implement": "openai/gpt-5.5"},
             },
         )
         assert patch.status_code == 200
         agents = {a["name"]: a for a in _software_factory_app(client)["agents"]}
 
-    assert agents["implement"]["model"] == "openai/gpt-5.5"
-    assert agents["implement"]["source"] == "agent"
+    assert agents["software_factory.implement"]["model"] == "openai/gpt-5.5"
+    assert agents["software_factory.implement"]["source"] == "agent"
 
 
 def test_apps_default_effort_and_per_agent_effort_override(tmp_path: Path):
     with _build_client(tmp_path) as client:
         agents = {a["name"]: a for a in _software_factory_app(client)["agents"]}
-        assert agents["generate_plan"]["effort"] == "high"
-        assert agents["generate_plan"]["effortSource"] == "default"
+        assert agents["software_factory.generate_plan"]["effort"] == "high"
+        assert agents["software_factory.generate_plan"]["effortSource"] == "default"
 
         client.patch("/api/settings", json={"defaultEffort": "low"})
-        client.patch("/api/settings/apps", json={"agentEfforts": {"generate_plan": "high"}})
+        client.patch(
+            "/api/settings/apps", json={"agentEfforts": {"software_factory.generate_plan": "high"}}
+        )
         agents = {a["name"]: a for a in _software_factory_app(client)["agents"]}
-        assert agents["generate_plan"]["effort"] == "high"
-        assert agents["generate_plan"]["effortSource"] == "agent"
-        assert agents["revise_contract"]["effort"] == "low"
-        assert agents["revise_contract"]["effortSource"] == "default"
+        assert agents["software_factory.generate_plan"]["effort"] == "high"
+        assert agents["software_factory.generate_plan"]["effortSource"] == "agent"
+        assert agents["software_factory.revise_contract"]["effort"] == "low"
+        assert agents["software_factory.revise_contract"]["effortSource"] == "default"
 
 
 def test_apps_reject_unknown_effort(tmp_path: Path):
     with _build_client(tmp_path) as client:
         response = client.patch(
             "/api/settings/apps",
-            json={"agentEfforts": {"implement": "turbo"}},
+            json={"agentEfforts": {"software_factory.implement": "turbo"}},
         )
     assert response.status_code == 422
     assert "agentEfforts" in str(response.json()["detail"])
@@ -547,23 +560,25 @@ def test_apps_reject_unknown_effort(tmp_path: Path):
 def test_apps_default_timeout_and_per_agent_timeout_override(tmp_path: Path):
     with _build_client(tmp_path) as client:
         agents = {a["name"]: a for a in _software_factory_app(client)["agents"]}
-        assert agents["implement"]["timeout"] == 1800
-        assert agents["implement"]["timeoutSource"] == "default"
+        assert agents["software_factory.implement"]["timeout"] == 1800
+        assert agents["software_factory.implement"]["timeoutSource"] == "default"
 
         client.patch("/api/settings", json={"defaultTimeout": 1200})
-        client.patch("/api/settings/apps", json={"agentTimeouts": {"implement": 3600}})
+        client.patch(
+            "/api/settings/apps", json={"agentTimeouts": {"software_factory.implement": 3600}}
+        )
         agents = {a["name"]: a for a in _software_factory_app(client)["agents"]}
-        assert agents["implement"]["timeout"] == 3600
-        assert agents["implement"]["timeoutSource"] == "agent"
-        assert agents["review_plan"]["timeout"] == 1200
-        assert agents["review_plan"]["timeoutSource"] == "default"
+        assert agents["software_factory.implement"]["timeout"] == 3600
+        assert agents["software_factory.implement"]["timeoutSource"] == "agent"
+        assert agents["software_factory.review_plan"]["timeout"] == 1200
+        assert agents["software_factory.review_plan"]["timeoutSource"] == "default"
 
 
 def test_apps_reject_non_positive_timeout(tmp_path: Path):
     with _build_client(tmp_path) as client:
         response = client.patch(
             "/api/settings/apps",
-            json={"agentTimeouts": {"implement": 0}},
+            json={"agentTimeouts": {"software_factory.implement": 0}},
         )
     assert response.status_code == 422
 
@@ -590,16 +605,18 @@ def test_apps_clearing_an_override_reverts_to_the_operator_default(tmp_path: Pat
     with _build_client(tmp_path) as client:
         client.patch(
             "/api/settings/apps",
-            json={"agentModels": {"generate_plan": "anthropic/claude-opus-4-7"}},
+            json={"agentModels": {"software_factory.generate_plan": "anthropic/claude-opus-4-7"}},
         )
         agents = {a["name"]: a for a in _software_factory_app(client)["agents"]}
-        assert agents["generate_plan"]["model"] == "anthropic/claude-opus-4-7"
-        assert agents["generate_plan"]["source"] == "agent"
+        assert agents["software_factory.generate_plan"]["model"] == "anthropic/claude-opus-4-7"
+        assert agents["software_factory.generate_plan"]["source"] == "agent"
 
-        client.patch("/api/settings/apps", json={"agentModels": {"generate_plan": None}})
+        client.patch(
+            "/api/settings/apps", json={"agentModels": {"software_factory.generate_plan": None}}
+        )
         agents = {a["name"]: a for a in _software_factory_app(client)["agents"]}
-        assert agents["generate_plan"]["model"] == "anthropic/claude-opus-4-7"
-        assert agents["generate_plan"]["source"] == "default"
+        assert agents["software_factory.generate_plan"]["model"] == "anthropic/claude-opus-4-7"
+        assert agents["software_factory.generate_plan"]["source"] == "default"
 
 
 def test_apps_reject_unknown_agent_model(tmp_path: Path):
@@ -607,7 +624,7 @@ def test_apps_reject_unknown_agent_model(tmp_path: Path):
         # No installed harness owns this namespace, so nothing could run it.
         response = client.patch(
             "/api/settings/apps",
-            json={"agentModels": {"implement": "llama-3-70b"}},
+            json={"agentModels": {"software_factory.implement": "llama-3-70b"}},
         )
     assert response.status_code == 422
     assert "llama-3-70b" in response.json()["detail"]

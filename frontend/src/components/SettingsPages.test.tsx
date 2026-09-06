@@ -45,7 +45,8 @@ const userSettings = {
 }
 
 const coder: AgentSetting = {
-  name: 'coder',
+  name: 'software_factory.coder',
+  label: 'coder',
   description: 'writes the change',
   harness: 'codex',
   harnessSource: 'agent',
@@ -60,7 +61,8 @@ const coder: AgentSetting = {
 }
 
 const critic: AgentSetting = {
-  name: 'critic',
+  name: 'review.critic',
+  label: 'critic',
   description: 'reviews the change',
   harness: 'opencode',
   harnessSource: 'agent',
@@ -1084,7 +1086,7 @@ describe('canonical app settings', () => {
         ([path, init]) => String(path) === '/api/settings/apps' && init?.method === 'PATCH',
       )
     expect(JSON.parse(String(patch?.[1]?.body))).toEqual({
-      agentEfforts: { coder: 'low' },
+      agentEfforts: { 'software_factory.coder': 'low' },
       appSettings: { software_factory: { linear_trigger_status: 'Agent Queue' } },
       workflowSettings: {},
     })
@@ -1413,8 +1415,8 @@ it('focuses the same search result on each click', async () => {
 it('keeps focus on another agent field after saving an app reached through search', async () => {
   stubFetch(false)
   const scroll = mockScroll()
-  renderSettings('/apps/software_factory/settings/agents?field=agent.coder.model')
-  await waitFor(() => expect(document.activeElement?.closest('[data-setting]')?.getAttribute('data-setting')).toBe('agent.coder.model'))
+  renderSettings('/apps/software_factory/settings/agents?field=agent.software_factory.coder.model')
+  await waitFor(() => expect(document.activeElement?.closest('[data-setting]')?.getAttribute('data-setting')).toBe('agent.software_factory.coder.model'))
   fireEvent.click(screen.getByRole('button', { name: /^effort:/ }))
   fireEvent.click(screen.getByRole('button', { name: 'low' }))
   const harness = screen.getByRole('button', { name: /^harness:/ })

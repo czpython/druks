@@ -150,7 +150,7 @@ class SoftwareFactory(App):
         ``source`` to get it only when that source is the selected one — a
         work item syncs only to the tracker that owns it."""
         settings = await cls.settings()
-        if source is not None and source != settings.tracker:
+        if source and source != settings.tracker:
             return
         try:
             if settings.tracker == "linear":
@@ -172,8 +172,9 @@ class SoftwareFactory(App):
         except ServiceNotConnectedError:
             return
 
-    # The app's agents — any of its workflows run them. The attribute name is each
-    # agent's id (its durable settings/timeline key).
+    # The app's agents — any of its workflows run them. The app name and the
+    # attribute name form each agent's id (``software_factory.implement``), its
+    # durable settings and timeline key.
     generate_plan = Agent(
         description="ticket → implementation plan",
         prompt="software_factory/build/generate_plan.md",

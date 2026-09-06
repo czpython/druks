@@ -28,7 +28,8 @@ async def get_agent_setting(agent: "Agent") -> AgentSettingResponse:
     effort = await SettingsOverride.agent_effort(agent.id)
     timeout = await SettingsOverride.agent_timeout(agent.id, agent.timeout)
     return AgentSettingResponse(
-        name=agent.name or agent.id,
+        name=agent.id,
+        label=agent.name or agent.id.rsplit(".", 1)[-1],
         description=agent.description,
         harness=harness.value,
         harness_source=harness.source,

@@ -358,6 +358,9 @@ class NightWatch(App):
     )
 ```
 
+The app name and the attribute name form the agent's id: `night_watch.report`.
+Settings overrides, the timeline, and the step name use that id.
+
 Call it only inside a workflow:
 
 ```python

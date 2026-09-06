@@ -780,7 +780,7 @@ function ResolvedAgentRow({
   return (
     <div className="set-trow">
       <div className="agent-cell agents-agent">
-        <span className="agent-name">{agent.name}</span>
+        <span className="agent-name">{agent.label}</span>
         <span className="agent-desc">{agent.description}</span>
       </div>
       <div>
@@ -3198,9 +3198,9 @@ function AgentRecords({
           disabled: busy,
         }
         return (
-          <section key={agent.name} className="agent-record" aria-label={agent.name}>
+          <section key={agent.name} className="agent-record" aria-label={agent.label}>
             <header className="agent-identity">
-              <h3>{agent.name}</h3>
+              <h3>{agent.label}</h3>
               <p>{agent.description}</p>
             </header>
             <div className="agent-field agent-field-harness" role="group" aria-label="Harness" data-setting={`agent.${agent.name}.${SETTINGS_FIELDS.harness.field}`}>
