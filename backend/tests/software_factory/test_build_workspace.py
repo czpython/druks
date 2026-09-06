@@ -25,9 +25,8 @@ def test_build_workspace_grants_related_root_add_dir():
     # scaffolding kwargs never carry it.
     workspace = BuildWorkspace(
         host=_FakeSandbox(),  # type: ignore[arg-type]
-        repo="o/main",
+        subject=SimpleNamespace(repo="o/main"),
         branch="b",
-        github_token="t",
         mcp_token="ghs_review",
         skills=("python-house-rules",),
     )
@@ -35,10 +34,35 @@ def test_build_workspace_grants_related_root_add_dir():
 
     assert kwargs["model"] == "m"  # the run's own kwargs pass through
     assert kwargs["add_dirs"] == (get_related_root("exedev"),)
-    assert kwargs["github_token"] == "t"
     assert kwargs["skills"] == ("python-house-rules",)
     assert "mcp_servers" not in kwargs
     assert "extra_env" not in kwargs
+
+
+async def test_build_workspace_makes_the_related_root_before_the_clone(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    execs: list[list[str]] = []
+
+    async def fake_exec(self: Any, argv: list[str], **_kw: Any) -> None:
+        execs.append(argv)
+
+    async def base_run_agent(self: Any, **kwargs: Any) -> str:
+        execs.append(["run_agent"])
+        return "ran"
+
+    workspace = BuildWorkspace(
+        host=host_mod.Host(record=SimpleNamespace(id="h1", ssh_username="exedev")),  # type: ignore[arg-type]
+        subject=SimpleNamespace(repo="o/main"),
+        branch="b",
+        mcp_token="ghs_review",
+        skills=(),
+    )
+    monkeypatch.setattr(host_mod.Host, "exec", fake_exec)
+    monkeypatch.setattr(RepoWorkspace, "run_agent", base_run_agent)
+
+    assert await workspace.run_agent(account_id=None) == "ran"
+    assert execs == [["mkdir", "-p", get_related_root("exedev")], ["run_agent"]]
 
 
 async def test_build_workspace_declares_its_github_mcp(druks_db):
@@ -48,9 +72,8 @@ async def test_build_workspace_declares_its_github_mcp(druks_db):
     # in the run env.
     workspace = BuildWorkspace(
         host=_FakeSandbox(),  # type: ignore[arg-type]
-        repo="o/main",
+        subject=SimpleNamespace(repo="o/main"),
         branch="b",
-        github_token="t",
         mcp_token="ghs_review",
         skills=("python-house-rules",),
     )
@@ -62,49 +85,19 @@ async def test_build_workspace_declares_its_github_mcp(druks_db):
     assert "ghs_review" not in repr(github)
 
 
-def _workspace_kwargs_stubs(monkeypatch: pytest.MonkeyPatch, *, review_actor):
-    ensured: list[str] = []
-    execs: list[list[str]] = []
-
-    async def _token(_repo: str) -> str:
-        return "tok"
-
-    async def _noop(self: Any, **_kw: Any) -> None:
-        pass
-
-    async def fake_ensure(_sb: Any, *, repo_url: str, ref: Any, target_path: str) -> None:
-        ensured.append(repo_url)
-
-    async def fake_exec(self: Any, argv: list[str], **_kw: Any) -> Any:
-        execs.append(argv)
-        return SimpleNamespace(ok=True, exit_code=0, stdout="", stderr="")
-
-    monkeypatch.setattr(host_mod.Host, "write_secret", _noop)
-    monkeypatch.setattr(host_mod.Host, "exec", fake_exec)
-
-    async def _github_client():
-        return SimpleNamespace(token_for_repo=_token)
-
+def _review_actor_stub(monkeypatch: pytest.MonkeyPatch, *, review_actor) -> None:
     async def _review_actor():
         return review_actor()
 
-    monkeypatch.setattr(
-        "druks.contrib.software_factory.workflows.get_github_client", _github_client
-    )
     monkeypatch.setattr("druks.contrib.software_factory.workflows.get_review_actor", _review_actor)
-    monkeypatch.setattr("druks.sandbox.repo.ensure", fake_ensure)
-    return ensured, execs
 
 
 @pytest.mark.asyncio
-async def test_get_workspace_kwargs_clones_primary_only(monkeypatch: pytest.MonkeyPatch):
-    # Only the primary repo is provisioned; related repos are the agents' job.
-    # get_related_root is mkdir'd so Claude's --add-dir target exists before the
-    # first on-demand clone.
+async def test_get_workspace_kwargs_carries_the_build_fields(monkeypatch: pytest.MonkeyPatch):
     async def _review_token(_repo: str) -> str:
         return "ghs_review"
 
-    ensured, execs = _workspace_kwargs_stubs(
+    _review_actor_stub(
         monkeypatch,
         review_actor=lambda: SimpleNamespace(
             client=SimpleNamespace(token_for_repo=_review_token), mode="approve"
@@ -118,11 +111,13 @@ async def test_get_workspace_kwargs_clones_primary_only(monkeypatch: pytest.Monk
     workflow._profile = {"recommended_skills": ["python-house-rules"]}
     kwargs = await workflow.get_workspace_kwargs(sandbox)
 
-    assert ensured == ["https://github.com/o/app"]
-    assert ["mkdir", "-p", get_related_root("exedev")] in execs
-    assert kwargs["mcp_token"] == "ghs_review"
-    assert kwargs["skills"] == ("python-house-rules",)
-    assert "related" not in kwargs
+    assert kwargs == {
+        "host": sandbox,
+        "subject": workflow.__dict__["subject"],
+        "branch": None,
+        "mcp_token": "ghs_review",
+        "skills": ("python-house-rules",),
+    }
 
 
 @pytest.mark.asyncio
@@ -134,7 +129,7 @@ async def test_get_workspace_kwargs_fails_loudly_when_the_token_wont_mint(
     async def _no_token(_repo: str) -> str:
         raise RuntimeError("app not installed on this repo")
 
-    _workspace_kwargs_stubs(
+    _review_actor_stub(
         monkeypatch,
         review_actor=lambda: SimpleNamespace(
             client=SimpleNamespace(token_for_repo=_no_token), mode="comment"
@@ -187,7 +182,7 @@ async def test_set_git_identity_stamps_the_workspace_repo(
 ) -> None:
     repo_path = tmp_path / "repo"
     subprocess.run(["git", "init", "-q", str(repo_path)], check=True)
-    workspace = RepoWorkspace(host=_IdentitySandbox(repo_path), repo="o/main", github_token="t")  # type: ignore[arg-type]
+    workspace = RepoWorkspace(host=_IdentitySandbox(repo_path))  # type: ignore[arg-type]
     hook = repo_path / ".git" / "hooks" / "prepare-commit-msg"
     message = repo_path / "COMMIT_EDITMSG"
 

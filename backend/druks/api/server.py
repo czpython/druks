@@ -34,7 +34,7 @@ from druks.durable.engine import init_dbos, launch, shutdown
 from druks.durable.exceptions import AgentCallNotFound
 from druks.events.routes import router as events_router
 from druks.files.routes import router as files_router
-from druks.harnesses.exceptions import CatalogError, ExecutionSettingsError
+from druks.harnesses.exceptions import CatalogError, ProfileSettingsError
 from druks.harnesses.routes import router as providers_router
 from druks.mcp.catalog import load_mcp_catalog
 from druks.mcp.gateway import exceptions as gate_errors
@@ -219,10 +219,8 @@ async def _catalog_error_handler(request: Request, exc: CatalogError) -> JSONRes
     return JSONResponse(status_code=503, content={"error": "HTTP_503", "detail": detail})
 
 
-@app.exception_handler(ExecutionSettingsError)
-async def _execution_settings_handler(
-    request: Request, exc: ExecutionSettingsError
-) -> JSONResponse:
+@app.exception_handler(ProfileSettingsError)
+async def _profile_settings_handler(request: Request, exc: ProfileSettingsError) -> JSONResponse:
     return JSONResponse(status_code=422, content={"error": "HTTP_422", "detail": str(exc)})
 
 

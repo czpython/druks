@@ -382,15 +382,67 @@ If an agent produces a file, use [`File` and `FileField`](files.md).
 The contract declares the file, Druks transports and serves it, and the app can
 persist its stable reference on an app row.
 
+An app that runs a CLI of its own inside the sandbox reads how a declared agent
+would run, and hands that to the CLI. Declare the agent and never call it; the
+operator configures it in **Settings → Agents** like any other:
+
+```python
+profile = await NightWatch.auditor.get_profile()
+profile.harness   # "claude" | "codex" | "opencode" | "pi"
+profile.model_id  # the model as that CLI names it, provider prefix stripped
+profile.model     # "provider/model"
+profile.effort
+profile.billing   # "subscription" | "api_key"
+profile.key       # the provider API key under api_key billing, else None
+```
+
+`get_profile()` runs inside a workflow and reads the settings at call time for
+the run's own actor, the same read Druks makes for the calling agent. A
+missing login or key raises before any sandbox work. Under subscription
+billing there is no key. The VM home holds the login of the calling agent's
+subscription only, so a nested CLI on another provider needs `api_key` billing.
+
 Do not ask the framework to infer domain side effects from agent prose.
 The prompt or a subsequent explicit step owns those actions.
 
 ## Customize the workspace
 
-Every agent uses a `Workspace` around a Drukbox sandbox. Override
-`Workflow.workspace_class` and `get_workspace_kwargs()` for app-specific
-workspace behavior. This behavior can clone a repository, mint a short-lived
-token, or require an MCP server.
+Every agent uses a `Workspace` around a Drukbox sandbox. `Workflow.workspace_class`
+names the kind. A workflow about a GitHub repository declares `RepoWorkspace`
+and nothing else:
+
+```python
+from druks.workspaces import RepoWorkspace
+
+
+class Sweep(Workflow):
+    subject = Repository  # a StoredSubject with a ``repo`` column, "owner/name"
+    workspace_class = RepoWorkspace
+```
+
+Before every agent call Druks mints the GitHub App token for the subject's
+`repo`, writes it into the VM, and clones the default branch into
+`workspace.repo_path`. Prompts read `{{ workspace.repo_path }}`. In the VM,
+git and `gh` read the token through the sandbox helper. The clone is
+idempotent, so a warm host keeps its working tree and a host rotated in bare
+gets one back.
+
+Every workspace holds the run's `subject`. `RepoWorkspace.get_repo()` reads
+its `repo` column. Override it when the subject names the repository
+differently:
+
+```python
+class SweepWorkspace(RepoWorkspace):
+    def get_repo(self) -> str:
+        return self.subject.full_name
+```
+
+Override `Workflow.get_workspace_kwargs()` to pass `branch` or the fields a
+subclass adds. Extend `RepoWorkspace` by adding fields, not by cloning again.
+Override `get_github_token()` to clone and act as another identity,
+`run_agent()` to prepare the VM before the call, `get_agent_run_kwargs()` to
+grant directories or skills, and `get_required_mcp_servers()` to require an
+MCP server the workspace credentials itself.
 
 Keep durable state outside the VM. A workflow can set
 `steps_reuse_sandbox = True` to retain one host across a segment. Druks releases
@@ -1428,6 +1480,7 @@ Import from concern namespaces, not from `druks.durable` or internal modules:
 | `druks.agents` | `Agent`, `AgentOutput` |
 | `druks.workflows` | `Workflow`, `Gate`, `step`, run/agent response types, lifecycle enums and workflow errors |
 | `druks.sandbox` | `Sandbox` |
+| `druks.workspaces` | `Workspace`, `RepoWorkspace` |
 | `druks.db` | `Base`, `StoredSubject`, `db_session` |
 | `druks.schemas` | `Schema` |
 | `druks.ui` | `Action`, `Block`, `Callout`, `Card`, `Cards`, `Chart`, `ChartSeries`, `CheckboxField`, `Columns`, `Divider`, `EmptyState`, `Fact`, `Facts`, `Field`, `FileSummary`, `Files`, `Follows`, `Form`, `GateControls`, `Image`, `ImageGallery`, `Link`, `List`, `Markdown`, `Metric`, `Metrics`, `MultiSelectField`, `NumberField`, `NumberValue`, `Option`, `Page`, `Progress`, `ProgressStep`, `RadioField`, `Section`, `SecretField`, `SelectField`, `Stack`, `StatusValue`, `Table`, `TableColumn`, `TableRow`, `Text`, `TextAreaField`, `TextField`, `TextValue`, `TimeValue`, `Timeline`, `TimelineItem`, `UploadField`, `Value`, `page` |

@@ -4,7 +4,7 @@ from druks.db import StoredSubject, db_session
 from sqlalchemy import select
 from sqlalchemy.orm import Mapped, mapped_column
 
-from druks_field_notes.schemas import NoteSummary
+from druks_field_notes.schemas import NoteSummary, RepositorySummary
 
 
 class Note(StoredSubject):
@@ -48,3 +48,38 @@ class Note(StoredSubject):
 
         notes = await cls.list_recent(limit=(await FieldNotes.settings()).board_size)
         return [note.get_summary() for note in notes]
+
+
+class Repository(StoredSubject):
+    __tablename__ = "field_notes_repositories"
+
+    # ``owner/name``; a Survey run's RepoWorkspace clones it.
+    repo: Mapped[str] = mapped_column(unique=True)
+    gist: Mapped[str | None]
+
+    @classmethod
+    async def create(cls, *, repo: str) -> "Repository":
+        session = db_session()
+        repository = cls(repo=repo)
+        session.add(repository)
+        await session.flush()
+        return repository
+
+    @classmethod
+    async def get(cls, repository_id: int) -> "Repository | None":
+        return await db_session().get(cls, repository_id)
+
+    async def save_gist(self, gist: str) -> None:
+        self.gist = gist
+        await db_session().flush()
+
+    def get_label(self) -> str:
+        return self.repo
+
+    def get_summary(self) -> RepositorySummary:
+        return RepositorySummary.model_validate(self)
+
+    @classmethod
+    async def list_summaries(cls, account_id: str | None) -> list[RepositorySummary]:
+        rows = await db_session().scalars(select(cls).order_by(cls.repo))
+        return [row.get_summary() for row in rows]

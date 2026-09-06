@@ -228,15 +228,15 @@ class Host:
         # druks.sandbox is mid-init.
         from druks.durable.enums import AgentCallStatus
         from druks.harnesses.datastructures import SandboxSettings
-        from druks.harnesses.execution import resolve_execution
+        from druks.harnesses.profiles import get_profile
 
         settings = load_settings()
-        execution = await resolve_execution(agent, account_id)
-        model, timeout = execution.model, execution.timeout
-        harness = execution.harness_class(
+        profile = await get_profile(agent, account_id)
+        model, timeout = profile.model, profile.timeout
+        harness = profile.harness_class(
             model=model,
-            fast_mode=execution.fast_mode,
-            effort=execution.effort,
+            fast_mode=profile.fast_mode,
+            effort=profile.effort,
             sandbox=SandboxSettings.maybe_from_settings(settings),
         )
 
@@ -261,8 +261,8 @@ class Host:
                 extra_env=extra_env,
                 mcp_servers=mcp_servers,
                 call_id=run_id,
-                subscription=execution.subscription,
-                key=execution.key,
+                subscription=profile.subscription,
+                key=profile.key,
             )
         except HarnessError as exc:
             error = exc

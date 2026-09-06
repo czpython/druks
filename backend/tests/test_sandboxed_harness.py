@@ -522,20 +522,21 @@ def test_agent_result_names_the_agent_in_its_failure():
 def _patch_harness_resolution(monkeypatch: pytest.MonkeyPatch) -> None:
     # run_agent resolves the call through the one resolver; these tests are
     # about the failure boundary, not resolution.
-    from druks.harnesses.execution import Execution
+    from druks.harnesses.profiles import Profile
 
-    async def resolve_execution(agent, account_id):
-        return Execution(
+    async def get_profile(agent, account_id):
+        return Profile(
             harness_class=ClaudeHarness,
             model="anthropic/claude-opus-4-7",
             subscription=SimpleNamespace(id="subscription-1", account_id="acc"),
             key=None,
+            billing="subscription",
             effort="high",
             timeout=60,
             fast_mode=False,
         )
 
-    monkeypatch.setattr("druks.harnesses.execution.resolve_execution", resolve_execution)
+    monkeypatch.setattr("druks.harnesses.profiles.get_profile", get_profile)
 
 
 async def test_run_agent_carries_foreign_failures_as_harness_errors(
