@@ -139,9 +139,9 @@ describe('ProviderConnect', () => {
     expect(screen.getByText('Connected')).toBeTruthy()
     expect(screen.getByText('Claude Max · claude-seat@corp.com')).toBeTruthy()
     expect(screen.getByLabelText('82% remaining')).toBeTruthy()
-    expect(screen.getByLabelText('41% remaining')).toBeTruthy()
+    expect(screen.queryByLabelText('41% remaining')).toBeNull()
     expect(screen.getByText('5-hour')).toBeTruthy()
-    expect(screen.getByText('Weekly')).toBeTruthy()
+    expect(screen.queryByText('Weekly')).toBeNull()
     expect(screen.queryByText(/Token expires/)).toBeNull()
     expect(screen.queryByText('Expired')).toBeNull()
     expect(screen.queryByRole('button', { name: 'Reconnect' })).toBeNull()
@@ -151,7 +151,7 @@ describe('ProviderConnect', () => {
     expect(screen.queryByText('Remove API key')).toBeNull()
   })
 
-  it('shows the 5-hour and general weekly quotas and keeps reset times relative', () => {
+  it('shows the extra 5-hour quota and keeps its reset time relative', () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-09-05T10:00:00Z'))
     renderCard(provider(), {
@@ -182,11 +182,11 @@ describe('ProviderConnect', () => {
       },
     })
 
-    expect(screen.getAllByText('Weekly')).toHaveLength(1)
-    expect(screen.getByLabelText('83% remaining').textContent).toBe('83% left')
+    expect(screen.queryByText('Weekly')).toBeNull()
+    expect(screen.queryByLabelText('83% remaining')).toBeNull()
     expect(screen.queryByLabelText('69% remaining')).toBeNull()
     expect(screen.queryByText('Weekly · Fable')).toBeNull()
-    expect(screen.getByText('Resets in 6d')).toBeTruthy()
+    expect(screen.queryByText('Resets in 6d')).toBeNull()
     expect(screen.getByText('Resets in 2h').getAttribute('dateTime')).toBe('2026-09-05T12:00:00Z')
     expect(screen.getByText('Resets in 2h').getAttribute('title')).toBeTruthy()
     act(() => {

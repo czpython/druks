@@ -93,6 +93,8 @@ describe('Provider resource rows', () => {
     expect(summary.textContent).not.toContain('Not configured')
 
     fireEvent.click(screen.getByRole('button', { name: 'Manage Anthropic' }))
+    expect(screen.getAllByLabelText('41% remaining')).toHaveLength(1)
+    expect(screen.getByLabelText('82% remaining')).toBeTruthy()
     expect(screen.getByRole('region', { name: 'Anthropic subscription' })).toBeTruthy()
     expect(screen.getByRole('region', { name: 'Anthropic API key' })).toBeTruthy()
     expect(screen.getByText(/1 model · Catalog fetched/)).toBeTruthy()
@@ -142,6 +144,22 @@ describe('Account grant groups', () => {
   }
 
   function renderAccounts() {
+    vi.spyOn(api, 'services').mockResolvedValue([
+      {
+        slug: 'gmail',
+        title: 'Gmail',
+        description: 'Connect mailboxes.',
+        required: true,
+        connected: true,
+        connectedAt: account.connectedAt,
+        facts: {},
+        fields: [],
+        isOauth: true,
+        requiredScopes: [],
+        usedBy: ['inbox_manager'],
+        connections: [account],
+      },
+    ])
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     render(
       <QueryClientProvider client={queryClient}>
@@ -180,18 +198,20 @@ describe('Account grant groups', () => {
     const current = within(screen.getByRole('region', { name: 'Current accounts' }))
     const history = within(screen.getByRole('region', { name: 'Grant history' }))
     await current.findByText(/mailbox@example.invalid/)
+    expect(await current.findByRole('cell', { name: 'Gmail' })).toBeTruthy()
     expect(current.queryByText(/old@example.invalid/)).toBeNull()
     expect(history.getByText(/old@example.invalid/)).toBeTruthy()
     expect(history.queryByRole('button', { name: 'Disconnect' })).toBeNull()
     fireEvent.click(current.getByRole('button', { name: 'Disconnect' }))
     expect(confirm).toHaveBeenCalledWith(
-      'Disconnect mailbox@example.invalid from gmail? Its access will be revoked.',
+      'Disconnect mailbox@example.invalid from Gmail? Its access will be revoked.',
     )
     expect(disconnect).not.toHaveBeenCalled()
     confirm.mockReturnValue(true)
     fireEvent.click(current.getByRole('button', { name: 'Disconnect' }))
     await waitFor(() => expect(disconnect).toHaveBeenCalledWith('account-1'))
     expect(await current.findByText('No connected accounts.')).toBeTruthy()
+    expect(current.queryByRole('table')).toBeNull()
     expect(history.getByText(/mailbox@example.invalid/)).toBeTruthy()
     expect(current.getByRole('status').textContent).toContain('disconnected')
   })

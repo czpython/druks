@@ -30,6 +30,7 @@ export interface CatalogChoice extends CatalogModel {
 
 export interface Catalog {
   modelsOf: (harness: string, billing: Billing) => CatalogChoice[]
+  hasApiKeyFor: (harness: Harness) => boolean
 }
 
 export function knownProviders(providers: Provider[], catalogs: ProviderCatalog[]): Provider[] {
@@ -71,6 +72,12 @@ export function buildCatalog(
     }))
   }
   return {
+    hasApiKeyFor: (harness) =>
+      keys.some(
+        (key) =>
+          (!harness.provider || harness.provider === key.provider) &&
+          providersById.get(key.provider)?.billingOptions.includes('api_key'),
+      ),
     modelsOf: (name, billing) => {
       const harness = harnesses.find((entry) => entry.name === name)
       if (!harness) return []
