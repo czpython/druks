@@ -108,8 +108,8 @@ button { background: none; border: none; color: inherit; cursor: pointer; font: 
   width: 18px;
   height: 18px;
   background-color: var(--text);
-  mask-image: url(/favicon.svg);
-  -webkit-mask-image: url(/favicon.svg);
+  mask-image: url(/brand-mark.svg);
+  -webkit-mask-image: url(/brand-mark.svg);
   mask-repeat: no-repeat;
   -webkit-mask-repeat: no-repeat;
   mask-size: contain;
