@@ -1,5 +1,7 @@
 from dataclasses import dataclass
 
+from drukbox_sdk import Secret
+
 from druks.accounts.models import Account
 from druks.sandbox.constants import MAX_AGENT_TIMEOUT_SECONDS
 from druks.user_settings.models import SettingsOverride, SettingsProfile
@@ -14,14 +16,13 @@ from .registry import get_harness
 @dataclass(frozen=True)
 class Profile:
     """How an agent runs for one account: harness, model, effort, billing, read from
-    Settings → Agents at call time. ``key`` rides here because an app driving its
-    own CLI in the VM builds that CLI's environment; the harness fills only the
-    calling agent's."""
+    Settings → Agents at call time."""
 
     harness_class: type[Harness]
     model: str
     subscription: ProviderSubscription | None
     api_key: ProviderKey | None
+    secrets: dict[str, Secret]
     billing: str
     effort: str
     timeout: int
@@ -38,7 +39,15 @@ class Profile:
 
     @property
     def key(self) -> str | None:
-        return self.api_key.value.decrypt() if self.api_key else None
+        # Codex, Pi, and OpenCode read the key from their invocation.
+        if self.api_key and not self.secrets:
+            return self.api_key.value.decrypt()
+
+    @property
+    def secrets_id(self) -> str:
+        if self.secrets:
+            return f"{self.api_key.provider}.{self.api_key.updated_at:%Y%m%dT%H%M%S}"
+        return ""
 
     @property
     def charged_account_id(self) -> str | None:
@@ -91,11 +100,13 @@ async def get_profile(agent_name: str, account_id: str | None) -> Profile:
     provider_id = model.partition("/")[0]
     subscription = None
     provider_key = None
+    secrets: dict[str, Secret] = {}
     if billing == "api_key":
         provider_key = await ProviderKey.get(provider_id)
         if not provider_key:
             label = await provider_label(provider_id)
             raise HarnessNotConnectedError(f"add the {label} API key in Settings → Providers.")
+        secrets = harness_class.get_secrets(provider_key.value.decrypt())
     else:
         subscription = await ProviderSubscription.lookup(provider_id, account_id)
     timeout = (
@@ -106,6 +117,7 @@ async def get_profile(agent_name: str, account_id: str | None) -> Profile:
         model=model,
         subscription=subscription,
         api_key=provider_key,
+        secrets=secrets,
         billing=billing,
         effort=(await SettingsOverride.agent_effort(agent_name, settings=settings)).value,
         # Capped so a single call always fits inside a fresh sandbox lease.

@@ -13,9 +13,10 @@ import asyncssh
 from drukbox_sdk import SandboxHost as SandboxHostRecord
 from drukbox_sdk.exceptions import SandboxAPIError, SandboxUnavailableError
 
-from druks.accounts.models import Account
 from druks.core.utils.time import ensure_utc
+from druks.durable.enums import AgentCallStatus
 from druks.harnesses.artifacts import persist_manifest, persist_prompt, read_cost
+from druks.harnesses.datastructures import SandboxSettings
 from druks.harnesses.exceptions import (
     HarnessError,
     HarnessFirstByteTimeoutError,
@@ -225,19 +226,12 @@ class Host:
         ``include_plugins=False`` (Claude only) skips uploading the operator's plugin
         state — for prompts that hit no MCP server; a no-op for codex.
         """
-        # cycle: the harnesses package eagerly imports claude/codex, which
-        # import this package's siblings — so the factory can't load while
-        # druks.sandbox is mid-init.
-        from druks.durable.enums import AgentCallStatus
-        from druks.harnesses.datastructures import SandboxSettings
-
-        settings = load_settings()
         model, timeout = profile.model, profile.timeout
         harness = profile.harness_class(
             model=model,
             fast_mode=profile.fast_mode,
             effort=profile.effort,
-            sandbox=SandboxSettings.maybe_from_settings(settings),
+            sandbox=SandboxSettings.maybe_from_settings(load_settings()),
         )
 
         # Names the artifact subdir and is the AgentCall.id — supplied by the
@@ -305,18 +299,7 @@ class Host:
         key: str | None = None,
     ) -> Any:
         """Drive one prompt through ``harness`` on this VM: the harness
-        builds the invocation and parses the result; this sandbox executes it.
-        One-shot callers with a hand-built harness use this directly;
-        ``run_agent`` adds the harness factory + cost capture on top."""
-        # A one-shot caller with a hand-built harness runs on the default
-        # account's subscription.
-        from druks.harnesses.models import ProviderSubscription
-
-        if not (subscription or key):
-            account = await Account.get_default()
-            subscription = await ProviderSubscription.lookup(
-                harness.model.partition("/")[0], account.id if account else None
-            )
+        builds the invocation and parses the result; this sandbox executes it."""
         run_id = harness.mint_run_id(call_id)
         artifact_dir.mkdir(parents=True, exist_ok=True)
         persist_prompt(artifact_dir, call_id=run_id, prompt=prompt)

@@ -6,7 +6,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import asyncssh
-from drukbox_sdk import SandboxAPI, SandboxHost
+from drukbox_sdk import SandboxAPI, SandboxHost, Secret
 from drukbox_sdk.exceptions import (
     SandboxAPIError,
     SandboxNotFoundError,
@@ -53,10 +53,10 @@ class Client:
         image_override: str | None = None,
         provider: str | None = None,
         sandbox_env: dict[str, str] | None = None,
+        secrets: dict[str, Secret] | None = None,
         template: str | None = None,
     ) -> AsyncIterator[Host]:
-        """One-shot lifecycle: acquire → yield → release. For callers
-        whose sandbox is bound to a single context manager body."""
+        """Acquire, yield, release: for a sandbox bound to one context manager body."""
         host_id: str | None = None
 
         try:
@@ -65,6 +65,7 @@ class Client:
                 image_override=image_override,
                 provider=provider,
                 sandbox_env=sandbox_env,
+                secrets=secrets,
                 template=template,
             ) as host:
                 host_id = host.id
@@ -81,6 +82,7 @@ class Client:
         image_override: str | None = None,
         provider: str | None = None,
         sandbox_env: dict[str, str] | None = None,
+        secrets: dict[str, Secret] | None = None,
         template: str | None = None,
     ) -> AsyncIterator[Host]:
         """Create a new host (or reuse one matching ``idempotency_key``)
@@ -102,6 +104,7 @@ class Client:
                     idempotency_key=key,
                     image=image or None,
                     provider=provider,
+                    secrets=secrets,
                     template=template,
                 )
             except (SandboxProvisioningError, SandboxUnavailableError) as exc:
@@ -221,6 +224,7 @@ class Client:
         image_override: str | None = None,
         provider: str | None = None,
         sandbox_env: dict[str, str] | None = None,
+        secrets: dict[str, Secret] | None = None,
         template: str | None = None,
     ) -> Host:
         """Create a host and return its handle without holding an SSH connection —
@@ -231,6 +235,7 @@ class Client:
             image_override=image_override,
             provider=provider,
             sandbox_env=sandbox_env,
+            secrets=secrets,
             template=template,
         ) as host:
             return host
@@ -267,6 +272,10 @@ class Client:
             token=settings.sandbox.service_token,
             timeout=settings.sandbox.timeout,
         )
+
+
+def provisioning_key(*parts: str) -> str:
+    return ":".join(part for part in parts if part)
 
 
 async def _upload_helper_script(host: Host) -> None:

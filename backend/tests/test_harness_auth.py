@@ -147,15 +147,16 @@ async def test_missing_config_root_keeps_the_db_credential(druks_db, tmp_path):
 
 
 @pytest.mark.parametrize(
-    ("harness", "config_name", "auth_name"),
+    ("harness", "config_name", "auth_name", "key"),
     [
-        (ClaudeHarness, "settings.json", ".credentials.json"),
-        (CodexHarness, "config.toml", "auth.json"),
+        # Claude reads the key from a placeholder in the VM, so its invocation gets none.
+        (ClaudeHarness, "settings.json", ".credentials.json", None),
+        (CodexHarness, "config.toml", "auth.json", "selected-key"),
     ],
 )
 @pytest.mark.parametrize("config_exists", [False, True])
 async def test_config_delivery_does_not_copy_host_provider_credentials(
-    druks_db, tmp_path, harness, config_name, auth_name, config_exists
+    druks_db, tmp_path, harness, config_name, auth_name, key, config_exists
 ):
     config_root = tmp_path / "harnesses"
     config_dir = config_root / harness.name
@@ -178,7 +179,7 @@ async def test_config_delivery_does_not_copy_host_provider_credentials(
         schema={"type": "object"},
         run_id="run-1",
         ssh_username="druks",
-        key="selected-key",
+        key=key,
     )
     host = AsyncMock()
     for file in invocation.credentials.home:
@@ -199,7 +200,7 @@ async def test_config_delivery_does_not_copy_host_provider_credentials(
         )
     else:
         host.write_secret.assert_not_awaited()
-        assert invocation.env["ANTHROPIC_API_KEY"] == "selected-key"
+        assert not invocation.env
 
 
 async def test_credential_without_a_selection_reads_the_accounts_row(druks_db):

@@ -398,7 +398,8 @@ profile.model_id  # the model as that CLI names it, provider prefix stripped
 profile.model     # "provider/model"
 profile.effort
 profile.billing   # "subscription" | "api_key"
-profile.key       # the provider API key under api_key billing, else None
+profile.secrets   # the Drukbox entries that put the key in the VM as a placeholder
+profile.key       # an API key the CLI reads from its invocation, else None
 ```
 
 `get_profile()` runs inside a workflow and reads the settings at call time for
@@ -406,6 +407,9 @@ the run's own actor, the same read Druks makes for the calling agent. A
 missing login or key raises before any sandbox work. Under subscription
 billing there is no key. The VM home holds the login of the calling agent's
 subscription only, so a nested CLI on another provider needs `api_key` billing.
+Under `api_key` billing on `claude`, the VM holds the key as a placeholder in
+`ANTHROPIC_API_KEY`, the variable the entry names. A nested CLI reads it from
+the environment. Codex, Pi, and OpenCode read the key from `profile.key`.
 
 Do not ask the framework to infer domain side effects from agent prose.
 The prompt or a subsequent explicit step owns those actions.
@@ -451,7 +455,8 @@ MCP server the workspace credentials itself.
 
 Keep durable state outside the VM. A workflow can set
 `steps_reuse_sandbox = True` to retain one host across a segment. Druks releases
-the host at a gate and at workflow exit. It rotates the host near lease expiry.
+the host at a gate and at workflow exit. It rotates the host near lease expiry,
+and when the next agent call needs other secret entries.
 
 ### Borrow a browser session
 

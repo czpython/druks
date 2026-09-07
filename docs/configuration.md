@@ -301,10 +301,18 @@ Druks registers two subscription providers, `anthropic` and `openai`. Each
 also accepts an API key. Both connect from **Settings → Providers**. The
 connection flow stores each credential in Postgres. Druks refreshes a
 subscription token on a schedule. It creates the CLI credential file inside
-each sandbox, or passes the key in the CLI environment. It does not copy a
-host login. This is a capability connection for the requesting account. In a
-fresh `none`-mode install, the first completed subscription connection also
-creates the operator account. See [access control](#public-urls-and-access-control).
+each sandbox. It does not copy a host login. This is a capability connection
+for the requesting account. In a fresh `none`-mode install, the first
+completed subscription connection also creates the operator account. See
+[access control](#public-urls-and-access-control).
+
+An API key for `claude` never enters the sandbox. Druks gives the key to
+Drukbox as a secret entry when it creates the sandbox. The sandbox holds a
+placeholder in `ANTHROPIC_API_KEY`. The Drukbox secrets proxy swaps the
+placeholder for the key in the `x-api-key` header of each request to
+`api.anthropic.com`. The Drukbox deployment must run the secrets proxy. Without
+it, Drukbox refuses the sandbox and the call fails. Codex, Pi, and OpenCode
+still receive the key inside the sandbox.
 
 **Add provider** searches Models.dev for providers that use one API key.
 Druks caches the directory in Redis for one day for search and provider details.

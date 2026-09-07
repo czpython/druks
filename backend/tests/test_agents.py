@@ -1,5 +1,6 @@
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -798,9 +799,10 @@ async def test_reused_host_retry_presents_a_stable_idempotency_key(monkeypatch, 
 
     monkeypatch.setattr("druks.sandbox.client.Client.provision", fake_provision)
 
+    profile = SimpleNamespace(secrets={}, secrets_id="")
     with pytest.raises(HarnessSandboxProvisioningError):
-        await current_run._lease_host()
-    host_id = await current_run._lease_host()
+        await current_run._lease_host(profile)
+    host_id = await current_run._lease_host(profile)
 
     assert host_id == "warm-host"
     assert keys == ["wf-9:sandbox", "wf-9:sandbox"]
@@ -834,16 +836,70 @@ async def test_provisioning_failure_exhausts_retries_with_classified_code(
     assert current_run._reap_run.await_count == 1
 
 
+async def test_api_key_billing_hands_claude_a_placeholder(
+    druks_db, tmp_path, monkeypatch, current_run
+):
+    """Under api_key billing the VM is created with the key as a Drukbox entry. The
+    profile the sandbox runs carries no key, and the durable call records none."""
+    import json
+
+    from drukbox_sdk import Secret
+
+    pasted = await installation_key()
+    key = pasted.value.decrypt()
+    await SettingsOverride.set_agent_billing(DUMMY_AGENT.id, "api_key")
+    sandbox = _patch_runtime(monkeypatch, tmp_path, {"ok": True})
+    seen: list[dict] = []
+    keys: list[str] = []
+
+    @asynccontextmanager
+    async def fake_ephemeral(self, *, idempotency_key, secrets, **_kwargs):
+        keys.append(idempotency_key)
+        seen.append(secrets)
+        yield sandbox
+
+    monkeypatch.setattr("druks.sandbox.client.Client.ephemeral", fake_ephemeral)
+
+    await DUMMY_AGENT._run(workflow_id="wf-9")
+
+    assert seen == [
+        {
+            "anthropic": Secret(
+                key,
+                host="api.anthropic.com",
+                auth_variable="ANTHROPIC_API_KEY",
+                auth_header="x-api-key",
+                auth_prefix="",
+            )
+        }
+    ]
+    # The VM's key names the pasted key, never its value.
+    assert keys == [f"wf-9:dummy:anthropic.{pasted.updated_at:%Y%m%dT%H%M%S}"]
+    profile = sandbox.run_agent.await_args.kwargs["profile"]
+    assert (profile.billing, profile.key, profile.subscription) == ("api_key", None, None)
+    [call] = await AgentCall.list_for_run("wf-9")
+    assert (call.subscription_id, call.api_key_provider) == (None, "anthropic")
+    row = {column.key: getattr(call, column.key) for column in AgentCall.__table__.columns}
+    assert key not in json.dumps(row, default=str)
+
+
+@pytest.mark.parametrize(
+    "fatal_name",
+    [
+        pytest.param("SandboxValidationError", id="422"),
+        pytest.param("SandboxConflictError", id="409"),
+    ],
+)
 async def test_fatal_sdk_error_does_not_trigger_agent_retry(
-    druks_db, tmp_path, monkeypatch, current_run, _inline_agent_steps
+    druks_db, tmp_path, monkeypatch, current_run, _inline_agent_steps, fatal_name
 ):
     """A non-transient SDK failure surfacing from acquire is not a HarnessError,
     so it propagates on the first attempt with no retry sleep — auth/validation
     failures can't recover without changed inputs."""
-    from drukbox_sdk.exceptions import SandboxValidationError
+    from drukbox_sdk import exceptions as sdk_exceptions
 
     _patch_runtime(monkeypatch, tmp_path, {"ok": True})
-    fatal = SandboxValidationError("bad image")
+    fatal = getattr(sdk_exceptions, fatal_name)("drukbox refused the entries")
     attempts = 0
 
     @asynccontextmanager
@@ -857,7 +913,7 @@ async def test_fatal_sdk_error_does_not_trigger_agent_retry(
     current_run._reap_run = AsyncMock()
     _, sleep = _inline_agent_steps
 
-    with pytest.raises(SandboxValidationError) as excinfo:
+    with pytest.raises(type(fatal)) as excinfo:
         await DUMMY_AGENT()
 
     assert excinfo.value is fatal
