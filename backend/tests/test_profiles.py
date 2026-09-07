@@ -131,7 +131,8 @@ async def test_a_subscription_agent_runs_as_its_actor_or_the_default_account(dru
     assert as_actor.subscription.id == actor.id
     assert as_actor.charged_account_id == actor.account_id
     assert unattended.subscription.id == default_subscription.id
-    assert (as_actor.secrets, as_actor.secrets_id, as_actor.key) == ({}, "", None)
+    assert (as_actor.secrets, as_actor.secrets_id, as_actor.key) == ({}, actor.id, None)
+    assert as_actor.services == {"anthropic": actor.id}
     assert as_actor.harness_class is ClaudeHarness
     assert as_actor.model == "anthropic/claude-opus-4-7"
     assert (as_actor.effort, as_actor.timeout, as_actor.fast_mode) == ("high", 1800, False)

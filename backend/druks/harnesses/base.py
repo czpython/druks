@@ -108,6 +108,12 @@ class Harness(ABC):
     def get_secrets(cls, key: str) -> dict[str, Secret]:
         return {}
 
+    @classmethod
+    def get_services(cls, subscription: ProviderSubscription) -> dict[str, str]:
+        """The subscription a box fetches, by Drukbox catalog service name.
+        Empty for a CLI that reads its credential from a file."""
+        return {}
+
     @property
     def model_id(self) -> str:
         """The model as the CLI names it, without the provider namespace."""

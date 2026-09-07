@@ -203,7 +203,14 @@ the hosts with a registered secret. No service in the deployment uses that CA.
 The exchange fetches an issuer value from the Druks web process at
 `[sandbox].issuer_url`, `http://127.0.0.1:8001` on every shape, over plain
 HTTP on the host loopback. The API and the exchange trust no extra CA. There
-is no public mint route.
+is no public issuer route.
+
+A subscription token is such a value. The issuer route is
+`GET /api/secrets/<grant id>/<service>`. It authenticates the sandbox's grant
+bearer and nothing else, and it answers `value` and the provider's
+`expires_at`. After every rotation Druks requests a refresh at
+`POST /refresh/<host id>/<service>` on `[sandbox].exchange_url`, one request for
+each live sandbox on the subscription.
 
 Drukbox encrypts the secret entries of each sandbox with `SECRETS_KEY`. The
 installer generates `[secrets].drukbox_secrets_key` and renders it as

@@ -186,6 +186,21 @@ warm sandbox across a segment. Druks releases it before a gate and at workflow
 exit. Druks also rotates it before the lease becomes too short for another
 call. Store durable state in an external system such as Git, not only on the VM.
 
+A sandbox never holds a subscription token. Druks creates one grant for each
+sandbox that fetches one, before Drukbox provisions it. The grant names the run,
+the services the sandbox can fetch, and the workflow or agent the sandbox is
+scoped to. It keeps a hash of a random bearer. A replay after a crash finds the
+sandbox through the run's live grant with the same scope.
+Drukbox holds the bearer in the sandbox's issuer entry and fetches the token
+from the Druks issuer, `GET /api/secrets/<grant id>/<service>`. The issuer
+answers a fresh token at once. A token inside its refresh margin rotates first, while the
+subscription is idle or the token is urgent. One rotator runs at a time, and
+new calls wait for it. After a rotation, Druks requests a refresh from the secrets
+exchange for every live sandbox on that subscription. A provider can revoke
+the previous token at the rotation. Druks revokes the grant when it
+releases the sandbox, and a terminal run denies every fetch. The grant expires
+with the sandbox lease.
+
 ## Events, signals, webhooks, and subjects
 
 A subject is the object of a run. It is always a class that represents an app

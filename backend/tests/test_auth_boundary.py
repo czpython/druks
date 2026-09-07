@@ -16,6 +16,7 @@ EXEMPT_API_PATHS = {
     "/api/providers",
     "/api/providers/{provider_id}/connection/start",
     "/api/providers/{provider_id}/connection/complete",
+    "/api/secrets/{grant_id}/{service}",  # a box's grant bearer, nothing else
     "/api/{path:path}",  # the JSON-404 catch-all
 }
 

@@ -43,6 +43,7 @@ from druks.mcp.routes import router as mcp_router
 from druks.notifications.routes import external_router as notifications_external_router
 from druks.notifications.routes import router as notifications_router
 from druks.redis import close_client
+from druks.sandbox.routes import router as secrets_router
 from druks.services.exceptions import OauthPageError, ServiceNotConnectedError
 from druks.services.routes import oauth_router
 from druks.services.routes import router as service_identities_router
@@ -281,7 +282,8 @@ async def _unhandled_exception_handler(
 # boundary test pins the split. The auth and harness-connection routers mount
 # ungated because each of their routes carries its own resolver (/me and the
 # connection flow must answer during none/zero setup; capability management
-# admits only the session identity).
+# admits only the session identity). The secrets router authenticates a box's
+# grant bearer and nothing else.
 _identity_gate = [Depends(current_account)]
 app.include_router(health_router)
 # Before the webhook catch-all ({hook_path:path}): declaration order is match order.
@@ -289,6 +291,7 @@ app.include_router(notifications_external_router)
 app.include_router(webhooks_router)
 app.include_router(auth_router)
 app.include_router(providers_router)
+app.include_router(secrets_router)
 app.include_router(browser_sessions_router)
 app.include_router(settings_router, dependencies=_identity_gate)
 app.include_router(agents_router, dependencies=_identity_gate)

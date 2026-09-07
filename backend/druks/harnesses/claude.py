@@ -69,8 +69,9 @@ class ClaudeHarness(Harness):
         skills: tuple[str, ...] = (),
         extra_env: dict[str, str] | None = None,
         mcp_servers: tuple[McpServer, ...] = (),
+        # Both accepted for signature parity. The sandbox holds a placeholder
+        # for the subscription token or the key. Drukbox delivers it.
         subscription: ProviderSubscription | None = None,
-        # Accepted for signature parity. The sandbox entry carries the key.
         key: str | None = None,
         timeout: int = Harness.default_timeout,
     ) -> AgentInvocation:
@@ -132,7 +133,6 @@ class ClaudeHarness(Harness):
                 github_token=github_token,
                 include_plugins=include_plugins,
                 skills=skills,
-                subscription=subscription,
             ),
             env=extra_env,
             extra_artifact_filenames=("debug.log", "session.jsonl"),
@@ -189,8 +189,10 @@ class ClaudeHarness(Harness):
         return ("--mcp-config", json.dumps({"mcpServers": entries}))
 
     @classmethod
-    def auth_file(cls, subscription: ProviderSubscription) -> HomeFile:
-        return HomeFile(".claude/.credentials.json", json.dumps(dict(subscription.payload)))
+    def get_services(cls, subscription: ProviderSubscription) -> dict[str, str]:
+        # The catalog entry puts the placeholder in ANTHROPIC_AUTH_TOKEN, which
+        # the CLI sends as a bearer. It never refreshes a token from there.
+        return {AnthropicProvider.id: subscription.id}
 
     @classmethod
     def get_secrets(cls, key: str) -> dict[str, Secret]:
@@ -221,17 +223,14 @@ async def _get_credentials(
     github_token: str | None,
     include_plugins: bool = True,
     skills: tuple[str, ...] = (),
-    subscription: ProviderSubscription | None,
 ) -> Credentials:
-    """The Credentials bundle the runner pushes into the sandbox: the rendered
-    credentials file, plus any local config, plugins, and skills.
-    ``include_plugins=False`` skips the operator's plugin state, for prompts
-    that use no MCP server and would otherwise die on a misconfigured plugin."""
+    """The Credentials bundle the runner pushes into the sandbox: the local
+    config, plugins, and skills. No credential file: the sandbox holds a
+    placeholder for its token or key. ``include_plugins=False`` skips the
+    operator's plugin state, for prompts that use no MCP server and would
+    otherwise die on a misconfigured plugin."""
     config_dir = sandbox.harness_config_root / ClaudeHarness.name
-    home: list[HomeFile | HomeCopy] = []
-    if subscription:
-        home.append(ClaudeHarness.auth_file(subscription))
-    home += [
+    home: list[HomeFile | HomeCopy] = [
         HomeCopy(".claude.json", config_dir / ".claude.json"),
         HomeCopy(".claude/settings.json", config_dir / "settings.json"),
         HomeCopy(".claude/CLAUDE.md", config_dir / "CLAUDE.md"),

@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import json
 from datetime import UTC, datetime, timedelta
@@ -8,12 +9,18 @@ import httpx
 import pytest
 from conftest import connect_provider
 from druks.accounts.models import Account
+from druks.core import tasks
 from druks.database import db_session
 from druks.harnesses import providers as pbase
 from druks.harnesses.datastructures import ParsedUsage
 from druks.harnesses.exceptions import HarnessNotConnectedError, OAuthTokenError
 from druks.harnesses.models import ProviderKey, ProviderSubscription
 from druks.harnesses.providers import AnthropicProvider, OpenAiProvider
+from druks.sandbox import gate
+from druks.sandbox.models import SandboxGrant
+from druks.testing import seed_run
+from druks_field_notes.workflows import Summarize
+from sqlalchemy import update
 
 _NOW = datetime(2026, 6, 4, 20, 0, tzinfo=UTC)
 
@@ -322,11 +329,11 @@ async def test_rotation_lock_is_released_after_refresh(monkeypatch, druks_db):
     assert not await druks.redis.get_client().get(f"druks:harness:refresh:{connection.id}")
 
 
-async def test_two_mints_inside_the_margin_rotate_once_and_read_the_same_token(
+async def test_two_fetches_inside_the_margin_rotate_once_and_read_the_same_token(
     monkeypatch, druks_db
 ):
-    # Two boxes mint at once inside the margin: the lock elects one grant, and
-    # the second mint reloads and answers with the token the first one stored.
+    # Two boxes fetch at once inside the margin: the lock elects one grant, and
+    # the second fetch reloads and answers with the token the first one stored.
     connection = await _seed_claude(
         access="old", refresh="R0", expires_at=_NOW + timedelta(minutes=30)
     )
@@ -344,7 +351,7 @@ async def test_two_mints_inside_the_margin_rotate_once_and_read_the_same_token(
 
 
 async def test_a_failed_refresh_keeps_a_live_token_to_serve(monkeypatch, druks_db):
-    # The mint answers a box with the stored token while it is valid. A refresh
+    # The issuer answers a box with the stored token while it is valid. A refresh
     # that fails inside the margin changes nothing the box can see.
     soon = _NOW + timedelta(minutes=30)
     connection = await _seed_claude(access="old", refresh="R0", expires_at=soon)
@@ -356,7 +363,7 @@ async def test_a_failed_refresh_keeps_a_live_token_to_serve(monkeypatch, druks_d
 
 
 async def test_a_failed_refresh_of_an_expired_token_leaves_nothing_to_serve(monkeypatch, druks_db):
-    # Nothing valid is left, so the mint answers 503 and the exchange retries.
+    # Nothing valid is left, so the issuer answers 503 and the exchange retries.
     connection = await _seed_claude(
         access="old", refresh="R0", expires_at=_NOW - timedelta(minutes=1)
     )
@@ -563,3 +570,232 @@ async def test_minimal_provider_reports_unsupported_usage(monkeypatch):
         ok=False, error="unsupported"
     )
     assert calls == []
+
+
+async def _bound_grant(subscription, *, host_id: str, run_id: str) -> SandboxGrant:
+    await seed_run(db_session(), kind=Summarize.kind, run_id=run_id)
+    grant, _ = await SandboxGrant.create(
+        run_id=run_id,
+        scoped_to="workflow",
+        services={"anthropic": subscription.id},
+    )
+    await grant.bind(host_id)
+    return grant
+
+
+def _no_gate(subscription_id: str):
+    raise AssertionError(f"a fresh token shut the gate of {subscription_id}")
+
+
+_REFRESHED = {"access_token": "new", "refresh_token": "R1", "expires_in": 28800}
+_REFRESH_URL = "http://127.0.0.1:8781/refresh/{host_id}/anthropic"
+
+
+def _in(delta: timedelta) -> datetime:
+    return datetime.now(UTC) + delta
+
+
+async def test_a_fetch_answers_a_fresh_token_without_a_provider_call_or_the_gate(
+    monkeypatch, druks_db
+):
+    connection = await _seed_claude(access="live", expires_at=_in(timedelta(hours=6)))
+    calls = _mock_post(monkeypatch, _resp(200, _REFRESHED))
+    monkeypatch.setattr(pbase.gate, "shut", _no_gate)
+
+    token = await AnthropicProvider.issue_token(connection.id)
+
+    assert token.access_token == "live"
+    assert calls == []
+
+
+async def test_two_fetches_inside_the_margin_rotate_once_request_once_and_answer_the_same_token(
+    monkeypatch, druks_db
+):
+    connection = await _seed_claude(
+        access="old", refresh="R0", expires_at=_in(timedelta(minutes=30))
+    )
+    await _bound_grant(connection, host_id="host-other", run_id="run-other")
+    calls = _mock_post(monkeypatch, _resp(200, _REFRESHED))
+
+    first = await AnthropicProvider.issue_token(connection.id, except_host_id="host-mine")
+    second = await AnthropicProvider.issue_token(connection.id, except_host_id="host-mine")
+
+    assert first.access_token == second.access_token == "new"
+    assert [call["url"] for call in calls] == [
+        AnthropicProvider._TOKEN_URL,
+        _REFRESH_URL.format(host_id="host-other"),
+    ]
+
+
+async def test_a_fetch_on_a_busy_subscription_answers_the_current_token(monkeypatch, druks_db):
+    # Inside the margin, above the call horizon: the call in flight keeps its token.
+    connection = await _seed_claude(
+        access="current", refresh="R0", expires_at=_in(timedelta(minutes=90))
+    )
+    calls = _mock_post(monkeypatch, _resp(200, _REFRESHED))
+
+    async with gate.use(connection.id, "call-1"):
+        token = await AnthropicProvider.issue_token(connection.id)
+
+    assert token.access_token == "current"
+    assert calls == []
+
+
+async def test_a_fetch_rotates_a_busy_subscription_once_urgent(monkeypatch, druks_db):
+    connection = await _seed_claude(
+        access="old", refresh="R0", expires_at=_in(timedelta(minutes=30))
+    )
+    calls = _mock_post(monkeypatch, _resp(200, _REFRESHED))
+
+    async with gate.use(connection.id, "call-1"):
+        token = await AnthropicProvider.issue_token(connection.id)
+
+    assert token.access_token == "new"
+    assert calls[0]["json"]["refresh_token"] == "R0"
+
+
+async def test_a_fetch_waits_out_a_shut_gate_then_answers_the_stored_token(monkeypatch, druks_db):
+    monkeypatch.setattr(gate, "_POLL", 0.01)
+    connection = await _seed_claude(
+        access="old", refresh="R0", expires_at=_in(timedelta(minutes=30))
+    )
+    calls = _mock_post(monkeypatch, _resp(200, _REFRESHED))
+    client = druks.redis.get_client()
+    rotating = f"druks:sandbox:rotating:{connection.id}"
+    await client.set(rotating, "1", ex=60)
+    session = db_session()
+
+    async def other_rotator() -> None:
+        # The holder advances the row, then reopens the gate.
+        await asyncio.sleep(0.03)
+        await session.execute(
+            update(ProviderSubscription)
+            .where(ProviderSubscription.id == connection.id)
+            .values(
+                payload=_claude_payload(
+                    access="stored", refresh="R1", expires_at=_in(timedelta(hours=8))
+                )
+            )
+        )
+        await client.delete(rotating)
+
+    holder = asyncio.create_task(other_rotator())
+    token = await AnthropicProvider.issue_token(connection.id)
+    await holder
+
+    assert token.access_token == "stored"
+    assert calls == []
+
+
+async def test_a_rotation_requests_a_refresh_for_every_other_live_bound_grant(
+    monkeypatch, druks_db
+):
+    connection = await _seed_claude(
+        access="old", refresh="R0", expires_at=_in(timedelta(minutes=30))
+    )
+    await _bound_grant(connection, host_id="host-a", run_id="run-a")
+    await _bound_grant(connection, host_id="host-mine", run_id="run-mine")
+    await seed_run(db_session(), kind=Summarize.kind, run_id="run-unbound")
+    await SandboxGrant.create(
+        run_id="run-unbound",
+        scoped_to="workflow",
+        services={"anthropic": connection.id},
+    )
+    revoked = await _bound_grant(connection, host_id="host-revoked", run_id="run-revoked")
+    await revoked.revoke()
+    other = await _seed_claude(
+        access="x", refresh="RX", expires_at=_in(timedelta(hours=6)), provider_email="b@example.com"
+    )
+    await _bound_grant(other, host_id="host-elsewhere", run_id="run-elsewhere")
+    calls = _mock_post(monkeypatch, _resp(200, _REFRESHED))
+
+    result = await AnthropicProvider.rotate_token(connection.id, except_host_id="host-mine")
+
+    assert result.action == "refreshed"
+    assert [call["url"] for call in calls] == [
+        AnthropicProvider._TOKEN_URL,
+        _REFRESH_URL.format(host_id="host-a"),
+    ]
+
+
+async def test_a_failed_refresh_request_is_a_log_line_and_the_rotation_stands(
+    monkeypatch, druks_db, caplog
+):
+    connection = await _seed_claude(
+        access="old", refresh="R0", expires_at=_in(timedelta(minutes=30))
+    )
+    await _bound_grant(connection, host_id="host-a", run_id="run-a")
+
+    async def fake_post(self, url, *, json=None, **_kwargs):
+        if "/refresh/" in url:
+            raise httpx.ConnectError("the exchange is down")
+        return _resp(200, _REFRESHED)
+
+    monkeypatch.setattr(pbase.httpx.AsyncClient, "post", fake_post)
+
+    result = await AnthropicProvider.rotate_token(connection.id)
+
+    assert result.action == "refreshed"
+    assert (await _payload("anthropic"))["claudeAiOauth"]["accessToken"] == "new"
+    assert "refresh request for box host-a service anthropic failed" in caplog.text
+
+
+async def test_a_failed_rotation_answers_the_live_token(monkeypatch, druks_db):
+    connection = await _seed_claude(
+        access="old", refresh="R0", expires_at=_in(timedelta(minutes=30))
+    )
+    _mock_post(monkeypatch, httpx.ConnectError("boom"))
+
+    token = await AnthropicProvider.issue_token(connection.id)
+
+    assert token.access_token == "old"
+
+
+async def test_an_expired_token_with_a_failed_rotation_answers_nothing(monkeypatch, druks_db):
+    connection = await _seed_claude(
+        access="old", refresh="R0", expires_at=_in(-timedelta(minutes=1))
+    )
+    _mock_post(monkeypatch, httpx.ConnectError("boom"))
+
+    with pytest.raises(OAuthTokenError) as error:
+        await AnthropicProvider.issue_token(connection.id)
+    assert error.value.tag == "token_expired"
+
+
+async def test_the_cron_requests_refreshes_after_a_rotation(monkeypatch, druks_db):
+    connection = await _seed_claude(
+        access="old", refresh="R0", expires_at=_in(timedelta(minutes=30))
+    )
+    await _bound_grant(connection, host_id="host-a", run_id="run-a")
+    calls = _mock_post(monkeypatch, _resp(200, _REFRESHED))
+
+    await tasks._refresh()
+
+    assert [call["url"] for call in calls] == [
+        AnthropicProvider._TOKEN_URL,
+        _REFRESH_URL.format(host_id="host-a"),
+    ]
+
+
+async def test_the_usage_fetch_requests_refreshes_after_its_rotation(monkeypatch, druks_db):
+    connection = await _seed_claude(access="dead", refresh="R0", expires_at=_in(timedelta(hours=6)))
+    await _bound_grant(connection, host_id="host-a", run_id="run-a")
+    posts = _mock_post(monkeypatch, _resp(200, _REFRESHED))
+    usage = {
+        "five_hour": {"utilization": 16.0, "resets_at": "2026-06-04T23:19:59+00:00"},
+        "seven_day": {"utilization": 48.0, "resets_at": "2026-06-07T16:00:00+00:00"},
+    }
+    answers = [_resp(401, {"error": "revoked"}), _resp(200, usage)]
+
+    async def fake_get(self, url, *, headers=None, **_kwargs):
+        return answers.pop(0)
+
+    monkeypatch.setattr(pbase.httpx.AsyncClient, "get", fake_get)
+
+    parsed = await AnthropicProvider.fetch_usage(connection)
+
+    assert parsed.ok
+    assert [call["url"] for call in posts] == [
+        AnthropicProvider._TOKEN_URL,
+        _REFRESH_URL.format(host_id="host-a"),
+    ]

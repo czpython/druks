@@ -25,6 +25,7 @@ from druks.harnesses.profiles import Profile, get_profile
 from druks.prompts import render_prompt
 from druks.sandbox import gate as sandbox_gate
 from druks.sandbox.client import provisioning_key, sandbox_client
+from druks.sandbox.models import SandboxGrant
 from druks.sandbox.templates import get_template_id
 from druks.settings import load_settings
 from druks.usage.models import UsageScrape
@@ -50,15 +51,29 @@ async def _runner(
     # the runner — fresh per call, so nothing (connection or credential) is held across steps.
     if host_id:
         vm = sandbox_client.attach(host_id=host_id)
+    elif profile.services and (
+        grant := await SandboxGrant.lookup(workflow_id, step, profile.services)
+    ):
+        # A crashed attempt left its box behind. Its grant finds it again.
+        vm = sandbox_client.resume(host_id=grant.host_id)
     else:
         template = None
         if workflow.sandbox:
             template = await get_template_id(workflow.sandbox)
             await set_run_phase("provisioning_vm")
+        # A box that fetches gets its own grant, and the key names it. A replay
+        # finds the box through the grant, above.
+        grant, entries, key = None, {}, profile.secrets_id
+        if profile.services:
+            grant, entries = await SandboxGrant.create(
+                run_id=workflow_id, scoped_to=step, services=profile.services
+            )
+            key = grant.id
         vm = sandbox_client.ephemeral(
-            idempotency_key=provisioning_key(workflow_id, step, profile.secrets_id),
-            secrets=profile.secrets,
+            idempotency_key=provisioning_key(workflow_id, step, key),
+            secrets={**profile.secrets, **entries},
             template=template,
+            grant=grant,
         )
     async with vm as box:
         yield await workflow.get_workspace(box)
