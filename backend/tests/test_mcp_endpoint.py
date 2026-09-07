@@ -164,7 +164,16 @@ async def test_tools_list_pins_platform_and_app_tools(app, pat_token):
         tools = {tool.name: tool for tool in await client.list_tools()}
 
     assert list(tools)[:7] == _TOOL_NAMES
-    assert list(tools)[7:] == ["software_factory_start", "software_factory_review"]
+    assert list(tools)[7:] == [
+        "software_factory_create_ticket_project",
+        "software_factory_create_ticket",
+        "software_factory_get_ticket",
+        "software_factory_update_ticket",
+        "software_factory_set_status",
+        "software_factory_add_comment",
+        "software_factory_start",
+        "software_factory_review",
+    ]
 
     expected_annotations = {
         "cancel_run": (False, True, True),
