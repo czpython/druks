@@ -6,26 +6,28 @@ icon: "server"
 ---
 
 `compose.yaml` holds the full stack. It includes Druks, Postgres, Redis,
-Drukbox, the janitor, the SSH gateway, and the Caddy edge. The `web` service
-contains the DBOS durable engine and serves the dashboard SPA. The `drukbox`
-service is the sandbox control plane. `install.sh` writes `COMPOSE_PROFILES` to
-`.env`. Then plain
-`docker compose` commands in the install directory do the correct thing.
+Drukbox, its secrets exchange, the secrets proxy, the janitor, the SSH gateway,
+and the Caddy edge. The `web` service contains the DBOS durable engine and
+serves the dashboard SPA. The `drukbox` service is the sandbox control plane.
+`install.sh` writes `COMPOSE_PROFILES` to `.env`. After that, `docker compose`
+in the install directory starts the services of the selected shape.
 
-A **local** install (`DRUKS_PROVIDER=docker`) runs bare, with no profiles.
+A **local** install (`DRUKS_PROVIDER=docker`) enables `COMPOSE_PROFILES=proxy`.
 `drukbox` mounts the Docker socket of the host. Sandboxes are sibling
 containers on the host daemon. The dashboard is on `127.0.0.1:8001`, with no
 Caddy. See [Full local](full-local.md).
 
 A **remote** installation uses each other `DRUKS_PROVIDER` value. It enables
-`COMPOSE_PROFILES=hosted`. This profile includes a remote Drukbox control plane,
-the periodic janitor, and stock Caddy. Caddy supplies the identity edge and
-proxy with a bind-mounted Caddyfile.
+`COMPOSE_PROFILES=hosted,proxy`. The `hosted` profile includes a remote Drukbox
+control plane, the periodic janitor, and stock Caddy. Caddy supplies the
+identity edge and proxy with a bind-mounted Caddyfile. The `proxy` profile
+includes the secrets proxy.
 
-The **docker-sbx** provider also layers `compose.docker-sbx.yaml` and enables
-the `gateway` profile. The overlay connects the Drukbox services to the
-[Docker Sandboxes](https://docs.docker.com/ai/sandboxes/) daemon of the host
-(microVM sandboxes). The gateway is the SSH path into them.
+The **docker-sbx** provider layers `compose.docker-sbx.yaml` and enables
+`COMPOSE_PROFILES=hosted,gateway`. The overlay connects the Drukbox services to
+the [Docker Sandboxes](https://docs.docker.com/ai/sandboxes/) daemon of the host
+(microVM sandboxes). The gateway is the SSH path into them. This provider runs
+no secrets proxy, because sbx swaps the placeholders itself.
 
 Prepare the host first. Install `docker-sbx`. Put the service user in the `kvm` group. Run
 `sbx login`. Then run `sbx daemon start -d --policy balanced`. The installer stops
@@ -170,6 +172,48 @@ Webhook URLs become
 `https://druks.example.com/mcp`
 ([Connect your agent](connect-your-agent.md)). Leave
 `[urls].webhook_host` blank to bring your own ingress instead.
+
+## The secrets exchange and the secrets proxy
+
+A sandbox holds a placeholder for each credential, never the value. Two
+Drukbox services put the value into the request:
+
+- `drukbox-exchange` runs `python -m secrets_exchange` from the Drukbox image
+  on every shape. It keeps each issuer value in memory. It binds
+  `127.0.0.1:8781`, so only the proxy and the Druks web process reach it.
+- `drukbox-proxy` runs `ghcr.io/czpython/drukbox/proxy` under the `proxy`
+  profile. A sandbox sends its HTTPS through it. The proxy swaps the
+  placeholder for the value. It binds port 8880 at the host of
+  `[sandbox].proxy_url` and no other address. A proxy on a public address
+  accepts requests from anyone.
+
+`[sandbox].proxy_url` is the address a sandbox dials. The docker shape sets
+`http://172.17.0.1:8880`, the Docker bridge gateway. A remote shape sets the
+address of the Druks host that its sandboxes reach. On exe that is the tailnet
+address of the Druks box, and the tailnet policy needs one grant from
+`tag:sandbox` to that box on `tcp:8880`. The proxy is the only connection from
+a sandbox to the Druks host. docker-sbx runs no proxy and leaves the value
+empty.
+
+The proxy writes its CA into the `secrets_proxy_ca` volume at its first start.
+The Drukbox API mounts the volume read-only and reads the public certificate
+at `SECRETS_PROXY_CA_FILE`. Only the proxy user can read the key file. A
+sandbox with secrets installs the certificate at boot and trusts the proxy for
+the hosts with a registered secret. No service in the deployment uses that CA.
+The exchange fetches an issuer value from the Druks web process at
+`[sandbox].issuer_url`, `http://127.0.0.1:8001` on every shape, over plain
+HTTP on the host loopback. The API and the exchange trust no extra CA. There
+is no public mint route.
+
+Drukbox encrypts the secret entries of each sandbox with `SECRETS_KEY`. The
+installer generates `[secrets].drukbox_secrets_key` and renders it as
+`SECRETS_KEY` for the API and the exchange. Pin the proxy image with
+`DRUKS_SECRETS_PROXY_IMAGE` in `[env]`, at the tag of
+`DRUKS_SANDBOX_SERVICE_IMAGE`.
+
+An install from before these services has `SECRETS_KEY` in `[env]` or in
+`[sandbox.<provider>]`. Move that value to `[secrets].drukbox_secrets_key`,
+set `[sandbox].proxy_url`, and run the installer again.
 
 ## Update / redeploy
 

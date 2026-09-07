@@ -40,7 +40,7 @@ host-run development template for that environment plane.
 | `[urls]` | Dashboard callback base URL and public webhook hostname |
 | `[secrets]` | Generated deployment secrets |
 | `[paths]` | Host data and harness configuration paths |
-| `[sandbox]` | Drukbox provider, service URL, token behavior, and image override |
+| `[sandbox]` | Drukbox provider, service URL and token, image override, and the proxy, mint, and exchange addresses |
 | `[sandbox.<provider>]` | Provider environment passed through to the remote stack |
 | `[env]` | Additional deployment environment settings rendered verbatim |
 
@@ -310,9 +310,11 @@ An API key for `claude` never enters the sandbox. Druks gives the key to
 Drukbox as a secret entry when it creates the sandbox. The sandbox holds a
 placeholder in `ANTHROPIC_API_KEY`. The Drukbox secrets proxy swaps the
 placeholder for the key in the `x-api-key` header of each request to
-`api.anthropic.com`. The Drukbox deployment must run the secrets proxy. Without
-it, Drukbox refuses the sandbox and the call fails. Codex, Pi, and OpenCode
-still receive the key inside the sandbox.
+`api.anthropic.com`. The Compose stack runs the secrets proxy on every provider
+but docker-sbx. See
+[the secrets exchange and the secrets proxy](deployment.md#the-secrets-exchange-and-the-secrets-proxy).
+Without it, Drukbox refuses the sandbox and the call fails. Codex, Pi, and
+OpenCode still receive the key inside the sandbox.
 
 **Add provider** searches Models.dev for providers that use one API key.
 Druks caches the directory in Redis for one day for search and provider details.
@@ -370,6 +372,9 @@ credential is missing.
 | `sandbox.service_token` | Drukbox API token |
 | `sandbox.timeout` | Control-plane request timeout. The default is 180 seconds |
 | `sandbox.image` | Optional provider image override |
+| `sandbox.proxy_url` | The secrets proxy, at the address a sandbox dials. The docker shape sets `http://172.17.0.1:8880`. docker-sbx leaves it empty |
+| `sandbox.issuer_url` | The mint base URL the secrets exchange dials. The default is `http://127.0.0.1:8001` on every shape. Only an explicit value changes it |
+| `sandbox.exchange_url` | The secrets exchange, for refresh orders and the doctor probe. The default is `http://127.0.0.1:8781` |
 | `sandbox.browser_login_proxy` | Login-window egress proxy. An empty value keeps the box IP |
 | `sandbox.browser_login_tz` | Login-window timezone (IANA zone). An empty value keeps the container default |
 
@@ -512,6 +517,11 @@ While a stored row depends on the old key, keep that key. If you lose each key f
 row, you cannot recover that secret. Reconnect the OAuth grants. Enter the
 static tokens again. Log in to the affected browser sessions again. Validation
 and API errors do not include submitted secret values.
+
+`secrets.drukbox_secrets_key` encrypts the secret entries of each sandbox in
+the Drukbox database. The installer generates it and renders it as
+`SECRETS_KEY` for the Drukbox API and the secrets exchange. Rotate it as you
+rotate `secrets_key`, with the new key first.
 
 The encryption envelope does **not** currently cover harness subscription
 payloads or notification webhook URLs. Postgres stores them as

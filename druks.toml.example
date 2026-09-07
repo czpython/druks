@@ -21,4 +21,6 @@ secrets_key = ""
 service_url = ""
 service_token = ""
 image = ""
+issuer_url = ""
+exchange_url = ""
 timeout = 180

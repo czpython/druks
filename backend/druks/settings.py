@@ -156,6 +156,14 @@ class Sandbox(BaseModel):
     service_token: str = ""
     # Empty → drukbox decides.
     image: str = ""
+    # The mint base URL the secrets exchange dials for an issuer value. It is
+    # the web process on the host loopback, over plain HTTP, on every shape.
+    # It never derives from the dashboard, webhook, ingress, or provider
+    # settings. Only an explicit value changes it.
+    issuer_url: str = "http://127.0.0.1:8001"
+    # The secrets exchange, for refresh orders and the doctor probe. The
+    # exchange binds the host loopback.
+    exchange_url: str = "http://127.0.0.1:8781"
     # The browser home: browser containers boot on this provider with this image.
     browser_sandbox_provider: str = "docker"
     browser_sandbox_image: str = "ghcr.io/czpython/druks/browser:latest"

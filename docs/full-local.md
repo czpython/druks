@@ -10,12 +10,14 @@ The local shape keeps every component on one machine:
 browser -> Druks :8001 -> Drukbox :8780 -> Docker sandbox containers
                          \
                           -> SSH from Druks to each container
+sandbox container -> secrets proxy 172.17.0.1:8880 -> secrets exchange 127.0.0.1:8781
 ```
 
-Compose runs Druks, Postgres, Redis, and Drukbox. The Drukbox service holds the
-Docker socket of the host. Its `docker` provider starts sandboxes as sibling
-containers on the host daemon. Agent work stays in these isolated containers.
-It does not run in the Druks process.
+Compose runs Druks, Postgres, Redis, Drukbox, the secrets exchange, and the
+secrets proxy. The Drukbox service holds the Docker socket of the host. Its
+`docker` provider starts sandboxes as sibling containers on the host daemon.
+Agent work stays in these isolated containers. It does not run in the Druks
+process.
 
 ## Prerequisites
 
@@ -43,9 +45,12 @@ The local shape needs no authored values, so the first run goes all the way:
 - It creates `~/.config/druks/harnesses` for optional harness configuration.
 - It generates the database password and the stored-secret key.
 - It pulls images and applies migrations.
-- It starts Druks, Postgres, Redis, and Drukbox. Drukbox listens on `127.0.0.1:8780`.
-- It uses `COMPOSE_FILE=compose.yaml:compose.override.yaml` without Caddy or the
-  janitor profiles.
+- It starts Druks, Postgres, Redis, Drukbox, the secrets exchange, and the
+  secrets proxy. Drukbox listens on `127.0.0.1:8780`. The exchange listens on
+  `127.0.0.1:8781`. The proxy listens on `172.17.0.1:8880`, where sandbox
+  containers reach it.
+- It uses `COMPOSE_FILE=compose.yaml:compose.override.yaml` and
+  `COMPOSE_PROFILES=proxy`, without Caddy or the janitor.
 
 Drukbox controls sandboxes through the mounted `/var/run/docker.sock`. The
 installer records the group ID of the socket in `.env`. This value gives the
@@ -53,6 +58,10 @@ non-root service user access to the socket. Drukbox keeps its schema in a
 `drukbox` database in the same Postgres instance. It does not require a separate
 data store. If sandbox SSH is unreachable on macOS, enable host networking in
 the Docker Desktop settings.
+
+A sandbox holds a placeholder for each credential and sends its HTTPS through
+the secrets proxy. See
+[the secrets exchange and the secrets proxy](deployment.md#the-secrets-exchange-and-the-secrets-proxy).
 
 For the bundled `software_factory` app, connect its GitHub App after startup.
 Use **Settings → Connections → Services** in the dashboard. Create the app there, or paste the

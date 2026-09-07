@@ -37,8 +37,9 @@ docker compose ps
 curl -fsS http://127.0.0.1:8001/health
 ```
 
-Verification: `web`, `postgres`, `redis`, and `drukbox` operate without
-restarts. The health endpoint returns `{"status":"ok"}`.
+Verification: `docker compose ps` lists `web`, `postgres`, `redis`, `drukbox`,
+`drukbox-exchange`, and `drukbox-proxy` as up, and none of them restarts. The
+health endpoint returns `{"status":"ok"}`.
 
 ## 4. Preflight
 
