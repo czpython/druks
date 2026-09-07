@@ -254,7 +254,6 @@ class Host:
                 mcp_servers=mcp_servers,
                 call_id=run_id,
                 subscription=profile.subscription,
-                key=profile.key,
             )
         except HarnessError as exc:
             error = exc
@@ -293,7 +292,6 @@ class Host:
         mcp_servers: tuple[McpServer, ...] = (),
         call_id: str | None = None,
         subscription: "VaultSecret | None" = None,
-        key: str | None = None,
     ) -> Any:
         """Drive one prompt through ``harness`` on this VM: the harness
         builds the invocation and parses the result; this sandbox executes it."""
@@ -317,7 +315,6 @@ class Host:
             extra_env=extra_env,
             mcp_servers=mcp_servers,
             subscription=subscription,
-            key=key,
             timeout=timeout,
         )
         result = await self._exec(

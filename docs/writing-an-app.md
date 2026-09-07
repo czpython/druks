@@ -399,7 +399,6 @@ profile.model     # "provider/model"
 profile.effort
 profile.billing   # "subscription" | "api_key"
 profile.secrets   # the Drukbox entries that put the key in the VM as a placeholder
-profile.key       # an API key the CLI reads from its invocation, else None
 ```
 
 `get_profile()` runs inside a workflow and reads the settings at call time for
@@ -407,9 +406,11 @@ the run's own actor, the same read Druks makes for the calling agent. A
 missing login or key raises before any sandbox work. Under subscription
 billing there is no key. The VM home holds the login of the calling agent's
 subscription only, so a nested CLI on another provider needs `api_key` billing.
-Under `api_key` billing on `claude`, the VM holds the key as a placeholder in
-`ANTHROPIC_API_KEY`, the variable the entry names. A nested CLI reads it from
-the environment. Codex, Pi, and OpenCode read the key from `profile.key`.
+Under `api_key` billing, the VM holds the key as a placeholder in the variable
+the entry names: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or `CODEX_API_KEY` for
+Codex. A nested CLI reads it from the environment. The
+[configuration guide](configuration.md#harnesses) lists the variable, host, and
+header per harness.
 
 Do not ask the framework to infer domain side effects from agent prose.
 The prompt or a subsequent explicit step owns those actions.

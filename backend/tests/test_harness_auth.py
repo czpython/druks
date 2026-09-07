@@ -5,11 +5,14 @@ from unittest.mock import AsyncMock
 
 import pytest
 from conftest import connect_provider
+from drukbox_sdk import Secret
 from druks.accounts.models import Account
 from druks.harnesses.claude import ClaudeHarness, _get_credentials
 from druks.harnesses.codex import CodexHarness
 from druks.harnesses.datastructures import SandboxSettings
-from druks.harnesses.exceptions import HarnessNotConnectedError
+from druks.harnesses.exceptions import HarnessNotConnectedError, ProfileSettingsError
+from druks.harnesses.opencode import OpenCodeHarness
+from druks.harnesses.pi import PiHarness
 from druks.harnesses.providers import AnthropicProvider, OpenAiProvider
 from druks.sandbox.datastructures import HomeCopy, HomeFile
 from druks.secrets.models import VaultSecret
@@ -113,11 +116,7 @@ async def test_credentials_builders_read_their_harness_config_directories(druks_
         fast_mode=False,
         effort=None,
         sandbox=sandbox,
-    )._get_credentials(
-        sandbox,
-        subscription=codex_subscription,
-        key=None,
-    )
+    )._get_credentials(sandbox, subscription=codex_subscription)
 
     assert codex_bundle.home[0].path == ".codex/auth.json"
     assert HomeCopy(".claude/settings.json", config_root / "claude/settings.json") in (
@@ -155,16 +154,17 @@ async def test_credentials_builders_read_their_harness_config_directories(druks_
 
 
 @pytest.mark.parametrize(
-    ("harness", "config_name", "auth_name", "key"),
+    ("harness", "config_name", "auth_name"),
     [
-        # Claude reads the key from a placeholder in the VM, so its invocation gets none.
-        (ClaudeHarness, "settings.json", ".credentials.json", None),
-        (CodexHarness, "config.toml", "auth.json", "selected-key"),
+        # Each CLI reads its key from a placeholder in the VM, so its invocation
+        # carries no key and writes no credential file.
+        (ClaudeHarness, "settings.json", ".credentials.json"),
+        (CodexHarness, "config.toml", "auth.json"),
     ],
 )
 @pytest.mark.parametrize("config_exists", [False, True])
 async def test_config_delivery_does_not_copy_host_provider_credentials(
-    druks_db, tmp_path, harness, config_name, auth_name, key, config_exists
+    druks_db, tmp_path, harness, config_name, auth_name, config_exists
 ):
     config_root = tmp_path / "harnesses"
     config_dir = config_root / harness.name
@@ -187,7 +187,6 @@ async def test_config_delivery_does_not_copy_host_provider_credentials(
         schema={"type": "object"},
         run_id="run-1",
         ssh_username="druks",
-        key=key,
     )
     host = AsyncMock()
     for file in invocation.credentials.home:
@@ -201,14 +200,41 @@ async def test_config_delivery_does_not_copy_host_provider_credentials(
     else:
         host.upload_file.assert_not_awaited()
     host.upload_dir.assert_not_awaited()
-    if harness.name == "codex":
-        host.write_secret.assert_awaited_once_with(
-            secret=json.dumps({"OPENAI_API_KEY": "selected-key"}),
-            remote="/home/druks/.codex/auth.json",
+    host.write_secret.assert_not_awaited()
+    assert not invocation.env
+
+
+_ANTHROPIC_ENTRY = Secret(
+    "sk-1",
+    host="api.anthropic.com",
+    auth_variable="ANTHROPIC_API_KEY",
+    auth_header="x-api-key",
+    auth_prefix="",
+)
+
+
+def test_key_entries_follow_the_proven_transport_of_each_harness():
+    # Codex reads CODEX_API_KEY; every other CLI
+    # reads the provider's own variable, x-api-key for Anthropic and a bearer
+    # for OpenAI.
+    assert CodexHarness.get_secrets("openai", "sk-1") == {
+        "openai": Secret(
+            "sk-1",
+            host="api.openai.com",
+            auth_variable="CODEX_API_KEY",
+            auth_header="Authorization",
+            auth_prefix="Bearer ",
         )
-    else:
-        host.write_secret.assert_not_awaited()
-        assert not invocation.env
+    }
+    for harness in (ClaudeHarness, PiHarness, OpenCodeHarness):
+        assert harness.get_secrets("anthropic", "sk-1") == {"anthropic": _ANTHROPIC_ENTRY}
+    for harness in (PiHarness, OpenCodeHarness):
+        assert harness.get_secrets("openai", "sk-1") == {"openai": Secret("sk-1")}
+
+
+def test_an_unproven_provider_key_refuses_instead_of_entering_the_box():
+    with pytest.raises(ProfileSettingsError, match="'openrouter'"):
+        OpenCodeHarness.get_secrets("openrouter", "sk-1")
 
 
 async def test_credential_without_a_selection_reads_the_accounts_row(druks_db):

@@ -12,6 +12,7 @@ from typing import ClassVar
 from urllib.parse import urlencode
 
 import httpx
+from drukbox_sdk import Secret
 from pydantic import TypeAdapter
 
 from druks.core.utils.time import ensure_utc
@@ -83,6 +84,12 @@ class Provider:
     REFRESH_MARGIN: ClassVar[timedelta]
     _TOKEN_URL: ClassVar[str]
     _CLIENT_ID: ClassVar[str]
+
+    @classmethod
+    def get_secret(cls, key: str) -> Secret:
+        """The Drukbox entry that puts ``key`` in a box as a placeholder: the
+        host, variable, header, and prefix this provider's API takes."""
+        raise NotImplementedError
 
     @classmethod
     async def connect_start(cls, *, account_id: str | None = None) -> tuple[str, str]:
@@ -675,6 +682,18 @@ class AnthropicProvider(Provider):
     redirect_uri = "https://console.anthropic.com/oauth/code/callback"
 
     @classmethod
+    def get_secret(cls, key: str) -> Secret:
+        # The API takes a key in x-api-key. The catalog entry is a bearer for a
+        # subscription token, so the key needs its own entry.
+        return Secret(
+            key,
+            host="api.anthropic.com",
+            auth_variable="ANTHROPIC_API_KEY",
+            auth_header="x-api-key",
+            auth_prefix="",
+        )
+
+    @classmethod
     def _token_from_credentials(cls, data: dict) -> OAuthToken:
         block = _oauth_block(data)
         if access := block.get("accessToken") or block.get("access_token"):
@@ -894,6 +913,11 @@ class OpenAiProvider(Provider):
     # Connect-flow (PKCE): authorize on auth.openai.com; the operator pastes the
     # failed localhost redirect URL back.
     redirect_uri = "http://localhost:1455/auth/callback"
+
+    @classmethod
+    def get_secret(cls, key: str) -> Secret:
+        # The catalog entry: OPENAI_API_KEY as a bearer on api.openai.com.
+        return Secret(key)
 
     @classmethod
     def _token_from_credentials(cls, data: dict) -> CodexToken:

@@ -893,7 +893,7 @@ async def test_api_key_billing_hands_claude_a_placeholder(
     # The VM's key names the pasted key, never its value.
     assert keys == [f"wf-9:dummy:anthropic.{pasted.updated_at:%Y%m%dT%H%M%S}"]
     profile = sandbox.run_agent.await_args.kwargs["profile"]
-    assert (profile.billing, profile.key, profile.subscription) == ("api_key", None, None)
+    assert (profile.billing, profile.subscription) == ("api_key", None)
     [call] = await AgentCall.list_for_run("wf-9")
     assert (call.subscription_id, call.api_key.audience_name) == (None, "anthropic")
     row = {column.key: getattr(call, column.key) for column in AgentCall.__table__.columns}

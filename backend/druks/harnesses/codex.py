@@ -9,6 +9,8 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
+from drukbox_sdk import Secret
+
 from druks.sandbox.datastructures import (
     AgentInvocation,
     Credentials,
@@ -366,7 +368,6 @@ class CodexHarness(Harness):
         extra_env: dict[str, str] | None = None,
         mcp_servers: tuple[McpServer, ...] = (),
         subscription: VaultSecret | None = None,
-        key: str | None = None,
         timeout: int = Harness.default_timeout,
     ) -> AgentInvocation:
         sandbox = self.sandbox
@@ -397,7 +398,6 @@ class CodexHarness(Harness):
                 sandbox,
                 skills=skills,
                 subscription=subscription,
-                key=key,
             ),
             env=extra_env,
             extra_artifact_filenames=("output.json", "session.jsonl"),
@@ -478,11 +478,12 @@ class CodexHarness(Harness):
         *,
         skills: tuple[str, ...] = (),
         subscription: VaultSecret | None,
-        key: str | None,
     ) -> Credentials:
         config_dir = sandbox.harness_config_root / self.name
-        home: list[HomeFile | HomeCopy] = [
-            self.auth_file(subscription, key=key),
+        home: list[HomeFile | HomeCopy] = []
+        if subscription:
+            home.append(self.auth_file(subscription))
+        home += [
             HomeCopy(".codex/config.toml", config_dir / "config.toml"),
             HomeCopy(".codex/AGENTS.md", config_dir / "AGENTS.md"),
         ]
@@ -493,9 +494,19 @@ class CodexHarness(Harness):
         return Credentials(home=tuple(home))
 
     @classmethod
-    def auth_file(cls, subscription: VaultSecret | None, *, key: str | None = None) -> HomeFile:
-        if subscription:
-            auth = dict(subscription.secrets)
-        else:
-            auth = {"OPENAI_API_KEY": key}
-        return HomeFile(".codex/auth.json", json.dumps(auth))
+    def auth_file(cls, subscription: VaultSecret) -> HomeFile:
+        return HomeFile(".codex/auth.json", json.dumps(dict(subscription.secrets)))
+
+    @classmethod
+    def get_secrets(cls, provider: str, key: str) -> dict[str, Secret]:
+        # codex exec reads CODEX_API_KEY from the environment and ignores
+        # OPENAI_API_KEY there, so the key needs its own entry, not the catalog's.
+        return {
+            OpenAiProvider.id: Secret(
+                key,
+                host="api.openai.com",
+                auth_variable="CODEX_API_KEY",
+                auth_header="Authorization",
+                auth_prefix="Bearer ",
+            )
+        }

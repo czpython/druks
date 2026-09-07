@@ -1,11 +1,10 @@
-import base64
 import json
 import shlex
 import subprocess
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
+from drukbox_sdk import Secret
 from druks.harnesses.datastructures import SandboxSettings
 from druks.harnesses.exceptions import (
     HarnessAuthError,
@@ -16,7 +15,7 @@ from druks.harnesses.exceptions import (
 )
 from druks.harnesses.pi import PiHarness
 from druks.harnesses.registry import get_harness
-from druks.sandbox.datastructures import HarnessRunResult, HomeFile, McpServer
+from druks.sandbox.datastructures import HarnessRunResult, McpServer
 from druks.secrets.datastructures import Audience
 from druks.secrets.enums import SecretKind
 from druks.secrets.models import VaultSecret
@@ -75,36 +74,6 @@ def test_class_facts_and_registration() -> None:
     assert PiHarness.billing_options == {"api_key"}
 
 
-def test_auth_file_renders_a_key_under_the_vendor() -> None:
-    rendered = PiHarness.auth_file("anthropic", key=_API_KEY)
-    assert rendered.path == ".pi/agent/auth.json"
-    assert json.loads(rendered.content) == {"anthropic": {"type": "api_key", "key": _API_KEY}}
-
-
-def test_auth_file_renders_an_openai_subscription_as_pis_openai_codex() -> None:
-    # pi keeps the ChatGPT backend as its own provider name.
-    header = base64.urlsafe_b64encode(b'{"alg":"none"}').rstrip(b"=").decode()
-    claims = base64.urlsafe_b64encode(b'{"exp": 1800000000}').rstrip(b"=").decode()
-    subscription = SimpleNamespace(
-        secrets={
-            "tokens": {
-                "access_token": f"{header}.{claims}.sig",
-                "refresh_token": "R0",
-                "account_id": "acc-1",
-            }
-        },
-    )
-    assert json.loads(PiHarness.auth_file("openai-codex", subscription=subscription).content) == {
-        "openai-codex": {
-            "type": "oauth",
-            "access": f"{header}.{claims}.sig",
-            "refresh": "R0",
-            "expires": 1800000000000,
-            "accountId": "acc-1",
-        }
-    }
-
-
 async def test_build_invocation_writes_the_run_files_and_pi_argv(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -118,7 +87,6 @@ async def test_build_invocation_writes_the_run_files_and_pi_argv(
     public = McpServer(name="public", url="https://public.example.test/mcp")
 
     invocation = await _harness().build_invocation(
-        key=_API_KEY,
         prompt="A large prompt stays on stdin.",
         schema={"type": "object"},
         run_id="run-1",
@@ -176,11 +144,8 @@ async def test_build_invocation_writes_the_run_files_and_pi_argv(
         "DRUKS_SCHEMA_PATH": f"{_RUN_DIR}/schema.json",
         "DRUKS_RESULT_PATH": f"{_RUN_DIR}/output.json",
     }
-    assert invocation.credentials.home == (
-        HomeFile(
-            ".pi/agent/auth.json", json.dumps({"openai": {"type": "api_key", "key": _API_KEY}})
-        ),
-    )
+    # The key is a placeholder in the VM environment; no home file carries it.
+    assert invocation.credentials.home == ()
     assert invocation.extra_artifact_filenames == ("output.json",)
     for secret in (_API_KEY, "mcp-secret", "trace-secret"):
         assert secret not in wrapper
@@ -194,7 +159,6 @@ async def test_build_invocation_without_servers_or_effort_is_bare(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     invocation = await _harness(effort=None).build_invocation(
-        key=_API_KEY,
         prompt="Prompt",
         schema={"type": "object"},
         run_id="run-1",
@@ -298,11 +262,8 @@ def test_parse_treats_a_broken_stream_as_invalid_output(tmp_path: Path) -> None:
         _parse(b"not json", tmp_path)
 
 
-async def test_a_pasted_key_renders_under_its_provider(client, druks_db) -> None:
+async def test_a_pasted_key_becomes_the_catalog_entry(client, druks_db) -> None:
     assert client.post("/api/providers/openai/key", json={"key": _API_KEY}).status_code == 200
     stored = await VaultSecret.lookup(SecretKind.STATIC, Audience.provider("openai"))
 
-    auth = PiHarness.auth_file("openai", key=stored.secrets["value"])
-
-    assert auth.path == ".pi/agent/auth.json"
-    assert json.loads(auth.content) == {"openai": {"type": "api_key", "key": _API_KEY}}
+    assert PiHarness.get_secrets("openai", stored.secrets["value"]) == {"openai": Secret(_API_KEY)}

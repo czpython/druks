@@ -157,7 +157,7 @@ async def test_codex_build_invocation_carries_every_flag():
 async def test_claude_reads_its_key_from_a_placeholder_in_the_vm():
     # Drukbox delivers the key as a placeholder under ANTHROPIC_API_KEY. The
     # invocation carries no key and no credentials file.
-    assert ClaudeHarness.get_secrets("sk-secret") == {
+    assert ClaudeHarness.get_secrets("anthropic", "sk-secret") == {
         "anthropic": Secret(
             "sk-secret",
             host="api.anthropic.com",
@@ -180,19 +180,27 @@ async def test_claude_reads_its_key_from_a_placeholder_in_the_vm():
     assert "sk-secret" not in inv.args[2]
 
 
-async def test_codex_runs_a_key_from_auth_json():
-    # The CLI reads OPENAI_API_KEY from auth.json for usage-based billing.
+async def test_codex_reads_its_key_from_a_placeholder_in_the_vm():
+    # Drukbox delivers the key as a placeholder under CODEX_API_KEY, the one
+    # variable codex exec reads. The invocation carries no key and no auth.json.
+    assert CodexHarness.get_secrets("openai", "sk-secret") == {
+        "openai": Secret(
+            "sk-secret",
+            host="api.openai.com",
+            auth_variable="CODEX_API_KEY",
+            auth_header="Authorization",
+            auth_prefix="Bearer ",
+        )
+    }
     inv = await CodexHarness(
         model=_CODEX_MODEL, fast_mode=False, effort=None, sandbox=_sandbox_config()
     ).build_invocation(
-        key="sk-secret",
         prompt="hello",
         schema={"type": "object"},
         run_id="run-1",
         ssh_username="exedev",
     )
-    [auth] = [file for file in inv.credentials.home if file.path == ".codex/auth.json"]
-    assert json.loads(auth.content) == {"OPENAI_API_KEY": "sk-secret"}
+    assert not any(file.path == ".codex/auth.json" for file in inv.credentials.home)
     assert inv.env is None
     assert "sk-secret" not in inv.args[2]
 

@@ -44,12 +44,6 @@ class Profile:
         return self.model.partition("/")[2]
 
     @property
-    def key(self) -> str | None:
-        # Codex, Pi, and OpenCode read the key from their invocation.
-        if self.api_key and not self.secrets:
-            return self.api_key.secrets["value"]
-
-    @property
     def secrets_id(self) -> str:
         """What a box created for this profile holds: the pasted key, or the
         subscriptions it fetches."""
@@ -115,7 +109,7 @@ async def get_profile(agent_name: str, account_id: str | None) -> Profile:
         if not provider_key:
             label = await provider_label(provider_id)
             raise HarnessNotConnectedError(f"add the {label} API key in Settings → Providers.")
-        secrets = harness_class.get_secrets(provider_key.secrets["value"])
+        secrets = harness_class.get_secrets(provider_id, provider_key.secrets["value"])
     else:
         subscription = await get_provider(provider_id).get_subscription(account_id)
         secret_refs = harness_class.get_secret_refs(subscription)

@@ -314,21 +314,27 @@ subscription token on a schedule. A `claude` sandbox holds a placeholder in
 Druks issuer through the sandbox's identity, and the secrets proxy swaps the
 placeholder on each request. See
 [sandbox identities and the issuer](concepts.md#agents-harnesses-workspaces-and-sandboxes).
-Codex and Pi still receive their credential file inside the sandbox. Druks does
+Codex still receives its subscription file inside the sandbox. Druks does
 not copy a host login. This is a capability connection for the requesting
 account. In a fresh `none`-mode install, the first completed subscription
 connection also creates the operator account. See
 [access control](#public-urls-and-access-control).
 
-An API key for `claude` never enters the sandbox. Druks gives the key to
-Drukbox as a secret entry when it creates the sandbox. The sandbox holds a
-placeholder in `ANTHROPIC_API_KEY`. The Drukbox secrets proxy swaps the
-placeholder for the key in the `x-api-key` header of each request to
-`api.anthropic.com`. The Compose stack runs the secrets proxy on every provider
-but docker-sbx. See
+An API key never enters the sandbox. Druks gives the key to Drukbox as a
+secret entry when it creates the sandbox. The sandbox holds a placeholder in
+the variable the entry names, and the CLI reads it from the environment. The
+Drukbox secrets proxy swaps the placeholder for the key in the entry's header
+on each request to the entry's host.
+
+| Harness | Provider | Variable | Host | Header |
+| --- | --- | --- | --- | --- |
+| `claude`, `pi`, `opencode` | Anthropic | `ANTHROPIC_API_KEY` | `api.anthropic.com` | `x-api-key` |
+| `pi`, `opencode` | OpenAI | `OPENAI_API_KEY` | `api.openai.com` | `Authorization: Bearer` |
+| `codex` | OpenAI | `CODEX_API_KEY` | `api.openai.com` | `Authorization: Bearer` |
+
+The Compose stack runs the secrets proxy on every provider but docker-sbx. See
 [the secrets exchange and the secrets proxy](deployment.md#the-secrets-exchange-and-the-secrets-proxy).
-Without it, Drukbox refuses the sandbox and the call fails. Codex, Pi, and
-OpenCode still receive the key inside the sandbox.
+Without it, Drukbox refuses the sandbox and the call fails.
 
 **Add provider** searches Models.dev for providers that use one API key.
 Druks caches the directory in Redis for one day for search and provider details.
@@ -348,9 +354,10 @@ Anthropic and OpenAI fetch separate model lists.
 Added providers use the cached Models.dev directory.
 
 The `claude` and `codex` CLIs run on their own vendor's subscription or key.
-`opencode` and `pi` run on an API key only. OpenCode can run a supported
-Models.dev provider after its key is stored. A model ID is `provider/model`
-for each harness, for example `openai/gpt-5.5`.
+`opencode` and `pi` run on an API key only, for Anthropic or OpenAI. A key for
+a Models.dev provider stores, but an agent on that provider refuses to run: no
+proven transport carries its placeholder through the secrets proxy. A model ID
+is `provider/model` for each harness, for example `openai/gpt-5.5`.
 The harness menus disable `opencode` and `pi` until a provider API key is configured.
 
 `paths.harness_config_root` points at optional CLI configuration that Druks
