@@ -125,11 +125,14 @@ button { background: none; border: none; color: inherit; cursor: pointer; font: 
 }
 
 .page-shell {
+  width: 100%;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   flex: 1;
   min-height: 0;
 }
+.page-shell[data-inset="true"] { padding: var(--page-padding); }
 .page-shell[data-scroll="page"] { overflow: auto; }
 .page-shell[data-scroll="internal"] { overflow: hidden; }
 .page-shell-header { flex-shrink: 0; }
@@ -532,7 +535,7 @@ a.row-repo:hover { color: var(--bucket-run); text-decoration: underline; }
 .wi-updated { text-align: right; white-space: nowrap; font-size: 11px; }
 
 .wi-group-head {
-  padding: 10px 20px 4px;
+  padding: 10px var(--page-gutter) 4px;
   font-size: 10px; text-transform: uppercase; letter-spacing: 0.12em;
 }
 .wi-group + .wi-group .wi-group-head { border-top: 1px solid var(--border-soft); }
@@ -540,7 +543,7 @@ a.row-repo:hover { color: var(--bucket-run); text-decoration: underline; }
 
 .active-page-head {
   display: flex; align-items: flex-end; justify-content: space-between;
-  padding: 24px 28px 16px;
+  padding: 24px var(--page-gutter) 16px;
   gap: 24px;
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
@@ -609,7 +612,7 @@ a.row-repo:hover { color: var(--bucket-run); text-decoration: underline; }
   display: grid; align-items: center;
   grid-template-columns: 16px 110px minmax(0, 1fr) 130px 60px 84px minmax(0, 88px);
   gap: 14px;
-  padding: 0 28px;
+  padding: 0 var(--page-gutter);
   min-height: var(--row-h);
   border-bottom: 1px solid var(--border-soft);
   cursor: pointer;
@@ -621,7 +624,7 @@ a.row-repo:hover { color: var(--bucket-run); text-decoration: underline; }
   display: grid; align-items: center;
   grid-template-columns: 16px 110px minmax(0, 1fr) 130px 60px 84px minmax(0, 88px);
   gap: 14px;
-  padding: 6px 28px;
+  padding: 6px var(--page-gutter);
   background: var(--surface);
   border-bottom: 1px solid var(--border);
   font-size: 10px; text-transform: uppercase; letter-spacing: 0.12em;
@@ -1146,12 +1149,6 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
   margin: 1em 0;
 }
 
-.page-usage {
-  max-width: 1400px;
-  margin: 0 auto;
-  padding: 24px 32px 64px;
-}
-
 .us-col { display: flex; flex-direction: column; }
 
 .us-head {
@@ -1549,10 +1546,10 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
 .event-row {
   display: grid;
 
-  grid-template-columns: 110px 240px 90px minmax(0, 1fr);
+  grid-template-columns: 110px 240px minmax(120px, 180px) minmax(0, 1fr);
   gap: 18px;
   align-items: center;
-  padding: 8px 28px;
+  padding: 8px var(--page-gutter);
   border-bottom: 1px solid var(--border-soft);
   font-size: 15px;
 }
@@ -1978,7 +1975,6 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
   --dui-primary-active: #5942b7;
   --dui-control-height: 40px;
   color-scheme: dark;
-  padding: 28px 32px 48px;
 }
 body[data-palette="desat"] .dui-page {
   --dui-primary: #655b9f;
@@ -2078,7 +2074,6 @@ body[data-palette="mono"] .dui-page {
 .dui-unknown { font-size: 12px; color: var(--outcome-failed); border: 1px solid color-mix(in oklch, var(--outcome-failed) 30%, transparent); border-radius: 6px; padding: 9px 12px; margin: 10px 0; }
 
 @media (max-width: 720px) {
-  .dui-page { padding: 20px 16px 40px; }
   .dui-page-head, .dui-section-head { align-items: flex-start; flex-direction: column; }
   .dui-title { font-size: 24px; line-height: 32px; }
   .dui-tabs { overflow-x: auto; }

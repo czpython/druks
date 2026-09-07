@@ -33,7 +33,7 @@ describe('eventLine', () => {
     const line = eventLine(event({ kind: 'merged', app: 'software_factory' }))
 
     expect(line.label).toBe('merged')
-    expect(line.source).toBe('software_factory')
+    expect(line.source).toBe('Software Factory')
     expect(line.bucket).toBe('event-kind-audit')
   })
 

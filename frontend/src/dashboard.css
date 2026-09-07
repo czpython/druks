@@ -1,8 +1,7 @@
-.dashboard .page-shell-body { padding: 36px 40px 48px; }
 .dashboard-head { display: flex; justify-content: space-between; gap: 24px; align-items: flex-start; }
 .dashboard h1 { margin: 0 0 10px; font-size: 26px; font-weight: 500; letter-spacing: -.02em; }
 .dashboard-head p { margin: 0; color: var(--text-mid); }
-.dashboard-filter select { min-height: 44px; max-width: 240px; padding: 0 12px; border: 1px solid var(--border-loud); border-radius: 5px; background: var(--surface); color: var(--text); font: inherit; text-transform: capitalize; }
+.dashboard-filter select { min-height: 44px; max-width: 240px; padding: 0 12px; border: 1px solid var(--border-loud); border-radius: 5px; background: var(--surface); color: var(--text); font: inherit; }
 .dashboard-counts { display: flex; flex-wrap: wrap; gap: 12px 24px; padding: 36px 0 18px; border-bottom: 1px solid var(--border); color: var(--text-mid); }
 .dashboard-counts strong { color: var(--text); font-weight: 500; }
 .dashboard-section { margin-top: 30px; }
@@ -28,18 +27,15 @@
 .dashboard-schedule { display: flex; flex-direction: column; gap: 5px; text-align: right; }
 .dashboard-unavailable { display: flex; flex-direction: column; gap: 6px; }
 .dashboard-unavailable a { color: var(--text); min-height: 32px; display: inline-flex; align-items: center; }
-.dashboard-empty, .dashboard-more, .dashboard-access { color: var(--text-dim); }
+.dashboard-empty, .dashboard-more { color: var(--text-dim); }
 .dashboard-empty { margin: 0; padding: 18px 0; border-top: 1px solid var(--border); }
-.dashboard-more, .dashboard-access { font-size: 13px; }
-.dashboard-access { padding-top: 24px; border-top: 1px solid var(--border); margin-top: 32px; }
+.dashboard-more { font-size: 13px; }
 @media (max-width: 1024px) {
-  .dashboard .page-shell-body { padding-inline: 24px; }
   .dashboard-row { grid-template-columns: 18px minmax(0, 1fr) 110px; }
   .dashboard-age, .dashboard-schedule { grid-column: 2; text-align: left; }
   .dashboard-action, .dashboard-unavailable { grid-column: 3; grid-row: 1 / 3; }
 }
 @media (max-width: 649px) {
-  .dashboard .page-shell-body { padding: 24px 20px 32px; }
   .dashboard-head { flex-wrap: wrap; gap: 20px; }
   .dashboard-filter, .dashboard-filter select { width: 100%; max-width: none; }
   .dashboard-filter select { font-size: 16px; }

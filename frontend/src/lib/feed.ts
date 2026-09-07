@@ -1,5 +1,5 @@
 import type { FeedItem } from '../api/types'
-import { getAppUI } from '../apps/registry'
+import { appLabel, getAppUI } from '../apps/registry'
 
 // What a workflow doing something is called. The platform owns these words because it
 // owns the lifecycle; an app's own milestones are already named by their type.
@@ -29,7 +29,7 @@ export function eventLine(event: FeedItem): EventLine {
   return {
     label: label(event),
     subject: event.subjectLabel ?? '',
-    source: localName(event.workflow) || event.app || 'druks',
+    source: localName(event.workflow) || appLabel(event.app || 'druks'),
     path: subjectPath(event),
     bucket: isLifecycle(event) ? `event-kind-${event.kind.slice('workflow.'.length)}` : 'event-kind-audit',
   }

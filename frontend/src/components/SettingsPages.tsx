@@ -14,6 +14,7 @@ import { appLabel } from '../apps/registry'
 import { useTicker } from '../lib/useTicker'
 import { absTime } from '../lib/format'
 import { harnessColors } from '../lib/harnessColors'
+import { Page } from './Page'
 import { Sidebar } from './Sidebar'
 import { BrowserSessionsPane } from './BrowserSessionsPane'
 import {
@@ -494,299 +495,301 @@ export function SettingsPages({
       )}
       <Content
         ref={content}
-        className="settings-main"
+        className="app-main"
         id={appName ? 'app-settings-content' : 'settings-content'}
         tabIndex={-1}
       >
-        <div className="settings-page-head">
-          <div>
-            <h1 tabIndex={-1} ref={heading}>
-              {title}
-            </h1>
-          </div>
-          {!appName && (
-            <label className="settings-search">
-              <Search size={17} aria-hidden="true" />
-              <input
-                type="search"
-                aria-label="Search settings"
-                placeholder="Search settings"
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-              />
-            </label>
-          )}
-        </div>
-        {appName && app && (
-          <>
-            <p className="app-settings-description">{app.description}</p>
-            {hasOptions && app.agents.length > 0 && (
-              <nav className="settings-tabs" aria-label="App settings sections">
-                <Link
-                  href={`/apps/${app.name}/settings`}
-                  aria-current={paneSection === 'options' ? 'page' : undefined}
-                >
-                  Options
-                </Link>
-                <Link
-                  href={`/apps/${app.name}/settings/agents`}
-                  aria-current={paneSection === 'agents' ? 'page' : undefined}
-                >
-                  Agents
-                </Link>
-              </nav>
-            )}
-          </>
-        )}
-        {search.trim() && (
-          <div className="settings-search-results" aria-label="Settings search results">
-            {searchResults.length === 0 ? (
-              <p>No matching settings.</p>
-            ) : (
-              searchResults.map((entry, index) => (
-                <Link
-                  key={`${entry.path}:${entry.label}:${index}`}
-                  href={entry.path}
-                  onClick={() => setSearch('')}
-                >
-                  <span>{entry.label}</span>{' '}
-                  <small>{entry.owner} · {entry.kind}</small>
-                </Link>
-              ))
+        <Page inset>
+          <div className="settings-page-head">
+            <div>
+              <h1 tabIndex={-1} ref={heading}>
+                {title}
+              </h1>
+            </div>
+            {!appName && (
+              <label className="settings-search">
+                <Search size={17} aria-hidden="true" />
+                <input
+                  type="search"
+                  aria-label="Search settings"
+                  placeholder="Search settings"
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                />
+              </label>
             )}
           </div>
-        )}
-        {errors[section] && (
-          <p ref={errorNotice} tabIndex={-1} role="alert" className="settings-error">
-            {errors[section]}
-          </p>
-        )}
-        {appName && appsQuery.isPending && <p role="status">Loading app settings…</p>}
-        {executionPage && !executionReady &&
-          (executionFailed ? (
-            <p role="alert" className="settings-error">
-              Could not load agent configuration.{' '}
-              <button
-                onClick={() => {
-                  for (const query of executionQueries) if (query.isError) void query.refetch()
-                }}
-              >
-                Try again
-              </button>
-            </p>
-          ) : (
-            <p role="status">Loading agent configuration…</p>
-          ))}
-        {(settingsQuery.isError || appsQuery.isError) &&
-          !executionPage &&
-          (appName || formPage || section === 'apps') && (
-            <p role="alert" className="settings-error">
-              Could not load settings.{' '}
-              <button
-                onClick={() => {
-                  void settingsQuery.refetch()
-                  void appsQuery.refetch()
-                }}
-              >
-                Try again
-              </button>
-            </p>
-          )}
-        {visited.map((page) => (
-          <div key={page} hidden={page !== section} className="settings-pane">
-            {page === 'general' && (
-              <GeneralPane
-                timezone={effectiveTimezone}
-                setTimezone={setTimezone}
-                timezones={timezones}
-                clock={clock}
-                busy={saving || !settingsQuery.isSuccess}
-              />
-            )}
-            {page === 'agents' && executionReady && effectiveDefaults && (
-              <AgentsPane
-                defaults={effectiveDefaults}
-                onDefaults={setDefaults}
-                accounts={accountsQuery.data ?? []}
-                resolved={agentsQuery.data ?? { apps: [] }}
-                harnessByName={harnessByName}
-                harnessColor={harnessColor}
-                catalog={catalog}
-                allowedEfforts={appsQuery.data?.allowedEfforts ?? []}
-                onOpenApp={(name) => navigate(`/apps/${name}/settings`)}
-                onAddProvider={() => navigate('/settings/providers')}
-                busy={saving}
-              />
-            )}
-            {page === 'providers' && (
-              <ProvidersPane
-                providers={providers}
-                registeredProviders={providersQuery.data ?? []}
-                subscriptions={subscriptionsQuery.data ?? []}
-                keys={keysQuery.data ?? []}
-                catalogs={catalogs}
-                loading={
-                  providersQuery.isPending ||
-                  subscriptionsQuery.isPending ||
-                  keysQuery.isPending ||
-                  catalogsQuery.isPending
-                }
-                requestError={
-                  [
-                    providersQuery.error,
-                    subscriptionsQuery.error,
-                    keysQuery.error,
-                    catalogsQuery.error,
-                  ].find((error) => error)?.message ?? null
-                }
-                onRetry={() => {
-                  for (const query of executionQueries) if (query.isError) void query.refetch()
-                }}
-              />
-            )}
-            {page === 'connections' && (
-              <>
-                <nav className="settings-tabs" aria-label="Connections">
-                  <button
-                    onClick={() => setConnectionsTab('services')}
-                    aria-current={connectionsTab === 'services' ? 'page' : undefined}
-                  >
-                    Services
-                  </button>
-                  <button
-                    onClick={() => setConnectionsTab('accounts')}
-                    aria-current={connectionsTab === 'accounts' ? 'page' : undefined}
-                  >
-                    Accounts
-                  </button>
-                  <button
-                    onClick={() => setConnectionsTab('revoked')}
-                    aria-current={connectionsTab === 'revoked' ? 'page' : undefined}
-                  >
-                    Revoked
-                  </button>
-                </nav>
-                <div hidden={connectionsTab !== 'services'}>
-                  <ServicesPane />
-                </div>
-                <div hidden={connectionsTab !== 'accounts'}>
-                  <ConnectionsPane />
-                </div>
-                <div hidden={connectionsTab !== 'revoked'}>
-                  <ConnectionsPane revokedOnly />
-                </div>
-              </>
-            )}
-            {page === 'mcp' && <McpServersPane />}
-            {page === 'skills' && <SkillsPane />}
-            {page === 'browser-sessions' && <BrowserSessionsPane />}
-            {page === 'api-tokens' && <AgentAccessPane />}
-            {page === 'apps' && !search.trim() && (
-              <div className="settings-app-index">
-                {apps.map((entry) => (
+          {appName && app && (
+            <>
+              <p className="app-settings-description">{app.description}</p>
+              {hasOptions && app.agents.length > 0 && (
+                <nav className="settings-tabs" aria-label="App settings sections">
                   <Link
-                    key={entry.name}
-                    aria-label={appLabel(entry.name)}
-                    href={`/apps/${entry.name}/settings`}
+                    href={`/apps/${app.name}/settings`}
+                    aria-current={paneSection === 'options' ? 'page' : undefined}
                   >
-                    <strong>{appLabel(entry.name)}</strong>
-                    <span>{entry.description}</span>
+                    Options
                   </Link>
-                ))}
-                {appsQuery.isPending && <p role="status">Loading app settings…</p>}
-                {!appsQuery.isPending && !appsQuery.isError && apps.length === 0 && (
-                  <p>No installed app declares settings.</p>
-                )}
-              </div>
-            )}
-            {apps
-              .filter(
-                (entry) =>
-                  validAppPage && appName === entry.name && page === `apps/${entry.name}` &&
-                  (paneSection !== 'agents' || executionReady),
-              )
-              .map((entry) => (
-                <div key={entry.name} className="app-settings-layout">
-                  <AppPane
-                    app={entry}
-                    section={paneSection}
-                    edits={appEdits[entry.name] ?? {}}
-                    fieldErrors={appProblems[entry.name] ?? {}}
-                    harnessColor={harnessColor}
-                    catalog={catalog}
-                    harnessByName={harnessByName}
-                    defaults={savedDefaults}
-                    allowedEfforts={appsQuery.data?.allowedEfforts ?? []}
-                    busy={saving}
-                    onAgentHarness={(name, value) =>
-                      editApp(entry.name, (current) => ({
-                        ...current,
-                        agentHarnesses: { ...current.agentHarnesses, [name]: value },
-                      }))
-                    }
-                    onAgentModel={(name, value) =>
-                      editApp(entry.name, (current) => ({
-                        ...current,
-                        agentModels: { ...current.agentModels, [name]: value },
-                      }))
-                    }
-                    onAgentBilling={(name, value) =>
-                      editApp(entry.name, (current) => ({
-                        ...current,
-                        agentBillings: { ...current.agentBillings, [name]: value },
-                      }))
-                    }
-                    onAgentEffort={(name, value) =>
-                      editApp(entry.name, (current) => ({
-                        ...current,
-                        agentEfforts: { ...current.agentEfforts, [name]: value },
-                      }))
-                    }
-                    onAgentTimeout={(name, value) =>
-                      editApp(entry.name, (current) => ({
-                        ...current,
-                        agentTimeouts: { ...current.agentTimeouts, [name]: value },
-                      }))
-                    }
-                    onWorkflowField={(kind, field, value) =>
-                      editApp(entry.name, (current) => ({
-                        ...current,
-                        workflowSettings: {
-                          ...current.workflowSettings,
-                          [kind]: withField(current.workflowSettings?.[kind], field, value),
-                        },
-                      }))
-                    }
-                    onAppSetting={(name, field, value) => {
-                      editApp(entry.name, (current) => ({
-                        ...current,
-                        appSettings: {
-                          ...current.appSettings,
-                          [name]: withField(current.appSettings?.[name], field, value),
-                        },
-                      }))
-                      setAppProblems((current) => {
-                        const next = { ...current[name] }
-                        delete next[field]
-                        return { ...current, [name]: next }
-                      })
-                    }}
-                    onAddProvider={() => navigate('/settings/providers')}
-                  />
-                  <aside className="app-settings-owner">
-                    <p>Changes apply to {appLabel(entry.name)}. Unset agent fields inherit the shared defaults.</p>
-                    <Link href="/settings/agents">
-                      Agent defaults <ArrowUpRight size={15} aria-hidden="true" />
-                    </Link>
-                  </aside>
-                </div>
-              ))}
-          </div>
-        ))}
-        {appsQuery.isSuccess &&
-          (!validAppPage || (!SECTIONS.some((entry) => entry.id === section) && !app)) && (
-            <p>No settings page matches this address.</p>
+                  <Link
+                    href={`/apps/${app.name}/settings/agents`}
+                    aria-current={paneSection === 'agents' ? 'page' : undefined}
+                  >
+                    Agents
+                  </Link>
+                </nav>
+              )}
+            </>
           )}
+          {search.trim() && (
+            <div className="settings-search-results" aria-label="Settings search results">
+              {searchResults.length === 0 ? (
+                <p>No matching settings.</p>
+              ) : (
+                searchResults.map((entry, index) => (
+                  <Link
+                    key={`${entry.path}:${entry.label}:${index}`}
+                    href={entry.path}
+                    onClick={() => setSearch('')}
+                  >
+                    <span>{entry.label}</span>{' '}
+                    <small>{entry.owner} · {entry.kind}</small>
+                  </Link>
+                ))
+              )}
+            </div>
+          )}
+          {errors[section] && (
+            <p ref={errorNotice} tabIndex={-1} role="alert" className="settings-error">
+              {errors[section]}
+            </p>
+          )}
+          {appName && appsQuery.isPending && <p role="status">Loading app settings…</p>}
+          {executionPage && !executionReady &&
+            (executionFailed ? (
+              <p role="alert" className="settings-error">
+                Could not load agent configuration.{' '}
+                <button
+                  onClick={() => {
+                    for (const query of executionQueries) if (query.isError) void query.refetch()
+                  }}
+                >
+                  Try again
+                </button>
+              </p>
+            ) : (
+              <p role="status">Loading agent configuration…</p>
+            ))}
+          {(settingsQuery.isError || appsQuery.isError) &&
+            !executionPage &&
+            (appName || formPage || section === 'apps') && (
+              <p role="alert" className="settings-error">
+                Could not load settings.{' '}
+                <button
+                  onClick={() => {
+                    void settingsQuery.refetch()
+                    void appsQuery.refetch()
+                  }}
+                >
+                  Try again
+                </button>
+              </p>
+            )}
+          {visited.map((page) => (
+            <div key={page} hidden={page !== section} className="settings-pane">
+              {page === 'general' && (
+                <GeneralPane
+                  timezone={effectiveTimezone}
+                  setTimezone={setTimezone}
+                  timezones={timezones}
+                  clock={clock}
+                  busy={saving || !settingsQuery.isSuccess}
+                />
+              )}
+              {page === 'agents' && executionReady && effectiveDefaults && (
+                <AgentsPane
+                  defaults={effectiveDefaults}
+                  onDefaults={setDefaults}
+                  accounts={accountsQuery.data ?? []}
+                  resolved={agentsQuery.data ?? { apps: [] }}
+                  harnessByName={harnessByName}
+                  harnessColor={harnessColor}
+                  catalog={catalog}
+                  allowedEfforts={appsQuery.data?.allowedEfforts ?? []}
+                  onOpenApp={(name) => navigate(`/apps/${name}/settings`)}
+                  onAddProvider={() => navigate('/settings/providers')}
+                  busy={saving}
+                />
+              )}
+              {page === 'providers' && (
+                <ProvidersPane
+                  providers={providers}
+                  registeredProviders={providersQuery.data ?? []}
+                  subscriptions={subscriptionsQuery.data ?? []}
+                  keys={keysQuery.data ?? []}
+                  catalogs={catalogs}
+                  loading={
+                    providersQuery.isPending ||
+                    subscriptionsQuery.isPending ||
+                    keysQuery.isPending ||
+                    catalogsQuery.isPending
+                  }
+                  requestError={
+                    [
+                      providersQuery.error,
+                      subscriptionsQuery.error,
+                      keysQuery.error,
+                      catalogsQuery.error,
+                    ].find((error) => error)?.message ?? null
+                  }
+                  onRetry={() => {
+                    for (const query of executionQueries) if (query.isError) void query.refetch()
+                  }}
+                />
+              )}
+              {page === 'connections' && (
+                <>
+                  <nav className="settings-tabs" aria-label="Connections">
+                    <button
+                      onClick={() => setConnectionsTab('services')}
+                      aria-current={connectionsTab === 'services' ? 'page' : undefined}
+                    >
+                      Services
+                    </button>
+                    <button
+                      onClick={() => setConnectionsTab('accounts')}
+                      aria-current={connectionsTab === 'accounts' ? 'page' : undefined}
+                    >
+                      Accounts
+                    </button>
+                    <button
+                      onClick={() => setConnectionsTab('revoked')}
+                      aria-current={connectionsTab === 'revoked' ? 'page' : undefined}
+                    >
+                      Revoked
+                    </button>
+                  </nav>
+                  <div hidden={connectionsTab !== 'services'}>
+                    <ServicesPane />
+                  </div>
+                  <div hidden={connectionsTab !== 'accounts'}>
+                    <ConnectionsPane />
+                  </div>
+                  <div hidden={connectionsTab !== 'revoked'}>
+                    <ConnectionsPane revokedOnly />
+                  </div>
+                </>
+              )}
+              {page === 'mcp' && <McpServersPane />}
+              {page === 'skills' && <SkillsPane />}
+              {page === 'browser-sessions' && <BrowserSessionsPane />}
+              {page === 'api-tokens' && <AgentAccessPane />}
+              {page === 'apps' && !search.trim() && (
+                <div className="settings-app-index">
+                  {apps.map((entry) => (
+                    <Link
+                      key={entry.name}
+                      aria-label={appLabel(entry.name)}
+                      href={`/apps/${entry.name}/settings`}
+                    >
+                      <strong>{appLabel(entry.name)}</strong>
+                      <span>{entry.description}</span>
+                    </Link>
+                  ))}
+                  {appsQuery.isPending && <p role="status">Loading app settings…</p>}
+                  {!appsQuery.isPending && !appsQuery.isError && apps.length === 0 && (
+                    <p>No installed app declares settings.</p>
+                  )}
+                </div>
+              )}
+              {apps
+                .filter(
+                  (entry) =>
+                    validAppPage && appName === entry.name && page === `apps/${entry.name}` &&
+                    (paneSection !== 'agents' || executionReady),
+                )
+                .map((entry) => (
+                  <div key={entry.name} className="app-settings-layout">
+                    <AppPane
+                      app={entry}
+                      section={paneSection}
+                      edits={appEdits[entry.name] ?? {}}
+                      fieldErrors={appProblems[entry.name] ?? {}}
+                      harnessColor={harnessColor}
+                      catalog={catalog}
+                      harnessByName={harnessByName}
+                      defaults={savedDefaults}
+                      allowedEfforts={appsQuery.data?.allowedEfforts ?? []}
+                      busy={saving}
+                      onAgentHarness={(name, value) =>
+                        editApp(entry.name, (current) => ({
+                          ...current,
+                          agentHarnesses: { ...current.agentHarnesses, [name]: value },
+                        }))
+                      }
+                      onAgentModel={(name, value) =>
+                        editApp(entry.name, (current) => ({
+                          ...current,
+                          agentModels: { ...current.agentModels, [name]: value },
+                        }))
+                      }
+                      onAgentBilling={(name, value) =>
+                        editApp(entry.name, (current) => ({
+                          ...current,
+                          agentBillings: { ...current.agentBillings, [name]: value },
+                        }))
+                      }
+                      onAgentEffort={(name, value) =>
+                        editApp(entry.name, (current) => ({
+                          ...current,
+                          agentEfforts: { ...current.agentEfforts, [name]: value },
+                        }))
+                      }
+                      onAgentTimeout={(name, value) =>
+                        editApp(entry.name, (current) => ({
+                          ...current,
+                          agentTimeouts: { ...current.agentTimeouts, [name]: value },
+                        }))
+                      }
+                      onWorkflowField={(kind, field, value) =>
+                        editApp(entry.name, (current) => ({
+                          ...current,
+                          workflowSettings: {
+                            ...current.workflowSettings,
+                            [kind]: withField(current.workflowSettings?.[kind], field, value),
+                          },
+                        }))
+                      }
+                      onAppSetting={(name, field, value) => {
+                        editApp(entry.name, (current) => ({
+                          ...current,
+                          appSettings: {
+                            ...current.appSettings,
+                            [name]: withField(current.appSettings?.[name], field, value),
+                          },
+                        }))
+                        setAppProblems((current) => {
+                          const next = { ...current[name] }
+                          delete next[field]
+                          return { ...current, [name]: next }
+                        })
+                      }}
+                      onAddProvider={() => navigate('/settings/providers')}
+                    />
+                    <aside className="app-settings-owner">
+                      <p>Changes apply to {appLabel(entry.name)}. Unset agent fields inherit the shared defaults.</p>
+                      <Link href="/settings/agents">
+                        Agent defaults <ArrowUpRight size={15} aria-hidden="true" />
+                      </Link>
+                    </aside>
+                  </div>
+                ))}
+            </div>
+          ))}
+          {appsQuery.isSuccess &&
+            (!validAppPage || (!SECTIONS.some((entry) => entry.id === section) && !app)) && (
+              <p>No settings page matches this address.</p>
+            )}
+        </Page>
       </Content>
       {formPage && (
         <footer className="settings-save-bar">

@@ -4,7 +4,7 @@ import { UsagePanel } from '../components/UsagePanel'
 
 export function UsagePage() {
   return (
-    <Page scroll="page" className="page-usage">
+    <Page inset scroll="page" className="page-usage">
       <UsagePanel />
     </Page>
   )
