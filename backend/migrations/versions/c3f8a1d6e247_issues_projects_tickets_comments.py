@@ -1,7 +1,7 @@
 """Software Factory local board: projects, tickets, and comments.
 
 Revision ID: c3f8a1d6e247
-Revises: d2f7a9c4e816
+Revises: a8d4c1e63f92
 Create Date: 2026-09-07
 """
 
@@ -11,7 +11,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "c3f8a1d6e247"
-down_revision: str | Sequence[str] | None = "d2f7a9c4e816"
+down_revision: str | Sequence[str] | None = "a8d4c1e63f92"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
