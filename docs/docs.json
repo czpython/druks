@@ -73,6 +73,7 @@
         "group": "Contribute",
         "pages": [
           "development",
+          "api-key-transport",
           "releasing"
         ]
       }

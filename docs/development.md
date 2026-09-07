@@ -185,6 +185,10 @@ image = "ghcr.io/czpython/druks/sandbox:latest"
 `uv run druks doctor --sandbox` creates a real host. If you require a real
 sandbox test, run this command. It is not part of the normal test suite.
 
+The [API-key transport proof](api-key-transport.md) records how Codex, Pi, and
+OpenCode carry a placeholder through the secrets proxy.
+`scripts/proof/api_key_transport.sh` repeats its local observation.
+
 ## Frontend ownership
 
 An app's screens are Python. It declares them in `pages.py`, and the shell
