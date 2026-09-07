@@ -50,6 +50,9 @@ import { SETTINGS_FIELDS, isFieldVisible, type Catalog, type CatalogChoice, type
 const keyOnly = (harness: Harness | undefined) =>
   Boolean(harness) && !harness!.billingOptions.includes('subscription')
 
+const harnessNeedsKey = (harness: Harness, catalog: Catalog) =>
+  keyOnly(harness) && !catalog.hasApiKeyFor(harness)
+
 const BILLINGS: Billing[] = ['subscription', 'api_key']
 const billingLabel = (billing: string) => (billing === 'api_key' ? 'API key' : 'subscription')
 
@@ -157,15 +160,22 @@ function MenuOption({
   main,
   sub,
   onClick,
+  disabled,
 }: {
   selected: boolean
   harnessColor?: string
   main: string
   sub?: string
   onClick: () => void
+  disabled?: boolean
 }) {
   return (
-    <button type="button" className={'menu-opt' + (selected ? ' sel' : '')} onClick={onClick}>
+    <button
+      type="button"
+      className={'menu-opt' + (selected ? ' sel' : '')}
+      onClick={onClick}
+      disabled={disabled}
+    >
       <span className="mo-check">{selected ? '✓' : ''}</span>
       {harnessColor && <span className="mo-fam" style={{ background: harnessColor }} />}
       <span className="mo-main">
@@ -383,6 +393,8 @@ function InheritCell({
               selected={value === harness.name}
               harnessColor={harnessColor[harness.name]}
               main={harness.name}
+              sub={harnessNeedsKey(harness, catalog) ? 'Add a provider API key first' : undefined}
+              disabled={harnessNeedsKey(harness, catalog)}
               onClick={() => pick(harness.name)}
             />
           ))}
@@ -593,8 +605,13 @@ export function AgentsPane({
               disabled={busy}
             >
               {harnesses.map((harness) => (
-                <option key={harness.name} value={harness.name}>
+                <option
+                  key={harness.name}
+                  value={harness.name}
+                  disabled={harnessNeedsKey(harness, catalog)}
+                >
                   {harness.name}
+                  {harnessNeedsKey(harness, catalog) ? ' — add an API key' : ''}
                 </option>
               ))}
             </select>
@@ -850,32 +867,58 @@ export function ServicesPane() {
               Configure the services your apps use. Manage account access in Accounts.
             </p>
           </header>
-          <div className="svc-grid">
-            {services.map((service) => {
-              const identity = service.connected
-                ? (service.facts.slug ?? Object.values(service.facts)[0])
-                : undefined
-              return (
-                <button
-                  key={service.slug}
-                  type="button"
-                  className="set-card svc-card"
-                  onClick={() => setSelectedSlug(service.slug)}
-                >
-                  <span className="svc-card-top">
-                    <span className="svc-card-name">{service.title}</span>
-                    <ServiceStatus connected={service.connected} />
-                  </span>
-                  <span className="svc-card-desc">{service.description}</span>
-                  <span className="svc-card-foot">
-                    {identity && <span className="svc-card-id">{identity}</span>}
-                    <span className="svc-card-cue">Configure</span>
-                    <span className="chev" aria-hidden="true" />
-                  </span>
-                </button>
-              )
-            })}
-          </div>
+          <table className="connections-table" aria-label="Services">
+            <thead>
+              <tr>
+                <th scope="col">Service</th>
+                <th scope="col">Setup</th>
+                <th scope="col">Access</th>
+                <th scope="col">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {services.map((service) => {
+                const accounts = service.connections.filter((connection) => !connection.revokedAt)
+                return (
+                  <tr key={service.slug}>
+                    <th scope="row">
+                      <span className="connection-name">{service.title}</span>
+                      {service.usedBy.length > 0 && (
+                        <span className="connection-context">
+                          Used by {service.usedBy.map(appLabel).join(', ')}
+                        </span>
+                      )}
+                    </th>
+                    <td data-label="Setup">
+                      <ServiceStatus
+                        connected={service.connected}
+                        label={service.connected ? 'Configured' : 'Not configured'}
+                      />
+                    </td>
+                    <td data-label="Access">
+                      {service.isOauth
+                        ? accounts.length === 1
+                          ? (connectionIdentity(accounts[0]!) ?? '1 connected account')
+                          : accounts.length > 1
+                            ? `${accounts.length} connected accounts`
+                            : 'No connected accounts'
+                        : 'Service credentials'}
+                    </td>
+                    <td className="connection-actions">
+                      <button
+                        type="button"
+                        className="set-btn ghost"
+                        aria-label={`Configure ${service.title}`}
+                        onClick={() => setSelectedSlug(service.slug)}
+                      >
+                        Configure
+                      </button>
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
         </>
       )}
     </div>
@@ -1118,7 +1161,7 @@ function ServiceAccess({ service }: { service: Service }) {
       {service.usedBy.length > 0 && (
         <div className="svc-fact">
           <span className="svc-fact-key">used by</span>
-          <span className="svc-fact-val">{service.usedBy.join(', ')}</span>
+          <span className="svc-fact-val">{service.usedBy.map(appLabel).join(', ')}</span>
         </div>
       )}
       {live.map((connection) => (
@@ -1182,15 +1225,24 @@ export function ConnectionsPane({ revokedOnly = false }: { revokedOnly?: boolean
     queryFn: () => api.listConnections(),
     staleTime: 60_000,
   })
+  const servicesQuery = useQuery({
+    queryKey: ['services'],
+    queryFn: api.services,
+    staleTime: 60_000,
+  })
+  const serviceTitles = Object.fromEntries(
+    (servicesQuery.data ?? []).map((service) => [service.slug, service.title]),
+  )
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState('')
 
   const revoke = (connection: Connection) => {
     const identity = connectionIdentity(connection) ?? connection.provider
+    const service = serviceTitles[connection.provider] ?? connection.provider
     if (
       !window.confirm(
-        `Disconnect ${identity} from ${connection.provider}? Its access will be revoked.`,
+        `Disconnect ${identity} from ${service}? Its access will be revoked.`,
       )
     )
       return
@@ -1210,8 +1262,7 @@ export function ConnectionsPane({ revokedOnly = false }: { revokedOnly?: boolean
   }
 
   const connections = query.data ?? []
-  const live = connections.filter((connection) => !connection.revokedAt)
-  const revoked = connections.filter((connection) => connection.revokedAt)
+  const visible = connections.filter((connection) => Boolean(connection.revokedAt) === revokedOnly)
 
   return (
     <div className="set-pane mcp-pane svc-pane">
@@ -1239,44 +1290,72 @@ export function ConnectionsPane({ revokedOnly = false }: { revokedOnly?: boolean
       )}
       {busy && <p role="status">Disconnecting account…</p>}
       {notice && <p role="status">{notice}</p>}
-      {query.isSuccess && (revokedOnly ? revoked : live).length === 0 && (
+      {query.isSuccess && visible.length === 0 && (
         <p className="mcp-pane-sub">
           {revokedOnly ? 'No revoked accounts.' : 'No connected accounts.'}
         </p>
       )}
-      {connections.length > 0 && (
-        <div className="set-card svc-facts">
-          {!revokedOnly &&
-            live.map((connection) => (
-              <div className="svc-fact" key={connection.id}>
-                <span className="svc-fact-key">{connection.provider}</span>
-                <span className="svc-fact-val">
-                  {connectionIdentity(connection) ??
-                    (connection.scopes.join(', ') || 'unlabeled')}{' '}
-                  · {new Date(connection.connectedAt).toLocaleDateString()}
-                </span>
-                <button
-                  className="set-btn danger"
-                  onClick={() => revoke(connection)}
-                  disabled={busy}
-                >
-                  Disconnect
-                </button>
-              </div>
+      {visible.length > 0 && (
+        <table
+          className="connections-table"
+          aria-label={revokedOnly ? 'Revoked accounts' : 'Accounts'}
+        >
+          <thead>
+            <tr>
+              <th scope="col">Account</th>
+              <th scope="col">Service</th>
+              <th scope="col">Access</th>
+              <th scope="col">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {visible.map((connection) => (
+              <tr key={connection.id}>
+                <th scope="row">
+                  <span className="connection-name">
+                    {connectionIdentity(connection) ?? 'Account identity unavailable'}
+                  </span>
+                  {revokedOnly && (
+                    <span className="connection-context">{revokedCopy(connection)}</span>
+                  )}
+                </th>
+                <td data-label="Service">
+                  {serviceTitles[connection.provider] ?? connection.provider}
+                </td>
+                <td>
+                  <details className="connection-details">
+                    <summary>Access details</summary>
+                    <dl>
+                      <dt>Connected</dt>
+                      <dd>
+                        <time dateTime={connection.connectedAt}>
+                          {new Date(connection.connectedAt).toLocaleString()}
+                        </time>
+                      </dd>
+                      <dt>Permissions</dt>
+                      <dd>
+                        {connection.scopes.length > 0
+                          ? connection.scopes.join(', ')
+                          : 'No scopes recorded'}
+                      </dd>
+                    </dl>
+                  </details>
+                </td>
+                <td className="connection-actions">
+                  {!revokedOnly && (
+                    <button
+                      className="set-btn danger"
+                      onClick={() => revoke(connection)}
+                      disabled={busy}
+                    >
+                      Disconnect
+                    </button>
+                  )}
+                </td>
+              </tr>
             ))}
-          {revokedOnly &&
-            revoked.map((connection) => (
-              <div className="svc-fact svc-revoked" key={connection.id}>
-                <span className="svc-fact-key">{connection.provider}</span>
-                <span className="svc-fact-val">
-                  {connectionIdentity(connection) ??
-                    (connection.scopes.join(', ') || 'unlabeled')}{' '}
-                  · connected {new Date(connection.connectedAt).toLocaleDateString()} ·{' '}
-                  {revokedCopy(connection)}
-                </span>
-              </div>
-            ))}
-        </div>
+          </tbody>
+        </table>
       )}
     </div>
   )
@@ -1664,7 +1743,6 @@ export function ProviderConnect({
   })
   const acceptsSubscription = provider.billingOptions.includes('subscription')
   const acceptsApiKey = provider.billingOptions.includes('api_key')
-  const weekly = usage?.weeks.find((week) => week.model === null)
 
   const run = (action: () => Promise<unknown>, after: () => Promise<unknown>, done: string) => {
     setBusy(true)
@@ -1759,16 +1837,11 @@ export function ProviderConnect({
                 {usage?.planTier ? `${usage.planTier} · ` : ''}
                 {subscription.providerEmail}
               </p>
-              <div className="provider-quotas">
-                {usage?.unlimited ? (
-                  <p>Quota: unmetered</p>
-                ) : (
-                  <>
-                    {usage?.fiveHour && <QuotaRow label="5-hour" metric={usage.fiveHour} />}
-                    {weekly && <QuotaRow label="Weekly" metric={weekly} />}
-                  </>
-                )}
-              </div>
+              {usage?.fiveHour && !usage.unlimited && (
+                <div className="provider-quotas">
+                  <QuotaRow label="5-hour" metric={usage.fiveHour} />
+                </div>
+              )}
             </>
           ) : (
             <p className="provider-account">Not connected</p>

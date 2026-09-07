@@ -41,7 +41,7 @@ navigation button opens a modal drawer. Escape closes the drawer and returns
 focus to the button.
 
 Shared settings use `/settings/<section>` routes. Search matches section names
-and app field labels. General and Agent defaults retain separate
+and app field labels. General and Agents retain separate
 drafts across settings pages. Save changes applies only the current page.
 Leaving Settings offers Save, Discard, and Stay. Save applies each dirty page;
 a failed request keeps the operator on that page with its draft. Resource

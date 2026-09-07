@@ -29,6 +29,7 @@ const harnesses = [
   { name: 'claude', provider: 'anthropic', billingOptions: ['api_key', 'subscription'] },
   { name: 'codex', provider: 'openai', billingOptions: ['api_key', 'subscription'] },
   { name: 'opencode', provider: null, billingOptions: ['api_key'] },
+  { name: 'pi', provider: null, billingOptions: ['api_key'] },
 ]
 
 const userSettings = {
@@ -564,11 +565,30 @@ describe('SettingsPages app fields', () => {
 })
 
 describe('SettingsPages agents', () => {
-  it('offers Agent defaults separately from General preferences', async () => {
+  it.each([false, true])('enables key-only harnesses only with a configured API key (key: %s)', async (hasKey) => {
+    stubFetch(false)
+    if (!hasKey) vi.spyOn(api, 'providerKeys').mockResolvedValue([])
+    renderSettings('/settings/agents')
+    await screen.findByLabelText('Harness')
+    for (const name of ['pi', 'opencode']) {
+      const choice = screen.getByRole('option', { name: new RegExp(`^${name}`) }) as HTMLOptionElement
+      expect(choice.disabled).toBe(!hasKey)
+    }
+    fireEvent.click(screen.getByRole('button', { name: 'Open Software Factory' }))
+    fireEvent.click(await screen.findByRole('link', { name: 'Agents' }))
+    const harness = await screen.findByRole('button', { name: /^harness:/ })
+    fireEvent.click(harness)
+    for (const name of ['pi', 'opencode']) {
+      const choice = screen.getByRole('button', { name: new RegExp(`^${name}`) }) as HTMLButtonElement
+      expect(choice.disabled).toBe(!hasKey)
+    }
+  })
+
+  it('offers Agents separately from General preferences', async () => {
     stubFetch()
     renderSettings()
 
-    expect(await screen.findByRole('link', { name: 'Agent defaults' })).toBeTruthy()
+    expect(await screen.findByRole('link', { name: 'Agents' })).toBeTruthy()
     expect(screen.queryByRole('button', { name: 'Harnesses' })).toBeNull()
     expect(screen.queryByText('default model')).toBeNull()
   })
@@ -576,9 +596,9 @@ describe('SettingsPages agents', () => {
   it('renders the defaults, the unattended-runs account, and every agent resolved', async () => {
     stubFetch()
     renderSettings()
-    fireEvent.click(await screen.findByRole('link', { name: 'Agent defaults' }))
+    fireEvent.click(await screen.findByRole('link', { name: 'Agents' }))
 
-    expect(await screen.findByRole('heading', { name: 'Agent defaults' })).toBeTruthy()
+    expect(await screen.findByRole('heading', { name: 'Agents' })).toBeTruthy()
     expect((screen.getByLabelText('Harness') as HTMLSelectElement).value).toBe('claude')
     expect((screen.getByLabelText('Billing') as HTMLSelectElement).value).toBe('subscription')
     expect((screen.getByLabelText('Unattended runs use') as HTMLSelectElement).value).toBe('acc-1')
@@ -595,8 +615,8 @@ describe('SettingsPages agents', () => {
   it('a key-only default harness locks billing to API key and Save sends the changed defaults', async () => {
     stubFetch()
     renderSettings()
-    fireEvent.click(await screen.findByRole('link', { name: 'Agent defaults' }))
-    await screen.findByRole('heading', { name: 'Agent defaults' })
+    fireEvent.click(await screen.findByRole('link', { name: 'Agents' }))
+    await screen.findByRole('heading', { name: 'Agents' })
 
     fireEvent.change(screen.getByLabelText('Harness'), { target: { value: 'opencode' } })
     const billing = screen.getByLabelText('Billing') as HTMLSelectElement
@@ -647,7 +667,7 @@ describe('SettingsPages agents', () => {
   it('selects a configured third-party OpenCode model', async () => {
     stubFetch()
     renderSettings()
-    fireEvent.click(await screen.findByRole('link', { name: 'Agent defaults' }))
+    fireEvent.click(await screen.findByRole('link', { name: 'Agents' }))
 
     fireEvent.change(screen.getByLabelText('Harness'), { target: { value: 'opencode' } })
     fireEvent.click(await screen.findByRole('button', { name: /^Model:/ }))
@@ -722,7 +742,7 @@ describe('SettingsPages agents', () => {
   it('closes the model chooser with Escape without closing settings', async () => {
     stubFetch()
     renderSettings()
-    fireEvent.click(await screen.findByRole('link', { name: 'Agent defaults' }))
+    fireEvent.click(await screen.findByRole('link', { name: 'Agents' }))
     fireEvent.click(await screen.findByRole('button', { name: /^Model:/ }))
 
     const search = screen.getByLabelText('Search models')
@@ -740,13 +760,13 @@ describe('settings drafts and navigation', () => {
     fireEvent.change(await screen.findByRole('combobox', { name: 'Timezone' }), {
       target: { value: 'Europe/Madrid' },
     })
-    fireEvent.click(screen.getByRole('link', { name: 'Agent defaults' }))
+    fireEvent.click(screen.getByRole('link', { name: 'Agents' }))
     fireEvent.change(await screen.findByLabelText('Effort'), { target: { value: 'low' } })
     fireEvent.click(screen.getByRole('link', { name: 'General' }))
     expect((screen.getByLabelText('Timezone') as HTMLSelectElement).value).toBe('Europe/Madrid')
     fireEvent.click(screen.getByRole('button', { name: 'Save changes' }))
     await waitFor(() => expect(patched).toEqual([{ timezone: 'Europe/Madrid' }]))
-    fireEvent.click(screen.getByRole('link', { name: 'Agent defaults' }))
+    fireEvent.click(screen.getByRole('link', { name: 'Agents' }))
     expect((screen.getByLabelText('Effort') as HTMLSelectElement).value).toBe('low')
     expect(
       (screen.getByRole('button', { name: 'Save changes' }) as HTMLButtonElement).disabled,
@@ -798,7 +818,7 @@ describe('settings drafts and navigation', () => {
     fireEvent.change(await screen.findByLabelText('Timezone'), {
       target: { value: 'Europe/Madrid' },
     })
-    fireEvent.click(screen.getByRole('link', { name: 'Agent defaults' }))
+    fireEvent.click(screen.getByRole('link', { name: 'Agents' }))
     fireEvent.change(await screen.findByLabelText('Effort'), { target: { value: 'low' } })
     fireEvent.click(screen.getByRole('link', { name: 'Back to Druks' }))
     fireEvent.click(
@@ -899,7 +919,7 @@ describe('settings resource and keyboard behavior', () => {
   it('does not bypass model credential validation through the save shortcut', async () => {
     stubFetch(false)
     renderSettings()
-    fireEvent.click(screen.getByRole('link', { name: 'Agent defaults' }))
+    fireEvent.click(screen.getByRole('link', { name: 'Agents' }))
     const harness = await screen.findByLabelText('Harness')
     fireEvent.change(harness, { target: { value: 'codex' } })
     fireEvent.keyDown(harness, { key: 'Enter', ctrlKey: true })
@@ -914,8 +934,8 @@ describe('settings resource and keyboard behavior', () => {
     renderSettings()
     fireEvent.click(screen.getByRole('button', { name: 'Open navigation' }))
     const drawer = screen.getByRole('dialog', { name: 'Druks navigation' })
-    fireEvent.click(within(drawer).getByRole('link', { name: 'Agent defaults' }))
-    const heading = await screen.findByRole('heading', { name: 'Agent defaults' })
+    fireEvent.click(within(drawer).getByRole('link', { name: 'Agents' }))
+    const heading = await screen.findByRole('heading', { name: 'Agents' })
     expect(document.activeElement).toBe(heading)
     expect(drawer.hasAttribute('open')).toBe(false)
   })
@@ -1148,8 +1168,8 @@ describe('canonical app settings', () => {
     renderSettings('/apps/software_factory/settings/agents')
     const settings = await screen.findByRole('link', { name: 'Software Factory settings' })
     expect(settings.getAttribute('aria-current')).toBe('page')
-    fireEvent.click(screen.getByRole('link', { name: 'Agent defaults' }))
-    await screen.findByRole('heading', { name: 'Agent defaults' })
+    fireEvent.click(screen.getByRole('link', { name: 'Shared agents' }))
+    await screen.findByRole('heading', { name: 'Agents' })
     fireEvent.click(screen.getByRole('link', { name: 'Back to Druks' }))
     await screen.findByText('coder')
     expect(window.location.pathname).toBe('/apps/software_factory/settings/agents')
@@ -1157,13 +1177,13 @@ describe('canonical app settings', () => {
     fireEvent.change(screen.getByLabelText('Linear trigger status'), {
       target: { value: 'Agent Queue' },
     })
-    fireEvent.click(screen.getByRole('link', { name: 'Agent defaults' }))
+    fireEvent.click(screen.getByRole('link', { name: 'Shared agents' }))
     expect(screen.getByRole('dialog', { name: 'Save your changes?' })).toBeTruthy()
   })
 })
 
 describe('settings resource read failures', () => {
-  it('uses a newly saved directory catalog in Agent defaults without remounting Settings', async () => {
+  it('uses a newly saved directory catalog in Agents without remounting Settings', async () => {
     stubFetch(false)
     const originalFetch = fetch
     let keySaved = false
@@ -1208,7 +1228,7 @@ describe('settings resource read failures', () => {
     fireEvent.change(resource.getByLabelText('API key'), { target: { value: 'local-test-key' } })
     fireEvent.click(resource.getByRole('button', { name: 'Save' }))
     await resource.findByText(/1 model · Catalog fetched/)
-    fireEvent.click(screen.getByRole('link', { name: 'Agent defaults' }))
+    fireEvent.click(screen.getByRole('link', { name: 'Agents' }))
     fireEvent.change(await screen.findByLabelText('Harness'), { target: { value: 'opencode' } })
     fireEvent.click(screen.getByRole('button', { name: /^Model:/ }))
     expect((await screen.findByRole('option', { name: /GPT OSS 120B/ }) as HTMLButtonElement).disabled).toBe(false)
@@ -1253,7 +1273,7 @@ describe('settings resource read failures', () => {
     'accounts',
     'agents',
   ] as const)(
-    'shows a failed %s read on Agent defaults and retries without false choices',
+    'shows a failed %s read on Agents and retries without false choices',
     async (method) => {
       stubFetch(false)
       const original = api[method]
@@ -1342,7 +1362,7 @@ it('finds model defaults, app overrides, and timezone with working field focus',
   const search = await screen.findByLabelText('Search settings')
   fireEvent.change(search, { target: { value: 'model' } })
   const results = screen.getByLabelText('Settings search results')
-  const defaultModel = within(results).getByRole('link', { name: 'Model Agent defaults · Field' })
+  const defaultModel = within(results).getByRole('link', { name: 'Model Agents · Field' })
   expect(within(results).getAllByRole('link').some((link) => link.getAttribute('href')?.includes('/settings/agents?field=agent.'))).toBe(true)
   fireEvent.click(defaultModel)
   await waitFor(() => expect(document.activeElement?.getAttribute('aria-label')).toMatch(/^Model:/))
@@ -1374,7 +1394,7 @@ it.each(Object.values(SETTINGS_FIELDS))('opens the shared $label field from sear
   mockScroll()
   renderSettings('/settings/general')
   fireEvent.change(await screen.findByLabelText('Search settings'), { target: { value: field.label } })
-  const owner = field.section === 'general' ? 'General' : 'Agent defaults'
+  const owner = field.section === 'general' ? 'General' : 'Agents'
   fireEvent.click(await screen.findByRole('link', { name: `${field.label} ${owner} · Field` }))
   await waitFor(() => expect(document.activeElement?.closest('[data-setting]')?.getAttribute('data-setting')).toBe(field.field))
 })

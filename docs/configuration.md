@@ -292,14 +292,16 @@ When an agent runs, OpenCode selects the endpoint.
 Before you save a key, check the provider documentation and domain.
 
 Provider rows show access state and weekly quota when available. Open
-**Manage** for credential controls, detailed usage, exact reset times, and the
-model catalog timestamp. Anthropic and OpenAI fetch separate model lists.
+**Manage** for credential controls, the 5-hour quota when available, and the
+model catalog timestamp. The weekly quota stays in the provider row.
+Anthropic and OpenAI fetch separate model lists.
 Added providers use the cached Models.dev directory.
 
 The `claude` and `codex` CLIs run on their own vendor's subscription or key.
 `opencode` and `pi` run on an API key only. OpenCode can run a supported
 Models.dev provider after its key is stored. A model ID is `provider/model`
 for each harness, for example `openai/gpt-5.5`.
+The harness menus disable `opencode` and `pi` until a provider API key is configured.
 
 `paths.harness_config_root` points at optional CLI configuration that Druks
 carries into sandboxes. The installer creates the root. Compose mounts it
@@ -321,7 +323,7 @@ read-only at `/harnesses`. Claude and Codex each read their named directory:
 Missing files are optional. Codex uses `.credentials.json` for MCP credentials.
 Provider credentials do not belong in this root. OpenCode and Pi do not read it.
 The default harness, model, billing, effort, and timeout live in
-**Settings → Agent defaults**. Each agent can override any of them on its app's page.
+**Settings → Agents**. Each agent can override any of them on its app's page.
 **Unattended runs use** names the account whose subscription an unattended
 run bills. A call refuses before provisioning a VM if its selected
 credential is missing.

@@ -40,7 +40,7 @@ import {
 
 const SECTIONS = [
   { id: 'providers', label: 'Providers', group: 'AI execution' },
-  { id: 'agents', label: 'Agent defaults', group: 'AI execution' },
+  { id: 'agents', label: 'Agents', group: 'AI execution' },
   { id: 'connections', label: 'Connections', group: 'Tools & access' },
   { id: 'mcp', label: 'MCP servers', group: 'Tools & access' },
   { id: 'skills', label: 'Skills', group: 'Tools & access' },
@@ -778,7 +778,7 @@ export function SettingsPages({
                     <aside className="app-settings-owner">
                       <p>Changes apply to {appLabel(entry.name)}. Unset agent fields inherit the shared defaults.</p>
                       <Link href="/settings/agents">
-                        Agent defaults <ArrowUpRight size={15} aria-hidden="true" />
+                        Shared agents <ArrowUpRight size={15} aria-hidden="true" />
                       </Link>
                     </aside>
                   </div>

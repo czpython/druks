@@ -335,7 +335,7 @@ from replayed orchestration allows later edits to change an in-flight run.
 
 An agent belongs to the app class. Which CLI runs it, which model, which
 login it bills, and at what effort are the operator's choices: defaults in
-**Settings → Agent defaults**, overridden per agent on the app's own page. `timeout`
+**Settings → Agents**, overridden per agent on the app's own page. `timeout`
 is the one declarable knob, because how long a step may take is a fact about
 the task.
 
@@ -388,7 +388,7 @@ persist its stable reference on an app row.
 An app that runs a CLI of its own inside the sandbox reads how a declared agent
 would run, and hands that to the CLI. Declare the agent and never call it; the
 operator configures it in the app's **Settings → Agents**. Shared defaults
-are in **Settings → Agent defaults**:
+are in **Settings → Agents**:
 
 ```python
 profile = await NightWatch.auditor.get_profile()
