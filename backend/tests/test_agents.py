@@ -3,12 +3,14 @@ from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from conftest import make_agent_result
+from conftest import installation_key, make_agent_result
 from druks import agents
+from druks.accounts.models import Account
 from druks.durable import AgentCall, WorkflowError
 from druks.files import File
 from druks.sandbox.exceptions import SandboxDownloadError
 from druks.usage.models import UsageScrape
+from druks.user_settings.models import SettingsOverride
 
 
 class DummyOutput(agents.AgentOutput):
@@ -82,11 +84,12 @@ def _patch_ephemeral(monkeypatch, box):
 
 
 @pytest.fixture
-def current_run():
+async def current_run():
     # An agent call reads its workflow from current_workflow; set it like the run engine does.
     from druks.workflows import Workflow, current_workflow
 
     workflow = Workflow()
+    workflow.account_id = (await Account.get_default()).id
     workflow._workflow_id = "wf-9"
     workflow.kind = "test"
     token = current_workflow.set(workflow)
@@ -152,11 +155,9 @@ async def test_declaration_drives_run_agent_call(druks_db, tmp_path, monkeypatch
     result = await DUMMY_AGENT._run(workflow_id="wf-9", repo="acme/widget")
 
     assert result == DummyOutput(ok=True)
-    # The sandbox resolves harness, model, credential, effort, and timeout itself
-    # from the agent's name and the run's account.
     kwargs = sandbox.run_agent.await_args.kwargs
     assert kwargs["agent"] == "dummy"
-    assert kwargs["account_id"] is None
+    assert kwargs["profile"].subscription.account_id == current_run.account_id
     assert kwargs["schema"] == DummyOutput.model_json_schema()
     assert kwargs["prompt"] == "PROMPT:dummy/agent.md:repo=acme/widget"
     assert kwargs["artifact_dir"] == tmp_path / "run-wf-9"
@@ -227,14 +228,21 @@ async def test_ephemeral_acquisition_keys_idempotency_to_workflow_step(
     assert seen == ["wf-9:dummy"]
 
 
-async def test_running_call_visible_then_finished(druks_db, tmp_path, monkeypatch, current_run):
+@pytest.mark.parametrize("billing", ["subscription", "api_key"])
+async def test_running_call_visible_then_finished(
+    druks_db, tmp_path, monkeypatch, current_run, billing
+):
     """The AgentCall exists RUNNING on its host while the agent runs, so the live
     transcript has a row to stream onto, and is finished once it returns."""
     sandbox = _patch_runtime(monkeypatch, tmp_path, {"ok": True})
+    await installation_key()
+    await SettingsOverride.set_agent_billing(DUMMY_AGENT.id, billing)
     during: dict[str, object] = {}
 
-    async def _run_agent(*, call_id, **_kwargs):
+    async def _run_agent(*, call_id, profile, **_kwargs):
         row = await AgentCall.get(call_id)
+        assert row.subscription_id == (profile.subscription.id if profile.subscription else None)
+        assert row.api_key_provider == (profile.api_key.provider if profile.api_key else None)
         during["status"] = row.status
         during["host"] = row.sandbox_host_id
         return make_agent_result({"ok": True}, agent="dummy")
@@ -871,7 +879,8 @@ async def test_recovery_supersedes_the_orphaned_running_call(druks_db):
         model="m",
         agent="summarize",
         host_id="h",
-        account_id="system",
+        subscription_id=None,
+        api_key_provider=(await installation_key()).provider,
     )
     await AgentCall.start(
         engine,
@@ -880,7 +889,8 @@ async def test_recovery_supersedes_the_orphaned_running_call(druks_db):
         model="m",
         agent="summarize",
         host_id="h",
-        account_id="system",
+        subscription_id=None,
+        api_key_provider=(await installation_key()).provider,
     )
 
     by_id = {call.id: call for call in await AgentCall.list_for_run("wf-9")}

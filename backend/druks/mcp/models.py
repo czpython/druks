@@ -7,7 +7,6 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Mapped, mapped_column
 
-from druks.accounts.constants import SYSTEM_ACCOUNT_ID
 from druks.apps.registry import mcp_servers
 from druks.core.models import Uuid7Pk
 from druks.database import db_session
@@ -174,14 +173,16 @@ class McpServer(Base, Uuid7Pk):
 
 class McpClientRegistration(Base, Uuid7Pk):
     __tablename__ = "mcp_client_registrations"
-    __table_args__ = (UniqueConstraint("server_id", "account_id"),)
+    __table_args__ = (
+        UniqueConstraint("server_id", "account_id", postgresql_nulls_not_distinct=True),
+    )
 
     # One RFC 7591 registration per grant: druks registers a fresh client on
     # every connect, so each account's grant refreshes as the client it
     # consented through. The refresh token lives on the platform's OauthConnection.
     server_id: Mapped[str] = mapped_column(ForeignKey("mcp_servers.id", ondelete="CASCADE"))
-    account_id: Mapped[str] = mapped_column(
-        ForeignKey("accounts.id", ondelete="RESTRICT"), default=SYSTEM_ACCOUNT_ID
+    account_id: Mapped[str | None] = mapped_column(
+        ForeignKey("accounts.id", ondelete="RESTRICT"), default=None
     )
     token_endpoint: Mapped[str] = mapped_column(String)
     client_id: Mapped[str] = mapped_column(String)
@@ -191,7 +192,7 @@ class McpClientRegistration(Base, Uuid7Pk):
 
     @classmethod
     async def get_for_account(
-        cls, server_name: str, account_id: str
+        cls, server_name: str, account_id: str | None
     ) -> "McpClientRegistration | None":
         return (
             await db_session().execute(
@@ -206,7 +207,7 @@ class McpClientRegistration(Base, Uuid7Pk):
         cls,
         *,
         server_id: str,
-        account_id: str,
+        account_id: str | None,
         token_endpoint: str,
         client_id: str,
         client_secret: str = "",

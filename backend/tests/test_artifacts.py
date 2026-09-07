@@ -1,4 +1,6 @@
 import pytest
+from conftest import installation_key
+from druks.accounts.models import Account
 from druks.api.artifacts import get_artifact
 from druks.durable.enums import RunState
 from druks.durable.models import AgentCall, Artifact, Run
@@ -11,9 +13,16 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 
 async def _seed_call(druks_db) -> AgentCall:
-    druks_db.add(Run(id="run-1", kind="build"))
+    druks_db.add(
+        Run(id="run-1", kind="build", account_id=(await Account.get_or_create("op@example.com")).id)
+    )
     call = AgentCall(
-        id="call-1", run_id="run-1", agent="summarize", model="m", sandbox_host_id="host-1"
+        api_key_provider=(await installation_key()).provider,
+        id="call-1",
+        run_id="run-1",
+        agent="summarize",
+        model="m",
+        sandbox_host_id="host-1",
     )
     druks_db.add(call)
     await druks_db.flush()
@@ -67,11 +76,18 @@ async def test_artifact_cascades_with_its_call(druks_db, tmp_path):
 async def test_get_latest_for_run_returns_the_newest_calls_artifact(druks_db, tmp_path):
     # The read side serves the run's latest artifact on the in-app review ask —
     # the second call's plan wins.
-    druks_db.add(Run(id="run-1", kind="build"))
+    druks_db.add(
+        Run(id="run-1", kind="build", account_id=(await Account.get_or_create("op@example.com")).id)
+    )
     for call_id, title in (("call-1", "First plan"), ("call-2", "Revised plan")):
         druks_db.add(
             AgentCall(
-                id=call_id, run_id="run-1", agent="summarize", model="m", sandbox_host_id="host-1"
+                api_key_provider=(await installation_key()).provider,
+                id=call_id,
+                run_id="run-1",
+                agent="summarize",
+                model="m",
+                sandbox_host_id="host-1",
             )
         )
         await druks_db.flush()
@@ -90,6 +106,7 @@ async def test_get_ask_resolves_the_review_artifact(druks_db, tmp_path):
     # An in-app ask stores no label/artifact — the read side derives both from
     # the run's latest artifact. A declared ask passes through untouched.
     run = Run(
+        account_id=(await Account.get_or_create("op@example.com")).id,
         id="run-1",
         kind="build",
         state=RunState.PARKED.value,
@@ -98,7 +115,12 @@ async def test_get_ask_resolves_the_review_artifact(druks_db, tmp_path):
     druks_db.add(run)
     druks_db.add(
         AgentCall(
-            id="call-1", run_id="run-1", agent="summarize", model="m", sandbox_host_id="host-1"
+            api_key_provider=(await installation_key()).provider,
+            id="call-1",
+            run_id="run-1",
+            agent="summarize",
+            model="m",
+            sandbox_host_id="host-1",
         )
     )
     await druks_db.flush()
@@ -117,6 +139,7 @@ async def test_get_ask_resolves_the_review_artifact(druks_db, tmp_path):
     }
 
     external = Run(
+        account_id=(await Account.get_or_create("op@example.com")).id,
         id="run-2",
         kind="build",
         state=RunState.PARKED.value,
@@ -144,9 +167,16 @@ async def test_run_response_projects_the_parked_gate(druks_db):
 async def test_get_artifact_returns_recorded_content(druks_db, tmp_path, monkeypatch):
     # call_dir resolves through load_settings().artifacts_dir, so point it at tmp.
     monkeypatch.setenv("DRUKS_DATA_DIR", str(tmp_path))
-    druks_db.add(Run(id="run-1", kind="build"))
+    druks_db.add(
+        Run(id="run-1", kind="build", account_id=(await Account.get_or_create("op@example.com")).id)
+    )
     call = AgentCall(
-        id="call-1", run_id="run-1", agent="summarize", model="m", sandbox_host_id="host-1"
+        api_key_provider=(await installation_key()).provider,
+        id="call-1",
+        run_id="run-1",
+        agent="summarize",
+        model="m",
+        sandbox_host_id="host-1",
     )
     druks_db.add(call)
     await druks_db.flush()
@@ -175,10 +205,17 @@ async def test_get_artifact_404_when_content_gone(druks_db, tmp_path, monkeypatc
     # Descriptor row present but the file never written — the read repairs to a 404,
     # not a 500.
     monkeypatch.setenv("DRUKS_DATA_DIR", str(tmp_path))
-    druks_db.add(Run(id="run-1", kind="build"))
+    druks_db.add(
+        Run(id="run-1", kind="build", account_id=(await Account.get_or_create("op@example.com")).id)
+    )
     druks_db.add(
         AgentCall(
-            id="call-1", run_id="run-1", agent="summarize", model="m", sandbox_host_id="host-1"
+            api_key_provider=(await installation_key()).provider,
+            id="call-1",
+            run_id="run-1",
+            agent="summarize",
+            model="m",
+            sandbox_host_id="host-1",
         )
     )
     await druks_db.flush()

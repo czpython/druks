@@ -189,17 +189,18 @@ resolved account, and `start()` inherits it. A route does not require more
 attribution code. If the dispatcher has a better account, pass `account_id`.
 For example, a webhook can resolve the ticket assignee.
 
-Each agent call uses the subscription of the run account. A run with no
-account uses the installation fallback account's subscription. A missing
-subscription refuses the call. Druks never falls through to another account
-or to an API key. An API key is the installation's, owned by no account, so a
-call billed to it records the system account as the charged account. The call
-records the charged account. Thus, you can see fallback use.
+`Run.account_id` is required. A browser start records the authenticated account.
+An unattended start records the default account. Druks refuses to start a run
+before an account is available. A parked run keeps its account after resume.
 
-A cron or background run
-without an account uses the system account. A parked run keeps its original
-attribution after resume. The person who selects **Resume** does not become the
-payer.
+Each agent call uses that account's profile. Agent overrides take priority.
+The call records exactly one billing reference: `subscription_id` or
+`api_key_provider`. Druks uses that selected credential for execution. Missing
+credentials refuse the call. A workflow can use different providers across its
+agent calls. Disconnect clears the credential secret and retains its billing
+identity for call history.
+See [personal and installation settings](configuration.md#personal-and-installation-settings)
+for profile creation and timezone rules.
 
 ### The journal
 
@@ -279,7 +280,7 @@ class Engage(Workflow):
 ```
 
 A scheduled `dispatch()` fires with no arguments, so it must be nullary. Druks
-evaluates cron expressions in the operator timezone. The dashboard can retune or
+evaluates cron expressions in the installation timezone. The dashboard can retune or
 disable a declared schedule but cannot invent a new workflow schedule.
 
 ### Background tasks
@@ -1253,10 +1254,9 @@ Create the database one time with `createdb druks_test`. The
 development Compose project already creates it.
 
 On that database, the plugin creates `citext` and imports installed app models.
-It runs SQLAlchemy `create_all` and seeds platform reference rows. It builds the
-DBOS system tables through DBOS database migrations. It does not reset or drop a
-schema. It rolls back each test write through `druks_db`. `druks_redis`
-runs `FLUSHDB` on the test index.
+It runs SQLAlchemy `create_all`. It builds the DBOS system tables through DBOS
+database migrations. It does not reset or drop a schema. It rolls back each test
+write through `druks_db`. `druks_redis` runs `FLUSHDB` on the test index.
 
 ## Declare pages
 

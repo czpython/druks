@@ -25,7 +25,7 @@ def _http() -> httpx.AsyncClient:
     return httpx.AsyncClient(timeout=30.0, follow_redirects=True)
 
 
-async def get_connection(name: str, account_id: str) -> OauthConnection | None:
+async def get_connection(name: str, account_id: str | None) -> OauthConnection | None:
     # One live connection per (server, account) — MCP's policy over the
     # shared table. Revoked rows stay behind as history.
     rows = await OauthConnection.list_for_account(grant_provider(name), account_id)
@@ -273,13 +273,13 @@ async def complete_connect(*, state: str, code: str) -> str:
     return name
 
 
-async def evict_access_token(name: str, account_id: str) -> None:
+async def evict_access_token(name: str, account_id: str | None) -> None:
     connection = await get_connection(name, account_id)
     if connection:
         await OauthClient(provider=grant_provider(name)).evict_access_token(connection.id)
 
 
-async def disconnect(name: str, account_id: str, *, reason: str = "user") -> None:
+async def disconnect(name: str, account_id: str | None, *, reason: str = "user") -> None:
     connection = await get_connection(name, account_id)
     if connection:
         await OauthClient(provider=grant_provider(name)).disconnect(connection, reason=reason)
@@ -288,7 +288,7 @@ async def disconnect(name: str, account_id: str, *, reason: str = "user") -> Non
         await registration.delete()
 
 
-async def get_access_token(name: str, account_id: str) -> str:
+async def get_access_token(name: str, account_id: str | None) -> str:
     """The delivery-side token for a connected server, served by the shared
     engine from this server's grant — delivery never ships a server the agent
     can't authenticate to."""

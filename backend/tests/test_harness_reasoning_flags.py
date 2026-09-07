@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 from conftest import connect_provider
+from druks.accounts.models import Account
 from druks.harnesses.claude import ClaudeHarness
 from druks.harnesses.codex import CodexHarness
 from druks.harnesses.datastructures import SandboxSettings
@@ -42,7 +43,9 @@ async def test_claude_build_invocation_carries_every_flag():
         effort="high",
         sandbox=_sandbox_config(),
     ).build_invocation(
-        subscription=await ProviderSubscription.get_for_account("anthropic", fallback=True),
+        subscription=await ProviderSubscription.get_for_account(
+            "anthropic", (await Account.get_default()).id
+        ),
         prompt="hello",
         schema=schema,
         run_id="run-1",
@@ -98,7 +101,9 @@ async def test_codex_build_invocation_carries_every_flag():
         effort="high",
         sandbox=_sandbox_config(),
     ).build_invocation(
-        subscription=await ProviderSubscription.get_for_account("openai", fallback=True),
+        subscription=await ProviderSubscription.get_for_account(
+            "openai", (await Account.get_default()).id
+        ),
         prompt="hello",
         schema={"type": "object"},
         run_id="run-1",

@@ -26,13 +26,14 @@ import druks.redis
 import druks.services.models  # noqa: F401
 import druks.skills.models  # noqa: F401
 import druks.user_settings.models  # noqa: F401
+from druks.accounts.models import Account
 from druks.apps.loader import import_app_models, iter_apps
-from druks.bootstrap import seed
 from druks.database import _session_factory, configure_session, create_engine_from_url, db_session
 from druks.durable import AgentCall, Run
 from druks.durable.datastructures import Subject
 from druks.durable.dbos_state import DBOS_SYSTEM_SCHEMA, workflow_status
 from druks.durable.engine import _dbos_database_url, configure_engine
+from druks.harnesses.models import ProviderKey
 from druks.models import Base, StoredSubject
 from druks.settings import Settings
 from druks.workflows import Workflow, WorkflowError, _bind_instance, current_workflow
@@ -111,14 +112,13 @@ def _druks_engine() -> Iterator[Engine]:
 
 
 def init_db(engine: Engine) -> None:
-    """Create every installed app's tables and the first-start seed rows.
+    """Create every installed app's tables.
     Idempotent; production owns its schema through Alembic instead."""
     import_app_models()
     # citext backs the case-insensitive email columns and must exist before create_all.
     with engine.begin() as connection:
         connection.execute(text("CREATE EXTENSION IF NOT EXISTS citext"))
     Base.metadata.create_all(engine)
-    seed(engine)
 
 
 @pytest.fixture(scope="session")
@@ -293,7 +293,11 @@ def druks_without_remote_config(monkeypatch) -> None:
 
 
 async def run_workflow(
-    workflow_class, *, subject: "Subject | StoredSubject | None" = None, **input
+    workflow_class,
+    *,
+    subject: "Subject | StoredSubject | None" = None,
+    account_id: str | None = None,
+    **input,
 ) -> object:
     """Run a workflow's body against ``subject`` and return its result, without a
     durable engine — no checkpoints, no lifecycle events, no retries. Only the
@@ -309,7 +313,12 @@ async def run_workflow(
     identity = None
     if subject:
         identity = subject.identity
-    instance, run_kwargs = _bind_instance(workflow_class, identity, input)
+    account = (
+        await Account.get_for_run(account_id)
+        if account_id
+        else await Account.get_or_create("op@example.com")
+    )
+    instance, run_kwargs = _bind_instance(workflow_class, identity, input, account_id=account.id)
     body = getattr(workflow_class, workflow_class._body_method)
     token = current_workflow.set(instance)
     try:
@@ -328,10 +337,12 @@ async def seed_run(
     input_gate: str | None = None,
     input_request: dict | None = None,
     failure: str | None = None,
-    account_id: str = "system",
+    account_id: str | None = None,
 ) -> Run:
     if state == "parked" and not input_gate:
         raise ValueError("input_gate is required for a parked run")
+    if not account_id:
+        account_id = (await Account.get_or_create("op@example.com")).id
     run = Run(
         id=run_id or str(uuid7()),
         kind=kind,
@@ -396,8 +407,17 @@ async def seed_call(
     status: str = "succeeded",
     model: str = "gpt-5.5",
     last_error: str | None = None,
+    subscription_id: str | None = None,
+    api_key_provider: str | None = None,
 ) -> AgentCall:
     """An agent call on a run, stamped with the id of the agent that made it."""
+    if not (subscription_id or api_key_provider):
+        key = await ProviderKey.create(
+            provider=model.partition("/")[0],
+            key="test-key",
+            account=await Account.get_for_run(run.account_id),
+        )
+        api_key_provider = key.provider
     call = AgentCall(
         run_id=run.id,
         agent=agent,
@@ -406,10 +426,12 @@ async def seed_call(
         last_error=last_error,
         finished_at=Base.utc_now() if status != "running" else None,
         sandbox_host_id=f"test-host-{run.id}",
+        subscription_id=subscription_id,
+        api_key_provider=api_key_provider,
     )
     session.add(call)
     await session.flush()
-    # The read side serializes account and run off the row; a flush loads
+    # The read side serializes billing and run off the row; a flush loads
     # neither, and under async a lazy touch is an error.
-    await session.refresh(call, ["account", "run"])
+    await session.refresh(call, ["subscription", "api_key", "run"])
     return call

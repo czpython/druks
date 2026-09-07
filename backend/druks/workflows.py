@@ -27,6 +27,7 @@ from pydantic import BaseModel, Field, create_model
 from uuid_utils import uuid7
 
 from druks.accounts.context import current_account_id
+from druks.accounts.models import Account
 from druks.apps.loader import resolve_workflow_app
 from druks.apps.registry import workflows
 from druks.apps.settings import (
@@ -56,7 +57,7 @@ from druks.sandbox.constants import SANDBOX_HOST_ROTATE_BEFORE_SECONDS
 from druks.sandbox.datastructures import Sandbox
 from druks.sandbox.templates import get_template_id
 from druks.signals import publish
-from druks.user_settings.models import SettingsOverride, UserSettings
+from druks.user_settings.models import SettingsOverride, SettingsProfile
 from druks.workspaces import Workspace
 
 # druks.workflows is the author door for workflow authoring: Workflow, Gate,
@@ -370,9 +371,9 @@ async def _notify_designated_destination(workflow_id: str, subject: dict[str, An
     # the settings pointer is the operator's off-switch.
     async def _create() -> str | None:
         async with step_session():
-            destination_id = (await UserSettings.get()).gate_park_destination_id
+            run = await Run.get(workflow_id)
+            destination_id = (await SettingsProfile.get(run.account_id)).gate_park_destination_id
             if destination_id:
-                run = await Run.get(workflow_id)
                 return await run.create_park_notification(destination_id, subject)
 
     notification_id = await DBOS.run_step_async(
@@ -636,7 +637,7 @@ async def _execute_run(
     workflow_id: str,
     kind: str,
     subject: dict[str, Any] | None,
-    account_id: str | None,
+    account_id: str,
     body: Callable,
 ) -> Any:
     # Ensure the row (idempotent, so a scheduled run with no start() makes it
@@ -768,9 +769,8 @@ class Workflow:
         # run()'s validated input bundle (the model synthesized from its signature),
         # set before run() — for templates and derived properties. None = no input.
         self.input: BaseModel | None = None
-        # Who requested/triggered the run, replayed off the reserved input
-        # key; None on system-owned runs (crons, old checkpoints).
-        self.account_id: str | None = None
+        # The dispatcher binds the authenticated or default account before execution.
+        self.account_id: str
         self.journal = self.journal_class()
         # The run's warm VM, provisioned lazily and reaped at segment boundaries;
         # its lease expiry decides when it must rotate.
@@ -950,17 +950,14 @@ class Workflow:
         # subject is required (no default) so a run can't silently lose its
         # timeline by omission — pass subject=None explicitly for a background run.
         cls._validate_subject(subject)
-        if not account_id:
-            # Browser-origin starts inherit the request's authenticated account;
-            # dispatchers that know better pass account_id explicitly.
-            account_id = current_account_id.get()
+        account = await Account.get_for_run(account_id or current_account_id.get())
+        account_id = account.id
         wire: dict[str, Any] = {}
         if cls._run_input_model:
             wire = cls._run_input_model.model_validate(input).model_dump(mode="json")
         elif input:
             raise WorkflowError(f"{cls.__name__}.{cls._body_method}() takes no input")
-        if account_id:
-            wire[_ACCOUNT_INPUT_KEY] = account_id
+        wire[_ACCOUNT_INPUT_KEY] = account_id
         workflow_id = str(uuid7())
         # A subject has at most one active run per workflow kind, enforced by
         # DBOS queue deduplication: the slot is claimed atomically at enqueue,
@@ -1041,15 +1038,16 @@ def _bind_instance(
     cls: type[Workflow],
     subject: dict[str, Any] | None = None,
     input: dict[str, Any] | None = None,
+    *,
+    account_id: str,
 ) -> tuple[Workflow, dict[str, Any]]:
     """A workflow instance carrying its subject and validated input, with the
     keyword arguments its body takes."""
     instance = cls()
     instance._subject = subject
-    # Platform routing comes off before body validation; an old checkpoint
-    # without the key replays account-less.
     input = dict(input or {})
-    instance.account_id = input.pop(_ACCOUNT_INPUT_KEY, None)
+    input.pop(_ACCOUNT_INPUT_KEY, None)
+    instance.account_id = account_id
     # The body's input re-validates from its wire dict; a cron fires with no
     # input, so a scheduled workflow must default every parameter. The validated
     # bundle also lands on the instance for templates / derived properties.
@@ -1066,7 +1064,9 @@ async def _run_instance(
     subject: dict[str, Any] | None = None,
     input: dict[str, Any] | None = None,
 ) -> Any:
-    instance, run_kwargs = _bind_instance(cls, subject, input)
+    async with step_session():
+        account_id = (await Account.get_for_run((input or {}).get(_ACCOUNT_INPUT_KEY))).id
+    instance, run_kwargs = _bind_instance(cls, subject, input, account_id=account_id)
     instance._workflow_id = DBOS.workflow_id  # type: ignore[assignment]
     token = current_workflow.set(instance)
     try:

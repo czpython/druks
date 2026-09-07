@@ -533,27 +533,26 @@ async def test_with_scopes_declares_the_union_and_reads_connections(declared_ser
         "digest.acme",
     ]
 
-    from druks.accounts.constants import SYSTEM_ACCOUNT_ID
     from druks.services.models import OauthConnection
 
     row = await OauthConnection.create(
         provider="acme",
-        account_id=SYSTEM_ACCOUNT_ID,
+        account_id=None,
         refresh_token="rt-1",
         scopes=["profile.read"],
         identity={"email": "night@acme.test"},
     )
-    connections = await NightWatch.acme.list_for_account(SYSTEM_ACCOUNT_ID)
+    connections = await NightWatch.acme.list_for_account(None)
     assert [connection.id for connection in connections] == [row.id]
     assert connections[0].scopes == ["profile.read"]
     assert connections[0].identity == {"email": "night@acme.test"}
-    assert connections[0].account_id == SYSTEM_ACCOUNT_ID
+    assert connections[0].account_id is None
     assert (await NightWatch.acme.get(row.id)).id == row.id
     assert not await NightWatch.acme.get("missing")
 
     # The handle serves live connections only; the revoked row survives.
     await row.revoke("user")
-    assert not await NightWatch.acme.list_for_account(SYSTEM_ACCOUNT_ID)
+    assert not await NightWatch.acme.list_for_account(None)
     assert not await NightWatch.acme.get(row.id)
     assert (await OauthConnection.get(row.id)).identity == {"email": "night@acme.test"}
 
@@ -1109,7 +1108,6 @@ async def test_connections_list_and_revoke(tmp_path, acme, druks_db, monkeypatch
 async def test_replacing_the_client_credentials_revokes_its_connections(
     tmp_path, acme, druks_db, monkeypatch
 ):
-    from druks.accounts.constants import SYSTEM_ACCOUNT_ID
     from druks.services.models import OauthConnection
     from druks.testing import configure_app_for_test
 
@@ -1120,7 +1118,7 @@ async def test_replacing_the_client_credentials_revokes_its_connections(
 
     monkeypatch.setattr("druks.services.routes.publish", record)
     row = await OauthConnection.create(
-        provider="acme", account_id=SYSTEM_ACCOUNT_ID, refresh_token="rt-old", scopes=[]
+        provider="acme", account_id=None, refresh_token="rt-old", scopes=[]
     )
 
     with TestClient(configure_app_for_test(settings=make_settings(tmp_path))) as client:
@@ -1139,13 +1137,12 @@ async def test_replacing_the_client_credentials_revokes_its_connections(
     assert published == [
         (
             "oauth.disconnected",
-            {"provider": "acme", "connection_id": row.id, "account_id": SYSTEM_ACCOUNT_ID},
+            {"provider": "acme", "connection_id": row.id, "account_id": None},
         )
     ]
 
 
 async def test_list_serves_the_connections_beside_the_declared_union(tmp_path, acme, druks_db):
-    from druks.accounts.constants import SYSTEM_ACCOUNT_ID
     from druks.services.models import OauthConnection
     from druks.testing import configure_app_for_test
 
@@ -1162,7 +1159,7 @@ async def test_list_serves_the_connections_beside_the_declared_union(tmp_path, a
 
         row = await OauthConnection.create(
             provider="acme",
-            account_id=SYSTEM_ACCOUNT_ID,
+            account_id=None,
             refresh_token="rt-1",
             scopes=["profile.read"],
         )

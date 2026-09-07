@@ -40,7 +40,7 @@ async def get_identity(
     dependencies=[Depends(current_account)],
 )
 async def list_accounts() -> list[Account]:
-    return await Account.list_non_system()
+    return await Account.list_all()
 
 
 @router.get("/personal-tokens", response_model=list[PatResponse], response_model_by_alias=True)

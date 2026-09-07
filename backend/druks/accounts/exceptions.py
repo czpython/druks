@@ -5,7 +5,7 @@ class InvalidPatError(Exception):
 
 class AuthConfigurationError(Exception):
     """The configured auth mode cannot resolve a single operator identity —
-    e.g. ``none`` mode with more than one non-system account. Refuses the
+    e.g. ``none`` mode with more than one account. Refuses the
     request (and startup) instead of guessing which account is the operator."""
 
 

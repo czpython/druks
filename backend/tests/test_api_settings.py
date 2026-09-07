@@ -1,20 +1,16 @@
 from pathlib import Path
 
+from conftest import settings_client
 from druks.accounts.models import Account
 from druks.contrib.software_factory.app import SoftwareFactory
 from druks.database import db_session
-from druks.testing import configure_app_for_test, make_settings
 from druks.user_settings.models import SettingsOverride
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 
 
-def _build_client(tmp_path: Path) -> TestClient:
-    return TestClient(configure_app_for_test(settings=make_settings(tmp_path)))
-
-
 def test_get_settings_returns_default_utc_when_no_row_exists(tmp_path: Path):
-    with _build_client(tmp_path) as client:
+    with settings_client(tmp_path) as client:
         response = client.get("/api/settings")
 
     assert response.status_code == 200
@@ -24,7 +20,7 @@ def test_get_settings_returns_default_utc_when_no_row_exists(tmp_path: Path):
 
 
 def test_get_harnesses_lists_the_registry(tmp_path: Path):
-    with _build_client(tmp_path) as client:
+    with settings_client(tmp_path) as client:
         harnesses = {h["name"]: h for h in client.get("/api/settings/harnesses").json()}
     assert list(harnesses) == ["claude", "codex", "opencode", "pi"]
     assert harnesses["claude"] == {
@@ -37,7 +33,7 @@ def test_get_harnesses_lists_the_registry(tmp_path: Path):
 
 
 def test_get_settings_carries_the_execution_defaults(tmp_path: Path):
-    with _build_client(tmp_path) as client:
+    with settings_client(tmp_path) as client:
         body = client.get("/api/settings").json()
     assert body["defaultHarness"] == "claude"
     assert body["defaultModel"] == "anthropic/claude-opus-4-7"
@@ -47,11 +43,11 @@ def test_get_settings_carries_the_execution_defaults(tmp_path: Path):
         False,
         1800,
     )
-    assert body["fallbackAccountId"] is None
+    assert body["accountId"] is None
 
 
 def test_patch_settings_judges_the_default_triple_together(tmp_path: Path):
-    with _build_client(tmp_path) as client:
+    with settings_client(tmp_path) as client:
         # opencode takes keys only: the harness alone does not fit the
         # subscription default it would inherit.
         alone = client.patch("/api/settings", json={"defaultHarness": "opencode"})
@@ -72,18 +68,14 @@ def test_patch_settings_judges_the_default_triple_together(tmp_path: Path):
         assert "does not run OpenAI" in codex.json()["detail"]
 
 
-async def test_patch_settings_sets_the_account_unattended_runs_run_as(tmp_path: Path, druks_db):
+async def test_accounts_report_the_default_without_a_fallback_setting(tmp_path: Path, druks_db):
     account = await Account.get_or_create("ops@example.com")
-    with _build_client(tmp_path) as client:
-        assert {"id": account.id, "username": "ops@example.com"} in client.get(
+    with settings_client(tmp_path) as client:
+        assert {"id": account.id, "username": "ops@example.com", "isDefault": True} in client.get(
             "/api/auth/accounts"
         ).json()
-        patch = client.patch("/api/settings", json={"fallbackAccountId": account.id})
-        assert patch.status_code == 200
-        assert patch.json()["fallbackAccountId"] == account.id
-        assert client.patch("/api/settings", json={"fallbackAccountId": "ghost"}).status_code == 422
         assert (
-            client.patch("/api/settings", json={"fallbackAccountId": "system"}).status_code == 422
+            client.patch("/api/settings", json={"fallbackAccountId": account.id}).status_code == 422
         )
 
 
@@ -92,7 +84,7 @@ def test_patch_settings_persists_valid_iana_zone(tmp_path: Path, monkeypatch):
         return
 
     monkeypatch.setattr("druks.user_settings.routes.apply_schedules", _noop_schedules)
-    with _build_client(tmp_path) as client:
+    with settings_client(tmp_path) as client:
         patch = client.patch("/api/settings", json={"timezone": "Europe/Madrid"})
         assert patch.status_code == 200
         assert patch.json()["timezone"] == "Europe/Madrid"
@@ -103,7 +95,7 @@ def test_patch_settings_persists_valid_iana_zone(tmp_path: Path, monkeypatch):
 
 
 def test_patch_settings_rejects_invalid_timezone(tmp_path: Path):
-    with _build_client(tmp_path) as client:
+    with settings_client(tmp_path) as client:
         response = client.patch("/api/settings", json={"timezone": "Not/A/Zone"})
 
     assert response.status_code == 422
@@ -120,7 +112,7 @@ def test_timezone_change_reconciles_schedules(tmp_path: Path, monkeypatch):
         reconciled.append(True)
 
     monkeypatch.setattr("druks.user_settings.routes.apply_schedules", record)
-    with _build_client(tmp_path) as client:
+    with settings_client(tmp_path) as client:
         patch = client.patch("/api/settings", json={"timezone": "Europe/Madrid"})
         assert patch.status_code == 200
         assert len(reconciled) == 1
@@ -131,7 +123,7 @@ def test_timezone_change_reconciles_schedules(tmp_path: Path, monkeypatch):
 
 
 def test_patch_settings_updates_the_defaults_every_agent_inherits(tmp_path: Path):
-    with _build_client(tmp_path) as client:
+    with settings_client(tmp_path) as client:
         patch = client.patch(
             "/api/settings",
             json={"defaultHarness": "codex", "defaultModel": "openai/gpt-5.5", "fastMode": True},
@@ -146,7 +138,7 @@ def test_patch_settings_updates_the_defaults_every_agent_inherits(tmp_path: Path
 
 
 def test_patch_settings_rejects_defaults_that_break_an_agent_override(tmp_path: Path):
-    with _build_client(tmp_path) as client:
+    with settings_client(tmp_path) as client:
         override = client.patch(
             "/api/settings/apps",
             json={"agentModels": {"software_factory.generate_plan": "anthropic/claude-opus-4-7"}},
@@ -164,14 +156,14 @@ def test_patch_settings_rejects_defaults_that_break_an_agent_override(tmp_path: 
 
 
 def test_patch_settings_rejects_a_model_no_harness_runs(tmp_path: Path):
-    with _build_client(tmp_path) as client:
+    with settings_client(tmp_path) as client:
         response = client.patch("/api/settings", json={"defaultModel": "gpt-5.5"})
     assert response.status_code == 422
     assert "gpt-5.5" in response.json()["detail"]
 
 
 def test_agents_lists_every_apps_agents_as_they_resolve(tmp_path: Path):
-    with _build_client(tmp_path) as client:
+    with settings_client(tmp_path) as client:
         client.patch(
             "/api/settings/apps",
             json={
@@ -209,7 +201,7 @@ def test_agents_lists_every_apps_agents_as_they_resolve(tmp_path: Path):
 
 
 def test_apps_judge_an_agents_triple_as_it_resolves(tmp_path: Path):
-    with _build_client(tmp_path) as client:
+    with settings_client(tmp_path) as client:
         response = client.patch(
             "/api/settings/apps", json={"agentHarnesses": {"software_factory.implement": "pi"}}
         )
@@ -253,7 +245,7 @@ def _software_factory_settings_fields(client: TestClient) -> dict:
 
 def test_apps_surface_build_agents(tmp_path: Path):
     """The build pipeline's agents all tune under the SoftwareFactory app."""
-    with _build_client(tmp_path) as client:
+    with settings_client(tmp_path) as client:
         body = client.get("/api/settings/apps").json()
     apps = {m["name"]: m for m in body["apps"]}
 
@@ -263,7 +255,7 @@ def test_apps_surface_build_agents(tmp_path: Path):
 
 
 def test_apps_surface_build_agents_and_workflow_defaults(tmp_path: Path):
-    with _build_client(tmp_path) as client:
+    with settings_client(tmp_path) as client:
         build = _software_factory_app(client)
 
     agents = {a["name"]: a for a in build["agents"]}
@@ -330,7 +322,7 @@ async def test_app_secret_round_trip_encrypts_at_rest(tmp_path: Path):
     secret = "review-pem-value"
     app_id = "42424242"
     key = "app:software_factory:review_private_key"
-    with _build_client(tmp_path) as client:
+    with settings_client(tmp_path) as client:
         written = client.patch(
             "/api/settings/apps",
             json={
@@ -381,7 +373,7 @@ async def test_app_secret_plaintext_row_is_unset_until_resaved(tmp_path: Path):
     db_session().add(SettingsOverride(key=key, value=secret))
     await db_session().flush()
 
-    with _build_client(tmp_path) as client:
+    with settings_client(tmp_path) as client:
         initial = _software_factory_app(client)
         resolved_initial = (await SoftwareFactory.settings()).review_private_key
         saved = client.patch(
@@ -421,7 +413,7 @@ async def test_app_non_secret_setting_stays_in_value(tmp_path: Path):
     status = "Agent Queue"
     key = "app:software_factory:linear_trigger_status"
 
-    with _build_client(tmp_path) as client:
+    with settings_client(tmp_path) as client:
         written = client.patch(
             "/api/settings/apps",
             json={"appSettings": {"software_factory": {"linear_trigger_status": status}}},
@@ -456,7 +448,7 @@ def test_incoherent_app_save_is_rejected_and_rolled_back_before_schedules(
         reconciled.append(True)
 
     monkeypatch.setattr("druks.user_settings.routes.apply_schedules", record)
-    with _build_client(tmp_path) as client:
+    with settings_client(tmp_path) as client:
         response = client.patch(
             "/api/settings/apps",
             json={
@@ -478,7 +470,7 @@ def test_incoherent_app_save_is_rejected_and_rolled_back_before_schedules(
 async def test_clearing_the_identity_deletes_its_overrides_and_stays_coherent(tmp_path: Path):
     key = "app:software_factory:review_app_id"
 
-    with _build_client(tmp_path) as client:
+    with settings_client(tmp_path) as client:
         configured = client.patch(
             "/api/settings/apps",
             json={
@@ -515,7 +507,7 @@ async def test_clearing_the_identity_deletes_its_overrides_and_stays_coherent(tm
 
 
 def test_apps_override_agent_model_persists(tmp_path: Path):
-    with _build_client(tmp_path) as client:
+    with settings_client(tmp_path) as client:
         patch = client.patch(
             "/api/settings/apps",
             json={
@@ -531,7 +523,7 @@ def test_apps_override_agent_model_persists(tmp_path: Path):
 
 
 def test_apps_default_effort_and_per_agent_effort_override(tmp_path: Path):
-    with _build_client(tmp_path) as client:
+    with settings_client(tmp_path) as client:
         agents = {a["name"]: a for a in _software_factory_app(client)["agents"]}
         assert agents["software_factory.generate_plan"]["effort"] == "high"
         assert agents["software_factory.generate_plan"]["effortSource"] == "default"
@@ -548,7 +540,7 @@ def test_apps_default_effort_and_per_agent_effort_override(tmp_path: Path):
 
 
 def test_apps_reject_unknown_effort(tmp_path: Path):
-    with _build_client(tmp_path) as client:
+    with settings_client(tmp_path) as client:
         response = client.patch(
             "/api/settings/apps",
             json={"agentEfforts": {"software_factory.implement": "turbo"}},
@@ -558,7 +550,7 @@ def test_apps_reject_unknown_effort(tmp_path: Path):
 
 
 def test_apps_default_timeout_and_per_agent_timeout_override(tmp_path: Path):
-    with _build_client(tmp_path) as client:
+    with settings_client(tmp_path) as client:
         agents = {a["name"]: a for a in _software_factory_app(client)["agents"]}
         assert agents["software_factory.implement"]["timeout"] == 1800
         assert agents["software_factory.implement"]["timeoutSource"] == "default"
@@ -575,7 +567,7 @@ def test_apps_default_timeout_and_per_agent_timeout_override(tmp_path: Path):
 
 
 def test_apps_reject_non_positive_timeout(tmp_path: Path):
-    with _build_client(tmp_path) as client:
+    with settings_client(tmp_path) as client:
         response = client.patch(
             "/api/settings/apps",
             json={"agentTimeouts": {"software_factory.implement": 0}},
@@ -585,7 +577,7 @@ def test_apps_reject_non_positive_timeout(tmp_path: Path):
 
 def test_build_review_code_is_a_workflow_setting(tmp_path: Path):
     """Gating the code reviewer is a build-workflow boolean, not an agent flag."""
-    with _build_client(tmp_path) as client:
+    with settings_client(tmp_path) as client:
         workflow = _software_factory_app(client)["workflows"][0]
         fields = {f["name"]: f for f in workflow["fields"]}
         assert fields["review_code"]["value"] is True
@@ -602,7 +594,7 @@ def test_build_review_code_is_a_workflow_setting(tmp_path: Path):
 
 
 def test_apps_clearing_an_override_reverts_to_the_operator_default(tmp_path: Path):
-    with _build_client(tmp_path) as client:
+    with settings_client(tmp_path) as client:
         client.patch(
             "/api/settings/apps",
             json={"agentModels": {"software_factory.generate_plan": "anthropic/claude-opus-4-7"}},
@@ -620,7 +612,7 @@ def test_apps_clearing_an_override_reverts_to_the_operator_default(tmp_path: Pat
 
 
 def test_apps_reject_unknown_agent_model(tmp_path: Path):
-    with _build_client(tmp_path) as client:
+    with settings_client(tmp_path) as client:
         # No installed harness owns this namespace, so nothing could run it.
         response = client.patch(
             "/api/settings/apps",
@@ -631,7 +623,7 @@ def test_apps_reject_unknown_agent_model(tmp_path: Path):
 
 
 def test_apps_override_workflow_setting_persists(tmp_path: Path):
-    with _build_client(tmp_path) as client:
+    with settings_client(tmp_path) as client:
         patch = client.patch(
             "/api/settings/apps",
             json={
@@ -646,7 +638,7 @@ def test_apps_override_workflow_setting_persists(tmp_path: Path):
 
 
 def test_apps_plan_gate_override_persists(tmp_path: Path):
-    with _build_client(tmp_path) as client:
+    with settings_client(tmp_path) as client:
         patch = client.patch(
             "/api/settings/apps",
             json={
@@ -661,7 +653,7 @@ def test_apps_plan_gate_override_persists(tmp_path: Path):
 
 
 def test_apps_reject_removed_auto_dispatch_setting(tmp_path: Path):
-    with _build_client(tmp_path) as client:
+    with settings_client(tmp_path) as client:
         response = client.patch(
             "/api/settings/apps",
             json={
@@ -677,7 +669,7 @@ def test_apps_reject_removed_auto_dispatch_setting(tmp_path: Path):
 
 
 def test_apps_reject_out_of_range_workflow_setting(tmp_path: Path):
-    with _build_client(tmp_path) as client:
+    with settings_client(tmp_path) as client:
         response = client.patch(
             "/api/settings/apps",
             json={

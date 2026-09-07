@@ -2,6 +2,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
+from conftest import connect_anthropic_subscription
 from druks.accounts.models import Account, PersonalAccessToken
 from druks.api.server import app
 from druks.contrib.software_factory.app import SoftwareFactory
@@ -701,7 +702,7 @@ async def test_usage_agent_route_matches_the_service(client: TestClient, druks_d
         AgentCall(
             run_id=run.id,
             agent="summarize",
-            account_id=account.id,
+            subscription_id=(await connect_anthropic_subscription(account.username)).id,
             sandbox_host_id="host",
             model="gpt-5.5",
             status="succeeded",

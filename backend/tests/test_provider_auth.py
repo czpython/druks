@@ -14,7 +14,6 @@ from druks.harnesses.datastructures import ParsedUsage
 from druks.harnesses.exceptions import HarnessNotConnectedError, OAuthTokenError
 from druks.harnesses.models import ProviderKey, ProviderSubscription
 from druks.harnesses.providers import AnthropicProvider, OpenAiProvider
-from druks.user_settings.models import UserSettings
 
 _NOW = datetime(2026, 6, 4, 20, 0, tzinfo=UTC)
 
@@ -58,7 +57,7 @@ async def _seed_codex(*, provider_email="op@example.com", **kwargs) -> ProviderS
 
 async def _payload(provider_id: str) -> dict:
     # Rotation commits in its own session; refresh past this session's identity map.
-    row = await ProviderSubscription.get_for_account(provider_id, fallback=True)
+    row = await ProviderSubscription.get_for_account(provider_id, (await Account.get_default()).id)
     await db_session().refresh(row)
     return row.payload
 
@@ -358,7 +357,7 @@ async def test_connect_scopes_rows_by_provider_and_account(druks_db):
     assert other.account_id != claude_row.account_id
     assert (await Account.get_for_username("a@example.com")).id == claude_row.account_id
     # The first account adopted the execution fallback.
-    assert (await UserSettings.get()).fallback_account_id == claude_row.account_id
+    assert (await Account.get_default()).id == claude_row.account_id
 
 
 async def test_reconnect_updates_the_existing_credential_in_place(druks_db):

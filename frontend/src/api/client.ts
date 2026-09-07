@@ -16,7 +16,7 @@ import type {
   SubjectResponse,
   SubjectSummary,
   UpdateAppsSettingsRequest,
-  UpdateUserSettingsRequest,
+  UpdateSettingsRequest,
   UsageHistoryResponse,
   UsageResponse,
   UsageTodayResponse,
@@ -33,7 +33,7 @@ import type {
   ProviderSubscription,
   Skill,
   SkillCollection,
-  UserSettings,
+  SettingsProfile,
   DashboardSchedules,
   DashboardWork,
 } from './types'
@@ -264,9 +264,12 @@ export const api = {
     const qs = query.toString()
     return getJSON<FeedResponse>(`/api/events${qs ? `?${qs}` : ''}`)
   },
-  getSettings: () => getJSON<UserSettings>('/api/settings'),
-  updateSettings: (body: UpdateUserSettingsRequest) =>
-    patchJSON<UserSettings>('/api/settings', body),
+  getSettings: () => getJSON<SettingsProfile>('/api/settings'),
+  updateSettings: (body: UpdateSettingsRequest) =>
+    patchJSON<SettingsProfile>('/api/settings', body),
+  getPersonalSettings: () => getJSON<SettingsProfile>('/api/settings/personal'),
+  updatePersonalSettings: (body: UpdateSettingsRequest) =>
+    patchJSON<SettingsProfile>('/api/settings/personal', body),
   harnesses: () => getJSON<Harness[]>('/api/settings/harnesses'),
   agents: () => getJSON<AgentsResponse>('/api/agents'),
   accounts: () => getJSON<Account[]>('/api/auth/accounts'),

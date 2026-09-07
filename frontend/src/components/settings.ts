@@ -6,7 +6,7 @@ import type {
   ProviderCatalog,
   ProviderKey,
   ProviderSubscription,
-  UserSettings,
+  SettingsProfile,
   WorkflowSettingField,
 } from '../api/types'
 
@@ -90,23 +90,22 @@ export function buildCatalog(
 }
 
 export type Defaults = Pick<
-  UserSettings,
+  SettingsProfile,
   | 'defaultHarness'
   | 'defaultModel'
   | 'defaultBilling'
   | 'defaultEffort'
   | 'fastMode'
   | 'defaultTimeout'
-> & { fallbackAccountId: string | null }
+>
 
-export const defaultsOf = (settings: UserSettings): Defaults => ({
+export const defaultsOf = (settings: SettingsProfile): Defaults => ({
   defaultHarness: settings.defaultHarness,
   defaultModel: settings.defaultModel,
   defaultBilling: settings.defaultBilling,
   defaultEffort: settings.defaultEffort,
   fastMode: settings.fastMode,
   defaultTimeout: settings.defaultTimeout,
-  fallbackAccountId: settings.fallbackAccountId,
 })
 
 export function isFieldVisible(

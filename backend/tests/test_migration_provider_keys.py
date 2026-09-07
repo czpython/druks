@@ -6,7 +6,7 @@ import pytest
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
 from druks.accounts.models import Account
-from druks.harnesses.models import ProviderKey, ProviderSubscription
+from druks.harnesses.models import ProviderSubscription
 from druks.secrets import utils
 from sqlalchemy import text
 
@@ -29,7 +29,7 @@ def _upgrade(connection) -> None:
 
 
 async def _pre_migration_shape(druks_db) -> None:
-    await druks_db.execute(text("DROP TABLE provider_keys"))
+    await druks_db.execute(text("DROP TABLE provider_keys CASCADE"))
     await druks_db.execute(text("ALTER TABLE provider_subscriptions RENAME TO provider_logins"))
     await druks_db.execute(
         text(
@@ -71,10 +71,10 @@ async def test_a_persons_key_row_becomes_the_providers_key(druks_db):
 
     await (await druks_db.connection()).run_sync(_upgrade)
 
-    [stored] = await ProviderKey.list_all()
+    [stored] = (await druks_db.execute(text("SELECT * FROM provider_keys"))).all()
     assert stored.provider == "openai"
-    assert stored.value.decrypt() == "sk-4f2a"
-    assert stored.updated_by.username == "keyholder@example.com"
+    assert utils.decrypt(stored.value, "provider_keys.value") == b"sk-4f2a"
+    assert (await Account.get(stored.updated_by_account_id)).username == "keyholder@example.com"
     # The login row is a subscription now, resealed under the new table name.
     [subscription] = await ProviderSubscription.list_all()
     assert subscription.provider == "anthropic"

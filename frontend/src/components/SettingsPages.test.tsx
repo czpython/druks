@@ -9,7 +9,7 @@ import type {
   AgentSetting,
   AppsSettingsResponse,
   UpdateAppsSettingsRequest,
-  UserSettings,
+  SettingsProfile,
 } from '../api/types'
 
 vi.mock('../apps', () => ({}))
@@ -40,7 +40,7 @@ const userSettings = {
   defaultEffort: 'high',
   fastMode: false,
   defaultTimeout: 1800,
-  fallbackAccountId: 'acc-1',
+  accountId: null,
   gateParkDestinationId: null,
   updatedAt: '2026-08-01T00:00:00Z',
 }
@@ -144,6 +144,7 @@ const providerDirectory = [
 ]
 
 const patched: Record<string, unknown>[] = []
+const personalPatched: Record<string, unknown>[] = []
 
 const appSettings: AppsSettingsResponse = {
   allowedEfforts: ['low', 'medium', 'high'],
@@ -282,6 +283,7 @@ function stubFetch(
   initialApps: AppsSettingsResponse = appSettings,
 ) {
   let savedSettings = { ...userSettings }
+  let savedPersonal: typeof userSettings | null = null
   const savedApps = structuredClone(initialApps)
   vi.stubGlobal(
     'fetch',
@@ -341,9 +343,17 @@ function stubFetch(
         return new Response(JSON.stringify(resolvedAgents), { status: 200 })
       }
       if (path === '/api/auth/accounts') {
-        return new Response(JSON.stringify([{ id: 'acc-1', username: 'paulo@example.com' }]), {
+        return new Response(JSON.stringify([{ id: 'acc-1', username: 'paulo@example.com', isDefault: true }]), {
           status: 200,
         })
+      }
+      if (path === '/api/settings/personal') {
+        if (init?.method === 'PATCH') {
+          const changes = JSON.parse(String(init.body))
+          personalPatched.push(changes)
+          savedPersonal = { ...(savedPersonal ?? savedSettings), ...changes, accountId: 'operator' }
+        }
+        return new Response(JSON.stringify(savedPersonal ?? savedSettings), { status: 200 })
       }
       if (path === '/api/settings' && init?.method === 'PATCH') {
         patched.push(JSON.parse(String(init.body)))
@@ -376,7 +386,7 @@ function stubFetch(
             {
               provider: 'groq',
               keyTail: '4f2a',
-              updatedBy: { id: 'acc-1', username: 'paulo@example.com' },
+              updatedBy: { id: 'acc-1', username: 'paulo@example.com', isDefault: true },
               updatedAt: '2026-09-05T08:00:00Z',
             },
           ]),
@@ -425,7 +435,7 @@ function renderSettings(workPath?: string) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   render(
     <QueryClientProvider client={queryClient}>
-      <App account={{ id: 'operator', username: 'operator@example.invalid' }} />
+      <App account={{ id: 'operator', username: 'operator@example.invalid', isDefault: true }} />
     </QueryClientProvider>,
   )
 }
@@ -435,6 +445,7 @@ afterEach(() => {
   vi.unstubAllGlobals()
   vi.restoreAllMocks()
   patched.length = 0
+  personalPatched.length = 0
 })
 
 describe('SettingsPages app fields', () => {
@@ -601,9 +612,9 @@ describe('SettingsPages agents', () => {
     expect(await screen.findByRole('heading', { name: 'Agents' })).toBeTruthy()
     expect((screen.getByLabelText('Harness') as HTMLSelectElement).value).toBe('claude')
     expect((screen.getByLabelText('Billing') as HTMLSelectElement).value).toBe('subscription')
-    expect((screen.getByLabelText('Unattended runs use') as HTMLSelectElement).value).toBe('acc-1')
+    expect((screen.getByLabelText('Unattended runs use') as HTMLInputElement).value).toBe('paulo@example.com')
     expect(
-      screen.getByText('Applies to subscription billing for schedules and webhooks.'),
+      screen.getByText('The default account supplies unattended preferences and subscriptions.'),
     ).toBeTruthy()
     expect(await screen.findByText('coder')).toBeTruthy()
     expect(screen.getByText('critic')).toBeTruthy()
@@ -810,7 +821,7 @@ describe('settings drafts and navigation', () => {
     stubFetch(false)
     const update = vi
       .spyOn(api, 'updateSettings')
-      .mockResolvedValueOnce({ ...userSettings, timezone: 'Europe/Madrid' } as UserSettings)
+      .mockResolvedValueOnce({ ...userSettings, timezone: 'Europe/Madrid' } as SettingsProfile)
       .mockRejectedValueOnce(new Error('Could not save the agent defaults.'))
     renderSettings('/events')
     fireEvent.click(await screen.findByRole('link', { name: 'Settings' }))
@@ -895,7 +906,7 @@ describe('settings resource and keyboard behavior', () => {
 
   it('blocks duplicate shortcut saves while a request is pending', async () => {
     stubFetch(false)
-    let finish!: (settings: UserSettings) => void
+    let finish!: (settings: SettingsProfile) => void
     const update = vi.spyOn(api, 'updateSettings').mockReturnValue(
       new Promise((resolve) => {
         finish = resolve
@@ -909,7 +920,7 @@ describe('settings resource and keyboard behavior', () => {
     expect(update).toHaveBeenCalledTimes(1)
     expect(update).toHaveBeenCalledWith({ timezone: 'Europe/Madrid' })
     await act(async () => {
-      finish({ ...userSettings, timezone: 'Europe/Madrid' } as UserSettings)
+      finish({ ...userSettings, timezone: 'Europe/Madrid' } as SettingsProfile)
     })
     expect(
       (screen.getByRole('button', { name: 'Save changes' }) as HTMLButtonElement).disabled,
@@ -955,7 +966,7 @@ it('restores the work return URL when a settings fragment route reloads', async 
     <QueryClientProvider
       client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
     >
-      <App account={{ id: 'operator', username: 'operator@example.invalid' }} />
+      <App account={{ id: 'operator', username: 'operator@example.invalid', isDefault: true }} />
     </QueryClientProvider>,
   )
   await screen.findByRole('combobox', { name: 'Timezone' })
@@ -1190,7 +1201,7 @@ describe('settings resource read failures', () => {
     const key = {
       provider: 'cerebras',
       keyTail: 'test',
-      updatedBy: { id: 'acc-1', username: 'test@example.invalid' },
+      updatedBy: { id: 'acc-1', username: 'test@example.invalid', isDefault: true },
       updatedAt: '2026-09-05T08:00:00Z',
     }
     vi.stubGlobal(
@@ -1446,4 +1457,40 @@ it('keeps focus on another agent field after saving an app reached through searc
   await waitFor(() => expect(screen.getByRole('status').textContent).toBe('Saved'))
   expect(document.activeElement).toBe(harness)
   expect(scroll).not.toHaveBeenCalled()
+})
+
+
+it('saves a personal profile without changing installation settings', async () => {
+  stubFetch()
+  renderSettings('/settings/personal')
+  const timezone = await screen.findByRole('combobox', { name: 'Timezone' })
+  expect(screen.getByText(/Your first save creates a personal profile/)).toBeTruthy()
+  fireEvent.change(timezone, { target: { value: 'Europe/Madrid' } })
+  fireEvent.change(screen.getByRole('combobox', { name: 'Effort' }), { target: { value: 'low' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+  await waitFor(() => expect(personalPatched).toEqual([{ timezone: 'Europe/Madrid', defaultEffort: 'low' }]))
+  expect(patched).toEqual([])
+  await screen.findByText(/Your saved profile applies/)
+  fireEvent.click(screen.getByRole('link', { name: 'General' }))
+  expect((await screen.findByRole('combobox', { name: 'Timezone' }) as HTMLSelectElement).value).toBe('UTC')
+  fireEvent.change(screen.getByRole('combobox', { name: 'Timezone' }), { target: { value: 'Asia/Tokyo' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+  await waitFor(() => expect(patched).toEqual([{ timezone: 'Asia/Tokyo' }]))
+  fireEvent.click(screen.getByRole('link', { name: 'Preferences' }))
+  expect((await screen.findByRole('combobox', { name: 'Timezone' }) as HTMLSelectElement).value).toBe('Europe/Madrid')
+})
+
+it('keeps personal and installation drafts separate when saving one page', async () => {
+  stubFetch()
+  renderSettings('/settings/personal')
+  fireEvent.change(await screen.findByRole('combobox', { name: 'Timezone' }), { target: { value: 'Europe/Madrid' } })
+  fireEvent.click(screen.getByRole('link', { name: 'General' }))
+  fireEvent.change(await screen.findByRole('combobox', { name: 'Timezone' }), { target: { value: 'Asia/Tokyo' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+  await waitFor(() => expect(patched).toEqual([{ timezone: 'Asia/Tokyo' }]))
+  expect(personalPatched).toEqual([])
+  fireEvent.click(screen.getByRole('link', { name: /Preferences/ }))
+  expect((await screen.findByRole('combobox', { name: 'Timezone' }) as HTMLSelectElement).value).toBe('Europe/Madrid')
+  fireEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+  await waitFor(() => expect(personalPatched).toEqual([{ timezone: 'Europe/Madrid' }]))
 })

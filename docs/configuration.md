@@ -62,6 +62,31 @@ The installer generates secrets only when it first creates the TOML. When you mo
 recover an installation, preserve `[secrets]`. Use repeatable
 `druks setup ... --set key.path=value` arguments for explicit scripted writes.
 
+## Personal and installation settings
+
+**Settings → Preferences** edits your personal profile. **Settings → General**
+and **Settings → Agents** edit installation defaults. Each page saves its
+own draft.
+
+Your account uses installation defaults until the first personal edit. That edit
+copies the complete profile. Later installation changes do not change your saved
+profile. Shared agent overrides take priority. A declared agent timeout also takes
+priority over the profile default.
+
+The first account becomes the default account, including in header and JWT modes.
+Unattended calls use its profile and subscriptions. The flag grants no extra
+permissions. Calls with an explicit account use that account's subscriptions.
+Missing subscriptions fail the call. API keys belong to the installation.
+
+The installation timezone controls schedules and operational day boundaries.
+Your personal timezone controls timestamp display. Gate notifications use the
+run account's profile. Unattended runs record the default account.
+Druks refuses to start a run before account setup.
+
+The API exposes installation settings at `GET/PATCH /api/settings` and your
+profile at `GET/PATCH /api/settings/personal`. The personal route uses the
+authenticated account. Its `accountId` is NULL while it inherits defaults.
+
 ## Core process settings
 
 | Variable | Default | Purpose |
@@ -125,17 +150,18 @@ order:
    returns a 401 with the error class, not the token. Druks uses a fixed RS256
    profile and does not negotiate it.
 4. **No-authentication mode (`none`).** This mode has no authentication or identity edge. Druks
-   resolves the only non-system account. Zero accounts is the setup state. The
+   resolves the only account. Zero accounts is the setup state. The
    first completed provider connection creates the operator account from the
    provider-validated email.
 
-   More than one non-system account is configuration
+   More than one account is configuration
    drift. Druks refuses requests and startup in this state.
 
 A subscription is always one person's. An API key is the installation's:
 one per provider, owned by no account, and visible to every account in
 **Settings → Providers** with the name of the person who last pasted it. A
-paste from any account replaces it.
+paste from any account replaces it. Disconnect clears the secret and retains
+the credential identity for historical agent-call billing references.
 
 Before you enable `jwt` mode, make sure that the edge uses the configured header,
 claims, and rotation process.
@@ -324,8 +350,8 @@ Missing files are optional. Codex uses `.credentials.json` for MCP credentials.
 Provider credentials do not belong in this root. OpenCode and Pi do not read it.
 The default harness, model, billing, effort, and timeout live in
 **Settings → Agents**. Each agent can override any of them on its app's page.
-**Unattended runs use** names the account whose subscription an unattended
-run bills. A call refuses before provisioning a VM if its selected
+**Unattended runs use** names the default account. Its profile selects the
+subscription or installation API key. A call refuses before provisioning a VM if its selected
 credential is missing.
 
 ## Sandboxes

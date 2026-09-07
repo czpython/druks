@@ -185,8 +185,7 @@ class Agent:
             # Runs as its own step: the body does no IO, and replay reuses the
             # recorded wait instead of re-reading the scrape.
             async with step_session():
-                # The scrape belongs to the charged account — it differs from
-                # the run's on fallback.
+                # The scrape belongs to the subscription account.
                 profile = await get_profile(self.id, workflow.account_id)
                 provider_id = profile.model.partition("/")[0]
                 scrape = await UsageScrape.latest_for(provider_id, profile.charged_account_id)
@@ -262,9 +261,9 @@ class Agent:
         # Refusing an unservable call here beats provisioning a VM and
         # 401ing mid-run.
         profile = await get_profile(self.id, workflow.account_id)
-        # Plain snapshots: the commits below expire the ORM row mid-flight.
-        model, charged_account_id = profile.model, profile.charged_account_id
+        model = profile.model
         subscription_id = profile.subscription.id if profile.subscription else None
+        api_key_provider = profile.api_key.provider if profile.api_key else None
         # An agent call is a durability boundary — its effects don't roll back —
         # so commit here rather than hold the step's connection idle through the
         # minutes of provisioning and the run.
@@ -307,11 +306,13 @@ class Agent:
                     model=model,
                     agent=self.id,
                     host_id=runner.host_id,
-                    account_id=charged_account_id,
+                    subscription_id=subscription_id,
+                    api_key_provider=api_key_provider,
                 )
                 try:
                     result = await runner.run_agent(
                         account_id=workflow.account_id,
+                        profile=profile,
                         agent=self.id,
                         prompt=prompt,
                         schema=contract.model_json_schema(),
