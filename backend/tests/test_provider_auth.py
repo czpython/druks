@@ -322,6 +322,51 @@ async def test_rotation_lock_is_released_after_refresh(monkeypatch, druks_db):
     assert not await druks.redis.get_client().get(f"druks:harness:refresh:{connection.id}")
 
 
+async def test_two_mints_inside_the_margin_rotate_once_and_read_the_same_token(
+    monkeypatch, druks_db
+):
+    # Two boxes mint at once inside the margin: the lock elects one grant, and
+    # the second mint reloads and answers with the token the first one stored.
+    connection = await _seed_claude(
+        access="old", refresh="R0", expires_at=_NOW + timedelta(minutes=30)
+    )
+    calls = _mock_post(
+        monkeypatch,
+        _resp(200, {"access_token": "new", "refresh_token": "R1", "expires_in": 28800}),
+    )
+    first = await AnthropicProvider.rotate_token(connection.id, now=_NOW)
+    second = await AnthropicProvider.rotate_token(connection.id, now=_NOW)
+    assert (first.action, second.action) == ("refreshed", "fresh")
+    assert len(calls) == 1
+    token = AnthropicProvider.load_token(await ProviderSubscription.reload(connection.id), now=_NOW)
+    assert token.access_token == "new"
+    assert token.expires_at == second.expires_at == _NOW + timedelta(seconds=28800)
+
+
+async def test_a_failed_refresh_keeps_a_live_token_to_serve(monkeypatch, druks_db):
+    # The mint answers a box with the stored token while it is valid. A refresh
+    # that fails inside the margin changes nothing the box can see.
+    soon = _NOW + timedelta(minutes=30)
+    connection = await _seed_claude(access="old", refresh="R0", expires_at=soon)
+    _mock_post(monkeypatch, httpx.ConnectError("boom"))
+    result = await AnthropicProvider.rotate_token(connection.id, now=_NOW)
+    assert (result.action, result.error) == ("failed", "network")
+    token = AnthropicProvider.load_token(await ProviderSubscription.reload(connection.id), now=_NOW)
+    assert (token.access_token, token.expires_at) == ("old", soon)
+
+
+async def test_a_failed_refresh_of_an_expired_token_leaves_nothing_to_serve(monkeypatch, druks_db):
+    # Nothing valid is left, so the mint answers 503 and the exchange retries.
+    connection = await _seed_claude(
+        access="old", refresh="R0", expires_at=_NOW - timedelta(minutes=1)
+    )
+    _mock_post(monkeypatch, httpx.ConnectError("boom"))
+    await AnthropicProvider.rotate_token(connection.id, now=_NOW)
+    with pytest.raises(OAuthTokenError) as error:
+        AnthropicProvider.load_token(await ProviderSubscription.reload(connection.id), now=_NOW)
+    assert error.value.tag == "token_expired"
+
+
 async def test_disconnect_removes_only_the_addressed_login(druks_db):
     mine = await _seed_claude(provider_email="a@example.com")
     other = await _seed_claude(provider_email="b@example.com")
