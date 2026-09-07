@@ -48,8 +48,8 @@ a failed request keeps the operator on that page with its draft. Resource
 actions, such as connecting a provider or minting an API token, apply at once.
 Back to Druks restores the previous work URL and keeps the work page mounted.
 
-App settings use `/apps/<name>/settings` in the work context. The app's page
-navigation and the central App settings index link to this same route.
+App settings use `/apps/<name>/settings` in the work context. A gear beside the
+app name in the header and the central App settings index link to this same route.
 Options and Agents appear only when the app declares those controls. Both
 sections share one app draft. Leaving the app form offers Save, Discard, and
 Stay. An app without controls has no Settings destination. Backend app schemas

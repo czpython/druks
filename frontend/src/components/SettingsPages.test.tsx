@@ -991,6 +991,7 @@ describe('canonical app settings', () => {
     fireEvent.click(appLink)
     await waitFor(() => expect(window.location.pathname).toBe('/software_factory'))
     expect(screen.queryByRole('navigation', { name: 'Software Factory pages' })).toBeNull()
+    expect(screen.queryByRole('link', { name: 'Software Factory settings' })).toBeNull()
   })
 
   it('saves a workflow cadence through the app settings route', async () => {
@@ -1145,10 +1146,8 @@ describe('canonical app settings', () => {
   it('restores app settings from shared settings and guards new edits after return', async () => {
     stubFetch(false)
     renderSettings('/apps/software_factory/settings/agents')
-    const pages = await screen.findByRole('navigation', { name: 'Software Factory pages' })
-    expect(within(pages).getByRole('link', { name: 'Settings' }).getAttribute('aria-current')).toBe(
-      'page',
-    )
+    const settings = await screen.findByRole('link', { name: 'Software Factory settings' })
+    expect(settings.getAttribute('aria-current')).toBe('page')
     fireEvent.click(screen.getByRole('link', { name: 'Agent defaults' }))
     await screen.findByRole('heading', { name: 'Agent defaults' })
     fireEvent.click(screen.getByRole('link', { name: 'Back to Druks' }))
