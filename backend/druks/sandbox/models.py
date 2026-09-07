@@ -88,7 +88,6 @@ class SandboxIdentity(Base, Uuid7Pk):
         identity = cls(
             run_id=run_id,
             scoped_to=scoped_to,
-            # Own rows: the caller's values stay values.
             secret_refs=[
                 SecretRef(
                     name=ref.name,
@@ -110,9 +109,8 @@ class SandboxIdentity(Base, Uuid7Pk):
         entries = {}
         for ref in secret_refs:
             secret = await VaultSecret.get(ref.secret_id)
-            # A custom entry binds the host the proxy swaps at, the variable
-            # the box exports, and the header the value fills. A catalog entry
-            # leaves those to Drukbox.
+            # A custom entry names its host, variable, and header; a catalog
+            # entry leaves those to Drukbox.
             fields = {}
             if ref.host:
                 header = secret.header or BEARER_HEADER
@@ -188,8 +186,23 @@ class SandboxIdentity(Base, Uuid7Pk):
         await db_session().commit()
 
     async def revoke(self) -> None:
-        self.revoked_at = Base.utc_now()
+        # A second revoke keeps the first stamp.
+        self.revoked_at = self.revoked_at or Base.utc_now()
         await db_session().commit()
+
+    @classmethod
+    async def list_orphans(cls) -> list["SandboxIdentity"]:
+        """The identities of boxes whose run ended: bound, inside their lease, not revoked."""
+        rows = await db_session().scalars(
+            select(cls)
+            .options(selectinload(cls.run))
+            .where(
+                cls.host_id.is_not(None),
+                cls.revoked_at.is_(None),
+                cls.expires_at > Base.utc_now(),
+            )
+        )
+        return [identity for identity in rows if not identity.run.is_active]
 
     @classmethod
     async def revoke_for_host(cls, engine, host_id: str) -> None:

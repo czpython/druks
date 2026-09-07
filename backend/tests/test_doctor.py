@@ -198,6 +198,66 @@ async def test_drukbox_passes_when_unconfigured(tmp_path: Path) -> None:
     assert "not configured" in result.detail
 
 
+_SANDBOX = {"service_url": "https://sb.test", "service_token": "t"}
+
+
+def _exchange(monkeypatch, *, status: int = 200, error: Exception | None = None) -> list[str]:
+    # The exchange as the probe sees it: a status, or a connection error.
+    asked: list[str] = []
+
+    class FakeClient:
+        def __init__(self, **_kwargs) -> None:
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_exc) -> None:
+            pass
+
+        async def get(self, url: str):
+            asked.append(url)
+            if error:
+                raise error
+            return SimpleNamespace(status_code=status)
+
+    monkeypatch.setattr(doctor.httpx, "AsyncClient", FakeClient)
+    return asked
+
+
+async def test_secrets_exchange_is_not_probed_when_sandbox_execution_is_off(
+    tmp_path: Path, monkeypatch
+) -> None:
+    asked = _exchange(monkeypatch)
+
+    result = await doctor.check_secrets_exchange(make_settings(tmp_path))
+
+    assert result.ok
+    assert "not configured" in result.detail
+    assert asked == []
+
+
+async def test_secrets_exchange_reports_a_healthy_exchange(tmp_path: Path, monkeypatch) -> None:
+    _exchange(monkeypatch, status=200)
+
+    result = await doctor.check_secrets_exchange(make_settings(tmp_path, sandbox=_SANDBOX))
+
+    assert result.ok
+    assert result.detail == "http://127.0.0.1:8781/healthz"
+
+
+async def test_secrets_exchange_names_the_service_and_the_fix_when_unreachable(
+    tmp_path: Path, monkeypatch
+) -> None:
+    _exchange(monkeypatch, error=httpx.ConnectError("refused"))
+
+    result = await doctor.check_secrets_exchange(make_settings(tmp_path, sandbox=_SANDBOX))
+
+    assert not result.ok
+    assert "drukbox-exchange is unreachable at http://127.0.0.1:8781/healthz" in result.detail
+    assert "docker compose up -d drukbox-exchange" in result.detail
+
+
 async def test_declared_sandboxes_pass_when_none_are_declared(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -300,6 +360,7 @@ async def test_run_checks_covers_all_check_names(tmp_path: Path) -> None:
         "database",
         "redis",
         "drukbox",
+        "secrets_exchange",
         "capability_modules",
     }
 
