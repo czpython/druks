@@ -2,6 +2,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useMemo, useRef, type ReactNode } from 'react'
 import { Link as RouteLink } from 'wouter'
 
+import { appLabel } from '../apps/registry'
 import { api } from '../api/client'
 import type { Action, Follows, Link, PageEntry, PageSnapshot } from '../api/types'
 import { EmptyState } from '../components/EmptyState'
@@ -81,19 +82,19 @@ export function AppPage({ app, page }: { app: string; page: string }) {
   const chrome = { app, page, location, parent, root, tabs }
 
   if (snapshot.isLoading) {
-    const waiting = `loading ${app.replaceAll('_', ' ')}`
+    const waiting = `loading ${appLabel(app)}`
     // The breadcrumb and the tabs come from the roster, which is already warm,
     // so the page keeps its frame while the body arrives. A cold deeplink has
     // no roster yet and waits bare.
     if (!pages.length) {
       return (
-        <Page className="dui-page">
+        <Page inset className="dui-page">
           <EmptyState glyph="…" msg={waiting} />
         </Page>
       )
     }
     return (
-      <Page className="dui-page">
+      <Page inset className="dui-page">
         {/* The title is the app's to compute, so it is held rather than
             guessed: a page label would show the wrong words first. */}
         <PageChrome {...chrome} title="…" />
@@ -124,7 +125,7 @@ export function AppPage({ app, page }: { app: string; page: string }) {
         />
       ))}
       <PagesContext.Provider value={{ app, pages, operations, target }}>
-        <Page className="dui-page">
+        <Page inset className="dui-page">
           <PageChrome
             {...chrome}
             title={snapshot.data.title}
@@ -185,7 +186,7 @@ function PageChrome({
         ) : null}
       </div>
       {tabs.length > 0 && root && (
-        <nav className="dui-tabs" aria-label={`${app} page tabs`}>
+        <nav className="dui-tabs" aria-label={`${appLabel(app)} page tabs`}>
           {tabs.map((tab) => (
             <RouteLink
               key={tab.name}
@@ -204,10 +205,10 @@ function PageChrome({
 
 function appError(app: string, detail: string, retry: () => void): ReactNode {
   return (
-    <Page className="dui-page">
+    <Page inset className="dui-page">
       <EmptyState
         glyph="!"
-        msg={`${app} could not render this page`}
+        msg={`${appLabel(app)} could not render this page`}
         sub={detail || undefined}
         action={
           <button type="button" className="dui-retry" onClick={retry}>

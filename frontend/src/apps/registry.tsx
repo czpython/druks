@@ -35,7 +35,10 @@ export function targetQuery(target?: SubjectTarget): string {
 }
 
 export function appLabel(name: string): string {
-  return name.replace(/_/g, ' ')
+  return name
+    .split('_')
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ')
 }
 
 const REGISTRY = new Map<string, AppUI>()

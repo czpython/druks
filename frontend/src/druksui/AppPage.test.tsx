@@ -177,7 +177,7 @@ describe('a declared page', () => {
     )
 
     await waitFor(() =>
-      expect(screen.getByText('field_notes could not render this page')).toBeTruthy(),
+      expect(screen.getByText('Field Notes could not render this page')).toBeTruthy(),
     )
     expect(screen.getByText('try again')).toBeTruthy()
   })
@@ -280,7 +280,7 @@ describe('a page snapshot the renderer cannot walk', () => {
     renderAt('/field_notes', 'notes', broken as unknown as PageSnapshot)
 
     await waitFor(() =>
-      expect(screen.getByText('field_notes could not render this page')).toBeTruthy(),
+      expect(screen.getByText('Field Notes could not render this page')).toBeTruthy(),
     )
     expect(screen.getByText('the page snapshot was not renderable')).toBeTruthy()
   })

@@ -76,7 +76,7 @@ describe('Dashboard', () => {
     expect(details[0]!.textContent).toContain(failure)
     expect(details[0]!.querySelectorAll('code')[0]!.textContent).toBe('latest')
     expect(details[0]!.textContent).toContain('Earlier error')
-    expect(within(problems).getByRole('link', { name: 'Open events' }).getAttribute('href')).toBe('/events?app=notes')
+    expect(within(problems).getAllByRole('link', { name: 'Open' })[0]!.getAttribute('href')).toBe('/events?app=notes')
     expect(details[0]!.open).toBe(false)
   })
 
@@ -164,9 +164,11 @@ describe('Dashboard', () => {
     mount()
     expect(await screen.findAllByText('Review destination unavailable')).toHaveLength(2)
     expect(screen.queryByRole('link', { name: 'Review' })).toBeNull()
-    expect(screen.getByRole('link', { name: 'Open request' }).getAttribute('href')).toBe(
+    expect(screen.getAllByRole('link', { name: 'Open' }).map((link) => link.getAttribute('href'))).toEqual([
+      '/unsupported',
+      '/notes',
       'https://example.invalid/review',
-    )
+    ])
   })
 })
 

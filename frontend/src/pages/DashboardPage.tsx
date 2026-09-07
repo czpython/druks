@@ -83,7 +83,7 @@ export function DashboardPage({ apps }: { apps: string[] }) {
   const failed = work.isError || schedules.isError
 
   return (
-    <Page className="dashboard">
+    <Page inset className="dashboard">
       <header className="dashboard-head">
         <div>
           <h1>Dashboard</h1>
@@ -191,7 +191,6 @@ export function DashboardPage({ apps }: { apps: string[] }) {
           </div>
         ))}
       </section>
-      <p className="dashboard-access">Access health has not been checked.</p>
     </Page>
   )
 }
@@ -241,7 +240,7 @@ function WorkRow({ row, pending, failures }: { row: DashboardRun; pending: boole
       {destination ? (
         external ? (
           <a className="dashboard-action" href={destination} target="_blank" rel="noreferrer">
-            Open request
+            Open
           </a>
         ) : (
           <Link className={`dashboard-action${pending ? ' primary' : ''}`} href={destination}>
@@ -250,12 +249,12 @@ function WorkRow({ row, pending, failures }: { row: DashboardRun; pending: boole
         )
       ) : failures ? (
         <Link className="dashboard-action" href={`/events?app=${encodeURIComponent(row.app)}`}>
-          Open events
+          Open
         </Link>
       ) : (
         <div className="dashboard-unavailable">
           <span>{pending ? 'Review destination unavailable' : 'Run destination unavailable'}</span>
-          <Link href={appHome(row.app)}>Open app</Link>
+          <Link href={appHome(row.app)}>Open</Link>
         </div>
       )}
     </div>

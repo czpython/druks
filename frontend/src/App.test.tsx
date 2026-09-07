@@ -109,7 +109,7 @@ describe('command center navigation', () => {
   it('keeps app destinations stable on list and detail pages', async () => {
     renderApp()
     const apps = await screen.findByRole('navigation', { name: 'Apps' })
-    await within(apps).findByRole('link', { name: 'external' })
+    await within(apps).findByRole('link', { name: 'External' })
     const links = within(apps)
       .getAllByRole('link')
       .map((link) => link.getAttribute('href'))
@@ -120,7 +120,7 @@ describe('command center navigation', () => {
         .getAllByRole('link')
         .map((link) => link.getAttribute('href')),
     ).toEqual(links)
-    expect(within(apps).getByRole('link', { name: 'notes' }).getAttribute('aria-current')).toBe(
+    expect(within(apps).getByRole('link', { name: 'Notes' }).getAttribute('aria-current')).toBe(
       'page',
     )
     expect(
@@ -132,7 +132,7 @@ describe('command center navigation', () => {
 
   it('selects deep links and follows browser history', async () => {
     renderApp('/notes/history')
-    const pages = await screen.findByRole('navigation', { name: 'notes pages' })
+    const pages = await screen.findByRole('navigation', { name: 'Notes pages' })
     expect(within(pages).getByRole('link', { name: 'History' }).getAttribute('aria-current')).toBe(
       'page',
     )
@@ -144,7 +144,7 @@ describe('command center navigation', () => {
     })
     await screen.findByRole('heading', { name: 'Note history' })
     expect(
-      within(screen.getByRole('navigation', { name: 'notes pages' }))
+      within(screen.getByRole('navigation', { name: 'Notes pages' }))
         .getByRole('link', { name: 'History' })
         .getAttribute('aria-current'),
     ).toBe('page')
@@ -152,15 +152,15 @@ describe('command center navigation', () => {
 
   it('opens installed generic and standalone apps', async () => {
     renderApp()
-    fireEvent.click(await screen.findByRole('link', { name: 'headless' }))
+    fireEvent.click(await screen.findByRole('link', { name: 'Headless' }))
     await screen.findByRole('heading', { name: 'headless home' })
-    fireEvent.click(screen.getByRole('link', { name: 'external' }))
+    fireEvent.click(screen.getByRole('link', { name: 'External' }))
     await screen.findByRole('heading', { name: 'external mounted' })
   })
 
   it('filters the roster without removing shared destinations', async () => {
     renderApp()
-    await screen.findByRole('link', { name: 'external' })
+    await screen.findByRole('link', { name: 'External' })
     fireEvent.change(screen.getByRole('textbox', { name: 'Find an app' }), {
       target: { value: 'EXTERNAL' },
     })
@@ -258,7 +258,7 @@ describe('command center navigation', () => {
     }))
     vi.mocked(api.listApps).mockResolvedValueOnce([...roster, ...apps])
     renderApp()
-    await screen.findByRole('link', { name: 'department 39 with a long app name' })
+    await screen.findByRole('link', { name: 'Department 39 With A Long App Name' })
     fireEvent.change(screen.getByRole('textbox', { name: 'Find an app' }), {
       target: { value: 'department 39' },
     })

@@ -8,7 +8,7 @@ import { useSSE } from '../api/sse'
 import type { FeedItem } from '../api/types'
 import { EmptyState } from '../components/EmptyState'
 import { Page } from '../components/Page'
-import { registeredApps } from '../apps/registry'
+import { appLabel, registeredApps } from '../apps/registry'
 import { eventLine } from '../lib/feed'
 import { relTimeFromIso } from '../lib/format'
 import { useFormatters } from '../lib/preferences'
@@ -186,7 +186,7 @@ function AppFilter({
           aria-pressed={name === filter}
           onClick={() => onPick(name)}
         >
-          {name ?? 'all'}
+          {name ? appLabel(name) : 'All'}
         </button>
       ))}
     </div>
