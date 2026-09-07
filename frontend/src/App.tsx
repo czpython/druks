@@ -261,15 +261,13 @@ function AppShell({
 
   const declaredNavigation =
     ui?.navigation ?? rosterQuery.data?.find((entry) => entry.name === app)?.navigation
-  const hasSettings = Boolean(settingsQuery.data?.apps.some((entry) => entry.name === app))
-  const navigation: [string, string][] = urlApp
-    ? [
-        ...(declaredNavigation ?? []),
-        ...(hasSettings ? [[`/apps/${urlApp}/settings`, 'Settings'] as [string, string]] : []),
-      ]
-    : []
+  const appSettingsPath =
+    urlApp && settingsQuery.data?.apps.some((entry) => entry.name === urlApp)
+      ? `/apps/${urlApp}/settings`
+      : undefined
+  const navigation = urlApp ? (declaredNavigation ?? []) : []
   const activeTab = navigation
-    ?.map(([url]) => url)
+    .map(([url]) => url)
     .filter((url) => location === url || location.startsWith(`${url}/`))
     .sort((left, right) => right.length - left.length)[0]
   const visibleApps = registered.filter((name) =>
@@ -374,13 +372,28 @@ function AppShell({
         <div className="command-breadcrumb">
           <span>Command center /</span>
           <strong className="app-name">{title}</strong>
+          {appSettingsPath && (
+            <Link
+              href={appSettingsPath}
+              className="command-app-settings"
+              aria-label={`${title} settings`}
+              title={`${title} settings`}
+              aria-current={
+                location === appSettingsPath || location.startsWith(`${appSettingsPath}/`)
+                  ? 'page'
+                  : undefined
+              }
+            >
+              <Settings size={17} aria-hidden="true" />
+            </Link>
+          )}
         </div>
         <div className="command-utilities">
           <WakeLockIndicator />
           <span className="mono command-timezone">{timezone}</span>
         </div>
       </header>
-      {urlApp && navigation && navigation.length > 0 && (
+      {urlApp && navigation.length > 0 && (
         <nav className="command-app-navigation" aria-label={`${appLabel(urlApp)} pages`}>
           {navigation.map(([url, name]) => (
             <Link
