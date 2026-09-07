@@ -5,6 +5,8 @@ import shlex
 from pathlib import Path
 from typing import Any
 
+from drukbox_sdk import Secret
+
 from druks.sandbox.datastructures import (
     AgentInvocation,
     Credentials,
@@ -68,6 +70,7 @@ class ClaudeHarness(Harness):
         extra_env: dict[str, str] | None = None,
         mcp_servers: tuple[McpServer, ...] = (),
         subscription: ProviderSubscription | None = None,
+        # Accepted for signature parity. The sandbox entry carries the key.
         key: str | None = None,
         timeout: int = Harness.default_timeout,
     ) -> AgentInvocation:
@@ -120,9 +123,6 @@ class ClaudeHarness(Harness):
             f'if [ -n "$sf" ]; then cp "$sf" {session_q}; fi; '
             "exit $ec"
         )
-        env = dict(extra_env or {})
-        if key:
-            env["ANTHROPIC_API_KEY"] = key
         return AgentInvocation(
             name="claude",
             args=("sh", "-c", wrapper),
@@ -134,7 +134,7 @@ class ClaudeHarness(Harness):
                 skills=skills,
                 subscription=subscription,
             ),
-            env=env,
+            env=extra_env,
             extra_artifact_filenames=("debug.log", "session.jsonl"),
         )
 
@@ -191,6 +191,18 @@ class ClaudeHarness(Harness):
     @classmethod
     def auth_file(cls, subscription: ProviderSubscription) -> HomeFile:
         return HomeFile(".claude/.credentials.json", json.dumps(dict(subscription.payload)))
+
+    @classmethod
+    def get_secrets(cls, key: str) -> dict[str, Secret]:
+        return {
+            AnthropicProvider.id: Secret(
+                key,
+                host="api.anthropic.com",
+                auth_variable="ANTHROPIC_API_KEY",
+                auth_header="x-api-key",
+                auth_prefix="",
+            )
+        }
 
     def _command_args(self) -> tuple[str, ...]:
         args = (self.command,)

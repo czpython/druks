@@ -110,7 +110,7 @@ async def test_unattended_api_key_uses_installation_profile_without_a_default_ac
 
     profile = await get_profile(PROFILE_PROBE.id, None)
 
-    assert profile.key == "test-api-key"
+    assert profile.api_key.value.decrypt() == "test-api-key"
     assert profile.subscription is None
     assert profile.effort == "low"
 

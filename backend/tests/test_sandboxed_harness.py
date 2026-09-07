@@ -1,4 +1,5 @@
 import asyncio
+import functools
 import json
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
@@ -8,6 +9,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from conftest import PROFILE_PROBE, installation_key
 from druks.durable.enums import AgentCallStatus
 from druks.harnesses.base import Harness
 from druks.harnesses.claude import ClaudeHarness
@@ -23,14 +25,17 @@ from druks.harnesses.exceptions import (
     HarnessUsageLimitError,
     Retry,
 )
+from druks.harnesses.profiles import Profile, get_profile
 from druks.sandbox.datastructures import (
     AgentInvocation,
     AgentResult,
     Credentials,
     HarnessRunResult,
+    HomeFile,
 )
 from druks.sandbox.exceptions import SandboxUnreachable
 from druks.sandbox.host import Host
+from druks.user_settings.models import SettingsOverride
 
 
 @dataclass
@@ -521,13 +526,12 @@ def test_agent_result_names_the_agent_in_its_failure():
 
 @pytest.fixture
 def agent_profile():
-    from druks.harnesses.profiles import Profile
-
     return Profile(
         harness_class=ClaudeHarness,
         model="anthropic/claude-opus-4-7",
         subscription=SimpleNamespace(id="subscription-1", account_id="acc"),
         api_key=None,
+        secrets={},
         billing="subscription",
         effort="high",
         timeout=60,
@@ -586,3 +590,52 @@ async def test_run_agent_carries_a_taxonomy_failure_as_itself(ctx: SimpleNamespa
     )
 
     assert result.error is timeout
+
+
+async def test_claude_api_key_stays_on_the_server(
+    ctx: SimpleNamespace, druks_db, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Under api_key billing the VM is created with the key as a Drukbox entry and
+    holds a placeholder. The key reaches no invocation, VM file, artifact, or result."""
+    key = (await installation_key()).value.decrypt()
+    await SettingsOverride.set_agent_billing(PROFILE_PROBE.id, "api_key")
+    profile = await get_profile(PROFILE_PROBE.id, None)
+    result_event = {
+        "type": "result",
+        "subtype": "success",
+        "structured_output": {"ok": True},
+        "total_cost_usd": 0.01,
+    }
+    run = _FakeRun(stdout_chunks=[json.dumps(result_event).encode() + b"\n"])
+    sandbox = _fake_sandbox(run)
+    sandbox.run_prompt = functools.partial(Host.run_prompt, sandbox)
+    sandbox._exec = functools.partial(Host._exec, sandbox)
+    settings = SimpleNamespace(
+        sandbox=SimpleNamespace(service_url="x", service_token="x", timeout=30.0, image="x"),
+        harness_config_root=tmp_path / "harnesses",
+        skills_dir=None,
+    )
+    monkeypatch.setattr("druks.sandbox.host.load_settings", lambda: settings)
+
+    result = await Host.run_agent(
+        sandbox,
+        agent="evaluate",
+        profile=profile,
+        prompt="p",
+        schema={"type": "object"},
+        artifact_dir=ctx.artifact_dir,
+        call_id="call-9",
+    )
+
+    assert result.status is AgentCallStatus.SUCCEEDED
+    assert result.output == {"ok": True}
+    [start] = sandbox.calls
+    assert not start.kwargs["extra_env"]
+    assert key not in " ".join(start.kwargs["cmd"])
+    assert key not in start.kwargs["stdin_data"].decode()
+    bundle = start.kwargs["credentials_bundle"]
+    assert not bundle.github_token
+    assert not any(type(entry) is HomeFile for entry in bundle.home)
+    for artifact in (ctx.artifact_dir / "call-9").iterdir():
+        assert key not in artifact.read_text()
+    assert key not in repr(result) and key not in repr(profile)

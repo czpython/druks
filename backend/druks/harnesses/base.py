@@ -7,6 +7,8 @@ from collections.abc import Collection
 from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar
 
+from drukbox_sdk import Secret
+
 from druks.mcp import models as mcp_models
 from druks.mcp.helpers import get_bearer_token_env_var
 from druks.skills.models import Skill
@@ -101,6 +103,10 @@ class Harness(ABC):
         if cls.provider:
             return cls.provider == provider.id
         return bool(cls.billing_options & provider.billing_options)
+
+    @classmethod
+    def get_secrets(cls, key: str) -> dict[str, Secret]:
+        return {}
 
     @property
     def model_id(self) -> str:

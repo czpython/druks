@@ -1,10 +1,27 @@
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 
 import druks.workflows as sdk
 import pytest
+from drukbox_sdk import Secret
 from druks.sandbox.constants import SANDBOX_HOST_ROTATE_BEFORE_SECONDS
 from druks.workflows import Workflow
+
+
+def _profile(secrets: dict[str, Secret], secrets_id: str = "") -> SimpleNamespace:
+    return SimpleNamespace(secrets=secrets, secrets_id=secrets_id)
+
+
+_ENTRY = Secret(
+    "sk-real",
+    host="api.anthropic.com",
+    auth_variable="ANTHROPIC_API_KEY",
+    auth_header="x-api-key",
+    auth_prefix="",
+)
+_NONE = _profile({})
+_ANTHROPIC = _profile({"anthropic": _ENTRY}, "anthropic.20260907T110000")
 
 
 @dataclass
@@ -17,11 +34,15 @@ class _FakeSandboxClient:
     def __init__(self, *, lease: timedelta) -> None:
         self.lease = lease
         self.provisions: list[str] = []
+        self.secrets: list[dict[str, Secret]] = []
         self.released: list[str] = []
 
-    async def provision(self, *, idempotency_key: str, template: str | None) -> _FakeSandbox:
+    async def provision(
+        self, *, idempotency_key: str, secrets: dict[str, Secret], template: str | None
+    ) -> _FakeSandbox:
         assert template is None
         self.provisions.append(idempotency_key)
+        self.secrets.append(secrets)
         host_id = f"host-{len(self.provisions)}"
         return _FakeSandbox(id=host_id, expires_at=datetime.now(UTC) + self.lease)
 
@@ -46,8 +67,8 @@ async def test_warm_host_reused_while_lease_covers_another_call(monkeypatch):
     monkeypatch.setattr(sdk, "sandbox_client", fake)
     flow = _warm_workflow()
 
-    first = await flow._lease_host()
-    second = await flow._lease_host()
+    first = await flow._lease_host(_NONE)
+    second = await flow._lease_host(_NONE)
 
     assert first == second == "host-1"
     assert fake.provisions == ["wf-1:sandbox"]
@@ -62,13 +83,66 @@ async def test_warm_host_rotates_when_lease_cannot_cover_a_call(monkeypatch):
     monkeypatch.setattr(sdk, "sandbox_client", fake)
     flow = _warm_workflow()
 
-    first = await flow._lease_host()
-    second = await flow._lease_host()
+    first = await flow._lease_host(_NONE)
+    second = await flow._lease_host(_NONE)
 
     assert first == "host-1"
     assert second == "host-2"
     assert fake.released == ["host-1"]
     assert fake.provisions == ["wf-1:sandbox", "wf-1:sandbox"]
+
+
+@pytest.mark.asyncio
+async def test_warm_host_keeps_its_entries_across_calls(monkeypatch):
+    """Calls with the same entries keep the host created with those entries."""
+    fake = _FakeSandboxClient(lease=timedelta(hours=2))
+    monkeypatch.setattr(sdk, "sandbox_client", fake)
+    flow = _warm_workflow()
+
+    first = await flow._lease_host(_ANTHROPIC)
+    second = await flow._lease_host(_profile({"anthropic": _ENTRY}, _ANTHROPIC.secrets_id))
+
+    assert first == second == "host-1"
+    assert fake.provisions == ["wf-1:sandbox:anthropic.20260907T110000"]
+    assert fake.secrets == [{"anthropic": _ENTRY}]
+    assert fake.released == []
+
+
+@pytest.mark.asyncio
+async def test_warm_host_rotates_when_a_call_needs_other_entries(monkeypatch):
+    """A host holds only the entries it was created with. A call that needs other
+    entries gets a fresh host under a new provisioning key."""
+    fake = _FakeSandboxClient(lease=timedelta(hours=2))
+    monkeypatch.setattr(sdk, "sandbox_client", fake)
+    flow = _warm_workflow()
+
+    first = await flow._lease_host(_ANTHROPIC)
+    second = await flow._lease_host(_NONE)
+
+    assert first == "host-1"
+    assert second == "host-2"
+    assert fake.released == ["host-1"]
+    assert fake.provisions == ["wf-1:sandbox:anthropic.20260907T110000", "wf-1:sandbox"]
+    assert fake.secrets == [{"anthropic": _ENTRY}, {}]
+
+
+@pytest.mark.asyncio
+async def test_provisioning_key_names_the_pasted_key(monkeypatch):
+    """A replay after a crash starts with no held host and presents its key again.
+    The same pasted key finds the host. A replaced key asks for a fresh host."""
+    fake = _FakeSandboxClient(lease=timedelta(hours=2))
+    monkeypatch.setattr(sdk, "sandbox_client", fake)
+    replaced = _profile({"anthropic": _ENTRY}, "anthropic.20260907T120000")
+
+    await _warm_workflow()._lease_host(_ANTHROPIC)
+    await _warm_workflow()._lease_host(_ANTHROPIC)
+    await _warm_workflow()._lease_host(replaced)
+
+    assert fake.provisions == [
+        "wf-1:sandbox:anthropic.20260907T110000",
+        "wf-1:sandbox:anthropic.20260907T110000",
+        "wf-1:sandbox:anthropic.20260907T120000",
+    ]
 
 
 @pytest.mark.asyncio
@@ -79,5 +153,5 @@ async def test_no_warm_host_when_reuse_disabled(monkeypatch):
     monkeypatch.setattr(sdk, "sandbox_client", fake)
     flow = _warm_workflow(reuse=False)
 
-    assert await flow._lease_host() is None
+    assert await flow._lease_host(_NONE) is None
     assert fake.provisions == []

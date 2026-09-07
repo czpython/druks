@@ -24,7 +24,7 @@ from druks.harnesses.exceptions import (
 from druks.harnesses.profiles import Profile, get_profile
 from druks.prompts import render_prompt
 from druks.sandbox import gate as sandbox_gate
-from druks.sandbox.client import sandbox_client
+from druks.sandbox.client import provisioning_key, sandbox_client
 from druks.sandbox.templates import get_template_id
 from druks.settings import load_settings
 from druks.usage.models import UsageScrape
@@ -43,7 +43,7 @@ _REAP_BEFORE_WAIT_SECONDS = 120
 
 @contextlib.asynccontextmanager
 async def _runner(
-    workflow: "Workflow", host_id: str | None, workflow_id: str, step: str | None
+    workflow: "Workflow", host_id: str | None, workflow_id: str, step: str, profile: Profile
 ) -> AsyncIterator["Workspace"]:
     # The agent always runs in a Workspace. A warm run attaches the run's held VM; the
     # rest get a fresh ephemeral VM. Either way workflow.get_workspace() turns the VM into
@@ -56,7 +56,8 @@ async def _runner(
             template = await get_template_id(workflow.sandbox)
             await set_run_phase("provisioning_vm")
         vm = sandbox_client.ephemeral(
-            idempotency_key=f"{workflow_id}:{step}",
+            idempotency_key=provisioning_key(workflow_id, step, profile.secrets_id),
+            secrets=profile.secrets,
             template=template,
         )
     async with vm as box:
@@ -283,14 +284,14 @@ class Agent:
         )
         async with gate:
             await set_run_phase("provisioning_vm")
-            host_id = await workflow._lease_host()
+            host_id = await workflow._lease_host(profile)
 
             # Record the call RUNNING once it has a host to run on (its id names
             # the on-disk transcript dir) so the live step shows while the agent
             # works, then finish it — or fail it if the run raised after
             # starting. A provisioning failure happens before this and records
             # no call.
-            async with _runner(workflow, host_id, workflow_id, self.id) as runner:
+            async with _runner(workflow, host_id, workflow_id, self.id, profile) as runner:
                 context = await runner.prepare_context(context, agent_call_id=call_id)
                 # Templates read the live workflow + the workspace the agent runs in,
                 # alongside whatever the workflow's get_prompt_context composes.

@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 from conftest import connect_provider
+from drukbox_sdk import Secret
 from druks.accounts.models import Account
 from druks.harnesses.claude import ClaudeHarness
 from druks.harnesses.codex import CodexHarness
@@ -149,19 +150,28 @@ async def test_codex_build_invocation_carries_every_flag():
     assert inv.extra_artifact_filenames == ("output.json", "session.jsonl")
 
 
-async def test_claude_runs_a_key_from_the_environment():
-    # A key ships as ANTHROPIC_API_KEY; no credentials file lands in the home.
+async def test_claude_reads_its_key_from_a_placeholder_in_the_vm():
+    # Drukbox delivers the key as a placeholder under ANTHROPIC_API_KEY. The
+    # invocation carries no key and no credentials file.
+    assert ClaudeHarness.get_secrets("sk-secret") == {
+        "anthropic": Secret(
+            "sk-secret",
+            host="api.anthropic.com",
+            auth_variable="ANTHROPIC_API_KEY",
+            auth_header="x-api-key",
+            auth_prefix="",
+        )
+    }
     inv = await ClaudeHarness(
         model="anthropic/claude-x", fast_mode=False, effort=None, sandbox=_sandbox_config()
     ).build_invocation(
-        key="sk-secret",
         prompt="hello",
         schema={"type": "object"},
         run_id="run-1",
         ssh_username="exedev",
         extra_env={"TOK": "secret"},
     )
-    assert inv.env == {"TOK": "secret", "ANTHROPIC_API_KEY": "sk-secret"}
+    assert inv.env == {"TOK": "secret"}
     assert not any(file.path == ".claude/.credentials.json" for file in inv.credentials.home)
     assert "sk-secret" not in inv.args[2]
 

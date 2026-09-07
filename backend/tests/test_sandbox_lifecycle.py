@@ -5,11 +5,14 @@ from typing import Any
 
 import pytest
 from drukbox_sdk import SandboxHost as SandboxHostRecord
+from drukbox_sdk import Secret
 from drukbox_sdk.exceptions import (
     SandboxAuthError,
+    SandboxConflictError,
     SandboxNotFoundError,
     SandboxProvisioningError,
     SandboxUnavailableError,
+    SandboxValidationError,
 )
 from druks.harnesses.exceptions import HarnessSandboxProvisioningError, Retry
 from druks.sandbox import credentials as creds_module
@@ -82,6 +85,7 @@ class _FakeSandbox:
 @dataclass
 class _FakeAPI:
     created_envs: list[dict[str, str] | None] = field(default_factory=list)
+    created_secrets: list[dict[str, Secret] | None] = field(default_factory=list)
     created_expires_at: list[datetime | None] = field(default_factory=list)
     deleted_ids: list[str] = field(default_factory=list)
     get_host_responses: list[SandboxHostRecord] = field(default_factory=list)
@@ -102,9 +106,11 @@ class _FakeAPI:
         idempotency_key: str | None = None,
         expires_at: datetime | None = None,
         provider: str | None = None,
+        secrets: dict[str, Secret] | None = None,
         template: str | None = None,
     ) -> SandboxHostRecord:
         self.created_envs.append(env)
+        self.created_secrets.append(secrets)
         self.created_expires_at.append(expires_at)
         if self.create_raises is not None:
             raise self.create_raises
@@ -537,6 +543,85 @@ async def test_acquire_translates_transient_create_failures(
     # The schedule is inherited from HarnessSandboxError, not re-declared.
     assert error.retry_delays == (60, 300)
     assert error.__cause__ is sdk_error
+
+
+_ENTRIES = {
+    "anthropic": Secret(
+        "sk-real",
+        host="api.anthropic.com",
+        auth_variable="ANTHROPIC_API_KEY",
+        auth_header="x-api-key",
+        auth_prefix="",
+    )
+}
+
+
+async def test_acquire_hands_the_entries_to_drukbox(
+    patched_real_sandbox: list[_FakeSandbox],
+    patched_sandbox_api: list[_FakeAPI],
+):
+    api = _FakeAPI(create_record=_record(status="active"))
+    patched_sandbox_api.append(api)
+
+    async with sandbox_client.acquire(secrets=_ENTRIES):
+        pass
+
+    assert api.created_secrets == [_ENTRIES]
+    # The VM gets a placeholder from Drukbox. Druks writes no key into it.
+    assert patched_real_sandbox[0].secrets == []
+
+
+async def test_provision_hands_the_entries_to_drukbox(
+    patched_real_sandbox: list[_FakeSandbox],
+    patched_sandbox_api: list[_FakeAPI],
+):
+    api = _FakeAPI(create_record=_record(status="active"))
+    patched_sandbox_api.append(api)
+
+    host = await sandbox_client.provision(secrets=_ENTRIES)
+
+    assert host.id == "host-xyz"
+    assert api.created_secrets == [_ENTRIES]
+
+
+async def test_ephemeral_hands_the_entries_to_drukbox_and_releases(
+    patched_real_sandbox: list[_FakeSandbox],
+    patched_sandbox_api: list[_FakeAPI],
+):
+    api = _FakeAPI(create_record=_record(status="active"))
+    patched_sandbox_api.append(api)
+
+    async with sandbox_client.ephemeral(secrets=_ENTRIES):
+        pass
+
+    assert api.created_secrets == [_ENTRIES]
+    assert api.deleted_ids == ["host-xyz"]
+
+
+@pytest.mark.parametrize(
+    "sdk_error",
+    [
+        pytest.param(SandboxValidationError("unknown secret service"), id="422"),
+        pytest.param(SandboxConflictError("secrets need the secrets proxy"), id="409"),
+    ],
+)
+async def test_acquire_refuses_entries_drukbox_rejects(
+    sdk_error: Exception,
+    patched_real_sandbox: list[_FakeSandbox],
+    patched_sandbox_api: list[_FakeAPI],
+):
+    """Drukbox refuses the entries: the call fails on that answer. There is no
+    second attempt without them, and no key reaches a VM."""
+    api = _FakeAPI(create_raises=sdk_error)
+    patched_sandbox_api.append(api)
+
+    with pytest.raises(type(sdk_error)) as excinfo:
+        async with sandbox_client.acquire(secrets=_ENTRIES):
+            pass
+
+    assert excinfo.value is sdk_error
+    assert api.created_secrets == [_ENTRIES]
+    assert patched_real_sandbox == []
 
 
 async def test_acquire_passes_through_fatal_create_failure(

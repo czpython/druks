@@ -52,7 +52,7 @@ from druks.events.models import Event
 from druks.harnesses.exceptions import HarnessError
 from druks.models import StoredSubject, snake_name
 from druks.notifications.outbox import notifications_queue, send_notification
-from druks.sandbox.client import sandbox_client
+from druks.sandbox.client import provisioning_key, sandbox_client
 from druks.sandbox.constants import SANDBOX_HOST_ROTATE_BEFORE_SECONDS
 from druks.sandbox.datastructures import Sandbox
 from druks.sandbox.templates import get_template_id
@@ -85,6 +85,7 @@ __all__ = [
 ]
 
 if TYPE_CHECKING:
+    from druks.harnesses.profiles import Profile
     from druks.sandbox.host import Host
 
 # A human gate can park for days; a long recv TTL still caps zombie parks.
@@ -166,9 +167,8 @@ class _DeclaredSubject:
         async def resolve() -> Any:
             if "subject" in run.__dict__:
                 return run.__dict__["subject"]
-            if not run._subject:
-                return None
-            return await self.subject_class.get_for_subject_id(str(run._subject["id"]))
+            if run._subject:
+                return await self.subject_class.get_for_subject_id(str(run._subject["id"]))
 
         return resolve()
 
@@ -775,6 +775,7 @@ class Workflow:
         # The run's warm VM, provisioned lazily and reaped at segment boundaries;
         # its lease expiry decides when it must rotate.
         self._host: Host | None = None
+        self._host_secrets_id = ""
 
     async def announce(self, topic: str, **facts: Any) -> None:
         # The workflow announcing a domain event in its app's vocabulary
@@ -831,7 +832,7 @@ class Workflow:
         # Built per agent call, so nothing is held across steps.
         return self.workspace_class(**await self.get_workspace_kwargs(host))
 
-    async def _lease_host(self) -> str | None:
+    async def _lease_host(self, profile: "Profile") -> str | None:
         # The warm VM, provisioned once per segment; state is carried in git, so
         # only the host-id matters across steps — held-across-steps never fights replay.
         if not self.steps_reuse_sandbox:
@@ -843,15 +844,21 @@ class Workflow:
                 # host. Safe because each call rebuilds its workspace on whatever
                 # host it lands on (state lives in git), so a bare VM is fine.
                 await self._reap_run()
+        if self._host and self._host_secrets_id != profile.secrets_id:
+            # Drukbox binds entries at creation.
+            await self._reap_run()
         if not self._host:
             template = None
             if self.sandbox:
                 template = await get_template_id(self.sandbox)
                 await set_run_phase("provisioning_vm")
             self._host = await sandbox_client.provision(
-                idempotency_key=f"{self._workflow_id}:sandbox",
+                # The key names the pasted key the VM holds, so a replay finds its VM.
+                idempotency_key=provisioning_key(self._workflow_id, "sandbox", profile.secrets_id),
+                secrets=profile.secrets,
                 template=template,
             )
+            self._host_secrets_id = profile.secrets_id
         return self._host.id
 
     async def _reap_run(self) -> None:
