@@ -186,7 +186,7 @@ def _comment_blocks(comments: list[Comment], account_names: dict[str, str]) -> l
 async def board():
     tickets = await Ticket.list_board()
     projects = await IssuesProject.list()
-    accounts = await Account.list_non_system()
+    accounts = await Account.list_all()
     account_names = {account.id: account.username for account in accounts}
     return ui.Page(
         "Board",
@@ -236,7 +236,7 @@ async def ticket(identifier: str):
         )
 
     projects = await IssuesProject.list()
-    accounts = await Account.list_non_system()
+    accounts = await Account.list_all()
     project_names = {project.id: project.name for project in projects}
     account_names = {account.id: account.username for account in accounts}
     status = Status(found.status)
@@ -351,7 +351,7 @@ async def ticket(identifier: str):
 @ui.page("/list")
 async def list():
     projects = await IssuesProject.list()
-    accounts = await Account.list_non_system()
+    accounts = await Account.list_all()
     project_names = {project.id: project.name for project in projects}
     account_names = {account.id: account.username for account in accounts}
     sections = []
