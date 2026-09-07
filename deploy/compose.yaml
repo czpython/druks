@@ -1,10 +1,11 @@
-# The Druks stack: web, Postgres, Redis, and the drukbox sandbox control plane.
-# This one file applies to all install shapes. install.sh writes COMPOSE_PROFILES
-# to .env. The "hosted" profile starts the Caddy edge and the janitor. The
-# docker-sbx provider adds one overlay file, because its drukbox has different
-# mounts. All services use the host network. Services connect to Postgres and
-# Redis on 127.0.0.1. drukbox connects to each sandbox at the address the
-# provider returns.
+# The Druks stack: web, Postgres, Redis, the drukbox sandbox control plane, its
+# secrets exchange, and the secrets proxy. This one file applies to all install
+# shapes. install.sh writes COMPOSE_PROFILES to .env. The "hosted" profile
+# starts the Caddy edge and the janitor. The "proxy" profile starts the secrets
+# proxy, on every provider but docker-sbx. The docker-sbx provider adds one
+# overlay file, because its drukbox has different mounts. All services use the
+# host network. Services connect to Postgres and Redis on 127.0.0.1. drukbox
+# connects to each sandbox at the address the provider returns.
 
 x-druks: &druks
   image: ghcr.io/czpython/druks:${DRUKS_TAG:-latest}
@@ -68,8 +69,13 @@ x-drukbox: &drukbox
     TAILSCALE_ENABLED: ${TAILSCALE_ENABLED:-false}
     # Browser-login containers run sshd for the druks user, not for root.
     DOCKER_SSH_USERNAME: druks
+    # The public certificate of the secrets proxy, delivered into each sandbox
+    # with secrets. The proxy writes its CA into the volume at its first start.
+    # The key file is readable by the proxy user only.
+    SECRETS_PROXY_CA_FILE: /secrets-proxy-ca/mitmproxy-ca-cert.pem
   volumes:
     - /var/run/docker.sock:/var/run/docker.sock
+    - secrets_proxy_ca:/secrets-proxy-ca:ro
   depends_on:
     postgres:
       condition: service_healthy
@@ -128,6 +134,38 @@ services:
     # that API.
     healthcheck:
       disable: true
+
+  # The secrets exchange. The proxy asks it for the value behind a placeholder.
+  # On docker-sbx it pushes issuer values into each sandbox. Every shape runs it.
+  # It binds the host loopback, its default, so only the proxy and web reach it.
+  # It fetches issuer values from web over plain HTTP on the loopback.
+  drukbox-exchange:
+    <<: *drukbox
+    entrypoint: [".venv/bin/python", "-m", "secrets_exchange"]
+    # The image HEALTHCHECK probes the drukbox HTTP API. This service is not
+    # that API.
+    healthcheck:
+      disable: true
+
+  # The secrets proxy. A sandbox sends its HTTPS through it. The proxy swaps the
+  # placeholder for the value. Every provider but docker-sbx needs it, since sbx
+  # swaps its own placeholders. install.sh enables the profile. The proxy binds
+  # the host of [sandbox].proxy_url and no other address. A proxy on a public
+  # address accepts requests from anyone. druks setup renders the bind host. The
+  # CA lives in a volume. It survives a restart, so a sandbox that installed it
+  # still trusts the proxy.
+  drukbox-proxy:
+    image: ${DRUKS_SECRETS_PROXY_IMAGE:-ghcr.io/czpython/drukbox/proxy:latest}
+    profiles: ["proxy"]
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      SECRETS_EXCHANGE_URL: http://127.0.0.1:8781
+      SECRETS_PROXY_BIND_HOST: ${DRUKS_SECRETS_PROXY_BIND_HOST:-127.0.0.1}
+    volumes:
+      - secrets_proxy_ca:/home/mitmproxy/.mitmproxy
+    depends_on:
+      - drukbox-exchange
 
   # The identity edge and webhook TLS. Only hosted installs run it. A local
   # box gets the dashboard directly on 127.0.0.1:8001. Stock image with no
@@ -198,5 +236,6 @@ volumes:
   redis_data:
   postgres_data:
   druks_sandbox_keys:
+  secrets_proxy_ca:
   caddy_data:
   caddy_config:
