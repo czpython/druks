@@ -5,7 +5,6 @@ from urllib.parse import urlsplit, urlunsplit
 
 from pydantic import BaseModel, Field
 
-from druks.accounts.constants import SYSTEM_ACCOUNT_ID
 from druks.accounts.models import Account, PersonalAccessToken
 from druks.contrib.software_factory.contracts import ImplementationOutput, ReviewWork
 from druks.contrib.software_factory.enums import (
@@ -240,20 +239,19 @@ class Build(Workflow):
         if (await SoftwareFactory.settings()).tracker == "issues":
             kwargs["appliance_mcp_url"] = appliance_mcp_url()
             account_id = self.account_id
-            if account_id and account_id != SYSTEM_ACCOUNT_ID:
-                account = await Account.get(account_id, exclude_system=True)
+            if account_id:
+                account = await Account.get(account_id)
                 if not account:
                     raise FatalError(
                         f"issues tracker tools need account {account_id} to mint the /mcp PAT."
                     )
             else:
-                accounts = await Account.list_non_system()
-                if len(accounts) != 1:
+                account = await Account.get_default()
+                if not account:
                     raise FatalError(
-                        "issues tracker tools need a run account or exactly one "
-                        "operator account to mint the /mcp PAT."
+                        "issues tracker tools need a run account or a default "
+                        "account to mint the /mcp PAT."
                     )
-                account = accounts[0]
             _, kwargs["appliance_mcp_token"] = await PersonalAccessToken.create(
                 account_id=account.id, name="issues sandbox"
             )
