@@ -171,7 +171,7 @@ def _dispatched_by(monkeypatch: pytest.MonkeyPatch, username: str | None) -> Non
     monkeypatch.setattr(workspace_mod, "get_github_client", _client)
     account = SimpleNamespace(username=username) if username else None
 
-    async def _get_account(_id, *, exclude_system):
+    async def _get_account(_id):
         return account
 
     monkeypatch.setattr(workspace_mod, "Account", SimpleNamespace(get=_get_account))

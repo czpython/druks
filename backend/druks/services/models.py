@@ -48,10 +48,10 @@ class ServiceIdentity(Base):
 
 
 class OauthConnection(Base, Uuid7Pk):
-    """One signed-in provider account: the durable outcome of an OAuth
-    consent, owned by the druks account that completed it. An account can
-    hold many per provider — one per mailbox, handle, or workspace. The
-    engine rotates the refresh token on mint; nothing else writes here.
+    """The durable outcome of OAuth consent. A personal grant belongs to
+    the account that completed it. A shared grant belongs to the installation.
+    Each owner can hold many grants per provider: one per mailbox, handle,
+    or workspace. The engine rotates the refresh token on mint.
 
     Revoking is a state, never a deletion: the consent happened, and the row
     keeps its owner, identity, scopes, and dates forever. Only the refresh
@@ -60,8 +60,8 @@ class OauthConnection(Base, Uuid7Pk):
     __tablename__ = "oauth_connections"
 
     provider: Mapped[str] = mapped_column(String)
-    # Who in druks connected it — every read scopes through the owner.
-    account_id: Mapped[str] = mapped_column(ForeignKey("accounts.id", ondelete="RESTRICT"))
+    # Null identifies a shared installation grant.
+    account_id: Mapped[str | None] = mapped_column(ForeignKey("accounts.id", ondelete="RESTRICT"))
     # Ciphertext at rest; decrypted only into the refresh request body.
     refresh_token = EncryptedTextField()
     # The token response's ``scope`` when the provider echoes one, else the
@@ -85,7 +85,7 @@ class OauthConnection(Base, Uuid7Pk):
         cls,
         *,
         provider: str,
-        account_id: str,
+        account_id: str | None,
         refresh_token: str,
         scopes: list[str],
         identity: dict[str, Any] | None = None,
@@ -102,7 +102,9 @@ class OauthConnection(Base, Uuid7Pk):
         return connection
 
     @classmethod
-    async def list_for_account(cls, provider: str, account_id: str) -> "list[OauthConnection]":
+    async def list_for_account(
+        cls, provider: str, account_id: str | None
+    ) -> "list[OauthConnection]":
         return list(
             await db_session().scalars(
                 select(cls)
@@ -117,7 +119,7 @@ class OauthConnection(Base, Uuid7Pk):
 
     @classmethod
     async def get_for_identity(
-        cls, provider: str, account_id: str, key: str, value: Any
+        cls, provider: str, account_id: str | None, key: str, value: Any
     ) -> "OauthConnection | None":
         # A live match wins; among revoked matches, the latest consent wins.
         return (

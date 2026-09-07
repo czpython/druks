@@ -7,7 +7,7 @@ from alembic.operations import Operations
 from druks.accounts.models import Account
 from druks.harnesses.models import ProviderCatalog, ProviderSubscription
 from druks.usage.models import UsageScrape
-from druks.user_settings.models import SettingsOverride, UserSettings
+from druks.user_settings.models import SettingsOverride, SettingsProfile
 from sqlalchemy import text
 
 # Data-only, so it runs inside the suite's rolled-back transaction against the
@@ -30,6 +30,7 @@ def _upgrade(connection) -> None:
 
 async def _run_upgrade(druks_db) -> None:
     await druks_db.flush()
+    await druks_db.execute(text("ALTER TABLE settings RENAME TO user_settings"))
     # The rows were seeded through today's model; the migration ran when the
     # table still carried its old name.
     await druks_db.execute(text("ALTER TABLE provider_subscriptions RENAME TO provider_logins"))
@@ -61,7 +62,7 @@ async def test_openai_codex_rows_become_openai_everywhere(druks_db):
     await ProviderCatalog.create(
         "openai", [{"id": "openai/gpt-5.5", "label": "key"}], label="OpenAI"
     )
-    await (await UserSettings.get()).update_profile(default_model="openai-codex/gpt-5.5")
+    await (await SettingsProfile.get()).update_profile(default_model="openai-codex/gpt-5.5")
     await SettingsOverride.set_agent_model("implement", "openai-codex/gpt-5-mini")
     await SettingsOverride.set_agent_effort("implement", "openai-codex/keep")
 

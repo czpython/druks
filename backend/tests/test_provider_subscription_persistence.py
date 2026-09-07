@@ -2,6 +2,7 @@ import os
 
 import psycopg
 import pytest
+from druks.accounts.models import Account
 from druks.database import configure_session, db_session, get_session
 from druks.harnesses.models import ProviderSubscription
 from druks.testing import init_db
@@ -61,13 +62,7 @@ async def _committed(engine, work):
 
 
 async def _connect(payload: dict) -> str:
-    from druks.accounts.models import Account
-    from druks.user_settings.models import UserSettings
-
     account = await Account.get_or_create("op@example.com")
-    settings = await UserSettings.get()
-    if not settings.fallback_account_id:
-        await settings.set_fallback_account(account.id)
     row = await ProviderSubscription.connect(
         provider="anthropic",
         account=account,
@@ -138,7 +133,9 @@ async def test_payload_is_ciphertext_at_rest(engine):
     assert b"claudeAiOauth" not in raw
 
     async def read_logins():
-        row = await ProviderSubscription.get_for_account("anthropic", fallback=True)
+        row = await ProviderSubscription.get_for_account(
+            "anthropic", (await Account.get_default()).id
+        )
         return dict(row.payload)["claudeAiOauth"]
 
     block = await _committed(engine, read_logins)

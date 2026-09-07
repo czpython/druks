@@ -519,35 +519,30 @@ def test_agent_result_names_the_agent_in_its_failure():
     assert result.error.code == "overloaded"
 
 
-def _patch_harness_resolution(monkeypatch: pytest.MonkeyPatch) -> None:
-    # run_agent resolves the call through the one resolver; these tests are
-    # about the failure boundary, not resolution.
+@pytest.fixture
+def agent_profile():
     from druks.harnesses.profiles import Profile
 
-    async def get_profile(agent, account_id):
-        return Profile(
-            harness_class=ClaudeHarness,
-            model="anthropic/claude-opus-4-7",
-            subscription=SimpleNamespace(id="subscription-1", account_id="acc"),
-            key=None,
-            billing="subscription",
-            effort="high",
-            timeout=60,
-            fast_mode=False,
-        )
-
-    monkeypatch.setattr("druks.harnesses.profiles.get_profile", get_profile)
+    return Profile(
+        harness_class=ClaudeHarness,
+        model="anthropic/claude-opus-4-7",
+        subscription=SimpleNamespace(id="subscription-1", account_id="acc"),
+        api_key=None,
+        billing="subscription",
+        effort="high",
+        timeout=60,
+        fast_mode=False,
+    )
 
 
 async def test_run_agent_carries_foreign_failures_as_harness_errors(
-    ctx: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+    ctx: SimpleNamespace, agent_profile
 ):
     """The result's error is always from the taxonomy: a foreign failure is
     wrapped unclassified, keeps its traceback via the chain, and — unlike an
     asyncssh or httpx error — survives DBOS's pickled step record."""
     import pickle
 
-    _patch_harness_resolution(monkeypatch)
     sandbox = SimpleNamespace(id="host-abc", ssh_username="root")
     original = RuntimeError("kaboom")
 
@@ -558,7 +553,7 @@ async def test_run_agent_carries_foreign_failures_as_harness_errors(
     result = await Host.run_agent(
         sandbox,
         agent="evaluate",
-        account_id=None,
+        profile=agent_profile,
         prompt="p",
         schema={"type": "object"},
         artifact_dir=ctx.artifact_dir,
@@ -573,10 +568,7 @@ async def test_run_agent_carries_foreign_failures_as_harness_errors(
     assert type(revived) is HarnessError and revived.__cause__ is None
 
 
-async def test_run_agent_carries_a_taxonomy_failure_as_itself(
-    ctx: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
-):
-    _patch_harness_resolution(monkeypatch)
+async def test_run_agent_carries_a_taxonomy_failure_as_itself(ctx: SimpleNamespace, agent_profile):
     sandbox = SimpleNamespace(id="host-abc", ssh_username="root")
     timeout = HarnessTimeoutError("claude timed out after 60s.")
 
@@ -587,7 +579,7 @@ async def test_run_agent_carries_a_taxonomy_failure_as_itself(
     result = await Host.run_agent(
         sandbox,
         agent="evaluate",
-        account_id=None,
+        profile=agent_profile,
         prompt="p",
         schema={"type": "object"},
         artifact_dir=ctx.artifact_dir,

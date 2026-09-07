@@ -2,7 +2,6 @@ from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends
 
-from druks.accounts.constants import SYSTEM_ACCOUNT_ID
 from druks.accounts.dependencies import current_account
 from druks.accounts.models import Account
 from druks.core.utils.time import operator_local_day
@@ -23,7 +22,7 @@ from druks.usage.schemas import (
     UsageWindowHistory,
 )
 from druks.usage.trends import FIVE_HOUR_RANGE, WEEK_RANGE, downsample
-from druks.user_settings.models import UserSettings
+from druks.user_settings.models import SettingsProfile
 
 router = APIRouter()
 
@@ -98,7 +97,7 @@ async def get_usage_today(account: Account = Depends(current_account)) -> UsageT
     # Deriving the operator-local-day window here (the query just takes it) keeps
     # this total identical to the sys-strip's and the agent surface's figures.
     timezone, local_start = operator_local_day(
-        (await UserSettings.get()).timezone, datetime.now(UTC)
+        (await SettingsProfile.get()).timezone, datetime.now(UTC)
     )
     rows = await list_finished_calls(
         account.id, since=local_start, until=local_start + timedelta(days=1)
@@ -125,10 +124,10 @@ async def get_usage_today(account: Account = Depends(current_account)) -> UsageT
             bucket["spend"] += cost_usd
             hours[name][finished_at.astimezone(timezone).hour] += cost_usd
 
-    # A call billed to the API key is charged to the system account.
+    # A call billed to the API key is charged to the installation.
     key_spend = dict.fromkeys(ids, 0.0)
     for model, cost_usd, _metadata, _finished_at in await list_finished_calls(
-        SYSTEM_ACCOUNT_ID, since=local_start, until=local_start + timedelta(days=1)
+        None, since=local_start, until=local_start + timedelta(days=1)
     ):
         provider = model.partition("/")[0]
         if provider in key_spend and cost_usd is not None:

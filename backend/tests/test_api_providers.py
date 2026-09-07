@@ -52,7 +52,7 @@ async def test_keys_list_the_installations_keys_for_every_account(tmp_path: Path
     assert key == {
         "provider": "openai",
         "keyTail": "4f2a",
-        "updatedBy": {"id": ops.id, "username": "ops@example.com"},
+        "updatedBy": {"id": ops.id, "username": "ops@example.com", "isDefault": True},
         "updatedAt": stored.updated_at.isoformat().replace("+00:00", "Z"),
     }
 

@@ -19,14 +19,13 @@ from druks.files.storage import get_file_storage
 from druks.mcp import models as mcp_models
 from druks.mcp import oauth
 from druks.mcp.constants import TOKEN_ENV_PREFIX
-from druks.mcp.enums import TokenSource
+from druks.mcp.enums import IdentityMode, TokenSource
 from druks.mcp.exceptions import MissingTokenError, SourceEnvVarUnsetError
 from druks.mcp.helpers import get_bearer_token_env_var, get_grant_account
 from druks.sandbox import repo as checkout
 from druks.sandbox.datastructures import AgentResult, McpServer, RequiredMcpServer
 from druks.sandbox.exceptions import ExecFailed
 from druks.sandbox.layout import get_github_token_remote_path, get_repo_root, get_work_root
-from druks.user_settings.models import UserSettings
 
 if TYPE_CHECKING:
     from druks.sandbox.host import Host
@@ -139,7 +138,7 @@ class Workspace:
         # with_mcp_servers is the run's last DB read; commit so the step's
         # connection isn't held idle through the minutes the agent runs.
         await db_session().commit()
-        return await self.host.run_agent(account_id=account_id, **run_kwargs)
+        return await self.host.run_agent(**run_kwargs)
 
     async def with_mcp_servers(self, account_id: str | None, **kwargs: Any) -> dict[str, Any]:
         # Fold every MCP server into this call — the workspace's required
@@ -155,7 +154,7 @@ class Workspace:
         enabled = await mcp_models.McpServer.list_enabled()
         if not required and not enabled:
             return kwargs
-        run_account = account_id or (await UserSettings.get()).fallback_account_id
+        run_account = account_id
         # ``extra_env`` may be omitted or an explicit ``None`` (both valid for the
         # underlying run_agent); treat them the same so the merge never unpacks None.
         env = dict(kwargs.get("extra_env") or {})
@@ -192,6 +191,9 @@ class Workspace:
                 if not token:
                     raise SourceEnvVarUnsetError(server["name"], server["source_env_var"])
             else:  # oauth
+                if server["identity_mode"] == IdentityMode.PER_USER and not run_account:
+                    account = await Account.get_default()
+                    run_account = account.id if account else None
                 grant_account = get_grant_account(server["identity_mode"], run_account)
                 token = await oauth.get_access_token(server["name"], grant_account)
             bearer_token_env_var = ""
@@ -265,7 +267,7 @@ class RepoWorkspace(Workspace):
             f"git config user.email {shlex.quote(author_email)}",
             "rm -f .git/hooks/prepare-commit-msg",
         ]
-        if account_id and (account := await Account.get(account_id, exclude_system=True)):
+        if account_id and (account := await Account.get(account_id)):
             trailer = f"Co-Authored-By: {account.username} <{account.username}>"
             hook = (
                 "#!/bin/sh\n"

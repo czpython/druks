@@ -40,9 +40,12 @@ header. Settings opens from the bottom of the sidebar. Below 650 px, a
 navigation button opens a modal drawer. Escape closes the drawer and returns
 focus to the button.
 
-Shared settings use `/settings/<section>` routes. Search matches section names
-and app field labels. General and Agents retain separate
-drafts across settings pages. Save changes applies only the current page.
+Settings use `/settings/<section>` routes. `/settings/personal` edits the current
+account through `/api/settings/personal`; `/settings/general` and
+`/settings/agents` edit installation defaults through `/api/settings`. The
+preferences provider uses the personal endpoint for timestamp display. Search
+matches section names and app field labels. Preferences, General, and Agents
+retain separate drafts across settings pages. Save changes applies only the current page.
 Leaving Settings offers Save, Discard, and Stay. Save applies each dirty page;
 a failed request keeps the operator on that page with its draft. Resource
 actions, such as connecting a provider or minting an API token, apply at once.

@@ -264,15 +264,14 @@ async def rt():
 
     # An agent run checks the resolved provider is connected before any VM work;
     # AgentFlow's decider resolves to claude, so connect anthropic for the module —
-    # and mark the account as the execution fallback, the way the first
-    # subscription would.
+    # and mark its account as the default.
     from druks.accounts.models import Account
     from druks.harnesses.models import ProviderSubscription
-    from druks.user_settings.models import UserSettings
+    from druks.user_settings.models import SettingsProfile
 
     session = get_session(engine)
     try:
-        account = Account(username="op@example.com")
+        account = Account(username="op@example.com", is_default=True)
         session.add(account)
         await session.flush()
         session.add_all(
@@ -287,9 +286,7 @@ async def rt():
                 payload={"claudeAiOauth": {"accessToken": "t"}},
             )
         )
-        await session.merge(
-            UserSettings(id=UserSettings.SINGLETON_ID, fallback_account_id=account.id)
-        )
+        session.add(SettingsProfile())
         await session.commit()
     finally:
         await session.close()
@@ -399,7 +396,7 @@ async def _account_id(engine, email: str) -> str:
 
 async def test_attribution_rides_the_run_and_survives_resume(rt):
     """start(account_id=…) lands on the durable_runs row and the reserved
-    input key; attributes stay subject-only; a resume never swaps the payer."""
+    input key; attributes stay subject-only; a resume keeps the trigger account."""
     from druks.durable.dbos_state import workflow_status
 
     SINK.clear()
@@ -420,7 +417,7 @@ async def test_attribution_rides_the_run_and_survives_resume(rt):
 
     await parked.resume(action="go")
     await _wait_for(rt.engine, wfid, lambda r: r.state == RunState.FINISHED)
-    assert f"acct-after:{account_id}" in SINK  # the resumer never becomes the payer
+    assert f"acct-after:{account_id}" in SINK
 
 
 async def test_browser_origin_start_inherits_the_ambient_account(rt):
@@ -706,9 +703,10 @@ async def test_run_agent_step(rt, monkeypatch):
         await session.close()
     # The call is recorded under the orchestrator-minted id threaded to run_agent.
     assert recorded[0].id == seen[0]["call_id"]
-    # No account on the start: the fallback account (the module's op@ seed)
-    # is charged.
-    assert recorded[0].account_id == await _account_id(rt.engine, "op@example.com")
+    account_id = await _account_id(rt.engine, "op@example.com")
+    assert failed.account_id == account_id
+    assert recorded[0].subscription.account_id == account_id
+    assert recorded[0].api_key_provider is None
     assert held == [False]  # the step let its connection go before the agent ran
 
 
@@ -950,11 +948,16 @@ async def test_launch_commits_the_user_settings_seed(rt):
     # reads its timezone), and the row must land committed before the app
     # serves: two requests racing the first-touch insert wait on its key lock
     # synchronously on the event loop and deadlock the whole process.
-    from druks.user_settings.models import UserSettings
+    from druks.user_settings.models import SettingsProfile
 
     session = get_session(rt.engine)
     try:
-        assert await session.get(UserSettings, UserSettings.SINGLETON_ID) is not None
+        assert (
+            await session.scalar(
+                select(SettingsProfile).where(SettingsProfile.account_id.is_(None))
+            )
+            is not None
+        )
     finally:
         await session.close()
 
@@ -964,7 +967,7 @@ async def test_apply_schedules_evaluates_cron_in_operator_timezone(rt):
     # "daily at midnight" is their midnight and stays honest across DST.
     from dbos import DBOS
     from druks.durable.engine import apply_schedules
-    from druks.user_settings.models import UserSettings
+    from druks.user_settings.models import SettingsProfile
 
     def sweep_timezone():
         rows = {s["schedule_name"]: s["cron_timezone"] for s in DBOS.list_schedules()}
@@ -978,7 +981,7 @@ async def test_apply_schedules_evaluates_cron_in_operator_timezone(rt):
     from druks.database import session_scope
 
     async with session_scope(rt.engine):
-        await (await UserSettings.get()).update_profile(timezone="Europe/Madrid")
+        await (await SettingsProfile.get()).update_profile(timezone="Europe/Madrid")
     await apply_schedules()
     assert sweep_timezone() == "Europe/Madrid"
 
@@ -987,15 +990,15 @@ async def test_user_settings_get_recreates_the_singleton(rt):
     # get() is the first-touch creator; its ON CONFLICT insert lets two
     # processes booting one fresh database both call it safely.
     from druks.database import db_session, session_scope
-    from druks.user_settings.models import UserSettings
+    from druks.user_settings.models import SettingsProfile
     from sqlalchemy import delete
 
     async with session_scope(rt.engine):
-        await db_session().execute(delete(UserSettings))
+        await db_session().execute(delete(SettingsProfile))
     async with session_scope(rt.engine):
-        assert (await UserSettings.get()).timezone == "UTC"
+        assert (await SettingsProfile.get()).timezone == "UTC"
     async with session_scope(rt.engine):
-        assert (await UserSettings.get()).id == UserSettings.SINGLETON_ID
+        assert (await SettingsProfile.get()).account_id is None
 
 
 async def test_a_run_hydrates_the_subject_row_it_was_started_for(rt):

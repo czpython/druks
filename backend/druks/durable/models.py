@@ -5,12 +5,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
 from dbos import DBOS
-from sqlalchemy import ForeignKey, Index, Select, String, func, select, update
+from sqlalchemy import CheckConstraint, ForeignKey, Index, Select, String, func, select, update
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Mapped, column_property, mapped_column, relationship, selectinload
 
-from druks.accounts.constants import SYSTEM_ACCOUNT_ID
 from druks.accounts.models import Account
 from druks.core.models import Uuid7Pk
 from druks.database import db_session, get_session
@@ -31,6 +30,7 @@ from druks.durable.enums import (
 )
 from druks.durable.exceptions import AgentCallNotFound
 from druks.harnesses.artifacts import normalize_token_usage
+from druks.harnesses.models import ProviderKey, ProviderSubscription
 from druks.models import Base
 from druks.notifications.models import Notification
 from druks.settings import load_settings
@@ -71,13 +71,8 @@ class Run(Base):
     # How the subject showed itself when this run started — read with the row, so
     # every event the run writes names it without a second lookup.
     subject_label: Mapped[str | None] = column_property(subject_label_expression(id))
-    # Who asked; the system account when nobody did (crons, background work).
-    account_id: Mapped[str] = mapped_column(
-        ForeignKey("accounts.id", ondelete="RESTRICT"), default=SYSTEM_ACCOUNT_ID
-    )
-    account: Mapped[Account] = relationship(
-        lazy="joined", innerjoin=True, foreign_keys=[account_id]
-    )
+    account_id: Mapped[str] = mapped_column(ForeignKey("accounts.id", ondelete="RESTRICT"))
+    account: Mapped[Account] = relationship(lazy="joined", foreign_keys=[account_id])
     # The run's agent calls in execution order — lazy, so a parked board row that
     # never reads them costs no query; the timeline read eager-loads them.
     agent_calls: Mapped[list["AgentCall"]] = relationship(
@@ -111,9 +106,7 @@ class Run(Base):
             return self.agent_calls[-1].last_error
 
     @classmethod
-    async def create_row(
-        cls, engine, *, workflow_id: str, kind: str, account_id: str | None
-    ) -> None:
+    async def create_row(cls, engine, *, workflow_id: str, kind: str, account_id: str) -> None:
         # Own committed transaction (not the caller's request txn) so the row
         # exists before the running workflow's first lifecycle event. Idempotent:
         # a scheduled run creates its row inside the (replayable) body, and a
@@ -121,7 +114,7 @@ class Run(Base):
         async with get_session(engine) as session:
             await session.execute(
                 pg_insert(cls)
-                .values(id=workflow_id, kind=kind, account_id=account_id or SYSTEM_ACCOUNT_ID)
+                .values(id=workflow_id, kind=kind, account_id=account_id)
                 .on_conflict_do_nothing()
             )
             await session.commit()
@@ -462,7 +455,11 @@ class AgentCall(Base, Uuid7Pk):
     __tablename__ = "agent_calls"
     __table_args__ = (
         Index("agent_calls_run_idx", "run_id"),
-        Index("agent_calls_account_finished_idx", "account_id", "finished_at"),
+        Index("agent_calls_subscription_finished_idx", "subscription_id", "finished_at"),
+        CheckConstraint(
+            "(subscription_id IS NOT NULL) <> (api_key_provider IS NOT NULL)",
+            name="agent_calls_billing_source_check",
+        ),
     )
 
     # Which model ran this row, snapshotted at dispatch — the model is resolved
@@ -476,12 +473,14 @@ class AgentCall(Base, Uuid7Pk):
     # timeline's grouping label. An agent is what makes a call, so there is no
     # unattributed one: the row is written from the registered agent's own id.
     agent: Mapped[str] = mapped_column(String)
-    # The subscription actually charged — differs from the run's account on
-    # fallback.
-    account_id: Mapped[str] = mapped_column(
-        ForeignKey("accounts.id", ondelete="RESTRICT"), default=SYSTEM_ACCOUNT_ID
+    subscription_id: Mapped[str | None] = mapped_column(
+        ForeignKey("provider_subscriptions.id", ondelete="RESTRICT")
     )
-    account: Mapped[Account] = relationship(lazy="joined", innerjoin=True)
+    api_key_provider: Mapped[str | None] = mapped_column(
+        ForeignKey("provider_keys.provider", ondelete="RESTRICT")
+    )
+    subscription: Mapped[ProviderSubscription | None] = relationship(lazy="selectin")
+    api_key: Mapped[ProviderKey | None] = relationship(lazy="selectin")
 
     created_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
     started_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
@@ -557,7 +556,8 @@ class AgentCall(Base, Uuid7Pk):
         model: str,
         agent: str,
         host_id: str,
-        account_id: str,
+        subscription_id: str | None,
+        api_key_provider: str | None,
     ) -> None:
         # Recorded RUNNING once the agent starts on its host (id = its on-disk
         # transcript dir) in its own committed transaction, so the live step
@@ -580,7 +580,8 @@ class AgentCall(Base, Uuid7Pk):
                     agent=agent,
                     model=model,
                     sandbox_host_id=host_id,
-                    account_id=account_id,
+                    subscription_id=subscription_id,
+                    api_key_provider=api_key_provider,
                 )
             )
             await session.commit()

@@ -69,7 +69,7 @@ async def test_a_valid_assertion_open_enrolls_its_subject(tmp_path, druks_db):
         assert response.json()["account"]["username"] == "op@example.com"
         other = client.get("/api/auth/me", headers={HEADER: _token(email="two@example.com")})
         assert other.status_code == 200
-    usernames = {account.username for account in await Account.list_non_system()}
+    usernames = {account.username for account in await Account.list_all()}
     assert usernames == {"op@example.com", "two@example.com"}
 
 
@@ -92,7 +92,7 @@ async def test_a_bad_assertion_rejects_without_enrolling(tmp_path, druks_db, tok
         assert response.status_code == 401
         # Only the failure class reaches the caller — never token material.
         assert token.split(".")[1] not in response.json()["detail"]
-    assert not await Account.list_non_system()
+    assert not await Account.list_all()
 
 
 def test_none_mode_multi_kid_document_serves_the_matching_key(tmp_path, druks_db):

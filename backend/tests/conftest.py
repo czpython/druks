@@ -1,14 +1,20 @@
+from pathlib import Path
 from unittest import mock
 
 import pytest
+from druks import agents
+from druks.accounts.models import Account
 from druks.apps.loader import (
     iter_apps,
     register_workflow_package,
 )
 from druks.database import create_engine_from_url
 from druks.durable.dbos_state import DBOS_SYSTEM_SCHEMA
+from druks.harnesses.models import ProviderKey, ProviderSubscription
+from druks.harnesses.providers import AnthropicProvider
 from druks.models import Base
-from druks.testing import TEST_DATABASE_URL
+from druks.testing import TEST_DATABASE_URL, configure_app_for_test, make_settings
+from fastapi.testclient import TestClient
 
 # A Workflow class resolves its declaring app at definition time, from
 # packages the loader registers before importing. Tests import workflow modules
@@ -17,6 +23,36 @@ from druks.testing import TEST_DATABASE_URL
 iter_apps()
 for test_module in ("test_durable_sdk", "test_notifications_durable"):
     register_workflow_package(test_module, "")
+
+
+IDENTITY_HEADER = "X-ExeDev-Email"
+
+
+class ProfileOutput(agents.AgentOutput):
+    ok: bool
+
+
+PROFILE_PROBE = agents.Agent(id="profile_probe", prompt="probe.md", contract=ProfileOutput)
+
+
+def settings_client(tmp_path: Path) -> TestClient:
+    return TestClient(configure_app_for_test(settings=make_settings(tmp_path)))
+
+
+def header_client(tmp_path: Path) -> TestClient:
+    settings = make_settings(tmp_path, identity={"mode": "header", "header": IDENTITY_HEADER})
+    return TestClient(configure_app_for_test(settings=settings, authenticated=False))
+
+
+async def connect_anthropic_subscription(email: str) -> ProviderSubscription:
+    return await connect_provider(
+        AnthropicProvider, {"claudeAiOauth": {"accessToken": email}}, provider_email=email
+    )
+
+
+async def installation_key() -> ProviderKey:
+    account = await Account.get_or_create("op@example.com")
+    return await ProviderKey.create(provider="anthropic", key="test-key", account=account)
 
 
 @pytest.fixture(autouse=True)
@@ -112,7 +148,7 @@ def browser_session_declarations():
 _OWN_DATABASE_MODULES = {
     "test_durable_sdk",
     "test_notifications_durable",
-    "test_provider_login_persistence",
+    "test_provider_subscription_persistence",
     "test_app_migrations",
     "test_proof_app_migration",
 }
@@ -164,14 +200,7 @@ def bind_ambient_session(session) -> None:
 
 async def connect_provider(provider_cls, payload: dict, *, provider_email: str = "op@example.com"):
     """Seed the ProviderSubscription row a finished OAuth connect flow would leave."""
-    from druks.accounts.models import Account
-    from druks.harnesses.models import ProviderSubscription
-    from druks.user_settings.models import UserSettings
-
     account = await Account.get_or_create(provider_email)
-    settings = await UserSettings.get()
-    if not settings.fallback_account_id:
-        await settings.set_fallback_account(account.id)
     _, expires_at = provider_cls._refresh_state(payload)
     return await ProviderSubscription.connect(
         provider=provider_cls.id,

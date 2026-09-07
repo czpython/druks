@@ -7,7 +7,6 @@ from druks.accounts.dependencies import current_session_account, current_session
 from druks.accounts.models import Account
 from druks.accounts.schemas import AccountResponse
 from druks.database import db_session
-from druks.user_settings.models import UserSettings
 
 from . import directory
 from .exceptions import ConnectError
@@ -128,11 +127,6 @@ async def complete_connection(
         # completions of the same email converge, and a true different-email
         # race surfaces as the none-mode multi-operator refusal.
         resolved = account or await Account.get_or_create(completed.provider_email)
-    # Runs with no actor execute as the fallback account; claim the slot when
-    # none is set yet.
-    settings = await UserSettings.get()
-    if not settings.fallback_account_id:
-        await settings.set_fallback_account(resolved.id)
     await ProviderSubscription.connect(
         provider=provider.id,
         account=resolved,

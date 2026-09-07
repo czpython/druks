@@ -6,7 +6,7 @@ from druks.api import dashboard
 from druks.durable.dbos_state import workflow_status
 from druks.durable.models import Artifact, Run
 from druks.testing import configure_app_for_test, make_settings, seed_call, seed_run
-from druks.user_settings.models import SettingsOverride, UserSettings
+from druks.user_settings.models import SettingsOverride, SettingsProfile
 from druks_field_notes.models import Note
 from druks_field_notes.workflows import Summarize
 from fastapi.testclient import TestClient
@@ -65,7 +65,10 @@ async def test_newer_success_hides_historical_failure(client, druks_db):
 async def test_subjectless_and_orphaned_runs_each_stay_current(client, druks_db):
     background = await seed_run(druks_db, kind=Summarize.kind, state="running")
     orphan = Run(
-        id=str(uuid7()), kind=Summarize.kind, created_at=datetime.now(UTC) - timedelta(minutes=10)
+        account_id=background.account_id,
+        id=str(uuid7()),
+        kind=Summarize.kind,
+        created_at=datetime.now(UTC) - timedelta(minutes=10),
     )
     druks_db.add(orphan)
     await druks_db.flush()
@@ -117,7 +120,7 @@ async def test_schedules_resolve_paused_override_and_operator_timezone(
     monkeypatch.setattr(Summarize, "every", "0 9 * * *")
     await SettingsOverride.set_workflow_setting(Summarize.kind, "schedule", "15 10 * * 1")
     await SettingsOverride.set_workflow_setting(Summarize.kind, "schedule_enabled", False)
-    await (await UserSettings.get()).update_profile(timezone="Europe/Madrid")
+    await (await SettingsProfile.get()).update_profile(timezone="Europe/Madrid")
 
     response = client.get("/api/dashboard/schedules")
 

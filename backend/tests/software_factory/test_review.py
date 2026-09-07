@@ -80,6 +80,7 @@ async def test_a_queued_run_replays_through_its_subject():
         PullRequestReview,
         PullRequest.get("acme/app", 7).identity,
         {"repo": "acme/app", "pr_number": 7, "requested_by": "dev@example.com"},
+        account_id="review-account",
     )
 
     assert run_kwargs == {"requested_by": "dev@example.com"}

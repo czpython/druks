@@ -2,7 +2,6 @@ import json
 
 import httpx
 import pytest
-from druks.accounts.constants import SYSTEM_ACCOUNT_ID
 from druks.mcp import registry
 from druks.mcp.enums import IdentityMode
 from druks.mcp.exceptions import RegistryUnavailableError
@@ -448,7 +447,7 @@ async def test_removing_a_connected_row_drops_its_grant(tmp_path, monkeypatch, d
             json={"name": "grafana", "registry": "io.github.grafana/mcp-grafana", "headers": {}},
         )
         await OauthConnection.create(
-            provider="mcp:grafana", account_id=SYSTEM_ACCOUNT_ID, refresh_token="rt", scopes=[]
+            provider="mcp:grafana", account_id=None, refresh_token="rt", scopes=[]
         )
 
         assert client.delete("/api/mcp-servers/grafana").status_code == 204

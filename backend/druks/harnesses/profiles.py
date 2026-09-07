@@ -1,8 +1,8 @@
 from dataclasses import dataclass
 
-from druks.accounts.constants import SYSTEM_ACCOUNT_ID
+from druks.accounts.models import Account
 from druks.sandbox.constants import MAX_AGENT_TIMEOUT_SECONDS
-from druks.user_settings.models import SettingsOverride, UserSettings
+from druks.user_settings.models import SettingsOverride, SettingsProfile
 
 from .base import Harness
 from .exceptions import HarnessNotConnectedError, ProfileSettingsError
@@ -21,7 +21,7 @@ class Profile:
     harness_class: type[Harness]
     model: str
     subscription: ProviderSubscription | None
-    key: str | None
+    api_key: ProviderKey | None
     billing: str
     effort: str
     timeout: int
@@ -37,8 +37,12 @@ class Profile:
         return self.model.partition("/")[2]
 
     @property
-    def charged_account_id(self) -> str:
-        return self.subscription.account_id if self.subscription else SYSTEM_ACCOUNT_ID
+    def key(self) -> str | None:
+        return self.api_key.value.decrypt() if self.api_key else None
+
+    @property
+    def charged_account_id(self) -> str | None:
+        return self.subscription.account_id if self.subscription else None
 
 
 async def check_profile(harness_name: str, model: str, billing: str) -> type[Harness]:
@@ -69,39 +73,41 @@ async def check_profile(harness_name: str, model: str, billing: str) -> type[Har
 
 
 async def get_profile(agent_name: str, account_id: str | None) -> Profile:
-    """How ``agent_name`` runs as ``account_id``, or as the fallback account
-    when the run has no actor. A missing credential raises."""
+    """Resolve an agent's profile for the supplied or default account.
+    A missing credential raises."""
     from druks.apps.registry import agents  # cycle: apps → agents → this module
 
     agent = agents.get(agent_name)
     if not agent:
         raise KeyError(f"no agent is registered as {agent_name!r}")
-    settings = await UserSettings.get()
-    harness_name = (await SettingsOverride.agent_harness(agent_name)).value
-    model = (await SettingsOverride.agent_model(agent_name)).value
-    billing = (await SettingsOverride.agent_billing(agent_name)).value
+    if not account_id:
+        account = await Account.get_default()
+        account_id = account.id if account else None
+    settings = await SettingsProfile.get(account_id)
+    harness_name = (await SettingsOverride.agent_harness(agent_name, settings=settings)).value
+    model = (await SettingsOverride.agent_model(agent_name, settings=settings)).value
+    billing = (await SettingsOverride.agent_billing(agent_name, settings=settings)).value
     harness_class = await check_profile(harness_name, model, billing)
     provider_id = model.partition("/")[0]
     subscription = None
-    key = None
+    provider_key = None
     if billing == "api_key":
         provider_key = await ProviderKey.get(provider_id)
         if not provider_key:
             label = await provider_label(provider_id)
             raise HarnessNotConnectedError(f"add the {label} API key in Settings → Providers.")
-        key = provider_key.value.decrypt()
     else:
-        subscription = await ProviderSubscription.lookup(
-            provider_id, account_id or settings.fallback_account_id
-        )
-    timeout = (await SettingsOverride.agent_timeout(agent_name, agent.timeout)).value
+        subscription = await ProviderSubscription.lookup(provider_id, account_id)
+    timeout = (
+        await SettingsOverride.agent_timeout(agent_name, agent.timeout, settings=settings)
+    ).value
     return Profile(
         harness_class=harness_class,
         model=model,
         subscription=subscription,
-        key=key,
+        api_key=provider_key,
         billing=billing,
-        effort=(await SettingsOverride.agent_effort(agent_name)).value,
+        effort=(await SettingsOverride.agent_effort(agent_name, settings=settings)).value,
         # Capped so a single call always fits inside a fresh sandbox lease.
         timeout=min(timeout, MAX_AGENT_TIMEOUT_SECONDS),
         fast_mode=settings.fast_mode,

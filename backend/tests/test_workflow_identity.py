@@ -1,4 +1,5 @@
 import pytest
+from druks.accounts.models import Account
 from druks.apps import loader as apps_loader
 from druks.apps.exceptions import MalformedApp
 from druks.apps.loader import register_workflow_package, resolve_workflow_app
@@ -164,7 +165,11 @@ async def test_lifecycle_event_stamps_the_declaring_app(druks_db):
     # never an argument, never a stored copy on the run.
     register_workflow_package("alpha_pkg", "alpha")
     flow = _workflow("Beacon", "alpha_pkg.workflows")
-    run = Run(id="wf-identity-1", kind=flow.kind)
+    run = Run(
+        id="wf-identity-1",
+        kind=flow.kind,
+        account_id=(await Account.get_or_create("op@example.com")).id,
+    )
     druks_db.add(run)
     await druks_db.flush()
 

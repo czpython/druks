@@ -13,6 +13,7 @@ import asyncssh
 from drukbox_sdk import SandboxHost as SandboxHostRecord
 from drukbox_sdk.exceptions import SandboxAPIError, SandboxUnavailableError
 
+from druks.accounts.models import Account
 from druks.core.utils.time import ensure_utc
 from druks.harnesses.artifacts import persist_manifest, persist_prompt, read_cost
 from druks.harnesses.exceptions import (
@@ -37,6 +38,7 @@ from .layout import get_helper_script_path, get_work_root
 if TYPE_CHECKING:
     from druks.harnesses.base import Harness
     from druks.harnesses.models import ProviderSubscription
+    from druks.harnesses.profiles import Profile
 
     from .runner import Exec
 
@@ -201,7 +203,7 @@ class Host:
         self,
         *,
         agent: str,
-        account_id: str | None,
+        profile: "Profile",
         prompt: str,
         schema: dict[str, Any],
         artifact_dir: Path,
@@ -213,7 +215,7 @@ class Host:
         extra_env: dict[str, Any] | None = None,
         mcp_servers: tuple[McpServer, ...] = (),
     ) -> AgentResult:
-        """Run ``agent`` as ``account_id`` and return a pure ``AgentResult`` —
+        """Run ``agent`` with ``profile`` and return a pure ``AgentResult`` —
         no database write. A failure is carried on the result's ``error``, not
         raised, so the call still records what it cost before the agent call
         re-raises it.
@@ -228,10 +230,8 @@ class Host:
         # druks.sandbox is mid-init.
         from druks.durable.enums import AgentCallStatus
         from druks.harnesses.datastructures import SandboxSettings
-        from druks.harnesses.profiles import get_profile
 
         settings = load_settings()
-        profile = await get_profile(agent, account_id)
         model, timeout = profile.model, profile.timeout
         harness = profile.harness_class(
             model=model,
@@ -308,15 +308,14 @@ class Host:
         builds the invocation and parses the result; this sandbox executes it.
         One-shot callers with a hand-built harness use this directly;
         ``run_agent`` adds the harness factory + cost capture on top."""
-        # A one-shot caller with a hand-built harness runs on the fallback
+        # A one-shot caller with a hand-built harness runs on the default
         # account's subscription.
         from druks.harnesses.models import ProviderSubscription
-        from druks.user_settings.models import UserSettings
 
         if not (subscription or key):
-            fallback_id = (await UserSettings.get()).fallback_account_id
+            account = await Account.get_default()
             subscription = await ProviderSubscription.lookup(
-                harness.model.partition("/")[0], fallback_id
+                harness.model.partition("/")[0], account.id if account else None
             )
         run_id = harness.mint_run_id(call_id)
         artifact_dir.mkdir(parents=True, exist_ok=True)

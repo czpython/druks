@@ -1,4 +1,5 @@
 import pytest
+from druks.accounts.models import Account
 from druks.api.runs import resume_run
 from druks.api.schemas import ResumeRequest
 from druks.durable import Run
@@ -20,6 +21,7 @@ async def _park(druks_db, *, context: str | None = None) -> None:
         ask["context"] = context
     druks_db.add(
         Run(
+            account_id=(await Account.get_or_create("op@example.com")).id,
             id="r1",
             kind="build",
             input_gate="review_plan",
@@ -171,7 +173,9 @@ async def test_resume_404_when_run_missing(druks_db):
 
 
 async def test_resume_409_when_run_not_parked(druks_db):
-    druks_db.add(Run(id="r2", kind="build"))
+    druks_db.add(
+        Run(id="r2", kind="build", account_id=(await Account.get_or_create("op@example.com")).id)
+    )
     await druks_db.flush()
     await seed_dbos_status(druks_db, "r2", "running")
     with pytest.raises(HTTPException) as exc:

@@ -8,7 +8,7 @@ import type {
   Account,
   AppSettingsProblems,
   UpdateAppsSettingsRequest,
-  UpdateUserSettingsRequest,
+  UpdateSettingsRequest,
 } from '../api/types'
 import { appLabel } from '../apps/registry'
 import { useTicker } from '../lib/useTicker'
@@ -45,7 +45,8 @@ const SECTIONS = [
   { id: 'mcp', label: 'MCP servers', group: 'Tools & access' },
   { id: 'skills', label: 'Skills', group: 'Tools & access' },
   { id: 'browser-sessions', label: 'Browser sessions', group: 'Tools & access' },
-  { id: 'general', label: 'General', group: 'Personal' },
+  { id: 'general', label: 'General', group: 'Installation' },
+  { id: 'personal', label: 'Preferences', group: 'Personal' },
   { id: 'api-tokens', label: 'API tokens', group: 'Personal' },
   { id: 'apps', label: 'App settings', group: 'Apps' },
 ]
@@ -81,6 +82,7 @@ export function SettingsPages({
   const formPath = `${import.meta.env.BASE_URL.replace(/\/$/, '')}${appName ? `/apps/${appName}/settings` : '/settings'}`
   const queryClient = useQueryClient()
   const settingsQuery = useQuery({ queryKey: ['settings'], queryFn: api.getSettings })
+  const personalQuery = useQuery({ queryKey: ['personalSettings'], queryFn: api.getPersonalSettings })
   const appsQuery = useQuery({ queryKey: ['appSettings'], queryFn: api.getAppSettings })
   const harnessesQuery = useQuery({ queryKey: ['harnesses'], queryFn: api.harnesses })
   const agentsQuery = useQuery({ queryKey: ['agents'], queryFn: api.agents })
@@ -94,6 +96,7 @@ export function SettingsPages({
   const catalogsQuery = useQuery({ queryKey: ['providerCatalogs'], queryFn: api.providerCatalogs })
   const executionQueries = [
     settingsQuery,
+    personalQuery,
     appsQuery,
     harnessesQuery,
     providersQuery,
@@ -118,6 +121,8 @@ export function SettingsPages({
   const harnessByName = Object.fromEntries(harnesses.map((harness) => [harness.name, harness]))
   const harnessColor = harnessColors(harnesses.map((harness) => harness.name))
   const savedDefaults = settingsQuery.data ? defaultsOf(settingsQuery.data) : null
+  const savedPersonal = personalQuery.data ? defaultsOf(personalQuery.data) : null
+  const [personalEdits, setPersonalEdits] = useState<UpdateSettingsRequest>({})
   const [timezone, setTimezone] = useState<string | null>(null)
   const [defaults, setDefaults] = useState<Defaults | null>(null)
   const [appEdits, setAppEdits] = useState<Record<string, UpdateAppsSettingsRequest>>({})
@@ -137,12 +142,20 @@ export function SettingsPages({
   const errorNotice = useRef<HTMLParagraphElement>(null)
   const effectiveTimezone = timezone ?? settingsQuery.data?.timezone ?? 'UTC'
   const effectiveDefaults = defaults ?? savedDefaults
+  const personalDefaults = personalQuery.data ? defaultsOf({ ...personalQuery.data, ...personalEdits }) : null
+  const personalTimezone = personalEdits.timezone ?? personalQuery.data?.timezone ?? 'UTC'
+  const personalChanges = Object.fromEntries(
+    Object.entries(personalEdits).filter(([field, value]) =>
+      value !== personalQuery.data?.[field as keyof UpdateSettingsRequest],
+    ),
+  )
   const timezones = useMemo(() => ['UTC', ...Intl.supportedValuesOf('timeZone')], [])
   const clock = useMemo(() => {
     void tick
     return absTime(new Date().toISOString(), effectiveTimezone)
   }, [tick, effectiveTimezone])
   const dirtyPages = [
+    ...(Object.keys(personalChanges).length > 0 ? ['personal'] : []),
     ...(timezone !== null && settingsQuery.data && timezone !== settingsQuery.data.timezone
       ? ['general']
       : []),
@@ -173,11 +186,11 @@ export function SettingsPages({
     app && (app.settings.length || app.workflows.some((workflow) => workflow.fields.length)),
   )
   const paneSection = app?.agents.length && !hasOptions ? 'agents' : appTab
-  const executionPage = section === 'agents' || Boolean(appName && paneSection === 'agents')
+  const executionPage = section === 'agents' || section === 'personal' || Boolean(appName && paneSection === 'agents')
   const Content = appName ? 'section' : 'main'
   const title =
     SECTIONS.find((entry) => entry.id === section)?.label ?? (app ? appLabel(app.name) : 'Settings')
-  const formPage = section === 'general' || section === 'agents' || Boolean(app && validAppPage)
+  const formPage = section === 'general' || section === 'agents' || section === 'personal' || Boolean(app && validAppPage)
   const executionChanged =
     defaults &&
     savedDefaults &&
@@ -190,6 +203,17 @@ export function SettingsPages({
       !catalog
         .modelsOf(defaults.defaultHarness, defaults.defaultBilling)
         .some((model) => model.id === defaults.defaultModel && model.enabled),
+  )
+
+  const personalExecutionChanged = personalDefaults && savedPersonal && (
+    personalDefaults.defaultHarness !== savedPersonal.defaultHarness ||
+    personalDefaults.defaultModel !== savedPersonal.defaultModel ||
+    personalDefaults.defaultBilling !== savedPersonal.defaultBilling
+  )
+  const personalExecutionInvalid = Boolean(
+    personalExecutionChanged && personalDefaults && !catalog
+      .modelsOf(personalDefaults.defaultHarness, personalDefaults.defaultBilling)
+      .some((model) => model.id === personalDefaults.defaultModel && model.enabled),
   )
 
   useEffect(() => {
@@ -232,6 +256,7 @@ export function SettingsPages({
 
   function discard(page: string) {
     if (page === 'general') setTimezone(null)
+    else if (page === 'personal') setPersonalEdits({})
     else if (page === 'agents') setDefaults(null)
     else
       setAppEdits((current) => {
@@ -270,20 +295,30 @@ export function SettingsPages({
           delete next[currentPage]
           return next
         })
-        if (page === 'general') {
+        if (page === 'personal') {
+          if (personalExecutionInvalid)
+            throw new Error('Choose a model with a connected credential before you save.')
+          const saved = await api.updatePersonalSettings(personalChanges)
+          queryClient.setQueryData(['personalSettings'], saved)
+          await queryClient.invalidateQueries({ queryKey: ['agents'] })
+          await queryClient.invalidateQueries({ queryKey: ['appSettings'] })
+        } else if (page === 'general') {
           const saved = await api.updateSettings({ timezone: effectiveTimezone })
           queryClient.setQueryData(['settings'], saved)
+          await queryClient.invalidateQueries({ queryKey: ['personalSettings'] })
         } else if (page === 'agents' && defaults && savedDefaults) {
           if (executionInvalid)
             throw new Error('Choose a model with a connected credential before you save.')
-          const body: UpdateUserSettingsRequest = {}
+          const body: UpdateSettingsRequest = {}
           for (const key of Object.keys(defaults) as (keyof Defaults)[]) {
             if (defaults[key] !== savedDefaults[key] && defaults[key] !== null)
               Object.assign(body, { [key]: defaults[key] })
           }
           const saved = await api.updateSettings(body)
           queryClient.setQueryData(['settings'], saved)
+          await queryClient.invalidateQueries({ queryKey: ['personalSettings'] })
           await queryClient.invalidateQueries({ queryKey: ['agents'] })
+          await queryClient.invalidateQueries({ queryKey: ['appSettings'] })
         } else {
           const owner = apps.find((entry) => page === `apps/${entry.name}`)!
           const edits = appEdits[owner.name]!
@@ -411,6 +446,7 @@ export function SettingsPages({
           dirty &&
           !saving &&
           !(section === 'agents' && executionInvalid) &&
+          !(section === 'personal' && personalExecutionInvalid) &&
           !confirmation.current?.open
         ) {
           event.preventDefault()
@@ -460,7 +496,7 @@ export function SettingsPages({
               </Link>
               <h2 className="settings-sidebar-title">Settings</h2>
               <nav className="settings-navigation" aria-label="Settings">
-                {['AI execution', 'Tools & access', 'Personal', 'Apps'].map((group) => (
+                {['AI execution', 'Tools & access', 'Installation', 'Personal', 'Apps'].map((group) => (
                   <div key={group}>
                     <div className="sidebar-group-title">{group}</div>
                     {SECTIONS.filter((entry) => entry.group === group).map((entry) => (
@@ -596,6 +632,38 @@ export function SettingsPages({
             )}
           {visited.map((page) => (
             <div key={page} hidden={page !== section} className="settings-pane">
+              {page === 'personal' && executionReady && personalDefaults && personalQuery.data && (
+                <div className="set-group">
+                  <p className="set-field-help">
+                    {personalQuery.data.accountId
+                      ? 'Your saved profile applies to your runs. Agent overrides take priority.'
+                      : 'You use installation defaults. Your first save creates a personal profile with the current defaults.'}
+                    {account.isDefault && ' Unattended runs also use this profile.'}
+                  </p>
+                  <GeneralPane
+                    personal
+                    timezone={personalTimezone}
+                    setTimezone={(value) => setPersonalEdits((current) => ({ ...current, timezone: value }))}
+                    timezones={timezones}
+                    clock={absTime(new Date().toISOString(), personalTimezone)}
+                    busy={saving}
+                  />
+                  <AgentsPane
+                    personal
+                    defaults={personalDefaults}
+                    onDefaults={(value) => setPersonalEdits((current) => ({ ...current, ...value }))}
+                    accounts={accountsQuery.data ?? []}
+                    resolved={agentsQuery.data ?? { apps: [] }}
+                    harnessByName={harnessByName}
+                    harnessColor={harnessColor}
+                    catalog={catalog}
+                    allowedEfforts={appsQuery.data?.allowedEfforts ?? []}
+                    onOpenApp={(name) => navigate(`/apps/${name}/settings`)}
+                    onAddProvider={() => navigate('/settings/providers')}
+                    busy={saving}
+                  />
+                </div>
+              )}
               {page === 'general' && (
                 <GeneralPane
                   timezone={effectiveTimezone}
@@ -717,7 +785,7 @@ export function SettingsPages({
                       harnessColor={harnessColor}
                       catalog={catalog}
                       harnessByName={harnessByName}
-                      defaults={savedDefaults}
+                      defaults={savedPersonal}
                       allowedEfforts={appsQuery.data?.allowedEfforts ?? []}
                       busy={saving}
                       onAgentHarness={(name, value) =>
@@ -809,6 +877,7 @@ export function SettingsPages({
                 saving ||
                 !dirty ||
                 (section === 'agents' && executionInvalid) ||
+                (section === 'personal' && (personalExecutionInvalid || !personalQuery.isSuccess)) ||
                 settingsQuery.isPending ||
                 appsQuery.isPending
               }

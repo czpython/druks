@@ -4,7 +4,6 @@ from urllib.parse import parse_qsl, urlparse
 
 import httpx
 import pytest
-from druks.accounts.constants import SYSTEM_ACCOUNT_ID
 from druks.database import db_session
 from druks.redis import get_client
 from druks.services import OauthClient, OauthExchangeError, OauthRefreshError
@@ -58,7 +57,7 @@ async def _connection(
 ) -> OauthConnection:
     return await OauthConnection.create(
         provider=_PROVIDER,
-        account_id=SYSTEM_ACCOUNT_ID,
+        account_id=None,
         refresh_token=refresh_token,
         scopes=scopes or [],
     )
@@ -183,7 +182,7 @@ async def test_disconnect_revokes_the_connection_and_drops_the_cached_token(toke
     assert revoked.revoked_reason == "user"
     # Nothing secret outlives the consent at rest.
     assert not revoked.refresh_token
-    assert revoked.account_id == SYSTEM_ACCOUNT_ID
+    assert revoked.account_id is None
     assert not await get_client().get(_token_key(connection))
 
     # A second revoke keeps the first stamp.

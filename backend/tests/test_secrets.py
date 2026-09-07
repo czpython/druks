@@ -2,7 +2,6 @@ import base64
 import os
 
 import pytest
-from druks.accounts.constants import SYSTEM_ACCOUNT_ID
 from druks.core.models import Uuid7Pk
 from druks.database import db_session
 from druks.mcp.models import McpClientRegistration, McpServer
@@ -45,14 +44,14 @@ async def _store_grant(
     )
     await McpClientRegistration.store(
         server_id=server.id,
-        account_id=SYSTEM_ACCOUNT_ID,
+        account_id=None,
         token_endpoint="https://auth.test/token",
         client_id="client-123",
         client_secret=client_secret,
     )
     return await OauthConnection.create(
         provider="mcp:notion",
-        account_id=SYSTEM_ACCOUNT_ID,
+        account_id=None,
         refresh_token=refresh_token,
         scopes=[],
     )
@@ -76,8 +75,8 @@ async def test_grant_secret_halves_round_trip(druks_db):
     await _store_grant(refresh_token="rt-secret", client_secret="cs-secret")
 
     druks_db.expunge_all()
-    grant = (await OauthConnection.list_for_account("mcp:notion", SYSTEM_ACCOUNT_ID))[0]
-    registration = await McpClientRegistration.get_for_account("notion", SYSTEM_ACCOUNT_ID)
+    grant = (await OauthConnection.list_for_account("mcp:notion", None))[0]
+    registration = await McpClientRegistration.get_for_account("notion", None)
     assert grant.refresh_token.decrypt() == "rt-secret"
     assert registration.client_secret.decrypt() == "cs-secret"
 
@@ -188,8 +187,8 @@ async def test_ciphertext_is_bound_to_its_column(druks_db):
     )
     druks_db.expunge_all()
 
-    grant = (await OauthConnection.list_for_account("mcp:notion", SYSTEM_ACCOUNT_ID))[0]
-    registration = await McpClientRegistration.get_for_account("notion", SYSTEM_ACCOUNT_ID)
+    grant = (await OauthConnection.list_for_account("mcp:notion", None))[0]
+    registration = await McpClientRegistration.get_for_account("notion", None)
     with pytest.raises(SecretDecryptError):
         grant.refresh_token.decrypt()
     with pytest.raises(SecretDecryptError):
@@ -207,7 +206,7 @@ async def test_prepended_key_still_decrypts(monkeypatch, tmp_path, druks_db):
     _set_key(monkeypatch, tmp_path, f"{_key()},{old_key}")
     druks_db.expunge_all()
     assert (await McpServer.get_for_name("linear")).token.decrypt() == _TOKEN
-    assert (await OauthConnection.list_for_account("mcp:notion", SYSTEM_ACCOUNT_ID))[
+    assert (await OauthConnection.list_for_account("mcp:notion", None))[
         0
     ].refresh_token.decrypt() == "rt-secret"
 

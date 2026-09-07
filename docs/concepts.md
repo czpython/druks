@@ -133,7 +133,7 @@ most 2,048 characters. It never carries transcripts or complete review content.
 Needs you lists parked runs that carry a request the operator can act on,
 oldest request first. Other parked work is Waiting. Active work is running and
 queued runs. Problems is failed and orphaned runs. Scheduled work lists
-declared schedules with resolved cadence, pause state, and operator timezone.
+declared schedules with resolved cadence, pause state, and installation timezone.
 These are configuration facts, not proof that a future run will succeed.
 
 Review opens the owning app at the selected run and names the request round
@@ -212,9 +212,10 @@ app or integration owns the provider payload and domain reaction.
 Configuration has two planes:
 
 - **Deployment:** `druks.toml` configures the deployment and creates the process environment.
-- Postgres-backed settings configure the operator profile, harness defaults,
-  app/workflow knobs, per-agent overrides, notifications, MCP servers,
-  and skills.
+- Postgres settings configure installation defaults, personal profiles,
+  app and workflow settings, agent overrides, notifications, MCP servers, and skills.
+  See [personal and installation settings](configuration.md#personal-and-installation-settings)
+  for profile resolution and timezone rules.
 
 Druks encrypts stored MCP tokens and OAuth grants at rest. It decrypts them
 only to mint or deliver a token to an agent call. API responses and

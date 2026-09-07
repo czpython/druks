@@ -99,8 +99,8 @@ export interface AgentCallSummary {
   // Which agent made this call ("scope", "implement"); label is its display name.
   agent: string
   label: string
-  /** The account charged for this call — differs from the run's on fallback. */
-  accountUsername: string
+  /** The subscription owner. Null for installation API keys. */
+  accountUsername: string | null
   status: 'running' | 'succeeded' | 'failed' | 'abandoned'
   startedAt: string
   finishedAt?: string | null
@@ -148,7 +148,6 @@ export interface RunSummary {
   inputRequest?: InputRequest | null
   createdAt: string
   updatedAt: string
-  /** Who asked; "system" when nobody did. */
   accountUsername: string
   agentCalls: AgentCallSummary[]
 }
@@ -554,6 +553,7 @@ export interface ProviderKey {
 export interface Account {
   id: string
   username: string
+  isDefault: boolean
 }
 
 /** What /api/auth/me answers: how this deployment authenticates, who the
@@ -611,7 +611,8 @@ export interface Service {
 
 export type Billing = 'subscription' | 'api_key'
 
-export interface UserSettings {
+export interface SettingsProfile {
+  accountId: string | null
   timezone: string
   defaultHarness: string
   defaultModel: string
@@ -619,11 +620,11 @@ export interface UserSettings {
   defaultEffort: string
   fastMode: boolean
   defaultTimeout: number
-  fallbackAccountId: string | null
+  gateParkDestinationId: string | null
   updatedAt: string
 }
 
-export interface UpdateUserSettingsRequest {
+export interface UpdateSettingsRequest {
   timezone?: string
   defaultHarness?: string
   defaultModel?: string
@@ -631,7 +632,7 @@ export interface UpdateUserSettingsRequest {
   defaultEffort?: string
   fastMode?: boolean
   defaultTimeout?: number
-  fallbackAccountId?: string
+  gateParkDestinationId?: string | null
 }
 
 export type BrowserSessionStatus = 'needs_login' | 'ready' | 'stale' | 'anonymous'

@@ -10,6 +10,7 @@ class AccountResponse(Schema):
 
     id: str
     username: str
+    is_default: bool
 
 
 class IdentityResponse(Schema):

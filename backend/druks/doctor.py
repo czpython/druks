@@ -33,7 +33,6 @@ from .sandbox.templates import get_declared_sandboxes, prepare_sandbox_templates
 from .services import Service, ServiceNotConnectedError
 from .services.models import ServiceIdentity
 from .settings import Settings, load_settings
-from .user_settings.models import UserSettings
 from .webhooks.base import Webhook
 from .workflows import Workflow, _Task
 
@@ -142,7 +141,7 @@ def _credentials_check(
     expires_at: datetime | None,
     key_set_by: str | None = None,
 ) -> CheckResult:
-    """``connected`` is the fallback account's subscription; ``key_set_by``
+    """``connected`` is the default account's subscription; ``key_set_by``
     names who pasted the provider's API key, when one exists."""
     check_name = f"{provider_id}_credentials"
     key_note = f"API key set by {key_set_by}" if key_set_by else ""
@@ -175,23 +174,22 @@ def check_provider_credentials(settings: Settings) -> list[CheckResult]:
     engine = create_engine_from_url(settings.database_url)
     try:
         with Session(engine) as session:
-            fallback_id = session.scalar(
-                select(UserSettings.fallback_account_id).where(
-                    UserSettings.id == UserSettings.SINGLETON_ID
-                )
-            )
+            default_account_id = session.scalar(select(Account.id).where(Account.is_default))
             results: list[CheckResult] = []
             for provider in get_providers():
                 row = session.scalar(
                     select(ProviderSubscription).where(
                         ProviderSubscription.provider == provider.id,
-                        ProviderSubscription.account_id == fallback_id,
+                        ProviderSubscription.account_id == default_account_id,
+                        ProviderSubscription.disconnected_at.is_(None),
                     )
                 )
                 key_set_by = session.scalar(
                     select(Account.username)
                     .join(ProviderKey, ProviderKey.updated_by_account_id == Account.id)
-                    .where(ProviderKey.provider == provider.id)
+                    .where(
+                        ProviderKey.provider == provider.id, ProviderKey.disconnected_at.is_(None)
+                    )
                 )
                 results.append(
                     _credentials_check(

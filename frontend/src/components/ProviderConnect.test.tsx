@@ -33,7 +33,7 @@ function subscription(overrides: Partial<ProviderSubscription> = {}): ProviderSu
 const sharedKey: ProviderKey = {
   provider: 'anthropic',
   keyTail: '4f2a',
-  updatedBy: { id: 'acc-ops', username: 'ops@corp.com' },
+  updatedBy: { id: 'acc-ops', username: 'ops@corp.com', isDefault: true },
   updatedAt: '2026-09-01T00:00:00Z',
 }
 
