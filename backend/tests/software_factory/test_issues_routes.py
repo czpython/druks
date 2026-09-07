@@ -1,4 +1,3 @@
-from druks.accounts.constants import SYSTEM_ACCOUNT_ID
 from druks.accounts.models import Account
 from druks.api.server import app as api
 from druks.contrib.software_factory.issues.enums import Status
@@ -218,7 +217,7 @@ async def test_blank_title_and_body_are_refused(druks_client):
     assert commented.status_code == 422
 
 
-async def test_unknown_ticket_and_system_assignee_are_404(druks_client):
+async def test_unknown_ticket_and_unknown_assignee_are_404(druks_client):
     missing = await druks_client.get(f"{_TICKETS}/DRU-99")
     assert missing.status_code == 404
 
@@ -226,9 +225,9 @@ async def test_unknown_ticket_and_system_assignee_are_404(druks_client):
     assigned = await druks_client.post(
         _TICKETS,
         json={
-            "title": "handed to the system",
+            "title": "handed to nobody real",
             "project_id": project["id"],
-            "assignee_id": SYSTEM_ACCOUNT_ID,
+            "assignee_id": "not-an-account",
         },
     )
     assert assigned.status_code == 404
@@ -236,7 +235,7 @@ async def test_unknown_ticket_and_system_assignee_are_404(druks_client):
     ticket = await _open_ticket(druks_client, project["id"])
     updated = await druks_client.patch(
         f"{_TICKETS}/{ticket['identifier']}",
-        json={"assignee_id": SYSTEM_ACCOUNT_ID},
+        json={"assignee_id": "not-an-account"},
     )
     assert updated.status_code == 404
 

@@ -45,11 +45,10 @@ async def require_ticket(identifier: str) -> Ticket:
 
 
 async def require_assignee(assignee_id: str) -> None:
-    """A ticket is assigned to a real, non-system account or to nobody. The
-    assignee FK is RESTRICT, so a bad id would surface as a 500 IntegrityError
-    on write — check it here instead, where the answer is a 404 the form can
-    show. The system account is druks' own actor, never someone to hand work to."""
-    if not await Account.get(assignee_id, exclude_system=True):
+    """A ticket is assigned to a real account or to nobody. The assignee FK is
+    RESTRICT, so a bad id would surface as a 500 IntegrityError on write —
+    check it here instead, where the answer is a 404 the form can show."""
+    if not await Account.get(assignee_id):
         raise HTTPException(http_status.HTTP_404_NOT_FOUND, f"no account {assignee_id!r}")
 
 
