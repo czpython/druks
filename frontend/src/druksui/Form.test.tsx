@@ -370,18 +370,83 @@ describe('submitting a form', () => {
     await waitFor(() => expect(callOperation).toHaveBeenCalledTimes(1))
   })
 
-  it('calls the resolved operation with the arguments and the values as one object', async () => {
-    renderBlocks([form([BODY], action({ arguments: { source: 'dashboard' }, refresh: 'none' }))])
+    it('calls the resolved operation with the arguments and the values as one object', async () => {
+      renderBlocks([form([BODY], action({ arguments: { source: 'dashboard' }, refresh: 'none' }))])
 
-    fireEvent.change(screen.getByLabelText(/Note/), { target: { value: 'Fan noise.' } })
-    fireEvent.click(screen.getByText('Save'))
+      fireEvent.change(screen.getByLabelText(/Note/), { target: { value: 'Fan noise.' } })
+      fireEvent.click(screen.getByText('Save'))
 
-    await waitFor(() => expect(callOperation).toHaveBeenCalled())
-    expect(callOperation).toHaveBeenCalledWith('POST', '/api/field_notes/notes', {
-      source: 'dashboard',
-      body: 'Fan noise.',
+      await waitFor(() => expect(callOperation).toHaveBeenCalled())
+      expect(callOperation).toHaveBeenCalledWith('POST', '/api/field_notes/notes', {
+        source: 'dashboard',
+        body: 'Fan noise.',
+      })
     })
-  })
+
+    it('sends a live form when a text field blurs, with no Save button', async () => {
+      renderBlocks([
+        {
+          ...form([BODY], action({ refresh: 'none' })),
+          submit: 'change',
+          layout: 'prose',
+        },
+      ])
+
+      expect(screen.queryByRole('button', { name: 'Save' })).toBeNull()
+      fireEvent.change(screen.getByLabelText(/Note/), { target: { value: 'Fan noise.' } })
+      fireEvent.blur(screen.getByLabelText(/Note/))
+
+      await waitFor(() => expect(callOperation).toHaveBeenCalled())
+      expect(callOperation).toHaveBeenCalledWith('POST', '/api/field_notes/notes', {
+        body: 'Fan noise.',
+      })
+    })
+
+    it('does not send a live form that nobody changed', () => {
+      renderBlocks([
+        {
+          ...form([BODY], action({ refresh: 'none' })),
+          submit: 'change',
+          layout: 'prose',
+        },
+      ])
+
+      fireEvent.blur(screen.getByLabelText(/Note/))
+      expect(callOperation).not.toHaveBeenCalled()
+    })
+
+    it('sends a live select as soon as it changes', async () => {
+      renderBlocks([
+        {
+          ...form(
+            [
+              {
+                field: 'select',
+                name: 'severity',
+                label: 'Severity',
+                options: [
+                  { value: 'low', label: 'Low' },
+                  { value: 'high', label: 'High' },
+                ],
+                value: 'low',
+                helpText: '',
+                isRequired: false,
+              },
+            ],
+            action({ refresh: 'none' }),
+          ),
+          submit: 'change',
+          layout: 'row',
+        },
+      ])
+
+      fireEvent.change(screen.getByLabelText(/Severity/), { target: { value: 'high' } })
+
+      await waitFor(() => expect(callOperation).toHaveBeenCalled())
+      expect(callOperation).toHaveBeenCalledWith('POST', '/api/field_notes/notes', {
+        severity: 'high',
+      })
+    })
 
   it('fills the path from the payload and sends what is left as the body', async () => {
     renderBlocks([

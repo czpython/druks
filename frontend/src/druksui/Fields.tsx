@@ -10,12 +10,14 @@ export function Fields({
   errors,
   resets,
   onChange,
+  onBlur,
 }: {
   fields: Field[]
   values: Record<string, unknown>
   errors: Record<string, string>
   resets: number
   onChange: (name: string, value: unknown) => void
+  onBlur?: () => void
 }) {
   // A page can hold two forms that both take a "body", so the id a label points
   // at belongs to this form, not to the field name alone.
@@ -52,6 +54,9 @@ export function Fields({
               id={id}
               value={values[field.name]}
               onChange={onChange}
+              onBlur={
+                ['text', 'text_area', 'number', 'secret'].includes(field.field) ? onBlur : undefined
+              }
               describedBy={describedBy}
               isInvalid={Boolean(errors[field.name])}
               resets={resets}
@@ -78,6 +83,7 @@ function Input({
   id,
   value,
   onChange,
+  onBlur,
   describedBy,
   isInvalid,
   resets,
@@ -86,6 +92,7 @@ function Input({
   id: string
   value: unknown
   onChange: (name: string, value: unknown) => void
+  onBlur?: () => void
   describedBy?: string
   isInvalid: boolean
   resets: number
@@ -115,6 +122,7 @@ function Input({
           placeholder={field.placeholder}
           value={String(value ?? '')}
           onChange={(event) => onChange(field.name, event.target.value)}
+          onBlur={onBlur}
         />
       )
     case 'text_area':
@@ -126,6 +134,7 @@ function Input({
           placeholder={field.placeholder}
           value={String(value ?? '')}
           onChange={(event) => onChange(field.name, event.target.value)}
+          onBlur={onBlur}
         />
       )
     case 'number':
@@ -141,6 +150,7 @@ function Input({
           onChange={(event) =>
             onChange(field.name, event.target.value === '' ? null : Number(event.target.value))
           }
+          onBlur={onBlur}
         />
       )
     case 'select':
@@ -226,6 +236,7 @@ function Input({
           data-lpignore="true"
           value={String(value ?? '')}
           onChange={(event) => onChange(field.name, event.target.value)}
+          onBlur={onBlur}
         />
       )
     case 'upload':

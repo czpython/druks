@@ -434,7 +434,7 @@ export type Block =
     }
   | { block: 'list'; title: string; items: Value[] }
   | { block: 'stack'; gap: 'small' | 'medium' | 'large'; blocks: Block[] }
-  | { block: 'columns'; blocks: Block[] }
+  | { block: 'columns'; layout?: 'even' | 'sidebar'; blocks: Block[] }
   | Action
   | {
       block: 'form'
@@ -442,6 +442,8 @@ export type Block =
       description: string
       fields: Field[]
       action: Action
+      submit?: 'button' | 'change'
+      layout?: 'stack' | 'prose' | 'row'
     }
   | CardBlock
   | { block: 'cards'; title: string; cards: CardBlock[]; empty: EmptyStateBlock | null }

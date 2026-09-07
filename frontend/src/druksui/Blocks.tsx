@@ -43,6 +43,8 @@ function BlockContent({ block }: { block: Block }) {
           description={block.description}
           fields={block.fields}
           action={block.action}
+          submit={block.submit ?? 'button'}
+          layout={block.layout ?? 'stack'}
         />
       )
     case 'gate_controls':
@@ -103,7 +105,7 @@ function BlockContent({ block }: { block: Block }) {
     case 'columns':
       if (!block.blocks.length) return null
       return (
-        <div className="dui-columns">
+        <div className={`dui-columns${block.layout === 'sidebar' ? ' dui-columns-sidebar' : ''}`}>
           {block.blocks.map((column, index) => (
             <div key={index} className="dui-column">
               <BlockContent block={column} />

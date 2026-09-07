@@ -127,9 +127,9 @@ async def create_ticket(
     priority: Priority = Body(Priority.NONE, embed=True),
     assignee_id: str | None = Body(None, embed=True),
 ) -> TicketDetail:
-    """Write a ticket down. It lands in Todo and takes the next number in its
-    project's sequence. Creating is quiet: moving a ticket into Ready for Agent
-    is what opens a build, so a new ticket publishes nothing."""
+    """Write a ticket down. It takes the next number in its project's sequence.
+    Creating in Ready for Agent is a transition into the trigger, so a build
+    can open. Creating in Todo publishes nothing."""
     title = required_text(title, "title")
     if not await IssuesProject.get(project_id):
         raise HTTPException(http_status.HTTP_404_NOT_FOUND, f"no project {project_id}")
