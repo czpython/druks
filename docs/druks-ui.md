@@ -683,6 +683,7 @@ class Card:
     description: str = ""
     blocks: list[Block] = []
     controls: list[Action | Link] = []
+    link: Link | None = None
 ```
 
 ```json
@@ -691,9 +692,15 @@ class Card:
   "title": "peer-7",
   "description": "Last answered 4 minutes ago.",
   "blocks": [{"block": "text", "text": "Healthy."}],
-  "controls": [{"block": "link", "label": "Open", "page": "peer", "arguments": {"peer_id": "7"}, "url": ""}]
+  "controls": [],
+  "link": {"block": "link", "label": "peer-7", "page": "peer", "arguments": {"peer_id": "7"}, "url": ""}
 }
 ```
+
+`link` is the card's destination. With no `controls`, the shell makes the whole
+panel the control. With `controls`, the title carries the link so a button is
+not nested inside an anchor. A linked card should not hold other links in
+`blocks`.
 
 ### Cards
 
@@ -719,7 +726,14 @@ One card for each of a set of things.
 ```python
 ui.Cards(
     title="Peers",
-    cards=[ui.Card(title=peer.name, blocks=[...], controls=[...]) for peer in peers],
+    cards=[
+        ui.Card(
+            title=peer.name,
+            blocks=[...],
+            link=ui.Link(peer.name, page="peer", arguments={"peer_id": str(peer.id)}),
+        )
+        for peer in peers
+    ],
     empty=ui.EmptyState("No peer yet", controls=[ui.Link("Add one", page="new_peer")]),
 )
 ```
@@ -1648,7 +1662,8 @@ action in `blocks` stays with the body content.
 `Page`, `Section`, `Card` and `EmptyState` all take `controls` the same way: a
 list of `Action` and `Link`, in the order the app wants them read. An `Action`
 calls one of the app's operations; a `Link` navigates. Both are things an
-operator presses, so they share the row.
+operator presses, so they share the row. A `Card` can also take `link`. That is
+the card's destination, not a control on the row.
 
 ```python
 return ui.Page(

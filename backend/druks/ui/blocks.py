@@ -588,10 +588,14 @@ class Columns(BlockParent):
 
 
 class Card(BlockParent):
+    """A titled panel. ``link`` is its destination. The shell makes the whole
+    panel the control when ``controls`` is empty."""
+
     block: Literal["card"] = "card"
     title: str = ""
     description: str = ""
     controls: list[Action | Link] = Field(default_factory=list)
+    link: Link | None = None
 
     def iter_actions(self) -> "Iterable[Action]":
         yield from super().iter_actions()
@@ -602,6 +606,8 @@ class Card(BlockParent):
         super().check_placement(followed=followed, regions=regions, region=region)
         for control in self.controls:
             control.check_placement(followed=followed, regions=regions, region=region)
+        if self.link:
+            self.link.check_placement(followed=followed, regions=regions, region=region)
 
 
 class Cards(PageBlock):
