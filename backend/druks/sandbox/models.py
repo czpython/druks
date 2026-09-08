@@ -5,12 +5,13 @@ from secrets import token_urlsafe
 from typing import TYPE_CHECKING
 
 from drukbox_sdk import Issuer
-from sqlalchemy import CheckConstraint, ForeignKey, LargeBinary, select, update
+from sqlalchemy import ForeignKey, LargeBinary, select, update
 from sqlalchemy.orm import Mapped, mapped_column, relationship, selectinload
 
 from druks.core.models import Uuid7Pk
 from druks.database import db_session, get_session
 from druks.models import Base
+from druks.secrets.models import VaultSecret
 from druks.settings import load_settings
 
 from .constants import SANDBOX_HOST_LEASE_SECONDS
@@ -24,37 +25,27 @@ if TYPE_CHECKING:
 _ISSUER_REFRESH = "1h"
 
 
-class SandboxSecret(Base):
-    """One secret a box holds as a placeholder, and where the issuer gets its
-    value: an identity of the appliance at a service, or a harness login."""
+class SecretRef(Base):
+    """One secret a box holds as a placeholder: the vault row the issuer
+    answers from, under the box's name for it."""
 
-    __tablename__ = "sandbox_secrets"
+    __tablename__ = "sandbox_secret_refs"
 
     identity_id: Mapped[str] = mapped_column(
         ForeignKey("sandbox_identities.id", ondelete="CASCADE"), primary_key=True
     )
     # The Drukbox catalog name: the key of the box's secret and its variable.
     name: Mapped[str] = mapped_column(primary_key=True)
-    # The appliance identity that issues, by service slug.
-    service: Mapped[str | None] = mapped_column(
-        ForeignKey("service_identities.service", ondelete="CASCADE")
-    )
-    # The harness login that issues.
-    subscription_id: Mapped[str | None] = mapped_column(
-        ForeignKey("provider_subscriptions.id", ondelete="CASCADE")
-    )
+    secret_id: Mapped[str] = mapped_column(ForeignKey("vault.id", ondelete="CASCADE"))
     # What the token is for: the repo. Empty for a subscription.
     resource: Mapped[str] = mapped_column(default="")
 
-    __table_args__ = (
-        CheckConstraint("(service IS NULL) <> (subscription_id IS NULL)", name="one_source"),
-    )
-
-    identity: Mapped["SandboxIdentity"] = relationship(back_populates="secrets")
+    identity: Mapped["SandboxIdentity"] = relationship(back_populates="secret_refs")
+    secret: Mapped[VaultSecret] = relationship(lazy="selectin")
 
     @property
-    def key(self) -> tuple[str, str | None, str | None, str]:
-        return (self.name, self.service, self.subscription_id, self.resource or "")
+    def key(self) -> tuple[str, str, str]:
+        return (self.name, self.secret_id, self.resource or "")
 
 
 class SandboxIdentity(Base, Uuid7Pk):
@@ -74,13 +65,13 @@ class SandboxIdentity(Base, Uuid7Pk):
     created_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
     expires_at: Mapped[datetime]
     revoked_at: Mapped[datetime | None]
-    secrets: Mapped[list[SandboxSecret]] = relationship(
+    secret_refs: Mapped[list[SecretRef]] = relationship(
         back_populates="identity", cascade="all, delete-orphan", lazy="selectin"
     )
 
     @classmethod
     async def create(
-        cls, *, run_id: str, scoped_to: str, secrets: list[SandboxSecret]
+        cls, *, run_id: str, scoped_to: str, secret_refs: list[SecretRef]
     ) -> tuple["SandboxIdentity", dict[str, Issuer]]:
         """The committed identity and the issuer entries for its box. Committed
         before the box exists: Drukbox fetches an issuer during provisioning."""
@@ -90,14 +81,9 @@ class SandboxIdentity(Base, Uuid7Pk):
             run_id=run_id,
             scoped_to=scoped_to,
             # Own rows: the caller's values stay values.
-            secrets=[
-                SandboxSecret(
-                    name=secret.name,
-                    service=secret.service,
-                    subscription_id=secret.subscription_id,
-                    resource=secret.resource or "",
-                )
-                for secret in secrets
+            secret_refs=[
+                SecretRef(name=ref.name, secret_id=ref.secret_id, resource=ref.resource or "")
+                for ref in secret_refs
             ],
             token_hash=hashlib.sha256(bearer.encode()).digest(),
             created_at=now,
@@ -109,18 +95,18 @@ class SandboxIdentity(Base, Uuid7Pk):
         await session.commit()
         issuer_url = load_settings().sandbox.issuer_url.rstrip("/")
         entries = {
-            secret.name: Issuer(
-                url=f"{issuer_url}/api/secrets/{identity.id}/{secret.name}",
+            ref.name: Issuer(
+                url=f"{issuer_url}/api/secrets/{identity.id}/{ref.name}",
                 headers={"Authorization": f"Bearer {bearer}"},
                 refresh=_ISSUER_REFRESH,
             )
-            for secret in secrets
+            for ref in secret_refs
         }
         return identity, entries
 
     @classmethod
     async def lookup(
-        cls, run_id: str, scoped_to: str, secrets: list[SandboxSecret]
+        cls, run_id: str, scoped_to: str, secret_refs: list[SecretRef]
     ) -> "SandboxIdentity | None":
         """The live identity bound to the box scoped to a workflow or an agent,
         with these secrets. A replay finds the box a crashed process left."""
@@ -134,9 +120,9 @@ class SandboxIdentity(Base, Uuid7Pk):
             )
             .order_by(cls.id.desc())
         )
-        wanted = {secret.key for secret in secrets}
+        wanted = {ref.key for ref in secret_refs}
         return next(
-            (row for row in rows if row.is_live and {s.key for s in row.secrets} == wanted),
+            (row for row in rows if row.is_live and {r.key for r in row.secret_refs} == wanted),
             None,
         )
 
@@ -146,7 +132,7 @@ class SandboxIdentity(Base, Uuid7Pk):
         secret it names, read fresh. Else IdentityDenied."""
         identity = await db_session().scalar(
             select(cls)
-            .options(selectinload(cls.run), selectinload(cls.secrets))
+            .options(selectinload(cls.run), selectinload(cls.secret_refs))
             .where(cls.id == identity_id)
             .execution_options(populate_existing=True)
         )
@@ -156,15 +142,15 @@ class SandboxIdentity(Base, Uuid7Pk):
             and identity.is_live
             and identity.run.is_active
         ):
-            identity.get_secret(name)
+            identity.get_secret_ref(name)
             return identity
         raise IdentityDenied(f"no live identity {identity_id} for a fetch of {name}")
 
-    def get_secret(self, name: str) -> SandboxSecret:
+    def get_secret_ref(self, name: str) -> SecretRef:
         """The secret the box holds under a Drukbox name, or IdentityDenied."""
-        for secret in self.secrets:
-            if secret.name == name:
-                return secret
+        for ref in self.secret_refs:
+            if ref.name == name:
+                return ref
         raise IdentityDenied(f"identity {self.id} holds no secret {name}")
 
     @property
@@ -191,13 +177,13 @@ class SandboxIdentity(Base, Uuid7Pk):
             await session.commit()
 
     @classmethod
-    async def list_subscription_identities(cls, subscription_id: str) -> list["SandboxIdentity"]:
-        """The live identities with a bound box that hold a secret of the subscription."""
+    async def list_for_secret(cls, secret_id: str) -> list["SandboxIdentity"]:
+        """The live identities with a bound box that hold a ref to the secret."""
         rows = await db_session().scalars(
             select(cls)
-            .join(cls.secrets)
+            .join(cls.secret_refs)
             .where(
-                SandboxSecret.subscription_id == subscription_id,
+                SecretRef.secret_id == secret_id,
                 cls.host_id.is_not(None),
                 cls.revoked_at.is_(None),
             )

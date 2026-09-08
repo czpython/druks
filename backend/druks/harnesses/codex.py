@@ -18,6 +18,7 @@ from druks.sandbox.datastructures import (
     McpServer,
 )
 from druks.sandbox.layout import get_runs_root, get_work_root
+from druks.secrets.models import VaultSecret
 from druks.skills.models import Skill
 
 from .artifacts import write_cost
@@ -30,7 +31,6 @@ from .exceptions import (
     HarnessRateLimitError,
     HarnessUsageLimitError,
 )
-from .models import ProviderSubscription
 from .providers import OpenAiProvider
 from .subprocess import read_result_json
 
@@ -365,7 +365,7 @@ class CodexHarness(Harness):
         skills: tuple[str, ...] = (),
         extra_env: dict[str, str] | None = None,
         mcp_servers: tuple[McpServer, ...] = (),
-        subscription: ProviderSubscription | None = None,
+        subscription: VaultSecret | None = None,
         key: str | None = None,
         timeout: int = Harness.default_timeout,
     ) -> AgentInvocation:
@@ -477,7 +477,7 @@ class CodexHarness(Harness):
         sandbox: SandboxSettings,
         *,
         skills: tuple[str, ...] = (),
-        subscription: ProviderSubscription | None,
+        subscription: VaultSecret | None,
         key: str | None,
     ) -> Credentials:
         config_dir = sandbox.harness_config_root / self.name
@@ -494,11 +494,9 @@ class CodexHarness(Harness):
         return Credentials(home=tuple(home))
 
     @classmethod
-    def auth_file(
-        cls, subscription: ProviderSubscription | None, *, key: str | None = None
-    ) -> HomeFile:
+    def auth_file(cls, subscription: VaultSecret | None, *, key: str | None = None) -> HomeFile:
         if subscription:
-            auth = dict(subscription.payload)
+            auth = dict(subscription.secrets)
         else:
             auth = {"OPENAI_API_KEY": key}
         return HomeFile(".codex/auth.json", json.dumps(auth))

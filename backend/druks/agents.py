@@ -51,8 +51,8 @@ async def _runner(
     # the runner — fresh per call, so nothing (connection or credential) is held across steps.
     if host_id:
         vm = sandbox_client.attach(host_id=host_id)
-    elif (secrets := [*profile.sandbox_secrets, *await workflow.get_sandbox_secrets()]) and (
-        identity := await SandboxIdentity.lookup(workflow_id, step, secrets)
+    elif (refs := [*profile.secret_refs, *await workflow.get_secret_refs()]) and (
+        identity := await SandboxIdentity.lookup(workflow_id, step, refs)
     ):
         # A crashed attempt left its box behind. Its identity finds it again.
         vm = sandbox_client.resume(host_id=identity.host_id)
@@ -64,9 +64,9 @@ async def _runner(
         # A box that fetches gets its own identity, and the key names it. A
         # replay finds the box through the identity, above.
         identity, entries, key = None, {}, profile.secrets_id
-        if secrets:
+        if refs:
             identity, entries = await SandboxIdentity.create(
-                run_id=workflow_id, scoped_to=step, secrets=secrets
+                run_id=workflow_id, scoped_to=step, secret_refs=refs
             )
             key = identity.id
         vm = sandbox_client.ephemeral(
@@ -279,7 +279,7 @@ class Agent:
         profile = await get_profile(self.id, workflow.account_id)
         model = profile.model
         subscription_id = profile.subscription.id if profile.subscription else None
-        api_key_provider = profile.api_key.provider if profile.api_key else None
+        api_key_id = profile.api_key.id if profile.api_key else None
         # An agent call is a durability boundary — its effects don't roll back —
         # so commit here rather than hold the step's connection idle through the
         # minutes of provisioning and the run.
@@ -323,7 +323,7 @@ class Agent:
                     agent=self.id,
                     host_id=runner.host_id,
                     subscription_id=subscription_id,
-                    api_key_provider=api_key_provider,
+                    api_key_id=api_key_id,
                 )
                 try:
                     result = await runner.run_agent(

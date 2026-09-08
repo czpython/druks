@@ -11,7 +11,6 @@ from druks.mcp.exceptions import (
     InvalidCatalogError,
     InvalidServerNameError,
     MissingTokenError,
-    SourceEnvVarUnsetError,
 )
 from druks.mcp.helpers import get_bearer_token_env_var
 from druks.mcp.models import McpServer
@@ -334,7 +333,7 @@ async def test_bearerless_server_merges_with_its_headers(druks_db):
     grafana = (await McpServer._merged())["grafana"]
     assert grafana["token_source"] == ""
     assert grafana["headers"] == {"X-Grafana-URL": "https://acme.grafana.net"}
-    assert grafana["secret_headers"]["X-Api-Key"] == "grafana-api-secret"
+    assert grafana["secret_headers"]["X-Api-Key"].secrets["value"] == "grafana-api-secret"
 
 
 # --- API: CRUD + enable/disable + redaction ------------------------------
@@ -450,10 +449,6 @@ def _write_catalog(tmp_path, content):
     return path
 
 
-def _env_entry(url="https://mcp.vault.test/", env="VAULT_TEST_TOKEN"):
-    return {"url": url, "auth": {"type": "static_from_env", "env": env}}
-
-
 def _static_entry(url):
     return {"url": url, "auth": {"type": "static"}}
 
@@ -519,7 +514,6 @@ def test_load_catalog_fails_loudly_on_bad_content(tmp_path, registry_state):
         ({"x": {"url": "https://x/", "transport": "stdio", "auth": {"type": "static"}}}, "stdio"),
         ({"x": {"url": "https://x/"}}, "auth"),
         ({"x": {"url": "https://x/", "auth": {"type": "magic"}}}, "magic"),
-        ({"x": {"url": "https://x/", "auth": {"type": "static_from_env"}}}, "env"),
         ({"x": {"url": "https://x/", "auth": {"type": "static", "env": "FOO"}}}, "env"),
         ({"x": {"url": "https://x/", "trasport": "http", "auth": {"type": "static"}}}, "trasport"),
     ):
@@ -564,68 +558,3 @@ async def test_catalog_enabled_false_ships_the_entry_dark(tmp_path, registry_sta
     enabled_names = {s["name"] for s in await McpServer.list_enabled()}
     assert "dark_test" not in enabled_names
     assert "lit_test" in enabled_names
-
-
-# --- static-from-env: the token lives in druks' own process env -----------
-
-
-async def test_static_from_env_delivers_the_token_from_process_env(
-    tmp_path, registry_state, monkeypatch, druks_db
-):
-    load_mcp_catalog(_write_catalog(tmp_path, {"vault_test": _env_entry()}))
-    monkeypatch.setenv("VAULT_TEST_TOKEN", "vault-secret")
-
-    kwargs = await _delivery()
-
-    # The value rides only in env, under the derived var the config names; the
-    # wire shape never carries it.
-    assert kwargs["extra_env"][get_bearer_token_env_var("vault_test")] == "vault-secret"
-    vault = next(s for s in kwargs["mcp_servers"] if s.name == "vault_test")
-    assert vault.url == "https://mcp.vault.test/"
-    assert "vault-secret" not in repr(vault)
-
-
-async def test_static_from_env_unset_var_fails_loudly_at_delivery(
-    tmp_path, registry_state, monkeypatch, druks_db
-):
-    load_mcp_catalog(_write_catalog(tmp_path, {"vault_test": _env_entry()}))
-    monkeypatch.delenv("VAULT_TEST_TOKEN", raising=False)
-
-    with pytest.raises(SourceEnvVarUnsetError, match="VAULT_TEST_TOKEN"):
-        await _delivery()
-
-
-async def test_definition_auth_wins_over_an_overlay_row_token(
-    tmp_path, registry_state, monkeypatch, druks_db
-):
-    # Precedence: for a catalog-managed name the definition's auth strategy
-    # decides how the token is sourced — a row token is inert for env-sourced
-    # entries, and druks never needs one stored.
-    load_mcp_catalog(_write_catalog(tmp_path, {"vault_test": _env_entry()}))
-    await McpServer.create(name="vault_test", url="https://mcp.vault.test/", token="db-token")
-    monkeypatch.setenv("VAULT_TEST_TOKEN", "env-token")
-
-    kwargs = await _delivery()
-
-    assert kwargs["extra_env"][get_bearer_token_env_var("vault_test")] == "env-token"
-
-
-async def test_api_has_token_reflects_env_presence_for_env_sourced(
-    tmp_path, registry_state, monkeypatch, druks_db
-):
-    load_mcp_catalog(_write_catalog(tmp_path, {"vault_test": _env_entry()}))
-    monkeypatch.delenv("VAULT_TEST_TOKEN", raising=False)
-
-    async with asgi_client(configure_app_for_test(settings=make_settings(tmp_path))) as client:
-        vault = next(
-            s for s in (await client.get("/api/mcp-servers")).json() if s["name"] == "vault_test"
-        )
-        assert vault["hasToken"] is False
-        # The badge can name the var to set — a var name, never a value.
-        assert vault["sourceEnvVar"] == "VAULT_TEST_TOKEN"
-
-        monkeypatch.setenv("VAULT_TEST_TOKEN", "vault-secret")
-        listed = await client.get("/api/mcp-servers")
-        vault = next(s for s in listed.json() if s["name"] == "vault_test")
-        assert vault["hasToken"] is True
-        assert "vault-secret" not in listed.text

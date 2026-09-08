@@ -14,10 +14,12 @@ from druks.database import db_session
 from druks.harnesses import providers as pbase
 from druks.harnesses.datastructures import ParsedUsage
 from druks.harnesses.exceptions import HarnessNotConnectedError, OAuthTokenError
-from druks.harnesses.models import ProviderKey, ProviderSubscription
 from druks.harnesses.providers import AnthropicProvider, OpenAiProvider
 from druks.sandbox import gate
-from druks.sandbox.models import SandboxIdentity, SandboxSecret
+from druks.sandbox.models import SandboxIdentity, SecretRef
+from druks.secrets.datastructures import Audience
+from druks.secrets.enums import SecretKind
+from druks.secrets.models import VaultSecret
 from druks.testing import seed_run
 from druks_field_notes.workflows import Summarize
 from sqlalchemy import update
@@ -42,7 +44,7 @@ def _claude_payload(*, access="A0", refresh="R0", expires_at=None, extra=None) -
     return {"claudeAiOauth": block}
 
 
-async def _seed_claude(*, provider_email="op@example.com", **kwargs) -> ProviderSubscription:
+async def _seed_claude(*, provider_email="op@example.com", **kwargs) -> VaultSecret:
     return await connect_provider(
         AnthropicProvider, _claude_payload(**kwargs), provider_email=provider_email
     )
@@ -56,7 +58,7 @@ def _codex_payload(*, access=None, refresh="R0", account_id="acc-1", id_token="i
     return {"auth_mode": "chatgpt", "OPENAI_API_KEY": None, "tokens": tokens}
 
 
-async def _seed_codex(*, provider_email="op@example.com", **kwargs) -> ProviderSubscription:
+async def _seed_codex(*, provider_email="op@example.com", **kwargs) -> VaultSecret:
     return await connect_provider(
         OpenAiProvider, _codex_payload(**kwargs), provider_email=provider_email
     )
@@ -64,9 +66,11 @@ async def _seed_codex(*, provider_email="op@example.com", **kwargs) -> ProviderS
 
 async def _payload(provider_id: str) -> dict:
     # Rotation commits in its own session; refresh past this session's identity map.
-    row = await ProviderSubscription.get_for_account(provider_id, (await Account.get_default()).id)
+    row = await VaultSecret.lookup(
+        SecretKind.SUBSCRIPTION, Audience.provider(provider_id), (await Account.get_default()).id
+    )
     await db_session().refresh(row)
-    return row.payload
+    return row.secrets
 
 
 def _resp(status: int, body: object) -> httpx.Response:
@@ -173,9 +177,9 @@ async def test_claude_invalid_grant_drops_row(monkeypatch, druks_db):
     assert result.error == "invalid_grant"
     # A revoked lineage self-disconnects and commits inside the rotation — the
     # deletion never rides (or rolls back with) the tick's later commit.
-    assert not await ProviderSubscription.list_all()
+    assert not await VaultSecret.list_subscriptions()
     with pytest.raises(HarnessNotConnectedError):
-        await ProviderSubscription.lookup("anthropic", account_id)
+        await AnthropicProvider.get_subscription(account_id)
 
 
 async def test_claude_network_error_keeps_row(monkeypatch, druks_db):
@@ -282,12 +286,10 @@ async def test_rotation_touches_only_the_addressed_row(monkeypatch, druks_db):
     result = await AnthropicProvider.rotate_token(stale_id, now=_NOW)
     assert result.action == "refreshed"
     assert (
-        dict((await ProviderSubscription.get(stale_id)).payload)["claudeAiOauth"]["accessToken"]
-        == "new"
+        dict((await VaultSecret.reload(stale_id)).secrets)["claudeAiOauth"]["accessToken"] == "new"
     )
     assert (
-        dict((await ProviderSubscription.get(other_id)).payload)["claudeAiOauth"]["accessToken"]
-        == "keep"
+        dict((await VaultSecret.reload(other_id)).secrets)["claudeAiOauth"]["accessToken"] == "keep"
     )
 
 
@@ -299,8 +301,8 @@ async def test_invalid_grant_drops_only_the_addressed_row(monkeypatch, druks_db)
     kept_id, other_id = kept.id, other.id
     _mock_post(monkeypatch, _resp(400, {"error": "invalid_grant"}))
     await AnthropicProvider.rotate_token(other_id, now=_NOW)
-    assert not await ProviderSubscription.get(other_id)
-    assert await ProviderSubscription.get(kept_id)
+    assert not await VaultSecret.reload(other_id)
+    assert await VaultSecret.reload(kept_id)
 
 
 async def test_rotation_stands_down_while_the_lock_is_held(monkeypatch, druks_db):
@@ -345,7 +347,7 @@ async def test_two_fetches_inside_the_margin_rotate_once_and_read_the_same_token
     second = await AnthropicProvider.rotate_token(connection.id, now=_NOW)
     assert (first.action, second.action) == ("refreshed", "fresh")
     assert len(calls) == 1
-    token = AnthropicProvider.load_token(await ProviderSubscription.reload(connection.id), now=_NOW)
+    token = AnthropicProvider.load_token(await VaultSecret.reload(connection.id), now=_NOW)
     assert token.access_token == "new"
     assert token.expires_at == second.expires_at == _NOW + timedelta(seconds=28800)
 
@@ -358,7 +360,7 @@ async def test_a_failed_refresh_keeps_a_live_token_to_serve(monkeypatch, druks_d
     _mock_post(monkeypatch, httpx.ConnectError("boom"))
     result = await AnthropicProvider.rotate_token(connection.id, now=_NOW)
     assert (result.action, result.error) == ("failed", "network")
-    token = AnthropicProvider.load_token(await ProviderSubscription.reload(connection.id), now=_NOW)
+    token = AnthropicProvider.load_token(await VaultSecret.reload(connection.id), now=_NOW)
     assert (token.access_token, token.expires_at) == ("old", soon)
 
 
@@ -370,7 +372,7 @@ async def test_a_failed_refresh_of_an_expired_token_leaves_nothing_to_serve(monk
     _mock_post(monkeypatch, httpx.ConnectError("boom"))
     await AnthropicProvider.rotate_token(connection.id, now=_NOW)
     with pytest.raises(OAuthTokenError) as error:
-        AnthropicProvider.load_token(await ProviderSubscription.reload(connection.id), now=_NOW)
+        AnthropicProvider.load_token(await VaultSecret.reload(connection.id), now=_NOW)
     assert error.value.tag == "token_expired"
 
 
@@ -378,25 +380,25 @@ async def test_disconnect_removes_only_the_addressed_login(druks_db):
     mine = await _seed_claude(provider_email="a@example.com")
     other = await _seed_claude(provider_email="b@example.com")
 
-    await mine.delete()
+    await mine.revoke("user")
 
-    assert await ProviderSubscription.get(other.id)
+    assert await VaultSecret.reload(other.id)
     # The fallback account (the first) has no anthropic subscription left; another
     # account's subscription never leaks into execution.
     with pytest.raises(HarnessNotConnectedError):
-        await ProviderSubscription.lookup("anthropic", mine.account_id)
+        await AnthropicProvider.get_subscription(mine.account_id)
 
 
 async def test_reconnect_restores_execution(druks_db):
     mine = await _seed_claude(provider_email="a@example.com")
     account_id = mine.account_id
-    await mine.delete()
+    await mine.revoke("user")
     with pytest.raises(HarnessNotConnectedError):
-        await ProviderSubscription.lookup("anthropic", account_id)
+        await AnthropicProvider.get_subscription(account_id)
 
     await _seed_claude(access="fresh", provider_email="a@example.com")
-    restored = await ProviderSubscription.lookup("anthropic", account_id)
-    assert dict(restored.payload)["claudeAiOauth"]["accessToken"] == "fresh"
+    restored = await AnthropicProvider.get_subscription(account_id)
+    assert dict(restored.secrets)["claudeAiOauth"]["accessToken"] == "fresh"
 
 
 async def test_connect_scopes_rows_by_provider_and_account(druks_db):
@@ -418,8 +420,8 @@ async def test_reconnect_updates_the_existing_credential_in_place(druks_db):
     # so the reconnect updates that one connection rather than making a second.
     again = await _seed_claude(access="new", provider_email="A@Example.com")
     assert again.id == row.id
-    assert dict(again.payload)["claudeAiOauth"]["accessToken"] == "new"
-    assert again.provider_email == "A@Example.com"  # stored as last given
+    assert dict(again.secrets)["claudeAiOauth"]["accessToken"] == "new"
+    assert again.identity["email"] == "A@Example.com"  # stored as last given
 
 
 async def test_claude_fetch_usage_success(monkeypatch, druks_db):
@@ -526,8 +528,8 @@ async def test_lookup_reads_only_the_accounts_own_subscription(druks_db):
     own = await _seed_claude(provider_email="a@example.com")
     other = await _seed_claude(provider_email="b@example.com")
 
-    assert (await ProviderSubscription.lookup("anthropic", own.account_id)).id == own.id
-    assert (await ProviderSubscription.lookup("anthropic", other.account_id)).id == other.id
+    assert (await AnthropicProvider.get_subscription(own.account_id)).id == own.id
+    assert (await AnthropicProvider.get_subscription(other.account_id)).id == other.id
 
 
 async def test_lookup_never_falls_through_to_another_account_or_the_key(druks_db):
@@ -535,26 +537,26 @@ async def test_lookup_never_falls_through_to_another_account_or_the_key(druks_db
     # neither stands in, and the miss names the fix.
     await _seed_claude(provider_email="a@example.com")
     unsubscribed = await Account.get_or_create("b@example.com")
-    await ProviderKey.create(provider="anthropic", key="sk-shared", account=unsubscribed)
+    await VaultSecret.paste(Audience.provider("anthropic"), "sk-shared", pasted_by=unsubscribed)
 
     with pytest.raises(HarnessNotConnectedError, match="connect your Anthropic subscription"):
-        await ProviderSubscription.lookup("anthropic", unsubscribed.id)
+        await AnthropicProvider.get_subscription(unsubscribed.id)
     with pytest.raises(HarnessNotConnectedError, match="connect your Anthropic subscription"):
-        await ProviderSubscription.lookup("anthropic", None)
+        await AnthropicProvider.get_subscription(None)
 
 
 async def test_a_providers_key_is_one_row_replaced_by_the_next_paste(druks_db):
     first = await Account.get_or_create("a@example.com")
     second = await Account.get_or_create("b@example.com")
-    assert await ProviderKey.get("anthropic") is None
+    assert await VaultSecret.lookup(SecretKind.STATIC, Audience.provider("anthropic")) is None
 
-    await ProviderKey.create(provider="anthropic", key="sk-one", account=first)
-    await ProviderKey.create(provider="anthropic", key="sk-two", account=second)
+    await VaultSecret.paste(Audience.provider("anthropic"), "sk-one", pasted_by=first)
+    await VaultSecret.paste(Audience.provider("anthropic"), "sk-two", pasted_by=second)
 
-    [stored] = await ProviderKey.list_all()
-    assert stored.value.decrypt() == "sk-two"
-    assert stored.key_tail == "-two"
-    assert stored.updated_by.username == "b@example.com"
+    [stored] = await VaultSecret.list_keys()
+    assert stored.secrets["value"] == "sk-two"
+    assert stored.secrets["value"][-4:] == "-two"
+    assert (await Account.get(stored.identity["pasted_by"])).username == "b@example.com"
 
 
 async def test_minimal_provider_reports_unsupported_usage(monkeypatch):
@@ -563,7 +565,7 @@ async def test_minimal_provider_reports_unsupported_usage(monkeypatch):
         label = "Minimal"
         billing_options = frozenset({"api_key"})
 
-    subscription = SimpleNamespace(payload={})
+    subscription = SimpleNamespace(secrets={})
     calls = _mock_get(monkeypatch, _resp(200, {}))
 
     assert await MinimalProvider.fetch_usage(subscription) == ParsedUsage(
@@ -577,7 +579,7 @@ async def _bound_identity(subscription, *, host_id: str, run_id: str) -> Sandbox
     identity, _ = await SandboxIdentity.create(
         run_id=run_id,
         scoped_to="workflow",
-        secrets=[SandboxSecret(name="anthropic", subscription_id=subscription.id)],
+        secret_refs=[SecretRef(name="anthropic", secret_id=subscription.id)],
     )
     await identity.bind(host_id)
     return identity
@@ -669,10 +671,10 @@ async def test_a_fetch_waits_out_a_shut_gate_then_answers_the_stored_token(monke
         # The holder advances the row, then reopens the gate.
         await asyncio.sleep(0.03)
         await session.execute(
-            update(ProviderSubscription)
-            .where(ProviderSubscription.id == connection.id)
+            update(VaultSecret)
+            .where(VaultSecret.id == connection.id)
             .values(
-                payload=_claude_payload(
+                secrets=_claude_payload(
                     access="stored", refresh="R1", expires_at=_in(timedelta(hours=8))
                 )
             )
@@ -699,7 +701,7 @@ async def test_a_rotation_requests_a_refresh_for_every_other_live_bound_identity
     await SandboxIdentity.create(
         run_id="run-unbound",
         scoped_to="workflow",
-        secrets=[SandboxSecret(name="anthropic", subscription_id=connection.id)],
+        secret_refs=[SecretRef(name="anthropic", secret_id=connection.id)],
     )
     revoked = await _bound_identity(connection, host_id="host-revoked", run_id="run-revoked")
     await revoked.revoke()

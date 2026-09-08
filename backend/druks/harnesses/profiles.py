@@ -4,12 +4,15 @@ from drukbox_sdk import Secret
 
 from druks.accounts.models import Account
 from druks.sandbox.constants import MAX_AGENT_TIMEOUT_SECONDS
-from druks.sandbox.models import SandboxSecret
+from druks.sandbox.models import SecretRef
+from druks.secrets.datastructures import Audience
+from druks.secrets.enums import SecretKind
+from druks.secrets.models import VaultSecret
 from druks.user_settings.models import SettingsOverride, SettingsProfile
 
 from .base import Harness
 from .exceptions import HarnessNotConnectedError, ProfileSettingsError
-from .models import ProviderCatalog, ProviderKey, ProviderSubscription
+from .models import ProviderCatalog
 from .providers import get_provider, is_registered, provider_label
 from .registry import get_harness
 
@@ -21,11 +24,11 @@ class Profile:
 
     harness_class: type[Harness]
     model: str
-    subscription: ProviderSubscription | None
-    api_key: ProviderKey | None
+    subscription: VaultSecret | None
+    api_key: VaultSecret | None
     secrets: dict[str, Secret]
     # The secrets a box fetches through the issuer, beyond its pasted key.
-    sandbox_secrets: list[SandboxSecret]
+    secret_refs: list[SecretRef]
     billing: str
     effort: str
     timeout: int
@@ -44,15 +47,15 @@ class Profile:
     def key(self) -> str | None:
         # Codex, Pi, and OpenCode read the key from their invocation.
         if self.api_key and not self.secrets:
-            return self.api_key.value.decrypt()
+            return self.api_key.secrets["value"]
 
     @property
     def secrets_id(self) -> str:
         """What a box created for this profile holds: the pasted key, or the
         subscriptions it fetches."""
         if self.secrets:
-            return f"{self.api_key.provider}.{self.api_key.updated_at:%Y%m%dT%H%M%S}"
-        return ".".join(secret.subscription_id or "" for secret in self.sandbox_secrets)
+            return f"{self.api_key.audience_name}.{self.api_key.updated_at:%Y%m%dT%H%M%S}"
+        return ".".join(ref.secret_id for ref in self.secret_refs)
 
     @property
     def charged_account_id(self) -> str | None:
@@ -106,16 +109,16 @@ async def get_profile(agent_name: str, account_id: str | None) -> Profile:
     subscription = None
     provider_key = None
     secrets: dict[str, Secret] = {}
-    sandbox_secrets: list[SandboxSecret] = []
+    secret_refs: list[SecretRef] = []
     if billing == "api_key":
-        provider_key = await ProviderKey.get(provider_id)
+        provider_key = await VaultSecret.lookup(SecretKind.STATIC, Audience.provider(provider_id))
         if not provider_key:
             label = await provider_label(provider_id)
             raise HarnessNotConnectedError(f"add the {label} API key in Settings → Providers.")
-        secrets = harness_class.get_secrets(provider_key.value.decrypt())
+        secrets = harness_class.get_secrets(provider_key.secrets["value"])
     else:
-        subscription = await ProviderSubscription.lookup(provider_id, account_id)
-        sandbox_secrets = harness_class.get_sandbox_secrets(subscription)
+        subscription = await get_provider(provider_id).get_subscription(account_id)
+        secret_refs = harness_class.get_secret_refs(subscription)
     timeout = (
         await SettingsOverride.agent_timeout(agent_name, agent.timeout, settings=settings)
     ).value
@@ -125,7 +128,7 @@ async def get_profile(agent_name: str, account_id: str | None) -> Profile:
         subscription=subscription,
         api_key=provider_key,
         secrets=secrets,
-        sandbox_secrets=sandbox_secrets,
+        secret_refs=secret_refs,
         billing=billing,
         effort=(await SettingsOverride.agent_effort(agent_name, settings=settings)).value,
         # Capped so a single call always fits inside a fresh sandbox lease.

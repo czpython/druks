@@ -4,9 +4,8 @@ from typing import Any, ClassVar
 from fastapi import HTTPException, status
 from fastapi.responses import JSONResponse, Response
 
-from druks.core.apis.github import GITHUB
+from druks.core.services import Github
 from druks.services.exceptions import ServiceNotConnectedError
-from druks.services.models import ServiceIdentity
 from druks.signals import publish
 from druks.webhooks import Webhook, verify_hmac_sha256
 
@@ -33,7 +32,7 @@ class GitHubEvents(Webhook):
         # same paste that connected the App. No identity, no secret to verify
         # against: reject before any event dispatch.
         try:
-            identity = await ServiceIdentity.get(GITHUB)
+            identity = await Github.get()
         except ServiceNotConnectedError as error:
             raise HTTPException(
                 status.HTTP_401_UNAUTHORIZED,

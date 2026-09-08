@@ -266,7 +266,9 @@ async def rt():
     # AgentFlow's decider resolves to claude, so connect anthropic for the module —
     # and mark its account as the default.
     from druks.accounts.models import Account
-    from druks.harnesses.models import ProviderSubscription
+    from druks.secrets.datastructures import Audience
+    from druks.secrets.enums import SecretKind
+    from druks.secrets.models import VaultSecret
     from druks.user_settings.models import SettingsProfile
 
     session = get_session(engine)
@@ -279,11 +281,12 @@ async def rt():
             for subject_id in (7, 4242, 636363, 424242, 515151, 878787, 909090, 313131)
         )
         session.add(
-            ProviderSubscription(
-                provider="anthropic",
+            VaultSecret(
+                kind=SecretKind.SUBSCRIPTION,
+                audience=Audience.provider("anthropic"),
                 account_id=account.id,
-                provider_email=account.username,
-                payload={"claudeAiOauth": {"accessToken": "t"}},
+                identity={"email": account.username},
+                secrets={"claudeAiOauth": {"accessToken": "t"}},
             )
         )
         session.add(SettingsProfile())
@@ -706,7 +709,7 @@ async def test_run_agent_step(rt, monkeypatch):
     account_id = await _account_id(rt.engine, "op@example.com")
     assert failed.account_id == account_id
     assert recorded[0].subscription.account_id == account_id
-    assert recorded[0].api_key_provider is None
+    assert recorded[0].api_key_id is None
     assert held == [False]  # the step let its connection go before the agent ran
 
 

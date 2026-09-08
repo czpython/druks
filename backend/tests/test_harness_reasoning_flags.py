@@ -9,9 +9,11 @@ from druks.accounts.models import Account
 from druks.harnesses.claude import ClaudeHarness
 from druks.harnesses.codex import CodexHarness
 from druks.harnesses.datastructures import SandboxSettings
-from druks.harnesses.models import ProviderSubscription
 from druks.harnesses.providers import AnthropicProvider, OpenAiProvider
 from druks.sandbox.datastructures import McpServer
+from druks.secrets.datastructures import Audience
+from druks.secrets.enums import SecretKind
+from druks.secrets.models import VaultSecret
 
 _CODEX_MODEL = CodexHarness.default_model
 
@@ -44,8 +46,10 @@ async def test_claude_build_invocation_carries_every_flag():
         effort="high",
         sandbox=_sandbox_config(),
     ).build_invocation(
-        subscription=await ProviderSubscription.get_for_account(
-            "anthropic", (await Account.get_default()).id
+        subscription=await VaultSecret.lookup(
+            SecretKind.SUBSCRIPTION,
+            Audience.provider("anthropic"),
+            (await Account.get_default()).id,
         ),
         prompt="hello",
         schema=schema,
@@ -102,8 +106,8 @@ async def test_codex_build_invocation_carries_every_flag():
         effort="high",
         sandbox=_sandbox_config(),
     ).build_invocation(
-        subscription=await ProviderSubscription.get_for_account(
-            "openai", (await Account.get_default()).id
+        subscription=await VaultSecret.lookup(
+            SecretKind.SUBSCRIPTION, Audience.provider("openai"), (await Account.get_default()).id
         ),
         prompt="hello",
         schema={"type": "object"},

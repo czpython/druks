@@ -95,7 +95,7 @@ class _FakeProvider:
 
 
 class _FakeLogin:
-    provider = "fake"
+    audience_name = "fake"
 
     def __init__(self, subscription_id: str) -> None:
         self.id = subscription_id
@@ -103,7 +103,7 @@ class _FakeLogin:
 
 class _FakeLogins:
     @classmethod
-    async def list_all(cls):
+    async def list_subscriptions(cls):
         return [
             _FakeLogin(subscription_id) for subscription_id in ("subscription-1", "subscription-2")
         ]
@@ -121,7 +121,7 @@ def _fake_shut(shut: list[str], *, idle: bool):
 async def test_refresh_shuts_only_the_due_logins(monkeypatch):
     shut: list[str] = []
     monkeypatch.setattr(tasks, "get_provider", lambda _provider_id: _FakeProvider)
-    monkeypatch.setattr(tasks, "ProviderSubscription", _FakeLogins)
+    monkeypatch.setattr(tasks, "VaultSecret", _FakeLogins)
     monkeypatch.setattr(tasks.gate, "shut", _fake_shut(shut, idle=True))
     _FakeProvider.due_credential_ids = {"subscription-2"}
     _FakeProvider.urgent_credential_ids = set()
@@ -137,7 +137,7 @@ async def test_refresh_shuts_only_the_due_logins(monkeypatch):
 async def test_refresh_defers_a_busy_login(monkeypatch):
     shut: list[str] = []
     monkeypatch.setattr(tasks, "get_provider", lambda _provider_id: _FakeProvider)
-    monkeypatch.setattr(tasks, "ProviderSubscription", _FakeLogins)
+    monkeypatch.setattr(tasks, "VaultSecret", _FakeLogins)
     monkeypatch.setattr(tasks.gate, "shut", _fake_shut(shut, idle=False))
     _FakeProvider.due_credential_ids = {"subscription-2"}
     _FakeProvider.urgent_credential_ids = set()
@@ -152,7 +152,7 @@ async def test_refresh_rotates_a_busy_credential_once_urgent(monkeypatch):
     # so the rotation no longer defers.
     shut: list[str] = []
     monkeypatch.setattr(tasks, "get_provider", lambda _provider_id: _FakeProvider)
-    monkeypatch.setattr(tasks, "ProviderSubscription", _FakeLogins)
+    monkeypatch.setattr(tasks, "VaultSecret", _FakeLogins)
     monkeypatch.setattr(tasks.gate, "shut", _fake_shut(shut, idle=False))
     _FakeProvider.due_credential_ids = {"subscription-2"}
     _FakeProvider.urgent_credential_ids = {"subscription-2"}
@@ -165,7 +165,7 @@ async def test_refresh_rotates_a_busy_credential_once_urgent(monkeypatch):
 async def test_refresh_touches_no_gate_on_a_no_op_tick(monkeypatch):
     shut: list[str] = []
     monkeypatch.setattr(tasks, "get_provider", lambda _provider_id: _FakeProvider)
-    monkeypatch.setattr(tasks, "ProviderSubscription", _FakeLogins)
+    monkeypatch.setattr(tasks, "VaultSecret", _FakeLogins)
     monkeypatch.setattr(tasks.gate, "shut", _fake_shut(shut, idle=True))
     _FakeProvider.due_credential_ids = set()
     _FakeProvider.urgent_credential_ids = set()

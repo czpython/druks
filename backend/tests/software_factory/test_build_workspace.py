@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from conftest import connect_service
 from druks import workspaces as workspace_mod
 from druks.contrib.software_factory.constants import GITHUB_MCP_NAME, GITHUB_MCP_URL
 from druks.contrib.software_factory.services import GithubReviewer
@@ -155,16 +156,21 @@ def test_the_build_clones_as_the_operator():
 
 @pytest.mark.asyncio
 async def test_the_review_workspace_names_the_review_actors_identity(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, druks_db
 ):
+    row = await connect_service(
+        "github_reviewer",
+        identity={"app_id": "2", "slug": "reviewer"},
+        secrets={"private_key": "pem"},
+    )
     _review_actor_stub(
         monkeypatch,
         review_actor=lambda: SimpleNamespace(service=GithubReviewer, client=None, mode="approve"),
     )
 
-    [secret] = await ReviewWorkspace.get_sandbox_secrets(SimpleNamespace(repo="o/app"))
+    [secret] = await ReviewWorkspace.get_secret_refs(SimpleNamespace(repo="o/app"))
 
-    assert secret.key == ("github", "github_reviewer", None, "o/app")
+    assert secret.key == ("github", row.id, "o/app")
 
 
 class _IdentitySandbox:

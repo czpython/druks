@@ -3,12 +3,13 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from conftest import connect_service
 from druks import workspaces as workspace_mod
 from druks.contrib.software_factory.services import GithubReviewer
 from druks.core.apis.github import GitHubClient
 from druks.core.services import Github
 from druks.sandbox.layout import get_repo_root
-from druks.services.models import ServiceIdentity
+from druks.secrets.models import VaultSecret
 from druks.workspaces import RepoWorkspace, Workspace
 
 
@@ -49,22 +50,31 @@ async def test_repo_workspace_clones_before_every_agent_call_and_writes_no_token
     ]
 
 
-async def test_repo_workspace_names_its_github_identity_and_repo_before_the_box_exists():
+async def _connect(slug: str = "github") -> VaultSecret:
+    return await connect_service(
+        slug, identity={"app_id": "1", "slug": "druks-operator"}, secrets={"private_key": "pem"}
+    )
+
+
+async def test_repo_workspace_names_its_github_secret_and_repo_before_the_box_exists(druks_db):
+    row = await _connect()
     subject = SimpleNamespace(repo="acme/widgets")
 
-    [secret] = await RepoWorkspace.get_sandbox_secrets(subject)
+    [secret] = await RepoWorkspace.get_secret_refs(subject)
 
-    assert secret.key == ("github", "github", None, "acme/widgets")
-    assert await Workspace.get_sandbox_secrets(subject) == []
+    assert secret.key == ("github", row.id, "acme/widgets")
+    assert await Workspace.get_secret_refs(subject) == []
 
 
-async def test_a_workspace_selects_its_github_identity_by_service():
+async def test_a_workspace_selects_its_github_identity_by_service(druks_db):
+    row = await _connect("github_reviewer")
+
     class Reviewing(RepoWorkspace):
         github = GithubReviewer
 
-    [secret] = await Reviewing.get_sandbox_secrets(SimpleNamespace(repo="o/r"))
+    [secret] = await Reviewing.get_secret_refs(SimpleNamespace(repo="o/r"))
 
-    assert (secret.service, secret.resource) == ("github_reviewer", "o/r")
+    assert (secret.secret_id, secret.resource) == (row.id, "o/r")
 
 
 async def test_the_github_service_issues_its_installation_token(
@@ -78,7 +88,7 @@ async def test_the_github_service_issues_its_installation_token(
         return "ghs_operator", expiry
 
     monkeypatch.setattr(GitHubClient, "token_for_repo", token_for_repo)
-    await ServiceIdentity.connect(
+    await connect_service(
         "github",
         identity={"app_id": "1", "slug": "druks-operator"},
         secrets={"private_key": "operator-pem"},

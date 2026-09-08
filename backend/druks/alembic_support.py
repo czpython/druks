@@ -1,9 +1,9 @@
 from alembic import context
 from sqlalchemy import engine_from_config, pool
+from sqlalchemy_encrypted_field import EncryptedBytes, EncryptedJson, EncryptedText
 
 from druks.database import _MIGRATION_SUPPORT_ONLY
 from druks.models import Base
-from druks.secrets.fields import _EncryptedColumn
 from druks.settings import load_settings
 
 
@@ -15,7 +15,7 @@ def _render_item(type_, obj, autogen_context):
         return "sa.DateTime(timezone=True)"
     if type_ == "type" and obj.__class__.__name__ == "_FileColumn":
         return "sa.String()"
-    if type_ == "type" and isinstance(obj, _EncryptedColumn):
+    if type_ == "type" and isinstance(obj, EncryptedBytes | EncryptedJson | EncryptedText):
         return "sa.LargeBinary()"
     return False
 

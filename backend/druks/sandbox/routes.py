@@ -4,10 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
-from druks.apps.registry import services
 from druks.harnesses.exceptions import OAuthTokenError
-from druks.harnesses.models import ProviderSubscription
-from druks.harnesses.providers import get_provider
 
 from .exceptions import IdentityDenied
 from .models import SandboxIdentity
@@ -32,19 +29,12 @@ async def secret(
     credential = bearer.credentials if bearer else ""
     try:
         identity = await SandboxIdentity.authenticate(identity_id, credential, name)
-        # The row is the whole selection: the service or the subscription, and
-        # the resource. Nothing in the request can pick another.
-        secret = identity.get_secret(name)
-        if secret.service:
-            value, expires_at = await services.get(secret.service).issue_token(secret.resource)
-        else:
-            subscription = await ProviderSubscription.get(secret.subscription_id)
-            if not subscription:
-                raise OAuthTokenError("no_credentials", "the subscription is disconnected")
-            token = await get_provider(subscription.provider).issue_token(
-                subscription.id, except_host_id=identity.host_id or ""
-            )
-            value, expires_at = token.access_token, token.expires_at
+        # The ref is the whole selection: the vault row and the resource.
+        # Nothing in the request can pick another.
+        ref = identity.get_secret_ref(name)
+        value, expires_at = await ref.secret.issue_token(
+            ref.resource, host_id=identity.host_id or ""
+        )
         # The identity can die during the source I/O.
         await SandboxIdentity.authenticate(identity_id, credential, name)
     except IdentityDenied:

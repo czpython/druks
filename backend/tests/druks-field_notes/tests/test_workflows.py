@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 from unittest import mock
 
+from conftest import connect_service
 from druks.sandbox.layout import get_repo_root
 from druks.testing import run_workflow
 from druks_field_notes.app import FieldNotes
@@ -51,6 +52,9 @@ async def test_survey_workspace_clones_the_subject_repo(druks_db):
 
     assert (workspace.get_repo(workspace.subject), workspace.branch) == ("acme/widgets", None)
     assert workspace.repo_path == get_repo_root("exedev")
-    # The box's secret names the operator identity and the repo before the box exists.
-    [secret] = await workflow.get_sandbox_secrets()
-    assert secret.key == ("github", "github", None, "acme/widgets")
+    # The box's secret names the operator's vault row and the repo before the box exists.
+    row = await connect_service(
+        "github", identity={"app_id": "1", "slug": "druks-operator"}, secrets={"private_key": "pem"}
+    )
+    [secret] = await workflow.get_secret_refs()
+    assert secret.key == ("github", row.id, "acme/widgets")

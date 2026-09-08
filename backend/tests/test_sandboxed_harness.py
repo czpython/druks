@@ -533,7 +533,7 @@ def agent_profile():
         subscription=SimpleNamespace(id="subscription-1", account_id="acc"),
         api_key=None,
         secrets={},
-        sandbox_secrets=[],
+        secret_refs=[],
         billing="subscription",
         effort="high",
         timeout=60,
@@ -599,7 +599,7 @@ async def test_claude_api_key_stays_on_the_server(
 ):
     """Under api_key billing the VM is created with the key as a Drukbox entry and
     holds a placeholder. The key reaches no invocation, VM file, artifact, or result."""
-    key = (await installation_key()).value.decrypt()
+    key = (await installation_key()).secrets["value"]
     await SettingsOverride.set_agent_billing(PROFILE_PROBE.id, "api_key")
     profile = await get_profile(PROFILE_PROBE.id, None)
     result_event = {
@@ -688,8 +688,8 @@ async def test_claude_subscription_token_stays_on_the_server(
     )
 
     assert result.status is AgentCallStatus.SUCCEEDED
-    [secret] = profile.sandbox_secrets
-    assert secret.key == ("anthropic", None, profile.subscription.id, "")
+    [secret] = profile.secret_refs
+    assert secret.key == ("anthropic", profile.subscription.id, "")
     [start] = sandbox.calls
     assert not start.kwargs["extra_env"]
     bundle = start.kwargs["credentials_bundle"]

@@ -1,7 +1,7 @@
 from datetime import UTC, datetime
 
+from conftest import connect_service
 from druks.contrib.software_factory.workflows import Build
-from druks.services.models import ServiceIdentity
 from druks.signals import publish
 from druks.testing import seed_run
 
@@ -9,7 +9,7 @@ from software_factory.factories import make_test_work_item
 
 
 async def _connect_github() -> None:
-    await ServiceIdentity.connect(
+    await connect_service(
         "github",
         identity={"app_id": "1", "slug": "druks-operator"},
         secrets={"private_key": "operator-pem", "webhook_secret": "hook-secret"},

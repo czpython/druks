@@ -943,7 +943,7 @@ class Gmail(Service):
         client_secret: SecretStr = Field(title="Client secret")
 ```
 
-The slug keys the `service_identities` row and the connect wire. A class
+The slug names the service's vault row and the connect wire. A class
 rename changes the slug, rekeys the card, and orphans the connected identity.
 Set `slug = "gmail"` on the class to keep the old key.
 

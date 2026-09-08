@@ -20,6 +20,9 @@ from druks.redis import get_client
 from druks.sandbox import gate
 from druks.sandbox.client import sandbox_client
 from druks.sandbox.constants import MAX_AGENT_TIMEOUT_SECONDS
+from druks.secrets.datastructures import Audience
+from druks.secrets.enums import SecretKind
+from druks.secrets.models import VaultSecret
 from druks.usage.models import UsageScrape
 
 from . import exceptions
@@ -33,7 +36,7 @@ from .datastructures import (
     ProviderRequest,
     RotationResult,
 )
-from .models import ProviderCatalog, ProviderKey, ProviderSubscription
+from .models import ProviderCatalog
 
 logger = logging.getLogger(__name__)
 
@@ -147,12 +150,30 @@ class Provider:
         raise NotImplementedError
 
     @classmethod
-    def load_token(
-        cls, subscription: ProviderSubscription, *, now: datetime | None = None
-    ) -> Token:
+    async def get_subscription(
+        cls, account_id: str | None, *, subscription_id: str | None = None
+    ) -> VaultSecret:
+        """The subscription a call runs with: the selected row, read fresh so a
+        vanished one fails the call; else ``account_id``'s own. A miss raises."""
+        if subscription_id:
+            if row := await VaultSecret.reload(subscription_id):
+                return row
+            raise exceptions.HarnessNotConnectedError(
+                "the selected subscription was removed — reconnect it in Settings → Providers."
+            )
+        if row := await VaultSecret.lookup(
+            SecretKind.SUBSCRIPTION, Audience.provider(cls.id), account_id
+        ):
+            return row
+        raise exceptions.HarnessNotConnectedError(
+            f"connect your {cls.label} subscription in Settings → Providers."
+        )
+
+    @classmethod
+    def load_token(cls, subscription: VaultSecret, *, now: datetime | None = None) -> Token:
         """Read + validate ``subscription``'s access token, or raise
         :class:`OAuthTokenError`. Read-only; never refreshes."""
-        token = cls._token_from_credentials(dict(subscription.payload))
+        token = cls._token_from_credentials(dict(subscription.secrets))
         moment = now or _utc_now()
         if token.expires_at and token.expires_at <= moment:
             raise exceptions.OAuthTokenError(
@@ -172,7 +193,7 @@ class Provider:
         subscription is idle or the token is urgent. The gate holds every other
         fetch and every new call until the rotation and its refresh requests end.
         Raises :class:`OAuthTokenError` when the row holds nothing valid."""
-        row = await ProviderSubscription.reload(subscription_id)
+        row = await VaultSecret.reload(subscription_id)
         if row and cls.refresh_is_due(row):
             async with gate.shut(subscription_id) as is_idle:
                 if is_idle or cls.refresh_is_urgent(row):
@@ -187,7 +208,7 @@ class Provider:
                         rotation = await cls.rotate_token(
                             subscription_id, except_host_id=except_host_id
                         )
-            row = await ProviderSubscription.reload(subscription_id)
+            row = await VaultSecret.reload(subscription_id)
         if not row:
             raise exceptions.OAuthTokenError("no_credentials", "the subscription is disconnected")
         return cls.load_token(row)
@@ -207,12 +228,12 @@ class Provider:
         A refresh that succeeds requests a refresh for every live box on the
         subscription, except ``except_host_id``, whose answer carries it."""
         moment = now or _utc_now()
-        row = await ProviderSubscription.reload(subscription_id)
+        row = await VaultSecret.reload(subscription_id)
         if not row:
             return RotationResult(
                 cls.id, "failed", error="no_credentials", subscription_id=subscription_id
             )
-        data = dict(row.payload)
+        data = dict(row.secrets)
         refresh_token, expires_at = cls._refresh_state(data)
         if not refresh_token:
             return RotationResult(cls.id, "no_refresh_token", subscription_id=subscription_id)
@@ -230,12 +251,12 @@ class Provider:
         try:
             # Re-read after winning the lock: the previous holder may have
             # advanced this lineage (or deleted the row) after our first read.
-            row = await ProviderSubscription.reload(subscription_id)
+            row = await VaultSecret.reload(subscription_id)
             if not row:
                 return RotationResult(
                     cls.id, "failed", error="no_credentials", subscription_id=subscription_id
                 )
-            data = dict(row.payload)
+            data = dict(row.secrets)
             refresh_token, expires_at = cls._refresh_state(data)
             if not refresh_token:
                 return RotationResult(cls.id, "no_refresh_token", subscription_id=row.id)
@@ -253,7 +274,7 @@ class Provider:
                     # presenting it again can never succeed. Drop only this
                     # subscription so the provider reads as disconnected — the
                     # UI shows Reconnect and the next tick has no row to hammer.
-                    await row.delete()
+                    await row.revoke("invalid_grant")
                     await db_session().commit()
                     logger.warning(
                         "%s subscription %s auto-disconnected after invalid_grant; "
@@ -267,7 +288,7 @@ class Provider:
                     cls.id, "failed", error="bad_response", subscription_id=row.id
                 )
 
-            await row.update_payload(data, expires_at=new_expiry)
+            await row.update_secrets(data, expires_at=new_expiry)
             # The grant is externally anchored — the provider may have killed
             # the old refresh token the moment it issued this one — so the new
             # lineage must be committed before the lock releases; deferring to
@@ -284,24 +305,24 @@ class Provider:
             await redis.delete(lock_key)
 
     @classmethod
-    def refresh_is_due(cls, subscription: ProviderSubscription) -> bool:
+    def refresh_is_due(cls, subscription: VaultSecret) -> bool:
         """Expiry inside the refresh margin, or past."""
-        _, expires_at = cls._refresh_state(dict(subscription.payload))
+        _, expires_at = cls._refresh_state(dict(subscription.secrets))
         return bool(expires_at) and expires_at - _utc_now() <= cls.REFRESH_MARGIN
 
     @classmethod
-    def refresh_is_urgent(cls, subscription: ProviderSubscription) -> bool:
+    def refresh_is_urgent(cls, subscription: VaultSecret) -> bool:
         """Expiry inside the call horizon: a mid-run 401 is unavoidable."""
-        _, expires_at = cls._refresh_state(dict(subscription.payload))
+        _, expires_at = cls._refresh_state(dict(subscription.secrets))
         horizon = timedelta(seconds=MAX_AGENT_TIMEOUT_SECONDS)
         return bool(expires_at) and expires_at - _utc_now() < horizon
 
     @classmethod
-    def needs_refresh(cls, subscription: ProviderSubscription) -> bool:
+    def needs_refresh(cls, subscription: VaultSecret) -> bool:
         """Whether the access token is inside its refresh margin. Unreadable
         or expired reads False: nothing live to protect, rotate ungated."""
         try:
-            token = cls._token_from_credentials(dict(subscription.payload))
+            token = cls._token_from_credentials(dict(subscription.secrets))
         except exceptions.OAuthTokenError:
             return False
         now = _utc_now()
@@ -325,7 +346,7 @@ class Provider:
 
     @classmethod
     async def fetch_usage(
-        cls, subscription: ProviderSubscription, *, now: datetime | None = None
+        cls, subscription: VaultSecret, *, now: datetime | None = None
     ) -> ParsedUsage:
         """Fetch + parse the subscription's remaining-quota snapshot, refreshing
         the token once on a 401. A provider can revoke an access token
@@ -338,14 +359,14 @@ class Provider:
         # rotate_token drops the row when the refresh lineage is also revoked,
         # so the account then reads disconnected and the card asks for a Reconnect.
         result = await cls.rotate_token(subscription.id, margin=timedelta.max)
-        refreshed = await ProviderSubscription.reload(subscription.id)
+        refreshed = await VaultSecret.reload(subscription.id)
         if result.action != "refreshed" or not refreshed:
             return ParsedUsage(ok=False, error="auth_required")
         return await cls._usage_snapshot(refreshed, now=now)
 
     @classmethod
     async def _usage_snapshot(
-        cls, subscription: ProviderSubscription, *, now: datetime | None = None
+        cls, subscription: VaultSecret, *, now: datetime | None = None
     ) -> ParsedUsage:
         """One fetch of the usage endpoint. Auth/HTTP failures collapse to a
         ``ParsedUsage(ok=False, error=<tag>)`` so they never look like
@@ -378,7 +399,7 @@ class Provider:
         return ParsedUsage(ok=False, error=tag)
 
     @classmethod
-    async def poll_usage(cls, subscription: ProviderSubscription) -> dict[str, object]:
+    async def poll_usage(cls, subscription: VaultSecret) -> dict[str, object]:
         """Fetch the subscription's quota snapshot and persist it as that
         account's UsageScrape row."""
         account_id = subscription.account_id
@@ -435,7 +456,7 @@ class Provider:
 
     @classmethod
     async def fetch_catalog(
-        cls, subscription: ProviderSubscription | None = None, *, key: str | None = None
+        cls, subscription: VaultSecret | None = None, *, key: str | None = None
     ) -> tuple[dict, ...]:
         """The models this provider offers, ``{"id", "label"}`` each with ids
         namespaced ``provider/model``. Raises :class:`CatalogError`."""
@@ -457,12 +478,12 @@ class Provider:
     async def refresh_catalog(cls) -> None:
         """Store a fresh catalog, read over a subscription before the key. A
         failed fetch logs and keeps the stored one."""
-        subscriptions = await ProviderSubscription.list_for_provider(cls.id)
-        key = await ProviderKey.get(cls.id)
+        subscriptions = await VaultSecret.list_subscriptions(Audience.provider(cls.id))
+        key = await VaultSecret.lookup(SecretKind.STATIC, Audience.provider(cls.id))
         if subscriptions:
             fetch = cls.fetch_catalog(subscriptions[0])
         elif key:
-            fetch = cls.fetch_catalog(key=key.value.decrypt())
+            fetch = cls.fetch_catalog(key=key.secrets["value"])
         else:
             return
         try:
@@ -473,9 +494,7 @@ class Provider:
             await ProviderCatalog.create(cls.id, list(models), label=cls.label)
 
     @classmethod
-    def _catalog_request(
-        cls, subscription: ProviderSubscription | None, key: str | None
-    ) -> ProviderRequest:
+    def _catalog_request(cls, subscription: VaultSecret | None, key: str | None) -> ProviderRequest:
         """The request for this provider's model list, authenticated by ``subscription``
         or ``key``."""
         raise NotImplementedError
@@ -769,9 +788,7 @@ class AnthropicProvider(Provider):
         return ParsedUsage(ok=True, five_hour=five_hour, weeks=weeks, raw=raw)
 
     @classmethod
-    def _catalog_request(
-        cls, subscription: ProviderSubscription | None, key: str | None
-    ) -> ProviderRequest:
+    def _catalog_request(cls, subscription: VaultSecret | None, key: str | None) -> ProviderRequest:
         if subscription:
             headers = cls.oauth_headers(cls.load_token(subscription))
         else:
@@ -1023,9 +1040,7 @@ class OpenAiProvider(Provider):
         )
 
     @classmethod
-    def _catalog_request(
-        cls, subscription: ProviderSubscription | None, key: str | None
-    ) -> ProviderRequest:
+    def _catalog_request(cls, subscription: VaultSecret | None, key: str | None) -> ProviderRequest:
         if not subscription:
             return ProviderRequest(_OPENAI_MODELS_URL, {"Authorization": f"Bearer {key}"})
         # ``client_version`` is required and lower-bounds the list (the server

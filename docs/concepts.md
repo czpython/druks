@@ -189,11 +189,10 @@ call. Store durable state in an external system such as Git, not only on the VM.
 A sandbox never holds a subscription token. Druks gives each sandbox that
 fetches one an identity at its issuer, before Drukbox provisions it. The
 identity names the run and the workflow or agent the sandbox is scoped to. It
-keeps a hash of a random bearer and one row per secret the sandbox holds: the
-Drukbox name, the source, and the resource. The source is a connected service
-of the appliance, such as the GitHub App, or a harness subscription. A replay
-after a crash finds the sandbox through the run's live identity with the same
-scope.
+keeps a hash of a random bearer and one secret ref per secret the sandbox
+holds: the Drukbox name, the vault row, and the resource. The row can be the
+GitHub App key, a pasted token, or a provider subscription. A replay after a
+crash finds the sandbox through the run's live identity with the same scope.
 Drukbox holds the bearer in the sandbox's issuer entry and fetches the token
 from the Druks issuer, `GET /api/secrets/<identity id>/<name>`. The issuer
 answers a fresh token at once. A token inside its refresh margin rotates first, while the
@@ -235,13 +234,14 @@ Configuration has two planes:
   See [personal and installation settings](configuration.md#personal-and-installation-settings)
   for profile resolution and timezone rules.
 
-Druks encrypts stored MCP tokens and OAuth grants at rest. It decrypts them
-only to mint or deliver a token to an agent call. API responses and
+Druks keeps every secret in the vault, encrypted at rest: pasted keys, MCP
+tokens, OAuth grants, GitHub App keys, and provider subscriptions. It decrypts
+a row only to issue or deliver a token to an agent call. API responses and
 capability manifests expose presence, never secret values.
 
-Harness subscription payloads and notification webhook URLs do not use that
-encryption envelope. They are standard Postgres fields. The API withholds or
-masks their values. Thus, database and backup access is credential access.
+Notification webhook URLs do not use that encryption envelope. They are
+standard Postgres fields, and the API masks their values. Thus, database and
+backup access is credential access.
 
 Druks injects enabled MCP servers through the selected harness. A call receives
 the enabled skills it requests, or every enabled skill when it requests none.

@@ -38,8 +38,8 @@ from .layout import get_helper_script_path, get_work_root
 
 if TYPE_CHECKING:
     from druks.harnesses.base import Harness
-    from druks.harnesses.models import ProviderSubscription
     from druks.harnesses.profiles import Profile
+    from druks.secrets.models import VaultSecret
 
     from .runner import Exec
 
@@ -292,7 +292,7 @@ class Host:
         extra_env: dict[str, str] | None = None,
         mcp_servers: tuple[McpServer, ...] = (),
         call_id: str | None = None,
-        subscription: "ProviderSubscription | None" = None,
+        subscription: "VaultSecret | None" = None,
         key: str | None = None,
     ) -> Any:
         """Drive one prompt through ``harness`` on this VM: the harness

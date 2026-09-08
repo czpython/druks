@@ -11,7 +11,10 @@ from druks.database import db_session
 from druks.durable import AgentCall, WorkflowError
 from druks.files import File
 from druks.sandbox.exceptions import SandboxDownloadError
-from druks.sandbox.models import SandboxIdentity, SandboxSecret
+from druks.sandbox.models import SandboxIdentity, SecretRef
+from druks.secrets.datastructures import Audience
+from druks.secrets.enums import SecretKind
+from druks.secrets.models import VaultSecret
 from druks.usage.models import UsageScrape
 from druks.user_settings.models import SettingsOverride
 from sqlalchemy import select
@@ -141,13 +144,14 @@ async def test_run_refuses_unconnected_harness(druks_db, tmp_path, monkeypatch, 
     # The precondition fires where the harness is resolved — before any VM work.
     from druks.accounts.models import Account
     from druks.harnesses.exceptions import HarnessNotConnectedError
-    from druks.harnesses.models import ProviderSubscription
 
     await (
-        await ProviderSubscription.get_for_account(
-            "anthropic", (await Account.get_for_username("op@example.com")).id
+        await VaultSecret.lookup(
+            SecretKind.SUBSCRIPTION,
+            Audience.provider("anthropic"),
+            (await Account.get_for_username("op@example.com")).id,
         )
-    ).delete()
+    ).revoke("user")
     sandbox = _patch_runtime(monkeypatch, tmp_path, {"ok": True})
     _patch_ephemeral(monkeypatch, sandbox)
 
@@ -254,7 +258,7 @@ async def test_running_call_visible_then_finished(
     async def _run_agent(*, call_id, profile, **_kwargs):
         row = await AgentCall.get(call_id)
         assert row.subscription_id == (profile.subscription.id if profile.subscription else None)
-        assert row.api_key_provider == (profile.api_key.provider if profile.api_key else None)
+        assert row.api_key_id == (profile.api_key.id if profile.api_key else None)
         during["status"] = row.status
         during["host"] = row.sandbox_host_id
         return make_agent_result({"ok": True}, agent="dummy")
@@ -812,7 +816,7 @@ async def test_reused_host_retry_presents_a_stable_idempotency_key(monkeypatch, 
 
     monkeypatch.setattr("druks.sandbox.client.Client.provision", fake_provision)
 
-    profile = SimpleNamespace(secrets={}, sandbox_secrets=[], secrets_id="")
+    profile = SimpleNamespace(secrets={}, secret_refs=[], secrets_id="")
     with pytest.raises(HarnessSandboxProvisioningError):
         await current_run._lease_host(profile)
     host_id = await current_run._lease_host(profile)
@@ -859,7 +863,7 @@ async def test_api_key_billing_hands_claude_a_placeholder(
     from drukbox_sdk import Secret
 
     pasted = await installation_key()
-    key = pasted.value.decrypt()
+    key = pasted.secrets["value"]
     await SettingsOverride.set_agent_billing(DUMMY_AGENT.id, "api_key")
     sandbox = _patch_runtime(monkeypatch, tmp_path, {"ok": True})
     seen: list[dict] = []
@@ -891,7 +895,7 @@ async def test_api_key_billing_hands_claude_a_placeholder(
     profile = sandbox.run_agent.await_args.kwargs["profile"]
     assert (profile.billing, profile.key, profile.subscription) == ("api_key", None, None)
     [call] = await AgentCall.list_for_run("wf-9")
-    assert (call.subscription_id, call.api_key_provider) == (None, "anthropic")
+    assert (call.subscription_id, call.api_key.audience_name) == (None, "anthropic")
     row = {column.key: getattr(call, column.key) for column in AgentCall.__table__.columns}
     assert key not in json.dumps(row, default=str)
 
@@ -949,7 +953,7 @@ async def test_recovery_supersedes_the_orphaned_running_call(druks_db):
         agent="summarize",
         host_id="h",
         subscription_id=None,
-        api_key_provider=(await installation_key()).provider,
+        api_key_id=(await installation_key()).id,
     )
     await AgentCall.start(
         engine,
@@ -959,7 +963,7 @@ async def test_recovery_supersedes_the_orphaned_running_call(druks_db):
         agent="summarize",
         host_id="h",
         subscription_id=None,
-        api_key_provider=(await installation_key()).provider,
+        api_key_id=(await installation_key()).id,
     )
 
     by_id = {call.id: call for call in await AgentCall.list_for_run("wf-9")}
@@ -973,14 +977,14 @@ async def test_a_replay_resumes_the_ephemeral_box_through_its_identity(
 ):
     """A crashed attempt left a bound box under a live identity. The replay resumes
     that box and creates no identity."""
-    from druks.harnesses.models import ProviderSubscription
-
     sandbox = _patch_runtime(monkeypatch, tmp_path, {"ok": True})
-    subscription = await db_session().scalar(select(ProviderSubscription))
+    subscription = await db_session().scalar(
+        select(VaultSecret).where(VaultSecret.kind == SecretKind.SUBSCRIPTION)
+    )
     identity, _ = await SandboxIdentity.create(
         run_id="wf-9",
         scoped_to="dummy",
-        secrets=[SandboxSecret(name="anthropic", subscription_id=subscription.id)],
+        secret_refs=[SecretRef(name="anthropic", secret_id=subscription.id)],
     )
     await identity.bind("host-crashed")
     resumed: list[str] = []

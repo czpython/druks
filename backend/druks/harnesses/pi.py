@@ -12,11 +12,11 @@ from druks.sandbox.datastructures import (
     McpServer,
 )
 from druks.sandbox.layout import get_runs_root
+from druks.secrets.models import VaultSecret
 
 from . import exceptions
 from .artifacts import write_cost
 from .base import Harness
-from .models import ProviderSubscription
 from .providers import jwt_expiry
 from .subprocess import read_result_json
 
@@ -43,11 +43,11 @@ class PiHarness(Harness):
         cls,
         provider: str,
         *,
-        subscription: ProviderSubscription | None = None,
+        subscription: VaultSecret | None = None,
         key: str | None = None,
     ) -> HomeFile:
         if subscription:
-            tokens = subscription.payload["tokens"]
+            tokens = subscription.secrets["tokens"]
             entry = {
                 "type": "oauth",
                 "access": tokens["access_token"],
@@ -74,7 +74,7 @@ class PiHarness(Harness):
         skills: tuple[str, ...] = (),
         extra_env: dict[str, str] | None = None,
         mcp_servers: tuple[McpServer, ...] = (),
-        subscription: ProviderSubscription | None = None,
+        subscription: VaultSecret | None = None,
         key: str | None = None,
         timeout: int = Harness.default_timeout,
     ) -> AgentInvocation:

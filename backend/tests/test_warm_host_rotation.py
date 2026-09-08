@@ -10,7 +10,7 @@ from druks.workflows import Workflow
 
 
 def _profile(secrets: dict[str, Secret], secrets_id: str = "") -> SimpleNamespace:
-    return SimpleNamespace(secrets=secrets, sandbox_secrets=[], secrets_id=secrets_id)
+    return SimpleNamespace(secrets=secrets, secret_refs=[], secrets_id=secrets_id)
 
 
 _ENTRY = Secret(
@@ -175,7 +175,7 @@ async def test_a_replay_finds_the_warm_box_through_its_identity(
     from conftest import connect_provider
     from druks.database import db_session
     from druks.harnesses.providers import AnthropicProvider
-    from druks.sandbox.models import SandboxIdentity, SandboxSecret
+    from druks.sandbox.models import SandboxIdentity, SecretRef
     from druks.testing import seed_run
     from druks_field_notes.workflows import Summarize
 
@@ -183,13 +183,15 @@ async def test_a_replay_finds_the_warm_box_through_its_identity(
     subscription = await connect_provider(
         AnthropicProvider, {"claudeAiOauth": {"accessToken": "test-token"}}
     )
-    secrets = [SandboxSecret(name="anthropic", subscription_id=subscription.id)]
-    identity, _ = await SandboxIdentity.create(run_id="wf-1", scoped_to="workflow", secrets=secrets)
+    secrets = [SecretRef(name="anthropic", secret_id=subscription.id)]
+    identity, _ = await SandboxIdentity.create(
+        run_id="wf-1", scoped_to="workflow", secret_refs=secrets
+    )
     await identity.bind("host-crashed")
     client = _FakeSandboxClient(lease=timedelta(hours=2))
     monkeypatch.setattr(sdk, "sandbox_client", client)
     flow = _warm_workflow()
-    profile = SimpleNamespace(secrets={}, sandbox_secrets=secrets, secrets_id=subscription.id)
+    profile = SimpleNamespace(secrets={}, secret_refs=secrets, secrets_id=subscription.id)
 
     assert await flow._lease_host(profile) == "host-crashed"
 
