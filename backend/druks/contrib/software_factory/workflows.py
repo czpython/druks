@@ -13,8 +13,10 @@ from druks.contrib.software_factory.enums import (
 )
 from druks.contrib.software_factory.models import ProjectRepo, WorkItem
 from druks.core.apis.github import GITHUB, get_github_client
+from druks.core.services import Github
 from druks.sandbox.datastructures import RequiredMcpServer
 from druks.sandbox.layout import get_related_root, get_work_root
+from druks.sandbox.models import SandboxSecret
 from druks.services.exceptions import ServiceNotConnectedError
 from druks.services.models import ServiceIdentity
 from druks.settings import load_settings
@@ -184,7 +186,7 @@ class Build(Workflow):
         kwargs = await super().get_workspace_kwargs(host)
         repo = kwargs["subject"].repo
         try:
-            mcp_token = await (await get_review_actor()).client.token_for_repo(repo)
+            mcp_token, _ = await (await get_review_actor()).client.token_for_repo(repo)
         except Exception as error:
             # There is no build without github: agents push and review through
             # the github MCP, so a run that can't mint its token fails here,
@@ -410,8 +412,9 @@ class Build(Workflow):
 
 
 class ProfileWorkspace(RepoWorkspace):
-    def get_repo(self) -> str:
-        return self.subject.full_name
+    @classmethod
+    def get_repo(cls, subject: Any) -> str:
+        return subject.full_name
 
 
 class Profile(Workflow):
@@ -474,14 +477,19 @@ class Profile(Workflow):
 class ReviewWorkspace(RepoWorkspace):
     # The default-branch checkout (the reviewer checks the PR out itself) plus room
     # beside it for siblings; Claude's add_dirs grant needs the directory to exist.
+    @classmethod
+    async def get_sandbox_secrets(cls, subject: Any) -> list[SandboxSecret]:
+        # The review is authored under the review actor's identity.
+        actor = await get_review_actor()
+        return [
+            SandboxSecret(
+                name=Github.secret_name, service=actor.service.slug, resource=cls.get_repo(subject)
+            )
+        ]
 
     @property
     def related_root(self) -> str:
         return get_related_root(self.host.ssh_username)
-
-    async def get_github_token(self) -> str:
-        # The review is authored under the review actor's identity.
-        return await (await get_review_actor()).client.token_for_repo(self.get_repo())
 
     async def run_agent(self, *, account_id: str | None, **kwargs: Any):
         await self.host.exec(["mkdir", "-p", self.related_root], timeout=10.0)

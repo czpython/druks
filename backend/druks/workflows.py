@@ -55,7 +55,7 @@ from druks.notifications.outbox import notifications_queue, send_notification
 from druks.sandbox.client import provisioning_key, sandbox_client
 from druks.sandbox.constants import SANDBOX_HOST_ROTATE_BEFORE_SECONDS
 from druks.sandbox.datastructures import Sandbox
-from druks.sandbox.models import SandboxGrant
+from druks.sandbox.models import SandboxIdentity, SandboxSecret
 from druks.sandbox.templates import get_template_id
 from druks.signals import publish
 from druks.user_settings.models import SettingsOverride, SettingsProfile
@@ -833,20 +833,24 @@ class Workflow:
         # Built per agent call, so nothing is held across steps.
         return self.workspace_class(**await self.get_workspace_kwargs(host))
 
+    async def get_sandbox_secrets(self) -> list[SandboxSecret]:
+        # The secrets a box of this run fetches beyond its profile's: the
+        # workspace's, read before the box exists.
+        return await self.workspace_class.get_sandbox_secrets(await self.subject)
+
     async def _lease_host(self, profile: "Profile") -> str | None:
         # The warm VM, provisioned once per segment; state is carried in git, so
         # only the host-id matters across steps — held-across-steps never fights replay.
         if not self.steps_reuse_sandbox:
             return
-        # A crashed process left its box behind. Its grant finds it again.
+        secrets = [*profile.sandbox_secrets, *await self.get_sandbox_secrets()]
+        # A crashed process left its box behind. Its identity finds it again.
         if (
             not self._host
-            and profile.services
-            and (
-                grant := await SandboxGrant.lookup(self._workflow_id, "workflow", profile.services)
-            )
+            and secrets
+            and (identity := await SandboxIdentity.lookup(self._workflow_id, "workflow", secrets))
         ):
-            self._host = await sandbox_client.reattach(host_id=grant.host_id)
+            self._host = await sandbox_client.reattach(host_id=identity.host_id)
             self._host_secrets_id = profile.secrets_id
         if self._host and self._host.expires_at:
             remaining = (self._host.expires_at - datetime.now(UTC)).total_seconds()
@@ -864,19 +868,19 @@ class Workflow:
                 template = await get_template_id(self.sandbox)
                 await set_run_phase("provisioning_vm")
             # The key names the pasted key the VM holds, so a replay finds its VM.
-            # A box that fetches gets its own grant, and the key names that instead.
-            # A replay finds the box through the grant, above.
-            grant, entries, key = None, {}, profile.secrets_id
-            if profile.services:
-                grant, entries = await SandboxGrant.create(
-                    run_id=self._workflow_id, scoped_to="workflow", services=profile.services
+            # A box that fetches gets its own identity, and the key names that
+            # instead. A replay finds the box through the identity, above.
+            identity, entries, key = None, {}, profile.secrets_id
+            if secrets:
+                identity, entries = await SandboxIdentity.create(
+                    run_id=self._workflow_id, scoped_to="workflow", secrets=secrets
                 )
-                key = grant.id
+                key = identity.id
             self._host = await sandbox_client.provision(
                 idempotency_key=provisioning_key(self._workflow_id, "workflow", key),
                 secrets={**profile.secrets, **entries},
                 template=template,
-                grant=grant,
+                identity=identity,
             )
             self._host_secrets_id = profile.secrets_id
         return self._host.id

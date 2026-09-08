@@ -5,11 +5,12 @@ import os
 import shlex
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from druks.accounts.models import Account
 from druks.core.apis.github import get_github_client
 from druks.core.models import uuid7_str
+from druks.core.services import Github
 from druks.database import db_session
 from druks.files.constants import MAX_FILE_BYTES
 from druks.files.datastructures import File
@@ -25,7 +26,8 @@ from druks.mcp.helpers import get_bearer_token_env_var, get_grant_account
 from druks.sandbox import repo as checkout
 from druks.sandbox.datastructures import AgentResult, McpServer, RequiredMcpServer
 from druks.sandbox.exceptions import ExecFailed
-from druks.sandbox.layout import get_github_token_remote_path, get_repo_root, get_work_root
+from druks.sandbox.layout import get_repo_root, get_work_root
+from druks.sandbox.models import SandboxSecret
 
 if TYPE_CHECKING:
     from druks.sandbox.host import Host
@@ -50,6 +52,12 @@ class Workspace:
         # Override to declare the servers this workspace requires and
         # credentials itself. Base: none.
         return ()
+
+    @classmethod
+    async def get_sandbox_secrets(cls, subject: Any) -> list[SandboxSecret]:
+        # The secrets a box of this workspace fetches, beyond its profile's.
+        # Read before the box exists, so from the subject alone. Base: none.
+        return []
 
     async def prepare_context(
         self, context: dict[str, Any], *, agent_call_id: str
@@ -223,36 +231,41 @@ class Workspace:
 @dataclass(frozen=True)
 class RepoWorkspace(Workspace):
     """A VM with the subject's ``repo`` cloned at ``branch`` (default branch when
-    None), re-cloned and re-tokened before every agent call."""
+    None), re-cloned before every agent call. The box holds a placeholder in
+    ``GH_TOKEN``, and Drukbox points git and ``gh`` at it; the Druks issuer
+    answers the token of the GitHub identity this workspace names."""
 
     branch: str | None = None
+    # The GitHub identity the box's git and gh act as: a connected service.
+    github: ClassVar[type[Github]] = Github
+
+    @classmethod
+    def get_repo(cls, subject: Any) -> str:
+        # Override when the subject names its ``owner/name`` differently.
+        return subject.repo
+
+    @classmethod
+    async def get_sandbox_secrets(cls, subject: Any) -> list[SandboxSecret]:
+        # The identity and the repo: the whole selection the issuer reads.
+        return [
+            SandboxSecret(
+                name=cls.github.secret_name, service=cls.github.slug, resource=cls.get_repo(subject)
+            )
+        ]
 
     @property
     def repo_path(self) -> str:
         return get_repo_root(self.host.ssh_username)
 
-    def get_repo(self) -> str:
-        # Override when the subject names its ``owner/name`` differently.
-        return self.subject.repo
-
-    async def get_github_token(self) -> str:
-        # Override to clone and act as another identity than the operator App.
-        return await (await get_github_client()).token_for_repo(self.get_repo())
-
     async def run_agent(self, *, account_id: str | None, **kwargs: Any) -> AgentResult:
-        github_token = await self.get_github_token()
-        # The clone authenticates through the VM's credential helper, which reads this file.
-        await self.host.write_secret(
-            secret=github_token, remote=get_github_token_remote_path(self.host.ssh_username)
-        )
         await checkout.ensure(
             self.host,
-            repo_url=f"https://github.com/{self.get_repo()}",
+            repo_url=f"https://github.com/{self.get_repo(self.subject)}",
             ref=self.branch,
             target_path=self.repo_path,
         )
         await self.set_git_identity(account_id)
-        return await super().run_agent(account_id=account_id, github_token=github_token, **kwargs)
+        return await super().run_agent(account_id=account_id, **kwargs)
 
     async def set_git_identity(self, account_id: str | None) -> None:
         """Commits in the repo are authored as the operator's bot user, with a

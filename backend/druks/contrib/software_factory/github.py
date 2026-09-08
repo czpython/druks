@@ -1,34 +1,28 @@
 from dataclasses import dataclass
 from typing import Literal
 
-from druks.contrib.software_factory.app import SoftwareFactory
-from druks.core.apis.github import GitHubClient, get_github_client
-from druks.settings import load_settings
+from druks.core.apis.github import GitHubClient
+from druks.core.services import Github
+
+from .services import GithubReviewer
 
 
 @dataclass(frozen=True)
 class ReviewActor:
-    """Who reviews act as, and how they may post. ``approve`` — a review
-    identity distinct from the operator, so GitHub accepts its verdict reviews
-    on operator-authored pull requests. ``comment`` — the operator itself,
-    which GitHub bars from approving its own pull requests, so reviews publish
-    as comment events with the verdict in the body."""
+    """Who reviews act as, and how they may post. ``approve`` — the reviewer
+    service, a distinct identity, so GitHub accepts its verdict reviews on
+    operator-authored pull requests. ``comment`` — the operator itself, which
+    GitHub bars from approving its own pull requests, so reviews publish as
+    comment events with the verdict in the body."""
 
+    service: type[Github]
     client: GitHubClient
     mode: Literal["approve", "comment"]
 
 
 async def get_review_actor() -> ReviewActor:
-    settings = await SoftwareFactory.settings()
-    if settings.review_app_id and settings.review_private_key:
-        # Only a complete pair selects the distinct identity — a half-configured
-        # one (flagged by clean()) still borrows the operator client below.
+    if await GithubReviewer.is_connected():
         return ReviewActor(
-            client=GitHubClient(
-                app_id=settings.review_app_id.get_secret_value(),
-                private_key=settings.review_private_key.get_secret_value(),
-                base_url=load_settings().github_api_url,
-            ),
-            mode="approve",
+            service=GithubReviewer, client=await GithubReviewer.client(), mode="approve"
         )
-    return ReviewActor(client=await get_github_client(), mode="comment")
+    return ReviewActor(service=Github, client=await Github.client(), mode="comment")

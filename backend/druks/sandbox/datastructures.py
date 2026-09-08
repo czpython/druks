@@ -201,4 +201,3 @@ class Credentials:
     """What lands in the sandbox home before the CLI runs."""
 
     home: tuple[HomeFile | HomeCopy, ...] = ()
-    github_token: str | None = None

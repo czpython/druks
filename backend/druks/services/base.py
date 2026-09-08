@@ -1,4 +1,5 @@
 import re
+from datetime import datetime
 from typing import Any, ClassVar
 
 from pydantic import BaseModel, ValidationError
@@ -249,6 +250,12 @@ class Service:
             basic_auth=cls.basic_auth,
             extra_authorize_params=cls.extra_authorize_params,
         )
+
+    @classmethod
+    async def issue_token(cls, resource: str) -> tuple[str, datetime]:
+        """The token a sandbox fetches for this identity, and its expiry. A
+        service without one raises."""
+        raise NotImplementedError(f"{cls.slug} issues no sandbox token")
 
     @classmethod
     async def is_connected(cls) -> bool:

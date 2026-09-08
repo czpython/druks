@@ -4,16 +4,17 @@ from types import SimpleNamespace
 import pytest
 from druks.apps.settings import field_kind, field_multiline
 from druks.contrib.software_factory import subscribers  # noqa: F401 — the import registers it
-from druks.contrib.software_factory.app import SoftwareFactory, check_review_identity
+from druks.contrib.software_factory.app import check_review_identity
 from druks.contrib.software_factory.datastructures import PullRequest
 from druks.contrib.software_factory.github import get_review_actor
+from druks.contrib.software_factory.services import GithubReviewer
 from druks.contrib.software_factory.workflows import PullRequestReview
+from druks.core.services import Github
 from druks.prompts import render_prompt
 from druks.services.exceptions import ServiceNotConnectedError
 from druks.services.models import ServiceIdentity
 from druks.signals import publish
 from druks.testing import configure_app_for_test, make_settings, seed_run
-from druks.user_settings.models import SettingsOverride
 from druks.workflows import _bind_instance
 from fastapi.testclient import TestClient
 
@@ -140,71 +141,52 @@ async def _connect_operator() -> None:
     )
 
 
-async def _set_review_setting(field: str, value: str) -> None:
-    await SettingsOverride.set_app_setting("software_factory", field, value, is_secret=True)
+async def _connect_reviewer() -> None:
+    await ServiceIdentity.connect(
+        "github_reviewer",
+        identity={"app_id": "2", "slug": "druks-reviewer"},
+        secrets={"private_key": "review-pem\nline-two"},
+    )
 
 
-async def test_a_configured_review_identity_approves(druks_db):
-    await _set_review_setting("review_app_id", "2")
-    await _set_review_setting("review_private_key", "review-pem\nline-two")
+async def test_a_connected_reviewer_approves(druks_db):
+    await _connect_operator()
+    await _connect_reviewer()
 
     actor = await get_review_actor()
 
-    assert actor.mode == "approve"
+    assert (actor.mode, actor.service) == ("approve", GithubReviewer)
     assert actor.client._app_id == "2"
 
 
-async def test_an_unset_review_identity_borrows_the_operator_in_comment_mode(druks_db):
+async def test_an_unconnected_reviewer_borrows_the_operator_in_comment_mode(druks_db):
     await _connect_operator()
 
     actor = await get_review_actor()
 
-    assert actor.mode == "comment"
+    assert (actor.mode, actor.service) == ("comment", Github)
     assert actor.client._app_id == "1"
 
 
-async def test_a_half_configured_review_identity_still_borrows_the_operator(druks_db):
-    # Only a complete pair selects the distinct client; app_id alone is the
-    # incoherent state clean() flags, not a mode switch.
-    await _connect_operator()
-    await _set_review_setting("review_app_id", "2")
-
-    actor = await get_review_actor()
-
-    assert actor.mode == "comment"
-    assert actor.client._app_id == "1"
+def test_the_reviewer_is_an_optional_service_the_app_declares():
+    assert (GithubReviewer.slug, GithubReviewer.required) == ("github_reviewer", False)
+    assert GithubReviewer.secret_name == "github"
+    fields = GithubReviewer.Settings.model_fields
+    assert set(fields) == {"app_id", "private_key"}
+    assert field_kind(fields["private_key"]) == "secret"
+    assert field_multiline(fields["private_key"])
+    assert not field_multiline(fields["app_id"])
 
 
-def test_review_settings_reject_a_half_configured_pair():
-    assert SoftwareFactory.Settings(review_app_id="2").clean() == {
-        "review_private_key": "Required once the review App ID is set."
-    }
-    assert SoftwareFactory.Settings(review_private_key="review-pem").clean() == {
-        "review_app_id": "Required once the review App private key is set."
-    }
-    assert SoftwareFactory.Settings().clean() == {}
-    complete = SoftwareFactory.Settings(review_app_id="2", review_private_key="review-pem")
-    assert complete.clean() == {}
-
-
-def test_the_review_pem_declares_the_multiline_secret_presentation():
-    field = SoftwareFactory.Settings.model_fields["review_private_key"]
-
-    assert field_kind(field) == "secret"
-    assert field_multiline(field)
-    assert not field_multiline(SoftwareFactory.Settings.model_fields["review_app_id"])
-
-
-async def test_review_identity_check_is_healthy_set_or_unset(druks_db):
+async def test_review_identity_check_is_healthy_connected_or_not(druks_db):
     assert (await check_review_identity()).ok
     assert "unset" in (await check_review_identity()).detail
 
-    await _set_review_setting("review_app_id", "2")
-    await _set_review_setting("review_private_key", "review-pem")
+    await _connect_reviewer()
 
     result = await check_review_identity()
     assert result.ok
-    assert "distinct App" in result.detail
+    assert "reviewer App" in result.detail
 
 
 async def test_review_dispatch_refuses_before_start_without_github(druks_db, monkeypatch):

@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime
 from typing import Any
 
 import httpx
@@ -15,6 +16,8 @@ _VERIFY_TIMEOUT = 10.0
 
 
 class Github(Service):
+    # The Drukbox catalog name a box holds this identity's token under.
+    secret_name = "github"
     description = (
         "The GitHub App druks acts as — it receives webhooks and writes branches, "
         "pull requests, and comments. Create it from here, or paste an existing "
@@ -60,6 +63,15 @@ class Github(Service):
                 "GitHub did not accept these credentials — check the App ID and PEM key."
             ) from error
         return {"slug": slug}
+
+    @classmethod
+    async def client(cls) -> GitHubClient:
+        return GitHubClient.from_identity(await cls.get())
+
+    @classmethod
+    async def issue_token(cls, resource: str) -> tuple[str, datetime]:
+        """The installation token for the repo, and the expiry GitHub gave it."""
+        return await (await cls.client()).token_for_repo(resource)
 
 
 class Linear(Service):

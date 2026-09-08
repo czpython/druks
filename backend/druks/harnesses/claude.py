@@ -16,6 +16,7 @@ from druks.sandbox.datastructures import (
     McpServer,
 )
 from druks.sandbox.layout import get_runs_root
+from druks.sandbox.models import SandboxSecret
 from druks.skills.models import Skill
 
 from . import exceptions
@@ -63,7 +64,6 @@ class ClaudeHarness(Harness):
         schema: dict[str, object],
         run_id: str,
         ssh_username: str,
-        github_token: str | None = None,
         include_plugins: bool = True,
         add_dirs: tuple[str, ...] = (),
         skills: tuple[str, ...] = (),
@@ -130,7 +130,6 @@ class ClaudeHarness(Harness):
             stdin=prompt.encode("utf-8"),
             credentials=await _get_credentials(
                 self.sandbox,
-                github_token=github_token,
                 include_plugins=include_plugins,
                 skills=skills,
             ),
@@ -189,10 +188,10 @@ class ClaudeHarness(Harness):
         return ("--mcp-config", json.dumps({"mcpServers": entries}))
 
     @classmethod
-    def get_services(cls, subscription: ProviderSubscription) -> dict[str, str]:
+    def get_sandbox_secrets(cls, subscription: ProviderSubscription) -> list[SandboxSecret]:
         # The catalog entry puts the placeholder in ANTHROPIC_AUTH_TOKEN, which
         # the CLI sends as a bearer. It never refreshes a token from there.
-        return {AnthropicProvider.id: subscription.id}
+        return [SandboxSecret(name=AnthropicProvider.id, subscription_id=subscription.id)]
 
     @classmethod
     def get_secrets(cls, key: str) -> dict[str, Secret]:
@@ -220,7 +219,6 @@ class ClaudeHarness(Harness):
 async def _get_credentials(
     sandbox: SandboxSettings,
     *,
-    github_token: str | None,
     include_plugins: bool = True,
     skills: tuple[str, ...] = (),
 ) -> Credentials:
@@ -249,7 +247,7 @@ async def _get_credentials(
     home.append(
         HomeCopy(".claude/skills", skills_dir, excludes=await Skill.delivery_excludes(skills))
     )
-    return Credentials(home=tuple(home), github_token=github_token)
+    return Credentials(home=tuple(home))
 
 
 def collapse_claude_stream(stdout: bytes) -> dict[str, Any]:

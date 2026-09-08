@@ -117,7 +117,7 @@ def _inv(args: tuple[str, ...], **overrides: Any) -> AgentInvocation:
         "name": "claude",
         "args": args,
         "stdin": b"prompt-bytes",
-        "credentials": Credentials(github_token="gho_x"),
+        "credentials": Credentials(),
     }
     fields.update(overrides)
     return AgentInvocation(**fields)
@@ -533,7 +533,7 @@ def agent_profile():
         subscription=SimpleNamespace(id="subscription-1", account_id="acc"),
         api_key=None,
         secrets={},
-        services={},
+        sandbox_secrets=[],
         billing="subscription",
         effort="high",
         timeout=60,
@@ -636,7 +636,6 @@ async def test_claude_api_key_stays_on_the_server(
     assert key not in " ".join(start.kwargs["cmd"])
     assert key not in start.kwargs["stdin_data"].decode()
     bundle = start.kwargs["credentials_bundle"]
-    assert not bundle.github_token
     assert not any(type(entry) is HomeFile for entry in bundle.home)
     for artifact in (ctx.artifact_dir / "call-9").iterdir():
         assert key not in artifact.read_text()
@@ -689,7 +688,8 @@ async def test_claude_subscription_token_stays_on_the_server(
     )
 
     assert result.status is AgentCallStatus.SUCCEEDED
-    assert profile.services == {"anthropic": profile.subscription.id}
+    [secret] = profile.sandbox_secrets
+    assert secret.key == ("anthropic", None, profile.subscription.id, "")
     [start] = sandbox.calls
     assert not start.kwargs["extra_env"]
     bundle = start.kwargs["credentials_bundle"]

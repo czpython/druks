@@ -121,7 +121,6 @@ async def test_build_invocation_writes_the_run_files_and_pi_argv(
         schema={"type": "object"},
         run_id="run-1",
         ssh_username="exedev",
-        github_token="github-token",
         extra_env={"MCP_GITHUB_TOKEN": "mcp-secret", "MCP_TRACE_KEY": "trace-secret"},
         mcp_servers=(github, public),
     )
@@ -175,7 +174,6 @@ async def test_build_invocation_writes_the_run_files_and_pi_argv(
         "DRUKS_SCHEMA_PATH": f"{_RUN_DIR}/schema.json",
         "DRUKS_RESULT_PATH": f"{_RUN_DIR}/output.json",
     }
-    assert invocation.credentials.github_token == "github-token"
     assert invocation.credentials.home == (
         HomeFile(
             ".pi/agent/auth.json", json.dumps({"openai": {"type": "api_key", "key": _API_KEY}})

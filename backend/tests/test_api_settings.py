@@ -5,6 +5,7 @@ from druks.accounts.models import Account
 from druks.contrib.software_factory.app import SoftwareFactory
 from druks.database import db_session
 from druks.user_settings.models import SettingsOverride
+from druks_field_notes.app import FieldNotes
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 
@@ -243,6 +244,15 @@ def _software_factory_settings_fields(client: TestClient) -> dict:
     return {field["name"]: field for field in _software_factory_app(client)["settings"]}
 
 
+def _field_notes_app(client: TestClient) -> dict:
+    body = client.get("/api/settings/apps").json()
+    return next(m for m in body["apps"] if m["name"] == "field_notes")
+
+
+def _field_notes_settings_fields(client: TestClient) -> dict:
+    return {field["name"]: field for field in _field_notes_app(client)["settings"]}
+
+
 def test_apps_surface_build_agents(tmp_path: Path):
     """The build pipeline's agents all tune under the SoftwareFactory app."""
     with settings_client(tmp_path) as client:
@@ -319,17 +329,18 @@ def test_apps_surface_build_agents_and_workflow_defaults(tmp_path: Path):
 
 
 async def test_app_secret_round_trip_encrypts_at_rest(tmp_path: Path):
-    secret = "review-pem-value"
-    app_id = "42424242"
-    key = "app:software_factory:review_private_key"
+    secret = "signing-pem-value"
+    token = "sk-42424242"
+    key = "app:field_notes:sync_signing_key"
     with settings_client(tmp_path) as client:
         written = client.patch(
             "/api/settings/apps",
             json={
                 "appSettings": {
-                    "software_factory": {
-                        "review_app_id": app_id,
-                        "review_private_key": secret,
+                    "field_notes": {
+                        "visibility": "public",
+                        "sync_token": token,
+                        "sync_signing_key": secret,
                     }
                 }
             },
@@ -344,7 +355,7 @@ async def test_app_secret_round_trip_encrypts_at_rest(tmp_path: Path):
             )
         ).one()
         read = client.get("/api/settings/apps")
-        resolved = (await SoftwareFactory.settings()).review_private_key
+        resolved = (await FieldNotes.settings()).sync_signing_key
 
     assert written.status_code == 200
     assert read.status_code == 200
@@ -354,38 +365,31 @@ async def test_app_secret_round_trip_encrypts_at_rest(tmp_path: Path):
     assert secret.encode() not in stored.secret_value
     assert secret not in written.text
     assert secret not in read.text
-    assert app_id not in written.text
-    assert app_id not in read.text
+    assert token not in written.text
+    assert token not in read.text
     assert resolved and resolved.get_secret_value() == secret
-    software_factory = next(app for app in read.json()["apps"] if app["name"] == "software_factory")
-    fields = {field["name"]: field for field in software_factory["settings"]}
-    assert fields["review_private_key"]["type"] == "secret"
-    assert fields["review_private_key"]["value"] is None
-    assert fields["review_private_key"]["default"] is None
-    assert fields["review_private_key"]["secretSet"] is True
-    assert fields["review_private_key"]["overridden"] is True
-    assert fields["review_app_id"]["secretSet"] is True
+    field_notes = next(app for app in read.json()["apps"] if app["name"] == "field_notes")
+    fields = {field["name"]: field for field in field_notes["settings"]}
+    assert fields["sync_signing_key"]["type"] == "secret"
+    assert fields["sync_signing_key"]["value"] is None
+    assert fields["sync_signing_key"]["default"] is None
+    assert fields["sync_signing_key"]["secretSet"] is True
+    assert fields["sync_signing_key"]["overridden"] is True
+    assert fields["sync_token"]["secretSet"] is True
 
 
 async def test_app_secret_plaintext_row_is_unset_until_resaved(tmp_path: Path):
     secret = "legacy-plaintext-secret"
-    key = "app:software_factory:review_private_key"
+    key = "app:field_notes:sync_signing_key"
     db_session().add(SettingsOverride(key=key, value=secret))
     await db_session().flush()
 
     with settings_client(tmp_path) as client:
-        initial = _software_factory_app(client)
-        resolved_initial = (await SoftwareFactory.settings()).review_private_key
+        initial = _field_notes_app(client)
+        resolved_initial = (await FieldNotes.settings()).sync_signing_key
         saved = client.patch(
             "/api/settings/apps",
-            json={
-                "appSettings": {
-                    "software_factory": {
-                        "review_app_id": "42",
-                        "review_private_key": secret,
-                    }
-                }
-            },
+            json={"appSettings": {"field_notes": {"sync_signing_key": secret}}},
         )
         stored = (
             await db_session().execute(
@@ -398,7 +402,7 @@ async def test_app_secret_plaintext_row_is_unset_until_resaved(tmp_path: Path):
         ).one()
 
     initial_field = next(
-        setting for setting in initial["settings"] if setting["name"] == "review_private_key"
+        setting for setting in initial["settings"] if setting["name"] == "sync_signing_key"
     )
     assert initial_field["secretSet"] is False
     assert not resolved_initial
@@ -453,31 +457,32 @@ def test_incoherent_app_save_is_rejected_and_rolled_back_before_schedules(
             "/api/settings/apps",
             json={
                 "agentModels": {"software_factory.generate_plan": "anthropic/claude-opus-4-7"},
-                "appSettings": {"software_factory": {"review_app_id": "42"}},
+                "appSettings": {"field_notes": {"visibility": "public"}},
             },
         )
 
         assert response.status_code == 422
         assert response.json()["detail"] == {
-            "software_factory": {"review_private_key": "Required once the review App ID is set."}
+            "field_notes": {"sync_token": "Required when visibility is public."}
         }
         assert not reconciled
-        assert _software_factory_settings_fields(client)["review_app_id"]["secretSet"] is False
+        assert _field_notes_settings_fields(client)["visibility"]["overridden"] is False
         agents = {agent["name"]: agent for agent in _software_factory_app(client)["agents"]}
         assert agents["software_factory.generate_plan"]["model"] == "anthropic/claude-opus-4-7"
 
 
-async def test_clearing_the_identity_deletes_its_overrides_and_stays_coherent(tmp_path: Path):
-    key = "app:software_factory:review_app_id"
+async def test_clearing_a_secret_deletes_its_override_and_stays_coherent(tmp_path: Path):
+    key = "app:field_notes:sync_token"
 
     with settings_client(tmp_path) as client:
         configured = client.patch(
             "/api/settings/apps",
             json={
                 "appSettings": {
-                    "software_factory": {
-                        "review_app_id": "42",
-                        "review_private_key": "review-pem",
+                    "field_notes": {
+                        "visibility": "public",
+                        "sync_token": "sk-42",
+                        "sync_signing_key": "signing-pem",
                     }
                 }
             },
@@ -486,7 +491,11 @@ async def test_clearing_the_identity_deletes_its_overrides_and_stays_coherent(tm
             "/api/settings/apps",
             json={
                 "appSettings": {
-                    "software_factory": {"review_app_id": None, "review_private_key": None}
+                    "field_notes": {
+                        "visibility": "private",
+                        "sync_token": None,
+                        "sync_signing_key": None,
+                    }
                 }
             },
         )
@@ -496,14 +505,14 @@ async def test_clearing_the_identity_deletes_its_overrides_and_stays_coherent(tm
                 {"key": key},
             )
         ).one_or_none()
-        fields = _software_factory_settings_fields(client)
+        fields = _field_notes_settings_fields(client)
 
     assert configured.status_code == 200
     assert cleared.status_code == 200
     assert stored is None
-    assert not (await SoftwareFactory.settings()).review_app_id
-    assert fields["review_app_id"]["secretSet"] is False
-    assert fields["review_private_key"]["secretSet"] is False
+    assert not (await FieldNotes.settings()).sync_token
+    assert fields["sync_token"]["secretSet"] is False
+    assert fields["sync_signing_key"]["secretSet"] is False
 
 
 def test_apps_override_agent_model_persists(tmp_path: Path):

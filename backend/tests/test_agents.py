@@ -11,7 +11,7 @@ from druks.database import db_session
 from druks.durable import AgentCall, WorkflowError
 from druks.files import File
 from druks.sandbox.exceptions import SandboxDownloadError
-from druks.sandbox.models import SandboxGrant
+from druks.sandbox.models import SandboxIdentity, SandboxSecret
 from druks.usage.models import UsageScrape
 from druks.user_settings.models import SettingsOverride
 from sqlalchemy import select
@@ -77,9 +77,9 @@ def _patch_runtime(monkeypatch, tmp_path, payload):
     return sandbox
 
 
-async def _grants(run_id: str) -> list[SandboxGrant]:
+async def _identities(run_id: str) -> list[SandboxIdentity]:
     rows = await db_session().scalars(
-        select(SandboxGrant).where(SandboxGrant.run_id == run_id).order_by(SandboxGrant.id)
+        select(SandboxIdentity).where(SandboxIdentity.run_id == run_id).order_by(SandboxIdentity.id)
     )
     return list(rows)
 
@@ -222,7 +222,7 @@ async def test_ephemeral_acquisition_keys_idempotency_to_workflow_step(
     druks_db, tmp_path, monkeypatch, current_run
 ):
     """Without a warm context the runtime acquires a throwaway VM, keyed for
-    idempotency to ``<workflow_id>:<step>:<grant>``."""
+    idempotency to ``<workflow_id>:<step>:<identity>``."""
     sandbox = _patch_runtime(monkeypatch, tmp_path, {"ok": True})
     seen: list[str | None] = []
 
@@ -236,8 +236,8 @@ async def test_ephemeral_acquisition_keys_idempotency_to_workflow_step(
     result = await DUMMY_AGENT._run(workflow_id="wf-9")
 
     assert result == DummyOutput(ok=True)
-    [grant] = await _grants("wf-9")
-    assert seen == [f"wf-9:dummy:{grant.id}"]
+    [identity] = await _identities("wf-9")
+    assert seen == [f"wf-9:dummy:{identity.id}"]
 
 
 @pytest.mark.parametrize("billing", ["subscription", "api_key"])
@@ -722,7 +722,7 @@ async def test_provisioning_failure_recovers_through_durable_retry(
 ):
     """A transient provisioning failure at acquire time is retried by the
     body-level durable path with backoff; a later attempt succeeds, and each
-    attempt presents a fresh grant, so a fresh ephemeral key."""
+    attempt presents a fresh identity, so a fresh ephemeral key."""
     from druks.harnesses.exceptions import HarnessSandboxProvisioningError
 
     sandbox = _patch_runtime(monkeypatch, tmp_path, {"ok": True})
@@ -742,8 +742,8 @@ async def test_provisioning_failure_recovers_through_durable_retry(
     assert result == DummyOutput(ok=True)
     # First delay off the schedule HarnessSandboxProvisioningError inherits (60, 300).
     assert [awaited.args[0] for awaited in sleep.await_args_list] == [60.0]
-    # Each attempt re-enters _run and asks for a fresh box under a fresh grant.
-    first, second = await _grants("wf-9")
+    # Each attempt re-enters _run and asks for a fresh box under a fresh identity.
+    first, second = await _identities("wf-9")
     assert keys == [f"wf-9:dummy:{first.id}", f"wf-9:dummy:{second.id}"]
     # A 60s wait is under the reap-before threshold, so the (never-acquired) VM
     # isn't reaped between attempts.
@@ -757,7 +757,7 @@ async def test_provisioning_failure_recovers_in_step_retry(
 ):
     """An agent invoked inside an enclosing @step retries the same transient
     provisioning failure in memory (plain asyncio.sleep, no durable sleep) and
-    recovers, with a fresh grant and key per attempt."""
+    recovers, with a fresh identity and key per attempt."""
     from druks.harnesses.exceptions import HarnessSandboxProvisioningError
     from druks.workflows import _in_step
 
@@ -784,7 +784,7 @@ async def test_provisioning_failure_recovers_in_step_retry(
     assert result == DummyOutput(ok=True)
     memory_sleep.assert_awaited_once_with(60.0)
     durable_sleep.assert_not_awaited()
-    first, second = await _grants("wf-9")
+    first, second = await _identities("wf-9")
     assert keys == [f"wf-9:dummy:{first.id}", f"wf-9:dummy:{second.id}"]
 
 
@@ -812,7 +812,7 @@ async def test_reused_host_retry_presents_a_stable_idempotency_key(monkeypatch, 
 
     monkeypatch.setattr("druks.sandbox.client.Client.provision", fake_provision)
 
-    profile = SimpleNamespace(secrets={}, services={}, secrets_id="")
+    profile = SimpleNamespace(secrets={}, sandbox_secrets=[], secrets_id="")
     with pytest.raises(HarnessSandboxProvisioningError):
         await current_run._lease_host(profile)
     host_id = await current_run._lease_host(profile)
@@ -968,19 +968,21 @@ async def test_recovery_supersedes_the_orphaned_running_call(druks_db):
     assert by_id["b"].status == "running"
 
 
-async def test_a_replay_resumes_the_ephemeral_box_through_its_grant(
+async def test_a_replay_resumes_the_ephemeral_box_through_its_identity(
     druks_db, tmp_path, monkeypatch, current_run
 ):
-    """A crashed attempt left a bound box under a live grant. The replay resumes
-    that box and creates no grant."""
+    """A crashed attempt left a bound box under a live identity. The replay resumes
+    that box and creates no identity."""
     from druks.harnesses.models import ProviderSubscription
 
     sandbox = _patch_runtime(monkeypatch, tmp_path, {"ok": True})
     subscription = await db_session().scalar(select(ProviderSubscription))
-    grant, _ = await SandboxGrant.create(
-        run_id="wf-9", scoped_to="dummy", services={"anthropic": subscription.id}
+    identity, _ = await SandboxIdentity.create(
+        run_id="wf-9",
+        scoped_to="dummy",
+        secrets=[SandboxSecret(name="anthropic", subscription_id=subscription.id)],
     )
-    await grant.bind("host-crashed")
+    await identity.bind("host-crashed")
     resumed: list[str] = []
 
     @asynccontextmanager
@@ -1000,4 +1002,4 @@ async def test_a_replay_resumes_the_ephemeral_box_through_its_grant(
 
     assert result == DummyOutput(ok=True)
     assert resumed == ["host-crashed"]
-    assert [row.id for row in await _grants("wf-9")] == [grant.id]
+    assert [row.id for row in await _identities("wf-9")] == [identity.id]

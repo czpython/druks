@@ -258,6 +258,14 @@ Install the GitHub App on the repositories that Druks will use. This
 installation set defines where `software_factory` can act. Personal access
 tokens are not a supported substitute.
 
+A sandbox never holds an installation token. It holds a placeholder in
+`GH_TOKEN`, and git and `gh` read it through Drukbox's setup. The Drukbox
+secrets proxy swaps the placeholder for a token that Druks mints for the
+sandbox's repo, with the expiry GitHub gives it, and fetches a new one before
+it expires. The `software_factory` build clones and pushes as the operator App.
+A review clones as the reviewer App when one is connected. Its GitHub MCP
+server acts as the review identity. The identities stay separate.
+
 **To upgrade an existing installation**, paste the credentials one time on each
 active host. Open **Settings → Connections → Services**. Connect GitHub with the
 existing operator GitHub App ID, private key, and webhook secret. Do not create
@@ -266,14 +274,14 @@ the pasted credentials.
 
 ### Review identity (optional)
 
-The bundled `software_factory` app can post its verdict reviews as a second
-GitHub App, so GitHub accepts approvals on Druks-authored pull requests.
-Configure it in **Software Factory → Settings**, under **Review identity**. Enter
-the review GitHub App ID and its PEM private key, both stored encrypted and
-empty-as-unset. Leave the pair empty and reviews publish as operator comments.
-Set both values to publish separate approval reviews. The review GitHub App needs
-read access to metadata and contents, read/write access to pull requests, and no
-webhook.
+The bundled `software_factory` app declares an optional service, **Github
+Reviewer**: a second GitHub App, so GitHub accepts approvals on Druks-authored
+pull requests. Connect it in **Settings → Connections → Services** with the App
+ID and its PEM private key, both stored encrypted. Leave it unconnected and
+reviews publish as operator comments. Connect it and reviews publish as
+approval reviews, and a review sandbox clones as it. The reviewer App needs
+read access to metadata and contents, read/write access to pull requests, and
+no webhook.
 
 `GITHUB_API_URL` defaults to `https://api.github.com` and can point every
 client at another compatible GitHub API endpoint.
@@ -302,9 +310,9 @@ also accepts an API key. Both connect from **Settings → Providers**. The
 connection flow stores each credential in Postgres. Druks refreshes a
 subscription token on a schedule. A `claude` sandbox holds a placeholder in
 `ANTHROPIC_AUTH_TOKEN` and never the token. Drukbox fetches the token from the
-Druks issuer through the sandbox's grant, and the secrets proxy swaps the
+Druks issuer through the sandbox's identity, and the secrets proxy swaps the
 placeholder on each request. See
-[grants and the issuer](concepts.md#agents-harnesses-workspaces-and-sandboxes).
+[sandbox identities and the issuer](concepts.md#agents-harnesses-workspaces-and-sandboxes).
 Codex and Pi still receive their credential file inside the sandbox. Druks does
 not copy a host login. This is a capability connection for the requesting
 account. In a fresh `none`-mode install, the first completed subscription
