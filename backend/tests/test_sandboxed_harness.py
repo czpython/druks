@@ -3,13 +3,13 @@ import functools
 import json
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from conftest import PROFILE_PROBE, installation_key
+from conftest import PROFILE_PROBE, connect_provider, installation_key
 from druks.durable.enums import AgentCallStatus
 from druks.harnesses.base import Harness
 from druks.harnesses.claude import ClaudeHarness
@@ -26,6 +26,7 @@ from druks.harnesses.exceptions import (
     Retry,
 )
 from druks.harnesses.profiles import Profile, get_profile
+from druks.harnesses.providers import AnthropicProvider
 from druks.sandbox.datastructures import (
     AgentInvocation,
     AgentResult,
@@ -532,6 +533,7 @@ def agent_profile():
         subscription=SimpleNamespace(id="subscription-1", account_id="acc"),
         api_key=None,
         secrets={},
+        services={},
         billing="subscription",
         effort="high",
         timeout=60,
@@ -639,3 +641,61 @@ async def test_claude_api_key_stays_on_the_server(
     for artifact in (ctx.artifact_dir / "call-9").iterdir():
         assert key not in artifact.read_text()
     assert key not in repr(result) and key not in repr(profile)
+
+
+async def test_claude_subscription_token_stays_on_the_server(
+    ctx: SimpleNamespace, druks_db, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Under subscription billing the VM holds a placeholder in ANTHROPIC_AUTH_TOKEN.
+    The token and its refresh token reach no invocation, VM file, artifact, or result."""
+    expires_at = int((datetime.now(UTC) + timedelta(hours=6)).timestamp() * 1000)
+    await connect_provider(
+        AnthropicProvider,
+        {
+            "claudeAiOauth": {
+                "accessToken": "oat-live",
+                "refreshToken": "rt-secret",
+                "expiresAt": expires_at,
+            }
+        },
+    )
+    await SettingsOverride.set_agent_billing(PROFILE_PROBE.id, "subscription")
+    profile = await get_profile(PROFILE_PROBE.id, None)
+    result_event = {
+        "type": "result",
+        "subtype": "success",
+        "structured_output": {"ok": True},
+        "total_cost_usd": 0.01,
+    }
+    run = _FakeRun(stdout_chunks=[json.dumps(result_event).encode() + b"\n"])
+    sandbox = _fake_sandbox(run)
+    sandbox.run_prompt = functools.partial(Host.run_prompt, sandbox)
+    sandbox._exec = functools.partial(Host._exec, sandbox)
+    settings = SimpleNamespace(
+        sandbox=SimpleNamespace(service_url="x", service_token="x", timeout=30.0, image="x"),
+        harness_config_root=tmp_path / "harnesses",
+        skills_dir=None,
+    )
+    monkeypatch.setattr("druks.sandbox.host.load_settings", lambda: settings)
+
+    result = await Host.run_agent(
+        sandbox,
+        agent="evaluate",
+        profile=profile,
+        prompt="p",
+        schema={"type": "object"},
+        artifact_dir=ctx.artifact_dir,
+        call_id="call-9",
+    )
+
+    assert result.status is AgentCallStatus.SUCCEEDED
+    assert profile.services == {"anthropic": profile.subscription.id}
+    [start] = sandbox.calls
+    assert not start.kwargs["extra_env"]
+    bundle = start.kwargs["credentials_bundle"]
+    assert not any(type(entry) is HomeFile for entry in bundle.home)
+    for secret in ("oat-live", "rt-secret"):
+        assert secret not in " ".join(start.kwargs["cmd"])
+        assert secret not in start.kwargs["stdin_data"].decode()
+        for artifact in (ctx.artifact_dir / "call-9").iterdir():
+            assert secret not in artifact.read_text()

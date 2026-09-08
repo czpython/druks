@@ -23,6 +23,8 @@ class Profile:
     subscription: ProviderSubscription | None
     api_key: ProviderKey | None
     secrets: dict[str, Secret]
+    # Service name → the subscription the box fetches.
+    services: dict[str, str]
     billing: str
     effort: str
     timeout: int
@@ -45,8 +47,12 @@ class Profile:
 
     @property
     def secrets_id(self) -> str:
+        """What a box created for this profile holds: the pasted key, or the
+        subscription its grant fetches."""
         if self.secrets:
             return f"{self.api_key.provider}.{self.api_key.updated_at:%Y%m%dT%H%M%S}"
+        if self.services:
+            return ".".join(self.services.values())
         return ""
 
     @property
@@ -101,6 +107,7 @@ async def get_profile(agent_name: str, account_id: str | None) -> Profile:
     subscription = None
     provider_key = None
     secrets: dict[str, Secret] = {}
+    services: dict[str, str] = {}
     if billing == "api_key":
         provider_key = await ProviderKey.get(provider_id)
         if not provider_key:
@@ -109,6 +116,7 @@ async def get_profile(agent_name: str, account_id: str | None) -> Profile:
         secrets = harness_class.get_secrets(provider_key.value.decrypt())
     else:
         subscription = await ProviderSubscription.lookup(provider_id, account_id)
+        services = harness_class.get_services(subscription)
     timeout = (
         await SettingsOverride.agent_timeout(agent_name, agent.timeout, settings=settings)
     ).value
@@ -118,6 +126,7 @@ async def get_profile(agent_name: str, account_id: str | None) -> Profile:
         subscription=subscription,
         api_key=provider_key,
         secrets=secrets,
+        services=services,
         billing=billing,
         effort=(await SettingsOverride.agent_effort(agent_name, settings=settings)).value,
         # Capped so a single call always fits inside a fresh sandbox lease.

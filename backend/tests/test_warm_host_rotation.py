@@ -10,7 +10,7 @@ from druks.workflows import Workflow
 
 
 def _profile(secrets: dict[str, Secret], secrets_id: str = "") -> SimpleNamespace:
-    return SimpleNamespace(secrets=secrets, secrets_id=secrets_id)
+    return SimpleNamespace(secrets=secrets, services={}, secrets_id=secrets_id)
 
 
 _ENTRY = Secret(
@@ -36,11 +36,18 @@ class _FakeSandboxClient:
         self.provisions: list[str] = []
         self.secrets: list[dict[str, Secret]] = []
         self.released: list[str] = []
+        self.reattached: list[str] = []
 
     async def provision(
-        self, *, idempotency_key: str, secrets: dict[str, Secret], template: str | None
+        self,
+        *,
+        idempotency_key: str,
+        secrets: dict[str, Secret],
+        template: str | None,
+        grant: object = None,
     ) -> _FakeSandbox:
         assert template is None
+        assert grant is None
         self.provisions.append(idempotency_key)
         self.secrets.append(secrets)
         host_id = f"host-{len(self.provisions)}"
@@ -48,6 +55,10 @@ class _FakeSandboxClient:
 
     async def release(self, *, host_id: str) -> None:
         self.released.append(host_id)
+
+    async def reattach(self, *, host_id: str) -> _FakeSandbox:
+        self.reattached.append(host_id)
+        return _FakeSandbox(id=host_id, expires_at=datetime.now(UTC) + self.lease)
 
 
 def _warm_workflow(*, reuse: bool = True) -> Workflow:
@@ -71,7 +82,7 @@ async def test_warm_host_reused_while_lease_covers_another_call(monkeypatch):
     second = await flow._lease_host(_NONE)
 
     assert first == second == "host-1"
-    assert fake.provisions == ["wf-1:sandbox"]
+    assert fake.provisions == ["wf-1:workflow"]
     assert fake.released == []
 
 
@@ -89,7 +100,7 @@ async def test_warm_host_rotates_when_lease_cannot_cover_a_call(monkeypatch):
     assert first == "host-1"
     assert second == "host-2"
     assert fake.released == ["host-1"]
-    assert fake.provisions == ["wf-1:sandbox", "wf-1:sandbox"]
+    assert fake.provisions == ["wf-1:workflow", "wf-1:workflow"]
 
 
 @pytest.mark.asyncio
@@ -103,7 +114,7 @@ async def test_warm_host_keeps_its_entries_across_calls(monkeypatch):
     second = await flow._lease_host(_profile({"anthropic": _ENTRY}, _ANTHROPIC.secrets_id))
 
     assert first == second == "host-1"
-    assert fake.provisions == ["wf-1:sandbox:anthropic.20260907T110000"]
+    assert fake.provisions == ["wf-1:workflow:anthropic.20260907T110000"]
     assert fake.secrets == [{"anthropic": _ENTRY}]
     assert fake.released == []
 
@@ -122,7 +133,7 @@ async def test_warm_host_rotates_when_a_call_needs_other_entries(monkeypatch):
     assert first == "host-1"
     assert second == "host-2"
     assert fake.released == ["host-1"]
-    assert fake.provisions == ["wf-1:sandbox:anthropic.20260907T110000", "wf-1:sandbox"]
+    assert fake.provisions == ["wf-1:workflow:anthropic.20260907T110000", "wf-1:workflow"]
     assert fake.secrets == [{"anthropic": _ENTRY}, {}]
 
 
@@ -139,9 +150,9 @@ async def test_provisioning_key_names_the_pasted_key(monkeypatch):
     await _warm_workflow()._lease_host(replaced)
 
     assert fake.provisions == [
-        "wf-1:sandbox:anthropic.20260907T110000",
-        "wf-1:sandbox:anthropic.20260907T110000",
-        "wf-1:sandbox:anthropic.20260907T120000",
+        "wf-1:workflow:anthropic.20260907T110000",
+        "wf-1:workflow:anthropic.20260907T110000",
+        "wf-1:workflow:anthropic.20260907T120000",
     ]
 
 
@@ -155,3 +166,27 @@ async def test_no_warm_host_when_reuse_disabled(monkeypatch):
 
     assert await flow._lease_host(_NONE) is None
     assert fake.provisions == []
+
+
+async def test_a_replay_finds_the_warm_box_through_its_grant(
+    monkeypatch: pytest.MonkeyPatch, druks_db
+) -> None:
+    from druks.database import db_session
+    from druks.sandbox.models import SandboxGrant
+    from druks.testing import seed_run
+    from druks_field_notes.workflows import Summarize
+
+    await seed_run(db_session(), kind=Summarize.kind, run_id="wf-1")
+    grant, _ = await SandboxGrant.create(
+        run_id="wf-1", scoped_to="workflow", services={"anthropic": "sub-1"}
+    )
+    await grant.bind("host-crashed")
+    client = _FakeSandboxClient(lease=timedelta(hours=2))
+    monkeypatch.setattr(sdk, "sandbox_client", client)
+    flow = _warm_workflow()
+    profile = SimpleNamespace(secrets={}, services={"anthropic": "sub-1"}, secrets_id="sub-1")
+
+    assert await flow._lease_host(profile) == "host-crashed"
+
+    assert client.reattached == ["host-crashed"]
+    assert client.provisions == []

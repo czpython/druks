@@ -36,11 +36,10 @@ async def refresh_catalogs() -> None:
 async def _refresh() -> dict[str, object]:
     subscriptions = await ProviderSubscription.list_all()
 
-    # A refresh 401s a VM mid-call holding the old token, so a due rotation
-    # runs only while its subscription is idle — busy defers to the next tick;
-    # urgent rotates regardless. rotate_token no-ops rows outside their
-    # margin. Snapshot plain values: each refresh commits and expires the
-    # session's ORM objects mid-loop.
+    # A rotation ends the token every box holds, so a due rotation runs only
+    # while its subscription is idle, or once urgent. rotate_token no-ops
+    # outside the margin and requests a refresh for every live box. Snapshot
+    # plain values: each refresh commits and expires the session's ORM objects.
     rows = [
         (
             subscription.provider,

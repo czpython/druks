@@ -14,6 +14,7 @@ from drukbox_sdk.exceptions import (
     SandboxUnavailableError,
     SandboxValidationError,
 )
+from druks.database import db_session
 from druks.harnesses.exceptions import HarnessSandboxProvisioningError, Retry
 from druks.sandbox import credentials as creds_module
 from druks.sandbox import layout, repo
@@ -22,6 +23,9 @@ from druks.sandbox.constants import SANDBOX_HOST_LEASE_SECONDS
 from druks.sandbox.datastructures import Credentials, HomeCopy, HomeFile
 from druks.sandbox.exceptions import ExecFailed, HostGone, SandboxUnreachable
 from druks.sandbox.host import ExecResult
+from druks.sandbox.models import SandboxGrant
+from druks.testing import seed_run
+from druks_field_notes.workflows import Summarize
 
 
 @dataclass
@@ -489,6 +493,7 @@ async def test_acquire_uploads_helper_and_closes_ssh_without_releasing(
 
 
 async def test_acquire_releases_host_when_helper_upload_fails(
+    druks_db,
     patched_real_sandbox: list[_FakeSandbox],
     patched_sandbox_api: list[_FakeAPI],
 ):
@@ -585,6 +590,7 @@ async def test_provision_hands_the_entries_to_drukbox(
 
 
 async def test_ephemeral_hands_the_entries_to_drukbox_and_releases(
+    druks_db,
     patched_real_sandbox: list[_FakeSandbox],
     patched_sandbox_api: list[_FakeAPI],
 ):
@@ -645,6 +651,7 @@ async def test_acquire_passes_through_fatal_create_failure(
 
 
 async def test_acquire_classifies_setup_reachability_failure_after_rollback(
+    druks_db,
     patched_real_sandbox: list[_FakeSandbox],
     patched_sandbox_api: list[_FakeAPI],
 ):
@@ -672,6 +679,7 @@ async def test_acquire_classifies_setup_reachability_failure_after_rollback(
 
 
 async def test_acquire_setup_cancellation_propagates_unclassified(
+    druks_db,
     patched_real_sandbox: list[_FakeSandbox],
     patched_sandbox_api: list[_FakeAPI],
 ):
@@ -746,7 +754,7 @@ async def test_attach_raises_host_gone_on_not_found(
             pass
 
 
-async def test_release_calls_sdk_delete(patched_sandbox_api: list[_FakeAPI]):
+async def test_release_calls_sdk_delete(druks_db, patched_sandbox_api: list[_FakeAPI]):
 
     api = _FakeAPI(create_record=None)
     patched_sandbox_api.append(api)
@@ -757,6 +765,7 @@ async def test_release_calls_sdk_delete(patched_sandbox_api: list[_FakeAPI]):
 
 
 async def test_release_swallows_sdk_delete_failure(
+    druks_db,
     patched_sandbox_api: list[_FakeAPI],
 ):
 
@@ -772,3 +781,142 @@ async def test_release_swallows_sdk_delete_failure(
     await sandbox_client.release(host_id="host-xyz")
 
     assert api.deleted_ids == ["host-xyz"]
+
+
+async def _grant() -> SandboxGrant:
+    await seed_run(db_session(), kind=Summarize.kind, run_id="run-1")
+    grant, _ = await SandboxGrant.create(
+        run_id="run-1",
+        scoped_to="workflow",
+        services={"anthropic": "sub-1"},
+    )
+    return grant
+
+
+async def test_acquire_binds_the_grant_to_the_box(
+    druks_db,
+    patched_real_sandbox: list[_FakeSandbox],
+    patched_sandbox_api: list[_FakeAPI],
+):
+    api = _FakeAPI(create_record=_record(status="active"))
+    patched_sandbox_api.append(api)
+    grant = await _grant()
+
+    async with sandbox_client.acquire(grant=grant):
+        pass
+
+    assert grant.host_id == "host-xyz"
+    assert not grant.revoked_at
+
+
+async def test_a_failed_create_revokes_the_unbound_grant(
+    druks_db,
+    patched_real_sandbox: list[_FakeSandbox],
+    patched_sandbox_api: list[_FakeAPI],
+):
+    api = _FakeAPI(create_raises=SandboxProvisioningError("create timed out"))
+    patched_sandbox_api.append(api)
+    grant = await _grant()
+
+    with pytest.raises(HarnessSandboxProvisioningError):
+        async with sandbox_client.acquire(grant=grant):
+            pass
+
+    assert grant.revoked_at
+    assert not grant.host_id
+
+
+async def test_a_failed_setup_revokes_the_bound_grant(
+    druks_db,
+    patched_real_sandbox: list[_FakeSandbox],
+    patched_sandbox_api: list[_FakeAPI],
+):
+    api = _FakeAPI(create_record=_record(status="active"))
+    patched_sandbox_api.append(api)
+    grant = await _grant()
+
+    async def _fake_upload(sandbox: Any) -> None:
+        raise SandboxUnreachable("failed to write /root/.gitconfig")
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr("druks.sandbox.client._upload_helper_script", _fake_upload)
+        with pytest.raises(HarnessSandboxProvisioningError):
+            async with sandbox_client.acquire(grant=grant):
+                pass
+
+    await db_session().refresh(grant)
+    assert grant.host_id == "host-xyz"
+    assert grant.revoked_at
+    assert api.deleted_ids == ["host-xyz"]
+
+
+async def test_release_revokes_the_boxs_grant(druks_db, patched_sandbox_api: list[_FakeAPI]):
+    api = _FakeAPI(create_record=None)
+    patched_sandbox_api.append(api)
+    grant = await _grant()
+    await grant.bind("host-xyz")
+
+    await sandbox_client.release(host_id="host-xyz")
+
+    await db_session().refresh(grant)
+    assert grant.revoked_at
+    assert api.deleted_ids == ["host-xyz"]
+
+
+async def test_attach_reuses_a_bound_box_without_the_bearer(
+    druks_db,
+    patched_real_sandbox: list[_FakeSandbox],
+    patched_sandbox_api: list[_FakeAPI],
+):
+    """A process that reattaches never held the bearer. The box keeps its grant."""
+    api = _FakeAPI(get_host_responses=[_record(status="active")])
+    patched_sandbox_api.append(api)
+    grant = await _grant()
+    await grant.bind("host-xyz")
+
+    async with sandbox_client.attach(host_id="host-xyz") as host:
+        assert host.id == "host-xyz"
+
+    await db_session().refresh(grant)
+    assert grant.is_live
+
+
+async def test_resume_reattaches_the_box_and_releases_it_on_exit(
+    druks_db,
+    patched_real_sandbox: list[_FakeSandbox],
+    patched_sandbox_api: list[_FakeAPI],
+):
+    """A replay resumes the box a crashed attempt left behind. The exit releases
+    the box and revokes its grant, like an ephemeral box."""
+    api = _FakeAPI(get_host_responses=[_record(status="active")])
+    patched_sandbox_api.append(api)
+    grant = await _grant()
+    await grant.bind("host-xyz")
+
+    async with sandbox_client.resume(host_id="host-xyz") as host:
+        assert host.id == "host-xyz"
+        assert api.deleted_ids == []
+
+    assert api.deleted_ids == ["host-xyz"]
+    await db_session().refresh(grant)
+    assert not grant.is_live
+
+
+async def test_a_gone_box_loses_its_grant_and_the_retry_provisions_anew(
+    druks_db,
+    patched_real_sandbox: list[_FakeSandbox],
+    patched_sandbox_api: list[_FakeAPI],
+):
+    """The grant outlived its box. The reattach revokes the grant and fails as
+    transient, so the retry finds no grant and provisions anew."""
+    api = _FakeAPI(get_host_raises=SandboxNotFoundError("host-xyz not found"))
+    patched_sandbox_api.append(api)
+    grant = await _grant()
+    await grant.bind("host-xyz")
+
+    with pytest.raises(HarnessSandboxProvisioningError):
+        await sandbox_client.reattach(host_id="host-xyz")
+
+    await db_session().refresh(grant)
+    assert not grant.is_live
+    assert await SandboxGrant.lookup("run-1", "workflow", {"anthropic": "sub-1"}) is None

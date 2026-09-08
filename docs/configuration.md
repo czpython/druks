@@ -40,7 +40,7 @@ host-run development template for that environment plane.
 | `[urls]` | Dashboard callback base URL and public webhook hostname |
 | `[secrets]` | Generated deployment secrets |
 | `[paths]` | Host data and harness configuration paths |
-| `[sandbox]` | Drukbox provider, service URL and token, image override, and the proxy, mint, and exchange addresses |
+| `[sandbox]` | Drukbox provider, service URL and token, image override, and the proxy, issuer, and exchange addresses |
 | `[sandbox.<provider>]` | Provider environment passed through to the remote stack |
 | `[env]` | Additional deployment environment settings rendered verbatim |
 
@@ -300,10 +300,15 @@ optional. It reports pending setup if the selected tracker lacks a connection.
 Druks registers two subscription providers, `anthropic` and `openai`. Each
 also accepts an API key. Both connect from **Settings → Providers**. The
 connection flow stores each credential in Postgres. Druks refreshes a
-subscription token on a schedule. It creates the CLI credential file inside
-each sandbox. It does not copy a host login. This is a capability connection
-for the requesting account. In a fresh `none`-mode install, the first
-completed subscription connection also creates the operator account. See
+subscription token on a schedule. A `claude` sandbox holds a placeholder in
+`ANTHROPIC_AUTH_TOKEN` and never the token. Drukbox fetches the token from the
+Druks issuer through the sandbox's grant, and the secrets proxy swaps the
+placeholder on each request. See
+[grants and the issuer](concepts.md#agents-harnesses-workspaces-and-sandboxes).
+Codex and Pi still receive their credential file inside the sandbox. Druks does
+not copy a host login. This is a capability connection for the requesting
+account. In a fresh `none`-mode install, the first completed subscription
+connection also creates the operator account. See
 [access control](#public-urls-and-access-control).
 
 An API key for `claude` never enters the sandbox. Druks gives the key to
@@ -373,8 +378,8 @@ credential is missing.
 | `sandbox.timeout` | Control-plane request timeout. The default is 180 seconds |
 | `sandbox.image` | Optional provider image override |
 | `sandbox.proxy_url` | The secrets proxy, at the address a sandbox dials. The docker shape sets `http://172.17.0.1:8880`. docker-sbx leaves it empty |
-| `sandbox.issuer_url` | The mint base URL the secrets exchange dials. The default is `http://127.0.0.1:8001` on every shape. Only an explicit value changes it |
-| `sandbox.exchange_url` | The secrets exchange, for refresh orders and the doctor probe. The default is `http://127.0.0.1:8781` |
+| `sandbox.issuer_url` | The issuer base URL the secrets exchange dials. The default is `http://127.0.0.1:8001` on every shape. Only an explicit value changes it |
+| `sandbox.exchange_url` | The secrets exchange, for refresh requests and the doctor probe. The default is `http://127.0.0.1:8781` |
 | `sandbox.browser_login_proxy` | Login-window egress proxy. An empty value keeps the box IP |
 | `sandbox.browser_login_tz` | Login-window timezone (IANA zone). An empty value keeps the container default |
 

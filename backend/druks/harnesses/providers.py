@@ -1,9 +1,11 @@
+import asyncio
 import base64
 import hashlib
 import json
 import logging
 import re
 import secrets
+import time
 import urllib.parse
 from datetime import UTC, datetime, timedelta
 from typing import ClassVar
@@ -15,6 +17,8 @@ from pydantic import TypeAdapter
 from druks.core.utils.time import ensure_utc
 from druks.database import db_session
 from druks.redis import get_client
+from druks.sandbox import gate
+from druks.sandbox.client import sandbox_client
 from druks.sandbox.constants import MAX_AGENT_TIMEOUT_SECONDS
 from druks.usage.models import UsageScrape
 
@@ -33,7 +37,7 @@ from .models import ProviderCatalog, ProviderKey, ProviderSubscription
 
 logger = logging.getLogger(__name__)
 
-_GRANT_TIMEOUT_SECONDS = 30.0
+_TOKEN_REQUEST_TIMEOUT_SECONDS = 30.0
 _USAGE_TIMEOUT_SECONDS = 20.0
 _CATALOG_TIMEOUT_SECONDS = 20.0
 _OPENAI_MODELS_URL = "https://api.openai.com/v1/models"
@@ -53,9 +57,11 @@ _OPENAI_NON_CHAT_MARKERS = (
 # long — enough to authorize and paste, short enough that an abandoned attempt
 # clears.
 _CONNECT_PENDING_TTL_SECONDS = 600
-# Per-row refresh lock: five minutes outlives the provider grant timeout and
+# Per-row refresh lock: five minutes outlives the token request timeout and
 # expires before the next 15-minute cron tick if the holder dies mid-refresh.
 _REFRESH_LOCK_TTL_SECONDS = 300
+# How often a fetch asks again while another refresher holds the row lock.
+_LOCK_POLL_SECONDS = 0.5
 
 Token = OAuthToken | CodexToken
 
@@ -161,16 +167,45 @@ class Provider:
         raise NotImplementedError
 
     @classmethod
+    async def issue_token(cls, subscription_id: str, *, except_host_id: str = "") -> Token:
+        """The token a box can use now. A due token rotates first, while the
+        subscription is idle or the token is urgent. The gate holds every other
+        fetch and every new call until the rotation and its refresh requests end.
+        Raises :class:`OAuthTokenError` when the row holds nothing valid."""
+        row = await ProviderSubscription.reload(subscription_id)
+        if row and cls.refresh_is_due(row):
+            async with gate.shut(subscription_id) as is_idle:
+                if is_idle or cls.refresh_is_urgent(row):
+                    # A refresher that holds the row lock keeps it for its token
+                    # request. Wait for it, then read the row it advanced.
+                    deadline = time.monotonic() + _TOKEN_REQUEST_TIMEOUT_SECONDS
+                    rotation = await cls.rotate_token(
+                        subscription_id, except_host_id=except_host_id
+                    )
+                    while rotation.action == "locked" and time.monotonic() < deadline:
+                        await asyncio.sleep(_LOCK_POLL_SECONDS)
+                        rotation = await cls.rotate_token(
+                            subscription_id, except_host_id=except_host_id
+                        )
+            row = await ProviderSubscription.reload(subscription_id)
+        if not row:
+            raise exceptions.OAuthTokenError("no_credentials", "the subscription is disconnected")
+        return cls.load_token(row)
+
+    @classmethod
     async def rotate_token(
         cls,
         subscription_id: str,
         *,
         now: datetime | None = None,
         margin: timedelta | None = None,
+        except_host_id: str = "",
     ) -> RotationResult:
         """Refresh one subscription's token when it is inside the expiry margin.
         A Redis lock elects one refresher per row; the loser reports ``locked``
-        and never presents the refresh token a concurrent grant may have burned."""
+        and never presents the refresh token a concurrent token request may have burned.
+        A refresh that succeeds requests a refresh for every live box on the
+        subscription, except ``except_host_id``, whose answer carries it."""
         moment = now or _utc_now()
         row = await ProviderSubscription.reload(subscription_id)
         if not row:
@@ -239,11 +274,20 @@ class Provider:
             # the step's own commit would let a concurrent refresher take the
             # freed lock and re-present the superseded token.
             await db_session().commit()
+            # The refresh requests go out before the lock releases: a rotation
+            # ends the value every box on this subscription holds.
+            await sandbox_client.request_refreshes(row.id, except_host_id=except_host_id)
             return RotationResult(
                 cls.id, "refreshed", expires_at=new_expiry, subscription_id=row.id
             )
         finally:
             await redis.delete(lock_key)
+
+    @classmethod
+    def refresh_is_due(cls, subscription: ProviderSubscription) -> bool:
+        """Expiry inside the refresh margin, or past."""
+        _, expires_at = cls._refresh_state(dict(subscription.payload))
+        return bool(expires_at) and expires_at - _utc_now() <= cls.REFRESH_MARGIN
 
     @classmethod
     def refresh_is_urgent(cls, subscription: ProviderSubscription) -> bool:
@@ -517,7 +561,7 @@ async def _post_grant(url: str, body: dict) -> dict:
     """POST a refresh grant and return the parsed grant dict. Raises
     :class:`GrantError` tagged with why no usable grant came back."""
     try:
-        async with httpx.AsyncClient(timeout=_GRANT_TIMEOUT_SECONDS) as client:
+        async with httpx.AsyncClient(timeout=_TOKEN_REQUEST_TIMEOUT_SECONDS) as client:
             response = await client.post(url, json=body)
     except httpx.HTTPError as exc:
         logger.warning("token refresh request failed (%s): %s", url, exc, exc_info=True)
@@ -567,7 +611,7 @@ async def post_token(url: str, body: dict, *, form: bool) -> dict:
     parsed grant. Raises :class:`ConnectError` with the provider's error text on
     any failure, so the operator sees why the connect didn't take."""
     try:
-        async with httpx.AsyncClient(timeout=_GRANT_TIMEOUT_SECONDS) as client:
+        async with httpx.AsyncClient(timeout=_TOKEN_REQUEST_TIMEOUT_SECONDS) as client:
             if form:
                 response = await client.post(url, data=body)
             else:

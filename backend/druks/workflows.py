@@ -55,6 +55,7 @@ from druks.notifications.outbox import notifications_queue, send_notification
 from druks.sandbox.client import provisioning_key, sandbox_client
 from druks.sandbox.constants import SANDBOX_HOST_ROTATE_BEFORE_SECONDS
 from druks.sandbox.datastructures import Sandbox
+from druks.sandbox.models import SandboxGrant
 from druks.sandbox.templates import get_template_id
 from druks.signals import publish
 from druks.user_settings.models import SettingsOverride, SettingsProfile
@@ -837,6 +838,16 @@ class Workflow:
         # only the host-id matters across steps — held-across-steps never fights replay.
         if not self.steps_reuse_sandbox:
             return
+        # A crashed process left its box behind. Its grant finds it again.
+        if (
+            not self._host
+            and profile.services
+            and (
+                grant := await SandboxGrant.lookup(self._workflow_id, "workflow", profile.services)
+            )
+        ):
+            self._host = await sandbox_client.reattach(host_id=grant.host_id)
+            self._host_secrets_id = profile.secrets_id
         if self._host and self._host.expires_at:
             remaining = (self._host.expires_at - datetime.now(UTC)).total_seconds()
             if remaining < SANDBOX_HOST_ROTATE_BEFORE_SECONDS:
@@ -852,11 +863,20 @@ class Workflow:
             if self.sandbox:
                 template = await get_template_id(self.sandbox)
                 await set_run_phase("provisioning_vm")
+            # The key names the pasted key the VM holds, so a replay finds its VM.
+            # A box that fetches gets its own grant, and the key names that instead.
+            # A replay finds the box through the grant, above.
+            grant, entries, key = None, {}, profile.secrets_id
+            if profile.services:
+                grant, entries = await SandboxGrant.create(
+                    run_id=self._workflow_id, scoped_to="workflow", services=profile.services
+                )
+                key = grant.id
             self._host = await sandbox_client.provision(
-                # The key names the pasted key the VM holds, so a replay finds its VM.
-                idempotency_key=provisioning_key(self._workflow_id, "sandbox", profile.secrets_id),
-                secrets=profile.secrets,
+                idempotency_key=provisioning_key(self._workflow_id, "workflow", key),
+                secrets={**profile.secrets, **entries},
                 template=template,
+                grant=grant,
             )
             self._host_secrets_id = profile.secrets_id
         return self._host.id

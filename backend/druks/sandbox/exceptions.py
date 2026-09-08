@@ -34,6 +34,10 @@ class ExecFailed(SandboxError):
         self.exit_code = exit_code
 
 
+class GrantDenied(SandboxError):
+    """A fetch names no live grant for its bearer and service."""
+
+
 class HostGone(SandboxError):
     """The provider says this host no longer exists.
 
