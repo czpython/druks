@@ -303,6 +303,32 @@ async def _drukbox_doctor(settings: Settings):
         await api.aclose()
 
 
+async def check_secrets_exchange(settings: Settings) -> CheckResult:
+    if not settings.sandbox.service_url:
+        return CheckResult(
+            name="secrets_exchange", ok=True, detail="not configured (sandbox execution is off)"
+        )
+    url = f"{settings.sandbox.exchange_url.rstrip('/')}/healthz"
+    try:
+        async with httpx.AsyncClient(timeout=3.0) as http:
+            status = (await http.get(url)).status_code
+    except httpx.HTTPError as error:
+        return CheckResult(
+            name="secrets_exchange",
+            ok=False,
+            detail=f"drukbox-exchange is unreachable at {url}: {error}. "
+            "Start it: docker compose up -d drukbox-exchange",
+        )
+    if status != 200:
+        return CheckResult(
+            name="secrets_exchange",
+            ok=False,
+            detail=f"drukbox-exchange answered {status} at {url}. "
+            "Read its log: docker compose logs drukbox-exchange",
+        )
+    return CheckResult(name="secrets_exchange", ok=True, detail=url)
+
+
 async def check_sandbox_e2e(settings: Settings) -> CheckResult | list[CheckResult]:
     """Provision a real VM, exercise the acquire and reattach dial paths, and
     probe each registered harness CLI's presence on the image. Costs one
@@ -570,6 +596,7 @@ CHECKS = (
     check_database,
     check_redis,
     check_drukbox,
+    check_secrets_exchange,
     check_capability_modules,
     check_apps,
     check_declared_sandboxes,

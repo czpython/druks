@@ -212,6 +212,13 @@ identity bearer and nothing else, and it answers `value` and the provider's
 `POST /refresh/<host id>/<service>` on `[sandbox].exchange_url`, one request for
 each live sandbox on the subscription.
 
+An identity dies with its sandbox. Druks revokes it before it deletes the
+sandbox, and the issuer denies a terminal run's identity before any cleanup.
+A run that dies without its cleanup leaves its sandbox until the lease ends.
+The `release_orphan_boxes` task runs every hour and releases such a sandbox
+sooner. Drukbox reaps a sandbox at the end of its lease in any case. `druks doctor` probes the exchange at
+`[sandbox].exchange_url` on `/healthz` and names the corrective action.
+
 Drukbox encrypts the secret entries of each sandbox with `SECRETS_KEY`. The
 installer generates `[secrets].drukbox_secrets_key` and renders it as
 `SECRETS_KEY` for the API and the exchange. Pin the proxy image with

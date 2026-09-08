@@ -200,7 +200,8 @@ subscription is idle or the token is urgent. One rotator runs at a time, and
 new calls wait for it. After a rotation, Druks requests a refresh from the secrets
 exchange for every live sandbox on that subscription. A provider can revoke
 the previous token at the rotation. Druks revokes the identity when it
-releases the sandbox, and a terminal run denies every fetch. The identity
+releases the sandbox, and a terminal run denies every fetch. An hourly task
+releases the sandbox of a run that ended without its cleanup. The identity
 expires with the sandbox lease.
 
 ## Events, signals, webhooks, and subjects
