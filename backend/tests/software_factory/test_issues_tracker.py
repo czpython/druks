@@ -1,6 +1,7 @@
 import druks.contrib.software_factory.subscribers  # noqa: F401
 import pytest
 from druks.contrib.software_factory.app import SoftwareFactory
+from druks.contrib.software_factory.contracts import ReviewWork
 from druks.contrib.software_factory.issues.enums import Status
 from druks.contrib.software_factory.issues.models import Ticket
 from druks.contrib.software_factory.models import Project, ProjectRepo, WorkItem
@@ -10,7 +11,7 @@ from druks.contrib.software_factory.workflows import Build
 from druks.core.apis.exceptions import UnknownTicketError
 from druks.services.models import ServiceIdentity
 
-from software_factory.factories import make_test_work_item
+from software_factory.factories import make_test_work_item, seed_build_run
 
 
 async def _open_ticket(*, project="Acme", prefix="WID", full_name="acme/widget", title="one"):
@@ -103,3 +104,30 @@ async def test_ready_for_agent_opens_a_build_against_the_selected_repo(druks_db,
     assert item.ticket_key == "WID-1"
     assert item.repo == "acme/widget"
     assert started[0]["subject"].id == item.id
+
+
+async def test_ready_for_agent_on_a_parked_build_moves_the_ticket_to_in_review(
+    druks_db, monkeypatch
+):
+    await _connect_github()
+    _pin_software_factory_settings(monkeypatch, tracker="issues")
+    ticket = await _open_ticket(title="Add an endpoint")
+    item = await make_test_work_item(
+        repo="acme/widget",
+        source="issues",
+        ticket_key=ticket.identifier,
+        title=ticket.title,
+    )
+    await seed_build_run(druks_db, work_item_id=item.id, state="parked", input_gate=ReviewWork.name)
+    started = []
+
+    async def fake_start(cls, **kwargs):
+        started.append(kwargs)
+        return "should-not-run"
+
+    monkeypatch.setattr(Build, "start", classmethod(fake_start))
+
+    await ticket.transition(Status.READY_FOR_AGENT)
+
+    assert started == []
+    assert (await Ticket.get_for_identifier(ticket.identifier)).status == Status.IN_REVIEW
