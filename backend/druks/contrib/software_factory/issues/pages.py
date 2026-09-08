@@ -90,6 +90,12 @@ def _assignee_name(assignee_id: str | None, account_names: dict[str, str]) -> st
     return account_names.get(assignee_id, UNATTRIBUTED)
 
 
+def _creator_name(creator_id: str | None, account_names: dict[str, str]) -> str:
+    if not creator_id:
+        return UNATTRIBUTED
+    return account_names.get(creator_id, UNATTRIBUTED)
+
+
 def _create_actions(repos: list[ProjectRepo], accounts: list[Account]) -> list[ui.Action]:
     """Creation is a control on the board and the issues page, not a destination:
     a page that lists nothing is not where a ticket gets written."""
@@ -546,6 +552,12 @@ async def ticket(identifier: str):
                             ui.Facts(
                                 [
                                     ui.Fact("Identifier", value=ui.TextValue(found.identifier)),
+                                    ui.Fact(
+                                        "Created by",
+                                        value=ui.TextValue(
+                                            _creator_name(found.creator_id, account_names)
+                                        ),
+                                    ),
                                     ui.Fact("Created", value=ui.TimeValue(found.created_at)),
                                     ui.Fact("Updated", value=ui.TimeValue(found.updated_at)),
                                 ]
