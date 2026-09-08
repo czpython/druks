@@ -207,4 +207,64 @@ describe('Cards', () => {
 
     expect(container.textContent).toBe('')
   })
+
+  it('makes a linked card the destination, with no Open control', () => {
+    renderBlocks([
+      {
+        block: 'card',
+        title: 'Ship the board',
+        description: 'DRU-1',
+        blocks: [],
+        controls: [],
+        link: {
+          block: 'link',
+          label: 'Ship the board',
+          page: 'note',
+          arguments: { note_id: '7' },
+          url: '',
+          subject: null,
+        },
+      },
+    ])
+
+    const card = screen.getByText('Ship the board').closest('a')
+    expect(card?.getAttribute('href')).toBe('/field_notes/notes/7')
+    expect(card?.className).toContain('dui-card')
+    expect(screen.queryByText('Open')).toBeNull()
+  })
+
+  it('puts the link on the title when the card also has controls', () => {
+    renderBlocks([
+      {
+        block: 'card',
+        title: 'Ship the board',
+        description: 'DRU-1',
+        blocks: [],
+        controls: [
+          {
+            block: 'link',
+            label: 'Archive',
+            page: 'notes',
+            arguments: {},
+            url: '',
+            subject: null,
+          },
+        ],
+        link: {
+          block: 'link',
+          label: 'Ship the board',
+          page: 'note',
+          arguments: { note_id: '7' },
+          url: '',
+          subject: null,
+        },
+      },
+    ])
+
+    expect(screen.getByText('Ship the board').closest('a')?.getAttribute('href')).toBe(
+      '/field_notes/notes/7',
+    )
+    expect(screen.getByText('Ship the board').closest('.dui-card')?.tagName).toBe('DIV')
+    expect(screen.getByText('Archive').getAttribute('href')).toBe('/field_notes')
+  })
 })
