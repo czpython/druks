@@ -1,5 +1,7 @@
 from druks.contrib.software_factory.issues.models import Ticket
 
+from software_factory.factories import make_test_work_item
+
 BOARD_COLUMNS = [
     "Backlog",
     "Todo",
@@ -208,6 +210,30 @@ async def test_ticket_page_follows_the_row_and_comments_refresh_the_region(druks
     after = (await druks_client.get(f"{_PAGES}/tickets/{created['identifier']}")).json()
     thread = _comments(after)
     assert thread["blocks"][0]["blocks"][0]["text"] == "looks good"
+
+
+async def test_ticket_page_links_the_open_build(druks_client):
+    repo = await _open_repo(druks_client)
+    created = await _open_ticket(druks_client, repo["id"], title="Follow me")
+    item = await make_test_work_item(
+        repo="acme/druks",
+        source="issues",
+        ticket_key=created["identifier"],
+        title="Follow me",
+    )
+
+    page = (await druks_client.get(f"{_PAGES}/tickets/{created['identifier']}")).json()
+
+    assert page["controls"] == [
+        {
+            "block": "link",
+            "label": "Open build",
+            "page": "",
+            "arguments": {},
+            "url": f"/software_factory/work-items/{item.id}",
+            "subject": None,
+        }
+    ]
 
 
 async def test_new_ticket_groups_repos_by_github_project(druks_client):
