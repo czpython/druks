@@ -160,6 +160,7 @@ services:
     restart: unless-stopped
     network_mode: host
     environment:
+      HOME: /home/mitmproxy
       SECRETS_EXCHANGE_URL: http://127.0.0.1:8781
       SECRETS_PROXY_BIND_HOST: ${DRUKS_SECRETS_PROXY_BIND_HOST:-127.0.0.1}
     volumes:
