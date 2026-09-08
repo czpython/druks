@@ -31,7 +31,7 @@ from .datastructures import PullRequest
 from .github import get_review_actor
 from .journal import BuildJournal
 from .policy import PlanGate, RepoPolicy
-from .prompt_context import BuildPromptContext
+from .prompt_context import TRACKER_LABELS, BuildPromptContext
 
 if TYPE_CHECKING:
     from druks.sandbox.host import Host
@@ -283,6 +283,7 @@ class Build(Workflow):
             pr_number=self.pr_number,
             ticket_ref=work_item.ticket_key,
             source=work_item.source,
+            tracker_label=TRACKER_LABELS[work_item.source],
             issue_number=self.input.issue_number,
             task_owner_name=self.input.task_owner_name,
             task_owner_email=self.input.task_owner_email,

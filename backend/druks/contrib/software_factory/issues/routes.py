@@ -205,6 +205,7 @@ async def add_comment(
 
 @router.get("/tickets/{identifier}", operation_id="get_ticket", tags=["agent"])
 async def get_ticket(identifier: str) -> TicketDetail:
-    """Read one ticket: what it asks for, and everything said about it so far,
-    oldest comment first."""
+    """Read one Druks board ticket by identifier (for example BOX-3), including
+    every comment, oldest first. This is not a GitHub issue — GitHub issue tools
+    cannot fetch it."""
     return await ticket_detail(await require_ticket(identifier))
