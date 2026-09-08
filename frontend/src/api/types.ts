@@ -365,6 +365,7 @@ export type Field =
       value: string
       placeholder: string
       rows: number
+      markdown?: boolean
     })
   | (FieldBase & {
       field: 'number'
