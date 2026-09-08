@@ -6,6 +6,7 @@ from sqlalchemy import ForeignKey, Index, func, select
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from druks.contrib.software_factory.issues import models as _issues_models  # noqa: F401
 from druks.contrib.software_factory.policy import RepoPolicy
 from druks.contrib.software_factory.schemas import ProjectRepoSummary, WorkItemSummary
 from druks.contrib.software_factory.ticketing.enums import TicketStatus
