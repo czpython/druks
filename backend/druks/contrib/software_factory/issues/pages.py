@@ -4,7 +4,7 @@ from druks import ui
 from druks.accounts.models import Account
 from druks.contrib.software_factory.issues.enums import Priority, Status
 from druks.contrib.software_factory.issues.models import Comment, Ticket
-from druks.contrib.software_factory.models import Project, ProjectRepo
+from druks.contrib.software_factory.models import Project, ProjectRepo, WorkItem
 from druks.db import Base
 
 # The board's columns, worked-on left to right. Cancelled and blocked are off
@@ -419,12 +419,16 @@ async def ticket(identifier: str):
     thread = _comment_blocks(comments, account_names) or [
         ui.EmptyState("No comments yet", description="Say something about this ticket.")
     ]
+    build = await WorkItem.get_for_ticket_key(source="issues", ticket_key=found.identifier)
 
     return ui.Page(
         found.identifier,
         # The whole page follows the ticket, so a status write from anywhere —
         # Software Factory included — redraws it without a navigation.
         follows=found,
+        controls=(
+            [ui.Link("Open build", url=f"/software_factory/work-items/{build.id}")] if build else []
+        ),
         blocks=[
             ui.Columns(
                 [
