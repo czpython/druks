@@ -4,10 +4,12 @@ from druks.files.storage import reap_deleted_file_bytes
 from druks.harnesses.datastructures import RotationResult
 from druks.harnesses.directory import refresh_added_catalogs
 from druks.harnesses.providers import get_provider, get_providers
+from druks.models import Base
 from druks.sandbox import gate
 from druks.sandbox.client import sandbox_client
 from druks.sandbox.models import SandboxIdentity
 from druks.secrets.models import VaultSecret
+from druks.usage.models import UsageScrape
 from druks.workflows import task
 
 logger = logging.getLogger(__name__)
@@ -25,6 +27,18 @@ async def refresh_tokens() -> None:
     # Fifteen minutes keeps every token inside its refresh margin and does
     # almost nothing on most ticks.
     await _refresh()
+
+
+@task(every="*/5 * * * *")
+async def refresh_usage() -> None:
+    # A poll can commit and expire every subscription in the session.
+    subscription_ids = [subscription.id for subscription in await VaultSecret.list_subscriptions()]
+
+    for subscription_id in subscription_ids:
+        subscription = await VaultSecret.reload(subscription_id)
+
+        if subscription and await UsageScrape.is_due(subscription, now=Base.utc_now()):
+            await get_provider(subscription.audience_name).poll_usage(subscription)
 
 
 @task(every="0 * * * *")

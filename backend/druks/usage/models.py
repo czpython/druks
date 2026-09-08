@@ -1,11 +1,15 @@
 from datetime import datetime, timedelta
-from typing import Any
+from itertools import pairwise
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import ForeignKey, Index, delete, select
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from druks.db import Base, db_session
+
+if TYPE_CHECKING:
+    from druks.secrets.models import VaultSecret
 
 
 class UsageScrape(Base):
@@ -31,8 +35,7 @@ class UsageScrape(Base):
     # Subscription tier when the CLI surfaces it (e.g. ``pro``, ``max``,
     # ``plus``). Display-only.
     plan_tier: Mapped[str | None]
-    # Five-hour rolling window. Claude exposes this directly; Codex
-    # doesn't have a 5h concept yet so it stays null for the codex row.
+    # The provider's five-hour rolling window.
     five_hour_percent_left: Mapped[int | None]
     five_hour_resets_at: Mapped[datetime | None]
     # Weekly windows in provider order, including separately metered models.
@@ -42,6 +45,60 @@ class UsageScrape(Base):
     # buckets when this is set — the UI renders "unmetered" instead of
     # a quota bar that never moves.
     unlimited: Mapped[bool] = mapped_column(default=False)
+
+    @classmethod
+    async def is_due(cls, subscription: "VaultSecret", *, now: datetime) -> bool:
+        """Use scrape history to delay idle polls, except after calls or window resets."""
+        # Harness registration imports UsageScrape before AgentCall finishes loading.
+        from druks.durable.models import AgentCall
+
+        stmt = (
+            select(cls)
+            .where(
+                cls.provider == subscription.audience_name,
+                cls.account_id == subscription.account_id,
+            )
+            .order_by(cls.scraped_at.desc(), cls.id.desc())
+            .limit(5)
+        )
+        rows = list(await db_session().scalars(stmt))
+
+        if not rows:
+            return True
+        latest_scrape = rows[0]
+        exhausted_reset = latest_scrape.soonest_reset_after(
+            latest_scrape.scraped_at, exhausted_only=True
+        )
+
+        if exhausted_reset:
+            return now >= exhausted_reset
+        finished_call = select(AgentCall.id).where(
+            AgentCall.subscription_id == subscription.id,
+            AgentCall.finished_at > latest_scrape.scraped_at,
+        )
+
+        if await db_session().scalar(select(finished_call.exists())):
+            return True
+        reset = latest_scrape.soonest_reset_after(latest_scrape.scraped_at)
+
+        if reset and now >= reset:
+            return True
+        interval = timedelta(minutes=5)
+
+        for newer_scrape, older_scrape in pairwise(rows):
+            if (
+                newer_scrape.error != older_scrape.error
+                or newer_scrape.five_hour_percent_left != older_scrape.five_hour_percent_left
+                or [(week["model"], week["percent_left"]) for week in newer_scrape.weeks]
+                != [(week["model"], week["percent_left"]) for week in older_scrape.weeks]
+            ):
+                break
+            reset = older_scrape.soonest_reset_after(older_scrape.scraped_at)
+
+            if reset and newer_scrape.scraped_at >= reset:
+                break
+            interval = min(interval * 2, timedelta(minutes=60))
+        return now >= latest_scrape.scraped_at + interval
 
     @classmethod
     async def latest_for(cls, provider_id: str, account_id: str) -> "UsageScrape | None":
@@ -75,12 +132,18 @@ class UsageScrape(Base):
         if reported_windows:
             return min(reported_windows, key=lambda week: week["percent_left"])
 
-    def soonest_reset_after(self, now: datetime) -> datetime | None:
+    def soonest_reset_after(
+        self, now: datetime, *, exhausted_only: bool = False
+    ) -> datetime | None:
         resets = []
-        if self.five_hour_resets_at and self.five_hour_resets_at > now:
+        if (
+            self.five_hour_resets_at
+            and self.five_hour_resets_at > now
+            and (not exhausted_only or self.five_hour_percent_left == 0)
+        ):
             resets.append(self.five_hour_resets_at)
         for week in self.weeks:
-            if week["resets_at"]:
+            if week["resets_at"] and (not exhausted_only or week["percent_left"] == 0):
                 reset = datetime.fromisoformat(week["resets_at"])
                 if reset > now:
                     resets.append(reset)
