@@ -1,6 +1,37 @@
-import { useId, useRef } from 'react'
+import { useId, useRef, type ReactNode } from 'react'
 
-import type { Field } from '../api/types'
+import type { Field, Option } from '../api/types'
+
+function groupedOptions(options: Option[]): { group: string; options: Option[] }[] {
+  const groups: { group: string; options: Option[] }[] = []
+  for (const option of options) {
+    const group = option.group ?? ''
+    const last = groups.at(-1)
+    if (last && last.group === group) last.options.push(option)
+    else groups.push({ group, options: [option] })
+  }
+  return groups
+}
+
+function selectOptions(options: Option[]): ReactNode {
+  return groupedOptions(options).map((entry) =>
+    entry.group ? (
+      <optgroup key={entry.group} label={entry.group}>
+        {entry.options.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </optgroup>
+    ) : (
+      entry.options.map((option) => (
+        <option key={option.value} value={option.value}>
+          {option.label}
+        </option>
+      ))
+    ),
+  )
+}
 
 /** Every input in a form, with the value the operator has given it so far and
  * whatever the server said about it. */
@@ -161,12 +192,8 @@ function Input({
           value={String(value ?? '')}
           onChange={(event) => onChange(field.name, event.target.value)}
         >
-          <option value="">—</option>
-          {field.options.map((option) => (
-            <option key={option.value} value={option.value}>
-              {option.label}
-            </option>
-          ))}
+          {field.options.length === 0 ? <option value="">—</option> : null}
+          {selectOptions(field.options)}
         </select>
       )
     case 'multi_select':

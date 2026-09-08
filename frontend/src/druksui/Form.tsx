@@ -4,10 +4,11 @@ import { useLocation } from 'wouter'
 
 import { ApiError, api } from '../api/client'
 import { useFlashNote } from '../lib/useFlashNote'
+import { useRawLocation } from '../lib/useRawLocation'
 import type { Action, Field, Operation, PageEntry } from '../api/types'
 import type { PageSnapshot } from '../api/types'
 import { Fields } from './Fields'
-import { fillPath, mergeRegion, PagesContext, RegionContext } from './pages'
+import { fillPath, mergeRegion, pageFilterSearch, pageQueryKey, PagesContext, RegionContext } from './pages'
 
 // What a submitted form or action sends: the action's own arguments first, then
 // the values the operator gave.
@@ -331,8 +332,9 @@ function useAction(action: Action, fields: Field[] = [], clear?: () => void) {
   const { app, pages, operations } = useContext(PagesContext)
   const region = useContext(RegionContext)
   const queryClient = useQueryClient()
-  const [location] = useLocation()
+  const { path: rawPath, search, base } = useRawLocation()
   const [, navigate] = useLocation()
+  const location = rawPath.slice(base.length)
 
   async function call(values: Payload) {
     if (pending || saved) return
@@ -450,8 +452,9 @@ function useAction(action: Action, fields: Field[] = [], clear?: () => void) {
   // action sits in, so everything around it stays as the operator left it.
   async function reregion() {
     const path = location.slice(`/${app}`.length)
-    const fresh = await api.readPage(app, path)
-    queryClient.setQueryData(['page', app, path], (previous?: PageSnapshot) =>
+    const filters = pageFilterSearch(search)
+    const fresh = await (filters ? api.readPage(app, path, filters) : api.readPage(app, path))
+    queryClient.setQueryData(pageQueryKey(app, path, filters), (previous?: PageSnapshot) =>
       previous ? mergeRegion(previous, fresh, region) : fresh,
     )
     await queryClient.invalidateQueries({ queryKey: ['gate'] })
@@ -549,5 +552,17 @@ function startingValue(field: Field): [string, unknown] {
   // into a file input, and the browser would refuse it if it tried.
   if (field.field === 'upload') return [field.name, null]
   if (field.field === 'secret') return [field.name, '']
+  if (field.field === 'select' || field.field === 'radio') {
+    if (field.options.some((option) => option.value === field.value)) {
+      return [field.name, field.value]
+    }
+    // A required select with no matching value still paints the first option
+    // in the browser. Submitting the empty declared value would send a label
+    // or a blank to a door that wants the option's id.
+    if (field.isRequired) {
+      const first = field.options[0]
+      if (first) return [field.name, first.value]
+    }
+  }
   return [field.name, field.value]
 }

@@ -1,16 +1,28 @@
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useMemo, useRef, type ReactNode } from 'react'
-import { Link as RouteLink } from 'wouter'
+import { Link as RouteLink, useLocation } from 'wouter'
 
 import { appLabel } from '../apps/registry'
 import { api } from '../api/client'
-import type { Action, Follows, Link, PageEntry, PageSnapshot } from '../api/types'
+import type { Action, Field, Follows, Link, PageEntry, PageSnapshot } from '../api/types'
 import { EmptyState } from '../components/EmptyState'
 import { Page } from '../components/Page'
 import { useRawLocation } from '../lib/useRawLocation'
 import { AppSurface } from './AppSurface'
 import { Blocks, Controls } from './Blocks'
-import { followedSubjects, gateRuns, hrefUnder, isDetail, mergeRegions, PagesContext, parentOf, tabsFor } from './pages'
+import { Fields } from './Fields'
+import {
+  followedSubjects,
+  gateRuns,
+  hrefUnder,
+  isDetail,
+  mergeRegions,
+  pageFilterSearch,
+  pageQueryKey,
+  PagesContext,
+  parentOf,
+  tabsFor,
+} from './pages'
 import { SubjectStream } from './SubjectStream'
 
 // The wait before each attempt at one refresh. Three tries, then the page
@@ -31,10 +43,12 @@ export function AppPage({ app, page }: { app: string; page: string }) {
   const pages = installed?.pages ?? []
   const operations = installed?.operations ?? []
   const path = location.slice(`/${app}`.length)
-  const key = ['page', app, path]
+  const filters = pageFilterSearch(search)
+  const key = pageQueryKey(app, path, filters)
   const snapshot = useQuery({
     queryKey: key,
-    queryFn: () => api.readPage(app, path),
+    queryFn: () => (filters ? api.readPage(app, path, filters) : api.readPage(app, path)),
+    placeholderData: keepPreviousData,
     // The stream is what keeps this page fresh. Without this, a background
     // refetch would write the cache outside the numbered reads below and could
     // land after a newer snapshot.
@@ -53,7 +67,9 @@ export function AppPage({ app, page }: { app: string; page: string }) {
     // numbered, so a newer read still wins.
     for (const wait of REFRESH_WAITS) {
       if (wait) await new Promise((resume) => setTimeout(resume, wait))
-      const fresh = await api.readPage(app, path).catch(() => undefined)
+      const fresh = await (filters ? api.readPage(app, path, filters) : api.readPage(app, path)).catch(
+        () => undefined,
+      )
       if (mine !== latest.current.get(watched)) return
       if (fresh) {
         queryClient.setQueryData(key, (previous?: PageSnapshot) =>
@@ -131,6 +147,7 @@ export function AppPage({ app, page }: { app: string; page: string }) {
             title={snapshot.data.title}
             description={snapshot.data.description}
             controls={snapshot.data.controls}
+            filters={snapshot.data.filters ?? []}
           />
           {target && !gateRuns(snapshot.data.blocks).includes(target.run) && (
             <p role="alert">This input request is unavailable. Return to the Dashboard to open the current request.</p>
@@ -154,6 +171,7 @@ function PageChrome({
   title,
   description,
   controls,
+  filters,
 }: {
   app: string
   page: string
@@ -164,6 +182,7 @@ function PageChrome({
   title: ReactNode
   description?: string
   controls?: (Action | Link)[]
+  filters?: Field[]
 }) {
   return (
     <>
@@ -199,7 +218,36 @@ function PageChrome({
           ))}
         </nav>
       )}
+      {filters?.length ? <PageFilters fields={filters} /> : null}
     </>
+  )
+}
+
+function PageFilters({ fields }: { fields: Field[] }) {
+  const { path: rawPath, search, base } = useRawLocation()
+  const location = rawPath.slice(base.length)
+  const [, navigate] = useLocation()
+  const values = Object.fromEntries(
+    fields.map((field) => [field.name, 'value' in field ? (field.value ?? '') : '']),
+  )
+  return (
+    <div className="dui-filters" aria-label="Filters">
+      <Fields
+        fields={fields}
+        values={values}
+        errors={{}}
+        resets={0}
+        onChange={(name, value) => {
+          const query = new URLSearchParams(search.startsWith('?') ? search.slice(1) : search)
+          const next = value == null || value === '' ? '' : String(value)
+          if (next) query.set(name, next)
+          else query.delete(name)
+          if (name === 'project') query.delete('repo')
+          const qs = query.toString()
+          navigate(`${location}${qs ? `?${qs}` : ''}`, { replace: true })
+        }}
+      />
+    </div>
   )
 }
 

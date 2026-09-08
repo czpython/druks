@@ -1,12 +1,21 @@
 import logging
+import re
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import ForeignKey, Index, func, select
+import sqlalchemy as sa
+from sqlalchemy import CheckConstraint, ForeignKey, Index, String, func, select
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Mapped, mapped_column, relationship, validates
 
-from druks.contrib.software_factory.issues import models as _issues_models  # noqa: F401
+from druks.contrib.software_factory.exceptions import (
+    InvalidPrefix,
+    MissingPrefix,
+    PrefixLocked,
+    PrefixTaken,
+    ProjectNotFound,
+)
 from druks.contrib.software_factory.policy import RepoPolicy
 from druks.contrib.software_factory.schemas import ProjectRepoSummary, WorkItemSummary
 from druks.contrib.software_factory.ticketing.enums import TicketStatus
@@ -16,6 +25,28 @@ from druks.workflows import FatalError
 
 logger = logging.getLogger(__name__)
 
+# A project's prefix is the identifier namespace — Linear's team key. Short
+# enough to read at a glance, long enough to stay distinct. Null until set:
+# a GitHub project can exist before anyone mints a ticket against it.
+PREFIX_PATTERN = "^[A-Z]{2,6}$"
+PREFIX_RE = re.compile(PREFIX_PATTERN)
+PREFIX_UNIQUE = "projects_prefix_key"
+
+
+def _raise_prefix_taken(error: IntegrityError, prefix: str | None) -> None:
+    constraint = getattr(getattr(error.orig, "diag", None), "constraint_name", None)
+    if prefix and constraint == PREFIX_UNIQUE:
+        raise PrefixTaken(prefix) from error
+
+
+def normalize_prefix(prefix: str) -> str:
+    """The stored form of an operator's prefix: uppercase, and 2-6 letters."""
+    normalized = prefix.strip().upper()
+    if not PREFIX_RE.match(normalized):
+        raise InvalidPrefix(prefix)
+    return normalized
+
+
 # WorkItem.update() sentinel: a field left at _KEEP is untouched, while passing
 # None clears the (nullable) column — the two an intent flag has to tell apart.
 _KEEP: Any = object()
@@ -23,9 +54,21 @@ _KEEP: Any = object()
 
 class Project(Base):
     __tablename__ = "projects"
+    __table_args__ = (
+        CheckConstraint(
+            f"(prefix IS NULL) OR (prefix ~ '{PREFIX_PATTERN}')",
+            name="projects_prefix_shape",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(unique=True)
+    prefix: Mapped[str | None] = mapped_column(String(6), unique=True, default=None)
+    # The monotonic ticket sequence. It only ever goes up: it is bumped inside
+    # the UPDATE that mints an identifier and is never decremented, so deleting
+    # DRU-1 does not hand DRU-1 out again. Deriving the number from a count or a
+    # MAX over the tickets table would do exactly that, and would race besides.
+    ticket_seq: Mapped[int] = mapped_column(default=0)
     created_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
     updated_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
 
@@ -35,14 +78,27 @@ class Project(Base):
         lazy="selectin",
     )
 
+    @validates("prefix")
+    def _normalize_prefix(self, key: str, prefix: str | None) -> str | None:
+        # Every assignment path — create, an edit, a fixture — normalizes and
+        # validates, so an unshaped prefix can't reach the column. Blank is
+        # unset: a project can exist before it mints tickets.
+        if prefix is None or not str(prefix).strip():
+            return None
+        return normalize_prefix(prefix)
+
     @classmethod
-    async def create(cls, *, name: str) -> "Project":
+    async def create(cls, *, name: str, prefix: str | None = None) -> "Project":
         session = db_session()
         # Seed the collection as loaded-empty: a fresh project has no repos, and
         # the summary read right after flush must not trigger a lazy load.
-        project = cls(name=name, repos=[])
+        project = cls(name=name, prefix=prefix, repos=[])
         session.add(project)
-        await session.flush()
+        try:
+            await session.flush()
+        except IntegrityError as error:
+            _raise_prefix_taken(error, project.prefix)
+            raise
         return project
 
     @classmethod
@@ -63,6 +119,56 @@ class Project(Base):
             .limit(1)
         )
         return (await db_session().scalars(stmt)).first()
+
+    @classmethod
+    async def list(cls) -> list["Project"]:
+        return list(await db_session().scalars(select(cls).order_by(cls.name)))
+
+    @classmethod
+    async def mint_identifier(cls, project_id: int) -> str:
+        """Take the next number in this project's sequence and spell it as an
+        identifier. One statement: the row is locked, bumped, and read in the
+        same UPDATE ... RETURNING, so concurrent creates queue instead of
+        colliding and no number is ever handed out twice. A project with no
+        prefix is refused rather than minting a nameless ticket."""
+        statement = (
+            sa.update(cls)
+            .where(cls.id == project_id, cls.prefix.is_not(None))
+            .values(ticket_seq=cls.ticket_seq + 1)
+            .returning(cls.prefix, cls.ticket_seq)
+            .execution_options(synchronize_session=False)
+        )
+        row = (await db_session().execute(statement)).one_or_none()
+        if row:
+            prefix, number = row
+            return f"{prefix}-{number}"
+        project = await cls.get(project_id)
+        if not project:
+            raise ProjectNotFound(project_id)
+        raise MissingPrefix(project.name)
+
+    async def set_prefix(self, prefix: str | None) -> None:
+        """Rename the namespace — refused once a ticket has been minted against
+        it, because the identifiers already handed out spell the old prefix and
+        are never rewritten. The counter is read from the row rather than the
+        instance: ``mint_identifier`` bumps it with an UPDATE this session's
+        copy has not seen."""
+        session = db_session()
+        minted = await session.scalar(select(Project.ticket_seq).where(Project.id == self.id))
+        # Normalize explicitly for this comparison: @validates only normalizes
+        # on assignment, which happens below, after the lock check.
+        next_prefix = (
+            None if prefix is None or not str(prefix).strip() else normalize_prefix(prefix)
+        )
+        if minted and next_prefix != self.prefix:
+            raise PrefixLocked(self.prefix or "")
+        self.prefix = prefix
+        self.updated_at = Base.utc_now()
+        try:
+            await session.flush()
+        except IntegrityError as error:
+            _raise_prefix_taken(error, next_prefix)
+            raise
 
 
 class ProjectRepo(StoredSubject):
@@ -98,6 +204,18 @@ class ProjectRepo(StoredSubject):
     @classmethod
     async def get(cls, repo_id: int) -> "ProjectRepo | None":
         return await db_session().get(cls, repo_id)
+
+    @classmethod
+    async def list_for_tickets(cls) -> list["ProjectRepo"]:
+        """Repos whose project can mint an identifier. A project without a
+        prefix is not a ticket target yet."""
+        statement = (
+            select(cls)
+            .join(Project)
+            .where(Project.prefix.is_not(None))
+            .order_by(Project.name, cls.full_name)
+        )
+        return list(await db_session().scalars(statement))
 
     @classmethod
     async def get_in_project(cls, *, project_id: int, repo_id: int) -> "ProjectRepo | None":
@@ -414,3 +532,7 @@ class WorkItem(StoredSubject):
             self.project_id = project_id
         self.updated_at = Base.utc_now()
         await db_session().flush()
+
+
+# Tickets import Project; register their tables after Project exists.
+from druks.contrib.software_factory.issues import models as _issues_models  # noqa: E402, F401

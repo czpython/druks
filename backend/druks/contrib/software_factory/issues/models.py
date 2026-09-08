@@ -1,119 +1,16 @@
-import re
 from datetime import datetime
 
 import sqlalchemy as sa
-from sqlalchemy import ForeignKey, String, select
-from sqlalchemy.orm import Mapped, mapped_column, validates
+from sqlalchemy import ForeignKey, select
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from druks.accounts.models import Account
+from druks.contrib.software_factory.exceptions import RepoNotFound
 from druks.contrib.software_factory.issues.enums import Priority, Status
-from druks.contrib.software_factory.issues.exceptions import (
-    InvalidPrefix,
-    PrefixLocked,
-    ProjectNotFound,
-)
 from druks.contrib.software_factory.issues.schemas import TicketSummary
+from druks.contrib.software_factory.models import Project, ProjectRepo
 from druks.db import Base, StoredSubject, db_session
 from druks.signals import publish
-
-# A project's prefix is the identifier namespace — Linear's team key. Short
-# enough to read at a glance, long enough to stay distinct.
-PREFIX_PATTERN = "^[A-Z]{2,6}$"
-PREFIX_RE = re.compile(PREFIX_PATTERN)
-
-
-def normalize_prefix(prefix: str) -> str:
-    """The stored form of an operator's prefix: uppercase, and 2-6 letters or
-    nothing at all."""
-    normalized = prefix.strip().upper()
-    if not PREFIX_RE.match(normalized):
-        raise InvalidPrefix(prefix)
-    return normalized
-
-
-class IssuesProject(Base):
-    """A ticket namespace (prefix + sequence). Not GitHub ``Project`` — that
-    row is a repo collection; this one exists before a repo is registered."""
-
-    __tablename__ = "issues_projects"
-    # The prefix shape lives in the database too: validation covers this app's
-    # own doors, the constraint covers everything else that can write the row.
-    __table_args__ = (
-        sa.CheckConstraint(f"prefix ~ '{PREFIX_PATTERN}'", name="issues_projects_prefix_shape"),
-    )
-
-    # Not a StoredSubject: no run is ever *about* a project — runs are about the
-    # tickets it namespaces.
-    id: Mapped[int] = mapped_column(primary_key=True)
-    name: Mapped[str] = mapped_column(unique=True)
-    prefix: Mapped[str] = mapped_column(String(6), unique=True)
-    # The monotonic ticket sequence. It only ever goes up: it is bumped inside
-    # the INSERT that mints an identifier and is never decremented, so deleting
-    # DRU-1 does not hand DRU-1 out again. Deriving the number from a count or a
-    # MAX over the tickets table would do exactly that, and would race besides.
-    ticket_seq: Mapped[int] = mapped_column(default=0)
-    created_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
-
-    @validates("prefix")
-    def _normalize_prefix(self, key: str, prefix: str) -> str:
-        # Every assignment path — create, an edit, a fixture — normalizes and
-        # validates, so an unshaped prefix can't reach the column.
-        return normalize_prefix(prefix)
-
-    @classmethod
-    async def create(cls, *, name: str, prefix: str) -> "IssuesProject":
-        session = db_session()
-        project = cls(name=name, prefix=prefix)
-        session.add(project)
-        # A duplicate name or prefix surfaces here, as the unique violation it
-        # is: the board refuses two namespaces that spell the same thing.
-        await session.flush()
-        return project
-
-    @classmethod
-    async def get(cls, project_id: int) -> "IssuesProject | None":
-        return await db_session().get(cls, project_id)
-
-    @classmethod
-    async def list(cls) -> list["IssuesProject"]:
-        statement = select(cls).order_by(cls.created_at, cls.id)
-        return list(await db_session().scalars(statement))
-
-    @classmethod
-    async def mint_identifier(cls, project_id: int) -> str:
-        """Take the next number in this project's sequence and spell it as an
-        identifier. One statement: the row is locked, bumped, and read in the
-        same UPDATE ... RETURNING, so concurrent creates queue instead of
-        colliding and no number is ever handed out twice."""
-        statement = (
-            sa.update(cls)
-            .where(cls.id == project_id)
-            .values(ticket_seq=cls.ticket_seq + 1)
-            .returning(cls.prefix, cls.ticket_seq)
-            .execution_options(synchronize_session=False)
-        )
-        row = (await db_session().execute(statement)).one_or_none()
-        if not row:
-            raise ProjectNotFound(project_id)
-        prefix, number = row
-        return f"{prefix}-{number}"
-
-    async def set_prefix(self, prefix: str) -> None:
-        """Rename the namespace — refused once a ticket has been minted against
-        it, because the identifiers already handed out spell the old prefix and
-        are never rewritten. The counter is read from the row rather than the
-        instance: ``mint_identifier`` bumps it with an UPDATE this session's
-        copy has not seen."""
-        session = db_session()
-        minted = await session.scalar(
-            select(IssuesProject.ticket_seq).where(IssuesProject.id == self.id)
-        )
-        # Normalize explicitly for this comparison: @validates only normalizes
-        # on assignment, which happens below, after the lock check.
-        if minted and normalize_prefix(prefix) != self.prefix:
-            raise PrefixLocked(self.prefix)
-        self.prefix = prefix
-        await session.flush()
 
 
 class Ticket(StoredSubject):
@@ -129,10 +26,17 @@ class Ticket(StoredSubject):
     # change never needs an ALTER TYPE.
     status: Mapped[str] = mapped_column(default=Status.TODO)
     priority: Mapped[str] = mapped_column(default=Priority.NONE)
-    # Required: a ticket without a namespace could not be named.
-    project_id: Mapped[int] = mapped_column(ForeignKey("issues_projects.id"))
+    # Required: a ticket names the repo its PR will land in, and the identifier
+    # is minted from that repo's project.
+    repo_id: Mapped[int] = mapped_column(ForeignKey("project_repos.id"))
+    repo: Mapped[ProjectRepo] = relationship(lazy="joined")
     # Optional: a ticket exists before anyone picks it up.
     assignee_id: Mapped[str | None] = mapped_column(
+        ForeignKey("accounts.id", ondelete="RESTRICT"), default=None
+    )
+    # Who opened it. Optional on the row so a ticket minted outside the HTTP
+    # door still stores; the create door stamps the signed-in account.
+    creator_id: Mapped[str | None] = mapped_column(
         ForeignKey("accounts.id", ondelete="RESTRICT"), default=None
     )
     created_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
@@ -142,22 +46,27 @@ class Ticket(StoredSubject):
     async def create(
         cls,
         *,
-        project_id: int,
+        repo_id: int,
         title: str,
         description: str = "",
         status: Status = Status.TODO,
         priority: Priority = Priority.NONE,
         assignee_id: str | None = None,
+        creator_id: str | None = None,
     ) -> "Ticket":
         session = db_session()
+        repo = await ProjectRepo.get(repo_id)
+        if not repo:
+            raise RepoNotFound(repo_id)
         ticket = cls(
-            identifier=await IssuesProject.mint_identifier(project_id),
-            project_id=project_id,
+            identifier=await Project.mint_identifier(repo.project_id),
+            repo_id=repo_id,
             title=title,
             description=description,
             status=status,
             priority=priority,
             assignee_id=assignee_id,
+            creator_id=creator_id,
         )
         session.add(ticket)
         await session.flush()
@@ -182,15 +91,49 @@ class Ticket(StoredSubject):
         return (await db_session().scalars(statement)).first()
 
     @classmethod
-    async def list_board(cls) -> list["Ticket"]:
-        """Everything on the board — cancelled tickets are off it. The page
-        groups these by status; the model just says which rows are live."""
-        statement = (
-            select(cls)
-            .where(cls.status != Status.CANCELLED)
-            .order_by(cls.updated_at.desc(), cls.id.desc())
-        )
+    async def list_matching(
+        cls,
+        *,
+        exclude_cancelled: bool = False,
+        status: str = "",
+        priority: str = "",
+        assignee: str = "",
+        creator: str = "",
+        project_id: int | None = None,
+        repo_id: int | None = None,
+        updated_since: datetime | None = None,
+    ) -> list["Ticket"]:
+        statement = select(cls)
+        if exclude_cancelled:
+            statement = statement.where(
+                cls.status.notin_((Status.CANCELLED, Status.BLOCKED))
+            )
+        if status:
+            statement = statement.where(cls.status == status)
+        if priority:
+            statement = statement.where(cls.priority == priority)
+        if assignee == "none":
+            statement = statement.where(cls.assignee_id.is_(None))
+        elif assignee:
+            statement = statement.where(cls.assignee_id == assignee)
+        if creator:
+            statement = statement.where(cls.creator_id == creator)
+        if repo_id:
+            statement = statement.where(cls.repo_id == repo_id)
+        elif project_id:
+            statement = statement.where(
+                cls.repo_id.in_(select(ProjectRepo.id).where(ProjectRepo.project_id == project_id))
+            )
+        if updated_since:
+            statement = statement.where(cls.updated_at >= updated_since)
+        statement = statement.order_by(cls.updated_at.desc(), cls.id.desc())
         return list(await db_session().scalars(statement))
+
+    @classmethod
+    async def list_board(cls) -> list["Ticket"]:
+        """Everything on the board — cancelled and blocked tickets are off it.
+        The page groups these by status; the model just says which rows are live."""
+        return await cls.list_matching(exclude_cancelled=True)
 
     @classmethod
     async def list_for_status(cls, status: Status) -> list["Ticket"]:
@@ -219,7 +162,7 @@ class Ticket(StoredSubject):
         await self._emit_transitioned(status)
 
     async def _emit_transitioned(self, status: Status) -> None:
-        project = await IssuesProject.get(self.project_id)
+        repo = await ProjectRepo.get(self.repo_id)
         assignee = await Account.get(self.assignee_id) if self.assignee_id else None
         await publish(
             "ticket.transitioned",
@@ -231,7 +174,9 @@ class Ticket(StoredSubject):
                 "status": status.label,
                 "title": self.title,
                 "url": f"/software_factory/tickets/{self.identifier}",
-                "project_name": project.name if project else None,
+                # Bare repo name so Build.dispatch / ProjectRepo.lookup still
+                # find the PR target the operator picked.
+                "project_name": repo.full_name.rsplit("/", 1)[-1],
                 "labels": [],
                 "assignee_email": assignee.username if assignee else None,
                 "assignee_name": assignee.username if assignee else None,
