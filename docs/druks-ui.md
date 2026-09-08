@@ -863,6 +863,8 @@ class Form:
     description: str = ""
     fields: list[Field] = []
     action: Action
+    submit: Literal["button", "change"] = "button"
+    layout: Literal["stack", "prose", "row"] = "stack"
 ```
 
 ```python
@@ -905,9 +907,15 @@ Druks refuses the form when the page function builds it.
     "confirm": "",
     "refresh": "page",
     "link": null
-  }
+  },
+  "submit": "button",
+  "layout": "stack"
 }
 ```
+
+`submit="change"` sends the form when a select changes or a text field blurs.
+The shell draws no button. `layout="prose"` is a title and body. `layout="row"`
+is a labelled property. A form cannot both submit on change and set `confirm`.
 
 ### Timeline
 
@@ -1258,15 +1266,16 @@ class Stack:
 ```python
 class Columns:
     block: Literal["columns"] = "columns"
+    layout: Literal["even", "sidebar"] = "even"
     blocks: list[Block] = []
 ```
 
 ```json
-{"block": "columns", "blocks": []}
+{"block": "columns", "layout": "even", "blocks": []}
 ```
 
-Each child block is one column. The columns share the width. On a narrow
-screen they stack.
+Each child block is one column. `even` shares the width. `sidebar` keeps the
+last column a rail. On a narrow screen they stack.
 
 `Stack` and `Columns` hold every V1 block, including each other. They have no
 special cases.

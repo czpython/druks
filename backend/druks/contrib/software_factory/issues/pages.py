@@ -33,16 +33,6 @@ PRIORITY_LABELS: dict[Priority, str] = {
     Priority.MEDIUM: "Medium",
     Priority.LOW: "Low",
 }
-# How a status reads as a chip. Presentation only — the workflow is the enum.
-STATUS_TONES: dict[Status, str] = {
-    Status.BACKLOG: "neutral",
-    Status.TODO: "neutral",
-    Status.READY_FOR_AGENT: "warning",
-    Status.IN_PROGRESS: "active",
-    Status.IN_REVIEW: "active",
-    Status.DONE: "success",
-    Status.CANCELLED: "danger",
-}
 
 UNASSIGNED = "Unassigned"
 # An account that has since gone, or druks' own system actor: the row still
@@ -133,6 +123,27 @@ def _create_actions(projects: list[IssuesProject], accounts: list[Account]) -> l
 
 def _ticket_link(ticket: Ticket, label: str) -> ui.Link:
     return ui.Link(label, page="ticket", arguments={"identifier": ticket.identifier})
+
+
+def _live_form(
+    ticket: Ticket,
+    field: ui.Field,
+    *,
+    operation: str,
+    layout: str,
+    refresh: str,
+) -> ui.Form:
+    return ui.Form(
+        fields=[field],
+        action=ui.Action(
+            label=f"Save {field.label.lower()}",
+            operation=operation,
+            arguments={"identifier": ticket.identifier},
+            refresh=refresh,
+        ),
+        submit="change",
+        layout=layout,
+    )
 
 
 def _ticket_card(ticket: Ticket, account_names: dict[str, str]) -> ui.Card:
@@ -235,111 +246,139 @@ async def ticket(identifier: str):
 
     projects = await IssuesProject.list()
     accounts = await Account.list_all()
-    project_names = {project.id: project.name for project in projects}
     account_names = {account.id: account.username for account in accounts}
-    status = Status(found.status)
     comments = await found.list_comments()
     thread = _comment_blocks(comments, account_names) or [
         ui.EmptyState("No comments yet", description="Say something about this ticket.")
     ]
 
     return ui.Page(
-        found.title,
-        description=found.identifier,
+        found.identifier,
         # The whole page follows the ticket, so a status write from anywhere —
         # Software Factory included — redraws it without a navigation.
         follows=found,
-        controls=[
-            ui.Action(
-                label="Move",
-                operation="set_status",
-                arguments={"identifier": found.identifier},
-                fields=[
-                    ui.SelectField(
-                        name="status",
-                        label="Status",
-                        options=_status_options(),
-                        value=status.value,
-                        is_required=True,
-                    )
-                ],
-            )
-        ],
         blocks=[
-            ui.Markdown(found.description or "_No description._"),
-            ui.Facts(
+            ui.Columns(
                 [
-                    ui.Fact(
-                        "Status", value=ui.StatusValue(status.label, tone=STATUS_TONES[status])
+                    ui.Stack(
+                        [
+                            ui.Form(
+                                fields=[
+                                    ui.TextField(
+                                        name="title",
+                                        label="Title",
+                                        value=found.title,
+                                        is_required=True,
+                                        placeholder="Title",
+                                    ),
+                                    ui.TextAreaField(
+                                        name="description",
+                                        label="Description",
+                                        value=found.description,
+                                        placeholder="Add a description…",
+                                        rows=12,
+                                    ),
+                                ],
+                                action=ui.Action(
+                                    label="Save",
+                                    operation="update_ticket",
+                                    arguments={"identifier": found.identifier},
+                                    refresh="none",
+                                ),
+                                submit="change",
+                                layout="prose",
+                            ),
+                            ui.Section(
+                                title="Comments",
+                                # Named, so the comment below replaces this section alone and
+                                # the thread grows in place.
+                                name="comments",
+                                blocks=[
+                                    *thread,
+                                    ui.Form(
+                                        title="Add a comment",
+                                        fields=[
+                                            ui.TextAreaField(
+                                                name="body", label="Comment", is_required=True
+                                            )
+                                        ],
+                                        action=ui.Action(
+                                            label="Comment",
+                                            operation="add_comment",
+                                            arguments={"identifier": found.identifier},
+                                            tone="primary",
+                                            refresh="region",
+                                        ),
+                                    ),
+                                ],
+                            ),
+                        ],
+                        gap="large",
                     ),
-                    ui.Fact(
-                        "Priority",
-                        value=ui.TextValue(PRIORITY_LABELS[Priority(found.priority)]),
+                    ui.Stack(
+                        [
+                            _live_form(
+                                found,
+                                ui.SelectField(
+                                    name="status",
+                                    label="Status",
+                                    options=_status_options(),
+                                    value=found.status,
+                                    is_required=True,
+                                ),
+                                operation="set_status",
+                                layout="row",
+                                refresh="page",
+                            ),
+                            _live_form(
+                                found,
+                                ui.SelectField(
+                                    name="priority",
+                                    label="Priority",
+                                    options=_priority_options(),
+                                    value=found.priority,
+                                ),
+                                operation="update_ticket",
+                                layout="row",
+                                refresh="page",
+                            ),
+                            _live_form(
+                                found,
+                                ui.SelectField(
+                                    name="assignee_id",
+                                    label="Assignee",
+                                    options=_assignee_options(accounts),
+                                    value=found.assignee_id or "",
+                                ),
+                                operation="update_ticket",
+                                layout="row",
+                                refresh="page",
+                            ),
+                            _live_form(
+                                found,
+                                ui.SelectField(
+                                    name="project_id",
+                                    label="Project",
+                                    options=_project_options(projects),
+                                    value=str(found.project_id),
+                                ),
+                                operation="update_ticket",
+                                layout="row",
+                                refresh="page",
+                            ),
+                            ui.Facts(
+                                [
+                                    ui.Fact("Identifier", value=ui.TextValue(found.identifier)),
+                                    ui.Fact("Created", value=ui.TimeValue(found.created_at)),
+                                    ui.Fact("Updated", value=ui.TimeValue(found.updated_at)),
+                                ]
+                            ),
+                        ],
+                        gap="small",
                     ),
-                    ui.Fact(
-                        "Assignee",
-                        value=ui.TextValue(_assignee_name(found.assignee_id, account_names)),
-                    ),
-                    ui.Fact(
-                        "Project",
-                        value=ui.TextValue(project_names.get(found.project_id, "")),
-                    ),
-                    ui.Fact("Identifier", value=ui.TextValue(found.identifier)),
                 ],
-                title="Details",
-            ),
-            ui.Form(
-                title="Edit",
-                fields=[
-                    ui.TextField(name="title", label="Title", value=found.title, is_required=True),
-                    ui.TextAreaField(
-                        name="description", label="Description", value=found.description
-                    ),
-                    ui.SelectField(
-                        name="priority",
-                        label="Priority",
-                        options=_priority_options(),
-                        value=found.priority,
-                    ),
-                    ui.SelectField(
-                        name="assignee_id",
-                        label="Assignee",
-                        options=_assignee_options(accounts),
-                        value=found.assignee_id or "",
-                    ),
-                    ui.SelectField(
-                        name="project_id",
-                        label="Project",
-                        options=_project_options(projects),
-                        value=str(found.project_id),
-                    ),
-                ],
-                action=ui.Action(
-                    label="Save",
-                    operation="update_ticket",
-                    arguments={"identifier": found.identifier},
-                ),
-            ),
-            ui.Section(
-                title="Comments",
-                # Named, so the comment below replaces this section alone and
-                # the thread grows in place.
-                name="comments",
-                blocks=[
-                    *thread,
-                    ui.Form(
-                        title="Add a comment",
-                        fields=[ui.TextAreaField(name="body", label="Comment", is_required=True)],
-                        action=ui.Action(
-                            label="Comment",
-                            operation="add_comment",
-                            arguments={"identifier": found.identifier},
-                            tone="primary",
-                            refresh="region",
-                        ),
-                    ),
-                ],
-            ),
+                layout="sidebar",
+            )
         ],
     )
 

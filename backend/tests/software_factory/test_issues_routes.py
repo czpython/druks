@@ -41,17 +41,41 @@ def test_get_and_comment_are_agent_operations():
     assert add_comment["operationId"] in {"add_comment", "software_factory_add_comment"}
 
 
-async def test_create_does_not_publish(druks_client, monkeypatch):
+async def test_create_as_todo_does_not_publish(druks_client, monkeypatch):
     events = _published(monkeypatch)
     project = await _open_project(druks_client)
-    ticket = await _open_ticket(
-        druks_client, project["id"], status="ready_for_agent", title="quiet"
-    )
+    ticket = await _open_ticket(druks_client, project["id"], title="quiet")
 
     assert ticket["identifier"] == "DRU-1"
-    assert ticket["status"] == "ready_for_agent"
+    assert ticket["status"] == "todo"
     assert ticket["comments"] == []
     assert events == []
+
+
+async def test_create_as_ready_for_agent_publishes_the_trigger(druks_client, monkeypatch):
+    events = _published(monkeypatch)
+    project = await _open_project(druks_client, name="acme-app")
+    ticket = await _open_ticket(druks_client, project["id"], status="ready_for_agent", title="go")
+
+    assert ticket["status"] == "ready_for_agent"
+    assert events == [
+        (
+            "ticket.transitioned",
+            {
+                "source": "issues",
+                "identifier": "DRU-1",
+                "status": Status.READY_FOR_AGENT.label,
+                "title": "go",
+                "url": "/software_factory/tickets/DRU-1",
+                "project_name": "acme-app",
+                "labels": [],
+                "assignee_email": None,
+                "assignee_name": None,
+                "completed": False,
+                "terminal": False,
+            },
+        )
+    ]
 
 
 async def test_set_status_publishes_one_transition_with_display_labels(druks_client, monkeypatch):

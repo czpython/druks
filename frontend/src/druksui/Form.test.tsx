@@ -121,13 +121,18 @@ function action(overrides: Partial<Action> = {}): Action {
   }
 }
 
-function form(fields: Field[], sends = action()): Block {
+function form(
+  fields: Field[],
+  sends = action(),
+  extras: { submit?: 'button' | 'change'; layout?: 'stack' | 'prose' | 'row' } = {},
+): Extract<Block, { block: 'form' }> {
   return {
     block: 'form',
     title: 'New note',
     description: 'What did you see?',
     fields,
     action: sends,
+    ...extras,
   }
 }
 
@@ -380,6 +385,60 @@ describe('submitting a form', () => {
     expect(callOperation).toHaveBeenCalledWith('POST', '/api/field_notes/notes', {
       source: 'dashboard',
       body: 'Fan noise.',
+    })
+  })
+
+  it('sends a live form when a text field blurs, with no Save button', async () => {
+    renderBlocks([
+      form([BODY], action({ refresh: 'none' }), { submit: 'change', layout: 'prose' }),
+    ])
+
+    expect(screen.queryByRole('button', { name: 'Save' })).toBeNull()
+    fireEvent.change(screen.getByLabelText(/Note/), { target: { value: 'Fan noise.' } })
+    fireEvent.blur(screen.getByLabelText(/Note/))
+
+    await waitFor(() => expect(callOperation).toHaveBeenCalled())
+    expect(callOperation).toHaveBeenCalledWith('POST', '/api/field_notes/notes', {
+      body: 'Fan noise.',
+    })
+  })
+
+  it('does not send a live form that nobody changed', () => {
+    renderBlocks([
+      form([BODY], action({ refresh: 'none' }), { submit: 'change', layout: 'prose' }),
+    ])
+
+    fireEvent.blur(screen.getByLabelText(/Note/))
+    expect(callOperation).not.toHaveBeenCalled()
+  })
+
+  it('sends a live select as soon as it changes', async () => {
+    renderBlocks([
+      form(
+        [
+          {
+            field: 'select',
+            name: 'severity',
+            label: 'Severity',
+            options: [
+              { value: 'low', label: 'Low' },
+              { value: 'high', label: 'High' },
+            ],
+            value: 'low',
+            helpText: '',
+            isRequired: false,
+          },
+        ],
+        action({ refresh: 'none' }),
+        { submit: 'change', layout: 'row' },
+      ),
+    ])
+
+    fireEvent.change(screen.getByLabelText(/Severity/), { target: { value: 'high' } })
+
+    await waitFor(() => expect(callOperation).toHaveBeenCalled())
+    expect(callOperation).toHaveBeenCalledWith('POST', '/api/field_notes/notes', {
+      severity: 'high',
     })
   })
 

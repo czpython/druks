@@ -2117,6 +2117,8 @@ a.dui-card:hover .dui-card-title { text-decoration: underline; text-underline-of
 .dui-stack-large { gap: 32px; }
 .dui-columns { display: flex; gap: 24px; margin: 16px 0; }
 .dui-column { flex: 1 1 0; min-width: 0; }
+.dui-columns-sidebar { align-items: start; }
+.dui-columns-sidebar > .dui-column:last-child { flex: 0 0 280px; }
 
 .dui-metric-row { display: flex; flex-wrap: wrap; gap: 32px; margin: 16px 0; }
 .dui-metric { margin: 0; }
@@ -2178,6 +2180,7 @@ a.dui-card:hover .dui-card-title { text-decoration: underline; text-underline-of
    the values without knowing what they are. */
 @media (max-width: 720px) {
   .dui-columns { flex-direction: column; }
+  .dui-columns-sidebar > .dui-column:last-child { flex: 1 1 auto; }
   .dui-table { font-size: 13px; }
   .dui-table thead th { padding: 10px 12px; }
   .dui-table :is(td, tbody th) { padding: 12px; }
@@ -2191,6 +2194,31 @@ a.dui-card:hover .dui-card-title { text-decoration: underline; text-underline-of
 
 .dui-form { margin: 16px 0; max-width: 520px; }
 .dui-form-desc { font-size: 13px; line-height: 18px; margin: 0 0 16px; }
+.dui-form-live .dui-action-note:empty { display: none; }
+.dui-form-prose { max-width: none; margin: 0; }
+.dui-form-prose .dui-field { margin-bottom: 8px; }
+.dui-form-prose .dui-field-label {
+  position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0);
+}
+.dui-form-prose .dui-field:first-child .dui-input {
+  font-size: 28px; line-height: 36px; font-weight: 600; min-height: 0;
+  padding: 4px 0; border: none; background: transparent; border-radius: 0;
+}
+.dui-form-prose textarea.dui-input {
+  min-height: 12em; padding: 8px 0; border: none; background: transparent; border-radius: 0;
+  resize: vertical;
+}
+.dui-form-prose .dui-input:hover, .dui-form-prose .dui-input:focus {
+  background: transparent; border: none; outline: none;
+}
+.dui-form-prose .dui-input:focus { box-shadow: 0 1px 0 var(--border-loud); }
+.dui-form-row { max-width: none; margin: 0; }
+.dui-form-row .dui-field {
+  display: grid; grid-template-columns: 7.5rem minmax(0, 1fr); gap: 8px 12px;
+  align-items: center; margin: 0; padding: 4px 0;
+}
+.dui-form-row .dui-field-label { margin: 0; }
+.dui-form-row .dui-input { min-height: 32px; padding: 6px 10px; }
 .dui-field { margin-bottom: 16px; }
 .dui-field-label { display: block; font-size: 12px; line-height: 16px; font-weight: 500; color: var(--text-mid); margin-bottom: 8px; }
 .dui-field-required { color: var(--decision-request-revision); }
