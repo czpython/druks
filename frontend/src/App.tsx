@@ -260,7 +260,9 @@ function AppShell({
   }, [location, app, ui, navigate, defaultApp, hidden])
 
   const declaredNavigation =
-    ui?.navigation ?? rosterQuery.data?.find((entry) => entry.name === app)?.navigation
+    ui?.navigationFor?.(settingsQuery.data) ??
+    ui?.navigation ??
+    rosterQuery.data?.find((entry) => entry.name === app)?.navigation
   const appSettingsPath =
     urlApp && settingsQuery.data?.apps.some((entry) => entry.name === urlApp)
       ? `/apps/${urlApp}/settings`

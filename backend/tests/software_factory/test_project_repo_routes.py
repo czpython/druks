@@ -39,6 +39,44 @@ async def test_get_project_returns_the_summary_or_404(client: TestClient):
     assert (await client.get("/api/software_factory/projects/999999")).status_code == 404
 
 
+async def test_create_and_update_carry_a_ticket_prefix(client: TestClient):
+    created = (
+        await client.post("/api/software_factory/projects", json={"name": "Acme", "prefix": "acm"})
+    ).json()
+    assert created["prefix"] == "ACM"
+
+    updated = await client.patch(
+        f"/api/software_factory/projects/{created['id']}", json={"prefix": "acme"}
+    )
+    assert updated.status_code == 200
+    assert updated.json()["prefix"] == "ACME"
+
+    refused = await client.patch(
+        f"/api/software_factory/projects/{created['id']}", json={"prefix": "1"}
+    )
+    assert refused.status_code == 422
+
+
+async def test_a_taken_prefix_is_a_conflict(client: TestClient):
+    await client.post("/api/software_factory/projects", json={"name": "BOX", "prefix": "box"})
+    acme = (await client.post("/api/software_factory/projects", json={"name": "Acme"})).json()
+
+    refused = await client.patch(
+        f"/api/software_factory/projects/{acme['id']}", json={"prefix": "box"}
+    )
+    assert refused.status_code == 409
+    assert "already in use" in refused.json()["detail"]
+    assert (await client.get(f"/api/software_factory/projects/{acme['id']}")).json()[
+        "prefix"
+    ] is None
+
+    created = await client.post(
+        "/api/software_factory/projects", json={"name": "Other", "prefix": "BOX"}
+    )
+    assert created.status_code == 409
+    assert "already in use" in created.json()["detail"]
+
+
 async def test_adding_a_repo_dispatches_a_profile_run(client: TestClient, monkeypatch):
     calls = _stub_profile_dispatch(monkeypatch)
 

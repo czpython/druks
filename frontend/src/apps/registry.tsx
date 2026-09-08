@@ -1,5 +1,7 @@
 import type { ReactNode } from 'react'
 
+import type { AppsSettingsResponse } from '../api/types'
+
 export interface AppRoute {
   /** A wouter pattern under the router base, such as /notes/:id. */
   path: string
@@ -15,6 +17,9 @@ export interface AppUI {
   // JavaScript. A Python-page app leaves this off and declares
   // ``App.navigation`` on its backend class instead.
   navigation?: [string, string][]
+  // When set, the shell asks this for the tabs so an app can hide pages that
+  // only apply under a given setting.
+  navigationFor?: (settings?: AppsSettingsResponse) => [string, string][]
   // Where a feed row about one of this app's subjects navigates. The shell knows
   // an app has subjects, never where its pages put them.
   subjectPath?: (subject: { type: string; id: string }, target?: SubjectTarget) => string | undefined

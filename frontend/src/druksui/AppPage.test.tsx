@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Router } from 'wouter'
 import { memoryLocation } from 'wouter/memory-location'
@@ -83,11 +83,11 @@ const ROSTER = [
 function renderAt(location: string, page: string, snapshot: PageSnapshot) {
   listApps.mockResolvedValue(ROSTER)
   readPage.mockResolvedValue(snapshot)
-  const { hook } = memoryLocation({ path: location })
+  const memory = memoryLocation({ path: location, record: true })
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
     <QueryClientProvider client={queryClient}>
-      <Router hook={hook}>
+      <Router hook={memory.hook} searchHook={memory.searchHook}>
         <AppPage app="field_notes" page={page} />
       </Router>
     </QueryClientProvider>,
@@ -271,6 +271,34 @@ describe('the parent link', () => {
 
     await waitFor(() => expect(screen.getByText('Notes')).toBeTruthy())
     expect(container.querySelector('.dui-parent')).toBeNull()
+  })
+
+  it('rereads the page when a filter changes and strips the parked decision from the read', async () => {
+    const snapshot: PageSnapshot = {
+      ...NOTES,
+      filters: [
+        {
+          field: 'select',
+          name: 'status',
+          label: 'Status',
+          helpText: '',
+          isRequired: false,
+          options: [
+            { value: '', label: 'Any' },
+            { value: 'todo', label: 'Todo' },
+          ],
+          value: '',
+        },
+      ],
+    }
+    renderAt('/field_notes?run=abc&parkedAt=x', 'notes', snapshot)
+
+    await waitFor(() => expect(screen.getByLabelText('Status')).toBeTruthy())
+    expect(readPage).toHaveBeenCalledWith('field_notes', '')
+
+    fireEvent.change(screen.getByLabelText('Status'), { target: { value: 'todo' } })
+
+    await waitFor(() => expect(readPage).toHaveBeenCalledWith('field_notes', '', 'status=todo'))
   })
 })
 

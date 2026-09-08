@@ -194,6 +194,19 @@ def test_an_extra_parameter_must_come_from_the_route():
         list_pages_for_app("extra_parameter", "extra_parameter")
 
 
+def test_an_optional_extra_parameter_is_a_query_filter():
+    declare("query_filter", "/", "overview")
+
+    async def notes(status: str = ""):
+        return Page(title="notes")
+
+    notes.__module__ = "query_filter.pages"
+    page("/notes")(notes)
+
+    names = [declaration.name for declaration in list_pages_for_app("query_filter", "query_filter")]
+    assert names == ["overview", "notes"]
+
+
 def test_navigation_resolves_page_labels():
     app = load_app("field_notes")
 

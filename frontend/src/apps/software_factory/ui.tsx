@@ -1,24 +1,19 @@
-import { AppPage } from '../../druksui/AppPage'
 import { registerAppUI, targetQuery } from '../registry'
 import { SOFTWARE_FACTORY } from './api'
 import { parseLeadingId } from './slug'
 import { AgentCallPage } from './AgentCallPage'
+import { DruksIssuesPage } from './DruksIssuesPage'
 import { HistoryPage } from './HistoryPage'
 import { NotFound } from './NotFound'
 import { ProjectsPage } from './projects/ProjectsPage'
+import { softwareFactoryNavigation } from './tracker'
 import { WorkItemPage } from './WorkItemPage'
 import { WorkItemsPage } from './WorkItemsPage'
 
 registerAppUI({
   name: SOFTWARE_FACTORY,
   home: `/${SOFTWARE_FACTORY}`,
-  navigation: [
-    [`/${SOFTWARE_FACTORY}`, 'Overview'],
-    [`/${SOFTWARE_FACTORY}/board`, 'board'],
-    [`/${SOFTWARE_FACTORY}/list`, 'list'],
-    [`/${SOFTWARE_FACTORY}/history`, 'history'],
-    [`/${SOFTWARE_FACTORY}/projects`, 'projects'],
-  ],
+  navigationFor: softwareFactoryNavigation,
   // Software Factory's other subject, a project repo, has no page of its own — a row about one
   // stays unclickable rather than landing on the work item that shares its id.
   parentPath: (location) => {
@@ -31,11 +26,11 @@ registerAppUI({
       : undefined,
   routes: [
     { path: `/${SOFTWARE_FACTORY}`, render: () => <WorkItemsPage /> },
-    { path: `/${SOFTWARE_FACTORY}/board`, render: () => <AppPage app={SOFTWARE_FACTORY} page="board" /> },
-    { path: `/${SOFTWARE_FACTORY}/list`, render: () => <AppPage app={SOFTWARE_FACTORY} page="list" /> },
+    { path: `/${SOFTWARE_FACTORY}/board`, render: () => <DruksIssuesPage page="board" /> },
+    { path: `/${SOFTWARE_FACTORY}/issues`, render: () => <DruksIssuesPage page="issues" /> },
     {
       path: `/${SOFTWARE_FACTORY}/tickets/:identifier`,
-      render: () => <AppPage app={SOFTWARE_FACTORY} page="ticket" />,
+      render: () => <DruksIssuesPage page="ticket" />,
     },
     { path: `/${SOFTWARE_FACTORY}/history`, render: () => <HistoryPage /> },
     { path: `/${SOFTWARE_FACTORY}/projects`, render: () => <ProjectsPage /> },

@@ -286,7 +286,8 @@ and webhook secret. The Jira identity uses a base URL, email, API token, and web
 validates the credentials before it stores them. Select the tracker and its
 workflow statuses in **Software Factory → Settings**. Select **druks** to use
 Software Factory's local issue board on this appliance. That choice needs no
-credentials. `druks doctor` reports it as healthy. Each build then ships this
+credentials. The dashboard shows the board, the Issues list, and project ticket
+prefixes only for that tracker. `druks doctor` reports it as healthy. Each build then ships this
 appliance's `/mcp` into the sandbox so the agent can read and comment on the
 ticket. Set `urls.endpoint` so the VM can reach it.
 

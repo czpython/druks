@@ -9,9 +9,11 @@ from druks.ui import (
     Form,
     Link,
     MultiUploadField,
+    Option,
     Page,
     SecretField,
     Section,
+    SelectField,
     TextField,
 )
 from druks.ui.fields import PageField
@@ -131,6 +133,30 @@ def test_multi_upload_fields_round_trip_through_the_page(owner: str):
             "helpText": "Pictures of the shop.",
             "isRequired": True,
         }
+    ]
+
+
+def test_a_select_option_carries_its_group():
+    (block,) = wire(
+        Form(
+            fields=[
+                SelectField(
+                    name="repo_id",
+                    label="Repo",
+                    options=[
+                        Option("acme/app", value="12", group="Acme"),
+                        Option("beta/api", value="14", group="Beta"),
+                    ],
+                    is_required=True,
+                )
+            ],
+            action=Action(label="Save", operation="write_note"),
+        )
+    )
+
+    assert block["fields"][0]["options"] == [
+        {"value": "12", "label": "acme/app", "group": "Acme"},
+        {"value": "14", "label": "beta/api", "group": "Beta"},
     ]
 
 

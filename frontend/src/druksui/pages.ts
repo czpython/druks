@@ -80,6 +80,30 @@ export function hrefUnder(location: string, ancestor: PageEntry): string {
   return location.split('/').slice(0, ancestor.path.split('/').length).join('/')
 }
 
+const DECISION_QUERY = new Set(['run', 'parkedAt'])
+
+/** Query string a page read carries: filters, not the decision the shell parked. */
+export function pageFilterSearch(search: string): string {
+  const query = new URLSearchParams(search.startsWith('?') ? search.slice(1) : search)
+  for (const name of DECISION_QUERY) query.delete(name)
+  const names: string[] = []
+  query.forEach((_value, key) => names.push(key))
+  const next = new URLSearchParams()
+  for (const key of names.sort()) {
+    const value = query.get(key)
+    if (value) next.set(key, value)
+  }
+  return next.toString()
+}
+
+export function pageQueryKey(
+  app: string,
+  path: string,
+  search: string,
+): ['page', string, string, string] {
+  return ['page', app, path, search]
+}
+
 /** Every subject this snapshot watches: the page's own, and each named
  * region's. One entry per subject, so a page that follows the same subject
  * twice opens one stream. */
