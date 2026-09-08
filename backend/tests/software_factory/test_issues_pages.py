@@ -96,8 +96,19 @@ async def test_empty_board_shows_columns_and_create_actions(druks_client):
     assert [column["title"] for column in columns] == BOARD_COLUMNS
     for column in columns:
         cards = column["blocks"][0]
+        assert cards["layout"] == "stack"
+        assert cards["drop"]["operation"] == "set_status"
+        assert cards["drop"]["refresh"] == "page"
         assert cards["cards"] == []
         assert cards["empty"]["title"] == "Nothing here"
+    assert [column["blocks"][0]["drop"]["arguments"]["status"] for column in columns] == [
+        "backlog",
+        "todo",
+        "ready_for_agent",
+        "in_progress",
+        "in_review",
+        "done",
+    ]
 
 
 async def test_created_ticket_lands_in_todo_on_board_and_issues(druks_client):
@@ -110,6 +121,7 @@ async def test_created_ticket_lands_in_todo_on_board_and_issues(druks_client):
     assert card["title"] == "Ship the board"
     assert card["description"].startswith("DRU-1")
     assert card["link"]["arguments"] == {"identifier": ticket["identifier"]}
+    assert card["drag"] == {"identifier": ticket["identifier"]}
     assert card["controls"] == []
     for title in BOARD_COLUMNS:
         if title != "Todo":
