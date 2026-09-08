@@ -1,3 +1,4 @@
+import base64
 import json
 import logging
 import os
@@ -16,10 +17,10 @@ from druks.sandbox.datastructures import (
     Credentials,
     HarnessRunResult,
     HomeCopy,
-    HomeFile,
     McpServer,
 )
 from druks.sandbox.layout import get_runs_root, get_work_root
+from druks.sandbox.models import SecretRef
 from druks.secrets.models import VaultSecret
 from druks.skills.models import Skill
 
@@ -33,12 +34,14 @@ from .exceptions import (
     HarnessRateLimitError,
     HarnessUsageLimitError,
 )
-from .providers import OpenAiProvider
+from .providers import OPENAI_AUTH_CLAIM, OpenAiProvider
 from .subprocess import read_result_json
 
 logger = logging.getLogger(__name__)
 
 _TOKEN_COUNT_MARKERS = ('"type":"token_count"', '"type": "token_count"')
+_CHATGPT_HOST = "chatgpt.com"
+_SUBSCRIPTION_TOKEN = "codex_subscription_token"
 
 
 @dataclass(frozen=True)
@@ -135,6 +138,35 @@ def _with_final_message_note(prompt: str) -> str:
         "Do not send interim assistant messages — narrate your work in your "
         "reasoning instead. Send exactly one assistant message: the final "
         "result object."
+    )
+
+
+def _auth_file(identity: dict) -> str:
+    """The ``auth.json`` Codex reads in subscription mode. Codex needs the id
+    token and a refresh token key present, else it switches to API-key mode."""
+    claims = {"chatgpt_account_id": identity["account_id"]}
+    if "plan" in identity:
+        claims["chatgpt_plan_type"] = identity["plan"]
+    # Codex decodes the id token without a signature check.
+    header = {"alg": "none", "typ": "JWT"}
+    payload = {OPENAI_AUTH_CLAIM: claims, "email": identity["email"]}
+    segments = [
+        base64.urlsafe_b64encode(json.dumps(part).encode()).rstrip(b"=").decode()
+        for part in (header, payload)
+    ]
+    return json.dumps(
+        {
+            "OPENAI_API_KEY": None,
+            "tokens": {
+                "id_token": ".".join((*segments, "unsigned")),
+                "access_token": f"${_SUBSCRIPTION_TOKEN.upper()}",
+                # The one refresh Codex attempts after a 401 fails fast on this
+                # value, and the turn ends. Druks refreshes; the box never does.
+                "refresh_token": "druks-placeholder",
+                "account_id": identity["account_id"],
+            },
+            "last_refresh": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+        }
     )
 
 
@@ -291,6 +323,7 @@ class CodexHarness(Harness):
         run_id: str,
         codex_flags: tuple[str, ...],
         cwd: str,
+        identity: dict | None,
     ) -> list[str]:
         # In-VM paths under <get_runs_root>/<run_id>/. Schema is inlined via
         # printf (~few KB); the prompt rides as stdin via the helper.
@@ -329,6 +362,16 @@ class CodexHarness(Harness):
         codex_cmdline = " ".join(shlex.quote(a) for a in codex_argv)
         marker_q = shlex.quote(in_vm_marker)
         session_q = shlex.quote(in_vm_session)
+        # A subscription run writes its login before the command. Drukbox hands
+        # the placeholder to the box only, so the box fills the file itself.
+        login = ""
+        if identity:
+            auth_file = _auth_file(identity).replace('"', '\\"')
+            login = (
+                'mkdir -p "$HOME/.codex" && '
+                f'printf %s "{auth_file}" > "$HOME/.codex/auth.json" && '
+                'chmod 600 "$HOME/.codex/auth.json" && '
+            )
         # Codex runs against its real ``~/.codex`` because CODEX_HOME re-homes
         # all home-resolved state: auth, skills, and future features. A marker
         # file plus ``-newer`` identifies the session JSONL. More than one match
@@ -337,6 +380,7 @@ class CodexHarness(Harness):
         wrapper = (
             f"mkdir -p {shlex.quote(in_vm_run_dir)} && "
             f"printf %s {shlex.quote(schema_body)} > {shlex.quote(in_vm_schema)} && "
+            f"{login}"
             f"touch {marker_q} && "
             f"{codex_cmdline}; "
             "ec=$?; "
@@ -367,7 +411,7 @@ class CodexHarness(Harness):
         skills: tuple[str, ...] = (),
         extra_env: dict[str, str] | None = None,
         mcp_servers: tuple[McpServer, ...] = (),
-        subscription: VaultSecret | None = None,
+        identity: dict | None = None,
         timeout: int = Harness.default_timeout,
     ) -> AgentInvocation:
         sandbox = self.sandbox
@@ -383,6 +427,7 @@ class CodexHarness(Harness):
             run_id=run_id,
             codex_flags=(*self._prompt_flags(), *self._mcp_flags(mcp_servers)),
             cwd=get_work_root(ssh_username),
+            identity=identity,
         )
         # --output-schema constrains EVERY agent_message mechanically (the
         # "final response shape" in its docs is inaccurate — verified by
@@ -394,11 +439,7 @@ class CodexHarness(Harness):
             name=self.name,
             args=tuple(cmd),
             stdin=_with_final_message_note(prompt).encode("utf-8"),
-            credentials=await self._get_credentials(
-                sandbox,
-                skills=skills,
-                subscription=subscription,
-            ),
+            credentials=await self._get_credentials(sandbox, skills=skills),
             env=extra_env,
             extra_artifact_filenames=("output.json", "session.jsonl"),
         )
@@ -473,29 +514,25 @@ class CodexHarness(Harness):
         return args
 
     async def _get_credentials(
-        self,
-        sandbox: SandboxSettings,
-        *,
-        skills: tuple[str, ...] = (),
-        subscription: VaultSecret | None,
+        self, sandbox: SandboxSettings, *, skills: tuple[str, ...] = ()
     ) -> Credentials:
         config_dir = sandbox.harness_config_root / self.name
-        home: list[HomeFile | HomeCopy] = []
-        if subscription:
-            home.append(self.auth_file(subscription))
-        home += [
-            HomeCopy(".codex/config.toml", config_dir / "config.toml"),
-            HomeCopy(".codex/AGENTS.md", config_dir / "AGENTS.md"),
-        ]
         skills_dir = sandbox.skills_dir or config_dir / "skills"
-        home.append(
-            HomeCopy(".codex/skills", skills_dir, excludes=await Skill.delivery_excludes(skills))
+        return Credentials(
+            home=(
+                HomeCopy(".codex/config.toml", config_dir / "config.toml"),
+                HomeCopy(".codex/AGENTS.md", config_dir / "AGENTS.md"),
+                HomeCopy(
+                    ".codex/skills", skills_dir, excludes=await Skill.delivery_excludes(skills)
+                ),
+            )
         )
-        return Credentials(home=tuple(home))
 
     @classmethod
-    def auth_file(cls, subscription: VaultSecret) -> HomeFile:
-        return HomeFile(".codex/auth.json", json.dumps(dict(subscription.secrets)))
+    def get_secret_refs(cls, subscription: VaultSecret) -> list[SecretRef]:
+        # A custom entry: the proxy swaps the placeholder on every chatgpt.com
+        # request. CODEX_API_KEY would put codex exec in API-key mode.
+        return [SecretRef(name=_SUBSCRIPTION_TOKEN, secret_id=subscription.id, host=_CHATGPT_HOST)]
 
     @classmethod
     def get_secrets(cls, provider: str, key: str) -> dict[str, Secret]:

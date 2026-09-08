@@ -2,28 +2,13 @@ import json
 import shlex
 from pathlib import Path
 
-import pytest
-from conftest import connect_provider
 from drukbox_sdk import Secret
-from druks.accounts.models import Account
 from druks.harnesses.claude import ClaudeHarness
 from druks.harnesses.codex import CodexHarness
 from druks.harnesses.datastructures import SandboxSettings
-from druks.harnesses.providers import AnthropicProvider, OpenAiProvider
 from druks.sandbox.datastructures import McpServer
-from druks.secrets.datastructures import Audience
-from druks.secrets.enums import SecretKind
-from druks.secrets.models import VaultSecret
 
 _CODEX_MODEL = CodexHarness.default_model
-
-
-@pytest.fixture(autouse=True)
-async def _connected_harnesses(druks_db):
-    # build_invocation renders each subscription bundle from the DB row and
-    # raises when that harness isn't connected.
-    await connect_provider(AnthropicProvider, {"claudeAiOauth": {"accessToken": "t"}})
-    await connect_provider(OpenAiProvider, {"tokens": {"access_token": "t"}})
 
 
 def _sandbox_config():
@@ -46,11 +31,7 @@ async def test_claude_build_invocation_carries_every_flag():
         effort="high",
         sandbox=_sandbox_config(),
     ).build_invocation(
-        subscription=await VaultSecret.lookup(
-            SecretKind.SUBSCRIPTION,
-            Audience.provider("anthropic"),
-            (await Account.get_default()).id,
-        ),
+        identity={"email": "op@example.com"},
         prompt="hello",
         schema=schema,
         run_id="run-1",
@@ -106,9 +87,7 @@ async def test_codex_build_invocation_carries_every_flag():
         effort="high",
         sandbox=_sandbox_config(),
     ).build_invocation(
-        subscription=await VaultSecret.lookup(
-            SecretKind.SUBSCRIPTION, Audience.provider("openai"), (await Account.get_default()).id
-        ),
+        identity={"email": "op@example.com", "account_id": "acc-1"},
         prompt="hello",
         schema={"type": "object"},
         run_id="run-1",

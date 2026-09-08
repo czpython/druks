@@ -29,6 +29,8 @@ class Profile:
     secrets: dict[str, Secret]
     # The secrets a box fetches through the issuer, beyond its pasted key.
     secret_refs: list[SecretRef]
+    # The subscription's non-secret facts, for the login a box sees. Empty for a key.
+    identity: dict
     billing: str
     effort: str
     timeout: int
@@ -104,6 +106,7 @@ async def get_profile(agent_name: str, account_id: str | None) -> Profile:
     provider_key = None
     secrets: dict[str, Secret] = {}
     secret_refs: list[SecretRef] = []
+    identity: dict = {}
     if billing == "api_key":
         provider_key = await VaultSecret.lookup(SecretKind.STATIC, Audience.provider(provider_id))
         if not provider_key:
@@ -111,7 +114,9 @@ async def get_profile(agent_name: str, account_id: str | None) -> Profile:
             raise HarnessNotConnectedError(f"add the {label} API key in Settings → Providers.")
         secrets = harness_class.get_secrets(provider_id, provider_key.secrets["value"])
     else:
-        subscription = await get_provider(provider_id).get_subscription(account_id)
+        provider = get_provider(provider_id)
+        subscription = await provider.get_subscription(account_id)
+        identity = provider.get_identity(subscription)
         secret_refs = harness_class.get_secret_refs(subscription)
     timeout = (
         await SettingsOverride.agent_timeout(agent_name, agent.timeout, settings=settings)
@@ -123,6 +128,7 @@ async def get_profile(agent_name: str, account_id: str | None) -> Profile:
         api_key=provider_key,
         secrets=secrets,
         secret_refs=secret_refs,
+        identity=identity,
         billing=billing,
         effort=(await SettingsOverride.agent_effort(agent_name, settings=settings)).value,
         # Capped so a single call always fits inside a fresh sandbox lease.

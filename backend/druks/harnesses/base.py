@@ -120,8 +120,8 @@ class Harness(ABC):
 
     @classmethod
     def get_secret_refs(cls, subscription: VaultSecret) -> list[SecretRef]:
-        """The secrets a box fetches for the subscription, by Drukbox catalog
-        name. Empty for a CLI that reads its credential from a file."""
+        """The secrets a box fetches for the subscription, under the box's
+        name for each. Empty for a key-only CLI."""
         return []
 
     @property

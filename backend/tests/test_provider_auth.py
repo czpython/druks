@@ -574,12 +574,14 @@ async def test_minimal_provider_reports_unsupported_usage(monkeypatch):
     assert calls == []
 
 
-async def _bound_identity(subscription, *, host_id: str, run_id: str) -> SandboxIdentity:
+async def _bound_identity(
+    subscription, *, host_id: str, run_id: str, name: str = "anthropic", host: str = ""
+) -> SandboxIdentity:
     await seed_run(db_session(), kind=Summarize.kind, run_id=run_id)
     identity, _ = await SandboxIdentity.create(
         run_id=run_id,
         scoped_to="workflow",
-        secret_refs=[SecretRef(name="anthropic", secret_id=subscription.id)],
+        secret_refs=[SecretRef(name=name, secret_id=subscription.id, host=host)],
     )
     await identity.bind(host_id)
     return identity
@@ -801,3 +803,133 @@ async def test_the_usage_fetch_requests_refreshes_after_its_rotation(monkeypatch
         AnthropicProvider._TOKEN_URL,
         _REFRESH_URL.format(host_id="host-a"),
     ]
+
+
+def _jwt_in(delta: timedelta) -> str:
+    return _jwt(int(_in(delta).timestamp()))
+
+
+def _codex_refreshed() -> dict:
+    return {"access_token": _jwt_in(timedelta(days=9)), "refresh_token": "R1", "id_token": "id-1"}
+
+
+_CODEX_REFRESH_URL = "http://127.0.0.1:8781/refresh/{host_id}/codex_subscription_token"
+
+
+async def test_a_codex_fetch_answers_a_fresh_token_with_its_exp_without_a_provider_call_or_the_gate(
+    monkeypatch, druks_db
+):
+    # Above the 24-hour margin. The answer carries the JWT exp as its expiry.
+    exp = int(_in(timedelta(hours=48)).timestamp())
+    connection = await _seed_codex(access=_jwt(exp))
+    calls = _mock_post(monkeypatch, _resp(200, _codex_refreshed()))
+    monkeypatch.setattr(pbase.gate, "shut", _no_gate)
+
+    token = await OpenAiProvider.issue_token(connection.id)
+
+    assert (token.access_token, token.expires_at) == (
+        _jwt(exp),
+        datetime.fromtimestamp(exp, tz=UTC),
+    )
+    assert calls == []
+
+
+async def test_two_codex_fetches_inside_the_margin_rotate_once_and_request_once(
+    monkeypatch, druks_db
+):
+    connection = await _seed_codex(access=_jwt_in(timedelta(hours=12)), refresh="R0")
+    await _bound_identity(
+        connection,
+        host_id="host-other",
+        run_id="run-other",
+        name="codex_subscription_token",
+        host="chatgpt.com",
+    )
+    refreshed = _codex_refreshed()
+    calls = _mock_post(monkeypatch, _resp(200, refreshed))
+
+    first = await OpenAiProvider.issue_token(connection.id, except_host_id="host-mine")
+    second = await OpenAiProvider.issue_token(connection.id, except_host_id="host-mine")
+
+    assert first.access_token == second.access_token == refreshed["access_token"]
+    assert calls[0]["json"]["refresh_token"] == "R0"
+    assert [call["url"] for call in calls] == [
+        OpenAiProvider._TOKEN_URL,
+        _CODEX_REFRESH_URL.format(host_id="host-other"),
+    ]
+
+
+async def test_a_codex_fetch_on_a_busy_subscription_answers_the_current_token(
+    monkeypatch, druks_db
+):
+    # Inside the margin, above the call horizon: the call in flight keeps its token.
+    current = _jwt_in(timedelta(hours=12))
+    connection = await _seed_codex(access=current, refresh="R0")
+    calls = _mock_post(monkeypatch, _resp(200, _codex_refreshed()))
+
+    async with gate.use(connection.id, "call-1"):
+        token = await OpenAiProvider.issue_token(connection.id)
+
+    assert token.access_token == current
+    assert calls == []
+
+
+async def test_a_codex_fetch_rotates_a_busy_subscription_once_urgent(monkeypatch, druks_db):
+    connection = await _seed_codex(access=_jwt_in(timedelta(minutes=30)), refresh="R0")
+    refreshed = _codex_refreshed()
+    calls = _mock_post(monkeypatch, _resp(200, refreshed))
+
+    async with gate.use(connection.id, "call-1"):
+        token = await OpenAiProvider.issue_token(connection.id)
+
+    assert token.access_token == refreshed["access_token"]
+    assert calls[0]["json"]["refresh_token"] == "R0"
+
+
+async def test_a_codex_fetch_waits_out_a_shut_gate_then_answers_the_stored_token(
+    monkeypatch, druks_db
+):
+    monkeypatch.setattr(gate, "_POLL", 0.01)
+    connection = await _seed_codex(access=_jwt_in(timedelta(hours=12)), refresh="R0")
+    calls = _mock_post(monkeypatch, _resp(200, _codex_refreshed()))
+    client = druks.redis.get_client()
+    rotating = f"druks:sandbox:rotating:{connection.id}"
+    await client.set(rotating, "1", ex=60)
+    session = db_session()
+    stored = _jwt_in(timedelta(hours=48))
+
+    async def other_rotator() -> None:
+        # The holder advances the row, then reopens the gate.
+        await asyncio.sleep(0.03)
+        await session.execute(
+            update(VaultSecret)
+            .where(VaultSecret.id == connection.id)
+            .values(secrets=_codex_payload(access=stored, refresh="R1"))
+        )
+        await client.delete(rotating)
+
+    holder = asyncio.create_task(other_rotator())
+    token = await OpenAiProvider.issue_token(connection.id)
+    await holder
+
+    assert token.access_token == stored
+    assert calls == []
+
+
+async def test_a_failed_codex_rotation_answers_the_live_token(monkeypatch, druks_db):
+    live = _jwt_in(timedelta(hours=12))
+    connection = await _seed_codex(access=live, refresh="R0")
+    _mock_post(monkeypatch, httpx.ConnectError("boom"))
+
+    token = await OpenAiProvider.issue_token(connection.id)
+
+    assert token.access_token == live
+
+
+async def test_an_expired_codex_token_with_a_failed_rotation_answers_nothing(monkeypatch, druks_db):
+    connection = await _seed_codex(access=_jwt_in(-timedelta(minutes=1)), refresh="R0")
+    _mock_post(monkeypatch, httpx.ConnectError("boom"))
+
+    with pytest.raises(OAuthTokenError) as error:
+        await OpenAiProvider.issue_token(connection.id)
+    assert error.value.tag == "token_expired"
