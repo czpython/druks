@@ -689,7 +689,7 @@ async def test_claude_subscription_token_stays_on_the_server(
 
     assert result.status is AgentCallStatus.SUCCEEDED
     [secret] = profile.secret_refs
-    assert secret.key == ("anthropic", profile.subscription.id, "")
+    assert secret.key == ("anthropic", profile.subscription.id, "", "")
     [start] = sandbox.calls
     assert not start.kwargs["extra_env"]
     bundle = start.kwargs["credentials_bundle"]

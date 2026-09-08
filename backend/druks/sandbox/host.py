@@ -303,11 +303,7 @@ class Host:
         persist_manifest(
             artifact_dir,
             call_id=run_id,
-            manifest=await harness.get_manifest(
-                mcp_servers=mcp_servers,
-                skills=skills,
-                extra_env=extra_env,
-            ),
+            manifest=await harness.get_manifest(mcp_servers=mcp_servers, skills=skills),
         )
 
         invocation = await harness.build_invocation(

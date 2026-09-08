@@ -78,6 +78,9 @@ class OpenCodeHarness(Harness):
             }
             if headers:
                 entry["headers"] = headers
+            if server.bearer_token_env_var or server.env_headers:
+                # Druks owns this server's credential; opencode starts no OAuth for it.
+                entry["oauth"] = False
             mcp[server.name] = entry
 
         provider, _, model = self.model.partition("/")

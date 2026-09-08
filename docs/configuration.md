@@ -263,8 +263,9 @@ A sandbox never holds an installation token. It holds a placeholder in
 secrets proxy swaps the placeholder for a token that Druks mints for the
 sandbox's repo, with the expiry GitHub gives it, and fetches a new one before
 it expires. The `software_factory` build clones and pushes as the operator App.
-A review clones as the reviewer App when one is connected. Its GitHub MCP
-server acts as the review identity. The identities stay separate.
+A review clones as the reviewer App when one is connected. The build's GitHub
+MCP server acts as the review identity through a second entry, for
+`api.githubcopilot.com`. The identities stay separate.
 
 **To upgrade an existing installation**, paste the credentials one time on each
 active host. Open **Settings → Connections → Services**. Connect GitHub with the
@@ -364,13 +365,14 @@ read-only at `/harnesses`. Claude and Codex each read their named directory:
 │   ├── settings.json
 │   └── plugins/
 └── codex/
-    ├── .credentials.json
     ├── AGENTS.md
     └── config.toml
 ```
 
-Missing files are optional. Codex uses `.credentials.json` for MCP credentials.
-Provider credentials do not belong in this root. OpenCode and Pi do not read it.
+Missing files are optional. Druks copies no credentials file, and it removes
+the `mcpServers` block from `.claude.json` before the copy. MCP credentials
+are sandbox entries. Provider credentials do not belong in this root. OpenCode
+and Pi do not read it.
 The default harness, model, billing, effort, and timeout live in
 **Settings → Agents**. Each agent can override any of them on its app's page.
 **Unattended runs use** names the default account. Its profile selects the
@@ -489,8 +491,14 @@ is one of:
 - An OAuth connection, which requires `urls.endpoint`.
 
 Druks delivers enabled servers through the selected harness unless an app
-workspace owns a required server with the same name. Tokens enter the agent
-environment under a derived variable and are never returned by the API.
+workspace owns a required server with the same name. Each bearer token and
+each secret header is a Drukbox entry behind a vault row. The sandbox holds a
+placeholder under a derived variable, and the harness configuration names that
+variable. The secrets proxy swaps the placeholder only for the server's host.
+The Druks issuer answers the value from the row that was bound when the
+sandbox was created. A pasted token reaches a running sandbox within five
+minutes. A server enabled after that gets no entry in a running sandbox. The
+API never returns a token.
 
 ## Skills
 

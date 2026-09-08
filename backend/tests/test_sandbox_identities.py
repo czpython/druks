@@ -10,9 +10,14 @@ from druks.database import db_session
 from druks.durable.engine import _step_engine
 from druks.harnesses import providers as pbase
 from druks.harnesses.providers import AnthropicProvider
+from druks.mcp.enums import IdentityMode
+from druks.mcp.models import McpServer
 from druks.sandbox.constants import SANDBOX_HOST_LEASE_SECONDS
 from druks.sandbox.models import SandboxIdentity, SecretRef
+from druks.secrets.datastructures import Audience
+from druks.secrets.models import VaultSecret
 from druks.testing import asgi_client, configure_app_for_test, make_settings, seed_run
+from druks.workspaces import Workspace
 from druks_field_notes.workflows import Summarize
 from sqlalchemy.exc import IntegrityError
 
@@ -99,7 +104,7 @@ async def test_an_identity_keeps_the_hash_and_puts_the_bearer_in_the_issuer_entr
         seconds=SANDBOX_HOST_LEASE_SECONDS
     )
     [secret] = identity.secret_refs
-    assert secret.key == ("anthropic", subscription.id, "")
+    assert secret.key == ("anthropic", subscription.id, "", "")
     rows = [identity, secret]
     columns = {
         column.name: getattr(row, column.name) for row in rows for column in row.__table__.columns
@@ -319,3 +324,79 @@ async def test_the_issuer_answers_503_when_github_refuses(druks_db, tmp_path, mo
 
     assert response.status_code == 503
     assert "installed" not in response.text
+
+
+async def _mcp_identity() -> tuple[SandboxIdentity, str, dict]:
+    # The one ref a box of a plain workspace binds for the enabled servers.
+    await seed_run(db_session(), kind=Summarize.kind, run_id="run-1")
+    [ref] = (await Workspace.get_mcp_delivery(None, None))[1]
+    identity, entries = await SandboxIdentity.create(
+        run_id="run-1", scoped_to="workflow", secret_refs=[ref]
+    )
+    await identity.bind("host-1")
+    bearer = entries[ref.name].headers["Authorization"].removeprefix("Bearer ")
+    return identity, bearer, entries[ref.name].entry()
+
+
+async def test_an_mcp_ref_binds_a_custom_entry_and_the_issuer_answers_the_stored_token(
+    druks_db, tmp_path
+):
+    await McpServer.create(name="linear", url="https://mcp.linear.app/mcp", token="lin_secret")
+    identity, bearer, entry = await _mcp_identity()
+
+    response = await _fetch(tmp_path, identity.id, bearer, "mcp_linear_token")
+
+    # The entry binds the host, the variable, the header, and the prefix. A
+    # pasted value has no expiry, so the static refresh bounds it.
+    assert entry == {
+        "host": "mcp.linear.app",
+        "auth_variable": "MCP_LINEAR_TOKEN",
+        "auth_header": "Authorization",
+        "auth_prefix": "Bearer ",
+        "issuer": {
+            "url": f"http://127.0.0.1:8001/api/secrets/{identity.id}/mcp_linear_token",
+            "headers": {"Authorization": f"Bearer {bearer}"},
+            "refresh": "5m",
+        },
+    }
+    assert response.json() == {"value": "lin_secret", "expires_at": None}
+    # A later server edit moves nothing: the row keeps the host its entry was made for.
+    [stored] = identity.secret_refs
+    assert stored.host == "mcp.linear.app"
+
+
+async def test_a_secret_header_entry_fills_its_own_header_with_no_prefix(druks_db, tmp_path):
+    await McpServer.create(
+        name="grafana",
+        url="https://mcp.grafana.com/mcp",
+        token_source="",
+        secret_headers={"X-Api-Key": "grafana-api-secret"},
+    )
+    identity, bearer, entry = await _mcp_identity()
+
+    response = await _fetch(tmp_path, identity.id, bearer, "mcp_grafana_header_0")
+
+    assert (entry["auth_header"], entry["auth_prefix"], entry["auth_variable"]) == (
+        "X-Api-Key",
+        "",
+        "MCP_GRAFANA_HEADER_0",
+    )
+    assert response.json() == {"value": "grafana-api-secret", "expires_at": None}
+
+
+async def test_the_issuer_answers_503_for_a_disconnected_mcp_grant(druks_db, tmp_path):
+    server = await McpServer.create(
+        name="linear", url="https://mcp.linear.app/mcp", token_source="oauth"
+    )
+    server.identity_mode = IdentityMode.SHARED
+    grant = await VaultSecret.connect(
+        Audience.mcp("linear"), account_id=None, refresh_token="rt", scopes=[]
+    )
+    identity, bearer, entry = await _mcp_identity()
+    assert entry["issuer"]["refresh"] == "1h"
+    await grant.revoke("user")
+
+    response = await _fetch(tmp_path, identity.id, bearer, "mcp_linear_token")
+
+    assert response.status_code == 503
+    assert "rt" not in response.text

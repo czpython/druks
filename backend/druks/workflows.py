@@ -835,8 +835,10 @@ class Workflow:
 
     async def get_secret_refs(self) -> list[SecretRef]:
         # The secrets a box of this run fetches beyond its profile's: the
-        # workspace's, read before the box exists.
-        return await self.workspace_class.get_secret_refs(await self.subject)
+        # workspace's and its MCP servers', read before the box exists.
+        subject = await self.subject
+        _, mcp = await self.workspace_class.get_mcp_delivery(subject, self.account_id)
+        return [*await self.workspace_class.get_secret_refs(subject), *mcp]
 
     async def _lease_host(self, profile: "Profile") -> str | None:
         # The warm VM, provisioned once per segment; state is carried in git, so

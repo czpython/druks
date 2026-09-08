@@ -479,8 +479,35 @@ those two, so a request cannot select another repo or identity.
 Override `Workflow.get_workspace_kwargs()` to pass `branch` or the fields a
 subclass adds. Extend `RepoWorkspace` by adding fields, not by cloning again.
 Override `run_agent()` to prepare the VM before the call, `get_agent_run_kwargs()`
-to grant directories or skills, and `get_required_mcp_servers()` to require an
-MCP server the workspace credentials itself.
+to grant directories or skills, and `get_required_mcp_servers(subject)` to
+require an MCP server with its own vault row:
+
+```python
+from druks.sandbox.datastructures import RequiredMcpServer
+
+
+class BuildWorkspace(RepoWorkspace):
+    @classmethod
+    async def get_required_mcp_servers(cls, subject) -> tuple[RequiredMcpServer, ...]:
+        actor = await get_review_actor()
+        return (
+            RequiredMcpServer(
+                name="github",
+                url="https://api.githubcopilot.com/mcp/",
+                secret_id=(await actor.service.get()).id,
+                resource=cls.get_repo(subject),
+            ),
+        )
+```
+
+The server names the vault row the issuer answers from and what the token is
+for: here a connected GitHub service and its repo. Druks binds the server's
+host and the variable `MCP_GITHUB_TOKEN` to the entry when it creates the
+sandbox. The harness configuration names the variable, and the sandbox never
+holds the token. A required server owns its name, so a same-named registry
+server is not delivered. `Workspace.get_mcp_delivery(subject, account_id)`
+returns the wire shapes and the secret refs for every MCP server of a sandbox.
+Override it to deliver none.
 
 Keep durable state outside the VM. A workflow can set
 `steps_reuse_sandbox = True` to retain one host across a segment. Druks releases
