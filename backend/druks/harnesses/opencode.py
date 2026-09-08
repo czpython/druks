@@ -11,7 +11,6 @@ from druks.sandbox.datastructures import (
     McpServer,
 )
 from druks.sandbox.layout import get_runs_root, get_work_root
-from druks.secrets.models import VaultSecret
 
 from . import exceptions
 from .artifacts import call_dir, write_cost
@@ -49,9 +48,7 @@ class OpenCodeHarness(Harness):
         skills: tuple[str, ...] = (),
         extra_env: dict[str, str] | None = None,
         mcp_servers: tuple[McpServer, ...] = (),
-        # Accepted for signature parity; opencode runs on an API key only, and
-        # the sandbox holds it as a placeholder in the provider's variable.
-        subscription: VaultSecret | None = None,
+        identity: dict | None = None,
         timeout: int = Harness.default_timeout,
     ) -> AgentInvocation:
         if not self.sandbox:

@@ -194,9 +194,13 @@ holds: the Drukbox name, the vault row, and the resource. The row can be the
 GitHub App key, a pasted token, or a provider subscription. A replay after a
 crash finds the sandbox through the run's live identity with the same scope.
 Drukbox holds the bearer in the sandbox's issuer entry and fetches the token
-from the Druks issuer, `GET /api/secrets/<identity id>/<name>`. The issuer
-answers a fresh token at once. A token inside its refresh margin rotates first, while the
-subscription is idle or the token is urgent. One rotator runs at a time, and
+from the Druks issuer, `GET /api/secrets/<identity id>/<name>`. The sandbox
+sees a placeholder in the variable the entry names. Claude reads it from
+`ANTHROPIC_AUTH_TOKEN`. The Codex run wrapper writes it into
+`~/.codex/auth.json` beside a sentinel refresh token, so Codex never refreshes
+inside the sandbox. The issuer answers a fresh token at once. A token inside
+its refresh margin rotates first, while the subscription is idle or the token
+is urgent. One rotator runs at a time, and
 new calls wait for it. After a rotation, Druks requests a refresh from the secrets
 exchange for every live sandbox on that subscription. A provider can revoke
 the previous token at the rotation. Druks revokes the identity when it

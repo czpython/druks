@@ -1,3 +1,5 @@
+import base64
+import json
 from pathlib import Path
 from unittest import mock
 
@@ -206,6 +208,13 @@ def bind_ambient_session(session) -> None:
     from druks.database import db_session
 
     db_session.registry.set(session)
+
+
+def make_jwt(claims: dict) -> str:
+    """An unsigned JWT carrying ``claims``; the providers read claims without a signature check."""
+    header = base64.urlsafe_b64encode(b'{"alg":"none"}').rstrip(b"=").decode()
+    payload = base64.urlsafe_b64encode(json.dumps(claims).encode()).rstrip(b"=").decode()
+    return f"{header}.{payload}.sig"
 
 
 async def connect_provider(provider_cls, payload: dict, *, provider_email: str = "op@example.com"):

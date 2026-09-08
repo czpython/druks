@@ -1,7 +1,13 @@
 from types import SimpleNamespace
 
 import pytest
-from conftest import PROFILE_PROBE, ProfileOutput, connect_anthropic_subscription
+from conftest import (
+    PROFILE_PROBE,
+    ProfileOutput,
+    connect_anthropic_subscription,
+    connect_provider,
+    make_jwt,
+)
 from drukbox_sdk import Secret
 from druks import agents
 from druks.accounts.models import Account
@@ -10,10 +16,12 @@ from druks.apps.registry import agents as agent_registry
 from druks.database import db_session
 from druks.durable.models import AgentCall
 from druks.harnesses.claude import ClaudeHarness
+from druks.harnesses.codex import CodexHarness
 from druks.harnesses.exceptions import HarnessNotConnectedError, ProfileSettingsError
 from druks.harnesses.models import ProviderCatalog
 from druks.harnesses.opencode import OpenCodeHarness
 from druks.harnesses.profiles import check_profile, get_profile
+from druks.harnesses.providers import OpenAiProvider
 from druks.sandbox.constants import MAX_AGENT_TIMEOUT_SECONDS
 from druks.secrets.datastructures import Audience
 from druks.secrets.enums import SecretKind
@@ -134,12 +142,50 @@ async def test_a_subscription_agent_runs_as_its_actor_or_the_default_account(dru
     assert as_actor.subscription.id == actor.id
     assert as_actor.charged_account_id == actor.account_id
     assert unattended.subscription.id == default_subscription.id
+    assert as_actor.identity == {"email": "b@example.com"}
     assert (as_actor.secrets, as_actor.secrets_id) == ({}, actor.id)
     [secret] = as_actor.secret_refs
     assert secret.key == ("anthropic", actor.id, "", "")
     assert as_actor.harness_class is ClaudeHarness
     assert as_actor.model == "anthropic/claude-opus-4-7"
     assert (as_actor.effort, as_actor.timeout, as_actor.fast_mode) == ("high", 1800, False)
+
+
+async def test_a_codex_subscription_profile_carries_its_login_facts_and_its_ref(druks_db):
+    id_token = make_jwt(
+        {
+            "https://api.openai.com/auth": {
+                "chatgpt_account_id": "acc-1",
+                "chatgpt_plan_type": "pro",
+            },
+            "email": "a@example.com",
+        }
+    )
+    subscription = await connect_provider(
+        OpenAiProvider,
+        {
+            "OPENAI_API_KEY": None,
+            "tokens": {
+                "access_token": make_jwt({"exp": 4_102_444_800}),
+                "refresh_token": "R0",
+                "id_token": id_token,
+                "account_id": "acc-1",
+            },
+        },
+        provider_email="a@example.com",
+    )
+    await SettingsOverride.set_agent_harness(PROFILE_PROBE.id, "codex")
+    await SettingsOverride.set_agent_model(PROFILE_PROBE.id, "openai/gpt-5.5")
+
+    profile = await get_profile(PROFILE_PROBE.id, subscription.account_id)
+
+    assert profile.harness_class is CodexHarness
+    # The facts the box's login names come from the row and its id token; the
+    # tokens stay on the server.
+    assert profile.identity == {"email": "a@example.com", "account_id": "acc-1", "plan": "pro"}
+    [ref] = profile.secret_refs
+    assert ref.key == ("codex_subscription_token", subscription.id, "", "chatgpt.com")
+    assert profile.secrets_id == subscription.id
 
 
 async def test_a_subscription_agent_refuses_without_the_actors_own_subscription(druks_db):
@@ -162,7 +208,7 @@ async def test_a_key_agent_runs_on_the_installations_key_for_anyone(druks_db):
 
     # Claude reads the key from a placeholder in the VM, never from its invocation.
     assert (as_actor.secrets, as_actor.subscription) == ({"anthropic": _SHARED_ENTRY}, None)
-    assert unattended.secrets == {"anthropic": _SHARED_ENTRY}
+    assert (unattended.secrets, unattended.identity) == ({"anthropic": _SHARED_ENTRY}, {})
     # The entries' identity is the pasted key, with no secret material.
     assert as_actor.secrets_id == f"anthropic.{pasted.updated_at:%Y%m%dT%H%M%S}"
     assert "sk-shared" not in as_actor.secrets_id

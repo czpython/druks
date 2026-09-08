@@ -67,9 +67,7 @@ class ClaudeHarness(Harness):
         skills: tuple[str, ...] = (),
         extra_env: dict[str, str] | None = None,
         mcp_servers: tuple[McpServer, ...] = (),
-        # Accepted for signature parity. The sandbox holds a placeholder for
-        # the subscription token or the key. Drukbox delivers it.
-        subscription: VaultSecret | None = None,
+        identity: dict | None = None,
         timeout: int = Harness.default_timeout,
     ) -> AgentInvocation:
         if not self.sandbox:

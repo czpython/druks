@@ -309,16 +309,25 @@ optional. It reports pending setup if the selected tracker lacks a connection.
 Druks registers two subscription providers, `anthropic` and `openai`. Each
 also accepts an API key. Both connect from **Settings → Providers**. The
 connection flow stores each credential in Postgres. Druks refreshes a
-subscription token on a schedule. A `claude` sandbox holds a placeholder in
-`ANTHROPIC_AUTH_TOKEN` and never the token. Drukbox fetches the token from the
+subscription token on a schedule. A sandbox holds a placeholder for the
+subscription token and never the token. Drukbox fetches the token from the
 Druks issuer through the sandbox's identity, and the secrets proxy swaps the
-placeholder on each request. See
+placeholder on each request to the entry's host. See
 [sandbox identities and the issuer](concepts.md#agents-harnesses-workspaces-and-sandboxes).
-Codex still receives its subscription file inside the sandbox. Druks does
-not copy a host login. This is a capability connection for the requesting
-account. In a fresh `none`-mode install, the first completed subscription
-connection also creates the operator account. See
+Druks does not copy a host login. This is a capability connection for the
+requesting account. In a fresh `none`-mode install, the first completed
+subscription connection also creates the operator account. See
 [access control](#public-urls-and-access-control).
+
+A `claude` sandbox reads its placeholder from `ANTHROPIC_AUTH_TOKEN`. A
+`codex` sandbox reads its placeholder from `CODEX_SUBSCRIPTION_TOKEN`. The
+Codex run wrapper writes `~/.codex/auth.json` from that variable before the
+command. The file carries the account id, the sentinel refresh token
+`druks-placeholder`, and an unsigned id token with the account id, the plan,
+and the email. Codex sends the placeholder to `chatgpt.com` on every request.
+Codex never refreshes it: the one refresh it attempts after a 401 fails on
+the sentinel, and the turn ends. The real refresh token and id token stay in
+Postgres.
 
 An API key never enters the sandbox. Druks gives the key to Drukbox as a
 secret entry when it creates the sandbox. The sandbox holds a placeholder in
@@ -326,11 +335,16 @@ the variable the entry names, and the CLI reads it from the environment. The
 Drukbox secrets proxy swaps the placeholder for the key in the entry's header
 on each request to the entry's host.
 
-| Harness | Provider | Variable | Host | Header |
+| Harness | Credential | Variable | Host | Header |
 | --- | --- | --- | --- | --- |
-| `claude`, `pi`, `opencode` | Anthropic | `ANTHROPIC_API_KEY` | `api.anthropic.com` | `x-api-key` |
-| `pi`, `opencode` | OpenAI | `OPENAI_API_KEY` | `api.openai.com` | `Authorization: Bearer` |
-| `codex` | OpenAI | `CODEX_API_KEY` | `api.openai.com` | `Authorization: Bearer` |
+| `claude` | Anthropic subscription | `ANTHROPIC_AUTH_TOKEN` | `api.anthropic.com` | `Authorization: Bearer` |
+| `codex` | OpenAI subscription | `CODEX_SUBSCRIPTION_TOKEN` | `chatgpt.com` | `Authorization: Bearer` |
+| `claude`, `pi`, `opencode` | Anthropic API key | `ANTHROPIC_API_KEY` | `api.anthropic.com` | `x-api-key` |
+| `pi`, `opencode` | OpenAI API key | `OPENAI_API_KEY` | `api.openai.com` | `Authorization: Bearer` |
+| `codex` | OpenAI API key | `CODEX_API_KEY` | `api.openai.com` | `Authorization: Bearer` |
+
+The `ANTHROPIC_AUTH_TOKEN` and `OPENAI_API_KEY` entries come from the Drukbox
+catalog. Druks declares the other entries with their host and header.
 
 The Compose stack runs the secrets proxy on every provider but docker-sbx. See
 [the secrets exchange and the secrets proxy](deployment.md#the-secrets-exchange-and-the-secrets-proxy).

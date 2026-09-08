@@ -177,6 +177,11 @@ class Provider:
         )
 
     @classmethod
+    def get_identity(cls, subscription: VaultSecret) -> dict:
+        """The subscription's non-secret facts, for the login a box sees."""
+        return dict(subscription.identity)
+
+    @classmethod
     def load_token(cls, subscription: VaultSecret, *, now: datetime | None = None) -> Token:
         """Read + validate ``subscription``'s access token, or raise
         :class:`OAuthTokenError`. Read-only; never refreshes."""
@@ -883,8 +888,8 @@ def _parse_iso(value: object) -> datetime | None:
     return ensure_utc(parsed)
 
 
-# Namespaced claims OpenAI packs into the Codex access-token JWT.
-_OPENAI_AUTH_CLAIM = "https://api.openai.com/auth"
+# Namespaced claims OpenAI packs into the Codex access and id token JWTs.
+OPENAI_AUTH_CLAIM = "https://api.openai.com/auth"
 _OPENAI_PROFILE_CLAIM = "https://api.openai.com/profile"
 
 # ChatGPT subscription usage endpoint — the standalone fetch the codex CLI's
@@ -918,6 +923,15 @@ class OpenAiProvider(Provider):
     def get_secret(cls, key: str) -> Secret:
         # The catalog entry: OPENAI_API_KEY as a bearer on api.openai.com.
         return Secret(key)
+
+    @classmethod
+    def get_identity(cls, subscription: VaultSecret) -> dict:
+        tokens = subscription.secrets["tokens"]
+        auth = (jwt_claims(tokens.get("id_token") or "") or {}).get(OPENAI_AUTH_CLAIM) or {}
+        identity = {**super().get_identity(subscription), "account_id": tokens.get("account_id")}
+        if plan := auth.get("chatgpt_plan_type"):
+            identity["plan"] = plan
+        return identity
 
     @classmethod
     def _token_from_credentials(cls, data: dict) -> CodexToken:
@@ -975,7 +989,7 @@ class OpenAiProvider(Provider):
         )
         access = grant["access_token"]
         claims = jwt_claims(access) or {}
-        auth = claims.get(_OPENAI_AUTH_CLAIM) or {}
+        auth = claims.get(OPENAI_AUTH_CLAIM) or {}
         profile = claims.get(_OPENAI_PROFILE_CLAIM) or {}
         payload = {
             "OPENAI_API_KEY": None,

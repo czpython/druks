@@ -1,21 +1,26 @@
 import base64
 import json
+import shlex
 from pathlib import Path
 from unittest.mock import AsyncMock
 
 import pytest
-from conftest import connect_provider
+from conftest import connect_provider, make_jwt
 from drukbox_sdk import Secret
 from druks.accounts.models import Account
+from druks.database import db_session
 from druks.harnesses.claude import ClaudeHarness, _get_credentials
 from druks.harnesses.codex import CodexHarness
 from druks.harnesses.datastructures import SandboxSettings
 from druks.harnesses.exceptions import HarnessNotConnectedError, ProfileSettingsError
 from druks.harnesses.opencode import OpenCodeHarness
 from druks.harnesses.pi import PiHarness
-from druks.harnesses.providers import AnthropicProvider, OpenAiProvider
+from druks.harnesses.providers import AnthropicProvider, OpenAiProvider, jwt_claims
 from druks.sandbox.datastructures import HomeCopy, HomeFile
+from druks.sandbox.models import SandboxIdentity
 from druks.secrets.models import VaultSecret
+from druks.testing import seed_run
+from druks_field_notes.workflows import Summarize
 
 
 async def _seed_claude(
@@ -81,26 +86,31 @@ async def test_the_operators_claude_config_reaches_the_box_without_its_mcp_serve
     assert "lin_secret" not in repr(bundle)
 
 
-async def test_credentials_builders_read_their_harness_config_directories(druks_db):
-    far_future_expiration = 4_102_444_800
-    jwt_header = base64.urlsafe_b64encode(b'{"alg":"none"}').rstrip(b"=").decode()
-    jwt_payload = (
-        base64.urlsafe_b64encode(json.dumps({"exp": far_future_expiration}).encode())
-        .rstrip(b"=")
-        .decode()
+async def _seed_codex() -> VaultSecret:
+    id_token = make_jwt(
+        {
+            "https://api.openai.com/auth": {
+                "chatgpt_account_id": "acc-1",
+                "chatgpt_plan_type": "pro",
+            },
+            "email": "op@example.com",
+        }
     )
-    codex_subscription = await connect_provider(
+    return await connect_provider(
         OpenAiProvider,
         {
-            "auth_mode": "chatgpt",
             "OPENAI_API_KEY": None,
             "tokens": {
-                "access_token": f"{jwt_header}.{jwt_payload}.sig",
-                "refresh_token": "R0",
+                "access_token": make_jwt({"exp": 4_102_444_800}),
+                "refresh_token": "rt-secret",
+                "id_token": id_token,
                 "account_id": "acc-1",
             },
         },
     )
+
+
+async def test_credentials_builders_read_their_harness_config_directories(druks_db):
     config_root = Path("/harnesses")
     sandbox = SandboxSettings(
         service_url="x",
@@ -116,9 +126,10 @@ async def test_credentials_builders_read_their_harness_config_directories(druks_
         fast_mode=False,
         effort=None,
         sandbox=sandbox,
-    )._get_credentials(sandbox, subscription=codex_subscription)
+    )._get_credentials(sandbox)
 
-    assert codex_bundle.home[0].path == ".codex/auth.json"
+    # No credential file: each CLI reads a placeholder the box holds.
+    assert not any(type(entry) is HomeFile for entry in (*claude_bundle.home, *codex_bundle.home))
     assert HomeCopy(".claude/settings.json", config_root / "claude/settings.json") in (
         claude_bundle.home
     )
@@ -202,6 +213,71 @@ async def test_config_delivery_does_not_copy_host_provider_credentials(
     host.upload_dir.assert_not_awaited()
     host.write_secret.assert_not_awaited()
     assert not invocation.env
+
+
+async def test_a_codex_subscription_binds_a_custom_entry_on_chatgpt(druks_db):
+    subscription = await _seed_codex()
+    [ref] = CodexHarness.get_secret_refs(subscription)
+    await seed_run(db_session(), kind=Summarize.kind, run_id="run-1")
+
+    identity, entries = await SandboxIdentity.create(
+        run_id="run-1", scoped_to="workflow", secret_refs=[ref]
+    )
+    entry = entries["codex_subscription_token"].entry()
+
+    assert ref.key == ("codex_subscription_token", subscription.id, "", "chatgpt.com")
+    assert (entry["host"], entry["auth_variable"], entry["auth_header"], entry["auth_prefix"]) == (
+        "chatgpt.com",
+        "CODEX_SUBSCRIPTION_TOKEN",
+        "Authorization",
+        "Bearer ",
+    )
+    assert entry["issuer"]["refresh"] == "1h"
+    assert entry["issuer"]["url"].endswith(f"/api/secrets/{identity.id}/codex_subscription_token")
+
+
+async def test_the_codex_wrapper_writes_its_login_around_the_placeholder(druks_db):
+    subscription = await _seed_codex()
+    tokens = subscription.secrets["tokens"]
+    sandbox = SandboxSettings(
+        service_url="x",
+        service_token="x",
+        service_timeout=30.0,
+        image="x",
+        harness_config_root=Path("/harnesses"),
+    )
+
+    invocation = await CodexHarness(
+        model=CodexHarness.default_model, fast_mode=False, effort=None, sandbox=sandbox
+    ).build_invocation(
+        prompt="hello",
+        schema={"type": "object"},
+        run_id="run-1",
+        ssh_username="druks",
+        identity=OpenAiProvider.get_identity(subscription),
+    )
+
+    wrapper = invocation.args[2]
+    # The file rides in a double-quoted shell word, so the box expands the variable.
+    [auth] = [json.loads(word) for word in shlex.split(wrapper) if word.startswith('{"OPENAI')]
+    assert auth["OPENAI_API_KEY"] is None
+    assert auth["tokens"]["access_token"] == "$CODEX_SUBSCRIPTION_TOKEN"
+    assert auth["tokens"]["refresh_token"] == "druks-placeholder"
+    assert auth["tokens"]["account_id"] == "acc-1"
+    assert auth["last_refresh"].endswith("Z")
+    header, _, _ = auth["tokens"]["id_token"].split(".")
+    assert json.loads(base64.urlsafe_b64decode(header + "=" * (-len(header) % 4))) == {
+        "alg": "none",
+        "typ": "JWT",
+    }
+    assert jwt_claims(auth["tokens"]["id_token"]) == {
+        "https://api.openai.com/auth": {"chatgpt_account_id": "acc-1", "chatgpt_plan_type": "pro"},
+        "email": "op@example.com",
+    }
+    assert wrapper.index('chmod 600 "$HOME/.codex/auth.json"') < wrapper.index("codex exec")
+    for secret in (tokens["access_token"], tokens["refresh_token"], tokens["id_token"]):
+        assert secret not in wrapper
+    assert not any(type(entry) is HomeFile for entry in invocation.credentials.home)
 
 
 _ANTHROPIC_ENTRY = Secret(
