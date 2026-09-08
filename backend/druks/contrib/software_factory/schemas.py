@@ -63,7 +63,7 @@ class WorkItemSummary(SubjectSummary):
     # The work item's domain header — what only Software Factory knows. Status (where it is
     # in its lifecycle) and the timeline come from the platform's subject read-side,
     # which composes this with them; ``id`` is the platform subject key (str).
-    source: Literal["linear", "github", "jira"]
+    source: Literal["linear", "github", "jira", "issues"]
     repo: str
     # Druks Project name (e.g. "Acme"), not the repo. Required —
     # every WorkItem is born into a project, intake refuses tickets

@@ -284,7 +284,9 @@ Tracker credentials are service identities. Connect Linear or Jira Cloud from
 **Settings → Connections → Services**. The Linear identity uses an API key
 and webhook secret. The Jira identity uses a base URL, email, API token, and webhook secret. Druks
 validates the credentials before it stores them. Select the tracker and its
-workflow statuses in **Software Factory → Settings**.
+workflow statuses in **Software Factory → Settings**. Select **druks** to use
+Software Factory's local issue board on this appliance. That choice needs no
+credentials. `druks doctor` reports it as healthy.
 
 Webhook URLs remain `/_external/linear/events/` and
 `/_external/jira/events/`. The Jira webhook uses a Jira Automation
