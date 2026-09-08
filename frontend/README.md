@@ -29,8 +29,10 @@ runs lint, tests, and build for PRs into `main` and `codex/` stack branches.
 - Shared routing and fallback behavior.
 
 Bundled app UI lives under `src/apps/<name>/`. Its module calls
-`registerAppUI()` with routes and an optional home path. The backend app class
-declares the subnav tabs. The roster supplies these tabs to the frontend.
+`registerAppUI()` with routes and an optional home path. A Python-page app
+declares subnav tabs on its backend class; the roster supplies them. An app
+that ships its own JavaScript sets `navigation` on the registration, or
+`navigationFor` when the tabs depend on settings.
 Import the module one time from `src/apps/index.ts`. The shell finds the
 registration and does not hardcode the app name.
 

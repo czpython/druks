@@ -39,6 +39,8 @@ class TextAreaField(PageField):
     value: str = ""
     placeholder: str = ""
     rows: int = 4
+    # The value is markdown source. The shell renders it as formatted text.
+    markdown: bool = False
 
 
 class NumberField(PageField):

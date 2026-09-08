@@ -1,6 +1,7 @@
 import { useId, useRef, type ReactNode } from 'react'
 
 import type { Field, Option } from '../api/types'
+import { MarkdownEditor } from './MarkdownEditor'
 
 function groupedOptions(options: Option[]): { group: string; options: Option[] }[] {
   const groups: { group: string; options: Option[] }[] = []
@@ -157,6 +158,20 @@ function Input({
         />
       )
     case 'text_area':
+      if (field.markdown) {
+        return (
+          <MarkdownEditor
+            key={resets}
+            field={field}
+            id={id}
+            value={String(value ?? '')}
+            onChange={onChange}
+            onBlur={onBlur}
+            describedBy={describedBy}
+            isInvalid={isInvalid}
+          />
+        )
+      }
       return (
         <textarea
           {...shared}

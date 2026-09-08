@@ -1424,11 +1424,17 @@ class TextAreaField:
     help_text: str = ""
     is_required: bool = False
     rows: int = 4
+    markdown: bool = False
 ```
 
 ```json
-{"field": "text_area", "name": "body", "label": "Note", "value": "", "placeholder": "", "helpText": "", "isRequired": false, "rows": 4}
+{"field": "text_area", "name": "body", "label": "Note", "value": "", "placeholder": "", "helpText": "", "isRequired": false, "rows": 4, "markdown": false}
 ```
+
+`markdown=True` keeps the value as markdown source. The shell renders formatted
+text in place. A selection toolbar applies marks, headings, lists, and links.
+Submit still sends markdown. There is no HTML roundtrip. Read-only `Markdown`
+blocks still use the GFM renderer.
 
 ### NumberField
 
