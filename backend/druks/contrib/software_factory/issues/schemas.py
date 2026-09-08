@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, field_validator
 
 from druks.contrib.software_factory.issues.enums import Priority, Status
 from druks.workflows import SubjectSummary
@@ -12,17 +12,6 @@ class TicketSummary(SubjectSummary):
     # this with the generic status and timeline.
     title: str
     status: Status
-
-
-class ProjectRead(BaseModel):
-    """A namespace as a door answers it — the prefix is what every identifier
-    minted against this project starts with."""
-
-    model_config = ConfigDict(from_attributes=True)
-
-    id: int
-    name: str
-    prefix: str
 
 
 class CommentRead(BaseModel):
@@ -46,7 +35,7 @@ class TicketDetail(BaseModel):
     description: str
     status: Status
     priority: Priority
-    project_id: int
+    repo_id: int
     assignee_id: str | None
     comments: list[CommentRead]
 
@@ -61,7 +50,7 @@ class TicketEdit(BaseModel):
     description: str | None = None
     priority: Priority | None = None
     assignee_id: str | None = None
-    project_id: int | None = None
+    repo_id: int | None = None
 
     @field_validator("assignee_id", mode="before")
     @classmethod

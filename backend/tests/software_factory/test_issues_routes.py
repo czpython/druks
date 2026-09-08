@@ -3,7 +3,7 @@ from druks.api.server import app as api
 from druks.contrib.software_factory.issues.enums import Status
 
 _TICKETS = "/api/software_factory/tickets"
-_PROJECTS = "/api/software_factory/ticket-projects"
+_PROJECTS = "/api/software_factory/projects"
 
 
 def _published(monkeypatch):
@@ -16,16 +16,21 @@ def _published(monkeypatch):
     return events
 
 
-async def _open_project(druks_client, *, name="druks", prefix="dru"):
-    created = await druks_client.post(_PROJECTS, json={"name": name, "prefix": prefix})
+async def _open_repo(druks_client, *, project="Acme", prefix="dru", repo="acme/druks"):
+    created = await druks_client.post(_PROJECTS, json={"name": project, "prefix": prefix})
     assert created.status_code == 201
-    return created.json()
+    added = await druks_client.post(
+        f"{_PROJECTS}/{created.json()['id']}/repos",
+        json={"fullName": repo},
+    )
+    assert added.status_code == 201
+    return added.json()
 
 
-async def _open_ticket(druks_client, project_id, **fields):
+async def _open_ticket(druks_client, repo_id, **fields):
     created = await druks_client.post(
         _TICKETS,
-        json={"title": "one", "project_id": project_id, **fields},
+        json={"title": "one", "repo_id": int(repo_id), **fields},
     )
     assert created.status_code == 201
     return created.json()
@@ -43,8 +48,8 @@ def test_get_and_comment_are_agent_operations():
 
 async def test_create_as_todo_does_not_publish(druks_client, monkeypatch):
     events = _published(monkeypatch)
-    project = await _open_project(druks_client)
-    ticket = await _open_ticket(druks_client, project["id"], title="quiet")
+    repo = await _open_repo(druks_client)
+    ticket = await _open_ticket(druks_client, repo["id"], title="quiet")
 
     assert ticket["identifier"] == "DRU-1"
     assert ticket["status"] == "todo"
@@ -54,8 +59,8 @@ async def test_create_as_todo_does_not_publish(druks_client, monkeypatch):
 
 async def test_create_as_ready_for_agent_publishes_the_trigger(druks_client, monkeypatch):
     events = _published(monkeypatch)
-    project = await _open_project(druks_client, name="acme-app")
-    ticket = await _open_ticket(druks_client, project["id"], status="ready_for_agent", title="go")
+    repo = await _open_repo(druks_client, repo="acme/acme-app")
+    ticket = await _open_ticket(druks_client, repo["id"], status="ready_for_agent", title="go")
 
     assert ticket["status"] == "ready_for_agent"
     assert events == [
@@ -80,8 +85,8 @@ async def test_create_as_ready_for_agent_publishes_the_trigger(druks_client, mon
 
 async def test_set_status_publishes_one_transition_with_display_labels(druks_client, monkeypatch):
     events = _published(monkeypatch)
-    project = await _open_project(druks_client, name="acme-app")
-    ticket = await _open_ticket(druks_client, project["id"], title="Add an endpoint")
+    repo = await _open_repo(druks_client, repo="acme/acme-app")
+    ticket = await _open_ticket(druks_client, repo["id"], title="Add an endpoint")
 
     moved = await druks_client.post(
         f"{_TICKETS}/{ticket['identifier']}/status",
@@ -119,8 +124,8 @@ async def test_set_status_publishes_one_transition_with_display_labels(druks_cli
 
 async def test_set_status_marks_done_completed_and_cancelled_terminal(druks_client, monkeypatch):
     events = _published(monkeypatch)
-    project = await _open_project(druks_client)
-    ticket = await _open_ticket(druks_client, project["id"])
+    repo = await _open_repo(druks_client)
+    ticket = await _open_ticket(druks_client, repo["id"])
 
     done = await druks_client.post(
         f"{_TICKETS}/{ticket['identifier']}/status",
@@ -140,8 +145,8 @@ async def test_set_status_marks_done_completed_and_cancelled_terminal(druks_clie
 
 async def test_update_ticket_never_publishes_and_cannot_set_status(druks_client, monkeypatch):
     events = _published(monkeypatch)
-    project = await _open_project(druks_client)
-    ticket = await _open_ticket(druks_client, project["id"], title="old")
+    repo = await _open_repo(druks_client)
+    ticket = await _open_ticket(druks_client, repo["id"], title="old")
 
     edited = await druks_client.patch(
         f"{_TICKETS}/{ticket['identifier']}",
@@ -157,10 +162,10 @@ async def test_update_ticket_never_publishes_and_cannot_set_status(druks_client,
 
 
 async def test_blank_assignee_is_nobody(druks_client):
-    project = await _open_project(druks_client)
+    repo = await _open_repo(druks_client)
     created = await druks_client.post(
         _TICKETS,
-        json={"title": "unheld", "project_id": project["id"], "assignee_id": ""},
+        json={"title": "unheld", "repo_id": int(repo["id"]), "assignee_id": ""},
     )
 
     assert created.status_code == 201
@@ -183,25 +188,25 @@ async def test_blank_assignee_is_nobody(druks_client):
     assert cleared.json()["assignee_id"] is None
 
 
-async def test_update_can_move_a_ticket_to_another_project(druks_client):
-    first = await _open_project(druks_client, name="alpha", prefix="alp")
-    second = await _open_project(druks_client, name="beta", prefix="bet")
+async def test_update_can_move_a_ticket_to_another_repo(druks_client):
+    first = await _open_repo(druks_client, project="Alpha", prefix="alp", repo="acme/alpha")
+    second = await _open_repo(druks_client, project="Beta", prefix="bet", repo="acme/beta")
     ticket = await _open_ticket(druks_client, first["id"])
 
     moved = await druks_client.patch(
         f"{_TICKETS}/{ticket['identifier']}",
-        json={"project_id": second["id"]},
+        json={"repo_id": int(second["id"])},
     )
 
     assert moved.status_code == 200
-    assert moved.json()["project_id"] == second["id"]
+    assert moved.json()["repo_id"] == int(second["id"])
     assert moved.json()["identifier"] == "ALP-1"
 
 
 async def test_add_comment_authors_from_the_request_account(druks_client):
     account = await Account.get_or_create("op@example.com")
-    project = await _open_project(druks_client)
-    ticket = await _open_ticket(druks_client, project["id"])
+    repo = await _open_repo(druks_client)
+    ticket = await _open_ticket(druks_client, repo["id"])
 
     written = await druks_client.post(
         f"{_TICKETS}/{ticket['identifier']}/comments",
@@ -219,15 +224,15 @@ async def test_add_comment_authors_from_the_request_account(druks_client):
 
 
 async def test_blank_title_and_body_are_refused(druks_client):
-    project = await _open_project(druks_client)
+    repo = await _open_repo(druks_client)
 
     created = await druks_client.post(
         _TICKETS,
-        json={"title": "   ", "project_id": project["id"]},
+        json={"title": "   ", "repo_id": int(repo["id"])},
     )
     assert created.status_code == 422
 
-    ticket = await _open_ticket(druks_client, project["id"])
+    ticket = await _open_ticket(druks_client, repo["id"])
     edited = await druks_client.patch(
         f"{_TICKETS}/{ticket['identifier']}",
         json={"title": " "},
@@ -245,18 +250,18 @@ async def test_unknown_ticket_and_unknown_assignee_are_404(druks_client):
     missing = await druks_client.get(f"{_TICKETS}/DRU-99")
     assert missing.status_code == 404
 
-    project = await _open_project(druks_client)
+    repo = await _open_repo(druks_client)
     assigned = await druks_client.post(
         _TICKETS,
         json={
             "title": "handed to nobody real",
-            "project_id": project["id"],
+            "repo_id": int(repo["id"]),
             "assignee_id": "not-an-account",
         },
     )
     assert assigned.status_code == 404
 
-    ticket = await _open_ticket(druks_client, project["id"])
+    ticket = await _open_ticket(druks_client, repo["id"])
     updated = await druks_client.patch(
         f"{_TICKETS}/{ticket['identifier']}",
         json={"assignee_id": "not-an-account"},

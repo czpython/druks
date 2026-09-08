@@ -11,7 +11,8 @@ from conftest import finish_agent_run, make_test_note, seed_note_agent_run, seed
 from druks.accounts.models import Account, PersonalAccessToken
 from druks.api.server import mcp_app
 from druks.contrib.software_factory.app import SoftwareFactory
-from druks.contrib.software_factory.issues.models import IssuesProject, Ticket
+from druks.contrib.software_factory.issues.models import Ticket
+from druks.contrib.software_factory.models import Project, ProjectRepo
 from druks.core.apis.exceptions import UnknownTicketError
 from druks.durable.models import Artifact, Run
 from druks.mcp.exceptions import InvalidAgentToolError
@@ -171,7 +172,6 @@ async def test_tools_list_pins_platform_and_app_tools(app, pat_token, mode):
 
     assert list(tools)[:7] == _TOOL_NAMES
     assert list(tools)[7:] == [
-        "software_factory_create_ticket_project",
         "software_factory_create_ticket",
         "software_factory_get_ticket",
         "software_factory_update_ticket",
@@ -228,9 +228,10 @@ async def test_tools_list_pins_platform_and_app_tools(app, pat_token, mode):
 
 
 async def test_issues_ticket_tools_read_and_comment_as_the_pat_account(app, account, pat_token):
-    project = await IssuesProject.create(name="widget", prefix="WID")
+    project = await Project.create(name="Acme", prefix="WID")
+    repo = await ProjectRepo.create(project_id=project.id, full_name="acme/widget")
     ticket = await Ticket.create(
-        project_id=project.id, title="Add an endpoint", description="do the thing"
+        repo_id=repo.id, title="Add an endpoint", description="do the thing"
     )
 
     async with live(app), _client(app, pat_token) as client:

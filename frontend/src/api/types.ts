@@ -304,6 +304,7 @@ export interface Fact {
 export interface TableColumn {
   label: string
   align: 'start' | 'end'
+  width?: string
 }
 
 export interface TableRow {
@@ -345,6 +346,7 @@ export interface FileSummary {
 export interface Option {
   value: string
   label: string
+  group?: string
 }
 
 interface FieldBase {
@@ -354,10 +356,16 @@ interface FieldBase {
   isRequired: boolean
 }
 
-// One named input that the shell collects before an action runs.
+// One named input. An action collects it before it runs. A page filter
+// collects it in the URL query.
 export type Field =
   | (FieldBase & { field: 'text'; value: string; placeholder: string })
-  | (FieldBase & { field: 'text_area'; value: string; placeholder: string; rows: number })
+  | (FieldBase & {
+      field: 'text_area'
+      value: string
+      placeholder: string
+      rows: number
+    })
   | (FieldBase & {
       field: 'number'
       value: number | null
@@ -474,6 +482,7 @@ export interface PageSnapshot {
   title: string
   description: string
   controls: (Action | Link)[]
+  filters?: Field[]
   blocks: Block[]
   follows: Follows | null
 }

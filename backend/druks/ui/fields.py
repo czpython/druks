@@ -8,6 +8,8 @@ from druks.schemas import Schema
 class Option(Schema):
     value: str
     label: str
+    # Empty: a flat choice. Set: the shell nests this option in an ``<optgroup>``.
+    group: str = ""
 
     def __init__(self, label: str, **data):
         super().__init__(label=label, **data)

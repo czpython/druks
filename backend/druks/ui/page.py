@@ -94,8 +94,10 @@ class PageRoute:
 
     def check(self, app_name: str) -> None:
         """Everything this page decides on its own: its catch-all sits last, and
-        it takes one name-callable parameter for each parameter of its route. A
-        child inherits its parent's; an extra one comes from the child path."""
+        it takes one required name-callable parameter for each parameter of its
+        route. Extra parameters must have defaults — they are query filters. A
+        child inherits its parent's; an extra required one comes from the child
+        path."""
         if any(":path}" in segment for segment in self.route.split("/")[:-1]):
             raise PageRouteError(
                 f"app {app_name!r} routes {self.name!r} at {self.route!r}, and its catch-all "
@@ -113,12 +115,22 @@ class PageRoute:
         by_name = {
             name for name, parameter in declared.items() if parameter.kind in _CALLABLE_BY_NAME
         }
-        if set(declared) == route_parameters and by_name == route_parameters:
+        if set(declared) != by_name:
+            raise PageRouteError(
+                f"app {app_name!r} page {self.name!r} takes {sorted(declared)}, and its route "
+                f"{self.route!r} carries {sorted(route_parameters)}. Take one parameter for "
+                "each route parameter, each one callable by name."
+            )
+        required = {
+            name for name, parameter in declared.items() if parameter.default is Parameter.empty
+        }
+        if required == route_parameters:
             return
         raise PageRouteError(
             f"app {app_name!r} page {self.name!r} takes {sorted(declared)}, and its route "
             f"{self.route!r} carries {sorted(route_parameters)}. Take one parameter for "
-            "each route parameter, each one callable by name."
+            "each route parameter, each one callable by name. Extra parameters must have "
+            "defaults — they are query filters."
         )
 
     @property

@@ -5,6 +5,7 @@ from pydantic import Field, model_validator
 from druks.schemas import Schema
 
 from .blocks import Action, Block, Link, Watched
+from .fields import Field as PageField
 
 
 class Page(Schema):
@@ -14,6 +15,7 @@ class Page(Schema):
     title: str
     description: str = ""
     controls: list[Action | Link] = Field(default_factory=list)
+    filters: list[PageField] = Field(default_factory=list)
     blocks: list[Block] = Field(default_factory=list)
     follows: Watched = None
 
