@@ -134,7 +134,7 @@ async def test_a_subscription_agent_runs_as_its_actor_or_the_default_account(dru
     assert as_actor.subscription.id == actor.id
     assert as_actor.charged_account_id == actor.account_id
     assert unattended.subscription.id == default_subscription.id
-    assert (as_actor.secrets, as_actor.secrets_id, as_actor.key) == ({}, actor.id, None)
+    assert (as_actor.secrets, as_actor.secrets_id) == ({}, actor.id)
     [secret] = as_actor.secret_refs
     assert secret.key == ("anthropic", actor.id, "", "")
     assert as_actor.harness_class is ClaudeHarness
@@ -161,11 +161,7 @@ async def test_a_key_agent_runs_on_the_installations_key_for_anyone(druks_db):
     unattended = await get_profile(PROFILE_PROBE.id, None)
 
     # Claude reads the key from a placeholder in the VM, never from its invocation.
-    assert (as_actor.secrets, as_actor.key, as_actor.subscription) == (
-        {"anthropic": _SHARED_ENTRY},
-        None,
-        None,
-    )
+    assert (as_actor.secrets, as_actor.subscription) == ({"anthropic": _SHARED_ENTRY}, None)
     assert unattended.secrets == {"anthropic": _SHARED_ENTRY}
     # The entries' identity is the pasted key, with no secret material.
     assert as_actor.secrets_id == f"anthropic.{pasted.updated_at:%Y%m%dT%H%M%S}"
@@ -182,7 +178,8 @@ async def test_a_key_agent_refuses_without_the_key(druks_db):
         await get_profile(PROFILE_PROBE.id, actor.account_id)
 
 
-async def test_opencode_runs_an_added_provider_with_its_key_and_model(druks_db):
+async def test_an_added_provider_refuses_until_its_transport_is_proven(druks_db):
+    # A Models.dev provider has no proven transport, so no raw key enters a box.
     await ProviderCatalog.create(
         "openrouter",
         [{"id": "openrouter/anthropic/claude-sonnet-4", "label": "Claude Sonnet 4"}],
@@ -197,12 +194,8 @@ async def test_opencode_runs_an_added_provider_with_its_key_and_model(druks_db):
     await SettingsOverride.set_agent_model(PROFILE_PROBE.id, "openrouter/anthropic/claude-sonnet-4")
     await SettingsOverride.set_agent_billing(PROFILE_PROBE.id, "api_key")
 
-    profile = await get_profile(PROFILE_PROBE.id, None)
-
-    assert profile.harness_class is OpenCodeHarness
-    assert profile.model == "openrouter/anthropic/claude-sonnet-4"
-    # OpenCode still reads the key from its invocation.
-    assert (profile.secrets, profile.key) == ({}, "sk-openrouter")
+    with pytest.raises(ProfileSettingsError, match="'openrouter'"):
+        await get_profile(PROFILE_PROBE.id, None)
 
 
 async def test_an_added_provider_without_a_key_names_it(druks_db):
@@ -238,7 +231,7 @@ async def test_a_key_only_harness_bills_the_key(druks_db):
     profile = await get_profile(PROFILE_PROBE.id, None)
 
     assert profile.harness_class is OpenCodeHarness
-    assert (profile.secrets, profile.key) == ({}, "sk-shared")
+    assert profile.secrets == {"anthropic": _SHARED_ENTRY}
 
 
 async def test_a_stored_triple_no_harness_runs_refuses(druks_db):
@@ -278,12 +271,8 @@ async def test_an_agent_reads_its_own_profile(druks_db):
         await PROFILE_PROBE.get_profile()
 
     assert (subscribed.harness, subscribed.model_id) == ("claude", "claude-opus-4-7")
-    assert (subscribed.billing, subscribed.secrets, subscribed.key) == ("subscription", {}, None)
-    assert (keyed.billing, keyed.secrets, keyed.key) == (
-        "api_key",
-        {"anthropic": _SHARED_ENTRY},
-        None,
-    )
+    assert (subscribed.billing, subscribed.secrets) == ("subscription", {})
+    assert (keyed.billing, keyed.secrets) == ("api_key", {"anthropic": _SHARED_ENTRY})
 
 
 async def test_an_unregistered_agent_is_named(druks_db):

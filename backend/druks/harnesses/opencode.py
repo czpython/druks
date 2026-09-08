@@ -37,11 +37,6 @@ class OpenCodeHarness(Harness):
     # owns an earlier deadline so it can abort the OpenCode session cleanly.
     first_byte_seconds = None
 
-    @classmethod
-    def auth_json(cls, provider: str, key: str) -> str:
-        """The auth store opencode reads from OPENCODE_AUTH_CONTENT."""
-        return json.dumps({provider: {"type": "api", "key": key}})
-
     async def build_invocation(
         self,
         *,
@@ -54,8 +49,9 @@ class OpenCodeHarness(Harness):
         skills: tuple[str, ...] = (),
         extra_env: dict[str, str] | None = None,
         mcp_servers: tuple[McpServer, ...] = (),
+        # Accepted for signature parity; opencode runs on an API key only, and
+        # the sandbox holds it as a placeholder in the provider's variable.
         subscription: VaultSecret | None = None,
-        key: str | None = None,
         timeout: int = Harness.default_timeout,
     ) -> AgentInvocation:
         if not self.sandbox:
@@ -91,7 +87,6 @@ class OpenCodeHarness(Harness):
             credentials=Credentials(),
             env={
                 **(extra_env or {}),
-                "OPENCODE_AUTH_CONTENT": self.auth_json(provider, key),
                 "DRUKS_RUN_DIR": f"{get_runs_root(ssh_username)}/{run_id}",
                 "OPENCODE_CONFIG_CONTENT": json.dumps(
                     {"$schema": "https://opencode.ai/config.json", "mcp": mcp},

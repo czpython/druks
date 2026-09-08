@@ -21,7 +21,7 @@ from .datastructures import (
     HarnessRunResult,
     SandboxSettings,
 )
-from .providers import Provider
+from .providers import Provider, get_provider, is_registered
 
 if TYPE_CHECKING:
     from druks.sandbox.datastructures import McpServer
@@ -106,8 +106,17 @@ class Harness(ABC):
         return bool(cls.billing_options & provider.billing_options)
 
     @classmethod
-    def get_secrets(cls, key: str) -> dict[str, Secret]:
-        return {}
+    def get_secrets(cls, provider: str, key: str) -> dict[str, Secret]:
+        """The Drukbox entries a box gets for the pasted key of ``provider``,
+        the one the model names. The CLI reads the placeholder from the
+        variable the entry names. A provider without a proven transport
+        refuses: no raw key enters a box."""
+        if is_registered(provider):
+            return {provider: get_provider(provider).get_secret(key)}
+        raise exceptions.ProfileSettingsError(
+            f"Druks has no proven API-key transport for provider {provider!r}. "
+            "Use an Anthropic or OpenAI key."
+        )
 
     @classmethod
     def get_secret_refs(cls, subscription: VaultSecret) -> list[SecretRef]:

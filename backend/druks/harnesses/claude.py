@@ -5,8 +5,6 @@ import shlex
 from pathlib import Path
 from typing import Any
 
-from drukbox_sdk import Secret
-
 from druks.sandbox.datastructures import (
     AgentInvocation,
     Credentials,
@@ -69,10 +67,9 @@ class ClaudeHarness(Harness):
         skills: tuple[str, ...] = (),
         extra_env: dict[str, str] | None = None,
         mcp_servers: tuple[McpServer, ...] = (),
-        # Both accepted for signature parity. The sandbox holds a placeholder
-        # for the subscription token or the key. Drukbox delivers it.
+        # Accepted for signature parity. The sandbox holds a placeholder for
+        # the subscription token or the key. Drukbox delivers it.
         subscription: VaultSecret | None = None,
-        key: str | None = None,
         timeout: int = Harness.default_timeout,
     ) -> AgentInvocation:
         if not self.sandbox:
@@ -192,18 +189,6 @@ class ClaudeHarness(Harness):
         # The catalog entry puts the placeholder in ANTHROPIC_AUTH_TOKEN, which
         # the CLI sends as a bearer. It never refreshes a token from there.
         return [SecretRef(name=AnthropicProvider.id, secret_id=subscription.id)]
-
-    @classmethod
-    def get_secrets(cls, key: str) -> dict[str, Secret]:
-        return {
-            AnthropicProvider.id: Secret(
-                key,
-                host="api.anthropic.com",
-                auth_variable="ANTHROPIC_API_KEY",
-                auth_header="x-api-key",
-                auth_prefix="",
-            )
-        }
 
     def _command_args(self) -> tuple[str, ...]:
         args = (self.command,)
