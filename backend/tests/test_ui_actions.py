@@ -73,6 +73,8 @@ def test_a_form_carries_its_fields_and_the_action_that_sends_them():
         }
     ]
     assert block["action"]["operation"] == "write_note"
+    assert block["submit"] == "button"
+    assert block["layout"] == "stack"
     assert "presentation" not in block
 
 
@@ -210,6 +212,15 @@ def test_a_form_keeps_all_fields_on_the_form():
                 fields=[TextField(name="tag", label="Tag")],
             ),
             fields=[TextField(name="body", label="Body")],
+        )
+
+
+def test_a_form_that_submits_on_change_cannot_also_confirm():
+    with pytest.raises(ValueError, match="submits on change"):
+        Form(
+            action=Action(label="Save", operation="write_note", confirm="Sure?"),
+            fields=[TextField(name="body", label="Note")],
+            submit="change",
         )
 
 

@@ -50,6 +50,11 @@ def _tables(page: dict) -> list[dict]:
     return page["blocks"][0]["blocks"]
 
 
+def _comments(page: dict) -> dict:
+    left = page["blocks"][0]["blocks"][0]["blocks"]
+    return next(block for block in left if block.get("name") == "comments")
+
+
 async def test_empty_board_shows_columns_and_create_actions(druks_client):
     page = (await druks_client.get(f"{_PAGES}/board")).json()
 
@@ -141,10 +146,21 @@ async def test_ticket_page_follows_the_row_and_comments_refresh_the_region(druks
 
     page = (await druks_client.get(f"{_PAGES}/tickets/{created['identifier']}")).json()
 
-    assert page["title"] == "Follow me"
+    assert page["title"] == created["identifier"]
     assert page["follows"] == {"subjectType": "ticket", "subjectId": str(row.id)}
-    assert page["controls"][0]["operation"] == "set_status"
-    comments = next(block for block in page["blocks"] if block.get("name") == "comments")
+    assert page["controls"] == []
+    columns = page["blocks"][0]
+    assert columns["layout"] == "sidebar"
+    left = columns["blocks"][0]["blocks"]
+    prose = left[0]
+    assert prose["submit"] == "change"
+    assert prose["layout"] == "prose"
+    assert prose["fields"][0]["value"] == "Follow me"
+    assert prose["action"]["operation"] == "update_ticket"
+    status = columns["blocks"][1]["blocks"][0]
+    assert status["action"]["operation"] == "set_status"
+    assert status["submit"] == "change"
+    comments = _comments(page)
     assert comments["title"] == "Comments"
     assert comments["blocks"][0]["title"] == "No comments yet"
     comment_form = comments["blocks"][1]
@@ -158,7 +174,7 @@ async def test_ticket_page_follows_the_row_and_comments_refresh_the_region(druks
     assert written.status_code == 201
 
     after = (await druks_client.get(f"{_PAGES}/tickets/{created['identifier']}")).json()
-    thread = next(block for block in after["blocks"] if block.get("name") == "comments")
+    thread = _comments(after)
     assert thread["blocks"][0]["blocks"][0]["text"] == "looks good"
 
 

@@ -161,6 +161,11 @@ class Ticket(StoredSubject):
         )
         session.add(ticket)
         await session.flush()
+        # Creating already in Ready for Agent is arriving at the trigger, the
+        # same as a later move into it. Todo and the rest stay quiet: drafting
+        # is not a funnel event.
+        if status == Status.READY_FOR_AGENT:
+            await ticket._emit_transitioned(status)
         return ticket
 
     def get_label(self) -> str:
@@ -211,6 +216,9 @@ class Ticket(StoredSubject):
         if self.status == status:
             return
         await self.set_status(status)
+        await self._emit_transitioned(status)
+
+    async def _emit_transitioned(self, status: Status) -> None:
         project = await IssuesProject.get(self.project_id)
         assignee = await Account.get(self.assignee_id) if self.assignee_id else None
         await publish(

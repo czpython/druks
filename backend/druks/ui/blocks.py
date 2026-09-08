@@ -187,13 +187,16 @@ class Action(PageBlock):
 
 class Form(PageBlock):
     """Inputs and the action that submits them. The shell sends the action's
-    arguments and the field values as one object."""
+    arguments and the field values as one object. ``submit="change"`` sends
+    on blur for text and on change for a select, with no button."""
 
     block: Literal["form"] = "form"
     title: str = ""
     description: str = ""
     fields: list[FormField] = Field(default_factory=list)
     action: Action
+    submit: Literal["button", "change"] = "button"
+    layout: Literal["stack", "prose", "row"] = "stack"
 
     def iter_actions(self) -> "Iterable[Action]":
         yield self.action
@@ -206,6 +209,11 @@ class Form(PageBlock):
         if self.action.fields:
             raise ValueError(
                 f"form {self.title!r} has fields on its action. Put all form fields on the form."
+            )
+        if self.submit == "change" and self.action.confirm:
+            raise ValueError(
+                f"form {self.title!r} submits on change and also asks to confirm. "
+                "A confirm is a press; give the form a button, or drop confirm."
             )
         _check_field_names(
             owner=f"form {self.title!r}",
@@ -578,10 +586,11 @@ class Stack(BlockParent):
 
 
 class Columns(BlockParent):
-    """Blocks across the page. Each child is one column; they share the width
-    and stack on a narrow screen."""
+    """Blocks across the page. ``even`` shares the width. ``sidebar`` keeps
+    the last column a rail. They stack on a narrow screen."""
 
     block: Literal["columns"] = "columns"
+    layout: Literal["even", "sidebar"] = "even"
 
     def __init__(self, blocks=(), **data):
         super().__init__(blocks=blocks, **data)
