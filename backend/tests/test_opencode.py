@@ -95,7 +95,6 @@ async def test_build_invocation_uses_server_schema_and_env_auth(
         schema={"type": "object", "properties": {"answer": {"type": "string"}}},
         run_id="run-1",
         ssh_username="exedev",
-        github_token="github-token",
         extra_env={"MCP_GITHUB_TOKEN": "mcp-secret", "MCP_TRACE_KEY": "trace-secret"},
         mcp_servers=(server,),
         timeout=60,
@@ -118,7 +117,6 @@ async def test_build_invocation_uses_server_schema_and_env_auth(
         assert text in wrapper
     assert invocation.stdin == b"A large prompt stays on stdin."
     assert invocation.credentials.home == ()
-    assert invocation.credentials.github_token == "github-token"
     env = invocation.env
     assert env is not None
     assert json.loads(env["OPENCODE_AUTH_CONTENT"]) == {

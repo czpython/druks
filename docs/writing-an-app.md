@@ -429,28 +429,57 @@ class Sweep(Workflow):
     workspace_class = RepoWorkspace
 ```
 
-Before every agent call Druks mints the GitHub App token for the subject's
-`repo`, writes it into the VM, and clones the default branch into
-`workspace.repo_path`. Prompts read `{{ workspace.repo_path }}`. In the VM,
-git and `gh` read the token through the sandbox helper. The clone is
-idempotent, so a warm host keeps its working tree and a host rotated in bare
-gets one back.
+Before every agent call Druks clones the default branch into
+`workspace.repo_path`. Prompts read `{{ workspace.repo_path }}`. The sandbox
+holds a placeholder for its GitHub token in `GH_TOKEN`, and Drukbox points git
+and `gh` at it. The Drukbox secrets proxy swaps the placeholder for a token
+that Druks mints on demand, so a long run never outlives its token. The clone
+is idempotent, so a warm host keeps its working tree and a host rotated in
+bare gets one back.
 
-Every workspace holds the run's `subject`. `RepoWorkspace.get_repo()` reads
-its `repo` column. Override it when the subject names the repository
+Every workspace holds the run's `subject`. `RepoWorkspace.get_repo(subject)`
+reads its `repo` column. Override it when the subject names the repository
 differently:
 
 ```python
 class SweepWorkspace(RepoWorkspace):
-    def get_repo(self) -> str:
-        return self.subject.full_name
+    @classmethod
+    def get_repo(cls, subject) -> str:
+        return subject.full_name
 ```
+
+The sandbox's GitHub token comes from a connected service of the appliance.
+`RepoWorkspace` names the operator App, `Github`. An app that acts as another
+identity declares its own service in its `services` module, a subclass with
+its own connect card, and names it on its workspace:
+
+```python
+from pydantic import BaseModel, Field, SecretStr
+
+from druks.core.services import Github
+from druks.workspaces import RepoWorkspace
+
+
+class GithubReviewer(Github):
+    required = False
+
+    class Settings(BaseModel):
+        app_id: str = Field(title="App ID")
+        private_key: SecretStr = Field(title="Private key (PEM)")
+
+
+class ReviewWorkspace(RepoWorkspace):
+    github = GithubReviewer
+```
+
+The operator connects the service in **Settings → Connections → Services**. The
+sandbox's identity stores the service and the repo. The issuer reads only
+those two, so a request cannot select another repo or identity.
 
 Override `Workflow.get_workspace_kwargs()` to pass `branch` or the fields a
 subclass adds. Extend `RepoWorkspace` by adding fields, not by cloning again.
-Override `get_github_token()` to clone and act as another identity,
-`run_agent()` to prepare the VM before the call, `get_agent_run_kwargs()` to
-grant directories or skills, and `get_required_mcp_servers()` to require an
+Override `run_agent()` to prepare the VM before the call, `get_agent_run_kwargs()`
+to grant directories or skills, and `get_required_mcp_servers()` to require an
 MCP server the workspace credentials itself.
 
 Keep durable state outside the VM. A workflow can set

@@ -1,3 +1,4 @@
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, Mock, call
@@ -458,6 +459,7 @@ async def test_token_for_repo_retries_on_401_and_succeeds() -> None:
             class _Tok:
                 class parsed_data:
                     token = "ghs_fresh_token"
+                    expires_at = "2026-09-07T18:00:00Z"
 
             return _Tok()
 
@@ -481,7 +483,8 @@ async def test_token_for_repo_retries_on_401_and_succeeds() -> None:
     client = _Client()
     token = await client.token_for_repo("ClawHaven/example")
 
-    assert token == "ghs_fresh_token"
+    # GitHub's expiry rides with the token, so a mint can answer it.
+    assert token == ("ghs_fresh_token", datetime(2026, 9, 7, 18, 0, tzinfo=UTC))
     assert calls["n"] == 2
     assert client.invalidated == ["ClawHaven/example"]
 

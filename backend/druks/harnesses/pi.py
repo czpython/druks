@@ -66,7 +66,6 @@ class PiHarness(Harness):
         schema: dict[str, object],
         run_id: str,
         ssh_username: str,
-        github_token: str | None = None,
         # Accepted for signature parity and dropped: pi has no plugin layer, it
         # runs with full filesystem access, and --no-skills is what keeps the
         # run hermetic.
@@ -146,7 +145,7 @@ class PiHarness(Harness):
             name=self.name,
             args=("sh", "-c", wrapper),
             stdin=prompt.encode("utf-8"),
-            credentials=Credentials(home=(auth_file,), github_token=github_token),
+            credentials=Credentials(home=(auth_file,)),
             env={
                 **(extra_env or {}),
                 "DRUKS_SCHEMA_PATH": in_vm_schema,

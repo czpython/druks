@@ -10,7 +10,7 @@ from druks.workflows import Workflow
 
 
 def _profile(secrets: dict[str, Secret], secrets_id: str = "") -> SimpleNamespace:
-    return SimpleNamespace(secrets=secrets, services={}, secrets_id=secrets_id)
+    return SimpleNamespace(secrets=secrets, sandbox_secrets=[], secrets_id=secrets_id)
 
 
 _ENTRY = Secret(
@@ -44,10 +44,10 @@ class _FakeSandboxClient:
         idempotency_key: str,
         secrets: dict[str, Secret],
         template: str | None,
-        grant: object = None,
+        identity: object = None,
     ) -> _FakeSandbox:
         assert template is None
-        assert grant is None
+        assert identity is None
         self.provisions.append(idempotency_key)
         self.secrets.append(secrets)
         host_id = f"host-{len(self.provisions)}"
@@ -67,6 +67,7 @@ def _warm_workflow(*, reuse: bool = True) -> Workflow:
     flow = Workflow.__new__(Workflow)
     flow.steps_reuse_sandbox = reuse
     flow._host = None
+    flow._subject = None
     flow._workflow_id = "wf-1"
     return flow
 
@@ -168,23 +169,27 @@ async def test_no_warm_host_when_reuse_disabled(monkeypatch):
     assert fake.provisions == []
 
 
-async def test_a_replay_finds_the_warm_box_through_its_grant(
+async def test_a_replay_finds_the_warm_box_through_its_identity(
     monkeypatch: pytest.MonkeyPatch, druks_db
 ) -> None:
+    from conftest import connect_provider
     from druks.database import db_session
-    from druks.sandbox.models import SandboxGrant
+    from druks.harnesses.providers import AnthropicProvider
+    from druks.sandbox.models import SandboxIdentity, SandboxSecret
     from druks.testing import seed_run
     from druks_field_notes.workflows import Summarize
 
     await seed_run(db_session(), kind=Summarize.kind, run_id="wf-1")
-    grant, _ = await SandboxGrant.create(
-        run_id="wf-1", scoped_to="workflow", services={"anthropic": "sub-1"}
+    subscription = await connect_provider(
+        AnthropicProvider, {"claudeAiOauth": {"accessToken": "test-token"}}
     )
-    await grant.bind("host-crashed")
+    secrets = [SandboxSecret(name="anthropic", subscription_id=subscription.id)]
+    identity, _ = await SandboxIdentity.create(run_id="wf-1", scoped_to="workflow", secrets=secrets)
+    await identity.bind("host-crashed")
     client = _FakeSandboxClient(lease=timedelta(hours=2))
     monkeypatch.setattr(sdk, "sandbox_client", client)
     flow = _warm_workflow()
-    profile = SimpleNamespace(secrets={}, services={"anthropic": "sub-1"}, secrets_id="sub-1")
+    profile = SimpleNamespace(secrets={}, sandbox_secrets=secrets, secrets_id=subscription.id)
 
     assert await flow._lease_host(profile) == "host-crashed"
 

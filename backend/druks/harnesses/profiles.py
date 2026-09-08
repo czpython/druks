@@ -4,6 +4,7 @@ from drukbox_sdk import Secret
 
 from druks.accounts.models import Account
 from druks.sandbox.constants import MAX_AGENT_TIMEOUT_SECONDS
+from druks.sandbox.models import SandboxSecret
 from druks.user_settings.models import SettingsOverride, SettingsProfile
 
 from .base import Harness
@@ -23,8 +24,8 @@ class Profile:
     subscription: ProviderSubscription | None
     api_key: ProviderKey | None
     secrets: dict[str, Secret]
-    # Service name → the subscription the box fetches.
-    services: dict[str, str]
+    # The secrets a box fetches through the issuer, beyond its pasted key.
+    sandbox_secrets: list[SandboxSecret]
     billing: str
     effort: str
     timeout: int
@@ -48,12 +49,10 @@ class Profile:
     @property
     def secrets_id(self) -> str:
         """What a box created for this profile holds: the pasted key, or the
-        subscription its grant fetches."""
+        subscriptions it fetches."""
         if self.secrets:
             return f"{self.api_key.provider}.{self.api_key.updated_at:%Y%m%dT%H%M%S}"
-        if self.services:
-            return ".".join(self.services.values())
-        return ""
+        return ".".join(secret.subscription_id or "" for secret in self.sandbox_secrets)
 
     @property
     def charged_account_id(self) -> str | None:
@@ -107,7 +106,7 @@ async def get_profile(agent_name: str, account_id: str | None) -> Profile:
     subscription = None
     provider_key = None
     secrets: dict[str, Secret] = {}
-    services: dict[str, str] = {}
+    sandbox_secrets: list[SandboxSecret] = []
     if billing == "api_key":
         provider_key = await ProviderKey.get(provider_id)
         if not provider_key:
@@ -116,7 +115,7 @@ async def get_profile(agent_name: str, account_id: str | None) -> Profile:
         secrets = harness_class.get_secrets(provider_key.value.decrypt())
     else:
         subscription = await ProviderSubscription.lookup(provider_id, account_id)
-        services = harness_class.get_services(subscription)
+        sandbox_secrets = harness_class.get_sandbox_secrets(subscription)
     timeout = (
         await SettingsOverride.agent_timeout(agent_name, agent.timeout, settings=settings)
     ).value
@@ -126,7 +125,7 @@ async def get_profile(agent_name: str, account_id: str | None) -> Profile:
         subscription=subscription,
         api_key=provider_key,
         secrets=secrets,
-        services=services,
+        sandbox_secrets=sandbox_secrets,
         billing=billing,
         effort=(await SettingsOverride.agent_effort(agent_name, settings=settings)).value,
         # Capped so a single call always fits inside a fresh sandbox lease.

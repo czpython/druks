@@ -34,8 +34,8 @@ class ExecFailed(SandboxError):
         self.exit_code = exit_code
 
 
-class GrantDenied(SandboxError):
-    """A fetch names no live grant for its bearer and service."""
+class IdentityDenied(SandboxError):
+    """A fetch names no live sandbox identity for its bearer and secret."""
 
 
 class HostGone(SandboxError):

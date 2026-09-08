@@ -49,5 +49,8 @@ async def test_survey_workspace_clones_the_subject_repo(druks_db):
 
     workspace = await workflow.get_workspace(host)
 
-    assert (workspace.get_repo(), workspace.branch) == ("acme/widgets", None)
+    assert (workspace.get_repo(workspace.subject), workspace.branch) == ("acme/widgets", None)
     assert workspace.repo_path == get_repo_root("exedev")
+    # The box's secret names the operator identity and the repo before the box exists.
+    [secret] = await workflow.get_sandbox_secrets()
+    assert secret.key == ("github", "github", None, "acme/widgets")

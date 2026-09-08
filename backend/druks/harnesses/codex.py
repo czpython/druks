@@ -357,7 +357,6 @@ class CodexHarness(Harness):
         schema: dict[str, object],
         run_id: str,
         ssh_username: str,
-        github_token: str | None = None,
         # Accepted for signature parity with ClaudeHarness; codex has no
         # plugin layer so there's nothing to skip, and it runs with full FS
         # access so it needs no per-dir grants.
@@ -396,7 +395,6 @@ class CodexHarness(Harness):
             stdin=_with_final_message_note(prompt).encode("utf-8"),
             credentials=await self._get_credentials(
                 sandbox,
-                github_token=github_token,
                 skills=skills,
                 subscription=subscription,
                 key=key,
@@ -478,7 +476,6 @@ class CodexHarness(Harness):
         self,
         sandbox: SandboxSettings,
         *,
-        github_token: str | None,
         skills: tuple[str, ...] = (),
         subscription: ProviderSubscription | None,
         key: str | None,
@@ -494,7 +491,7 @@ class CodexHarness(Harness):
         home.append(
             HomeCopy(".codex/skills", skills_dir, excludes=await Skill.delivery_excludes(skills))
         )
-        return Credentials(home=tuple(home), github_token=github_token)
+        return Credentials(home=tuple(home))
 
     @classmethod
     def auth_file(

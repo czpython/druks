@@ -11,6 +11,7 @@ from drukbox_sdk import Secret
 
 from druks.mcp import models as mcp_models
 from druks.mcp.helpers import get_bearer_token_env_var
+from druks.sandbox.models import SandboxSecret
 from druks.skills.models import Skill
 
 from . import exceptions
@@ -109,10 +110,10 @@ class Harness(ABC):
         return {}
 
     @classmethod
-    def get_services(cls, subscription: ProviderSubscription) -> dict[str, str]:
-        """The subscription a box fetches, by Drukbox catalog service name.
-        Empty for a CLI that reads its credential from a file."""
-        return {}
+    def get_sandbox_secrets(cls, subscription: ProviderSubscription) -> list[SandboxSecret]:
+        """The secrets a box fetches for the subscription, by Drukbox catalog
+        name. Empty for a CLI that reads its credential from a file."""
+        return []
 
     @property
     def model_id(self) -> str:

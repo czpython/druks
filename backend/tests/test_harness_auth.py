@@ -41,7 +41,7 @@ async def test_claude_bundle_carries_no_credential_file(druks_db):
         image="x",
         harness_config_root=Path("/harnesses"),
     )
-    bundle = await _get_credentials(sandbox, github_token=None)
+    bundle = await _get_credentials(sandbox)
     assert not any(type(entry) is HomeFile for entry in bundle.home)
     assert bundle.home[0] == HomeCopy(".claude.json", Path("/harnesses/claude/.claude.json"))
 
@@ -75,7 +75,7 @@ async def test_credentials_builders_read_their_harness_config_directories(druks_
         harness_config_root=config_root,
     )
 
-    claude_bundle = await _get_credentials(sandbox, github_token=None)
+    claude_bundle = await _get_credentials(sandbox)
     codex_bundle = await CodexHarness(
         model=CodexHarness.default_model,
         fast_mode=False,
@@ -83,7 +83,6 @@ async def test_credentials_builders_read_their_harness_config_directories(druks_
         sandbox=sandbox,
     )._get_credentials(
         sandbox,
-        github_token=None,
         subscription=codex_subscription,
         key=None,
     )
@@ -123,19 +122,6 @@ async def test_credentials_builders_read_their_harness_config_directories(druks_
     )
     assert HomeCopy(".codex/AGENTS.md", config_root / "codex/AGENTS.md") in codex_bundle.home
     assert codex_bundle.home[-1].source == config_root / "codex/skills"
-
-
-async def test_missing_config_root_keeps_the_github_token(druks_db, tmp_path):
-    sandbox = SandboxSettings(
-        service_url="x",
-        service_token="x",
-        service_timeout=30.0,
-        image="x",
-        harness_config_root=tmp_path / "missing",
-    )
-    bundle = await _get_credentials(sandbox, github_token="gh")
-    assert not any(type(entry) is HomeFile for entry in bundle.home)
-    assert bundle.github_token == "gh"
 
 
 @pytest.mark.parametrize(

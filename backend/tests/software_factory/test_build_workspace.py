@@ -1,5 +1,6 @@
 import shlex
 import subprocess
+from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -7,7 +8,9 @@ from typing import Any
 import pytest
 from druks import workspaces as workspace_mod
 from druks.contrib.software_factory.constants import GITHUB_MCP_NAME, GITHUB_MCP_URL
-from druks.contrib.software_factory.workflows import Build, BuildWorkspace
+from druks.contrib.software_factory.services import GithubReviewer
+from druks.contrib.software_factory.workflows import Build, BuildWorkspace, ReviewWorkspace
+from druks.core.services import Github
 from druks.mcp.helpers import get_bearer_token_env_var
 from druks.sandbox import host as host_mod
 from druks.sandbox.layout import get_related_root, get_repo_root
@@ -94,8 +97,8 @@ def _review_actor_stub(monkeypatch: pytest.MonkeyPatch, *, review_actor) -> None
 
 @pytest.mark.asyncio
 async def test_get_workspace_kwargs_carries_the_build_fields(monkeypatch: pytest.MonkeyPatch):
-    async def _review_token(_repo: str) -> str:
-        return "ghs_review"
+    async def _review_token(_repo: str) -> tuple[str, datetime]:
+        return "ghs_review", datetime(2026, 9, 7, 18, 0, tzinfo=UTC)
 
     _review_actor_stub(
         monkeypatch,
@@ -126,7 +129,7 @@ async def test_get_workspace_kwargs_fails_loudly_when_the_token_wont_mint(
 ):
     # There is no build without github: a run that can't mint its MCP token
     # fails at workspace setup, never degrades mid-run.
-    async def _no_token(_repo: str) -> str:
+    async def _no_token(_repo: str) -> tuple[str, datetime]:
         raise RuntimeError("app not installed on this repo")
 
     _review_actor_stub(
@@ -144,6 +147,24 @@ async def test_get_workspace_kwargs_fails_loudly_when_the_token_wont_mint(
 
     with pytest.raises(FatalError, match="github MCP server"):
         await workflow.get_workspace_kwargs(sandbox)
+
+
+def test_the_build_clones_as_the_operator():
+    assert BuildWorkspace.github is Github
+
+
+@pytest.mark.asyncio
+async def test_the_review_workspace_names_the_review_actors_identity(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    _review_actor_stub(
+        monkeypatch,
+        review_actor=lambda: SimpleNamespace(service=GithubReviewer, client=None, mode="approve"),
+    )
+
+    [secret] = await ReviewWorkspace.get_sandbox_secrets(SimpleNamespace(repo="o/app"))
+
+    assert secret.key == ("github", "github_reviewer", None, "o/app")
 
 
 class _IdentitySandbox:

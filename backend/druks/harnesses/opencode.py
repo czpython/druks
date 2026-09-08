@@ -49,7 +49,6 @@ class OpenCodeHarness(Harness):
         schema: dict[str, object],
         run_id: str,
         ssh_username: str,
-        github_token: str | None = None,
         include_plugins: bool = True,
         add_dirs: tuple[str, ...] = (),
         skills: tuple[str, ...] = (),
@@ -86,7 +85,7 @@ class OpenCodeHarness(Harness):
             name=self.name,
             args=("sh", "-c", _WRAPPER),
             stdin=prompt.encode("utf-8"),
-            credentials=Credentials(github_token=github_token),
+            credentials=Credentials(),
             env={
                 **(extra_env or {}),
                 "OPENCODE_AUTH_CONTENT": self.auth_json(provider, key),
