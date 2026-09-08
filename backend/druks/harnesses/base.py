@@ -11,7 +11,8 @@ from drukbox_sdk import Secret
 
 from druks.mcp import models as mcp_models
 from druks.mcp.helpers import get_bearer_token_env_var
-from druks.sandbox.models import SandboxSecret
+from druks.sandbox.models import SecretRef
+from druks.secrets.models import VaultSecret
 from druks.skills.models import Skill
 
 from . import exceptions
@@ -20,7 +21,6 @@ from .datastructures import (
     HarnessRunResult,
     SandboxSettings,
 )
-from .models import ProviderSubscription
 from .providers import Provider
 
 if TYPE_CHECKING:
@@ -93,9 +93,9 @@ class Harness(ABC):
             raise exceptions.HarnessError(message)
 
     @classmethod
-    def accepts(cls, subscription: ProviderSubscription) -> bool:
+    def accepts(cls, subscription: VaultSecret) -> bool:
         """Whether this CLI runs on the subscription ``subscription``."""
-        bound = not cls.provider or cls.provider == subscription.provider
+        bound = not cls.provider or cls.provider == subscription.audience_name
         return bound and "subscription" in cls.billing_options
 
     @classmethod
@@ -110,7 +110,7 @@ class Harness(ABC):
         return {}
 
     @classmethod
-    def get_sandbox_secrets(cls, subscription: ProviderSubscription) -> list[SandboxSecret]:
+    def get_secret_refs(cls, subscription: VaultSecret) -> list[SecretRef]:
         """The secrets a box fetches for the subscription, by Drukbox catalog
         name. Empty for a CLI that reads its credential from a file."""
         return []

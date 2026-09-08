@@ -3,10 +3,10 @@ from unittest.mock import AsyncMock
 
 import druks.contrib.software_factory.subscribers as subs
 import pytest
+from conftest import connect_service
 from druks.contrib.software_factory import webhooks as webhook_module
 from druks.contrib.software_factory.webhooks import JiraEvents
 from druks.contrib.software_factory.workflows import Build
-from druks.services.models import ServiceIdentity
 from druks.testing import make_settings, seed_run
 from druks.webhooks.router import router as webhooks_router
 from fastapi import HTTPException
@@ -59,7 +59,7 @@ def test_route_is_unchanged():
 
 
 async def _connect_jira(*, base_url="https://jira.test/", webhook_secret="s3cret"):
-    return await ServiceIdentity.connect(
+    return await connect_service(
         "jira",
         identity={"base_url": base_url, "email": "a@b.com", "display_name": "druks"},
         secrets={"api_token": "tok", "webhook_secret": webhook_secret},
@@ -197,7 +197,7 @@ async def test_trigger_status_does_not_redispatch_a_merged_item(druks_db, monkey
 
 
 async def test_trigger_status_redispatches_a_closed_item(druks_db, monkeypatch):
-    await ServiceIdentity.connect(
+    await connect_service(
         "github",
         identity={"app_id": "1", "slug": "druks-operator"},
         secrets={"private_key": "operator-pem", "webhook_secret": "hook-secret"},

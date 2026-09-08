@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field, SecretStr
 
 from druks.core.apis.github import GitHubClient
 from druks.core.apis.linear import LINEAR_GRAPHQL_URL
+from druks.secrets.enums import SecretKind
 from druks.services import Service, ServiceConnectError
 from druks.settings import load_settings
 
@@ -16,6 +17,7 @@ _VERIFY_TIMEOUT = 10.0
 
 
 class Github(Service):
+    secret_kind = SecretKind.APP_KEY
     # The Drukbox catalog name a box holds this identity's token under.
     secret_name = "github"
     description = (
@@ -66,7 +68,7 @@ class Github(Service):
 
     @classmethod
     async def client(cls) -> GitHubClient:
-        return GitHubClient.from_identity(await cls.get())
+        return GitHubClient.from_secret(await cls.get())
 
     @classmethod
     async def issue_token(cls, resource: str) -> tuple[str, datetime]:

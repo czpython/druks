@@ -6,8 +6,10 @@ from druks.accounts.dependencies import current_account
 from druks.accounts.models import Account
 from druks.core.utils.time import operator_local_day
 from druks.harnesses.artifacts import normalize_token_usage
-from druks.harnesses.models import ProviderSubscription
 from druks.harnesses.providers import Provider, get_providers
+from druks.secrets.datastructures import Audience
+from druks.secrets.enums import SecretKind
+from druks.secrets.models import VaultSecret
 from druks.usage.models import UsageScrape
 from druks.usage.reads import list_finished_calls
 from druks.usage.schemas import (
@@ -49,14 +51,16 @@ async def get_usage(account: Account = Depends(current_account)) -> UsageRespons
     now = datetime.now(UTC)
     summaries = []
     for provider in get_providers():
-        subscription = await ProviderSubscription.get_for_account(provider.id, account.id)
+        subscription = await VaultSecret.lookup(
+            SecretKind.SUBSCRIPTION, Audience.provider(provider.id), account.id
+        )
         summaries.append(
             _summarize(
                 await UsageScrape.latest_for(provider.id, account.id),
                 provider=provider,
                 now=now,
                 connected=bool(subscription),
-                provider_email=subscription.provider_email if subscription else None,
+                provider_email=subscription.identity["email"] if subscription else None,
             )
         )
     return UsageResponse(providers=summaries)
@@ -66,7 +70,9 @@ async def get_usage(account: Account = Depends(current_account)) -> UsageRespons
 async def refresh_usage(account: Account = Depends(current_account)) -> None:
     now = datetime.now(UTC)
     for provider in get_providers():
-        subscription = await ProviderSubscription.get_for_account(provider.id, account.id)
+        subscription = await VaultSecret.lookup(
+            SecretKind.SUBSCRIPTION, Audience.provider(provider.id), account.id
+        )
         row = await UsageScrape.latest_for(provider.id, account.id)
         age = _age_seconds(row.scraped_at, now=now) if row else None
         if subscription and (age is None or age >= _REFRESH_FLOOR_SECONDS):

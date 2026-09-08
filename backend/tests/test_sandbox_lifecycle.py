@@ -25,7 +25,7 @@ from druks.sandbox.constants import SANDBOX_HOST_LEASE_SECONDS
 from druks.sandbox.datastructures import Credentials, HomeCopy, HomeFile
 from druks.sandbox.exceptions import ExecFailed, HostGone, SandboxUnreachable
 from druks.sandbox.host import ExecResult
-from druks.sandbox.models import SandboxIdentity, SandboxSecret
+from druks.sandbox.models import SandboxIdentity, SecretRef
 from druks.testing import seed_run
 from druks_field_notes.workflows import Summarize
 
@@ -791,7 +791,7 @@ async def _identity() -> SandboxIdentity:
     identity, _ = await SandboxIdentity.create(
         run_id="run-1",
         scoped_to="workflow",
-        secrets=[SandboxSecret(name="anthropic", subscription_id=subscription.id)],
+        secret_refs=[SecretRef(name="anthropic", secret_id=subscription.id)],
     )
     return identity
 
@@ -922,4 +922,4 @@ async def test_a_gone_box_loses_its_identity_and_the_retry_provisions_anew(
 
     await db_session().refresh(identity)
     assert not identity.is_live
-    assert await SandboxIdentity.lookup("run-1", "workflow", identity.secrets) is None
+    assert await SandboxIdentity.lookup("run-1", "workflow", identity.secret_refs) is None

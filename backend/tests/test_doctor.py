@@ -6,10 +6,11 @@ from unittest.mock import AsyncMock
 
 import httpx
 import pytest
+from conftest import connect_service
 from druks import doctor
 from druks.database import db_session
 from druks.sandbox.exceptions import TemplateNotFound
-from druks.services.models import ServiceIdentity
+from druks.secrets.models import VaultSecret
 from druks.testing import make_settings
 
 
@@ -37,8 +38,8 @@ def doctor_db(druks_db, monkeypatch: pytest.MonkeyPatch):
     db_session.registry.set(druks_db)
 
 
-async def _connect_github(slug: str = "druks-operator") -> ServiceIdentity:
-    return await ServiceIdentity.connect(
+async def _connect_github(slug: str = "druks-operator") -> VaultSecret:
+    return await connect_service(
         "github",
         identity={"app_id": "12345", "slug": slug},
         secrets={

@@ -485,8 +485,7 @@ not declare the URL, pin the URL.
 The dashboard can enable catalog entries and add custom servers. Authentication
 is one of:
 
-- A static token that Druks stores encrypted in Postgres
-- A token from a named process environment variable
+- A static token, which Druks keeps in the vault
 - An OAuth connection, which requires `urls.endpoint`.
 
 Druks delivers enabled servers through the selected harness unless an app
@@ -507,12 +506,23 @@ set for each agent.
 
 ## Credential custody and secrets at rest
 
-`secrets.secrets_key` encrypts MCP tokens, OAuth grants, browser-session
-payloads, and the GitHub service identity's private key and webhook secret
-with AES-256-GCM.
-Each database column supplies authenticated associated data, and each value
-gets a derived encryption key. The setting is one or more comma-separated,
-base64-encoded 32-byte master keys:
+Druks keeps every secret it holds in one table, the vault. A vault row has a
+kind, an audience, and an encrypted mapping of secrets:
+
+| Kind | Audience | What the row keeps |
+| --- | --- | --- |
+| `static` | `provider:<id>`, `mcp:<name>` | A pasted API key, an MCP bearer token, or one secret header |
+| `app_key` | `service:<slug>` | A GitHub App private key and webhook secret |
+| `oauth` | `service:<slug>`, `mcp:<name>` | A refresh token and the client that refreshes it |
+| `subscription` | `provider:<id>` | The token payload of a provider subscription |
+
+A revoked row keeps its facts and loses its secrets. An agent call keeps its
+reference to the row it billed. A reconnect revives the row.
+
+`secrets.secrets_key` encrypts the vault and the browser-session payloads with
+AES-256-GCM. Each database column supplies authenticated associated data, and
+each value gets a derived encryption key. The setting is one or more
+comma-separated, base64-encoded 32-byte master keys:
 
 ```bash
 python3 -c 'import base64, os; print(base64.b64encode(os.urandom(32)).decode())'
@@ -526,19 +536,19 @@ the key, put a new key first in `druks.toml`. Then run the installer again:
 secrets_key = "<new>,<old>"
 ```
 
-While a stored row depends on the old key, keep that key. If you lose each key for a
-row, you cannot recover that secret. Reconnect the OAuth grants. Enter the
-static tokens again. Log in to the affected browser sessions again. Validation
-and API errors do not include submitted secret values.
+While a stored row depends on the old key, keep that key. If you lose each key
+for a row, you cannot recover that secret. Reconnect the OAuth grants and the
+subscriptions. Enter the static tokens again. Log in to the affected browser
+sessions again. Validation and API errors do not include submitted secret
+values.
 
 `secrets.drukbox_secrets_key` encrypts the secret entries of each sandbox in
 the Drukbox database. The installer generates it and renders it as
 `SECRETS_KEY` for the Drukbox API and the secrets exchange. Rotate it as you
 rotate `secrets_key`, with the new key first.
 
-The encryption envelope does **not** currently cover harness subscription
-payloads or notification webhook URLs. Postgres stores them as
-ordinary Postgres fields, although APIs withhold or mask their values. Treat
-access to Postgres and its backups as access to those credentials. GitHub App
-private keys — the operator identity's and the review identity's — are
-database values under the envelope, no longer files mounted into the process.
+The envelope does **not** cover notification webhook URLs. Postgres stores
+them as ordinary fields, although the API masks their values. Treat access to
+Postgres and its backups as access to those values. GitHub App private keys,
+the operator identity's and the review identity's, are vault rows, not files
+mounted into the process.

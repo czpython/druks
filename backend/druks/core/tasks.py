@@ -3,9 +3,9 @@ import logging
 from druks.files.storage import reap_deleted_file_bytes
 from druks.harnesses.datastructures import RotationResult
 from druks.harnesses.directory import refresh_added_catalogs
-from druks.harnesses.models import ProviderSubscription
 from druks.harnesses.providers import get_provider, get_providers
 from druks.sandbox import gate
+from druks.secrets.models import VaultSecret
 from druks.workflows import task
 
 logger = logging.getLogger(__name__)
@@ -34,7 +34,7 @@ async def refresh_catalogs() -> None:
 
 
 async def _refresh() -> dict[str, object]:
-    subscriptions = await ProviderSubscription.list_all()
+    subscriptions = await VaultSecret.list_subscriptions()
 
     # A rotation ends the token every box holds, so a due rotation runs only
     # while its subscription is idle, or once urgent. rotate_token no-ops
@@ -42,10 +42,10 @@ async def _refresh() -> dict[str, object]:
     # plain values: each refresh commits and expires the session's ORM objects.
     rows = [
         (
-            subscription.provider,
+            subscription.audience_name,
             subscription.id,
-            get_provider(subscription.provider).needs_refresh(subscription),
-            get_provider(subscription.provider).refresh_is_urgent(subscription),
+            get_provider(subscription.audience_name).needs_refresh(subscription),
+            get_provider(subscription.audience_name).refresh_is_urgent(subscription),
         )
         for subscription in subscriptions
     ]

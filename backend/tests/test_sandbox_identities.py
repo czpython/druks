@@ -4,15 +4,14 @@ from datetime import UTC, datetime, timedelta
 
 import httpx
 import pytest
-from conftest import connect_provider
+from conftest import connect_provider, connect_service
 from druks.core.services import Github
 from druks.database import db_session
 from druks.durable.engine import _step_engine
 from druks.harnesses import providers as pbase
 from druks.harnesses.providers import AnthropicProvider
 from druks.sandbox.constants import SANDBOX_HOST_LEASE_SECONDS
-from druks.sandbox.models import SandboxIdentity, SandboxSecret
-from druks.services.models import ServiceIdentity
+from druks.sandbox.models import SandboxIdentity, SecretRef
 from druks.testing import asgi_client, configure_app_for_test, make_settings, seed_run
 from druks_field_notes.workflows import Summarize
 from sqlalchemy.exc import IntegrityError
@@ -34,14 +33,14 @@ async def _subscription(email: str = "op@example.com", **kwargs):
     return await connect_provider(AnthropicProvider, _payload(**kwargs), provider_email=email)
 
 
-def _anthropic(subscription) -> SandboxSecret:
-    return SandboxSecret(name="anthropic", subscription_id=subscription.id)
+def _anthropic(subscription) -> SecretRef:
+    return SecretRef(name="anthropic", secret_id=subscription.id)
 
 
 async def _bound_identity(subscription, *, state: str = "running") -> tuple[SandboxIdentity, str]:
     await seed_run(db_session(), kind=Summarize.kind, run_id="run-1", state=state)
     identity, entries = await SandboxIdentity.create(
-        run_id="run-1", scoped_to="workflow", secrets=[_anthropic(subscription)]
+        run_id="run-1", scoped_to="workflow", secret_refs=[_anthropic(subscription)]
     )
     await identity.bind("host-1")
     return identity, entries["anthropic"].headers["Authorization"].removeprefix("Bearer ")
@@ -83,7 +82,7 @@ async def test_an_identity_keeps_the_hash_and_puts_the_bearer_in_the_issuer_entr
     await seed_run(db_session(), kind=Summarize.kind, run_id="run-1")
 
     identity, entries = await SandboxIdentity.create(
-        run_id="run-1", scoped_to="workflow", secrets=[_anthropic(subscription)]
+        run_id="run-1", scoped_to="workflow", secret_refs=[_anthropic(subscription)]
     )
 
     [entry] = entries.values()
@@ -99,8 +98,8 @@ async def test_an_identity_keeps_the_hash_and_puts_the_bearer_in_the_issuer_entr
     assert identity.expires_at - identity.created_at == timedelta(
         seconds=SANDBOX_HOST_LEASE_SECONDS
     )
-    [secret] = identity.secrets
-    assert secret.key == ("anthropic", None, subscription.id, "")
+    [secret] = identity.secret_refs
+    assert secret.key == ("anthropic", subscription.id, "")
     rows = [identity, secret]
     columns = {
         column.name: getattr(row, column.name) for row in rows for column in row.__table__.columns
@@ -113,10 +112,10 @@ async def test_one_box_holds_one_identity(druks_db):
     subscription = await _subscription()
     await seed_run(db_session(), kind=Summarize.kind, run_id="run-1")
     first, _ = await SandboxIdentity.create(
-        run_id="run-1", scoped_to="workflow", secrets=[_anthropic(subscription)]
+        run_id="run-1", scoped_to="workflow", secret_refs=[_anthropic(subscription)]
     )
     second, _ = await SandboxIdentity.create(
-        run_id="run-1", scoped_to="workflow", secrets=[_anthropic(subscription)]
+        run_id="run-1", scoped_to="workflow", secret_refs=[_anthropic(subscription)]
     )
 
     await first.bind("host-1")
@@ -129,25 +128,22 @@ async def test_an_identity_needs_its_run(druks_db):
 
     with pytest.raises(IntegrityError):
         await SandboxIdentity.create(
-            run_id="no-such-run", scoped_to="workflow", secrets=[_anthropic(subscription)]
+            run_id="no-such-run", scoped_to="workflow", secret_refs=[_anthropic(subscription)]
         )
 
 
-@pytest.mark.parametrize("source", ["none", "both", "unknown_service", "unknown_subscription"])
-async def test_a_secret_names_one_source_that_exists(druks_db, source):
-    """The table says where a secret comes from: one connected service, or one
-    subscription. Anything else is refused."""
-    subscription = await _subscription()
+@pytest.mark.parametrize("source", ["none", "unknown"])
+async def test_a_ref_names_a_vault_row_that_exists(druks_db, source):
+    """The table says which vault row a secret comes from. Anything else is
+    refused."""
     await seed_run(db_session(), kind=Summarize.kind, run_id="run-1")
     secret = {
-        "none": SandboxSecret(name="github"),
-        "both": SandboxSecret(name="github", service="github", subscription_id=subscription.id),
-        "unknown_service": SandboxSecret(name="github", service="nobody"),
-        "unknown_subscription": SandboxSecret(name="anthropic", subscription_id="no-such-row"),
+        "none": SecretRef(name="github"),
+        "unknown": SecretRef(name="github", secret_id="no-such-row"),
     }[source]
 
     with pytest.raises(IntegrityError):
-        await SandboxIdentity.create(run_id="run-1", scoped_to="workflow", secrets=[secret])
+        await SandboxIdentity.create(run_id="run-1", scoped_to="workflow", secret_refs=[secret])
 
 
 async def test_the_issuer_answers_a_fresh_token_with_its_expiry(druks_db, tmp_path, monkeypatch):
@@ -226,44 +222,49 @@ async def test_lookup_finds_the_live_bound_identity_of_a_scope(druks_db) -> None
     one = await _subscription("one@example.com")
     two = await _subscription("two@example.com")
     secrets = [_anthropic(one)]
-    await SandboxIdentity.create(run_id="run-1", scoped_to="workflow", secrets=secrets)
-    revoked, _ = await SandboxIdentity.create(run_id="run-1", scoped_to="workflow", secrets=secrets)
+    await SandboxIdentity.create(run_id="run-1", scoped_to="workflow", secret_refs=secrets)
+    revoked, _ = await SandboxIdentity.create(
+        run_id="run-1", scoped_to="workflow", secret_refs=secrets
+    )
     await revoked.bind("host-revoked")
     await revoked.revoke()
     other_scope, _ = await SandboxIdentity.create(
-        run_id="run-1", scoped_to="reviewer", secrets=secrets
+        run_id="run-1", scoped_to="reviewer", secret_refs=secrets
     )
     await other_scope.bind("host-reviewer")
     other_secrets, _ = await SandboxIdentity.create(
-        run_id="run-1", scoped_to="workflow", secrets=[_anthropic(two)]
+        run_id="run-1", scoped_to="workflow", secret_refs=[_anthropic(two)]
     )
     await other_secrets.bind("host-other")
-    live, _ = await SandboxIdentity.create(run_id="run-1", scoped_to="workflow", secrets=secrets)
+    live, _ = await SandboxIdentity.create(
+        run_id="run-1", scoped_to="workflow", secret_refs=secrets
+    )
     await live.bind("host-live")
 
     found = await SandboxIdentity.lookup("run-1", "workflow", secrets)
 
     assert found is not None
     assert found.id == live.id
-    more = [*secrets, SandboxSecret(name="github", service="github", resource="acme/widgets")]
+    more = [*secrets, SecretRef(name="github", secret_id="other", resource="acme/widgets")]
     assert await SandboxIdentity.lookup("run-1", "workflow", more) is None
     assert await SandboxIdentity.lookup("run-2", "workflow", secrets) is None
 
 
 async def _connect_github(slug: str = "github") -> None:
-    await ServiceIdentity.connect(
+    await connect_service(
         slug,
         identity={"app_id": "1", "slug": "druks-operator"},
         secrets={"private_key": "operator-pem"},
     )
 
 
-async def _github_identity(*, service: str = "github") -> tuple[SandboxIdentity, str]:
+async def _github_identity() -> tuple[SandboxIdentity, str]:
     await seed_run(db_session(), kind=Summarize.kind, run_id="run-1")
+    secret_id = (await Github.get()).id
     identity, entries = await SandboxIdentity.create(
         run_id="run-1",
         scoped_to="workflow",
-        secrets=[SandboxSecret(name="github", service=service, resource="acme/widgets")],
+        secret_refs=[SecretRef(name="github", secret_id=secret_id, resource="acme/widgets")],
     )
     await identity.bind("host-1")
     return identity, entries["github"].headers["Authorization"].removeprefix("Bearer ")
@@ -299,7 +300,7 @@ async def test_a_disconnected_service_ends_its_secrets(druks_db, tmp_path):
     await _connect_github()
     identity, bearer = await _github_identity()
 
-    await db_session().delete(await ServiceIdentity.get("github"))
+    await db_session().delete(await Github.get())
     await db_session().commit()
 
     response = await _fetch(tmp_path, identity.id, bearer, "github")

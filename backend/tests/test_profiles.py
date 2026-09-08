@@ -11,10 +11,13 @@ from druks.database import db_session
 from druks.durable.models import AgentCall
 from druks.harnesses.claude import ClaudeHarness
 from druks.harnesses.exceptions import HarnessNotConnectedError, ProfileSettingsError
-from druks.harnesses.models import ProviderCatalog, ProviderKey
+from druks.harnesses.models import ProviderCatalog
 from druks.harnesses.opencode import OpenCodeHarness
 from druks.harnesses.profiles import check_profile, get_profile
 from druks.sandbox.constants import MAX_AGENT_TIMEOUT_SECONDS
+from druks.secrets.datastructures import Audience
+from druks.secrets.enums import SecretKind
+from druks.secrets.models import VaultSecret
 from druks.testing import seed_call, seed_run
 from druks.user_settings import reads
 from druks.user_settings.models import SettingsOverride, SettingsProfile
@@ -51,11 +54,11 @@ async def test_check_judges_the_triple_together(druks_db):
         await check_profile("claude", "claude-opus-4-7", "subscription")
 
 
-async def _key() -> ProviderKey:
-    return await ProviderKey.create(
-        provider="anthropic",
-        key="sk-shared",
-        account=await Account.get_or_create("ops@example.com"),
+async def _key() -> VaultSecret:
+    return await VaultSecret.paste(
+        Audience.provider("anthropic"),
+        "sk-shared",
+        pasted_by=await Account.get_or_create("ops@example.com"),
     )
 
 
@@ -78,25 +81,25 @@ async def test_call_keeps_its_billing_reference_after_disconnect(druks_db, billi
         run,
         PROFILE_PROBE.id,
         subscription_id=subscription.id if billing == "subscription" else None,
-        api_key_provider=key.provider if billing == "api_key" else None,
+        api_key_id=key.id if billing == "api_key" else None,
     )
 
     if billing == "subscription":
-        await subscription.delete()
-        await subscription.update_payload({"late_refresh": "secret"}, expires_at=None)
-        assert not dict(subscription.payload)
-        assert not subscription.is_connected
-        assert await type(subscription).get(subscription.id) is None
+        await subscription.revoke("user")
+        await subscription.update_secrets({"late_refresh": "secret"}, expires_at=None)
+        assert not dict(subscription.secrets)
+        assert not subscription.is_live
+        assert await type(subscription).reload(subscription.id) is None
         assert call.subscription_id == subscription.id
         connected = await connect_anthropic_subscription("a@example.com")
         assert connected.id == subscription.id
     else:
-        await key.delete()
+        await key.revoke("user")
         await db_session().refresh(key)
-        assert key.value.decrypt() == ""
-        assert await ProviderKey.get(key.provider) is None
-        assert call.api_key_provider == key.provider
-        assert (await _key()).provider == key.provider
+        assert dict(key.secrets) == {}
+        assert await VaultSecret.lookup(SecretKind.STATIC, key.audience) is None
+        assert call.api_key_id == key.id
+        assert (await _key()).id == key.id
 
     assert (await AgentCall.get(call.id)).id == call.id
 
@@ -115,7 +118,7 @@ async def test_call_requires_exactly_one_billing_reference(druks_db, both):
                     model="anthropic/claude-opus-4-7",
                     sandbox_host_id="test-host",
                     subscription_id=subscription.id if both else None,
-                    api_key_provider=key.provider if both else None,
+                    api_key_id=key.id if both else None,
                 )
             )
             await druks_db.flush()
@@ -132,8 +135,8 @@ async def test_a_subscription_agent_runs_as_its_actor_or_the_default_account(dru
     assert as_actor.charged_account_id == actor.account_id
     assert unattended.subscription.id == default_subscription.id
     assert (as_actor.secrets, as_actor.secrets_id, as_actor.key) == ({}, actor.id, None)
-    [secret] = as_actor.sandbox_secrets
-    assert secret.key == ("anthropic", None, actor.id, "")
+    [secret] = as_actor.secret_refs
+    assert secret.key == ("anthropic", actor.id, "")
     assert as_actor.harness_class is ClaudeHarness
     assert as_actor.model == "anthropic/claude-opus-4-7"
     assert (as_actor.effort, as_actor.timeout, as_actor.fast_mode) == ("high", 1800, False)
@@ -185,10 +188,10 @@ async def test_opencode_runs_an_added_provider_with_its_key_and_model(druks_db):
         [{"id": "openrouter/anthropic/claude-sonnet-4", "label": "Claude Sonnet 4"}],
         label="OpenRouter",
     )
-    await ProviderKey.create(
-        provider="openrouter",
-        key="sk-openrouter",
-        account=await Account.get_or_create("ops@example.com"),
+    await VaultSecret.paste(
+        Audience.provider("openrouter"),
+        "sk-openrouter",
+        pasted_by=await Account.get_or_create("ops@example.com"),
     )
     await SettingsOverride.set_agent_harness(PROFILE_PROBE.id, "opencode")
     await SettingsOverride.set_agent_model(PROFILE_PROBE.id, "openrouter/anthropic/claude-sonnet-4")

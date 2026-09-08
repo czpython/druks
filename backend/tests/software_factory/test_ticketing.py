@@ -2,6 +2,7 @@ import json
 
 import httpx
 import pytest
+from conftest import connect_service
 from druks.contrib.software_factory.app import SoftwareFactory, check_tracker_identity
 from druks.contrib.software_factory.ticketing.enums import TicketStatus
 from druks.contrib.software_factory.ticketing.jira import Jira
@@ -11,7 +12,6 @@ from druks.core.apis.exceptions import JiraAPIError, LinearAPIError, UnknownTick
 from druks.core.apis.jira import JiraClient
 from druks.core.apis.linear import LinearClient
 from druks.services import ServiceConnectError
-from druks.services.models import ServiceIdentity
 
 from software_factory.factories import make_test_work_item
 
@@ -26,7 +26,7 @@ def _pin_software_factory_settings(monkeypatch, **values):
 
 
 async def _connect_linear():
-    return await ServiceIdentity.connect(
+    return await connect_service(
         "linear",
         identity={"actor": "druks", "workspace": "Acme"},
         secrets={"api_key": "lin_secret", "webhook_secret": "lin-hook"},
@@ -34,7 +34,7 @@ async def _connect_linear():
 
 
 async def _connect_jira():
-    return await ServiceIdentity.connect(
+    return await connect_service(
         "jira",
         identity={"base_url": "https://jira.test", "email": "a@b.com", "display_name": "druks"},
         secrets={"api_token": "jira_secret", "webhook_secret": "jira-hook"},

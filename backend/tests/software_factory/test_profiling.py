@@ -1,11 +1,11 @@
 import pytest
+from conftest import connect_service
 from druks.contrib.software_factory.app import SoftwareFactory
 from druks.contrib.software_factory.models import Project, ProjectRepo
 from druks.contrib.software_factory.policy import RepoPolicy, VerificationProfile
 from druks.contrib.software_factory.workflows import Profile
 from druks.durable.engine import configure_engine
 from druks.services.exceptions import ServiceNotConnectedError
-from druks.services.models import ServiceIdentity
 from druks.skills.datastructures import InstalledSkill
 from druks.skills.models import SkillCollection
 
@@ -66,7 +66,7 @@ async def _no_policy(repo):
 
 @pytest.mark.parametrize("refresh_only", [False, True])
 async def test_dispatch_shapes_the_profile_start(druks_db, monkeypatch, refresh_only):
-    await ServiceIdentity.connect(
+    await connect_service(
         "github",
         identity={"app_id": "1", "slug": "druks-operator"},
         secrets={"private_key": "operator-pem", "webhook_secret": "hook-secret"},

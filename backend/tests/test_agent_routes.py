@@ -2,7 +2,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
-from conftest import connect_anthropic_subscription
+from conftest import connect_anthropic_subscription, connect_service
 from druks.accounts.models import Account, PersonalAccessToken
 from druks.api.server import app
 from druks.contrib.software_factory.app import SoftwareFactory
@@ -14,7 +14,6 @@ from druks.durable.dbos_state import workflow_status
 from druks.durable.models import AgentCall, Run
 from druks.durable.reads import read_transcript_chunk
 from druks.mcp.gateway import services
-from druks.services.models import ServiceIdentity
 from druks.testing import configure_app_for_test, make_settings, seed_call, seed_run
 from druks_field_notes.models import Note
 from druks_field_notes.workflows import Summarize
@@ -53,7 +52,7 @@ async def account(druks_db):
 
 async def _connect_github() -> None:
     # Start routes guard on the GitHub service identity before spending a run.
-    await ServiceIdentity.connect(
+    await connect_service(
         "github",
         identity={"app_id": "1", "slug": "druks-operator"},
         secrets={"private_key": "operator-pem", "webhook_secret": "hook-secret"},

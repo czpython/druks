@@ -1,13 +1,15 @@
 import asyncio
 import hashlib
+from datetime import UTC, datetime, timedelta
 from urllib.parse import parse_qsl, urlparse
 
 import httpx
 import pytest
 from druks.database import db_session
 from druks.redis import get_client
+from druks.secrets.datastructures import Audience
+from druks.secrets.models import VaultSecret
 from druks.services import OauthClient, OauthExchangeError, OauthRefreshError
-from druks.services.models import OauthConnection
 from druks.services.oauth import complete_connect
 
 _PROVIDER = "acme"
@@ -54,16 +56,16 @@ def _client(**overrides) -> OauthClient:
 
 async def _connection(
     refresh_token: str = "rt-old", scopes: list[str] | None = None
-) -> OauthConnection:
-    return await OauthConnection.create(
-        provider=_PROVIDER,
+) -> VaultSecret:
+    return await VaultSecret.connect(
+        Audience.service(_PROVIDER),
         account_id=None,
         refresh_token=refresh_token,
         scopes=scopes or [],
     )
 
 
-def _token_key(connection: OauthConnection) -> str:
+def _token_key(connection: VaultSecret) -> str:
     return f"{_PROVIDER}:access_token:{connection.id}"
 
 
@@ -71,7 +73,7 @@ def _scoped_suffix(scopes: tuple[str, ...]) -> str:
     return ":" + hashlib.sha256(" ".join(sorted(scopes)).encode()).hexdigest()[:16]
 
 
-def _lock_key(connection: OauthConnection) -> str:
+def _lock_key(connection: VaultSecret) -> str:
     return f"{_PROVIDER}:refresh_lock:{connection.id}"
 
 
@@ -79,9 +81,11 @@ async def test_get_serves_the_cache_without_a_refresh(token_endpoint):
     connection = await _connection()
     await get_client().set(_token_key(connection), "at-cached")
 
-    token = await _client().get_access_token(connection=connection)
+    token, expires_at = await _client().get_access_token(connection=connection)
 
     assert token == "at-cached"
+    # A cached token without a lifetime carries no expiry.
+    assert expires_at is None
     assert not token_endpoint.requests
 
 
@@ -89,11 +93,13 @@ async def test_get_refreshes_persists_rotation_and_fills_with_skewed_ttl(token_e
     token_endpoint.response = {"access_token": "at-2", "refresh_token": "rt-new", "expires_in": 300}
     connection = await _connection()
 
-    token = await _client().get_access_token(connection=connection)
+    token, expires_at = await _client().get_access_token(connection=connection)
 
     assert token == "at-2"
+    # The expiry is the cache lifetime: the provider's 300s less the skew.
+    assert timedelta(seconds=230) < expires_at - datetime.now(UTC) <= timedelta(seconds=240)
     db_session().expunge_all()
-    assert (await OauthConnection.get(connection.id)).refresh_token.decrypt() == "rt-new"
+    assert (await VaultSecret.get(connection.id)).secrets["refresh_token"] == "rt-new"
     refresh = token_endpoint.requests[0]
     assert refresh["grant_type"] == "refresh_token"
     assert refresh["refresh_token"] == "rt-old"
@@ -113,7 +119,7 @@ async def test_get_fills_the_cache_only_after_the_rotation_is_saved(token_endpoi
     def _unsavable(self, rotated: str) -> None:
         raise RuntimeError("rotation write failed")
 
-    monkeypatch.setattr(OauthConnection, "_save_refresh_token", _unsavable)
+    monkeypatch.setattr(VaultSecret, "_save_refresh_token", _unsavable)
     with pytest.raises(RuntimeError, match="rotation write failed"):
         await _client().get_access_token(connection=connection)
 
@@ -132,7 +138,7 @@ async def test_get_losing_the_lock_polls_for_the_winners_token(token_endpoint):
         await redis.delete(_lock_key(connection))
 
     winner = asyncio.create_task(_winner_finishes())
-    token = await _client().get_access_token(connection=connection)
+    token, _ = await _client().get_access_token(connection=connection)
     await winner
 
     assert token == "at-winner"
@@ -154,7 +160,7 @@ async def test_get_refresh_rejection_evicts_and_raises(token_endpoint):
     with pytest.raises(OauthRefreshError, match="HTTP 400"):
         await _client().get_access_token(connection=connection)
 
-    assert (await OauthConnection.get(connection.id)).refresh_token.decrypt() == "rt-old"
+    assert (await VaultSecret.get(connection.id)).secrets["refresh_token"] == "rt-old"
     redis = get_client()
     assert not await redis.get(_token_key(connection))
     assert not await redis.get(_lock_key(connection))
@@ -177,11 +183,11 @@ async def test_disconnect_revokes_the_connection_and_drops_the_cached_token(toke
 
     await _client().disconnect(connection, reason="user")
 
-    revoked = await OauthConnection.get(connection.id)
+    revoked = await VaultSecret.get(connection.id)
     assert revoked.revoked_at
     assert revoked.revoked_reason == "user"
     # Nothing secret outlives the consent at rest.
-    assert not revoked.refresh_token
+    assert "refresh_token" not in revoked.secrets
     assert revoked.account_id is None
     assert not await get_client().get(_token_key(connection))
 
@@ -206,7 +212,7 @@ async def test_a_revoke_landing_mid_refresh_is_not_overwritten(token_endpoint):
         await _client().get_access_token(connection=connection)
 
     # The rotated token is not stored and no access token is cached.
-    assert not (await OauthConnection.get(connection.id)).refresh_token
+    assert "refresh_token" not in (await VaultSecret.get(connection.id)).secrets
     assert not await get_client().get(_token_key(connection))
 
 
@@ -282,7 +288,7 @@ async def test_downscoped_get_asks_and_caches_apart_from_the_full_grant(token_en
         "scope": "profile.read",
     }
 
-    narrow = await _client().get_access_token(connection=connection, scopes=("profile.read",))
+    narrow, _ = await _client().get_access_token(connection=connection, scopes=("profile.read",))
 
     assert narrow == "at-narrow"
     assert token_endpoint.requests[0]["scope"] == "profile.read"
@@ -296,7 +302,7 @@ async def test_downscoped_get_asks_and_caches_apart_from_the_full_grant(token_en
         "refresh_token": "rt-1",
         "expires_in": 3600,
     }
-    full = await _client().get_access_token(connection=connection)
+    full, _ = await _client().get_access_token(connection=connection)
 
     assert full == "at-full"
     assert "scope" not in token_endpoint.requests[1]
@@ -304,10 +310,9 @@ async def test_downscoped_get_asks_and_caches_apart_from_the_full_grant(token_en
     assert await redis.get(scoped_key) == b"at-narrow"
 
     # The scoped cache serves the scoped ask without another refresh.
-    assert (
-        await _client().get_access_token(connection=connection, scopes=("profile.read",))
-        == "at-narrow"
-    )
+    assert (await _client().get_access_token(connection=connection, scopes=("profile.read",)))[
+        0
+    ] == "at-narrow"
     assert len(token_endpoint.requests) == 2
 
 
@@ -341,7 +346,7 @@ async def test_uncached_get_refreshes_past_a_live_cache_and_refills_it(token_end
     redis = get_client()
     await redis.set(_token_key(connection), "at-tail")
 
-    token = await _client().get_access_token(connection=connection, cached=False)
+    token, _ = await _client().get_access_token(connection=connection, cached=False)
 
     assert token == "at-1"
     assert len(token_endpoint.requests) == 1
@@ -355,7 +360,7 @@ async def test_refresher_election_is_per_scope_set(token_endpoint):
     await redis.set(_lock_key(connection) + _scoped_suffix(("profile.read",)), "1")
 
     # The scoped variant's lock never blocks the full-grant mint.
-    assert await _client().get_access_token(connection=connection) == "at-1"
+    assert (await _client().get_access_token(connection=connection))[0] == "at-1"
     assert len(token_endpoint.requests) == 1
 
 

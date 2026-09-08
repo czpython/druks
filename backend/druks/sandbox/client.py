@@ -291,18 +291,18 @@ class Client:
             await host.aclose()
             await self.release(host_id=host_id)
 
-    async def request_refreshes(self, subscription_id: str, *, except_host_id: str = "") -> None:
+    async def request_refreshes(self, secret_id: str, *, except_host_id: str = "") -> None:
         """Tell the exchange to fetch again for every live box on the
-        subscription: a rotation ended the value they hold. One attempt per
+        secret: a rotation ended the value they hold. One attempt per
         box, side by side, and a failure is a log line. The exchange refreshes
         at expiry in any case. The box whose answer carries the new token
         needs no request."""
         boxes = [
-            (identity.host_id, secret.name)
-            for identity in await SandboxIdentity.list_subscription_identities(subscription_id)
+            (identity.host_id, ref.name)
+            for identity in await SandboxIdentity.list_for_secret(secret_id)
             if identity.host_id != except_host_id
-            for secret in identity.secrets
-            if secret.subscription_id == subscription_id
+            for ref in identity.secret_refs
+            if ref.secret_id == secret_id
         ]
         exchange_url = load_settings().sandbox.exchange_url.rstrip("/")
         async with httpx.AsyncClient(timeout=_REQUEST_TIMEOUT_SECONDS) as client:

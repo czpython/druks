@@ -39,6 +39,7 @@ dependencies = [
     "apprise>=1.9",
     "cryptography>=48.0.1",
     "fastmcp>=3.4.4,<4",
+    "sqlalchemy-encrypted-field==1.0.2",
 ]
 
 [project.urls]

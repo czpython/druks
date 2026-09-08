@@ -11,11 +11,11 @@ from druks.sandbox.datastructures import (
     McpServer,
 )
 from druks.sandbox.layout import get_runs_root, get_work_root
+from druks.secrets.models import VaultSecret
 
 from . import exceptions
 from .artifacts import call_dir, write_cost
 from .base import Harness
-from .models import ProviderSubscription
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +54,7 @@ class OpenCodeHarness(Harness):
         skills: tuple[str, ...] = (),
         extra_env: dict[str, str] | None = None,
         mcp_servers: tuple[McpServer, ...] = (),
-        subscription: ProviderSubscription | None = None,
+        subscription: VaultSecret | None = None,
         key: str | None = None,
         timeout: int = Harness.default_timeout,
     ) -> AgentInvocation:

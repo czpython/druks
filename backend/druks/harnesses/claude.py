@@ -16,7 +16,8 @@ from druks.sandbox.datastructures import (
     McpServer,
 )
 from druks.sandbox.layout import get_runs_root
-from druks.sandbox.models import SandboxSecret
+from druks.sandbox.models import SecretRef
+from druks.secrets.models import VaultSecret
 from druks.skills.models import Skill
 
 from . import exceptions
@@ -24,7 +25,6 @@ from .artifacts import call_dir, write_cost
 from .base import Harness
 from .constants import CLAUDE_DISALLOWED_TOOLS
 from .datastructures import SandboxSettings
-from .models import ProviderSubscription
 from .providers import AnthropicProvider
 
 logger = logging.getLogger(__name__)
@@ -71,7 +71,7 @@ class ClaudeHarness(Harness):
         mcp_servers: tuple[McpServer, ...] = (),
         # Both accepted for signature parity. The sandbox holds a placeholder
         # for the subscription token or the key. Drukbox delivers it.
-        subscription: ProviderSubscription | None = None,
+        subscription: VaultSecret | None = None,
         key: str | None = None,
         timeout: int = Harness.default_timeout,
     ) -> AgentInvocation:
@@ -188,10 +188,10 @@ class ClaudeHarness(Harness):
         return ("--mcp-config", json.dumps({"mcpServers": entries}))
 
     @classmethod
-    def get_sandbox_secrets(cls, subscription: ProviderSubscription) -> list[SandboxSecret]:
+    def get_secret_refs(cls, subscription: VaultSecret) -> list[SecretRef]:
         # The catalog entry puts the placeholder in ANTHROPIC_AUTH_TOKEN, which
         # the CLI sends as a bearer. It never refreshes a token from there.
-        return [SandboxSecret(name=AnthropicProvider.id, subscription_id=subscription.id)]
+        return [SecretRef(name=AnthropicProvider.id, secret_id=subscription.id)]
 
     @classmethod
     def get_secrets(cls, key: str) -> dict[str, Secret]:

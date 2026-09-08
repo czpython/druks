@@ -1,4 +1,3 @@
-import base64
 import logging
 import os
 from pathlib import Path
@@ -12,6 +11,7 @@ from pydantic_settings import (
     SettingsConfigDict,
     TomlConfigSettingsSource,
 )
+from sqlalchemy_encrypted_field import validate_keys
 
 DEFAULT_DATA_DIR = Path("/var/lib/druks")
 
@@ -43,26 +43,7 @@ def _expand_optional_path(value: Any) -> Any:
     return _expand_path(value)
 
 
-def _secrets_key(value: Any) -> Any:
-    # Comma-separated base64 32-byte master keys: the first encrypts, every
-    # key decrypts — rotation is prepending a fresh key, stored rows keep
-    # decrypting under the old one. Blank segments are config noise, dropped;
-    # none left, or a malformed one, refuses boot: a keyless process could
-    # neither store nor use a secret.
-    segments = [segment.strip() for segment in str(value).split(",") if segment.strip()]
-    if not segments:
-        raise ValueError("set at least one base64-encoded 32-byte key")
-    for segment in segments:
-        try:
-            key = base64.b64decode(segment, validate=True)
-        except ValueError as error:
-            raise ValueError("keys must be base64-encoded") from error
-        if len(key) != 32:
-            raise ValueError("keys must decode to 32 bytes")
-    return ",".join(segments)
-
-
-SecretsKey = Annotated[str, BeforeValidator(_secrets_key)]
+SecretsKey = Annotated[str, BeforeValidator(validate_keys)]
 ExpandedPath = Annotated[Path, BeforeValidator(_expand_path)]
 OptionalExpandedPath = Annotated[Path | None, BeforeValidator(_expand_optional_path)]
 

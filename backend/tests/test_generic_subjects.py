@@ -100,7 +100,7 @@ async def _seed_run(
 
 async def _seed_call(session, run, *, agent, status="succeeded"):
     call = AgentCall(
-        api_key_provider=(await installation_key()).provider,
+        api_key_id=(await installation_key()).id,
         run_id=run.id,
         agent=agent,
         model="m",

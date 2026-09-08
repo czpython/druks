@@ -55,7 +55,7 @@ from druks.notifications.outbox import notifications_queue, send_notification
 from druks.sandbox.client import provisioning_key, sandbox_client
 from druks.sandbox.constants import SANDBOX_HOST_ROTATE_BEFORE_SECONDS
 from druks.sandbox.datastructures import Sandbox
-from druks.sandbox.models import SandboxIdentity, SandboxSecret
+from druks.sandbox.models import SandboxIdentity, SecretRef
 from druks.sandbox.templates import get_template_id
 from druks.signals import publish
 from druks.user_settings.models import SettingsOverride, SettingsProfile
@@ -833,22 +833,22 @@ class Workflow:
         # Built per agent call, so nothing is held across steps.
         return self.workspace_class(**await self.get_workspace_kwargs(host))
 
-    async def get_sandbox_secrets(self) -> list[SandboxSecret]:
+    async def get_secret_refs(self) -> list[SecretRef]:
         # The secrets a box of this run fetches beyond its profile's: the
         # workspace's, read before the box exists.
-        return await self.workspace_class.get_sandbox_secrets(await self.subject)
+        return await self.workspace_class.get_secret_refs(await self.subject)
 
     async def _lease_host(self, profile: "Profile") -> str | None:
         # The warm VM, provisioned once per segment; state is carried in git, so
         # only the host-id matters across steps — held-across-steps never fights replay.
         if not self.steps_reuse_sandbox:
             return
-        secrets = [*profile.sandbox_secrets, *await self.get_sandbox_secrets()]
+        refs = [*profile.secret_refs, *await self.get_secret_refs()]
         # A crashed process left its box behind. Its identity finds it again.
         if (
             not self._host
-            and secrets
-            and (identity := await SandboxIdentity.lookup(self._workflow_id, "workflow", secrets))
+            and refs
+            and (identity := await SandboxIdentity.lookup(self._workflow_id, "workflow", refs))
         ):
             self._host = await sandbox_client.reattach(host_id=identity.host_id)
             self._host_secrets_id = profile.secrets_id
@@ -871,9 +871,9 @@ class Workflow:
             # A box that fetches gets its own identity, and the key names that
             # instead. A replay finds the box through the identity, above.
             identity, entries, key = None, {}, profile.secrets_id
-            if secrets:
+            if refs:
                 identity, entries = await SandboxIdentity.create(
-                    run_id=self._workflow_id, scoped_to="workflow", secrets=secrets
+                    run_id=self._workflow_id, scoped_to="workflow", secret_refs=refs
                 )
                 key = identity.id
             self._host = await sandbox_client.provision(

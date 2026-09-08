@@ -2,6 +2,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from conftest import connect_service
 from druks.apps.settings import field_kind, field_multiline
 from druks.contrib.software_factory import subscribers  # noqa: F401 — the import registers it
 from druks.contrib.software_factory.app import check_review_identity
@@ -12,7 +13,6 @@ from druks.contrib.software_factory.workflows import PullRequestReview
 from druks.core.services import Github
 from druks.prompts import render_prompt
 from druks.services.exceptions import ServiceNotConnectedError
-from druks.services.models import ServiceIdentity
 from druks.signals import publish
 from druks.testing import configure_app_for_test, make_settings, seed_run
 from druks.workflows import _bind_instance
@@ -134,7 +134,7 @@ async def test_comment_mode_reviews_publish_as_comments():
 
 
 async def _connect_operator() -> None:
-    await ServiceIdentity.connect(
+    await connect_service(
         "github",
         identity={"app_id": "1", "slug": "druks-operator"},
         secrets={"private_key": "operator-pem", "webhook_secret": "hook-secret"},
@@ -142,7 +142,7 @@ async def _connect_operator() -> None:
 
 
 async def _connect_reviewer() -> None:
-    await ServiceIdentity.connect(
+    await connect_service(
         "github_reviewer",
         identity={"app_id": "2", "slug": "druks-reviewer"},
         secrets={"private_key": "review-pem\nline-two"},

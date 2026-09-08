@@ -14,10 +14,12 @@ from druks.harnesses.exceptions import (
     HarnessOverloadedError,
     HarnessRateLimitError,
 )
-from druks.harnesses.models import ProviderKey
 from druks.harnesses.pi import PiHarness
 from druks.harnesses.registry import get_harness
 from druks.sandbox.datastructures import HarnessRunResult, HomeFile, McpServer
+from druks.secrets.datastructures import Audience
+from druks.secrets.enums import SecretKind
+from druks.secrets.models import VaultSecret
 from druks.testing import configure_app_for_test, make_settings
 from fastapi.testclient import TestClient
 from pydantic import BaseModel
@@ -84,7 +86,7 @@ def test_auth_file_renders_an_openai_subscription_as_pis_openai_codex() -> None:
     header = base64.urlsafe_b64encode(b'{"alg":"none"}').rstrip(b"=").decode()
     claims = base64.urlsafe_b64encode(b'{"exp": 1800000000}').rstrip(b"=").decode()
     subscription = SimpleNamespace(
-        payload={
+        secrets={
             "tokens": {
                 "access_token": f"{header}.{claims}.sig",
                 "refresh_token": "R0",
@@ -298,9 +300,9 @@ def test_parse_treats_a_broken_stream_as_invalid_output(tmp_path: Path) -> None:
 
 async def test_a_pasted_key_renders_under_its_provider(client, druks_db) -> None:
     assert client.post("/api/providers/openai/key", json={"key": _API_KEY}).status_code == 200
-    stored = await ProviderKey.get("openai")
+    stored = await VaultSecret.lookup(SecretKind.STATIC, Audience.provider("openai"))
 
-    auth = PiHarness.auth_file("openai", key=stored.value.decrypt())
+    auth = PiHarness.auth_file("openai", key=stored.secrets["value"])
 
     assert auth.path == ".pi/agent/auth.json"
     assert json.loads(auth.content) == {"openai": {"type": "api_key", "key": _API_KEY}}

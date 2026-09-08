@@ -30,9 +30,9 @@ from druks.durable.enums import (
 )
 from druks.durable.exceptions import AgentCallNotFound
 from druks.harnesses.artifacts import normalize_token_usage
-from druks.harnesses.models import ProviderKey, ProviderSubscription
 from druks.models import Base
 from druks.notifications.models import Notification
+from druks.secrets.models import VaultSecret
 from druks.settings import load_settings
 from druks.signals import publish
 
@@ -457,7 +457,7 @@ class AgentCall(Base, Uuid7Pk):
         Index("agent_calls_run_idx", "run_id"),
         Index("agent_calls_subscription_finished_idx", "subscription_id", "finished_at"),
         CheckConstraint(
-            "(subscription_id IS NOT NULL) <> (api_key_provider IS NOT NULL)",
+            "(subscription_id IS NOT NULL) <> (api_key_id IS NOT NULL)",
             name="agent_calls_billing_source_check",
         ),
     )
@@ -473,14 +473,12 @@ class AgentCall(Base, Uuid7Pk):
     # timeline's grouping label. An agent is what makes a call, so there is no
     # unattributed one: the row is written from the registered agent's own id.
     agent: Mapped[str] = mapped_column(String)
-    subscription_id: Mapped[str | None] = mapped_column(
-        ForeignKey("provider_subscriptions.id", ondelete="RESTRICT")
+    subscription_id: Mapped[str | None] = mapped_column(ForeignKey("vault.id", ondelete="RESTRICT"))
+    api_key_id: Mapped[str | None] = mapped_column(ForeignKey("vault.id", ondelete="RESTRICT"))
+    subscription: Mapped[VaultSecret | None] = relationship(
+        lazy="selectin", foreign_keys=[subscription_id]
     )
-    api_key_provider: Mapped[str | None] = mapped_column(
-        ForeignKey("provider_keys.provider", ondelete="RESTRICT")
-    )
-    subscription: Mapped[ProviderSubscription | None] = relationship(lazy="selectin")
-    api_key: Mapped[ProviderKey | None] = relationship(lazy="selectin")
+    api_key: Mapped[VaultSecret | None] = relationship(lazy="selectin", foreign_keys=[api_key_id])
 
     created_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
     started_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
@@ -557,7 +555,7 @@ class AgentCall(Base, Uuid7Pk):
         agent: str,
         host_id: str,
         subscription_id: str | None,
-        api_key_provider: str | None,
+        api_key_id: str | None,
     ) -> None:
         # Recorded RUNNING once the agent starts on its host (id = its on-disk
         # transcript dir) in its own committed transaction, so the live step
@@ -581,7 +579,7 @@ class AgentCall(Base, Uuid7Pk):
                     model=model,
                     sandbox_host_id=host_id,
                     subscription_id=subscription_id,
-                    api_key_provider=api_key_provider,
+                    api_key_id=api_key_id,
                 )
             )
             await session.commit()

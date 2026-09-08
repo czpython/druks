@@ -33,19 +33,6 @@ class MissingTokenError(McpServerError):
         self.name = name
 
 
-class SourceEnvVarUnsetError(McpServerError):
-    # An env-sourced server reads its token from druks' own process env at
-    # delivery; an unset var means it can't authenticate. Raised loudly, naming
-    # the var the operator must set, rather than shipping a dead server.
-    def __init__(self, name: str, source_env_var: str):
-        super().__init__(
-            f"Enabled MCP server {name!r} reads its token from ${source_env_var}, "
-            "which is not set in druks' environment."
-        )
-        self.name = name
-        self.source_env_var = source_env_var
-
-
 class InvalidCatalogError(McpServerError):
     # The catalog declares a deployment's default servers; a file that can't be
     # read or an entry that would emit a broken config stops boot by name —

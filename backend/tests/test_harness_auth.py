@@ -10,9 +10,9 @@ from druks.harnesses.claude import ClaudeHarness, _get_credentials
 from druks.harnesses.codex import CodexHarness
 from druks.harnesses.datastructures import SandboxSettings
 from druks.harnesses.exceptions import HarnessNotConnectedError
-from druks.harnesses.models import ProviderSubscription
 from druks.harnesses.providers import AnthropicProvider, OpenAiProvider
 from druks.sandbox.datastructures import HomeCopy, HomeFile
+from druks.secrets.models import VaultSecret
 
 
 async def _seed_claude(
@@ -20,7 +20,7 @@ async def _seed_claude(
     provider_email="op@example.com",
     access="A0",
     refresh="R0",
-) -> ProviderSubscription:
+) -> VaultSecret:
     block = {"accessToken": access, "scopes": ["user:profile"], "subscriptionType": "max"}
     if refresh:
         block["refreshToken"] = refresh
@@ -184,21 +184,21 @@ async def test_config_delivery_does_not_copy_host_provider_credentials(
 async def test_credential_without_a_selection_reads_the_accounts_row(druks_db):
     own = await _seed_claude(access="own", provider_email="a@example.com")
 
-    assert (await ProviderSubscription.lookup("anthropic", own.account_id)).id == own.id
+    assert (await AnthropicProvider.get_subscription(own.account_id)).id == own.id
 
 
 async def test_credential_without_any_row_raises(druks_db):
     account = await Account.get_or_create("a@example.com")
     with pytest.raises(HarnessNotConnectedError, match="connect your Anthropic subscription"):
-        await ProviderSubscription.lookup("anthropic", account.id)
+        await AnthropicProvider.get_subscription(account.id)
 
 
 async def test_credential_for_a_deleted_row_raises(druks_db):
     await _seed_claude(provider_email="a@example.com")  # the surviving fallback
     gone = await _seed_claude(provider_email="b@example.com")
     gone_id = gone.id
-    await gone.delete()
+    await gone.revoke("user")
     # A disconnect between selection and push fails the call — it must never
     # fall through to another account's payload.
     with pytest.raises(HarnessNotConnectedError, match="removed"):
-        await ProviderSubscription.lookup("anthropic", None, subscription_id=gone_id)
+        await AnthropicProvider.get_subscription(None, subscription_id=gone_id)

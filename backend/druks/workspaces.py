@@ -1,7 +1,6 @@
 import asyncio
 import hashlib
 import mimetypes
-import os
 import shlex
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
@@ -21,13 +20,13 @@ from druks.mcp import models as mcp_models
 from druks.mcp import oauth
 from druks.mcp.constants import TOKEN_ENV_PREFIX
 from druks.mcp.enums import IdentityMode, TokenSource
-from druks.mcp.exceptions import MissingTokenError, SourceEnvVarUnsetError
+from druks.mcp.exceptions import MissingTokenError
 from druks.mcp.helpers import get_bearer_token_env_var, get_grant_account
 from druks.sandbox import repo as checkout
 from druks.sandbox.datastructures import AgentResult, McpServer, RequiredMcpServer
 from druks.sandbox.exceptions import ExecFailed
 from druks.sandbox.layout import get_repo_root, get_work_root
-from druks.sandbox.models import SandboxSecret
+from druks.sandbox.models import SecretRef
 
 if TYPE_CHECKING:
     from druks.sandbox.host import Host
@@ -54,7 +53,7 @@ class Workspace:
         return ()
 
     @classmethod
-    async def get_sandbox_secrets(cls, subject: Any) -> list[SandboxSecret]:
+    async def get_secret_refs(cls, subject: Any) -> list[SecretRef]:
         # The secrets a box of this workspace fetches, beyond its profile's.
         # Read before the box exists, so from the subject alone. Base: none.
         return []
@@ -189,29 +188,25 @@ class Workspace:
                 # No bearer; auth, if any, rides the declared headers below.
                 token = ""
             elif source == TokenSource.STATIC:
-                # A stored token is ciphertext everywhere else; decrypted only
+                # A stored token is ciphertext everywhere else; it is read only
                 # here, entering the run env.
                 if not server["token"]:
                     raise MissingTokenError(server["name"])
-                token = server["token"].decrypt()
-            elif source == TokenSource.STATIC_FROM_ENV:
-                token = os.environ.get(server["source_env_var"], "")
-                if not token:
-                    raise SourceEnvVarUnsetError(server["name"], server["source_env_var"])
+                token = server["token"].secrets["value"]
             else:  # oauth
                 if server["identity_mode"] == IdentityMode.PER_USER and not run_account:
                     account = await Account.get_default()
                     run_account = account.id if account else None
                 grant_account = get_grant_account(server["identity_mode"], run_account)
-                token = await oauth.get_access_token(server["name"], grant_account)
+                token, _ = await oauth.get_access_token(server["name"], grant_account)
             bearer_token_env_var = ""
             if token:
                 bearer_token_env_var = get_bearer_token_env_var(server["name"])
                 env[bearer_token_env_var] = token
             env_headers = {}
-            for index, (header, value) in enumerate(server["secret_headers"].items()):
+            for index, (header, secret) in enumerate(server["secret_headers"].items()):
                 env_var = f"{TOKEN_ENV_PREFIX}{server['name'].upper()}_HEADER_{index}"
-                env[env_var] = value
+                env[env_var] = secret.secrets["value"]
                 env_headers[header] = env_var
             wire.append(
                 McpServer(
@@ -245,11 +240,14 @@ class RepoWorkspace(Workspace):
         return subject.repo
 
     @classmethod
-    async def get_sandbox_secrets(cls, subject: Any) -> list[SandboxSecret]:
-        # The identity and the repo: the whole selection the issuer reads.
+    async def get_secret_refs(cls, subject: Any) -> list[SecretRef]:
+        # The identity's vault row and the repo: the whole selection the
+        # issuer reads. A service that is not connected fails here, before the box.
         return [
-            SandboxSecret(
-                name=cls.github.secret_name, service=cls.github.slug, resource=cls.get_repo(subject)
+            SecretRef(
+                name=cls.github.secret_name,
+                secret_id=(await cls.github.get()).id,
+                resource=cls.get_repo(subject),
             )
         ]
 

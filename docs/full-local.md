@@ -96,8 +96,8 @@ authentication and exactly one operator account.
 A new installation shows its
 setup page until the first subscription connection completes. That connection
 creates the operator account from the provider-verified email. Protect database
-access and backups as credential data. Harness payloads do not use the
-`[secrets].secrets_key` envelope that protects MCP tokens and OAuth grants.
+access and backups as credential data. The `[secrets].secrets_key` envelope
+protects every secret in the vault, subscriptions included.
 
 Agent calls refuse before provisioning if their selected harness is not
 connected. `druks doctor` reports the connection and token expiry for every

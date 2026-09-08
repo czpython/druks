@@ -8,11 +8,14 @@ from druks.apps.loader import (
     iter_apps,
     register_workflow_package,
 )
+from druks.apps.registry import services
 from druks.database import create_engine_from_url
 from druks.durable.dbos_state import DBOS_SYSTEM_SCHEMA
-from druks.harnesses.models import ProviderKey, ProviderSubscription
 from druks.harnesses.providers import AnthropicProvider
 from druks.models import Base
+from druks.secrets.datastructures import Audience
+from druks.secrets.enums import SecretKind
+from druks.secrets.models import VaultSecret
 from druks.testing import TEST_DATABASE_URL, configure_app_for_test, make_settings
 from fastapi.testclient import TestClient
 
@@ -44,15 +47,22 @@ def header_client(tmp_path: Path) -> TestClient:
     return TestClient(configure_app_for_test(settings=settings, authenticated=False))
 
 
-async def connect_anthropic_subscription(email: str) -> ProviderSubscription:
+async def connect_anthropic_subscription(email: str) -> VaultSecret:
     return await connect_provider(
         AnthropicProvider, {"claudeAiOauth": {"accessToken": email}}, provider_email=email
     )
 
 
-async def installation_key() -> ProviderKey:
+async def connect_service(slug: str, *, identity: dict, secrets: dict) -> VaultSecret:
+    """Seed the vault row a finished connect flow would leave for a service."""
+    return await VaultSecret.store(
+        services.get(slug).secret_kind, Audience.service(slug), identity=identity, secrets=secrets
+    )
+
+
+async def installation_key() -> VaultSecret:
     account = await Account.get_or_create("op@example.com")
-    return await ProviderKey.create(provider="anthropic", key="test-key", account=account)
+    return await VaultSecret.paste(Audience.provider("anthropic"), "test-key", pasted_by=account)
 
 
 @pytest.fixture(autouse=True)
@@ -199,15 +209,16 @@ def bind_ambient_session(session) -> None:
 
 
 async def connect_provider(provider_cls, payload: dict, *, provider_email: str = "op@example.com"):
-    """Seed the ProviderSubscription row a finished OAuth connect flow would leave."""
+    """Seed the vault row a finished OAuth connect flow would leave for a subscription."""
     account = await Account.get_or_create(provider_email)
     _, expires_at = provider_cls._refresh_state(payload)
-    return await ProviderSubscription.connect(
-        provider=provider_cls.id,
-        account=account,
-        payload=payload,
+    return await VaultSecret.store(
+        SecretKind.SUBSCRIPTION,
+        Audience.provider(provider_cls.id),
+        account_id=account.id,
+        secrets=payload,
+        identity={"email": provider_email},
         expires_at=expires_at,
-        provider_email=provider_email,
     )
 
 

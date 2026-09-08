@@ -12,7 +12,10 @@ from githubkit.exception import GraphQLFailed, RequestFailed
 
 from druks.core.apis.exceptions import GitHubAppNotInstalledError
 from druks.core.utils.time import ensure_utc
-from druks.services.models import ServiceIdentity
+from druks.secrets.datastructures import Audience
+from druks.secrets.enums import SecretKind
+from druks.secrets.models import VaultSecret
+from druks.services.exceptions import ServiceNotConnectedError
 from druks.settings import load_settings
 
 logger = logging.getLogger(__name__)
@@ -284,9 +287,9 @@ class GitHubClient:
                 )
 
     @classmethod
-    def from_identity(cls, row: ServiceIdentity) -> "GitHubClient":
-        """The client of a connected GitHub App identity. PEM plaintext exists
-        only here, feeding the auth strategy."""
+    def from_secret(cls, row: VaultSecret) -> "GitHubClient":
+        """The client of a connected GitHub App's vault row. PEM plaintext
+        exists only here, feeding the auth strategy."""
         return cls(
             app_id=row.identity["app_id"],
             private_key=row.secrets["private_key"],
@@ -589,4 +592,6 @@ async def get_github_client() -> GitHubClient:
     ``ServiceNotConnectedError`` when GitHub isn't connected. ``github_api_url``
     stays a Settings input because it is transport, not identity. PEM plaintext
     exists only here, feeding the client's auth strategy."""
-    return GitHubClient.from_identity(await ServiceIdentity.get(GITHUB))
+    if row := await VaultSecret.lookup(SecretKind.APP_KEY, Audience.service(GITHUB)):
+        return GitHubClient.from_secret(row)
+    raise ServiceNotConnectedError(GITHUB)

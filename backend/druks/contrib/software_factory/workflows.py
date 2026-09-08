@@ -12,13 +12,12 @@ from druks.contrib.software_factory.enums import (
     ReviewDecision,
 )
 from druks.contrib.software_factory.models import ProjectRepo, WorkItem
-from druks.core.apis.github import GITHUB, get_github_client
+from druks.core.apis.github import get_github_client
 from druks.core.services import Github
 from druks.sandbox.datastructures import RequiredMcpServer
 from druks.sandbox.layout import get_related_root, get_work_root
-from druks.sandbox.models import SandboxSecret
+from druks.sandbox.models import SecretRef
 from druks.services.exceptions import ServiceNotConnectedError
-from druks.services.models import ServiceIdentity
 from druks.settings import load_settings
 from druks.skills.models import Skill
 from druks.workflows import FatalError, Workflow, step
@@ -149,7 +148,7 @@ class Build(Workflow):
                 logger.info("Ticket %s has no routable repo; skipping.", ticket["identifier"])
                 return
         try:
-            await ServiceIdentity.get(GITHUB)
+            await Github.get()
         except ServiceNotConnectedError as error:
             # A raise would 5xx the tracker's webhook and put the delivery into
             # provider redelivery; the delivery itself succeeded. Log the
@@ -432,7 +431,7 @@ class Profile(Workflow):
         # The profiler clones with an operator-App token, so resolve the
         # identity before the start spends a run and provisions a VM — the
         # raising lookup surfaces the actionable not-connected error.
-        await ServiceIdentity.get(GITHUB)
+        await Github.get()
         return await cls.start(
             subject=repo,
             repo_id=repo.id,
@@ -478,12 +477,14 @@ class ReviewWorkspace(RepoWorkspace):
     # The default-branch checkout (the reviewer checks the PR out itself) plus room
     # beside it for siblings; Claude's add_dirs grant needs the directory to exist.
     @classmethod
-    async def get_sandbox_secrets(cls, subject: Any) -> list[SandboxSecret]:
+    async def get_secret_refs(cls, subject: Any) -> list[SecretRef]:
         # The review is authored under the review actor's identity.
         actor = await get_review_actor()
         return [
-            SandboxSecret(
-                name=Github.secret_name, service=actor.service.slug, resource=cls.get_repo(subject)
+            SecretRef(
+                name=Github.secret_name,
+                secret_id=(await actor.service.get()).id,
+                resource=cls.get_repo(subject),
             )
         ]
 
@@ -513,7 +514,7 @@ class PullRequestReview(Workflow):
         # Even a distinct review identity clones alongside the operator App, so
         # resolve the operator identity before the start spends a run and
         # provisions a VM — the raising lookup surfaces the actionable error.
-        await ServiceIdentity.get(GITHUB)
+        await Github.get()
         # Attribution follows the requester when druks knows them by that name; a
         # review asked for by someone with no account runs as the system's.
         account = await Account.get_for_username(requested_by)
