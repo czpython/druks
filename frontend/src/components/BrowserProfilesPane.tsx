@@ -27,7 +27,7 @@ const LOGIN_ACTION_LABELS: Record<Exclude<BrowserSessionStatus, 'anonymous'>, st
   stale: 'Reconnect',
 }
 
-export function BrowserSessionsPane() {
+export function BrowserProfilesPane() {
   const queryClient = useQueryClient()
   const query = useQuery({
     queryKey: ['browserSessions'],
@@ -57,16 +57,16 @@ export function BrowserSessionsPane() {
   return (
     <div className="set-pane mcp-pane browser-sessions-pane">
       <header className="mcp-pane-head">
-        <h2 className="mcp-pane-title">Browser</h2>
+        <h2 className="mcp-pane-title">Browser profiles</h2>
         <p className="mcp-pane-sub">
-          Sign-ins your apps declare, kept as encrypted browser state.
+          Saved browser state for the sites your apps use.
         </p>
       </header>
 
-      {query.isPending && <p role="status">Loading browser sessions…</p>}
+      {query.isPending && <p role="status">Loading browser profiles…</p>}
       {query.isError && (
         <p className="mcp-error" role="alert">
-          Could not load browser sessions.{' '}
+          Could not load browser profiles.{' '}
           <button className="set-btn ghost" onClick={() => void query.refetch()}>
             Try again
           </button>
@@ -80,10 +80,10 @@ export function BrowserSessionsPane() {
 
       <section className="mcp-section">
         <h3 className="mcp-h">
-          Sessions <span className="gl-count">{sessions.length}</span>
+          Profiles <span className="gl-count">{sessions.length}</span>
         </h3>
         {query.isSuccess && sessions.length === 0 && (
-          <p className="mcp-help">No installed app declares a browser session.</p>
+          <p className="mcp-help">No installed app declares a browser profile.</p>
         )}
         {sessions.length > 0 && (
           <div className="browser-session-list">
