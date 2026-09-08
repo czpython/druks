@@ -76,7 +76,8 @@ async def test_created_ticket_lands_in_todo_on_board_and_list(druks_client):
     (card,) = _cards_in(by_title["Todo"])
     assert card["title"] == "Ship the board"
     assert card["description"].startswith("DRU-1")
-    assert card["controls"][0]["arguments"] == {"identifier": ticket["identifier"]}
+    assert card["link"]["arguments"] == {"identifier": ticket["identifier"]}
+    assert card["controls"] == []
     for title in BOARD_COLUMNS:
         if title != "Todo":
             assert _cards_in(by_title[title]) == []
@@ -87,6 +88,7 @@ async def test_created_ticket_lands_in_todo_on_board_and_list(druks_client):
     (row,) = by_section["Todo"]["rows"]
     assert row["cells"][0]["text"] == "DRU-1"
     assert row["cells"][1]["text"] == "Ship the board"
+    assert row["cells"][1]["link"]["arguments"] == {"identifier": ticket["identifier"]}
     for title in LIST_SECTIONS:
         if title != "Todo":
             assert by_section[title]["rows"] == []

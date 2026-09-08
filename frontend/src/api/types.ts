@@ -313,6 +313,7 @@ export interface CardBlock {
   description: string
   blocks: Block[]
   controls: (Action | Link)[]
+  link?: Link | null
 }
 
 export interface EmptyStateBlock {

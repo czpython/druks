@@ -131,6 +131,10 @@ def _create_actions(projects: list[IssuesProject], accounts: list[Account]) -> l
     ]
 
 
+def _ticket_link(ticket: Ticket, label: str) -> ui.Link:
+    return ui.Link(label, page="ticket", arguments={"identifier": ticket.identifier})
+
+
 def _ticket_card(ticket: Ticket, account_names: dict[str, str]) -> ui.Card:
     description = [ticket.identifier]
     priority = Priority(ticket.priority)
@@ -141,9 +145,7 @@ def _ticket_card(ticket: Ticket, account_names: dict[str, str]) -> ui.Card:
     return ui.Card(
         title=ticket.title,
         description=" · ".join(description),
-        controls=[
-            ui.Link("Open", page="ticket", arguments={"identifier": ticket.identifier}),
-        ],
+        link=_ticket_link(ticket, ticket.title),
     )
 
 
@@ -156,13 +158,9 @@ def _ticket_row(
         [
             ui.TextValue(
                 ticket.identifier,
-                link=ui.Link(
-                    ticket.identifier,
-                    page="ticket",
-                    arguments={"identifier": ticket.identifier},
-                ),
+                link=_ticket_link(ticket, ticket.identifier),
             ),
-            ui.TextValue(ticket.title),
+            ui.TextValue(ticket.title, link=_ticket_link(ticket, ticket.title)),
             ui.TextValue(PRIORITY_LABELS[Priority(ticket.priority)]),
             ui.TextValue(_assignee_name(ticket.assignee_id, account_names)),
             ui.TextValue(project_names.get(ticket.project_id, "")),

@@ -1,7 +1,7 @@
 import { createContext } from 'react'
 import type { SubjectTarget } from '../apps/registry'
 
-import type { Block, Follows, Operation, PageEntry, PageSnapshot } from '../api/types'
+import type { Block, Follows, Link, Operation, PageEntry, PageSnapshot } from '../api/types'
 
 // Which app's pages a block tree belongs to. A Link carries a page name, and
 // only this table turns that name into a URL — so the renderer reads it here
@@ -33,6 +33,14 @@ export function fillPath(path: string, args: Record<string, string>): string {
     return encodeURIComponent(value)
   })
   return missing ? '' : filled
+}
+
+/** Empty when the page name or an argument is missing. */
+export function hrefForLink(link: Link, app: string, pages: PageEntry[]): string {
+  if (link.url) return link.url
+  if (link.subject) return `/${app}/${link.subject.subjectType}/${link.subject.subjectId}`
+  const target = pages.find((entry) => entry.name === link.page)
+  return target ? fillPath(target.path, link.arguments) : ''
 }
 
 /** The tab strip a page belongs to: its family root first, then the root's

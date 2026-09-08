@@ -13,7 +13,7 @@ import type {
 } from '../api/types'
 import { RelTime } from '../components/RelTime'
 import { Image, Status } from './RunBlocks'
-import { fillPath, PagesContext } from './pages'
+import { hrefForLink, PagesContext } from './pages'
 
 // The plot's own coordinates; CSS gives it its real size.
 const PLOT_WIDTH = 300
@@ -76,26 +76,14 @@ function TextDatum({
     which shows the value's own text. */
 export function LinkControl({ link, label = link.label }: { link: Link; label?: string }) {
   const { app, pages } = useContext(PagesContext)
+  const href = hrefForLink(link, app, pages)
   if (link.url) {
     return (
-      <a className="dui-link" href={link.url} target="_blank" rel="noreferrer">
+      <a className="dui-link" href={href} target="_blank" rel="noreferrer">
         {label}
       </a>
     )
   }
-  if (link.subject) {
-    // The subject's own platform page — the full story of what druks did.
-    return (
-      <RouteLink
-        href={`/${app}/${link.subject.subjectType}/${link.subject.subjectId}`}
-        className="dui-link"
-      >
-        {label}
-      </RouteLink>
-    )
-  }
-  const target = pages.find((entry) => entry.name === link.page)
-  const href = target ? fillPath(target.path, link.arguments) : ''
   if (href) {
     return (
       <RouteLink href={href} className="dui-link">
