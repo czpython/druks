@@ -103,7 +103,7 @@ ignore = ["SIM108"]
 # FastAPI dependency markers are the documented way to declare injected
 # parameters; B008 (no function calls in argument defaults) is a false
 # positive for them.
-extend-immutable-calls = ["fastapi.Depends", "fastapi.Query"]
+extend-immutable-calls = ["fastapi.Depends", "fastapi.Query", "fastapi.Body"]
 
 [tool.pytest.ini_options]
 testpaths = ["backend/tests"]
