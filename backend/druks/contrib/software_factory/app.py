@@ -1,5 +1,6 @@
 from typing import Literal
 
+import httpx
 from pydantic import Field
 
 from druks.agents import Agent
@@ -22,6 +23,7 @@ from druks.contrib.software_factory.ticketing.linear import Linear
 from druks.core import services
 from druks.doctor import CheckResult
 from druks.services import ServiceNotConnectedError
+from druks.settings import load_settings
 
 from .services import GithubReviewer
 
@@ -57,6 +59,38 @@ async def check_review_identity() -> CheckResult:
     return CheckResult(
         name="review_identity", ok=True, detail="unset — reviews publish as operator comments"
     )
+
+
+async def check_issues_mcp() -> CheckResult:
+    """Whether this appliance's /mcp answers, so an issues build can fetch
+    and comment. Linear and Jira do not need it."""
+    if (await SoftwareFactory.settings()).tracker != "issues":
+        return CheckResult(name="issues_mcp", ok=True, detail="not required")
+    endpoint = load_settings().urls.endpoint.rstrip("/")
+    if not endpoint:
+        return CheckResult(
+            name="issues_mcp",
+            ok=False,
+            pending=True,
+            detail="urls.endpoint is unset — the sandbox needs it to reach /mcp.",
+        )
+    url = f"{endpoint}/mcp"
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            response = await client.get(url)
+    except httpx.RequestError as error:
+        return CheckResult(
+            name="issues_mcp",
+            ok=False,
+            detail=f"{url} is unreachable: {error}. The issues tracker tools need it.",
+        )
+    if response.status_code >= 500:
+        return CheckResult(
+            name="issues_mcp",
+            ok=False,
+            detail=f"{url} returned {response.status_code}. The issues tracker tools need it.",
+        )
+    return CheckResult(name="issues_mcp", ok=True, detail=url)
 
 
 class SoftwareFactory(App):
@@ -127,7 +161,7 @@ class SoftwareFactory(App):
                 return IssuesStatus.READY_FOR_AGENT.label
             return ""
 
-    checks = [check_tracker_identity, check_review_identity]
+    checks = [check_tracker_identity, check_review_identity, check_issues_mcp]
 
     @classmethod
     async def get_tracker(cls, source: str | None = None) -> Tracker | None:
