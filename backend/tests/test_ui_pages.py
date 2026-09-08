@@ -139,11 +139,11 @@ def test_a_child_of_a_child_fails_at_declaration():
         history.child("/deeper")
 
 
-def test_a_missing_landing_page_fails():
+def test_a_missing_landing_page_is_allowed():
     declare("no_landing", "/notes", "notes")
 
-    with pytest.raises(PageRouteError, match=r"declares 0 pages at '/'"):
-        list_pages_for_app("no_landing", "no_landing")
+    routes = list_pages_for_app("no_landing", "no_landing")
+    assert [page.name for page in routes] == ["notes"]
 
 
 def test_two_landing_pages_fail():
