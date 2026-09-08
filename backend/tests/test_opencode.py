@@ -135,6 +135,8 @@ async def test_build_invocation_uses_server_schema_and_env_auth(
         "Authorization": "Bearer {env:MCP_GITHUB_TOKEN}",
         "X-Trace-Key": "{env:MCP_TRACE_KEY}",
     }
+    # Druks owns the credential, so opencode must not start its own OAuth.
+    assert config["mcp"]["github"]["oauth"] is False
     assert _API_KEY not in wrapper
     assert "mcp-secret" not in env["OPENCODE_CONFIG_CONTENT"]
     assert "trace-secret" not in env["OPENCODE_CONFIG_CONTENT"]

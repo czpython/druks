@@ -245,7 +245,9 @@ backup access is credential access.
 
 Druks injects enabled MCP servers through the selected harness. A call receives
 the enabled skills it requests, or every enabled skill when it requests none.
-A workspace can also require an MCP server and supply its credentials.
+A workspace can also require an MCP server and name its vault row. Each MCP
+credential is a sandbox entry that the Druks issuer answers, so no token
+enters the sandbox environment.
 Each agent call records its declarations and delivery so later evaluation can
 distinguish capability sets without storing the tokens.
 

@@ -484,7 +484,6 @@ class CodexHarness(Harness):
         home: list[HomeFile | HomeCopy] = [
             self.auth_file(subscription, key=key),
             HomeCopy(".codex/config.toml", config_dir / "config.toml"),
-            HomeCopy(".codex/.credentials.json", config_dir / ".credentials.json"),
             HomeCopy(".codex/AGENTS.md", config_dir / "AGENTS.md"),
         ]
         skills_dir = sandbox.skills_dir or config_dir / "skills"

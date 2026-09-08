@@ -43,7 +43,39 @@ async def test_claude_bundle_carries_no_credential_file(druks_db):
     )
     bundle = await _get_credentials(sandbox)
     assert not any(type(entry) is HomeFile for entry in bundle.home)
-    assert bundle.home[0] == HomeCopy(".claude.json", Path("/harnesses/claude/.claude.json"))
+    assert bundle.home[0] == HomeCopy(
+        ".claude/settings.json", Path("/harnesses/claude/settings.json")
+    )
+
+
+async def test_the_operators_claude_config_reaches_the_box_without_its_mcp_servers(
+    druks_db, tmp_path
+):
+    # Druks delivers every server it manages; a copied entry could carry a
+    # token the vault never saw.
+    config_root = tmp_path / "harnesses"
+    (config_root / "claude").mkdir(parents=True)
+    (config_root / "claude" / ".claude.json").write_text(
+        json.dumps(
+            {
+                "theme": "dark",
+                "mcpServers": {"linear": {"headers": {"Authorization": "Bearer lin_secret"}}},
+            }
+        )
+    )
+    sandbox = SandboxSettings(
+        service_url="x",
+        service_token="x",
+        service_timeout=30.0,
+        image="x",
+        harness_config_root=config_root,
+    )
+
+    bundle = await _get_credentials(sandbox)
+
+    [config] = [entry for entry in bundle.home if entry.path == ".claude.json"]
+    assert json.loads(config.content) == {"theme": "dark"}
+    assert "lin_secret" not in repr(bundle)
 
 
 async def test_credentials_builders_read_their_harness_config_directories(druks_db):
@@ -92,7 +124,6 @@ async def test_credentials_builders_read_their_harness_config_directories(druks_
         claude_bundle.home
     )
     assert HomeCopy(".claude/CLAUDE.md", config_root / "claude/CLAUDE.md") in claude_bundle.home
-    assert HomeCopy(".claude.json", config_root / "claude/.claude.json") in claude_bundle.home
     assert (
         HomeCopy(
             ".claude/plugins/installed_plugins.json",
@@ -116,10 +147,9 @@ async def test_credentials_builders_read_their_harness_config_directories(druks_
     )
     assert claude_bundle.home[-1].source == config_root / "claude/skills"
     assert HomeCopy(".codex/config.toml", config_root / "codex/config.toml") in codex_bundle.home
-    assert (
-        HomeCopy(".codex/.credentials.json", config_root / "codex/.credentials.json")
-        in codex_bundle.home
-    )
+    # MCP credentials are box entries; a copied credentials file would carry a
+    # second, unmanaged set.
+    assert not any(file.path == ".codex/.credentials.json" for file in codex_bundle.home)
     assert HomeCopy(".codex/AGENTS.md", config_root / "codex/AGENTS.md") in codex_bundle.home
     assert codex_bundle.home[-1].source == config_root / "codex/skills"
 

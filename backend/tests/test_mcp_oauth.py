@@ -21,7 +21,9 @@ from druks.mcp.exceptions import (
 from druks.mcp.helpers import get_bearer_token_env_var, get_grant_account
 from druks.mcp.models import McpServer
 from druks.redis import close_client, get_client
+from druks.sandbox.models import SecretRef
 from druks.secrets.datastructures import Audience
+from druks.secrets.exceptions import SecretRevokedError
 from druks.secrets.models import VaultSecret
 from druks.testing import configure_app_for_test, make_settings
 from druks.workspaces import Workspace
@@ -32,10 +34,6 @@ _SERVER_URL = "https://mcp.linear.test/sse"
 _AUTH_BASE = "https://auth.linear.test"
 _ENDPOINT = "https://druks.example"
 _CALLBACK = f"{_ENDPOINT}/api/mcp-servers/oauth/callback"
-
-
-class _FakeSandbox:
-    ssh_username = "exedev"
 
 
 class FakeAuthServer:
@@ -581,23 +579,32 @@ async def test_get_cache_and_refresh_lock_are_per_account(auth_server, druks_db)
     assert await redis.get(await _token_key(second.id)) == b"at-1"
 
 
-# --- delivery: the oauth branch of the fold ---------------------------------
+# --- delivery: the oauth ref and the row that issues -------------------------
 
 
-async def test_delivery_mints_and_injects_the_oauth_token(registry_state, auth_server, druks_db):
+async def _ref(account_id: str | None = None) -> SecretRef:
+    _, refs = await Workspace.get_mcp_delivery(None, account_id)
+    return next(ref for ref in refs if ref.name == get_bearer_token_env_var(_NAME).lower())
+
+
+async def test_delivery_binds_the_grant_and_the_row_issues_the_token(
+    registry_state, auth_server, druks_db
+):
     _register_oauth_server()
-    await _store_grant()
+    grant = await _store_grant()
 
-    kwargs = await Workspace(host=_FakeSandbox()).with_mcp_servers(  # type: ignore[arg-type]
-        None
-    )
+    wire, refs = await Workspace.get_mcp_delivery(None, None)
 
     var = get_bearer_token_env_var(_NAME)
-    assert kwargs["extra_env"][var] == "at-1"
-    entry = next(s for s in kwargs["mcp_servers"] if s.name == _NAME)
+    entry = next(s for s in wire if s.name == _NAME)
     assert entry.url == _SERVER_URL
     assert entry.bearer_token_env_var == var
-    assert "at-1" not in repr(entry)
+    [ref] = refs
+    assert ref.key == (var.lower(), grant.id, "", "mcp.linear.test")
+    token, expires_at = await grant.issue_token("")
+    assert token == "at-1"
+    assert expires_at > datetime.now(UTC)
+    assert "at-1" not in repr(wire) + repr(refs)
 
 
 async def test_delivery_fails_loudly_for_an_unconnected_enabled_oauth_server(
@@ -608,9 +615,7 @@ async def test_delivery_fails_loudly_for_an_unconnected_enabled_oauth_server(
     server.identity_mode = IdentityMode.SHARED
 
     with pytest.raises(MissingGrantError, match=_NAME):
-        await Workspace(host=_FakeSandbox()).with_mcp_servers(  # type: ignore[arg-type]
-            None
-        )
+        await Workspace.get_mcp_delivery(None, None)
 
 
 async def test_delivery_names_the_account_missing_its_per_user_grant(druks_db):
@@ -619,9 +624,7 @@ async def test_delivery_names_the_account_missing_its_per_user_grant(druks_db):
     server.identity_mode = IdentityMode.PER_USER
 
     with pytest.raises(MissingGrantError) as error:
-        await Workspace(host=_FakeSandbox()).with_mcp_servers(  # type: ignore[arg-type]
-            account.id
-        )
+        await Workspace.get_mcp_delivery(None, account.id)
 
     assert error.value.name == _NAME
     assert error.value.account_id == account.id
@@ -631,13 +634,11 @@ async def test_delivery_names_the_account_missing_its_per_user_grant(druks_db):
 
 async def test_delivery_without_a_run_account_uses_the_default_account(auth_server, druks_db):
     default_account = await Account.get_or_create("default@example.com")
-    await _store_grant(account_id=default_account.id, identity_mode=IdentityMode.PER_USER)
+    grant = await _store_grant(account_id=default_account.id, identity_mode=IdentityMode.PER_USER)
 
-    kwargs = await Workspace(host=_FakeSandbox()).with_mcp_servers(  # type: ignore[arg-type]
-        None
-    )
+    ref = await _ref()
 
-    assert kwargs["extra_env"][get_bearer_token_env_var(_NAME)] == "at-1"
+    assert ref.secret_id == grant.id
 
 
 async def test_delivery_with_a_named_account_does_not_use_the_default_account(
@@ -648,11 +649,32 @@ async def test_delivery_with_a_named_account_does_not_use_the_default_account(
     await _store_grant(account_id=default_account.id, identity_mode=IdentityMode.PER_USER)
 
     with pytest.raises(MissingGrantError) as error:
-        await Workspace(host=_FakeSandbox()).with_mcp_servers(  # type: ignore[arg-type]
-            named.id
-        )
+        await Workspace.get_mcp_delivery(None, named.id)
 
     assert error.value.account_id == named.id
+
+
+async def test_the_ref_binds_the_accounts_own_grant(auth_server, druks_db):
+    # The ref binds the grant row at creation: a held box keeps that account's
+    # grant whatever account asks later.
+    first = await Account.get_or_create("first@example.com")
+    second = await Account.get_or_create("second@example.com")
+    grant = await _store_grant(account_id=first.id, identity_mode=IdentityMode.PER_USER)
+    await _store_grant(account_id=second.id, identity_mode=IdentityMode.PER_USER)
+
+    ref = await _ref(first.id)
+
+    assert ref.secret_id == grant.id
+    assert (await VaultSecret.get(ref.secret_id)).account_id == first.id
+
+
+async def test_a_disconnected_grant_issues_nothing(auth_server, druks_db):
+    await _store_grant()
+    ref = await _ref()
+    await oauth.disconnect(_NAME, None)
+
+    with pytest.raises(SecretRevokedError, match=_NAME):
+        await (await VaultSecret.get(ref.secret_id)).issue_token("")
 
 
 # --- API: connect / callback / disconnect / badge ---------------------------

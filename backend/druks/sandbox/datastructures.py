@@ -137,8 +137,8 @@ class AgentInvocation:
 class McpServer:
     """A streamable-HTTP MCP server the agent talks to. Config-safe by
     construction: no secret value appears here — the bearer token and every
-    secret header value ride the run's env, and this shape names only their
-    env vars; the harness reads them at runtime. Only non-secret declared
+    secret header value are box entries behind the named env vars, and the
+    harness reads the placeholders at runtime. Only non-secret declared
     header values are carried inline."""
 
     name: str
@@ -154,14 +154,15 @@ class McpServer:
 
 @dataclass(frozen=True)
 class RequiredMcpServer:
-    """An MCP server a workspace requires for its runs and credentials itself —
-    a run-scoped token the operator registry can't hold (Software Factory's per-repo
-    reviewer token). It owns its name: a same-named registry entry is not
-    delivered."""
+    """An MCP server a workspace requires for its runs. ``secret_id`` names
+    the vault row the box's entry issues from, and ``resource`` what the token
+    is for: Software Factory's review identity and the repo. It owns its
+    name: a same-named registry entry is not delivered."""
 
     name: str
     url: str
-    token: str = field(repr=False)
+    secret_id: str
+    resource: str = ""
 
 
 @dataclass(frozen=True)

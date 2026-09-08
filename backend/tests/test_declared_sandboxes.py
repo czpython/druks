@@ -234,6 +234,7 @@ async def test_warm_lease_uses_workflow_template(monkeypatch):
     workflow._workflow_id = "run-1"
     workflow._host = None
     workflow._subject = None
+    workflow.account_id = None
     monkeypatch.setattr(
         workflow_module,
         "sandbox_client",

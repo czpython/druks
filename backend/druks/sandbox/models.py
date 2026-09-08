@@ -10,7 +10,9 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship, selectinload
 
 from druks.core.models import Uuid7Pk
 from druks.database import db_session, get_session
+from druks.mcp.constants import BEARER_HEADER, BEARER_PREFIX
 from druks.models import Base
+from druks.secrets.enums import SecretKind
 from druks.secrets.models import VaultSecret
 from druks.settings import load_settings
 
@@ -23,6 +25,9 @@ if TYPE_CHECKING:
 # The lifetime the exchange gives an answer without expires_at. A
 # subscription answer always carries one. Nothing polls on it.
 _ISSUER_REFRESH = "1h"
+# A pasted value never expires, so the exchange fetches it again on this
+# cadence: a new paste reaches a running box within it.
+_STATIC_REFRESH = "5m"
 
 
 class SecretRef(Base):
@@ -39,13 +44,16 @@ class SecretRef(Base):
     secret_id: Mapped[str] = mapped_column(ForeignKey("vault.id", ondelete="CASCADE"))
     # What the token is for: the repo. Empty for a subscription.
     resource: Mapped[str] = mapped_column(default="")
+    # The host the box's placeholder is swapped at, for a custom entry such
+    # as an MCP server. Empty for a Drukbox catalog entry.
+    host: Mapped[str] = mapped_column(default="")
 
     identity: Mapped["SandboxIdentity"] = relationship(back_populates="secret_refs")
     secret: Mapped[VaultSecret] = relationship(lazy="selectin")
 
     @property
-    def key(self) -> tuple[str, str, str]:
-        return (self.name, self.secret_id, self.resource or "")
+    def key(self) -> tuple[str, str, str, str]:
+        return (self.name, self.secret_id, self.resource or "", self.host or "")
 
 
 class SandboxIdentity(Base, Uuid7Pk):
@@ -82,7 +90,12 @@ class SandboxIdentity(Base, Uuid7Pk):
             scoped_to=scoped_to,
             # Own rows: the caller's values stay values.
             secret_refs=[
-                SecretRef(name=ref.name, secret_id=ref.secret_id, resource=ref.resource or "")
+                SecretRef(
+                    name=ref.name,
+                    secret_id=ref.secret_id,
+                    resource=ref.resource or "",
+                    host=ref.host or "",
+                )
                 for ref in secret_refs
             ],
             token_hash=hashlib.sha256(bearer.encode()).digest(),
@@ -94,14 +107,27 @@ class SandboxIdentity(Base, Uuid7Pk):
         session.add(identity)
         await session.commit()
         issuer_url = load_settings().sandbox.issuer_url.rstrip("/")
-        entries = {
-            ref.name: Issuer(
+        entries = {}
+        for ref in secret_refs:
+            secret = await VaultSecret.get(ref.secret_id)
+            # A custom entry binds the host the proxy swaps at, the variable
+            # the box exports, and the header the value fills. A catalog entry
+            # leaves those to Drukbox.
+            fields = {}
+            if ref.host:
+                header = secret.header or BEARER_HEADER
+                fields = {
+                    "host": ref.host,
+                    "auth_variable": ref.name.upper(),
+                    "auth_header": header,
+                    "auth_prefix": BEARER_PREFIX if header == BEARER_HEADER else "",
+                }
+            entries[ref.name] = Issuer(
                 url=f"{issuer_url}/api/secrets/{identity.id}/{ref.name}",
                 headers={"Authorization": f"Bearer {bearer}"},
-                refresh=_ISSUER_REFRESH,
+                refresh=_STATIC_REFRESH if secret.kind == SecretKind.STATIC else _ISSUER_REFRESH,
+                **fields,
             )
-            for ref in secret_refs
-        }
         return identity, entries
 
     @classmethod

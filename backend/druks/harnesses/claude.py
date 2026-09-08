@@ -228,8 +228,15 @@ async def _get_credentials(
     operator's plugin state, for prompts that use no MCP server and would
     otherwise die on a misconfigured plugin."""
     config_dir = sandbox.harness_config_root / ClaudeHarness.name
-    home: list[HomeFile | HomeCopy] = [
-        HomeCopy(".claude.json", config_dir / ".claude.json"),
+    home: list[HomeFile | HomeCopy] = []
+    claude_json = config_dir / ".claude.json"
+    if claude_json.is_file():
+        # The operator's own MCP servers stay out of the box: Druks delivers
+        # every server it manages, and a copied entry could carry a token.
+        config = json.loads(claude_json.read_text())
+        config.pop("mcpServers", None)
+        home.append(HomeFile(".claude.json", json.dumps(config)))
+    home += [
         HomeCopy(".claude/settings.json", config_dir / "settings.json"),
         HomeCopy(".claude/CLAUDE.md", config_dir / "CLAUDE.md"),
     ]

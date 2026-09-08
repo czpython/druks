@@ -46,6 +46,7 @@ async def test_survey_writes_the_repository_gist(druks_db, monkeypatch):
 async def test_survey_workspace_clones_the_subject_repo(druks_db):
     workflow = Survey()
     workflow.subject = await Repository.create(repo="acme/widgets")
+    workflow.account_id = None
     host = SimpleNamespace(id="h1", ssh_username="exedev")
 
     workspace = await workflow.get_workspace(host)
@@ -57,4 +58,4 @@ async def test_survey_workspace_clones_the_subject_repo(druks_db):
         "github", identity={"app_id": "1", "slug": "druks-operator"}, secrets={"private_key": "pem"}
     )
     [secret] = await workflow.get_secret_refs()
-    assert secret.key == ("github", row.id, "acme/widgets")
+    assert secret.key == ("github", row.id, "acme/widgets", "")

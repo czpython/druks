@@ -69,6 +69,7 @@ def _warm_workflow(*, reuse: bool = True) -> Workflow:
     flow._host = None
     flow._subject = None
     flow._workflow_id = "wf-1"
+    flow.account_id = None
     return flow
 
 

@@ -40,16 +40,23 @@ logger = logging.getLogger(__name__)
 @dataclass(frozen=True, kw_only=True)
 class BuildWorkspace(RepoWorkspace):
     skills: tuple[str, ...]
-    # Installation token for build's github MCP server, minted per repo from
-    # the identity reviews act as. Required — there is no build without github.
-    mcp_token: str
 
     @property
     def workspace_root(self) -> str:
         return get_work_root(self.host.ssh_username)
 
-    def get_required_mcp_servers(self) -> tuple[RequiredMcpServer, ...]:
-        return (RequiredMcpServer(name=GITHUB_MCP_NAME, url=GITHUB_MCP_URL, token=self.mcp_token),)
+    @classmethod
+    async def get_required_mcp_servers(cls, subject: Any) -> tuple[RequiredMcpServer, ...]:
+        # GitHub MCP acts as the review actor; the clone acts as the operator.
+        actor = await get_review_actor()
+        return (
+            RequiredMcpServer(
+                name=GITHUB_MCP_NAME,
+                url=GITHUB_MCP_URL,
+                secret_id=(await actor.service.get()).id,
+                resource=cls.get_repo(subject),
+            ),
+        )
 
     async def run_agent(self, *, account_id: str | None, **kwargs: Any):
         # Agents clone related repos on demand; Claude's --add-dir target must exist first.
@@ -183,22 +190,10 @@ class Build(Workflow):
 
     async def get_workspace_kwargs(self, host: "Host") -> dict[str, Any]:
         kwargs = await super().get_workspace_kwargs(host)
-        repo = kwargs["subject"].repo
-        try:
-            mcp_token, _ = await (await get_review_actor()).client.token_for_repo(repo)
-        except Exception as error:
-            # There is no build without github: agents push and review through
-            # the github MCP, so a run that can't mint its token fails here,
-            # loudly, instead of degrading mid-run.
-            raise FatalError(
-                f"Could not mint the GitHub token for {repo}; build requires it "
-                "for its github MCP server."
-            ) from error
         return {
             **kwargs,
             # None until the first implement provisions the PR branch.
             "branch": self.branch,
-            "mcp_token": mcp_token,
             "skills": tuple(self._profile.get("recommended_skills", [])),
         }
 

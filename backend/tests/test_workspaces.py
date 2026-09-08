@@ -62,7 +62,7 @@ async def test_repo_workspace_names_its_github_secret_and_repo_before_the_box_ex
 
     [secret] = await RepoWorkspace.get_secret_refs(subject)
 
-    assert secret.key == ("github", row.id, "acme/widgets")
+    assert secret.key == ("github", row.id, "acme/widgets", "")
     assert await Workspace.get_secret_refs(subject) == []
 
 

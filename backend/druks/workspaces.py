@@ -5,6 +5,7 @@ import shlex
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any, ClassVar
+from urllib.parse import urlsplit
 
 from druks.accounts.models import Account
 from druks.core.apis.github import get_github_client
@@ -20,7 +21,7 @@ from druks.mcp import models as mcp_models
 from druks.mcp import oauth
 from druks.mcp.constants import TOKEN_ENV_PREFIX
 from druks.mcp.enums import IdentityMode, TokenSource
-from druks.mcp.exceptions import MissingTokenError
+from druks.mcp.exceptions import MissingGrantError, MissingTokenError
 from druks.mcp.helpers import get_bearer_token_env_var, get_grant_account
 from druks.sandbox import repo as checkout
 from druks.sandbox.datastructures import AgentResult, McpServer, RequiredMcpServer
@@ -47,9 +48,10 @@ class Workspace:
         # Override to add what the run needs on this workspace (add_dirs, skills).
         return kwargs
 
-    def get_required_mcp_servers(self) -> tuple[RequiredMcpServer, ...]:
-        # Override to declare the servers this workspace requires and
-        # credentials itself. Base: none.
+    @classmethod
+    async def get_required_mcp_servers(cls, subject: Any) -> tuple[RequiredMcpServer, ...]:
+        # Override to declare the servers this workspace requires and the vault
+        # row each one issues through. Read before the box exists. Base: none.
         return ()
 
     @classmethod
@@ -148,79 +150,84 @@ class Workspace:
         return await self.host.run_agent(**run_kwargs)
 
     async def with_mcp_servers(self, account_id: str | None, **kwargs: Any) -> dict[str, Any]:
-        # Fold every MCP server into this call — the workspace's required
-        # servers, then the operator registry's enabled entries. Each becomes a
-        # wire shape on ``mcp_servers`` (url + derived env var, never the
-        # token); each token rides ``extra_env`` under that var.
-        required = self.get_required_mcp_servers()
+        # The harness names each server's url, variables, and plain headers.
+        # Every credential is a box entry, so nothing rides ``extra_env``.
+        wire, _ = await self.get_mcp_delivery(self.subject, account_id)
+        if wire:
+            kwargs["mcp_servers"] = wire
+        return kwargs
+
+    @classmethod
+    async def get_mcp_delivery(
+        cls, subject: Any, account_id: str | None
+    ) -> tuple[tuple[McpServer, ...], list[SecretRef]]:
+        """The MCP servers a box of this workspace reaches: the wire shapes for
+        the harness and the secret refs for the box's entries, one per bearer
+        and per secret header. The workspace's required servers come first
+        and own their names: a same-named registry entry is neither resolved
+        nor delivered. A server that cannot authenticate fails here, before
+        the box."""
+        required = await cls.get_required_mcp_servers(subject)
         required_names = {server.name for server in required}
         if len(required_names) != len(required):
             # One config key per name in the emitted harness config — a dupe
             # would break the VM's config parse mid-run.
             raise ValueError(f"duplicate required MCP server names: {sorted(required_names)}")
-        enabled = await mcp_models.McpServer.list_enabled()
-        if not required and not enabled:
-            return kwargs
-        run_account = account_id
-        # ``extra_env`` may be omitted or an explicit ``None`` (both valid for the
-        # underlying run_agent); treat them the same so the merge never unpacks None.
-        env = dict(kwargs.get("extra_env") or {})
         wire = []
+        refs = []
         for server in required:
-            env[get_bearer_token_env_var(server.name)] = server.token
-            wire.append(
-                McpServer(
-                    name=server.name,
-                    url=server.url,
-                    bearer_token_env_var=get_bearer_token_env_var(server.name),
+            variable = get_bearer_token_env_var(server.name)
+            wire.append(McpServer(name=server.name, url=server.url, bearer_token_env_var=variable))
+            refs.append(
+                SecretRef(
+                    name=variable.lower(),
+                    secret_id=server.secret_id,
+                    resource=server.resource,
+                    host=urlsplit(server.url).hostname,
                 )
             )
-        for server in enabled:
-            if server["name"] in required_names:
-                # A required server owns its name: the registry twin is neither
-                # resolved (no raise, no env clobber) nor delivered.
+        run_account = account_id
+        for server in await mcp_models.McpServer.list_enabled():
+            name = server["name"]
+            if name in required_names:
                 continue
-            # Per-strategy bearer resolution, loud when a server can't
-            # authenticate — delivery never ships a header the harness
-            # can't fill.
+            host = urlsplit(server["url"]).hostname
+            # The bearer's vault row, by source, loud when the server cannot
+            # authenticate. A bearerless server rides its declared headers.
             source = server["token_source"]
-            if not source:
-                # No bearer; auth, if any, rides the declared headers below.
-                token = ""
-            elif source == TokenSource.STATIC:
-                # A stored token is ciphertext everywhere else; it is read only
-                # here, entering the run env.
-                if not server["token"]:
-                    raise MissingTokenError(server["name"])
-                token = server["token"].secrets["value"]
-            else:  # oauth
+            bearer_token_env_var = ""
+            if source == TokenSource.STATIC:
+                secret = server["token"]
+                if not secret:
+                    raise MissingTokenError(name)
+            elif source:
                 if server["identity_mode"] == IdentityMode.PER_USER and not run_account:
                     account = await Account.get_default()
                     run_account = account.id if account else None
                 grant_account = get_grant_account(server["identity_mode"], run_account)
-                token, _ = await oauth.get_access_token(server["name"], grant_account)
-            bearer_token_env_var = ""
-            if token:
-                bearer_token_env_var = get_bearer_token_env_var(server["name"])
-                env[bearer_token_env_var] = token
+                secret = await oauth.get_connection(name, grant_account)
+                if not secret:
+                    raise MissingGrantError(name, grant_account)
+            if source:
+                bearer_token_env_var = get_bearer_token_env_var(name)
+                refs.append(
+                    SecretRef(name=bearer_token_env_var.lower(), secret_id=secret.id, host=host)
+                )
             env_headers = {}
             for index, (header, secret) in enumerate(server["secret_headers"].items()):
-                env_var = f"{TOKEN_ENV_PREFIX}{server['name'].upper()}_HEADER_{index}"
-                env[env_var] = secret.secrets["value"]
-                env_headers[header] = env_var
+                variable = f"{TOKEN_ENV_PREFIX}{name.upper()}_HEADER_{index}"
+                env_headers[header] = variable
+                refs.append(SecretRef(name=variable.lower(), secret_id=secret.id, host=host))
             wire.append(
                 McpServer(
-                    name=server["name"],
+                    name=name,
                     url=server["url"],
                     bearer_token_env_var=bearer_token_env_var,
                     headers=dict(server["headers"]),
                     env_headers=env_headers,
                 )
             )
-        kwargs["mcp_servers"] = tuple(wire)
-        if env:
-            kwargs["extra_env"] = env
-        return kwargs
+        return tuple(wire), refs
 
 
 @dataclass(frozen=True)

@@ -125,7 +125,6 @@ class Harness(ABC):
         *,
         mcp_servers: tuple["McpServer", ...],
         skills: Collection[str],
-        extra_env: dict[str, str] | None,
     ) -> dict:
         """The capability manifest for one AgentCall: what this harness was
         handed. Presence only — a token records as a boolean, never its value,
@@ -138,15 +137,13 @@ class Harness(ABC):
         is a stable digest of the canonicalised record, so an identical
         capability set always hashes the same and an eval report can bucket
         calls by it."""
-        delivered_env = extra_env or {}
         # Declared = the enabled registry view; delivered = what actually
         # reached this call (a workspace's required server owns its name — see
-        # Workspace.with_mcp_servers). The delivered server is what
+        # Workspace.get_mcp_delivery). The delivered server is what
         # this harness ran against, so record its url + env var; fall back to
         # the declared values only for a declared-but-not-delivered entry.
-        # token_present reads the delivered env: a server's bearer env var is
-        # set iff its token was found at delivery, for a static or an
-        # app-minted token alike.
+        # token_present reads the delivered shape: it names a bearer env var
+        # iff the box holds an entry behind it.
         declared = {server["name"]: server for server in await mcp_models.McpServer.list_enabled()}
         delivered_by_name = {server.name: server for server in mcp_servers}
         mcp = []
@@ -160,7 +157,7 @@ class Harness(ABC):
                     "bearer_token_env_var": env_var,
                     "declared": name in declared,
                     "delivered": name in delivered_by_name,
-                    "token_present": env_var in delivered_env,
+                    "token_present": bool(server and server.bearer_token_env_var),
                 }
             )
         # Only the delivered skill set is reachable in either CLI home, so the
