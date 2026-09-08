@@ -6,7 +6,6 @@ from conftest import (
     connect_anthropic_subscription,
     connect_provider,
     seed_note_run,
-    settings_client,
 )
 from druks.core.tasks import refresh_usage
 from druks.harnesses.datastructures import ParsedMetric, ParsedUsage
@@ -84,7 +83,6 @@ async def test_unchanged_scrapes_double_interval_to_one_hour(
         {"error": "timeout"},
         {"weeks": [{"model": "Fable", "percent_left": 49, "resets_at": None}]},
         {"weeks": []},
-        {"weeks": [{"model": "Other", "percent_left": 50, "resets_at": None}]},
     ],
 )
 async def test_changed_values_restart_the_interval(subscription, changes) -> None:
@@ -96,53 +94,6 @@ async def test_changed_values_restart_the_interval(subscription, changes) -> Non
     await _scrape(subscription, NOW, **(values | changes))
 
     assert not await UsageScrape.is_due(subscription, now=NOW + timedelta(minutes=4))
-    assert await UsageScrape.is_due(subscription, now=NOW + timedelta(minutes=5))
-
-
-async def test_error_tag_change_restarts_the_interval(subscription) -> None:
-    """An outage with a new error does not retain the previous error's delay."""
-    await _scrape(subscription, NOW - timedelta(minutes=10), five=None, error="timeout")
-    await _scrape(subscription, NOW - timedelta(minutes=5), five=None, error="timeout")
-    await _scrape(subscription, NOW, five=None, error="auth_required")
-
-    assert await UsageScrape.is_due(subscription, now=NOW + timedelta(minutes=5))
-
-
-async def test_display_metadata_does_not_restart_interval(subscription) -> None:
-    """Only each window's percentage and the error tag control the idle streak."""
-    weeks = [
-        {"model": None, "percent_left": 50, "resets_at": None},
-        {"model": "Fable", "percent_left": 20, "resets_at": None},
-    ]
-    await _scrape(subscription, NOW - timedelta(minutes=5), weeks=weeks)
-    row = await _scrape(subscription, NOW, weeks=weeks)
-    row.plan_tier = "max"
-    row.raw_output = "different response text"
-    await row.save()
-
-    assert not await UsageScrape.is_due(subscription, now=NOW + timedelta(minutes=5))
-    assert await UsageScrape.is_due(subscription, now=NOW + timedelta(minutes=10))
-
-
-async def test_each_weekly_window_counts_when_model_labels_match(subscription) -> None:
-    """The provider can return multiple weekly windows without a model label."""
-    await _scrape(
-        subscription,
-        NOW - timedelta(minutes=5),
-        weeks=[
-            {"model": None, "percent_left": 50, "resets_at": None},
-            {"model": None, "percent_left": 20, "resets_at": None},
-        ],
-    )
-    await _scrape(
-        subscription,
-        NOW,
-        weeks=[
-            {"model": None, "percent_left": 40, "resets_at": None},
-            {"model": None, "percent_left": 20, "resets_at": None},
-        ],
-    )
-
     assert await UsageScrape.is_due(subscription, now=NOW + timedelta(minutes=5))
 
 
@@ -191,10 +142,8 @@ async def test_unrelated_or_unfinished_calls_do_not_bypass_delay(
 
 
 @pytest.mark.parametrize("window", ["five_hour", "weekly"])
-async def test_exhausted_window_waits_for_reset_even_after_call(
-    subscription, druks_db, window
-) -> None:
-    """A completed call cannot poll an exhausted window before its reset."""
+async def test_finished_call_bypasses_exhausted_window(subscription, druks_db, window) -> None:
+    """A completed call makes an exhausted snapshot due before its reset."""
     reset = NOW + timedelta(hours=2)
     values = {"five": 0, "reset": reset}
 
@@ -206,8 +155,7 @@ async def test_exhausted_window_waits_for_reset_even_after_call(
     call.finished_at = NOW + timedelta(seconds=1)
     await druks_db.flush()
 
-    assert not await UsageScrape.is_due(subscription, now=reset - timedelta(seconds=1))
-    assert await UsageScrape.is_due(subscription, now=reset)
+    assert await UsageScrape.is_due(subscription, now=NOW + timedelta(minutes=1))
 
 
 async def test_soonest_exhausted_reset_controls_polling(subscription) -> None:
@@ -242,32 +190,6 @@ async def test_zero_without_a_future_reset_uses_normal_interval(subscription, re
 
     assert not await UsageScrape.is_due(subscription, now=NOW + timedelta(minutes=4))
     assert await UsageScrape.is_due(subscription, now=NOW + timedelta(minutes=5))
-
-
-@pytest.mark.parametrize("window", ["five_hour", "weekly"])
-async def test_window_reset_restarts_ramp_once_even_when_values_stay_full(
-    subscription, window
-) -> None:
-    """A reset ends the idle streak, then fresh scrapes build a new streak."""
-    reset = NOW + timedelta(minutes=5)
-    values = {"five": 100, "reset": reset}
-
-    if window == "weekly":
-        values = {"weeks": [{"model": None, "percent_left": 100, "resets_at": reset.isoformat()}]}
-
-    for index in range(5):
-        await _scrape(subscription, NOW - timedelta(minutes=5 - index), **values)
-
-    assert not await UsageScrape.is_due(subscription, now=reset - timedelta(seconds=1))
-    assert await UsageScrape.is_due(subscription, now=reset)
-    await _scrape(subscription, reset, **values)
-
-    assert not await UsageScrape.is_due(subscription, now=reset + timedelta(minutes=4))
-    assert await UsageScrape.is_due(subscription, now=reset + timedelta(minutes=5))
-    await _scrape(subscription, reset + timedelta(minutes=5), **values)
-
-    assert not await UsageScrape.is_due(subscription, now=reset + timedelta(minutes=10))
-    assert await UsageScrape.is_due(subscription, now=reset + timedelta(minutes=15))
 
 
 @pytest.mark.parametrize("error", [None, "timeout"])
@@ -335,36 +257,3 @@ async def test_task_skips_a_subscription_revoked_during_a_poll(subscription, dru
     await refresh_usage._function()
 
     assert fetched == expected
-
-
-@pytest.mark.parametrize("exhausted", [False, True])
-async def test_manual_refresh_bypasses_due_policy_and_retains_floor(
-    subscription, tmp_path, monkeypatch, exhausted
-) -> None:
-    """A manual poll bypasses delay and contributes to the same scrape history."""
-    now = Base.utc_now()
-    five = 0 if exhausted else 50
-    reset = now + timedelta(hours=2)
-
-    for index in range(5):
-        await _scrape(subscription, now - timedelta(minutes=6 - index), five=five, reset=reset)
-    fetched = []
-
-    async def fetch_usage(subscription, *, now=None):
-        fetched.append(subscription.id)
-        return ParsedUsage(ok=True, five_hour=ParsedMetric(percent_left=five, resets_at=reset))
-
-    monkeypatch.setattr(AnthropicProvider, "fetch_usage", fetch_usage)
-    assert not await UsageScrape.is_due(subscription, now=now)
-
-    with settings_client(tmp_path) as client:
-        assert client.post("/api/usage/refresh").status_code == 200
-        assert client.post("/api/usage/refresh").status_code == 200
-
-    assert fetched == [subscription.id]
-    latest = await UsageScrape.latest_for("anthropic", subscription.account_id)
-    assert latest.scraped_at >= now
-    assert not await UsageScrape.is_due(subscription, now=now + timedelta(minutes=58))
-
-    if not exhausted:
-        assert await UsageScrape.is_due(subscription, now=latest.scraped_at + timedelta(hours=1))

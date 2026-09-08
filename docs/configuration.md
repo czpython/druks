@@ -367,18 +367,10 @@ model catalog timestamp. The weekly quota stays in the provider row.
 Anthropic and OpenAI fetch separate model lists.
 Added providers use the cached Models.dev directory.
 
-Druks checks which subscriptions need a usage poll every five minutes, even
-with no dashboard open.
-A subscription without a scrape is due immediately. A completed agent call on
-that subscription makes its next poll due, unless a quota window is exhausted.
-Unchanged percentages and error tags increase the interval to 10, 20, 40, then
-60 minutes. A change or a window reset starts the five-minute interval again.
-Each subscription uses its own scrape history.
-
-A window with 0% left and a future reset pauses automatic polls. Polls resume
-after the soonest exhausted window resets. Manual refresh on the Usage page
-bypasses these delays but keeps a 60-second minimum between polls.
-Manual and automatic polls contribute to the same history.
+Druks polls subscription usage every five minutes, with intervals up to one hour
+while values stay unchanged. An exhausted window waits for its reset unless an
+agent call finishes on the subscription. Manual refresh keeps a 60-second
+minimum between polls.
 
 The `claude` and `codex` CLIs run on their own vendor's subscription or key.
 `opencode` and `pi` run on an API key only, for Anthropic or OpenAI. A key for
