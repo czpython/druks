@@ -449,14 +449,31 @@ afterEach(() => {
 })
 
 describe('SettingsPages app fields', () => {
-  it('opens browser sessions from settings navigation', async () => {
+  it('opens browser profiles through Connections and settings search', async () => {
     stubFetch()
     renderSettings()
 
-    fireEvent.click(await screen.findByRole('link', { name: 'Browser sessions' }))
+    expect(screen.queryByRole('link', { name: 'Browser sessions' })).toBeNull()
+    fireEvent.click(await screen.findByRole('link', { name: 'Connections' }))
+    fireEvent.click(screen.getByRole('link', { name: 'Browser' }))
 
-    expect(await screen.findByRole('heading', { name: 'Browser' })).toBeTruthy()
-    expect(await screen.findByText('No installed app declares a browser session.')).toBeTruthy()
+    expect(await screen.findByRole('heading', { name: 'Browser profiles' })).toBeTruthy()
+    expect(await screen.findByText('No installed app declares a browser profile.')).toBeTruthy()
+    expect(window.location.search).toBe('?tab=browser')
+
+    fireEvent.click(screen.getByRole('link', { name: 'Accounts' }))
+    expect(screen.queryByRole('heading', { name: 'Browser profiles' })).toBeNull()
+    fireEvent.change(screen.getByLabelText('Search settings'), {
+      target: { value: 'browser sessions' },
+    })
+    fireEvent.click(
+      within(screen.getByLabelText('Settings search results')).getByRole('link', {
+        name: /Browser profiles/,
+      }),
+    )
+    expect(screen.getByRole('heading', { name: 'Browser profiles' })).toBeTruthy()
+    expect(screen.getByRole('link', { name: 'Browser' }).getAttribute('aria-current')).toBe('page')
+    expect(window.location.search).toBe('?tab=browser')
   })
 
   it('spells an underscored app name out in the index and its options group', async () => {
@@ -1339,7 +1356,7 @@ describe('settings resource read failures', () => {
         .mockResolvedValue([])
       renderSettings(`/settings/${section}`)
       if (method === 'listConnections') {
-        fireEvent.click(await screen.findByRole('button', { name: 'Accounts' }))
+        fireEvent.click(await screen.findByRole('link', { name: 'Accounts' }))
       }
       const alert = await screen.findByRole('alert')
       expect(alert.textContent).toContain(`Could not load ${label}.`)

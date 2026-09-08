@@ -122,18 +122,18 @@ docker compose exec web druks doctor --sandbox
 
 This creates and deletes a real sandbox container.
 
-## 4. Log in a browser session
+## 4. Connect a browser profile
 
-Create the browser session:
+Installed apps declare the browser profiles they use. To save a login:
 
-1. Open **Settings → Browser sessions**.
-2. Create a stable session name.
+1. Open **Settings → Connections → Browser**.
+2. Find the profile for the site.
 3. Choose **Log in**. Druks opens a headed browser in a disposable browser sandbox.
 4. Authenticate on the site.
 5. Choose **Save**. Druks closes the browser and stores its encrypted profile.
-   It marks the session as ready.
+   It marks the profile as ready.
 
-When a site expires the login, the session becomes stale. Choose **Reconnect**.
+When a site expires the login, the profile becomes stale. Choose **Reconnect**.
 Druks creates a new login window from the saved state. Authenticate again. Then
 save the replacement profile.
 
@@ -141,9 +141,9 @@ save the replacement profile.
 a change to the saved state. A web-process restart also deletes open login
 windows. After Druks returns, open the window again.
 
-To examine the complete path, save the session. Then run an app workflow that
+To examine the complete path, save the profile. Then run an app workflow that
 borrows it. Make sure that its browser opens the authenticated site. A saved
-login window always stores `profile_dir`. This rule also applies to a session
+login window always stores `profile_dir`. This rule also applies to a profile
 that came from Playwright `storage_state`.
 
 ## 5. Exercise an app
