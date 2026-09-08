@@ -31,16 +31,26 @@ import { useEffect, useRef, useState } from 'react'
  * Lines that don't parse as JSON pass through as plain text — partial
  * stderr leakage stays legible.
  */
-export function StreamTranscript({ text, complete = false }: { text: string; complete?: boolean }) {
+export function StreamTranscript({
+  text,
+  complete = false,
+  isLive = false,
+}: {
+  text: string
+  complete?: boolean
+  isLive?: boolean
+}) {
   const [parseState, setParseState] = useState(() =>
     appendStreamText(emptyParseState, text, complete),
   )
-  let rows = parseState.rows
+  let current = parseState
   if (parseState.receivedLength !== text.length || parseState.tailFlushed !== complete) {
     const nextParseState = appendStreamText(parseState, text, complete)
     setParseState(nextParseState)
-    rows = nextParseState.rows
+    current = nextParseState
   }
+  const { rows, thinkingTokens } = current
+  const showThinking = isLive && !complete && thinkingTokens !== null
 
   // Stick-to-bottom: when the transcript renders inside its own scroll box
   // (the detail page caps `.ins-xscript .stream-transcript`), follow new rows
@@ -52,9 +62,9 @@ export function StreamTranscript({ text, complete = false }: { text: string; com
   useEffect(() => {
     const el = boxRef.current
     if (el && pinnedRef.current) el.scrollTop = el.scrollHeight
-  }, [rows])
+  }, [rows, thinkingTokens])
 
-  if (rows.length === 0) {
+  if (rows.length === 0 && !showThinking) {
     return <pre className="run-pre mono dim">waiting for output…</pre>
   }
   return (
@@ -70,6 +80,12 @@ export function StreamTranscript({ text, complete = false }: { text: string; com
       {rows.map((row, i) => (
         <StreamRow key={i} row={row} />
       ))}
+      {showThinking && (
+        <div className="stream-row mono dim" role="status" aria-label="Thinking">
+          Thinking…
+          <span aria-hidden="true"> · about {formatTokens(thinkingTokens)} tokens</span>
+        </div>
+      )}
     </div>
   )
 }
@@ -105,6 +121,7 @@ type Row =
 // the suffix by `receivedLength` sound.
 interface IncrementalParseState {
   rows: Row[]
+  thinkingTokens: number | null
   receivedLength: number
   partialLine: string
   tailFlushed: boolean
@@ -112,6 +129,7 @@ interface IncrementalParseState {
 
 const emptyParseState: IncrementalParseState = {
   rows: [],
+  thinkingTokens: null,
   receivedLength: 0,
   partialLine: '',
   tailFlushed: false,
@@ -129,15 +147,15 @@ function appendStreamText(
   const lastNewline = pending.lastIndexOf('\n')
   const terminated = lastNewline === -1 ? [] : pending.slice(0, lastNewline).split('\n')
   let partialLine = lastNewline === -1 ? pending : pending.slice(lastNewline + 1)
-  const newRows = rowsForLines(terminated)
-
   if (complete && partialLine !== '') {
-    newRows.push(...rowsForLines([partialLine]))
+    terminated.push(partialLine)
     partialLine = ''
   }
+  const { rows: newRows, thinkingTokens } = rowsForLines(terminated, previous.thinkingTokens)
 
   return {
     rows: newRows.length === 0 ? previous.rows : [...previous.rows, ...newRows],
+    thinkingTokens,
     receivedLength: text.length,
     partialLine,
     tailFlushed: complete,
@@ -150,18 +168,28 @@ export function parseStream(text: string, complete: boolean): Row[] {
   return appendStreamText(emptyParseState, text, complete).rows
 }
 
-function rowsForLines(lines: string[]): Row[] {
+function rowsForLines(
+  lines: string[],
+  thinkingTokens: number | null,
+): Pick<IncrementalParseState, 'rows' | 'thinkingTokens'> {
   const rows: Row[] = []
   for (const line of lines) {
     if (!line.trim()) continue
     const event = tryParse(line)
     if (event === null) {
       rows.push({ kind: 'raw', line })
+      thinkingTokens = null
       continue
     }
-    rows.push(...rowsForEvent(event, line))
+    if (event.type === 'system' && event.subtype === 'thinking_tokens') {
+      if (typeof event.estimated_tokens === 'number') thinkingTokens = event.estimated_tokens
+      continue
+    }
+    const eventRows = rowsForEvent(event, line)
+    if (eventRows.length) thinkingTokens = null
+    rows.push(...eventRows)
   }
-  return rows
+  return { rows, thinkingTokens }
 }
 
 function tryParse(line: string): Record<string, unknown> | null {
@@ -187,10 +215,7 @@ function rowsForEvent(event: Record<string, unknown>, raw: string): Row[] {
         },
       ]
     }
-    // Every other system subtype — thinking_tokens (a token-count progress
-    // ticker), hook_started / hook_response, task_started / task_notification —
-    // is infra with no content. Drop it so the assistant text and tool calls
-    // aren't buried under raw JSON noise.
+    // Hook and task notifications have no transcript content.
     return []
   }
   if (eventType === 'rate_limit_event') {
