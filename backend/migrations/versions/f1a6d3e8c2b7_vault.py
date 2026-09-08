@@ -192,7 +192,7 @@ def _move_oauth_grants() -> None:
             ),
         }
     for row in _read(
-        "SELECT provider, account_id, refresh_token, scopes, identity, connected_at, "
+        "SELECT id, provider, account_id, refresh_token, scopes, identity, connected_at, "
         "revoked_at, revoked_reason FROM oauth_connections"
     ):
         provider = row["provider"]
@@ -206,6 +206,7 @@ def _move_oauth_grants() -> None:
             secrets.update(clients.get((provider.partition(":")[2], row["account_id"]), {}))
         _row(
             kind="oauth",
+            secret_id=row["id"],
             audience=audience,
             secrets=secrets,
             account_id=row["account_id"],
