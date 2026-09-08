@@ -111,7 +111,7 @@ def _create_actions(repos: list[ProjectRepo], accounts: list[Account]) -> list[u
                     is_required=True,
                     help_text="The GitHub repo this ticket's pull request will target.",
                 ),
-                ui.TextAreaField(name="description", label="Description"),
+                ui.TextAreaField(name="description", label="Description", markdown=True, rows=3),
                 ui.SelectField(
                     name="status",
                     label="Status",
@@ -444,6 +444,8 @@ async def ticket(identifier: str):
                                         label="Description",
                                         value=found.description,
                                         placeholder="Add a description…",
+                                        rows=12,
+                                        markdown=True,
                                     ),
                                 ],
                                 action=ui.Action(
@@ -469,6 +471,8 @@ async def ticket(identifier: str):
                                                 name="body",
                                                 label="Comment",
                                                 is_required=True,
+                                                markdown=True,
+                                                rows=3,
                                             )
                                         ],
                                         action=ui.Action(

@@ -14,6 +14,7 @@ from druks.ui import (
     SecretField,
     Section,
     SelectField,
+    TextAreaField,
     TextField,
 )
 from druks.ui.fields import PageField
@@ -78,6 +79,29 @@ def test_a_form_carries_its_fields_and_the_action_that_sends_them():
     assert block["submit"] == "button"
     assert block["layout"] == "stack"
     assert "presentation" not in block
+
+
+def test_a_markdown_text_area_stays_source_on_the_wire():
+    (block,) = wire(
+        Form(
+            action=Action(label="Save", operation="write_note"),
+            fields=[TextAreaField(name="body", label="Note", markdown=True, rows=8)],
+        )
+    )
+
+    assert block["fields"] == [
+        {
+            "field": "text_area",
+            "name": "body",
+            "label": "Note",
+            "value": "",
+            "placeholder": "",
+            "helpText": "",
+            "isRequired": False,
+            "rows": 8,
+            "markdown": True,
+        }
+    ]
 
 
 def test_an_action_can_collect_fields_before_it_runs():

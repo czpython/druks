@@ -15,6 +15,12 @@
   "dependencies": {
     "@novnc/novnc": "1.7.0",
     "@tanstack/react-query": "^5.102.6",
+    "@tiptap/extension-bubble-menu": "^3.31.3",
+    "@tiptap/extension-placeholder": "^3.31.3",
+    "@tiptap/markdown": "^3.31.3",
+    "@tiptap/pm": "^3.31.3",
+    "@tiptap/react": "^3.31.3",
+    "@tiptap/starter-kit": "^3.31.3",
     "lucide-react": "^1.34.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",

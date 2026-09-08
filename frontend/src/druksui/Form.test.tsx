@@ -501,6 +501,36 @@ describe('submitting a form', () => {
     })
   })
 
+  it('renders a markdown text area as formatted text and submits markdown source', async () => {
+    renderBlocks([
+      form(
+        [
+          {
+            field: 'text_area',
+            name: 'body',
+            label: 'Description',
+            value: '**bold gist**',
+            placeholder: '',
+            helpText: '',
+            isRequired: false,
+            rows: 8,
+            markdown: true,
+          },
+        ],
+        action({ refresh: 'none' }),
+      ),
+    ])
+
+    const box = await screen.findByRole('textbox', { name: 'Description' })
+    expect(box.getAttribute('contenteditable')).toBe('true')
+    expect(screen.queryByRole('tab', { name: 'Preview' })).toBeNull()
+    await waitFor(() => expect(screen.getByText('bold gist').tagName).toBe('STRONG'))
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(callOperation).toHaveBeenCalled())
+    const body = (callOperation.mock.calls[0]?.[2] as { body: string }).body
+    expect(body.trim()).toBe('**bold gist**')
+  })
+
   it('fills the path from the payload and sends what is left as the body', async () => {
     renderBlocks([
       form(

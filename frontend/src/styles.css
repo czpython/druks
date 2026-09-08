@@ -2239,6 +2239,44 @@ a.dui-card:hover .dui-card-title { text-decoration: underline; text-underline-of
   background: transparent; border: none; outline: none;
 }
 .dui-form-prose .dui-input:focus { box-shadow: 0 1px 0 var(--border-loud); }
+.dui-markdown-field {
+  display: block; overflow: auto;
+}
+.dui-markdown-field .tiptap { min-height: inherit; }
+.dui-markdown-editor { outline: none; min-height: inherit; max-width: none; }
+.dui-markdown-editor p.is-empty:first-child::before {
+  color: var(--text-faint); content: attr(data-placeholder); float: left; height: 0; pointer-events: none;
+}
+.dui-form-prose .dui-markdown-field {
+  min-height: calc(var(--dui-markdown-rows, 12) * 1lh); padding: 8px 0; border: none; background: transparent; border-radius: 0;
+}
+.dui-form-prose .dui-markdown-field:hover,
+.dui-form-prose .dui-markdown-field:focus-within {
+  background: transparent; border: none; outline: none;
+}
+.dui-form-prose .dui-markdown-field:focus-within { box-shadow: 0 1px 0 var(--border-loud); }
+.dui-markdown-bubble {
+  z-index: 30; display: flex; align-items: center; gap: 2px; padding: 4px;
+  background: var(--surface-2); border: 1px solid var(--border-loud);
+  border-radius: var(--dui-radius-control); color: var(--text);
+  box-shadow: 0 8px 24px color-mix(in oklch, var(--bg) 55%, transparent);
+}
+.dui-markdown-bubble-rule {
+  width: 1px; align-self: stretch; margin: 3px 4px; background: var(--border);
+}
+.dui-markdown-mark {
+  appearance: none; display: inline-flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; padding: 0; border: none; border-radius: 6px;
+  background: transparent; color: var(--text-mid); cursor: pointer;
+}
+.dui-markdown-mark:hover, .dui-markdown-mark[aria-pressed='true'] {
+  background: var(--surface-3); color: var(--text);
+}
+.dui-markdown-block {
+  appearance: none; height: 28px; padding: 0 8px; border: none; border-radius: 6px;
+  background: transparent; color: var(--text); font: inherit; font-size: 13px; cursor: pointer;
+}
+.dui-markdown-block:hover { background: var(--surface-3); }
 .dui-form-row { max-width: none; margin: 0; }
 .dui-form-row .dui-field {
   display: grid; grid-template-columns: 7.5rem minmax(0, 1fr); gap: 8px 12px;
@@ -2250,6 +2288,7 @@ a.dui-card:hover .dui-card-title { text-decoration: underline; text-underline-of
 .dui-field-label { display: block; font-size: 12px; line-height: 16px; font-weight: 500; color: var(--text-mid); margin-bottom: 8px; }
 .dui-field-required { color: var(--decision-request-revision); }
 .dui-input { width: 100%; min-height: var(--dui-control-height); background: var(--surface-2); border: 1px solid var(--border-loud); border-radius: var(--dui-radius-control); color: var(--text); padding: 9px 12px; font-size: 14px; line-height: 20px; font-family: inherit; caret-color: var(--accent-violet); transition: background-color 160ms ease, border-color 160ms ease; }
+.dui-input.dui-markdown-field { min-height: calc(var(--dui-markdown-rows, 3) * 1lh + 20px); }
 .dui-input:hover { border-color: var(--text-faint); }
 .dui-input::placeholder { color: var(--text-faint); opacity: 1; }
 .dui-input[aria-invalid='true'] { border-color: var(--outcome-failed); }
@@ -2366,7 +2405,7 @@ a.dui-card:hover .dui-card-title { text-decoration: underline; text-underline-of
 
 :is(.dui-action, .dui-link, .dui-tab, .dui-retry, .dui-parent, .dui-checkbox,
     .dui-choice input, .dui-input, .dui-gallery-item, .dui-dialog-close,
-    .dui-decision .review-btn, a.dui-card):focus-visible {
+    .dui-decision .review-btn, a.dui-card, .dui-markdown-mark, .dui-markdown-block):focus-visible {
   outline: 2px solid var(--accent-violet);
   outline-offset: 2px;
 }
