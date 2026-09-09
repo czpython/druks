@@ -15,6 +15,8 @@ export interface UseSSEOptions {
   handlers: Record<string, Handler>
   /** Called when EventSource fires `error`. Read live via ref. */
   onError?: (event: Event) => void
+  /** Called when the connection opens or reconnects. */
+  onOpen?: () => void
   /** Hook does nothing while disabled — used to gate by route mount state. */
   enabled?: boolean
 }
@@ -28,9 +30,10 @@ export interface UseSSEOptions {
  * EventSource reconnects are expensive and re-trigger the backend's "first tick
  * emits full state" path, which would otherwise create a churn loop.
  */
-export function useSSE(url: string, { handlers, onError, enabled = true }: UseSSEOptions): void {
+export function useSSE(url: string, { handlers, onError, onOpen, enabled = true }: UseSSEOptions): void {
   const handlersRef = useRef(handlers)
   const onErrorRef = useRef(onError)
+  const onOpenRef = useRef(onOpen)
 
   // Keep the refs current without affecting the connection-managing effect.
   useEffect(() => {
@@ -38,7 +41,8 @@ export function useSSE(url: string, { handlers, onError, enabled = true }: UseSS
   }, [handlers])
   useEffect(() => {
     onErrorRef.current = onError
-  }, [onError])
+    onOpenRef.current = onOpen
+  }, [onError, onOpen])
 
   useEffect(() => {
     if (!enabled || !url) return undefined
@@ -80,12 +84,15 @@ export function useSSE(url: string, { handlers, onError, enabled = true }: UseSS
         })
     }
     source.addEventListener('error', errorListener)
+    const openListener = () => onOpenRef.current?.()
+    source.addEventListener('open', openListener)
 
     return () => {
       for (const [eventType, listener] of registered) {
         source.removeEventListener(eventType, listener)
       }
       source.removeEventListener('error', errorListener)
+      source.removeEventListener('open', openListener)
       source.close()
     }
   }, [url, enabled])

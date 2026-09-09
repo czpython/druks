@@ -136,9 +136,9 @@ describe('command center navigation', () => {
     expect(within(pages).getByRole('link', { name: 'History' }).getAttribute('aria-current')).toBe(
       'page',
     )
-    fireEvent.click(screen.getByRole('link', { name: 'Events' }))
+    fireEvent.click(screen.getByRole('link', { name: 'Activity' }))
     await screen.findByRole('heading', { name: 'Events feed' })
-    expect(screen.getByRole('link', { name: 'Events' }).getAttribute('aria-current')).toBe('page')
+    expect(screen.getByRole('link', { name: 'Activity' }).getAttribute('aria-current')).toBe('page')
     await act(async () => {
       window.history.back()
     })
@@ -166,7 +166,7 @@ describe('command center navigation', () => {
     })
     const apps = screen.getByRole('navigation', { name: 'Apps' })
     expect(within(apps).getAllByRole('link')).toHaveLength(1)
-    expect(screen.getByRole('link', { name: 'Events' })).toBeTruthy()
+    expect(screen.getByRole('link', { name: 'Activity' })).toBeTruthy()
     fireEvent.change(screen.getByRole('textbox', { name: 'Find an app' }), {
       target: { value: 'missing' },
     })
@@ -193,7 +193,7 @@ describe('command center navigation', () => {
   it('leaves a shared page with Escape to where the operator came from', async () => {
     renderApp('/notes')
     await screen.findByRole('heading', { name: 'Notes home' })
-    fireEvent.click(screen.getByRole('link', { name: 'Events' }))
+    fireEvent.click(screen.getByRole('link', { name: 'Activity' }))
     await screen.findByRole('heading', { name: 'Events feed' })
     await act(async () => {
       fireEvent.keyDown(window, { key: 'Escape' })

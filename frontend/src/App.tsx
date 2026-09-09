@@ -32,7 +32,7 @@ import { registerInstalledApps } from './apps/installed'
 import { appHome, appLabel, appOwning, getAppUI, registeredApps } from './apps/registry'
 
 const ROUTER_BASE = import.meta.env.BASE_URL.replace(/\/$/, '')
-const SHELL_PAGES: Record<string, string> = { '/': 'Dashboard', '/events': 'Events', '/usage': 'Usage' }
+const SHELL_PAGES: Record<string, string> = { '/': 'Dashboard', '/events': 'Activity', '/usage': 'Usage' }
 
 export function App({ account }: { account: Account }) {
   const unsavedFormRef = useRef<UnsavedForm | null>(null)
@@ -239,7 +239,7 @@ function AppShell({
 
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
-      if (hidden || document.querySelector('dialog[open]')) return
+      if (hidden || event.defaultPrevented || document.querySelector('dialog[open]')) return
       const meta = event.metaKey || event.ctrlKey
       if (meta && event.key.toLowerCase() === 'k' && defaultApp) {
         event.preventDefault()
@@ -297,7 +297,7 @@ function AppShell({
               aria-current={location === '/events' ? 'page' : undefined}
             >
               <Activity size={17} aria-hidden="true" />
-              Events
+              Activity
             </Link>
             <Link
               href="/usage"

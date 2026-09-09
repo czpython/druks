@@ -121,6 +121,8 @@ export interface AskQuestion {
 // artifact right here; "external" points at the PR/ticket.
 export interface InputRequest {
   presentation: 'in_app' | 'external'
+  label?: string
+  url?: string
   controls?: string[]
   questions?: AskQuestion[]
   artifact_id?: string | null

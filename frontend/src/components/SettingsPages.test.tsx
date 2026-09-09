@@ -1164,12 +1164,12 @@ describe('canonical app settings', () => {
     stubFetch(false)
     renderSettings('/apps/field_notes/settings')
     fireEvent.change(await screen.findByLabelText('Notebook'), { target: { value: 'travel' } })
-    fireEvent.click(screen.getByRole('link', { name: 'Events' }))
+    fireEvent.click(screen.getByRole('link', { name: 'Activity' }))
     const dialog = screen.getByRole('dialog', { name: 'Save your changes?' })
     fireEvent.click(within(dialog).getByRole('button', { name: 'Stay' }))
     expect(window.location.pathname).toBe('/apps/field_notes/settings')
     expect((screen.getByLabelText('Notebook') as HTMLInputElement).value).toBe('travel')
-    fireEvent.click(screen.getByRole('link', { name: 'Events' }))
+    fireEvent.click(screen.getByRole('link', { name: 'Activity' }))
     fireEvent.click(
       within(screen.getByRole('dialog', { name: 'Save your changes?' })).getByRole('button', {
         name: 'Discard',
