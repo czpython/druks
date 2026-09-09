@@ -364,11 +364,10 @@ async def test_a_foreign_code_never_becomes_the_failure_code(druks_db, _inline_s
 
 @pytest.mark.asyncio
 async def test_announce_carries_the_runs_routing(druks_db):
-    # The body states its facts; the platform injects what subscribers filter on,
-    # and the publish rides its own named checkpoint — the boundary that keeps a
-    # recovery replay from re-firing it.
-    workflow = Workflow()
-    workflow._subject = {"type": "note", "id": 7}
+    note, run = await _item_and_run(druks_db, "running")
+    workflow = Summarize()
+    workflow._workflow_id = run.id
+    workflow._subject = note.identity
     received = []
     checkpoints = []
 
@@ -383,8 +382,12 @@ async def test_announce_carries_the_runs_routing(druks_db):
     with mock.patch("druks.workflows.DBOS.run_step_async", side_effect=run_inline):
         await workflow.announce("test.announced", pr_number=12)
 
-    assert received == [({"type": "note", "id": 7}, {"pr_number": 12})]
-    assert checkpoints == ["test.announced"]
+    assert received == [(note.identity, {"pr_number": 12})]
+    assert checkpoints == ["test.announced", "test.announced:propagate"]
+    event = (await ambient_session().scalars(select(Event).filter_by(type="test.announced"))).one()
+    assert event.app == "field_notes"
+    assert event.subject_label == note.label
+    assert event.payload == {"pr_number": 12, "run": run.id, "kind": workflow.kind}
 
 
 @pytest.mark.asyncio

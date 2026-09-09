@@ -5,13 +5,16 @@ from types import SimpleNamespace
 
 import psycopg
 import pytest
+from dbos import DBOS
 from druks.agents import Agent, AgentOutput
 from druks.apps.registry import agents, workflows
 from druks.database import configure_session, get_session
 from druks.durable import FatalError, Run, RunState
 from druks.durable.dbos_state import workflow_status
 from druks.durable.engine import configure_engine, init_dbos, launch, shutdown
+from druks.events.models import Event
 from druks.models import StoredSubject
+from druks.signals import subscribe
 from druks.testing import init_db
 from druks.workflows import Gate, Subject, Workflow, step, task
 from pydantic import BaseModel
@@ -227,6 +230,15 @@ def _build_units():
             await Approve.wait()
             SINK.append(f"acct-after:{self.account_id}")
 
+    class AnnounceFlow(Workflow):
+        subject = Widget
+
+        async def run_multistep(self) -> None:
+            await self.announce("test.revision", revision=1)
+            await self.announce("test.revision", revision=2)
+            SINK.append(f"announced:{self.workflow_id}")
+            await DBOS.recv_async("finish")
+
     return (
         SampleFlow,
         AgentFlow,
@@ -238,6 +250,7 @@ def _build_units():
         SubjectlessConfirmFlow,
         ReviewFlow,
         AttributedFlow,
+        AnnounceFlow,
         ScheduledDispatch,
         RetryingStepFlow,
         EnqueueInStepFlow,
@@ -305,6 +318,7 @@ async def rt():
         subjectless_confirm_flow,
         review_flow,
         attributed_flow,
+        announce_flow,
         scheduled_dispatch,
         retrying_step_flow,
         enqueue_in_step_flow,
@@ -329,6 +343,7 @@ async def rt():
             SubjectlessConfirmFlow=subjectless_confirm_flow,
             ReviewFlow=review_flow,
             AttributedFlow=attributed_flow,
+            AnnounceFlow=announce_flow,
             ScheduledDispatch=scheduled_dispatch,
             RetryingStepFlow=retrying_step_flow,
             EnqueueInStepFlow=enqueue_in_step_flow,
@@ -354,6 +369,7 @@ async def rt():
         workflows._items.pop("subjectless_confirm_flow", None)
         workflows._items.pop("review_flow", None)
         workflows._items.pop("attributed_flow", None)
+        workflows._items.pop("announce_flow", None)
         workflows._items.pop("scheduled_dispatch", None)
         workflows._items.pop("retrying_step_flow", None)
         workflows._items.pop("enqueue_in_step_flow", None)
@@ -1222,3 +1238,38 @@ async def test_subjectless_run_emits_no_events(rt):
         await session.close()
 
     assert events == []
+
+
+async def test_announcements_survive_subscriber_retry_and_workflow_replay(rt):
+    deliveries = []
+
+    @subscribe("test.revision", workflow=rt.AnnounceFlow)
+    async def receive(*, subject: Widget, revision: int) -> None:
+        async with get_session(rt.engine) as session:
+            events = list(await session.scalars(select(Event).filter_by(type="test.revision")))
+        deliveries.append((revision, len(events)))
+        if len(deliveries) == 1:
+            raise RuntimeError("Subscriber unavailable")
+
+    workflow_id = await rt.AnnounceFlow.start(subject=Widget(id=7))
+    marker = f"announced:{workflow_id}"
+    try:
+        await _wait_for(rt.engine, workflow_id, lambda run: SINK.count(marker) == 1)
+        assert deliveries == [(1, 1), (1, 1), (2, 2)]
+
+        await DBOS.resume_workflow_async(workflow_id)
+        await _wait_for(rt.engine, workflow_id, lambda run: SINK.count(marker) == 2)
+
+        async with get_session(rt.engine) as session:
+            events = list(
+                await session.scalars(
+                    select(Event).filter_by(type="test.revision").order_by(Event.id)
+                )
+            )
+        assert [event.payload for event in events] == [
+            {"revision": 1, "run": workflow_id, "kind": rt.AnnounceFlow.kind},
+            {"revision": 2, "run": workflow_id, "kind": rt.AnnounceFlow.kind},
+        ]
+        assert deliveries == [(1, 1), (1, 1), (2, 2)]
+    finally:
+        await DBOS.cancel_workflow_async(workflow_id)

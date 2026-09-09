@@ -38,6 +38,22 @@ class Subject:
         # the handle, not a surrogate key.
         return self.id
 
+    async def announce(self, topic: str, **facts: Any) -> None:
+        """Record and deliver a domain fact in the current transaction."""
+        # The app loader imports the durable package during registration.
+        from druks.apps.loader import resolve_workflow_app
+        from druks.events.models import Event
+        from druks.signals import publish
+
+        await Event.emit(
+            type=topic,
+            subject=self.identity,
+            label=self.label,
+            payload=facts,
+            app=resolve_workflow_app(type(self).__module__),
+        )
+        await publish(topic, subject=self.identity, **facts)
+
     @classmethod
     async def get_for_subject_id(cls, subject_id: str) -> Self | None:
         """The subject this id names. Ids reach the read side as free text off a URL,

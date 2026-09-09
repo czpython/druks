@@ -779,19 +779,28 @@ class Workflow:
         self._host_secrets_id = ""
 
     async def announce(self, topic: str, **facts: Any) -> None:
-        # The workflow announcing a domain event in its app's vocabulary
-        # ("pr.opened", pr_number=12, branch="agent/eng-8"). The platform injects
-        # the routing subscribers filter on, and the publish runs as its own
-        # retrying checkpoint so a recovery replay doesn't re-fire it. Body-only,
-        # enforced: the checkpoint is a step, so it can't nest inside one.
+        """Record a domain fact, then notify subscribers in a separate checkpoint."""
         if _in_step.get():
             raise WorkflowError("announce() runs in the workflow body, not inside a @step")
 
-        async def _fan_out() -> None:
+        async def record() -> None:
+            async with step_session():
+                run = await Run.get(self.workflow_id)
+                await Event.emit(
+                    type=topic,
+                    subject=self._subject,
+                    label=run.subject_label,
+                    payload={**facts, "run": self.workflow_id, "kind": self.kind},
+                    app=self.app,
+                )
+
+        await DBOS.run_step_async(StepOptions(name=topic, **_IO_RETRIES), record)
+
+        async def notify() -> None:
             async with step_session():
                 await publish(topic, subject=self._subject, kind=self.kind, **facts)
 
-        await DBOS.run_step_async(StepOptions(name=topic, **_IO_RETRIES), _fan_out)
+        await DBOS.run_step_async(StepOptions(name=f"{topic}:propagate", **_IO_RETRIES), notify)
 
     async def review(
         self, *, questions: list[BaseModel] | None = None, context: str = ""
