@@ -9,6 +9,7 @@ from druks import agents
 from druks.accounts.models import Account
 from druks.database import db_session
 from druks.durable import AgentCall, WorkflowError
+from druks.events.models import Event
 from druks.files import File
 from druks.sandbox.exceptions import SandboxDownloadError
 from druks.sandbox.models import SandboxIdentity, SecretRef
@@ -1007,3 +1008,45 @@ async def test_a_replay_resumes_the_ephemeral_box_through_its_identity(
     assert result == DummyOutput(ok=True)
     assert resumed == ["host-crashed"]
     assert [row.id for row in await _identities("wf-9")] == [identity.id]
+
+
+@pytest.mark.parametrize(
+    "activity",
+    [
+        None,
+        [],
+        "review.completed",
+        {"summary": "Ready"},
+        {"kind": ""},
+        {"kind": "review.completed", "summary": 1},
+        {"kind": "review.completed", "copy": "Ready"},
+    ],
+)
+async def test_invalid_activity_contract_records_no_success(
+    druks_db, tmp_path, monkeypatch, current_run, activity
+):
+    sandbox = _patch_runtime(monkeypatch, tmp_path, {"ok": True})
+    _patch_ephemeral(monkeypatch, sandbox)
+    monkeypatch.setattr(DummyOutput, "get_activity", lambda self: activity)
+
+    with pytest.raises(WorkflowError, match="invalid contract"):
+        await DUMMY_AGENT._run(workflow_id="wf-9")
+
+    assert not list(await db_session().scalars(select(agents.Artifact)))
+    assert not list(await db_session().scalars(select(Event)))
+    calls = await AgentCall.list_for_run("wf-9")
+    assert len(calls) == 1
+    assert calls[0].status == "failed"
+
+
+async def test_activity_requires_an_artifact(druks_db, tmp_path, monkeypatch, current_run):
+    sandbox = _patch_runtime(monkeypatch, tmp_path, {"ok": True})
+    _patch_ephemeral(monkeypatch, sandbox)
+    monkeypatch.setattr(DummyOutput, "get_activity", lambda self: {"kind": "review.completed"})
+
+    with pytest.raises(WorkflowError, match="without an artifact"):
+        await DUMMY_AGENT._run(workflow_id="wf-9")
+
+    assert not list(await db_session().scalars(select(agents.Artifact)))
+    assert not list(await db_session().scalars(select(Event)))
+    assert (await AgentCall.list_for_run("wf-9"))[0].status == "failed"

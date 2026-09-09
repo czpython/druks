@@ -13,6 +13,7 @@ from druks.database import configure_session, db_session, get_session, session_s
 from druks.durable import FatalError, Run, RunState
 from druks.durable.dbos_state import workflow_status
 from druks.durable.engine import configure_engine, init_dbos, launch, shutdown
+from druks.durable.models import Artifact
 from druks.events.models import Event
 from druks.models import StoredSubject
 from druks.signals import subscribe
@@ -51,6 +52,16 @@ class Decision(AgentOutput):
 class RepoCfg(BaseModel):
     # The one typed run() input the test flows share.
     repo: str
+
+
+class ReviewResult(AgentOutput):
+    action: str
+
+    def get_artifact(self) -> dict[str, str]:
+        return {"kind": "markdown", "title": "Review", "content": self.action}
+
+    def get_activity(self) -> dict[str, str]:
+        return {"kind": "review.completed", "summary": self.action}
 
 
 SINK: list[str] = []
@@ -1383,3 +1394,44 @@ async def test_failed_retry_attempts_keep_separate_terminal_records(rt):
         assert {event.payload["failure"] for event in failures} == {"Source unavailable"}
     finally:
         workflows._items.pop(FailingAttempt.kind)
+
+
+async def test_output_activity_survives_completed_step_replay(rt, monkeypatch):
+    calls = []
+    held = []
+    monkeypatch.setattr(
+        "druks.sandbox.client.Client.ephemeral", _fake_ephemeral_returning("reviewed", calls, held)
+    )
+    monkeypatch.setattr("druks.agents.render_prompt", _fake_render)
+    completed = []
+
+    class OutputFlow(Workflow):
+        subject = Widget
+
+        async def run_multistep(self) -> None:
+            for _ in range(2):
+                await rt.AgentFlow.DECIDER(contract=ReviewResult, body="x")
+            completed.append(self.workflow_id)
+            if len(completed) == 1:
+                raise asyncio.CancelledError
+
+    workflow_id = await OutputFlow.start(subject=Widget(id=7))
+    try:
+        await _wait_for(rt.engine, workflow_id, lambda run: len(completed) == 1)
+        await DBOS.resume_workflow_async(workflow_id)
+        await _wait_for(rt.engine, workflow_id, lambda run: run.state == RunState.FINISHED)
+        assert len(completed) == 2
+        assert len(calls) == 2
+        async with get_session(rt.engine) as session:
+            events = list(await session.scalars(select(Event).filter_by(type="review.completed")))
+            artifacts = list(await session.scalars(select(Artifact)))
+        assert len(events) == len(artifacts) == 2
+        assert {event.payload["artifact_id"] for event in events} == {
+            artifact.id for artifact in artifacts
+        }
+        assert {event.payload["agent_call_id"] for event in events} == {
+            call["call_id"] for call in calls
+        }
+        assert {event.payload["run"] for event in events} == {workflow_id}
+    finally:
+        workflows._items.pop(OutputFlow.kind)

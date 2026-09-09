@@ -102,6 +102,10 @@ class AgentOutput(BaseModel):
         # it after the call. Empty unless the contract produces a reviewable document.
         return {}
 
+    def get_activity(self) -> dict[str, str]:
+        """Return a kind and optional summary for the saved result. Empty opts out."""
+        return {}
+
 
 @dataclass(frozen=True)
 class Agent:
@@ -354,6 +358,26 @@ class Agent:
                             f"agent {self.id!r} returned a payload that fails "
                             f"{contract.__name__}: {error}"
                         ) from error
+                    activity = output.get_activity()
+                    spec = output.get_artifact()
+                    if not isinstance(activity, dict) or (
+                        activity
+                        and (
+                            not isinstance(activity.get("kind"), str)
+                            or not activity["kind"].strip()
+                            or set(activity) - {"kind", "summary"}
+                            or any(not isinstance(value, str) for value in activity.values())
+                        )
+                    ):
+                        raise WorkflowError(
+                            f"{contract.__name__}.get_activity() returned an invalid contract. "
+                            "Return an empty dict or a kind with an optional string summary."
+                        )
+                    if activity and not spec:
+                        raise WorkflowError(
+                            f"{contract.__name__} declares activity without an artifact. "
+                            "Implement get_artifact() for the saved result."
+                        )
                     if workspace_files:
                         await runner.save_files(
                             workspace_files,
@@ -365,6 +389,8 @@ class Agent:
                     await AgentCall.fail(engine, call_id=call_id, error=error)
                     raise
 
-        if spec := output.get_artifact():
-            await Artifact.record(call_dir=artifact_dir / call_id, call_id=call_id, **spec)
+        if spec:
+            await Artifact.record(
+                call_dir=artifact_dir / call_id, call_id=call_id, activity=activity, **spec
+            )
         return output.to_result()
