@@ -749,6 +749,14 @@ export interface UpdateAppsSettingsRequest {
 }
 
 
+export interface EventFilters {
+  q?: string
+  app?: string
+  kind?: string
+  from?: string
+  until?: string
+}
+
 export interface FeedItem {
   id: string
   seq: number
@@ -764,11 +772,24 @@ export interface FeedItem {
   // How the subject showed itself ("ENG-767"), snapshotted at write. Absent
   // exactly when the subject is.
   subjectLabel?: string | null
+  run?: string | null
+  gate?: string | null
+  parkedAt?: string | null
+  inputRequest?: InputRequest | null
+  result?: unknown
+  summary?: string | null
+  reason?: string | null
+  artifactId?: string | null
+  agentCallId?: string | null
+  isSubjectAvailable: boolean
+  isRunAvailable: boolean
+  isArtifactAvailable: boolean
 }
 
 export interface FeedResponse {
   items: FeedItem[]
   nextCursor: string | null
+  kinds?: string[]
 }
 
 

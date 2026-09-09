@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import type { FeedItem, InputRequest } from '../api/types'
+import type { FeedItem } from '../api/types'
 
 export interface AppRoute {
   /** A wouter pattern under the router base, such as /notes/:id. */
@@ -7,10 +7,7 @@ export interface AppRoute {
   render: (params: Record<string, string>) => ReactNode
 }
 
-export type ActivityEvent = Pick<FeedItem, 'kind' | 'workflow'> & {
-  gate?: string | null
-  inputRequest?: InputRequest | null
-}
+export type ActivityEvent = Pick<FeedItem, 'kind' | 'workflow' | 'gate' | 'inputRequest'>
 
 export interface AppUI {
   name: string

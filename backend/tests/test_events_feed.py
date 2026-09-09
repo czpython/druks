@@ -19,7 +19,7 @@ class Pallet(StoredSubject):
 async def test_feed_carries_what_a_row_is_worded_from(druks_db):
     note = await Note.create(body="the pump ran hot")
     await Event.emit(
-        type="workflow.running",
+        type="workflow.scheduled",
         subject=note.identity,
         label=note.label,
         app="field_notes",
@@ -30,7 +30,7 @@ async def test_feed_carries_what_a_row_is_worded_from(druks_db):
 
     by_kind = {row.kind: row for row in (await build_feed())[0]}
 
-    started = by_kind["workflow.running"]
+    started = by_kind["workflow.scheduled"]
     assert (started.app, started.workflow) == ("field_notes", Summarize.kind)
     assert (started.subject_type, started.subject_id) == ("note", str(note.id))
     # A note declares no label of its own, so it shows itself by identity.
@@ -49,12 +49,12 @@ async def test_every_subject_shows_itself(druks_db):
     assert crate.identity == {"type": "crate", "id": 7}
     for subject in (crate, pallet):
         await Event.emit(
-            type="stocked", subject=subject.identity, label=subject.label, app="faketest"
+            type="stocked", subject=subject.identity, label=subject.label, app="field_notes"
         )
     await druks_db.delete(crate)
     await druks_db.flush()
 
-    by_type = {row.subject_type: row for row in (await build_feed())[0] if row.app == "faketest"}
+    by_type = {row.subject_type: row for row in (await build_feed())[0] if row.app == "field_notes"}
 
     assert by_type["crate"].subject_label == "CRATE-7"
     assert by_type["pallet"].subject_label == "pallet 7"
@@ -65,7 +65,7 @@ async def test_feed_paginates_same_second_events_without_loss_or_repeat(druks_db
     # the truncated timestamp used to drop the whole second on the next page; paging on
     # the monotonic pk covers every event exactly once.
     for i in range(5):
-        await Event.emit(type=f"evt-{i}")
+        await Event.emit(type=f"evt-{i}", app="field_notes")
     await druks_db.flush()
 
     collected = []

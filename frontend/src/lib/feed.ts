@@ -4,7 +4,8 @@ import { appLabel, getAppUI } from '../apps/registry'
 // What a workflow doing something is called. The platform owns these words because it
 // owns the lifecycle; an app's own milestones are already named by their type.
 const LIFECYCLE_VERBS: Record<string, string> = {
-  'workflow.running': 'started',
+  'workflow.scheduled': 'queued',
+  'workflow.running': 'response received',
   'workflow.parked': 'waiting on you',
   'workflow.finished': 'finished',
   'workflow.failed': 'failed',
@@ -47,9 +48,12 @@ function label(event: FeedItem): string {
 }
 
 function subjectPath(event: FeedItem): string | undefined {
-  if (event.app && event.subjectType && event.subjectId) {
+  if (event.isSubjectAvailable && event.app && event.subjectType && event.subjectId) {
     const ui = getAppUI(event.app)
-    return ui?.subjectPath?.({ type: event.subjectType, id: event.subjectId })
+    const target = event.run
+      ? { run: event.run, parkedAt: event.parkedAt ?? undefined }
+      : undefined
+    return ui?.subjectPath?.({ type: event.subjectType, id: event.subjectId }, target)
   }
   return undefined
 }

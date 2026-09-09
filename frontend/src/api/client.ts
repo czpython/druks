@@ -8,6 +8,7 @@ import type {
   Connection,
   App,
   FeedResponse,
+  EventFilters,
   FileSummary,
   AppsSettingsResponse,
   Harness,
@@ -222,6 +223,14 @@ async function sendOperation(method: string, path: string, body: unknown): Promi
   }
 }
 
+export function eventQuery(params: EventFilters & { limit?: number; before?: string; after?: string }): string {
+  const query = new URLSearchParams()
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined) query.set(key, String(value))
+  }
+  return query.toString()
+}
+
 export const api = {
   dashboardWork: () => getJSON<DashboardWork>('/api/dashboard/work'),
   dashboardSchedules: () => getJSON<DashboardSchedules>('/api/dashboard/schedules'),
@@ -256,13 +265,9 @@ export const api = {
     postJSON<{ run: string; result: string }>(`/api/runs/${runId}/cancel`, { reason }),
   retryRun: (runId: string) =>
     postJSON<{ run: string }>(`/api/runs/${runId}/retry`, undefined),
-  listEvents: (params: { limit?: number; before?: string; app?: string } = {}) => {
-    const query = new URLSearchParams()
-    if (params.limit !== undefined) query.set('limit', String(params.limit))
-    if (params.before !== undefined) query.set('before', params.before)
-    if (params.app !== undefined) query.set('app', params.app)
-    const qs = query.toString()
-    return getJSON<FeedResponse>(`/api/events${qs ? `?${qs}` : ''}`)
+  listEvents: (params: EventFilters & { limit?: number; before?: string } = {}) => {
+    const query = eventQuery(params)
+    return getJSON<FeedResponse>(`/api/events${query ? `?${query}` : ''}`)
   },
   getSettings: () => getJSON<SettingsProfile>('/api/settings'),
   updateSettings: (body: UpdateSettingsRequest) =>

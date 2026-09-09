@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { App } from '../api/types'
+import { eventLine } from '../lib/feed'
 import { registerInstalledApps } from './installed'
 import { getAppUI } from './registry'
 
@@ -96,4 +97,13 @@ it('uses the declared decision page and preserves encoded subject and request id
   expect(url.searchParams.get('run')).toBe(target.run)
   expect(url.searchParams.get('parkedAt')).toBe(target.parkedAt)
   expect(ui.subjectPath!({ type: 'file', id: '7' }, { run: 'run-one' })).toBe('/decision_app/file/7?run=run-one')
+  const activity = eventLine({
+    id: 'event:1', seq: 1, at: target.parkedAt, kind: 'workflow.parked', app: 'decision_app',
+    subjectType: 'file', subjectId: '7', run: target.run, parkedAt: target.parkedAt,
+    isSubjectAvailable: true, isRunAvailable: false, isArtifactAvailable: false,
+  })
+  const destination = new URL(activity.path!, 'https://example.invalid')
+  expect(destination.pathname).toBe('/decision_app/review/7')
+  expect(destination.searchParams.get('run')).toBe(target.run)
+  expect(destination.searchParams.get('parkedAt')).toBe(target.parkedAt)
 })

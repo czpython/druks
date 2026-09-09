@@ -1,6 +1,7 @@
 from datetime import datetime
+from typing import Any
 
-from pydantic import AliasPath, ConfigDict, Field, computed_field
+from pydantic import AliasChoices, AliasPath, ConfigDict, Field, computed_field
 
 from druks.schemas import Schema
 
@@ -21,6 +22,35 @@ class FeedItem(Schema):
     subject_type: str | None = None
     subject_id: str | None = None
     subject_label: str | None = None
+    run: str | None = Field(default=None, validation_alias=AliasPath("payload", "run"))
+    gate: str | None = Field(default=None, validation_alias=AliasPath("payload", "gate"))
+    parked_at: datetime | None = Field(
+        default=None, validation_alias=AliasPath("payload", "input_requested_at")
+    )
+    input_request: dict[str, Any] | None = Field(
+        default=None, validation_alias=AliasPath("payload", "input_request")
+    )
+    result: Any = Field(default=None, validation_alias=AliasPath("payload", "result"))
+    summary: str | None = Field(default=None, validation_alias=AliasPath("payload", "summary"))
+    reason: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            AliasPath("payload", "reason"), AliasPath("payload", "failure")
+        ),
+    )
+    artifact_id: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            AliasPath("payload", "artifact_id"),
+            AliasPath("payload", "input_request", "artifact_id"),
+        ),
+    )
+    agent_call_id: str | None = Field(
+        default=None, validation_alias=AliasPath("payload", "agent_call_id")
+    )
+    is_subject_available: bool = False
+    is_run_available: bool = False
+    is_artifact_available: bool = False
 
     @computed_field
     @property
@@ -32,3 +62,4 @@ class FeedResponse(Schema):
     items: list[FeedItem]
     # Event sequence cursor for the next (older) page; None at the tail.
     next_cursor: str | None = None
+    kinds: list[str] | None = None

@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import Index
+from sqlalchemy import Index, Select, and_, or_, select
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column
@@ -31,6 +31,36 @@ class Event(Base):
     # Append-only, so creation time is the event time. No updated_at.
     created_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
     payload: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+
+    @classmethod
+    def get_history(cls, *, app: str | None = None) -> Select[tuple["Event"]]:
+        # App imports Event while the loader imports App.
+        from druks.apps.loader import iter_apps
+
+        owners = [owner.name for owner in iter_apps() if not owner.builtin]
+        statement = select(cls).where(
+            cls.app.in_(owners),
+            or_(
+                cls.type.not_like("workflow.%"),
+                cls.type.in_(
+                    [
+                        "workflow.scheduled",
+                        "workflow.parked",
+                        "workflow.failed",
+                        "workflow.cancelled",
+                    ]
+                ),
+                and_(
+                    cls.type == "workflow.running",
+                    cls.payload["gate"].astext != "",
+                    cls.payload["input_requested_at"].astext != "",
+                    cls.payload["result"].astext.is_not(None),
+                ),
+            ),
+        )
+        if app is not None:
+            statement = statement.where(cls.app == app)
+        return statement
 
     @classmethod
     async def emit(
