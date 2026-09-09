@@ -1,87 +1,103 @@
+from unittest.mock import AsyncMock
+
 import pytest
 from dbos import DBOS
 from dbos._error import DBOSWorkflowCancelledError
 from druks.durable.exceptions import GateTimeout
 from druks.durable.models import Run
+from druks.events.models import Event
 from druks.testing import seed_run
-from druks.workflows import _park
+from druks.workflows import OperatorReply, current_workflow
+from druks_field_notes.models import Note
 from druks_field_notes.workflows import Summarize
+from pydantic import ValidationError
+from sqlalchemy import select
 
-_ASK = {"presentation": "in_app", "controls": ["approve"], "questions": []}
-
-
-class _ParkedWorkflow:
-    # The slice of Workflow that _park touches. A subjectless run keeps the emit to
-    # its facts write (no feed event, no notification) — the receipt path under
-    # test is exactly that write.
-    def __init__(self, workflow_id: str) -> None:
-        self.workflow_id = workflow_id
-        self._subject = None
-
-    async def _reap_run(self) -> None:
-        return
+_ASK = {"presentation": "in_app", "controls": ["approve", "request_changes"], "questions": []}
 
 
 @pytest.fixture
-def _direct_steps(monkeypatch):
-    # Run each durable step body inline — the test exercises _park's own logic,
-    # not DBOS checkpointing.
-    async def _call_through(options, func, *args, **kwargs):
-        return await func(*args, **kwargs)
+def direct_steps(monkeypatch):
+    async def call_through(options, function, *args, **kwargs):
+        return await function(*args, **kwargs)
 
-    monkeypatch.setattr(DBOS, "run_step_async", _call_through)
-
-
-async def _reload(druks_db, run_id: str) -> Run:
-    druks_db.expunge_all()
-    return await druks_db.get(Run, run_id)
+    monkeypatch.setattr(DBOS, "run_step_async", call_through)
+    monkeypatch.setattr("druks.workflows._notify_designated_destination", AsyncMock())
 
 
-async def test_answer_stamps_the_receipt_beside_the_gate_clear(
-    druks_db, _direct_steps, monkeypatch
+@pytest.fixture(params=["gate", "review"])
+async def request_reply(request, druks_db, direct_steps):
+    note = await Note.create(body="A request to review")
+    run = await seed_run(druks_db, kind=Summarize.kind, subject=note)
+    workflow = Summarize()
+    workflow._workflow_id = run.id
+    workflow._subject = note.identity
+    token = current_workflow.set(workflow)
+    try:
+        call = (
+            OperatorReply.wait(input_request=_ASK) if request.param == "gate" else workflow.review()
+        )
+        yield run.id, call
+    finally:
+        current_workflow.reset(token)
+
+
+async def test_valid_reply_records_the_request_round_before_current_fields_clear(
+    druks_db, request_reply, monkeypatch
 ):
-    run = await seed_run(druks_db, kind=Summarize.kind, run_id="run-receipt-answer")
+    run_id, call = request_reply
+    monkeypatch.setattr(DBOS, "recv_async", AsyncMock(return_value={"action": "approve"}))
 
-    async def _answer(topic, timeout_seconds):
-        return {"action": "approve"}
+    reply = await call
 
-    monkeypatch.setattr(DBOS, "recv_async", _answer)
-    payload = await _park(_ParkedWorkflow(run.id), "review", _ASK, ttl_seconds=1.0)
-
-    assert payload == {"action": "approve"}
-    run = await _reload(druks_db, run.id)
-    # The receipt is the round the answer cleared: the same stamp the park
-    # wrote, which _GATE_CLEARED preserves on the row.
-    assert run.input_requested_at
+    assert reply == OperatorReply(action="approve")
+    druks_db.expunge_all()
+    run = await druks_db.get(Run, run_id)
     assert run.answer_parked_at == run.input_requested_at
     assert not run.input_gate
     assert not run.input_request
+    events = list(await druks_db.scalars(select(Event).order_by(Event.id)))
+    assert [event.type for event in events] == ["workflow.parked", "workflow.running"]
+    request, receipt = events
+    for event in events:
+        assert event.payload["run"] == run_id
+        assert event.payload["gate"] == "review"
+        assert event.payload["input_requested_at"] == run.input_requested_at.isoformat()
+    assert request.payload["input_request"] == _ASK
+    assert receipt.payload["result"] == {"action": "approve", "answers": {}, "note": ""}
 
 
-async def test_timeout_never_writes_the_receipt(druks_db, _direct_steps, monkeypatch):
-    run = await seed_run(druks_db, kind=Summarize.kind, run_id="run-receipt-timeout")
+@pytest.mark.parametrize("payload", [{"action": "merge"}, {}, None])
+async def test_invalid_reply_or_timeout_records_no_receipt(
+    druks_db, request_reply, monkeypatch, payload
+):
+    run_id, call = request_reply
+    monkeypatch.setattr(DBOS, "recv_async", AsyncMock(return_value=payload))
 
-    async def _lapse(topic, timeout_seconds):
-        return None
+    with pytest.raises(GateTimeout if payload is None else ValidationError):
+        await call
 
-    monkeypatch.setattr(DBOS, "recv_async", _lapse)
-    with pytest.raises(GateTimeout):
-        await _park(_ParkedWorkflow(run.id), "review", _ASK, ttl_seconds=1.0)
-
-    run = await _reload(druks_db, run.id)
+    druks_db.expunge_all()
+    run = await druks_db.get(Run, run_id)
     assert not run.answer_parked_at
+    assert run.input_gate == "review"
+    assert run.input_request == _ASK
     assert run.input_requested_at
+    events = list(await druks_db.scalars(select(Event)))
+    assert [event.type for event in events] == ["workflow.parked"]
 
 
-async def test_cancel_never_writes_the_receipt(druks_db, _direct_steps, monkeypatch):
-    run = await seed_run(druks_db, kind=Summarize.kind, run_id="run-receipt-cancel")
+async def test_cancel_records_no_receipt(druks_db, request_reply, monkeypatch):
+    run_id, call = request_reply
+    monkeypatch.setattr(
+        DBOS, "recv_async", AsyncMock(side_effect=DBOSWorkflowCancelledError(run_id))
+    )
 
-    async def _cancelled(topic, timeout_seconds):
-        raise DBOSWorkflowCancelledError(run.id)
-
-    monkeypatch.setattr(DBOS, "recv_async", _cancelled)
     with pytest.raises(DBOSWorkflowCancelledError):
-        await _park(_ParkedWorkflow(run.id), "review", _ASK, ttl_seconds=1.0)
+        await call
 
-    run = await _reload(druks_db, run.id)
+    druks_db.expunge_all()
+    run = await druks_db.get(Run, run_id)
     assert not run.answer_parked_at
+    events = list(await druks_db.scalars(select(Event)))
+    assert [event.type for event in events] == ["workflow.parked"]

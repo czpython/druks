@@ -162,7 +162,11 @@ async def test_facts_and_event_land_before_a_raising_subscriber(druks_db, _inlin
             run.id,
             RunState.PARKED,
             subject={"type": "work_item", "id": item.id},
-            facts={"input_gate": "review_work", "input_request": {"label": "Review"}},
+            facts={
+                "input_gate": "review_work",
+                "input_request": {"label": "Review"},
+                "input_requested_at": datetime.now(UTC),
+            },
         )
 
     ambient_session().expunge_all()
