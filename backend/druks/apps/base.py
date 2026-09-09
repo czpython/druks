@@ -31,7 +31,6 @@ if TYPE_CHECKING:
     from druks.agents import Agent
     from druks.doctor import CheckResult
     from druks.durable.datastructures import Subject
-    from druks.durable.schemas import SubjectActivity
     from druks.ui.page import PageRoute
     from druks.workflows import Workflow
 
@@ -574,7 +573,7 @@ class App:
     def _get_subject_routes(
         cls, subject_class: "type[Subject] | type[StoredSubject]"
     ) -> "APIRouter":
-        """The board and one subject (header + status + timeline + activity), each with a
+        """The board and one subject (header + status + timeline + phase), each with a
         point-in-time read and a ``/stream`` that pushes the whole snapshot on change.
         Mounted at ``/api/<name>/<subject_type>`` for every subject the app's
         workflows declare. Every read here is keyed by identity, so an app that
@@ -606,15 +605,10 @@ class App:
             )
 
         async def subject_response(subject_id: str) -> SubjectResponse | None:
-            subject = await subject_class.get_for_subject_id(subject_id)
-            if subject is None:
-                return
-            return await reads.get_subject_response(
-                subject_type,
-                subject_id,
-                summary=subject.get_summary(),
-                activity=await cls.get_subject_activity(subject),
-            )
+            if subject := await subject_class.get_for_subject_id(subject_id):
+                return await reads.get_subject_response(
+                    subject_type, subject_id, summary=subject.get_summary()
+                )
 
         @router.get("", response_model=SubjectList, response_model_by_alias=True)
         async def list_subjects() -> SubjectList:
@@ -684,11 +678,3 @@ class App:
             payload=payload,
             app=cls.name,
         )
-
-    @classmethod
-    async def get_subject_activity(
-        cls, subject: "Subject | StoredSubject"
-    ) -> "SubjectActivity | None":
-        """The subject's live sub-phase, if any (e.g. "Provisioning sandbox VM…"). Optional —
-        override to surface a transient signal the running run pushes."""
-        return

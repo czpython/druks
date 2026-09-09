@@ -196,19 +196,14 @@ class SubjectList(Schema):
     rows: list[SubjectRow] = Field(default_factory=list)
 
 
-class SubjectActivity(Schema):
-    # The running sub-phase the timeline can't show ("Provisioning sandbox VM…"), supplied
-    # by the app; ``kind`` groups it for display ("infra" | "agent").
-    label: str
-    kind: str
-
-
 class SubjectResponse(Schema):
     summary: SerializeAsAny[SubjectSummary]
     status: SubjectStatus
     # The subject's runs, oldest first, each with its agent calls — the timeline.
     timeline: list[RunResponse] = Field(default_factory=list)
-    activity: SubjectActivity | None = None
+    # The driving run's sandbox phase while it starts ("provisioning_vm"). The
+    # shell supplies the words.
+    phase: str | None = None
 
 
 class TranscriptChunk(Schema):

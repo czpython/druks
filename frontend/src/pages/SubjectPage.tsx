@@ -15,6 +15,7 @@ import { GateControls } from '../druksui/GateControls'
 import { RunTranscript } from '../components/RunTranscript'
 import { StatusGlyph } from '../components/StatusGlyph'
 import { relTimeFromIso } from '../lib/format'
+import { phaseLine } from '../lib/phase'
 import { summaryEntries } from '../lib/summary'
 
 const isActiveRun = (run: RunSummary) =>
@@ -98,6 +99,7 @@ function SubjectDetail({
 
   const data = query.data!
   const runs = [...data.timeline].reverse()
+  const now = phaseLine(data.phase)
   const crumb = (
     <div className="ins-crumb">
       <Link href={`/${app}`} className="ins-crumb-back">
@@ -115,7 +117,7 @@ function SubjectDetail({
             {value}
           </Fact>
         ))}
-        {data.activity && <Fact k="now">{data.activity.label}</Fact>}
+        {now && <Fact k="now">{now}</Fact>}
       </Facts>
       {selectedRun && !runs.some((run) => run.id === selectedRun) && (
         <p role="alert">This run does not belong to this subject or is no longer available.</p>

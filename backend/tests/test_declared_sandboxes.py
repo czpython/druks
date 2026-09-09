@@ -7,7 +7,6 @@ from unittest.mock import AsyncMock
 import druks.agents as agent_module
 import druks.workflows as workflow_module
 import pytest
-from druks.contrib.software_factory.app import _PHASE_META
 from druks.sandbox import datastructures, templates
 from druks.sandbox.client import Client
 from druks.sandbox.datastructures import Sandbox
@@ -58,11 +57,6 @@ def test_get_declared_sandboxes_deduplicates_by_content(monkeypatch):
     declared = templates.get_declared_sandboxes()
 
     assert declared == {hashlib.sha256(b"setup").hexdigest(): other}
-
-
-def test_software_factory_maps_the_sandbox_building_phase():
-    assert _PHASE_META["sandbox_building"].label == "Building sandbox…"
-    assert _PHASE_META["sandbox_building"].kind == "infra"
 
 
 async def test_prepare_sandbox_templates_requests_each_declaration(monkeypatch):

@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 from druks.contrib.software_factory.models import WorkItem
 from druks.durable.reads import list_subject_timeline
-from druks.testing import asgi_client, seed_call
+from druks.testing import asgi_client, configure_app_for_test, make_settings, seed_call
 from fastapi.testclient import TestClient
 
 from software_factory.factories import make_test_work_item, seed_build_run
@@ -17,16 +17,11 @@ _RUN_STATE = {
 }
 
 
-def _build_app(tmp_path):
-    from druks.testing import configure_app_for_test, make_settings
-
-    settings = make_settings(tmp_path)
-    return configure_app_for_test(settings=settings)
-
-
 @pytest.fixture
 async def client(tmp_path: Path, druks_db):
-    async with asgi_client(_build_app(tmp_path)) as client:
+    app = configure_app_for_test(settings=make_settings(tmp_path))
+
+    async with asgi_client(app) as client:
         yield client
 
 
@@ -85,7 +80,7 @@ async def test_subject_list_shows_active_and_excludes_resolved(client: TestClien
     assert "building" in rows
     assert "merged one" not in rows
     assert rows["building"]["status"]["state"] == "running"
-    assert rows["building"]["summary"]["resolution"] is None
+    assert not rows["building"]["summary"]["resolution"]
 
 
 async def test_subject_detail_composes_summary_status_and_timeline(client: TestClient, druks_db):
@@ -244,11 +239,7 @@ async def test_timeline_shows_every_build_attempt(druks_db):
     assert any(e.failure == "boom" for e in entries)
 
 
-async def test_subject_activity_surfaces_running_phase(druks_db, monkeypatch):
-    # A running build run pushes a transient phase; the detail view's live activity
-    # surfaces it ("Provisioning sandbox VM…") — finer than the lifecycle status.
-    from druks.contrib.software_factory import app as software_factory_app
-
+async def test_detail_carries_the_running_phase(client: TestClient, druks_db, monkeypatch):
     item = await make_test_work_item(repo="ClawHaven/acme-app", title="x")
     await seed_build_run(druks_db, work_item_id=item.id, state="running")
 
@@ -256,17 +247,13 @@ async def test_subject_activity_surfaces_running_phase(druks_db, monkeypatch):
         return "provisioning_vm"
 
     monkeypatch.setattr("druks.durable.reads.get_run_phase", phase)
-    activity = await software_factory_app.SoftwareFactory.get_subject_activity(item)
-    assert activity is not None
-    assert activity.label == "Provisioning sandbox VM…"
-    assert activity.kind == "infra"
+    detail = (await client.get(f"/api/software_factory/work_item/{item.id}")).json()
+    assert detail["phase"] == "provisioning_vm"
 
 
-async def test_subject_activity_none_when_not_running(druks_db):
-    # A run parked on a gate isn't working — no live sub-phase.
-    from druks.contrib.software_factory import app as software_factory_app
-
+async def test_detail_has_no_phase_when_not_running(client: TestClient, druks_db):
     item = await make_test_work_item(repo="ClawHaven/acme-app", title="x")
     await seed_build_run(druks_db, work_item_id=item.id, state="parked", input_gate="review_plan")
 
-    assert await software_factory_app.SoftwareFactory.get_subject_activity(item) is None
+    detail = (await client.get(f"/api/software_factory/work_item/{item.id}")).json()
+    assert not detail["phase"]

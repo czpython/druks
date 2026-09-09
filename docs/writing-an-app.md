@@ -734,9 +734,8 @@ method.
 Druks serves the same `/api/night_watch/repository` surface for both subject
 types. This surface contains a board, detail pages, and a live stream. Druks
 mounts it for each declared subject. Each response contains your summary, run
-status, timeline, agent calls, artifacts, and active question. Override
-`get_subject_activity()` only to add transient app detail, such as
-"Building sandbox VM…".
+status, timeline, agent calls, artifacts, active question, and the sandbox
+phase while a run starts.
 
 Pass the subject instance to each component that requires one. This includes a
 workflow start, gate answer, or event:
