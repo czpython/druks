@@ -125,6 +125,7 @@ async def test_stale_pr_on_a_reused_branch_cannot_resolve_the_current_attempt(dr
 
 @pytest.mark.parametrize("pr_number", [None, 42])
 async def test_operator_stop_records_no_owner_close(druks_db, druks_client, pr_number):
+    db_session.registry.set(druks_db)
     item = await make_test_work_item(repo="acme/widget", title="Stopped work")
     await item.update(pr_number=pr_number, branch="agent/stopped")
     run = await seed_run(druks_db, kind=Build.kind, subject=item)
