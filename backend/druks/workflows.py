@@ -36,6 +36,7 @@ from druks.apps.settings import (
     validate_setting_override,
     validate_settings_declaration,
 )
+from druks.database import get_session
 from druks.durable.activity import set_run_phase
 from druks.durable.datastructures import Subject
 from druks.durable.engine import _step_engine, register_schedule, run_queue, step_session
@@ -1041,6 +1042,17 @@ class Workflow:
                 _step_engine(), workflow_id=workflow_id, kind=cls.kind, account_id=account_id
             )
             if subject:
+                # Its own transaction lets readers see the admission before the caller commits.
+                async with get_session(_step_engine()) as session:
+                    await Event.emit(
+                        type=WorkflowEvent.SCHEDULED,
+                        subject=subject.identity,
+                        label=subject.label,
+                        payload={"run": workflow_id, "kind": cls.kind},
+                        app=cls.app,
+                        session=session,
+                    )
+                    await session.commit()
                 await publish(WorkflowEvent.SCHEDULED, subject=subject.identity, kind=cls.kind)
             return workflow_id
         # The slot was held — the handle is the subject's live run.

@@ -10,8 +10,10 @@ from druks.api.exceptions import (
     agent_error_responses,
 )
 from druks.api.schemas import CancelRunResponse, ResumeRequest, RetryRunResponse
-from druks.durable.enums import RunState
+from druks.apps.registry import workflows
+from druks.durable.enums import RunState, WorkflowEvent
 from druks.durable.models import Run
+from druks.events.models import Event
 from druks.notifications.exceptions import InvalidChoiceError
 from druks.notifications.services import validate_in_app_answer
 
@@ -72,7 +74,18 @@ async def cancel_run(
         return CancelRunResponse(run=run.id, result="already_cancelled")
     if not run.is_active:
         raise RunNotActive(run_id)
+    subject = await run.get_subject()
+    # cancel() flushes the run and expires this computed column, so read it first.
+    label = run.subject_label
     await run.cancel(failure=reason)
+    if subject:
+        await Event.emit(
+            type=WorkflowEvent.CANCELLED,
+            subject=subject,
+            label=label,
+            payload={"run": run.id, "kind": run.kind, "failure": reason},
+            app=workflows.get(run.kind).app,
+        )
     return CancelRunResponse(run=run.id, result="cancelled")
 
 
