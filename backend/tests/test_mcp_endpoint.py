@@ -2,8 +2,10 @@ import ast
 import json
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
+from typing import Literal
 
 import httpx
+import httpx2
 import pytest
 from conftest import finish_agent_run, make_test_note, seed_note_agent_run, seed_note_run
 from druks.accounts.models import Account, PersonalAccessToken
@@ -90,17 +92,17 @@ def resume_spy(monkeypatch):
     return calls
 
 
-def _client(app, token: str) -> Client:
+def _client(app, token: str, *, mode: Literal["auto", "legacy"] = "auto") -> Client:
     def factory(**kwargs):
         kwargs.pop("verify", None)  # meaningless for the in-process transport
-        return httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=app), base_url="http://druks.test", **kwargs
+        return httpx2.AsyncClient(
+            transport=httpx2.ASGITransport(app=app), base_url="http://druks.test", **kwargs
         )
 
     transport = StreamableHttpTransport(
         "http://druks.test/mcp", auth=token, httpx_client_factory=factory
     )
-    return Client(transport)
+    return Client(transport, mode=mode)
 
 
 async def _call_error(client: Client, name: str, arguments: dict) -> dict:
@@ -157,10 +159,13 @@ async def test_mcp_subpaths_never_reach_the_spa(app):
             assert stray.headers["content-type"].startswith("application/json")
 
 
-async def test_tools_list_pins_platform_and_app_tools(app, pat_token):
-    async with live(app), _client(app, pat_token) as client:
-        assert "list_open_subjects" in (client.initialize_result.instructions or "")
-        assert "parkedAt" in (client.initialize_result.instructions or "")
+@pytest.mark.parametrize("mode", ["auto", "legacy"])
+async def test_tools_list_pins_platform_and_app_tools(app, pat_token, mode):
+    async with live(app), _client(app, pat_token, mode=mode) as client:
+        if mode == "auto":
+            assert client.protocol_version == "2026-07-28"
+        assert "list_open_subjects" in (client.instructions or "")
+        assert "parkedAt" in (client.instructions or "")
         tools = {tool.name: tool for tool in await client.list_tools()}
 
     assert list(tools)[:7] == _TOOL_NAMES
@@ -178,29 +183,29 @@ async def test_tools_list_pins_platform_and_app_tools(app, pat_token):
     for name, expected in expected_annotations.items():
         annotations = tools[name].annotations
         assert (
-            annotations.readOnlyHint,
-            annotations.destructiveHint,
-            annotations.idempotentHint,
+            annotations.read_only_hint,
+            annotations.destructive_hint,
+            annotations.idempotent_hint,
         ) == expected
         assert tools[name].description
 
     for name in ("software_factory_review", "software_factory_start"):
         app_tool = tools[name]
         assert (
-            app_tool.annotations.readOnlyHint,
-            app_tool.annotations.destructiveHint,
-            app_tool.annotations.idempotentHint,
+            app_tool.annotations.read_only_hint,
+            app_tool.annotations.destructive_hint,
+            app_tool.annotations.idempotent_hint,
         ) == (False, True, False)
         assert app_tool.description
 
     # Derived schemas keep the routes' own shapes and constraints.
-    assert tools["answer_gate"].inputSchema["required"] == ["run", "parkedAt", "control"]
-    assert tools["answer_gate"].inputSchema["properties"]["control"]["description"] == (
+    assert tools["answer_gate"].input_schema["required"] == ["run", "parkedAt", "control"]
+    assert tools["answer_gate"].input_schema["properties"]["control"]["description"] == (
         "The decision to take: one of the ids the ask offers as controls, e.g. approve."
     )
-    reason = tools["cancel_run"].inputSchema["properties"]["reason"]
+    reason = tools["cancel_run"].input_schema["properties"]["reason"]
     assert (reason["minLength"], reason["maxLength"]) == (1, 500)
-    assert tools["software_factory_start"].inputSchema["properties"]["ticket"]["description"] == (
+    assert tools["software_factory_start"].input_schema["properties"]["ticket"]["description"] == (
         "The tracker's ticket key, e.g. ENG-831."
     )
     # software_factory_start moves the tracker ticket and waits on webhook intake — its
@@ -208,8 +213,8 @@ async def test_tools_list_pins_platform_and_app_tools(app, pat_token):
     assert "trigger status" in tools["software_factory_start"].description
     assert "webhook intake" in tools["software_factory_start"].description
     assert "list_open_subjects" in tools["software_factory_start"].description
-    assert not tools["list_open_subjects"].inputSchema.get("required")
-    assert not tools["get_usage"].inputSchema.get("required")
+    assert not tools["list_open_subjects"].input_schema.get("required")
+    assert not tools["get_usage"].input_schema.get("required")
 
 
 @pytest.mark.parametrize(

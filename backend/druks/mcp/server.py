@@ -5,7 +5,7 @@
 import inspect
 from collections.abc import Generator
 
-import httpx
+import httpx2
 from fastapi import FastAPI
 from fastapi.routing import APIRoute, iter_route_contexts
 from fastmcp import FastMCP
@@ -59,10 +59,12 @@ class PatTokenVerifier(TokenVerifier):
             await db_session.remove()
 
 
-class CallerPat(httpx.Auth):
+class CallerPat(httpx2.Auth):
     # The derivation strips authorization when replaying inbound headers;
     # the caller's PAT re-enters here, so each route runs as that account.
-    def auth_flow(self, request: httpx.Request) -> Generator[httpx.Request, httpx.Response, None]:
+    def auth_flow(
+        self, request: httpx2.Request
+    ) -> Generator[httpx2.Request, httpx2.Response, None]:
         try:
             incoming = get_http_request()
         except RuntimeError:
@@ -154,9 +156,9 @@ def _annotate(route: HTTPRoute, component: object) -> None:
     if isinstance(component, OpenAPITool):
         is_read = route.method == "GET"
         component.annotations = ToolAnnotations(
-            readOnlyHint=is_read,
-            destructiveHint=not is_read and route.extensions.get("x-destructive", True),
-            idempotentHint=route.extensions.get("x-idempotent", False),
+            read_only_hint=is_read,
+            destructive_hint=not is_read and route.extensions.get("x-destructive", True),
+            idempotent_hint=route.extensions.get("x-idempotent", False),
         )
 
 
@@ -166,8 +168,8 @@ def create_mcp_app(api: FastAPI) -> StarletteWithLifespan:
     # Built directly rather than via from_fastapi, which owns the transport:
     # raise_app_exceptions=False makes an app crash reach the tool as the
     # app's sanitized 500, so no masking is needed and the taxonomy travels.
-    client = httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=api, raise_app_exceptions=False),
+    client = httpx2.AsyncClient(
+        transport=httpx2.ASGITransport(app=api, raise_app_exceptions=False),
         base_url="http://druks",
         auth=CallerPat(),
     )
