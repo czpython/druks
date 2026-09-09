@@ -18,6 +18,7 @@ describe('Factory Activity', () => {
     ['workflow.cancelled', 'Build stopped'],
   ])('formats %s through the app registry', (kind, label) => {
     expect(eventLine({ id: 'event:1', seq: 1, at: '2026-09-09T12:00:00Z',
+      isSubjectAvailable: true, isRunAvailable: false, isArtifactAvailable: false,
       kind, app: 'software_factory', workflow: 'software_factory.build' }).label).toBe(label)
   })
 
