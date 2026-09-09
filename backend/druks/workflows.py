@@ -44,7 +44,7 @@ from druks.durable.models import AgentCall, Run
 from druks.durable.schemas import (
     AgentCallResponse,
     RunResponse,
-    SubjectActivity,
+    SubjectProgress,
     SubjectStatus,
     SubjectSummary,
 )
@@ -74,7 +74,7 @@ __all__ = [
     "OperatorReply",
     "RunResponse",
     "Subject",
-    "SubjectActivity",
+    "SubjectProgress",
     "SubjectStatus",
     "SubjectSummary",
     "Workflow",

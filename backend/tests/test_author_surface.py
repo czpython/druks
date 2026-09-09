@@ -27,7 +27,7 @@ AUTHOR_SURFACE = {
         "OperatorReply",
         "RunResponse",
         "Subject",
-        "SubjectActivity",
+        "SubjectProgress",
         "SubjectStatus",
         "SubjectSummary",
         "Workflow",

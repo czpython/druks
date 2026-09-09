@@ -196,9 +196,9 @@ class SubjectList(Schema):
     rows: list[SubjectRow] = Field(default_factory=list)
 
 
-class SubjectActivity(Schema):
-    # The running sub-phase the timeline can't show ("Provisioning sandbox VM…"), supplied
-    # by the app; ``kind`` groups it for display ("infra" | "agent").
+class SubjectProgress(Schema):
+    """The app's labeled live detail, grouped by kind for display."""
+
     label: str
     kind: str
 
@@ -208,7 +208,7 @@ class SubjectResponse(Schema):
     status: SubjectStatus
     # The subject's runs, oldest first, each with its agent calls — the timeline.
     timeline: list[RunResponse] = Field(default_factory=list)
-    activity: SubjectActivity | None = None
+    progress: SubjectProgress | None = None
 
 
 class TranscriptChunk(Schema):

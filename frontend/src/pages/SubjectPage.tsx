@@ -115,7 +115,7 @@ function SubjectDetail({
             {value}
           </Fact>
         ))}
-        {data.activity && <Fact k="now">{data.activity.label}</Fact>}
+        {data.progress && <Fact k="now">{data.progress.label}</Fact>}
       </Facts>
       {selectedRun && !runs.some((run) => run.id === selectedRun) && (
         <p role="alert">This run does not belong to this subject or is no longer available.</p>

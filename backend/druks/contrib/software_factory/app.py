@@ -21,15 +21,15 @@ from druks.core import services
 from druks.db import StoredSubject
 from druks.doctor import CheckResult
 from druks.services import ServiceNotConnectedError
-from druks.workflows import SubjectActivity
+from druks.workflows import SubjectProgress
 
 from .services import GithubReviewer
 
 # Only what the timeline can't already show. A running agent has an agent call
 # to name it, so the phase that clears provisioning maps to nothing.
-_PHASE_META: dict[str, SubjectActivity] = {
-    "provisioning_vm": SubjectActivity(label="Provisioning sandbox VM…", kind="infra"),
-    "sandbox_building": SubjectActivity(label="Building sandbox…", kind="infra"),
+_PHASE_META: dict[str, SubjectProgress] = {
+    "provisioning_vm": SubjectProgress(label="Provisioning sandbox VM…", kind="infra"),
+    "sandbox_building": SubjectProgress(label="Building sandbox…", kind="infra"),
 }
 
 
@@ -198,6 +198,6 @@ class SoftwareFactory(App):
     )
 
     @classmethod
-    async def get_subject_activity(cls, subject: StoredSubject) -> SubjectActivity | None:
+    async def get_subject_progress(cls, subject: StoredSubject) -> SubjectProgress | None:
         phase = await subject.get_phase()
         return _PHASE_META.get(phase or "")

@@ -733,8 +733,26 @@ Druks serves the same `/api/night_watch/repository` surface for both subject
 types. This surface contains a board, detail pages, and a live stream. Druks
 mounts it for each declared subject. Each response contains your summary, run
 status, timeline, agent calls, artifacts, and active question. Override
-`get_subject_activity()` only to add transient app detail, such as
-"Building sandbox VM…".
+`get_subject_progress()` to add labeled live detail:
+
+```python
+from druks.apps import App
+from druks.db import StoredSubject
+from druks.workflows import SubjectProgress
+
+
+class NightWatch(App):
+    name = "night_watch"
+
+    @classmethod
+    async def get_subject_progress(cls, subject: StoredSubject) -> SubjectProgress | None:
+        if await subject.get_phase() == "sandbox_building":
+            return SubjectProgress(label="Building sandbox…", kind="infra")
+```
+
+The response carries this detail in `progress`. `Subject.get_phase()` and
+`durable.reads.get_subject_phase()` return the raw step string. Activity names
+recorded history.
 
 Pass the subject instance to each component that requires one. This includes a
 workflow start, gate answer, or event:

@@ -21,7 +21,7 @@ from .schemas import (
     ArtifactDescriptor,
     ArtifactFile,
     RunResponse,
-    SubjectActivity,
+    SubjectProgress,
     SubjectResponse,
     SubjectStatus,
     SubjectSummary,
@@ -104,7 +104,7 @@ async def get_subject_response(
     subject_id: str,
     *,
     summary: SubjectSummary,
-    activity: SubjectActivity | None = None,
+    progress: SubjectProgress | None = None,
 ) -> SubjectResponse:
     # list_for_subject is newest-first, so runs[0] is the driving run the status
     # reads — the same row get_latest_for_subject would return, its calls already
@@ -115,7 +115,7 @@ async def get_subject_response(
         summary=summary,
         status=await _status(latest),
         timeline=await _timeline(runs),
-        activity=activity,
+        progress=progress,
     )
 
 

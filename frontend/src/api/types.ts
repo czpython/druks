@@ -80,7 +80,7 @@ export interface SubjectStatus {
 
 // The live sub-phase a running run pushes ("Provisioning sandbox VM…", "Working…") —
 // finer than the lifecycle status; null unless something is actively running.
-export interface SubjectActivity {
+export interface SubjectProgress {
   label: string
   kind: string
 }
@@ -160,12 +160,12 @@ export interface SubjectRow<S extends SubjectSummary = SubjectSummary> {
 
 // A subject's full read view: domain summary, status, the platform timeline
 // (the subject's runs, oldest first, each with its agent calls), and the
-// app's optional live activity (the running sub-phase).
+// app's optional live progress (the running sub-phase).
 export interface SubjectResponse<S extends SubjectSummary = SubjectSummary> {
   summary: S
   status: SubjectStatus
   timeline: RunSummary[]
-  activity?: SubjectActivity | null
+  progress?: SubjectProgress | null
 }
 
 export interface ArtifactFile {

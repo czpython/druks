@@ -1,5 +1,5 @@
 import type { PRResolution } from './api'
-import type { RunSummary, SubjectActivity, SubjectStatus } from '../../api/types'
+import type { RunSummary, SubjectProgress, SubjectStatus } from '../../api/types'
 
 // Build's status-line copy, composed from the platform's status facts — the backend
 // ships data; the app owns its own vocabulary.
@@ -51,10 +51,10 @@ const STATE_LABEL: Record<string, string> = {
 }
 
 // What a run row says it is doing. A folded-in step names itself, since its own
-// row isn't there to; the activity covers what the timeline can't show at all.
+// row isn't there to; the progress covers what the timeline can't show at all.
 export function runSubLine(
   run: RunSummary,
-  activity: SubjectActivity | null | undefined,
+  progress: SubjectProgress | null | undefined,
   collapsed: boolean,
 ): string {
   if (run.state === 'failed' && run.failure) {
@@ -66,7 +66,7 @@ export function runSubLine(
   if (run.state === 'running') {
     const step = collapsed && run.agentCalls.find((call) => call.status === 'running')
     if (step) return step.label
-    if (activity) return activity.label
+    if (progress) return progress.label
   }
   return STATE_LABEL[run.state] ?? run.state
 }
