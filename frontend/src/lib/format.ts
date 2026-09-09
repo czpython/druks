@@ -73,7 +73,7 @@ interface _DateParts {
   minute: number
 }
 
-function _zonedParts(d: Date, timeZone: string): _DateParts {
+export function zonedParts(d: Date, timeZone: string): _DateParts {
   const parts = _partsFormatter(timeZone).formatToParts(d)
   const out: Record<string, number> = {}
   for (const part of parts) {
@@ -101,8 +101,8 @@ function _zonedParts(d: Date, timeZone: string): _DateParts {
 export function absTimeCompact(iso: string, timeZone: string = 'UTC'): string {
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return ''
-  const dp = _zonedParts(d, timeZone)
-  const np = _zonedParts(new Date(), timeZone)
+  const dp = zonedParts(d, timeZone)
+  const np = zonedParts(new Date(), timeZone)
   const hh = String(dp.hour).padStart(2, '0')
   const mm = String(dp.minute).padStart(2, '0')
   if (dp.year === np.year && dp.month === np.month && dp.day === np.day) {

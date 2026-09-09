@@ -16,7 +16,7 @@ export function activityLabel(event: ActivityEvent): string | undefined {
     switch (event.kind) {
       case 'workflow.scheduled': return 'Build queued'
       case 'workflow.failed': return 'Build failed'
-      case 'workflow.cancelled': return 'Build stopped'
+      case 'workflow.cancelled': return 'Build cancelled'
       case 'workflow.parked':
         if (event.gate === 'review_work') return 'Implementation review requested'
         if (event.gate === 'review') {

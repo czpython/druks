@@ -227,6 +227,14 @@ async function sendOperation(method: string, path: string, body: unknown): Promi
   }
 }
 
+export function eventQuery(params: EventFilters & { limit?: number; before?: string; after?: string }): string {
+  const query = new URLSearchParams()
+  for (const [key, value] of Object.entries(params)) {
+    if (value) query.set(key, String(value))
+  }
+  return query.toString()
+}
+
 export const api = {
   dashboardOverview: (app?: string) => getJSON<DashboardOverview>(
     `/api/dashboard/overview${app ? `?app=${encodeURIComponent(app)}` : ''}`,
@@ -265,12 +273,8 @@ export const api = {
   retryRun: (runId: string) =>
     postJSON<{ run: string }>(`/api/runs/${runId}/retry`, undefined),
   listEvents: (params: EventFilters & { limit?: number; before?: string } = {}) => {
-    const query = new URLSearchParams()
-    for (const [key, value] of Object.entries(params)) {
-      if (value !== undefined) query.set(key, String(value))
-    }
-    const qs = query.toString()
-    return getJSON<FeedResponse>(`/api/events${qs ? `?${qs}` : ''}`)
+    const query = eventQuery(params)
+    return getJSON<FeedResponse>(`/api/events${query ? `?${query}` : ''}`)
   },
   listEventKinds: (app?: string) =>
     getJSON<string[]>(`/api/events/kinds${app ? `?app=${encodeURIComponent(app)}` : ''}`),

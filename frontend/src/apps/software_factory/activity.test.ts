@@ -14,7 +14,7 @@ describe('Factory Activity', () => {
     ['closed', null, 'Pull request closed'],
     ['workflow.failed', 'software_factory.build', 'Build failed'],
     ['build.rejected', null, 'Build could not start'],
-    ['workflow.cancelled', 'software_factory.build', 'Build stopped'],
+    ['workflow.cancelled', 'software_factory.build', 'Build cancelled'],
   ])('formats %s through the app registry', (kind, workflow, label) => {
     expect(eventLine({ id: 'event:1', seq: 1, at: '2026-09-09T12:00:00Z',
       kind, app: 'software_factory', workflow }).label).toBe(label)

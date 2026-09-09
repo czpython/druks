@@ -97,8 +97,6 @@
 
 @media (max-width: 1024px) {
   :root { --page-gutter: 24px; }
-  .event-row { grid-template-columns: auto minmax(0, 1fr) auto; gap: 8px 12px; padding-inline: var(--page-gutter); }
-  .event-summary { grid-column: 1 / -1; white-space: normal; overflow-wrap: anywhere; }
 }
 
 @media (max-width: 649px) {

@@ -158,8 +158,8 @@ To run without Linear or Jira, select **druks** in
 still required for pull requests. See
 [ticketing integrations](configuration.md#ticketing-integrations).
 
-The run appears on the subject page and in the Events
-feed. Agent-call pages stream transcript and artifact data.
+The run appears on the subject page and in Activity. Agent-call pages stream
+transcript and artifact data.
 
 If you develop a different app, install that distribution into a
 development Druks environment and invoke its documented trigger or

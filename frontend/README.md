@@ -25,7 +25,7 @@ runs lint, tests, and build for PRs into `main` and `codex/` stack branches.
 
 - The work sidebar and searchable installed app roster
 - Settings
-- Dashboard, Events, Usage, and Schedules
+- Dashboard, Activity, Usage, and Schedules
 - Shared routing and fallback behavior.
 
 `src/components/Page.tsx` owns page width, outer spacing, and scrolling. Use
@@ -47,7 +47,7 @@ Import the module one time from `src/apps/index.ts`. The shell finds the
 registration and does not hardcode the app name.
 
 The work sidebar keeps the same destinations across app pages. The Dashboard
-opens at `/`. Events, Usage, and Schedules have shared routes. Schedules appears
+opens at `/`. Activity, Usage, and Schedules have shared routes. Schedules appears
 directly below Usage. App-declared navigation appears below the page
 header. Settings opens from the bottom of the sidebar. Below 650 px, a
 navigation button opens a modal drawer. Escape closes the drawer and returns
@@ -147,9 +147,17 @@ router hooks, decode each subject component once, and let `subjectApi` encode
 the HTTP path. Canonical slug replacement preserves the raw query and hash
 and only runs while the owner page is visible.
 
+## Activity
+
+Activity at `/events` keeps its filters and selection in the URL. History, the
+live stream, and `/api/events/kinds` use the same filters. Day filters use the
+operator timezone. The detail panel reads `/api/events/{seq}/destinations` to
+show which recorded work, run, and saved result still exist. Its owner links use
+the `subjectPath` target described above.
+
 ## API and live data
 
-Shared requests use `src/api/client.ts`. The event feed and transcript
+Shared requests use `src/api/client.ts`. The Activity feed and transcript
 components consume server-sent events. Standard HTTP queries supply the initial
 state. Keep API field names aligned with the camelCase `Schema` output from the
 backend.

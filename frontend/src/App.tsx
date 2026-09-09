@@ -34,7 +34,7 @@ import { appHome, appLabel, appOwning, getAppUI, registeredApps } from './apps/r
 
 const ROUTER_BASE = import.meta.env.BASE_URL.replace(/\/$/, '')
 const SHELL_PAGES: Record<string, string> = {
-  '/': 'Dashboard', '/events': 'Events', '/usage': 'Usage', '/schedules': 'Schedules',
+  '/': 'Dashboard', '/events': 'Activity', '/usage': 'Usage', '/schedules': 'Schedules',
 }
 
 export function App({ account }: { account: Account }) {
@@ -249,7 +249,10 @@ function AppShell({
         navigate(appHome(defaultApp))
         return
       }
-      if (event.key === 'Escape') {
+      // Escape in a field belongs to the field, so typing never leaves the page.
+      const isInField = event.target instanceof HTMLElement
+        && (event.target.isContentEditable || event.target.matches('input, select, textarea'))
+      if (event.key === 'Escape' && !isInField) {
         const sharedDetail = location === '/usage' || location === '/events' || location === '/schedules'
         const parent = ui?.parentPath?.(location) ?? (sharedDetail && app ? appHome(app) : undefined)
         if (parent) {
@@ -302,7 +305,7 @@ function AppShell({
               aria-current={location === '/events' ? 'page' : undefined}
             >
               <Activity size={17} aria-hidden="true" />
-              Events
+              Activity
             </Link>
             <Link
               href="/usage"

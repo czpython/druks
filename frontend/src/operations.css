@@ -9,14 +9,6 @@
 .page-work-items .wi-group-head { font: 14px var(--font-sans); letter-spacing: 0; text-transform: none; }
 .page-work-items .active-filters { min-width: 0; max-width: 100%; }
 .page-work-items .history-search { width: min(320px, 100%); min-width: 0; min-height: 40px; font: 15px var(--font-sans); }
-.page-events .events-filter-pill { min-height: 40px; padding: 8px 12px; font: 15px var(--font-sans); }
-.page-events :is(.event-time, .event-kind-pill, .event-source) { font-size: 13px; }
-.page-events .event-summary { font-size: 15px; }
-.page-events .event-kind-failed { color: var(--outcome-failed); border-color: var(--outcome-failed); }
-.page-events .event-kind-running { color: var(--bucket-run); border-color: var(--bucket-run); }
-.page-events .event-kind-parked { color: var(--accent-amber); border-color: var(--accent-amber); }
-.page-events .event-kind-finished { color: var(--outcome-merged); border-color: var(--outcome-merged); }
-.page-events .event-kind-cancelled { color: var(--text-dim); border-color: var(--text-dim); }
 .us-head-title, .us-prov-name { margin: 0; }
 .us-prov-identity { min-width: 0; flex: 1 1 160px; }
 .page-usage .us-prov-spacer { display: none; }
@@ -41,7 +33,6 @@
   .work-item-title { min-height: 44px; }
   .work-item-updated { text-align: left; }
   .page-work-items .history-search { min-height: 44px; font-size: 16px; }
-  .page-events .events-filter-pill { min-height: 44px; }
   .page-usage .us-head { flex-wrap: wrap; }
   .page-usage .us-head-updated { order: 1; width: 100%; }
   .page-usage .us-refresh { min-height: 44px; }

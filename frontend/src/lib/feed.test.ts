@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { eventLine } from './feed'
+import { activityDay, activityTypeLabel, eventLine } from './feed'
 // Software Factory's own registration, not a stand-in: its subjectPath is what makes a row navigate.
 import '../apps/software_factory/ui'
 import type { FeedItem } from '../api/types'
@@ -20,12 +20,11 @@ describe('eventLine', () => {
     const line = eventLine(event({ kind: 'workflow.running', workflow: 'software_factory.build' }))
 
     expect(line.label).toBe('Build response received')
-    expect(line.source).toBe('build')
   })
 
-  it('calls a parked run waiting on you', () => {
+  it('names a recorded input request', () => {
     expect(eventLine(event({ kind: 'workflow.parked', workflow: 'software_factory.build' })).label).toBe(
-      'Build waiting on you',
+      'Build input requested',
     )
   })
 
@@ -33,7 +32,6 @@ describe('eventLine', () => {
     const line = eventLine(event({ kind: 'merged', app: 'software_factory' }))
 
     expect(line.label).toBe('Pull request merged')
-    expect(line.source).toBe('Software Factory')
     expect(line.bucket).toBe('event-kind-audit')
   })
 
@@ -94,4 +92,22 @@ it('retains the recorded run and decision round in Factory links', () => {
   const target = new URL(line.path!, 'https://druks.test')
   expect(target.searchParams.get('run')).toBe('older-run')
   expect(target.searchParams.get('parkedAt')).toBe('2026-09-09T01:00:00Z')
+})
+
+it.each([
+  ['2026-03-29', 'Europe/Madrid', '2026-03-28T23:00:00.000Z', '2026-03-29T22:00:00.000Z'],
+  ['2026-10-25', 'Europe/Madrid', '2026-10-24T22:00:00.000Z', '2026-10-25T23:00:00.000Z'],
+  ['2026-03-08', 'America/New_York', '2026-03-08T05:00:00.000Z', '2026-03-09T04:00:00.000Z'],
+  ['2026-09-09', 'Asia/Kolkata', '2026-09-08T18:30:00.000Z', '2026-09-09T18:30:00.000Z'],
+  ['2026-09-06', 'America/Santiago', '2026-09-06T04:00:00.000Z', '2026-09-07T03:00:00.000Z'],
+])('uses both local midnights for %s in %s', (date, timezone, start, until) => {
+  expect(activityDay(date, timezone)).toBe(start)
+  expect(activityDay(date, timezone, true)).toBe(until)
+})
+
+it('uses shared type words and registered Factory topic labels', () => {
+  expect(activityTypeLabel('workflow.scheduled', 'software_factory')).toBe('Queued')
+  expect(activityTypeLabel('workflow.parked')).toBe('Input requested')
+  expect(activityTypeLabel('review.completed')).toBe('Review completed')
+  expect(activityTypeLabel('unknown.topic_name')).toBe('Unknown topic name')
 })
