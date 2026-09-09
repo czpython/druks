@@ -196,6 +196,8 @@ def _build_units():
     class DoubleGateFlow(Workflow):
         # Two rounds on the same gate — the shape a stale buffered reply would
         # ghost-resume.
+        subject = Widget
+
         async def run_multistep(self) -> None:
             first = await Approve.wait()
             SINK.append(f"round1:{first.action}")
@@ -203,6 +205,9 @@ def _build_units():
             SINK.append(f"round2:{second.action}")
             replies = [reply.action for reply in self.journal.filter(Approve)]
             SINK.append(f"gate-journal:{replies}")
+            SINK.append("gate:completed")
+            if SINK.count("gate:completed") == 1:
+                raise asyncio.CancelledError
 
     class ConfirmFlow(Workflow):
         subject = Widget
@@ -505,7 +510,7 @@ async def test_duplicate_replies_to_one_round_collapse(rt):
     not buffer on the topic and ghost-resume the gate's next round unprompted."""
     from sqlalchemy import text
 
-    wfid = await rt.DoubleGateFlow.start(subject=None)
+    wfid = await rt.DoubleGateFlow.start(subject=Widget(id=515151))
     parked = await _wait_for(rt.engine, wfid, lambda r: r.state == RunState.PARKED)
     first_asked_at = parked.input_requested_at
 
@@ -538,8 +543,34 @@ async def test_duplicate_replies_to_one_round_collapse(rt):
     assert "round1:first" in SINK
 
     # A fresh reply to the new round is a new key, so it still gets through.
+    second_asked_at = parked.input_requested_at
     await parked.resume(action="second")
+    for _ in range(100):
+        if "gate:completed" in SINK:
+            break
+        await asyncio.sleep(0.1)
+    assert SINK.count("gate:completed") == 1
+    await asyncio.sleep(0.2)
+    await DBOS.resume_workflow_async(wfid)
     await _wait_for(rt.engine, wfid, lambda r: r.state == RunState.FINISHED)
+    assert SINK.count("gate:completed") == 2
+    async with get_session(rt.engine) as session:
+        events = list(
+            await session.scalars(
+                select(Event).where(Event.payload["run"].astext == wfid).order_by(Event.id)
+            )
+        )
+    requests = [event for event in events if event.type == "workflow.parked"]
+    receipts = [
+        event for event in events if event.type == "workflow.running" and "result" in event.payload
+    ]
+    rounds = [first_asked_at.isoformat(), second_asked_at.isoformat()]
+    assert [event.payload["input_requested_at"] for event in requests] == rounds
+    assert [event.payload["input_requested_at"] for event in receipts] == rounds
+    assert [event.payload["result"] for event in receipts] == [
+        {"action": "first"},
+        {"action": "second"},
+    ]
     assert "round2:second" in SINK
     assert "round2:duplicate" not in SINK
     # Both replies landed on the journal, in reply order.

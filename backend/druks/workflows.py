@@ -100,6 +100,7 @@ _ReviewAction = Literal["approve", "request_changes"]
 _REVIEW_CONTROLS = get_args(_ReviewAction)
 
 T = TypeVar("T")
+GateReply = TypeVar("GateReply", bound="Gate")
 
 # The running workflow instance, so a Gate's on_wait() can reach its app's
 # side-effects (set draft, request review, …) when the gate parks. No default:
@@ -316,8 +317,7 @@ class Gate(BaseModel):
                 await cls.on_wait(workflow)
 
         await DBOS.run_step_async(StepOptions(name=f"{cls.name}._on_wait"), _on_wait)
-        payload = await _park(workflow, cls.name, input_request, ttl_seconds)
-        reply = cls.model_validate(payload)
+        reply = await _park(workflow, cls, input_request, ttl_seconds)
         workflow.journal.add(reply)
         return reply
 
@@ -335,10 +335,10 @@ class OperatorReply(Gate):
 
 async def _park(
     workflow: "Workflow",
-    gate: str,
+    gate: type[GateReply],
     input_request: dict[str, Any] | None,
     ttl_seconds: float,
-) -> dict[str, Any]:
+) -> GateReply:
     # Shared park core: a park lasts days, so reap the warm VM, then suspend on the
     # gate's channel until Run.resume answers it.
     await workflow._reap_run()
@@ -347,7 +347,7 @@ async def _park(
         RunState.PARKED,
         subject=workflow._subject,
         facts={
-            "input_gate": gate,
+            "input_gate": gate.name,
             "input_request": input_request,
             "input_requested_at": datetime.now(UTC),
         },
@@ -355,22 +355,22 @@ async def _park(
     if workflow._subject:
         # Every subjected park notifies the designated destination — no author opt-in.
         await _notify_designated_destination(workflow.workflow_id, workflow._subject)
-    payload = await DBOS.recv_async(gate, timeout_seconds=ttl_seconds)
+    payload = await DBOS.recv_async(gate.name, timeout_seconds=ttl_seconds)
     if payload is None:
-        raise GateTimeout(gate)
+        raise GateTimeout(gate.name)
+    reply = gate.model_validate(payload)
     await _emit_run_event(
         workflow.workflow_id,
         RunState.RUNNING,
         subject=workflow._subject,
         facts={**_GATE_CLEARED, "answer_parked_at": Run.input_requested_at},
+        result=reply,
     )
-    return payload
+    return reply
 
 
 async def _notify_designated_destination(workflow_id: str, subject: dict[str, Any]) -> None:
-    # Reads the ask off the run row the parked step just wrote (the
-    # signal payload carries no ask — producer-side placement is the point);
-    # the settings pointer is the operator's off-switch.
+    # The operator's settings select the destination for the recorded request.
     async def _create() -> str | None:
         async with step_session():
             run = await Run.get(workflow_id)
@@ -554,6 +554,7 @@ async def _emit_run_event(
             # Read before the flush: flushing the update unloads the row's
             # computed columns, and reading one back would be implicit IO.
             label = run.subject_label
+            gate = run.input_gate if state == RunState.RUNNING and result else None
             if facts:
                 for field, value in facts.items():
                     setattr(run, field, value)
@@ -563,7 +564,7 @@ async def _emit_run_event(
                 return {
                     "kind": run.kind,
                     "subject": subject,
-                    "payload": await _log_run_event(run, state, subject, label, result),
+                    "payload": await _log_run_event(run, state, subject, label, result, gate),
                 }
 
     transition = await DBOS.run_step_async(
@@ -592,14 +593,19 @@ async def _log_run_event(
     subject: dict[str, Any],
     label: str | None,
     result: Any = None,
+    gate: str | None = None,
 ) -> dict[str, Any]:
     # One event per transition — the feed's run-level granularity, read off the
     # just-written row so gate and failure ride the transition that set them.
     # The result rides the finished event so reactions read the outcome off the
     # payload instead of artifacts.
     payload: dict[str, Any] = {"run": run.id, "kind": run.kind}
-    if run.input_gate:
-        payload["gate"] = run.input_gate
+    if gate or run.input_gate:
+        payload["gate"] = gate or run.input_gate
+    if gate or state == RunState.PARKED:
+        payload["input_requested_at"] = run.input_requested_at.isoformat()
+    if state == RunState.PARKED:
+        payload["input_request"] = run.input_request
     if run.failure:
         payload["failure"] = run.failure
     if isinstance(result, BaseModel):
@@ -824,8 +830,7 @@ class Workflow:
         }
         if context:
             request["context"] = context
-        payload = await _park(self, OperatorReply.name, request, GATE_TTL_SECONDS)
-        reply = OperatorReply.model_validate(payload)
+        reply = await _park(self, OperatorReply, request, GATE_TTL_SECONDS)
         self.journal.add(reply)
         return reply
 
