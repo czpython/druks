@@ -97,9 +97,14 @@ class AgentOutput(BaseModel):
         # applied by the call so no caller ever invokes it.
         return self
 
-    def get_artifact(self) -> dict[str, str]:
+    def to_artifact(self) -> dict[str, str]:
         # The call's renderable output as {kind, title, content} — the platform persists
         # it after the call. Empty unless the contract produces a reviewable document.
+        return {}
+
+    def to_event(self) -> dict[str, str]:
+        """Return a topic and optional summary to record with the saved artifact. Empty
+        opts out."""
         return {}
 
 
@@ -360,11 +365,20 @@ class Agent:
                             app=workflow.app,
                             agent_call_id=call_id,
                         )
+                    event = output.to_event()
+                    artifact = output.to_artifact()
+                    if event and not artifact:
+                        raise WorkflowError(
+                            f"{contract.__name__}.to_event() returned an event without an "
+                            "artifact. Implement to_artifact() for the saved result."
+                        )
                     await AgentCall.finish(engine, call_id=call_id, result=result)
                 except BaseException as error:
                     await AgentCall.fail(engine, call_id=call_id, error=error)
                     raise
 
-        if spec := output.get_artifact():
-            await Artifact.record(call_dir=artifact_dir / call_id, call_id=call_id, **spec)
+        if artifact:
+            await Artifact.record(
+                call_dir=artifact_dir / call_id, call_id=call_id, event=event, **artifact
+            )
         return output.to_result()

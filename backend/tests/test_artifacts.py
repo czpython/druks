@@ -37,6 +37,7 @@ async def test_record_writes_content_and_descriptor(druks_db, tmp_path):
         kind="markdown",
         title="Implementation plan",
         content="# Plan\nbody",
+        event={},
     )
     artifact = await Artifact.get_for_call("call-1")
     assert artifact is not None
@@ -53,7 +54,12 @@ async def test_record_is_idempotent_per_call(druks_db, tmp_path):
     await _seed_call(druks_db)
     for _ in range(2):
         await Artifact.record(
-            call_dir=tmp_path, call_id="call-1", kind="markdown", title="P", content="x"
+            call_dir=tmp_path,
+            call_id="call-1",
+            kind="markdown",
+            title="P",
+            content="x",
+            event={},
         )
     rows = (
         await druks_db.scalars(select(Artifact).where(Artifact.agent_call_id == "call-1"))
@@ -64,7 +70,12 @@ async def test_record_is_idempotent_per_call(druks_db, tmp_path):
 async def test_artifact_cascades_with_its_call(druks_db, tmp_path):
     call = await _seed_call(druks_db)
     await Artifact.record(
-        call_dir=tmp_path, call_id="call-1", kind="markdown", title="P", content="x"
+        call_dir=tmp_path,
+        call_id="call-1",
+        kind="markdown",
+        title="P",
+        content="x",
+        event={},
     )
     assert await Artifact.get_for_call("call-1") is not None
 
@@ -97,6 +108,7 @@ async def test_get_latest_for_run_returns_the_newest_calls_artifact(druks_db, tm
             kind="markdown",
             title=title,
             content="x",
+            event={},
         )
     latest = await Artifact.get_latest_for_run("run-1")
     assert latest is not None and latest.title == "Revised plan"
@@ -125,7 +137,12 @@ async def test_get_ask_resolves_the_review_artifact(druks_db, tmp_path):
     )
     await druks_db.flush()
     await Artifact.record(
-        call_dir=tmp_path, call_id="call-1", kind="markdown", title="Plan", content="x"
+        call_dir=tmp_path,
+        call_id="call-1",
+        kind="markdown",
+        title="Plan",
+        content="x",
+        event={},
     )
 
     await druks_db.refresh(run)
@@ -186,6 +203,7 @@ async def test_get_artifact_returns_recorded_content(druks_db, tmp_path, monkeyp
         kind="markdown",
         title="Implementation plan",
         content="# Plan\nbody",
+        event={},
     )
     result = await get_artifact((await Artifact.get_for_call("call-1")).id)
     assert (result.kind, result.title, result.content) == (

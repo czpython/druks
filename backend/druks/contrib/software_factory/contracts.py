@@ -151,7 +151,7 @@ class PlanOutput(AgentOutput):
     # resolved no assignee login convincingly.
     assignee_github_login: str | None
 
-    def get_artifact(self) -> dict[str, str]:
+    def to_artifact(self) -> dict[str, str]:
         return {"kind": "markdown", "title": "Implementation plan", "content": self.plan_markdown}
 
     def to_result(self) -> PlanData:
@@ -170,7 +170,7 @@ class ContractRevisionOutput(AgentOutput):
     acceptance_criteria: list[AcceptanceCriterionOutput]
     implementation_instructions: str
 
-    def get_artifact(self) -> dict[str, str]:
+    def to_artifact(self) -> dict[str, str]:
         return {"kind": "markdown", "title": "Implementation plan", "content": self.plan_markdown}
 
     def to_result(self) -> PlanData:
@@ -184,7 +184,7 @@ class ContractRevisionOutput(AgentOutput):
 
 
 class ReviewOutput(AgentOutput):
-    # No get_artifact: the plan must stay the parked ask's resolved document.
+    # No to_artifact: the plan must stay the parked ask's resolved document.
     decision: Literal[ReviewDecision.APPROVE, ReviewDecision.REQUEST_CHANGES]
     body: str
 

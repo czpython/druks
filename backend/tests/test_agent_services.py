@@ -121,7 +121,12 @@ async def test_get_gate_serves_the_artifact(druks_db):
     run = await _park(druks_db, item)
     call = await seed_call(druks_db, run, "generate_plan")
     await Artifact.record(
-        call_dir=call.call_dir, call_id=call.id, kind="markdown", title="Plan", content="x" * 10240
+        call_dir=call.call_dir,
+        call_id=call.id,
+        kind="markdown",
+        title="Plan",
+        content="x" * 10240,
+        event={},
     )
 
     view = await services.get_gate(run.id)
@@ -224,7 +229,12 @@ async def test_get_agent_call_serves_bounded_tails(druks_db):
     (call_dir / "stderr.log").write_bytes(b"e" * 10240)
     await finish_agent_run(call, last_error="boom " * 100)
     await Artifact.record(
-        call_dir=call_dir, call_id=call.id, kind="markdown", title="Out", content="a" * 10240
+        call_dir=call_dir,
+        call_id=call.id,
+        kind="markdown",
+        title="Out",
+        content="a" * 10240,
+        event={},
     )
 
     detail = await services.get_agent_call(call.id)

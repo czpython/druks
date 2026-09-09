@@ -405,7 +405,7 @@ refuses before any sandbox work when the login is missing, then provisions or
 attaches a sandbox, executes the CLI, validates the structured output, and
 records the call. Override
 `AgentOutput.to_result()` to map the strict agent contract to a domain value.
-Override `get_artifact()` to publish a reviewable artifact.
+Override `to_artifact()` to publish a reviewable artifact.
 
 Pass `contract=OutputType` on an agent call when its required output fields
 depend on the input. Druks uses that type for the harness schema, validation,

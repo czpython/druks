@@ -209,7 +209,7 @@ def test_ask_contracts_cap_identity_and_cardinality():
 def test_review_output_records_no_artifact():
     # An artifact would displace the plan as the parked ask's document.
     grade = O.ReviewOutput(decision=ReviewDecision.REQUEST_CHANGES, body="name the wire schema")
-    assert grade.get_artifact() == {}
+    assert grade.to_artifact() == {}
 
 
 @pytest.mark.parametrize("body", ["", "   \n"])

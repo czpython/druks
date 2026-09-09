@@ -352,7 +352,7 @@ async def test_file_output_reaches_the_next_agents_input(
     monkeypatch,
     current_run,
 ):
-    """Call A's hydrated output reaches call B as a fresh in-sandbox path."""
+    """Call A's hydrated output reaches its artifact and call B as a fresh in-sandbox path."""
     monkeypatch.setenv("DRUKS_DATA_DIR", str(tmp_path))
     current_run.app = "field_notes"
     sandbox = _patch_runtime(monkeypatch, tmp_path, {"ok": True})
@@ -377,6 +377,11 @@ async def test_file_output_reaches_the_next_agents_input(
         return name
 
     monkeypatch.setattr(agents, "render_prompt", render)
+    monkeypatch.setattr(
+        FileOutput,
+        "to_artifact",
+        lambda self: {"kind": "markdown", "title": "Shot", "content": self.image.url},
+    )
 
     produced = await FILE_AGENT._run(workflow_id="wf-9")
     consumed = await DUMMY_AGENT._run(workflow_id="wf-9", image=produced.image)
@@ -386,6 +391,9 @@ async def test_file_output_reaches_the_next_agents_input(
     sandbox.upload_file.assert_awaited_once()
     calls = await AgentCall.list_for_run("wf-9")
     assert [call.status for call in calls] == ["succeeded", "succeeded"]
+    artifact = (await db_session().scalars(select(agents.Artifact))).one()
+    content = (tmp_path / "run-wf-9" / artifact.agent_call_id / artifact.path).read_text()
+    assert content == produced.image.url
 
 
 async def test_a_carried_failure_is_raised_with_its_code(
@@ -1007,3 +1015,14 @@ async def test_a_replay_resumes_the_ephemeral_box_through_its_identity(
     assert result == DummyOutput(ok=True)
     assert resumed == ["host-crashed"]
     assert [row.id for row in await _identities("wf-9")] == [identity.id]
+
+
+async def test_event_requires_an_artifact(druks_db, tmp_path, monkeypatch, current_run):
+    sandbox = _patch_runtime(monkeypatch, tmp_path, {"ok": True})
+    _patch_ephemeral(monkeypatch, sandbox)
+    monkeypatch.setattr(DummyOutput, "to_event", lambda self: {"topic": "review.completed"})
+
+    with pytest.raises(WorkflowError, match="without an artifact"):
+        await DUMMY_AGENT._run(workflow_id="wf-9")
+
+    assert (await AgentCall.list_for_run("wf-9"))[0].status == "failed"
