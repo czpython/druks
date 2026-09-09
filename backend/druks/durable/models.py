@@ -11,6 +11,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Mapped, column_property, mapped_column, relationship, selectinload
 
 from druks.accounts.models import Account
+from druks.apps.registry import workflows
 from druks.core.models import Uuid7Pk
 from druks.database import db_session, get_session
 from druks.durable.dbos_state import (
@@ -29,6 +30,7 @@ from druks.durable.enums import (
     WorkflowEvent,
 )
 from druks.durable.exceptions import AgentCallNotFound
+from druks.events.models import Event
 from druks.harnesses.artifacts import normalize_token_usage
 from druks.models import Base
 from druks.notifications.models import Notification
@@ -655,7 +657,14 @@ class Artifact(Base, Uuid7Pk):
 
     @classmethod
     async def record(
-        cls, *, call_dir: Path, call_id: str, kind: str, title: str, content: str
+        cls,
+        *,
+        call_dir: Path,
+        call_id: str,
+        kind: str,
+        title: str,
+        content: str,
+        activity: dict[str, str] | None = None,
     ) -> None:
         # Platform-owned: write a call's declared renderable output into its dir and
         # record the descriptor on the call's step session. Idempotent per call
@@ -664,11 +673,28 @@ class Artifact(Base, Uuid7Pk):
         call_dir.mkdir(parents=True, exist_ok=True)
         (call_dir / name).write_text(content)
         session = db_session()
-        await session.execute(
+        artifact_id = await session.scalar(
             pg_insert(cls)
             .values(agent_call_id=call_id, kind=kind, title=title, path=name)
             .on_conflict_do_nothing(index_elements=["agent_call_id"])
+            .returning(cls.id)
         )
+        if artifact_id and activity:
+            call = await AgentCall.get(call_id)
+            run = call.run
+            await Event.emit(
+                type=activity["kind"],
+                subject=await run.get_subject(),
+                label=run.subject_label,
+                app=workflows.get(run.kind).app,
+                payload={
+                    "run": run.id,
+                    "kind": run.kind,
+                    "agent_call_id": call.id,
+                    "artifact_id": artifact_id,
+                    **{key: value for key, value in activity.items() if key == "summary"},
+                },
+            )
         await session.flush()
 
     @classmethod
