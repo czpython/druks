@@ -1,8 +1,9 @@
 from druks.contrib.software_factory.app import SoftwareFactory
 from druks.contrib.software_factory.contracts import ReviewWork
+from druks.contrib.software_factory.github import get_review_actor
 from druks.contrib.software_factory.models import ProjectRepo, WorkItem
 from druks.contrib.software_factory.ticketing.enums import TicketStatus
-from druks.contrib.software_factory.workflows import Build, Profile
+from druks.contrib.software_factory.workflows import Build, Profile, PullRequestReview
 from druks.db import Base
 from druks.signals import subscribe
 from druks.workflows import WorkflowEvent
@@ -78,6 +79,18 @@ async def pr_close_settles_the_item(*, repo: str, pr_number: int, payload: dict)
             await item.ship()
         else:
             await item.close_external()
+
+
+@subscribe("pr.commented", payload__author_can_write=True)
+async def mention_asks_for_a_review(*, repo: str, pr_number: int, payload: dict) -> None:
+    """Addressing the review actor asks it to review that pull request, and only someone
+    who writes to the repo may ask — a review is the account's to spend."""
+    handle = await (await get_review_actor()).client.get_mention_handle()
+    is_mentioned = handle and f"@{handle}".casefold() in payload["body"].casefold()
+    if is_mentioned and await ProjectRepo.get_for_repo(repo):
+        await PullRequestReview.dispatch(
+            repo=repo, pr_number=pr_number, requested_by=payload["author"]
+        )
 
 
 @subscribe("ticket.transitioned")

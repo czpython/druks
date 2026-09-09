@@ -48,7 +48,6 @@ def load_mcp_catalog(path: Path) -> None:
                 "name": name,
                 "url": parsed.url,
                 "token_source": parsed.auth.type,
-                "source_env_var": parsed.auth.source_env_var,
                 "enabled": parsed.enabled,
             }
         )

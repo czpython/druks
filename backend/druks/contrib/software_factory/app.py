@@ -11,6 +11,7 @@ from druks.contrib.software_factory.contracts import (
     PlanOutput,
     RepoProfilerOutput,
     ReviewOutput,
+    ReviewReport,
     TriageOutput,
 )
 from druks.contrib.software_factory.ticketing.base import Tracker
@@ -21,6 +22,8 @@ from druks.db import StoredSubject
 from druks.doctor import CheckResult
 from druks.services import ServiceNotConnectedError
 from druks.workflows import SubjectActivity
+
+from .services import GithubReviewer
 
 # Only what the timeline can't already show. A running agent has an agent call
 # to name it, so the phase that clears provisioning maps to nothing.
@@ -44,7 +47,20 @@ async def check_tracker_identity() -> CheckResult:
         ok=False,
         pending=True,
         detail=f"tracker is {settings.tracker} but it is not connected — "
-        "connect it in Settings → Services.",
+        "connect it in Settings → Connections → Services.",
+    )
+
+
+async def check_review_identity() -> CheckResult:
+    """Connected or not, both healthy: no reviewer is comment mode by design."""
+    if await GithubReviewer.is_connected():
+        return CheckResult(
+            name="review_identity",
+            ok=True,
+            detail="connected — reviews approve as the reviewer App",
+        )
+    return CheckResult(
+        name="review_identity", ok=True, detail="unset — reviews publish as operator comments"
     )
 
 
@@ -56,7 +72,7 @@ class SoftwareFactory(App):
     icon = "factory"
     description = (
         "Turns a ticket into a pull request — it plans the change, builds it, and "
-        "gates on you before shipping."
+        "gates on you before shipping. Reviews a pull request when asked."
     )
 
     class Settings(AppSettings):
@@ -106,7 +122,7 @@ class SoftwareFactory(App):
                 return self.jira_trigger_status
             return ""
 
-    checks = [check_tracker_identity]
+    checks = [check_tracker_identity, check_review_identity]
 
     @classmethod
     async def get_tracker(cls, source: str | None = None) -> Tracker | None:
@@ -115,7 +131,7 @@ class SoftwareFactory(App):
         ``source`` to get it only when that source is the selected one — a
         work item syncs only to the tracker that owns it."""
         settings = await cls.settings()
-        if source is not None and source != settings.tracker:
+        if source and source != settings.tracker:
             return
         try:
             if settings.tracker == "linear":
@@ -137,8 +153,9 @@ class SoftwareFactory(App):
         except ServiceNotConnectedError:
             return
 
-    # The build pipeline's agents — the app owns them; any of its workflows run
-    # them. The attribute name is each agent's id (its durable settings/timeline key).
+    # The app's agents — any of its workflows run them. The app name and the
+    # attribute name form each agent's id (``software_factory.implement``), its
+    # durable settings and timeline key.
     generate_plan = Agent(
         description="ticket → implementation plan",
         prompt="software_factory/build/generate_plan.md",
@@ -173,6 +190,11 @@ class SoftwareFactory(App):
         description="reads a repo once and reports its stack, verification commands, and skills",
         prompt="software_factory/profile/repo_profiler.md",
         contract=RepoProfilerOutput,
+    )
+    review_pull_request = Agent(
+        description="reads a pull request and writes the review",
+        prompt="software_factory/review/review_pull_request.md",
+        contract=ReviewReport,
     )
 
     @classmethod

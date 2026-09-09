@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime
 from urllib.parse import urlparse
 
 import httpx
@@ -9,11 +10,12 @@ from druks.database import db_session
 from druks.mcp.constants import OAUTH_CALLBACK_PATH
 from druks.mcp.enums import IdentityMode
 from druks.mcp.exceptions import GrantRefreshError, MissingGrantError, OauthConnectError
-from druks.mcp.helpers import get_grant_account, grant_provider
-from druks.mcp.models import McpClientRegistration, McpServer
+from druks.mcp.helpers import get_grant_account
+from druks.mcp.models import McpServer
+from druks.secrets.datastructures import Audience
+from druks.secrets.models import VaultSecret
 from druks.services import OauthClient, OauthExchangeError, OauthRefreshError
 from druks.services.constants import OAUTH_MINT_WAIT_ATTEMPTS, OAUTH_MINT_WAIT_INTERVAL_SECONDS
-from druks.services.models import OauthConnection
 from druks.services.oauth import complete_connect as complete_oauth_exchange
 from druks.services.oauth import fetch_identity
 
@@ -25,15 +27,15 @@ def _http() -> httpx.AsyncClient:
     return httpx.AsyncClient(timeout=30.0, follow_redirects=True)
 
 
-async def get_connection(name: str, account_id: str) -> OauthConnection | None:
-    # One live connection per (server, account) — MCP's policy over the
-    # shared table. Revoked rows stay behind as history.
-    rows = await OauthConnection.list_for_account(grant_provider(name), account_id)
+async def get_connection(name: str, account_id: str | None) -> VaultSecret | None:
+    # One live grant per (server, account) — MCP's policy over the vault.
+    # Revoked rows stay behind as history.
+    rows = await VaultSecret.list_account_connections(Audience.mcp(name), account_id)
     return rows[0] if rows else None
 
 
-async def list_connections(name: str) -> list[OauthConnection]:
-    return await OauthConnection.list_for_provider(grant_provider(name))
+async def list_connections(name: str) -> list[VaultSecret]:
+    return await VaultSecret.list_connections(Audience.mcp(name))
 
 
 def _origin(url: str) -> str:
@@ -196,7 +198,7 @@ async def begin_connect(
             raise OauthConnectError(name, "the authorization server does not support PKCE S256")
         registration = await _register_client(client, name, metadata, redirect_uri)
     return await OauthClient(
-        provider=grant_provider(name),
+        provider=Audience.mcp(name),
         authorization_endpoint=metadata["authorization_endpoint"],
         token_endpoint=metadata["token_endpoint"],
         client_id=registration["client_id"],
@@ -245,63 +247,61 @@ async def complete_connect(*, state: str, code: str) -> str:
     )
     server = (await session.scalars(select(McpServer).where(McpServer.name == name))).one()
     account_id = get_grant_account(server.identity_mode, pending["account_id"])
-    await McpClientRegistration.store(
-        server_id=server.id,
-        account_id=account_id,
-        token_endpoint=pending["token_endpoint"],
-        client_id=pending["client_id"],
-        client_secret=pending["client_secret"],
-    )
+    # Druks registered a fresh client for this consent; the grant refreshes
+    # through it, so the client rides in the grant's secrets.
+    client = {
+        "token_endpoint": pending["token_endpoint"],
+        "client_id": pending["client_id"],
+        "client_secret": pending["client_secret"],
+    }
     identity = {}
     if pending["userinfo_endpoint"]:
         identity = await fetch_identity(pending["userinfo_endpoint"], tokens["access_token"])
     connection = await get_connection(name, account_id)
     if connection:
         await connection.reconnect(
-            refresh_token=tokens["refresh_token"], scopes=[], identity=identity
+            refresh_token=tokens["refresh_token"], scopes=[], identity=identity, secrets=client
         )
         # A reconsent's stale cached token must not serve until its TTL runs out.
         await evict_access_token(name, account_id)
     else:
-        await OauthConnection.create(
-            provider=grant_provider(name),
+        await VaultSecret.connect(
+            Audience.mcp(name),
             account_id=account_id,
             refresh_token=tokens["refresh_token"],
             scopes=[],
             identity=identity,
+            secrets=client,
         )
     return name
 
 
-async def evict_access_token(name: str, account_id: str) -> None:
+async def evict_access_token(name: str, account_id: str | None) -> None:
     connection = await get_connection(name, account_id)
     if connection:
-        await OauthClient(provider=grant_provider(name)).evict_access_token(connection.id)
+        await OauthClient(provider=Audience.mcp(name)).evict_access_token(connection.id)
 
 
-async def disconnect(name: str, account_id: str, *, reason: str = "user") -> None:
+async def disconnect(name: str, account_id: str | None, *, reason: str = "user") -> None:
+    # The grant's secrets carry its client, so one revoke ends both.
     connection = await get_connection(name, account_id)
     if connection:
-        await OauthClient(provider=grant_provider(name)).disconnect(connection, reason=reason)
-    registration = await McpClientRegistration.get_for_account(name, account_id)
-    if registration:
-        await registration.delete()
+        await OauthClient(provider=Audience.mcp(name)).disconnect(connection, reason=reason)
 
 
-async def get_access_token(name: str, account_id: str) -> str:
-    """The delivery-side token for a connected server, served by the shared
-    engine from this server's grant — delivery never ships a server the agent
-    can't authenticate to."""
+async def get_access_token(name: str, account_id: str | None) -> tuple[str, datetime | None]:
+    """The token for a connected server and its expiry, served by the shared
+    engine from this server's grant — the issuer never answers a server the
+    agent can't authenticate to."""
     connection = await get_connection(name, account_id)
-    registration = await McpClientRegistration.get_for_account(name, account_id)
     server = await McpServer.get_for_name(name)
-    if not connection or not registration or not server:
+    if not connection or not server or "client_id" not in connection.secrets:
         raise MissingGrantError(name, account_id)
     client = OauthClient(
-        provider=grant_provider(name),
-        token_endpoint=registration.token_endpoint,
-        client_id=registration.client_id,
-        client_secret=registration.client_secret.decrypt(),
+        provider=Audience.mcp(name),
+        token_endpoint=connection.secrets["token_endpoint"],
+        client_id=connection.secrets["client_id"],
+        client_secret=connection.secrets.get("client_secret", ""),
         # RFC 8707: an audience-binding server expects the refresh to carry
         # the same resource the code exchange was bound to.
         extra_token_params={"resource": server.url},

@@ -15,7 +15,6 @@ from druks.sandbox.layout import get_runs_root, get_work_root
 from . import exceptions
 from .artifacts import call_dir, write_cost
 from .base import Harness
-from .models import ProviderSubscription
 
 logger = logging.getLogger(__name__)
 
@@ -37,11 +36,6 @@ class OpenCodeHarness(Harness):
     # owns an earlier deadline so it can abort the OpenCode session cleanly.
     first_byte_seconds = None
 
-    @classmethod
-    def auth_json(cls, provider: str, key: str) -> str:
-        """The auth store opencode reads from OPENCODE_AUTH_CONTENT."""
-        return json.dumps({provider: {"type": "api", "key": key}})
-
     async def build_invocation(
         self,
         *,
@@ -49,14 +43,12 @@ class OpenCodeHarness(Harness):
         schema: dict[str, object],
         run_id: str,
         ssh_username: str,
-        github_token: str | None = None,
         include_plugins: bool = True,
         add_dirs: tuple[str, ...] = (),
         skills: tuple[str, ...] = (),
         extra_env: dict[str, str] | None = None,
         mcp_servers: tuple[McpServer, ...] = (),
-        subscription: ProviderSubscription | None = None,
-        key: str | None = None,
+        identity: dict | None = None,
         timeout: int = Harness.default_timeout,
     ) -> AgentInvocation:
         if not self.sandbox:
@@ -79,6 +71,9 @@ class OpenCodeHarness(Harness):
             }
             if headers:
                 entry["headers"] = headers
+            if server.bearer_token_env_var or server.env_headers:
+                # Druks owns this server's credential; opencode starts no OAuth for it.
+                entry["oauth"] = False
             mcp[server.name] = entry
 
         provider, _, model = self.model.partition("/")
@@ -86,10 +81,9 @@ class OpenCodeHarness(Harness):
             name=self.name,
             args=("sh", "-c", _WRAPPER),
             stdin=prompt.encode("utf-8"),
-            credentials=Credentials(github_token=github_token),
+            credentials=Credentials(),
             env={
                 **(extra_env or {}),
-                "OPENCODE_AUTH_CONTENT": self.auth_json(provider, key),
                 "DRUKS_RUN_DIR": f"{get_runs_root(ssh_username)}/{run_id}",
                 "OPENCODE_CONFIG_CONTENT": json.dumps(
                     {"$schema": "https://opencode.ai/config.json", "mcp": mcp},

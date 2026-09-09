@@ -3,10 +3,12 @@ import { Field, Select, Textarea, TextInput } from './Control'
 
 interface SettingFieldProps {
   label: string
+  setting?: string
   help?: string
   /** A field kind. The pane renders boolean fields as toggle rows. */
   type: string
   choices?: string[] | null
+  choiceDetails?: Record<string, { label: string; help: string }>
   multiline?: boolean
   // Whether a secret is already stored; the value itself never leaves the server.
   secretSet?: boolean | null
@@ -16,9 +18,9 @@ interface SettingFieldProps {
   disabled?: boolean
 }
 
-export function SettingField({ label, help, error, ...field }: SettingFieldProps) {
+export function SettingField({ label, help, error, setting, ...field }: SettingFieldProps) {
   return (
-    <Field label={label} help={help} error={error}>
+    <Field label={label} help={field.choiceDetails?.[field.value]?.help ?? help} error={error} setting={setting}>
       <FieldControl label={label} {...field} />
     </Field>
   )
@@ -30,6 +32,7 @@ function FieldControl({
   label,
   type,
   choices,
+  choiceDetails,
   multiline = false,
   secretSet,
   value,
@@ -49,7 +52,7 @@ function FieldControl({
       >
         {choices.map((choice) => (
           <option key={choice} value={choice}>
-            {choice}
+            {choiceDetails?.[choice]?.label ?? choice.replaceAll('_', ' ')}
           </option>
         ))}
       </Select>

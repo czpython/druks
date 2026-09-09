@@ -2,8 +2,11 @@ import os
 
 import psycopg
 import pytest
+from druks.accounts.models import Account
 from druks.database import configure_session, db_session, get_session
-from druks.harnesses.models import ProviderSubscription
+from druks.secrets.datastructures import Audience
+from druks.secrets.enums import SecretKind
+from druks.secrets.models import VaultSecret
 from druks.testing import init_db
 from sqlalchemy import create_engine, text
 from sqlalchemy.ext.asyncio import create_async_engine
@@ -61,19 +64,14 @@ async def _committed(engine, work):
 
 
 async def _connect(payload: dict) -> str:
-    from druks.accounts.models import Account
-    from druks.user_settings.models import UserSettings
-
     account = await Account.get_or_create("op@example.com")
-    settings = await UserSettings.get()
-    if not settings.fallback_account_id:
-        await settings.set_fallback_account(account.id)
-    row = await ProviderSubscription.connect(
-        provider="anthropic",
-        account=account,
-        payload=payload,
+    row = await VaultSecret.store(
+        SecretKind.SUBSCRIPTION,
+        Audience.provider("anthropic"),
+        account_id=account.id,
+        secrets=payload,
+        identity={"email": "op@example.com"},
         expires_at=None,
-        provider_email="op@example.com",
     )
     return row.id
 
@@ -90,8 +88,8 @@ async def test_reconnect_overwrites_the_payload_on_the_same_row(engine):
     reconnected_id = await _committed(engine, connect_again)
 
     async def read_back():
-        row = await ProviderSubscription.get(connection_id)
-        return dict(row.payload)["claudeAiOauth"]["accessToken"]
+        row = await VaultSecret.get(connection_id)
+        return dict(row.secrets)["claudeAiOauth"]["accessToken"]
 
     assert reconnected_id == connection_id
     assert await _committed(engine, read_back) == "second"
@@ -108,16 +106,16 @@ async def test_rotation_persists_new_payload_across_sessions(engine):
     connection_id = await _committed(engine, connect_old)
 
     async def rotate_in_place():
-        row = await ProviderSubscription.get(connection_id)
-        data = dict(row.payload)
+        row = await VaultSecret.get(connection_id)
+        data = dict(row.secrets)
         data["claudeAiOauth"]["accessToken"] = "new"
-        await row.update_payload(data, expires_at=None)
+        await row.update_secrets(data, expires_at=None)
 
     await _committed(engine, rotate_in_place)
 
     async def read_back():
-        row = await ProviderSubscription.get(connection_id)
-        return dict(row.payload)["claudeAiOauth"]
+        row = await VaultSecret.get(connection_id)
+        return dict(row.secrets)["claudeAiOauth"]
 
     block = await _committed(engine, read_back)
     assert block["accessToken"] == "new"
@@ -130,16 +128,18 @@ async def test_payload_is_ciphertext_at_rest(engine):
     await _committed(engine, connect_secret)
 
     async with engine.connect() as connection:
-        stored = (
-            await connection.execute(text("SELECT payload FROM provider_subscriptions"))
-        ).scalar_one()
+        stored = (await connection.execute(text("SELECT secrets FROM vault"))).scalar_one()
     raw = bytes(stored)
     assert b"supersecret" not in raw
     assert b"claudeAiOauth" not in raw
 
     async def read_logins():
-        row = await ProviderSubscription.get_for_account("anthropic", fallback=True)
-        return dict(row.payload)["claudeAiOauth"]
+        row = await VaultSecret.lookup(
+            SecretKind.SUBSCRIPTION,
+            Audience.provider("anthropic"),
+            (await Account.get_default()).id,
+        )
+        return dict(row.secrets)["claudeAiOauth"]
 
     block = await _committed(engine, read_logins)
     assert block["accessToken"] == "supersecret"

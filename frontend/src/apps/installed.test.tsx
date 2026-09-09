@@ -22,15 +22,33 @@ function roster(name: string, pages: App['pages']): App[] {
 }
 
 describe('page routes', () => {
+  it('keeps the run and request round on the generic subject page', () => {
+    registerInstalledApps(roster('target_app', []))
+    const target = { run: 'run-one', parkedAt: '2026-09-01T00:00:00.123456Z' }
+    const path = getAppUI('target_app')!.subjectPath!({ type: 'file', id: 'a%20b/c?#é' }, target)!
+    const url = new URL(path, 'https://example.invalid')
+    expect(url.pathname).toBe('/target_app/file/a%2520b%2Fc%3F%23%C3%A9')
+    expect(url.searchParams.get('run')).toBe('run-one')
+    expect(url.searchParams.get('parkedAt')).toBe(target.parkedAt)
+    expect(getAppUI('target_app')!.subjectPath!({ type: 'file', id: '1' })).toBe('/target_app/file/1')
+  })
   it('mounts one route per declared page, and the subject matcher last', () => {
     registerInstalledApps(
       roster('archive_app', [
-        { name: 'files', label: 'files', path: '/archive_app', parent: '', order: 0 },
+        {
+          name: 'files',
+          label: 'files',
+          path: '/archive_app',
+          parent: '',
+          subjectType: '',
+          order: 0,
+        },
         {
           name: 'one_file',
           label: 'one file',
           path: '/archive_app/files/{name}',
           parent: '',
+          subjectType: '',
           order: 1,
         },
         {
@@ -38,6 +56,7 @@ describe('page routes', () => {
           label: 'any file',
           path: '/archive_app/raw/{rest:path}',
           parent: '',
+          subjectType: '',
           order: 2,
         },
       ]),
@@ -61,4 +80,20 @@ describe('page routes', () => {
       '/empty_app/:subjectType/*',
     ])
   })
+})
+
+it('uses the declared decision page and preserves encoded subject and request identifiers', () => {
+  registerInstalledApps(roster('decision_app', [{
+    name: 'review',
+    label: 'Review',
+    path: '/decision_app/review/{id}',
+    parent: '', order: 0, subjectType: 'file',
+  }]))
+  const ui = getAppUI('decision_app')!
+  const target = { run: 'run%?#é', parkedAt: '2026-09-06T00:00:00.123456Z' }
+  const url = new URL(ui.subjectPath!({ type: 'file', id: 'a%20b/c?#é' }, target)!, 'https://example.invalid')
+  expect(url.pathname).toBe('/decision_app/review/a%2520b%2Fc%3F%23%C3%A9')
+  expect(url.searchParams.get('run')).toBe(target.run)
+  expect(url.searchParams.get('parkedAt')).toBe(target.parkedAt)
+  expect(ui.subjectPath!({ type: 'file', id: '7' }, { run: 'run-one' })).toBe('/decision_app/file/7?run=run-one')
 })

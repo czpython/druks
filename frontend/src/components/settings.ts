@@ -6,9 +6,20 @@ import type {
   ProviderCatalog,
   ProviderKey,
   ProviderSubscription,
-  UserSettings,
+  SettingsProfile,
   WorkflowSettingField,
 } from '../api/types'
+
+export const SETTINGS_FIELDS = {
+  timezone: { section: 'general', label: 'Timezone', field: 'timezone', terms: 'time zone clock' },
+  harness: { section: 'agents', label: 'Harness', field: 'harness', terms: 'execution' },
+  model: { section: 'agents', label: 'Model', field: 'model', terms: 'execution' },
+  billing: { section: 'agents', label: 'Billing', field: 'billing', terms: 'subscription API key' },
+  effort: { section: 'agents', label: 'Effort', field: 'effort', terms: 'execution' },
+  timeout: { section: 'agents', label: 'Timeout', field: 'timeout', terms: 'execution' },
+  unattendedAccount: { section: 'agents', label: 'Unattended account', field: 'unattended-account', terms: 'execution' },
+  fastMode: { section: 'agents', label: 'Fast mode', field: 'fast', terms: 'execution' },
+} as const
 
 export interface CatalogChoice extends CatalogModel {
   provider: string
@@ -19,6 +30,7 @@ export interface CatalogChoice extends CatalogModel {
 
 export interface Catalog {
   modelsOf: (harness: string, billing: Billing) => CatalogChoice[]
+  hasApiKeyFor: (harness: Harness) => boolean
 }
 
 export function knownProviders(providers: Provider[], catalogs: ProviderCatalog[]): Provider[] {
@@ -60,6 +72,12 @@ export function buildCatalog(
     }))
   }
   return {
+    hasApiKeyFor: (harness) =>
+      keys.some(
+        (key) =>
+          (!harness.provider || harness.provider === key.provider) &&
+          providersById.get(key.provider)?.billingOptions.includes('api_key'),
+      ),
     modelsOf: (name, billing) => {
       const harness = harnesses.find((entry) => entry.name === name)
       if (!harness) return []
@@ -72,23 +90,22 @@ export function buildCatalog(
 }
 
 export type Defaults = Pick<
-  UserSettings,
+  SettingsProfile,
   | 'defaultHarness'
   | 'defaultModel'
   | 'defaultBilling'
   | 'defaultEffort'
   | 'fastMode'
   | 'defaultTimeout'
-> & { fallbackAccountId: string | null }
+>
 
-export const defaultsOf = (settings: UserSettings): Defaults => ({
+export const defaultsOf = (settings: SettingsProfile): Defaults => ({
   defaultHarness: settings.defaultHarness,
   defaultModel: settings.defaultModel,
   defaultBilling: settings.defaultBilling,
   defaultEffort: settings.defaultEffort,
   fastMode: settings.fastMode,
   defaultTimeout: settings.defaultTimeout,
-  fallbackAccountId: settings.fallbackAccountId,
 })
 
 export function isFieldVisible(

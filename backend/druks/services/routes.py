@@ -5,13 +5,14 @@ from druks.accounts.context import current_account_id
 from druks.accounts.dependencies import current_session_account
 from druks.apps.registry import services
 from druks.core.templates import render_page
+from druks.secrets.datastructures import Audience
+from druks.secrets.models import VaultSecret
 from druks.services.exceptions import (
     OauthExchangeError,
     OauthPageError,
     ServiceConnectError,
     ServiceNotConnectedError,
 )
-from druks.services.models import OauthConnection, ServiceIdentity
 from druks.services.oauth import OauthClient, complete_connect
 from druks.services.schemas import ConnectionResponse, ServiceResponse
 from druks.signals import publish
@@ -25,14 +26,14 @@ async def list_services() -> list[ServiceResponse]:
     entries = []
     for service in services.all():
         try:
-            row = await ServiceIdentity.get(service.slug)
+            row = await service.get()
         except ServiceNotConnectedError:
             row = None
         connections = []
         if service.token_endpoint:
             # The detail shows revoked connections as history beside the live.
-            connections = await OauthConnection.list_for_provider(
-                service.slug, include_revoked=True
+            connections = await VaultSecret.list_connections(
+                Audience.service(service.slug), include_revoked=True
             )
         entries.append(ServiceResponse.from_row(service, row, connections))
     return entries
@@ -58,7 +59,7 @@ async def connect_service(slug: str, payload: dict[str, str]) -> ServiceResponse
         # A replaced client can never refresh the old client's connections —
         # revoke every live one; the consents stay on record.
         client = OauthClient(provider=slug)
-        for connection in await OauthConnection.list_for_provider(slug):
+        for connection in await VaultSecret.list_connections(Audience.service(slug)):
             await client.disconnect(connection, reason="client_replaced")
             await publish(
                 "oauth.disconnected",
@@ -83,8 +84,8 @@ async def connect_oauth_service(
     service = _get_oauth_service(slug)
     account_id = current_account_id.get()
     if connection:
-        row = await OauthConnection.get(connection)
-        if not row or row.provider != slug:
+        row = await VaultSecret.get(connection)
+        if not row or row.audience != Audience.service(slug):
             raise OauthPageError(f"No connection {connection!r} on {slug!r}.", status_code=404)
     if next and (not next.startswith("/") or next.startswith(("//", "/\\"))):
         # A bare same-origin path only — anything host-shaped is an open redirect.
@@ -132,14 +133,14 @@ async def oauth_callback(state: str = "", code: str = "", error: str = "") -> Re
     # matches a fresh sign-in to one. Both make a revoked row live again.
     row = None
     if connection_id:
-        row = await OauthConnection.get(connection_id)
+        row = await VaultSecret.get(connection_id)
         if not row:
             raise OauthPageError(
                 "The connection was removed while consent was open.", status_code=400
             )
     elif service.identity_key and (value := identity.get(service.identity_key)):
-        row = await OauthConnection.get_for_identity(
-            provider, pending["account_id"], service.identity_key, value
+        row = await VaultSecret.get_for_identity(
+            Audience.service(provider), pending["account_id"], service.identity_key, value
         )
     reconsent = bool(row)
     if row:
@@ -149,8 +150,8 @@ async def oauth_callback(state: str = "", code: str = "", error: str = "") -> Re
         # A token cached before this consent must not serve the new one.
         await OauthClient(provider=provider).evict_access_token(row.id)
     else:
-        row = await OauthConnection.create(
-            provider=provider,
+        row = await VaultSecret.connect(
+            Audience.service(provider),
             account_id=pending["account_id"],
             refresh_token=tokens["refresh_token"],
             scopes=granted,
@@ -170,8 +171,8 @@ async def oauth_callback(state: str = "", code: str = "", error: str = "") -> Re
 
 @oauth_router.get("/connections", dependencies=[Depends(current_session_account)])
 async def list_connections() -> list[ConnectionResponse]:
-    rows = await OauthConnection.list_owned_by(current_account_id.get())
-    return [ConnectionResponse.model_validate(row) for row in rows]
+    rows = await VaultSecret.list_owned_by(current_account_id.get())
+    return [ConnectionResponse.from_secret(row) for row in rows]
 
 
 @oauth_router.delete(
@@ -180,16 +181,16 @@ async def list_connections() -> list[ConnectionResponse]:
     dependencies=[Depends(current_session_account)],
 )
 async def disconnect_connection(connection_id: str) -> None:
-    row = await OauthConnection.get(connection_id)
-    if not row:
+    row = await VaultSecret.get(connection_id)
+    if not row or row.kind != "oauth":
         raise HTTPException(status_code=404, detail=f"No connection {connection_id!r}.")
     if row.revoked_at:
         # Revoking is idempotent — the second delete finds the state true.
         return
-    await OauthClient(provider=row.provider).disconnect(row, reason="user")
+    await OauthClient(provider=row.audience_name).disconnect(row, reason="user")
     await publish(
         "oauth.disconnected",
-        provider=row.provider,
+        provider=row.audience_name,
         connection_id=row.id,
         account_id=row.account_id,
     )

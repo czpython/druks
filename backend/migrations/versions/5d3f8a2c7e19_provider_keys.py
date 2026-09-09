@@ -11,7 +11,7 @@ from collections.abc import Sequence
 import sqlalchemy as sa
 from alembic import op
 
-from druks.secrets import utils
+from sqlalchemy_encrypted_field import utils
 
 revision: str = "5d3f8a2c7e19"
 down_revision: str | Sequence[str] | None = "4b8d2f6e9a13"

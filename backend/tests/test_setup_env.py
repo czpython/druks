@@ -35,6 +35,10 @@ def _read_toml(path: Path) -> dict:
         return tomllib.load(config_file)
 
 
+def drukbox_key(tmp_path: Path) -> str:
+    return _read_toml(tmp_path / "druks.toml")["secrets"]["drukbox_secrets_key"]
+
+
 def test_fresh_exe_render_matches_the_deployment_contract(tmp_path):
     env_path = tmp_path / ".env"
 
@@ -48,6 +52,9 @@ def test_fresh_exe_render_matches_the_deployment_contract(tmp_path):
     assert values["EXE_DEFAULT_IMAGE"] == "ghcr.io/boldsoftware/exeuntu:latest"
     assert values["DRUKS_AUTH_HEADER"] == "X-ExeDev-Email"
     assert values["SERVICE_TOKENS"] == config["sandbox"]["service_token"]
+    assert values["SECRETS_KEY"] == config["secrets"]["drukbox_secrets_key"]
+    assert "SECRETS_PROXY_URL" not in values
+    assert "DRUKS_SECRETS_PROXY_BIND_HOST" not in values
     assert values["DRUKS_DATA_DIR"] == "/home/op/druks-data"
     assert values["DRUKS_HARNESS_CONFIG_ROOT"] == "/home/op/.config/druks/harnesses"
     assert config["paths"]["harness_config_root"] == values["DRUKS_HARNESS_CONFIG_ROOT"]
@@ -57,6 +64,7 @@ def test_fresh_exe_render_matches_the_deployment_contract(tmp_path):
         assert config["sandbox"]["exe"][key] == ""
         assert key not in values
     assert len(config["secrets"]["postgres_password"]) == 64
+    assert len(config["secrets"]["drukbox_secrets_key"]) == 44
     assert len(config["sandbox"]["service_token"]) == 64
     assert (tmp_path / ".gitignore").read_text().splitlines() == [
         "druks.toml",
@@ -148,6 +156,12 @@ def test_docker_shape_matches_local_wiring_and_ignores_provider_environment(tmp_
     # Rendered on every shape. Without it, drukbox stops instead of falling
     # back to a known token.
     assert values["SERVICE_TOKENS"] == "dev-token"
+    assert values["SECRETS_KEY"] == drukbox_key(tmp_path)
+    # Sandbox containers reach the host at the bridge gateway. The proxy binds
+    # that address only.
+    assert values["SECRETS_PROXY_URL"] == "http://172.17.0.1:8880"
+    assert values["DRUKS_SECRETS_PROXY_BIND_HOST"] == "172.17.0.1"
+    assert "DRUKS_WEBHOOK_HOST" not in values
     assert "DOCKER_HOST" not in values
 
 
@@ -435,6 +449,9 @@ def test_setup_toml_is_the_settings_source(tmp_path, monkeypatch):
             "urls.endpoint=https://druks.example",
             "urls.webhook_host=hooks.druks.example",
             "sandbox.image=druks-sandbox:test",
+            "sandbox.proxy_url=http://100.64.0.10:8880",
+            "sandbox.issuer_url=http://10.0.0.5:8001",
+            "sandbox.exchange_url=http://10.0.0.5:8781",
             "sandbox.timeout=240",
             "sandbox.exe.EXE_API_TOKEN=exe-token",
             "sandbox.exe.TAILSCALE_TAILNET=tail.ts.net",
@@ -453,7 +470,99 @@ def test_setup_toml_is_the_settings_source(tmp_path, monkeypatch):
     assert settings.sandbox.service_token == config["sandbox"]["service_token"]
     assert settings.sandbox.service_url == config["sandbox"]["service_url"]
     assert settings.sandbox.image == config["sandbox"]["image"]
+    assert settings.sandbox.issuer_url == config["sandbox"]["issuer_url"]
+    assert settings.sandbox.exchange_url == config["sandbox"]["exchange_url"]
     assert settings.sandbox.timeout == float(config["sandbox"]["timeout"])
+
+
+def test_a_hosted_install_keeps_the_internal_issuer_url(tmp_path, monkeypatch):
+    env_path = tmp_path / ".env"
+    _run(
+        env_path,
+        set_values=(
+            "urls.endpoint=https://druks.example",
+            "urls.webhook_host=hooks.druks.example",
+            "sandbox.proxy_url=http://100.64.0.10:8880",
+            "sandbox.exe.EXE_API_TOKEN=exe-token",
+            "sandbox.exe.TAILSCALE_TAILNET=tail.ts.net",
+        ),
+    )
+    monkeypatch.setenv("DRUKS_CONFIG", str(tmp_path / "druks.toml"))
+
+    settings = Settings()
+
+    assert settings.sandbox.issuer_url == "http://127.0.0.1:8001"
+    assert settings.sandbox.exchange_url == "http://127.0.0.1:8781"
+
+
+def test_exe_shape_requires_the_proxy_address(tmp_path):
+    env_path = tmp_path / ".env"
+    printed = []
+
+    rc = _run(
+        env_path,
+        set_values=(
+            "sandbox.exe.EXE_API_TOKEN=exe-token",
+            "sandbox.exe.TAILSCALE_TAILNET=tail.ts.net",
+        ),
+        print_fn=printed.append,
+    )
+
+    assert rc == GAPS_EXIT_CODE
+    assert "sandbox.proxy_url is empty" in "\n".join(printed)
+    assert _run(env_path, set_values=("sandbox.proxy_url=http://100.64.0.10:8880",)) == 0
+    values = read_env(env_path)
+    assert values["SECRETS_PROXY_URL"] == "http://100.64.0.10:8880"
+    assert values["DRUKS_SECRETS_PROXY_BIND_HOST"] == "100.64.0.10"
+
+
+def test_a_remote_shape_without_a_proxy_renders_no_proxy_address(tmp_path):
+    """docker-sbx swaps its own placeholders. Setup knows no provider names, so
+    the generic shape has no proxy gap. Drukbox names the fix at the first box."""
+    env_path = tmp_path / ".env"
+
+    rc = _run(
+        env_path,
+        provider="docker-sbx",
+        set_values=(
+            "identity.header=X-Forwarded-Email",
+            "sandbox.docker-sbx.GATEWAY_SSH_HOST=10.0.0.5",
+        ),
+    )
+
+    assert rc == 0
+    values = read_env(env_path)
+    assert values["GATEWAY_SSH_HOST"] == "10.0.0.5"
+    assert "SECRETS_PROXY_URL" not in values
+    assert "DRUKS_SECRETS_PROXY_BIND_HOST" not in values
+
+
+@pytest.mark.parametrize(
+    ("assignment", "gap"),
+    [
+        ("env.SECRETS_KEY=wrong", "env.SECRETS_KEY is reserved by druks"),
+        (
+            "sandbox.exoscale.SECRETS_PROXY_URL=http://elsewhere:8880",
+            "sandbox.exoscale.SECRETS_PROXY_URL is reserved by druks",
+        ),
+    ],
+)
+def test_a_copy_of_a_secrets_setting_is_a_named_gap(tmp_path, assignment, gap):
+    env_path = tmp_path / ".env"
+    printed = []
+
+    rc = _run(
+        env_path,
+        provider="exoscale",
+        set_values=("sandbox.exoscale.EXOSCALE_API_KEY=key", assignment),
+        print_fn=printed.append,
+    )
+
+    assert rc == GAPS_EXIT_CODE
+    assert gap in "\n".join(printed)
+    values = read_env(env_path)
+    assert values["SECRETS_KEY"] == drukbox_key(tmp_path)
+    assert "SECRETS_PROXY_URL" not in values
 
 
 @pytest.mark.parametrize("repository", ["ghcr.io/acme/templates", "docker.io/acme/templates"])
@@ -465,6 +574,7 @@ def test_exe_template_registry_uses_existing_provider_contract(tmp_path, reposit
             env_path,
             print_fn=printed.append,
             set_values=(
+                "sandbox.proxy_url=http://100.64.0.10:8880",
                 "sandbox.exe.EXE_API_TOKEN=exe-token",
                 "sandbox.exe.TAILSCALE_TAILNET=tail.ts.net",
                 f"sandbox.exe.EXE_IMAGE_REGISTRY={repository}",

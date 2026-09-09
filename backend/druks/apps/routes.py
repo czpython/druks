@@ -35,6 +35,7 @@ async def list_apps() -> list[AppResponse]:
                         path=f"/{app.name}{page.route}".rstrip("/"),
                         parent=page.parent.name if page.parent else "",
                         order=declaration_order[page.name],
+                        subject_type=page.subject.subject_type if page.subject else "",
                     )
                     for page in pages
                 ],

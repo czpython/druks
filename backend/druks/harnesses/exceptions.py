@@ -142,5 +142,5 @@ class CatalogError(Exception):
         self.tag = tag
 
 
-class ExecutionSettingsError(HarnessError):
+class ProfileSettingsError(HarnessError):
     """A (harness, model, billing) triple no installed harness runs; a 422."""

@@ -12,7 +12,6 @@ from druks.browser.login import LoginWindow, is_same_origin
 from druks.browser.models import StoredBrowserSession
 from druks.database import db_session
 from druks.sandbox.datastructures import ExecResult
-from druks.secrets import utils as secret_utils
 from druks.testing import make_settings
 from fastapi import HTTPException, WebSocket
 
@@ -78,7 +77,6 @@ def window_runtime(tmp_path, monkeypatch):
     client = FakeSandboxClient()
     monkeypatch.setattr(login, "sandbox_client", client)
     monkeypatch.setattr(login, "load_settings", lambda: settings)
-    monkeypatch.setattr(secret_utils, "load_settings", lambda: settings)
     return client
 
 
@@ -114,7 +112,6 @@ def _runtime_with_sandbox(tmp_path, monkeypatch, **sandbox) -> FakeSandboxClient
     client = FakeSandboxClient()
     monkeypatch.setattr(login, "sandbox_client", client)
     monkeypatch.setattr(login, "load_settings", lambda: settings)
-    monkeypatch.setattr(secret_utils, "load_settings", lambda: settings)
     return client
 
 

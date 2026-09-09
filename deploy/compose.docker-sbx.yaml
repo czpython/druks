@@ -1,8 +1,10 @@
-# The Docker Sandboxes overlay. It connects the drukbox services, and the
-# gateway that compose.yaml declares behind the "gateway" profile, to the
-# sandboxd daemon on the host. sandboxd runs as one user. The overlay mounts
-# four things: the daemon socket, the sbx CLI of the host, the CLI auth store,
-# and the workspace root. The mount of the host CLI keeps the CLI version and
+# The Docker Sandboxes overlay. It connects the drukbox services, the secrets
+# exchange, and the gateway that compose.yaml declares behind the "gateway"
+# profile, to the sandboxd daemon on the host. This provider runs no secrets
+# proxy. sbx swaps the placeholders itself, and the exchange pushes each issuer
+# value into the sandbox through the sbx CLI. sandboxd runs as one user. The
+# overlay mounts four things: the daemon socket, the sbx CLI of the host, the
+# CLI auth store, and the workspace root. The mount of the host CLI keeps the CLI version and
 # the daemon version equal. The auth store and the workspace root keep the
 # same path inside and outside the container, because the daemon resolves
 # paths on its own filesystem. The services run with the uid of the daemon
@@ -41,6 +43,11 @@ services:
       <<: *sbx-env
 
   drukbox-janitor:
+    <<: *sbx-rig
+    environment:
+      <<: *sbx-env
+
+  drukbox-exchange:
     <<: *sbx-rig
     environment:
       <<: *sbx-env

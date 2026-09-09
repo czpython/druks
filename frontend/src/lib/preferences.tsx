@@ -11,18 +11,13 @@ interface PreferencesContextValue {
 
 const PreferencesContext = createContext<PreferencesContextValue | null>(null)
 
-// Default fallback when settings haven't loaded yet or the API call
-// failed. We intentionally do NOT sniff the browser timezone — the
-// operator-facing setting in Settings → Preferences is the single
-// source of truth, and an implicit browser-sniff would silently
-// disagree with what the server thinks the timezone is on every
-// other render surface (PR comments, logs, etc., all UTC by default).
+// The selected preference controls display; the browser timezone never replaces it.
 const _FALLBACK_TIMEZONE = 'UTC'
 
 export function UserPreferencesProvider({ children }: { children: ReactNode }) {
   const query = useQuery({
-    queryKey: ['settings'],
-    queryFn: () => api.getSettings(),
+    queryKey: ['personalSettings'],
+    queryFn: () => api.getPersonalSettings(),
     staleTime: 60_000,
   })
 
@@ -44,10 +39,7 @@ export function useTimezone(): string {
 }
 
 /**
- * Returns the time-formatting helpers pre-bound to the operator's active
- * timezone. Call sites that previously imported ``absTime`` / ``absTimeCompact``
- * from ``lib/format`` should switch to this hook so the user's preference
- * applies uniformly.
+ * Format timestamps in the signed-in account's display timezone.
  */
 // eslint-disable-next-line react-refresh/only-export-components -- hook co-located with its context
 export function useFormatters() {

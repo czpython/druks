@@ -13,7 +13,7 @@ from alembic import op
 from sqlalchemy.dialects import postgresql
 
 from druks.core.models import uuid7_str
-from druks.secrets import utils
+from sqlalchemy_encrypted_field import utils
 
 # revision identifiers, used by Alembic.
 revision: str = "a7c2e9f14b38"

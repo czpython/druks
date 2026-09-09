@@ -2,6 +2,7 @@ from datetime import UTC, datetime
 
 import druks.contrib.software_factory.subscribers  # noqa: F401 — registers the lane reactions
 import pytest
+from druks.accounts.models import Account
 from druks.contrib.software_factory.contracts import ReviewWork
 from druks.contrib.software_factory.models import WorkItem
 from druks.contrib.software_factory.ticketing.enums import TicketStatus
@@ -117,6 +118,7 @@ async def test_pr_review_answers_through_the_review_gate(druks_db, monkeypatch):
     )
     await item.update(pr_number=12, branch="agent/acme-9")
     run = Run(
+        account_id=(await Account.get_or_create("op@example.com")).id,
         id=str(uuid7()),
         kind=Build.kind,
         input_gate=ReviewWork.name,

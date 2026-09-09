@@ -4,7 +4,9 @@ class ServiceNotConnectedError(Exception):
 
     def __init__(self, service: str) -> None:
         self.service = service
-        super().__init__(f"{service} is not connected — connect it in Settings → Services.")
+        super().__init__(
+            f"{service} is not connected — connect it in Settings → Connections → Services."
+        )
 
 
 class ServiceConnectError(Exception):

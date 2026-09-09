@@ -6,7 +6,7 @@ import { GateControls } from './GateControls'
 import { Chart, Facts, ImageGallery, LinkControl, List, Metrics, Table } from './DataBlocks'
 import { ActionButton, Form } from './Form'
 import { Files, Image, Progress, Timeline } from './RunBlocks'
-import { RegionContext } from './pages'
+import { PagesContext, RegionContext } from './pages'
 
 export function Blocks({ blocks }: { blocks: Block[] }) {
   return (
@@ -20,6 +20,7 @@ export function Blocks({ blocks }: { blocks: Block[] }) {
 
 function BlockContent({ block }: { block: Block }) {
   const enclosingRegion = useContext(RegionContext)
+  const { target } = useContext(PagesContext)
 
   switch (block.block) {
     case 'text':
@@ -44,7 +45,8 @@ function BlockContent({ block }: { block: Block }) {
         />
       )
     case 'gate_controls':
-      return <GateControls run={block.run} />
+      if (target && target.run !== block.run) return null
+      return <GateControls run={block.run} expected={target?.parkedAt} />
     case 'timeline':
       return <Timeline title={block.title} items={block.items} />
     case 'progress':

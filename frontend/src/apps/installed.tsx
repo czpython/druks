@@ -3,7 +3,7 @@ import { AppPage } from '../druksui/AppPage'
 import { AppHomePage } from '../pages/AppHomePage'
 import { SubjectPage } from '../pages/SubjectPage'
 import { InstalledAppHost } from './InstalledAppHost'
-import { getAppUI, registerAppUI, type AppRoute } from './registry'
+import { getAppUI, registerAppUI, targetQuery, type AppRoute, type AppUI } from './registry'
 
 // Bundled registration wins: a name already present is left alone, so this is
 // safe to call on every roster response.
@@ -26,7 +26,7 @@ function wouterPath(path: string): string {
   )
 }
 
-function installedUI(info: App) {
+function installedUI(info: App): AppUI {
   const name = info.name
   if (info.hasFrontend) {
     return {
@@ -59,18 +59,19 @@ function installedUI(info: App) {
   routes.push({
     // Wildcard, not :id — a subject id can contain slashes ("owner/repo#7").
     path: `/${name}/:subjectType/*`,
-    render: (params: Record<string, string>) => (
-      <SubjectPage
-        app={name}
-        subjectType={params.subjectType ?? ''}
-        subjectId={params['*'] ?? ''}
-      />
-    ),
+    render: () => <SubjectPage app={name} />,
   })
   return {
     name,
     routes,
-    subjectPath: ({ type, id }: { type: string; id: string }) =>
-      info.subjectTypes.includes(type) ? `/${name}/${type}/${id}` : undefined,
+    subjectPath: ({ type, id }, target) => {
+      const decisionPage = target?.parkedAt && info.pages.find((page) => page.subjectType === type)
+      if (decisionPage) {
+        return decisionPage.path.replace(/\{[^}]+\}/, () => encodeURIComponent(id)) + targetQuery(target)
+      }
+      return info.subjectTypes.includes(type)
+        ? `/${name}/${encodeURIComponent(type)}/${encodeURIComponent(id)}${targetQuery(target)}`
+        : undefined
+    },
   }
 }

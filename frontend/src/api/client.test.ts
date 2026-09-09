@@ -7,6 +7,7 @@ import {
   getJSON,
   identityApi,
   postJSON,
+  subjectApi,
 } from './client'
 
 function failWith(status: number, statusText: string, body: string) {
@@ -19,6 +20,16 @@ function failWith(status: number, statusText: string, body: string) {
 afterEach(() => vi.unstubAllGlobals())
 
 describe('API error messages', () => {
+  it('shows a gateway conflict message without its JSON envelope', async () => {
+    failWith(409, 'Conflict', JSON.stringify({ code: 'stale_gate', message: 'This request has changed.', retryable: false }))
+    await expect(api.answerGate('run', { parkedAt: '2026-09-01T00:00:00Z', control: 'approve', answers: {}, note: '' })).rejects.toThrow('This request has changed.')
+  })
+
+  it('encodes a subject identity once for both its read and stream', () => {
+    const id = 'a%20b/c?#é'
+    expect(subjectApi.base('notes', 'file', id)).toBe('/api/notes/file/a%2520b%2Fc%3F%23%C3%A9')
+    expect(subjectApi.stream('notes', 'file', id)).toBe('/api/notes/file/a%2520b%2Fc%3F%23%C3%A9/stream')
+  })
   it('surfaces the backend detail as the error message', async () => {
     failWith(409, 'Conflict', JSON.stringify({ error: 'HTTP_409', detail: 'Set DRUKS_ENDPOINT.' }))
     await expect(postJSON('/api/x', {})).rejects.toThrow('Set DRUKS_ENDPOINT.')
@@ -43,7 +54,6 @@ describe('personal access tokens', () => {
     expect(createCall?.[1]?.method).toBe('POST')
     expect(JSON.parse(String(createCall?.[1]?.body))).toEqual({ name: 'ci bot' })
 
-    // Revoke answers the updated row, so the client parses the DELETE body.
     const revoked = await api.revokePat('p1')
     const revokeCall = fetchMock.mock.calls[1]
     expect(revokeCall?.[0]).toBe('/api/auth/personal-tokens/p1')
@@ -108,7 +118,6 @@ describe('request identity', () => {
       accountId = 'b2'
       await identityApi.me()
       expect(invalidated).toHaveBeenCalledTimes(1)
-      // Settled on b2: rechecking the same account broadcasts nothing.
       await identityApi.me()
       expect(invalidated).toHaveBeenCalledTimes(1)
     } finally {

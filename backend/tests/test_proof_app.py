@@ -9,14 +9,14 @@ def test_boot_loads_the_external_app():
 
     assert app.name == "field_notes"
     assert app.package == _PACKAGE
-    assert [subject.__name__ for subject in app.subjects()] == ["Note"]
+    assert [subject.__name__ for subject in app.subjects()] == ["Note", "Repository"]
 
 
 def test_discovery_registers_the_tables_and_capabilities():
     app = load_app("field_notes")
 
     assert "field_notes_notes" in Base.metadata.tables
-    assert [workflow.__name__ for workflow in app.workflows()] == ["Summarize"]
+    assert [workflow.__name__ for workflow in app.workflows()] == ["Summarize", "Survey"]
 
     capability_modules = {module.__name__ for module in app.capability_modules()}
     assert f"{_PACKAGE}.subscribers" in capability_modules
@@ -29,5 +29,6 @@ def test_migration_is_the_history_root():
 
     package_dir = app.package_dir()
     assert app.migrations_dir() == package_dir / "migrations"
-    (baseline,) = (package_dir / "migrations" / "versions").glob("*.py")
-    assert baseline.name.startswith("field_notes_")
+    baseline, *later = sorted((package_dir / "migrations" / "versions").glob("*.py"))
+    assert baseline.name.startswith("field_notes_0001")
+    assert all(path.name.startswith("field_notes_") for path in later)

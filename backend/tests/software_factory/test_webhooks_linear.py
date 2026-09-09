@@ -4,9 +4,9 @@ from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
+from conftest import connect_service
 from druks.contrib.software_factory import webhooks as webhook_module
 from druks.contrib.software_factory.webhooks import LinearEvents
-from druks.services.models import ServiceIdentity
 from druks.testing import make_settings
 from druks.webhooks.router import router as webhooks_router
 from fastapi import HTTPException
@@ -56,7 +56,7 @@ async def test_authentication_reads_the_service_row(tmp_path, druks_db):
     secret = "linear-secret"
     raw_body = b"{}"
     signature = hmac.new(secret.encode(), raw_body, hashlib.sha256).hexdigest()
-    await ServiceIdentity.connect(
+    await connect_service(
         "linear",
         identity={"actor": "druks", "workspace": "Acme"},
         secrets={"api_key": "lin_secret", "webhook_secret": secret},

@@ -1,6 +1,7 @@
 from datetime import timedelta
 
 import pytest
+from druks.accounts.models import Account
 from druks.contrib.software_factory.contracts import ReviewWork
 from druks.contrib.software_factory.models import ProjectRepo, WorkItem
 from druks.contrib.software_factory.workflows import Build, Profile
@@ -29,6 +30,7 @@ async def _subject_run(
     gate: str | None = None,
 ) -> Run:
     run = Run(
+        account_id=(await Account.get_or_create("op@example.com")).id,
         id=str(uuid7()),
         kind=kind,
         input_gate=gate,

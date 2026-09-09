@@ -49,27 +49,43 @@ class OpenSubjectsResponse(Schema):
     subjects: list[OpenSubjectResponse]
 
 
+class DashboardRun(Schema):
+    app: str
+    run: str
+    kind: str
+    state: RunState
+    subject_type: str | None
+    subject_id: str | None
+    subject_label: str | None
+    updated_at: datetime
+    parked_at: datetime | None
+    request_label: str | None
+    artifact_title: str | None
+    presentation: str | None
+    request_url: str | None
+    failure: str | None
+
+
+class DashboardWork(Schema):
+    rows: list[DashboardRun]
+    has_more: bool
+
+
+class DashboardSchedule(Schema):
+    app: str
+    kind: str
+    cron: str | None
+    enabled: bool
+    timezone: str
+
+
+class DashboardSchedules(Schema):
+    rows: list[DashboardSchedule]
+
+
 class ArtifactContent(Schema):
     # A call's renderable output, served to the in-app review so it can show the
     # plan (or other markdown) beside its controls.
     kind: str
     title: str
     content: str
-
-
-class WebhookSource(Schema):
-    source: str
-    last_at: datetime | None = None
-
-
-class WebhookFreshness(Schema):
-    # One entry per monitored webhook source, with its newest delivery timestamp;
-    # the strip labels a tile per source.
-    sources: list[WebhookSource] = Field(default_factory=list)
-
-
-class DashboardHealth(Schema):
-    web: Literal["ok", "degraded"]
-    webhook_freshness: WebhookFreshness
-    spend_today_usd: float | None
-    tokens_today: int

@@ -1,8 +1,9 @@
 from druks.sandbox import Sandbox
 from druks.workflows import Workflow
+from druks.workspaces import RepoWorkspace
 
 from druks_field_notes.app import FieldNotes
-from druks_field_notes.models import Note
+from druks_field_notes.models import Note, Repository
 
 
 class Summarize(Workflow):
@@ -24,3 +25,19 @@ class Summarize(Workflow):
         # Launch policy for a note: one run per note, keyed by its subject; the
         # signed-in requester attributes it ambiently.
         return await cls.start(subject=note)
+
+
+class Survey(Workflow):
+    """Reads one repository, cloned into the VM by the workspace, and writes its gist."""
+
+    subject = Repository
+    workspace_class = RepoWorkspace
+
+    async def run(self) -> None:
+        repository = await self.subject
+        result = await FieldNotes.survey()
+        await repository.save_gist(result.gist)
+
+    @classmethod
+    async def dispatch(cls, *, repository: Repository) -> str:
+        return await cls.start(subject=repository)

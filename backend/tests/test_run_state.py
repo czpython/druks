@@ -2,12 +2,16 @@ from datetime import UTC, datetime, timedelta
 from unittest import mock
 
 import pytest
+from conftest import PROFILE_PROBE
 from dbos._error import DBOSWorkflowCancelledError
+from druks.accounts.models import Account
 from druks.database import db_session as ambient_session
 from druks.durable.dbos_state import workflow_status
 from druks.durable.enums import RunState
 from druks.durable.models import Run
 from druks.events.models import Event
+from druks.harnesses.exceptions import HarnessNotConnectedError
+from druks.harnesses.profiles import get_profile
 from druks.models import Base
 from druks.signals import subscribe
 from druks.testing import seed_run
@@ -41,7 +45,11 @@ async def test_pending_splits_on_the_gate(druks_db):
 async def _rowless_run(session):
     """A run with no ``dbos.workflow_status`` row — the gap these tests are about,
     which ``seed_run`` closes by design."""
-    run = Run(id=str(uuid7()), kind=Summarize.kind, account_id="system")
+    run = Run(
+        id=str(uuid7()),
+        kind=Summarize.kind,
+        account_id=(await Account.get_or_create("op@example.com")).id,
+    )
     session.add(run)
     await session.flush()
     return run
@@ -209,7 +217,9 @@ async def test_cancellation_passes_through_untouched(druks_db, _inline_steps):
         raise DBOSWorkflowCancelledError(f"workflow {run.id} cancelled")
 
     with pytest.raises(DBOSWorkflowCancelledError):
-        await _execute_run(run.id, run.kind, {"type": "work_item", "id": item.id}, None, body)
+        await _execute_run(
+            run.id, run.kind, {"type": "work_item", "id": item.id}, run.account_id, body
+        )
 
     ambient_session().expunge_all()
     assert (await Run.get(run.id)).failure is None
@@ -239,7 +249,9 @@ async def test_failure_writes_the_reason_and_reraises(druks_db, _inline_steps):
         raise FatalError("closed at review")
 
     with pytest.raises(FatalError):
-        await _execute_run(run.id, run.kind, {"type": "work_item", "id": item.id}, None, body)
+        await _execute_run(
+            run.id, run.kind, {"type": "work_item", "id": item.id}, run.account_id, body
+        )
 
     ambient_session().expunge_all()
     row = await Run.get(run.id)
@@ -268,10 +280,27 @@ async def test_gate_timeout_stamps_its_failure_code(druks_db, _inline_steps):
         raise GateTimeout("review_work")
 
     with pytest.raises(GateTimeout):
-        await _execute_run(run.id, run.kind, {"type": "work_item", "id": item.id}, None, body)
+        await _execute_run(
+            run.id, run.kind, {"type": "work_item", "id": item.id}, run.account_id, body
+        )
 
     ambient_session().expunge_all()
     assert (await Run.get(run.id)).failure_code == "gate_timeout"
+
+
+async def test_unattended_execution_without_subscription_records_not_connected(
+    druks_db, _inline_steps
+):
+    item, run = await _item_and_run(druks_db, "running")
+
+    async def body() -> None:
+        await get_profile(PROFILE_PROBE.id, None)
+
+    with pytest.raises(HarnessNotConnectedError, match="connect your Anthropic subscription"):
+        await _execute_run(run.id, run.kind, {"type": "note", "id": item.id}, run.account_id, body)
+
+    ambient_session().expunge_all()
+    assert (await Run.get(run.id)).failure_code == "not_connected"
 
 
 @pytest.mark.asyncio
@@ -284,7 +313,9 @@ async def test_a_harness_failure_stamps_its_code(druks_db, _inline_steps):
         raise HarnessOverloadedError("claude exited with 1. API Error: 529 Overloaded.")
 
     with pytest.raises(HarnessOverloadedError):
-        await _execute_run(run.id, run.kind, {"type": "work_item", "id": item.id}, None, body)
+        await _execute_run(
+            run.id, run.kind, {"type": "work_item", "id": item.id}, run.account_id, body
+        )
 
     ambient_session().expunge_all()
     assert (await Run.get(run.id)).failure_code == "overloaded"
@@ -303,7 +334,9 @@ async def test_an_exhausted_provisioning_failure_stamps_its_code(druks_db, _inli
         raise HarnessSandboxProvisioningError("exe.dev VM creation timed out")
 
     with pytest.raises(HarnessSandboxProvisioningError):
-        await _execute_run(run.id, run.kind, {"type": "work_item", "id": item.id}, None, body)
+        await _execute_run(
+            run.id, run.kind, {"type": "work_item", "id": item.id}, run.account_id, body
+        )
 
     ambient_session().expunge_all()
     assert (await Run.get(run.id)).failure_code == "sandbox_provisioning"
@@ -321,7 +354,9 @@ async def test_a_foreign_code_never_becomes_the_failure_code(druks_db, _inline_s
         raise asyncssh.PermissionDenied("denied")
 
     with pytest.raises(asyncssh.PermissionDenied):
-        await _execute_run(run.id, run.kind, {"type": "work_item", "id": item.id}, None, body)
+        await _execute_run(
+            run.id, run.kind, {"type": "work_item", "id": item.id}, run.account_id, body
+        )
 
     ambient_session().expunge_all()
     assert (await Run.get(run.id)).failure_code == ""

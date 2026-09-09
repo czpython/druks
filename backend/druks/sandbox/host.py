@@ -14,7 +14,9 @@ from drukbox_sdk import SandboxHost as SandboxHostRecord
 from drukbox_sdk.exceptions import SandboxAPIError, SandboxUnavailableError
 
 from druks.core.utils.time import ensure_utc
+from druks.durable.enums import AgentCallStatus
 from druks.harnesses.artifacts import persist_manifest, persist_prompt, read_cost
+from druks.harnesses.datastructures import SandboxSettings
 from druks.harnesses.exceptions import (
     HarnessError,
     HarnessFirstByteTimeoutError,
@@ -36,7 +38,7 @@ from .layout import get_helper_script_path, get_work_root
 
 if TYPE_CHECKING:
     from druks.harnesses.base import Harness
-    from druks.harnesses.models import ProviderSubscription
+    from druks.harnesses.profiles import Profile
 
     from .runner import Exec
 
@@ -201,19 +203,18 @@ class Host:
         self,
         *,
         agent: str,
-        account_id: str | None,
+        profile: "Profile",
         prompt: str,
         schema: dict[str, Any],
         artifact_dir: Path,
         call_id: str | None = None,
-        github_token: str | None = None,
         include_plugins: bool = True,
         add_dirs: tuple[str, ...] = (),
         skills: tuple[str, ...] = (),
         extra_env: dict[str, Any] | None = None,
         mcp_servers: tuple[McpServer, ...] = (),
     ) -> AgentResult:
-        """Run ``agent`` as ``account_id`` and return a pure ``AgentResult`` —
+        """Run ``agent`` with ``profile`` and return a pure ``AgentResult`` —
         no database write. A failure is carried on the result's ``error``, not
         raised, so the call still records what it cost before the agent call
         re-raises it.
@@ -223,21 +224,12 @@ class Host:
         ``include_plugins=False`` (Claude only) skips uploading the operator's plugin
         state — for prompts that hit no MCP server; a no-op for codex.
         """
-        # cycle: the harnesses package eagerly imports claude/codex, which
-        # import this package's siblings — so the factory can't load while
-        # druks.sandbox is mid-init.
-        from druks.durable.enums import AgentCallStatus
-        from druks.harnesses.datastructures import SandboxSettings
-        from druks.harnesses.execution import resolve_execution
-
-        settings = load_settings()
-        execution = await resolve_execution(agent, account_id)
-        model, timeout = execution.model, execution.timeout
-        harness = execution.harness_class(
+        model, timeout = profile.model, profile.timeout
+        harness = profile.harness_class(
             model=model,
-            fast_mode=execution.fast_mode,
-            effort=execution.effort,
-            sandbox=SandboxSettings.maybe_from_settings(settings),
+            fast_mode=profile.fast_mode,
+            effort=profile.effort,
+            sandbox=SandboxSettings.maybe_from_settings(load_settings()),
         )
 
         # Names the artifact subdir and is the AgentCall.id — supplied by the
@@ -254,15 +246,13 @@ class Host:
                 schema=schema,
                 artifact_dir=artifact_dir,
                 timeout=timeout,
-                github_token=github_token,
                 include_plugins=include_plugins,
                 add_dirs=add_dirs,
                 skills=skills,
                 extra_env=extra_env,
                 mcp_servers=mcp_servers,
                 call_id=run_id,
-                subscription=execution.subscription,
-                key=execution.key,
+                identity=profile.identity,
             )
         except HarnessError as exc:
             error = exc
@@ -294,41 +284,23 @@ class Host:
         schema: dict[str, Any],
         artifact_dir: Path,
         timeout: int,
-        github_token: str | None = None,
         include_plugins: bool = True,
         add_dirs: tuple[str, ...] = (),
         skills: tuple[str, ...] = (),
         extra_env: dict[str, str] | None = None,
         mcp_servers: tuple[McpServer, ...] = (),
         call_id: str | None = None,
-        subscription: "ProviderSubscription | None" = None,
-        key: str | None = None,
+        identity: dict | None = None,
     ) -> Any:
         """Drive one prompt through ``harness`` on this VM: the harness
-        builds the invocation and parses the result; this sandbox executes it.
-        One-shot callers with a hand-built harness use this directly;
-        ``run_agent`` adds the harness factory + cost capture on top."""
-        # A one-shot caller with a hand-built harness runs on the fallback
-        # account's subscription.
-        from druks.harnesses.models import ProviderSubscription
-        from druks.user_settings.models import UserSettings
-
-        if not (subscription or key):
-            fallback_id = (await UserSettings.get()).fallback_account_id
-            subscription = await ProviderSubscription.lookup(
-                harness.model.partition("/")[0], fallback_id
-            )
+        builds the invocation and parses the result; this sandbox executes it."""
         run_id = harness.mint_run_id(call_id)
         artifact_dir.mkdir(parents=True, exist_ok=True)
         persist_prompt(artifact_dir, call_id=run_id, prompt=prompt)
         persist_manifest(
             artifact_dir,
             call_id=run_id,
-            manifest=await harness.get_manifest(
-                mcp_servers=mcp_servers,
-                skills=skills,
-                extra_env=extra_env,
-            ),
+            manifest=await harness.get_manifest(mcp_servers=mcp_servers, skills=skills),
         )
 
         invocation = await harness.build_invocation(
@@ -336,14 +308,12 @@ class Host:
             schema=schema,
             run_id=run_id,
             ssh_username=self.ssh_username,
-            github_token=github_token,
             include_plugins=include_plugins,
             add_dirs=add_dirs,
             skills=skills,
             extra_env=extra_env,
             mcp_servers=mcp_servers,
-            subscription=subscription,
-            key=key,
+            identity=identity,
             timeout=timeout,
         )
         result = await self._exec(

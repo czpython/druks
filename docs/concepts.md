@@ -116,6 +116,33 @@ Subjected workflow starts use DBOS queue deduplication per workflow kind and
 subject. A duplicate start returns the active run's id. Druks does not impose
 that policy on subjectless background runs.
 
+## Current work on the Dashboard
+
+The Dashboard reads current runs across the installed apps with the same identity
+gate as the shared run API. An authenticated operator sees installation-wide
+run facts. `Run.account_id` records attribution and does not restrict this
+read.
+
+For each workflow kind and subject, the newest run counts. A newer successful
+run therefore removes an older failure from Problems. A run without a subject,
+including one whose DBOS record is missing, counts on its own until it is
+cancelled. The read returns the 200 most recently changed current runs with
+labels and artifact titles of at most 240 characters, and failure text of at
+most 2,048 characters. It never carries transcripts or complete review content.
+
+Needs you lists parked runs that carry a request the operator can act on,
+oldest request first. Other parked work is Waiting. Active work is running and
+queued runs. Problems is failed and orphaned runs. Scheduled work lists
+declared schedules with resolved cadence, pause state, and installation timezone.
+These are configuration facts, not proof that a future run will succeed.
+
+Review opens the owning app at the selected run and names the request round
+by its `parkedAt` timestamp. The owner reads the current gate. A different
+round shows a stale-link message, and an answer echoes the round it read, so
+the server rejects a stale one. An external request opens the app-declared
+HTTP or HTTPS address. The Dashboard does not infer access health from
+configuration.
+
 ## Waiting for people and systems
 
 A `Gate` defines a typed reply and a durable receive topic. When a workflow
@@ -159,6 +186,28 @@ warm sandbox across a segment. Druks releases it before a gate and at workflow
 exit. Druks also rotates it before the lease becomes too short for another
 call. Store durable state in an external system such as Git, not only on the VM.
 
+A sandbox never holds a subscription token. Druks gives each sandbox that
+fetches one an identity at its issuer, before Drukbox provisions it. The
+identity names the run and the workflow or agent the sandbox is scoped to. It
+keeps a hash of a random bearer and one secret ref per secret the sandbox
+holds: the Drukbox name, the vault row, and the resource. The row can be the
+GitHub App key, a pasted token, or a provider subscription. A replay after a
+crash finds the sandbox through the run's live identity with the same scope.
+Drukbox holds the bearer in the sandbox's issuer entry and fetches the token
+from the Druks issuer, `GET /api/secrets/<identity id>/<name>`. The sandbox
+sees a placeholder in the variable the entry names. Claude reads it from
+`ANTHROPIC_AUTH_TOKEN`. The Codex run wrapper writes it into
+`~/.codex/auth.json` beside a sentinel refresh token, so Codex never refreshes
+inside the sandbox. The issuer answers a fresh token at once. A token inside
+its refresh margin rotates first, while the subscription is idle or the token
+is urgent. One rotator runs at a time, and
+new calls wait for it. After a rotation, Druks requests a refresh from the secrets
+exchange for every live sandbox on that subscription. A provider can revoke
+the previous token at the rotation. Druks revokes the identity when it
+releases the sandbox, and a terminal run denies every fetch. An hourly task
+releases the sandbox of a run that ended without its cleanup. The identity
+expires with the sandbox lease.
+
 ## Events, signals, webhooks, and subjects
 
 A subject is the object of a run. It is always a class that represents an app
@@ -185,21 +234,25 @@ app or integration owns the provider payload and domain reaction.
 Configuration has two planes:
 
 - **Deployment:** `druks.toml` configures the deployment and creates the process environment.
-- Postgres-backed settings configure the operator profile, harness defaults,
-  app/workflow knobs, per-agent overrides, notifications, MCP servers,
-  and skills.
+- Postgres settings configure installation defaults, personal profiles,
+  app and workflow settings, agent overrides, notifications, MCP servers, and skills.
+  See [personal and installation settings](configuration.md#personal-and-installation-settings)
+  for profile resolution and timezone rules.
 
-Druks encrypts stored MCP tokens and OAuth grants at rest. It decrypts them
-only to mint or deliver a token to an agent call. API responses and
+Druks keeps every secret in the vault, encrypted at rest: pasted keys, MCP
+tokens, OAuth grants, GitHub App keys, and provider subscriptions. It decrypts
+a row only to issue or deliver a token to an agent call. API responses and
 capability manifests expose presence, never secret values.
 
-Harness subscription payloads and notification webhook URLs do not use that
-encryption envelope. They are standard Postgres fields. The API withholds or
-masks their values. Thus, database and backup access is credential access.
+Notification webhook URLs do not use that encryption envelope. They are
+standard Postgres fields, and the API masks their values. Thus, database and
+backup access is credential access.
 
 Druks injects enabled MCP servers through the selected harness. A call receives
 the enabled skills it requests, or every enabled skill when it requests none.
-A workspace can also require an MCP server and supply its credentials.
+A workspace can also require an MCP server and name its vault row. Each MCP
+credential is a sandbox entry that the Druks issuer answers, so no token
+enters the sandbox environment.
 Each agent call records its declarations and delivery so later evaluation can
 distinguish capability sets without storing the tokens.
 

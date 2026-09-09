@@ -2,13 +2,13 @@ import json
 
 import httpx
 import pytest
-from druks.accounts.constants import SYSTEM_ACCOUNT_ID
 from druks.mcp import registry
 from druks.mcp.enums import IdentityMode
 from druks.mcp.exceptions import RegistryUnavailableError
 from druks.mcp.models import McpServer
 from druks.mcp.registry import derive_server_name, resolve_candidates, search_registry
-from druks.services.models import OauthConnection
+from druks.secrets.datastructures import Audience
+from druks.secrets.models import VaultSecret
 from druks.settings import PACKAGED_MCP_TRUSTED
 from druks.testing import configure_app_for_test, make_settings
 from fastapi.testclient import TestClient
@@ -337,13 +337,15 @@ async def test_add_from_registry_writes_the_row_and_redacts_the_secret(
         assert "acme-api-secret" not in listed.text
 
     # The row: url from the registry (never the client), values split by the
-    # spec's secrecy — the plain one readable, the secret one ciphertext at
-    # rest and redacted in repr.
+    # spec's secrecy — the plain one on the row, the secret one a vault row
+    # under its header, ciphertext at rest and redacted in repr.
     row = await McpServer.get_for_name("observer")
     assert row.url == "https://mcp.acme.com/mcp"
     assert row.headers == {"X-Region": "eu"}
-    assert "acme-api-secret" not in repr(row.secret_headers)
-    assert row.secret_headers["X-Api-Key"] == "acme-api-secret"
+    [secret] = await VaultSecret.list_tokens(Audience.mcp("observer"))
+    assert secret.header == "X-Api-Key"
+    assert "acme-api-secret" not in repr(secret.secrets)
+    assert secret.secrets["value"] == "acme-api-secret"
 
 
 async def test_add_from_registry_oauth_candidate_ships_dark_and_connects(
@@ -447,12 +449,12 @@ async def test_removing_a_connected_row_drops_its_grant(tmp_path, monkeypatch, d
             "/api/mcp-servers/registry",
             json={"name": "grafana", "registry": "io.github.grafana/mcp-grafana", "headers": {}},
         )
-        await OauthConnection.create(
-            provider="mcp:grafana", account_id=SYSTEM_ACCOUNT_ID, refresh_token="rt", scopes=[]
+        await VaultSecret.connect(
+            Audience.mcp("grafana"), account_id=None, refresh_token="rt", scopes=[]
         )
 
         assert client.delete("/api/mcp-servers/grafana").status_code == 204
 
     # An orphan grant would revive as this name's credential on re-add.
     assert not await McpServer.get_for_name("grafana")
-    assert not await OauthConnection.list_for_provider("mcp:grafana")
+    assert not await VaultSecret.list_connections(Audience.mcp("grafana"))

@@ -1,4 +1,5 @@
 import { createContext } from 'react'
+import type { SubjectTarget } from '../apps/registry'
 
 import type { Block, Follows, Operation, PageEntry, PageSnapshot } from '../api/types'
 
@@ -7,6 +8,7 @@ import type { Block, Follows, Operation, PageEntry, PageSnapshot } from '../api/
 // rather than threading it through every nested block.
 export const PagesContext = createContext<{
   app: string
+  target?: SubjectTarget
   pages: PageEntry[]
   operations: Operation[]
 }>({
@@ -181,4 +183,14 @@ function replaceRegions(blocks: Block[], replacements: Map<string, Region>): Blo
   })
   if (changed) return next
   return blocks
+}
+
+/** Runs with a decision control in this page, including nested cards and regions. */
+export function gateRuns(blocks: Block[]): string[] {
+  return blocks.flatMap((block) => {
+    if (block.block === 'gate_controls') return [block.run]
+    if (block.block === 'cards') return gateRuns(block.cards)
+    const nested = inside(block)
+    return nested ? gateRuns(nested) : []
+  })
 }
