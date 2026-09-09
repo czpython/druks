@@ -155,6 +155,7 @@ def _move_provider_keys() -> None:
         "agent_calls_billing_source_check",
         "agent_calls",
         "(subscription_id IS NOT NULL) <> (api_key_id IS NOT NULL)",
+        postgresql_not_valid=True,
     )
     op.drop_table("provider_keys")
 
@@ -485,6 +486,7 @@ def _restore_provider_keys() -> None:
         "agent_calls_billing_source_check",
         "agent_calls",
         "(subscription_id IS NOT NULL) <> (api_key_provider IS NOT NULL)",
+        postgresql_not_valid=True,
     )
 
 
