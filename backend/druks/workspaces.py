@@ -1,15 +1,16 @@
 import asyncio
 import hashlib
 import mimetypes
-import os
 import shlex
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
+from urllib.parse import urlsplit
 
 from druks.accounts.models import Account
 from druks.core.apis.github import get_github_client
 from druks.core.models import uuid7_str
+from druks.core.services import Github
 from druks.database import db_session
 from druks.files.constants import MAX_FILE_BYTES
 from druks.files.datastructures import File
@@ -20,12 +21,13 @@ from druks.mcp import models as mcp_models
 from druks.mcp import oauth
 from druks.mcp.constants import TOKEN_ENV_PREFIX
 from druks.mcp.enums import IdentityMode, TokenSource
-from druks.mcp.exceptions import MissingTokenError, SourceEnvVarUnsetError
+from druks.mcp.exceptions import MissingGrantError, MissingTokenError
 from druks.mcp.helpers import get_bearer_token_env_var, get_grant_account
 from druks.sandbox import repo as checkout
 from druks.sandbox.datastructures import AgentResult, McpServer, RequiredMcpServer
 from druks.sandbox.exceptions import ExecFailed
-from druks.sandbox.layout import get_github_token_remote_path, get_repo_root, get_work_root
+from druks.sandbox.layout import get_repo_root, get_work_root
+from druks.sandbox.models import SecretRef
 
 if TYPE_CHECKING:
     from druks.sandbox.host import Host
@@ -46,10 +48,17 @@ class Workspace:
         # Override to add what the run needs on this workspace (add_dirs, skills).
         return kwargs
 
-    def get_required_mcp_servers(self) -> tuple[RequiredMcpServer, ...]:
-        # Override to declare the servers this workspace requires and
-        # credentials itself. Base: none.
+    @classmethod
+    async def get_required_mcp_servers(cls, subject: Any) -> tuple[RequiredMcpServer, ...]:
+        # Override to declare the servers this workspace requires and the vault
+        # row each one issues through. Read before the box exists. Base: none.
         return ()
+
+    @classmethod
+    async def get_secret_refs(cls, subject: Any) -> list[SecretRef]:
+        # The secrets a box of this workspace fetches, beyond its profile's.
+        # Read before the box exists, so from the subject alone. Base: none.
+        return []
 
     async def prepare_context(
         self, context: dict[str, Any], *, agent_call_id: str
@@ -141,118 +150,127 @@ class Workspace:
         return await self.host.run_agent(**run_kwargs)
 
     async def with_mcp_servers(self, account_id: str | None, **kwargs: Any) -> dict[str, Any]:
-        # Fold every MCP server into this call — the workspace's required
-        # servers, then the operator registry's enabled entries. Each becomes a
-        # wire shape on ``mcp_servers`` (url + derived env var, never the
-        # token); each token rides ``extra_env`` under that var.
-        required = self.get_required_mcp_servers()
+        # The harness names each server's url, variables, and plain headers.
+        # Every credential is a box entry, so nothing rides ``extra_env``.
+        wire, _ = await self.get_mcp_delivery(self.subject, account_id)
+        if wire:
+            kwargs["mcp_servers"] = wire
+        return kwargs
+
+    @classmethod
+    async def get_mcp_delivery(
+        cls, subject: Any, account_id: str | None
+    ) -> tuple[tuple[McpServer, ...], list[SecretRef]]:
+        """The MCP servers a box of this workspace reaches: the wire shapes for
+        the harness and the secret refs for the box's entries, one per bearer
+        and per secret header. The workspace's required servers come first
+        and own their names: a same-named registry entry is neither resolved
+        nor delivered. A server that cannot authenticate fails here, before
+        the box."""
+        required = await cls.get_required_mcp_servers(subject)
         required_names = {server.name for server in required}
         if len(required_names) != len(required):
             # One config key per name in the emitted harness config — a dupe
             # would break the VM's config parse mid-run.
             raise ValueError(f"duplicate required MCP server names: {sorted(required_names)}")
-        enabled = await mcp_models.McpServer.list_enabled()
-        if not required and not enabled:
-            return kwargs
-        run_account = account_id
-        # ``extra_env`` may be omitted or an explicit ``None`` (both valid for the
-        # underlying run_agent); treat them the same so the merge never unpacks None.
-        env = dict(kwargs.get("extra_env") or {})
         wire = []
+        refs = []
         for server in required:
-            env[get_bearer_token_env_var(server.name)] = server.token
-            wire.append(
-                McpServer(
-                    name=server.name,
-                    url=server.url,
-                    bearer_token_env_var=get_bearer_token_env_var(server.name),
+            variable = get_bearer_token_env_var(server.name)
+            wire.append(McpServer(name=server.name, url=server.url, bearer_token_env_var=variable))
+            refs.append(
+                SecretRef(
+                    name=variable.lower(),
+                    secret_id=server.secret_id,
+                    resource=server.resource,
+                    host=urlsplit(server.url).hostname,
                 )
             )
-        for server in enabled:
-            if server["name"] in required_names:
-                # A required server owns its name: the registry twin is neither
-                # resolved (no raise, no env clobber) nor delivered.
+        run_account = account_id
+        for server in await mcp_models.McpServer.list_enabled():
+            name = server["name"]
+            if name in required_names:
                 continue
-            # Per-strategy bearer resolution, loud when a server can't
-            # authenticate — delivery never ships a header the harness
-            # can't fill.
+            host = urlsplit(server["url"]).hostname
+            # The bearer's vault row, by source, loud when the server cannot
+            # authenticate. A bearerless server rides its declared headers.
             source = server["token_source"]
-            if not source:
-                # No bearer; auth, if any, rides the declared headers below.
-                token = ""
-            elif source == TokenSource.STATIC:
-                # A stored token is ciphertext everywhere else; decrypted only
-                # here, entering the run env.
-                if not server["token"]:
-                    raise MissingTokenError(server["name"])
-                token = server["token"].decrypt()
-            elif source == TokenSource.STATIC_FROM_ENV:
-                token = os.environ.get(server["source_env_var"], "")
-                if not token:
-                    raise SourceEnvVarUnsetError(server["name"], server["source_env_var"])
-            else:  # oauth
+            bearer_token_env_var = ""
+            if source == TokenSource.STATIC:
+                secret = server["token"]
+                if not secret:
+                    raise MissingTokenError(name)
+            elif source:
                 if server["identity_mode"] == IdentityMode.PER_USER and not run_account:
                     account = await Account.get_default()
                     run_account = account.id if account else None
                 grant_account = get_grant_account(server["identity_mode"], run_account)
-                token = await oauth.get_access_token(server["name"], grant_account)
-            bearer_token_env_var = ""
-            if token:
-                bearer_token_env_var = get_bearer_token_env_var(server["name"])
-                env[bearer_token_env_var] = token
+                secret = await oauth.get_connection(name, grant_account)
+                if not secret:
+                    raise MissingGrantError(name, grant_account)
+            if source:
+                bearer_token_env_var = get_bearer_token_env_var(name)
+                refs.append(
+                    SecretRef(name=bearer_token_env_var.lower(), secret_id=secret.id, host=host)
+                )
             env_headers = {}
-            for index, (header, value) in enumerate(server["secret_headers"].items()):
-                env_var = f"{TOKEN_ENV_PREFIX}{server['name'].upper()}_HEADER_{index}"
-                env[env_var] = value
-                env_headers[header] = env_var
+            for index, (header, secret) in enumerate(server["secret_headers"].items()):
+                variable = f"{TOKEN_ENV_PREFIX}{name.upper()}_HEADER_{index}"
+                env_headers[header] = variable
+                refs.append(SecretRef(name=variable.lower(), secret_id=secret.id, host=host))
             wire.append(
                 McpServer(
-                    name=server["name"],
+                    name=name,
                     url=server["url"],
                     bearer_token_env_var=bearer_token_env_var,
                     headers=dict(server["headers"]),
                     env_headers=env_headers,
                 )
             )
-        kwargs["mcp_servers"] = tuple(wire)
-        if env:
-            kwargs["extra_env"] = env
-        return kwargs
+        return tuple(wire), refs
 
 
 @dataclass(frozen=True)
 class RepoWorkspace(Workspace):
     """A VM with the subject's ``repo`` cloned at ``branch`` (default branch when
-    None), re-cloned and re-tokened before every agent call."""
+    None), re-cloned before every agent call. The box holds a placeholder in
+    ``GH_TOKEN``, and Drukbox points git and ``gh`` at it; the Druks issuer
+    answers the token of the GitHub identity this workspace names."""
 
     branch: str | None = None
+    # The GitHub identity the box's git and gh act as: a connected service.
+    github: ClassVar[type[Github]] = Github
+
+    @classmethod
+    def get_repo(cls, subject: Any) -> str:
+        # Override when the subject names its ``owner/name`` differently.
+        return subject.repo
+
+    @classmethod
+    async def get_secret_refs(cls, subject: Any) -> list[SecretRef]:
+        # The identity's vault row and the repo: the whole selection the
+        # issuer reads. A service that is not connected fails here, before the box.
+        return [
+            SecretRef(
+                name=cls.github.secret_name,
+                secret_id=(await cls.github.get()).id,
+                resource=cls.get_repo(subject),
+            )
+        ]
 
     @property
     def repo_path(self) -> str:
         return get_repo_root(self.host.ssh_username)
 
-    def get_repo(self) -> str:
-        # Override when the subject names its ``owner/name`` differently.
-        return self.subject.repo
-
-    async def get_github_token(self) -> str:
-        # Override to clone and act as another identity than the operator App.
-        return await (await get_github_client()).token_for_repo(self.get_repo())
-
     async def run_agent(self, *, account_id: str | None, **kwargs: Any) -> AgentResult:
-        github_token = await self.get_github_token()
-        # The clone authenticates through the VM's credential helper, which reads this file.
-        await self.host.write_secret(
-            secret=github_token, remote=get_github_token_remote_path(self.host.ssh_username)
-        )
         await checkout.ensure(
             self.host,
-            repo_url=f"https://github.com/{self.get_repo()}",
+            repo_url=f"https://github.com/{self.get_repo(self.subject)}",
             ref=self.branch,
             target_path=self.repo_path,
         )
         await self.set_git_identity(account_id)
-        return await super().run_agent(account_id=account_id, github_token=github_token, **kwargs)
+        return await super().run_agent(account_id=account_id, **kwargs)
 
     async def set_git_identity(self, account_id: str | None) -> None:
         """Commits in the repo are authored as the operator's bot user, with a

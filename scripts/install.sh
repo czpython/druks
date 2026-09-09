@@ -145,17 +145,18 @@ main() {
     set_env_var DRUKS_DOCKER_GID "$(stat -c '%g' /var/run/docker.sock)"
   fi
 
-  # Shape selection, written to .env. Then a plain `docker compose` command in
-  # this directory does the correct thing. The `hosted` profile turns on the
-  # Caddy edge and the janitor. A `docker` box runs bare, with the dashboard
-  # directly on :8001. docker-sbx also layers the overlay (drukbox connected to
-  # the host sandboxd) and enables the SSH gateway. compose.override.yaml loads
-  # last. Operator additions thus win over the repo files, and the installer
-  # never overwrites them.
+  # Shape selection, written to .env. After that, `docker compose` in this
+  # directory starts the services of the shape. The `hosted` profile adds the
+  # Caddy edge and the janitor. The `proxy` profile adds the secrets proxy on
+  # every provider but docker-sbx, where sbx swaps the placeholders itself.
+  # A `docker` box runs without Caddy, with the dashboard on :8001. docker-sbx
+  # also layers the overlay, which connects drukbox to the host sandboxd, and
+  # enables the SSH gateway. compose.override.yaml loads last, so operator
+  # additions win over the repo files, and the installer never overwrites them.
   set_env_var COMPOSE_FILE "compose.yaml:compose.override.yaml"
   case "$PROVIDER" in
     docker)
-      set_env_var COMPOSE_PROFILES ""
+      set_env_var COMPOSE_PROFILES "proxy"
       ;;
     docker-sbx)
       set_env_var COMPOSE_FILE "compose.yaml:compose.docker-sbx.yaml:compose.override.yaml"
@@ -178,7 +179,7 @@ main() {
       fi
       ;;
     *)
-      set_env_var COMPOSE_PROFILES "hosted"
+      set_env_var COMPOSE_PROFILES "hosted,proxy"
       ;;
   esac
 

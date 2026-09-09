@@ -11,8 +11,9 @@ from druks.accounts.models import Account
 from druks.database import db_session
 from druks.durable.models import Run
 from druks.harnesses.exceptions import HarnessNotConnectedError
-from druks.harnesses.models import ProviderKey
 from druks.harnesses.profiles import get_profile
+from druks.secrets.datastructures import Audience
+from druks.secrets.models import VaultSecret
 from druks.user_settings.models import SettingsOverride, SettingsProfile
 from druks.workflows import _run_instance
 from druks_field_notes.models import Note
@@ -103,14 +104,14 @@ async def test_unattended_api_key_uses_installation_profile_without_a_default_ac
     session = db_session()
     session.add(account)
     await session.flush()
-    await ProviderKey.create(provider="anthropic", key="test-api-key", account=account)
+    await VaultSecret.paste(Audience.provider("anthropic"), "test-api-key", pasted_by=account)
     installation = await SettingsProfile.get()
     await installation.update_profile(default_billing="api_key", default_effort="low")
     assert await Account.get_default() is None
 
     profile = await get_profile(PROFILE_PROBE.id, None)
 
-    assert profile.api_key.value.decrypt() == "test-api-key"
+    assert profile.api_key.secrets["value"] == "test-api-key"
     assert profile.subscription is None
     assert profile.effort == "low"
 

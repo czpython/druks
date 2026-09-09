@@ -6,10 +6,10 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import String
+from sqlalchemy_encrypted_field import EncryptedTextField
 
 from druks.database import db_session
 from druks.models import Base
-from druks.secrets.fields import EncryptedTextField
 
 from .constants import (
     DEFAULT_BILLING,

@@ -399,7 +399,6 @@ profile.model     # "provider/model"
 profile.effort
 profile.billing   # "subscription" | "api_key"
 profile.secrets   # the Drukbox entries that put the key in the VM as a placeholder
-profile.key       # an API key the CLI reads from its invocation, else None
 ```
 
 `get_profile()` runs inside a workflow and reads the settings at call time for
@@ -407,9 +406,11 @@ the run's own actor, the same read Druks makes for the calling agent. A
 missing login or key raises before any sandbox work. Under subscription
 billing there is no key. The VM home holds the login of the calling agent's
 subscription only, so a nested CLI on another provider needs `api_key` billing.
-Under `api_key` billing on `claude`, the VM holds the key as a placeholder in
-`ANTHROPIC_API_KEY`, the variable the entry names. A nested CLI reads it from
-the environment. Codex, Pi, and OpenCode read the key from `profile.key`.
+Under `api_key` billing, the VM holds the key as a placeholder in the variable
+the entry names: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or `CODEX_API_KEY` for
+Codex. A nested CLI reads it from the environment. The
+[configuration guide](configuration.md#harnesses) lists the variable, host, and
+header per harness.
 
 Do not ask the framework to infer domain side effects from agent prose.
 The prompt or a subsequent explicit step owns those actions.
@@ -429,29 +430,85 @@ class Sweep(Workflow):
     workspace_class = RepoWorkspace
 ```
 
-Before every agent call Druks mints the GitHub App token for the subject's
-`repo`, writes it into the VM, and clones the default branch into
-`workspace.repo_path`. Prompts read `{{ workspace.repo_path }}`. In the VM,
-git and `gh` read the token through the sandbox helper. The clone is
-idempotent, so a warm host keeps its working tree and a host rotated in bare
-gets one back.
+Before every agent call Druks clones the default branch into
+`workspace.repo_path`. Prompts read `{{ workspace.repo_path }}`. The sandbox
+holds a placeholder for its GitHub token in `GH_TOKEN`, and Drukbox points git
+and `gh` at it. The Drukbox secrets proxy swaps the placeholder for a token
+that Druks mints on demand, so a long run never outlives its token. The clone
+is idempotent, so a warm host keeps its working tree and a host rotated in
+bare gets one back.
 
-Every workspace holds the run's `subject`. `RepoWorkspace.get_repo()` reads
-its `repo` column. Override it when the subject names the repository
+Every workspace holds the run's `subject`. `RepoWorkspace.get_repo(subject)`
+reads its `repo` column. Override it when the subject names the repository
 differently:
 
 ```python
 class SweepWorkspace(RepoWorkspace):
-    def get_repo(self) -> str:
-        return self.subject.full_name
+    @classmethod
+    def get_repo(cls, subject) -> str:
+        return subject.full_name
 ```
+
+The sandbox's GitHub token comes from a connected service of the appliance.
+`RepoWorkspace` names the operator App, `Github`. An app that acts as another
+identity declares its own service in its `services` module, a subclass with
+its own connect card, and names it on its workspace:
+
+```python
+from pydantic import BaseModel, Field, SecretStr
+
+from druks.core.services import Github
+from druks.workspaces import RepoWorkspace
+
+
+class GithubReviewer(Github):
+    required = False
+
+    class Settings(BaseModel):
+        app_id: str = Field(title="App ID")
+        private_key: SecretStr = Field(title="Private key (PEM)")
+
+
+class ReviewWorkspace(RepoWorkspace):
+    github = GithubReviewer
+```
+
+The operator connects the service in **Settings → Connections → Services**. The
+sandbox's identity stores the service and the repo. The issuer reads only
+those two, so a request cannot select another repo or identity.
 
 Override `Workflow.get_workspace_kwargs()` to pass `branch` or the fields a
 subclass adds. Extend `RepoWorkspace` by adding fields, not by cloning again.
-Override `get_github_token()` to clone and act as another identity,
-`run_agent()` to prepare the VM before the call, `get_agent_run_kwargs()` to
-grant directories or skills, and `get_required_mcp_servers()` to require an
-MCP server the workspace credentials itself.
+Override `run_agent()` to prepare the VM before the call, `get_agent_run_kwargs()`
+to grant directories or skills, and `get_required_mcp_servers(subject)` to
+require an MCP server with its own vault row:
+
+```python
+from druks.sandbox.datastructures import RequiredMcpServer
+
+
+class BuildWorkspace(RepoWorkspace):
+    @classmethod
+    async def get_required_mcp_servers(cls, subject) -> tuple[RequiredMcpServer, ...]:
+        actor = await get_review_actor()
+        return (
+            RequiredMcpServer(
+                name="github",
+                url="https://api.githubcopilot.com/mcp/",
+                secret_id=(await actor.service.get()).id,
+                resource=cls.get_repo(subject),
+            ),
+        )
+```
+
+The server names the vault row the issuer answers from and what the token is
+for: here a connected GitHub service and its repo. Druks binds the server's
+host and the variable `MCP_GITHUB_TOKEN` to the entry when it creates the
+sandbox. The harness configuration names the variable, and the sandbox never
+holds the token. A required server owns its name, so a same-named registry
+server is not delivered. `Workspace.get_mcp_delivery(subject, account_id)`
+returns the wire shapes and the secret refs for every MCP server of a sandbox.
+Override it to deliver none.
 
 Keep durable state outside the VM. A workflow can set
 `steps_reuse_sandbox = True` to retain one host across a segment. Druks releases
@@ -914,7 +971,7 @@ class Gmail(Service):
         client_secret: SecretStr = Field(title="Client secret")
 ```
 
-The slug keys the `service_identities` row and the connect wire. A class
+The slug names the service's vault row and the connect wire. A class
 rename changes the slug, rekeys the card, and orphans the connected identity.
 Set `slug = "gmail"` on the class to keep the old key.
 

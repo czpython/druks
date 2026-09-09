@@ -1,6 +1,7 @@
 import base64
 
 import pytest
+from druks import database
 from druks.accounts.dependencies import current_account, current_session_account
 from druks.accounts.models import Account, PersonalAccessToken
 from druks.browser import routes
@@ -8,11 +9,11 @@ from druks.browser.enums import BrowserSessionPayloadFormat, BrowserSessionStatu
 from druks.browser.models import StoredBrowserSession
 from druks.browser.sessions import BrowserSession
 from druks.database import db_session
-from druks.secrets import utils as secret_utils
-from druks.secrets.exceptions import SecretDecryptError
 from druks.testing import configure_app_for_test, make_settings
 from fastapi.testclient import TestClient
 from sqlalchemy import text
+from sqlalchemy_encrypted_field import SecretDecryptError
+from sqlalchemy_encrypted_field import utils as secret_utils
 
 
 @pytest.fixture
@@ -28,7 +29,6 @@ def night_watch(browser_session_declarations):
 @pytest.fixture
 def client(tmp_path, druks_db, monkeypatch):
     settings = make_settings(tmp_path)
-    monkeypatch.setattr(secret_utils, "load_settings", lambda: settings)
     app = configure_app_for_test(settings=settings)
     try:
         with TestClient(app) as test_client:
@@ -148,7 +148,8 @@ async def test_import_materializes_the_row_survives_restart_and_delete_removes_i
     wrong_key = base64.b64encode(b"1" * 32).decode()
     wrong_settings = make_settings(tmp_path / "wrong", secrets={"secrets_key": wrong_key})
     with monkeypatch.context() as patch:
-        patch.setattr(secret_utils, "load_settings", lambda: wrong_settings)
+        # The plane reads its keys through druks.database at each use.
+        patch.setattr(database, "load_settings", lambda: wrong_settings)
         with pytest.raises(SecretDecryptError):
             row.payload.decrypt()
 

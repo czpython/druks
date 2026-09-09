@@ -16,7 +16,7 @@ import { absTime } from '../lib/format'
 import { harnessColors } from '../lib/harnessColors'
 import { Page } from './Page'
 import { Sidebar } from './Sidebar'
-import { BrowserSessionsPane } from './BrowserSessionsPane'
+import { BrowserProfilesPane } from './BrowserProfilesPane'
 import {
   AgentAccessPane,
   AgentsPane,
@@ -44,11 +44,17 @@ const SECTIONS = [
   { id: 'connections', label: 'Connections', group: 'Tools & access' },
   { id: 'mcp', label: 'MCP servers', group: 'Tools & access' },
   { id: 'skills', label: 'Skills', group: 'Tools & access' },
-  { id: 'browser-sessions', label: 'Browser sessions', group: 'Tools & access' },
   { id: 'general', label: 'General', group: 'Installation' },
   { id: 'personal', label: 'Preferences', group: 'Personal' },
   { id: 'api-tokens', label: 'API tokens', group: 'Personal' },
   { id: 'apps', label: 'App settings', group: 'Apps' },
+]
+
+const CONNECTION_TABS = [
+  { id: 'services', label: 'Services' },
+  { id: 'accounts', label: 'Accounts' },
+  { id: 'browser', label: 'Browser' },
+  { id: 'revoked', label: 'Revoked' },
 ]
 
 function withField(
@@ -76,7 +82,10 @@ export function SettingsPages({
   active?: boolean
 }) {
   const [location, navigate] = useLocation()
-  const fieldTarget = new URLSearchParams(useSearch()).get('field')
+  const searchParams = new URLSearchParams(useSearch())
+  const fieldTarget = searchParams.get('field')
+  const connectionsTab =
+    CONNECTION_TABS.find((tab) => tab.id === searchParams.get('tab'))?.id ?? 'services'
   const content = useRef<HTMLElement>(null)
   const section = appName ? `apps/${appName}` : location.slice('/settings/'.length) || 'providers'
   const formPath = `${import.meta.env.BASE_URL.replace(/\/$/, '')}${appName ? `/apps/${appName}/settings` : '/settings'}`
@@ -130,7 +139,6 @@ export function SettingsPages({
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [saving, setSaving] = useState(false)
   const [search, setSearch] = useState('')
-  const [connectionsTab, setConnectionsTab] = useState('services')
   const [visited, setVisited] = useState([section])
   if (!visited.includes(section)) setVisited([...visited, section])
   const tick = useTicker()
@@ -398,7 +406,11 @@ export function SettingsPages({
   const searchResults = SECTIONS.map((entry) => ({
     label: entry.label, owner: entry.group, kind: 'Section', terms: '',
     path: `/settings/${entry.id}`,
-  })).concat(Object.values(SETTINGS_FIELDS).map((field) => ({
+  })).concat([{
+    label: 'Browser profiles', owner: 'Connections', kind: 'Section',
+    terms: 'browser sessions sign-ins saved logins',
+    path: '/settings/connections?tab=browser',
+  }], Object.values(SETTINGS_FIELDS).map((field) => ({
     label: field.label, owner: SECTIONS.find((entry) => entry.id === field.section)!.label,
     kind: 'Field', terms: field.terms,
     path: `/settings/${field.section}?field=${field.field}`,
@@ -717,30 +729,24 @@ export function SettingsPages({
               {page === 'connections' && (
                 <>
                   <nav className="settings-tabs" aria-label="Connections">
-                    <button
-                      onClick={() => setConnectionsTab('services')}
-                      aria-current={connectionsTab === 'services' ? 'page' : undefined}
-                    >
-                      Services
-                    </button>
-                    <button
-                      onClick={() => setConnectionsTab('accounts')}
-                      aria-current={connectionsTab === 'accounts' ? 'page' : undefined}
-                    >
-                      Accounts
-                    </button>
-                    <button
-                      onClick={() => setConnectionsTab('revoked')}
-                      aria-current={connectionsTab === 'revoked' ? 'page' : undefined}
-                    >
-                      Revoked
-                    </button>
+                    {CONNECTION_TABS.map((tab) => (
+                      <Link
+                        key={tab.id}
+                        href={`/settings/connections?tab=${tab.id}`}
+                        aria-current={connectionsTab === tab.id ? 'page' : undefined}
+                      >
+                        {tab.label}
+                      </Link>
+                    ))}
                   </nav>
                   <div hidden={connectionsTab !== 'services'}>
                     <ServicesPane />
                   </div>
                   <div hidden={connectionsTab !== 'accounts'}>
                     <ConnectionsPane />
+                  </div>
+                  <div hidden={connectionsTab !== 'browser'}>
+                    <BrowserProfilesPane />
                   </div>
                   <div hidden={connectionsTab !== 'revoked'}>
                     <ConnectionsPane revokedOnly />
@@ -749,7 +755,6 @@ export function SettingsPages({
               )}
               {page === 'mcp' && <McpServersPane />}
               {page === 'skills' && <SkillsPane />}
-              {page === 'browser-sessions' && <BrowserSessionsPane />}
               {page === 'api-tokens' && <AgentAccessPane />}
               {page === 'apps' && !search.trim() && (
                 <div className="settings-app-index">

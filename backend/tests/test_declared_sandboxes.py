@@ -233,6 +233,8 @@ async def test_warm_lease_uses_workflow_template(monkeypatch):
     workflow.sandbox = sandbox
     workflow._workflow_id = "run-1"
     workflow._host = None
+    workflow._subject = None
+    workflow.account_id = None
     monkeypatch.setattr(
         workflow_module,
         "sandbox_client",
@@ -241,12 +243,16 @@ async def test_warm_lease_uses_workflow_template(monkeypatch):
     monkeypatch.setattr(workflow_module, "get_template_id", resolve)
     monkeypatch.setattr(workflow_module, "set_run_phase", AsyncMock())
 
-    assert await workflow._lease_host(SimpleNamespace(secrets={}, secrets_id="")) == "host-1"
+    assert (
+        await workflow._lease_host(SimpleNamespace(secrets={}, secret_refs=[], secrets_id=""))
+        == "host-1"
+    )
     resolve.assert_awaited_once_with(sandbox)
     provision.assert_awaited_once_with(
-        idempotency_key="run-1:sandbox",
+        idempotency_key="run-1:workflow",
         secrets={},
         template="template-1",
+        identity=None,
     )
 
 
@@ -263,6 +269,7 @@ async def test_ephemeral_lease_uses_workflow_template(monkeypatch):
     workflow = SimpleNamespace(
         sandbox=sandbox,
         get_workspace=AsyncMock(return_value="workspace"),
+        get_secret_refs=AsyncMock(return_value=[]),
     )
     resolve = AsyncMock(return_value="template-1")
     monkeypatch.setattr(
@@ -272,13 +279,18 @@ async def test_ephemeral_lease_uses_workflow_template(monkeypatch):
     )
     monkeypatch.setattr(agent_module, "get_template_id", resolve)
 
-    profile = SimpleNamespace(secrets={}, secrets_id="")
+    profile = SimpleNamespace(secrets={}, secret_refs=[], secrets_id="")
     async with agent_module._runner(workflow, None, "run-1", "summarize", profile) as runner:
         assert runner == "workspace"
 
     resolve.assert_awaited_once_with(sandbox)
     assert calls == [
-        {"idempotency_key": "run-1:summarize", "secrets": {}, "template": "template-1"}
+        {
+            "idempotency_key": "run-1:summarize",
+            "secrets": {},
+            "template": "template-1",
+            "identity": None,
+        }
     ]
 
 

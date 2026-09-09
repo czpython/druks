@@ -25,6 +25,7 @@ from druks.harnesses.profiles import Profile, get_profile
 from druks.prompts import render_prompt
 from druks.sandbox import gate as sandbox_gate
 from druks.sandbox.client import provisioning_key, sandbox_client
+from druks.sandbox.models import SandboxIdentity
 from druks.sandbox.templates import get_template_id
 from druks.settings import load_settings
 from druks.usage.models import UsageScrape
@@ -50,15 +51,29 @@ async def _runner(
     # the runner — fresh per call, so nothing (connection or credential) is held across steps.
     if host_id:
         vm = sandbox_client.attach(host_id=host_id)
+    elif (refs := [*profile.secret_refs, *await workflow.get_secret_refs()]) and (
+        identity := await SandboxIdentity.lookup(workflow_id, step, refs)
+    ):
+        # A crashed attempt left its box behind. Its identity finds it again.
+        vm = sandbox_client.resume(host_id=identity.host_id)
     else:
         template = None
         if workflow.sandbox:
             template = await get_template_id(workflow.sandbox)
             await set_run_phase("provisioning_vm")
+        # A box that fetches gets its own identity, and the key names it. A
+        # replay finds the box through the identity, above.
+        identity, entries, key = None, {}, profile.secrets_id
+        if refs:
+            identity, entries = await SandboxIdentity.create(
+                run_id=workflow_id, scoped_to=step, secret_refs=refs
+            )
+            key = identity.id
         vm = sandbox_client.ephemeral(
-            idempotency_key=provisioning_key(workflow_id, step, profile.secrets_id),
-            secrets=profile.secrets,
+            idempotency_key=provisioning_key(workflow_id, step, key),
+            secrets={**profile.secrets, **entries},
             template=template,
+            identity=identity,
         )
     async with vm as box:
         yield await workflow.get_workspace(box)
@@ -264,7 +279,7 @@ class Agent:
         profile = await get_profile(self.id, workflow.account_id)
         model = profile.model
         subscription_id = profile.subscription.id if profile.subscription else None
-        api_key_provider = profile.api_key.provider if profile.api_key else None
+        api_key_id = profile.api_key.id if profile.api_key else None
         # An agent call is a durability boundary — its effects don't roll back —
         # so commit here rather than hold the step's connection idle through the
         # minutes of provisioning and the run.
@@ -308,7 +323,7 @@ class Agent:
                     agent=self.id,
                     host_id=runner.host_id,
                     subscription_id=subscription_id,
-                    api_key_provider=api_key_provider,
+                    api_key_id=api_key_id,
                 )
                 try:
                     result = await runner.run_agent(

@@ -2660,9 +2660,6 @@ export function McpServersPane() {
 }
 
 function tokenStatusLabel(server: McpServer): string {
-  if (server.tokenSource === 'static_from_env') {
-    return `${server.sourceEnvVar} ${server.hasToken ? 'set' : 'unset'}`
-  }
   if (server.tokenSource === 'oauth') {
     return server.hasToken ? 'Connected' : 'Not connected'
   }

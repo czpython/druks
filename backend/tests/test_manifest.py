@@ -24,14 +24,13 @@ async def _build(
     harness: Harness | None = None,
     mcp_servers: tuple[McpServer, ...] = (),
     skills: tuple[str, ...] = (),
-    extra_env: dict[str, str] | None = None,
 ) -> dict:
     # get_manifest never touches the live sandbox, so the harness builds
     # without sandbox settings — the same shape argv unit tests use.
     harness = harness or ClaudeHarness(
         model="anthropic/claude-opus-4-8", fast_mode=False, effort=None
     )
-    return await harness.get_manifest(mcp_servers=mcp_servers, skills=skills, extra_env=extra_env)
+    return await harness.get_manifest(mcp_servers=mcp_servers, skills=skills)
 
 
 async def _seed_skills(*names: str, disabled: tuple[str, ...] = ()) -> None:
@@ -60,16 +59,9 @@ async def test_manifest_records_the_delivered_capability_set(druks_db):
         url="https://api.githubcopilot.com/mcp/",
         bearer_token_env_var=get_bearer_token_env_var("github"),
     )
-    # Both servers delivered with their token — github is SoftwareFactory's own
+    # Both servers delivered with a bearer entry — github is SoftwareFactory's own
     # requirement (get_required_mcp_servers), so it reads delivered but not declared.
-    manifest = await _build(
-        mcp_servers=(linear, github),
-        skills=("alpha",),
-        extra_env={
-            _LINEAR_ENV: _TOKEN,
-            get_bearer_token_env_var("github"): "ghs_from_build",
-        },
-    )
+    manifest = await _build(mcp_servers=(linear, github), skills=("alpha",))
 
     assert manifest["schema_version"] == 2
     assert manifest["model"] == "anthropic/claude-opus-4-8"
@@ -88,14 +80,11 @@ async def test_manifest_records_the_delivered_capability_set(druks_db):
 
 
 async def test_missing_mcp_token_records_absence(druks_db):
-    """A delivered server whose bearer var is absent from the run env reads
+    """A delivered server that names no bearer var holds no entry behind one:
     token_present False — recorded, not failed."""
     await models.McpServer.create(name="linear", url=_LINEAR_URL, token=_TOKEN)
 
-    manifest = await _build(
-        mcp_servers=(McpServer(name="linear", url=_LINEAR_URL, bearer_token_env_var=_LINEAR_ENV),),
-        extra_env={},
-    )
+    manifest = await _build(mcp_servers=(McpServer(name="linear", url=_LINEAR_URL),))
 
     linear_entry = next(s for s in manifest["mcp_servers"] if s["name"] == "linear")
     assert linear_entry["declared"] is True
@@ -127,7 +116,7 @@ async def test_records_the_delivered_server_not_the_registry_duplicate(druks_db)
         bearer_token_env_var="REQUIRED_LINEAR_TOKEN",
     )
 
-    manifest = await _build(mcp_servers=(required,), extra_env={"REQUIRED_LINEAR_TOKEN": "s"})
+    manifest = await _build(mcp_servers=(required,))
 
     linear_entry = next(s for s in manifest["mcp_servers"] if s["name"] == "linear")
     assert linear_entry["url"] == "https://required.internal/linear"
@@ -142,7 +131,7 @@ async def test_hash_is_stable_for_identical_capabilities(druks_db):
     availability, or the delivered skill set moves the hash."""
     await models.McpServer.create(name="linear", url=_LINEAR_URL, token=_TOKEN)
     linear = McpServer(name="linear", url=_LINEAR_URL, bearer_token_env_var=_LINEAR_ENV)
-    with_token = {"mcp_servers": (linear,), "extra_env": {_LINEAR_ENV: _TOKEN}}
+    with_token = {"mcp_servers": (linear,)}
 
     baseline = await _build(**with_token)
     assert (await _build(**with_token))["manifest_hash"] == baseline["manifest_hash"]
@@ -153,7 +142,7 @@ async def test_hash_is_stable_for_identical_capabilities(druks_db):
     )
     assert different_model["manifest_hash"] != baseline["manifest_hash"]
 
-    without_token = await _build(mcp_servers=(linear,), extra_env={})
+    without_token = await _build(mcp_servers=(McpServer(name="linear", url=_LINEAR_URL),))
     assert without_token["manifest_hash"] != baseline["manifest_hash"]
 
 
@@ -174,7 +163,7 @@ async def test_manifest_records_token_presence_never_the_value(druks_db):
     await models.McpServer.create(name="linear", url=_LINEAR_URL, token=_TOKEN)
     linear = McpServer(name="linear", url=_LINEAR_URL, bearer_token_env_var=_LINEAR_ENV)
 
-    manifest = await _build(mcp_servers=(linear,), extra_env={_LINEAR_ENV: _TOKEN})
+    manifest = await _build(mcp_servers=(linear,))
 
     serialized = json.dumps(manifest)
     assert _TOKEN not in serialized
@@ -199,10 +188,7 @@ async def test_manifest_stays_presence_only_for_a_declared_header_server(druks_d
         env_headers={"X-Api-Key": "MCP_GRAFANA_HEADER_X_API_KEY"},
     )
 
-    manifest = await _build(
-        mcp_servers=(delivered,),
-        extra_env={"MCP_GRAFANA_HEADER_X_API_KEY": "grafana-api-secret"},
-    )
+    manifest = await _build(mcp_servers=(delivered,))
 
     serialized = json.dumps(manifest)
     assert "grafana-api-secret" not in serialized

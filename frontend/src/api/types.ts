@@ -905,9 +905,6 @@ export interface McpServer {
   // A catalog-declared server — managed by druks, can't be removed here,
   // only disabled.
   builtin: boolean
-  // The deployment env var an env-sourced server reads its token from
-  // ('' otherwise) — a var name, never a value.
-  sourceEnvVar: string
   // The raw token never leaves the backend; ``hasToken`` says whether one is
   // configured without revealing it.
   hasToken: boolean

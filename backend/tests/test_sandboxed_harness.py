@@ -3,13 +3,13 @@ import functools
 import json
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from conftest import PROFILE_PROBE, installation_key
+from conftest import PROFILE_PROBE, connect_provider, installation_key, make_jwt
 from druks.durable.enums import AgentCallStatus
 from druks.harnesses.base import Harness
 from druks.harnesses.claude import ClaudeHarness
@@ -26,6 +26,7 @@ from druks.harnesses.exceptions import (
     Retry,
 )
 from druks.harnesses.profiles import Profile, get_profile
+from druks.harnesses.providers import AnthropicProvider, OpenAiProvider
 from druks.sandbox.datastructures import (
     AgentInvocation,
     AgentResult,
@@ -116,7 +117,7 @@ def _inv(args: tuple[str, ...], **overrides: Any) -> AgentInvocation:
         "name": "claude",
         "args": args,
         "stdin": b"prompt-bytes",
-        "credentials": Credentials(github_token="gho_x"),
+        "credentials": Credentials(),
     }
     fields.update(overrides)
     return AgentInvocation(**fields)
@@ -362,7 +363,7 @@ async def test_run_prompt_builds_executes_and_parses(
         artifact_dir=ctx.artifact_dir,
         timeout=60,
         call_id="call-7",
-        subscription=SimpleNamespace(provider="anthropic"),
+        identity={"email": "op@example.com"},
         extra_env={"GITHUB_MCP_TOKEN": "ghs_x"},
     )
 
@@ -532,6 +533,8 @@ def agent_profile():
         subscription=SimpleNamespace(id="subscription-1", account_id="acc"),
         api_key=None,
         secrets={},
+        secret_refs=[],
+        identity={"email": "op@example.com"},
         billing="subscription",
         effort="high",
         timeout=60,
@@ -597,7 +600,7 @@ async def test_claude_api_key_stays_on_the_server(
 ):
     """Under api_key billing the VM is created with the key as a Drukbox entry and
     holds a placeholder. The key reaches no invocation, VM file, artifact, or result."""
-    key = (await installation_key()).value.decrypt()
+    key = (await installation_key()).secrets["value"]
     await SettingsOverride.set_agent_billing(PROFILE_PROBE.id, "api_key")
     profile = await get_profile(PROFILE_PROBE.id, None)
     result_event = {
@@ -634,8 +637,125 @@ async def test_claude_api_key_stays_on_the_server(
     assert key not in " ".join(start.kwargs["cmd"])
     assert key not in start.kwargs["stdin_data"].decode()
     bundle = start.kwargs["credentials_bundle"]
-    assert not bundle.github_token
     assert not any(type(entry) is HomeFile for entry in bundle.home)
     for artifact in (ctx.artifact_dir / "call-9").iterdir():
         assert key not in artifact.read_text()
     assert key not in repr(result) and key not in repr(profile)
+
+
+async def test_claude_subscription_token_stays_on_the_server(
+    ctx: SimpleNamespace, druks_db, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Under subscription billing the VM holds a placeholder in ANTHROPIC_AUTH_TOKEN.
+    The token and its refresh token reach no invocation, VM file, artifact, or result."""
+    expires_at = int((datetime.now(UTC) + timedelta(hours=6)).timestamp() * 1000)
+    await connect_provider(
+        AnthropicProvider,
+        {
+            "claudeAiOauth": {
+                "accessToken": "oat-live",
+                "refreshToken": "rt-secret",
+                "expiresAt": expires_at,
+            }
+        },
+    )
+    await SettingsOverride.set_agent_billing(PROFILE_PROBE.id, "subscription")
+    profile = await get_profile(PROFILE_PROBE.id, None)
+    result_event = {
+        "type": "result",
+        "subtype": "success",
+        "structured_output": {"ok": True},
+        "total_cost_usd": 0.01,
+    }
+    run = _FakeRun(stdout_chunks=[json.dumps(result_event).encode() + b"\n"])
+    sandbox = _fake_sandbox(run)
+    sandbox.run_prompt = functools.partial(Host.run_prompt, sandbox)
+    sandbox._exec = functools.partial(Host._exec, sandbox)
+    settings = SimpleNamespace(
+        sandbox=SimpleNamespace(service_url="x", service_token="x", timeout=30.0, image="x"),
+        harness_config_root=tmp_path / "harnesses",
+        skills_dir=None,
+    )
+    monkeypatch.setattr("druks.sandbox.host.load_settings", lambda: settings)
+
+    result = await Host.run_agent(
+        sandbox,
+        agent="evaluate",
+        profile=profile,
+        prompt="p",
+        schema={"type": "object"},
+        artifact_dir=ctx.artifact_dir,
+        call_id="call-9",
+    )
+
+    assert result.status is AgentCallStatus.SUCCEEDED
+    [secret] = profile.secret_refs
+    assert secret.key == ("anthropic", profile.subscription.id, "", "")
+    [start] = sandbox.calls
+    assert not start.kwargs["extra_env"]
+    bundle = start.kwargs["credentials_bundle"]
+    assert not any(type(entry) is HomeFile for entry in bundle.home)
+    for secret in ("oat-live", "rt-secret"):
+        assert secret not in " ".join(start.kwargs["cmd"])
+        assert secret not in start.kwargs["stdin_data"].decode()
+        for artifact in (ctx.artifact_dir / "call-9").iterdir():
+            assert secret not in artifact.read_text()
+
+
+async def test_codex_subscription_token_stays_on_the_server(
+    ctx: SimpleNamespace, druks_db, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Under subscription billing the VM holds a placeholder in CODEX_SUBSCRIPTION_TOKEN,
+    and the run wrapper writes it into auth.json. The token, its refresh token, and its
+    id token reach no invocation, VM file, artifact, or result."""
+    tokens = {
+        "access_token": make_jwt({"exp": int((datetime.now(UTC) + timedelta(days=9)).timestamp())}),
+        "refresh_token": "rt-secret",
+        "id_token": make_jwt({"email": "op@example.com"}),
+        "account_id": "acc-1",
+    }
+    await connect_provider(OpenAiProvider, {"OPENAI_API_KEY": None, "tokens": tokens})
+    await SettingsOverride.set_agent_harness(PROFILE_PROBE.id, "codex")
+    await SettingsOverride.set_agent_model(PROFILE_PROBE.id, "openai/gpt-5.5")
+    await SettingsOverride.set_agent_billing(PROFILE_PROBE.id, "subscription")
+    profile = await get_profile(PROFILE_PROBE.id, None)
+    # Codex leaves its result in the box; the fake download pulls nothing, so
+    # the file is in place before the run.
+    (ctx.artifact_dir / "call-9").mkdir()
+    (ctx.artifact_dir / "call-9" / "output.json").write_text('{"ok": true}')
+    run = _FakeRun(stdout_chunks=[b'{"type":"thread.started"}\n'])
+    sandbox = _fake_sandbox(run)
+    sandbox.run_prompt = functools.partial(Host.run_prompt, sandbox)
+    sandbox._exec = functools.partial(Host._exec, sandbox)
+    settings = SimpleNamespace(
+        sandbox=SimpleNamespace(service_url="x", service_token="x", timeout=30.0, image="x"),
+        harness_config_root=tmp_path / "harnesses",
+        skills_dir=None,
+    )
+    monkeypatch.setattr("druks.sandbox.host.load_settings", lambda: settings)
+
+    result = await Host.run_agent(
+        sandbox,
+        agent="evaluate",
+        profile=profile,
+        prompt="p",
+        schema={"type": "object"},
+        artifact_dir=ctx.artifact_dir,
+        call_id="call-9",
+    )
+
+    assert result.status is AgentCallStatus.SUCCEEDED
+    assert result.output == {"ok": True}
+    [secret] = profile.secret_refs
+    assert secret.key == ("codex_subscription_token", profile.subscription.id, "", "chatgpt.com")
+    [start] = sandbox.calls
+    assert not start.kwargs["extra_env"]
+    bundle = start.kwargs["credentials_bundle"]
+    assert not any(type(entry) is HomeFile for entry in bundle.home)
+    assert "$CODEX_SUBSCRIPTION_TOKEN" in " ".join(start.kwargs["cmd"])
+    for secret in (tokens["access_token"], tokens["refresh_token"], tokens["id_token"]):
+        assert secret not in " ".join(start.kwargs["cmd"])
+        assert secret not in start.kwargs["stdin_data"].decode()
+        for artifact in (ctx.artifact_dir / "call-9").iterdir():
+            assert secret not in artifact.read_text()
+        assert secret not in repr(result) and secret not in repr(profile)

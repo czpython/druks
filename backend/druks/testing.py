@@ -33,8 +33,9 @@ from druks.durable import AgentCall, Run
 from druks.durable.datastructures import Subject
 from druks.durable.dbos_state import DBOS_SYSTEM_SCHEMA, workflow_status
 from druks.durable.engine import _dbos_database_url, configure_engine
-from druks.harnesses.models import ProviderKey
 from druks.models import Base, StoredSubject
+from druks.secrets.datastructures import Audience
+from druks.secrets.models import VaultSecret
 from druks.settings import Settings
 from druks.workflows import Workflow, WorkflowError, _bind_instance, current_workflow
 
@@ -408,16 +409,16 @@ async def seed_call(
     model: str = "gpt-5.5",
     last_error: str | None = None,
     subscription_id: str | None = None,
-    api_key_provider: str | None = None,
+    api_key_id: str | None = None,
 ) -> AgentCall:
     """An agent call on a run, stamped with the id of the agent that made it."""
-    if not (subscription_id or api_key_provider):
-        key = await ProviderKey.create(
-            provider=model.partition("/")[0],
-            key="test-key",
-            account=await Account.get_for_run(run.account_id),
+    if not (subscription_id or api_key_id):
+        key = await VaultSecret.paste(
+            Audience.provider(model.partition("/")[0]),
+            "test-key",
+            pasted_by=await Account.get_for_run(run.account_id),
         )
-        api_key_provider = key.provider
+        api_key_id = key.id
     call = AgentCall(
         run_id=run.id,
         agent=agent,
@@ -427,7 +428,7 @@ async def seed_call(
         finished_at=Base.utc_now() if status != "running" else None,
         sandbox_host_id=f"test-host-{run.id}",
         subscription_id=subscription_id,
-        api_key_provider=api_key_provider,
+        api_key_id=api_key_id,
     )
     session.add(call)
     await session.flush()

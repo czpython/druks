@@ -17,7 +17,7 @@ async def _seed_call(druks_db) -> AgentCall:
         Run(id="run-1", kind="build", account_id=(await Account.get_or_create("op@example.com")).id)
     )
     call = AgentCall(
-        api_key_provider=(await installation_key()).provider,
+        api_key_id=(await installation_key()).id,
         id="call-1",
         run_id="run-1",
         agent="summarize",
@@ -82,7 +82,7 @@ async def test_get_latest_for_run_returns_the_newest_calls_artifact(druks_db, tm
     for call_id, title in (("call-1", "First plan"), ("call-2", "Revised plan")):
         druks_db.add(
             AgentCall(
-                api_key_provider=(await installation_key()).provider,
+                api_key_id=(await installation_key()).id,
                 id=call_id,
                 run_id="run-1",
                 agent="summarize",
@@ -115,7 +115,7 @@ async def test_get_ask_resolves_the_review_artifact(druks_db, tmp_path):
     druks_db.add(run)
     druks_db.add(
         AgentCall(
-            api_key_provider=(await installation_key()).provider,
+            api_key_id=(await installation_key()).id,
             id="call-1",
             run_id="run-1",
             agent="summarize",
@@ -171,7 +171,7 @@ async def test_get_artifact_returns_recorded_content(druks_db, tmp_path, monkeyp
         Run(id="run-1", kind="build", account_id=(await Account.get_or_create("op@example.com")).id)
     )
     call = AgentCall(
-        api_key_provider=(await installation_key()).provider,
+        api_key_id=(await installation_key()).id,
         id="call-1",
         run_id="run-1",
         agent="summarize",
@@ -210,7 +210,7 @@ async def test_get_artifact_404_when_content_gone(druks_db, tmp_path, monkeypatc
     )
     druks_db.add(
         AgentCall(
-            api_key_provider=(await installation_key()).provider,
+            api_key_id=(await installation_key()).id,
             id="call-1",
             run_id="run-1",
             agent="summarize",

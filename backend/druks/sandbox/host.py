@@ -38,7 +38,6 @@ from .layout import get_helper_script_path, get_work_root
 
 if TYPE_CHECKING:
     from druks.harnesses.base import Harness
-    from druks.harnesses.models import ProviderSubscription
     from druks.harnesses.profiles import Profile
 
     from .runner import Exec
@@ -209,7 +208,6 @@ class Host:
         schema: dict[str, Any],
         artifact_dir: Path,
         call_id: str | None = None,
-        github_token: str | None = None,
         include_plugins: bool = True,
         add_dirs: tuple[str, ...] = (),
         skills: tuple[str, ...] = (),
@@ -248,15 +246,13 @@ class Host:
                 schema=schema,
                 artifact_dir=artifact_dir,
                 timeout=timeout,
-                github_token=github_token,
                 include_plugins=include_plugins,
                 add_dirs=add_dirs,
                 skills=skills,
                 extra_env=extra_env,
                 mcp_servers=mcp_servers,
                 call_id=run_id,
-                subscription=profile.subscription,
-                key=profile.key,
+                identity=profile.identity,
             )
         except HarnessError as exc:
             error = exc
@@ -288,15 +284,13 @@ class Host:
         schema: dict[str, Any],
         artifact_dir: Path,
         timeout: int,
-        github_token: str | None = None,
         include_plugins: bool = True,
         add_dirs: tuple[str, ...] = (),
         skills: tuple[str, ...] = (),
         extra_env: dict[str, str] | None = None,
         mcp_servers: tuple[McpServer, ...] = (),
         call_id: str | None = None,
-        subscription: "ProviderSubscription | None" = None,
-        key: str | None = None,
+        identity: dict | None = None,
     ) -> Any:
         """Drive one prompt through ``harness`` on this VM: the harness
         builds the invocation and parses the result; this sandbox executes it."""
@@ -306,11 +300,7 @@ class Host:
         persist_manifest(
             artifact_dir,
             call_id=run_id,
-            manifest=await harness.get_manifest(
-                mcp_servers=mcp_servers,
-                skills=skills,
-                extra_env=extra_env,
-            ),
+            manifest=await harness.get_manifest(mcp_servers=mcp_servers, skills=skills),
         )
 
         invocation = await harness.build_invocation(
@@ -318,14 +308,12 @@ class Host:
             schema=schema,
             run_id=run_id,
             ssh_username=self.ssh_username,
-            github_token=github_token,
             include_plugins=include_plugins,
             add_dirs=add_dirs,
             skills=skills,
             extra_env=extra_env,
             mcp_servers=mcp_servers,
-            subscription=subscription,
-            key=key,
+            identity=identity,
             timeout=timeout,
         )
         result = await self._exec(

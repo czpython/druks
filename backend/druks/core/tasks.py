@@ -3,9 +3,11 @@ import logging
 from druks.files.storage import reap_deleted_file_bytes
 from druks.harnesses.datastructures import RotationResult
 from druks.harnesses.directory import refresh_added_catalogs
-from druks.harnesses.models import ProviderSubscription
 from druks.harnesses.providers import get_provider, get_providers
 from druks.sandbox import gate
+from druks.sandbox.client import sandbox_client
+from druks.sandbox.models import SandboxIdentity
+from druks.secrets.models import VaultSecret
 from druks.workflows import task
 
 logger = logging.getLogger(__name__)
@@ -20,10 +22,21 @@ async def reap_deleted_files() -> None:
 
 @task(every="*/15 * * * *")
 async def refresh_tokens() -> None:
-    # Every 15 min. With an ~8h Claude TTL refreshed at <2h remaining (and
-    # codex ~10d at <24h), this keeps both tokens alive with a wide margin
-    # while doing almost nothing on most ticks.
+    # Fifteen minutes keeps every token inside its refresh margin and does
+    # almost nothing on most ticks.
     await _refresh()
+
+
+@task(every="0 * * * *")
+async def release_orphan_boxes() -> None:
+    await _release_orphan_boxes()
+
+
+async def _release_orphan_boxes() -> None:
+    # A run that died without its cleanup leaves its box until the lease ends.
+    for identity in await SandboxIdentity.list_orphans():
+        logger.info("releasing the orphan box %s of run %s", identity.host_id, identity.run_id)
+        await sandbox_client.release(host_id=identity.host_id)
 
 
 @task(every="0 6 * * *")
@@ -34,19 +47,17 @@ async def refresh_catalogs() -> None:
 
 
 async def _refresh() -> dict[str, object]:
-    subscriptions = await ProviderSubscription.list_all()
+    subscriptions = await VaultSecret.list_subscriptions()
 
-    # A refresh 401s a VM mid-call holding the old token, so a due rotation
-    # runs only while its subscription is idle — busy defers to the next tick;
-    # urgent rotates regardless. rotate_token no-ops rows outside their
-    # margin. Snapshot plain values: each refresh commits and expires the
-    # session's ORM objects mid-loop.
+    # A rotation ends the token every box holds, so a due one waits for an
+    # idle subscription unless it is urgent. Plain values: each refresh
+    # commits and expires the session's rows.
     rows = [
         (
-            subscription.provider,
+            subscription.audience_name,
             subscription.id,
-            get_provider(subscription.provider).needs_refresh(subscription),
-            get_provider(subscription.provider).refresh_is_urgent(subscription),
+            get_provider(subscription.audience_name).needs_refresh(subscription),
+            get_provider(subscription.audience_name).refresh_is_urgent(subscription),
         )
         for subscription in subscriptions
     ]
@@ -107,4 +118,3 @@ def _log_result(result: RotationResult) -> None:
             result.provider,
             result.subscription_id,
         )
-    # "fresh" and "locked" (another worker owns this row's refresh) are quiet no-ops.

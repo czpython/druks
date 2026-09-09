@@ -1,7 +1,13 @@
 from types import SimpleNamespace
 
 import pytest
-from conftest import PROFILE_PROBE, ProfileOutput, connect_anthropic_subscription
+from conftest import (
+    PROFILE_PROBE,
+    ProfileOutput,
+    connect_anthropic_subscription,
+    connect_provider,
+    make_jwt,
+)
 from drukbox_sdk import Secret
 from druks import agents
 from druks.accounts.models import Account
@@ -10,11 +16,16 @@ from druks.apps.registry import agents as agent_registry
 from druks.database import db_session
 from druks.durable.models import AgentCall
 from druks.harnesses.claude import ClaudeHarness
+from druks.harnesses.codex import CodexHarness
 from druks.harnesses.exceptions import HarnessNotConnectedError, ProfileSettingsError
-from druks.harnesses.models import ProviderCatalog, ProviderKey
+from druks.harnesses.models import ProviderCatalog
 from druks.harnesses.opencode import OpenCodeHarness
 from druks.harnesses.profiles import check_profile, get_profile
+from druks.harnesses.providers import OpenAiProvider
 from druks.sandbox.constants import MAX_AGENT_TIMEOUT_SECONDS
+from druks.secrets.datastructures import Audience
+from druks.secrets.enums import SecretKind
+from druks.secrets.models import VaultSecret
 from druks.testing import seed_call, seed_run
 from druks.user_settings import reads
 from druks.user_settings.models import SettingsOverride, SettingsProfile
@@ -51,11 +62,11 @@ async def test_check_judges_the_triple_together(druks_db):
         await check_profile("claude", "claude-opus-4-7", "subscription")
 
 
-async def _key() -> ProviderKey:
-    return await ProviderKey.create(
-        provider="anthropic",
-        key="sk-shared",
-        account=await Account.get_or_create("ops@example.com"),
+async def _key() -> VaultSecret:
+    return await VaultSecret.paste(
+        Audience.provider("anthropic"),
+        "sk-shared",
+        pasted_by=await Account.get_or_create("ops@example.com"),
     )
 
 
@@ -78,25 +89,25 @@ async def test_call_keeps_its_billing_reference_after_disconnect(druks_db, billi
         run,
         PROFILE_PROBE.id,
         subscription_id=subscription.id if billing == "subscription" else None,
-        api_key_provider=key.provider if billing == "api_key" else None,
+        api_key_id=key.id if billing == "api_key" else None,
     )
 
     if billing == "subscription":
-        await subscription.delete()
-        await subscription.update_payload({"late_refresh": "secret"}, expires_at=None)
-        assert not dict(subscription.payload)
-        assert not subscription.is_connected
-        assert await type(subscription).get(subscription.id) is None
+        await subscription.revoke("user")
+        await subscription.update_secrets({"late_refresh": "secret"}, expires_at=None)
+        assert not dict(subscription.secrets)
+        assert not subscription.is_live
+        assert await type(subscription).reload(subscription.id) is None
         assert call.subscription_id == subscription.id
         connected = await connect_anthropic_subscription("a@example.com")
         assert connected.id == subscription.id
     else:
-        await key.delete()
+        await key.revoke("user")
         await db_session().refresh(key)
-        assert key.value.decrypt() == ""
-        assert await ProviderKey.get(key.provider) is None
-        assert call.api_key_provider == key.provider
-        assert (await _key()).provider == key.provider
+        assert dict(key.secrets) == {}
+        assert await VaultSecret.lookup(SecretKind.STATIC, key.audience) is None
+        assert call.api_key_id == key.id
+        assert (await _key()).id == key.id
 
     assert (await AgentCall.get(call.id)).id == call.id
 
@@ -115,7 +126,7 @@ async def test_call_requires_exactly_one_billing_reference(druks_db, both):
                     model="anthropic/claude-opus-4-7",
                     sandbox_host_id="test-host",
                     subscription_id=subscription.id if both else None,
-                    api_key_provider=key.provider if both else None,
+                    api_key_id=key.id if both else None,
                 )
             )
             await druks_db.flush()
@@ -131,10 +142,50 @@ async def test_a_subscription_agent_runs_as_its_actor_or_the_default_account(dru
     assert as_actor.subscription.id == actor.id
     assert as_actor.charged_account_id == actor.account_id
     assert unattended.subscription.id == default_subscription.id
-    assert (as_actor.secrets, as_actor.secrets_id, as_actor.key) == ({}, "", None)
+    assert as_actor.identity == {"email": "b@example.com"}
+    assert (as_actor.secrets, as_actor.secrets_id) == ({}, actor.id)
+    [secret] = as_actor.secret_refs
+    assert secret.key == ("anthropic", actor.id, "", "")
     assert as_actor.harness_class is ClaudeHarness
     assert as_actor.model == "anthropic/claude-opus-4-7"
     assert (as_actor.effort, as_actor.timeout, as_actor.fast_mode) == ("high", 1800, False)
+
+
+async def test_a_codex_subscription_profile_carries_its_login_facts_and_its_ref(druks_db):
+    id_token = make_jwt(
+        {
+            "https://api.openai.com/auth": {
+                "chatgpt_account_id": "acc-1",
+                "chatgpt_plan_type": "pro",
+            },
+            "email": "a@example.com",
+        }
+    )
+    subscription = await connect_provider(
+        OpenAiProvider,
+        {
+            "OPENAI_API_KEY": None,
+            "tokens": {
+                "access_token": make_jwt({"exp": 4_102_444_800}),
+                "refresh_token": "R0",
+                "id_token": id_token,
+                "account_id": "acc-1",
+            },
+        },
+        provider_email="a@example.com",
+    )
+    await SettingsOverride.set_agent_harness(PROFILE_PROBE.id, "codex")
+    await SettingsOverride.set_agent_model(PROFILE_PROBE.id, "openai/gpt-5.5")
+
+    profile = await get_profile(PROFILE_PROBE.id, subscription.account_id)
+
+    assert profile.harness_class is CodexHarness
+    # The facts the box's login names come from the row and its id token; the
+    # tokens stay on the server.
+    assert profile.identity == {"email": "a@example.com", "account_id": "acc-1", "plan": "pro"}
+    [ref] = profile.secret_refs
+    assert ref.key == ("codex_subscription_token", subscription.id, "", "chatgpt.com")
+    assert profile.secrets_id == subscription.id
 
 
 async def test_a_subscription_agent_refuses_without_the_actors_own_subscription(druks_db):
@@ -156,12 +207,8 @@ async def test_a_key_agent_runs_on_the_installations_key_for_anyone(druks_db):
     unattended = await get_profile(PROFILE_PROBE.id, None)
 
     # Claude reads the key from a placeholder in the VM, never from its invocation.
-    assert (as_actor.secrets, as_actor.key, as_actor.subscription) == (
-        {"anthropic": _SHARED_ENTRY},
-        None,
-        None,
-    )
-    assert unattended.secrets == {"anthropic": _SHARED_ENTRY}
+    assert (as_actor.secrets, as_actor.subscription) == ({"anthropic": _SHARED_ENTRY}, None)
+    assert (unattended.secrets, unattended.identity) == ({"anthropic": _SHARED_ENTRY}, {})
     # The entries' identity is the pasted key, with no secret material.
     assert as_actor.secrets_id == f"anthropic.{pasted.updated_at:%Y%m%dT%H%M%S}"
     assert "sk-shared" not in as_actor.secrets_id
@@ -177,27 +224,24 @@ async def test_a_key_agent_refuses_without_the_key(druks_db):
         await get_profile(PROFILE_PROBE.id, actor.account_id)
 
 
-async def test_opencode_runs_an_added_provider_with_its_key_and_model(druks_db):
+async def test_an_added_provider_refuses_until_its_transport_is_proven(druks_db):
+    # A Models.dev provider has no proven transport, so no raw key enters a box.
     await ProviderCatalog.create(
         "openrouter",
         [{"id": "openrouter/anthropic/claude-sonnet-4", "label": "Claude Sonnet 4"}],
         label="OpenRouter",
     )
-    await ProviderKey.create(
-        provider="openrouter",
-        key="sk-openrouter",
-        account=await Account.get_or_create("ops@example.com"),
+    await VaultSecret.paste(
+        Audience.provider("openrouter"),
+        "sk-openrouter",
+        pasted_by=await Account.get_or_create("ops@example.com"),
     )
     await SettingsOverride.set_agent_harness(PROFILE_PROBE.id, "opencode")
     await SettingsOverride.set_agent_model(PROFILE_PROBE.id, "openrouter/anthropic/claude-sonnet-4")
     await SettingsOverride.set_agent_billing(PROFILE_PROBE.id, "api_key")
 
-    profile = await get_profile(PROFILE_PROBE.id, None)
-
-    assert profile.harness_class is OpenCodeHarness
-    assert profile.model == "openrouter/anthropic/claude-sonnet-4"
-    # OpenCode still reads the key from its invocation.
-    assert (profile.secrets, profile.key) == ({}, "sk-openrouter")
+    with pytest.raises(ProfileSettingsError, match="'openrouter'"):
+        await get_profile(PROFILE_PROBE.id, None)
 
 
 async def test_an_added_provider_without_a_key_names_it(druks_db):
@@ -233,7 +277,7 @@ async def test_a_key_only_harness_bills_the_key(druks_db):
     profile = await get_profile(PROFILE_PROBE.id, None)
 
     assert profile.harness_class is OpenCodeHarness
-    assert (profile.secrets, profile.key) == ({}, "sk-shared")
+    assert profile.secrets == {"anthropic": _SHARED_ENTRY}
 
 
 async def test_a_stored_triple_no_harness_runs_refuses(druks_db):
@@ -273,12 +317,8 @@ async def test_an_agent_reads_its_own_profile(druks_db):
         await PROFILE_PROBE.get_profile()
 
     assert (subscribed.harness, subscribed.model_id) == ("claude", "claude-opus-4-7")
-    assert (subscribed.billing, subscribed.secrets, subscribed.key) == ("subscription", {}, None)
-    assert (keyed.billing, keyed.secrets, keyed.key) == (
-        "api_key",
-        {"anthropic": _SHARED_ENTRY},
-        None,
-    )
+    assert (subscribed.billing, subscribed.secrets) == ("subscription", {})
+    assert (keyed.billing, keyed.secrets) == ("api_key", {"anthropic": _SHARED_ENTRY})
 
 
 async def test_an_unregistered_agent_is_named(druks_db):

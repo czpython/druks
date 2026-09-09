@@ -7,8 +7,10 @@ import pytest
 from conftest import connect_anthropic_subscription, connect_provider
 from druks.accounts.models import Account
 from druks.harnesses.datastructures import ParsedMetric, ParsedUsage
-from druks.harnesses.models import ProviderKey, ProviderSubscription
 from druks.harnesses.providers import AnthropicProvider, OpenAiProvider
+from druks.secrets.datastructures import Audience
+from druks.secrets.enums import SecretKind
+from druks.secrets.models import VaultSecret
 from druks.settings import Settings
 from druks.testing import configure_app_for_test, make_settings, seed_call, seed_run
 from druks.usage.models import UsageScrape
@@ -305,23 +307,25 @@ async def test_usage_excludes_another_accounts_scrape(client, druks_db) -> None:
 
 
 async def test_usage_reports_viewers_subscription_identity(client, druks_db) -> None:
-    await ProviderSubscription.connect(
-        provider="anthropic",
-        account=await Account.get_or_create("other@example.com"),
-        payload={"claudeAiOauth": {"accessToken": "other"}},
+    await VaultSecret.store(
+        SecretKind.SUBSCRIPTION,
+        Audience.provider("anthropic"),
+        account_id=(await Account.get_or_create("other@example.com")).id,
+        secrets={"claudeAiOauth": {"accessToken": "other"}},
+        identity={"email": "other-seat@example.com"},
         expires_at=None,
-        provider_email="other-seat@example.com",
     )
     body = client.get("/api/usage").json()
     assert _provider(body, "anthropic")["connected"] is False
     assert _provider(body, "anthropic")["providerEmail"] is None
 
-    await ProviderSubscription.connect(
-        provider="anthropic",
-        account=await Account.get_or_create("op@example.com"),
-        payload={"claudeAiOauth": {"accessToken": "mine"}},
+    await VaultSecret.store(
+        SecretKind.SUBSCRIPTION,
+        Audience.provider("anthropic"),
+        account_id=(await Account.get_or_create("op@example.com")).id,
+        secrets={"claudeAiOauth": {"accessToken": "mine"}},
+        identity={"email": "subscription@example.com"},
         expires_at=None,
-        provider_email="subscription@example.com",
     )
     body = client.get("/api/usage").json()
     assert _provider(body, "anthropic")["connected"] is True
@@ -388,8 +392,10 @@ async def test_refresh_scrapes_only_the_viewers_logins(client, druks_db, monkeyp
 
 async def test_refresh_never_scrapes_a_key(client, druks_db, monkeypatch) -> None:
     # A key has no quota; only a subscription is polled.
-    await ProviderKey.create(
-        provider="anthropic", key="sk", account=await Account.get_or_create("op@example.com")
+    await VaultSecret.paste(
+        Audience.provider("anthropic"),
+        "sk",
+        pasted_by=await Account.get_or_create("op@example.com"),
     )
     poll_usage = AsyncMock()
     monkeypatch.setattr(AnthropicProvider, "poll_usage", poll_usage)

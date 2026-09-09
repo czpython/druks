@@ -7,6 +7,7 @@ import tomllib
 from collections.abc import Callable, Mapping, MutableMapping
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 import tomlkit
 
@@ -48,6 +49,13 @@ _OWNED_ENV_KEYS = frozenset(
         "DRUKS_SANDBOX_SERVICE_URL",
         "DRUKS_SANDBOX_SERVICE_TOKEN",
         "DRUKS_SANDBOX_IMAGE",
+        "SECRETS_KEY",
+        "SECRETS_PROXY_URL",
+        "SECRETS_PROXY_CA_FILE",
+        "SECRETS_EXCHANGE_URL",
+        "SECRETS_EXCHANGE_BIND_HOST",
+        "SECRETS_EXCHANGE_PORT",
+        "DRUKS_SECRETS_PROXY_BIND_HOST",
     }
 )
 _KNOWN_TOML_KEYS = {
@@ -63,6 +71,7 @@ _KNOWN_TOML_KEYS = {
     "secrets": (
         "postgres_password",
         "secrets_key",
+        "drukbox_secrets_key",
     ),
     "paths": ("data_dir", "harness_config_root"),
     "sandbox": (
@@ -70,6 +79,9 @@ _KNOWN_TOML_KEYS = {
         "service_url",
         "service_token",
         "image",
+        "proxy_url",
+        "issuer_url",
+        "exchange_url",
         "browser_login_proxy",
         "browser_login_tz",
         "timeout",
@@ -168,6 +180,7 @@ webhook_host = ""
 [secrets]
 postgres_password = ""
 secrets_key = ""
+drukbox_secrets_key = ""
 
 # Host paths.
 [paths]
@@ -180,6 +193,16 @@ provider = ""
 service_url = ""
 service_token = ""
 image = ""
+# The secrets proxy, at the address a sandbox dials. A sandbox sends its HTTPS
+# through it. The docker shape uses the Docker bridge gateway. A remote shape
+# names the address of this host that its sandboxes reach, for example the
+# tailnet address on exe. docker-sbx runs no proxy and leaves it empty.
+proxy_url = ""
+# The mint base URL the exchange dials, and the exchange address. Both default
+# to the host loopback. Leave them empty unless web or the exchange listens
+# elsewhere.
+issuer_url = ""
+exchange_url = ""
 # An HTTP proxy for the login window. The login then leaves from a different IP
 # than the box. Use it for sign-in flows that refuse the box IP. Examples:
 # http://172.17.0.1:8888, or http://user:pass@host:port for a proxy with a user
@@ -213,6 +236,8 @@ def _fresh_values(*, provider: str, home: str) -> tuple[tuple[tuple[str, ...], s
             (("sandbox", "service_url"), "http://127.0.0.1:8780"),
             (("sandbox", "service_token"), "dev-token"),
             (("sandbox", "image"), "ghcr.io/czpython/druks/sandbox:latest"),
+            # Sandbox containers reach the host at the bridge gateway.
+            (("sandbox", "proxy_url"), "http://172.17.0.1:8880"),
         )
     elif provider == "exe":
         shape = (
@@ -244,6 +269,7 @@ def _fresh_values(*, provider: str, home: str) -> tuple[tuple[tuple[str, ...], s
         (("sandbox", "provider"), provider),
         (("secrets", "postgres_password"), _hex_secret()),
         (("secrets", "secrets_key"), _secrets_key()),
+        (("secrets", "drukbox_secrets_key"), _secrets_key()),
         (("paths", "data_dir"), f"{home.rstrip('/')}/druks-data"),
         (("paths", "harness_config_root"), f"{home.rstrip('/')}/.config/druks/harnesses"),
         *shape,
@@ -357,6 +383,7 @@ def _render_env(
     # start without it. A compose-side default would replace that safe stop
     # with a known token.
     service_tokens = _get_string(config, ("sandbox", "service_token"))
+    proxy_url = _get_string(config, ("sandbox", "proxy_url"))
 
     sections = (
         (
@@ -383,6 +410,10 @@ def _render_env(
             (
                 ("DEFAULT_HOST_PROVIDER", provider),
                 ("SERVICE_TOKENS", service_tokens),
+                ("SECRETS_KEY", _get_string(config, ("secrets", "drukbox_secrets_key"))),
+                ("SECRETS_PROXY_URL", proxy_url),
+                # The proxy binds the address sandboxes dial and nothing else.
+                ("DRUKS_SECRETS_PROXY_BIND_HOST", urlsplit(proxy_url).hostname or ""),
             ),
         ),
     )
@@ -467,6 +498,7 @@ def _collect_gaps(config: dict[str, Any]) -> list[str]:
         for path in (
             ("secrets", "postgres_password"),
             ("secrets", "secrets_key"),
+            ("secrets", "drukbox_secrets_key"),
             ("identity", "mode"),
             ("sandbox", "provider"),
             ("sandbox", "service_url"),
@@ -509,6 +541,8 @@ def _collect_gaps(config: dict[str, Any]) -> list[str]:
         for key in ("EXE_API_TOKEN", "TAILSCALE_TAILNET"):
             if not _get_string(config, ("sandbox", "exe", key)):
                 gaps.append(f"sandbox.exe.{key} is empty")
+        if not _get_string(config, ("sandbox", "proxy_url")):
+            gaps.append("sandbox.proxy_url is empty")
     elif provider != "docker" and not any(
         value for key, value in provider_environment.items() if not _is_reserved_env_key(key)
     ):
