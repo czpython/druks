@@ -224,8 +224,8 @@ function ActivityFeed({ filters, params }: { filters: EventFilters; params: URLS
                   ref={(node) => { if (node) rows.current.set(event.seq, node); else rows.current.delete(event.seq) }}
                   onClick={() => updateParams('selected', String(event.seq))}>
                   <CircleDot size={16} className="activity-row-glyph" aria-hidden="true" />
-                  <span className="activity-row-body"><strong>{line.label}</strong>
-                    <span>{line.subject || 'No work label recorded'}</span>
+                  <span className="activity-row-body"><strong>{line.label}</strong>{' '}
+                    <span>{line.subject || 'No work label recorded'}</span>{' '}
                     {(event.summary || event.reason) && <span className="activity-context">{event.summary || event.reason}</span>}
                   </span>
                   <time dateTime={event.at} title={`${absTime(event.at)} ${timezone}`}>{absTimeCompact(event.at)}</time>
