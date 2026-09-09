@@ -1,15 +1,15 @@
 import type { FeedItem } from '../api/types'
-import { appLabel, getAppUI } from '../apps/registry'
+import { appLabel, getAppUI, registeredApps, type ActivityEvent } from '../apps/registry'
 
 // What a workflow doing something is called. The platform owns these words because it
 // owns the lifecycle; an app's own milestones are already named by their type.
 const LIFECYCLE_VERBS: Record<string, string> = {
   'workflow.scheduled': 'queued',
   'workflow.running': 'response received',
-  'workflow.parked': 'waiting on you',
+  'workflow.parked': 'input requested',
   'workflow.finished': 'finished',
   'workflow.failed': 'failed',
-  'workflow.cancelled': 'cancelled',
+  'workflow.cancelled': 'stopped',
 }
 
 export interface EventLine {
@@ -28,7 +28,7 @@ export interface EventLine {
 
 export function eventLine(event: FeedItem): EventLine {
   return {
-    label: (event.app && getAppUI(event.app)?.activityLabel?.(event)) || label(event),
+    label: activityLabel(event),
     subject: event.subjectLabel ?? '',
     source: localName(event.workflow) || appLabel(event.app || 'druks'),
     path: subjectPath(event),
@@ -36,11 +36,13 @@ export function eventLine(event: FeedItem): EventLine {
   }
 }
 
-function label(event: FeedItem): string {
+export function activityLabel(event: ActivityEvent & { app?: string | null }): string {
+  const appWords = event.app && getAppUI(event.app)?.activityLabel?.(event)
+  if (appWords) return appWords
   const verb = LIFECYCLE_VERBS[event.kind]
   if (verb) {
     const workflow = localName(event.workflow)
-    return workflow ? `${workflow} ${verb}` : verb
+    return workflow ? `${words(workflow)} ${verb}` : words(verb)
   }
   // An app's milestone type is its own word ("merged", "needs_answers"), and an
   // unrecognised kind reads as itself rather than disappearing.
@@ -70,4 +72,36 @@ function localName(kind: string | null | undefined): string {
 function words(identifier: string): string {
   const text = identifier.replace(/[._]/g, ' ')
   return text.charAt(0).toUpperCase() + text.slice(1)
+}
+
+
+/** Type filters name an exact topic without inventing a workflow or gate. */
+export function activityTypeLabel(kind: string, app?: string): string {
+  if (LIFECYCLE_VERBS[kind]) return words(LIFECYCLE_VERBS[kind])
+  const apps = app ? [getAppUI(app)] : registeredApps()
+  for (const entry of apps) {
+    const label = entry?.activityLabel?.({ kind })
+    if (label) return label
+  }
+  return words(kind)
+}
+
+/** Convert a calendar day to its start, or the next day's start, in UTC. */
+export function activityDay(date: string, timezone: string, nextDay = false): string {
+  const [year, month, day] = date.split('-').map(Number)
+  const midnight = Date.UTC(year!, month! - 1, day! + Number(nextDay))
+  const formatter = new Intl.DateTimeFormat('en-GB', {
+    timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
+  })
+  let instant = midnight
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const parts = Object.fromEntries(formatter.formatToParts(instant).map(({ type, value }) => [type, value]))
+    const local = Date.UTC(Number(parts.year), Number(parts.month) - 1, Number(parts.day),
+      Number(parts.hour), Number(parts.minute), Number(parts.second))
+    const correction = midnight - local
+    instant += correction
+    if (correction === 0) break
+  }
+  return new Date(instant).toISOString()
 }

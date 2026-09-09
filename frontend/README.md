@@ -25,7 +25,7 @@ runs lint, tests, and build for PRs into `main` and `codex/` stack branches.
 
 - The work sidebar and searchable installed app roster
 - Settings
-- Dashboard, Events, and Usage
+- Dashboard, Activity, and Usage
 - Shared routing and fallback behavior.
 
 Bundled app UI lives under `src/apps/<name>/`. Its module calls
@@ -35,7 +35,7 @@ Import the module one time from `src/apps/index.ts`. The shell finds the
 registration and does not hardcode the app name.
 
 The work sidebar keeps the same destinations across app pages. The Dashboard
-opens at `/`. Events and Usage have shared routes. App-declared navigation appears below the page
+opens at `/`. Activity and Usage have shared routes. App-declared navigation appears below the page
 header. Settings opens from the bottom of the sidebar. Below 650 px, a
 navigation button opens a modal drawer. Escape closes the drawer and returns
 focus to the button.
@@ -107,6 +107,24 @@ Keep raw paths and queries in the retained work context. Wouter's public
 router hooks, decode each subject component once, and let `subjectApi` encode
 the HTTP path. Canonical slug replacement preserves the raw query and hash
 and only runs while the owner page is visible.
+
+## Activity
+
+Activity at `/events` shows recorded changes to app work. Search matches recorded
+work labels only. App, exact Activity type, and day filters apply to the same
+HTTP history and live stream. Day boundaries use the operator timezone and the
+next local midnight. The first HTTP page supplies type choices for the selected
+app scope. Pagination and live updates retain those choices.
+
+Each selected row opens a 360 px panel, or a full-width page on narrow screens.
+The panel reads the exact saved artifact and uses the shared Markdown renderer.
+It shows historical request and reply facts. Owner links retain the recorded run
+and request round; current approval controls stay on the owner page.
+
+Filters and selection remain in the URL when the operator leaves and returns.
+Close and Escape restore row focus. New rows wait behind **New activity** while
+older content or details are in use. **Pause updates** affects this feed only.
+The feed shows connection state and retains its context after a failed read.
 
 ## API and live data
 
