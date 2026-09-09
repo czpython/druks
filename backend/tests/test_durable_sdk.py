@@ -236,11 +236,11 @@ def _build_units():
         async def run_multistep(self) -> None:
             await self.announce("test.revision", revision=1)
             await self.announce("test.revision", revision=2)
-            SINK.append(f"announced:{self.workflow_id}")
-            try:
-                await DBOS.recv_async("finish")
-            finally:
-                SINK.append(f"exited:{self.workflow_id}")
+            marker = f"announced:{self.workflow_id}"
+            SINK.append(marker)
+            if SINK.count(marker) == 1:
+                # A worker interruption leaves the run available for recovery.
+                raise asyncio.CancelledError("Simulated worker interruption")
 
     return (
         SampleFlow,
@@ -1260,11 +1260,9 @@ async def test_announcements_survive_subscriber_retry_and_workflow_replay(rt):
         await _wait_for(rt.engine, workflow_id, lambda run: SINK.count(marker) == 1)
         assert deliveries == [(1, 1), (1, 1), (2, 2)]
 
-        # DBOS will not replay a run while its first invocation is still active.
-        await DBOS.cancel_workflow_async(workflow_id)
-        await _wait_for(rt.engine, workflow_id, lambda run: f"exited:{workflow_id}" in SINK)
         await DBOS.resume_workflow_async(workflow_id)
-        await _wait_for(rt.engine, workflow_id, lambda run: SINK.count(marker) == 2)
+        await _wait_for(rt.engine, workflow_id, lambda run: run.state == RunState.FINISHED)
+        assert SINK.count(marker) == 2
 
         async with get_session(rt.engine) as session:
             events = list(
