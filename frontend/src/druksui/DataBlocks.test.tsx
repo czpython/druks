@@ -10,7 +10,14 @@ import { PagesContext } from './pages'
 afterEach(cleanup)
 
 const PAGES: PageEntry[] = [
-  { name: 'note', label: 'note', path: '/field_notes/notes/{note_id}', parent: '', order: 0 },
+  {
+    name: 'note',
+    label: 'note',
+    path: '/field_notes/notes/{note_id}',
+    parent: '',
+    subjectType: '',
+    order: 0,
+  },
 ]
 
 function renderBlocks(blocks: Block[]) {
@@ -49,7 +56,6 @@ describe('values', () => {
       },
     ])
 
-    // One text, one number, one status, one time in each of the four blocks.
     expect(screen.getAllByText('peer-7')).toHaveLength(4)
     expect(screen.getAllByText('1,234')).toHaveLength(4)
     expect(screen.getAllByText('parked')).toHaveLength(4)
@@ -216,7 +222,6 @@ describe('Table', () => {
       },
     ])
 
-    // A heading over an empty box is worse than no block.
     expect(container.querySelector('.dui-table-block')).toBeNull()
     expect(screen.queryByText('Peers')).toBeNull()
   })
@@ -250,12 +255,10 @@ describe('Table', () => {
     ])
 
     expect(container.querySelector('.dui-table-scroll')).toBeTruthy()
-    // The headers stay in the table, so every cell keeps the column it belongs to.
     expect(screen.getAllByRole('columnheader').map((one) => one.textContent)).toEqual([
       'Peer',
       'Answers',
     ])
-    // The first cell names its row, so a reader hears which row a value is in.
     expect(screen.getAllByRole('rowheader').map((one) => one.textContent)).toEqual(['peer-7'])
     expect(container.querySelectorAll('td')[0]?.getAttribute('data-align')).toBe('end')
   })
@@ -324,7 +327,6 @@ describe('Chart', () => {
       '2',
     ])
     expect(within(data).getByText('Answers per day — Answers')).toBeTruthy()
-    // The drawing itself carries no information a reader needs.
     expect(container.querySelector('.dui-chart-plot')?.getAttribute('aria-hidden')).toBe('true')
     expect(container.querySelectorAll('.dui-chart-bar')).toHaveLength(4)
   })
@@ -368,7 +370,6 @@ describe('Chart kinds', () => {
     const zero = container.querySelector('line.dui-chart-zero')
     const baseline = Number(zero?.getAttribute('y1'))
     const [above, below] = Array.from(container.querySelectorAll('rect.dui-chart-bar'))
-    // The positive bar ends at the zero line; the negative one starts there.
     expect(Number(above?.getAttribute('y')) + Number(above?.getAttribute('height'))).toBeCloseTo(
       baseline,
       5,

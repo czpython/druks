@@ -7,6 +7,7 @@ class PageEntry(Schema):
     path: str
     parent: str
     order: int
+    subject_type: str = ""
 
 
 class Operation(Schema):

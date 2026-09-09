@@ -157,7 +157,7 @@ async def new_note():
     )
 
 
-@ui.page("/notes/{note_id}")
+@ui.page("/notes/{note_id}", subject=Note)
 async def note(note_id: int):
     found = await Note.get(note_id)
     if found:

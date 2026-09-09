@@ -3,6 +3,7 @@ from datetime import datetime
 from sqlalchemy import CheckConstraint, String, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy_encrypted_field import EncryptedBytesField, SecretBytes
 
 from druks.browser.constants import (
     BROWSER_SESSION_NAME_MAX_LENGTH,
@@ -12,7 +13,6 @@ from druks.browser.enums import BrowserSessionPayloadFormat, BrowserSessionStatu
 from druks.core.models import Uuid7Pk
 from druks.database import db_session
 from druks.models import Base
-from druks.secrets.fields import EncryptedBytesField, SecretBytes
 
 
 class StoredBrowserSession(Base, Uuid7Pk):

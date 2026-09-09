@@ -40,7 +40,14 @@ const ROSTER = [
     hasFrontend: false,
     navigation: [],
     operations: [],
-    pages: [{ name: 'note', label: 'note', path: '/field_notes/notes/{note_id}', parent: '', order: 0 }],
+    pages: [{
+      name: 'note',
+      label: 'note',
+      path: '/field_notes/notes/{note_id}',
+      parent: '',
+      subjectType: '',
+      order: 0,
+    }],
   },
 ] as App[]
 
@@ -91,8 +98,6 @@ describe('mergeRegions', () => {
 
     const merged = mergeRegions(previous, fresh, NOTE_7)
 
-    // The block outside the region is the object it already was, so React
-    // renders nothing there again.
     expect(merged.blocks[0]).toBe(stable)
     expect(merged.blocks[1]).toEqual(region('decision', 'answered'))
     expect(merged.title).toBe(previous.title)
@@ -134,7 +139,6 @@ function renderPage(first: PageSnapshot) {
   )
 }
 
-// The snapshot handler the page gave the subject stream.
 function fireSnapshot() {
   const options = sse.mock.calls.at(-1)?.[1]
   return act(async () => {

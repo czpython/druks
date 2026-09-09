@@ -4,13 +4,18 @@ import logging
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any, Literal, TypeVar
 
 from githubkit import AppAuthStrategy, AppInstallationAuthStrategy, GitHub
 from githubkit.exception import GraphQLFailed, RequestFailed
 
 from druks.core.apis.exceptions import GitHubAppNotInstalledError
-from druks.services.models import ServiceIdentity
+from druks.core.utils.time import ensure_utc
+from druks.secrets.datastructures import Audience
+from druks.secrets.enums import SecretKind
+from druks.secrets.models import VaultSecret
+from druks.services.exceptions import ServiceNotConnectedError
 from druks.settings import load_settings
 
 logger = logging.getLogger(__name__)
@@ -281,8 +286,20 @@ class GitHubClient:
                     exc_info=True,
                 )
 
+    @classmethod
+    def from_secret(cls, row: VaultSecret) -> "GitHubClient":
+        """The client of a connected GitHub App's vault row. PEM plaintext
+        exists only here, feeding the auth strategy."""
+        return cls(
+            app_id=row.identity["app_id"],
+            private_key=row.secrets["private_key"],
+            base_url=load_settings().github_api_url,
+            slug=row.identity["slug"],
+        )
+
     @_retry_on_401
-    async def token_for_repo(self, repo: str) -> str:
+    async def token_for_repo(self, repo: str) -> tuple[str, datetime]:
+        """The installation token for ``repo`` and the expiry GitHub gave it."""
         # The decorator drops the cached installation client + id on a
         # 401 and retries once. Important here because git is the
         # consumer of the minted token — once it's handed to git,
@@ -297,7 +314,8 @@ class GitHubClient:
         token_resp = await self._app.rest.apps.async_create_installation_access_token(
             installation_id,
         )
-        return str(token_resp.parsed_data.token)
+        token = token_resp.parsed_data
+        return str(token.token), ensure_utc(datetime.fromisoformat(str(token.expires_at)))
 
     @_retry_on_401
     async def get_repository(self, repo: str) -> dict[str, Any]:
@@ -574,10 +592,6 @@ async def get_github_client() -> GitHubClient:
     ``ServiceNotConnectedError`` when GitHub isn't connected. ``github_api_url``
     stays a Settings input because it is transport, not identity. PEM plaintext
     exists only here, feeding the client's auth strategy."""
-    row = await ServiceIdentity.get(GITHUB)
-    return GitHubClient(
-        app_id=row.identity["app_id"],
-        private_key=row.secrets["private_key"],
-        base_url=load_settings().github_api_url,
-        slug=row.identity["slug"],
-    )
+    if row := await VaultSecret.lookup(SecretKind.APP_KEY, Audience.service(GITHUB)):
+        return GitHubClient.from_secret(row)
+    raise ServiceNotConnectedError(GITHUB)

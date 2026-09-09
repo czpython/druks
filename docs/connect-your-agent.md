@@ -18,7 +18,7 @@ from the agent-tagged API routes. The platform contributes seven tools:
 Each installed app can add its own tools. `tools/list` is the live catalog.
 Each request uses a personal access token in
 `Authorization: Bearer <token>`. Mint and revoke tokens in
-**Settings → Tokens**. See
+**Settings → API tokens**. See
 [personal access tokens](configuration.md#personal-access-tokens) for token
 lifecycle and incident steps.
 

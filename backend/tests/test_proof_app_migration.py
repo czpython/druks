@@ -25,7 +25,10 @@ def _config() -> Config:
 
 
 def _drop(conn) -> None:
-    conn.exec_driver_sql("DROP TABLE IF EXISTS field_notes_notes, alembic_version_field_notes")
+    conn.exec_driver_sql(
+        "DROP TABLE IF EXISTS field_notes_notes, field_notes_repositories, "
+        "alembic_version_field_notes"
+    )
 
 
 def test_proof_migration_applies_under_its_own_version_table(request):
@@ -37,12 +40,12 @@ def test_proof_migration_applies_under_its_own_version_table(request):
     try:
         command.upgrade(_config(), "head")
         with engine.connect() as conn:
-            table = conn.exec_driver_sql("SELECT to_regclass('field_notes_notes')").scalar()
-            assert table is not None
+            for table in ("field_notes_notes", "field_notes_repositories"):
+                assert conn.exec_driver_sql(f"SELECT to_regclass('{table}')").scalar()
             head = conn.exec_driver_sql(
                 "SELECT version_num FROM alembic_version_field_notes"
             ).scalar()
-            assert head == "field_notes_0001"
+            assert head == "field_notes_0002"
     finally:
         with engine.connect() as conn:
             _drop(conn)

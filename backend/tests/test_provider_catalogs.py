@@ -14,9 +14,11 @@ from druks.harnesses.directory import (
     refresh_added_catalogs,
 )
 from druks.harnesses.exceptions import CatalogError
-from druks.harnesses.models import ProviderCatalog, ProviderKey
+from druks.harnesses.models import ProviderCatalog
 from druks.harnesses.providers import AnthropicProvider, OpenAiProvider
 from druks.redis import get_client
+from druks.secrets.datastructures import Audience
+from druks.secrets.models import VaultSecret
 
 _LLAMA = {"id": "groq/llama-4", "label": "Llama 4"}
 _GROQ = {"name": "Groq", "env": ["GROQ_API_KEY"], "models": {"llama-4": {"name": "Llama 4"}}}
@@ -243,7 +245,7 @@ async def test_refresh_without_a_login_stores_nothing(monkeypatch, druks_db):
 
 async def test_openai_refresh_reads_its_own_list_over_the_key(monkeypatch, druks_db):
     account = await Account.get_or_create("op@example.com")
-    await ProviderKey.create(provider="openai", key="sk-openai", account=account)
+    await VaultSecret.paste(Audience.provider("openai"), "sk-openai", pasted_by=account)
     calls = _mock_get(monkeypatch, _resp(200, {"data": [{"id": "gpt-5.5"}, {"id": "whisper-1"}]}))
     await OpenAiProvider.refresh_catalog()
     assert calls[0]["url"] == "https://api.openai.com/v1/models"
@@ -307,8 +309,8 @@ async def test_adding_a_directory_provider_creates_its_catalog(monkeypatch, druk
 
 async def test_added_catalogs_refresh_from_the_directory(monkeypatch, druks_db, druks_redis):
     account = await Account.get_or_create("op@example.com")
-    await ProviderKey.create(provider="groq", key="gsk", account=account)
-    await ProviderKey.create(provider="anthropic", key="sk-ant", account=account)
+    await VaultSecret.paste(Audience.provider("groq"), "gsk", pasted_by=account)
+    await VaultSecret.paste(Audience.provider("anthropic"), "sk-ant", pasted_by=account)
     calls = _mock_get(monkeypatch, _resp(200, {"groq": _GROQ}))
 
     await refresh_added_catalogs()

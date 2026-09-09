@@ -98,7 +98,7 @@ export function LoginWindowPage({ name }: Props) {
     <Page className="page-login-window" scroll="internal">
       <header className="login-window-head">
         <div>
-          <span className="login-window-kicker mono">browser session</span>
+          <span className="login-window-kicker mono">browser profile</span>
           <h1>{name}</h1>
           <p className={`login-window-connection is-${connection}`}>
             {CONNECTION_COPY[connection]}

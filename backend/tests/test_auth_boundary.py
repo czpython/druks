@@ -12,11 +12,11 @@ from fastapi.routing import APIRoute, _IncludedRouter
 
 # Every /api path allowed to skip the identity gate; additions are deliberate.
 EXEMPT_API_PATHS = {
-    "/api/system/health",
     "/api/auth/me",
     "/api/providers",
     "/api/providers/{provider_id}/connection/start",
     "/api/providers/{provider_id}/connection/complete",
+    "/api/secrets/{identity_id}/{name}",  # a box's identity bearer, nothing else
     "/api/{path:path}",  # the JSON-404 catch-all
 }
 
@@ -136,7 +136,7 @@ def test_provider_setup_uses_only_the_session_or_setup_resolver(api_routes):
 
 
 async def test_provider_list_answers_before_an_account_exists(druks_client):
-    assert not await Account.list_non_system()
+    assert not await Account.list_all()
 
     response = await druks_client.get("/api/providers")
 
@@ -146,7 +146,7 @@ async def test_provider_list_answers_before_an_account_exists(druks_client):
     by_id = {item["id"]: item for item in body}
     assert by_id["anthropic"]["billingOptions"] == ["api_key", "subscription"]
     assert by_id["openai"]["billingOptions"] == ["api_key", "subscription"]
-    assert not await Account.list_non_system()
+    assert not await Account.list_all()
 
 
 def test_capability_management_is_session_only(api_routes):

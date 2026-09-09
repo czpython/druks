@@ -1,9 +1,8 @@
 # One structured opencode call: start `opencode serve`, open a session, POST
 # the message with the contract schema, and print the POST response. Inputs
-# ride the environment (DRUKS_*, OPENCODE_AUTH_CONTENT,
-# OPENCODE_CONFIG_CONTENT); the prompt rides stdin. The message POST carries
-# the deadline — an unsatisfiable schema loops forever server-side, so on
-# expiry the wrapper aborts the session and exits 124.
+# ride the environment (DRUKS_*, OPENCODE_CONFIG_CONTENT); the prompt rides
+# stdin. The message POST carries the deadline — an unsatisfiable schema loops
+# forever server-side, so on expiry the wrapper aborts the session and exits 124.
 
 run_dir="$DRUKS_RUN_DIR"
 mkdir -p "$run_dir" &&

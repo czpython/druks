@@ -10,9 +10,10 @@ import { registerAppUI } from './apps/registry'
 
 vi.mock('./apps', () => ({}))
 vi.mock('./api/client', () => ({
-  api: { listApps: vi.fn(), systemHealth: vi.fn(), getAppSettings: vi.fn() },
+  api: { listApps: vi.fn(), getAppSettings: vi.fn() },
 }))
 vi.mock('./components/SettingsPages', () => ({ SettingsPages: () => <h1>Settings form</h1> }))
+vi.mock('./pages/DashboardPage', () => ({ DashboardPage: () => <h1>Dashboard page</h1> }))
 vi.mock('./pages/EventsPage', () => ({ EventsPage: () => <h1>Events feed</h1> }))
 vi.mock('./pages/UsagePage', () => ({ UsagePage: () => <h1>Usage report</h1> }))
 vi.mock('./pages/AppHomePage', () => ({
@@ -25,7 +26,7 @@ vi.mock('./lib/useScreenWakeLock', () => ({
   useScreenWakeLock: () => ({ active: true, supported: true, error: null }),
 }))
 
-const account = { id: 'operator', username: 'operator@example.invalid' }
+const account = { id: 'operator', username: 'operator@example.invalid', isDefault: true }
 const roster: InstalledApp[] = [
   {
     name: 'notes',
@@ -108,7 +109,7 @@ describe('command center navigation', () => {
   it('keeps app destinations stable on list and detail pages', async () => {
     renderApp()
     const apps = await screen.findByRole('navigation', { name: 'Apps' })
-    await within(apps).findByRole('link', { name: 'external' })
+    await within(apps).findByRole('link', { name: 'External' })
     const links = within(apps)
       .getAllByRole('link')
       .map((link) => link.getAttribute('href'))
@@ -119,7 +120,7 @@ describe('command center navigation', () => {
         .getAllByRole('link')
         .map((link) => link.getAttribute('href')),
     ).toEqual(links)
-    expect(within(apps).getByRole('link', { name: 'notes' }).getAttribute('aria-current')).toBe(
+    expect(within(apps).getByRole('link', { name: 'Notes' }).getAttribute('aria-current')).toBe(
       'page',
     )
     expect(
@@ -131,7 +132,7 @@ describe('command center navigation', () => {
 
   it('selects deep links and follows browser history', async () => {
     renderApp('/notes/history')
-    const pages = await screen.findByRole('navigation', { name: 'notes pages' })
+    const pages = await screen.findByRole('navigation', { name: 'Notes pages' })
     expect(within(pages).getByRole('link', { name: 'History' }).getAttribute('aria-current')).toBe(
       'page',
     )
@@ -143,7 +144,7 @@ describe('command center navigation', () => {
     })
     await screen.findByRole('heading', { name: 'Note history' })
     expect(
-      within(screen.getByRole('navigation', { name: 'notes pages' }))
+      within(screen.getByRole('navigation', { name: 'Notes pages' }))
         .getByRole('link', { name: 'History' })
         .getAttribute('aria-current'),
     ).toBe('page')
@@ -151,15 +152,15 @@ describe('command center navigation', () => {
 
   it('opens installed generic and standalone apps', async () => {
     renderApp()
-    fireEvent.click(await screen.findByRole('link', { name: 'headless' }))
+    fireEvent.click(await screen.findByRole('link', { name: 'Headless' }))
     await screen.findByRole('heading', { name: 'headless home' })
-    fireEvent.click(screen.getByRole('link', { name: 'external' }))
+    fireEvent.click(screen.getByRole('link', { name: 'External' }))
     await screen.findByRole('heading', { name: 'external mounted' })
   })
 
   it('filters the roster without removing shared destinations', async () => {
     renderApp()
-    await screen.findByRole('link', { name: 'external' })
+    await screen.findByRole('link', { name: 'External' })
     fireEvent.change(screen.getByRole('textbox', { name: 'Find an app' }), {
       target: { value: 'EXTERNAL' },
     })
@@ -181,6 +182,51 @@ describe('command center navigation', () => {
     await waitFor(() => expect(drawer.hasAttribute('open')).toBe(false))
     expect(screen.getByText('Settings form')).toBeTruthy()
     expect(window.location.pathname).toBe('/settings/providers')
+  })
+
+  it('opens the Dashboard at the root', async () => {
+    renderApp('/')
+    expect(await screen.findByRole('heading', { name: 'Dashboard page' })).toBeTruthy()
+    expect(screen.getByRole('link', { name: 'Dashboard' }).getAttribute('aria-current')).toBe('page')
+  })
+
+  it('leaves a shared page with Escape to where the operator came from', async () => {
+    renderApp('/notes')
+    await screen.findByRole('heading', { name: 'Notes home' })
+    fireEvent.click(screen.getByRole('link', { name: 'Events' }))
+    await screen.findByRole('heading', { name: 'Events feed' })
+    await act(async () => {
+      fireEvent.keyDown(window, { key: 'Escape' })
+    })
+    await screen.findByRole('heading', { name: 'Notes home' })
+  })
+
+  it('returns focus to the opener when the phone drawer closes', async () => {
+    renderApp()
+    const opener = screen.getByRole('button', { name: 'Open navigation' })
+    fireEvent.click(opener)
+    const drawer = screen.getByRole('dialog', { name: 'Druks navigation' })
+    fireEvent.click(within(drawer).getByRole('button', { name: 'Close navigation' }))
+    await waitFor(() => expect(drawer.hasAttribute('open')).toBe(false))
+    expect(document.activeElement).toBe(opener)
+  })
+
+  it('closes the phone drawer when the viewport grows to desktop', async () => {
+    const listeners: Array<() => void> = []
+    vi.stubGlobal(
+      'matchMedia',
+      vi.fn(() => ({
+        matches: true,
+        addEventListener: (_event: string, listener: () => void) => listeners.push(listener),
+        removeEventListener: vi.fn(),
+      })),
+    )
+    renderApp()
+    fireEvent.click(screen.getByRole('button', { name: 'Open navigation' }))
+    const drawer = screen.getByRole('dialog', { name: 'Druks navigation' })
+    expect(drawer.hasAttribute('open')).toBe(true)
+    act(() => listeners.forEach((listener) => listener()))
+    await waitFor(() => expect(drawer.hasAttribute('open')).toBe(false))
   })
 
   it('shows roster errors with a retry action', async () => {
@@ -212,7 +258,7 @@ describe('command center navigation', () => {
     }))
     vi.mocked(api.listApps).mockResolvedValueOnce([...roster, ...apps])
     renderApp()
-    await screen.findByRole('link', { name: 'department 39 with a long app name' })
+    await screen.findByRole('link', { name: 'Department 39 With A Long App Name' })
     fireEvent.change(screen.getByRole('textbox', { name: 'Find an app' }), {
       target: { value: 'department 39' },
     })

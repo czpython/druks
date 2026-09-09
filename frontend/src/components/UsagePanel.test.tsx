@@ -1,9 +1,10 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { UsageHistoryResponse, UsageResponse, UsageTodayResponse } from '../api/types'
 import { UsagePanel } from './UsagePanel'
+import { api } from '../api/client'
 
 const usage: UsageResponse = {
   providers: [
@@ -66,8 +67,7 @@ function stubFetch(summary: UsageResponse = usage, usageHistory: UsageHistoryRes
   )
 }
 
-function renderPanel() {
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+function renderPanel(queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })) {
   return render(
     <QueryClientProvider client={queryClient}>
       <UsagePanel />
@@ -78,6 +78,7 @@ function renderPanel() {
 afterEach(() => {
   cleanup()
   vi.unstubAllGlobals()
+  vi.restoreAllMocks()
 })
 
 describe('UsagePanel', () => {
@@ -86,6 +87,8 @@ describe('UsagePanel', () => {
     renderPanel()
 
     expect(await screen.findByText('subscription@example.com')).toBeTruthy()
+    expect(screen.getByRole('heading', { level: 1, name: 'Usage' })).toBeTruthy()
+    expect(screen.getByRole('heading', { level: 2, name: 'Anthropic' })).toBeTruthy()
   })
 
   it('pages model-scoped weekly capacity without exhausting the provider', async () => {
@@ -142,4 +145,26 @@ describe('UsagePanel', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Show weekly window 2 of 2: all models' }))
     expect(screen.getByText('10%')).toBeTruthy()
   })
+})
+
+
+it('keeps the heading and a retry action after a failed first read', async () => {
+  stubFetch()
+  vi.spyOn(api, 'usage').mockRejectedValue(new Error('Offline'))
+  renderPanel()
+  expect(await screen.findByRole('heading', { name: 'Usage', level: 1 })).toBeTruthy()
+  expect(await screen.findByText(/No usage data is available/, {}, { timeout: 3000 })).toBeTruthy()
+  expect(screen.getByRole('button', { name: 'Retry' })).toBeTruthy()
+})
+
+it('retains the previous usage after a failed refresh', async () => {
+  stubFetch()
+  const client = new QueryClient()
+  renderPanel(client)
+  await screen.findByText('subscription@example.com')
+  vi.spyOn(api, 'usage').mockRejectedValue(new Error('Offline'))
+  await act(() => client.invalidateQueries({ queryKey: ['usage'] }))
+  expect(await screen.findByText(/last successful read remains visible/, {}, { timeout: 3000 })).toBeTruthy()
+  expect(screen.getByRole('heading', { name: 'Anthropic' })).toBeTruthy()
+  expect(screen.getByText('subscription@example.com')).toBeTruthy()
 })

@@ -268,6 +268,13 @@ class FindingOutput(AgentOutput):
     start_line: int | None
 
 
+class ReviewReport(AgentOutput):
+    decision: Literal["approve", "request_changes", "comment"]
+    summary: str
+    findings: list[FindingOutput]
+    context_repos: list[str]
+
+
 class EvalCheckOutput(AgentOutput):
     name: str
     status: Literal["pass", "fail", "not_run"]

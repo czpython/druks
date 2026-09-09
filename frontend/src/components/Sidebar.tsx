@@ -38,13 +38,7 @@ export function Sidebar({
       </Link>
       {children}
       <div className="sidebar-account">
-        <span className="sidebar-avatar" aria-hidden="true">
-          {account.username.slice(0, 2).toUpperCase()}
-        </span>
-        <div>
-          <span className="sidebar-username">{account.username}</span>
-          <span className="sidebar-account-label">Your account</span>
-        </div>
+        {account.username}
       </div>
     </>
   )

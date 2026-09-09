@@ -34,6 +34,10 @@ class ExecFailed(SandboxError):
         self.exit_code = exit_code
 
 
+class IdentityDenied(SandboxError):
+    """A fetch names no live sandbox identity for its bearer and secret."""
+
+
 class HostGone(SandboxError):
     """The provider says this host no longer exists.
 

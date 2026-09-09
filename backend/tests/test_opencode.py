@@ -90,12 +90,10 @@ async def test_build_invocation_uses_server_schema_and_env_auth(
         env_headers={"X-Trace-Key": "MCP_TRACE_KEY"},
     )
     invocation = await _harness().build_invocation(
-        key=_API_KEY,
         prompt="A large prompt stays on stdin.",
         schema={"type": "object", "properties": {"answer": {"type": "string"}}},
         run_id="run-1",
         ssh_username="exedev",
-        github_token="github-token",
         extra_env={"MCP_GITHUB_TOKEN": "mcp-secret", "MCP_TRACE_KEY": "trace-secret"},
         mcp_servers=(server,),
         timeout=60,
@@ -118,12 +116,10 @@ async def test_build_invocation_uses_server_schema_and_env_auth(
         assert text in wrapper
     assert invocation.stdin == b"A large prompt stays on stdin."
     assert invocation.credentials.home == ()
-    assert invocation.credentials.github_token == "github-token"
     env = invocation.env
     assert env is not None
-    assert json.loads(env["OPENCODE_AUTH_CONTENT"]) == {
-        "anthropic": {"type": "api", "key": _API_KEY}
-    }
+    # The key is a placeholder in the VM environment; opencode reads it from there.
+    assert "OPENCODE_AUTH_CONTENT" not in env
     assert env["DRUKS_RUN_DIR"].endswith("/run-1")
     assert env["DRUKS_PROVIDER"] == "anthropic"
     assert env["DRUKS_MODEL"] == "claude-sonnet-4-5"
@@ -137,6 +133,8 @@ async def test_build_invocation_uses_server_schema_and_env_auth(
         "Authorization": "Bearer {env:MCP_GITHUB_TOKEN}",
         "X-Trace-Key": "{env:MCP_TRACE_KEY}",
     }
+    # Druks owns the credential, so opencode must not start its own OAuth.
+    assert config["mcp"]["github"]["oauth"] is False
     assert _API_KEY not in wrapper
     assert "mcp-secret" not in env["OPENCODE_CONFIG_CONTENT"]
     assert "trace-secret" not in env["OPENCODE_CONFIG_CONTENT"]
@@ -149,12 +147,6 @@ async def test_build_invocation_uses_server_schema_and_env_auth(
     assert syntax.returncode == 0, syntax.stderr
 
 
-def test_auth_json_keys_the_provider() -> None:
-    rendered = OpenCodeHarness.auth_json("openai", _API_KEY)
-
-    assert json.loads(rendered) == {"openai": {"type": "api", "key": _API_KEY}}
-
-
 async def test_third_party_invocation_keeps_provider_key_and_model_namespace() -> None:
     harness = OpenCodeHarness(
         model="openrouter/anthropic/claude-sonnet-4",
@@ -164,7 +156,6 @@ async def test_third_party_invocation_keeps_provider_key_and_model_namespace() -
     )
 
     invocation = await harness.build_invocation(
-        key="sk-openrouter",
         prompt="Run it.",
         schema={"type": "object"},
         run_id="run-openrouter",
@@ -172,9 +163,7 @@ async def test_third_party_invocation_keeps_provider_key_and_model_namespace() -
     )
 
     assert invocation.env is not None
-    assert json.loads(invocation.env["OPENCODE_AUTH_CONTENT"]) == {
-        "openrouter": {"type": "api", "key": "sk-openrouter"}
-    }
+    assert "OPENCODE_AUTH_CONTENT" not in invocation.env
     assert invocation.env["DRUKS_PROVIDER"] == "openrouter"
     assert invocation.env["DRUKS_MODEL"] == "anthropic/claude-sonnet-4"
 

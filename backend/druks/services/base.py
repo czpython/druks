@@ -1,4 +1,5 @@
 import re
+from datetime import datetime
 from typing import Any, ClassVar
 
 from pydantic import BaseModel, ValidationError
@@ -7,9 +8,11 @@ from druks.apps.base import NAME_RE
 from druks.apps.loader import iter_apps
 from druks.apps.registry import services
 from druks.apps.settings import field_kind, field_multiline
+from druks.secrets.datastructures import Audience
+from druks.secrets.enums import SecretKind
+from druks.secrets.models import VaultSecret
 
 from .exceptions import ServiceConnectError, ServiceNotConnectedError
-from .models import OauthConnection, ServiceIdentity
 from .oauth import OauthClient, fetch_identity
 
 # GoogleCalendar -> google_calendar, HTTPServer -> http_server.
@@ -21,7 +24,7 @@ class Connection:
     declared handle. ``get_access_token`` and ``disconnect`` act on this
     sign-in only."""
 
-    def __init__(self, service: "type[Service]", row: OauthConnection) -> None:
+    def __init__(self, service: "type[Service]", row: VaultSecret) -> None:
         self.service = service
         self.row = row
 
@@ -43,11 +46,12 @@ class Connection:
 
     @property
     def connected_at(self):
-        return self.row.connected_at
+        return self.row.updated_at
 
     async def get_access_token(self, scopes: tuple[str, ...] = (), cached: bool = True) -> str:
         client = await self.service.get_oauth_client()
-        return await client.get_access_token(connection=self.row, scopes=scopes, cached=cached)
+        token, _ = await client.get_access_token(connection=self.row, scopes=scopes, cached=cached)
+        return token
 
     async def disconnect(self) -> None:
         await OauthClient(provider=self.service.slug).disconnect(self.row, reason="user")
@@ -74,12 +78,19 @@ class ScopedService:
     async def list_for_account(self, account_id: str) -> list[Connection]:
         return [
             Connection(self.service, row)
-            for row in await OauthConnection.list_for_account(self.service.slug, account_id)
+            for row in await VaultSecret.list_account_connections(
+                Audience.service(self.service.slug), account_id
+            )
         ]
 
     async def get(self, connection_id: str) -> Connection | None:
-        row = await OauthConnection.get(connection_id)
-        if row and row.provider == self.service.slug and not row.revoked_at:
+        row = await VaultSecret.get(connection_id)
+        if (
+            row
+            and row.kind == SecretKind.OAUTH
+            and row.audience == Audience.service(self.service.slug)
+            and not row.revoked_at
+        ):
             return Connection(self.service, row)
 
 
@@ -103,6 +114,9 @@ class Service:
     description: ClassVar[str] = ""
     # Whether doctor fails when this service is not connected.
     required: ClassVar[bool] = True
+    # What the connected credential is in the vault: a pasted value, or an
+    # App key that issues tokens.
+    secret_kind: ClassVar[SecretKind] = SecretKind.STATIC
     # True marks a shared provider base. It never registers; its subclasses do.
     abstract: ClassVar[bool] = False
     settings_model: ClassVar[type[BaseModel]]
@@ -197,8 +211,11 @@ class Service:
         ]
 
     @classmethod
-    async def get(cls) -> ServiceIdentity:
-        return await ServiceIdentity.get(cls.slug)
+    async def get(cls) -> VaultSecret:
+        """The connected identity's vault row, or ServiceNotConnectedError."""
+        if row := await VaultSecret.lookup(cls.secret_kind, Audience.service(cls.slug)):
+            return row
+        raise ServiceNotConnectedError(cls.slug)
 
     @classmethod
     def with_scopes(cls, *scopes: str) -> ScopedService:
@@ -251,15 +268,17 @@ class Service:
         )
 
     @classmethod
-    async def is_connected(cls) -> bool:
-        try:
-            await ServiceIdentity.get(cls.slug)
-        except ServiceNotConnectedError:
-            return False
-        return True
+    async def issue_token(cls, resource: str) -> tuple[str, datetime]:
+        """The token a sandbox fetches for this identity, and its expiry. A
+        service without one raises."""
+        raise NotImplementedError(f"{cls.slug} issues no sandbox token")
 
     @classmethod
-    async def connect(cls, payload: dict[str, Any]) -> ServiceIdentity:
+    async def is_connected(cls) -> bool:
+        return bool(await VaultSecret.lookup(cls.secret_kind, Audience.service(cls.slug)))
+
+    @classmethod
+    async def connect(cls, payload: dict[str, Any]) -> VaultSecret:
         """Verify and store a full paste of the service's fields. Secret fields
         land in the encrypted ``secrets``, the rest become ``identity`` facts.
         Plain fields are stripped as pasted; secrets are stored byte-for-byte."""
@@ -287,7 +306,10 @@ class Service:
         }
         if all(str(value).strip() for value in (*identity.values(), *secrets.values())):
             proven = await cls.verify(settings)
-            return await ServiceIdentity.connect(
-                cls.slug, identity={**identity, **proven}, secrets=secrets
+            return await VaultSecret.store(
+                cls.secret_kind,
+                Audience.service(cls.slug),
+                identity={**identity, **proven},
+                secrets=secrets,
             )
         raise ServiceConnectError("Every field is required.")

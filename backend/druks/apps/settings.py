@@ -72,6 +72,22 @@ def field_multiline(field: FieldInfo) -> bool:
     return False
 
 
+def validate_field_choice_details(field: FieldInfo) -> dict[str, dict[str, str]]:
+    # A key outside the Literal shows as a raw value in the form. Druks rejects it here.
+    metadata = field.json_schema_extra
+    details: dict[str, dict[str, str]] = {}
+    if isinstance(metadata, dict):
+        details = metadata.get("choice_details", {})
+    choices = field_choices(field) or []
+    unknown = sorted(set(details) - set(choices))
+    if unknown:
+        raise SettingsDeclarationError(
+            f"choice_details keys {unknown!r} are not declared choices. "
+            f"Use values from {choices!r}."
+        )
+    return details
+
+
 def field_visibility(field: FieldInfo) -> tuple[str, Any]:
     # The sibling field this one is shown for and the value that field must hold. The
     # name is empty when the field is always shown.
@@ -101,6 +117,7 @@ def validate_settings_declaration(model: type[BaseModel]) -> None:
     # a shape the plane can't render (or safely redact) fails loudly where it's written
     # rather than at the first operator PATCH.
     for name, field in model.model_fields.items():
+        validate_field_choice_details(field)
         if nested := _nested_model(field.annotation):
             raise SettingsDeclarationError(
                 f"settings field {name!r}: nested models are not a supported settings "

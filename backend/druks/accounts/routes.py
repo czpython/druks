@@ -8,7 +8,7 @@ from druks.accounts.dependencies import (
 )
 from druks.accounts.models import Account, PersonalAccessToken
 from druks.accounts.schemas import AccountResponse, IdentityResponse, PatResponse
-from druks.harnesses.models import ProviderKey, ProviderSubscription
+from druks.secrets.models import VaultSecret
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -26,8 +26,8 @@ async def get_identity(
         onboarding_required=not (
             account
             and (
-                await ProviderSubscription.list_for_account(account.id)
-                or await ProviderKey.list_all()
+                await VaultSecret.list_subscriptions(account_id=account.id)
+                or await VaultSecret.list_keys()
             )
         ),
     )
@@ -40,7 +40,7 @@ async def get_identity(
     dependencies=[Depends(current_account)],
 )
 async def list_accounts() -> list[Account]:
-    return await Account.list_non_system()
+    return await Account.list_all()
 
 
 @router.get("/personal-tokens", response_model=list[PatResponse], response_model_by_alias=True)

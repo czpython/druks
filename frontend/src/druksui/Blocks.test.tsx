@@ -10,8 +10,22 @@ import { PagesContext } from './pages'
 afterEach(cleanup)
 
 const PAGES: PageEntry[] = [
-  { name: 'notes', label: 'notes', path: '/field_notes', parent: '', order: 0 },
-  { name: 'note', label: 'note', path: '/field_notes/notes/{note_id}', parent: '', order: 1 },
+  {
+    name: 'notes',
+    label: 'notes',
+    path: '/field_notes',
+    parent: '',
+    subjectType: '',
+    order: 0,
+  },
+  {
+    name: 'note',
+    label: 'note',
+    path: '/field_notes/notes/{note_id}',
+    parent: '',
+    subjectType: '',
+    order: 1,
+  },
 ]
 
 function renderBlocks(blocks: Block[]) {

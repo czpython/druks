@@ -21,7 +21,7 @@ from druks.contrib.software_factory.schemas import (
     WorkItemsHistoryResponse,
 )
 from druks.contrib.software_factory.ticketing.enums import TicketStatus
-from druks.contrib.software_factory.workflows import Profile
+from druks.contrib.software_factory.workflows import Profile, PullRequestReview
 from druks.core.apis.exceptions import UnknownTicketError
 from druks.core.apis.github import get_github_client
 from druks.db import db_session
@@ -285,3 +285,54 @@ async def start_work_item(
             await tracker.set_status(ticket, TicketStatus.TRIGGER)
         except UnknownTicketError as error:
             raise TicketNotFound(error.key, error.tracker) from error
+
+
+reviews_router = APIRouter(prefix="/reviews")
+
+
+@reviews_router.post(
+    "",
+    status_code=status.HTTP_202_ACCEPTED,
+    operation_id="review",
+    tags=["agent"],
+    responses={
+        404: {
+            "description": "The repository is not registered.",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "error": "HTTP_404",
+                        "detail": (
+                            "owner/name is not a registered project repo. "
+                            "Add it to a project first."
+                        ),
+                    }
+                }
+            },
+        }
+    },
+)
+async def request_review(
+    repo: str = Body(
+        ...,
+        embed=True,
+        description="A registered project repository in owner/name form.",
+    ),
+    pr_number: int = Body(
+        ...,
+        embed=True,
+        alias="prNumber",
+        gt=0,
+        description="The pull request number in that repository.",
+    ),
+    account: Account = Depends(current_account),
+) -> str:
+    """Start a pull request review."""
+    if await ProjectRepo.get_for_repo(repo):
+        return await PullRequestReview.dispatch(
+            repo=repo, pr_number=pr_number, requested_by=account.username
+        )
+    raise HTTPException(
+        status.HTTP_404_NOT_FOUND,
+        f"{repo} is not a registered project repo. Add it to a project first.",
+    )

@@ -1,6 +1,6 @@
 import argparse
 
-from .database import create_engine_from_url, make_app_migration, run_migrations
+from .database import make_app_migration, run_migrations
 from .settings import ensure_data_dirs, load_settings, setup_logging
 
 
@@ -119,15 +119,7 @@ def main() -> None:
     ensure_data_dirs(settings)
 
     if args.command == "init-db":
-        # Alembic owns the schema; the first-start seeds run after it.
-        from .bootstrap import seed
-
         run_migrations(settings.database_url)
-        engine = create_engine_from_url(settings.database_url)
-        try:
-            seed(engine)
-        finally:
-            engine.dispose()
         return
 
     if args.command == "makemigrations":

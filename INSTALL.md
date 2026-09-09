@@ -37,8 +37,9 @@ docker compose ps
 curl -fsS http://127.0.0.1:8001/health
 ```
 
-Verification: `web`, `postgres`, `redis`, and `drukbox` operate without
-restarts. The health endpoint returns `{"status":"ok"}`.
+Verification: `docker compose ps` lists `web`, `postgres`, `redis`, `drukbox`,
+`drukbox-exchange`, and `drukbox-proxy` as up, and none of them restarts. The
+health endpoint returns `{"status":"ok"}`.
 
 ## 4. Preflight
 
@@ -60,7 +61,7 @@ the error.
 Report that the installation succeeded. Tell the operator to open
 <http://127.0.0.1:8001>. Connect a provider under **Settings → Providers**.
 Agent runs require the selected provider credential. Then connect the GitHub
-App under **Settings → Services**. Run `docker compose exec web druks doctor --sandbox` to
+App under **Settings → Connections → Services**. Run `docker compose exec web druks doctor --sandbox` to
 prove the full sandbox path with a real container.
 
 ## Local customizations

@@ -41,7 +41,7 @@ async def resolve_pat_account(credentials: HTTPAuthorizationCredentials | None) 
 async def resolve_single_operator() -> Account | None:
     """None while zero accounts exist (setup); more than one refuses rather
     than guesses."""
-    operators = await Account.list_non_system()
+    operators = await Account.list_all()
     if len(operators) > 1:
         raise AuthConfigurationError(
             f"auth mode 'none' expects exactly one operator account, found "

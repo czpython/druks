@@ -10,7 +10,7 @@ from collections.abc import Sequence
 import sqlalchemy as sa
 from alembic import op
 
-from druks.secrets import utils
+from sqlalchemy_encrypted_field import utils
 
 revision: str = "e3a9c7d1b5f4"
 down_revision: str | Sequence[str] | None = "b4c7e1a8d052"

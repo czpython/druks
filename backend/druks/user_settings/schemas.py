@@ -10,6 +10,7 @@ from druks.apps.settings import (
     field_multiline,
     field_section,
     field_visibility,
+    validate_field_choice_details,
 )
 from druks.harnesses.datastructures import Billing
 from druks.harnesses.schemas import SortedNames
@@ -26,9 +27,10 @@ class HarnessResponse(Schema):
     billing_options: SortedNames
 
 
-class UserSettingsResponse(Schema):
+class SettingsResponse(Schema):
     model_config = ConfigDict(from_attributes=True)
 
+    account_id: str | None
     timezone: str
     default_harness: str
     default_model: str
@@ -36,12 +38,13 @@ class UserSettingsResponse(Schema):
     default_effort: str
     fast_mode: bool
     default_timeout: int
-    fallback_account_id: str | None
     gate_park_destination_id: str | None
     updated_at: datetime
 
 
-class UpdateUserSettingsRequest(BaseModel):
+class UpdateSettingsRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     timezone: str | None = None
     default_harness: str | None = Field(default=None, validation_alias="defaultHarness")
     default_model: str | None = Field(default=None, validation_alias="defaultModel")
@@ -49,7 +52,6 @@ class UpdateUserSettingsRequest(BaseModel):
     default_effort: Effort | None = Field(default=None, validation_alias="defaultEffort")
     fast_mode: bool | None = Field(default=None, validation_alias="fastMode")
     default_timeout: PositiveInt | None = Field(default=None, validation_alias="defaultTimeout")
-    fallback_account_id: str | None = Field(default=None, validation_alias="fallbackAccountId")
     # Tri-state: absent = unchanged, null = clear (off), value = designate.
     gate_park_destination_id: str | None = Field(
         default=None, validation_alias="gateParkDestinationId"
@@ -61,6 +63,7 @@ Source = Literal["agent", "default"]
 
 class AgentSettingResponse(Schema):
     name: str
+    label: str
     description: str
     harness: str
     harness_source: Source
@@ -95,6 +98,7 @@ class SettingsFieldResponse(Schema):
     default: Any
     # An enum field's allowed values; None for every other kind.
     choices: list[str] | None
+    choice_details: dict[str, dict[str, str]] = {}
     # The heading this field groups under; empty for an ungrouped one.
     section: str
     # The sibling field this one is shown for, and the value that field must hold. The
@@ -125,6 +129,7 @@ class SettingsFieldResponse(Schema):
             value=None if secret else value,
             default=None if secret else field.default,
             choices=field_choices(field),
+            choice_details=validate_field_choice_details(field),
             section=field_section(field),
             visible_when_field=controller,
             visible_when_value=target,

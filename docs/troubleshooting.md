@@ -107,7 +107,8 @@ Examine the webhook path:
 2. If `webhook_ingress` fails, fix DNS, TLS, or edge routing before you examine the provider.
 3. Make sure that the provider URL is
    `https://<host>/_external/<provider>/events/`.
-4. Make sure that its webhook secret matches the related `druks.toml` value.
+4. Make sure that its webhook secret matches the service configuration in
+   **Settings → Connections → Services**.
 5. Examine the provider delivery log and `docker compose logs web`.
 
 When you set `urls.webhook_host`, the doctor sends an unsigned GitHub probe and
@@ -122,7 +123,7 @@ be idempotent.
 
 Examine the MCP path:
 
-1. If the endpoint returns 401, mint a new token in **Settings → Tokens**.
+1. If the endpoint returns 401, mint a new token in **Settings → API tokens**.
 2. Send the token as `Authorization: Bearer <token>`.
 3. If the edge redirects or returns 404, run the installer again.
 4. As an alternative, copy `deploy/caddy/Caddyfile`.
@@ -141,7 +142,7 @@ provisioning a sandbox.
 
 ### Model has no harness
 
-A model id is `provider/model`, such as `anthropic/claude-opus-4-7`; a bare id
+A model id is `provider/model`, such as `anthropic/claude-opus-4-7`. A bare id
 names no harness. Clear a stale per-agent override in Settings or pick a model
 from the picker.
 Druks does not silently route an unknown model to another CLI.
@@ -158,6 +159,19 @@ docker compose logs --tail=200 drukbox
 Make sure that the service listens at `[sandbox].service_url` in `druks.toml`.
 For remote providers, a healthy Drukbox API does not prove SSH access. Then
 follow with `druks doctor --sandbox`.
+
+### The secrets exchange is unreachable
+
+`druks doctor` reports `secrets_exchange` with the URL it probed. Run:
+
+```bash
+docker compose up -d drukbox-exchange
+docker compose logs --tail=200 drukbox-exchange
+```
+
+The exchange binds `127.0.0.1:8781` on the Druks host. Until it answers, a
+sandbox gets no value for its placeholders, and each agent call fails at the
+provider with an authentication error.
 
 ### A sandbox process appears stuck
 
@@ -176,7 +190,7 @@ approve, request changes, or cancel. The owner system answers an external gate.
 If no notification arrived:
 
 - Make sure that an enabled destination is the gate destination.
-- Examine the Notifications page and its recorded delivery error.
+- Read the notification through the API and examine its recorded delivery error.
 - If it is an in-app gate, answer from the subject page.
 
 Notification failure deliberately leaves the run parked and resumable.

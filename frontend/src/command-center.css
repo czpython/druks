@@ -1,5 +1,7 @@
 :root {
   --sidebar-width: 220px;
+  --page-gutter: 32px;
+  --page-padding: 32px var(--page-gutter) 48px;
 }
 
 .command-center {
@@ -15,7 +17,7 @@
   flex: 0 0 auto;
   align-items: center;
   min-height: 58px;
-  padding: 8px 40px;
+  padding: 8px var(--page-gutter);
   gap: 12px;
   border-bottom: 1px solid var(--border);
   background: var(--bg);
@@ -23,7 +25,7 @@
 
 .command-breadcrumb {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 4px;
   font-size: 13px;
   min-width: 0;
@@ -32,7 +34,9 @@
 
 .command-breadcrumb > span { color: var(--text-dim); }
 .command-breadcrumb strong { font-weight: 500; }
-.app-name { text-transform: capitalize; }
+.command-app-settings { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; width: 32px; height: 32px; margin-left: 4px; border-radius: 5px; color: var(--text-mid); text-decoration: none; }
+.command-app-settings:visited { color: var(--text-mid); }
+.command-app-settings:hover, .command-app-settings[aria-current="page"] { color: var(--text); background: var(--surface-3); }
 .command-utilities { display: flex; align-items: center; gap: 20px; margin-left: auto; flex-shrink: 0; }
 .command-timezone { color: var(--text-mid); }
 .app-main { display: flex; flex: 1; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
@@ -57,13 +61,13 @@
 .sidebar-link:visited { color: var(--text-mid); }
 .sidebar-link:hover { background: var(--surface-2); color: var(--text); }
 .sidebar-link[aria-current="page"] { color: var(--text); background: var(--surface-3); border-color: var(--border-loud); }
-.sidebar-link[aria-current="page"] > svg { color: var(--bucket-run); }
+.sidebar-link[aria-current="page"] > svg { color: var(--text); }
 .sidebar-link > svg { flex-shrink: 0; }
 .sidebar-link > span { min-width: 0; overflow-wrap: anywhere; }
 .sidebar-apps { display: flex; flex: 1; flex-direction: column; min-height: 0; margin-top: 16px; }
 .sidebar-group-title { display: flex; align-items: baseline; justify-content: space-between; padding: 0 10px 8px; color: var(--text-dim); font-size: 13px; }
 .sidebar-search { display: flex; flex: 0 0 auto; align-items: center; min-height: 40px; gap: 8px; padding: 0 10px; margin-bottom: 8px; border: 1px solid var(--border-loud); border-radius: 5px; background: var(--bg); color: var(--text-dim); }
-.sidebar-search:focus-within { outline: 2px solid var(--bucket-run); outline-offset: 2px; }
+.sidebar-search:focus-within { outline: 2px solid var(--text-mid); outline-offset: 2px; }
 .sidebar-search > svg { flex-shrink: 0; }
 .sidebar-search input { width: 100%; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--text); font: inherit; padding: 8px 0; }
 .sidebar-search input::placeholder { color: var(--text-dim); }
@@ -71,52 +75,47 @@
 .sidebar-message { margin: 12px 10px; color: var(--text-dim); font-size: 13px; overflow-wrap: anywhere; }
 .sidebar-retry { text-decoration: underline; min-height: 44px; color: var(--text); }
 .sidebar-footer { padding-top: 12px; margin-top: 12px; border-top: 1px solid var(--border); }
-.sidebar-account { display: flex; flex: 0 0 auto; align-items: center; gap: 10px; padding: 16px 10px 0; }
-.sidebar-account > div { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
-.sidebar-avatar { display: grid; place-items: center; width: 32px; height: 32px; flex-shrink: 0; border-radius: 50%; background: var(--surface-3); font-size: 12px; }
-.sidebar-username { font-size: 13px; overflow-wrap: anywhere; }
-.sidebar-account-label { color: var(--text-dim); font-size: 13px; }
+.sidebar-account { flex: 0 0 auto; padding: 16px 10px 0; font-size: 13px; color: var(--text-mid); overflow-wrap: anywhere; }
 .navigation-toggle, .navigation-close { display: none; align-items: center; justify-content: center; width: 44px; height: 44px; flex-shrink: 0; color: var(--text-mid); border-radius: 5px; }
 .sidebar-drawer { inset: 0 auto 0 0; width: min(300px, calc(100vw - 44px)); height: 100dvh; max-width: none; max-height: none; margin: 0; padding: 0; border: 0; background: var(--surface); }
 .sidebar-drawer .sidebar { width: 100%; }
 .sidebar-drawer::backdrop { background: rgb(0 0 0 / 60%); }
 
-.command-app-navigation { display: flex; flex: 0 0 auto; gap: 20px; padding: 0 40px; border-bottom: 1px solid var(--border); overflow-x: auto; scrollbar-width: thin; }
+.command-app-navigation { display: flex; flex: 0 0 auto; gap: 20px; padding: 0 var(--page-gutter); border-bottom: 1px solid var(--border); overflow-x: auto; scrollbar-width: thin; }
 .command-tab { display: inline-flex; align-items: center; min-height: 46px; padding: 8px 0; color: var(--text-dim); border-bottom: 2px solid transparent; text-decoration: none; text-transform: capitalize; white-space: nowrap; }
 .command-tab:hover, .command-tab[aria-current="page"] { color: var(--text); }
-.command-tab[aria-current="page"] { border-bottom-color: var(--bucket-run); }
-.command-health-error { margin: 0; padding: 10px 24px; color: var(--bucket-human); font-size: 13px; }
+.command-tab[aria-current="page"] { border-bottom-color: var(--text); }
 .skip-navigation { position: fixed; top: 8px; left: 8px; z-index: 100; transform: translateY(-200%); padding: 12px; background: var(--surface-3); color: var(--text); }
 .skip-navigation:focus { transform: none; }
-.command-center :is(a, button, input, select, textarea):focus-visible { outline: 2px solid var(--bucket-run); outline-offset: 3px; }
-.command-center .sidebar-search input:focus-visible { outline: none; }
-::selection { background: var(--border-loud); color: var(--text); }
-input, textarea { caret-color: var(--bucket-run); }
-button.mono, label.mono { font-family: var(--font-sans); font-size: 15px; }
+:is(.sidebar, .command-header, .command-app-navigation) :is(a, button, input):focus-visible { outline: 2px solid var(--text); outline-offset: 3px; }
+.sidebar-search input:focus-visible { outline: none; }
+.command-center :is(.review-question legend, .review-option, .review-note, .review-btn, .ins-needs-body) { font-family: var(--font-sans); font-size: 15px; }
+.command-center :is(.review-artifact-title, .review-helper, .review-error, .review-recommended) { font-family: var(--font-sans); font-size: 13px; }
+.command-center .review-option { min-height: 44px; }
+.command-center .subject-run { font-family: var(--font-sans); }
+.command-center :is(.wic-op, .wic-call)[role="button"]:focus-visible { outline: 2px solid var(--text); outline-offset: -2px; }
 
 @media (max-width: 1024px) {
-  .command-header { padding-inline: 24px; }
-  .command-app-navigation { padding-inline: 24px; }
-  .event-row { grid-template-columns: auto minmax(0, 1fr) auto; gap: 8px 12px; padding-inline: 20px; }
+  :root { --page-gutter: 24px; }
+  .event-row { grid-template-columns: auto minmax(0, 1fr) auto; gap: 8px 12px; padding-inline: var(--page-gutter); }
   .event-summary { grid-column: 1 / -1; white-space: normal; overflow-wrap: anywhere; }
 }
 
 @media (max-width: 649px) {
+  :root { --page-gutter: 20px; --page-padding: 24px var(--page-gutter) 32px; }
   .command-center { padding-left: 0; }
   .sidebar-desktop { display: none; }
   .command-header { padding: 6px 12px; gap: 6px; }
   .command-breadcrumb > span, .command-timezone { display: none; }
   .command-breadcrumb { font-size: 15px; }
+  .command-app-settings { width: 44px; height: 44px; }
   .command-utilities { padding-inline: 8px; }
   .navigation-toggle, .navigation-close { display: inline-flex; }
   .navigation-close { position: absolute; top: 16px; right: 12px; }
   .sidebar-brand { margin-right: 48px; }
-  .command-app-navigation { padding-inline: 20px; }
-  .active-page-head { flex-direction: column; align-items: stretch; gap: 16px; padding-inline: 20px; }
-  .page-usage { width: 100%; padding-inline: 20px; }
+  .active-page-head { flex-direction: column; align-items: stretch; gap: 16px; }
   .us-head { flex-wrap: wrap; }
-  .back-to-app { min-height: 44px; }
   .command-center :is(input, select, textarea) { font-size: 16px; }
   .sidebar-search, .sidebar-search input { min-height: 44px; }
-  .command-center button { min-height: 44px; }
+  :is(.sidebar button, .command-header button, .wic-op[role="button"], .wic-call[role="button"]) { min-height: 44px; }
 }

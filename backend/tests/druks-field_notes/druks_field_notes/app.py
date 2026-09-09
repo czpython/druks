@@ -88,10 +88,14 @@ class FieldNotes(App):
                 return {"sync_token": "Required when visibility is public."}
             return {}
 
-    # The one agent this app runs: it reads a note and writes its gist.
     summarize = Agent(
         description="reads a note and writes its one-line gist",
         prompt="field_notes/summarize.md",
+        contract=GistOutput,
+    )
+    survey = Agent(
+        description="reads a cloned repository and writes its one-line gist",
+        prompt="field_notes/survey.md",
         contract=GistOutput,
     )
 

@@ -17,7 +17,7 @@ classifiers = [
 requires-python = ">=3.11"
 dependencies = [
     "asyncssh>=2.22",
-    "drukbox-python-sdk>=0.1.0",
+    "drukbox-python-sdk>=0.2.0",
     # 0.138 adds app.frontend(), which serves an app's shipped dist/.
     "fastapi>=0.138.0",
     "githubkit[auth-app]>=0.15.5",
@@ -39,6 +39,7 @@ dependencies = [
     "apprise>=1.9",
     "cryptography>=48.0.1",
     "fastmcp>=3.4.4,<4",
+    "sqlalchemy-encrypted-field==1.0.2",
 ]
 
 [project.urls]
@@ -68,7 +69,6 @@ druks = "druks.testing"
 # edits across the platform wiring.
 [project.entry-points."druks.apps"]
 core = "druks.core.app:Core"
-review = "druks.contrib.review.app:Review"
 software_factory = "druks.contrib.software_factory.app:SoftwareFactory"
 usage = "druks.usage.app:Usage"
 

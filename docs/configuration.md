@@ -11,7 +11,7 @@ without replacing the process.
 | Plane | Examples | Stored in |
 | --- | --- | --- |
 | Deployment | identity, ingress, Drukbox, encryption key | `~/druks/druks.toml` |
-| Dashboard | timezone, the GitHub connection, harness and tracker credentials, workflow and agent overrides, notifications, MCP servers, skills | Postgres |
+| Dashboard | timezone, the GitHub connection, harness and tracker credentials, workflow and agent overrides, MCP servers, skills | Postgres |
 
 The installer creates the deployment `.env` from `druks.toml`. Compose, Druks,
 and Drukbox consume this build artifact. Do not edit `.env`. Edit `druks.toml`,
@@ -40,7 +40,7 @@ host-run development template for that environment plane.
 | `[urls]` | Dashboard callback base URL and public webhook hostname |
 | `[secrets]` | Generated deployment secrets |
 | `[paths]` | Host data and harness configuration paths |
-| `[sandbox]` | Drukbox provider, service URL, token behavior, and image override |
+| `[sandbox]` | Drukbox provider, service URL and token, image override, and the proxy, issuer, and exchange addresses |
 | `[sandbox.<provider>]` | Provider environment passed through to the remote stack |
 | `[env]` | Additional deployment environment settings rendered verbatim |
 
@@ -61,6 +61,31 @@ service gets its environment from the defaults in `deploy/compose.yaml`.
 The installer generates secrets only when it first creates the TOML. When you move or
 recover an installation, preserve `[secrets]`. Use repeatable
 `druks setup ... --set key.path=value` arguments for explicit scripted writes.
+
+## Personal and installation settings
+
+**Settings → Preferences** edits your personal profile. **Settings → General**
+and **Settings → Agents** edit installation defaults. Each page saves its
+own draft.
+
+Your account uses installation defaults until the first personal edit. That edit
+copies the complete profile. Later installation changes do not change your saved
+profile. Shared agent overrides take priority. A declared agent timeout also takes
+priority over the profile default.
+
+The first account becomes the default account, including in header and JWT modes.
+Unattended calls use its profile and subscriptions. The flag grants no extra
+permissions. Calls with an explicit account use that account's subscriptions.
+Missing subscriptions fail the call. API keys belong to the installation.
+
+The installation timezone controls schedules and operational day boundaries.
+Your personal timezone controls timestamp display. Gate notifications use the
+run account's profile. Unattended runs record the default account.
+Druks refuses to start a run before account setup.
+
+The API exposes installation settings at `GET/PATCH /api/settings` and your
+profile at `GET/PATCH /api/settings/personal`. The personal route uses the
+authenticated account. Its `accountId` is NULL while it inherits defaults.
 
 ## Core process settings
 
@@ -125,17 +150,18 @@ order:
    returns a 401 with the error class, not the token. Druks uses a fixed RS256
    profile and does not negotiate it.
 4. **No-authentication mode (`none`).** This mode has no authentication or identity edge. Druks
-   resolves the only non-system account. Zero accounts is the setup state. The
+   resolves the only account. Zero accounts is the setup state. The
    first completed provider connection creates the operator account from the
    provider-validated email.
 
-   More than one non-system account is configuration
+   More than one account is configuration
    drift. Druks refuses requests and startup in this state.
 
 A subscription is always one person's. An API key is the installation's:
 one per provider, owned by no account, and visible to every account in
 **Settings → Providers** with the name of the person who last pasted it. A
-paste from any account replaces it.
+paste from any account replaces it. Disconnect clears the secret and retains
+the credential identity for historical agent-call billing references.
 
 Before you enable `jwt` mode, make sure that the edge uses the configured header,
 claims, and rotation process.
@@ -168,7 +194,7 @@ setup state.
 ## Personal access tokens
 
 Agents and other non-browser clients use personal access tokens for the
-internal API. Mint these tokens in Settings → Tokens. Send a token as
+internal API. Mint these tokens in Settings → API tokens. Send a token as
 `Authorization: Bearer <token>`. A token has the form
 `druks_pat_<prefix>_<secret>`. Druks stores only the SHA-256 hash of the full
 token. It shows the plaintext one time and expires the token after 365 days.
@@ -179,7 +205,7 @@ signed-in identity. It refuses requests that contain an `Authorization` header.
 Thus, a leaked token cannot mint or revoke tokens.
 
 If someone compromises a token, mint a replacement. Then revoke the old token in
-Settings → Tokens. Revocation is immediate. The list shows the prefix and last
+Settings → API tokens. Revocation is immediate. The list shows the prefix and last
 use of each token.
 
 Druks updates last use each hour. Agents consume the API
@@ -196,8 +222,8 @@ in Postgres. They do not come from TOML, the environment, or a PEM file.
 Until an operator connects GitHub, agent runs stop with a direct message.
 `druks doctor` reports that no GitHub connection exists.
 
-Connect it from **Settings → Services**. **Create GitHub App** starts the GitHub
-manifest flow. Enter a GitHub organization, or leave the field empty for a
+Connect it from **Settings → Connections → Services**. **Create GitHub App**
+starts the GitHub manifest flow. Enter a GitHub organization, or leave the field empty for a
 personal account. Accept the request on GitHub. Druks stores the credentials and
 opens the installation page. Install the GitHub App on the applicable
 repositories.
@@ -232,21 +258,31 @@ Install the GitHub App on the repositories that Druks will use. This
 installation set defines where `software_factory` can act. Personal access
 tokens are not a supported substitute.
 
+A sandbox never holds an installation token. It holds a placeholder in
+`GH_TOKEN`, and git and `gh` read it through Drukbox's setup. The Drukbox
+secrets proxy swaps the placeholder for a token that Druks mints for the
+sandbox's repo, with the expiry GitHub gives it, and fetches a new one before
+it expires. The `software_factory` build clones and pushes as the operator App.
+A review clones as the reviewer App when one is connected. The build's GitHub
+MCP server acts as the review identity through a second entry, for
+`api.githubcopilot.com`. The identities stay separate.
+
 **To upgrade an existing installation**, paste the credentials one time on each
-active host. Open Settings → Services. Connect GitHub with the existing operator
-GitHub App ID, private key, and webhook secret. Do not create a replacement
-GitHub App. The current webhook and installations continue to use the pasted
-credentials.
+active host. Open **Settings → Connections → Services**. Connect GitHub with the
+existing operator GitHub App ID, private key, and webhook secret. Do not create
+a replacement GitHub App. The current webhook and installations continue to use
+the pasted credentials.
 
 ### Review identity (optional)
 
-The bundled `review` app can post its verdict reviews as a second
-GitHub App, so GitHub accepts approvals on Druks-authored pull requests.
-Configure it in **Settings → Review**. Enter the review GitHub App ID and its PEM
-private key, both stored encrypted and empty-as-unset. Leave the pair empty and
-reviews publish as operator comments. Set both values to publish separate
-approval reviews. The review GitHub App needs read access to metadata and
-contents, read/write access to pull requests, and no webhook.
+The bundled `software_factory` app declares an optional service, **Github
+Reviewer**: a second GitHub App, so GitHub accepts approvals on Druks-authored
+pull requests. Connect it in **Settings → Connections → Services** with the App
+ID and its PEM private key, both stored encrypted. Leave it unconnected and
+reviews publish as operator comments. Connect it and reviews publish as
+approval reviews, and a review sandbox clones as it. The reviewer App needs
+read access to metadata and contents, read/write access to pull requests, and
+no webhook.
 
 `GITHUB_API_URL` defaults to `https://api.github.com` and can point every
 client at another compatible GitHub API endpoint.
@@ -254,10 +290,10 @@ client at another compatible GitHub API endpoint.
 ## Ticketing integrations
 
 Tracker credentials are service identities. Connect Linear or Jira Cloud from
-**Settings → Services**. The Linear identity uses an API key and webhook secret.
-The Jira identity uses a base URL, email, API token, and webhook secret. Druks
+**Settings → Connections → Services**. The Linear identity uses an API key
+and webhook secret. The Jira identity uses a base URL, email, API token, and webhook secret. Druks
 validates the credentials before it stores them. Select the tracker and its
-workflow statuses in **Settings → Software Factory**.
+workflow statuses in **Software Factory → Settings**.
 
 Webhook URLs remain `/_external/linear/events/` and
 `/_external/jira/events/`. The Jira webhook uses a Jira Automation
@@ -273,11 +309,46 @@ optional. It reports pending setup if the selected tracker lacks a connection.
 Druks registers two subscription providers, `anthropic` and `openai`. Each
 also accepts an API key. Both connect from **Settings → Providers**. The
 connection flow stores each credential in Postgres. Druks refreshes a
-subscription token on a schedule. It creates the CLI credential file inside
-each sandbox, or passes the key in the CLI environment. It does not copy a
-host login. This is a capability connection for the requesting account. In a
-fresh `none`-mode install, the first completed subscription connection also
-creates the operator account. See [access control](#public-urls-and-access-control).
+subscription token on a schedule. A sandbox holds a placeholder for the
+subscription token and never the token. Drukbox fetches the token from the
+Druks issuer through the sandbox's identity, and the secrets proxy swaps the
+placeholder on each request to the entry's host. See
+[sandbox identities and the issuer](concepts.md#agents-harnesses-workspaces-and-sandboxes).
+Druks does not copy a host login. This is a capability connection for the
+requesting account. In a fresh `none`-mode install, the first completed
+subscription connection also creates the operator account. See
+[access control](#public-urls-and-access-control).
+
+A `claude` sandbox reads its placeholder from `ANTHROPIC_AUTH_TOKEN`. A
+`codex` sandbox reads its placeholder from `CODEX_SUBSCRIPTION_TOKEN`. The
+Codex run wrapper writes `~/.codex/auth.json` from that variable before the
+command. The file carries the account id, the sentinel refresh token
+`druks-placeholder`, and an unsigned id token with the account id, the plan,
+and the email. Codex sends the placeholder to `chatgpt.com` on every request.
+Codex never refreshes it: the one refresh it attempts after a 401 fails on
+the sentinel, and the turn ends. The real refresh token and id token stay in
+Postgres.
+
+An API key never enters the sandbox. Druks gives the key to Drukbox as a
+secret entry when it creates the sandbox. The sandbox holds a placeholder in
+the variable the entry names, and the CLI reads it from the environment. The
+Drukbox secrets proxy swaps the placeholder for the key in the entry's header
+on each request to the entry's host.
+
+| Harness | Credential | Variable | Host | Header |
+| --- | --- | --- | --- | --- |
+| `claude` | Anthropic subscription | `ANTHROPIC_AUTH_TOKEN` | `api.anthropic.com` | `Authorization: Bearer` |
+| `codex` | OpenAI subscription | `CODEX_SUBSCRIPTION_TOKEN` | `chatgpt.com` | `Authorization: Bearer` |
+| `claude`, `pi`, `opencode` | Anthropic API key | `ANTHROPIC_API_KEY` | `api.anthropic.com` | `x-api-key` |
+| `pi`, `opencode` | OpenAI API key | `OPENAI_API_KEY` | `api.openai.com` | `Authorization: Bearer` |
+| `codex` | OpenAI API key | `CODEX_API_KEY` | `api.openai.com` | `Authorization: Bearer` |
+
+The `ANTHROPIC_AUTH_TOKEN` and `OPENAI_API_KEY` entries come from the Drukbox
+catalog. Druks declares the other entries with their host and header.
+
+The Compose stack runs the secrets proxy on every provider but docker-sbx. See
+[the secrets exchange and the secrets proxy](deployment.md#the-secrets-exchange-and-the-secrets-proxy).
+Without it, Drukbox refuses the sandbox and the call fails.
 
 **Add provider** searches Models.dev for providers that use one API key.
 Druks caches the directory in Redis for one day for search and provider details.
@@ -290,15 +361,18 @@ When an agent runs, OpenCode selects the endpoint.
 
 Before you save a key, check the provider documentation and domain.
 
-Cards show five-hour and general weekly limits with the time until reset.
-Tooltips show exact reset times. **Catalog status** shows each provider's last
-update. Anthropic and OpenAI fetch separate model lists. Added providers use
-the cached Models.dev directory.
+Provider rows show access state and weekly quota when available. Open
+**Manage** for credential controls, the 5-hour quota when available, and the
+model catalog timestamp. The weekly quota stays in the provider row.
+Anthropic and OpenAI fetch separate model lists.
+Added providers use the cached Models.dev directory.
 
 The `claude` and `codex` CLIs run on their own vendor's subscription or key.
-`opencode` and `pi` run on an API key only. OpenCode can run a supported
-Models.dev provider after its key is stored. A model ID is `provider/model`
-for each harness, for example `openai/gpt-5.5`.
+`opencode` and `pi` run on an API key only, for Anthropic or OpenAI. A key for
+a Models.dev provider stores, but an agent on that provider refuses to run: no
+proven transport carries its placeholder through the secrets proxy. A model ID
+is `provider/model` for each harness, for example `openai/gpt-5.5`.
+The harness menus disable `opencode` and `pi` until a provider API key is configured.
 
 `paths.harness_config_root` points at optional CLI configuration that Druks
 carries into sandboxes. The installer creates the root. Compose mounts it
@@ -312,18 +386,18 @@ read-only at `/harnesses`. Claude and Codex each read their named directory:
 │   ├── settings.json
 │   └── plugins/
 └── codex/
-    ├── .credentials.json
     ├── AGENTS.md
     └── config.toml
 ```
 
-Missing files are optional. Codex uses `.credentials.json` for MCP credentials.
-Provider credentials do not belong in this root. OpenCode and Pi do not read it.
+Missing files are optional. Druks copies no credentials file, and it removes
+the `mcpServers` block from `.claude.json` before the copy. MCP credentials
+are sandbox entries. Provider credentials do not belong in this root. OpenCode
+and Pi do not read it.
 The default harness, model, billing, effort, and timeout live in
 **Settings → Agents**. Each agent can override any of them on its app's page.
-**Unattended runs
-(webhooks, schedules) run as** names the account whose subscription an
-unattended run bills. A call refuses before provisioning a VM if its selected
+**Unattended runs use** names the default account. Its profile selects the
+subscription or installation API key. A call refuses before provisioning a VM if its selected
 credential is missing.
 
 ## Sandboxes
@@ -334,6 +408,9 @@ credential is missing.
 | `sandbox.service_token` | Drukbox API token |
 | `sandbox.timeout` | Control-plane request timeout. The default is 180 seconds |
 | `sandbox.image` | Optional provider image override |
+| `sandbox.proxy_url` | The secrets proxy, at the address a sandbox dials. The docker shape sets `http://172.17.0.1:8880`. docker-sbx leaves it empty |
+| `sandbox.issuer_url` | The issuer base URL the secrets exchange dials. The default is `http://127.0.0.1:8001` on every shape. Only an explicit value changes it |
+| `sandbox.exchange_url` | The secrets exchange, for refresh requests and the doctor probe. The default is `http://127.0.0.1:8781` |
 | `sandbox.browser_login_proxy` | Login-window egress proxy. An empty value keeps the box IP |
 | `sandbox.browser_login_tz` | Login-window timezone (IANA zone). An empty value keeps the container default |
 
@@ -393,13 +470,13 @@ topology.
 
 ## Notifications
 
-Manage destinations from the dashboard. The current destination type is a Slack
-incoming webhook. Actionable messages use Slack Block Kit. Other messages use
-the same URL through Apprise.
+The dashboard has no notifications page yet. Manage destinations through the
+API. The current destination type is a Slack incoming webhook. Actionable
+messages use Slack Block Kit. Other messages use the same URL through Apprise.
 `SLACK_SIGNING_SECRET` authenticates Slack interactivity callbacks.
 
-Choose one enabled destination as the gate-notification destination in
-Settings. A parked subjected run then produces a durable notification. Failure
+Select one enabled destination as the gate-notification destination through
+the API. A parked subjected run then produces a durable notification. Failure
 to deliver the notification does not unpark or fail the run.
 
 ## MCP servers
@@ -431,13 +508,18 @@ not declare the URL, pin the URL.
 The dashboard can enable catalog entries and add custom servers. Authentication
 is one of:
 
-- A static token that Druks stores encrypted in Postgres
-- A token from a named process environment variable
+- A static token, which Druks keeps in the vault
 - An OAuth connection, which requires `urls.endpoint`.
 
 Druks delivers enabled servers through the selected harness unless an app
-workspace owns a required server with the same name. Tokens enter the agent
-environment under a derived variable and are never returned by the API.
+workspace owns a required server with the same name. Each bearer token and
+each secret header is a Drukbox entry behind a vault row. The sandbox holds a
+placeholder under a derived variable, and the harness configuration names that
+variable. The secrets proxy swaps the placeholder only for the server's host.
+The Druks issuer answers the value from the row that was bound when the
+sandbox was created. A pasted token reaches a running sandbox within five
+minutes. A server enabled after that gets no entry in a running sandbox. The
+API never returns a token.
 
 ## Skills
 
@@ -453,12 +535,23 @@ set for each agent.
 
 ## Credential custody and secrets at rest
 
-`secrets.secrets_key` encrypts MCP tokens, OAuth grants, browser-session
-payloads, and the GitHub service identity's private key and webhook secret
-with AES-256-GCM.
-Each database column supplies authenticated associated data, and each value
-gets a derived encryption key. The setting is one or more comma-separated,
-base64-encoded 32-byte master keys:
+Druks keeps every secret it holds in one table, the vault. A vault row has a
+kind, an audience, and an encrypted mapping of secrets:
+
+| Kind | Audience | What the row keeps |
+| --- | --- | --- |
+| `static` | `provider:<id>`, `mcp:<name>` | A pasted API key, an MCP bearer token, or one secret header |
+| `app_key` | `service:<slug>` | A GitHub App private key and webhook secret |
+| `oauth` | `service:<slug>`, `mcp:<name>` | A refresh token and the client that refreshes it |
+| `subscription` | `provider:<id>` | The token payload of a provider subscription |
+
+A revoked row keeps its facts and loses its secrets. An agent call keeps its
+reference to the row it billed. A reconnect revives the row.
+
+`secrets.secrets_key` encrypts the vault and the browser-session payloads with
+AES-256-GCM. Each database column supplies authenticated associated data, and
+each value gets a derived encryption key. The setting is one or more
+comma-separated, base64-encoded 32-byte master keys:
 
 ```bash
 python3 -c 'import base64, os; print(base64.b64encode(os.urandom(32)).decode())'
@@ -472,14 +565,19 @@ the key, put a new key first in `druks.toml`. Then run the installer again:
 secrets_key = "<new>,<old>"
 ```
 
-While a stored row depends on the old key, keep that key. If you lose each key for a
-row, you cannot recover that secret. Reconnect the OAuth grants. Enter the
-static tokens again. Log in to the affected browser sessions again. Validation
-and API errors do not include submitted secret values.
+While a stored row depends on the old key, keep that key. If you lose each key
+for a row, you cannot recover that secret. Reconnect the OAuth grants and the
+subscriptions. Enter the static tokens again. Log in to the affected browser
+sessions again. Validation and API errors do not include submitted secret
+values.
 
-The encryption envelope does **not** currently cover harness subscription
-payloads or notification webhook URLs. Postgres stores them as
-ordinary Postgres fields, although APIs withhold or mask their values. Treat
-access to Postgres and its backups as access to those credentials. GitHub App
-private keys — the operator identity's and the review app's — are
-database values under the envelope, no longer files mounted into the process.
+`secrets.drukbox_secrets_key` encrypts the secret entries of each sandbox in
+the Drukbox database. The installer generates it and renders it as
+`SECRETS_KEY` for the Drukbox API and the secrets exchange. Rotate it as you
+rotate `secrets_key`, with the new key first.
+
+The envelope does **not** cover notification webhook URLs. Postgres stores
+them as ordinary fields, although the API masks their values. Treat access to
+Postgres and its backups as access to those values. GitHub App private keys,
+the operator identity's and the review identity's, are vault rows, not files
+mounted into the process.

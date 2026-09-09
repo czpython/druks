@@ -7,12 +7,15 @@ from urllib.parse import parse_qsl, urlparse
 
 import httpx
 import pytest
+from conftest import connect_service
 from druks.accounts.models import Account
 from druks.core.apis.github import GitHubClient, get_github_client
+from druks.core.services import Github
 from druks.core.webhooks.github import GitHubEvents
 from druks.database import db_session
+from druks.secrets.datastructures import Audience
+from druks.secrets.models import VaultSecret
 from druks.services.exceptions import ServiceNotConnectedError
-from druks.services.models import OauthConnection, ServiceIdentity
 from druks.services.oauth import OauthClient
 from druks.testing import make_settings
 from fastapi import HTTPException
@@ -32,8 +35,8 @@ _SECRET = "hook-secret-value"
 
 async def _connect(
     *, app_id="12345", slug="druks-operator", private_key=_PEM, webhook_secret=_SECRET
-) -> ServiceIdentity:
-    return await ServiceIdentity.connect(
+) -> VaultSecret:
+    return await connect_service(
         "github",
         identity={"app_id": app_id, "slug": slug},
         secrets={"private_key": private_key, "webhook_secret": webhook_secret},
@@ -52,14 +55,14 @@ async def test_secrets_round_trip_and_rest_is_ciphertext(druks_db):
     await _connect()
     druks_db.expunge_all()
 
-    row = await ServiceIdentity.get("github")
+    row = await Github.get()
     assert row.identity["app_id"] == "12345"
     assert row.identity["slug"] == "druks-operator"
-    assert row.connected_at is not None
+    assert row.updated_at is not None
     assert row.secrets["private_key"] == _PEM
     assert row.secrets["webhook_secret"] == _SECRET
 
-    stored = (await druks_db.execute(text("SELECT secrets FROM service_identities"))).scalar_one()
+    stored = (await druks_db.execute(text("SELECT secrets FROM vault"))).scalar_one()
     assert _PEM.encode() not in bytes(stored)
     assert _SECRET.encode() not in bytes(stored)
 
@@ -71,9 +74,9 @@ async def test_connect_replaces_the_single_github_row(druks_db):
     )
     druks_db.expunge_all()
 
-    count = (await druks_db.execute(text("SELECT count(*) FROM service_identities"))).scalar_one()
+    count = (await druks_db.execute(text("SELECT count(*) FROM vault"))).scalar_one()
     assert count == 1
-    row = await ServiceIdentity.get("github")
+    row = await Github.get()
     assert row.identity["app_id"] == "777"
     assert row.identity["slug"] == "new-slug"
     assert row.secrets["private_key"] == "new-pem"
@@ -82,7 +85,7 @@ async def test_connect_replaces_the_single_github_row(druks_db):
 
 async def test_get_raises_when_the_service_is_not_connected(druks_db):
     with pytest.raises(ServiceNotConnectedError, match="github is not connected"):
-        await ServiceIdentity.get("github")
+        await Github.get()
 
 
 # --- The zero-argument client factory ---------------------------------------
@@ -246,7 +249,7 @@ async def test_invalid_credentials_preserve_the_previous_row(
     assert "bad-pem" not in response.text
 
     druks_db.expunge_all()
-    row = await ServiceIdentity.get("github")
+    row = await Github.get()
     assert row.identity["app_id"] == "12345"
     assert row.secrets["private_key"] == _PEM
 
@@ -266,7 +269,7 @@ async def test_blank_fields_are_rejected_without_touching_github(
 
     assert response.status_code == 422
     with pytest.raises(ServiceNotConnectedError):
-        await ServiceIdentity.get("github")
+        await Github.get()
 
 
 # --- The manifest flow (dashboard-created App) -------------------------------
@@ -371,7 +374,7 @@ async def test_manifest_callback_exchanges_the_code_and_connects(
     assert "line-one" not in response.text
     assert _SECRET not in response.text
     druks_db.expunge_all()
-    row = await ServiceIdentity.get("github")
+    row = await Github.get()
     assert row.identity == {"app_id": "4242", "slug": "druks"}
     assert row.secrets == {"private_key": _PEM, "webhook_secret": _SECRET}
 
@@ -391,7 +394,7 @@ async def test_manifest_callback_rejects_a_dead_code(
     assert response.status_code == 400
     assert "restart" in response.json()["detail"]
     with pytest.raises(ServiceNotConnectedError):
-        await ServiceIdentity.get("github")
+        await Github.get()
 
 
 # --- OAuth declaration --------------------------------------------------------
@@ -423,7 +426,7 @@ async def test_get_oauth_client_reads_the_connected_identity(declared_services, 
             client_id: str
             client_secret: SecretStr
 
-    await ServiceIdentity.connect(
+    await connect_service(
         "acme", identity={"client_id": "id-1"}, secrets={"client_secret": "sec-1"}
     )
 
@@ -533,29 +536,29 @@ async def test_with_scopes_declares_the_union_and_reads_connections(declared_ser
         "digest.acme",
     ]
 
-    from druks.accounts.constants import SYSTEM_ACCOUNT_ID
-    from druks.services.models import OauthConnection
+    from druks.secrets.datastructures import Audience
+    from druks.secrets.models import VaultSecret
 
-    row = await OauthConnection.create(
-        provider="acme",
-        account_id=SYSTEM_ACCOUNT_ID,
+    row = await VaultSecret.connect(
+        Audience.service("acme"),
+        account_id=None,
         refresh_token="rt-1",
         scopes=["profile.read"],
         identity={"email": "night@acme.test"},
     )
-    connections = await NightWatch.acme.list_for_account(SYSTEM_ACCOUNT_ID)
+    connections = await NightWatch.acme.list_for_account(None)
     assert [connection.id for connection in connections] == [row.id]
     assert connections[0].scopes == ["profile.read"]
     assert connections[0].identity == {"email": "night@acme.test"}
-    assert connections[0].account_id == SYSTEM_ACCOUNT_ID
+    assert connections[0].account_id is None
     assert (await NightWatch.acme.get(row.id)).id == row.id
     assert not await NightWatch.acme.get("missing")
 
     # The handle serves live connections only; the revoked row survives.
     await row.revoke("user")
-    assert not await NightWatch.acme.list_for_account(SYSTEM_ACCOUNT_ID)
+    assert not await NightWatch.acme.list_for_account(None)
     assert not await NightWatch.acme.get(row.id)
-    assert (await OauthConnection.get(row.id)).identity == {"email": "night@acme.test"}
+    assert (await VaultSecret.get(row.id)).identity == {"email": "night@acme.test"}
 
 
 async def test_get_identity_without_a_declared_endpoint_is_empty(declared_services):
@@ -665,7 +668,7 @@ async def test_oauth_connect_redirects_to_consent_with_the_scope_union(
 
     from druks.testing import configure_app_for_test
 
-    await ServiceIdentity.connect(
+    await connect_service(
         "acme", identity={"client_id": "id-1"}, secrets={"client_secret": "sec-1"}
     )
     settings = make_settings(tmp_path, urls={"endpoint": "https://druks.example"})
@@ -724,10 +727,11 @@ async def test_oauth_callback_creates_and_reconnects_a_connection(
 
     import druks.redis
     from druks.redis import close_client, get_client
-    from druks.services.models import OauthConnection
+    from druks.secrets.datastructures import Audience
+    from druks.secrets.models import VaultSecret
     from druks.testing import configure_app_for_test
 
-    await ServiceIdentity.connect(
+    await connect_service(
         "acme", identity={"client_id": "id-1"}, secrets={"client_secret": "sec-1"}
     )
     published = []
@@ -756,8 +760,8 @@ async def test_oauth_callback_creates_and_reconnects_a_connection(
             == 400
         )
 
-        [connection] = await OauthConnection.list_for_provider("acme")
-        assert connection.refresh_token.decrypt() == "rt-1"
+        [connection] = await VaultSecret.list_connections(Audience.service("acme"))
+        assert connection.secrets["refresh_token"] == "rt-1"
         assert connection.identity == {"email": "op@acme.test"}
         assert connection.scopes == ["profile.read", "posts.write"]
 
@@ -771,7 +775,7 @@ async def test_oauth_callback_creates_and_reconnects_a_connection(
         state = dict(parse_qsl(urlparse(reconnect.headers["location"]).query))["state"]
         finish = client.get("/api/oauth/callback", params={"state": state, "code": "c-2"})
         assert finish.status_code == 200
-        assert len(await OauthConnection.list_for_provider("acme")) == 1
+        assert len(await VaultSecret.list_connections(Audience.service("acme"))) == 1
 
     assert [name for name, _ in published] == ["oauth.connected", "oauth.connected"]
     fresh, reconsent = (kwargs for _, kwargs in published)
@@ -790,7 +794,7 @@ async def test_oauth_callback_creates_and_reconnects_a_connection(
 async def test_oauth_connect_rejects_an_unknown_reconnect_target(tmp_path, acme, druks_db):
     from druks.testing import configure_app_for_test
 
-    await ServiceIdentity.connect(
+    await connect_service(
         "acme", identity={"client_id": "id-1"}, secrets={"client_secret": "sec-1"}
     )
     settings = make_settings(tmp_path, urls={"endpoint": "https://druks.example"})
@@ -803,12 +807,12 @@ async def test_fresh_sign_in_with_matching_identity_resurrects_revoked_connectio
 ):
     from druks.testing import configure_app_for_test
 
-    await ServiceIdentity.connect(
+    await connect_service(
         keyed_acme.slug, identity={"client_id": "id-1"}, secrets={"client_secret": "sec-1"}
     )
     account = await Account.get_or_create("op@example.com")
-    connection = await OauthConnection.create(
-        provider=keyed_acme.slug,
+    connection = await VaultSecret.connect(
+        Audience.service(keyed_acme.slug),
         account_id=account.id,
         refresh_token="rt-old",
         scopes=["profile.read"],
@@ -822,15 +826,22 @@ async def test_fresh_sign_in_with_matching_identity_resurrects_revoked_connectio
         _complete_oauth_sign_in(client, keyed_acme.slug)
 
     db_session().expunge_all()
-    resurrected = await OauthConnection.get(connection_id)
+    resurrected = await VaultSecret.get(connection_id)
     assert resurrected
     assert not resurrected.revoked_at
     assert not resurrected.revoked_reason
-    assert resurrected.refresh_token.decrypt() == "rt-1"
-    assert [row.id for row in await OauthConnection.list_for_provider(keyed_acme.slug)] == [
-        connection_id
-    ]
-    assert len(await OauthConnection.list_for_provider(keyed_acme.slug, include_revoked=True)) == 1
+    assert resurrected.secrets["refresh_token"] == "rt-1"
+    assert [
+        row.id for row in await VaultSecret.list_connections(Audience.service(keyed_acme.slug))
+    ] == [connection_id]
+    assert (
+        len(
+            await VaultSecret.list_connections(
+                Audience.service(keyed_acme.slug), include_revoked=True
+            )
+        )
+        == 1
+    )
     assert oauth_events == [
         (
             "oauth.connected",
@@ -849,12 +860,12 @@ async def test_matching_fresh_sign_in_lands_on_live_connection_and_evicts_cached
 ):
     from druks.testing import configure_app_for_test
 
-    await ServiceIdentity.connect(
+    await connect_service(
         keyed_acme.slug, identity={"client_id": "id-1"}, secrets={"client_secret": "sec-1"}
     )
     account = await Account.get_or_create("op@example.com")
-    connection = await OauthConnection.create(
-        provider=keyed_acme.slug,
+    connection = await VaultSecret.connect(
+        Audience.service(keyed_acme.slug),
         account_id=account.id,
         refresh_token="rt-old",
         scopes=["profile.read"],
@@ -874,10 +885,17 @@ async def test_matching_fresh_sign_in_lands_on_live_connection_and_evicts_cached
         _complete_oauth_sign_in(client, keyed_acme.slug)
 
     db_session().expunge_all()
-    reconnected = await OauthConnection.get(connection_id)
+    reconnected = await VaultSecret.get(connection_id)
     assert reconnected
-    assert reconnected.refresh_token.decrypt() == "rt-1"
-    assert len(await OauthConnection.list_for_provider(keyed_acme.slug, include_revoked=True)) == 1
+    assert reconnected.secrets["refresh_token"] == "rt-1"
+    assert (
+        len(
+            await VaultSecret.list_connections(
+                Audience.service(keyed_acme.slug), include_revoked=True
+            )
+        )
+        == 1
+    )
     assert evicted_connection_ids == [connection_id]
     assert oauth_events[-1][1]["connection_id"] == connection_id
     assert oauth_events[-1][1]["reconsent"] is True
@@ -888,20 +906,20 @@ async def test_fresh_sign_in_with_live_and_revoked_identity_matches_lands_on_liv
 ):
     from druks.testing import configure_app_for_test
 
-    await ServiceIdentity.connect(
+    await connect_service(
         keyed_acme.slug, identity={"client_id": "id-1"}, secrets={"client_secret": "sec-1"}
     )
     account = await Account.get_or_create("op@example.com")
-    live = await OauthConnection.create(
-        provider=keyed_acme.slug,
+    live = await VaultSecret.connect(
+        Audience.service(keyed_acme.slug),
         account_id=account.id,
         refresh_token="rt-live-old",
         scopes=["profile.read"],
         identity={"sub": "account-1"},
     )
     live_id = live.id
-    revoked = await OauthConnection.create(
-        provider=keyed_acme.slug,
+    revoked = await VaultSecret.connect(
+        Audience.service(keyed_acme.slug),
         account_id=account.id,
         refresh_token="rt-revoked-old",
         scopes=["profile.read"],
@@ -915,14 +933,21 @@ async def test_fresh_sign_in_with_live_and_revoked_identity_matches_lands_on_liv
         _complete_oauth_sign_in(client, keyed_acme.slug)
 
     db_session().expunge_all()
-    reconnected = await OauthConnection.get(live_id)
-    still_revoked = await OauthConnection.get(revoked_id)
+    reconnected = await VaultSecret.get(live_id)
+    still_revoked = await VaultSecret.get(revoked_id)
     assert reconnected
     assert still_revoked
-    assert reconnected.refresh_token.decrypt() == "rt-1"
+    assert reconnected.secrets["refresh_token"] == "rt-1"
     assert still_revoked.revoked_at
-    assert not still_revoked.refresh_token
-    assert len(await OauthConnection.list_for_provider(keyed_acme.slug, include_revoked=True)) == 2
+    assert "refresh_token" not in still_revoked.secrets
+    assert (
+        len(
+            await VaultSecret.list_connections(
+                Audience.service(keyed_acme.slug), include_revoked=True
+            )
+        )
+        == 2
+    )
     assert oauth_events[-1][1]["connection_id"] == live_id
     assert oauth_events[-1][1]["reconsent"] is True
 
@@ -932,12 +957,12 @@ async def test_fresh_sign_in_without_the_declared_identity_fact_creates_a_new_co
 ):
     from druks.testing import configure_app_for_test
 
-    await ServiceIdentity.connect(
+    await connect_service(
         acme.slug, identity={"client_id": "id-1"}, secrets={"client_secret": "sec-1"}
     )
     account = await Account.get_or_create("op@example.com")
-    revoked = await OauthConnection.create(
-        provider=acme.slug,
+    revoked = await VaultSecret.connect(
+        Audience.service(acme.slug),
         account_id=account.id,
         refresh_token="rt-old",
         scopes=["profile.read"],
@@ -951,10 +976,13 @@ async def test_fresh_sign_in_without_the_declared_identity_fact_creates_a_new_co
         _complete_oauth_sign_in(client, acme.slug)
 
     db_session().expunge_all()
-    [created] = await OauthConnection.list_for_provider(acme.slug)
+    [created] = await VaultSecret.list_connections(Audience.service(acme.slug))
     assert created.id != revoked_id
-    assert len(await OauthConnection.list_for_provider(acme.slug, include_revoked=True)) == 2
-    assert (await OauthConnection.get(revoked_id)).revoked_at
+    assert (
+        len(await VaultSecret.list_connections(Audience.service(acme.slug), include_revoked=True))
+        == 2
+    )
+    assert (await VaultSecret.get(revoked_id)).revoked_at
     assert oauth_events[-1][1]["connection_id"] == created.id
     assert oauth_events[-1][1]["reconsent"] is False
 
@@ -964,10 +992,11 @@ async def test_fresh_sign_in_after_revoke_creates_a_new_connection(
 ):
     from urllib.parse import parse_qsl, urlparse
 
-    from druks.services.models import OauthConnection
+    from druks.secrets.datastructures import Audience
+    from druks.secrets.models import VaultSecret
     from druks.testing import configure_app_for_test
 
-    await ServiceIdentity.connect(
+    await connect_service(
         "acme", identity={"client_id": "id-1"}, secrets={"client_secret": "sec-1"}
     )
     published = []
@@ -990,15 +1019,18 @@ async def test_fresh_sign_in_after_revoke_creates_a_new_connection(
             )
 
         sign_in()
-        [first] = await OauthConnection.list_for_provider("acme")
+        [first] = await VaultSecret.list_connections(Audience.service("acme"))
         assert client.delete(f"/api/oauth/connections/{first.id}").status_code == 204
 
         # The identity facts do not include "sub", so the sign-in cannot
         # match the existing row. The revoked row stays as history.
         sign_in()
-        [live] = await OauthConnection.list_for_provider("acme")
+        [live] = await VaultSecret.list_connections(Audience.service("acme"))
         assert live.id != first.id
-        assert len(await OauthConnection.list_for_provider("acme", include_revoked=True)) == 2
+        assert (
+            len(await VaultSecret.list_connections(Audience.service("acme"), include_revoked=True))
+            == 2
+        )
 
     events = [name for name, _ in published]
     assert events == ["oauth.connected", "oauth.disconnected", "oauth.connected"]
@@ -1015,10 +1047,11 @@ async def test_reconsent_returns_a_revoked_connection_to_life(
 ):
     from urllib.parse import parse_qsl, urlparse
 
-    from druks.services.models import OauthConnection
+    from druks.secrets.datastructures import Audience
+    from druks.secrets.models import VaultSecret
     from druks.testing import configure_app_for_test
 
-    await ServiceIdentity.connect(
+    await connect_service(
         "acme", identity={"client_id": "id-1"}, secrets={"client_secret": "sec-1"}
     )
     published = []
@@ -1032,7 +1065,7 @@ async def test_reconsent_returns_a_revoked_connection_to_life(
         consent = client.get("/api/oauth/acme/connect", follow_redirects=False)
         state = dict(parse_qsl(urlparse(consent.headers["location"]).query))["state"]
         client.get("/api/oauth/callback", params={"state": state, "code": "c-1"})
-        [connection] = await OauthConnection.list_for_provider("acme")
+        [connection] = await VaultSecret.list_connections(Audience.service("acme"))
         assert client.delete(f"/api/oauth/connections/{connection.id}").status_code == 204
 
         # Reconsent names the row and makes the revoked consent live again.
@@ -1047,11 +1080,11 @@ async def test_reconsent_returns_a_revoked_connection_to_life(
 
         # The routes wrote in their own transactions; drop stale instances.
         db_session().expunge_all()
-        [live] = await OauthConnection.list_for_provider("acme")
+        [live] = await VaultSecret.list_connections(Audience.service("acme"))
         assert live.id == connection.id
         assert not live.revoked_at
         assert not live.revoked_reason
-        assert live.refresh_token.decrypt() == "rt-1"
+        assert live.secrets["refresh_token"] == "rt-1"
 
     assert published[-1][1] == {
         "provider": "acme",
@@ -1063,7 +1096,8 @@ async def test_reconsent_returns_a_revoked_connection_to_life(
 
 async def test_connections_list_and_revoke(tmp_path, acme, druks_db, monkeypatch):
     from druks.accounts.models import Account
-    from druks.services.models import OauthConnection
+    from druks.secrets.datastructures import Audience
+    from druks.secrets.models import VaultSecret
     from druks.testing import configure_app_for_test
 
     published = []
@@ -1074,8 +1108,11 @@ async def test_connections_list_and_revoke(tmp_path, acme, druks_db, monkeypatch
     monkeypatch.setattr("druks.services.routes.publish", record)
     me = await Account.get_or_create("op@example.com")
     with TestClient(configure_app_for_test(settings=make_settings(tmp_path))) as client:
-        row = await OauthConnection.create(
-            provider="acme", account_id=me.id, refresh_token="rt-1", scopes=["profile.read"]
+        row = await VaultSecret.connect(
+            Audience.service("acme"),
+            account_id=me.id,
+            refresh_token="rt-1",
+            scopes=["profile.read"],
         )
         [listed] = client.get("/api/oauth/connections").json()
         assert listed["id"] == row.id
@@ -1084,13 +1121,13 @@ async def test_connections_list_and_revoke(tmp_path, acme, druks_db, monkeypatch
         assert listed["revokedAt"] is None
 
         assert client.delete(f"/api/oauth/connections/{row.id}").status_code == 204
-        assert not await OauthConnection.list_for_provider("acme")
+        assert not await VaultSecret.list_connections(Audience.service("acme"))
         # The route revoked in its own transaction; drop the stale instance.
         db_session().expunge_all()
-        revoked = await OauthConnection.get(row.id)
+        revoked = await VaultSecret.get(row.id)
         assert revoked.revoked_at
         assert revoked.revoked_reason == "user"
-        assert not revoked.refresh_token
+        assert "refresh_token" not in revoked.secrets
         # The audit read keeps serving the revoked row as history.
         [listed] = client.get("/api/oauth/connections").json()
         assert listed["revokedAt"]
@@ -1109,8 +1146,8 @@ async def test_connections_list_and_revoke(tmp_path, acme, druks_db, monkeypatch
 async def test_replacing_the_client_credentials_revokes_its_connections(
     tmp_path, acme, druks_db, monkeypatch
 ):
-    from druks.accounts.constants import SYSTEM_ACCOUNT_ID
-    from druks.services.models import OauthConnection
+    from druks.secrets.datastructures import Audience
+    from druks.secrets.models import VaultSecret
     from druks.testing import configure_app_for_test
 
     published = []
@@ -1119,8 +1156,8 @@ async def test_replacing_the_client_credentials_revokes_its_connections(
         published.append((name, kwargs))
 
     monkeypatch.setattr("druks.services.routes.publish", record)
-    row = await OauthConnection.create(
-        provider="acme", account_id=SYSTEM_ACCOUNT_ID, refresh_token="rt-old", scopes=[]
+    row = await VaultSecret.connect(
+        Audience.service("acme"), account_id=None, refresh_token="rt-old", scopes=[]
     )
 
     with TestClient(configure_app_for_test(settings=make_settings(tmp_path))) as client:
@@ -1131,22 +1168,22 @@ async def test_replacing_the_client_credentials_revokes_its_connections(
 
     # The new client can never refresh the old client's connections.
     db_session().expunge_all()
-    assert not await OauthConnection.list_for_provider("acme")
-    [revoked] = await OauthConnection.list_for_provider("acme", include_revoked=True)
+    assert not await VaultSecret.list_connections(Audience.service("acme"))
+    [revoked] = await VaultSecret.list_connections(Audience.service("acme"), include_revoked=True)
     assert revoked.id == row.id
     assert revoked.revoked_reason == "client_replaced"
-    assert not revoked.refresh_token
+    assert "refresh_token" not in revoked.secrets
     assert published == [
         (
             "oauth.disconnected",
-            {"provider": "acme", "connection_id": row.id, "account_id": SYSTEM_ACCOUNT_ID},
+            {"provider": "acme", "connection_id": row.id, "account_id": None},
         )
     ]
 
 
 async def test_list_serves_the_connections_beside_the_declared_union(tmp_path, acme, druks_db):
-    from druks.accounts.constants import SYSTEM_ACCOUNT_ID
-    from druks.services.models import OauthConnection
+    from druks.secrets.datastructures import Audience
+    from druks.secrets.models import VaultSecret
     from druks.testing import configure_app_for_test
 
     async def entry(client, slug="acme"):
@@ -1160,9 +1197,9 @@ async def test_list_serves_the_connections_beside_the_declared_union(tmp_path, a
         assert before["requiredScopes"] == ["openid", "posts.write", "profile.read"]
         assert before["usedBy"] == ["night_watch.acme"]
 
-        row = await OauthConnection.create(
-            provider="acme",
-            account_id=SYSTEM_ACCOUNT_ID,
+        row = await VaultSecret.connect(
+            Audience.service("acme"),
+            account_id=None,
             refresh_token="rt-1",
             scopes=["profile.read"],
         )
@@ -1178,7 +1215,7 @@ async def test_next_lands_the_user_back_on_the_app_page(tmp_path, acme, druks_db
 
     from druks.testing import configure_app_for_test
 
-    await ServiceIdentity.connect(
+    await connect_service(
         "acme", identity={"client_id": "id-1"}, secrets={"client_secret": "sec-1"}
     )
     settings = make_settings(tmp_path, urls={"endpoint": "https://druks.example"})
@@ -1200,7 +1237,7 @@ async def test_next_lands_the_user_back_on_the_app_page(tmp_path, acme, druks_db
 async def test_next_rejects_anything_but_a_bare_path(tmp_path, acme, druks_db):
     from druks.testing import configure_app_for_test
 
-    await ServiceIdentity.connect(
+    await connect_service(
         "acme", identity={"client_id": "id-1"}, secrets={"client_secret": "sec-1"}
     )
     settings = make_settings(tmp_path, urls={"endpoint": "https://druks.example"})

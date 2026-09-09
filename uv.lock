@@ -522,14 +522,14 @@ wheels = [
 
 [[package]]
 name = "drukbox-python-sdk"
-version = "0.1.0"
+version = "0.2.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "httpx" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/96/01/73e978566c3c6670ec2f5fcbd4829508f4f3edb992fa01856a120ef4f7b0/drukbox_python_sdk-0.1.0.tar.gz", hash = "sha256:d81cb31f865f67c01b28d531989525f9367bbbae0a335835aa61ad4400756715", size = 18394, upload-time = "2026-08-26T19:44:28.841Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/2d/b1/3e9e802bc3421eb190fb41804112d13bfc75c1515bc0c34a31e23a38f35f/drukbox_python_sdk-0.2.0.tar.gz", hash = "sha256:08e64c2318b55bcd52fad8dda08ac69f76e4e1d1fe2e7bbc73c1186e51fe7789", size = 20035, upload-time = "2026-09-07T10:51:49.012Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/65/f7/70dc580b901cbb6eec1fd6aa12cfa5c87f9ba8854840793ce59c534b8a11/drukbox_python_sdk-0.1.0-py3-none-any.whl", hash = "sha256:9a72cc443404d40bbdb23b08e691ff89746130b88e5bc2ac2e375f93eafebe04", size = 12186, upload-time = "2026-08-26T19:44:27.836Z" },
+    { url = "https://files.pythonhosted.org/packages/1b/4f/695698ffe986138cc1a7c796228dd447bda8cb45777d467798cc0df76df9/drukbox_python_sdk-0.2.0-py3-none-any.whl", hash = "sha256:2651dbff2642730e02a56ff3be99e4ae532df3ba4bb6077674f636d2d6699711", size = 13068, upload-time = "2026-09-07T10:51:47.797Z" },
 ]
 
 [[package]]
@@ -556,6 +556,7 @@ dependencies = [
     { name = "pyyaml" },
     { name = "redis" },
     { name = "sqlalchemy" },
+    { name = "sqlalchemy-encrypted-field" },
     { name = "tomlkit" },
     { name = "uuid-utils" },
     { name = "uvicorn" },
@@ -580,7 +581,7 @@ requires-dist = [
     { name = "croniter", specifier = ">=6.2.2" },
     { name = "cryptography", specifier = ">=48.0.1" },
     { name = "dbos", specifier = ">=2.30" },
-    { name = "drukbox-python-sdk", specifier = ">=0.1.0" },
+    { name = "drukbox-python-sdk", specifier = ">=0.2.0" },
     { name = "fastapi", specifier = ">=0.138.0" },
     { name = "fastmcp", specifier = ">=3.4.4,<4" },
     { name = "githubkit", extras = ["auth-app"], specifier = ">=0.15.5" },
@@ -592,6 +593,7 @@ requires-dist = [
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "redis", specifier = ">=8" },
     { name = "sqlalchemy", specifier = ">=2.0" },
+    { name = "sqlalchemy-encrypted-field", specifier = "==1.0.2" },
     { name = "tomlkit", specifier = ">=0.13" },
     { name = "uuid-utils", specifier = ">=0.16.0" },
     { name = "uvicorn", specifier = ">=0.38.0" },
@@ -2115,6 +2117,19 @@ wheels = [
 [package.optional-dependencies]
 asyncio = [
     { name = "greenlet" },
+]
+
+[[package]]
+name = "sqlalchemy-encrypted-field"
+version = "1.0.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "cryptography" },
+    { name = "sqlalchemy" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/8f/81/c61f39d4a2846fea3f2bd33a2907a7ae7f0cf6419dabc8e4a04821eb57ae/sqlalchemy_encrypted_field-1.0.2.tar.gz", hash = "sha256:5ea80fd66ddc902e1f0f533822f0c760cba91f20b8e7817ea040a015053c117e", size = 10956, upload-time = "2026-09-08T13:35:11.823Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/c2/f2/d547c79c46e2448201bb100bad3da633c375a8367840bd3ef185d722fb02/sqlalchemy_encrypted_field-1.0.2-py3-none-any.whl", hash = "sha256:83f47f32b092ce8c3b4cb38cc29fb66145b8ce73273caf8995b270becab5a302", size = 9752, upload-time = "2026-09-08T13:35:10.825Z" },
 ]
 
 [[package]]

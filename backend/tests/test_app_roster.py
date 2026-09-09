@@ -16,6 +16,6 @@ def test_roster_lists_installed_apps_with_subject_types(tmp_path: Path):
     assert software_factory["navigation"] == []
     assert software_factory["icon"]
     field_notes = roster["field_notes"]
-    assert field_notes["subjectTypes"] == ["note"]
+    assert field_notes["subjectTypes"] == ["note", "repository"]
     # Derived from the landing page the app declares, labelled by that page.
     assert field_notes["navigation"] == [["/field_notes", "notes"]]

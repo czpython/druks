@@ -12,69 +12,46 @@ import type {
   UsageTodayResponse,
 } from '../api/types'
 
-/**
- * The /usage operator surface: rate-limit windows with burn rate +
- * trend sparklines per provider, plus today's spend/token totals
- * split by provider.
- *
- * Layout follows the Claude Design handoff (Usage.html): a loud
- * exhaustion banner when a window is depleted, thick health-colored
- * bars, per-window burn + reset countdown + trend, and a "today"
- * section fed from druks' own run records.
- *
- * Unmetered plans (Codex business — ``unlimited``) render a single
- * permanently-full capacity row instead of fake quota windows; the
- * useful signal there is actual consumption, so the panel shows
- * used-today figures from run records in its place.
- *
- * On parse failure: shows last good values for whatever did parse,
- * plus a disclosure that reveals the raw scraped output so the
- * operator can update the parser regex without re-running the scrape.
- *
- * Empty-state (no snapshot yet) is intentionally chatty about *why*:
- *   - not_installed → "claude not installed"
- *   - auth_required → "not signed in"
- *   - timeout       → "scrape timed out — try refresh"
- * Anything else falls back to the generic copy.
- */
+/** Provider capacity and consumption from the operator’s runs. */
 export function UsagePanel() {
-  const { data, isLoading, isError, refresh, isFetching } = useUsage()
+  const { data, isLoading, isError, refresh, refetch, isFetching } = useUsage()
   const { data: history } = useUsageHistory()
   const { data: today } = useUsageToday()
   const [refreshing, setRefreshing] = useState(false)
+  const [refreshError, setRefreshError] = useState(false)
 
   if (isLoading) {
     return (
       <section className="us-col">
         <header className="us-head mono dim">
-          <span className="us-head-title">usage</span>
+          <h1 className="us-head-title">Usage</h1>
           <span>loading…</span>
         </header>
       </section>
     )
   }
 
-  if (isError || !data) {
-    return null // pill already shows nothing; panel staying quiet is fine
-  }
-
   async function handleRefresh() {
     setRefreshing(true)
+    setRefreshError(false)
     try {
       await refresh()
+    } catch {
+      setRefreshError(true)
     } finally {
       setRefreshing(false)
     }
   }
 
-  const ages = data.providers.map((h) => h.ageSeconds).filter((v): v is number => v !== null)
+  const providers = data?.providers ?? []
+  const ages = providers.map((h) => h.ageSeconds).filter((v): v is number => v !== null)
   const updatedLabel = ages.length > 0 ? `updated ${formatAge(Math.min(...ages))} ago` : ''
-  const harnessColor = harnessColors(data.providers.map((h) => h.id))
+  const harnessColor = harnessColors(providers.map((h) => h.id))
 
   return (
     <section className="us-col">
       <header className="us-head">
-        <span className="us-head-title">usage</span>
+        <h1 className="us-head-title">Usage</h1>
         <span className="us-head-spacer" />
         <span className="us-head-updated mono">{updatedLabel}</span>
         <button
@@ -89,10 +66,19 @@ export function UsagePanel() {
         </button>
       </header>
 
-      <ExhaustionAlert providers={data.providers} />
+      {(isError || refreshError) && (
+        <div className="us-read-error" role="alert">
+          <p>Could not refresh Usage. {data ? 'The last successful read remains visible.' : 'No usage data is available.'}</p>
+          <button className="us-refresh" disabled={isFetching || refreshing} onClick={() => {
+            if (refreshError) void handleRefresh()
+            else void refetch()
+          }}>Retry</button>
+        </div>
+      )}
+      <ExhaustionAlert providers={providers} />
 
       <div className="us-grid">
-        {data.providers.map((usage) => (
+        {providers.map((usage) => (
           <ProviderPanel
             key={usage.id}
             usage={usage}
@@ -108,7 +94,6 @@ export function UsagePanel() {
   )
 }
 
-// ---- Exhaustion banner ------------------------------------------------------
 
 interface Exhausted {
   provider: string
@@ -201,7 +186,6 @@ function ExhaustionAlert({ providers }: { providers: UsageProviderSummary[] }) {
   )
 }
 
-// ---- Provider panel ---------------------------------------------------------
 
 function ProviderPanel({
   usage,
@@ -220,9 +204,10 @@ function ProviderPanel({
     <section className="us-prov" style={{ '--fam': color } as CSSProperties}>
       <header className="us-prov-head">
         <span className="us-prov-dot" />
-        <span className="us-prov-name">
-          {usage.connected ? usage.providerEmail : usage.label}
-        </span>
+        <div className="us-prov-identity">
+          <h2 className="us-prov-name">{usage.label}</h2>
+          {usage.connected && usage.providerEmail && <span>{usage.providerEmail}</span>}
+        </div>
         {usage.planTier && <span className="us-prov-plan mono">{usage.planTier}</span>}
         <span className="us-prov-spacer" />
         <span className="us-prov-scraped mono">
@@ -350,7 +335,6 @@ function WeeklyCarousel({
   )
 }
 
-// ---- Window block -----------------------------------------------------------
 
 function WindowRow({
   label,
@@ -488,7 +472,6 @@ export function Bar({ pctLeft }: { pctLeft: number }) {
   )
 }
 
-// ---- Sparkline (trend of % remaining over the window) -----------------------
 
 function Spark({ data, tone, id }: { data: number[]; tone: UsageTone; id: string }) {
   const w = 260
@@ -523,7 +506,6 @@ function Spark({ data, tone, id }: { data: number[]; tone: UsageTone; id: string
   )
 }
 
-// ---- Today section ----------------------------------------------------------
 
 function TodaySection({ today }: { today: UsageTodayResponse }) {
   const totalSpend = today.providers.reduce((sum, h) => sum + h.spendUsd, 0)
@@ -658,8 +640,6 @@ function HoursTile({
                     className="us-hour-seg"
                     style={{
                       height: `${(amount / v) * 100}%`,
-                      // Softened off-hours, full accent on the current hour —
-                      // same treatment the old per-name CSS gave claude/codex.
                       background:
                         color && i !== nowHour
                           ? `color-mix(in oklch, ${color} 70%, var(--surface-3))`
@@ -683,9 +663,8 @@ function HoursTile({
   )
 }
 
-// ---- helpers ----------------------------------------------------------------
 
-/** Ticking clock for countdowns; shared cadence keeps re-renders cheap. */
+/** Updates countdowns at the requested interval. */
 function useNow(intervalMs: number): number {
   const [now, setNow] = useState(() => Date.now())
   useEffect(() => {

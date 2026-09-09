@@ -17,12 +17,12 @@ async def test_run_projects_its_account(druks_db):
     assert response.account_username == "dev@example.com"
 
 
-async def test_an_unowned_run_belongs_to_system(druks_db):
+async def test_a_run_projects_the_default_account(druks_db):
     await seed_run(druks_db, kind=Summarize.kind, run_id="run-attr-2")
     await druks_db.flush()
 
     run = await druks_db.get(Run, "run-attr-2")
     await run.awaitable_attrs.agent_calls
-    assert run.account_id == "system"
+    assert run.account_id == (await Account.get_default()).id
     response = RunResponse.from_run(run, input_request=None)
-    assert response.account_username == "system"
+    assert response.account_username == "op@example.com"

@@ -1,14 +1,16 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { useCallback, useMemo, useRef, type ReactNode } from 'react'
-import { Link as RouteLink, useLocation } from 'wouter'
+import { useMemo, useRef, type ReactNode } from 'react'
+import { Link as RouteLink } from 'wouter'
 
+import { appLabel } from '../apps/registry'
 import { api } from '../api/client'
 import type { Action, Follows, Link, PageEntry, PageSnapshot } from '../api/types'
 import { EmptyState } from '../components/EmptyState'
 import { Page } from '../components/Page'
+import { useRawLocation } from '../lib/useRawLocation'
 import { AppSurface } from './AppSurface'
 import { Blocks, Controls } from './Blocks'
-import { followedSubjects, hrefUnder, isDetail, mergeRegions, PagesContext, parentOf, tabsFor } from './pages'
+import { followedSubjects, gateRuns, hrefUnder, isDetail, mergeRegions, PagesContext, parentOf, tabsFor } from './pages'
 import { SubjectStream } from './SubjectStream'
 
 // The wait before each attempt at one refresh. Three tries, then the page
@@ -17,14 +19,19 @@ const REFRESH_WAITS = [0, 300, 1200]
 
 /** One page an app declared in Python, rendered by the shell. */
 export function AppPage({ app, page }: { app: string; page: string }) {
-  const [location] = useLocation()
+  const { path: rawPath, search, base } = useRawLocation()
+  const location = rawPath.slice(base.length)
+  const query = new URLSearchParams(search)
+  const run = query.get('run')
+  const parkedAt = query.get('parkedAt')
+  const target = run && parkedAt ? { run, parkedAt } : undefined
   const queryClient = useQueryClient()
   const roster = useQuery({ queryKey: ['apps'], queryFn: api.listApps, staleTime: 60_000 })
   const installed = roster.data?.find((entry) => entry.name === app)
   const pages = installed?.pages ?? []
   const operations = installed?.operations ?? []
   const path = location.slice(`/${app}`.length)
-  const key = useMemo(() => ['page', app, path], [app, path])
+  const key = ['page', app, path]
   const snapshot = useQuery({
     queryKey: key,
     queryFn: () => api.readPage(app, path),
@@ -37,31 +44,28 @@ export function AppPage({ app, page }: { app: string; page: string }) {
   // Every read gets a number, per subject: a read that lands after a newer read
   // of the same subject is stale, while another subject's read is not.
   const latest = useRef(new Map<string, number>())
-  const reread = useCallback(
-    async (subject: Follows) => {
-      const watched = `${subject.subjectType}/${subject.subjectId}`
-      const mine = (latest.current.get(watched) ?? 0) + 1
-      latest.current.set(watched, mine)
-      // The stream repeats nothing, so a read that fails would leave the page
-      // stale until the subject changes again. Back off and try again, still
-      // numbered, so a newer read still wins.
-      for (const wait of REFRESH_WAITS) {
-        if (wait) await new Promise((resume) => setTimeout(resume, wait))
-        const fresh = await api.readPage(app, path).catch(() => undefined)
-        if (mine !== latest.current.get(watched)) return
-        if (fresh) {
-          queryClient.setQueryData(key, (previous?: PageSnapshot) =>
-            previous ? mergeRegions(previous, fresh, subject) : fresh,
-          )
-          // A snapshot can open, change, or close a gate on a run this page
-          // already shows, so the gates read themselves again.
-          void queryClient.invalidateQueries({ queryKey: ['gate'] })
-          return
-        }
+  async function reread(subject: Follows) {
+    const watched = `${subject.subjectType}/${subject.subjectId}`
+    const mine = (latest.current.get(watched) ?? 0) + 1
+    latest.current.set(watched, mine)
+    // The stream repeats nothing, so a read that fails would leave the page
+    // stale until the subject changes again. Back off and try again, still
+    // numbered, so a newer read still wins.
+    for (const wait of REFRESH_WAITS) {
+      if (wait) await new Promise((resume) => setTimeout(resume, wait))
+      const fresh = await api.readPage(app, path).catch(() => undefined)
+      if (mine !== latest.current.get(watched)) return
+      if (fresh) {
+        queryClient.setQueryData(key, (previous?: PageSnapshot) =>
+          previous ? mergeRegions(previous, fresh, subject) : fresh,
+        )
+        // A snapshot can open, change, or close a gate on a run this page
+        // already shows, so the gates read themselves again.
+        void queryClient.invalidateQueries({ queryKey: ['gate'] })
+        return
       }
-    },
-    [app, path, key, queryClient],
-  )
+    }
+  }
 
   const followed = useMemo(
     () => (snapshot.data ? followedSubjects(snapshot.data) : []),
@@ -78,19 +82,19 @@ export function AppPage({ app, page }: { app: string; page: string }) {
   const chrome = { app, page, location, parent, root, tabs }
 
   if (snapshot.isLoading) {
-    const waiting = `loading ${app.replaceAll('_', ' ')}`
+    const waiting = `loading ${appLabel(app)}`
     // The breadcrumb and the tabs come from the roster, which is already warm,
     // so the page keeps its frame while the body arrives. A cold deeplink has
     // no roster yet and waits bare.
     if (!pages.length) {
       return (
-        <Page className="dui-page">
+        <Page inset className="dui-page">
           <EmptyState glyph="…" msg={waiting} />
         </Page>
       )
     }
     return (
-      <Page className="dui-page">
+      <Page inset className="dui-page">
         {/* The title is the app's to compute, so it is held rather than
             guessed: a page label would show the wrong words first. */}
         <PageChrome {...chrome} title="…" />
@@ -120,14 +124,17 @@ export function AppPage({ app, page }: { app: string; page: string }) {
           onSnapshot={reread}
         />
       ))}
-      <PagesContext.Provider value={{ app, pages, operations }}>
-        <Page className="dui-page">
+      <PagesContext.Provider value={{ app, pages, operations, target }}>
+        <Page inset className="dui-page">
           <PageChrome
             {...chrome}
             title={snapshot.data.title}
             description={snapshot.data.description}
             controls={snapshot.data.controls}
           />
+          {target && !gateRuns(snapshot.data.blocks).includes(target.run) && (
+            <p role="alert">This input request is unavailable. Return to the Dashboard to open the current request.</p>
+          )}
           <Blocks blocks={snapshot.data.blocks} />
         </Page>
       </PagesContext.Provider>
@@ -179,7 +186,7 @@ function PageChrome({
         ) : null}
       </div>
       {tabs.length > 0 && root && (
-        <nav className="dui-tabs" aria-label={`${app} page tabs`}>
+        <nav className="dui-tabs" aria-label={`${appLabel(app)} page tabs`}>
           {tabs.map((tab) => (
             <RouteLink
               key={tab.name}
@@ -198,10 +205,10 @@ function PageChrome({
 
 function appError(app: string, detail: string, retry: () => void): ReactNode {
   return (
-    <Page className="dui-page">
+    <Page inset className="dui-page">
       <EmptyState
         glyph="!"
-        msg={`${app} could not render this page`}
+        msg={`${appLabel(app)} could not render this page`}
         sub={detail || undefined}
         action={
           <button type="button" className="dui-retry" onClick={retry}>

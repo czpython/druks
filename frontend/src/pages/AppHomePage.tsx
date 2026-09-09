@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useLocation } from 'wouter'
 
+import { appLabel } from '../apps/registry'
 import { subjectApi } from '../api/client'
 import { useSSE } from '../api/sse'
 import type { SubjectRow } from '../api/types'
@@ -25,7 +26,7 @@ export function AppHomePage({ app, description, subjectTypes }: Props) {
     <Page
       scroll="internal"
       className="page-subjects"
-      header={<PageHeader eyebrow={app.replaceAll('_', ' ')} />}
+      header={<PageHeader eyebrow={appLabel(app)} />}
     >
       {subjectTypes.length === 0 ? (
         <EmptyState glyph="◳" msg="nothing to show yet" sub={description} />

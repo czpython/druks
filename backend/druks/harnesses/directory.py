@@ -4,10 +4,11 @@ import logging
 import httpx
 
 from druks.redis import get_client
+from druks.secrets.models import VaultSecret
 
 from . import exceptions
 from .constants import DIRECTORY_CACHE_KEY, DIRECTORY_CACHE_TTL_SECONDS
-from .models import ProviderCatalog, ProviderKey
+from .models import ProviderCatalog
 from .providers import error_tag, is_registered
 
 logger = logging.getLogger(__name__)
@@ -80,8 +81,8 @@ async def add_provider(provider_id: str) -> ProviderCatalog:
 
 async def refresh_added_catalogs() -> None:
     """Re-read the directory for every provider the operator added by key."""
-    keys = await ProviderKey.list_all()
-    added = [row.provider for row in keys if not is_registered(row.provider)]
+    keys = await VaultSecret.list_keys()
+    added = [row.audience_name for row in keys if not is_registered(row.audience_name)]
     for provider_id in added:
         try:
             await add_provider(provider_id)

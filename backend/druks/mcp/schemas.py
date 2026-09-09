@@ -8,18 +8,14 @@ NonBlank = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)
 
 
 class McpServerResponse(Schema):
-    # A pure projection of one account's ``McpServer.get_resolved()`` item — the dict's
-    # ``token`` is not a field here, so the secret can't serialize (and it
-    # arrives as a Secret, redacted even if it did).
+    # A pure projection of one account's ``McpServer.get_resolved()`` item — the
+    # dict's ``token`` is a vault row, not a field here, so no secret serializes.
     name: str
     url: str
     is_enabled: bool
     token_source: str
     identity_mode: str | None
     builtin: bool
-    # The deployment env var an env-sourced server reads its token from
-    # ("" otherwise) — a var name, never a value.
-    source_env_var: str
     # Whether the server can authenticate at delivery — never the token itself.
     has_token: bool
 
@@ -63,21 +59,6 @@ class StaticAuth(BaseModel):
     model_config = {"extra": "forbid"}
     type: Literal["static"]
 
-    @property
-    def source_env_var(self) -> str:
-        return ""
-
-
-class EnvAuth(BaseModel):
-    # Delivery reads the token from a named var in druks' own process env.
-    model_config = {"extra": "forbid"}
-    type: Literal["static_from_env"]
-    env: NonBlank
-
-    @property
-    def source_env_var(self) -> str:
-        return self.env
-
 
 class OauthAuth(BaseModel):
     # The operator connects the server once (consent → stored grant); delivery
@@ -85,16 +66,12 @@ class OauthAuth(BaseModel):
     model_config = {"extra": "forbid"}
     type: Literal["oauth"]
 
-    @property
-    def source_env_var(self) -> str:
-        return ""
-
 
 class CatalogEntry(BaseModel):
     model_config = {"extra": "forbid"}
     url: NonBlank
     transport: Literal["http"] = "http"
-    auth: Annotated[StaticAuth | EnvAuth | OauthAuth, Field(discriminator="type")]
+    auth: Annotated[StaticAuth | OauthAuth, Field(discriminator="type")]
     # A catalog can ship a server dark — visible in settings, delivered to no
     # run until the operator turns it on (an oauth entry is unconnectable
     # before its first consent, so enabled-by-default would break every run).

@@ -10,12 +10,14 @@ The local shape keeps every component on one machine:
 browser -> Druks :8001 -> Drukbox :8780 -> Docker sandbox containers
                          \
                           -> SSH from Druks to each container
+sandbox container -> secrets proxy 172.17.0.1:8880 -> secrets exchange 127.0.0.1:8781
 ```
 
-Compose runs Druks, Postgres, Redis, and Drukbox. The Drukbox service holds the
-Docker socket of the host. Its `docker` provider starts sandboxes as sibling
-containers on the host daemon. Agent work stays in these isolated containers.
-It does not run in the Druks process.
+Compose runs Druks, Postgres, Redis, Drukbox, the secrets exchange, and the
+secrets proxy. The Drukbox service holds the Docker socket of the host. Its
+`docker` provider starts sandboxes as sibling containers on the host daemon.
+Agent work stays in these isolated containers. It does not run in the Druks
+process.
 
 ## Prerequisites
 
@@ -43,9 +45,12 @@ The local shape needs no authored values, so the first run goes all the way:
 - It creates `~/.config/druks/harnesses` for optional harness configuration.
 - It generates the database password and the stored-secret key.
 - It pulls images and applies migrations.
-- It starts Druks, Postgres, Redis, and Drukbox. Drukbox listens on `127.0.0.1:8780`.
-- It uses `COMPOSE_FILE=compose.yaml:compose.override.yaml` without Caddy or the
-  janitor profiles.
+- It starts Druks, Postgres, Redis, Drukbox, the secrets exchange, and the
+  secrets proxy. Drukbox listens on `127.0.0.1:8780`. The exchange listens on
+  `127.0.0.1:8781`. The proxy listens on `172.17.0.1:8880`, where sandbox
+  containers reach it.
+- It uses `COMPOSE_FILE=compose.yaml:compose.override.yaml` and
+  `COMPOSE_PROFILES=proxy`, without Caddy or the janitor.
 
 Drukbox controls sandboxes through the mounted `/var/run/docker.sock`. The
 installer records the group ID of the socket in `.env`. This value gives the
@@ -54,8 +59,12 @@ non-root service user access to the socket. Drukbox keeps its schema in a
 data store. If sandbox SSH is unreachable on macOS, enable host networking in
 the Docker Desktop settings.
 
+A sandbox holds a placeholder for each credential and sends its HTTPS through
+the secrets proxy. See
+[the secrets exchange and the secrets proxy](deployment.md#the-secrets-exchange-and-the-secrets-proxy).
+
 For the bundled `software_factory` app, connect its GitHub App after startup.
-Use **Settings → Services** in the dashboard. Create the app there, or paste the
+Use **Settings → Connections → Services** in the dashboard. Create the app there, or paste the
 credentials of an existing GitHub App. See
 [the GitHub connection](configuration.md#github).
 
@@ -87,8 +96,8 @@ authentication and exactly one operator account.
 A new installation shows its
 setup page until the first subscription connection completes. That connection
 creates the operator account from the provider-verified email. Protect database
-access and backups as credential data. Harness payloads do not use the
-`[secrets].secrets_key` envelope that protects MCP tokens and OAuth grants.
+access and backups as credential data. The `[secrets].secrets_key` envelope
+protects every secret in the vault, subscriptions included.
 
 Agent calls refuse before provisioning if their selected harness is not
 connected. `druks doctor` reports the connection and token expiry for every
@@ -113,18 +122,18 @@ docker compose exec web druks doctor --sandbox
 
 This creates and deletes a real sandbox container.
 
-## 4. Log in a browser session
+## 4. Connect a browser profile
 
-Create the browser session:
+Installed apps declare the browser profiles they use. To save a login:
 
-1. Open **Settings → Browser sessions**.
-2. Create a stable session name.
+1. Open **Settings → Connections → Browser**.
+2. Find the profile for the site.
 3. Choose **Log in**. Druks opens a headed browser in a disposable browser sandbox.
 4. Authenticate on the site.
 5. Choose **Save**. Druks closes the browser and stores its encrypted profile.
-   It marks the session as ready.
+   It marks the profile as ready.
 
-When a site expires the login, the session becomes stale. Choose **Reconnect**.
+When a site expires the login, the profile becomes stale. Choose **Reconnect**.
 Druks creates a new login window from the saved state. Authenticate again. Then
 save the replacement profile.
 
@@ -132,9 +141,9 @@ save the replacement profile.
 a change to the saved state. A web-process restart also deletes open login
 windows. After Druks returns, open the window again.
 
-To examine the complete path, save the session. Then run an app workflow that
+To examine the complete path, save the profile. Then run an app workflow that
 borrows it. Make sure that its browser opens the authenticated site. A saved
-login window always stores `profile_dir`. This rule also applies to a session
+login window always stores `profile_dir`. This rule also applies to a profile
 that came from Playwright `storage_state`.
 
 ## 5. Exercise an app
@@ -177,7 +186,7 @@ value.
 
 GitHub, Linear, and Jira cannot connect to a loopback listener. Dashboard-initiated
 actions work locally, but provider-driven flows need an HTTPS tunnel forwarding
-to `127.0.0.1:8001`. Connect tracker credentials under **Settings → Services** and
+to `127.0.0.1:8001`. Connect tracker credentials under **Settings → Connections → Services** and
 keep the exact public paths:
 
 ```text
