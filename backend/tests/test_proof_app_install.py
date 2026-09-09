@@ -20,7 +20,11 @@ _CHECK = textwrap.dedent(
         "sync_signing_key",
         "sync_token",
     ]
-    assert [workflow.__name__ for workflow in app.workflows()] == ["Summarize", "Survey"]
+    assert [workflow.__name__ for workflow in app.workflows()] == [
+        "ApproveGist",
+        "Summarize",
+        "Survey",
+    ]
     assert {router.prefix for router in app.routers()} >= {"/notes", "/note"}
     assert app.migrations_dir() is not None
     print("ok")

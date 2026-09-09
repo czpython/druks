@@ -1,6 +1,7 @@
 import asyncio
 import contextlib
 import os
+from datetime import UTC, datetime
 from types import SimpleNamespace
 
 import psycopg
@@ -13,12 +14,16 @@ from druks.database import configure_session, db_session, get_session, session_s
 from druks.durable import FatalError, Run, RunState
 from druks.durable.dbos_state import workflow_status
 from druks.durable.engine import configure_engine, init_dbos, launch, shutdown
+from druks.durable.enums import AgentCallStatus
 from druks.durable.models import Artifact
 from druks.events.models import Event
 from druks.models import StoredSubject
+from druks.sandbox.datastructures import AgentResult
 from druks.signals import subscribe
 from druks.testing import init_db
-from druks.workflows import Gate, Subject, Workflow, step, task
+from druks.workflows import Gate, OperatorReply, Subject, Workflow, step, task
+from druks_field_notes.models import Note
+from druks_field_notes.workflows import ApproveGist
 from pydantic import BaseModel
 from sqlalchemy import NullPool, create_engine, select
 from sqlalchemy.ext.asyncio import create_async_engine
@@ -1436,3 +1441,80 @@ async def test_output_activity_survives_completed_step_replay(rt, monkeypatch, t
         assert {event.payload["run"] for event in events} == {workflow_id}
     finally:
         workflows._items.pop(OutputFlow.kind)
+
+
+async def test_field_notes_activity_through_admission_review_failure_and_replay(
+    rt, monkeypatch, tmp_path
+):
+    monkeypatch.setenv("DRUKS_DATA_DIR", str(tmp_path))
+    calls = []
+
+    @contextlib.asynccontextmanager
+    async def ephemeral(self, **kwargs):
+        async def run_agent(**kwargs):
+            calls.append(kwargs["call_id"])
+            return AgentResult(
+                output={"gist": "The pump ran hot."},
+                run_id=kwargs["call_id"],
+                sandbox_host_id="host-test",
+                model="claude",
+                agent=kwargs["agent"],
+                status=AgentCallStatus.SUCCEEDED,
+                started_at=datetime.now(UTC),
+            )
+
+        yield SimpleNamespace(run_agent=run_agent, id="host-test")
+
+    monkeypatch.setattr("druks.sandbox.client.Client.ephemeral", ephemeral)
+    monkeypatch.setattr("druks.agents.render_prompt", _fake_render)
+    completed = []
+    body = ApproveGist.run_multistep
+
+    async def interrupt_after_approval(self):
+        await body(self)
+        completed.append(self.workflow_id)
+        if len(completed) == 1:
+            raise asyncio.CancelledError
+
+    monkeypatch.setattr(ApproveGist, "run_multistep", interrupt_after_approval)
+    async with session_scope(rt.engine):
+        approved_note = await Note.create(body="The pump ran hot.")
+        rejected_note = await Note.create(body="The reading needs another pass.")
+
+    approved_id = await ApproveGist.start(subject=approved_note)
+    await _wait_for(rt.engine, approved_id, lambda run: run.is_parked)
+    async with session_scope(rt.engine):
+        await OperatorReply.answer(approved_note, action="approve")
+    await _wait_for(rt.engine, approved_id, lambda run: len(completed) == 1)
+    await DBOS.resume_workflow_async(approved_id)
+    await _wait_for(rt.engine, approved_id, lambda run: run.state == RunState.FINISHED)
+
+    rejected_id = await ApproveGist.start(subject=rejected_note)
+    await _wait_for(rt.engine, rejected_id, lambda run: run.is_parked)
+    async with session_scope(rt.engine):
+        await OperatorReply.answer(rejected_note, action="request_changes")
+    await _wait_for(rt.engine, rejected_id, lambda run: run.state == RunState.FAILED)
+
+    assert completed == [approved_id, approved_id]
+    assert len(calls) == 2
+    async with get_session(rt.engine) as session:
+        events = list(
+            await session.scalars(select(Event).filter_by(app="field_notes").order_by(Event.id))
+        )
+    for run_id, outcome in [(approved_id, "gist.approved"), (rejected_id, "workflow.failed")]:
+        history = [event for event in events if event.payload.get("run") == run_id]
+        for kind in ["workflow.scheduled", "gist.prepared", "workflow.parked", outcome]:
+            assert sum(event.type == kind for event in history) == 1
+        request = next(event for event in history if event.type == "workflow.parked")
+        receipts = [
+            event
+            for event in history
+            if event.type == "workflow.running" and "result" in event.payload
+        ]
+        assert len(receipts) == 1
+        assert receipts[0].payload["gate"] == "review"
+        assert receipts[0].payload["input_requested_at"] == request.payload["input_requested_at"]
+        result = next(event for event in history if event.type == "gist.prepared")
+        assert result.payload["agent_call_id"] in calls
+        assert result.payload["artifact_id"]
+    assert sum(event.type == "gist.approved" for event in events) == 1
