@@ -157,10 +157,9 @@ class Build(Workflow):
         try:
             await Github.get()
         except ServiceNotConnectedError as error:
-            # A raise would 5xx the tracker's webhook and put the delivery into
-            # provider redelivery; the delivery itself succeeded. Log the
-            # Connect GitHub direction and stand down without starting.
+            # The tracker delivery succeeded. A raise would request another delivery.
             logger.info("Ticket %s cannot start a build: %s", ticket["identifier"], error)
+            await item.announce("build.rejected", reason=str(error))
             return
         email = ticket["assignee_email"]
         assignee = await Account.get_for_username(email.strip()) if email else None
