@@ -207,10 +207,8 @@ async def test_eight_idle_hours_need_at_most_twelve_polls(subscription, error) -
     assert 8 <= polls <= 12
 
 
-async def test_task_polls_only_due_subscriptions_after_session_expiry(
-    subscription, druks_db, monkeypatch
-) -> None:
-    """A poll that expires ORM rows cannot break later subscriptions in the tick."""
+async def test_task_polls_only_due_subscriptions(subscription, monkeypatch) -> None:
+    """The task polls only due subscriptions across providers."""
     idle = await connect_anthropic_subscription("idle@example.com")
     exhausted = await connect_anthropic_subscription("exhausted@example.com")
     revoked = await connect_anthropic_subscription("revoked@example.com")
@@ -223,8 +221,6 @@ async def test_task_polls_only_due_subscriptions_after_session_expiry(
 
     async def fetch_usage(subscription, *, now=None):
         fetched.append(subscription.id)
-        await druks_db.commit()
-        druks_db.expire_all()
         return ParsedUsage(ok=True, five_hour=ParsedMetric(percent_left=50, resets_at=None))
 
     monkeypatch.setattr(Base, "utc_now", lambda: NOW)
@@ -235,25 +231,3 @@ async def test_task_polls_only_due_subscriptions_after_session_expiry(
 
     assert fetched == expected
     assert (await UsageScrape.latest_for("openai", openai.account_id)).scraped_at == NOW
-
-
-async def test_task_skips_a_subscription_revoked_during_a_poll(subscription, druks_db, monkeypatch):
-    """Reload reads the live state before each provider call."""
-    revoked = await connect_provider(OpenAiProvider, {})
-    fetched = []
-
-    async def fetch_usage(subscription, *, now=None):
-        fetched.append(subscription.id)
-        revoked.revoked_at = NOW
-        await druks_db.commit()
-        druks_db.expire_all()
-        return ParsedUsage(ok=True)
-
-    monkeypatch.setattr(Base, "utc_now", lambda: NOW)
-    monkeypatch.setattr(AnthropicProvider, "fetch_usage", fetch_usage)
-    monkeypatch.setattr(OpenAiProvider, "fetch_usage", fetch_usage)
-    expected = [subscription.id]
-
-    await refresh_usage._function()
-
-    assert fetched == expected

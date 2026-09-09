@@ -31,13 +31,8 @@ async def refresh_tokens() -> None:
 
 @task(every="*/5 * * * *")
 async def refresh_usage() -> None:
-    # A poll can commit and expire every subscription in the session.
-    subscription_ids = [subscription.id for subscription in await VaultSecret.list_subscriptions()]
-
-    for subscription_id in subscription_ids:
-        subscription = await VaultSecret.reload(subscription_id)
-
-        if subscription and await UsageScrape.is_due(subscription, now=Base.utc_now()):
+    for subscription in await VaultSecret.list_subscriptions():
+        if await UsageScrape.is_due(subscription, now=Base.utc_now()):
             await get_provider(subscription.audience_name).poll_usage(subscription)
 
 
