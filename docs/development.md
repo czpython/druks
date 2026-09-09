@@ -97,7 +97,11 @@ runs the proof-app tests. Those tests are the executable contract for:
 - Role-module discovery
 - Route and subject read-side mounting
 - Independent migrations and table-prefix enforcement
-- Workflow start, settings, and feed formatting.
+- Workflow start, settings, and feed formatting
+- Output artifacts and Activity declarations
+- Accepted work, validated gate replies, and terminal failures
+- Subject announcements on stored notes and repositories
+- Completed-step replay without duplicate output or announcement rows.
 
 If you change the author API, update the scaffold, proof app, author guide, and
 tests together.

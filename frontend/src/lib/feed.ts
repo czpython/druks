@@ -68,5 +68,6 @@ function localName(kind: string | null | undefined): string {
 }
 
 function words(identifier: string): string {
-  return identifier.replace(/_/g, ' ')
+  const text = identifier.replace(/[._]/g, ' ')
+  return text.charAt(0).toUpperCase() + text.slice(1)
 }

@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING, Annotated, Any, ClassVar
 
 from pydantic import BaseModel, Field, SecretStr
 
-from druks.events.models import Event
 from druks.models import StoredSubject
 from druks.ui.exceptions import PageContractError, PageReadError, PageRouteError
 from druks.user_settings.models import SettingsOverride
@@ -664,26 +663,6 @@ class App:
         and DBOS launch. Default no-op; an app overrides it to sync schedules or
         similar. The caller logs a failure and moves on, so one app can't wedge
         boot."""
-
-    @classmethod
-    async def record_event(
-        cls,
-        *,
-        type: str,
-        subject: "Subject | StoredSubject | None" = None,
-        payload: dict[str, Any] | None = None,
-    ) -> None:
-        """Record one of this app's domain events to the log, stamped with the
-        app automatically. Apps record through here so the ``Event`` model
-        stays a platform internal. ``type`` is the milestone's own word ("merged") —
-        the feed reads it as one, so an app writes no rendering."""
-        await Event.emit(
-            type=type,
-            subject=subject.identity if subject else None,
-            label=subject.label if subject else None,
-            payload=payload,
-            app=cls.name,
-        )
 
     @classmethod
     async def get_subject_progress(

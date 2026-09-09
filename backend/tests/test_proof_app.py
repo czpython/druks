@@ -16,7 +16,11 @@ def test_discovery_registers_the_tables_and_capabilities():
     app = load_app("field_notes")
 
     assert "field_notes_notes" in Base.metadata.tables
-    assert [workflow.__name__ for workflow in app.workflows()] == ["Summarize", "Survey"]
+    assert [workflow.__name__ for workflow in app.workflows()] == [
+        "ApproveGist",
+        "Summarize",
+        "Survey",
+    ]
 
     capability_modules = {module.__name__ for module in app.capability_modules()}
     assert f"{_PACKAGE}.subscribers" in capability_modules

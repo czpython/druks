@@ -1,5 +1,5 @@
 from druks.sandbox import Sandbox
-from druks.workflows import Workflow
+from druks.workflows import FatalError, Workflow
 from druks.workspaces import RepoWorkspace
 
 from druks_field_notes.app import FieldNotes
@@ -41,3 +41,16 @@ class Survey(Workflow):
     @classmethod
     async def dispatch(cls, *, repository: Repository) -> str:
         return await cls.start(subject=repository)
+
+
+class ApproveGist(Workflow):
+    """Prepare a gist and ask the operator to approve it."""
+
+    subject = Note
+
+    async def run_multistep(self) -> None:
+        await FieldNotes.summarize(note_body=(await self.subject).body)
+        reply = await self.review()
+        if reply.action != "approve":
+            raise FatalError("The operator did not approve the gist.")
+        await self.announce("gist.approved")

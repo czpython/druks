@@ -84,7 +84,7 @@ describe('eventLine', () => {
       }),
     )
 
-    expect(line.label).toBe('summarized')
+    expect(line.label).toBe('Summarized')
     expect(line.subject).toBe('note 7')
     expect(line.path).toBeUndefined()
   })
@@ -99,4 +99,13 @@ it('retains the recorded run and decision round in Factory links', () => {
   expect(target.searchParams.get('parkedAt')).toBe('2026-09-09T01:00:00Z')
   expect(eventLine(event({ app: 'software_factory', subjectType: 'work_item', subjectId: '42',
     isSubjectAvailable: false })).path).toBeUndefined()
+})
+
+
+it.each([
+  ['gist.prepared', 'Gist prepared'],
+  ['note.gist_saved', 'Note gist saved'],
+  ['gist.approved', 'Gist approved'],
+])('gives %s readable words without an app formatter', (kind, label) => {
+  expect(eventLine(event({ kind, app: 'field_notes' })).label).toBe(label)
 })
