@@ -3,6 +3,7 @@ from typing import Any
 
 from sqlalchemy import Index
 from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column
 
 from druks.database import db_session
@@ -10,9 +11,7 @@ from druks.models import Base
 
 
 class Event(Base):
-    """The append-only log: one row per run-state transition and (later) domain
-    milestone, keyed to the subject it concerns. An app reads it back as a feed,
-    or folds the newest-per-subject into a status."""
+    """Recorded workflow and domain facts, keyed to their subject."""
 
     __tablename__ = "events"
     # Newest-per-subject is the history/dashboard rollup; the feed orders on the
@@ -42,9 +41,12 @@ class Event(Base):
         label: str | None = None,
         payload: dict[str, Any] | None = None,
         app: str | None = None,
+        session: AsyncSession | None = None,
     ) -> None:
+        """Record in the supplied session or the current domain transaction."""
+        session = session or db_session()
         subject = subject or {}
-        db_session().add(
+        session.add(
             cls(
                 type=type,
                 subject_type=subject.get("type"),
@@ -54,4 +56,4 @@ class Event(Base):
                 payload=payload or {},
             )
         )
-        await db_session().flush()
+        await session.flush()
