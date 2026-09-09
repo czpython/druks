@@ -1,5 +1,6 @@
 import pytest
 from druks.apps import loader
+from druks.db import db_session
 from druks.events.models import Event
 from druks.signals import subscribe
 from druks.workflows import Subject
@@ -47,6 +48,7 @@ async def test_stored_subject_keeps_distinct_domain_changes(druks_db):
 
 
 async def test_domain_rollback_removes_the_change_and_announcement(druks_db):
+    db_session.registry.set(druks_db)
     note = await Note.create(body="An observation")
 
     with pytest.raises(ValueError, match="Rejected change"):
@@ -61,6 +63,7 @@ async def test_domain_rollback_removes_the_change_and_announcement(druks_db):
 
 
 async def test_subject_delivery_error_rolls_back_with_the_domain_transaction(druks_db):
+    db_session.registry.set(druks_db)
     note = await Note.create(body="An observation")
 
     @subscribe("note.delivery_failed", subject=Note)
