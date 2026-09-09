@@ -47,7 +47,6 @@ const SECTIONS = [
   { id: 'general', label: 'General', group: 'Installation' },
   { id: 'personal', label: 'Preferences', group: 'Personal' },
   { id: 'api-tokens', label: 'API tokens', group: 'Personal' },
-  { id: 'apps', label: 'App settings', group: 'Apps' },
 ]
 
 const CONNECTION_TABS = [
@@ -508,7 +507,7 @@ export function SettingsPages({
               </Link>
               <h2 className="settings-sidebar-title">Settings</h2>
               <nav className="settings-navigation" aria-label="Settings">
-                {['AI execution', 'Tools & access', 'Installation', 'Personal', 'Apps'].map((group) => (
+                {['AI execution', 'Tools & access', 'Installation', 'Personal'].map((group) => (
                   <div key={group}>
                     <div className="sidebar-group-title">{group}</div>
                     {SECTIONS.filter((entry) => entry.group === group).map((entry) => (
@@ -520,11 +519,7 @@ export function SettingsPages({
                         }
                         href={`/settings/${entry.id}`}
                         className="sidebar-link"
-                        aria-current={
-                          section === entry.id || (entry.id === 'apps' && Boolean(app))
-                            ? 'page'
-                            : undefined
-                        }
+                        aria-current={section === entry.id ? 'page' : undefined}
                       >
                         {entry.label}
                         {dirtyPages.includes(entry.id) && <span aria-hidden="true">•</span>}
@@ -629,7 +624,7 @@ export function SettingsPages({
             ))}
           {(settingsQuery.isError || appsQuery.isError) &&
             !executionPage &&
-            (appName || formPage || section === 'apps') && (
+            (appName || formPage) && (
               <p role="alert" className="settings-error">
                 Could not load settings.{' '}
                 <button
@@ -756,24 +751,6 @@ export function SettingsPages({
               {page === 'mcp' && <McpServersPane />}
               {page === 'skills' && <SkillsPane />}
               {page === 'api-tokens' && <AgentAccessPane />}
-              {page === 'apps' && !search.trim() && (
-                <div className="settings-app-index">
-                  {apps.map((entry) => (
-                    <Link
-                      key={entry.name}
-                      aria-label={appLabel(entry.name)}
-                      href={`/apps/${entry.name}/settings`}
-                    >
-                      <strong>{appLabel(entry.name)}</strong>
-                      <span>{entry.description}</span>
-                    </Link>
-                  ))}
-                  {appsQuery.isPending && <p role="status">Loading app settings…</p>}
-                  {!appsQuery.isPending && !appsQuery.isError && apps.length === 0 && (
-                    <p>No installed app declares settings.</p>
-                  )}
-                </div>
-              )}
               {apps
                 .filter(
                   (entry) =>

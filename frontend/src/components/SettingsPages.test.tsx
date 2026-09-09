@@ -476,23 +476,23 @@ describe('SettingsPages app fields', () => {
     expect(window.location.search).toBe('?tab=browser')
   })
 
-  it('spells an underscored app name out in the index and its options group', async () => {
+  it('opens app settings from the header gear and spells out the app name', async () => {
     stubFetch()
-    renderSettings()
+    renderSettings('/field_notes')
 
-    fireEvent.click(screen.getByRole('link', { name: 'App settings' }))
-    fireEvent.click(await screen.findByRole('link', { name: 'Field Notes' }))
+    const settings = await screen.findByRole('link', { name: 'Field Notes settings' })
+    expect(settings.getAttribute('href')).toBe('/apps/field_notes/settings')
+    fireEvent.click(settings)
 
-    expect(screen.getByText('Field Notes options')).toBeTruthy()
+    expect(await screen.findByText('Field Notes options')).toBeTruthy()
+    expect(settings.getAttribute('aria-current')).toBe('page')
   })
 
   it('renders every 422 message under the field named by the backend', async () => {
     stubFetch()
-    renderSettings()
+    renderSettings('/apps/review/settings')
 
-    fireEvent.click(screen.getByRole('link', { name: 'App settings' }))
-    fireEvent.click(await screen.findByRole('link', { name: 'Review' }))
-    const appIdField = screen.getByText('Review App ID').closest('.set-field')
+    const appIdField = (await screen.findByText('Review App ID')).closest('.set-field')
     const appIdInput = appIdField?.querySelector('input')
     expect(appIdInput).toBeTruthy()
     fireEvent.change(appIdInput as HTMLInputElement, { target: { value: '42' } })
@@ -508,11 +508,9 @@ describe('SettingsPages app fields', () => {
 
   it('reveals the chosen section immediately and prunes edits hidden before save', async () => {
     stubFetch(false)
-    renderSettings()
+    renderSettings('/apps/software_factory/settings')
 
-    fireEvent.click(screen.getByRole('link', { name: 'App settings' }))
-    fireEvent.click(await screen.findByRole('link', { name: 'Software Factory' }))
-    const options = screen.getByText('Software Factory options').closest('.set-group')
+    const options = (await screen.findByText('Software Factory options')).closest('.set-group')
     expect(options?.textContent?.indexOf('Tracker')).toBeLessThan(
       options?.textContent?.indexOf('Linear') ?? -1,
     )
@@ -545,11 +543,9 @@ describe('SettingsPages app fields', () => {
 
   it('renders a multiline secret as a textarea and PATCHes the paste with newlines intact', async () => {
     stubFetch(false)
-    renderSettings()
+    renderSettings('/apps/review/settings')
 
-    fireEvent.click(screen.getByRole('link', { name: 'App settings' }))
-    fireEvent.click(await screen.findByRole('link', { name: 'Review' }))
-    const pemField = screen.getByText('Review App private key').closest('.set-field')
+    const pemField = (await screen.findByText('Review App private key')).closest('.set-field')
     const textarea = pemField?.querySelector('textarea')
     expect(textarea).toBeTruthy()
     expect((textarea as HTMLTextAreaElement).value).toBe('')
@@ -578,11 +574,9 @@ describe('SettingsPages app fields', () => {
 
   it('renders a 422 message for a field hidden by the tracker selection', async () => {
     stubFetch(true, { software_factory: { linear_trigger_status: 'Not a Linear status name.' } })
-    renderSettings()
+    renderSettings('/apps/software_factory/settings')
 
-    fireEvent.click(screen.getByRole('link', { name: 'App settings' }))
-    fireEvent.click(await screen.findByRole('link', { name: 'Software Factory' }))
-    const trackerField = screen.getByText('Tracker').closest('.set-field')
+    const trackerField = (await screen.findByText('Tracker')).closest('.set-field')
     fireEvent.change(trackerField?.querySelector('select') as HTMLSelectElement, {
       target: { value: 'jira' },
     })
@@ -664,9 +658,7 @@ describe('SettingsPages agents', () => {
 
   it('the app page carries harness and billing cells that follow the chosen harness', async () => {
     stubFetch()
-    renderSettings()
-    fireEvent.click(screen.getByRole('link', { name: 'App settings' }))
-    fireEvent.click(await screen.findByRole('link', { name: 'Software Factory' }))
+    renderSettings('/apps/software_factory/settings')
     fireEvent.click(await screen.findByRole('link', { name: 'Agents' }))
     await screen.findByText('coder')
     const harnessCell = screen.getByText('codex').closest('button')!
@@ -994,6 +986,27 @@ it('restores the work return URL when a settings fragment route reloads', async 
 })
 
 describe('canonical app settings', () => {
+  it('removes the central index and its navigation and search destination', async () => {
+    stubFetch(false)
+    renderSettings('/settings/apps')
+
+    expect(await screen.findByText('No settings page matches this address.')).toBeTruthy()
+    const navigation = within(screen.getByRole('navigation', { name: 'Settings' }))
+    expect(navigation.queryByText('Apps')).toBeNull()
+    expect(navigation.queryByRole('link', { name: 'App settings' })).toBeNull()
+    expect(screen.queryByRole('heading', { name: 'App settings' })).toBeNull()
+    expect(screen.queryByRole('link', { name: 'Field Notes' })).toBeNull()
+
+    fireEvent.change(screen.getByLabelText('Search settings'), {
+      target: { value: 'app settings' },
+    })
+    const results = within(screen.getByLabelText('Settings search results'))
+    expect(results.queryByRole('link', { name: 'App settings Apps · Section' })).toBeNull()
+    fireEvent.click(results.getByRole('link', { name: 'Field Notes App settings · Section' }))
+    expect(await screen.findByLabelText('Notebook')).toBeTruthy()
+    expect(window.location.pathname).toBe('/apps/field_notes/settings')
+  })
+
   it('shows a load failure with Retry on a direct app settings link', async () => {
     stubFetch(false)
     vi.spyOn(api, 'getAppSettings')
@@ -1031,10 +1044,8 @@ describe('canonical app settings', () => {
       ...appSettings,
       apps: appSettings.apps.filter((entry) => entry.name !== 'software_factory'),
     })
-    renderSettings('/settings/apps')
-    expect(await screen.findByRole('link', { name: 'Review' })).toBeTruthy()
-    expect(screen.queryByRole('link', { name: 'Software Factory' })).toBeNull()
-    fireEvent.click(screen.getByRole('link', { name: 'Back to Druks' }))
+    renderSettings('/events')
+    await screen.findByRole('heading', { name: 'Current work' })
     const appLink = await screen.findByRole('link', { name: 'Software Factory' })
     fireEvent.click(appLink)
     await waitFor(() => expect(window.location.pathname).toBe('/software_factory'))
@@ -1175,11 +1186,13 @@ describe('canonical app settings', () => {
     fireEvent.change(await screen.findByLabelText('Timezone'), {
       target: { value: 'Europe/Madrid' },
     })
-    fireEvent.click(screen.getByRole('link', { name: 'App settings' }))
-    const destination = await screen.findByRole('link', { name: 'Field Notes' })
+    fireEvent.change(screen.getByLabelText('Search settings'), {
+      target: { value: 'field notes' },
+    })
+    const destination = await screen.findByRole('link', { name: 'Field Notes App settings · Section' })
     expect(destination.getAttribute('href')).toBe('/apps/field_notes/settings')
     fireEvent.click(destination)
-    expect(window.location.pathname).toBe('/settings/apps')
+    expect(window.location.pathname).toBe('/settings/general')
     fireEvent.click(
       within(screen.getByRole('dialog', { name: 'Save your changes?' })).getByRole('button', {
         name: 'Save',
