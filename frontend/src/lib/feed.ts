@@ -1,8 +1,7 @@
 import type { FeedItem } from '../api/types'
 import { appLabel, getAppUI } from '../apps/registry'
 
-// What a workflow doing something is called. The platform owns these words because it
-// owns the lifecycle; an app's own milestones are already named by their type.
+// What a workflow doing something is called when its app gives no label of its own.
 const LIFECYCLE_VERBS: Record<string, string> = {
   'workflow.running': 'started',
   'workflow.parked': 'waiting on you',
@@ -27,7 +26,7 @@ export interface EventLine {
 
 export function eventLine(event: FeedItem): EventLine {
   return {
-    label: label(event),
+    label: (event.app && getAppUI(event.app)?.activityLabel?.(event)) || label(event),
     subject: event.subjectLabel ?? '',
     source: localName(event.workflow) || appLabel(event.app || 'druks'),
     path: subjectPath(event),

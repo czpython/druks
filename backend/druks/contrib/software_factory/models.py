@@ -296,28 +296,10 @@ class WorkItem(StoredSubject):
         return await db_session().get(cls, work_item_id)
 
     @classmethod
-    async def get_for_pr(
-        cls, *, repo: str, pr_number: int | None, branch: str | None = None
-    ) -> "WorkItem | None":
-        """The item of a pull request, found by its number. The head branch is the
-        fallback for an event that arrives before Druks stores the number."""
-        if pr_number:
-            stmt = (
-                select(cls)
-                .where(func.lower(cls.repo) == repo.lower(), cls.pr_number == pr_number)
-                .order_by(cls.updated_at.desc())
-                .limit(1)
-            )
-            found = (await db_session().scalars(stmt)).first()
-            if found:
-                return found
-        return await cls.get_for_branch(repo=repo, branch=branch) if branch else None
-
-    @classmethod
-    async def get_for_branch(cls, *, repo: str, branch: str) -> "WorkItem | None":
+    async def get_for_pr(cls, *, repo: str, pr_number: int) -> "WorkItem | None":
         stmt = (
             select(cls)
-            .where(func.lower(cls.repo) == repo.lower(), cls.branch == branch)
+            .where(func.lower(cls.repo) == repo.lower(), cls.pr_number == pr_number)
             .order_by(cls.updated_at.desc())
             .limit(1)
         )
@@ -332,13 +314,17 @@ class WorkItem(StoredSubject):
         await db_session().flush()
 
     async def resolve(self, *, merged: bool, at: datetime) -> None:
-        # Import cycle: the app imports this module through ticketing/druks.py.
-        import druks.contrib.software_factory.app as software_factory_app
-
         self.resolution = "merged" if merged else "closed"
         self.resolved_at = at
         self.updated_at = Base.utc_now()
-        await software_factory_app.SoftwareFactory.record_event(type=self.resolution, subject=self)
+        await self.announce(self.resolution)
+        await db_session().flush()
+
+    async def stop(self) -> None:
+        """End the attempt after an operator stop, without a GitHub outcome."""
+        self.resolution = "closed"
+        self.resolved_at = Base.utc_now()
+        self.updated_at = self.resolved_at
         await db_session().flush()
 
     async def ship(self) -> None:

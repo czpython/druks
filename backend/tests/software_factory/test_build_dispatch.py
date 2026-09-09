@@ -5,8 +5,10 @@ from druks.contrib.software_factory import subscribers  # noqa: F401 (the import
 from druks.contrib.software_factory.app import SoftwareFactory
 from druks.contrib.software_factory.contracts import ReviewWork
 from druks.contrib.software_factory.workflows import Build
+from druks.events.models import Event
 from druks.signals import publish
 from druks.testing import seed_run
+from sqlalchemy import select
 
 from software_factory.factories import make_test_work_item, seed_build_run
 
@@ -76,6 +78,13 @@ async def test_dispatch_stands_down_without_github_instead_of_raising(
 
     assert not result
     assert not started
+    events = list(await druks_db.scalars(select(Event)))
+    assert len(events) == 1
+    assert events[0].type == "build.rejected"
+    assert events[0].app == "software_factory"
+    assert events[0].subject_id == str(item.id)
+    assert "not connected" in events[0].payload["reason"]
+    assert "run" not in events[0].payload
     assert any("not connected" in record.getMessage() for record in caplog.records)
 
 

@@ -7,7 +7,6 @@ from druks.contrib.software_factory.github import get_review_actor
 from druks.contrib.software_factory.models import ProjectRepo, WorkItem
 from druks.contrib.software_factory.ticketing.enums import TicketStatus
 from druks.contrib.software_factory.workflows import Build, Profile, PullRequestReview
-from druks.db import Base
 from druks.signals import subscribe
 from druks.workflows import WorkflowEvent
 
@@ -21,7 +20,7 @@ async def new_build_claims_the_item(*, subject: WorkItem, **_: object) -> None:
 async def cancelled_build_settles_the_item(*, subject: WorkItem, **_: object) -> None:
     """An operator cancellation explicitly abandons the work item."""
     if not subject.resolution:
-        await subject.resolve(merged=False, at=Base.utc_now())
+        await subject.stop()
 
 
 @subscribe("pr.opened", workflow=Build)
@@ -58,7 +57,7 @@ async def policy_push_reprofiles_the_repo(*, repo: str, paths: list, **_: object
 
 @subscribe("pr.review_submitted")
 async def pr_review_answers_the_gate(*, repo: str, pr_number: int, payload: dict) -> None:
-    item = await WorkItem.get_for_pr(repo=repo, pr_number=pr_number, branch=payload["branch"])
+    item = await WorkItem.get_for_pr(repo=repo, pr_number=pr_number)
     if item:
         status = await item.get_status(workflow=Build)
         if status.is_parked and status.gate == ReviewWork.name:
@@ -74,7 +73,7 @@ async def pr_review_answers_the_gate(*, repo: str, pr_number: int, payload: dict
 async def pr_close_settles_the_item(*, repo: str, pr_number: int, payload: dict) -> None:
     """GitHub announcing the verdict on a PR druks owns — one path for every merge,
     druks's own included. A stored verdict makes a redelivery a no-op."""
-    item = await WorkItem.get_for_pr(repo=repo, pr_number=pr_number, branch=payload["branch"])
+    item = await WorkItem.get_for_pr(repo=repo, pr_number=pr_number)
     if item and not item.resolution:
         await item.resolve(merged=payload["merged"], at=payload["resolved_at"])
         if payload["merged"]:

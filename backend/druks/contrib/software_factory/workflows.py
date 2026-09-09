@@ -173,6 +173,7 @@ class Build(Workflow):
             # The delivery succeeded. A raise would answer 5xx, and the provider would
             # deliver it again.
             logger.info("Ticket %s cannot start a build: %s", ticket["identifier"], error)
+            await item.announce("build.rejected", reason=str(error))
             return
         account_id = None
         if ticket["assignee_id"] and (tracker := await SoftwareFactory.get_tracker()):

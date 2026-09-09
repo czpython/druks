@@ -29,10 +29,10 @@ describe('eventLine', () => {
     )
   })
 
-  it("reads an app's own milestone as its own word", () => {
+  it("words an app's milestone through the app", () => {
     const line = eventLine(event({ kind: 'merged', app: 'software_factory' }))
 
-    expect(line.label).toBe('merged')
+    expect(line.label).toBe('Pull request merged')
     expect(line.source).toBe('Software Factory')
     expect(line.bucket).toBe('event-kind-audit')
   })

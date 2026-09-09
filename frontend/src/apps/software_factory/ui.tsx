@@ -1,5 +1,6 @@
 import { registerAppUI, targetQuery } from '../registry'
 import { SOFTWARE_FACTORY } from './api'
+import { activityLabel } from './activity'
 import { parseLeadingId } from './slug'
 import { AgentCallPage } from './AgentCallPage'
 import { BoardPage } from './BoardPage'
@@ -14,8 +15,7 @@ registerAppUI({
   name: SOFTWARE_FACTORY,
   home: `/${SOFTWARE_FACTORY}`,
   navigationFor: softwareFactoryNavigation,
-  // Software Factory's other subject, a project repo, has no page of its own — a row about one
-  // stays unclickable rather than landing on the work item that shares its id.
+  activityLabel,
   parentPath: (location) => {
     const workItem = /^(\/software_factory\/work-items\/[^/]+)/.exec(location)?.[1]
     return workItem && (location.startsWith(`${workItem}/agent-calls/`) ? workItem : `/${SOFTWARE_FACTORY}`)
